@@ -10,7 +10,7 @@ import { icon, type IconName } from "../ui/icons.ts";
 import { selector, type SelectorGroup } from "../ui/selector.ts";
 
 /*
- * The ledger: every side-effecting action Galahad classified, with the oath's
+ * The ledger: every side-effecting action the primary classified, with the policy's
  * verdict and why. Reads are free, creating and modifying are logged, outward
  * and destructive actions ask, and anything that breaks a hard limit is denied.
  */
@@ -21,7 +21,7 @@ export const CLASS_INFO: Record<ActionClass, { label: string; icon: IconName; to
   modify: { label: CLASS_LABEL.modify, icon: "edit", tone: "info", rule: "Change config, write objects, edit files", verdict: "allow (logged)" },
   outward: { label: CLASS_LABEL.outward, icon: "external", tone: "warn", rule: "Push, send, post, deploy, purchase", verdict: "ask" },
   delete: { label: CLASS_LABEL.delete, icon: "trash", tone: "danger", rule: "Remove anything persistent", verdict: "ask" },
-  forbidden: { label: CLASS_LABEL.forbidden, icon: "ban", tone: "danger", rule: "Breaks a hard limit of the oath", verdict: "deny" },
+  forbidden: { label: CLASS_LABEL.forbidden, icon: "ban", tone: "danger", rule: "Breaks a hard limit of the policy", verdict: "deny" },
 };
 
 export const VERDICT_TONE: Record<Verdict, Tone> = { allow: "ok", ask: "warn", deny: "danger", approved: "accent" };
@@ -50,7 +50,7 @@ export function ledgerItem(ctx: Ctx, entry: LedgerEntry, compact = false): HTMLE
       h("div", { class: "tl-title" }, h("span", { class: "strong small" }, entry.resource), h("span", { class: "mono small wrap-anywhere" }, entry.target), verdictBadge(entry.verdict)),
       meta(
         h("span", {}, info.label.toLowerCase()),
-        entry.quest ? h("span", {}, "quest ", h("span", { class: "mono" }, entry.quest)) : null,
+        entry.run ? h("span", {}, "run ", h("span", { class: "mono" }, entry.run)) : null,
         h("span", {}, "on ", deviceName(ctx, entry.device)),
         entry.reason ? h("span", { class: "muted" }, entry.reason) : null,
       ),
@@ -60,7 +60,7 @@ export function ledgerItem(ctx: Ctx, entry: LedgerEntry, compact = false): HTMLE
   );
 }
 
-/** The autonomy view: what Galahad may do on his own, what asks, what's denied, with recent counts. */
+/** The autonomy view: what the primary may do on its own, what asks, what's denied, with recent counts. */
 export function autonomyCard(entries: LedgerEntry[] | null): HTMLElement {
   const since = Date.now() - 24 * 3600_000;
   const counts = new Map<ActionClass, number>();
@@ -69,7 +69,7 @@ export function autonomyCard(entries: LedgerEntry[] | null): HTMLElement {
     if (ms && ms >= since) counts.set(e.class, (counts.get(e.class) ?? 0) + 1);
   }
   return card(
-    { title: "Autonomy", icon: "shield", actions: h("span", { class: "tiny subtle" }, entries ? "last 24 h" : ""), foot: note("Set by the oath. Only you can amend it, with your signature. Galahad may clean up ephemeral things he made for a quest."), flush: true },
+    { title: "Autonomy", icon: "shield", actions: h("span", { class: "tiny subtle" }, entries ? "last 24 h" : ""), foot: note("Set by the policy. Only you can amend it, with your signature. Your agent may clean up ephemeral things it made for a run."), flush: true },
     h(
       "div",
       { class: "autonomy" },
@@ -170,7 +170,7 @@ export const activityView: View = (root, ctx, { scope }) => {
     countLabel.textContent = entries.length ? `${list.length} of ${entries.length}` : "";
     filters.refresh();
     if (!entries.length) {
-      replace(timeline, empty({ icon: "activity", title: "Nothing recorded yet", body: "When Galahad creates, changes, sends or deletes anything, it is written here with the oath's verdict." }));
+      replace(timeline, empty({ icon: "activity", title: "Nothing recorded yet", body: "When your agent creates, changes, sends or deletes anything, it is written here with the policy's verdict." }));
       return;
     }
     if (!list.length) {
@@ -179,7 +179,7 @@ export const activityView: View = (root, ctx, { scope }) => {
         empty({
           icon: "filter",
           title: "Nothing matches",
-          body: filter.query ? "Try fewer words, or search for a node, a quest or a verdict." : undefined,
+          body: filter.query ? "Try fewer words, or search for a node, a run or a verdict." : undefined,
           actions: button("Show everything", {
             icon: "x",
             onClick: () => {
@@ -244,7 +244,7 @@ export const activityView: View = (root, ctx, { scope }) => {
     } catch (error) {
       if (scope.disposed) return;
       signature = "";
-      // What Galahad may do alone is worth showing even without the ledger's counts.
+      // What the primary may do alone is worth showing even without the ledger's counts.
       if (!autonomyBox.firstChild) replace(autonomyBox, autonomyCard(null));
       if (isUnavailable(error)) {
         replace(
@@ -252,7 +252,7 @@ export const activityView: View = (root, ctx, { scope }) => {
           empty({
             icon: "scroll",
             title: "The ledger isn't on this node yet",
-            body: "It arrives with an upcoming update. Until then, the oath still gates every action; it just isn't shown here.",
+            body: "It arrives with an upcoming update. Until then, the policy still gates every action; it just isn't shown here.",
           }),
         );
         stop();
@@ -275,7 +275,7 @@ export const activityView: View = (root, ctx, { scope }) => {
     h(
       "div",
       { class: "page" },
-      pageHead("Activity", "Everything Galahad does is written down. Reads are free, creating is logged, outward and destructive actions ask you first."),
+      pageHead("Activity", "Everything your agent does is written down. Reads are free, creating is logged, outward and destructive actions ask you first."),
       h("div", { class: "two-col" }, h("div", { class: "stack" }, bar, section("Timeline", {}, timeline)), h("div", { class: "stack loose" }, autonomyBox)),
     ),
   );

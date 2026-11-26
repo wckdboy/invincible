@@ -9,7 +9,7 @@ import { NETWORKS, SANDBOX_GATEWAY_PORT } from "./spec.ts";
  *
  *  - pf's rules, in an anchor under com.apple/ (macOS's own pf.conf evaluates every anchor there, and pf is on while
  *    vmnet's networks are), for what reaches the Mac's IP stack;
- *  - each Galahad bridge's member filter (BRDGSFILT with IFBF_FILT_MEMBER, XNU's if_bridge.c), so pf also sees what
+ *  - each the primary bridge's member filter (BRDGSFILT with IFBF_FILT_MEMBER, XNU's if_bridge.c), so pf also sees what
  *    passes between a bridge's VMs, which never reaches the IP stack and which no ifconfig option turns on.
  *
  * Both need root, so a helper does them: root's own file in /Library/PrivilegedHelperTools, the rules inside it,
@@ -24,7 +24,7 @@ export const MAC_FIREWALL = {
   helper: "/Library/PrivilegedHelperTools/sh.invincible.firewall",
   plist: "/Library/LaunchDaemons/sh.invincible.firewall.plist",
   status: "/var/run/sh.invincible.firewall.json",
-  anchor: "com.apple/galahad",
+  anchor: "com.apple/invincible",
   /** Seconds between its runs. */
   every: 10,
 } as const;
@@ -40,7 +40,7 @@ export function macFirewallRules(): string {
   const gw = NETWORKS.gateway;
   const on = NETWORKS.online;
   return [
-    `# Galahad's sandboxes on this Mac (docs/MAC.md), loaded by ${MAC_FIREWALL.label} into ${MAC_FIREWALL.anchor}.`,
+    `# Invincible's sandboxes on this Mac (docs/MAC.md), loaded by ${MAC_FIREWALL.label} into ${MAC_FIREWALL.anchor}.`,
     `gw4 = "${gw.subnet}"`,
     `on4 = "${on.subnet}"`,
     `pass in quick inet proto tcp from $gw4 to ${gw.gateway} port ${SANDBOX_GATEWAY_PORT}`,
@@ -54,15 +54,15 @@ export function macFirewallRules(): string {
 
 /**
  * The helper, as root runs it: perl, which macOS has, so nothing is compiled or downloaded. It reads nothing anyone
- * but root can write: the rules are inside it, and each bridge it touches is one carrying a Galahad gateway's address.
+ * but root can write: the rules are inside it, and each bridge it touches is one carrying a the primary gateway's address.
  * The rules are loaded afresh each run (`self` is the Mac's addresses as they are then).
  */
 export function macFirewallHelper(): string {
   return `#!/usr/bin/perl
-# Galahad's firewall for its sandboxes on this Mac (docs/MAC.md), run as root by launchd every ${MAC_FIREWALL.every} seconds
+# Invincible's firewall for its sandboxes on this Mac (docs/MAC.md), run as root by launchd every ${MAC_FIREWALL.every} seconds
 # (${MAC_FIREWALL.label}). It loads the rules below into pf's anchor ${MAC_FIREWALL.anchor}, has pf see what passes between the
-# VMs on each Galahad bridge (the bridge's member filter), and writes what it did to ${MAC_FIREWALL.status}.
-# Written by \`invincible firewall install\`: change Galahad's source, not this file.
+# VMs on each Invincible bridge (the bridge's member filter), and writes what it did to ${MAC_FIREWALL.status}.
+# Written by \`invincible firewall install\`: change Invincible's source, not this file.
 use strict;
 use warnings;
 use IPC::Open3 qw(open3);

@@ -3,7 +3,7 @@ import type { TeamTask } from "@invincible/core/team";
 import { givenLine, keptChanges, proposedLine, sensitiveLine, steppedLine, taskActions, taskBadge, taskEnd } from "./task-card.ts";
 
 const task = (status: TeamTask["status"], more: Partial<TeamTask> = {}): TeamTask => ({ id: "task-abcdefghijkl", room: "dm-ada", assignee: "ada", title: "Fix the importer", goal: "Fix it", dependsOn: [], gates: ["bun test"], status, verified: status === "done", progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, ...more });
-/** A task's output as the runner writes it: the knight's summary, then the review and where it worked. */
+/** A task's output as the runner writes it: the agent's summary, then the review and where it worked. */
 const output = (summary: string) => `${summary}\n\nReview: gave-up\nWorkspace: /work/tasks/task-abcdefghijkl`;
 
 describe("a task card's badge", () => {
@@ -28,12 +28,12 @@ describe("how a task ended, in words", () => {
     expect(taskEnd(task("running"))).toBeNull();
   });
 
-  test("a verified task says what the knight said of it, and nothing went wrong", () => {
+  test("a verified task says what the agent said of it, and nothing went wrong", () => {
     expect(taskEnd(task("done", { output: output("Parsed ISO dates; 4 new tests pass.") }))).toEqual({ why: null, said: "Parsed ISO dates; 4 new tests pass." });
     expect(taskEnd(task("done"))).toEqual({ why: null, said: null });
   });
 
-  test("a quest's own ending is said in words, and the knight's own account follows it", () => {
+  test("a run's own ending is said in words, and the agent's own account follows it", () => {
     const failed = task("failed", { verified: false, error: "gave-up", output: output("The gate needs a database this VM does not have:\nbun test db/ exits 1 before any work.") });
     expect(taskEnd(failed)).toEqual({ why: "It gave up.", said: "The gate needs a database this VM does not have:\nbun test db/ exits 1 before any work." });
     expect(taskEnd(task("failed", { verified: false, error: "unverified" }))!.why).toBe("Not verified: its gates or the independent review did not pass.");
@@ -48,7 +48,7 @@ describe("how a task ended, in words", () => {
     expect(taskEnd(task("stopped", { verified: false }))!.why).toBe("Stopped.");
   });
 
-  test("what the knight said is its summary, never the runner's lines after it, and a long one is cut", () => {
+  test("what the agent said is its summary, never the runner's lines after it, and a long one is cut", () => {
     expect(taskEnd(task("failed", { verified: false, error: "gave-up", output: "\n\nReview: gave-up\nWorkspace: /work" }))!.said).toBeNull();
     // Output from before the runner wrote a review line is taken whole.
     expect(taskEnd(task("done", { output: "Done, and checked." }))!.said).toBe("Done, and checked.");
@@ -69,10 +69,10 @@ describe("what can be done with a task", () => {
   });
 });
 
-describe("who gave a task to the Roundtable, and what it kept", () => {
-  test("a task given to the Roundtable says by whom; one given to a knight by name says nothing", () => {
-    expect(givenLine(task("queued", { givenBy: "owner" }))).toBe("Given to the Roundtable by you");
-    expect(givenLine(task("queued", { givenBy: "galahad" }))).toBe("Given to the Roundtable by Galahad");
+describe("who gave a task to the agents, and what it kept", () => {
+  test("a task given to the agents says by whom; one given to an agent by name says nothing", () => {
+    expect(givenLine(task("queued", { givenBy: "owner" }))).toBe("Given to the agents by you");
+    expect(givenLine(task("queued", { givenBy: "primary" }))).toBe("Given to the agents by your agent");
     // Sensitive mode for a task alone says which models every call of its work is held to.
     expect(sensitiveLine(task("queued", { models: ["nearai/Qwen/Qwen3.8-27B-abliterated"] }))).toBe("Sensitive mode: on nearai/Qwen/Qwen3.8-27B-abliterated alone");
     expect(sensitiveLine(task("queued"))).toBeNull();
@@ -88,18 +88,18 @@ describe("who gave a task to the Roundtable, and what it kept", () => {
   });
 });
 
-describe("a task a knight proposed", () => {
+describe("a task an agent proposed", () => {
   test("waits for you: approved, it runs; declined, it never does", () => {
-    const proposal = task("proposed", { proposedBy: "kay" });
+    const proposal = task("proposed", { proposedBy: "noa" });
     expect(taskBadge(proposal)).toEqual({ text: "Waiting for you", tone: "accent" });
     expect(taskEnd(proposal)).toBeNull();
     expect(taskActions(proposal)).toEqual(["approve", "decline"]);
-    expect(proposedLine(proposal, "Kay")).toBe("Kay proposes this: it starts when you approve it");
+    expect(proposedLine(proposal, "Noa")).toBe("Noa proposes this: it starts when you approve it");
     // Approved, it is work like any other, and says who proposed it.
-    expect(proposedLine(task("running", { proposedBy: "kay" }), "Kay")).toBe("Proposed by Kay");
+    expect(proposedLine(task("running", { proposedBy: "noa" }), "Noa")).toBe("Proposed by Noa");
     expect(proposedLine(task("running", { proposedBy: "gone" }), null)).toBe("Proposed by gone");
     // Declined, it says so, and it may still be taken up.
-    expect(taskEnd(task("stopped", { proposedBy: "kay", error: "Declined by you.", verified: false }))).toEqual({ why: "Declined by you.", said: null });
+    expect(taskEnd(task("stopped", { proposedBy: "noa", error: "Declined by you.", verified: false }))).toEqual({ why: "Declined by you.", said: null });
     expect(proposedLine(task("queued"), null)).toBeNull();
   });
 });

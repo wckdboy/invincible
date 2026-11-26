@@ -1,6 +1,6 @@
 import { findSecrets } from "@invincible/core/secret-scan";
 import type { View } from "../context.ts";
-import { galahadState } from "../lib/knight-state.ts";
+import { primaryState } from "../lib/agent-state.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { atAGlance, type Attended, inProject, type WorkRow } from "../lib/work.ts";
 import { setWorkOpen, workOpen } from "../prefs.ts";
@@ -9,20 +9,20 @@ import { cx, h, keepPlace, replace } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
-import { answerStep, chatActivity, nodeTurns, questsInHand, sendMessage, startNewChat, unreadChats } from "./chat.ts";
+import { answerStep, chatActivity, nodeTurns, runsInHand, sendMessage, startNewChat, unreadChats } from "./chat.ts";
 import { needsCount, needsItems, needsVersion, tickExpiries } from "./needs.ts";
 import { openPlaces } from "./places.ts";
-import { galahadLine } from "./sidebar.ts";
-import { giveToRoundtable } from "./team-forms.ts";
+import { primaryLine } from "./sidebar.ts";
+import { giveToAgents } from "./team-forms.ts";
 import { askProjects, projectTile, rowsVersion, workNow, workRow, workSources } from "./work-rows.ts";
 
 /*
- * Home: Galahad, first (your words, 26 November 2026: "agent first (Galahad)"; on a phone no tab bar, "a '…' sheet for
- * everything else"). His orb, the one that moves on the screen, his name and a line of how things stand, the machine he
+ * Home: the primary, first (your words, 26 November 2026: "agent first ([the primary])"; on a phone no tab bar, "a '…' sheet for
+ * everything else"). Its orb, the one that moves on the screen, its name and a line of how things stand, the machine it
  * runs on, and "…". Then what needs you, each with its answer in place (views/needs.ts); then the work in one list by
  * attention (what is new to you, then what is at work, faded; what is settled folds), each task a row of three lines
- * that opens its thread, with a filter for each project; and his message box docked at the foot, where whatever you ask
- * him starts a conversation with him. A phone opens here; a wide screen has it at #/home beside the same work in its
+ * that opens its thread, with a filter for each project; and its message box docked at the foot, where whatever you ask
+ * it starts a conversation with it. A phone opens here; a wide screen has it at #/home beside the same work in its
  * sidebar.
  */
 
@@ -34,7 +34,7 @@ export const homeView: View = (root, ctx, { scope }) => {
   const canChat = ctx.can("chat");
   const canGive = ctx.can("fleet:admin") && canChat;
 
-  // ---- his header: the orb (moving as he is), his name, how things stand, the machine, everything else ----
+  // ---- its header: the orb (moving as it is), its name, how things stand, the machine, everything else ----
   const face = h("span", { class: "home-orb" });
   const line = h("p", { class: "home-line ellipsis" });
   const machine = h("a", { class: "home-chip", href: "#/fleet", hidden: !ctx.can("mind:read") });
@@ -43,7 +43,7 @@ export const homeView: View = (root, ctx, { scope }) => {
   const head = h(
     "header",
     { class: "page-head home-head" },
-    h("a", { class: "home-who", href: "#/chat", title: "Galahad: his own conversation" }, face, h("div", { class: "home-name" }, h("h1", {}, "Galahad"), line)),
+    h("a", { class: "home-who", href: "#/chat", title: "Your agent: its own conversation" }, face, h("div", { class: "home-name" }, h("h1", {}, "Your agent"), line)),
     machine,
     more,
   );
@@ -58,9 +58,9 @@ export const homeView: View = (root, ctx, { scope }) => {
   const list = h("div", { class: "home-work-rows" }, skeletonRows(4, { avatar: true }));
   const work = h("section", { class: "home-work", "aria-labelledby": "home-work-head" }, h("div", { class: "home-work-head" }, h("h2", { id: "home-work-head" }, "Work"), filters), list);
 
-  // ---- his message box, docked ----
-  const input = h("textarea", { rows: 1, placeholder: "Ask Galahad…", "aria-label": "Ask Galahad", autocomplete: "off", enterkeyhint: "send" });
-  const send = button("Send", { variant: "primary", iconOnly: true, icon: "arrow-up", type: "submit", label: "Send to Galahad" });
+  // ---- its message box, docked ----
+  const input = h("textarea", { rows: 1, placeholder: "Ask your agent…", "aria-label": "Ask your agent", autocomplete: "off", enterkeyhint: "send" });
+  const send = button("Send", { variant: "primary", iconOnly: true, icon: "arrow-up", type: "submit", label: "Send to your agent" });
   const problem = h("div", { class: "home-dock-problem", role: "status" });
   let sending = false;
   const sync = (): void => {
@@ -74,7 +74,7 @@ export const homeView: View = (root, ctx, { scope }) => {
     const text = input.value.trim();
     sending = true;
     sync();
-    // A new conversation with him, as "Ask Galahad" anywhere starts one (the one open last stays among your chats).
+    // A new conversation with it, as "Ask the primary" anywhere starts one (the one open last stays among your chats).
     startNewChat();
     const result = await sendMessage(ctx.api, text);
     sending = false;
@@ -101,7 +101,7 @@ export const homeView: View = (root, ctx, { scope }) => {
         h(
           "form",
           { class: "home-composer", onsubmit: (event: Event) => (event.preventDefault(), void deliver()) },
-          canGive ? button("Give a task", { variant: "ghost", iconOnly: true, icon: "plus", title: "Give a task to the knight best suited to it, or to one by name", onClick: () => giveToRoundtable(ctx) }) : null,
+          canGive ? button("Give a task", { variant: "ghost", iconOnly: true, icon: "plus", title: "Give a task to the agent best suited to it, or to one by name", onClick: () => giveToAgents(ctx) }) : null,
           input,
           send,
         ),
@@ -115,24 +115,24 @@ export const homeView: View = (root, ctx, { scope }) => {
   replace(root, h("div", { class: cx("home", dock && "has-dock") }, head, wait, body, dock));
   sync();
 
-  // ---- drawn from what the app has: his line, the Inbox, the team ----
+  // ---- drawn from what the app has: its line, the Inbox, the team ----
   let shownFace = "";
   let shown = "";
   let open = workOpen();
   const drawHead = (work: Attended | null, waiting: number): void => {
-    const now = galahadLine(ctx);
-    const state = galahadState(now);
+    const now = primaryLine(ctx);
+    const state = primaryState(now);
     const look = `${now.tone}/${state}`;
     if (look !== shownFace) {
       shownFace = look;
-      // The one orb that moves here: his (the knights' in their rows are still).
-      replace(face, orb({ size: 48, tone: now.tone, mood: orbMoodOfState(state), key: "invincible:home", label: `Galahad: ${now.text}` }));
+      // The one orb that moves here: its (the agents' in their rows are still).
+      replace(face, orb({ size: 48, tone: now.tone, mood: orbMoodOfState(state), key: "invincible:home", label: `Your agent: ${now.text}` }));
     }
     const glance = work ? atAGlance(work, waiting, now.text) : { text: now.text, needs: false };
     if (line.textContent !== glance.text) line.textContent = glance.text;
     line.dataset.tone = glance.needs ? "needs" : now.tone;
     const fleet = ctx.live.fleet.value;
-    // The machine he runs on, by its name from the first frame (its dot says how the fleet stands once it answers).
+    // The machine it runs on, by its name from the first frame (its dot says how the fleet stands once it answers).
     const self = ctx.whoami.nodeName || ctx.whoami.fleetName || "This node";
     const nodes = fleet ? fleet.devices.filter((device) => device.kind === "node" && !device.revokedAt) : [];
     const online = fleet ? nodes.filter((device) => device.id === fleet.self || fleet.peers.find((peer) => peer.device === device.id)?.online).length : 0;
@@ -189,8 +189,8 @@ export const homeView: View = (root, ctx, { scope }) => {
           ? h(
               "div",
               { class: "home-empty" },
-              h("p", {}, filtered ? "Nothing in this project." : "Nothing under way. Ask Galahad below, or give a knight a task: each is a row here, from its first step to verified."),
-              canGive && !filtered ? button("Give a task", { size: "sm", icon: "layers", onClick: () => giveToRoundtable(ctx) }) : null,
+              h("p", {}, filtered ? "Nothing in this project." : "Nothing under way. Ask your agent below, or give an agent a task: each is a row here, from its first step to verified."),
+              canGive && !filtered ? button("Give a task", { size: "sm", icon: "layers", onClick: () => giveToAgents(ctx) }) : null,
             )
           : null,
       ),
@@ -203,7 +203,7 @@ export const homeView: View = (root, ctx, { scope }) => {
     body.hidden = false;
   }
 
-  for (const source of [...workSources(ctx), ctx.live.inboxCount, ctx.live.inboxLoaded, ctx.live.pairings, ctx.live.secretRequests, ctx.live.questions, ctx.live.notices, ctx.live.loopDrafts, ctx.live.connectorRequests, ctx.live.aboutYou, ctx.live.screenSessions, ctx.live.fleet, ctx.live.teamProblem, nodeTurns, questsInHand, unreadChats, answerStep, chatActivity] as { subscribe(listener: () => void): () => void }[]) scope.add(source.subscribe(() => draw()));
+  for (const source of [...workSources(ctx), ctx.live.inboxCount, ctx.live.inboxLoaded, ctx.live.pairings, ctx.live.secretRequests, ctx.live.questions, ctx.live.notices, ctx.live.loopDrafts, ctx.live.connectorRequests, ctx.live.aboutYou, ctx.live.screenSessions, ctx.live.fleet, ctx.live.teamProblem, nodeTurns, runsInHand, unreadChats, answerStep, chatActivity] as { subscribe(listener: () => void): () => void }[]) scope.add(source.subscribe(() => draw()));
   // "4m" moves on: drawn again each minute (only what changed is); an approval's time to answer, every half minute.
   scope.interval(() => draw(), 60_000);
   scope.interval(() => tickExpiries(needs), 30_000);

@@ -5,11 +5,11 @@ import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { chat, GatewayTokens, handleGateway, offeredModels, originOf, planOf, preset, PRESETS, resolveProvider, SELF } from "../src/index.ts";
 
 /*
- * Every provider preset, called the way Galahad calls it, against a fake of its server on this machine (no network,
+ * Every provider preset, called the way the primary calls it, against a fake of its server on this machine (no network,
  * no real key). Each row is what its vendor's documentation says (read 16 November 2026; the page is on the row), not
  * what the preset says, so a preset that drifts from its vendor fails here: where a call goes, which header carries
  * the key (never the address), what the body says, how its models are found, what a failure says, and for a coding
- * plan, who may call it (his own coding calls, a knight's coding tool, or only a tool you run yourself).
+ * plan, who may call it (its own coding calls, an agent's coding tool, or only a tool you run yourself).
  */
 
 interface Row {
@@ -74,7 +74,7 @@ const ROWS: Row[] = [
   { id: "llamacpp", docs: "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md", model: "local", chat: "http://127.0.0.1:9931/v1/chat/completions", auth: null, models: { asks: "http://127.0.0.1:9931/v1/models" } },
 ];
 
-/** What reached the fake: the address Galahad asked for, and the request as it arrived over HTTP. */
+/** What reached the fake: the address the primary asked for, and the request as it arrived over HTTP. */
 interface Seen {
   url: string;
   method: string;
@@ -138,7 +138,7 @@ const fakeKey = (id: string) => ["FAKE", id, "contract", crypto.randomUUID().sli
 function configured(row: Row) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   const known = preset(row.id)!;
   const baseUrl = row.base ?? known.baseUrl;
@@ -189,7 +189,7 @@ for (const row of ROWS) {
     });
 
     if (asItself) {
-      test(`his own call reaches ${row.chat} ${row.auth ? "with the key in its header" : "with no key"}, and says what it should`, async () => {
+      test(`its own call reaches ${row.chat} ${row.auth ? "with the key in its header" : "with no key"}, and says what it should`, async () => {
         const { ctx, key } = configured(row);
         seen.length = 0;
         const events = await answer(chat(ctx, { model: `${row.id}/${row.model}`, messages: hello, ...(row.plan ? { coding: true } : {}) }));
@@ -215,7 +215,7 @@ for (const row of ROWS) {
           expect(body.tools).toBeUndefined();
           expect(call.headers.get("content-type")).toBe("application/json");
         }
-        // To a coding plan he says who he is, and which conversation this is where it routes by one.
+        // To a coding plan it says who it is, and which conversation this is where it routes by one.
         if (row.plan) expect(call.headers.get("user-agent")).toBe(SELF);
         if (row.plan?.session) expect(call.headers.get(row.plan.session)).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
       });
@@ -235,7 +235,7 @@ for (const row of ROWS) {
         }
       });
     } else {
-      test("his own coding calls never reach it: its terms forbid them, and he says so", async () => {
+      test("its own coding calls never reach it: its terms forbid them, and it says so", async () => {
         const { ctx, key, store, vault } = configured(row);
         seen.length = 0;
         const events = await answer(chat(ctx, { model: `${row.id}/${row.model}`, messages: hello, coding: true }));
@@ -247,7 +247,7 @@ for (const row of ROWS) {
     }
 
     if (row.plan) {
-      test("he never answers you with it: a coding plan is for coding", async () => {
+      test("it never answers you with it: a coding plan is for coding", async () => {
         const { ctx } = configured(row);
         seen.length = 0;
         const events = await answer(chat(ctx, { model: `${row.id}/${row.model}`, messages: hello }));
@@ -256,9 +256,9 @@ for (const row of ROWS) {
       });
     }
 
-    test(`a tool's call through the gateway reaches it ${row.plan?.tools === "interactive" ? "only from one you run yourself" : "from a knight's VM"}, ${row.auth ? "with the key added" : "with no key to add"} and the tool's token kept back`, async () => {
+    test(`a tool's call through the gateway reaches it ${row.plan?.tools === "interactive" ? "only from one you run yourself" : "from an agent's VM"}, ${row.auth ? "with the key added" : "with no key to add"} and the tool's token kept back`, async () => {
       const { store, vault, key, tokens } = configured(row);
-      // (A tool asks where its own protocol says: Codex asks OpenAI's Responses, as Galahad does there.)
+      // (A tool asks where its own protocol says: Codex asks OpenAI's Responses, as the primary does there.)
       const path = known.kind === "anthropic" ? "v1/messages" : row.chat.endsWith("/responses") ? "responses" : "chat/completions";
       const body = JSON.stringify({ model: row.model, messages: hello, stream: false });
       const through = (label: string) => {
@@ -266,12 +266,12 @@ for (const row of ROWS) {
         return { token, response: handleGateway(new Request(`http://127.0.0.1:7400/gw/${row.id}/${path}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "user-agent": "opencode/2.2.7" }, body }), { store, vault, tokens, fetch: routed }) };
       };
       seen.length = 0;
-      const knight = through("sandbox:0123456789");
+      const agent = through("sandbox:0123456789");
       if (row.plan?.tools === "interactive") {
-        expect((await knight.response).status).toBe(403);
+        expect((await agent.response).status).toBe(403);
         expect(seen).toEqual([]);
       }
-      const yours = row.plan?.tools === "interactive" ? through("run:opencode") : knight;
+      const yours = row.plan?.tools === "interactive" ? through("run:opencode") : agent;
       expect((await yours.response).status).toBe(200);
       expect(seen).toHaveLength(1);
       const call = seen[0]!;

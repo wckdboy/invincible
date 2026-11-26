@@ -2,14 +2,14 @@ import { GENERIC_NOTIFICATION, isConversationId, isQuietKind, NOTIFY_OPENS, type
 import { afterPush, badgeCount, type BadgeState, type Badging, NO_BADGE, readBadgeMessage, readBadgeState, showBadge } from "./lib/badge.ts";
 
 /*
- * Service worker: keeps the app shell available offline, and shows what Galahad
- * pushes to this device (below the caching: "He comes to you").
+ * Service worker: keeps the app shell available offline, and shows what the primary
+ * pushes to this device (below the caching: "It comes to you").
  * The page itself comes from the network first (it carries all the CSS), the
  * cached copy only when the network is slow or gone. Other shell assets are served
  * from cache and refreshed in the background (stale-while-revalidate).
  * Anything under /api, /link or /gw is never cached: those are signed,
  * live requests and always go to the network. The pairing bundle (/pair.js)
- * is not cached either: pairing needs the network anyway. (The knights are orbs,
+ * is not cached either: pairing needs the network anyway. (The agents are orbs,
  * drawn by the app itself: there are no pictures of them to keep.)
  */
 
@@ -103,7 +103,7 @@ async function fromShell(event: FetchEventLike, key: string): Promise<Response> 
   event.waitUntil(refresh);
   if (cached) return cached;
   const fresh = await refresh;
-  return fresh ?? new Response("Galahad is offline and this page is not cached yet.", { status: 503 });
+  return fresh ?? new Response("Your agent is offline and this page is not cached yet.", { status: 503 });
 }
 
 /** How long opening the app waits for the network before falling back to the cached page. */
@@ -129,7 +129,7 @@ async function page(event: FetchEventLike): Promise<Response> {
   } catch {
     /* slow or offline: the cached page */
   }
-  return (await cache.match("/")) ?? new Response("Galahad is offline and this page is not cached yet.", { status: 503 });
+  return (await cache.match("/")) ?? new Response("Your agent is offline and this page is not cached yet.", { status: 503 });
 }
 
 sw.addEventListener("fetch", (event) => {
@@ -146,7 +146,7 @@ sw.addEventListener("fetch", (event) => {
 });
 
 /*
- * He comes to you. The node pushes a small JSON payload, encrypted to this browser (the push
+ * It comes to you. The node pushes a small JSON payload, encrypted to this browser (the push
  * service can't read it): a short title, one line, and where it opens. It's read strictly
  * (notify-payload.ts): anything that isn't one of ours is shown as a plain "something needs
  * you", never as whatever it says, and never as nothing (a browser requires a push to show).

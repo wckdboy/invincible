@@ -91,7 +91,7 @@ describe("a node on a Mac with Apple's container", () => {
     const before = fake.vms.size;
     firewall = { on: false, installed: false, soon: false, why: "this Mac's sandbox firewall isn't installed: run `invincible firewall install` (it asks for your password once)" };
     try {
-      await expect(api("createSandbox", { on: "mini", network: "gateway", cpus: 1, memoryGb: 1, quest: "q-no-firewall" })).rejects.toThrow("createSandbox: 424 no sandbox is made on this Mac while its firewall isn't on: this Mac's sandbox firewall isn't installed: run `invincible firewall install`");
+      await expect(api("createSandbox", { on: "mini", network: "gateway", cpus: 1, memoryGb: 1, run: "q-no-firewall" })).rejects.toThrow("createSandbox: 424 no sandbox is made on this Mac while its firewall isn't on: this Mac's sandbox firewall isn't installed: run `invincible firewall install`");
       expect(fake.vms.size).toBe(before);
     } finally {
       firewall = { on: true };
@@ -99,7 +99,7 @@ describe("a node on a Mac with Apple's container", () => {
   });
 
   test("makes a sandbox as a VM of its own through container, runs a command in it as uid 1000, and removes it", async () => {
-    const { sandbox } = await api<{ sandbox: SandboxView }>("createSandbox", { on: "mini", network: "gateway", cpus: 1, memoryGb: 1, quest: "q-mac-e2e" });
+    const { sandbox } = await api<{ sandbox: SandboxView }>("createSandbox", { on: "mini", network: "gateway", cpus: 1, memoryGb: 1, run: "q-mac-e2e" });
     expect(sandbox).toMatchObject({ isolation: "vm", network: "gateway", status: "running", disk: { limitGb: 20 } });
     const vm = fake.vms.get(sandbox.name)!;
     expect(vm.args).toEqual(expect.arrayContaining(["--read-only", "--cap-drop", "ALL", "--user", "1000:1000", "--no-dns"]));
@@ -118,30 +118,30 @@ describe("a node on a Mac with Apple's container", () => {
   });
 
   test("placed without being pinned: its sandbox is made on the Mac; one asked to be isolated finds no host here, and says why", async () => {
-    const { sandbox } = await api<{ sandbox: SandboxView }>("createSandbox", { network: "online", cpus: 1, memoryGb: 1, quest: "q-placed" });
+    const { sandbox } = await api<{ sandbox: SandboxView }>("createSandbox", { network: "online", cpus: 1, memoryGb: 1, run: "q-placed" });
     expect(sandbox).toMatchObject({ node: daemon.identity.id, network: "online", isolation: "vm" });
     expect(fake.vms.get(sandbox.name)!.networks).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
     await api("destroySandbox", { id: sandbox.id });
     await expect(api("createSandbox", { network: "isolated", cpus: 1, memoryGb: 1 })).rejects.toThrow(`createSandbox: 424 no sandbox host in this fleet can make it: mini: ${CONTAINER_CANNOT.isolated}`);
     await expect(api("createSandbox", { network: "online", desktop: true, cpus: 1, memoryGb: 1 })).rejects.toThrow(`createSandbox: 424 no sandbox host in this fleet can make it: mini: ${CONTAINER_CANNOT.desktop}`);
-    // Nor an image of his own that a Mac doesn't make: never looked for in a registry.
+    // Nor an image of its own that a Mac doesn't make: never looked for in a registry.
     await expect(api("createSandbox", { network: "online", image: CLAUDE_CODE_IMAGE, cpus: 1, memoryGb: 1 })).rejects.toThrow(`createSandbox: 424 no sandbox host in this fleet can make it: mini: it doesn't make ${CLAUDE_CODE_IMAGE}`);
   });
 
-  test("a knight's VM is made on the Mac, and grown by pausing: the answer says it paused, and the ledger why", async () => {
-    await api("saveTeammate", { id: "ada", name: "ADA", role: "engineer" });
-    const { workspace } = await api<{ workspace: SandboxView }>("provisionTeammate", { id: "ada" });
+  test("an agent's VM is made on the Mac, and grown by pausing: the answer says it paused, and the ledger why", async () => {
+    await api("saveAgent", { id: "ada", name: "ADA", role: "engineer" });
+    const { workspace } = await api<{ workspace: SandboxView }>("provisionAgent", { id: "ada" });
     expect(workspace).toMatchObject({ isolation: "vm", network: "online", ephemeral: false, cpus: 1, memoryGb: 2 });
     expect(fake.volumes.get(`${workspace.name}-work`)!.labels["dev.invincible.retained"]).toBe("1");
-    const grown = await api<{ workspace: SandboxView; paused?: boolean }>("resizeTeammate", { id: "ada", memoryGb: 4 });
+    const grown = await api<{ workspace: SandboxView; paused?: boolean }>("resizeAgent", { id: "ada", memoryGb: 4 });
     expect(grown).toMatchObject({ paused: true, workspace: { id: workspace.id, memoryGb: 4, status: "running" } });
     expect(fake.vms.get(workspace.name)!.volume).toBe(`${workspace.name}-work`);
     const { entries } = await api<{ entries: LedgerEntry[] }>("ledger");
     expect(entries.find((e) => e.class === "modify" && e.target === workspace.name)?.detail).toBe("paused to grow (a Mac's VM can't grow while it runs): 1 cpu · 4 GB · 20 GB disk");
     // Its disk can't grow there: refused, saying why.
-    await expect(api("resizeTeammate", { id: "ada", diskGb: 40 })).rejects.toThrow(/409 a VM's disk on a Mac keeps the size it was made with/);
+    await expect(api("resizeAgent", { id: "ada", diskGb: 40 })).rejects.toThrow(/409 a VM's disk on a Mac keeps the size it was made with/);
     // Nor is a desktop made there.
-    await expect(api("remakeTeammate", { id: "ada", desktop: true })).rejects.toThrow(CONTAINER_CANNOT.desktop);
+    await expect(api("remakeAgent", { id: "ada", desktop: true })).rejects.toThrow(CONTAINER_CANNOT.desktop);
   });
 
   test("an isolated sandbox asked of it is refused with the reason, and nothing is made", async () => {

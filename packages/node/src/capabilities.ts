@@ -31,7 +31,7 @@ export interface Capabilities {
   container?: { version: string | null; running: boolean };
   /** This node keeps its Mac from sleeping while it runs (`invincible awake on`: keep-awake.ts). Absent: it doesn't. */
   awake?: boolean;
-  /** This Mac's own screen can be Galahad's (mac-screen.ts: its node runs from the app). Whether macOS allows it now is asked of it. */
+  /** This Mac's own screen can be the primary's (mac-screen.ts: its node runs from the app). Whether macOS allows it now is asked of it. */
   screen?: true;
 }
 

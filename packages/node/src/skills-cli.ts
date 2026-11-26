@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { type RouteName, SKILL_ID, SKILL_LIMITS, skillAuthor, type SkillDetail, type SkillDoc, SkillDocInput, skillInWords, skillRecordLine, SKILLS_BUDGET_MAX, type SkillsView, type SkillVersionView, type SkillView } from "@invincible/core";
 
 /*
- * `invincible skills`: his skills at a terminal. Thin: the node keeps them and decides
+ * `invincible skills`: its skills at a terminal. Thin: the node keeps them and decides
  * everything (who may write, what a version's trust is, what may be approved); this
  * shapes input and prints. Approving shows the whole of what you approve, and where it
  * came from, before it asks.
@@ -24,16 +24,16 @@ const dim = (s: string) => (tty ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (tty ? `\x1b[1m${s}\x1b[0m` : s);
 
 export const SKILLS_USAGE = `usage:
-  invincible skills [--all]                 his skills: state, uses and track record (retired ones with --all)
-  invincible skills show <id>               one in full: its words, where it came from, every version, the quests that used it
+  invincible skills [--all]                 its skills: state, uses and track record (retired ones with --all)
+  invincible skills show <id>               one in full: its words, where it came from, every version, the runs that used it
   invincible skills approve <id> [-y]       read the version that waits, in full, then approve exactly that one
-  invincible skills lock <id> | unlock <id> locked: he may use it, not change it
+  invincible skills lock <id> | unlock <id> locked: it may use it, not change it
   invincible skills retire <id> | restore <id>   retired: kept, never offered (nothing is deleted)
   invincible skills rollback <id> [-y]      one step back, to the version before the latest
   invincible skills write [<id>] --title "…" --when "…" --step "…" [--step "…"]… [--proof "command => what to expect"]… [--pitfall "…"]…
   invincible skills write [<id>] --file skill.json     yours (owner); with an id, a new version of that skill
   invincible skills import <github folder>  an Agent Skill (its SKILL.md alone, as text: nothing in it runs), waiting for your approval
-  invincible skills budget [<tokens a day>] the day's budget for distilling skills from passed quests (0: off)`;
+  invincible skills budget [<tokens a day>] the day's budget for distilling skills from passed runs (0: off)`;
 
 const STATE: Record<SkillView["state"], string> = { proposed: "proposed", "in-use": "in use", stale: "stale", retired: "retired" };
 const when = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
@@ -53,7 +53,7 @@ export function skillRow(s: SkillView): string {
 /** Where a version came from, in a line: who wrote it, from what, with what trust, and whether you approved it. */
 export function versionLine(v: SkillVersionView): string {
   const approved = v.trust !== "untrusted" ? "" : v.approvedAt ? ` · approved by you ${when(v.approvedAt)}` : " · not approved";
-  return `v${v.n} · ${when(v.at)} · by ${skillAuthor(v.by)} · ${v.trust}${approved}${v.source ? ` · ${v.source}` : v.quest ? ` · quest ${v.quest}` : ""}`;
+  return `v${v.n} · ${when(v.at)} · by ${skillAuthor(v.by)} · ${v.trust}${approved}${v.source ? ` · ${v.source}` : v.run ? ` · run ${v.run}` : ""}`;
 }
 
 /** A skill in full, as a terminal shows it. */
@@ -69,7 +69,7 @@ export function skillPage(skill: SkillDetail): string[] {
     "",
     bold("Versions"),
     ...skill.history.map((v) => `  ${v.id === skill.head ? "→" : " "} ${versionLine(v)}`),
-    ...(skill.record.length ? ["", bold("Used in"), ...skill.record.slice(0, 20).map((u) => `  ${when(u.at)}  ${u.quest}${u.status ? `  ${u.status}` : ""}`)] : []),
+    ...(skill.record.length ? ["", bold("Used in"), ...skill.record.slice(0, 20).map((u) => `  ${when(u.at)}  ${u.run}${u.status ? `  ${u.status}` : ""}`)] : []),
   ];
 }
 
@@ -111,7 +111,7 @@ export async function skillsCommand(api: Api, sub: string | undefined, rest: str
     case "list": {
       const { skills, budget } = await api.call<SkillsView>("skills");
       const shown = flags.all ? skills : skills.filter((s) => s.state !== "retired");
-      if (!skills.length) console.log("He has no skills yet. He learns one when a quest of his passes its review (invincible do …), and you can write one: invincible skills write --title … --when … --step …");
+      if (!skills.length) console.log("It has no skills yet. It learns one when a run of its passes its review (invincible do …), and you can write one: invincible skills write --title … --when … --step …");
       for (const s of shown) console.log(skillRow(s));
       const retired = skills.length - shown.length;
       if (retired) console.log(dim(`${retired} retired (kept, never offered): invincible skills --all`));
@@ -140,7 +140,7 @@ export async function skillsCommand(api: Api, sub: string | undefined, rest: str
       // Approval is of what you read: all of it, and where it came from.
       console.log([`${bold("This version waits for your approval")} ${dim(`· ${skill.id}`)}`, versionLine(waiting), "", ...(waiting.doc ? skillInWords(waiting.doc).split("\n") : ["(this node can't read its words: approve it from a node that can show it to you)"]), ""].join("\n"));
       if (!waiting.doc) return;
-      console.log(dim("Approved, it is given to his planner and engineer as a note (data, fenced, marked untrusted) when it bears on a quest. It never runs anything by itself."));
+      console.log(dim("Approved, it is given to its planner and engineer as a note (data, fenced, marked untrusted) when it bears on a run. It never runs anything by itself."));
       if (!flags.yes && !hooks.confirm("Approve exactly this version?")) return;
       const done = await api.call<{ skill: SkillView }>("approveSkill", { id: skill.id, version: waiting.id });
       console.log(`Approved: "${done.skill.title}" is ${stateWords(done.skill)}.`);
@@ -149,7 +149,7 @@ export async function skillsCommand(api: Api, sub: string | undefined, rest: str
     case "lock":
     case "unlock": {
       const { skill } = await api.call<{ skill: SkillView }>("lockSkill", { id: need(rest[0]), locked: sub === "lock" });
-      console.log(skill.locked ? `Locked: he may use "${skill.title}", not change it.` : `Unlocked: he may revise "${skill.title}" again, if he wrote it.`);
+      console.log(skill.locked ? `Locked: it may use "${skill.title}", not change it.` : `Unlocked: it may revise "${skill.title}" again, if it wrote it.`);
       return;
     }
     case "retire":
@@ -181,13 +181,13 @@ export async function skillsCommand(api: Api, sub: string | undefined, rest: str
     case "budget": {
       if (rest[0] === undefined) {
         const { budget } = await api.call<SkillsView>("skills");
-        console.log(`Distilling skills: ${budget.tokensPerDay === 0 ? "off (0 tokens a day)" : `${budget.tokensPerDay} tokens a day`}; ${budget.usedToday} used in the last day. One bounded call per passed quest at most, by the cheapest usable role.`);
+        console.log(`Distilling skills: ${budget.tokensPerDay === 0 ? "off (0 tokens a day)" : `${budget.tokensPerDay} tokens a day`}; ${budget.usedToday} used in the last day. One bounded call per passed run at most, by the cheapest usable role.`);
         return;
       }
       const tokensPerDay = Number(rest[0]);
       if (!Number.isInteger(tokensPerDay) || tokensPerDay < 0 || tokensPerDay > SKILLS_BUDGET_MAX) throw new Error(`the budget is a whole number of tokens a day, 0 (off) to ${SKILLS_BUDGET_MAX}`);
       const { budget } = await api.call<{ budget: SkillsView["budget"] }>("setSkillsBudget", { tokensPerDay });
-      console.log(budget.tokensPerDay === 0 ? "Distilling skills is off: he learns none from quests until you raise it." : `He may spend ${budget.tokensPerDay} tokens a day distilling skills (${budget.usedToday} used in the last day).`);
+      console.log(budget.tokensPerDay === 0 ? "Distilling skills is off: it learns none from runs until you raise it." : `It may spend ${budget.tokensPerDay} tokens a day distilling skills (${budget.usedToday} used in the last day).`);
       return;
     }
     default:

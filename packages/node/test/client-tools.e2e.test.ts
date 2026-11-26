@@ -10,7 +10,7 @@ import { Home } from "../src/home.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * Tools the caller runs (clientTools: a quest's engineer's shell and files), end to end: a real daemon over real HTTP
+ * Tools the caller runs (clientTools: a run's engineer's shell and files), end to end: a real daemon over real HTTP
  * and a stand-in model that calls one. The node offers them, never runs one, ends the answer with its calls and carry,
  * and gives the next request's calls, carry and results back to the model as its provider takes them. Every result and
  * every call's input is scanned for secrets, as words are.
@@ -67,7 +67,7 @@ async function events(input: object): Promise<ChatStreamEvent[]> {
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "keep" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
@@ -122,7 +122,7 @@ describe("tools the caller runs, through the chat route", () => {
     expect(bodies).toHaveLength(0);
   });
 
-  test("they go only without Galahad's own tools, and never in a kept chat", async () => {
+  test("they go only without your agent's own tools, and never in a kept chat", async () => {
     expect((await call("chat", { ...asked, tools: true, messages: [{ role: "user", content: "x" }] })).status).toBe(400);
     expect((await call("chat", { ...asked, save: true, messages: [{ role: "user", content: "x" }] })).status).toBe(400);
   });

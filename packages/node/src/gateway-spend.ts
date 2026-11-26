@@ -1,8 +1,8 @@
 import { addUsage, type Usage, type UsageLine } from "@invincible/core";
 
 /*
- * What tools' calls through this node's gateway cost lately, by who called (a gateway token's label: a knight's VM is
- * `sandbox:<its id>`), kept in memory so a task's budget can count its knight's coding tool beside its own calls. The
+ * What tools' calls through this node's gateway cost lately, by who called (a gateway token's label: an agent's VM is
+ * `sandbox:<its id>`), kept in memory so a task's budget can count its agent's coding tool beside its own calls. The
  * node's usage table keeps the lasting count (by day); this keeps only the last two days of calls, and at most so many
  * a caller, so it can't grow.
  */
@@ -30,7 +30,7 @@ export class GatewaySpend {
     this.calls.set(label, kept);
   }
 
-  /** The calls `label` made since `since` (ms), by model, under `role`: lines for core's costOf, as a quest's own are. */
+  /** The calls `label` made since `since` (ms), by model, under `role`: lines for core's costOf, as a run's own are. */
   since(label: string, since: number, role = "tool"): UsageLine[] {
     const lines: UsageLine[] = [];
     for (const c of this.calls.get(label) ?? []) if (c.at >= since) addUsage(lines, role, c.model, c.usage);

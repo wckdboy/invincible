@@ -1,5 +1,5 @@
 /*
- * Something shared to Galahad from another app. Android's share sheet opens the installed app at
+ * Something shared to the primary from another app. Android's share sheet opens the installed app at
  * /?share-title=…&share-text=…&share-url=… (the manifest's share_target), and what was shared lands in a
  * new chat's message box, unsent: the words are the other app's, and only you send them. (iOS has no
  * share target for a web app.)

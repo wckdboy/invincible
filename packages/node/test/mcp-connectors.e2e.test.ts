@@ -118,7 +118,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${upstream.port}/mcp`;
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
@@ -264,13 +264,13 @@ describe("big servers, reviewed ones, and a tool read whole", () => {
     expect((await admin<ConnectorToolDefinition>("connectorTool", { connector: "tracker", tool: "search" })).body.changed).toBe(false);
   });
 
-  test("a template's tool reads whole as installed; an agent can't read the tools of a connector that's Galahad's alone", async () => {
+  test("a template's tool reads whole as installed; an agent can't read the tools of a connector that's your agent's alone", async () => {
     expect((await admin("setConnector", { id: "github" })).status).toBe(200);
     const repo = await arm<ConnectorToolDefinition>("connectorTool", { connector: "github", tool: "repo" });
     expect(repo.body).toMatchObject({ class: "read", asks: false, changed: false, input: { type: "object", required: ["owner", "repo"] } });
     expect((repo.body.input as { properties: Record<string, unknown> }).properties.owner).toMatchObject({ type: "string", pattern: "[A-Za-z0-9_.-]{1,100}" });
-    // One that's Galahad's alone: an agent can't read its tools; you can, and a tool it hasn't is said to be missing.
-    const alone = { id: "ledgerbook", label: "Ledgerbook", origin: "https://ledgerbook.example", access: { only: "galahad", allowed: [] }, tools: { entries: { method: "GET", path: "/entries", class: "read", description: "The entries." } } };
+    // One that's the primary's alone: an agent can't read its tools; you can, and a tool it hasn't is said to be missing.
+    const alone = { id: "ledgerbook", label: "Ledgerbook", origin: "https://ledgerbook.example", access: { only: "primary", allowed: [] }, tools: { entries: { method: "GET", path: "/entries", class: "read", description: "The entries." } } };
     expect((await admin("setConnector", { id: "ledgerbook", manifest: alone })).status).toBe(200);
     expect((await arm("connectorTool", { connector: "ledgerbook", tool: "entries" })).status).toBe(403);
     expect((await admin("connectorTool", { connector: "ledgerbook", tool: "entries" })).status).toBe(200);

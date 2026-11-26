@@ -2,10 +2,10 @@ import type { GatewayTokens } from "@invincible/models";
 import type { LedgerEntryInput } from "@invincible/sandbox";
 
 /*
- * Web search: Galahad's own SearXNG on the sandbox host (loopback only, installed by
+ * Web search: the primary's own SearXNG on the sandbox host (loopback only, installed by
  * the deploy). You, chat and agents search through the node (webSearch, MCP
  * web_search, `invincible search`); sandboxes through their gateway (`websearch` in the
- * images), with a token that carries the "search" scope, so a quest can research
+ * images), with a token that carries the "search" scope, so a run can research
  * without the internet. Results are what strangers wrote: data, never instructions.
  */
 

@@ -3,9 +3,9 @@ import { canonical, type Json } from "./canonical.ts";
 import { sha256B64u } from "./crypto.ts";
 
 /*
- * Compute: what the fleet can carry, and how Galahad spends it.
+ * Compute: what the fleet can carry, and how the primary spends it.
  *
- * He grows by having machines added to him, never by acquiring any: a node is one
+ * It grows by having machines added to it, never by acquiring any: a node is one
  * the owner enrolled through pairing, and nothing here provisions, rents or reaches
  * for more. Each node measures itself (a calibration, recorded in the mind), may
  * use no more than a ceiling the owner sets (by default half of the machine, so
@@ -22,7 +22,7 @@ export const SLOT_CPUS = 4;
 export const SLOT_MEMORY_GB = 8;
 /** The default ceiling: this share of a machine's threads and memory. The rest stays the host's. */
 export const DEFAULT_SHARE = 0.5;
-/** Whatever the ceiling, this share of the machine's threads is never his while other work wants it. */
+/** Whatever the ceiling, this share of the machine's threads is never its while other work wants it. */
 export const HOST_RESERVE = 0.1;
 /** And this share of its memory must stay free after a sandbox is admitted. */
 export const MEMORY_RESERVE = 0.05;
@@ -39,9 +39,9 @@ export const VM_OVERHEAD: VmOverhead = { cpus: 1, memoryGb: 2 };
  * Mac's until the VM stops, so a VM is counted at all it was given, and this on top.
  */
 export const MAC_VM_OVERHEAD: VmOverhead = { cpus: 1, memoryGb: 0.5 };
-/** The most attempts one quest runs at once. */
+/** The most attempts one run runs at once. */
 export const MAX_EFFORT = 3;
-/** Extra attempts (beyond each quest's first) Galahad may spend in any 24 hours unless the owner says otherwise. */
+/** Extra attempts (beyond each run's first) the primary may spend in any 24 hours unless the owner says otherwise. */
 export const EFFORT_BUDGET_DEFAULT = 12;
 /** A local model slower than this (tokens a second) isn't worth suggesting for a role. */
 export const WORTH_HIRING_TPS = 10;
@@ -68,7 +68,7 @@ export const REFERENCE_SINGLE = 62_000;
 const REFERENCES: Readonly<Record<number, number>> = { 1: 70_000, [KERNEL]: REFERENCE_SINGLE };
 /** The ledger's resource for an extra attempt: the day's budget is counted from these entries. */
 export const ATTEMPT_RESOURCE = "compute.attempt";
-/** The ledger's resource for a calibration, and for anything he re-derived. */
+/** The ledger's resource for a calibration, and for anything it re-derived. */
 export const COMPUTE_RESOURCE = "compute";
 
 const Name = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
@@ -89,7 +89,7 @@ export const Calibration = z.object({
   reason: CalibrationReason,
   /** The body it measured (bodyFingerprint): when the body or the ceiling changes, it's taken again. */
   body: z.string().regex(/^[A-Za-z0-9_-]{16}$/),
-  /** The kernel's score on one thread, and on `threads` at once (never more threads than his ceiling). */
+  /** The kernel's score on one thread, and on `threads` at once (never more threads than its ceiling). */
   cpu: z.object({
     single: z.number().positive().max(1e9),
     multi: z.number().positive().max(1e12),
@@ -115,7 +115,7 @@ export type Calibration = z.infer<typeof Calibration>;
 
 /** The owner's ceiling for one node. What's left out keeps its default. */
 export const ComputeLimit = z.object({
-  /** Threads he may use at once (never more than the machine has). */
+  /** Threads it may use at once (never more than the machine has). */
   cores: z.number().int().min(1).max(4096).optional(),
   memoryGb: z.number().min(1).max(65_536).optional(),
   /** Sandboxes at once (0: none on this node). */
@@ -129,7 +129,7 @@ export type EffortLevel = z.infer<typeof EffortLevel>;
 export const EffortAsk = z.union([z.literal("auto"), EffortLevel]);
 export type EffortAsk = z.infer<typeof EffortAsk>;
 
-/** How he spends compute on a quest: the level `auto` may go up to, and the day's budget of extra attempts. */
+/** How it spends compute on a run: the level `auto` may go up to, and the day's budget of extra attempts. */
 export const ComputePolicy = z.object({
   effort: EffortAsk.optional(),
   attemptsPerDay: z.number().int().min(0).max(500).optional(),
@@ -170,7 +170,7 @@ export function computeBody(caps: unknown): ComputeBody | null {
   return { cores: Math.floor(caps.cores), memoryGb: caps.memoryGb, gpu: gpu.slice(0, 16), sandboxHost: sandbox !== null, microVMs: sandbox?.vm === true, localModels: localModels.slice(0, 8) };
 }
 
-/** The threads he may use at once on a node: the owner's ceiling, else half of them. Never more than it has. */
+/** The threads it may use at once on a node: the owner's ceiling, else half of them. Never more than it has. */
 export function ceilingThreads(body: ComputeBody, limit: ComputeLimit | null): number {
   return Math.max(1, Math.min(body.cores, limit?.cores ?? Math.floor(body.cores * DEFAULT_SHARE)));
 }
@@ -207,7 +207,7 @@ export const RECALIBRATE_AFTER_MS = 60 * 60_000;
 /* ---------- capacity: what a node carries at once ---------- */
 
 export interface NodeCapacity {
-  /** Threads' worth of work he may run at once (measured, never above the ceiling). */
+  /** Threads' worth of work it may run at once (measured, never above the ceiling). */
   cores: number;
   memoryGb: number;
   /** Sandboxes at once. */
@@ -246,12 +246,12 @@ export function deriveCapacity(body: ComputeBody, calibration: Calibration | nul
     // A kernel this node doesn't know: what it did at once still counts, as that many reference cores until a node that knows it says.
     strength = reference ? calibration.cpu.multi / reference : delivered;
     speed = reference ? calibration.cpu.single / reference : null;
-    reasons.push(`Measured: ${plural(calibration.cpu.threads, "thread")} did ${fixed1(delivered)} cores' worth of work at once, so he counts ${cores}.`);
+    reasons.push(`Measured: ${plural(calibration.cpu.threads, "thread")} did ${fixed1(delivered)} cores' worth of work at once, so it counts ${cores}.`);
     if (!reference) reasons.push("Measured with a newer benchmark than this node knows: how fast one of its threads is against the reference isn't known here.");
-    if (calibration.cpu.threads !== threads) reasons.push(`That was measured on ${plural(calibration.cpu.threads, "thread")}; he measures again for ${threads}.`);
+    if (calibration.cpu.threads !== threads) reasons.push(`That was measured on ${plural(calibration.cpu.threads, "thread")}; it measures again for ${threads}.`);
   } else {
     cores = Math.max(1, Math.min(threads, SLOT_CPUS));
-    reasons.push(`Not measured yet: one sandbox's worth (${plural(cores, "thread")}) until he has calibrated.`);
+    reasons.push(`Not measured yet: one sandbox's worth (${plural(cores, "thread")}) until it has calibrated.`);
   }
   const memoryGb = Math.max(1, Math.floor(Math.min(body.memoryGb, limit?.memoryGb ?? body.memoryGb * DEFAULT_SHARE)));
   reasons.push(`Memory: ${memoryGb} of ${Math.round(body.memoryGb)} GB (${limit?.memoryGb !== undefined ? "your ceiling" : "half by default"}).`);
@@ -268,7 +268,7 @@ export function deriveCapacity(body: ComputeBody, calibration: Calibration | nul
     } else {
       reasons.push(`${plural(sandboxes, "sandbox", "sandboxes")} at once (${SLOT_CPUS} threads and ${SLOT_MEMORY_GB} GB each: the threads allow ${Math.max(1, byCores)}, the memory ${Math.max(1, byMemory)}).`);
     }
-    reasons.push("A knight's own VM takes no slot: it holds its memory of the ceiling as long as it is kept, and its threads while it works (and a few minutes after).");
+    reasons.push("An agent's own VM takes no slot: it holds its memory of the ceiling as long as it is kept, and its threads while it works (and a few minutes after).");
   }
   const modelCalls = limit?.modelCalls ?? MODEL_CALLS_DEFAULT;
   reasons.push(`${plural(modelCalls, "model call")} at once (${limit?.modelCalls !== undefined ? "your ceiling" : "the default"}).`);
@@ -284,13 +284,13 @@ export interface ComputeUse {
   memoryGb: number;
 }
 
-/** The machine, live: its load (1 minute, in threads), memory free, and how many threads his own sandboxes held lately. */
+/** The machine, live: its load (1 minute, in threads), memory free, and how many threads its own sandboxes held lately. */
 export interface HostLoad {
   load: number;
   cores: number;
   freeMemoryGb: number;
   totalMemoryGb: number;
-  /** The most threads his own sandboxes held in the last minute or so: load that is his, not the host's. */
+  /** The most threads its own sandboxes held in the last minute or so: load that is its, not the host's. */
   oursRecently: number;
 }
 
@@ -304,7 +304,7 @@ export function clampNeed(capacity: NodeCapacity, request: { cpus: number; memor
   return { ...fit, clamped: fit.cpus < cpus || fit.memoryGb < memoryGb };
 }
 
-/** Load on the machine that isn't his own sandboxes' (in threads). */
+/** Load on the machine that isn't its own sandboxes' (in threads). */
 const othersLoad = (used: ComputeUse, host: HostLoad): number => Math.max(0, host.load - Math.max(used.cores, host.oursRecently));
 
 /** `counted`: one more sandbox, so the count of them counts too (a sandbox that grows is already counted). */
@@ -312,26 +312,26 @@ function fits(capacity: NodeCapacity, used: ComputeUse, need: { cpus: number; me
   const no = (why: string, busy = false): Admission => ({ ok: false, why, busy });
   if (capacity.sandboxes <= 0) return no("this node takes no sandboxes");
   if (counted && used.sandboxes >= capacity.sandboxes) return no(`every slot is in use (${used.sandboxes} of ${capacity.sandboxes} sandboxes)`);
-  if (used.cores + need.cpus > capacity.cores + 1e-9) return no(`${fixed1(used.cores)} of the ${capacity.cores} threads he may use are taken, and this needs ${fixed1(need.cpus)}`);
-  if (used.memoryGb + need.memoryGb > capacity.memoryGb + 1e-9) return no(`${fixed1(used.memoryGb)} of the ${capacity.memoryGb} GB he may use are taken, and this needs ${fixed1(need.memoryGb)}`);
+  if (used.cores + need.cpus > capacity.cores + 1e-9) return no(`${fixed1(used.cores)} of the ${capacity.cores} threads it may use are taken, and this needs ${fixed1(need.cpus)}`);
+  if (used.memoryGb + need.memoryGb > capacity.memoryGb + 1e-9) return no(`${fixed1(used.memoryGb)} of the ${capacity.memoryGb} GB it may use are taken, and this needs ${fixed1(need.memoryGb)}`);
   if (host) {
     const room = host.cores * (1 - HOST_RESERVE) - others;
     if (used.cores + need.cpus > room + 1e-9) {
       return no(
         others > 0.05 * host.cores
-          ? `the machine is busy with other work (about ${fixed1(others)} of its ${host.cores} threads): he waits for it to ease`
-          : `a tenth of the machine's threads always stays the host's (${fixed1(room)} of ${host.cores} are his to use at most)`,
+          ? `the machine is busy with other work (about ${fixed1(others)} of its ${host.cores} threads): it waits for it to ease`
+          : `a tenth of the machine's threads always stays the host's (${fixed1(room)} of ${host.cores} are its to use at most)`,
         true,
       );
     }
-    if (host.freeMemoryGb - need.memoryGb < host.totalMemoryGb * MEMORY_RESERVE) return no(`the machine has only ${fixed1(host.freeMemoryGb)} GB of memory free: he waits for it to ease`, true);
+    if (host.freeMemoryGb - need.memoryGb < host.totalMemoryGb * MEMORY_RESERVE) return no(`the machine has only ${fixed1(host.freeMemoryGb)} GB of memory free: it waits for it to ease`, true);
   }
   return { ok: true };
 }
 
 /**
  * Whether one more sandbox fits now: inside the ceiling, and with room left on the machine itself
- * (he backs off while other work is using it). `host` null: the live load isn't known (another node).
+ * (it backs off while other work is using it). `host` null: the live load isn't known (another node).
  */
 export function admit(capacity: NodeCapacity, used: ComputeUse, need: { cpus: number; memoryGb: number }, host: HostLoad | null, opts: { slot?: boolean } = {}): Admission {
   return fits(capacity, used, need, host, host ? othersLoad(used, host) : 0, opts.slot ?? true);
@@ -358,7 +358,7 @@ export function freeSlots(capacity: NodeCapacity, used: ComputeUse, host: HostLo
   return free;
 }
 
-/* ---------- effort: how many attempts a quest runs at once ---------- */
+/* ---------- effort: how many attempts a run runs at once ---------- */
 
 export interface EffortInput {
   asked: EffortAsk;
@@ -375,7 +375,7 @@ export interface EffortInput {
 }
 
 /**
- * How many attempts a quest may run at once. `auto` (and anything an agent or a loop asks for)
+ * How many attempts a run may run at once. `auto` (and anything an agent or a loop asks for)
  * takes only what is free now and never goes past the day's budget or the owner's level. A level
  * you name yourself stands: attempts beyond the free slots wait their turn, and a budget already
  * spent is said, not enforced against you.
@@ -419,9 +419,9 @@ export function decideEffort(input: EffortInput): { attempts: EffortLevel; reaso
   return { attempts: final, reasons };
 }
 
-/* ---------- the plan he derives, and what changed ---------- */
+/* ---------- the plan it derives, and what changed ---------- */
 
-/** His defaults, derived from the fleet's compute. Recorded when it changes (compute.adapted), so he can say what changed. */
+/** Its defaults, derived from the fleet's compute. Recorded when it changes (compute.adapted), so it can say what changed. */
 export const ComputePlan = z.object({
   nodes: z.record(
     z.string().max(100),
@@ -441,7 +441,7 @@ export interface PlanNode {
   capacity: NodeCapacity;
 }
 
-/** His defaults for a fleet: each node's slots, the host that takes sandboxes first, the effort it can carry. Pure. */
+/** Its defaults for a fleet: each node's slots, the host that takes sandboxes first, the effort it can carry. Pure. */
 export function derivePlan(nodes: readonly PlanNode[]): ComputePlan {
   const sorted = [...nodes].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const plan: ComputePlan = { nodes: {}, sandboxHost: null, effort: 1 };
@@ -469,7 +469,7 @@ export function planChanges(before: ComputePlan | null, after: ComputePlan): str
   const ids = Object.keys(after.nodes).sort((a, b) => after.nodes[a]!.name.localeCompare(after.nodes[b]!.name));
   if (!before) {
     for (const id of ids) lines.push(`${after.nodes[id]!.name} carries ${carries(after.nodes[id]!)}.`);
-    lines.push(`Default effort ${after.effort}: auto may run up to ${plural(after.effort, "attempt")} at a quest at once.`);
+    lines.push(`Default effort ${after.effort}: auto may run up to ${plural(after.effort, "attempt")} at a run at once.`);
     return lines;
   }
   for (const id of ids) {
@@ -484,7 +484,7 @@ export function planChanges(before: ComputePlan | null, after: ComputePlan): str
     if (was.sandboxes === now.sandboxes && was.modelCalls === now.modelCalls) {
       if (was.strength === null && now.strength !== null) lines.push(`${now.name} measured itself: ${fixed1(now.strength)} reference cores' worth.`);
       else if (was.strength !== null && now.strength !== null && Math.abs(now.strength - was.strength) > 0.1 * was.strength) lines.push(`${now.name} measured itself again: ${fixed1(now.strength)} reference cores' worth (it was ${fixed1(was.strength)}).`);
-      else if (was.cores !== now.cores || was.memoryGb !== now.memoryGb) lines.push(`${now.name}: he may use ${now.cores} threads and ${now.memoryGb} GB now (it was ${was.cores} and ${was.memoryGb}).`);
+      else if (was.cores !== now.cores || was.memoryGb !== now.memoryGb) lines.push(`${now.name}: it may use ${now.cores} threads and ${now.memoryGb} GB now (it was ${was.cores} and ${was.memoryGb}).`);
     }
   }
   for (const id of Object.keys(before.nodes).sort((a, b) => before.nodes[a]!.name.localeCompare(before.nodes[b]!.name))) {
@@ -492,23 +492,23 @@ export function planChanges(before: ComputePlan | null, after: ComputePlan): str
     const was = before.nodes[id]!;
     lines.push(`${was.name} left the fleet: its ${was.sandboxes ? `${plural(was.sandboxes, "sandbox slot")} ${was.sandboxes === 1 ? "is" : "are"} gone` : "model calls are gone"}.`);
   }
-  if (before.effort !== after.effort) lines.push(`Default effort ${before.effort} → ${after.effort}: auto may now run up to ${plural(after.effort, "attempt")} at a quest at once.`);
+  if (before.effort !== after.effort) lines.push(`Default effort ${before.effort} → ${after.effort}: auto may now run up to ${plural(after.effort, "attempt")} at a run at once.`);
   if (before.sandboxHost !== after.sandboxHost && after.sandboxHost && before.sandboxHost) lines.push(`Sandboxes go to ${after.nodes[after.sandboxHost]!.name} first now (the stronger host).`);
   return lines;
 }
 
-/* ---------- what more would buy, and what he suggests ---------- */
+/* ---------- what more would buy, and what it suggests ---------- */
 
 /**
  * What more compute would buy, in a line each: a raised ceiling, another machine, a GPU. Pure, from the census
- * (the node that's asked first: its model calls are the ones a quest's calls take).
+ * (the node that's asked first: its model calls are the ones a run's calls take).
  */
 export function whatMoreBuys(nodes: readonly { name: string; body: ComputeBody; capacity: NodeCapacity; limit: ComputeLimit | null }[], plan: Pick<ComputePlan, "effort">): string[] {
   const lines: string[] = [];
   const hosts = nodes.filter((n) => n.body.sandboxHost);
   for (const n of hosts) {
     if (!n.capacity.measured) {
-      lines.push(`${n.name} isn't measured yet, so he counts one slot on it: invincible compute calibrate ${n.name}.`);
+      lines.push(`${n.name} isn't measured yet, so it counts one slot on it: invincible compute calibrate ${n.name}.`);
       continue;
     }
     if (n.limit?.cores !== undefined) continue;
@@ -523,7 +523,7 @@ export function whatMoreBuys(nodes: readonly { name: string; body: ComputeBody; 
     if (more > now && slots > n.capacity.sandboxes) {
       lines.push(
         `${n.name}: a ceiling of ${more} threads instead of ${now} could carry up to ${plural(slots, "sandbox slot")} instead of ${n.capacity.sandboxes}, if nothing else there needs them: invincible compute limit ${n.name} --cores ${more}. ` +
-          "Up to, because threads that share a core add less than a core each: he measures again on the new ceiling and counts what that shows.",
+          "Up to, because threads that share a core add less than a core each: it measures again on the new ceiling and counts what that shows.",
       );
     }
   }
@@ -534,19 +534,19 @@ export function whatMoreBuys(nodes: readonly { name: string; body: ComputeBody; 
     const together = Math.floor(after / MAX_EFFORT);
     const also =
       plan.effort < MAX_EFFORT
-        ? `, and auto could spend effort ${Math.min(MAX_EFFORT, after)} on a quest`
+        ? `, and auto could spend effort ${Math.min(MAX_EFFORT, after)} on a run`
         : together > Math.floor(slots / MAX_EFFORT)
-          ? `, and ${plural(together, "quest")} could run at effort ${MAX_EFFORT} together instead of ${Math.floor(slots / MAX_EFFORT)}`
+          ? `, and ${plural(together, "run")} could run at effort ${MAX_EFFORT} together instead of ${Math.floor(slots / MAX_EFFORT)}`
           : "";
-    lines.push(`Another machine like ${strongest.name} would carry ${plural(after, "slot")} instead of ${slots}: the Trials would run ${fixed1(after / Math.max(1, slots))}× as many problems at once${also}. Enroll it with invincible invite; he calibrates it and adapts.`);
-    // More slots only help while the model calls keep up: a quest's calls each take one on the node that's asked, and wait
+    lines.push(`Another machine like ${strongest.name} would carry ${plural(after, "slot")} instead of ${slots}: the Evals would run ${fixed1(after / Math.max(1, slots))}× as many problems at once${also}. Enroll it with invincible invite; it calibrates it and adapts.`);
+    // More slots only help while the model calls keep up: a run's calls each take one on the node that's asked, and wait
     // their turn beyond its ceiling (measured: bun run bench compute, where a ninth machine bought 1 % at eight calls).
     const asked = nodes[0]!;
     const calls = asked.capacity.modelCalls;
     if (after > calls) {
-      lines.push(`A quest's model calls go through the node that's asked, ${calls} at once on ${asked.name}: with ${plural(after, "slot")}, model calls ${slots > calls ? "are already" : "would be"} what limits him, not sandboxes. invincible compute limit ${asked.name} --model-calls n raises it.`);
+      lines.push(`A run's model calls go through the node that's asked, ${calls} at once on ${asked.name}: with ${plural(after, "slot")}, model calls ${slots > calls ? "are already" : "would be"} what limits it, not sandboxes. invincible compute limit ${asked.name} --model-calls n raises it.`);
     }
-  } else lines.push("A machine with Docker would give him sandboxes: quests and trials need one. Enroll it with invincible invite.");
+  } else lines.push("A machine with Docker would give it sandboxes: runs and evals need one. Enroll it with invincible invite.");
   if (!nodes.some((n) => n.body.gpu.length)) lines.push("A node with a GPU would let a local model answer for the swift role (and the Lab's GPU work run), with nothing leaving the fleet.");
   return lines;
 }
@@ -559,7 +559,7 @@ export interface ComputeSuggestion {
 }
 
 /**
- * What he'd suggest about the fleet's compute, never do: anything that installs, downloads or
+ * What it'd suggest about the fleet's compute, never do: anything that installs, downloads or
  * changes who is hired is yours. Pure, from the census and the roster. A machine that's away
  * (`online: false`) gets none: it can't be set up, measured or answer until it's back, and a
  * machine you keep off on purpose shouldn't be asked for again and again.
@@ -578,8 +578,8 @@ export function computeSuggestions(
       const gpu = node.body.gpu.find((g) => (g.memoryGb ?? 0) === vram)!;
       out.push({
         key: `compute-suggest:local-runtime:${node.id}`,
-        title: `Galahad suggests: a local model on ${node.name}`.slice(0, 200),
-        body: `${node.name} has a ${gpu.name} with ${Math.round(vram)} GB and no local model runtime. A model that fits it could answer for the swift role without anything leaving the fleet. He won't install or download anything himself: if you'd like it, install a runtime there (Ollama, say) and pull a model; he then measures it and tells you how fast it is.`,
+        title: `Your agent suggests: a local model on ${node.name}`.slice(0, 200),
+        body: `${node.name} has a ${gpu.name} with ${Math.round(vram)} GB and no local model runtime. A model that fits it could answer for the swift role without anything leaving the fleet. It won't install or download anything itself: if you'd like it, install a runtime there (Ollama, say) and pull a model; it then measures it and tells you how fast it is.`,
       });
     }
     const hired = (ref: string) => swift.includes(ref) || swift.includes(`${ref.split("/")[0]}/*`);
@@ -588,7 +588,7 @@ export function computeSuggestions(
       const ref = `${best.runtime}/${best.model}`;
       out.push({
         key: `compute-suggest:hire-local:${node.id}`,
-        title: `Galahad suggests: hire ${ref} for the swift role`.slice(0, 200),
+        title: `Your agent suggests: hire ${ref} for the swift role`.slice(0, 200),
         body: `${ref} wrote ${fixed1(best.tps)} tokens a second on ${node.name}, and nobody has hired it. Changing the roster is yours: invincible roster set swift ${[ref, ...swift].join(" ")}`.slice(0, 2000),
       });
     }
@@ -600,7 +600,7 @@ export function computeSuggestions(
 
 /** What a node's work holds now, and what waits. Travels with presence (never the log). */
 export interface ComputeUsage extends ComputeUse {
-  /** Knights' own VMs: kept, holding their threads and memory of the ceiling, and no slot (absent: a node from before). */
+  /** Agents' own VMs: kept, holding their threads and memory of the ceiling, and no slot (absent: a node from before). */
   kept?: number;
   /** Sandboxes waiting for a slot. */
   queued: number;
@@ -609,7 +609,7 @@ export interface ComputeUsage extends ComputeUse {
 }
 
 export interface QueuedWork {
-  quest: string;
+  run: string;
   cpus: number;
   memoryGb: number;
   since: number;
@@ -638,14 +638,14 @@ export interface ComputeNodeView {
   queue: QueuedWork[];
 }
 
-/** A quest in hand that asked for effort: its attempts, and where each is. */
+/** A run in hand that asked for effort: its attempts, and where each is. */
 /** Where an attempt's work is, in the census's words: at the council (planning), the forge (working in its sandbox), the observatory (being reviewed). */
 export type AttemptStation = "council" | "forge" | "observatory";
 /** An attempt that's made no call for this long, with none under way, has finished (or was abandoned). */
 export const ATTEMPT_IDLE_MS = 3 * 60_000;
 
 export interface EffortWork {
-  quest: string;
+  run: string;
   label: string;
   effort: EffortLevel;
   asked: EffortAsk;
@@ -660,7 +660,7 @@ export interface ComputeView {
   nodes: ComputeNodeView[];
   policy: { effort: EffortAsk; attemptsPerDay: number };
   budget: { perDay: number; usedToday: number };
-  /** His defaults as derived now, and as he last recorded them (with what changed then). */
+  /** Its defaults as derived now, and as it last recorded them (with what changed then). */
   plan: ComputePlan;
   adapted: { at: number; changes: string[] } | null;
   work: EffortWork[];
@@ -669,9 +669,9 @@ export interface ComputeView {
   suggestions: ComputeSuggestion[];
 }
 
-/** An effort grant: how many attempts this quest runs at once, and why. */
+/** An effort grant: how many attempts this run runs at once, and why. */
 export interface EffortGrant {
-  quest: string;
+  run: string;
   attempts: EffortLevel;
   asked: EffortAsk;
   host: string | null;

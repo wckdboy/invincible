@@ -20,7 +20,7 @@ import { toast } from "./toast.ts";
  * (h) and lifetimes are dom.ts's. Tones map to semantic tokens: a component never picks a colour.
  */
 
-/** A knight's state's tones (lib/knight-state.ts): `work` its blue at work, `needs` amber for what waits on you, `failed` the
+/** An agent's state's tones (lib/agent-state.ts): `work` its blue at work, `needs` amber for what waits on you, `failed` the
  * red of a failure, and `ok` green, also for what is new to you. */
 export type Tone = "ok" | "warn" | "danger" | "info" | "accent" | "agent" | "neutral" | "needs" | "work" | "failed";
 

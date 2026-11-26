@@ -1,7 +1,7 @@
 /*
  * What only root may do on a Mac (installing Apple's container, putting the sandbox firewall in root's places), asked
  * for as a Mac asks: by sudo on a terminal, and by macOS's own password prompt where there is no terminal (the app runs
- * the CLI with none). Either way the password goes to macOS, never to Galahad. The script runs as root through /bin/sh;
+ * the CLI with none). Either way the password goes to macOS, never to the primary. The script runs as root through /bin/sh;
  * what it prints comes back, to be said after.
  */
 

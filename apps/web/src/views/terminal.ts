@@ -7,7 +7,7 @@ import { openSheet } from "../ui/dialog.ts";
 import { h } from "../ui/dom.ts";
 
 /*
- * A terminal in a sandbox on this node (a knight's VM, one of yours): a login shell on a real terminal, drawn by the
+ * A terminal in a sandbox on this node (an agent's VM, one of yours): a login shell on a real terminal, drawn by the
  * emulator (/term.js, fetched when the first one opens). One already open in that sandbox is taken up again (the page
  * was reloaded, a phone came back from its browser); closing the sheet closes it. While the sheet is open a watching
  * that drops (the phone slept, the network went) is taken up again, the screen drawn afresh from what the node kept.
@@ -90,7 +90,7 @@ export async function openTerminal(ctx: Ctx, sandbox: { id: string; name: string
     emulator = mountEmulator(screen);
   } catch {
     // A cached app may point at an emulator the node has since replaced.
-    say("Galahad was just updated. Reload the app to open a terminal.");
+    say("Your agent was just updated. Reload the app to open a terminal.");
     return;
   }
   const shown = emulator;

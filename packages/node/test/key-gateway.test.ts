@@ -7,7 +7,7 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
 import { handleKeyGateway, keyScope, ungivable } from "../src/key-gateway.ts";
 
 /*
- * Keys a knight uses but never sees (PLAN #17): its script calls the key gateway with its VM's token where the key would
+ * Keys an agent uses but never sees (PLAN #17): its script calls the key gateway with its VM's token where the key would
  * go, and the call leaves for the key's pinned address with the vault's key put in. The API is a stand-in that says what
  * reached it; nothing leaves this machine, and every key here is an obvious fake.
  */
@@ -17,7 +17,7 @@ const KEY = ["FAKE", "stripe", "test", "key"].join("-");
 function world(grants: { secret: string; header?: string; write?: boolean }[]) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   vault.set("stripe", KEY, { origin: "https://api.stripe.test" });
   vault.set("plain", "FAKE-unpinned-value");
@@ -52,7 +52,7 @@ describe("the key gateway", () => {
     expect(JSON.stringify(sent)).not.toContain(w.token);
     // (It goes to that address alone: a redirect is never followed.)
     expect(sent!.redirect).toBe("manual");
-    // (Which VM's lease made the call: a knight's page counts its uses by it.)
+    // (Which VM's lease made the call: an agent's page counts its uses by it.)
     expect(w.ledger).toEqual([expect.objectContaining({ class: "read", resource: "key.stripe", target: "GET https://api.stripe.test/v1/charges", verdict: "allow", detail: "sandbox:0123456789" })]);
   });
 
@@ -103,10 +103,10 @@ describe("the key gateway", () => {
     expect(w.reached).toEqual([]);
   });
 
-  test("a knight's uses of a key are counted from the ledger, by the VM that made them, over the days asked", () => {
+  test("an agent's uses of a key are counted from the ledger, by the VM that made them, over the days asked", () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     const line = (detail: string, resource = "key.stripe") => store.emit(identity, "ledger.recorded", { class: "read", resource, target: "GET https://api.stripe.test/v1/x", verdict: "allow", detail });
     line("sandbox:0123456789");
     line("sandbox:0123456789");

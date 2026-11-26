@@ -85,8 +85,8 @@ const slackApi = Bun.serve({
     calls.push({ method, token, params });
     if (method === "apps.connections.open") return Response.json(token === APP_TOKEN ? { ok: true, url: `ws://127.0.0.1:${server.port}/link` } : { ok: false, error: "invalid_auth" });
     if (token !== BOT_TOKEN) return Response.json({ ok: false, error: "invalid_auth" });
-    if (method === "auth.test") return Response.json({ ok: true, team: "Camelot", team_id: "T0CAMELOT1", user: "galahad", user_id: "U0GALAHAD1", bot_id: "B0GALAHAD1" });
-    if (method === "users.info") return Response.json({ ok: true, user: { name: "liege.real", profile: { display_name: "liege" } } });
+    if (method === "auth.test") return Response.json({ ok: true, team: "Homelab", team_id: "T0HOMELAB1", user: "primary", user_id: "U0PRIMARY1", bot_id: "B0PRIMARY1" });
+    if (method === "users.info") return Response.json({ ok: true, user: { name: "owner.real", profile: { display_name: "owner" } } });
     if (method === "chat.postMessage") return Response.json({ ok: true, channel: params.channel, ts: `1700000000.${String(nextTs++).padStart(6, "0")}` });
     return Response.json({ ok: true });
   },
@@ -114,7 +114,7 @@ function envelope(type: string, payload: Record<string, unknown>): string {
 const message = (user: string, text: string, event: Record<string, unknown> = {}) =>
   envelope("events_api", {
     type: "event_callback",
-    team_id: "T0CAMELOT1",
+    team_id: "T0HOMELAB1",
     event_id: `Ev${nextEnvelope}`,
     event: { type: "message", channel: user === OWNER ? DM : "D0STRANGER", channel_type: "im", user, text, ts: `1699999999.${String(nextEnvelope).padStart(6, "0")}`, ...event },
   });
@@ -144,7 +144,7 @@ const json = async <T,>(response: Response): Promise<T> => {
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "slack-node" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "slack-node" });
   store.close();
   home.writeConfig({ v: 1, name: "slack-node", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 60_000, wakeWatchMs: false, ciWatchMs: false, defaultHeartbeat: false, slackBase: `http://127.0.0.1:${slackApi.port}/api` });
@@ -168,13 +168,13 @@ describe("Slack", () => {
     expect((await call("slackConnect", { appToken: "not an app token, clearly", botToken: BOT_TOKEN })).status).toBe(400);
     expect(sockets).toHaveLength(0);
     const connected = await json<{ bot: string; workspace: string; code: string; device: string }>(await call("slackConnect", { appToken: APP_TOKEN, botToken: BOT_TOKEN }));
-    expect(connected).toMatchObject({ bot: "@galahad", workspace: "Camelot" });
+    expect(connected).toMatchObject({ bot: "@primary", workspace: "Homelab" });
     expect(connected.code).toMatch(/^[A-Z2-9]{8}$/);
     code = connected.code;
     const { devices } = await json<FleetView>(await call("fleet", undefined));
-    expect(devices.find((d) => d.id === connected.device)).toMatchObject({ name: "Slack (@galahad in Camelot)", kind: "client", scopes: ["chat", "mind:read"] });
+    expect(devices.find((d) => d.id === connected.device)).toMatchObject({ name: "Slack (@primary in Homelab)", kind: "client", scopes: ["chat", "mind:read"] });
     const { slack, manifest } = await json<{ slack: SlackView; manifest: typeof SLACK_APP_MANIFEST }>(await call("slack", undefined));
-    expect(slack).toMatchObject({ connected: true, bot: "@galahad", workspace: "Camelot", owner: null, node: "slack-node" });
+    expect(slack).toMatchObject({ connected: true, bot: "@primary", workspace: "Homelab", owner: null, node: "slack-node" });
     // The app to make comes with it (the PWA shows it from here): Socket Mode, your direct messages alone.
     expect(manifest).toEqual(SLACK_APP_MANIFEST);
     expect([manifest.settings.socket_mode_enabled, manifest.settings.event_subscriptions.bot_events]).toEqual([true, ["message.im"]]);
@@ -193,7 +193,7 @@ describe("Slack", () => {
     await until("acknowledged", () => said.every((id) => acks.includes(id)));
     expect(posts().every((p) => p.params.channel === DM)).toBe(true);
     const { slack } = await json<{ slack: SlackView }>(await call("slack", undefined));
-    expect(slack).toMatchObject({ owner: "@liege", linkExpires: null });
+    expect(slack).toMatchObject({ owner: "@owner", linkExpires: null });
     // The code is spent: someone else sending it later is still a stranger.
     message(STRANGER, code);
     message(STRANGER, "What's in the vault?");
@@ -202,7 +202,7 @@ describe("Slack", () => {
     expect(asked.some((a) => /vault/.test(a))).toBe(false);
   });
 
-  test("your message is answered in your chat, its choices as buttons, with 👀 on it while he works; a tap is your next message there", async () => {
+  test("your message is answered in your chat, its choices as buttons, with 👀 on it while it works; a tap is your next message there", async () => {
     message(OWNER, "What's 2+2?");
     const answer = await until("the answer", () => posts().find((p) => (p.params.text ?? "").includes("*4*")));
     expect(answer.params).toMatchObject({ channel: DM, text: "It is *4*.", unfurl_links: "false" });
@@ -231,7 +231,7 @@ describe("Slack", () => {
   test("new starts a new chat; an envelope Slack sends again is taken once", async () => {
     message(OWNER, "new");
     await until("new", () => posts().find((p) => p.params.text === "A new chat. What's next?"));
-    const event = { type: "event_callback", team_id: "T0CAMELOT1", event_id: "EvTwice", event: { type: "message", channel: DM, channel_type: "im", user: OWNER, text: "Something else", ts: "1699999999.999999" } };
+    const event = { type: "event_callback", team_id: "T0HOMELAB1", event_id: "EvTwice", event: { type: "message", channel: DM, channel_type: "im", user: OWNER, text: "Something else", ts: "1699999999.999999" } };
     envelope("events_api", event);
     envelope("events_api", event);
     await until("answered", () => posts().find((p) => p.params.text === "You said: Something else"));
@@ -290,8 +290,8 @@ describe("Slack", () => {
 
 describe("your words as Slack sends them", () => {
   test("its links and mentions are read and its escapes undone", () => {
-    expect(fromSlack("see <https://x.test/a?b=1&amp;c=2|the run> and <https://x.test/> &lt;tag&gt; <@U0OWNER001|liege> in <#C0GENERAL1|general>")).toBe(
-      "see the run (https://x.test/a?b=1&c=2) and https://x.test/ <tag> liege in general",
+    expect(fromSlack("see <https://x.test/a?b=1&amp;c=2|the run> and <https://x.test/> &lt;tag&gt; <@U0OWNER001|owner> in <#C0GENERAL1|general>")).toBe(
+      "see the run (https://x.test/a?b=1&c=2) and https://x.test/ <tag> owner in general",
     );
   });
 });

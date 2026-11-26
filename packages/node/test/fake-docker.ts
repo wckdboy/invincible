@@ -3,7 +3,7 @@ import type { DockerRunner } from "@invincible/sandbox";
 /*
  * A stand-in for Docker, for tests on machines without one: it answers the commands
  * the sandbox host runs (info, inspect, run, ps, exec, stop, start, rename, rm, update, volumes, networks) from
- * memory, so the real host's own logic (labels, the ledger, the oath gate, reaping)
+ * memory, so the real host's own logic (labels, the ledger, approvals, reaping)
  * runs unchanged above it. Nothing is spawned.
  */
 

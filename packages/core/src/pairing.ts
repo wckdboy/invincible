@@ -42,7 +42,7 @@ export function decodeInvite(text: string): Invite {
   const trimmed = text.trim();
   const fromUrl = trimmed.match(/[#&?]pair=([A-Za-z0-9._-]+)/)?.[1];
   const token = fromUrl ?? trimmed;
-  if (!token.startsWith("gi1.")) throw new Error("not a Galahad invite");
+  if (!token.startsWith("gi1.")) throw new Error("not an Invincible invite");
   return Invite.parse(JSON.parse(fromUtf8(fromB64u(token.slice(4)))));
 }
 

@@ -17,7 +17,7 @@ const KEY = "github_pat_FAKEFAKEFAKEFAKE0000_fakefakefakefakefakefakefakefakefak
 function setup() {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   const manifest = { ...structuredClone(CATALOG.github!.manifest), id: "github-amiriteorg", auth: { secret: "github-amiriteorg", scheme: "bearer" as const } };
   store.emit(identity, "connector.set", { id: "github-amiriteorg", manifest });

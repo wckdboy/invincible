@@ -4,7 +4,7 @@ import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../src/inde
 
 /*
  * Compute in the log: a node's own calibration, the owner's ceilings and policy, the
- * plan he re-derived, a trial run's effort. Who may write each, what stands when two
+ * plan it re-derived, an eval run's effort. Who may write each, what stands when two
  * race, and that every replica agrees whatever order they arrive in.
  */
 
@@ -40,7 +40,7 @@ function fleet() {
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const storeA = new LedgerStore(":memory:");
-  foundFleet(storeA, a, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(storeA, a, { fleetName: "homelab", nodeName: "ultra" });
   enrollDevice(storeA, a, { device: b.id, name: "rack", kind: "node", box: b64u(b.boxPublic) });
   const storeB = new LedgerStore(":memory:");
   storeB.expectFleet(storeA.fleet!);
@@ -122,15 +122,15 @@ describe("the owner's ceiling and policy", () => {
   });
 });
 
-describe("a trial run's effort", () => {
+describe("an eval run's effort", () => {
   test("recorded once per run: the first stands", () => {
     const { a, b, storeA, storeB } = fleet();
-    storeA.emit(a, "trial.run", { run: "r-abc", suite: "engineering", settings: { effort: 3, parallel: 4 } });
-    expect(() => storeA.emit(a, "trial.run", { run: "r-abc", suite: "engineering", settings: { effort: 1 } })).toThrow(/already recorded/);
+    storeA.emit(a, "eval.run", { run: "r-abc", suite: "engineering", settings: { effort: 3, parallel: 4 } });
+    expect(() => storeA.emit(a, "eval.run", { run: "r-abc", suite: "engineering", settings: { effort: 1 } })).toThrow(/already recorded/);
     syncInto(storeA, storeB);
-    expect(storeB.lww<{ settings: { effort: number } }>("trial-run:r-abc")?.value?.settings.effort).toBe(3);
-    storeB.emit(b, "trial.run", { run: "r-def", suite: "engineering", settings: { effort: 2 } });
-    expect(storeB.lwwPrefix("trial-run:")).toHaveLength(2);
+    expect(storeB.lww<{ settings: { effort: number } }>("eval-run:r-abc")?.value?.settings.effort).toBe(3);
+    storeB.emit(b, "eval.run", { run: "r-def", suite: "engineering", settings: { effort: 2 } });
+    expect(storeB.lwwPrefix("eval-run:")).toHaveLength(2);
   });
 });
 
@@ -150,13 +150,13 @@ describe("convergence", () => {
         if (i % 2 === 0) store.emit(id, "compute.limit", { node: nodes[i % 3]![0].id, limit: { cores: 4 + i } });
         if (i % 3 === 0) store.emit(id, "compute.policy", { policy: { effort: ((i % 3) + 1) as 1 | 2 | 3, attemptsPerDay: i } });
         if (i % 4 === 1) store.emit(id, "compute.adapted", { at: i, digest: digest(i), plan: plan(i), changes: [`change ${i}`] });
-        store.emit(id, "trial.run", { run: `r-${store === storeA ? "a" : store === storeB ? "b" : "c"}${i}`, suite: "engineering", settings: { effort: 1 + (i % 3) } });
+        store.emit(id, "eval.run", { run: `r-${store === storeA ? "a" : store === storeB ? "b" : "c"}${i}`, suite: "engineering", settings: { effort: 1 + (i % 3) } });
         store.remember(id, `note ${i}`);
       }
     }
     // Two nodes record the same run: one of them stands, the same one everywhere.
-    storeA.emit(a, "trial.run", { run: "r-same", suite: "engineering", settings: { effort: 3 } });
-    storeB.emit(b, "trial.run", { run: "r-same", suite: "engineering", settings: { effort: 1 } });
+    storeA.emit(a, "eval.run", { run: "r-same", suite: "engineering", settings: { effort: 3 } });
+    storeB.emit(b, "eval.run", { run: "r-same", suite: "engineering", settings: { effort: 1 } });
     // A node is revoked while it's still measuring.
     revokeDevice(storeA, a, c.id, "retired");
     storeC.emit(c, "compute.calibrated", { measured: measured(1, 99) });
@@ -177,7 +177,7 @@ describe("convergence", () => {
       reference ??= replica.digest();
       expect(replica.digest()).toBe(reference);
       if (seed === 1) {
-        expect(replica.lww<{ settings: { effort: number } }>("trial-run:r-same")?.value).not.toBeNull();
+        expect(replica.lww<{ settings: { effort: number } }>("eval-run:r-same")?.value).not.toBeNull();
         expect(replica.lwwPrefix("calibration:").length).toBeGreaterThan(0);
         replica.rebuild();
         expect(replica.digest()).toBe(reference);

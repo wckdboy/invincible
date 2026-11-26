@@ -14,7 +14,7 @@ import { Database } from "bun:sqlite";
 import { fakeDocker } from "./fake-docker.ts";
 import { freePort } from "./ports.ts";
 
-// Real HTTP/controller/host/quest code, with stand-ins only for Docker and models.
+// Real HTTP/controller/host/run code, with stand-ins only for Docker and models.
 const root = mkdtempSync(join(tmpdir(), "invincible-team-vm-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
@@ -31,7 +31,7 @@ let daemon: Daemon;
 let alphaEntered = false;
 let releaseAlpha: (() => void) | undefined;
 let alphaHold: Promise<void> | undefined;
-/** A command of his on his computer that runs until it's let go (`hold-his`). */
+/** A command of its on its computer that runs until it's let go (`hold-its`). */
 let hisEntered = false;
 let releaseHis: (() => void) | undefined;
 let hisHold: Promise<void> | undefined;
@@ -41,22 +41,22 @@ let dockerSilent = false;
 const toolStatus = new Map<"claude" | "codex", { code: number; stdout: string }>();
 /** What a VM answers when asked for its notes store's version (unset: as a VM made from an image without it does). */
 let engramSays: { code: number; stdout: string; stderr?: string } | undefined;
-// A knight's face as the Roundtable page draws it: from the snapshot the node serves, by the page's own rule.
-const faceOf = (id: string, team: TeamSnapshot) => avatarExpression(team.teammates.find((member) => member.id === id)!, team, Date.now());
+// An agent's face as the agents page draws it: from the snapshot the node serves, by the page's own rule.
+const faceOf = (id: string, team: TeamSnapshot) => avatarExpression(team.agents.find((member) => member.id === id)!, team, Date.now());
 const summaries: Record<string, string> = { ALPHA: "Verified predecessor contract: packet-v1.", BETA: "Verified independent follow-up.", GAMMA: "Verified consumer of packet-v1." };
 const model = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async (request) => {
   const body = await request.json() as (typeof prompts)[number];
   prompts.push(body);
   const turns = body.messages.filter((message) => message.role !== "system");
-  // Galahad asked to give his computer more: the tool once, saying why, then a word on what came of it.
+  // The primary asked to give its computer more: the tool once, saying why, then a word on what came of it.
   if (turns.some((message) => message.content?.includes?.("GROW_HIS_COMPUTER"))) {
-    const call = { tool_calls: [{ index: 0, id: "call_grow", function: { name: "team_grow", arguments: JSON.stringify({ id: "galahad", memoryGb: 6, why: "its build ran out of memory" }) } }] };
+    const call = { tool_calls: [{ index: 0, id: "call_grow", function: { name: "team_grow", arguments: JSON.stringify({ id: "primary", memoryGb: 6, why: "its build ran out of memory" }) } }] };
     const delta = turns.some((message) => message.role === "tool") ? { content: "It has more now." } : call;
     return new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
   }
-  // Galahad asked to use his computer: the tool once, then a word on what came of it (HOLD_: a command that runs until it's let go).
+  // The primary asked to use its computer: the tool once, then a word on what came of it (HOLD_: a command that runs until it's let go).
   if (turns.some((message) => /(USE|HOLD)_YOUR_COMPUTER/.test(message.content ?? ""))) {
-    const command = turns.some((message) => message.content?.includes?.("HOLD_YOUR_COMPUTER")) ? "echo hold-his" : "echo computer-ok";
+    const command = turns.some((message) => message.content?.includes?.("HOLD_YOUR_COMPUTER")) ? "echo hold-its" : "echo computer-ok";
     const call = { tool_calls: [{ index: 0, id: "call_computer", function: { name: "computer", arguments: JSON.stringify({ command }) } }] };
     const delta = turns.some((message) => message.role === "tool") ? { content: "It ran on my computer." } : call;
     return new Response(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -66,7 +66,7 @@ const model = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async (request)
   let text = "1. Make the change.\n2. Run the required gate.\nDone when: the gate and independent review pass.";
   if (body.model === "engineer") {
     const command = `printf '%s' ${task} > result.txt # write-${task.toLowerCase()}`;
-    // Offered its own tools (a knight on the roster's models: quest.ts tools), it calls bash, as a real one does.
+    // Offered its own tools (an agent on the roster's models: run.ts tools), it calls bash, as a real one does.
     if (body.tools?.length && !turns.some((message) => message.role === "assistant")) {
       const call = { tool_calls: [{ index: 0, id: "call_work", function: { name: "bash", arguments: JSON.stringify({ command }) } }] };
       return new Response(`data: ${JSON.stringify({ choices: [{ delta: call }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -145,7 +145,7 @@ beforeAll(async () => {
       if (told) return told;
       if (command.at(-1) === "/opt/engram/bin/engram version") return engramSays ?? { code: 127, stdout: "", stderr: "bash: line 1: /opt/engram/bin/engram: No such file or directory" };
       if (text.includes("write-alpha")) { alphaEntered = true; await alphaHold; }
-      if (text.includes("hold-his")) { hisEntered = true; await hisHold; }
+      if (text.includes("hold-its")) { hisEntered = true; await hisHold; }
       return { code: 0, stdout: text.includes("gate-") ? "required gate passed" : "command completed" };
     } finally { active.set(container, count - 1); }
   };
@@ -153,14 +153,14 @@ beforeAll(async () => {
   await until(() => daemon.store.lww(`calibration:${daemon.identity.id}`) !== null);
   await api("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${model.port}/v1` });
   for (const role of ["planner", "engineer", "reviewer"]) await api("setRoster", { role, models: [`stand-in/${role}`] });
-  for (const id of ["ada", "lin"]) await api("saveTeammate", { id, name: id.toUpperCase(), role: "engineer" });
+  for (const id of ["ada", "lin"]) await api("saveAgent", { id, name: id.toUpperCase(), role: "engineer" });
   await api("saveTeamRoom", { id: "vm-forge", name: "VM Forge", members: ["ada", "lin"] });
 });
 afterAll(async () => { releaseAlpha?.(); await daemon?.stop(); model.stop(true); rmSync(root, { recursive: true, force: true }); });
 
-test("first task provisions one persistent VM; same-worker tasks serialize and verified dependencies cross knights", async () => {
+test("first task provisions one persistent VM; same-worker tasks serialize and verified dependencies cross agents", async () => {
   expect(runs).toHaveLength(0);
-  expect((await snapshot()).teammates.every((member) => member.workspace === null)).toBe(true);
+  expect((await snapshot()).agents.every((member) => member.workspace === null)).toBe(true);
   alphaHold = new Promise<void>((resolve) => { releaseAlpha = resolve; });
   const alpha = (await create("ada", "ALPHA")).task;
   try {
@@ -171,12 +171,12 @@ test("first task provisions one persistent VM; same-worker tasks serialize and v
     expect(held.tasks.find((item) => item.id === alpha.id)?.status).toBe("running");
     expect(held.tasks.find((item) => item.id === beta.id)?.status).toBe("queued");
     expect(held.tasks.find((item) => item.id === gamma.id)?.status).toBe("queued");
-    expect(held.teammates.find((member) => member.id === "lin")?.workspace).toBeNull();
-    const bound = held.teammates.find((member) => member.id === "ada")!.workspace!;
+    expect(held.agents.find((member) => member.id === "lin")?.workspace).toBeNull();
+    const bound = held.agents.find((member) => member.id === "ada")!.workspace!;
     expect(faceOf("ada", held)).toBe("working");
     expect(bound.id).toMatch(/^[0-9a-f]{10}$/);
     expect(runs).toHaveLength(1);
-    expect(runs[0]).toContain(`dev.invincible.quest=arm.${teamArmLabel(daemon.identity.id, "ada")}`);
+    expect(runs[0]).toContain(`dev.invincible.run=arm.${teamArmLabel(daemon.identity.id, "ada")}`);
     expect(runs[0]).toContain("dev.invincible.ephemeral=false");
     expect(runs[0]).toContain("dev.invincible.isolation=vm");
     expect(runs[0]).toContain("io.containerd.kata.v2");
@@ -192,7 +192,7 @@ test("first task provisions one persistent VM; same-worker tasks serialize and v
     expect(faceOf("lin", finished)).toBe("pleased");
     for (const id of [alpha.id, beta.id, gamma.id]) expect(finished.tasks.find((item) => item.id === id)).toMatchObject({ status: "done", verified: true, error: null });
     // What each did is kept as it happened, to read after it has ended: its gates, its command, the gate's run, the review.
-    // (A knight on the roster's models works with its own tools and makes no plan first: team-runtime toolsLoop.)
+    // (An agent on the roster's models works with its own tools and makes no plan first: team-runtime toolsLoop.)
     const trail = await api<{ task: { id: string; status: string }; entries: { n: number; at: number; text: string }[]; more: boolean }>("teamTrail", { task: alpha.id });
     expect(trail.task).toEqual({ id: alpha.id, status: "done" });
     expect(trail.more).toBe(false);
@@ -207,8 +207,8 @@ test("first task provisions one persistent VM; same-worker tasks serialize and v
     // Whoever follows asks for what is new; a task that isn't there is not found.
     expect((await api<{ entries: unknown[] }>("teamTrail", { task: alpha.id, after: trail.entries.length })).entries).toEqual([]);
     await expect(api("teamTrail", { task: "task-nosuchtask00" })).rejects.toThrow(/404/);
-    expect(finished.teammates.find((member) => member.id === "ada")!.workspace).toEqual(bound);
-    const other = finished.teammates.find((member) => member.id === "lin")!.workspace!;
+    expect(finished.agents.find((member) => member.id === "ada")!.workspace).toEqual(bound);
+    const other = finished.agents.find((member) => member.id === "lin")!.workspace!;
     expect(other.id).not.toBe(bound.id);
     expect(runs).toHaveLength(2);
     expect([...peak.values()].every((value) => value === 1)).toBe(true);
@@ -219,7 +219,7 @@ test("first task provisions one persistent VM; same-worker tasks serialize and v
       expect(lease).toBeGreaterThanOrEqual(0);
       expect(lease).toBeLessThan(activity.findIndex((event) => event.text.includes("mkdir -p")));
     }
-    const consumer = prompts.find((body) => body.model === "engineer" && body.messages.some((message) => typeof message.content === "string" && message.content.startsWith("Quest: TASK_GAMMA")))!;
+    const consumer = prompts.find((body) => body.model === "engineer" && body.messages.some((message) => typeof message.content === "string" && message.content.startsWith("Run: TASK_GAMMA")))!;
     expect(JSON.stringify(consumer)).toContain(summaries.ALPHA!);
     expect(JSON.stringify(consumer)).toContain("Verified predecessor results (file paths belong to their original VM)");
     for (const tag of ["ALPHA", "BETA", "GAMMA"]) {
@@ -237,7 +237,7 @@ test("harness readiness says what each would run on: a vendor's tool on its own 
   type Harness = { id: string; ready: boolean; on?: string; reason?: string };
   const readiness = async () => Object.fromEntries((await api<{ harnesses: Harness[] }>("teamWorkspace", { id: "ada" })).harnesses.map((harness) => [harness.id, harness])) as Record<string, Harness>;
   const told = (status: object) => JSON.stringify({ type: "status", ...status });
-  const vm = `invincible-sbx-${(await snapshot()).teammates.find((member) => member.id === "ada")!.workspace!.id}`;
+  const vm = `invincible-sbx-${(await snapshot()).agents.find((member) => member.id === "ada")!.workspace!.id}`;
   const before = events.length;
   try {
     // Idle, in a running VM. Claude Code says it is signed in there; Codex was never installed.
@@ -247,16 +247,16 @@ test("harness readiness says what each would run on: a vendor's tool on its own 
     expect(Object.keys(first)).toEqual(["native", "opencode", "hermes", "claude", "codex"]);
     expect(first.native).toEqual({ id: "native", ready: true });
     expect(first.claude).toEqual({ id: "claude", ready: true, on: "its own sign-in in this VM (claude.ai)" });
-    expect(first.codex).toEqual({ id: "codex", ready: false, reason: "Install Codex in this knight's VM (Galahad never installs or signs in a harness)" });
-    // Each was asked once, in this knight's own VM, by its bridge's own status question.
+    expect(first.codex).toEqual({ id: "codex", ready: false, reason: "Install Codex in this agent's VM (Your agent never installs or signs in a harness)" });
+    // Each was asked once, in this agent's own VM, by its bridge's own status question.
     const asked = events.slice(before).filter((event) => event.text.includes("--status"));
     expect(asked.map((event) => event.target)).toEqual([vm, vm]);
     expect(asked.every((event) => event.text.includes("def status():") && event.text.trimEnd().endsWith("--status"))).toBe(true);
     // Not signed in, and no Anthropic-API model on the engineer's roster: what a person can do about it.
     toolStatus.set("claude", { code: 0, stdout: told({ installed: true, signedIn: false }) });
-    expect((await readiness()).claude).toEqual({ id: "claude", ready: false, reason: "Sign Claude Code in in this knight's VM (claude auth login), or put an Anthropic-API model on the engineer's roster" });
+    expect((await readiness()).claude).toEqual({ id: "claude", ready: false, reason: "Sign Claude Code in in this agent's VM (claude auth login), or put an Anthropic-API model on the engineer's roster" });
     // A VM that says more than the bridge's own status line is not believed.
-    toolStatus.set("claude", { code: 0, stdout: `signed in as someone\n${told({ installed: true, signedIn: "yes", method: "claude.ai", email: "knight@example.invalid" })}` });
+    toolStatus.set("claude", { code: 0, stdout: `signed in as someone\n${told({ installed: true, signedIn: "yes", method: "claude.ai", email: "agent@example.invalid" })}` });
     const forged = await readiness();
     expect(forged.claude!.ready).toBe(false);
     expect(JSON.stringify(forged)).not.toContain("example.invalid");
@@ -272,7 +272,7 @@ test("harness readiness says what each would run on: a vendor's tool on its own 
     expect((await readiness()).claude).toEqual({ id: "claude", ready: true, on: "its own sign-in in this VM (claude.ai), then claude-api/claude-opus-5-5 through the gateway" });
     // (An Anthropic-API model is not one Codex can speak to, covered or not.)
     toolStatus.set("codex", { code: 0, stdout: told({ installed: true, signedIn: false }) });
-    expect((await readiness()).codex!.reason).toBe("Sign Codex in in this knight's VM (codex login --device-auth), or put an OpenAI-compatible model that speaks the Responses API on the engineer's roster");
+    expect((await readiness()).codex!.reason).toBe("Sign Codex in in this agent's VM (codex login --device-auth), or put an OpenAI-compatible model that speaks the Responses API on the engineer's roster");
   } finally {
     toolStatus.clear();
     await api("setRoster", { role: "engineer", models: ["stand-in/engineer"] });
@@ -308,7 +308,7 @@ test("a plan whose allowance is spent goes last on a harness's list: its task st
 test("the notes store is one switch, the owner's: on unless turned off, a task is given it only in a VM that has the pinned Engram, and says which it was", async () => {
   const workspace = async () => (await api<{ engram: TeamEngramStatus }>("teamWorkspace", { id: "ada" })).engram;
   const absent = "this VM's image has no Engram 3.7.2 (a VM keeps the image it was made from)";
-  const vm = `invincible-sbx-${(await snapshot()).teammates.find((member) => member.id === "ada")!.workspace!.id}`;
+  const vm = `invincible-sbx-${(await snapshot()).agents.find((member) => member.id === "ada")!.workspace!.id}`;
   /** One task of Ada's, to its end: what the engineer was told, what ran in her VM, and what the task kept. */
   const work = async () => {
     const [asked, ran] = [prompts.length, events.length];
@@ -328,7 +328,7 @@ test("the notes store is one switch, the owner's: on unless turned off, a task i
     expect(without.told).not.toMatch(/Notes store/);
     expect(without.ran.filter((text) => /engram/i.test(text))).toHaveLength(1);
 
-    // Turning it off is the owner's, from a device that may command the Roundtable: one that can only read them may not.
+    // Turning it off is the owner's, from a device that may command the agents: one that can only read them may not.
     const reader = await pairDevice("reader", ["chat", "sandbox"]);
     expect((await reader("teamEngram", { on: false })).status).toBe(403);
     expect((await snapshot()).engram).toBe(true);
@@ -382,7 +382,7 @@ test("the notes store is one switch, the owner's: on unless turned off, a task i
   }
 }, 30000);
 
-test("a knight's task on the node is held to your tripwires: a refused command never reaches its VM, and its trail and the ledger say which rule", async () => {
+test("an agent's task on the node is held to your tripwires: a refused command never reaches its VM, and its trail and the ledger say which rule", async () => {
   await api("setRule", { name: "no-beta-writes", does: "refuse", words: [], contains: "# write-beta" });
   try {
     const ran = events.length;
@@ -397,7 +397,7 @@ test("a knight's task on the node is held to your tripwires: a refused command n
     expect(entries.find((entry) => entry.resource === "rule")).toMatchObject({
       target: "no-beta-writes",
       verdict: "deny",
-      quest: `arm.${teamArmLabel(daemon.identity.id, "ada")}`,
+      run: `arm.${teamArmLabel(daemon.identity.id, "ada")}`,
       detail: `printf '%s' BETA > result.txt # write-beta · task ${made.id}`,
     });
   } finally {
@@ -405,11 +405,11 @@ test("a knight's task on the node is held to your tripwires: a refused command n
   }
 });
 
-test("a rule that tells you hears of a knight's task: once for each task, saying whose and how it ended; never of a gate", async () => {
+test("a rule that tells you hears of an agent's task: once for each task, saying whose and how it ended; never of a gate", async () => {
   await api("setRule", { name: "result-writes", does: "tell", words: ["result.txt"], contains: "printf" });
   await api("setRule", { name: "gate-runs", does: "tell", words: [], contains: "# gate-" });
   try {
-    const name = (await snapshot()).teammates.find((member) => member.id === "ada")!.name;
+    const name = (await snapshot()).agents.find((member) => member.id === "ada")!.name;
     const told = async (rule: string) => (await api<{ notices: NoticeView[] }>("notices")).notices.filter((n) => n.source === `rule:${rule}`);
     const done = [];
     for (const tag of ["ALPHA", "GAMMA"]) {
@@ -431,9 +431,9 @@ test("a rule that tells you hears of a knight's task: once for each task, saying
 });
 
 test("controller restart keeps the exact VM; failed old-worker cleanup blocks new credentials and work", async () => {
-  const binding = (await snapshot()).teammates.find((member) => member.id === "ada")!.workspace;
+  const binding = (await snapshot()).agents.find((member) => member.id === "ada")!.workspace;
   await daemon.stop(); daemon = await start();
-  expect((await snapshot()).teammates.find((member) => member.id === "ada")!.workspace).toEqual(binding);
+  expect((await snapshot()).agents.find((member) => member.id === "ada")!.workspace).toEqual(binding);
   cleanupFailure = true;
   const before = events.length;
   const existingVMs = runs.length;
@@ -446,31 +446,31 @@ test("controller restart keeps the exact VM; failed old-worker cleanup blocks ne
     expect(faceOf("ada", await snapshot())).toBe("concerned");
     const attempted = events.slice(before);
     expect(attempted.map((event) => event.kind)).toEqual(["cleanup"]);
-    expect(attempted[0]?.target).toBe(`invincible-sbx-${(await snapshot()).teammates.find((member) => member.id === "ada")!.workspace!.id}`);
+    expect(attempted[0]?.target).toBe(`invincible-sbx-${(await snapshot()).agents.find((member) => member.id === "ada")!.workspace!.id}`);
     expect(runs).toHaveLength(existingVMs);
   } finally { cleanupFailure = false; }
 }, 10000);
 
-test("removing a knight that has a VM: refused until you say its workspace goes, and only from a device that may destroy one; then both go and the others carry on", async () => {
-  const bound = (await snapshot()).teammates.find((member) => member.id === "ada")!.workspace!;
+test("removing an agent that has a VM: refused until you say its workspace goes, and only from a device that may destroy one; then both go and the others carry on", async () => {
+  const bound = (await snapshot()).agents.find((member) => member.id === "ada")!.workspace!;
   const vms = docker.running();
   const listed = async () => (await api<{ sandboxes: SandboxView[] }>("sandboxes", {})).sandboxes.map((s) => s.id);
   expect(await listed()).toContain(bound.id);
   // Not without saying so, and then nothing has changed: not even a pause.
-  await expect(api("removeTeammate", { id: "ada" })).rejects.toThrow(/409 .*workspace/);
+  await expect(api("removeAgent", { id: "ada" })).rejects.toThrow(/409 .*workspace/);
   // A device that may command Team but not destroy a sandbox cannot do it either.
   const commander = await pairDevice("commander", ["chat", "fleet:admin"]);
-  const refused = await commander("removeTeammate", { id: "ada", destroyWorkspace: true });
+  const refused = await commander("removeAgent", { id: "ada", destroyWorkspace: true });
   expect(refused.status).toBe(403);
   expect(((await refused.json()) as { error: string }).error).toContain("sandbox");
-  expect((await snapshot()).teammates.find((member) => member.id === "ada")).toMatchObject({ enabled: true, workspace: bound });
+  expect((await snapshot()).agents.find((member) => member.id === "ada")).toMatchObject({ enabled: true, workspace: bound });
   expect(docker.running()).toBe(vms);
 
-  expect(await api("removeTeammate", { id: "ada", destroyWorkspace: true })).toEqual({ removed: { id: "ada", name: "ADA" }, workspace: "destroyed" });
+  expect(await api("removeAgent", { id: "ada", destroyWorkspace: true })).toEqual({ removed: { id: "ada", name: "ADA" }, workspace: "destroyed" });
   expect(docker.running()).toBe(vms - 1);
   expect(await listed()).not.toContain(bound.id);
   const after = await snapshot();
-  expect(after.teammates.map((member) => member.id)).toEqual(["lin"]);
+  expect(after.agents.map((member) => member.id)).toEqual(["lin"]);
   expect(after.removed).toEqual([{ id: "ada", name: "ADA", removedAt: expect.any(Number) }]);
   expect(after.rooms.find((room) => room.id === "vm-forge")!.members).toEqual(["lin"]);
   const { entries } = await api<{ entries: LedgerEntry[] }>("ledger");
@@ -484,47 +484,47 @@ test("removing a knight that has a VM: refused until you say its workspace goes,
 
 test("what became of its VM is asked of the host and said as it was: Docker that cannot say stops the removal, a VM already gone is called gone, and one that was made but never bound is found and destroyed", async () => {
   const ledgered = async (id: string) => (await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "team" && e.class === "delete" && e.target === `worker:${id}`);
-  const lin = (await snapshot()).teammates.find((member) => member.id === "lin")!;
+  const lin = (await snapshot()).agents.find((member) => member.id === "lin")!;
   const vms = docker.running();
   // Docker on its host cannot list just now. That is not "it has none": nothing is removed, paused or unbound.
   dockerSilent = true;
-  try { await expect(api("removeTeammate", { id: "lin", destroyWorkspace: true })).rejects.toThrow(/503 .*could not list/); } finally { dockerSilent = false; }
-  expect((await snapshot()).teammates.find((member) => member.id === "lin")).toMatchObject({ enabled: true, workspace: lin.workspace });
+  try { await expect(api("removeAgent", { id: "lin", destroyWorkspace: true })).rejects.toThrow(/503 .*could not list/); } finally { dockerSilent = false; }
+  expect((await snapshot()).agents.find((member) => member.id === "lin")).toMatchObject({ enabled: true, workspace: lin.workspace });
   expect(docker.running()).toBe(vms);
   expect(await ledgered("lin")).toBeUndefined();
 
   // Its VM was destroyed from Sandboxes beforehand: there is nothing to confirm, and the record says gone, not destroyed.
   await api("destroySandbox", { id: lin.workspace!.id });
   expect(docker.running()).toBe(vms - 1);
-  expect(await api("removeTeammate", { id: "lin" })).toEqual({ removed: { id: "lin", name: "LIN" }, workspace: "gone" });
+  expect(await api("removeAgent", { id: "lin" })).toEqual({ removed: { id: "lin", name: "LIN" }, workspace: "gone" });
   expect(await ledgered("lin")).toMatchObject({ verdict: "approved", detail: "its VM was already gone from its host" });
 
   // A VM made just before a crash, its binding never written: the worker looks unbound, and its VM is still there.
-  await api("saveTeammate", { id: "sam", name: "SAM", role: "engineer" });
-  const made = (await api<{ workspace: SandboxView }>("provisionTeammate", { id: "sam" })).workspace;
-  // A knight's VM can use the internet, by the owner's word: it is made online unless you say otherwise.
+  await api("saveAgent", { id: "sam", name: "SAM", role: "engineer" });
+  const made = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "sam" })).workspace;
+  // An agent's VM can use the internet, by the owner's word: it is made online unless you say otherwise.
   expect(made.network).toBe("online");
   const ran = (id: string) => runs.find((args) => args[0] === "run" && args.some((arg) => arg.includes(id)))!;
   expect(ran(made.id).filter((arg, i, all) => all[i - 1] === "--network")).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
-  await api("saveTeammate", { id: "una", name: "UNA", role: "engineer" });
-  const kept = (await api<{ workspace: SandboxView }>("provisionTeammate", { id: "una", network: "gateway" })).workspace;
+  await api("saveAgent", { id: "una", name: "UNA", role: "engineer" });
+  const kept = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "una", network: "gateway" })).workspace;
   expect(kept.network).toBe("gateway");
   expect(ran(kept.id).filter((arg, i, all) => all[i - 1] === "--network")).toEqual([NETWORKS.gateway.name]);
   // Her VM is made again from its image as it is now, on your word: the same VM, and this time it may use the
   // internet, which nothing else can change about a microVM.
   const vmsBefore = docker.running();
-  const remade = (await api<{ teammate: { id: string }; workspace: SandboxView }>("remakeTeammate", { id: "una", network: "online" }));
-  expect(remade.teammate.id).toBe("una");
+  const remade = (await api<{ agent: { id: string }; workspace: SandboxView }>("remakeAgent", { id: "una", network: "online" }));
+  expect(remade.agent.id).toBe("una");
   expect(remade.workspace).toMatchObject({ id: kept.id, network: "online", status: "running", ephemeral: false, isolation: "vm" });
   expect(docker.running()).toBe(vmsBefore);
   const twice = runs.filter((args) => args[0] === "run" && args.some((arg) => arg.includes(kept.id)));
   expect(twice).toHaveLength(2);
   expect(twice[1]!.filter((arg, i, all) => all[i - 1] === "--network")).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
   // She is still bound to that VM, and what was done is in the ledger as yours.
-  expect((await snapshot()).teammates.find((member) => member.id === "una")!.workspace).toMatchObject({ id: kept.id });
+  expect((await snapshot()).agents.find((member) => member.id === "una")!.workspace).toMatchObject({ id: kept.id });
   expect((await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "docker.container" && e.class === "modify" && e.target.includes(kept.id))).toMatchObject({ verdict: "approved", detail: expect.stringContaining("made again from") });
   // Made again with a desktop: the same VM, from the desktop image.
-  const desked = (await api<{ workspace: SandboxView }>("remakeTeammate", { id: "una", desktop: true })).workspace;
+  const desked = (await api<{ workspace: SandboxView }>("remakeAgent", { id: "una", desktop: true })).workspace;
   expect(desked).toMatchObject({ id: kept.id, image: "invincible/desktop:1" });
   // You look at her desktop from the app and click on it: a picture comes back, and the click is in the ledger.
   const answered = docker.onExec;
@@ -546,89 +546,89 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   // Made bigger while it runs, on your word: the same VM, nothing stopped or started, the threads and memory given to
   // it as it runs, and in the ledger as yours.
   const runsBefore = runs.length;
-  const grown = (await api<{ teammate: { id: string }; workspace: SandboxView }>("resizeTeammate", { id: "una", cpus: 2, memoryGb: 6 })).workspace;
+  const grown = (await api<{ agent: { id: string }; workspace: SandboxView }>("resizeAgent", { id: "una", cpus: 2, memoryGb: 6 })).workspace;
   expect(grown).toMatchObject({ id: kept.id, cpus: 2, memoryGb: 6, status: "running" });
   expect(runs.length).toBe(runsBefore);
   expect(updates.at(-1)).toEqual(["update", "--cpus", "2", "--memory", "6144m", "--memory-swap", "6144m", `invincible-sbx-${kept.id}`]);
   expect((await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "docker.container" && e.class === "modify" && e.detail?.startsWith("grown while it runs"))).toMatchObject({ verdict: "approved", target: `invincible-sbx-${kept.id}`, detail: "grown while it runs: 2 cpu · 6 GB" });
   // Never smaller this way, never past the node's ceiling (8 threads here), and never nothing.
-  await expect(api("resizeTeammate", { id: "una", cpus: 1 })).rejects.toThrow(/409 .*only grows/);
-  await expect(api("resizeTeammate", { id: "una", cpus: 64 })).rejects.toThrow(/409 .*threads he may use/);
-  await expect(api("resizeTeammate", { id: "una" })).rejects.toThrow(/400/);
+  await expect(api("resizeAgent", { id: "una", cpus: 1 })).rejects.toThrow(/409 .*only grows/);
+  await expect(api("resizeAgent", { id: "una", cpus: 64 })).rejects.toThrow(/409 .*threads it may use/);
+  await expect(api("resizeAgent", { id: "una" })).rejects.toThrow(/400/);
   expect(updates).toHaveLength(1);
-  // A knight with no VM has none to make again, and a knight that isn't there is not found.
-  await api("saveTeammate", { id: "vmless", name: "VMLESS", role: "engineer" });
-  await expect(api("remakeTeammate", { id: "vmless" })).rejects.toThrow(/424 .*no VM yet/);
-  await expect(api("resizeTeammate", { id: "vmless", cpus: 2 })).rejects.toThrow(/424 .*no VM yet/);
-  await expect(api("remakeTeammate", { id: "nobody" })).rejects.toThrow(/404/);
-  expect(await api("removeTeammate", { id: "una", destroyWorkspace: true })).toMatchObject({ workspace: "destroyed" });
-  // A knight may be given a desktop from the start, with room for a browser whatever memory was asked.
+  // An agent with no VM has none to make again, and an agent that isn't there is not found.
+  await api("saveAgent", { id: "vmless", name: "VMLESS", role: "engineer" });
+  await expect(api("remakeAgent", { id: "vmless" })).rejects.toThrow(/424 .*no VM yet/);
+  await expect(api("resizeAgent", { id: "vmless", cpus: 2 })).rejects.toThrow(/424 .*no VM yet/);
+  await expect(api("remakeAgent", { id: "nobody" })).rejects.toThrow(/404/);
+  expect(await api("removeAgent", { id: "una", destroyWorkspace: true })).toMatchObject({ workspace: "destroyed" });
+  // An agent may be given a desktop from the start, with room for a browser whatever memory was asked.
   // (Here, once una's VM has gone: this host carries only so many at once.)
-  await api("saveTeammate", { id: "dex", name: "DEX", role: "engineer" });
-  const dex = (await api<{ workspace: SandboxView }>("provisionTeammate", { id: "dex", desktop: true, memoryGb: 2 })).workspace;
+  await api("saveAgent", { id: "dex", name: "DEX", role: "engineer" });
+  const dex = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "dex", desktop: true, memoryGb: 2 })).workspace;
   expect(dex).toMatchObject({ image: "invincible/desktop:1", memoryGb: 4, isolation: "vm" });
-  expect(await api("removeTeammate", { id: "dex", destroyWorkspace: true })).toMatchObject({ workspace: "destroyed" });
-  // Galahad's own computer: made under his reserved handle, with a desktop unless you say otherwise, and in no list of knights.
+  expect(await api("removeAgent", { id: "dex", destroyWorkspace: true })).toMatchObject({ workspace: "destroyed" });
+  // The primary's own computer: made under its reserved handle, with a desktop unless you say otherwise, and in no list of agents.
   expect((await snapshot()).computer).toBeUndefined();
-  await expect(api("teamDesktop", { id: "galahad" })).rejects.toThrow(/424 .*Galahad has no computer yet/);
-  const his = (await api<{ teammate: null; workspace: SandboxView }>("provisionTeammate", { id: "galahad" }));
-  expect(his.teammate).toBeNull();
-  expect(his.workspace).toMatchObject({ image: "invincible/desktop:1", isolation: "vm", ephemeral: false, network: "online", quest: expect.stringMatching(/^arm\.team\.[0-9a-f]{10}\.galahad$/) });
+  await expect(api("teamDesktop", { id: "primary" })).rejects.toThrow(/424 Your agent has no computer yet/);
+  const his = (await api<{ agent: null; workspace: SandboxView }>("provisionAgent", { id: "primary" }));
+  expect(his.agent).toBeNull();
+  expect(his.workspace).toMatchObject({ image: "invincible/desktop:1", isolation: "vm", ephemeral: false, network: "online", run: expect.stringMatching(/^arm\.team\.[0-9a-f]{10}\.primary$/) });
   const bound = await snapshot();
   expect(bound.computer).toEqual({ node: expect.any(String), id: his.workspace.id });
-  expect(bound.teammates.map((member) => member.id)).not.toContain("galahad");
-  expect(await api("teamWorkspace", { id: "galahad" })).toMatchObject({ workspace: { id: his.workspace.id }, harnesses: [] });
-  expect((await api<{ workspace: SandboxView }>("resizeTeammate", { id: "galahad", memoryGb: 5 })).workspace).toMatchObject({ id: his.workspace.id, memoryGb: 5 });
-  // His alone to work on: you watch it and take it over; nobody calls his tool's route but him.
+  expect(bound.agents.map((member) => member.id)).not.toContain("primary");
+  expect(await api("teamWorkspace", { id: "primary" })).toMatchObject({ workspace: { id: his.workspace.id }, harnesses: [] });
+  expect((await api<{ workspace: SandboxView }>("resizeAgent", { id: "primary", memoryGb: 5 })).workspace).toMatchObject({ id: his.workspace.id, memoryGb: 5 });
+  // Its alone to work on: you watch it and take it over; nobody calls its tool's route but it.
   await expect(api("computerExec", { command: "id" })).rejects.toThrow(/403/);
-  // He works on it with his computer tool, in your conversation with him: the command runs in his VM, with the gateway.
+  // It works on it with its computer tool, in your conversation with it: the command runs in its VM, with the gateway.
   const execsBefore = docker.execs.length;
   const reply = await fetch(`http://127.0.0.1:${port}${routes.chat.path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: "USE_YOUR_COMPUTER: run echo there." }] }) });
   const said = await reply.text();
   expect(said).toContain("It ran on my computer.");
   const onHis = docker.execs.slice(execsBefore).filter((exec) => exec.container === `invincible-sbx-${his.workspace.id}`).map((exec) => exec.cmd.join(" "));
   expect(onHis.some((command) => command.includes("echo computer-ok") && command.includes("/work/.invincible-gateway.json"))).toBe(true);
-  // He gives a VM more himself when its work needs it, within the ceiling (your ruling): the ledger says it was him, and why.
+  // It gives a VM more itself when its work needs it, within the ceiling (your ruling): the ledger says it was it, and why.
   const growing = await fetch(`http://127.0.0.1:${port}${routes.chat.path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: "GROW_HIS_COMPUTER: the build keeps running out of memory." }] }) });
   expect(await growing.text()).toContain("It has more now.");
-  expect((await api<{ workspace: SandboxView }>("teamWorkspace", { id: "galahad" })).workspace).toMatchObject({ id: his.workspace.id, memoryGb: 6 });
-  expect((await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "docker.container" && e.class === "modify" && e.reason?.startsWith("grown by Galahad"))).toMatchObject({
-    reason: "grown by Galahad: its build ran out of memory",
+  expect((await api<{ workspace: SandboxView }>("teamWorkspace", { id: "primary" })).workspace).toMatchObject({ id: his.workspace.id, memoryGb: 6 });
+  expect((await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "docker.container" && e.class === "modify" && e.reason?.startsWith("grown by your agent"))).toMatchObject({
+    reason: "grown by your agent: its build ran out of memory",
     detail: expect.stringContaining("6 GB"),
   });
-  // His route alone: you give a VM more with resizeTeammate; nobody else calls his.
-  await expect(api("growTeammate", { id: "galahad", memoryGb: 7, why: "because" })).rejects.toThrow(/403/);
+  // Its route alone: you give a VM more with resizeAgent; nobody else calls its.
+  await expect(api("growAgent", { id: "primary", memoryGb: 7, why: "because" })).rejects.toThrow(/403/);
   await daemon.stop();
   const raw = new Database(join(home.dir, "team.db"));
-  const stored = JSON.parse(raw.query<{ value: string }, [string]>("SELECT value FROM team_teammates WHERE id=?").get("sam")!.value);
-  raw.query("UPDATE team_teammates SET value=? WHERE id=?").run(JSON.stringify({ ...stored, workspace: null }), "sam");
+  const stored = JSON.parse(raw.query<{ value: string }, [string]>("SELECT value FROM team_agents WHERE id=?").get("sam")!.value);
+  raw.query("UPDATE team_agents SET value=? WHERE id=?").run(JSON.stringify({ ...stored, workspace: null }), "sam");
   raw.close();
   daemon = await start();
-  expect((await snapshot()).teammates.find((member) => member.id === "sam")).toMatchObject({ workspace: null, workspaceNode: made.node === "keep" ? daemon.identity.id : expect.any(String) });
+  expect((await snapshot()).agents.find((member) => member.id === "sam")).toMatchObject({ workspace: null, workspaceNode: made.node === "keep" ? daemon.identity.id : expect.any(String) });
   const before = docker.running();
-  await expect(api("removeTeammate", { id: "sam" })).rejects.toThrow(/409 .*persistent workspace/);
-  expect((await snapshot()).teammates.find((member) => member.id === "sam")).toMatchObject({ enabled: true });
-  expect(await api("removeTeammate", { id: "sam", destroyWorkspace: true })).toEqual({ removed: { id: "sam", name: "SAM" }, workspace: "destroyed" });
+  await expect(api("removeAgent", { id: "sam" })).rejects.toThrow(/409 .*persistent workspace/);
+  expect((await snapshot()).agents.find((member) => member.id === "sam")).toMatchObject({ enabled: true });
+  expect(await api("removeAgent", { id: "sam", destroyWorkspace: true })).toEqual({ removed: { id: "sam", name: "SAM" }, workspace: "destroyed" });
   expect(docker.running()).toBe(before - 1);
   expect((await api<{ sandboxes: SandboxView[] }>("sandboxes", {})).sandboxes.some((s) => s.id === made.id)).toBe(false);
   expect(await ledgered("sam")).toMatchObject({ detail: "its VM workspace was destroyed with it" });
 
   // Its VM was on a node that is no longer part of the fleet: nothing there can be asked or touched, and the record says so.
-  await api("saveTeammate", { id: "tom", name: "TOM", role: "engineer" });
+  await api("saveAgent", { id: "tom", name: "TOM", role: "engineer" });
   await daemon.stop();
   const again = new Database(join(home.dir, "team.db"));
-  const toms = JSON.parse(again.query<{ value: string }, [string]>("SELECT value FROM team_teammates WHERE id=?").get("tom")!.value);
-  again.query("UPDATE team_teammates SET value=? WHERE id=?").run(JSON.stringify({ ...toms, workspaceNode: "n_departed", workspace: { node: "n_departed", id: "0123456789" } }), "tom");
+  const toms = JSON.parse(again.query<{ value: string }, [string]>("SELECT value FROM team_agents WHERE id=?").get("tom")!.value);
+  again.query("UPDATE team_agents SET value=? WHERE id=?").run(JSON.stringify({ ...toms, workspaceNode: "n_departed", workspace: { node: "n_departed", id: "0123456789" } }), "tom");
   again.close();
   daemon = await start();
   const stillThere = docker.running();
-  expect(await api("removeTeammate", { id: "tom" })).toEqual({ removed: { id: "tom", name: "TOM" }, workspace: "left" });
+  expect(await api("removeAgent", { id: "tom" })).toEqual({ removed: { id: "tom", name: "TOM" }, workspace: "left" });
   expect(docker.running()).toBe(stillThere);
   expect(await ledgered("tom")).toMatchObject({ detail: "its VM was on a node that has left the fleet; nothing there was touched" });
   expect((await snapshot()).removed?.map((member) => member.id).sort()).toEqual(["ada", "dex", "lin", "sam", "tom", "una"]);
 }, 20000);
 
-test("his computer's model access, a lease of 30 minutes, is renewed before a command of his could outlive it, never under one still running", async () => {
+test("its computer's model access, a lease of 30 minutes, is renewed before a command of its could outlive it, never under one still running", async () => {
   const his = (await snapshot()).computer!;
   const leases = () => events.filter((event) => event.kind === "lease" && event.target === `invincible-sbx-${his.id}`).length;
   const use = (how: "USE" | "HOLD" = "USE") => fetch(`http://127.0.0.1:${port}${routes.chat.path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: `${how}_YOUR_COMPUTER: run it there.` }] }) }).then((reply) => reply.text());
@@ -642,14 +642,14 @@ test("his computer's model access, a lease of 30 minutes, is renewed before a co
     expect(await use()).toContain("It ran on my computer.");
     const first = leases();
     expect(first).toBeGreaterThan(0);
-    // Within it, his next command has the same one.
+    // Within it, its next command has the same one.
     expect(await use()).toContain("It ran on my computer.");
     expect(leases()).toBe(first);
     // A quarter of an hour on, a command of up to fifteen minutes could outlive it: a new one comes first.
     later(16);
     expect(await use()).toContain("It ran on my computer.");
     expect(leases()).toBe(first + 1);
-    // Due again while one of his runs: renewing would revoke the lease that one holds, so it waits for nothing of his to run.
+    // Due again while one of its runs: renewing would revoke the lease that one holds, so it waits for nothing of its to run.
     const held = hold();
     await until(() => hisEntered);
     later(16);
@@ -659,7 +659,7 @@ test("his computer's model access, a lease of 30 minutes, is renewed before a co
     expect(await held).toContain("It ran on my computer.");
     expect(await use()).toContain("It ran on my computer.");
     expect(leases()).toBe(first + 2);
-    // Lapsed, it is renewed whatever runs: no command of his still holds one that works.
+    // Lapsed, it is renewed whatever runs: no command of its still holds one that works.
     const heldAgain = hold();
     await until(() => hisEntered);
     later(31);

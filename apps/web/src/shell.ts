@@ -10,8 +10,8 @@ import { button, dot, kbd, retryFailed } from "./ui/controls.ts";
 import { openSheet } from "./ui/dialog.ts";
 import { h, isMac, isTyping, replace, Scope } from "./ui/dom.ts";
 import { icon } from "./ui/icons.ts";
-import { appMark, knightFace, orb } from "./ui/orb.ts";
-import { knightOfCaller } from "./lib/roster.ts";
+import { appMark, agentFace, orb } from "./ui/orb.ts";
+import { agentOfCaller } from "./lib/roster.ts";
 import { type Command, isPaletteOpen, openPalette } from "./ui/palette.ts";
 import { toast } from "./ui/toast.ts";
 import { activityView } from "./views/activity.ts";
@@ -41,13 +41,13 @@ import { moreView } from "./views/more.ts";
 import { overviewView } from "./views/overview.ts";
 import { openCreateSandbox, sandboxesView } from "./views/sandboxes.ts";
 import { forgetThisBrowser, settingsView } from "./views/settings.ts";
-import { trialsView } from "./views/trials.ts";
+import { evalsView } from "./views/evals.ts";
 import { teamView } from "./views/team.ts";
 import { homeView } from "./views/home.ts";
 import { openPlaces } from "./views/places.ts";
 import { sidebarNav } from "./views/sidebar.ts";
 import { taskView } from "./views/task.ts";
-import { giveToRoundtable } from "./views/team-forms.ts";
+import { giveToAgents } from "./views/team-forms.ts";
 import { teamLocation } from "./lib/team.ts";
 import { openAddKey, vaultView } from "./views/vault.ts";
 
@@ -64,7 +64,7 @@ const VIEWS: Record<Route, View> = {
   loops: loopsView,
   activity: activityView,
   artifacts: artifactsView,
-  trials: trialsView,
+  evals: evalsView,
   memory: memoryView,
   skills: skillsView,
   archive: archiveView,
@@ -111,13 +111,13 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     },
     onNewAction(action: ActionView) {
       if (current === "inbox") return;
-      // Who asks, by name and with their orb, still: a knight while its task runs, else Galahad (his loops are his).
-      const knight = knightOfCaller(action.by);
-      const mate = knight ? live.team.value?.teammates.find((one) => one.id === knight) : undefined;
-      const who = knight ? (mate?.name ?? knight) : "Galahad";
-      toast(action.class === "delete" ? `${who} asks to delete something` : `${who} asks your leave`, {
+      // Who asks, by name and with their orb, still: an agent while its task runs, else the primary (its loops are its).
+      const agent = agentOfCaller(action.by);
+      const mate = agent ? live.team.value?.agents.find((one) => one.id === agent) : undefined;
+      const who = agent ? (mate?.name ?? agent) : "Your agent";
+      toast(action.class === "delete" ? `${who} asks to delete something` : `${who} asks for your approval`, {
         description: `${action.connector}.${action.tool}: ${action.target}`,
-        lead: knight ? knightFace({ id: knight, profile: mate?.avatar, size: 28 }) : orb({ size: 28 }),
+        lead: agent ? agentFace({ id: agent, profile: mate?.avatar, size: 28 }) : orb({ size: 28 }),
         action: { label: "Review", run: () => ctx.navigate("inbox") },
         duration: 12_000,
       });
@@ -167,7 +167,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     return a;
   };
 
-  // The sidebar, on a wide screen (views/sidebar.ts): Galahad pinned, the work by attention, the machine and the knights
+  // The sidebar, on a wide screen (views/sidebar.ts): the primary pinned, the work by attention, the machine and the agents
   // at its foot, everything else under "…". A phone has none: its first screen is Home, and "…" is in each header.
   const sidebar = hasWork ? sidebarNav(ctx, { toggle: () => toggleSidebar() }) : null;
   // A sidebar folded away comes back from the top of the page, as T3 Code's does.
@@ -242,7 +242,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     { capture: true, passive: true, signal: lifetime.signal },
   );
 
-  // Warm what the first moves need once the page has settled: Galahad's kept chats, so a first visit to Chat is instant.
+  // Warm what the first moves need once the page has settled: the primary's kept chats, so a first visit to Chat is instant.
   if (can("chat")) setTimeout(() => !lifetime.signal.aborted && chatsForPalette(base.api, { chat: true, read: false }), 600);
   // A press on a link to a place asks for what that place reads first, a tap's length before the tap (lib/prefetch.ts).
   const visibleIds = visible.map((place) => place.id);
@@ -290,7 +290,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     replace(fleetPill, dot(tone, { live: true }), h("span", { class: "tnum" }, `${fleet.name || base.whoami.fleetName || "fleet"} · ${onlineCount}/${nodes.length} online`));
     fleetPill.setAttribute("aria-label", `Fleet ${fleet.name}: ${onlineCount} of ${nodes.length} nodes online`);
   });
-  // The banner under the top bar while Galahad can't be reached, and "Reconnected" for a moment once he can (ui/banner.ts).
+  // The banner under the top bar while the primary can't be reached, and "Reconnected" for a moment once it can (ui/banner.ts).
   const reach = connectionBanner(banner, () => void live.refreshFleet(), lifetime.signal);
   live.online.subscribe((ok) => {
     reach(ok);
@@ -303,11 +303,11 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   }
 
   // ---------- routing ----------
-  // (The Roundtable is #/team, and #/roundtable as well.)
+  // (The agents are at #/team, and #/agents as well.)
   const routeFromHash = (): Route | null => routeOf(location.hash, visible);
 
   /** How often the team is asked for (while the node's live stream is down): every two seconds where the work is the page
-   * (Home, a task, the Roundtable), slowly while it is only the sidebar, never when nothing shows it. */
+   * (Home, a task, the agents), slowly while it is only the sidebar, never when nothing shows it. */
   const watch = (): void => live.watchTeam(!hasWork ? null : current === "home" || current === "task" || current === "team" ? 2000 : narrow.matches ? null : 6000);
   narrow.addEventListener("change", () => (watch(), syncHome()), { signal: lifetime.signal });
   const syncHome = (): void => {
@@ -324,14 +324,14 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     const changed = current !== route;
     current = route;
     shell.dataset.route = route;
-    // A thread (his, a knight's, a room's, a task's) has no top bar: its header is whose it is. On a phone it is the whole
+    // A thread (its, an agent's, a room's, a task's) has no top bar: its header is whose it is. On a phone it is the whole
     // screen, with its way back. Home has its own header too.
     shell.dataset.pane = route === "home" ? "home" : route === "chat" || route === "task" || (route === "team" && opts.room) ? "timeline" : "page";
     sidebar?.at({ route, task: route === "task" ? (opts.task ?? null) : null });
     watch();
     topTitle.textContent = spec.label;
     const n = live.inboxCount.value;
-    document.title = `${n ? `(${n}) ` : ""}${spec.label} · Galahad`;
+    document.title = `${n ? `(${n}) ` : ""}${spec.label} · Invincible`;
     replace(main);
     VIEWS[route](main, ctx, { scope: viewScope, opts });
     // The top bar names the page only once the page's own heading has scrolled away.
@@ -386,7 +386,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       if (can("vault:write")) actions.push({ id: "add-key", label: "Add an API key", group: "Actions", icon: "key", keywords: ["vault", "secret", "seal", "token", "credential"], run: () => openAddKey(ctx) });
       if (can("brain:write")) actions.push({ id: "add-mcp", label: "Add an MCP server", group: "Actions", icon: "plug", keywords: ["mcp", "tools", "server", "connect"], run: () => ctx.navigate("connectors", { intent: "add-mcp" }) });
       if (can("brain:write")) actions.push({ id: "add-connector", label: "Add a connector", group: "Actions", icon: "plug", keywords: ["github", "cloudflare", "home assistant", "install", "service"], run: () => ctx.navigate("connectors", { intent: "catalog" }) });
-      if (can("fleet:admin") && can("chat")) actions.push({ id: "give", label: "Give a task to the Roundtable", group: "Actions", icon: "layers", keywords: ["task", "knights", "delegate", "best suited", "assign"], run: () => giveToRoundtable(ctx) });
+      if (can("fleet:admin") && can("chat")) actions.push({ id: "give", label: "Give a task to the agents", group: "Actions", icon: "layers", keywords: ["task", "agents", "delegate", "best suited", "assign"], run: () => giveToAgents(ctx) });
       if (can("fleet:admin")) {
         actions.push({ id: "invite-client", label: "Pair a phone or browser", group: "Actions", icon: "phone", keywords: ["invite", "device", "add"], run: () => openInvite(ctx, "client") });
         actions.push({ id: "invite-node", label: "Add a machine to the fleet", group: "Actions", icon: "server", keywords: ["invite", "node", "join"], run: () => openInvite(ctx, "node") });
@@ -424,7 +424,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
         out.push({ id: `chat:${c.id}`, label: c.title, group: "Chats", icon: c.pinned ? "pin" : "chat", hint: c.project ? projectName(c.project) : undefined, run: () => ctx.navigate("chat", { conversation: c.id }) });
       }
       if (can("mind:read")) out.push({ id: "q-memory", label: `Search memory for “${query}”`, group: "Search", icon: "memory", run: () => ctx.navigate("memory", { query }) });
-      if (can("chat")) out.push({ id: "q-chat", label: `Ask Galahad: “${query}”`, group: "Search", icon: "mark", run: () => ctx.navigate("chat", { query }) });
+      if (can("chat")) out.push({ id: "q-chat", label: `Ask your agent: “${query}”`, group: "Search", icon: "mark", run: () => ctx.navigate("chat", { query }) });
       return out;
     },
   };
@@ -444,7 +444,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
         ...keyedOf(visible).flatMap((spec) => row(`Go to ${spec.label}`, "G", spec.key.toUpperCase())),
         ...row("Send message", "Enter"),
         ...row("New line in a message", "Shift", "Enter"),
-        ...row("Stop Galahad answering", "Esc"),
+        ...row("Stop your agent answering", "Esc"),
       ),
     });
   }
@@ -480,13 +480,13 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   }
 
   // ---------- go ----------
-  // His line says what he is doing wherever it shows (the sidebar's pinned row, Home's header): asked for here while no
+  // Its line says what it is doing wherever it shows (the sidebar's pinned row, Home's header): asked for here while no
   // chat is on screen to ask it.
   const work = (): void => {
     if (hasWork && (!narrow.matches || current === "home")) void lookAtWork(base.api, { chat: can("chat"), read: can("mind:read") });
   };
-  // (Asked again when the turns or the quests change; every 15 s while the node's stream is down.)
-  lifetime.signal.addEventListener("abort", live.follow(["turns", "quests"], work, 15_000));
+  // (Asked again when the turns or the runs change; every 15 s while the node's stream is down.)
+  lifetime.signal.addEventListener("abort", live.follow(["turns", "runs"], work, 15_000));
   chatFromAddress();
   const initial = routeFromHash() ?? home();
   // (Tidied to its page; Team's address keeps its room and tab, and a task's its id, which is what a reload comes back to.)

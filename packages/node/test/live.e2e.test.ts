@@ -159,7 +159,7 @@ const MIND_READ_TOPICS = LIVE_TOPICS.filter((topic) => routes[topic].scope === "
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "keep" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 3_600_000, defaultHeartbeat: false, archiveIntervalMs: false, backups: false, shutdownGraceMs: 100 });
@@ -183,7 +183,7 @@ describe("your devices' live stream", () => {
     narrow.close();
   });
 
-  test("a key he asks for reaches a listening device in about one round trip: told as it is written, shown by the one read after", async () => {
+  test("a key it asks for reaches a listening device in about one round trip: told as it is written, shown by the one read after", async () => {
     const phone = await pair("phone-2", CLIENT_DEFAULT_SCOPES);
     const reader = await pair("reader-2", ["mind:read"]);
     const live = await phone.listen();
@@ -226,7 +226,7 @@ describe("your devices' live stream", () => {
     narrow.close();
   });
 
-  test("what the node writes by itself, with no request (a chat kept, his turn's end), is told within a look", async () => {
+  test("what the node writes by itself, with no request (a chat kept, its turn's end), is told within a look", async () => {
     const phone = await pair("phone-4", CLIENT_DEFAULT_SCOPES);
     const live = await phone.listen();
     await live.next((e) => e.type === "hello", 0);

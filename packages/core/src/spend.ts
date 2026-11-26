@@ -120,7 +120,7 @@ export function priceFor(prices: Prices, model: string): Price | null {
 /**
  * Your prices as money goes (your word, 23 November 2026: a budget of yours is outside the coding plans): a coding
  * plan's calls are paid for already, so every model of one of `plans` (their provider ids) costs nothing more, priced
- * by you or not. What each would cost at your prices stays yours to see (`invincible price`, the trials). Budgets, the
+ * by you or not. What each would cost at your prices stays yours to see (`invincible price`, the evals). Budgets, the
  * usage meter and what a task or an outcome spent are counted this way.
  */
 export function moneyPrices(prices: Prices, plans: readonly string[]): Prices {

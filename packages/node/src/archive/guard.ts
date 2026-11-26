@@ -41,7 +41,7 @@ const KEY_FILES = [
   /(^|\/)(admin|auth|access|refresh|bearer)[._-]?token(\.\w+)?$/i,
   /(^|\/)\.ssh\//i,
   /(^|\/)\.aws\/credentials$/i,
-  /(^|\/)\.galahad\//i,
+  /(^|\/)\.invincible\//i,
 ];
 
 const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|-----BEGIN OPENSSH PRIVATE KEY-----|PuTTY-User-Key-File-/;

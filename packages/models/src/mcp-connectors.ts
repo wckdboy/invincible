@@ -26,7 +26,7 @@ import { accessToken, type OAuthContext } from "./oauth.ts";
  *
  * Same fences as request templates: every request stays on the pinned origin,
  * redirects are refused, answers are size-capped and redacted. The client declares
- * no capabilities but one, so a server can't ask Galahad to run a model or list
+ * no capabilities but one, so a server can't ask the primary to run a model or list
  * files: it can only answer, and, in a call made where you can be asked (`elicit`),
  * ask you a question in a form (elicitation's form mode alone), which waits in your
  * Inbox and is answered by you, never a model.

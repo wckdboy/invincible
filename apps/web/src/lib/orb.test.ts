@@ -24,9 +24,9 @@ function reach(part: OrbPart): number {
   }
 }
 
-// Your word, 23 November 2026: Galahad, the one you talk to, as a Jarvis-like orb; every app draws these same parts. On
-// 25 November 2026 his sphere became points of light.
-describe("Galahad's orb, as data", () => {
+// Your word, 23 November 2026: the primary, the one you talk to, as a Jarvis-like orb; every app draws these same parts. On
+// 25 November 2026 its sphere became points of light.
+describe("Your agent's orb, as data", () => {
   test("each state has its own light, lit and shaded from it, in every theme", () => {
     expect(ORB_TONES.map((tone) => orbPalette(tone).tint)).toEqual(["#8ab8ff", "#58a6ff", "#f0b549", "#4cc38a", "#ff6b6b"]);
     for (const tone of ORB_TONES) {
@@ -37,12 +37,12 @@ describe("Galahad's orb, as data", () => {
     }
     // A tone it doesn't know is its rest.
     expect([orbTone("pulse"), orbTone(undefined), orbTone("warn")]).toEqual(["neutral", "neutral", "warn"]);
-    // At the Roundtable, the colour his ring would have.
+    // At the agents, the colour its ring would have.
     expect(["working", "needs", "failed", "verified", "unread", "paused", "queued", "resting", undefined].map(orbToneOfState)).toEqual(["accent", "warn", "danger", "ok", "ok", "neutral", "neutral", "neutral", "neutral"]);
     expect(orbPalette("pulse" as never)).toEqual(orbPalette("neutral"));
   });
 
-  test("small beside his words, a seat's rings at the Roundtable, the whole display on his welcome", () => {
+  test("small beside its words, a seat's rings among the agents, the whole display on its welcome", () => {
     expect([orbLevel(16), orbLevel(ORB_SEAT_FROM - 1), orbLevel(ORB_SEAT_FROM), orbLevel(ORB_FULL_FROM - 1), orbLevel(ORB_FULL_FROM), orbLevel(320)]).toEqual(["badge", "badge", "seat", "seat", "full", "full"]);
     const names = (size: number) => orbParts(size).map((part) => part.name);
     expect(names(28)).toEqual(["ring", "glow", "nucleus", "sphere"]);
@@ -62,8 +62,8 @@ describe("Galahad's orb, as data", () => {
         }
       }
     }
-    // His sphere of glyphs is the last thing drawn, over his nucleus and the light it sits in, inside every ring; finer
-    // the larger he is (your word, 25 November 2026: his orb too is glyphs, round a nucleus, with a ring of data).
+    // Its sphere of glyphs is the last thing drawn, over its nucleus and the light it sits in, inside every ring; finer
+    // the larger it is (your word, 25 November 2026: its orb too is glyphs, round a nucleus, with a ring of data).
     const spheres = [28, 64, 168].map((size) => orbParts(size).at(-1)!);
     for (const sphere of spheres) expect(sphere.kind).toBe("sphere");
     const [badge, seat, full] = spheres.map((part) => (part.kind === "sphere" ? part : null)!);

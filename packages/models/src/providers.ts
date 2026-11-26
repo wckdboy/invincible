@@ -8,7 +8,7 @@ export interface ProviderPreset {
   kind: ProviderKind;
   baseUrl: string;
   /**
-   * How it takes a thinking level in an OpenAI-compatible call: the request field, and Galahad's five levels in its own
+   * How it takes a thinking level in an OpenAI-compatible call: the request field, and the primary's five levels in its own
    * words: `levels` where every model it serves takes the same, `models` where they differ (a gateway's), each model's
    * own from its lowest, a level asked for being the lowest of them at or above it, or their highest (effortOf). A model
    * not named, or a provider with neither (every other provider), is asked as now, with no level, and chooses for
@@ -33,13 +33,13 @@ export interface ProviderPreset {
 
 /**
  * A coding plan: a flat-rate subscription whose key is for coding (its terms say so, and name
- * tools), not for calling the API from any program for anything. Galahad and the knights are a
- * coding tool, by their owner's word: he calls a plan himself for coding work (a quest's planner,
- * engineer and reviewer, a knight at its work), under his own name (SELF), and lends it through
- * the gateway to the other coding tools in the knights' VMs and under `invincible run`, each calling
- * as itself. Nothing else he does is handed its key: not his talk with you, his loops or his
+ * tools), not for calling the API from any program for anything. The primary and the agents are a
+ * coding tool, by their owner's word: it calls a plan itself for coding work (a run's planner,
+ * engineer and reviewer, an agent at its work), under its own name (SELF), and lends it through
+ * the gateway to the other coding tools in the agents' VMs and under `invincible run`, each calling
+ * as itself. Nothing else it does is handed its key: not its talk with you, its loops or its
  * heartbeat (chat.ts, resolveProvider). What a plan allows is its vendor's to say, and changes:
- * `says` is their sentence and `terms` where they say it. Whether a vendor counts him among its
+ * `says` is their sentence and `terms` where they say it. Whether a vendor counts it among its
  * supported tools is the vendor's to decide and the owner's to weigh.
  */
 export interface CodingPlan {
@@ -54,9 +54,9 @@ export interface CodingPlan {
   /** The header its endpoint routes a conversation by, where it refuses a call without one (OpenCode Go does: 400 MissingSessionID). */
   session?: string;
   /**
-   * What its vendor's own terms let Galahad do with it (read 14 November 2026). `native`: his own coding calls (a
-   * quest's engineer, a knight's native runner), which only a plan made for coding agents that call as themselves
-   * allows. `tools`: lent through the gateway to a coding tool in a knight's VM or a quest's sandbox ("unattended"),
+   * What its vendor's own terms let the primary do with it (read 14 November 2026). `native`: its own coding calls (a
+   * run's engineer, an agent's native runner), which only a plan made for coding agents that call as themselves
+   * allows. `tools`: lent through the gateway to a coding tool in an agent's VM or a run's sandbox ("unattended"),
    * or only to a tool you run yourself with `invincible run` ("interactive"), where the terms say interactive use only.
    */
   allows: { native: boolean; tools: "unattended" | "interactive" };
@@ -73,8 +73,8 @@ export const PRESETS: ProviderPreset[] = [
   { id: "anthropic", kind: "anthropic", baseUrl: "https://api.anthropic.com", keyPrefixes: ["sk-ant-"] },
   { id: "deepseek", kind: "openai", baseUrl: "https://api.deepseek.com", effort: { field: "reasoning_effort", levels: { low: "low", medium: "high", high: "high", xhigh: "max", max: "max" } } },
   { id: "abliteration", kind: "openai", baseUrl: "https://api.abliteration.ai/v1" },
-  { id: "heabsy", kind: "openai", baseUrl: "https://api.heabsy.com/v1", note: "Heabsy's OpenAI-compatible API (FEYA, s.r.o., Slovakia): low-refusal models; GET /v1/models lists the ones your key may use. For work that should run on nothing else, hold the knight or the task to them: sensitive mode." },
-  { id: "nearai", kind: "openai", baseUrl: "https://cloud-api.near.ai/v1", note: "NEAR AI Cloud's OpenAI-compatible API: open models run privately, abliterated ones among them (Qwen/Qwen3.8-27B-abliterated, deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated). It serves other vendors' models too, so sensitive mode holds a knight to the models you name, never to the provider." },
+  { id: "heabsy", kind: "openai", baseUrl: "https://api.heabsy.com/v1", note: "Heabsy's OpenAI-compatible API (FEYA, s.r.o., Slovakia): low-refusal models; GET /v1/models lists the ones your key may use. For work that should run on nothing else, hold the agent or the task to them: sensitive mode." },
+  { id: "nearai", kind: "openai", baseUrl: "https://cloud-api.near.ai/v1", note: "NEAR AI Cloud's OpenAI-compatible API: open models run privately, abliterated ones among them (Qwen/Qwen3.8-27B-abliterated, deepseek-ai/DeepSeek-V4.1-Flash-1017-abliterated). It serves other vendors' models too, so sensitive mode holds an agent to the models you name, never to the provider." },
   { id: "orcarouter", kind: "openai", baseUrl: "https://api.orcarouter.ai/v1", keyPrefixes: ["sk-orca-"] },
   { id: "openrouter", kind: "openai", baseUrl: "https://openrouter.ai/api/v1", keyPrefixes: ["sk-or-"] },
   // OpenAI's own API, xAI's and Mistral's (a project's or a service account's OpenAI key, an xAI key, is told by its form;
@@ -282,11 +282,11 @@ export const PRESETS: ProviderPreset[] = [
 
 export const preset = (id: string): ProviderPreset | undefined => PRESETS.find((p) => p.id === id);
 
-/** Thinking levels from least to most, in the words providers use: Galahad's five among them. */
+/** Thinking levels from least to most, in the words providers use: the primary's five among them. */
 const EFFORT_SCALE = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
- * How hard a provider's model is asked to think at Galahad's `level`, in the provider's words: its preset's field, and
+ * How hard a provider's model is asked to think at the primary's `level`, in the provider's words: its preset's field, and
  * its value for the level (one level for all its models, or the model's own: the lowest at or above the one asked for,
  * else its highest). Null where it takes none (the provider, or this model of it): asked with no level.
  */
@@ -299,13 +299,13 @@ export function effortOf(spec: ProviderPreset["effort"], model: string, level: T
   return { field: spec.field, value: takes.find((value) => EFFORT_SCALE.indexOf(value) >= asked) ?? takes.at(-1)! };
 }
 
-/** The coding plan a provider is on: one added as a plan's preset. A provider of your own making is yours, and Galahad knows nothing of its terms. */
+/** The coding plan a provider is on: one added as a plan's preset. A provider of your own making is yours, and the primary knows nothing of its terms. */
 export const planOf = (id: string): CodingPlan | null => preset(id)?.plan ?? null;
 
 /** The coding plans' provider ids: their calls are paid for already, so they cost nothing more as money goes (core's moneyPrices). */
 export const PLAN_PROVIDERS: readonly string[] = PRESETS.filter((p) => p.plan).map((p) => p.id);
 
-/** Whether he offers a model of his own accord: any a provider of yours serves; of a coding plan, the ones its preset names. */
+/** Whether it offers a model of its own accord: any a provider of yours serves; of a coding plan, the ones its preset names. */
 export function offersModel(ref: string): boolean {
   const slash = ref.indexOf("/");
   const plan = slash > 0 ? planOf(ref.slice(0, slash)) : null;
@@ -328,22 +328,22 @@ export function regionalBaseUrls(id: string): boolean {
   return /\bbase-url\b/i.test(note) && /(china|europe|region)/i.test(note);
 }
 
-/** Why he has no key to call a provider with: none in the vault, or a coding plan's, which is for coding and nothing else of his. */
+/** Why it has no key to call a provider with: none in the vault, or a coding plan's, which is for coding and nothing else of its. */
 export const whyNoKey = (id: string, use: "own" | "coding" = "own"): string => {
   const plan = planOf(id);
   if (!plan) return `provider "${id}" has no key in the vault`;
   if (use === "coding" && !plan.allows.native) {
     return plan.allows.tools === "interactive"
-      ? `${id} is a coding plan its vendor's terms allow for interactive use only, in a tool you run yourself (invincible run): never his own calls, nor a knight's unattended work (${plan.terms})`
-      : `${id} is a coding plan its vendor's terms allow it only inside the coding tools they name (a knight's OpenCode, Claude Code, Codex or Hermes): never his own calls (${plan.terms})`;
+      ? `${id} is a coding plan its vendor's terms allow for interactive use only, in a tool you run yourself (invincible run): never its own calls, nor an agent's unattended work (${plan.terms})`
+      : `${id} is a coding plan its vendor's terms allow it only inside the coding tools they name (an agent's OpenCode, Claude Code, Codex or Hermes): never its own calls (${plan.terms})`;
   }
-  return `${id} is a coding plan: its key is for coding (his quests, the knights' work and their coding tools), and nothing else he does`;
+  return `${id} is a coding plan: its key is for coding (its runs, the agents' work and their coding tools), and nothing else it does`;
 };
 
-/** Who he says he is when he calls a coding plan himself: his own name, and never another tool's. */
-export const SELF = "Galahad (coding agent; https://invincible.sh)";
+/** Who it says it is when it calls a coding plan itself: its own name, and never another tool's. */
+export const SELF = "Invincible (coding agent; https://invincible.sh)";
 
-/** What he sends beside the key when the call is his own: to a coding plan, his name, and which conversation this is where the plan routes by that. */
+/** What it sends beside the key when the call is its own: to a coding plan, its name, and which conversation this is where the plan routes by that. */
 export function selfHeaders(provider: { id: string }, session?: string): Record<string, string> {
   const plan = planOf(provider.id);
   if (!plan) return {};
@@ -378,7 +378,7 @@ export const SIGN_INS: { prefix: string; signIn: SignIn }[] = [
     signIn: {
       vendor: "Anthropic",
       tool: "Claude Code",
-      why: "This is a Claude subscription's sign-in, not an API key. Anthropic keeps a subscription to its own apps, and a sign-in to its own flow: Galahad doesn't hold it and never sends it to the API. It belongs with Claude Code itself, where that runs. An API key from the Claude Console starts sk-ant-api.",
+      why: "This is a Claude subscription's sign-in, not an API key. Anthropic keeps a subscription to its own apps, and a sign-in to its own flow: Invincible doesn't hold it and never sends it to the API. It belongs with Claude Code itself, where that runs. An API key from the Claude Console starts sk-ant-api.",
     },
   },
 ];
@@ -442,15 +442,15 @@ export function keyUsable(vault: Vault, record: ProviderRecord): boolean {
 
 /**
  * Provider config plus its key, decrypted in memory on this node only. A coding plan's key is
- * handed over only for `coding` (his own coding work: chat.ts) and for a `tool` (the gateway,
- * lending it to a coding tool). For his `own` calls of any other kind a plan resolves with no
- * key, so nothing else he does can call one, whoever forgets to ask.
+ * handed over only for `coding` (its own coding work: chat.ts) and for a `tool` (the gateway,
+ * lending it to a coding tool). For its `own` calls of any other kind a plan resolves with no
+ * key, so nothing else it does can call one, whoever forgets to ask.
  */
 export function resolveProvider(store: LedgerStore, vault: Vault, id: string, use: "own" | "coding" | "tool" = "own"): ResolvedProvider | null {
   const record = providerRecord(store, id);
   if (!record) return null;
   let apiKey: string | null = null;
-  // A plan's key: never for anything but coding, and for his own coding calls only where its terms allow them.
+  // A plan's key: never for anything but coding, and for its own coding calls only where its terms allow them.
   const plan = planOf(id);
   if (keyUsable(vault, record) && (!plan || use === "tool" || (use === "coding" && plan.allows.native))) {
     try {
@@ -531,7 +531,7 @@ export const withoutRedirects = (base: typeof fetch = fetch): typeof fetch =>
  * How long a model's call may send nothing at all (no headers, then no byte of its stream) before it is ended as a
  * failed call: the roster's next model is asked, or the same again. Measured on the bytes, so a model that streams
  * its reasoning for minutes is never cut; one on your own machine (`local`), whose silence may be a long prompt being
- * read, gets longer. A provider that stopped sending once held a trial's turn for over fifteen minutes (21 November
+ * read, gets longer. A provider that stopped sending once held an eval's turn for over fifteen minutes (21 November
  * 2026): nothing on `invincible do`'s path ended it.
  */
 export const QUIET_MS = { remote: 5 * 60_000, local: 15 * 60_000 } as const;

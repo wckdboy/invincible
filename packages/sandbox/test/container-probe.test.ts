@@ -36,7 +36,7 @@ function answering(over: { version?: string; image?: boolean; network?: boolean 
 }
 
 describe("finding Apple's container on a Mac", () => {
-  test("its service answering, at 1.x: a sandbox host whose every sandbox is a VM, that can't grow one live, and says what it won't make and which of his images it makes", async () => {
+  test("its service answering, at 1.x: a sandbox host whose every sandbox is a VM, that can't grow one live, and says what it won't make and which of its images it makes", async () => {
     const { runner, asked } = answering();
     expect(await probeContainer(runner)).toEqual({
       container: { version: "1.2.3", running: true },

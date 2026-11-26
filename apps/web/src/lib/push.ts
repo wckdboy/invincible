@@ -7,7 +7,7 @@ import { CLOCK, isConversationId, NOTIFY_OPENS, NOTIFY_PER_DAY, type NotifyLostV
  */
 
 /**
- * unsupported: this browser can't be pushed to · home-screen: an iPhone or iPad whose Galahad isn't on the
+ * unsupported: this browser can't be pushed to · home-screen: an iPhone or iPad whose the primary isn't on the
  * Home Screen yet (the only place iOS delivers to) · blocked: you, or the browser, said no for this site ·
  * off · on.
  */
@@ -37,7 +37,7 @@ export const isIos = (nav: { userAgent: string; platform?: string; maxTouchPoint
   /iPhone|iPad|iPod/.test(nav.userAgent) || (nav.platform === "MacIntel" && (nav.maxTouchPoints ?? 0) > 1);
 
 /**
- * What the welcome screen says before pairing. An iPhone in Safari: put Galahad on the Home Screen first and pair it
+ * What the welcome screen says before pairing. An iPhone in Safari: put the primary on the Home Screen first and pair it
  * there (the app there keeps its own key, apart from Safari's, and only it can be notified), or it's paired twice. An
  * installed app: it pairs on its own, by a pasted invite (links open in the browser). Anything else pairs where it is.
  */
@@ -46,17 +46,17 @@ export function pairingNote(env: { ios: boolean; standalone: boolean }): "home-s
   return env.ios ? "home-screen-first" : null;
 }
 
-export const WHAT_IS_SENT = "A short title and one line, with where it opens: a finding that needs you, an approval that's waiting, that he has finished or has a question. Fixed words only, never your own (a chat's title, a name you gave) or a model's: the app shows those once you open it. It's encrypted to this browser, so the push service that carries it can't read it. What needs you sounds; news comes quietly.";
+export const WHAT_IS_SENT = "A short title and one line, with where it opens: a finding that needs you, an approval that's waiting, that it has finished or has a question. Fixed words only, never your own (a chat's title, a name you gave) or a model's: the app shows those once you open it. It's encrypted to this browser, so the push service that carries it can't read it. What needs you sounds; news comes quietly.";
 
 export const PUSH_STATE_TEXT: Record<PushState, string> = {
   unsupported: "This browser can't receive notifications from a web app.",
-  "home-screen": "On iPhone and iPad, notifications work once Galahad is on your Home Screen: in Safari, tap Share (in the ⋯ menu on iOS 26), then Add to Home Screen, and open Galahad from there.",
+  "home-screen": "On iPhone and iPad, notifications work once your agent is on your Home Screen: in Safari, tap Share (in the ⋯ menu on iOS 26), then Add to Home Screen, and open your agent from there.",
   blocked: "Notifications are blocked for this site in your browser's settings. Allow them there, then turn this on.",
   off: "Off. Your browser asks you once, when you turn this on.",
-  on: "On: he can reach this device when the app is closed.",
+  on: "On: it can reach this device when the app is closed.",
 };
 
-/* ---------- when he can't reach this device ---------- */
+/* ---------- when it can't reach this device ---------- */
 
 /** How long the card stays away once you put it away (Not now): a week, on this device. */
 export const REACH_DISMISS_MS = 7 * 24 * 3600_000;
@@ -79,7 +79,7 @@ export function lostLine(lost: NotifyLostView): string {
 }
 
 /**
- * The card at the top of "Galahad asks you" and the Inbox, saying he can't reach this device when Galahad is closed,
+ * The card at the top of "The primary asks you" and the Inbox, saying it can't reach this device when the primary is closed,
  * and the one thing to do. Only while it matters: this device's subscription was lost (it was on, and you didn't turn
  * it off), or no device of yours can be reached at all. A device you turned off while another reaches you isn't
  * nagged; a browser that can't be pushed to at all is offered nothing (the Inbox's notice says where else).
@@ -90,7 +90,7 @@ export function reachCard(env: PushEnv, view: { subscribed: boolean | null; lost
   if (state === "on" || state === "unsupported") return null;
   const lost = view.lost ?? null;
   if (!lost && view.reachable !== 0) return null;
-  const title = "He can't reach this device when Galahad is closed.";
+  const title = "It can't reach this device when Invincible is closed.";
   if (state === "home-screen") return { why: "home-screen", title, detail: PUSH_STATE_TEXT["home-screen"], action: null };
   if (state === "blocked") return { why: "blocked", title, detail: "Notifications are blocked for this site in your browser: allow them in its settings for this site, then turn them on here.", action: null };
   return { why: lost ? "lost" : "off", title, detail: lost ? lostLine(lost) : null, action: "turn-on" };
@@ -149,14 +149,14 @@ export function perDayProblem(value: string): string | null {
 
 /** Quiet hours in a line. `zone`: the one your day is read in now (your devices'), when the node said it. */
 export function quietLine(prefs: NotifyPrefs, zone?: string): string {
-  if (!prefs.quiet.on) return "No quiet hours: he tells you whenever it happens.";
+  if (!prefs.quiet.on) return "No quiet hours: it tells you whenever it happens.";
   return `From ${prefs.quiet.from} to ${prefs.quiet.to}, ${(zone ?? prefs.quiet.tz).replace(/_/g, " ")} time, everything but an alert waits; then one message says what waited.`;
 }
 
 /** The day's digest in a line. */
 export function digestLine(prefs: NotifyPrefs, zone?: string): string {
-  if (!prefs.digest?.on) return "No digest: what he doesn't buzz you for waits in your Inbox.";
-  return `At ${prefs.digest.at}, ${(zone ?? prefs.quiet.tz).replace(/_/g, " ")} time, one quiet message says what happened that he didn't buzz you for, and what still waits.`;
+  if (!prefs.digest?.on) return "No digest: what it doesn't buzz you for waits in your Inbox.";
+  return `At ${prefs.digest.at}, ${(zone ?? prefs.quiet.tz).replace(/_/g, " ")} time, one quiet message says what happened that it didn't buzz you for, and what still waits.`;
 }
 
 /**

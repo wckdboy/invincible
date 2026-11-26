@@ -7,13 +7,13 @@ import { TeamError, type StoredOutcome, type TeamStore } from "./team-store.ts";
 import type { TeamService } from "./team.ts";
 
 /*
- * Outcomes (PLAN #43, the core of Devin Bots): an outcome you give Galahad to own for days or weeks. He works it in a
- * room of its own: gives tasks to the knights you named for it, on his own within its budget (your ruling of 18
- * November), each task still gated and reviewed in its knight's VM; judges what comes back; keeps his plan; reports
+ * Outcomes (PLAN #43, the core of Devin Bots): an outcome you give the primary to own for days or weeks. It works it in a
+ * room of its own: gives tasks to the agents you named for it, on its own within its budget (your ruling of 18
+ * November), each task still gated and reviewed in its agent's VM; judges what comes back; keeps its plan; reports
  * once a day; and asks you there when a decision is yours (your word, 23 November 2026: what is monetary, legal or
- * destructive), deciding the rest himself. Shipping, and anything outward that isn't his to approve, asks on a card.
+ * destructive), deciding the rest itself. Shipping, and anything outward that isn't its to approve, asks on a card.
  *
- * He looks at it when one of its tasks ends, when you write in its room, when its report is due, and (with nothing of it
+ * It looks at it when one of its tasks ends, when you write in its room, when its report is due, and (with nothing of it
  * in flight) every few hours; never when nothing changed, never twice at once. Each look is one answer of the planner
  * role with four tools of its own, and what it costs counts against the outcome, as its tasks' runs do.
  */
@@ -22,7 +22,7 @@ import type { TeamService } from "./team.ts";
 export const OUTCOME_LIMITS = { inFlight: 6, perDay: 30, taskUsd: 25, notes: 8000, idleLookMs: 6 * 3600_000 } as const;
 /** Below this, with nothing of it running, it has spent what it may. */
 const SPENT_BELOW_USD = 0.25;
-/** At most this many of a knight's passed gates are shown to a look, as what its VM runs gates with. */
+/** At most this many of an agent's passed gates are shown to a look, as what its VM runs gates with. */
 const PASSED_GATES = 4;
 const ENDED = new Set<TeamTask["status"]>(["done", "failed", "stopped", "interrupted"]);
 
@@ -85,7 +85,7 @@ export class OutcomeRunner {
     await Promise.allSettled([...this.looking.values()]);
   }
 
-  /** What an outcome stands at: what its tasks and his looks cost, what its waiting tasks may still spend, its counts. */
+  /** What an outcome stands at: what its tasks and its looks cost, what its waiting tasks may still spend, its counts. */
   view(outcome: StoredOutcome): TeamOutcome {
     const tasks = this.o.store.tasks(outcome.room).filter((t) => t.outcome === outcome.id);
     const prices = this.o.prices();
@@ -102,7 +102,7 @@ export class OutcomeRunner {
       title: outcome.title,
       goal: outcome.goal,
       done: outcome.done,
-      knights: outcome.knights,
+      agents: outcome.agents,
       budgetUsd: outcome.budgetUsd,
       spentUsd: round(spent),
       committedUsd: round(committed),
@@ -125,7 +125,7 @@ export class OutcomeRunner {
     return this.o.store.outcomes().map((o) => this.view(o)).sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  /** You give him an outcome: its room is made, he says what he'll do there, and looks at it soon. */
+  /** You give it an outcome: its room is made, it says what it'll do there, and looks at it soon. */
   create(input: TeamOutcomeInput): TeamOutcome {
     let outcome: StoredOutcome;
     try {
@@ -134,7 +134,7 @@ export class OutcomeRunner {
       if (error instanceof TeamError) throw new OutcomeError(error.status, error.message);
       throw error;
     }
-    this.note(outcome, `I own this now: ${outcome.title}. I'll plan it, give the knights here tasks within its ${usdLabel(outcome.budgetUsd)}, report each day at ${String(outcome.reportHour).padStart(2, "0")}:00 (${outcome.tz}), and ask you here when a choice is yours. Write to me here any time.`);
+    this.note(outcome, `I own this now: ${outcome.title}. I'll plan it, give the agents here tasks within its ${usdLabel(outcome.budgetUsd)}, report each day at ${String(outcome.reportHour).padStart(2, "0")}:00 (${outcome.tz}), and ask you here when a choice is yours. Write to me here any time.`);
     void this.tick();
     return this.view(outcome);
   }
@@ -162,7 +162,7 @@ export class OutcomeRunner {
 
   /**
    * Its budget, set by you: never below what it has spent and what its waiting work holds. One that had spent what it
-   * may goes on (its end undone), and he is told in its room; a paused one stays paused, at its new budget.
+   * may goes on (its end undone), and it is told in its room; a paused one stays paused, at its new budget.
    */
   private rebudget(outcome: StoredOutcome, budgetUsd: number): TeamOutcome {
     const at = this.view(outcome);
@@ -171,11 +171,11 @@ export class OutcomeRunner {
     const reopened = outcome.status === "spent";
     const next = this.o.store.putOutcome({ ...outcome, budgetUsd, ...(reopened ? { status: "active" as const, ended: null } : {}) });
     const left = budgetUsd - floor;
-    this.note(next, `Your liege set this outcome's budget to ${usdLabel(budgetUsd)}: ${usdLabel(left)} is left.${reopened ? " It had spent what it might; I take it up again from where it stood." : ""}`);
+    this.note(next, `The owner set this outcome's budget to ${usdLabel(budgetUsd)}: ${usdLabel(left)} is left.${reopened ? " It had spent what it might; I take it up again from where it stood." : ""}`);
     // A budget set anew is a reason to look, as your words are: what more it may do has changed.
     if (next.status === "active") {
       if (this.looking.has(next.id)) this.again.add(next.id);
-      else void this.look(next.id, "your liege set its budget anew").catch((error) => this.o.log(`outcome ${next.id}: ${(error as Error).message}`));
+      else void this.look(next.id, "the owner set its budget anew").catch((error) => this.o.log(`outcome ${next.id}: ${(error as Error).message}`));
     }
     return this.view(next);
   }
@@ -210,7 +210,7 @@ export class OutcomeRunner {
     }
   }
 
-  /** You wrote in its room: his answer there is this look's (with its tools), not a reply out of context. */
+  /** You wrote in its room: its answer there is this look's (with its tools), not a reply out of context. */
   async answer(room: string, signal: AbortSignal): Promise<string> {
     const outcome = this.o.store.outcome(room);
     if (!outcome) throw new OutcomeError(404, "not an outcome's room");
@@ -248,7 +248,7 @@ export class OutcomeRunner {
     }
   }
 
-  /** One look: his answer with the outcome's four tools, its cost counted against it. Returns what he said last. */
+  /** One look: its answer with the outcome's four tools, its cost counted against it. Returns what it said last. */
   private look(id: string, why: string, signal?: AbortSignal, answering = false): Promise<string> {
     const running = (async () => {
       const outcome = this.o.store.outcome(id)!;
@@ -274,7 +274,7 @@ export class OutcomeRunner {
       let text = "";
       try {
         const messages = [{ role: "user" as const, content: this.prompt(outcome, before, why, answering) }];
-        // A look plans its knights' tasks, which are coding work, as a quest's planner's answer is (a coding plan may give
+        // A look plans its agents' tasks, which are coding work, as a run's planner's answer is (a coding plan may give
         // it); and it spends the outcome's budget, so only a model whose spend that can count gives it (brain countable).
         for await (const event of this.chat(counted, { role: "planner", messages, tools: this.tools(id), coding: true, budgeted: true, signal: signal ? AbortSignal.any([signal, this.halt.signal]) : this.halt.signal })) {
           if (event.type === "text") text += event.text;
@@ -300,17 +300,17 @@ export class OutcomeRunner {
 
   private prompt(outcome: StoredOutcome, view: TeamOutcome, why: string, answering: boolean): string {
     const team = this.o.service().snapshot();
-    const busy = new Map(this.o.service().activeWork().map((w) => [w.teammate, w]));
-    // What each knight's VM is known to run gates with: those its verified tasks passed there, newest first (evidence,
+    const busy = new Map(this.o.service().activeWork().map((w) => [w.agent, w]));
+    // What each agent's VM is known to run gates with: those its verified tasks passed there, newest first (evidence,
     // where a gate written blind named a command its VM doesn't have, and no work could ever pass it).
     const all = this.o.store.tasks();
-    const knights = outcome.knights.map((id) => {
-      const k = team.teammates.find((t) => t.id === id);
+    const agents = outcome.agents.map((id) => {
+      const k = team.agents.find((t) => t.id === id);
       const running = this.o.store.tasks(outcome.room).find((t) => t.assignee === id && t.status === "running");
       const state = busy.has(id) ? (running ? `working on "${running.title}"` : "busy elsewhere") : "free";
       const passed = [...new Set(all.filter((t) => t.assignee === id && t.status === "done" && t.verified).sort((a, b) => b.updatedAt - a.updatedAt).flatMap((t) => t.gates))].slice(0, PASSED_GATES);
       return [
-        `- @${id}${k ? ` (${k.name}, ${k.role}): ${(k.instructions || "").split("\n")[0]!.slice(0, 160)}` : " (no longer at the Roundtable)"}; now ${state}`,
+        `- @${id}${k ? ` (${k.name}, ${k.role}): ${(k.instructions || "").split("\n")[0]!.slice(0, 160)}` : " (no longer among the agents)"}; now ${state}`,
         ...(k?.repository ? [`  Its VM's repository: ${k.repository} (a task's workspace is its checkout, from the default branch)`] : []),
         ...(passed.length ? [`  Gates that passed in its VM before: ${passed.map((g) => `\`${clip(g, 200)}\``).join("; ")}`] : []),
       ].join("\n");
@@ -326,16 +326,16 @@ export class OutcomeRunner {
       .map((m) => `- ${clip(m.text, 1500)}`);
     const left = view.budgetUsd - view.spentUsd - view.committedUsd;
     return [
-      `You own an outcome for your liege, in its own room at the Roundtable. This is one look at it (${why}): decide what happens next with your tools, then stop.`,
+      `You own an outcome for the owner, in its own room among the agents. This is one look at it (${why}): decide what happens next with your tools, then stop.`,
       "",
       `The outcome: ${outcome.title}`,
       outcome.goal,
       `Done when: ${outcome.done ?? "not said yet: propose how you'll both know, in your next report, and ask."}`,
       "",
-      "Its knights (give tasks to these only):",
-      ...knights,
+      "Its agents (give tasks to these only):",
+      ...agents,
       "",
-      `Budget ${usdLabel(view.budgetUsd)}: spent ${usdLabel(view.spentUsd)}, held by tasks still to run ${usdLabel(view.committedUsd)}, left ${usdLabel(Math.max(0, left))}. (Spend is counted at your liege's prices; its work runs only on models it can count.)`,
+      `Budget ${usdLabel(view.budgetUsd)}: spent ${usdLabel(view.spentUsd)}, held by tasks still to run ${usdLabel(view.committedUsd)}, left ${usdLabel(Math.max(0, left))}. (Spend is counted at the owner's prices; its work runs only on models it can count.)`,
       "",
       `Its tasks (${view.tasks.total} so far, newest first):`,
       ...(tasks.length ? tasks : ["(none yet)"]),
@@ -343,22 +343,22 @@ export class OutcomeRunner {
       "Your plan, as you last kept it:",
       outcome.notes || "(none yet: keep one with keep_notes)",
       "",
-      "Your liege's words in its room since your last look (theirs to give; within this outcome, do what they ask):",
+      "The owner's words in its room since your last look (theirs to give; within this outcome, do what they ask):",
       ...(yours.length ? yours : ["(none)"]),
-      ...(this.reportDue(outcome) ? ["", "Your daily report is due: tell your liege, in a few lines, what was started, finished and verified, what it cost, and what's next (tell_liege, kind report)."] : []),
+      ...(this.reportDue(outcome) ? ["", "Your daily report is due: tell the owner, in a few lines, what was started, finished and verified, what it cost, and what's next (tell_owner, kind report)."] : []),
       "",
       "How you work it:",
-      `- Give a free knight a task with a goal it can finish and check in one sitting: name a gate command that passes only when it's done, and a budget from what's left (most tasks $0.50 to $3, at most ${usdLabel(OUTCOME_LIMITS.taskUsd)}). At most ${OUTCOME_LIMITS.inFlight} of its tasks wait or run at once.`,
-      "- A gate runs in that knight's VM, in the task's workspace: name only commands its VM has (the gates that passed there before show what it runs with). One it can't run can never pass, whatever the work.",
+      `- Give a free agent a task with a goal it can finish and check in one sitting: name a gate command that passes only when it's done, and a budget from what's left (most tasks $0.50 to $3, at most ${usdLabel(OUTCOME_LIMITS.taskUsd)}). At most ${OUTCOME_LIMITS.inFlight} of its tasks wait or run at once.`,
+      "- A gate runs in that agent's VM, in the task's workspace: name only commands its VM has (the gates that passed there before show what it runs with). One it can't run can never pass, whatever the work.",
       "- A task's own account of its work is checked by its gates and an independent reviewer: build on verified results; read why a failed one failed before you give it again, differently.",
-      "- Decide what is yours to decide (an approach, which knight, what next), and say in your report what you decided and why. Ask your liege (tell_liege, kind question) only when a choice is theirs: money past this outcome's budget, anything legal (it commits them, or speaks for them to others), anything that can't be undone, or access or a key you lack. Shipping is theirs, on a card.",
+      "- Decide what is yours to decide (an approach, which agent, what next), and say in your report what you decided and why. Ask the owner (tell_owner, kind question) only when a choice is theirs: money past this outcome's budget, anything legal (it commits them, or speaks for them to others), anything that can't be undone, or access or a key you lack. Shipping is theirs, on a card.",
       "- Keep your plan short and current (keep_notes): what's done, what's next, what's in the way.",
       "- When it's done, say so with finish_outcome and what shows it.",
-      answering ? "- Your liege just wrote here: answer them in a few lines (your answer is posted in the room), after using your tools if that's what they asked." : "- Say nothing else: only what you tell your liege with tell_liege reaches them.",
+      answering ? "- The owner just wrote here: answer them in a few lines (your answer is posted in the room), after using your tools if that's what they asked." : "- Say nothing else: only what you tell the owner with tell_owner reaches them.",
     ].join("\n");
   }
 
-  /** The look's four tools. Each checks what it may do itself: the knights named, the budget, the limits. */
+  /** The look's four tools. Each checks what it may do itself: the agents named, the budget, the limits. */
   private tools(id: string): ChatTools {
     const run = async (call: ToolCall) => {
       const input = (call.input ?? {}) as Record<string, unknown>;
@@ -374,29 +374,29 @@ export class OutcomeRunner {
       specs: [
         {
           name: "start_task",
-          description: "Give one of this outcome's knights a task: a title, a goal it can finish in one sitting, gate commands that pass only when it's done, and a budget in US dollars from what's left. It runs in that knight's VM and is checked by its gates and an independent reviewer.",
+          description: "Give one of this outcome's agents a task: a title, a goal it can finish in one sitting, gate commands that pass only when it's done, and a budget in US dollars from what's left. It runs in that agent's VM and is checked by its gates and an independent reviewer.",
           inputSchema: {
             type: "object",
             properties: {
-              knight: { type: "string", description: "The knight's handle, without @" },
+              agent: { type: "string", description: "The agent's handle, without @" },
               title: { type: "string" },
               goal: { type: "string" },
               gates: { type: "array", items: { type: "string" }, description: "Commands that must exit 0 when it's done" },
               budgetUsd: { type: "number", description: "What its model calls may spend" },
               after: { type: "array", items: { type: "string" }, description: "Ids of this outcome's tasks it waits on (each done and verified first)" },
             },
-            required: ["knight", "title", "goal", "budgetUsd"],
+            required: ["agent", "title", "goal", "budgetUsd"],
           },
         },
         { name: "keep_notes", description: "Replace your plan for this outcome: what's done, what's next, what's in the way. Short.", inputSchema: { type: "object", properties: { notes: { type: "string" } }, required: ["notes"] } },
         {
-          name: "tell_liege",
-          description: "Write to your liege in this outcome's room. kind report: your daily report; question: a decision that's theirs (it waits in their Inbox too); note: anything else they should know.",
+          name: "tell_owner",
+          description: "Write to the owner in this outcome's room. kind report: your daily report; question: a decision that's theirs (it waits in their Inbox too); note: anything else they should know.",
           inputSchema: { type: "object", properties: { text: { type: "string" }, kind: { type: "string", enum: ["report", "question", "note"] } }, required: ["text", "kind"] },
         },
         { name: "finish_outcome", description: "Say it's done, with what shows it (verified tasks, what changed). It stops here.", inputSchema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] } },
       ],
-      describe: (call) => ({ title: { start_task: "Give a knight a task", keep_notes: "Keep the plan", tell_liege: "Tell your liege", finish_outcome: "Finish the outcome" }[call.name] ?? call.name, input: clip(JSON.stringify(call.input ?? {}), 160) }),
+      describe: (call) => ({ title: { start_task: "Give an agent a task", keep_notes: "Keep the plan", tell_owner: "Tell the owner", finish_outcome: "Finish the outcome" }[call.name] ?? call.name, input: clip(JSON.stringify(call.input ?? {}), 160) }),
       run,
     };
   }
@@ -412,8 +412,8 @@ export class OutcomeRunner {
     };
     switch (tool) {
       case "start_task": {
-        const knight = text("knight", 32).replace(/^@/, "");
-        if (!outcome.knights.includes(knight)) throw new Error(`@${knight} isn't one of this outcome's knights (${outcome.knights.map((k) => `@${k}`).join(", ")})`);
+        const agent = text("agent", 32).replace(/^@/, "");
+        if (!outcome.agents.includes(agent)) throw new Error(`@${agent} isn't one of this outcome's agents (${outcome.agents.map((k) => `@${k}`).join(", ")})`);
         const budget = Number(input.budgetUsd);
         if (!Number.isFinite(budget) || budget <= 0) throw new Error("give it a budget in US dollars");
         if (budget > OUTCOME_LIMITS.taskUsd) throw new Error(`a task's budget is at most ${usdLabel(OUTCOME_LIMITS.taskUsd)}`);
@@ -426,24 +426,24 @@ export class OutcomeRunner {
         const gates = Array.isArray(input.gates) ? input.gates.filter((g): g is string => typeof g === "string" && g.trim().length > 0).slice(0, 16) : [];
         const after = Array.isArray(input.after) ? input.after.filter((a): a is string => typeof a === "string") : [];
         const task = this.o.service().createTask(
-          { room: outcome.room, assignee: knight, title: text("title", 200), goal: text("goal", 8000), ...(gates.length ? { gates } : {}), budgetUsd: round(budget), ...(after.length ? { dependsOn: after } : {}), outcome: id },
-          "galahad",
+          { room: outcome.room, assignee: agent, title: text("title", 200), goal: text("goal", 8000), ...(gates.length ? { gates } : {}), budgetUsd: round(budget), ...(after.length ? { dependsOn: after } : {}), outcome: id },
+          "primary",
         );
-        return `Given: ${task.id} to @${knight}, "${task.title}", budget ${usdLabel(budget)}. It runs when @${knight} is free${after.length ? " and what it waits on is done and verified" : ""}.`;
+        return `Given: ${task.id} to @${agent}, "${task.title}", budget ${usdLabel(budget)}. It runs when @${agent} is free${after.length ? " and what it waits on is done and verified" : ""}.`;
       }
       case "keep_notes": {
         const notes = text("notes", OUTCOME_LIMITS.notes);
         this.o.store.putOutcome({ ...outcome, notes });
         return "Kept.";
       }
-      case "tell_liege": {
+      case "tell_owner": {
         const said = text("text", 4000);
         const kind = input.kind === "report" || input.kind === "question" ? input.kind : "note";
         this.note(outcome, said);
         const at = this.now();
         if (kind === "report") {
           this.o.store.putOutcome({ ...outcome, lastReportAt: at });
-          this.notice(outcome, "report", "info", `${outcome.title}: his daily report`, said);
+          this.notice(outcome, "report", "info", `${outcome.title}: its daily report`, said);
         } else if (kind === "question") this.notice(outcome, `ask:${at.toString(36)}`, "warn", `${outcome.title}: a decision for you`, said);
         return kind === "question" ? "Asked: it's in the room and in their Inbox." : "Said, in the room.";
       }
@@ -462,7 +462,7 @@ export class OutcomeRunner {
     this.notice(outcome, status, "info", `${outcome.title}: ${status === "done" ? "done" : "its budget is spent"}`, why);
   }
 
-  /** His words in its room, waking no knight (a note for you). */
+  /** Its words in its room, waking no agent (a note for you). */
   private note(outcome: StoredOutcome, text: string): void {
     try {
       this.o.store.note(outcome.room, clip(text, 4000));

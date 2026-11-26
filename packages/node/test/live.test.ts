@@ -55,7 +55,7 @@ describe("what changed", () => {
     stop();
   });
 
-  test("what no write pokes for (a knight's work, a turn's end) is told within a look", async () => {
+  test("what no write pokes for (an agent's work, a turn's end) is told within a look", async () => {
     const s = stamps();
     const live = new LiveChanges(s.table, { everyMs: 20 });
     const told: LiveTopic[][] = [];
@@ -90,7 +90,7 @@ describe("what changed", () => {
     const live = new LiveChanges(
       {
         ...s.table,
-        quests: () => {
+        runs: () => {
           if (broken) throw new Error("the board is gone");
           return "q";
         },
@@ -106,7 +106,7 @@ describe("what changed", () => {
     live.poke();
     await Bun.sleep(15);
     expect(told).toEqual([["fleet"]]);
-    expect(lines).toEqual(["live: quests's stamp failed: the board is gone"]);
+    expect(lines).toEqual(["live: runs's stamp failed: the board is gone"]);
     stop();
   });
 

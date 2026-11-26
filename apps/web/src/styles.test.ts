@@ -88,9 +88,9 @@ describe("the stylesheet", () => {
     expect(all.some((rule) => rule.media.length === 0 && rule.selectors.includes(':root[data-keyboard="open"]') && /--safe-bottom:\s*0px/.test(rule.body))).toBe(true);
   });
 
-  test("what a finger presses answers at once: a task's row, Galahad's row, the Inbox's, a fold and More's rows look pressed", () => {
+  test("what a finger presses answers at once: a task's row, your agent's row, the Inbox's, a fold and More's rows look pressed", () => {
     const pressed = (selector: string) => all.some((rule) => rule.selectors.some((s) => s === `${selector}:active`));
-    for (const control of [".work-row", ".side-galahad", ".side-inbox", ".home-fold", ".rows > a.item", ".suggestion"]) expect([control, pressed(control)]).toEqual([control, true]);
+    for (const control of [".work-row", ".side-primary", ".side-inbox", ".home-fold", ".rows > a.item", ".suggestion"]) expect([control, pressed(control)]).toEqual([control, true]);
   });
 
   test("on a phone, the palette's field lies exactly over the search button at the top bar's end (which grows into it), and Home's header lines up with the top bar at either side", () => {

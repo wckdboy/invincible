@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
-import type { RouteName, TeamSnapshot, Teammate, TerminalEvent, TerminalView } from "@invincible/core";
+import type { RouteName, TeamSnapshot, Agent, TerminalEvent, TerminalView } from "@invincible/core";
 import { type Screen, terminalCommand } from "../src/terminal-cli.ts";
 
 /* `invincible terminal` at a terminal, against what the node would answer. */
 
-const member = (id: string, over: Partial<Teammate> = {}): Teammate => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: null, workspace: null, memory: "", createdBy: "owner", instructionsBy: "owner", createdAt: 1, updatedAt: 1, ...over });
+const member = (id: string, over: Partial<Agent> = {}): Agent => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: null, workspace: null, memory: "", createdBy: "owner", instructionsBy: "owner", createdAt: 1, updatedAt: 1, ...over });
 const view = (id: string, over: Partial<TerminalView> = {}): TerminalView => ({ id, sandbox: "0123456789", name: "invincible-sbx-0123456789", cols: 80, rows: 24, opened: 1, exitCode: null, watchers: 0, ...over });
 const out = (text: string): TerminalEvent => ({ type: "output", data: Buffer.from(text).toString("base64") });
 
 /** The node: what the command asked of it, a terminal's events as the test sends them, and how long an input takes. */
-function node(teammates: Teammate[] = [], terminals: TerminalView[] = []) {
+function node(agents: Agent[] = [], terminals: TerminalView[] = []) {
   const asked: { name: RouteName; input: any }[] = [];
   /** Events sent before the command asked for the next one wait here; null is the stream's end. */
   const queue: (TerminalEvent | null)[] = [];
@@ -31,7 +31,7 @@ function node(teammates: Teammate[] = [], terminals: TerminalView[] = []) {
     api: {
       async call<T>(name: RouteName, input?: unknown): Promise<T> {
         asked.push({ name, input });
-        if (name === "team") return { teammates, rooms: [], tasks: [], deliveries: [] } satisfies TeamSnapshot as T;
+        if (name === "team") return { agents, rooms: [], tasks: [], deliveries: [] } satisfies TeamSnapshot as T;
         if (name === "terminals") return { terminals } as T;
         if (name === "openTerminal") return { terminal: view("tm_opened0000000000", { sandbox: (input as { sandbox: string }).sandbox }) } as T;
         if (name === "terminalInput" && node.holdInputs) await new Promise<void>((resolve) => (release = resolve));
@@ -95,10 +95,10 @@ function screen(cols = 120, rows = 40) {
 
 const tick = () => Bun.sleep(1);
 
-test("a knight by name: its VM's terminal at this one's size; keys go in order, what is typed meanwhile goes next together; the shell's exit is the command's", async () => {
-  const n = node([member("gawain", { workspace: { id: "abcdef0123", node: "ultra" } as Teammate["workspace"] })]);
+test("an agent by name: its VM's terminal at this one's size; keys go in order, what is typed meanwhile goes next together; the shell's exit is the command's", async () => {
+  const n = node([member("rio", { workspace: { id: "abcdef0123", node: "ultra" } as Agent["workspace"] })]);
   const s = screen(120, 40);
-  const done = terminalCommand(n.api, "Gawain", [], s.screen, () => {});
+  const done = terminalCommand(n.api, "Rio", [], s.screen, () => {});
   await tick();
   expect(n.asked.find((a) => a.name === "openTerminal")?.input).toEqual({ sandbox: "abcdef0123", size: { cols: 120, rows: 40 } });
   expect(s.raw).toBe(true);
@@ -161,11 +161,11 @@ test("the node letting go of a terminal says how to take it up again", async () 
   expect(s.said.at(-1)).toBe("[the node let go of this terminal: take it up again with invincible terminal attach tm_opened0000000000]");
 });
 
-test("a knight with no VM, or a name that is nothing: what to do instead; ls and close", async () => {
-  const n = node([member("percival")], [view("tm_aaaaaaaaaaaaaaaa", { name: "invincible-sbx-abcdef0123", cols: 90, rows: 30, watchers: 1 }), view("tm_bbbbbbbbbbbbbbbb", { exitCode: 0 })]);
+test("an agent with no VM, or a name that is nothing: what to do instead; ls and close", async () => {
+  const n = node([member("ivo")], [view("tm_aaaaaaaaaaaaaaaa", { name: "invincible-sbx-abcdef0123", cols: 90, rows: 30, watchers: 1 }), view("tm_bbbbbbbbbbbbbbbb", { exitCode: 0 })]);
   const s = screen();
-  await expect(terminalCommand(n.api, "percival", [], s.screen, () => {})).rejects.toThrow("Percival has no VM yet: invincible roundtable provision percival");
-  await expect(terminalCommand(n.api, "lancelot", [], s.screen, () => {})).rejects.toThrow(/no knight or sandbox "lancelot"/);
+  await expect(terminalCommand(n.api, "ivo", [], s.screen, () => {})).rejects.toThrow("Ivo has no VM yet: invincible agents provision ivo");
+  await expect(terminalCommand(n.api, "leo", [], s.screen, () => {})).rejects.toThrow(/no agent or sandbox "leo"/);
   const lines: string[] = [];
   expect(await terminalCommand(n.api, "ls", [], s.screen, (line) => lines.push(line))).toBe(0);
   expect(lines).toEqual(["tm_aaaaaaaaaaaaaaaa · invincible-sbx-abcdef0123 · 90×30 · watched by 1", "tm_bbbbbbbbbbbbbbbb · invincible-sbx-0123456789 · its shell ended (exit 0)"]);

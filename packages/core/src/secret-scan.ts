@@ -25,9 +25,9 @@ const PATTERNS: [kind: string, pattern: RegExp][] = [
   ["Slack token", /\bxox[abprs]-[A-Za-z0-9-]{10,}/g],
   ["Hugging Face token", /\bhf_[A-Za-z0-9]{30,}/g],
   ["private key", /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g],
-  ["Galahad gateway token", /\bgw_[A-Za-z0-9_-]{43}\b/g],
-  ["Galahad admin token", /\badm_[A-Za-z0-9_-]{43}\b/g],
-  ["Galahad invite", /\bgi1\.[A-Za-z0-9_-]{40,}/g],
+  ["Invincible gateway token", /\bgw_[A-Za-z0-9_-]{43}\b/g],
+  ["Invincible admin token", /\badm_[A-Za-z0-9_-]{43}\b/g],
+  ["Invincible invite", /\bgi1\.[A-Za-z0-9_-]{40,}/g],
 ];
 
 /**
@@ -193,7 +193,7 @@ function highEntropyTokens(text: string, opts: ScanOptions): SecretFinding[] {
   const out: SecretFinding[] = [];
   for (const match of text.matchAll(/(?<![A-Za-z0-9_+/=.-])[A-Za-z0-9_+/=-]{32,200}(?![A-Za-z0-9_+/=.-])/g)) {
     const token = match[0];
-    if (/^[nc]_/.test(token)) continue; // Galahad device ids are public keys
+    if (/^[nc]_/.test(token)) continue; // Invincible's device ids are public keys
     if (isIntegrityHash(token)) continue;
     if (opts.isPublic?.(token)) continue;
     const classes = [/[a-z]/, /[A-Z]/, /[0-9]/].filter((re) => re.test(token)).length;

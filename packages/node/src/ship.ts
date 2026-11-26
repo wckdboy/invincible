@@ -5,13 +5,13 @@ import type { ArtifactStore } from "./artifacts.ts";
 import type { NativeTool } from "./connectors.ts";
 
 /*
- * Shipping: a quest's changes become a pull request, through the oath gate.
+ * Shipping: a run's changes become a pull request, through approvals.
  *
- * The sandbox never holds a GitHub key. When a quest worked on a clone, it leaves its
+ * The sandbox never holds a GitHub key. When a run worked on a clone, it leaves its
  * changes in its kept work as a shipment (ship/manifest.json: the commit it started
  * from, each changed file's path and mode, deletions; ship/files/…: the new contents).
- * `github.ship` is one outward action: you approve it (or a standing order does, or he
- * does: his and his knights' work in a repository you gave a knight, oath.ts ownApproval),
+ * `github.ship` is one outward action: you approve it (or a standing order does, or it
+ * does: its and its agents' work in a repository you gave an agent, policy.ts ownApproval),
  * and then the node, with the connector's key on its pinned origin (api.github.com),
  * commits the files on a new branch with GitHub's Git Data API and opens the pull
  * request. A branch that already exists is never touched.
@@ -19,7 +19,7 @@ import type { NativeTool } from "./connectors.ts";
  * `github.ship.update` is the one exception, for a fix to a pull request already shipped
  * (ci-back.ts): its commit goes on top of the branch, and only when the branch stands
  * exactly where the fixing work began; the branch is moved forward, never forced, and
- * the pull request on it updates. Like a ship, it asks you first, but where it is his to approve.
+ * the pull request on it updates. Like a ship, it asks you first, but where it is its to approve.
  */
 
 const Sha = z.string().regex(/^[0-9a-f]{40}$/);
@@ -87,7 +87,7 @@ async function ship(deps: ShipDeps, args: Record<string, ArgValue>, update: bool
 
   const kept = deps.artifact(String(args.artifact));
   if (!kept) return fail(404, `the work ${args.artifact} isn't kept on this node`);
-  if (!kept.files.some((f) => f.path === "ship/manifest.json")) return fail(422, `${args.artifact} has no shipment (ship/manifest.json): only a quest that worked on a clone leaves one`);
+  if (!kept.files.some((f) => f.path === "ship/manifest.json")) return fail(422, `${args.artifact} has no shipment (ship/manifest.json): only a run that worked on a clone leaves one`);
   let shipment: ShipManifest;
   try {
     shipment = ShipManifest.parse(JSON.parse(new TextDecoder().decode(kept.read("ship/manifest.json"))));
@@ -212,10 +212,10 @@ export function shipNative(artifacts: ArtifactStore, update = false): NativeTool
 }
 
 /**
- * What a quest leaves for shipping, run in the sandbox after the work (python3 is in the
+ * What a run leaves for shipping, run in the sandbox after the work (python3 is in the
  * workshop) as `python3 -c SCRIPT <repo> <out> [<base>]`: the starting commit, the remote, and every
  * change since, new files included. Prints how many files changed. The start is the clone's HEAD unless
- * `base` says where the work began: a knight's task works in a worktree of its own and may commit there,
+ * `base` says where the work began: an agent's task works in a worktree of its own and may commit there,
  * and a commit of its own is no start GitHub has ever seen.
  */
 export const SHIPMENT_SCRIPT = `import json, os, shutil, subprocess, sys

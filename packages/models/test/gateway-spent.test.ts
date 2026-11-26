@@ -6,9 +6,9 @@ import { GatewayTokens, handleGateway, windowsOf } from "../src/index.ts";
 
 /*
  * A plan whose allowance is spent, through the gateway (#31). Told by its provider to try again in a day and a half,
- * OpenCode 2.3.0 waits fifteen minutes and tries again, and again, and Codex 0.169.0 waits the whole of it: a knight's
+ * OpenCode 2.3.0 waits fifteen minutes and tries again, and again, and Codex 0.169.0 waits the whole of it: an agent's
  * task stalls at "limit reached" (measured 21 Nov 2026 against a stand-in). Told 402, each ends within seconds, as Claude
- * Code does either way, and the next model on the knight's list takes over. So a refusal that says the allowance is
+ * Code does either way, and the next model on the agent's list takes over. So a refusal that says the allowance is
  * spent past the next minute is remembered (windows.ts), said to the tool as a spent quota without a time to wait for,
  * and not asked of its provider again until it resets. A shorter wait stays the provider's, for the tool to wait out.
  */
@@ -20,7 +20,7 @@ function gateway(answer: (model: string) => Response, id = "opencode-go") {
   const listing = () => Response.json({ data: [{ id: "glm-5.3" }] });
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   const baseUrl = "https://plan.invalid/v1";
   vault.set(id, KEY, { provider: id, origin: new URL(baseUrl).origin });

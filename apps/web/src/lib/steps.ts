@@ -3,8 +3,8 @@ import type { TeamTask, TeamTrailEntry } from "@invincible/core/team";
 
 /*
  * A task's work, folded (T3 Code's "Worked for 2m 14s ›", its steps grouped: "Read 6 files", "Edited 3 files", "Ran 4
- * commands"), and what proves it, told apart from what its knight says: each gate's command and how it ended, and the
- * reviewer's verdict, as the runner wrote them on the task's trail (POST /api/team/trail), never the knight's own account.
+ * commands"), and what proves it, told apart from what its agent says: each gate's command and how it ended, and the
+ * reviewer's verdict, as the runner wrote them on the task's trail (POST /api/team/trail), never the agent's own account.
  * Pure (no DOM), from the trail's lines as the node keeps them (the node's team-runtime.ts progress(): each line starts
  * with its step's mark, "Running · …", "Exit 0 · …", "Gate 1/2 · exit 0 · …", "Review · pass"). The iPhone, iPad, Mac
  * and Android apps port this.
@@ -126,7 +126,7 @@ function word(text: string): { word: string; rest: string } | null {
   return bare ? { word: bare[1]!, rest: bare[2]! } : null;
 }
 
-/** What a command was, as the knight's own tools say their calls (engineer-tools.ts): a file read, edited or written, or
+/** What a command was, as the agent's own tools say their calls (engineer-tools.ts): a file read, edited or written, or
  * a command run. */
 export function commandKind(command: string): { kind: "read" | "edit" | "run"; path: string | null } {
   const reading = /^sed -n '\d+,\d+p' ([\s\S]+)$/.exec(command);
@@ -182,7 +182,7 @@ function groupText(kind: "read" | "edit" | "run", items: { text: string; exit: n
 
 /**
  * The work, folded: steps alike in a row become one group (reads, edits, commands), and the plan, each gate, the review
- * and each note of the runner's stand alone, in the order they happened. What the knight thought aloud is not a step.
+ * and each note of the runner's stand alone, in the order they happened. What the agent thought aloud is not a step.
  */
 export function stepGroups(entries: readonly TeamTrailEntry[]): StepGroup[] {
   const groups: StepGroup[] = [];

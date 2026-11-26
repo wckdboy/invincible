@@ -65,7 +65,7 @@ async function ok<T = any>(name: RouteName, input?: unknown): Promise<T> {
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "providers-node" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "providers-node" });
   store.close();
   home.writeConfig({ v: 1, name: "providers-node", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
@@ -115,7 +115,7 @@ describe("a provider's models, listed through the node", () => {
  * Cloudflare AI Gateway has no address of its own: the one given with its key is where it goes.
  */
 describe("every preset is configured, on every surface", () => {
-  const GATEWAY = "https://gateway.ai.cloudflare.com/v1/0123456789abcdef0123456789abcdef/camelot/compat";
+  const GATEWAY = "https://gateway.ai.cloudflare.com/v1/0123456789abcdef0123456789abcdef/homelab/compat";
   const addressOf = (id: string) => preset(id)!.baseUrl || GATEWAY;
 
   async function usable() {

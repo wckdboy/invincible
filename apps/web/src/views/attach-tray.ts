@@ -10,7 +10,7 @@ import { icon } from "../ui/icons.ts";
 import { toast } from "../ui/toast.ts";
 
 /*
- * Files with your next message, in your chat with Galahad and at the Roundtable: chosen with the paperclip, pasted (a
+ * Files with your next message, in your chat with the primary and among the agents: chosen with the paperclip, pasted (a
  * picture copied alone) or dropped on the message box. Each is made ready as it's added (a picture made smaller, its
  * metadata left behind) and sent up to the node, and the message then names them. Where they wait is the caller's, so a
  * chat keeps them while you look elsewhere, as it keeps its words.

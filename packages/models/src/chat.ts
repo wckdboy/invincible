@@ -4,7 +4,7 @@ import { type ModelMessage, RefusalError, refusalWords, type ToolCall, type Tool
 import { conversationFor } from "./responses.ts";
 import { rotated } from "./effort.ts";
 import { isEmbeddingModel } from "./embeddings.ts";
-import { GALAHAD_SYSTEM, runtimeContext, SHOW_GUIDE, TOOL_GUIDE } from "./persona.ts";
+import { PRIMARY_SYSTEM, runtimeContext, SHOW_GUIDE, TOOL_GUIDE } from "./persona.ts";
 import { windowScope, windowsOf } from "./windows.ts";
 import { refusedKeysOf } from "./refused-keys.ts";
 import { followsFormat, readModelCheck, readsScreens, type ModelCheck } from "@invincible/core";
@@ -27,7 +27,7 @@ export interface ModelsContext {
 export interface ChatRequest {
   role?: string;
   model?: string;
-  /** These models, in order, in place of the role's (a knight's own: its work runs on them). `model` comes first. */
+  /** These models, in order, in place of the role's (an agent's own: its work runs on them). `model` comes first. */
   models?: string[];
   /** What was said, and the pictures that go with a message (yours, attached in your chat). */
   messages: ModelMessage[];
@@ -37,15 +37,15 @@ export interface ChatRequest {
   /** What the model may call while it answers, and how each call runs. */
   tools?: ChatTools;
   /**
-   * Tools the caller runs itself (a quest's engineer: its shell and its files): offered to the model, never run here.
+   * Tools the caller runs itself (a run's engineer: its shell and its files): offered to the model, never run here.
    * An answer that calls them ends with a `calls` event (and what the provider needs back to go on: its `carry`).
    */
   clientTools?: ToolSpec[];
   /** Start the role's models at this position (effort: each parallel attempt takes another one first). */
   rotate?: number;
   /**
-   * This answer is coding work: a quest's planner, engineer or reviewer, a knight at its work. A coding plan's
-   * models may give it (providers.ts); any other answer of his passes them over.
+   * This answer is coding work: a run's planner, engineer or reviewer, an agent at its work. A coding plan's
+   * models may give it (providers.ts); any other answer of its passes them over.
    */
   coding?: boolean;
   /**
@@ -54,7 +54,7 @@ export interface ChatRequest {
    */
   budgeted?: boolean;
   /**
-   * A turn of a quest's work loop (a command a reply), whichever role's models answer it: the engineer's, or the
+   * A turn of a run's work loop (a command a reply), whichever role's models answer it: the engineer's, or the
    * planner's once a gate has failed twice in a row. Held to the loop's format checks as the engineer's turns are.
    */
   loop?: boolean;
@@ -107,7 +107,7 @@ export class Steering {
     return late;
   }
 
-  /** The answer ended some other way (an error, a stop): no more is accepted, and what never reached him is handed back. */
+  /** The answer ended some other way (an error, a stop): no more is accepted, and what never reached it is handed back. */
   close(): string[] {
     this.closed = true;
     return this.take();
@@ -122,7 +122,7 @@ export class Steering {
 
 /** What a tool that hadn't started is answered with when a message from the owner arrived first. */
 const NOT_RUN = {
-  content: "Not run: a new message from your liege arrived before this call started. Read it first; call the tool again only if it is still wanted.",
+  content: "Not run: a new message from the owner arrived before this call started. Read it first; call the tool again only if it is still wanted.",
   isError: true,
   summary: "not run: your new message came first",
 } as const;
@@ -163,7 +163,7 @@ export const MAX_CONTINUATIONS = 3;
 /**
  * How many times one model call is asked again when its provider's filter ended it before it said or asked
  * for anything. Such filters aren't steady (the same conversation passes the next time more often than not),
- * and asking again loses nothing: what he'd said and done stays, and no tool is run twice.
+ * and asking again loses nothing: what it'd said and done stays, and no tool is run twice.
  */
 export const MAX_REFUSAL_RETRIES = 2;
 
@@ -219,11 +219,11 @@ async function expand(ctx: ModelsContext, refs: string[]): Promise<string[]> {
  */
 export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerator<ChatStreamEvent> {
   const asked = req.model ? [req.model] : req.models?.length ? [...req.models] : roleModels(ctx.store, req.role ?? "planner");
-  // A coding plan's key is for coding (providers.ts): his coding work uses it, and the knights' coding tools through
+  // A coding plan's key is for coding (providers.ts): its coding work uses it, and the agents' coding tools through
   // the gateway. For any other answer its models are passed over without a word, unless they were all there was.
   const own = req.coding ? asked : asked.filter((ref) => !onPlan(ref));
   if (!own.length && asked.length) {
-    yield { type: "error", error: `${asked.join(", ")} ${asked.length === 1 ? "is" : "are"} on a coding plan, whose key is for coding: his quests and the knights' work use it, and he doesn't answer you with it. ${req.model ? "Name" : "Give this role"} a model with a key of its own.` };
+    yield { type: "error", error: `${asked.join(", ")} ${asked.length === 1 ? "is" : "are"} on a coding plan, whose key is for coding: its runs and the agents' work use it, and it doesn't answer you with it. ${req.model ? "Name" : "Give this role"} a model with a key of its own.` };
     return;
   }
   const listed = req.model ? own : await expand(ctx, own);
@@ -239,7 +239,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
   const handed: string[][] = [];
   /** A tool that may change something has run for this answer: from then on no other model takes it over. */
   let changed = false;
-  /** He has said something in this answer (whichever model said it). */
+  /** It has said something in this answer (whichever model said it). */
   let wrote = false;
   /** Why the model that had begun this answer declined, when another was asked to take it over. */
   let declined: string | null = null;
@@ -254,7 +254,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
     whyNot.push(`${ref}: ${error.replace(/\s+/g, " ").slice(0, 240)}`);
     return { type: "fallback", from: ref, error };
   };
-  // A turn of the quest loop (the engineer's, or another role's doing the work: coding, no tools, the role's own models):
+  // A turn of the run loop (the engineer's, or another role's doing the work: coding, no tools, the role's own models):
   // a model that was checked and doesn't follow its format (one command a reply) is passed over while another can take
   // the turn (checks.ts; evidence, not a label).
   const loopTurn = !!req.coding && (req.loop || (req.role ?? "planner") === "engineer") && !tools && !req.clientTools && !req.model;
@@ -263,19 +263,19 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
   // Your prices, read once for an answer that spends a budget of yours (countable).
   const prices = req.budgeted ? pricesOf(ctx.store) : null;
   // How hard it thinks: the level you pinned its role to, whatever its messages say; else what they say, step by step
-  // (a quest's loop says each turn's: roster.ts STEP_EFFORT), and the role's own for one that says nothing.
+  // (a run's loop says each turn's: roster.ts STEP_EFFORT), and the role's own for one that says nothing.
   const pinned = pinnedEffort(ctx.store, req.role ?? "planner");
   const messages = pinned ? req.messages.map(({ effort: _, ...m }) => m) : req.messages;
   for (const ref of candidates) {
     const off = offFormat(ref);
     if (someoneFits && off?.format && followsFormat(off) === false) {
-      yield passOver(ref, `it doesn't follow the quest loop's command format (commands in ${off.format.good} of ${off.format.replies} replies when it was checked): passed over for this loop`);
+      yield passOver(ref, `it doesn't follow the run loop's command format (commands in ${off.format.good} of ${off.format.replies} replies when it was checked): passed over for this loop`);
       continue;
     }
     // Stable persona first (cacheable), then the model it runs on; the memories recalled for this question follow it,
     // after the part a provider keeps in its cache (adapters.ts).
-    // What he can show beyond words is for answers you read in the app, not a quest's commands.
-    const system = [GALAHAD_SYSTEM, tools ? TOOL_GUIDE : null, req.coding ? null : SHOW_GUIDE, runtimeContext(ref)].filter(Boolean).join("\n\n");
+    // What it can show beyond words is for answers you read in the app, not a run's commands.
+    const system = [PRIMARY_SYSTEM, tools ? TOOL_GUIDE : null, req.coding ? null : SHOW_GUIDE, runtimeContext(ref)].filter(Boolean).join("\n\n");
     let parsed: { provider: string; model: string };
     try {
       parsed = parseRef(ref);
@@ -333,7 +333,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
       let refused = 0;
       // Each call (its tool and input) and what it said last, with how many times it said that, in this answer.
       const repeats = new Map<string, { content: string; times: number }>();
-      // The owner's message(s) reach him: the turn goes on with them, as with a new message of theirs.
+      // The owner's message(s) reach it: the turn goes on with them, as with a new message of theirs.
       const handOver = function* (texts: string[], partial: string | null): Generator<ChatStreamEvent> {
         conversation.interject(texts, partial);
         handed.push(texts);
@@ -351,7 +351,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
         yield { type: "usage", ref, usage };
       };
       for (let round = 0; ; round++) {
-        // A message that came while a tool ran (or before he began): he's told before the next model call.
+        // A message that came while a tool ran (or before it began): it's told before the next model call.
         const waiting = steering?.take() ?? [];
         if (waiting.length) {
           yield* handOver(waiting, null);
@@ -379,7 +379,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
         } catch (error) {
           // A call that failed after it reached the model still cost something: it's counted (as unknown, if nothing said).
           yield* tally();
-          // Cut short for the owner's message (not a stop): what he'd said stays said, and the turn goes on with it.
+          // Cut short for the owner's message (not a stop): what it'd said stays said, and the turn goes on with it.
           const arrived = cut.signal.aborted && !req.signal?.aborted ? (steering?.take() ?? []) : [];
           if (arrived.length) {
             yield* handOver(arrived, said);
@@ -407,7 +407,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
         yield* tally();
         refused = 0;
         // A call to a tool when none was offered (a review, an audit; a runtime that takes none) is never run: the answer
-        // is its words, and a reply with only such calls has none. (22 November 2026: a knight's audit on Ultra failed
+        // is its words, and a reply with only such calls has none. (22 November 2026: an agent's audit on Ultra failed
         // twice so, "undefined is not an object (evaluating 'tools.describe')", and was asked again a minute later.)
         const unoffered = offered.length ? [] : end.calls;
         const calls: ToolCall[] = offered.length ? end.calls : [];
@@ -420,7 +420,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
             continue;
           }
           if (end.truncated) yield { type: "text", text: "\n\n*(This answer reached the model's length limit. Ask me to go on.)*" };
-          // A message that arrived as he finished is answered in this turn, after the whole answer. None: it's over.
+          // A message that arrived as it finished is answered in this turn, after the whole answer. None: it's over.
           const late = steering?.finish() ?? [];
           if (late.length) {
             yield* handOver(late, null);
@@ -474,7 +474,7 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
     } catch (error) {
       // Some providers echo the credential in error text; never let it reach a client.
       const message = redact(String((error as Error).message ?? error), [provider.apiKey]).slice(0, 500);
-      // Declined for good, and all he had done was look: the next model takes the answer over from your message.
+      // Declined for good, and all it had done was look: the next model takes the answer over from your message.
       const handsOver = error instanceof RefusalError && emitted && !changed && !req.signal?.aborted;
       if ((emitted && !handsOver) || req.signal?.aborted) {
         yield { type: "error", error: message };

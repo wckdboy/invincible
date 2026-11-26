@@ -9,11 +9,11 @@ import { h, replace, type Scope } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 
 /*
- * Settings → Notifications: he comes to you, on this device.
+ * Settings → Notifications: it comes to you, on this device.
  *
  * Turning it on is your act on this device: the browser's permission is asked only from
  * that tap, never when a page opens. The subscription the browser makes is handed to the
- * node as this device's, and removed when you turn it off here. What he tells you, quiet
+ * node as this device's, and removed when you turn it off here. What it tells you, quiet
  * hours and the day's limit are the node's settings, the same from every device.
  */
 
@@ -49,7 +49,7 @@ async function readEnv(nodeHasThisDevice: boolean): Promise<PushEnv> {
 }
 
 /**
- * This device as the card that says he can't reach it reads it, without waiting for the service worker (the Inbox,
+ * This device as the card that says it can't reach it reads it, without waiting for the service worker (the Inbox,
  * drawn whole, would wait with it, as long as a first visit takes to start one): whether it's on is the node's word.
  */
 function nodeEnv(nodeHasThisDevice: boolean): PushEnv {
@@ -155,11 +155,11 @@ export function syncPush(api: Api): Promise<void> {
   return syncing;
 }
 
-/* ---------- the card that says he can't reach this device ---------- */
+/* ---------- the card that says it can't reach this device ---------- */
 
 /**
- * At the top of "Galahad asks you" and the Inbox, while it matters (lib/push.ts reachCard): he can't reach this device
- * when Galahad is closed, why, and the one thing to do from your tap, then a test to see one arrive. Not now puts it
+ * At the top of "The primary asks you" and the Inbox, while it matters (lib/push.ts reachCard): it can't reach this device
+ * when the primary is closed, why, and the one thing to do from your tap, then a test to see one arrive. Not now puts it
  * away for a week, on this device. `changed`: it was shown or hidden (the place it's in is drawn again).
  */
 export function reachNote(ctx: Ctx, scope: Scope, changed: () => void = () => {}): { el: HTMLElement; shown: () => boolean } {
@@ -176,7 +176,7 @@ export function reachNote(ctx: Ctx, scope: Scope, changed: () => void = () => {}
     const said = note ? h("div", { class: note.wrong ? "error" : "tiny subtle", role: note.wrong ? "alert" : "status" }, note.text) : null;
     if (on) {
       const test = button("Send a test", { size: "sm", icon: "bell", onClick: () => void busy(test, sendTest) });
-      replace(el, callout("ok", h("div", { class: "stack tight" }, h("div", {}, "He can reach this device when Galahad is closed. Send a test to see one arrive."), said), { title: "Notifications are on", actions: test }));
+      replace(el, callout("ok", h("div", { class: "stack tight" }, h("div", {}, "It can reach this device when Invincible is closed. Send a test to see one arrive."), said), { title: "Notifications are on", actions: test }));
     } else if (card) {
       const turnOn = card.action === "turn-on" ? button("Turn on notifications", { size: "sm", variant: "primary", icon: "bell", onClick: () => void busy(turnOn!, flip) }) : null;
       const later = button("Not now", { size: "sm", variant: "ghost", onClick: () => putAway() });
@@ -329,11 +329,11 @@ export function notificationsSection(ctx: Ctx, scope: Scope): HTMLElement | null
 
     replace(
       nodeCards,
-      h("div", { class: "stack tight" }, h("div", { class: "label" }, "What he tells you"), h("div", { class: "card rows" }, ...NOTIFY_KINDS.map(kindRow)), noteLine("He's silent when there's nothing to say: “all quiet” is never a notification.")),
+      h("div", { class: "stack tight" }, h("div", { class: "label" }, "What it tells you"), h("div", { class: "card rows" }, ...NOTIFY_KINDS.map(kindRow)), noteLine("It's silent when there's nothing to say: “all quiet” is never a notification.")),
       h(
         "div",
         { class: "stack tight" },
-        h("div", { class: "label" }, "When he stays silent"),
+        h("div", { class: "label" }, "When it stays silent"),
         h(
           "div",
           { class: "card rows" },
@@ -347,7 +347,7 @@ export function notificationsSection(ctx: Ctx, scope: Scope): HTMLElement | null
           h(
             "div",
             { class: "item notify-row wrap" },
-            switchControl("The day's digest", digest.on, (checked) => void save({ digest: { on: checked } }), { hint: "What he didn't buzz you for, once a day, quietly.", disabled: !may }),
+            switchControl("The day's digest", digest.on, (checked) => void save({ digest: { on: checked } }), { hint: "What it didn't buzz you for, once a day, quietly.", disabled: !may }),
             h("div", { class: "notify-hours" }, digestAt),
           ),
           h("div", { class: "item" }, digestNote),
@@ -360,7 +360,7 @@ export function notificationsSection(ctx: Ctx, scope: Scope): HTMLElement | null
         ? h(
             "div",
             { class: "stack tight" },
-            h("div", { class: "label" }, "Devices he can reach"),
+            h("div", { class: "label" }, "Devices it can reach"),
             list(
               view.devices.map((d) =>
                 listRow({
@@ -406,7 +406,7 @@ export function notificationsSection(ctx: Ctx, scope: Scope): HTMLElement | null
         else note = null;
       } else {
         await turnOff(ctx.api, scope.signal);
-        say("Off. He won't reach this device until you turn it on again.");
+        say("Off. It won't reach this device until you turn it on again.");
       }
     } catch (error) {
       if (scope.disposed) return;

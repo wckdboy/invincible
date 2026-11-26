@@ -14,12 +14,12 @@ const view = (over: Partial<SkillView> = {}): SkillView => ({
   title: "Fix a failing test",
   when: "a test fails",
   trust: "agent",
-  by: "galahad",
+  by: "primary",
   offered: V1,
   pending: null,
   head: V1,
   versions: 1,
-  quest: "q-1",
+  run: "q-1",
   createdAt: 1,
   touchedAt: 1,
   uses: 0,
@@ -35,10 +35,10 @@ const version = (over: Partial<SkillVersionView> = {}): SkillVersionView => ({
   n: 1,
   prev: null,
   trust: "agent",
-  by: "galahad",
-  quest: "q-1",
+  by: "primary",
+  run: "q-1",
   via: null,
-  source: "quest:q-1",
+  source: "run:q-1",
   at: 1,
   approvedAt: null,
   doc: { title: "Fix a failing test", when: "a test fails", steps: ["run it alone", "fix the code"], proof: [{ command: "bun test", expect: "0 fail" }], pitfalls: ["never retry"] },
@@ -69,22 +69,22 @@ describe("the list", () => {
   });
 
   test("the budget in a line", () => {
-    expect(budgetLine({ tokensPerDay: 6000, usedToday: 1234 })).toBe("1,234 of 6,000 tokens used in the last day for distilling skills (one bounded call per passed quest).");
-    expect(budgetLine({ tokensPerDay: 0, usedToday: 0 })).toBe("He distils no skills from quests: the budget is 0.");
+    expect(budgetLine({ tokensPerDay: 6000, usedToday: 1234 })).toBe("1,234 of 6,000 tokens used in the last day for distilling skills (one bounded call per passed run).");
+    expect(budgetLine({ tokensPerDay: 0, usedToday: 0 })).toBe("It distils no skills from runs: the budget is 0.");
   });
 });
 
 describe("where a version came from", () => {
   test("who wrote it and from what; why it's untrusted, in the node's own words", () => {
-    expect(originWords(version())).toBe("Written by Galahad, from quest q-1.");
-    expect(originWords(version({ source: "quest:q-9 (its sandbox was online; the ledger records a sandbox of its that wasn't isolated)" }))).toBe("Written by Galahad, from quest q-9. Untrusted because its sandbox was online; the ledger records a sandbox of its that wasn't isolated.");
-    expect(originWords(version({ by: "arm:hermes", source: "arm:hermes", quest: null }))).toBe("Proposed by the agent hermes.");
-    expect(originWords(version({ by: "owner", source: null, quest: null }))).toBe("Written by you.");
-    expect(originWords(version({ source: "written in a chat", quest: null }))).toBe("Written by Galahad (written in a chat).");
-    expect(originWords(version({ source: null }))).toBe("Written by Galahad, from quest q-1.");
+    expect(originWords(version())).toBe("Written by your agent, from run q-1.");
+    expect(originWords(version({ source: "run:q-9 (its sandbox was online; the ledger records a sandbox of its that wasn't isolated)" }))).toBe("Written by your agent, from run q-9. Untrusted because its sandbox was online; the ledger records a sandbox of its that wasn't isolated.");
+    expect(originWords(version({ by: "arm:hermes", source: "arm:hermes", run: null }))).toBe("Proposed by the agent hermes.");
+    expect(originWords(version({ by: "owner", source: null, run: null }))).toBe("Written by you.");
+    expect(originWords(version({ source: "written in a chat", run: null }))).toBe("Written by your agent (written in a chat).");
+    expect(originWords(version({ source: null }))).toBe("Written by your agent, from run q-1.");
   });
 
-  test("what its trust means for whether he's given it", () => {
+  test("what its trust means for whether it's given it", () => {
     expect(trustWords(version({ trust: "owner", by: "owner" }))).toBe("Your own words.");
     expect(trustWords(version())).toContain("passed review with no network");
     expect(trustWords(version({ trust: "untrusted" }))).toContain("given to no model until you approve this exact version");
@@ -149,7 +149,7 @@ describe("the editor", () => {
 });
 
 describe("an answer's steps", () => {
-  test("the skills he had at hand are said as that, not as archived entries he read", async () => {
+  test("the skills it had at hand are said as that, not as archived entries it read", async () => {
     const { archiveStep } = await import("./chats.ts");
     const skill = { id: "sk_aaaaaaaaaaaaaaaa", title: "Fix a failing test", kind: "skill", trust: "agent" };
     expect(archiveStep([skill])).toEqual({ text: "Had 1 skill at hand", detail: "[sk_aaaaaaaaaaaaaaaa] Fix a failing test" });

@@ -1,13 +1,13 @@
-import type { AttachmentRef, AwayView, ChatMessage, ChatStreamEvent, ConversationSummary, ConversationView, ProjectView, QuestView, UnreadChat } from "@invincible/core";
+import type { AttachmentRef, AwayView, ChatMessage, ChatStreamEvent, ConversationSummary, ConversationView, ProjectView, RunView, UnreadChat } from "@invincible/core";
 import { findSecrets } from "@invincible/core/secret-scan";
 import type { QueuedMessage, QueueHold, TurnView } from "@invincible/core/turns";
 import { type Api, ApiError, isAbort } from "../api.ts";
 import { errorMessage, type Live, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { type ChatAction, chatActions, CHATS_MENU, filterConversations, groupConversations, mostRecent } from "../lib/chats.ts";
-import { galahadNow, type NowInput } from "../lib/now.ts";
-import { questInHand } from "../lib/quests.ts";
-import { galahadNeeds } from "../lib/roster.ts";
+import { primaryNow, type NowInput } from "../lib/now.ts";
+import { runInHand } from "../lib/runs.ts";
+import { primaryNeeds } from "../lib/roster.ts";
 import { plural } from "../lib/text.ts";
 import { duration, relativeTime } from "../lib/time.ts";
 import { lookedWords } from "../lib/underway.ts";
@@ -18,7 +18,7 @@ import { badge, button, callout, copyText, dot, empty, skeletonRows, spinner } f
 import { confirmAction, openSheet } from "../ui/dialog.ts";
 import { debounce, h, replace } from "../ui/dom.ts";
 import { orb } from "../ui/orb.ts";
-import { galahadState } from "../lib/knight-state.ts";
+import { primaryState } from "../lib/agent-state.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { icon, type IconName } from "../ui/icons.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
@@ -33,15 +33,15 @@ import { queuePanel } from "./chat-queue.ts";
 import { openInHand } from "./in-hand.ts";
 import { openAddKey, secretRequestCard } from "./vault.ts";
 import { connectorRequestCard } from "./connectors.ts";
-import { galahadAsks } from "./galahad-asks.ts";
+import { primaryAsks } from "./primary-asks.ts";
 
 /*
  * Chat. A turn runs on the node, not in this page: the page starts it and watches
  * it, and if the page goes away (a locked phone, a reload, another tab) the turn goes
  * on, and whoever opens the chat next attaches to it and sees it from its start. Stop
  * is always one click (or Esc) away, here or in the top bar, and it is said to the
- * node: it is the only thing that stops him. While he works, a new message steers him
- * (he's told at his next safe point) or is queued on the node (sent when he's done).
+ * node: it is the only thing that stops it. While it works, a new message steers it
+ * (it's told at its next safe point) or is queued on the node (sent when it's done).
  * The conversation is kept by the node; nothing of it is written to this device.
  */
 
@@ -58,7 +58,7 @@ function toolIcon(name: string): IconName {
 const stepIcon = (s: Step): IconName => (s.toolName ? toolIcon(s.toolName) : (s.icon as IconName));
 
 const DEFAULT_ROLES: Record<string, RoleSpec> = {
-  planner: { models: [], configured: false, description: "decomposes quests, makes judgment calls, talks to you" },
+  planner: { models: [], configured: false, description: "decomposes runs, makes judgment calls, talks to you" },
   engineer: { models: [], configured: false, description: "writes and changes code" },
   reviewer: { models: [], configured: false, description: "independent check, ideally a different model family" },
   swift: { models: [], configured: false, description: "cheap and fast: routing, classification, summaries" },
@@ -109,22 +109,22 @@ let live: Watching | null = null;
 /** What you queued behind this chat, and why it's held if it is. */
 let queue: QueuedMessage[] = [];
 let held: QueueHold | null = null;
-/** Messages sent to steer him that haven't reached him yet (he's mid-tool, or mid-thought). */
+/** Messages sent to steer it that haven't reached it yet (it's mid-tool, or mid-thought). */
 let steering: string[] = [];
 /** A turn is running in this chat that this device may not watch (started from another device). */
 let unwatchable: TurnView | null = null;
-/** The chat turns the node is running, as last asked (his line of what he's doing, in the chat's header and on the roster). */
+/** The chat turns the node is running, as last asked (its line of what it's doing, in the chat's header and on the roster). */
 export const nodeTurns = signal<TurnView[]>([]);
-/** The quests in hand, as last asked. */
-export const questsInHand = signal<QuestView[]>([]);
-/** His chats with an answer you haven't read yet, on any device, as last asked (his ring is green while there are some). */
+/** The runs in hand, as last asked. */
+export const runsInHand = signal<RunView[]>([]);
+/** Its chats with an answer you haven't read yet, on any device, as last asked (its ring is green while there are some). */
 export const unreadChats = signal<UnreadChat[]>([]);
-/** The step he is at in the answer this page watches (null: only just started; undefined: it watches none). */
+/** The step it is at in the answer this page watches (null: only just started; undefined: it watches none). */
 export const answerStep = signal<string | null | undefined>(undefined);
 const syncStep = (): void => answerStep.set(live ? (thread.target?.steps.at(-1)?.text ?? null) : undefined);
-/** What he has in hand, for his line wherever it is shown (lib/now.ts). */
-export const galahadWork = (): Pick<NowInput, "step" | "turns" | "quests" | "unread"> => ({ ...(answerStep.value === undefined ? {} : { step: answerStep.value }), turns: nodeTurns.value, quests: questsInHand.value, unread: unreadChats.value });
-/** A chat is on screen, and asks the node what he is doing itself. */
+/** What it has in hand, for its line wherever it is shown (lib/now.ts). */
+export const primaryWork = (): Pick<NowInput, "step" | "turns" | "runs" | "unread"> => ({ ...(answerStep.value === undefined ? {} : { step: answerStep.value }), turns: nodeTurns.value, runs: runsInHand.value, unread: unreadChats.value });
+/** A chat is on screen, and asks the node what it is doing itself. */
 let chatOnScreen = false;
 
 /** The turns the node runs, kept only when they changed (who is told redraws). */
@@ -135,34 +135,34 @@ function noteTurns(turns: TurnView[]): boolean {
   return true;
 }
 
-/** His answers you haven't read, kept only when they changed (a node from before them says none). */
+/** Its answers you haven't read, kept only when they changed (a node from before them says none). */
 function noteUnread(unread: UnreadChat[] | undefined): void {
   const of = (list: UnreadChat[]) => list.map((c) => `${c.id}:${c.answeredAt}:${c.title}`).join(",");
   if (of(unread ?? []) !== of(unreadChats.value)) unreadChats.set(unread ?? []);
 }
 
-/** The chat on screen, read: what he answered in it so far is no longer new, on any device. */
+/** The chat on screen, read: what it answered in it so far is no longer new, on any device. */
 function read(api: Api, conversation: Pick<ConversationView, "id" | "unread">): void {
   if (!conversation.unread || document.hidden) return;
   unreadChats.set(unreadChats.value.filter((c) => c.id !== conversation.id));
   void api.post("/api/conversations/seen", { id: conversation.id }).catch(() => {});
 }
 
-async function lookQuests(api: Api, signal?: AbortSignal): Promise<void> {
+async function lookRuns(api: Api, signal?: AbortSignal): Promise<void> {
   if (document.hidden) return;
   try {
-    const going = (await api.get<{ quests: QuestView[] }>("/api/quests", signal)).quests.filter((q) => questInHand(q.state));
-    if (going.map((q) => q.quest + q.goal).join() !== questsInHand.value.map((q) => q.quest + q.goal).join()) questsInHand.set(going);
+    const going = (await api.get<{ runs: RunView[] }>("/api/runs", signal)).runs.filter((q) => runInHand(q.state));
+    if (going.map((q) => q.run + q.goal).join() !== runsInHand.value.map((q) => q.run + q.goal).join()) runsInHand.set(going);
   } catch {
     /* out of reach just now: the next look tries again */
   }
 }
 
-/** For the roster, while no chat is on screen to ask: the turns the node runs and the quests in hand, so his row says what he is doing. */
+/** For the roster, while no chat is on screen to ask: the turns the node runs and the runs in hand, so its row says what it is doing. */
 export async function lookAtWork(api: Api, can: { chat: boolean; read: boolean }): Promise<void> {
   if (chatOnScreen || document.hidden) return;
   if (can.chat) await api.get<{ turns: TurnView[]; unread?: UnreadChat[] }>("/api/turns").then((view) => { noteTurns(view.turns); noteUnread(view.unread); }, () => {});
-  if (can.read) await lookQuests(api);
+  if (can.read) await lookRuns(api);
 }
 
 /** The kept conversation on screen (null: a new one, kept from its first answer, unless temporary). */
@@ -226,7 +226,7 @@ export function chatsForPalette(api: Api, can: { chat: boolean; read: boolean })
   return { chats: kept ?? [], projects: projects ?? [] };
 }
 
-/** For the shell: whether Galahad is answering right now, and with which model. */
+/** For the shell: whether the primary is answering right now, and with which model. */
 export const chatActivity = signal<{ streaming: boolean; model: string | null }>({ streaming: false, model: null });
 
 const emit = (turn: Turn | null) => {
@@ -249,7 +249,7 @@ function leave(): void {
   syncStep();
 }
 
-/** Stop him: said to the node, which stops the turn and keeps what he'd said. */
+/** Stop it: said to the node, which stops the turn and keeps what it'd said. */
 export function stopChat(): void {
   const w = live;
   if (!w) return;
@@ -258,7 +258,7 @@ export function stopChat(): void {
     w.stopAsked = true;
     return;
   }
-  void w.api.post("/api/turns/stop", { turn: w.id }).catch((error: unknown) => toast("Couldn't stop him", { tone: "error", description: errorMessage(error) }));
+  void w.api.post("/api/turns/stop", { turn: w.id }).catch((error: unknown) => toast("Couldn't stop it", { tone: "error", description: errorMessage(error) }));
 }
 
 function handle(w: Watching, event: ChatStreamEvent): void {
@@ -281,11 +281,11 @@ function handle(w: Watching, event: ChatStreamEvent): void {
     if (at >= 0) steering.splice(at, 1);
   } else if (event.type === "undelivered") {
     steering = [];
-    if (event.queued) toast(`${plural(event.texts.length, "message")} didn't reach him before the turn ended`, { description: "Queued, first in line, and held until you resume." });
+    if (event.queued) toast(`${plural(event.texts.length, "message")} didn't reach it before the turn ended`, { description: "Queued, first in line, and held until you resume." });
     else {
       // A temporary chat keeps nothing on the node: the words come back to the box.
       draft = [draft, ...event.texts].filter(Boolean).join("\n\n");
-      toast("Your message didn't reach him before the turn ended", { description: "It's back in the message box." });
+      toast("Your message didn't reach it before the turn ended", { description: "It's back in the message box." });
     }
     emit(null);
     return;
@@ -296,7 +296,7 @@ function handle(w: Watching, event: ChatStreamEvent): void {
   else if (what) emit(what);
 }
 
-/** Read a turn's stream into the thread, to its end; find the turn again if the connection drops while he works. */
+/** Read a turn's stream into the thread, to its end; find the turn again if the connection drops while it works. */
 async function follow(w: Watching, open: (signal: AbortSignal) => AsyncGenerator<ChatStreamEvent>): Promise<void> {
   let ended = false;
   let failure: unknown = null;
@@ -312,7 +312,7 @@ async function follow(w: Watching, open: (signal: AbortSignal) => AsyncGenerator
   }
   if (live !== w) return;
   if (ended) return finish(w);
-  // The node never said which turn it is: the message wasn't taken (a secret in it, he's busy in this chat, the node is full).
+  // The node never said which turn it is: the message wasn't taken (a secret in it, it's busy in this chat, the node is full).
   if (!w.id) {
     const error = failure;
     const text =
@@ -325,7 +325,7 @@ async function follow(w: Watching, open: (signal: AbortSignal) => AsyncGenerator
             : "The node didn't answer.";
     return finish(w, text);
   }
-  // He is (or was) working on the node; only the watching was cut. A turn that is gone has ended: its chat has how.
+  // It is (or was) working on the node; only the watching was cut. A turn that is gone has ended: its chat has how.
   if (failure instanceof ApiError && (failure.status === 404 || failure.status === 403)) {
     if (current) {
       const id = current.id;
@@ -335,14 +335,14 @@ async function follow(w: Watching, open: (signal: AbortSignal) => AsyncGenerator
       void openConversation(w.api, id).catch(() => {});
       return;
     }
-    return finish(w, failure.status === 403 ? failure.message : "The node restarted while he was answering, and a temporary chat's turn isn't kept anywhere.");
+    return finish(w, failure.status === 403 ? failure.message : "The node restarted while it was answering, and a temporary chat's turn isn't kept anywhere.");
   }
-  if (w.tries >= 8) return finish(w, `Lost the connection to ${location.host}. He may still be working there: open this chat again to see.`);
+  if (w.tries >= 8) return finish(w, `Lost the connection to ${location.host}. It may still be working there: open this chat again to see.`);
   w.tries += 1;
   const turn = thread.target;
   if (turn) {
     const last = turn.steps.at(-1);
-    if (last?.text !== RECONNECTING) turn.steps.push({ icon: "refresh", text: RECONNECTING, detail: "He's still working on the node; only this page's connection dropped.", state: "active" });
+    if (last?.text !== RECONNECTING) turn.steps.push({ icon: "refresh", text: RECONNECTING, detail: "It's still working on the node; only this page's connection dropped.", state: "active" });
     emit(turn);
   }
   await new Promise((resolve) => setTimeout(resolve, Math.min(500 * 2 ** (w.tries - 1), 8000)));
@@ -421,7 +421,7 @@ function adopt(api: Api, conversation: ConversationView): void {
 /** How many kept chats are being opened: while one is, its title's place under the header is held. */
 let opening = 0;
 
-/** A kept conversation, back on screen with its answers' steps; if he's working in it, live from where he is. */
+/** A kept conversation, back on screen with its answers' steps; if it's working in it, live from where it is. */
 export async function openConversation(api: Api, id: string): Promise<void> {
   opening++;
   let conversation: ConversationView;
@@ -452,7 +452,7 @@ export async function openConversation(api: Api, id: string): Promise<void> {
 
 /** A new conversation (in the same project, unless told otherwise); returns a function that brings the last one back (for Undo). */
 export function newConversation(project: string | null = current?.project ?? startIn): () => void {
-  // He goes on working in a kept chat (it's in your chats, marked as working); a temporary one ends here.
+  // It goes on working in a kept chat (it's in your chats, marked as working); a temporary one ends here.
   leave();
   const saved = { turns: thread.turns, current, startIn, temporary, queue, held };
   thread.turns = [];
@@ -478,8 +478,8 @@ export function newConversation(project: string | null = current?.project ?? sta
 
 /**
  * After a reload (the page's memory is gone, the node's isn't): back to the kept chat you had open, attached
- * to the turn he's working on in it. With none remembered (a new device, or a new chat was the last thing
- * here), his most recent conversation, continued: his row opens the one timeline, and a new chat is yours to
+ * to the turn it's working on in it. With none remembered (a new device, or a new chat was the last thing
+ * here), its most recent conversation, continued: its row opens the one timeline, and a new chat is yours to
  * start. Once per page load. A temporary chat is gone with the page; the node stops its turn once nobody has
  * watched it for a while (it's kept nowhere, so nobody could read it).
  */
@@ -555,7 +555,7 @@ function retry(api: Api, turn: Turn): void {
 }
 
 /**
- * Your message, from the composer. With nothing running it's sent. While he works, `modifier` says
+ * Your message, from the composer. With nothing running it's sent. While it works, `modifier` says
  * whether the other of steer and queue was asked for (this device's Enter does one, the modifier the other).
  * Resolves to what became of it, or why it wasn't taken.
  */
@@ -568,26 +568,26 @@ export async function sendMessage(api: Api, raw: string, opts: { modifier?: bool
     send(api, text, false, files);
     return "sent";
   }
-  // Files go with a message he answers from its start: not one handed him as he works, nor one queued.
-  if (files.length) return { problem: "Files go with your next message, once he's done: wait for him, or stop him first." };
+  // Files go with a message it answers from its start: not one handed it as it works, nor one queued.
+  if (files.length) return { problem: "Files go with your next message, once it's done: wait for it, or stop it first." };
   try {
     if (action === "queue") {
       const view = await api.post<{ queue: QueuedMessage[]; held: QueueHold | null; started: TurnView | null }>("/api/conversations/queue", { conversation: current!.id, text, role });
       queue = view.queue;
       held = view.held;
       emit(null);
-      // He'd finished in the meantime, so its turn came at once.
+      // It'd finished in the meantime, so its turn came at once.
       if (view.started && !live) void sync(api);
       return "queued";
     }
     const w = live;
-    if (!w?.id) return { problem: "He's only just starting: try again in a moment." };
+    if (!w?.id) return { problem: "It's only just starting: try again in a moment." };
     await api.post("/api/turns/steer", { turn: w.id, text });
     steering.push(text);
     emit(null);
     return "steered";
   } catch (error) {
-    // He finished while you typed: it's simply your next message.
+    // It finished while you typed: it's simply your next message.
     if (error instanceof ApiError && error.status === 409 && action === "steer") {
       await sync(api);
       if (!live) {
@@ -661,7 +661,7 @@ export function watchTurns(api: Api, signal: AbortSignal, follow: Live["follow"]
   void look();
 }
 
-/** A chat's state as its badge in a list (a live dot while he's working in it, sending out its waves). */
+/** A chat's state as its badge in a list (a live dot while it's working in it, sending out its waves). */
 export function chatStateBadge(c: Pick<ConversationSummary, "state" | "queued" | "held" | "needs">): HTMLElement | null {
   const b = stateBadge(c);
   if (!b) return null;
@@ -693,8 +693,8 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   const alerts = h("div", { class: "composer-alerts" });
   const input = h("textarea", {
     rows: 1,
-    placeholder: "Ask Galahad…",
-    "aria-label": "Message to Galahad",
+    placeholder: "Ask your agent…",
+    "aria-label": "Message to your agent",
     autocomplete: "off",
     enterkeyhint: "send",
   });
@@ -707,16 +707,16 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   jump.hidden = true;
   jump.classList.add("jump");
   const nodes = new Map<number, HTMLElement>();
-  // One persistent live region: says when Galahad starts, and reads the answer once it's complete.
+  // One persistent live region: says when the primary starts, and reads the answer once it's complete.
   const announcer = h("div", { class: "sr-only", role: "status", "aria-live": "polite" });
   const announced = new Map<number, Turn["status"]>(thread.turns.map((t) => [t.id, t.status]));
   function announce(turn: Turn | undefined): void {
     if (!turn || turn.role !== "assistant" || announced.get(turn.id) === turn.status) return;
     const before = announced.get(turn.id);
     announced.set(turn.id, turn.status);
-    if (turn.status === "streaming" && before === undefined) announcer.textContent = "Galahad is answering.";
-    else if (turn.status === "done") announcer.textContent = `Galahad answered: ${turn.content.replace(/[*_`#>|~]/g, "").slice(0, 2000)}`;
-    else if (turn.status === "error") announcer.textContent = `Galahad couldn't answer. ${turn.error ?? ""}`;
+    if (turn.status === "streaming" && before === undefined) announcer.textContent = "Your agent is answering.";
+    else if (turn.status === "done") announcer.textContent = `Your agent answered: ${turn.content.replace(/[*_`#>|~]/g, "").slice(0, 2000)}`;
+    else if (turn.status === "error") announcer.textContent = `Your agent couldn't answer. ${turn.error ?? ""}`;
     else if (turn.status === "stopped") announcer.textContent = "Stopped.";
   }
   let blocked: string | null = null;
@@ -724,48 +724,48 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   const canChat = ctx.can("chat");
   const coarse = matchMedia("(pointer: coarse)").matches;
 
-  // ---- Galahad himself: his orb, in the colour of what he's doing, and that in a line. A tap shows what he has in hand. ----
+  // ---- the primary itself: its orb, in the colour of what it's doing, and that in a line. A tap shows what it has in hand. ----
   const face = h("span", { class: "chat-face" });
-  // The welcome's orb, the same one large (your word, 23 November 2026: the one you talk to, as an orb), moving as he
+  // The welcome's orb, the same one large (your word, 23 November 2026: the one you talk to, as an orb), moving as it
   // is (24 November 2026: "pulsing/moving when doing a task, sitting idle, waiting, done"). Drawn by renderNow, as the
   // header's is, before the view is shown (one drawn here would be drawn again at once, for nothing).
-  const heroOrb = h("div", { class: "hero-galahad" });
-  // What he asks you, answered under his orb (made once: the welcome is drawn again, its subscriptions are not), shown
+  const heroOrb = h("div", { class: "hero-primary" });
+  // What it asks you, answered under its orb (made once: the welcome is drawn again, its subscriptions are not), shown
   // once no chat is being opened in its place.
-  const asks = canChat ? galahadAsks(ctx, scope, () => opening === 0) : null;
+  const asks = canChat ? primaryAsks(ctx, scope, () => opening === 0) : null;
   const nowLine = h("span", { class: "chat-now ellipsis" });
   const answers = h("span", { class: "chat-as ellipsis" });
-  const who = h("button", { class: "chat-who", type: "button", onclick: () => openInHand(ctx) }, face, h("span", { class: "chat-who-text" }, h("span", { class: "chat-name" }, "Galahad", answers), nowLine));
-  // On a phone his conversation is the whole screen: the way back Home.
+  const who = h("button", { class: "chat-who", type: "button", onclick: () => openInHand(ctx) }, face, h("span", { class: "chat-who-text" }, h("span", { class: "chat-name" }, "Your agent", answers), nowLine));
+  // On a phone its conversation is the whole screen: the way back Home.
   const back = h("a", { class: "btn ghost sm icon-only pane-back", href: "#/home", "aria-label": "Home", title: "Home" }, icon("chevron-left", { size: 16 }));
-  // The Inbox, one tap from him, counting what waits for you that is no other knight's (theirs is on their own rows).
+  // The Inbox, one tap from it, counting what waits for you that is no other agent's (theirs is on their own rows).
   const inboxCount = h("span", { class: "count", hidden: true });
   const inbox = h("a", { class: "btn ghost sm icon-only chat-inbox", href: "#/inbox", "aria-label": "Inbox", title: "Inbox" }, icon("inbox", { size: 16 }), inboxCount);
-  // His own computer: watched and taken over from here, and given to him here while he has none.
-  const computer = ctx.can("sandbox") ? h("button", { class: "btn ghost sm icon-only chat-computer", type: "button", "aria-label": "His computer", title: "His computer", onclick: () => openComputer(ctx) }, icon("monitor", { size: 16 })) : null;
+  // Its own computer: watched and taken over from here, and given to it here while it has none.
+  const computer = ctx.can("sandbox") ? h("button", { class: "btn ghost sm icon-only chat-computer", type: "button", "aria-label": "Its computer", title: "Its computer", onclick: () => openComputer(ctx) }, icon("monitor", { size: 16 })) : null;
   let shownTone = "";
   function renderNow(): void {
     const waiting = ctx.live.actions.value.filter((action) => isWaiting(action));
-    const needs = ctx.live.inboxLoaded.value ? galahadNeeds(ctx.live.inboxCount.value, waiting, ctx.live.team.value?.teammates.map((person) => person.id) ?? []) : null;
-    const now = galahadNow({ ...galahadWork(), needs });
+    const needs = ctx.live.inboxLoaded.value ? primaryNeeds(ctx.live.inboxCount.value, waiting, ctx.live.team.value?.agents.map((person) => person.id) ?? []) : null;
+    const now = primaryNow({ ...primaryWork(), needs });
     if (nowLine.textContent !== now.text) {
       nowLine.textContent = now.text;
       nowLine.dataset.tone = now.tone;
-      who.setAttribute("aria-label", `Galahad: ${now.text}. See what he has in hand.`);
+      who.setAttribute("aria-label", `Your agent: ${now.text}. See what it has in hand.`);
     }
     inboxCount.hidden = !needs;
     inboxCount.textContent = String(needs ?? "");
     inbox.setAttribute("aria-label", needs ? `Inbox: ${needs} waiting` : "Inbox");
-    // His orbs in the colour and the mood of where he stands: at work while he answers or works, waiting while
-    // something needs you, done while an answer of his is new to you, idle otherwise. (Both are his one orb: drawn
+    // Its orbs in the colour and the mood of where it stands: at work while it answers or works, waiting while
+    // something needs you, done while an answer of its is new to you, idle otherwise. (Both are its one orb: drawn
     // again, each carries on where it was, and a change of mood fades or bursts.)
-    const mood = orbMoodOfState(galahadState(now));
+    const mood = orbMoodOfState(primaryState(now));
     if (`${now.tone}/${mood}` !== shownTone) {
       shownTone = `${now.tone}/${mood}`;
       replace(face, orb({ size: 36, tone: now.tone, mood }));
       replace(heroOrb, orb({ size: 168, tone: now.tone, mood }));
     }
-    // Who answers and with what, beside his name: the model, and the role when it isn't the planner (the menu changes both).
+    // Who answers and with what, beside its name: the model, and the role when it isn't the planner (the menu changes both).
     const as = [role === "planner" ? null : role, modelName((roster ?? DEFAULT_ROLES)[role]?.models[0])].filter(Boolean).join(" · ");
     if (answers.textContent !== as) answers.textContent = as;
   }
@@ -834,14 +834,14 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     return bar;
   }
 
-  // (An orb of its own: he can be writing here while something waits on you, and his header's orb says the latter.)
+  // (An orb of its own: it can be writing here while something waits on you, and its header's orb says the latter.)
   let writing: { id: number; orb: HTMLElement } | null = null;
   const writingOrb = (id: number): HTMLElement => (writing?.id === id ? writing : (writing = { id, orb: orb({ size: 28, mood: "working", key: "invincible:writing" }) })).orb;
 
   function renderTurn(turn: Turn): HTMLElement {
-    // A look of his come back: his own note, never shown as yours.
+    // A look of its come back: its own note, never shown as yours.
     if (turn.role === "user" && turn.look) {
-      return h("article", { class: "turn look", "aria-label": "He looked again" }, icon("clock", { size: 16, class: "subtle" }), h("span", {}, lookedWords(turn.look, Date.now())));
+      return h("article", { class: "turn look", "aria-label": "It looked again" }, icon("clock", { size: 16, class: "subtle" }), h("span", {}, lookedWords(turn.look, Date.now())));
     }
     if (turn.role === "user") {
       return h(
@@ -851,8 +851,8 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
       );
     }
     const content = h("div", { class: "md" });
-    // His latest answer, once it's done: a choice he offered is tapped to answer with it, sent as if typed (the same
-    // checks). While he's writing, a page he makes waits for the end.
+    // Its latest answer, once it's done: a choice it offered is tapped to answer with it, sent as if typed (the same
+    // checks). While it's writing, a page it makes waits for the end.
     const answerable = thread.turns.at(-1) === turn && turn.status === "done" && canChat;
     content.append(renderMarkdown(turn.content, { live: turn.status === "streaming", choose: answerable ? (text) => ((input.value = text), void deliver()) : undefined }));
     if (turn.status === "streaming") {
@@ -865,13 +865,13 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
       turn.status === "error" && turn.error
         ? /looks like a/i.test(turn.error)
           ? callout("warn", turn.error, { title: "Not sent to any model", actions: ctx.can("vault:write") ? button("Open the vault", { size: "sm", icon: "vault", onClick: () => ctx.navigate("vault") }) : null })
-          : callout("danger", turn.error, { title: "Galahad couldn't answer" })
+          : callout("danger", turn.error, { title: "Your agent couldn't answer" })
         : null;
     return h(
       "article",
-      { class: `turn assistant${thread.turns.at(-1) === turn ? " last" : ""}`, "aria-label": "Galahad said" },
-      // His orb beside each answer of his, still and at rest, but for the one he is writing, which is at work (and kept
-      // while he writes, as the answer is drawn again with each word): the colour of his state is his line's, above.
+      { class: `turn assistant${thread.turns.at(-1) === turn ? " last" : ""}`, "aria-label": "Your agent said" },
+      // Its orb beside each answer of its, still and at rest, but for the one it is writing, which is at work (and kept
+      // while it writes, as the answer is drawn again with each word): the colour of its state is its line's, above.
       h("span", { class: "avatar agent orb-avatar", "aria-hidden": "true" }, turn.status === "streaming" ? writingOrb(turn.id) : orb({ size: 28 })),
       h("div", { class: "turn-body" }, processView(turn), turn.content ? content : null, errorBox, turn.status === "streaming" ? null : turnActions(turn)),
     );
@@ -918,17 +918,17 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   function emptyState(): HTMLElement {
     const suggestions: [string, string][] = [
       ["Catch me up", "What has my fleet been doing today, and does anything need me?"],
-      ["Plan", "Plan this week's work on Galahad as a short, ordered list."],
+      ["Plan", "Plan this week's work on your agent as a short, ordered list."],
       ["Recall", "What do we remember about how the fleet is deployed?"],
       ["Place", "Which of my machines should run a long build, and why?"],
     ];
     return h(
       "div",
       { class: "chat-hero" },
-      // Galahad himself, the orb you talk to, at your service.
+      // The primary itself, the orb you talk to, at your service.
       heroOrb,
       h("h2", {}, startIn ? projectName(startIn) : "At your service."),
-      h("p", {}, startIn ? "A new chat in this project: its instructions and memories go with every answer." : "Ask anything. Galahad recalls what your fleet remembers, and uses his tools. Keys belong in the vault, never here."),
+      h("p", {}, startIn ? "A new chat in this project: its instructions and memories go with every answer." : "Ask anything. Your agent recalls what your fleet remembers, and uses its tools. Keys belong in the vault, never here."),
       canChat
         ? h(
             "div",
@@ -1017,28 +1017,28 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     input.style.height = `${Math.min(input.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
   }
 
-  // While he works, a message steers him now or is queued for after: what Enter does is this device's choice
+  // While it works, a message steers it now or is queued for after: what Enter does is this device's choice
   // (Settings), Ctrl or ⌘ with Enter does the other, and each has its own button (the way on a phone).
-  const steerButton = button("Steer", { size: "sm", title: "Tell him now: it reaches him at his next safe point", onClick: () => void deliver({ how: "steer" }) });
-  const queueButton = button("Queue", { size: "sm", title: "Keep it on the node and send it when he's done", onClick: () => void deliver({ how: "queue" }) });
-  const stopButton = button("Stop", { icon: "stop", iconOnly: true, label: "Stop him", title: "Stop him (Esc)", onClick: () => stopChat() });
+  const steerButton = button("Steer", { size: "sm", title: "Tell it now: it reaches it at its next safe point", onClick: () => void deliver({ how: "steer" }) });
+  const queueButton = button("Queue", { size: "sm", title: "Keep it on the node and send it when it's done", onClick: () => void deliver({ how: "queue" }) });
+  const stopButton = button("Stop", { icon: "stop", iconOnly: true, label: "Stop it", title: "Stop it (Esc)", onClick: () => stopChat() });
   stopButton.classList.add("send");
   const panel = queuePanel(queueActions(ctx.api));
-  // What is under way in this chat: his knights' tasks given here (Stop on each), his looks that wait (Cancel).
+  // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait (Cancel).
   const going = underway(ctx);
   scope.add(() => going.stop());
   let wasAnswering = false;
   function syncUnderway(): void {
     const answering = live !== null;
     going.show(current && !temporary ? current.id : null, answering);
-    // His answer just ended: what he gave or set in it is asked for now.
+    // Its answer just ended: what it gave or set in it is asked for now.
     if (wasAnswering && !answering) going.refresh();
     wasAnswering = answering;
   }
   const elsewhere = h("div", { class: "composer-alerts" });
   let shownElsewhere = "";
-  // A key he asked for in this chat: its sealed field here, above the message box, as well as in the Inbox. What you
-  // seal goes straight to the vault; he learns that it exists, never what it is. Drawn again only when which keys wait
+  // A key it asked for in this chat: its sealed field here, above the message box, as well as in the Inbox. What you
+  // seal goes straight to the vault; it learns that it exists, never what it is. Drawn again only when which keys wait
   // changes, so a half-typed value stays.
   const keyAsks = h("div", { class: "composer-alerts key-asks" });
   let shownAsks = "";
@@ -1058,7 +1058,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     replace(keyAsks, ...waiting.map((request) => secretRequestCard(ctx, request)));
   }
 
-  // A connector he asked for in this chat: its card here, above the message box, as well as in the Inbox. Drawn again
+  // A connector it asked for in this chat: its card here, above the message box, as well as in the Inbox. Drawn again
   // only when which requests wait changes.
   const connectorAsks = h("div", { class: "composer-alerts" });
   let shownConnectorAsks = "";
@@ -1090,16 +1090,16 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     stopButton.hidden = !busy;
     steerButton.hidden = !busy;
     queueButton.hidden = !busy || !canQueue;
-    // (Files go with a message he answers from its start, never one he's handed as he works.)
+    // (Files go with a message it answers from its start, never one it's handed as it works.)
     steerButton.disabled = queueButton.disabled = !canChat || !has || files;
     // The one Enter does is in ink.
     steerButton.classList.toggle("primary", !canQueue || enter === "steer");
     queueButton.classList.toggle("primary", canQueue && enter === "queue");
-    input.placeholder = busy ? (canQueue ? "Steer him, or queue what's next…" : "Steer him…") : "Ask Galahad…";
+    input.placeholder = busy ? (canQueue ? "Steer it, or queue what's next…" : "Steer it…") : "Ask your agent…";
     syncKeyAsks();
     syncConnectorAsks();
     panel.render({ queue, held, steering, busy, deadline: live?.deadline ?? null });
-    // He's working in this chat on a turn this device may not watch (started from another device): said, with Stop.
+    // It's working in this chat on a turn this device may not watch (started from another device): said, with Stop.
     const other = unwatchable && !live ? unwatchable.id : "";
     if (other !== shownElsewhere) {
       shownElsewhere = other;
@@ -1107,8 +1107,8 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
         elsewhere,
         other
           ? callout("info", "That turn was started on another device, so it isn't shown here. It goes on on the node; the answer will be in the chat.", {
-              title: "He's working in this chat, started from another device",
-              actions: button("Stop him", { size: "sm", icon: "stop", onClick: () => void ctx.api.post("/api/turns/stop", { turn: other }).catch((error: unknown) => toast("Couldn't stop him", { tone: "error", description: errorMessage(error) })) }),
+              title: "It's working in this chat, started from another device",
+              actions: button("Stop it", { size: "sm", icon: "stop", onClick: () => void ctx.api.post("/api/turns/stop", { turn: other }).catch((error: unknown) => toast("Couldn't stop it", { tone: "error", description: errorMessage(error) })) }),
             })
           : null,
       );
@@ -1173,7 +1173,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     draft = findSecrets(input.value).length ? "" : input.value;
   });
 
-  /** Your message: sent, or (while he works) steered or queued. Whatever is asked of it, it's checked for secrets first. */
+  /** Your message: sent, or (while it works) steered or queued. Whatever is asked of it, it's checked for secrets first. */
   async function deliver(how: { modifier?: boolean; how?: "steer" | "queue" } = {}): Promise<void> {
     check(); // never trust a debounced result at the moment of sending
     const text = input.value.trim();
@@ -1217,7 +1217,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   input.addEventListener("keydown", (event: KeyboardEvent) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
-      // Enter never stops him: it sends, steers or queues. Only Stop or Esc stops.
+      // Enter never stops it: it sends, steers or queues. Only Stop or Esc stops.
       void deliver({ modifier: event.ctrlKey || event.metaKey });
     }
   });
@@ -1232,13 +1232,13 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   }, { passive: true });
   // A turn that started in this chat elsewhere (another device, the queue going on) is noticed and attached to.
   if (canChat) watchTurns(ctx.api, scope.signal, ctx.live.follow);
-  // What he has in hand beside this chat: the header's line says so.
+  // What it has in hand beside this chat: the header's line says so.
   scope.add(nodeTurns.subscribe(renderNow));
-  scope.add(questsInHand.subscribe(renderNow));
+  scope.add(runsInHand.subscribe(renderNow));
   scope.add(ctx.live.inboxCount.subscribe(renderNow));
   scope.add(ctx.live.inboxLoaded.subscribe(renderNow));
-  if (ctx.can("mind:read")) scope.add(ctx.live.follow(["quests"], () => lookQuests(ctx.api, scope.signal), 15_000));
-  // The minute "stops by itself in …" names moves on while he works.
+  if (ctx.can("mind:read")) scope.add(ctx.live.follow(["runs"], () => lookRuns(ctx.api, scope.signal), 15_000));
+  // The minute "stops by itself in …" names moves on while it works.
   const ticking = setInterval(() => live && syncComposer(), 30_000);
   scope.add(() => clearInterval(ticking));
 
@@ -1259,7 +1259,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
       id: "project",
       label: "Project",
       options: [
-        { value: "", label: "No project", icon: "chat", meta: "Galahad as he is", selected: !chosen },
+        { value: "", label: "No project", icon: "chat", meta: "Your agent as it is", selected: !chosen },
         ...projectsByUse().map((p) => ({ value: p.id, label: p.name, icon: "folder" as const, meta: firstLine(p.instructions) || "No instructions yet", keywords: [p.id], selected: chosen === p.id })),
       ],
     };
@@ -1293,7 +1293,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     if (!current) return;
     const ok = await confirmAction({
       title: "Delete this chat?",
-      body: [h("p", {}, `"${current.title}" is deleted on ${node} for good, with every answer in it. Memories Galahad made from it stay in the mind.`)],
+      body: [h("p", {}, `"${current.title}" is deleted on ${node} for good, with every answer in it. Memories your agent made from it stay in the mind.`)],
       confirmLabel: "Delete",
       tone: "danger",
     });
@@ -1487,7 +1487,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     h(
       "section",
       { class: "chat", "aria-labelledby": "chat-title" },
-      h("h1", { id: "chat-title", class: "sr-only" }, "Chat with Galahad"),
+      h("h1", { id: "chat-title", class: "sr-only" }, "Chat with your agent"),
       announcer,
       h("div", { class: "chat-head" }, back, who, computer, inbox, options.el),
       subHead,
@@ -1537,8 +1537,8 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
         /* roster needs mind:read; the default roles still work */
       });
   }
-  // Asked last: a browser sends only so many requests at once, and your chats come before his line.
-  if (ctx.can("mind:read")) void lookQuests(ctx.api, scope.signal);
+  // Asked last: a browser sends only so many requests at once, and your chats come before its line.
+  if (ctx.can("mind:read")) void lookRuns(ctx.api, scope.signal);
 };
 
 /** The shell's "answering…" pill: visible from every page while a reply streams. */
@@ -1551,7 +1551,7 @@ export function chatActivityPill(): HTMLElement {
       pill,
       dot("work", { live: true }),
       h("a", { class: "plain-link", href: "#/chat" }, model ? `Answering · ${model.split("/").pop()}` : "Answering…"),
-      button("Stop", { size: "sm", variant: "ghost", icon: "stop", onClick: stopChat, label: "Stop Galahad answering" }),
+      button("Stop", { size: "sm", variant: "ghost", icon: "stop", onClick: stopChat, label: "Stop your agent answering" }),
     );
   });
   return pill;

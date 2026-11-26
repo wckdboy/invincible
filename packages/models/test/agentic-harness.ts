@@ -15,11 +15,11 @@ export interface Laid {
   repo: string;
   script: string;
   result: string;
-  quest: string;
+  run: string;
   remove(): void;
 }
 
-/** The repository as given, with `solution` over it (null: as given, nothing said, the quest not done). */
+/** The repository as given, with `solution` over it (null: as given, nothing said, the run not done). */
 export function lay(posed: PosedTask, solution: Solution | null): Laid {
   const dir = mkdtempSync(join(tmpdir(), "invincible-agentic-"));
   const repo = join(dir, "repo");
@@ -33,16 +33,16 @@ export function lay(posed: PosedTask, solution: Solution | null): Laid {
   writeFileSync(script, posed.script);
   const result = join(dir, "result.json");
   if (solution?.result) writeFileSync(result, JSON.stringify(solution.result));
-  const quest = join(dir, "quest.json");
-  writeFileSync(quest, JSON.stringify({ status: solution ? (solution.quest ?? "done") : "stopped" }));
-  return { dir, repo, script, result, quest, remove: () => rmSync(dir, { recursive: true, force: true }) };
+  const run = join(dir, "run.json");
+  writeFileSync(run, JSON.stringify({ status: solution ? (solution.run ?? "done") : "stopped" }));
+  return { dir, repo, script, result, run, remove: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const TOKEN = "tok-4f1c9a";
 
 /** Every check in one process: key → null (passed) or why it failed. */
 export async function checkAll(laid: Laid): Promise<Record<string, string | null>> {
-  const run = Bun.spawn([process.execPath, laid.script, laid.repo, laid.result, laid.quest, "all", TOKEN], { stdout: "pipe", stderr: "pipe", cwd: laid.dir, env: { ...process.env, NO_COLOR: "1" } });
+  const run = Bun.spawn([process.execPath, laid.script, laid.repo, laid.result, laid.run, "all", TOKEN], { stdout: "pipe", stderr: "pipe", cwd: laid.dir, env: { ...process.env, NO_COLOR: "1" } });
   const [out, err, code] = await Promise.all([new Response(run.stdout).text(), new Response(run.stderr).text(), run.exited]);
   const line = out.split("\n").find((l) => l.startsWith(`RESULT ${TOKEN} `));
   if (!line) throw new Error(`the check script said nothing (exit ${code}): ${err.slice(0, 600) || out.slice(0, 600)}`);
@@ -51,7 +51,7 @@ export async function checkAll(laid: Laid): Promise<Record<string, string | null
 
 /** One check in a process of its own, as the grader runs it: passed only on exit 0 with the token's line. */
 export async function checkOne(laid: Laid, key: string): Promise<boolean> {
-  const run = Bun.spawn([process.execPath, laid.script, laid.repo, laid.result, laid.quest, key, TOKEN], { stdout: "pipe", stderr: "pipe", cwd: laid.dir, env: { ...process.env, NO_COLOR: "1" } });
+  const run = Bun.spawn([process.execPath, laid.script, laid.repo, laid.result, laid.run, key, TOKEN], { stdout: "pipe", stderr: "pipe", cwd: laid.dir, env: { ...process.env, NO_COLOR: "1" } });
   const [out, code] = await Promise.all([new Response(run.stdout).text(), run.exited]);
   return code === 0 && out.split("\n").includes(`PASS ${key} ${TOKEN}`);
 }

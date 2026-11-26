@@ -1,10 +1,10 @@
 import type { ChatMessage, ExecResult } from "../../packages/core/src/index.ts";
-import { type QuestRole, runQuest } from "../../packages/models/src/quest.ts";
+import { type RunRole, runLoop } from "../../packages/models/src/run.ts";
 import type { Suite } from "../lib.ts";
 
 /*
- * What a quest sends its engineer: the characters of every turn's conversation, summed over a whole quest, for three
- * kinds of work a stand-in engineer does the same way every time. The engineer's conversation is most of what a quest
+ * What a run sends its engineer: the characters of every turn's conversation, summed over a whole run, for three
+ * kinds of work a stand-in engineer does the same way every time. The engineer's conversation is most of what a run
  * costs, so a change that sends more (or rewrites the beginning a provider caches) shows here as a number, not a feeling.
  *
  * No model is called: the planner, engineer and reviewer are scripts, and every command answers at once.
@@ -17,15 +17,15 @@ interface Work {
   answer(command: string, i: number): Partial<ExecResult>;
 }
 
-/** The engineer's conversation on every turn of one quest. */
+/** The engineer's conversation on every turn of one run. */
 async function sent(work: Work): Promise<ChatMessage[][]> {
   const replies = [...work.commands.map((c) => `Next.\n\`\`\`sh\n${c}\n\`\`\``), "DONE\nIt is done."];
   const turns: ChatMessage[][] = [];
   let step = 0;
-  await runQuest(
+  await runLoop(
     { goal: "make it so", environment: "a stand-in sandbox", maxSteps: work.commands.length + 4 },
     {
-      ask: async (role: QuestRole, messages: ChatMessage[]) => {
+      ask: async (role: RunRole, messages: ChatMessage[]) => {
         if (role === "engineer") turns.push(messages.map((m) => ({ ...m })));
         if (role === "planner") return { text: "1. Do it.\nDone when: it is done.", model: "stand-in" };
         if (role === "reviewer") return { text: "PASS\nIt is.", model: "stand-in" };
@@ -49,23 +49,23 @@ const rewrites = (turns: readonly ChatMessage[][]): number => {
 const page = (c: string, n: number): string => c.repeat(n);
 
 /**
- * Code to understand before writing, as a knight's task has it: the five files the first real outcome's knights had to
+ * Code to understand before writing, as an agent's task has it: the five files the first real outcome's agents had to
  * read (AGENTS.md, ci-watch.ts, ci-back.ts and their tests, at their sizes on 19 November 2026, some 56 characters a
  * line), every line marked with its file and the file's version, so a stand-in can tell what it can see of them now.
  */
 const CODE_CHARS = [3_321, 16_892, 10_341, 15_609, 14_476];
 const LINES = CODE_CHARS.map((chars) => Math.ceil(chars / 56));
 const codeLine = (k: number, version: number, n: number): string => `F${k}.${version}:${n} ${"c".repeat(46)}`;
-/** The lines a sed window holds that fits a lean quest's whole output (8,000 characters), as the knights read them. */
+/** The lines a sed window holds that fits a lean run's whole output (8,000 characters), as the agents read them. */
 const WINDOW = 140;
 /** The files it changes, one edit each, in turn: ci-watch.ts, ci-back.ts, then a test. */
 const EDITS = [1, 2, 3];
 
 /**
- * A careful stand-in knight: before each of its three edits it must have every line of the code in its conversation at
+ * A careful stand-in agent: before each of its three edits it must have every line of the code in its conversation at
  * once, as the files are now, and until then reads what it can't see: a file whole first, then a window of what is
  * missing from it. Each edit is an inline python3 script naming the file it changes. Then it runs the tests and is done.
- * How many commands that takes, or that it never finished within eighty (the third real task ran 76), is what a quest's
+ * How many commands that takes, or that it never finished within eighty (the third real task ran 76), is what a run's
  * view of its work comes to.
  */
 async function understand(keepReads: boolean): Promise<{ turns: ChatMessage[][]; commands: number; done: boolean }> {
@@ -91,10 +91,10 @@ async function understand(keepReads: boolean): Promise<{ turns: ChatMessage[][];
   };
   const lines = (k: number, from: number, to: number): string => Array.from({ length: Math.min(to, LINES[k]!) - from }, (_, i) => codeLine(k, version[k]!, from + i)).join("\n");
   const ran = (stdout: string): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 5, truncated: false });
-  const outcome = await runQuest(
+  const outcome = await runLoop(
     { goal: "understand the code, then change it", environment: "a stand-in sandbox", maxSteps: 80, ...(keepReads ? { keepReads: true } : {}) },
     {
-      ask: async (role: QuestRole, messages: ChatMessage[]) => {
+      ask: async (role: RunRole, messages: ChatMessage[]) => {
         if (role === "planner") return { text: "1. Read the code.\n2. Change it.\nDone when: the tests pass.", model: "stand-in" };
         if (role === "reviewer") return { text: "PASS\nIt is.", model: "stand-in" };
         turns.push(messages.map((m) => ({ ...m })));
@@ -151,8 +151,8 @@ const longSurvey: Work = {
 
 export const suite: Suite = {
   name: "context",
-  about: "what a quest sends its engineer over a whole quest, for three kinds of work done by a stand-in: characters, and beginnings a provider can't cache",
-  headline: ["context.quest.tests-after-edits", "context.quest.read-edit-test", "context.quest.survey", "context.quest.fix-then-check", "context.quest.read-edit-test.last-turn", "context.quest.rewrites", "context.knight.understand.commands", "context.knight.understand"],
+  about: "what a run sends its engineer over a whole run, for three kinds of work done by a stand-in: characters, and beginnings a provider can't cache",
+  headline: ["context.run.tests-after-edits", "context.run.read-edit-test", "context.run.survey", "context.run.fix-then-check", "context.run.read-edit-test.last-turn", "context.run.rewrites", "context.agent.understand.commands", "context.agent.understand"],
   async run(ctx) {
     const kinds: [string, Work, string][] = [
       ["tests-after-edits", testsAfterEdits, "the tests run after each of 13 edits, failing until the last (26 commands)"],
@@ -162,19 +162,19 @@ export const suite: Suite = {
     let rewritten = 0;
     for (const [name, work, about] of kinds) {
       const turns = await sent(work);
-      ctx.quality(`context.quest.${name}`, turns.reduce((sum, t) => sum + size(t), 0), "chars", "lower", { note: `every engineer turn's conversation, summed: ${about}` });
-      if (name === "read-edit-test") ctx.quality("context.quest.read-edit-test.last-turn", size(turns.at(-1)!), "chars", "lower", { note: "the last turn of the same quest: what a long quest's every turn tends to" });
+      ctx.quality(`context.run.${name}`, turns.reduce((sum, t) => sum + size(t), 0), "chars", "lower", { note: `every engineer turn's conversation, summed: ${about}` });
+      if (name === "read-edit-test") ctx.quality("context.run.read-edit-test.last-turn", size(turns.at(-1)!), "chars", "lower", { note: "the last turn of the same run: what a long run's every turn tends to" });
       rewritten += rewrites(turns);
     }
-    ctx.quality("context.quest.rewrites", rewritten, "turns", "lower", { note: "turns, over the three quests, whose conversation doesn't begin with the turn before's (a batch cut is one)" });
+    ctx.quality("context.run.rewrites", rewritten, "turns", "lower", { note: "turns, over the three runs, whose conversation doesn't begin with the turn before's (a batch cut is one)" });
     // Failures each fixed by a later check (none run again as it was): measured apart, so the three above stay as they were.
     const fixes = await sent(fixThenCheck);
-    ctx.quality("context.quest.fix-then-check", fixes.reduce((sum, t) => sum + size(t), 0), "chars", "lower", { note: "every engineer turn's conversation, summed: eight test files failing in turn and fixed, the whole suite passing, a typecheck failing then passing, the work looked over (30 commands)" });
-    ctx.quality("context.quest.fix-then-check.rewrites", rewrites(fixes), "turns", "lower", { note: "turns of that quest whose conversation doesn't begin with the turn before's" });
-    // As a knight's task runs (keepReads): the code it must understand, read until it can see all of it, then changed.
-    const knight = await understand(true);
-    ctx.quality("context.knight.understand.commands", knight.commands, "commands", "lower", { note: "commands a careful stand-in knight ran to change three files of the first real outcome's code, each with all five files in view as they were then, and test it (eighty: it never finished)" });
-    ctx.quality("context.knight.understand.done", knight.done ? 1 : 0, "tasks", "higher", { note: "whether that stand-in finished within eighty commands: nought when its reads were cut before it could see what it needed" });
-    ctx.quality("context.knight.understand", knight.turns.reduce((sum, t) => sum + size(t), 0), "chars", "lower", { note: "every turn's conversation of the same task, summed: what its view of the code cost to send" });
+    ctx.quality("context.run.fix-then-check", fixes.reduce((sum, t) => sum + size(t), 0), "chars", "lower", { note: "every engineer turn's conversation, summed: eight test files failing in turn and fixed, the whole suite passing, a typecheck failing then passing, the work looked over (30 commands)" });
+    ctx.quality("context.run.fix-then-check.rewrites", rewrites(fixes), "turns", "lower", { note: "turns of that run whose conversation doesn't begin with the turn before's" });
+    // As an agent's task runs (keepReads): the code it must understand, read until it can see all of it, then changed.
+    const agent = await understand(true);
+    ctx.quality("context.agent.understand.commands", agent.commands, "commands", "lower", { note: "commands a careful stand-in agent ran to change three files of the first real outcome's code, each with all five files in view as they were then, and test it (eighty: it never finished)" });
+    ctx.quality("context.agent.understand.done", agent.done ? 1 : 0, "tasks", "higher", { note: "whether that stand-in finished within eighty commands: nought when its reads were cut before it could see what it needed" });
+    ctx.quality("context.agent.understand", agent.turns.reduce((sum, t) => sum + size(t), 0), "chars", "lower", { note: "every turn's conversation of the same task, summed: what its view of the code cost to send" });
   },
 };

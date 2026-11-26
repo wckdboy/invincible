@@ -116,12 +116,12 @@ describe("which calls an order answers", () => {
     expect(orderCovers(order, { ...call, args: { ...call.args, title: "anything at all", draft: true } }, NOW)).toBe(true);
     expect(orderCovers(order, { ...call, args: { ...call.args, head: { nested: "feat/x" } } }, NOW)).toBe(false);
   });
-  test("a loop is named loop.<name> whichever way it calls: as a quest's arm or directly", () => {
+  test("a loop is named loop.<name> whichever way it calls: as a run's arm or directly", () => {
     expect(orderCovers(order, { ...call, by: "loop:release" }, NOW)).toBe(true);
     expect(orderCovers(order, { ...call, by: "loop:other" }, NOW)).toBe(false);
   });
 
-  test("without callers, any of Galahad's agents may use it", () => {
+  test("without callers, any of your agent's agents may use it", () => {
     const { callers: _callers, ...anyone } = order;
     expect(orderCovers(anyone, { ...call, by: "arm:whoever" }, NOW)).toBe(true);
   });

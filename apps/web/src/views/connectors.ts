@@ -19,10 +19,10 @@ import { vaultChanged } from "./vault.ts";
 import { signInBlock } from "./sign-in.ts";
 
 /*
- * Connectors: how Galahad reaches the services you use. Each is a manifest,
+ * Connectors: how the primary reaches the services you use. Each is a manifest,
  * data rather than code: one pinned origin, the vault secret it signs in with,
- * and tools that are one HTTP request each with an oath class. Reading,
- * creating and changing are his to do (and logged); outward tools and deletes
+ * and tools that are one HTTP request each with a policy class. Reading,
+ * creating and changing are its to do (and logged); outward tools and deletes
  * ask you first. A connector's key goes from a password field into the vault,
  * pinned to the connector's origin; no model, arm or loop ever sees it.
  * A remote MCP server is a connector too: its tools are listed from the server,
@@ -34,7 +34,7 @@ export const connectorsChanged = signal(0);
 
 /**
  * A connector an agent asked you for, in the Inbox and in the chat it was asked in. Asking installs nothing: adding it
- * is yours, where it's added (one Galahad ships, at its Install; any other, as an MCP server).
+ * is yours, where it's added (one the primary ships, at its Install; any other, as an MCP server).
  */
 export function connectorRequestCard(ctx: Ctx, request: ConnectorRequestView): HTMLElement {
   const name = request.label ?? request.connector;
@@ -91,7 +91,7 @@ export function connectorRequestCard(ctx: Ctx, request: ConnectorRequestView): H
             "p",
             { class: "tiny subtle", title: new Date(request.at).toLocaleString() },
             `Asked ${relativeTime(request.at)}. `,
-            request.access ? `${name} is Galahad's alone: allowed, ${request.by} may read it too, until you stop it.` : "Asking installs nothing: it waits for you to add it.",
+            request.access ? `${name} is your agent's alone: allowed, ${request.by} may read it too, until you stop it.` : "Asking installs nothing: it waits for you to add it.",
           ),
         ),
       ),
@@ -205,7 +205,7 @@ export function classNote(cls: string, who: "you" | "loop"): HTMLElement | null 
       ? callout("danger", "It deletes something, and that can't be undone. You're the one asking, so it goes as soon as you confirm.", { title: "Deletes for good" })
       : callout("warn", "It deletes, so each run files a request in your Inbox instead. Nothing is deleted until you approve it.", { title: "Each run asks you" });
   }
-  if (cls === "create" || cls === "modify") return callout("quiet", "It creates or changes something. That's Galahad's to do, and the ledger records it.");
+  if (cls === "create" || cls === "modify") return callout("quiet", "It creates or changes something. That's your agent's to do, and the ledger records it.");
   return null;
 }
 
@@ -454,7 +454,7 @@ function installBlock(ctx: Ctx, c: ConnectorView): HTMLElement | null {
   );
 }
 
-/** Who may use it, when it's Galahad's alone (mail), and whether what it reads stays in the answer that read it. */
+/** Who may use it, when it's the primary's alone (mail), and whether what it reads stays in the answer that read it. */
 function accessBlock(ctx: Ctx, c: ConnectorView): HTMLElement | null {
   if (!c.access && !c.private) return null;
   const allowed = c.access?.allowed ?? [];
@@ -478,8 +478,8 @@ function accessBlock(ctx: Ctx, c: ConnectorView): HTMLElement | null {
           h(
             "span",
             {},
-            "Galahad's alone",
-            allowed.length ? ", and " : ": a knight or another agent asks you first.",
+            "Your agent's alone",
+            allowed.length ? ", and " : ": an agent or another agent asks you first.",
             ...allowed.map((agent, i) => [
               i ? ", " : "",
               h("span", { class: "strong" }, agentName(agent)),
@@ -493,16 +493,16 @@ function accessBlock(ctx: Ctx, c: ConnectorView): HTMLElement | null {
   );
 }
 
-/** An agent as you know it: a knight by its id (team.<tag>.kay is Kay), anything else by its label. */
+/** An agent as you know it: an agent by its id (team.<tag>.noa is Noa), anything else by its label. */
 const agentName = (label: string): string => {
-  const knight = /^team\.[0-9a-f]+\.(.+)$/.exec(label)?.[1];
-  return knight ? knight.charAt(0).toUpperCase() + knight.slice(1) : label;
+  const agent = /^team\.[0-9a-f]+\.(.+)$/.exec(label)?.[1];
+  return agent ? agent.charAt(0).toUpperCase() + agent.slice(1) : label;
 };
 
 async function remove(ctx: Ctx, c: ConnectorView): Promise<void> {
   const ok = await confirmAction({
     title: `Remove ${c.label}?`,
-    body: [h("p", {}, "Galahad can't reach it any more, and loops that call it fail until you install it again."), c.secret ? h("p", {}, "Its key stays in the vault until you delete it there.") : null],
+    body: [h("p", {}, "Your agent can't reach it any more, and loops that call it fail until you install it again."), c.secret ? h("p", {}, "Its key stays in the vault until you delete it there.") : null],
     confirmLabel: "Remove connector",
   });
   if (!ok) return;
@@ -577,7 +577,7 @@ function connectorCard(ctx: Ctx, c: ConnectorView, orders: OrderCounts, deps: Mc
             { class: "tiny subtle row wrap" },
             h("span", { class: "mono" }, c.id),
             mcp && c.url
-              ? h("span", { class: "mono wrap-anywhere", title: "Galahad talks to this server and nowhere else" }, `only to ${c.url.replace(/^https?:\/\//, "")}`)
+              ? h("span", { class: "mono wrap-anywhere", title: "Your agent talks to this server and nowhere else" }, `only to ${c.url.replace(/^https?:\/\//, "")}`)
               : c.origin
                 ? h("span", { class: "mono", title: "Every request goes to this origin and nowhere else" }, `only to ${host(c.origin)}`)
                 : h("span", {}, c.needsOrigin ? "runs at an address of yours" : ""),
@@ -601,9 +601,9 @@ function connectorCard(ctx: Ctx, c: ConnectorView, orders: OrderCounts, deps: Mc
               c.tools.length
                 ? "Its tools and their descriptions come from the server. You choose what each may do."
                 : signedOut
-                  ? "No tools yet: sign in, and Galahad lists them."
+                  ? "No tools yet: sign in, and your agent lists them."
                   : c.key === "missing"
-                    ? "No tools yet: add its key, and Galahad lists them."
+                    ? "No tools yet: add its key, and your agent lists them."
                     : "No tools yet. Refresh to list them.",
             ),
             refresh,
@@ -681,7 +681,7 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
     replace(
       note,
       installed.length && !ctx.can("connect")
-        ? callout("quiet", "This device can't run tools itself (it has no connect scope; it was likely paired before connectors existed). Galahad and your loops still can.")
+        ? callout("quiet", "This device can't run tools itself (it has no connect scope; it was likely paired before connectors existed). Your agent and your loops still can.")
         : null,
     );
     replace(
@@ -701,7 +701,7 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
             ),
           ]),
     );
-    // The ones Galahad ships and the hosted MCP servers of the reviewed list, as cards.
+    // The ones the primary ships and the hosted MCP servers of the reviewed list, as cards.
     replace(availableBox, ...available.map((c) => connectorCard(ctx, c, active, deps)));
     availableSection.hidden = !available.length;
   }
@@ -757,7 +757,7 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
     h(
       "div",
       { class: "page" },
-      pageHead("Connectors", "How Galahad reaches the services you use. Reading, creating and changing are his to do, and logged. Anything outward, and every delete, asks you first, but his and the knights' work in the repositories you gave them, which he approves himself."),
+      pageHead("Connectors", "How your agent reaches the services you use. Reading, creating and changing are its to do, and logged. Anything outward, and every delete, asks you first, but its and the agents' work in the repositories you gave them, which it approves itself."),
       ctx.can("brain:write") ? null : callout("quiet", "This device can see connectors but not install or remove them (no brain:write scope)."),
       note,
       // Shown whole once the connectors and the orders have answered: each part came in on its own, pushing the next.

@@ -195,12 +195,12 @@ export class Vault {
     return this.records().map((r) => this.info(r.name)!);
   }
 
-  /** Ask your liege for a credential. Fulfilled when a secret with that name is set afterwards. */
+  /** Ask the owner for a credential. Fulfilled when a secret with that name is set afterwards. */
   request(name: string, purpose: string, provider?: string): void {
     this.store.emit(this.identity, "secret.requested", { name, purpose, ...(provider ? { provider } : {}) });
   }
 
-  /** Dismisses an open request: it leaves the Inbox until he asks for it again. False when none is open by that name. */
+  /** Dismisses an open request: it leaves the Inbox until it asks for it again. False when none is open by that name. */
   dismissRequest(name: string): boolean {
     if (!this.requests().some((r) => r.name === name)) return false;
     this.store.emit(this.identity, "secret.request.dismissed", { name });

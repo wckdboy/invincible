@@ -8,8 +8,8 @@ import { icon } from "../ui/icons.ts";
 import { toast } from "../ui/toast.ts";
 
 /*
- * What's waiting while Galahad works, above the composer: the messages you sent to
- * steer him that haven't reached him yet, and the
+ * What's waiting while the primary works, above the composer: the messages you sent to
+ * steer it that haven't reached it yet, and the
  * ones you queued on the node, each editable and removable, with Send now. After a
  * stop, a failure or a restart the queue is held: nothing is sent until you resume
  * or discard it. And one line that says what unattended work may and may not do.
@@ -18,7 +18,7 @@ import { toast } from "../ui/toast.ts";
 export interface QueueState {
   queue: readonly QueuedMessage[];
   held: QueueHold | null;
-  /** Steers on their way to him. */
+  /** Steers on their way to it. */
   steering: readonly string[];
   busy: boolean;
   /** When the node stops the running turn by itself. */
@@ -95,7 +95,7 @@ export function queuePanel(actions: QueueActions, opts: { compact?: boolean } = 
         button("Send now", {
           size: "sm",
           variant: "ghost",
-          title: state.busy ? "Tell him now: it reaches him at his next safe point" : "Send it now, as a turn",
+          title: state.busy ? "Tell it now: it reaches it at its next safe point" : "Send it now, as a turn",
           onClick: () => act(actions.sendNow(q.id), "Couldn't send it"),
         }),
         button("Edit", { size: "sm", variant: "ghost", icon: "edit", iconOnly: true, label: "Edit this queued message", onClick: () => ((editing = q.id), (seen = ""), render(last!)) }),
@@ -120,7 +120,7 @@ export function queuePanel(actions: QueueActions, opts: { compact?: boolean } = 
           "div",
           { class: "chat-queue-steer", role: "status" },
           h("span", { class: "spinner", "aria-hidden": "true" }),
-          h("div", {}, h("div", { class: "tiny strong" }, `On ${state.steering.length === 1 ? "its" : "their"} way to him: he's told at his next safe point (a tool that's running finishes first)`), ...state.steering.map((text) => h("div", { class: "chat-queue-text" }, clip(text, opts.compact ? 90 : 220)))),
+          h("div", {}, h("div", { class: "tiny strong" }, `On ${state.steering.length === 1 ? "its" : "their"} way to it: it's told at its next safe point (a tool that's running finishes first)`), ...state.steering.map((text) => h("div", { class: "chat-queue-text" }, clip(text, opts.compact ? 90 : 220)))),
         ),
       );
     }
@@ -134,7 +134,7 @@ export function queuePanel(actions: QueueActions, opts: { compact?: boolean } = 
             button("Resume", { size: "sm", variant: "primary", icon: "play", onClick: () => act(actions.resume(), "Couldn't resume") }),
             button("Discard", { size: "sm", variant: "ghost", title: "Discard everything queued behind this chat", onClick: () => act(actions.discard(), "Couldn't discard them") }),
           )
-        : h("div", { class: "chat-queue-head" }, icon("clock", { size: 14 }), h("span", { class: "grow" }, h("strong", {}, `${plural(state.queue.length, "message")} queued`), state.busy ? ": sent in order when he's done with this turn." : ": waiting for room on the node."));
+        : h("div", { class: "chat-queue-head" }, icon("clock", { size: 14 }), h("span", { class: "grow" }, h("strong", {}, `${plural(state.queue.length, "message")} queued`), state.busy ? ": sent in order when it's done with this turn." : ": waiting for room on the node."));
       parts.push(head, h("ol", { class: "chat-queue-list" }, ...state.queue.map((q) => row(q, state))));
     }
     if (state.busy) {
@@ -144,7 +144,7 @@ export function queuePanel(actions: QueueActions, opts: { compact?: boolean } = 
           "div",
           { class: "chat-queue-foot tiny" },
           icon("shield-check", { size: 13 }),
-          h("span", {}, `He keeps working if you leave this page${minute ? `, and ${minute}` : ""}. Anything that needs you (an approval, a key) waits in your Inbox: nothing is approved for you.`),
+          h("span", {}, `It keeps working if you leave this page${minute ? `, and ${minute}` : ""}. Anything that needs you (an approval, a key) waits in your Inbox: nothing is approved for you.`),
         ),
       );
     }

@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Galahad",
-  "short_name": "Galahad",
-  "description": "One mind, many bodies. Your autonomous knight and engineer.",
+  "name": "Invincible",
+  "short_name": "Invincible",
+  "description": "One mind, many bodies. Your autonomous agent and engineer.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -17,7 +17,7 @@
   ],
   "shortcuts": [
     { "name": "Chat", "url": "/#/chat", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
-    { "name": "The Roundtable", "short_name": "Roundtable", "url": "/#/team", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Agents", "short_name": "Agents", "url": "/#/team", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
     { "name": "Inbox", "url": "/#/inbox", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]
 }

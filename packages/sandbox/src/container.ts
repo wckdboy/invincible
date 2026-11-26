@@ -42,7 +42,7 @@ export const containerSystemStartArgs = (kernel: boolean): string[] => ["system"
 
 /**
  * The network `container system start` makes, which its builder joins (`container build`). No sandbox is put on it: an
- * online sandbox's way out is Galahad's own invincible-net, as on Docker, so the Mac's firewall knows every address.
+ * online sandbox's way out is the primary's own invincible-net, as on Docker, so the Mac's firewall knows every address.
  */
 export const DEFAULT_NETWORK = "default";
 
@@ -65,10 +65,10 @@ export const CONTAINER_CANNOT = {
 } as const;
 export type Unmade = keyof typeof CONTAINER_CANNOT;
 export const CONTAINER_UNMADE = Object.keys(CONTAINER_CANNOT) as Unmade[];
-/** The images of his own a Mac makes: the workshop's (the others aren't built or proven for Apple silicon yet). */
+/** The images of its own a Mac makes: the workshop's (the others aren't built or proven for Apple silicon yet). */
 export const CONTAINER_IMAGES: readonly string[] = [DEFAULT_IMAGE];
 
-/** A sandbox as asked for, as far as what a host can't make goes. `image`: one named (Galahad's own, or any to pull). */
+/** A sandbox as asked for, as far as what a host can't make goes. `image`: one named (The primary's own, or any to pull). */
 export interface SandboxAsk {
   network?: SandboxNetwork;
   desktop?: boolean;
@@ -126,13 +126,13 @@ export const DOCKER_ON_A_MAC: Readonly<Record<string, { container: string | null
   "--pids-limit": {
     container: "--ulimit nproc=1024:1024",
     holds: "vm",
-    why: "No cgroup limit on processes: a fork bomb fills its own VM (its CPUs and memory) and never the host. RLIMIT_NPROC holds the knight's own processes near Docker's count.",
+    why: "No cgroup limit on processes: a fork bomb fills its own VM (its CPUs and memory) and never the host. RLIMIT_NPROC holds the agent's own processes near Docker's count.",
   },
   "--ulimit": { container: "--ulimit", holds: "same", why: "nofile=8192:8192, as on Docker (ulimits.md)." },
   "--network": {
     container: "--network invincible-net --network invincible-gw (online) · --network invincible-gw --no-dns (gateway)",
     holds: "refused",
-    why: "online: Galahad's own NAT network, then the gateway network, egress first, as on Docker (its resolver is the network's gateway). gateway: the internal network alone, with no resolver (it reaches the gateway by its address). isolated (--network none) has no counterpart: it isn't made on a Mac (CONTAINER_CANNOT).",
+    why: "online: Invincible's own NAT network, then the gateway network, egress first, as on Docker (its resolver is the network's gateway). gateway: the internal network alone, with no resolver (it reaches the gateway by its address). isolated (--network none) has no counterpart: it isn't made on a Mac (CONTAINER_CANNOT).",
   },
   "--runtime": { container: null, holds: "vm", why: "Every container is its own lightweight VM, with its own kernel: what Kata's runtime gives on Linux." },
   "--label": { container: "--label", holds: "same", why: "The same labels, and the image it was made from (a VM made again is made from it)." },
@@ -169,7 +169,7 @@ export function containerRunArgs(spec: SandboxSpec): string[] {
     "1000:1000",
     "--cap-drop",
     "ALL",
-    // The image is immutable; the knight writes only to its workspace and /tmp.
+    // The image is immutable; the agent writes only to its workspace and /tmp.
     "--read-only",
     "--tmpfs",
     "/tmp:size=2G,mode=1777",
@@ -303,7 +303,7 @@ export const containerNetworkInspectArgs = (kind: "gateway" | "online"): string[
  */
 export const networkHelper = (network: string): string => `com.apple.container.container-network-vmnet.${network}`;
 export const helperRestartArgs = (domain: string, network: string): string[] => ["kickstart", "-k", `${domain}/${networkHelper(network)}`];
-/** Galahad's images on a Mac: Apple silicon's, their base pulled afresh (`pull` false: a base of his own, in no registry). */
+/** The primary's images on a Mac: Apple silicon's, their base pulled afresh (`pull` false: a base of its own, in no registry). */
 export const containerBuildArgs = (image: string, contextDir: string, pull = true): string[] => ["build", ...(pull ? ["--pull"] : []), "--platform", "linux/arm64", "--tag", image, contextDir];
 /**
  * container's builder (its BuildKit, a VM of 2 CPUs and 2 GB) stopped: a build starts it and leaves it running, which
@@ -311,10 +311,10 @@ export const containerBuildArgs = (image: string, contextDir: string, pull = tru
  * build starts it again.
  */
 export const containerBuilderStopArgs = (): string[] => ["builder", "stop"];
-/** A workspace: a volume whose size is fixed as it is made, labelled as its sandbox's (and kept for good: a knight's). */
+/** A workspace: a volume whose size is fixed as it is made, labelled as its sandbox's (and kept for good: an agent's). */
 /**
  * A new volume's /work handed to the sandbox's user (uid 1000). container makes a volume's root root's and, unlike Docker,
- * doesn't copy the image's ownership into it (seen on the Mac mini, 17 November 2026, under Galahad's own image), and a
+ * doesn't copy the image's ownership into it (seen on the Mac mini, 17 November 2026, under the primary's own image), and a
  * sandbox can't take it itself: every capability is dropped. So a one-off container of the node's own does, as root,
  * from the local image (built before any workspace is made), on the gateway network, and is gone when it ends.
  */

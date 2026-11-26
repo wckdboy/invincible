@@ -18,7 +18,7 @@ import { freePort } from "./ports.ts";
 /*
  * Signing in to a hosted MCP server as you (MCP's authorization spec), over real HTTP: a stand-in that, as Linear's or
  * Notion's does, answers only with a token its own authorization server gave, names that server in its protected
- * resource metadata, and lets a client register itself. Galahad installs it, you sign in (a browser's visit and its
+ * resource metadata, and lets a client register itself. The primary installs it, you sign in (a browser's visit and its
  * return to the node's /oauth/callback, played here), its tools are listed by themselves, a tool runs on a token renewed
  * where it was pinned, and the sign-in is never shown or sent anywhere else.
  */
@@ -99,7 +99,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${upstream.port}/mcp`;
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
@@ -120,14 +120,14 @@ test("a server you sign in to: installed without tools, nothing asked for in the
   expect((await admin("setOAuthApp", { connector: "issues", client: "anything" })).status).toBe(400);
 });
 
-test("you sign in: Galahad registers itself, your browser allows it with PKCE, comes back, and the tools are listed by themselves", async () => {
+test("you sign in: Invincible registers itself, your browser allows it with PKCE, comes back, and the tools are listed by themselves", async () => {
   const started = await admin<{ flow: string; url: string }>("oauthStart", { connector: "issues", redirect: callback });
   expect(started.status).toBe(200);
   expect(started.body.flow).toBe("code");
   const sent = new URL(started.body.url);
   expect(`${sent.origin}${sent.pathname}`).toBe(`http://127.0.0.1:${upstream.port}/authorize`);
   expect(Object.fromEntries(sent.searchParams)).toMatchObject({ client_id: "client-123", response_type: "code", redirect_uri: callback, code_challenge_method: "S256", resource: url, scope: "read" });
-  expect(seen.registered).toMatchObject({ client_name: "Galahad", redirect_uris: [callback], token_endpoint_auth_method: "none" });
+  expect(seen.registered).toMatchObject({ client_name: "Invincible", redirect_uris: [callback], token_endpoint_auth_method: "none" });
 
   // Your browser: to the sign-in, which sends it back to the node.
   const allowed = await fetch(started.body.url, { redirect: "manual" });

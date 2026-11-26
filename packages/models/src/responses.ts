@@ -80,7 +80,7 @@ export function openAIResponsesConversation(input: CompletionInput): Conversatio
     else asked.content = [...asked.content, { type: "input_text", text: withoutImages("", input.images) }];
   }
   // How hard it thinks: the level the newest message that says one says, else the call's (OpenAI takes a level on each
-  // request; Galahad's five are the five GPT-6.2 Astra takes).
+  // request; the primary's five are the five GPT-6.2 Astra takes).
   const effort = () => input.messages.findLast((m) => m.role === "user" && m.effort)?.effort ?? input.effort;
   let last = "";
   /** The last turn ended whole and isn't in `items` yet (a message arriving now follows it). */

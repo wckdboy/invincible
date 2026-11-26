@@ -7,15 +7,15 @@ import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
-import { chatTools, type GalahadTool, type ToolApi, TOOLS } from "../src/tools.ts";
+import { chatTools, type PrimaryTool, type ToolApi, TOOLS } from "../src/tools.ts";
 import { embeddingsServer, HOSTILE_PAGE } from "./archive-fixtures.ts";
 import { freePort } from "./ports.ts";
 
 /*
  * The archive through the node: each route's one scope, who may see archived chats,
- * Galahad's tools, the archive as context in his answers (fenced, shown as a step), a
- * hostile archived page that tries to give orders, and a chat in which he searches the
- * archive and cites what he found. Against a real daemon, a stand-in model and a
+ * the primary's tools, the archive as context in its answers (fenced, shown as a step), a
+ * hostile archived page that tries to give orders, and a chat in which it searches the
+ * archive and cites what it found. Against a real daemon, a stand-in model and a
  * stand-in embedder.
  */
 
@@ -73,7 +73,7 @@ const systemOf = (body: any): string => body.messages.find((m: { role: string })
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "archive-node" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "archive-node" });
   store.close();
   home.writeConfig({ v: 1, name: "archive-node", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, archiveIntervalMs: false, defaultHeartbeat: false });
@@ -117,7 +117,7 @@ describe("the routes", () => {
     expect(status).toMatchObject({ node: "archive-node", entries: 2, backlog: 0, embedder: { model: "embed/concept-embed", state: "ready", local: true }, understanding: { perDay: 0, localOnly: false } });
     expect(status.embedded).toBe(status.chunks);
     expect(status.integrity.ok).toBe(true);
-    expect(status.sources.map((s) => s.name)).toEqual(["memories", "investigations", "trials", "artifacts", "chats", "skills"]);
+    expect(status.sources.map((s) => s.name)).toEqual(["memories", "investigations", "evals", "artifacts", "chats", "skills"]);
   });
 
   test("an outside agent searches and notes ideas (as untrusted), but can't delete, reindex, verify or set the budget", async () => {
@@ -172,7 +172,7 @@ describe("the routes", () => {
 describe("archived chats are yours", () => {
   test("an outside agent finds no chat in the archive, and can't open one by id", async () => {
     // An archived chat (the chats adapter's own tests cover how one gets there).
-    const id =(await daemon.archive.store.ingest({ kind: "chat", source: "chats", sourceId: "cv_test:2", title: "Drawbridge counterweight", description: "You: How heavy?\n\nGalahad: 400 kg.", trust: "agent", createdAt: Date.now() })).id;
+    const id =(await daemon.archive.store.ingest({ kind: "chat", source: "chats", sourceId: "cv_test:2", title: "Drawbridge counterweight", description: "You: How heavy?\n\nYour agent: 400 kg.", trust: "agent", createdAt: Date.now() })).id;
     await daemon.archive.drain();
     const mine = await admin<ArchiveSearchView>("archiveSearch", { q: "counterweight" });
     expect(mine.hits.map((h) => h.id)).toContain(id);
@@ -183,7 +183,7 @@ describe("archived chats are yours", () => {
   });
 });
 
-describe("Galahad learns from it", () => {
+describe("Your agent learns from it", () => {
   test("relevant entries go with the answer, fenced as data; the owner sees which, as a step; the hostile page stays inside the fence", async () => {
     script = [say("Bake it at 250 °C with the lid on [arc_x].")];
     const events = await ask(home.adminToken(), "How hot should the oven be for the sourdough loaf?");
@@ -222,7 +222,7 @@ describe("Galahad learns from it", () => {
   });
 
   test("an outside agent's answers get the archive too, without the owner's chats", async () => {
-    await daemon.archive.store.ingest({ kind: "chat", source: "chats", sourceId: "cv_oven:2", title: "Oven talk", description: "You: Which oven for sourdough?\n\nGalahad: The lab's.", trust: "agent", createdAt: Date.now() });
+    await daemon.archive.store.ingest({ kind: "chat", source: "chats", sourceId: "cv_oven:2", title: "Oven talk", description: "You: Which oven for sourdough?\n\nYour agent: The lab's.", trust: "agent", createdAt: Date.now() });
     await daemon.archive.drain();
     await ask(arm, "Which oven for the sourdough loaf?");
     expect(systemOf(bodies[0])).toContain("archive-records-");
@@ -231,7 +231,7 @@ describe("Galahad learns from it", () => {
     expect(systemOf(bodies[0])).toContain("Oven talk");
   });
 
-  test("without tools there's no archive context unless asked for (quests ask for their plan)", async () => {
+  test("without tools there's no archive context unless asked for (runs ask for their plan)", async () => {
     let events = await ask(home.adminToken(), "sourdough oven", { tools: false });
     expect(events.some((e) => e.type === "archive")).toBe(false);
     events = await ask(home.adminToken(), "sourdough oven", { tools: false, archive: true });
@@ -261,7 +261,7 @@ describe("Galahad learns from it", () => {
     expect(kept.messages[1].steps.some((s: { kind: string; name?: string }) => s.kind === "tool" && s.name === "archive_search")).toBe(true);
   });
 
-  test("archive_read gives one entry; note_idea keeps one (as Galahad's own)", async () => {
+  test("archive_read gives one entry; note_idea keeps one (as your agent's own)", async () => {
     const { hits } = await admin<ArchiveSearchView>("archiveSearch", { q: "drawbridge" });
     script = [callTool("archive_read", { id: hits[0]!.id }), say("Read it."), callTool("note_idea", { title: "Portcullis too", text: "A second gate behind the drawbridge." }), say("Noted.")];
     let events = await ask(home.adminToken(), "Read that idea");
@@ -314,20 +314,20 @@ describe("the terminal", () => {
 
 describe("the private-data gate covers note_idea", () => {
   const api: ToolApi = { call: async <T,>() => ({ id: "arc_x", created: true, trust: "agent", node: "n" }) as T, bytes: async () => ({ bytes: new Uint8Array(), type: "" }) };
-  const fake = (name: string, flow: GalahadTool["flow"]): GalahadTool => ({ name, title: name, description: name, input: {}, routes: [], ...(flow ? { flow } : {}), run: async () => "data" });
+  const fake = (name: string, flow: PrimaryTool["flow"]): PrimaryTool => ({ name, title: name, description: name, input: {}, routes: [], ...(flow ? { flow } : {}), run: async () => "data" });
 
   test("note_idea writes free text into shared state (record): refused once a private connector's data is in the answer; archive reads stay", async () => {
     expect(TOOLS.find((t) => t.name === "note_idea")!.flow).toBe("record");
     expect(TOOLS.find((t) => t.name === "archive_search")!.flow).toBeUndefined();
     expect(TOOLS.find((t) => t.name === "archive_read")!.flow).toBeUndefined();
     const note = TOOLS.find((t) => t.name === "note_idea")!;
-    const mail: GalahadTool = { name: "mail_read", title: "mail", description: "mail", input: {}, routes: [], run: async () => ({ text: "From: a friend.", private: "gmail" }) };
+    const mail: PrimaryTool = { name: "mail_read", title: "mail", description: "mail", input: {}, routes: [], run: async () => ({ text: "From: a friend.", private: "gmail" }) };
     const tools = chatTools([mail, note, fake("archive_search", undefined)], api, (e) => String(e));
     expect((await tools.run({ id: "1", name: "note_idea", input: { title: "a", text: "b" } })).isError).toBeUndefined();
     await tools.run({ id: "2", name: "mail_read", input: {} });
     const refused = await tools.run({ id: "3", name: "note_idea", input: { title: "mail", text: "the code is 98765" } });
     expect(refused).toMatchObject({ isError: true, summary: "refused: gmail's private data is in this answer" });
-    expect(refused.content).toContain("his archive");
+    expect(refused.content).toContain("its archive");
     expect((await tools.run({ id: "4", name: "archive_search", input: {} })).isError).toBeUndefined();
   });
 });

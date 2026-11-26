@@ -48,7 +48,7 @@ export const NOTIFY_QUIET_KINDS: readonly NotifyPayload["kind"][] = ["finished",
 export const isQuietKind = (kind: string): boolean => (NOTIFY_QUIET_KINDS as readonly string[]).includes(kind);
 
 /** What's shown when a push can't be read as a notification of ours: browsers require one, and it must mean something. */
-export const GENERIC_NOTIFICATION: NotifyPayload = { v: 1, kind: "needs-you", title: "Galahad", body: "Something needs you. Open the app to see it.", open: "inbox", tag: "galahad" };
+export const GENERIC_NOTIFICATION: NotifyPayload = { v: 1, kind: "needs-you", title: "Invincible", body: "Something needs you. Open the app to see it.", open: "inbox", tag: "primary" };
 
 const KINDS = new Set<string>([...NOTIFY_KINDS, "summary", "limit", "test"]);
 // Control characters, bidirectional overrides and isolates, zero-width characters: nothing a lock screen should act on.

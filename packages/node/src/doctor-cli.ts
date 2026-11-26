@@ -30,7 +30,7 @@ export function reportLines(report: DoctorReport, tty = !!process.stdout.isTTY):
   const paint = (code: string, s: string) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
   const style: DoctorStyle = { head: (s) => paint("1", s), state: (state, s) => paint(COLOURS[state], s), dim: (s) => paint("2", s) };
   const how = report.quick ? " · quick: only what costs nothing to look at" : report.offline ? " · offline: no model asked, no service probed" : "";
-  return [style.head(`Galahad's doctor on ${report.node}`) + style.dim(how), ...doctorLines(report, style), style.dim(`Took ${doctorTook(report.tookMs)}.`)];
+  return [style.head(`Your agent's doctor on ${report.node}`) + style.dim(how), ...doctorLines(report, style), style.dim(`Took ${doctorTook(report.tookMs)}.`)];
 }
 
 /** What can be told with no node running: that it isn't, and what it left on disk. Opens the mind read-only. */

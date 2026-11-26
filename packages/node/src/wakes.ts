@@ -9,7 +9,7 @@ import { loopRecords, type WakeEvent } from "./loops.ts";
  * What wakes a loop besides its schedule (PLAN #13), read on the node that runs it:
  *
  *   - a webhook: a POST to /hooks/<loop>, signed with the loop's own secret (sealed in the vault as loop-hook:<loop>)
- *     the way GitHub signs: X-Hub-Signature-256 (or X-Galahad-Signature) is "sha256=" and the HMAC-SHA256 of the body;
+ *     the way GitHub signs: X-Hub-Signature-256 (or X-the primary-Signature) is "sha256=" and the HMAC-SHA256 of the body;
  *   - new mail: the mail connector's search, every few minutes, as the loop (a read, logged like any other);
  *   - GitHub: the repository's failed Actions runs, its last push, and its new issues and pull requests, read the same
  *     way (through the owner's own GitHub connector when there is one).
@@ -72,7 +72,7 @@ export function hookEvent(body: Uint8Array, headers: { delivery: string | null; 
 }
 
 /**
- * What woke a run, for its model: data from outside, never instructions, within `room` characters (a quest's goal and
+ * What woke a run, for its model: data from outside, never instructions, within `room` characters (a run's goal and
  * this share its limit). Empty when nothing did.
  */
 export function wokenData(woken: readonly WakeEvent[], room = 3000): string {

@@ -27,7 +27,7 @@ const MARK: Record<string, string> = { ok: "✓", attention: "△", failed: "✗
 export function describeTask(task: LoopTask | null): string {
   if (!task) return "(a task this version can't read)";
   if (task.kind === "heartbeat") return `${task.checklist ? "heartbeat + your checklist" : "heartbeat"}${task.selfAction === false ? " (self-action off)" : ""}`;
-  if (task.kind === "quest") return `quest (${task.network}${task.gates?.length ? `, ${task.gates.length} gate${task.gates.length === 1 ? "" : "s"}` : ""}): ${task.goal.length > 70 ? `${task.goal.slice(0, 70)}…` : task.goal}`;
+  if (task.kind === "run") return `run (${task.network}${task.gates?.length ? `, ${task.gates.length} gate${task.gates.length === 1 ? "" : "s"}` : ""}): ${task.goal.length > 70 ? `${task.goal.slice(0, 70)}…` : task.goal}`;
   if (task.kind === "tell") return `tell you${task.text ? `: ${task.text}` : " what woke it"}`;
   const args = Object.entries(task.args ?? {}).map(([k, v]) => `${k}=${v}`).join(" ");
   return `call ${task.connector}.${task.tool}${args ? ` ${args}` : ""}`;
@@ -158,16 +158,16 @@ function printDiscovered(connector: ConnectorView, d: { server: string | null; t
 }
 
 async function taskFrom(api: Api, flags: Flags): Promise<LoopTask | undefined> {
-  const kinds = ["heartbeat", "quest", "call", "tell"].filter((k) => flags[k] !== undefined || (k === "tell" && flags.say !== undefined));
-  if (kinds.length > 1) throw new Error("give one of --heartbeat, --quest, --call or --tell");
+  const kinds = ["heartbeat", "run", "call", "tell"].filter((k) => flags[k] !== undefined || (k === "tell" && flags.say !== undefined));
+  if (kinds.length > 1) throw new Error("give one of --heartbeat, --run, --call or --tell");
   // Tell you: a notice each run, with what woke it (and your words, --say "…").
   if (flags.tell || str(flags, "say")) return { kind: "tell", ...(str(flags, "say") ? { text: str(flags, "say")! } : {}) };
   if (flags.heartbeat) return { kind: "heartbeat", ...(str(flags, "checklist") ? { checklist: str(flags, "checklist")! } : {}) };
-  if (str(flags, "quest")) {
+  if (str(flags, "run")) {
     const steps = str(flags, "steps");
     return {
-      kind: "quest",
-      goal: str(flags, "quest")!,
+      kind: "run",
+      goal: str(flags, "run")!,
       network: (str(flags, "net") ?? "isolated") as "isolated" | "gateway" | "online",
       ...(steps ? { maxSteps: Number(steps) } : {}),
       ...(list(flags, "gate").length ? { gates: list(flags, "gate") } : {}),
@@ -199,7 +199,7 @@ export async function loopCommand(api: Api, sub: string | undefined, rest: strin
     case undefined:
     case "ls": {
       const { loops } = await api.call<{ loops: LoopView[] }>("loops");
-      if (!loops.length) console.log('No loops yet. Try: invincible loop add morning --cron "0 7 * * 1-5" --tz Europe/Copenhagen --quest "…"');
+      if (!loops.length) console.log('No loops yet. Try: invincible loop add morning --cron "0 7 * * 1-5" --tz Europe/Copenhagen --run "…"');
       for (const loop of loops) {
         const state = loop.enabled ? (loop.running ? bold("running") : "on") : dim("paused");
         const when_ = loop.schedule === "never" ? "only when woken" : `${loop.schedule}${loop.tz !== "UTC" ? ` (${loop.tz})` : ""}`;
@@ -212,7 +212,7 @@ export async function loopCommand(api: Api, sub: string | undefined, rest: strin
     }
     case "drafts": {
       const { drafts } = await api.call<{ drafts: LoopDraftView[] }>("loopDrafts");
-      if (!drafts.length) console.log("No drafts. Ask Galahad in chat for something on a schedule, and his draft waits here for you.");
+      if (!drafts.length) console.log("No drafts. Ask your agent in chat for something on a schedule, and its draft waits here for you.");
       for (const draft of drafts) {
         console.log(`  ${bold(draft.id)}  ${bold(draft.name)}: ${draft.schedule}${draft.tz !== "UTC" ? ` (${draft.tz})` : ""}${draft.on ? ` on ${draft.on}` : ""}${draft.replaces ? dim(" (replaces your loop of that name)") : ""}`);
         console.log(`  ${" ".repeat(draft.id.length)}  ${dim(describeTask(draft.task))}`);
@@ -230,7 +230,7 @@ export async function loopCommand(api: Api, sub: string | undefined, rest: strin
     }
     case "add":
     case "set": {
-      // A draft Galahad made when you asked in chat: added as he drafted it (where it runs may still be given).
+      // A draft the primary made when you asked in chat: added as it drafted it (where it runs may still be given).
       if (sub === "add" && str(flags, "draft")) {
         const { drafts } = await api.call<{ drafts: LoopDraftView[] }>("loopDrafts");
         const draft = drafts.find((d) => d.id === str(flags, "draft"));
@@ -250,7 +250,7 @@ export async function loopCommand(api: Api, sub: string | undefined, rest: strin
         printSet(loop, hookSecret);
         return;
       }
-      if (!name) throw new Error(`usage: invincible loop ${sub} <name> (--every 30m | --cron "0 7 * * *" | --at "2026-11-25 09:00" | --in 2h | --wake …) [--tz Zone] [--on node] (--heartbeat | --quest "goal" | --call connector.tool [--arg k=v] | --tell)`);
+      if (!name) throw new Error(`usage: invincible loop ${sub} <name> (--every 30m | --cron "0 7 * * *" | --at "2026-11-25 09:00" | --in 2h | --wake …) [--tz Zone] [--on node] (--heartbeat | --run "goal" | --call connector.tool [--arg k=v] | --tell)`);
       const every = str(flags, "every");
       const cron = str(flags, "cron");
       const at = str(flags, "at");
@@ -263,7 +263,7 @@ export async function loopCommand(api: Api, sub: string | undefined, rest: strin
       // Something to wake it and no schedule: it runs only when woken.
       const schedule = every ? `every ${every}` : (cron ?? once ?? (sub === "add" && wakes?.length ? "never" : undefined));
       const task = await taskFrom(api, flags);
-      if (sub === "add" && (!schedule || !task)) throw new Error("a new loop needs --every, --cron, --at, --in or something to wake it (--wake), and --heartbeat, --quest, --call or --tell");
+      if (sub === "add" && (!schedule || !task)) throw new Error("a new loop needs --every, --cron, --at, --in or something to wake it (--wake), and --heartbeat, --run, --call or --tell");
       const cooldownMs = cooldownFrom(flags);
       const { loop, hookSecret } = await api.call<{ loop: LoopView; hookSecret?: string }>("setLoop", {
         name,
@@ -314,16 +314,16 @@ export async function loopCommand(api: Api, sub: string | undefined, rest: strin
   }
 }
 
-/** `invincible self-action [on|off]`: whether he fixes what's safe himself after each heartbeat, and what he fixed. */
+/** `invincible self-action [on|off]`: whether it fixes what's safe itself after each heartbeat, and what it fixed. */
 export async function selfActionCommand(api: Api, sub: string | undefined): Promise<void> {
   if (sub !== undefined && sub !== "on" && sub !== "off") throw new Error("usage: invincible self-action [on|off]");
   const view = sub ? await api.call<SelfActionView>("setSelfAction", { on: sub === "on" }) : await api.call<SelfActionView>("selfAction");
   console.log(`Self-action is ${bold(view.on ? "on" : "off")}${view.heartbeats.length ? dim(` (after each run of ${view.heartbeats.join(", ")})`) : dim(" (there's no heartbeat loop for it to follow)")}.`);
-  console.log(view.on ? "After each heartbeat Galahad fixes these himself, and asks you about everything else:" : "Galahad only reports; these would wait for you too:");
+  console.log(view.on ? "After each heartbeat your agent fixes these itself, and asks you about everything else:" : "Your agent only reports; these would wait for you too:");
   for (const a of view.allowlist) console.log(`  ${bold(a.kind.padEnd(16))} ${dim(`${a.class}: ${a.why}`)}`);
   if (view.recent.length) {
-    console.log("\nWhat he fixed lately:");
-    for (const e of view.recent.slice(0, 10)) console.log(`  ${dim(new Date(Number(e.hlc.slice(0, 15))).toLocaleString())} ${e.reason?.startsWith("Galahad's own fix didn't") ? "✗" : "✓"} ${e.detail ?? e.target}`);
+    console.log("\nWhat it fixed lately:");
+    for (const e of view.recent.slice(0, 10)) console.log(`  ${dim(new Date(Number(e.hlc.slice(0, 15))).toLocaleString())} ${e.reason?.startsWith("Your agent's own fix didn't") ? "✗" : "✓"} ${e.detail ?? e.target}`);
   }
 }
 
@@ -378,13 +378,13 @@ export async function connectorCommand(api: Api, sub: string | undefined, rest: 
       if (!requests.length) console.log("No agent is asking for a connector. When one needs a service it doesn't have, its request waits here.");
       for (const request of requests) {
         const pad = " ".repeat(request.id.length);
-        console.log(`  ${bold(request.id)}  ${bold(request.label ?? request.connector)}, ${request.access ? `${request.by} asks to use it` : `asked by ${request.by}`}`);
+        console.log(`  ${bold(request.id)}  ${bold(request.label ?? request.connector)}, ${request.access ? `${request.by} asks to use it` : `asked by ${request.by === "Your agent" ? "your agent" : request.by}`}`);
         console.log(`  ${pad}  ${dim(`why: ${request.why}`)}`);
         const how = request.access
           ? `let them: invincible connector allow ${request.connector} ${request.agent}`
           : request.label
             ? `add it: invincible connector add ${request.connector}`
-            : `not one Galahad ships: add it as an MCP server (invincible connector add ${request.connector} --mcp <url>) or from a manifest`;
+            : `not one your agent ships: add it as an MCP server (invincible connector add ${request.connector} --mcp <url>) or from a manifest`;
         console.log(`  ${pad}  ${dim(how)}`);
       }
       if (requests.length) console.log(dim("Dismiss one: invincible connector dismiss <id>"));
@@ -613,7 +613,7 @@ export async function actionCommand(api: Api, sub: string | undefined, rest: str
     console.log(`  ${bold(a.id)}  ${state.padEnd(8)} ${a.class.padEnd(7)} ${a.connector}.${a.tool}  ${dim(`asked by ${a.by}`)}`);
     if (a.state === "lapsed") console.log(dim(`      your approval expired ${new Date(a.sendBy!).toISOString()} before the node that asked could send it: never sent`));
     if (a.state === "approved" && a.sendBy !== null) console.log(dim(`      sent by ${new Date(a.sendBy).toISOString()} or never`));
-    const answered = a.order ? dim(`  · answered by your standing order "${a.order.label}"`) : a.self ? dim(`  · ${a.note ?? "Galahad approved it himself"}`) : "";
+    const answered = a.order ? dim(`  · answered by your standing order "${a.order.label}"`) : a.self ? dim(`  · ${a.note ?? "Your agent approved it itself"}`) : "";
     console.log(`      ${a.target}${a.why ? dim(`  · ${a.why}`) : ""}${answered}${a.receipt ? `\n      ${dim(a.receipt.slice(0, 200))}` : ""}`);
   }
   if (shown.some((a) => a.state === "waiting")) {
@@ -625,7 +625,7 @@ const ORDER_STATE: Record<OrderView["state"], string> = { active: "active", expi
 
 export function describeOrder(o: Pick<OrderView, "connector" | "tool" | "args" | "callers">): string {
   const args = Object.entries(o.args).map(([k, v]) => `${k}=${v}`).join(" ");
-  return `${o.connector}.${o.tool}${args ? ` ${args}` : ""}${o.callers ? ` · only ${o.callers.join(", ")}` : " · any of Galahad's agents"}`;
+  return `${o.connector}.${o.tool}${args ? ` ${args}` : ""}${o.callers ? ` · only ${o.callers.join(", ")}` : " · any of your agents"}`;
 }
 
 /** Standing orders: your answers given in advance, narrow and expiring. */
@@ -733,7 +733,7 @@ export async function statusLine(api: Api): Promise<void> {
     `${loops.length} loop${loops.length === 1 ? "" : "s"}`,
     beat ? `heartbeat ${MARK[beat.status]} ${new Date(beat.finished).toLocaleTimeString()}` : "no heartbeat yet",
     ...(needs.length ? needs.map(bold) : ["nothing needs you"]),
-    // His answers you haven't read: news, not something that needs you.
+    // Its answers you haven't read: news, not something that needs you.
     ...(unread ? [said(unread, "new answer", "new answers", "invincible chats")] : []),
   ];
   console.log(`\n  ${parts.join(" · ")}`);

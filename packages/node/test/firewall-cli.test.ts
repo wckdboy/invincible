@@ -115,7 +115,7 @@ describe("invincible firewall", () => {
     expect(await firewallCommand("remove", m.deps)).toBe(0);
     expect(m.ran).toEqual([
       ["/bin/launchctl", "bootout", "system/sh.invincible.firewall"],
-      ["/sbin/pfctl", "-a", "com.apple/galahad", "-F", "all"],
+      ["/sbin/pfctl", "-a", "com.apple/invincible", "-F", "all"],
     ]);
     expect(m.removed).toEqual([MAC_FIREWALL.plist, MAC_FIREWALL.helper, MAC_FIREWALL.status]);
   });

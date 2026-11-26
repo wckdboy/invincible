@@ -3,7 +3,7 @@ import { randomId, type Scope, sha256B64u } from "@invincible/core";
 
 /*
  * Arm tokens: how coding agents (Claude Code, OpenCode, Codex, Hermes, T3 Code)
- * talk to Galahad through the MCP server, with least privilege.
+ * talk to the primary through the MCP server, with least privilege.
  *
  * An arm may read and write memory (tagged as *agent*, never *owner*), run
  * sandboxes, read the ledger and ask for secrets. It can never touch the vault,
@@ -14,8 +14,8 @@ import { randomId, type Scope, sha256B64u } from "@invincible/core";
 export const ARM_DEFAULT_SCOPES: Scope[] = ["mind:read", "mind:write", "sandbox", "vault:read", "chat", "connect"];
 export const ARM_FORBIDDEN_SCOPES: Scope[] = ["vault:write", "fleet:admin", "gateway:mint", "brain:write"];
 
-/** Galahad himself, when his own chat runs tools: an agent's name no minted agent may take. */
-export const GALAHAD_ARM = "galahad";
+/** The primary itself, when its own chat runs tools: an agent's name no minted agent may take. */
+export const PRIMARY_ARM = "primary";
 export const ARM_LABEL = /^[a-z0-9][a-z0-9._-]{0,47}$/;
 
 export interface ArmInfo {
@@ -36,8 +36,8 @@ export class ArmTokens {
   /** Mint (or re-mint, replacing the old token) a credential for one arm. */
   mint(label: string, scopes: Scope[] = ARM_DEFAULT_SCOPES): { token: string; info: ArmInfo } {
     if (!ARM_LABEL.test(label)) throw new Error("arm labels are lowercase letters, digits, . _ - (max 48)");
-    if (label === GALAHAD_ARM) throw new Error(`"${GALAHAD_ARM}" is Galahad himself (his tools in chat); choose another name`);
-    if (label.startsWith("team.")) throw new Error(`"${label}" is reserved for Galahad's internal workers; choose another name`);
+    if (label === PRIMARY_ARM) throw new Error(`"${PRIMARY_ARM}" is your agent itself (its tools in chat); choose another name`);
+    if (label.startsWith("team.")) throw new Error(`"${label}" is reserved for Invincible's internal workers; choose another name`);
     const forbidden = scopes.filter((s) => ARM_FORBIDDEN_SCOPES.includes(s));
     if (forbidden.length) throw new Error(`arms may never hold: ${forbidden.join(", ")}`);
     const token = `arm_${randomId(32)}`;
@@ -65,8 +65,8 @@ export class ArmTokens {
     if (!/^arm_[A-Za-z0-9_-]{43}$/.test(token)) return null;
     const row = this.db.query<Row, [string]>("SELECT * FROM arm_tokens WHERE hash = ?").get(sha256B64u(token));
     // Tokens minted before workers existed must not acquire an internal worker's identity; nor one minted
-    // before his own name was reserved, Galahad's: what he alone may do is decided by that name.
-    if (row?.label.startsWith("team.") || row?.label === GALAHAD_ARM) return null;
+    // before its own name was reserved, the primary's: what it alone may do is decided by that name.
+    if (row?.label.startsWith("team.") || row?.label === PRIMARY_ARM) return null;
     return row ? toInfo(row) : null;
   }
 
@@ -93,5 +93,5 @@ interface Row {
 
 const toInfo = (row: Row): ArmInfo => ({ label: row.label, scopes: JSON.parse(row.scopes) as Scope[], createdAt: row.created_at });
 
-/** The quest every sandbox an arm creates belongs to: it may clean those up, nothing else. */
-export const armQuest = (label: string) => `arm.${label}`;
+/** The run every sandbox an arm creates belongs to: it may clean those up, nothing else. */
+export const armRun = (label: string) => `arm.${label}`;

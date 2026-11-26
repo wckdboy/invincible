@@ -73,7 +73,7 @@ describe("QR codes", () => {
   });
 
   test("drawn for a terminal (black on white, two rows a line) and as an SVG, each with the quiet zone", () => {
-    const code = encodeQr("galahad", "M");
+    const code = encodeQr("primary", "M");
     const lines = qrToTerminal(code).split("\n");
     expect(lines).toHaveLength(Math.ceil((code.size + 8) / 2));
     const plain = lines[0]!.replace(/\x1b\[[0-9;]*m/g, "");

@@ -15,7 +15,7 @@ export const IMAGES = {
 
 /** What a sandbox may reach through its gateway, as a chip says it: web search, or a provider's models. */
 export function gatewayUse(name: string): { kind: "search" | "models"; label: string; title: string } {
-  if (name === "search") return { kind: "search", label: "web search", title: "May search the web through Galahad's own search engine" };
+  if (name === "search") return { kind: "search", label: "web search", title: "May search the web through your agent's own search engine" };
   return { kind: "models", label: name, title: `May use ${name}'s models (your key stays in the vault)` };
 }
 
@@ -58,7 +58,7 @@ export function isolationPlan(choice: IsolationChoice, network: string, host: { 
   if (host.mac) {
     const note =
       network === "isolated"
-        ? `${host.name} is a Mac, which makes no sandbox with no network at all: placed by Galahad, it goes to a Linux host with Docker; asked of ${host.name}, it is refused.`
+        ? `${host.name} is a Mac, which makes no sandbox with no network at all: placed by your agent, it goes to a Linux host with Docker; asked of ${host.name}, it is refused.`
         : `On ${host.name}, a Mac, every sandbox is a VM of its own (Apple's container).`;
     return { isolation: "vm", ...(choice === "auto" ? {} : { send: choice }), vmAvailable: true, vmReason: null, note };
   }
@@ -76,7 +76,7 @@ export function isolationPlan(choice: IsolationChoice, network: string, host: { 
 }
 
 /**
- * Giving a knight's VM more, said as it will be: while it runs; or, its host a Mac (Apple's container can't grow a
+ * Giving an agent's VM more, said as it will be: while it runs; or, its host a Mac (Apple's container can't grow a
  * running VM), a pause in which what runs in it stops, and no bigger disk.
  */
 export function growWords(pauses: boolean): { intro: string; done: string; disk: boolean } {

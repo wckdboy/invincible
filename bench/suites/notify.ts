@@ -13,7 +13,7 @@ import { runNotifySim } from "../notify/sim.ts";
 
 export const suite: Suite = {
   name: "notify",
-  about: "a seeded week of asks and news on the owner's two devices: are asks answered in time, and how often does he buzz?",
+  about: "a seeded week of asks and news on the owner's two devices: are asks answered in time, and how often does it buzz?",
   headline: [
     "notify.week.asks-missed",
     "notify.week.ask-answer-p90",
@@ -35,12 +35,12 @@ export const suite: Suite = {
     ctx.quality("notify.week.ask-answer-p90", minutes.length ? quantile(minutes, 0.9) : 0, "min", "lower", { note: "from an ask to its answer, the 90th percentile, virtual minutes" });
     ctx.quality("notify.week.asks-unreachable-minutes", r.unreachableMinutes, "min", "lower", { note: "minutes in which an ask stood and no device of the owner's could be reached" });
     ctx.quality("notify.week.buzzes", r.buzzes, "buzzes", "lower", { note: `deliveries that sounded, of ${r.delivered} that arrived (tests and the day's-limit message aside)` });
-    ctx.quality("notify.week.buzzes-per-completed", r.completed ? r.buzzes / r.completed : 0, "", "lower", { note: `buzzes for each of ${r.completed} knights' tasks that ended verified (the north star's denominator)` });
+    ctx.quality("notify.week.buzzes-per-completed", r.completed ? r.buzzes / r.completed : 0, "", "lower", { note: `buzzes for each of ${r.completed} agents' tasks that ended verified (the north star's denominator)` });
     ctx.quality("notify.week.night-buzzes", r.nightBuzzes, "buzzes", "lower", { note: "buzzes between 22:00 and 07:00 in the owner's own time that weren't alerts" });
-    ctx.quality("notify.week.self-resolved-buzzes", r.selfResolvedBuzzes, "buzzes", "lower", { note: "buzzes about something that resolved without the owner (a CI failure a knight fixed, a node back online)" });
+    ctx.quality("notify.week.self-resolved-buzzes", r.selfResolvedBuzzes, "buzzes", "lower", { note: "buzzes about something that resolved without the owner (a CI failure an agent fixed, a node back online)" });
     ctx.quality("notify.week.summary-overwrote-ask", r.summaryOverwroteAsk, "", "lower", { note: "a notification that replaced one telling of an ask still waiting, without telling of it" });
     ctx.quality("notify.week.duplicates", r.duplicates, "", "lower", { note: "the same thing told as new again while it stood" });
-    ctx.quality("notify.week.model-buzzes", r.modelBuzzes, "buzzes", "lower", { note: "buzzes about what his own judgment raised (a look or an outcome ending by asking you)" });
+    ctx.quality("notify.week.model-buzzes", r.modelBuzzes, "buzzes", "lower", { note: "buzzes about what its own judgment raised (a look or an outcome ending by asking you)" });
     ctx.log(`a week: ${r.buzzes} buzzes of ${r.delivered} deliveries, ${r.answered} of ${r.asks} asks answered, ${r.missed} missed`);
 
     // What one look costs, with a day's worth standing: what a node pays every 15 seconds.
@@ -56,7 +56,7 @@ export const suite: Suite = {
       connectorRequests: () => [],
       turns: { running: () => [], view: () => ({ watchers: 0 }) },
       chats: { summary: () => null },
-      quests: { list: () => [], onChange: () => () => {} },
+      runs: { list: () => [], onChange: () => () => {} },
     };
     const device = { id: "c_bench-phone", name: "iPhone", kind: "client", scopes: ["mind:read", "chat", "vault:read", "brain:write"] };
     const mind = { activeDevice: (id: string) => (id === device.id ? device : null), devices: () => [device] } as unknown as LedgerStore;

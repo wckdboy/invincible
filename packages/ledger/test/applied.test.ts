@@ -20,7 +20,7 @@ function founded() {
   const b = newNodeIdentity();
   let now = Date.UTC(2026, 10, 25);
   const store = new LedgerStore(":memory:", new HlcClock(() => now));
-  foundFleet(store, a, { fleetName: "camelot", nodeName: "keep" });
+  foundFleet(store, a, { fleetName: "homelab", nodeName: "keep" });
   enrollDevice(store, a, { device: b.id, name: "tower", kind: "node", box: b64u(b.boxPublic) });
   return { a, b, store, tick: () => (now += 1_000) };
 }

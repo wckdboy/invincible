@@ -221,7 +221,7 @@ describe("chunking, per kind", () => {
       { role: "user", content: "And the bridge?" },
       { role: "assistant", content: "Stiffer." },
     ]);
-    expect(chunkChat(text)).toEqual(["You: How stiff is the beam?\n\nGalahad: About 2 kN/mm.", "You: And the bridge?\n\nGalahad: Stiffer."]);
+    expect(chunkChat(text)).toEqual(["You: How stiff is the beam?\n\nYour agent: About 2 kN/mm.", "You: And the bridge?\n\nYour agent: Stiffer."]);
     const nb = JSON.stringify({ cells: [{ cell_type: "markdown", source: ["# Rocket\n"] }, { cell_type: "code", source: "thrust = 10", outputs: [{ data: { "image/png": "iVBORw0KGgo" } }] }] });
     expect(notebookText(nb)).toBe("# Rocket\n\n# [code cell]\nthrust = 10");
     const csv = `t,x\n${Array.from({ length: 10_000 }, (_, i) => `${i},${i * 2}`).join("\n")}`;
@@ -273,6 +273,13 @@ describe("the guard", () => {
     for (const path of ["id_rsa", ".ssh/config", "secrets.json", "x/.env.local", "cookies.sqlite", "admin.token", "keys.json", "a.p12", ".invincible/keys.json"]) expect(refuseFile(path, enc("x"))).not.toBeNull();
     expect(refuseFile("model.stl", enc("-----BEGIN RSA PRIVATE KEY-----"))).toBe("it holds a private key");
     for (const path of ["model.stl", "id_rsa.pub", "report.md", "keyboard.py"]) expect(refuseFile(path, enc("ok"))).toBeNull();
+  });
+
+  // Renaming the system once left this rule naming a home folder no node has: anything in a node's home
+  // (~/.invincible), the ledger and the push key too, which no other rule names, is never stored.
+  test("anything inside a node's home folder, whatever its name", () => {
+    for (const path of [".invincible/ledger.db", "work/.invincible/push-key.json", ".invincible/config.json"]) expect(refuseFile(path, enc("x"))).not.toBeNull();
+    expect(refuseFile("invincible/notes.md", enc("ok"))).toBeNull();
   });
 });
 
@@ -336,7 +343,7 @@ describe("hybrid search: words and meaning, fused", () => {
       ["b", "teaching", "Cantilever deflection", "A beam fixed at one end deflects PL^3/3EI under a point load at its tip.", "owner"],
       ["c", "idea", "Truss for the stream crossing", "A small truss span over the stream by the lab, timber girders.", "owner"],
       ["d", "artifact", "Rocket thrust curve", "The booster's thrust peaked at 1.2 kN two seconds after launch.", "agent"],
-      ["e", "chat", "Sourdough", "You: How long should the loaf proof?\n\nGalahad: Overnight, in the fridge.", "agent"],
+      ["e", "chat", "Sourdough", "You: How long should the loaf proof?\n\nYour agent: Overnight, in the fridge.", "agent"],
       ["f", "teaching", "Web page on bridges", "Bridges: suspension, arch and beam bridges compared. Steel girders.", "untrusted"],
     ] as const;
     let t = 1_700_000_000_000;

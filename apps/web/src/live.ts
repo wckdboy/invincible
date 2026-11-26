@@ -9,7 +9,7 @@ import { signal } from "./ui/signal.ts";
 
 /*
  * What the shell shows everywhere: fleet health, the inbox (pairing requests, secret requests, actions waiting for your
- * answer, the heartbeat's notices, …) and the team (the knights, their rooms and work: the roster's rows and every
+ * answer, the heartbeat's notices, …) and the team (the agents, their rooms and work: the roster's rows and every
  * timeline read the one snapshot). The node's live stream (lib/live-link.ts, core's live.ts) says which of them changed,
  * as it changes, and only that is read again; nothing is asked for while nothing changes. While the stream is down (the
  * node away or restarting, an older node without it), each is asked for every FALLBACK_MS instead, and the stream is
@@ -73,7 +73,7 @@ export function startLive(api: Api, can: (scope: AnyScope) => boolean, events: L
   const connectorRequests = signal<ConnectorRequestView[]>([]);
   const aboutYou = signal<MemoryView[]>([]);
   const actions = signal<ActionView[]>([]);
-  /** His asks to use a Mac itself, and his sessions there (core's screen.ts). */
+  /** Its asks to use a Mac itself, and its sessions there (core's screen.ts). */
   const screenSessions = signal<ScreenSessionView[]>([]);
   /** MCP servers' questions to you, mid-call (core's questions.ts). */
   const questions = signal<QuestionView[]>([]);
@@ -194,7 +194,7 @@ export function startLive(api: Api, can: (scope: AnyScope) => boolean, events: L
     }
   }
 
-  /** The facts about you he proposed, waiting for you (what you kept is on the Memory page). */
+  /** The facts about you it proposed, waiting for you (what you kept is on the Memory page). */
   async function refreshAboutYou(): Promise<void> {
     if (!can("mind:read")) return;
     try {
@@ -319,7 +319,7 @@ export function startLive(api: Api, can: (scope: AnyScope) => boolean, events: L
 
   // The team, while something shows it: read again when it changes (or, while the stream is down, as often as the
   // shell says), and at once whenever the shell asks for another pace (another place came on screen). That first read
-  // is asked for here and now, ahead of anything the stream's coming up reads: the Roundtable waits on it.
+  // is asked for here and now, ahead of anything the stream's coming up reads: the agents waits on it.
   let teamEvery: number | null = null;
   let unfollowTeam: (() => void) | null = null;
   function watchTeam(everyMs: number | null = teamEvery): void {

@@ -51,7 +51,7 @@ async function api<T>(name: RouteName, input?: unknown): Promise<T> {
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   // The node reads where the helper is when it starts: here, the one above, as a server's would be at its usual place.

@@ -3,9 +3,9 @@ import type { IconName } from "../ui/icons.ts";
 import { teamHash, teamLocation, type TeamLocation } from "./team.ts";
 
 /*
- * The app's places, as one list (pure: no DOM; the shell gives each its view). Galahad comes first everywhere (your
- * words, 26 November 2026: "agent first (Galahad)", the knights "project/tasks/coding t3code style"): on a phone the app
- * opens on Home (his orb, what needs you, the work, his message box), on a wide screen on his own conversation beside the
+ * The app's places, as one list (pure: no DOM; the shell gives each its view). The primary comes first everywhere (your
+ * words, 26 November 2026: "agent first ([the primary])", the agents "project/tasks/coding t3code style"): on a phone the app
+ * opens on Home (its orb, what needs you, the work, its message box), on a wide screen on its own conversation beside the
  * work. Each task has an address of its own (#/task/<id>), opened from its row. Every other place is reached from the
  * index under "…" (a sheet; More is the same index as a page), and from the command palette. An address (`#/fleet`) is a
  * contract: a place is never renamed or dropped here (one that went keeps its address as a second name of another), and
@@ -32,37 +32,37 @@ interface PlaceSpec {
 }
 
 const LIST = [
-  // Home: a phone's first screen, and Galahad's place (your words, 26 November 2026: "agent first (Galahad)"): his orb,
-  // what needs you with its answers in place, the work by attention, and his message box. #/work (25 November 2026: "per
+  // Home: a phone's first screen, and the primary's place (your words, 26 November 2026: "agent first ([the primary])"): its orb,
+  // what needs you with its answers in place, the work by attention, and its message box. #/work (25 November 2026: "per
   // task/per project like t3code") is its second address: the work is here now, and in a wide screen's sidebar.
-  { id: "home", label: "Home", icon: "layers", under: "primary", scope: "chat", key: "j", keywords: ["home", "work", "tasks", "projects", "threads", "repositories", "under way", "needs you", "jobs", "code", "today"], about: "Galahad, what needs you, and the work" },
-  // Galahad himself, the one you talk to (your word, 23 November 2026): his address stays #/chat, and "chat" still finds him.
-  { id: "chat", label: "Galahad", icon: "chat", under: "primary", scope: "chat", key: "c", keywords: ["galahad", "chat", "counsel", "ask", "talk", "history", "conversations", "orb"], about: "" },
-  // (Its address stays #/team, and #/roundtable is the same page. Its older names still find it.)
-  { id: "team", label: "Roundtable", icon: "roundtable", under: "primary", scope: "chat", key: "h", keywords: ["knights", "roundtable", "give", "rooms", "messages", "tasks", "coordination", "team", "hermes"], about: "The knights: who works on what, their rooms" },
+  { id: "home", label: "Home", icon: "layers", under: "primary", scope: "chat", key: "j", keywords: ["home", "work", "tasks", "projects", "threads", "repositories", "under way", "needs you", "jobs", "code", "today"], about: "Your agent, what needs you, and the work" },
+  // The primary itself, the one you talk to (your word, 23 November 2026): its address stays #/chat, and "chat" still finds it.
+  { id: "chat", label: "Your agent", icon: "chat", under: "primary", scope: "chat", key: "c", keywords: ["primary", "chat", "counsel", "ask", "talk", "history", "conversations", "orb"], about: "" },
+  // (Its address stays #/team, and #/agents is the same page. Its older names still find it.)
+  { id: "team", label: "Agents", icon: "agents", under: "primary", scope: "chat", key: "h", keywords: ["agents", "give", "rooms", "messages", "tasks", "coordination", "team", "hermes"], about: "The agents: who works on what, their rooms" },
   // A task's own thread (#/task/<id>): its brief, its work folded, what proves it, and its details. Opened from its row;
   // #/task alone opens the one that needs you most.
   { id: "task", label: "Task", icon: "layers", under: "thread", scope: "chat", key: "", keywords: [], about: "" },
   // (What needs you shows on the row it belongs to; the Inbox is where all of it is answered.)
-  { id: "inbox", label: "Inbox", icon: "inbox", under: "work", scope: null, key: "i", keywords: ["approvals", "pairing", "requests", "actions", "notices", "oath"], about: "Everything that needs you, to answer" },
+  { id: "inbox", label: "Inbox", icon: "inbox", under: "work", scope: null, key: "i", keywords: ["approvals", "pairing", "requests", "actions", "notices", "policy"], about: "Everything that needs you, to answer" },
   { id: "more", label: "More", icon: "more", under: null, scope: null, key: ".", keywords: ["everything", "all", "index", "menu"], about: "" },
   { id: "overview", label: "Overview", icon: "overview", under: "work", scope: null, key: "o", keywords: ["dashboard", "health", "doctor"], about: "Health, what's in hand and recent activity" },
   { id: "projects", label: "Projects", icon: "folder", under: "work", scope: "mind:read", key: "p", keywords: ["workspaces", "instructions", "repositories", "folders"], about: "Instructions and chats, by project" },
-  { id: "loops", label: "Loops", icon: "repeat", under: "work", scope: "mind:read", key: "r", keywords: ["schedule", "cron", "heartbeat", "routine", "recurring", "tripwires", "rules", "hooks", "guardrails"], about: "What he does on a schedule, and your tripwires" },
-  { id: "activity", label: "Activity", icon: "activity", under: "work", scope: "mind:read", key: "a", keywords: ["ledger", "log", "audit", "history"], about: "Everything he did, and why it was allowed" },
-  { id: "artifacts", label: "Artifacts", icon: "archive", under: "work", scope: "mind:read", key: "w", keywords: ["work", "results", "files", "outputs", "kept", "reports", "plots"], about: "Files his work kept" },
-  { id: "trials", label: "Trials", icon: "gauge", under: "work", scope: "mind:read", key: "t", keywords: ["benchmarks", "evals", "galahad index", "score", "tests", "progress"], about: "Whether he is getting better" },
+  { id: "loops", label: "Loops", icon: "repeat", under: "work", scope: "mind:read", key: "r", keywords: ["schedule", "cron", "heartbeat", "routine", "recurring", "tripwires", "rules", "hooks", "guardrails"], about: "What it does on a schedule, and your tripwires" },
+  { id: "activity", label: "Activity", icon: "activity", under: "work", scope: "mind:read", key: "a", keywords: ["ledger", "log", "audit", "history"], about: "Everything it did, and why it was allowed" },
+  { id: "artifacts", label: "Artifacts", icon: "archive", under: "work", scope: "mind:read", key: "w", keywords: ["work", "results", "files", "outputs", "kept", "reports", "plots"], about: "Files its work kept" },
+  { id: "evals", label: "Evals", icon: "gauge", under: "work", scope: "mind:read", key: "t", keywords: ["benchmarks", "evals", "eval index", "score", "tests", "progress"], about: "Whether it is getting better" },
   { id: "memory", label: "Memory", icon: "memory", under: "knowledge", scope: "mind:read", key: "m", keywords: ["remember", "recall", "mind", "search", "find"], about: "What the fleet remembers" },
-  { id: "skills", label: "Skills", icon: "scroll", under: "knowledge", scope: "mind:read", key: "u", keywords: ["learn", "learned", "how", "notes", "playbook", "procedures", "know-how", "approve", "proposed", "library"], about: "What he learned to do, for you to approve" },
+  { id: "skills", label: "Skills", icon: "scroll", under: "knowledge", scope: "mind:read", key: "u", keywords: ["learn", "learned", "how", "notes", "playbook", "procedures", "know-how", "approve", "proposed", "library"], about: "What it learned to do, for you to approve" },
   { id: "archive", label: "Archive", icon: "library", under: "knowledge", scope: "mind:read", key: "k", keywords: ["kept", "forever", "ideas", "lessons", "models", "teachings", "semantic", "search", "vector", "history"], about: "Everything kept for good, searchable" },
-  { id: "findings", label: "Findings", icon: "flask", under: "knowledge", scope: "mind:read", key: "e", keywords: ["investigations", "experiments", "hypotheses", "science", "conclusions", "predictions"], about: "What his investigations concluded" },
+  { id: "findings", label: "Findings", icon: "flask", under: "knowledge", scope: "mind:read", key: "e", keywords: ["investigations", "experiments", "hypotheses", "science", "conclusions", "predictions"], about: "What its investigations concluded" },
   { id: "fleet", label: "Fleet", icon: "fleet", under: "machines", scope: "mind:read", key: "f", keywords: ["devices", "nodes", "machines", "compute", "agents"], about: "Your machines and devices" },
   // Owner devices see Sandboxes even before they hold the new scope, so the feature can be found;
   // the page explains what's missing instead of offering actions that would be refused.
   { id: "sandboxes", label: "Sandboxes", icon: "sandbox", under: "machines", scope: "sandbox", alsoFor: "fleet:admin", key: "s", keywords: ["containers", "vm", "console"], about: "Isolated places where work runs" },
   { id: "vault", label: "Vault", icon: "vault", under: "keys", scope: "vault:read", key: "v", keywords: ["keys", "secrets", "api key"], about: "Sealed keys; no model ever sees one" },
   { id: "models", label: "Models", icon: "models", under: "keys", scope: "mind:read", key: "l", keywords: ["providers", "roster", "llm"], about: "Who answers: roles, models, providers" },
-  { id: "connectors", label: "Connectors", icon: "plug", under: "keys", scope: "mind:read", key: "n", keywords: ["github", "cloudflare", "home assistant", "integrations", "services", "tools", "mcp", "standing orders", "install"], about: "Services and MCP servers he may call" },
+  { id: "connectors", label: "Connectors", icon: "plug", under: "keys", scope: "mind:read", key: "n", keywords: ["github", "cloudflare", "home assistant", "integrations", "services", "tools", "mcp", "standing orders", "install"], about: "Services and MCP servers it may call" },
   { id: "settings", label: "Settings", icon: "settings", under: "device", scope: null, key: ",", keywords: ["preferences", "theme", "device", "notifications"], about: "Theme, notifications, this device" },
 ] as const satisfies readonly PlaceSpec[];
 
@@ -73,9 +73,9 @@ export const PLACES: readonly Place[] = LIST;
 /** The places a device may see: its scopes decide. */
 export const placesFor = (can: (scope: AnyScope) => boolean): Place[] => PLACES.filter((place) => place.scope === null || can(place.scope) || (place.alsoFor !== undefined && can(place.alsoFor)));
 
-/** A place's second address: the Roundtable is #/team, and #/roundtable as well; the work by project (25 November 2026)
+/** A place's second address: the agents are at #/team, and #/agents as well; the work by project (25 November 2026)
  * is Home's now, so #/work opens Home. */
-export const ALIASES: Readonly<Record<string, Route>> = { roundtable: "team", work: "home" };
+export const ALIASES: Readonly<Record<string, Route>> = { agents: "team", work: "home" };
 
 /** The place an address is for, among those a device may see (null: none of them). */
 export function routeOf(hash: string, visible: Place[]): Route | null {
@@ -94,7 +94,7 @@ export function taskOf(hash: string): string | null {
   return id && TASK_ID.test(id) ? id : null;
 }
 
-/** Where a place is, with what it opens: a room (and its tab, and a task to bring into view) at the Roundtable; a task's
+/** Where a place is, with what it opens: a room (and its tab, and a task to bring into view) among the agents; a task's
  * own thread; any other place by its name. */
 export function hashOf(route: Route, opts: TeamLocation = {}): string {
   if (route === "team") return teamHash(opts);
@@ -110,13 +110,13 @@ export function landingOf(route: Route, hash: string): string {
   return `#/${route}`;
 }
 
-/** The places at the top of the app: Home, Galahad's own conversation, and the Roundtable. */
+/** The places at the top of the app: Home, the primary's own conversation, and the agents. */
 export const primaryOf = (visible: Place[]): Place[] => visible.filter((place) => place.under === "primary");
 
 /**
- * The place the app opens on, and falls back to: on a phone, Home (Galahad's place, with what needs you and the work:
- * your words, 26 November 2026, "agent first"); on a wide screen, his own conversation, beside the work in the sidebar
- * (23 November 2026: he is the one you talk to). A device that may not chat opens on its Inbox.
+ * The place the app opens on, and falls back to: on a phone, Home (The primary's place, with what needs you and the work:
+ * your words, 26 November 2026, "agent first"); on a wide screen, its own conversation, beside the work in the sidebar
+ * (23 November 2026: it is the one you talk to). A device that may not chat opens on its Inbox.
  */
 export function homeOf(visible: Place[], screen: { narrow: boolean }): Route {
   const want: Route = screen.narrow ? "home" : "chat";
@@ -132,8 +132,8 @@ export function moreIndex(visible: Place[]): { heading: string; places: Place[] 
 
 /**
  * The index under "…" (a sheet on every screen; the rail and the phone's tab bar went, 26 November 2026): the
- * Roundtable first, where the knights and their rooms are, then More's index. Everything this device may see but Home,
- * Galahad and a task's own thread, which are always a tap away.
+ * Agents first, where the agents and their rooms are, then More's index. Everything this device may see but Home,
+ * the primary and a task's own thread, which are always a tap away.
  */
 export function placesIndex(visible: Place[]): { heading: string | null; places: Place[] }[] {
   const top = visible.filter((place) => place.id === "team");

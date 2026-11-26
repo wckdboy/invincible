@@ -36,8 +36,8 @@ export interface RoleSpec {
   description: string;
   /** A role you made: yours to remove (absent from an older node). */
   custom?: boolean;
-  /** A knight may work on it: the planner, engineer and swift roles and yours (absent from an older node). */
-  forKnights?: boolean;
+  /** An agent may work on it: the planner, engineer and swift roles and yours (absent from an older node). */
+  forAgents?: boolean;
   /** How hard its models think: `auto`, by the step, or a level you pinned it to (absent from an older node). */
   effort?: "auto" | "low" | "medium" | "high" | "xhigh" | "max";
 }
@@ -54,7 +54,7 @@ export interface LedgerEntry {
   target: string;
   verdict: Verdict;
   reason: string | null;
-  quest: string | null;
+  run: string | null;
   detail: string | null;
 }
 

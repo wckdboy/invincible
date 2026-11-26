@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage, ExecResult } from "@invincible/core";
 import { attemptInstructions, chooseAttempt, evidenceCollector, parsePick, pickPrompt, rotated, runEffort, type EffortAttempt, type EffortEvent } from "../src/effort.ts";
-import { type QuestOutcome, type QuestRole, runQuest } from "../src/quest.ts";
+import { type RunOutcome, type RunRole, runLoop } from "../src/run.ts";
 
 /*
- * Effort: several independent attempts at one quest, each reviewed as any quest is,
+ * Effort: several independent attempts at one run, each reviewed as any run is,
  * then the independent reviewer takes the best on the evidence alone. The honesty
- * rules of quests don't change: the outcome is the taken attempt's own.
+ * rules of runs don't change: the outcome is the taken attempt's own.
  */
 
-const outcome = (status: QuestOutcome["status"], summary = "did it"): QuestOutcome => ({ status, summary, steps: 3, revisions: 0, plan: "1. Do it." });
-const attempt = (index: number, status: QuestOutcome["status"], evidence = `evidence of ${index}`): EffortAttempt<string> => ({ index, outcome: outcome(status, `summary ${index}`), evidence, handle: `sandbox-${index}` });
+const outcome = (status: RunOutcome["status"], summary = "did it"): RunOutcome => ({ status, summary, steps: 3, revisions: 0, plan: "1. Do it." });
+const attempt = (index: number, status: RunOutcome["status"], evidence = `evidence of ${index}`): EffortAttempt<string> => ({ index, outcome: outcome(status, `summary ${index}`), evidence, handle: `sandbox-${index}` });
 
 describe("reading the reviewer's pick", () => {
   test("PICK and a letter on the first line; anything else isn't a pick", () => {
@@ -104,7 +104,7 @@ describe("running attempts in parallel", () => {
     expect(events.at(-1)).toMatchObject({ type: "picked", index: 3 });
   });
 
-  test("an attempt that crashes is one attempt lost, not the quest; all crashing is an error", async () => {
+  test("an attempt that crashes is one attempt lost, not the run; all crashing is an error", async () => {
     const one = await runEffort<string>(
       { goal: "g", attempts: 2 },
       {
@@ -142,7 +142,7 @@ describe("running attempts in parallel", () => {
     expect(result.outcome.status).toBe("stopped");
   });
 
-  test("one attempt is just the quest: no pick, no extra call", async () => {
+  test("one attempt is just the run: no pick, no extra call", async () => {
     const result = await runEffort<string>(
       { goal: "g", attempts: 1 },
       {
@@ -157,7 +157,7 @@ describe("running attempts in parallel", () => {
 });
 
 describe("what makes attempts differ", () => {
-  test("the first attempt is the plain quest; the others are told they aren't alone", () => {
+  test("the first attempt is the plain run; the others are told they aren't alone", () => {
     expect(attemptInstructions(1, 3)).toBe("");
     expect(attemptInstructions(2, 3)).toMatch(/independently/);
     expect(attemptInstructions(1, 1)).toBe("");
@@ -175,13 +175,13 @@ describe("what makes attempts differ", () => {
 describe("an attempt's evidence, collected as it works", () => {
   test("what it ran, the exit codes and excerpts; then what the evidence commands print", async () => {
     const collect = evidenceCollector();
-    const turns: Partial<Record<QuestRole, number>> = {};
+    const turns: Partial<Record<RunRole, number>> = {};
     const outputs: Partial<ExecResult>[] = [{ stdout: "wrote a.txt\n" }, { exitCode: 1, stderr: "assertion failed\n" }];
-    const result = await runQuest(
+    const result = await runLoop(
       { goal: "make it so", environment: "a test sandbox" },
       {
-        ask: async (role: QuestRole) => {
-          const script: Record<QuestRole, string[]> = { planner: ["1. Do it."], engineer: ["One.\n```sh\necho hi > a.txt\n```", "Two.\n```sh\nbun test\n```", "DONE\nIt works."], reviewer: ["PASS"] };
+        ask: async (role: RunRole) => {
+          const script: Record<RunRole, string[]> = { planner: ["1. Do it."], engineer: ["One.\n```sh\necho hi > a.txt\n```", "Two.\n```sh\nbun test\n```", "DONE\nIt works."], reviewer: ["PASS"] };
           turns[role] = (turns[role] ?? 0) + 1;
           return { text: script[role][turns[role]! - 1]!, model: `test/${role}` };
         },

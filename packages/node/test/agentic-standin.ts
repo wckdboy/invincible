@@ -4,11 +4,11 @@ import { dirname, join } from "node:path";
 import { GRADE, MARK, REPO, RESULT_FILE, type Solution, treeOutput, unpackPayload } from "@invincible/models";
 
 /*
- * Stand-in sandboxes for agentic trials: each is a set of files in memory, and answers
- * the commands the trial runner sends through a sandbox's exec (putting a repository
+ * Stand-in sandboxes for agentic evals: each is a set of files in memory, and answers
+ * the commands the eval runner sends through a sandbox's exec (putting a repository
  * in, taking a tree out) as a real one would. Two kinds of command really run, with
  * bun, in a temporary directory holding that sandbox's files: the hidden checks, and
- * the repository's own gates (`cd /work/repo && bun …`). So a trial here is graded by
+ * the repository's own gates (`cd /work/repo && bun …`). So an eval here is graded by
  * the same hidden tests as on a server; only the sandbox is a stand-in.
  *
  * An engineer's own commands do what the test says (`onCommand`): lay a solution over
@@ -100,7 +100,7 @@ export class StandInSandboxes {
       else if (kind === "check") {
         const instead = this.onCheck?.(box, rest[0]!);
         if (instead) return instead;
-        return this.bun(box, GRADE.root, ".", [GRADE.script, GRADE.repo, GRADE.result, GRADE.quest, rest[0]!, rest[1]!]);
+        return this.bun(box, GRADE.root, ".", [GRADE.script, GRADE.repo, GRADE.result, GRADE.run, rest[0]!, rest[1]!]);
       }
       return { exitCode: 0, stdout: "" };
     }

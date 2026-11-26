@@ -7,7 +7,7 @@ const shape = (thread: Thread) => thread.turns.map((t) => [t.role, t.content, t.
 const feed = (thread: Thread, events: ChatStreamEvent[], now = 1000) => events.map((e) => applyEvent(thread, e, now));
 const turnEvent = (over: Partial<Extract<ChatStreamEvent, { type: "turn" }>> = {}): ChatStreamEvent => ({ type: "turn", id: "tn_x", conversation: "cv_x", answer: 2, role: "planner", startedAt: 500, deadline: 500 + 30 * 60_000, replay: false, ...over });
 
-describe("what sending does while he works", () => {
+describe("what sending does while it works", () => {
   test("nothing running: it sends, whatever the keys", () => {
     for (const enter of ["steer", "queue"] as const) for (const modifier of [false, true]) expect(composerAction({ busy: false, enter, modifier, canQueue: true })).toBe("send");
   });
@@ -26,9 +26,9 @@ describe("what sending does while he works", () => {
 
   test("the hint says what the keys do now", () => {
     expect(composerHint({ busy: false, enter: "steer", canQueue: true, coarse: false, mac: false })).toBe("Enter to send · Shift+Enter for a new line");
-    expect(composerHint({ busy: true, enter: "steer", canQueue: true, coarse: false, mac: false })).toBe("Enter steers him now · Ctrl+Enter queues it · Esc stops him");
-    expect(composerHint({ busy: true, enter: "queue", canQueue: true, coarse: false, mac: true })).toBe("Enter queues it · ⌘+Enter steers him now · Esc stops him");
-    expect(composerHint({ busy: true, enter: "queue", canQueue: false, coarse: false, mac: false })).toBe("Enter steers him now · Esc stops him");
+    expect(composerHint({ busy: true, enter: "steer", canQueue: true, coarse: false, mac: false })).toBe("Enter steers it now · Ctrl+Enter queues it · Esc stops it");
+    expect(composerHint({ busy: true, enter: "queue", canQueue: true, coarse: false, mac: true })).toBe("Enter queues it · ⌘+Enter steers it now · Esc stops it");
+    expect(composerHint({ busy: true, enter: "queue", canQueue: false, coarse: false, mac: false })).toBe("Enter steers it now · Esc stops it");
     expect(composerHint({ busy: false, enter: "steer", canQueue: true, coarse: true, mac: false })).toBe("");
     expect(composerHint({ busy: true, enter: "steer", canQueue: true, coarse: true, mac: false })).toBe("");
   });
@@ -111,11 +111,11 @@ describe("a turn's stream, as the thread on screen", () => {
       ["user", "Never mind. The weather?", "done"],
       ["assistant", "Dry.", "done"],
     ]);
-    expect(thread.turns[1]!.steps.at(-1)).toMatchObject({ text: "Your message reached him here", state: "done" });
+    expect(thread.turns[1]!.steps.at(-1)).toMatchObject({ text: "Your message reached it here", state: "done" });
     expect(thread.turns[3]!.model).toBe("a/m");
   });
 
-  test("a steer before he'd said or done anything leaves no empty answer", () => {
+  test("a steer before it'd said or done anything leaves no empty answer", () => {
     const thread = fresh();
     beginTurn(thread, "Plan my week.", "planner", 0);
     feed(thread, [{ type: "model", ref: "a/m" }, { type: "steer", text: "Only Monday." }, { type: "steer", text: "Briefly." }, { type: "text", text: "Rest." }]);
@@ -224,7 +224,7 @@ describe("attaching to a turn already under way", () => {
     const thread = fresh();
     beginTurn(thread, "q", "planner", 0);
     feed(thread, [{ type: "text", text: "Half" }]);
-    expect(failTurn(thread, "The node restarted while he was answering.", 7)).toMatchObject({ status: "error", content: "Half", error: "The node restarted while he was answering." });
+    expect(failTurn(thread, "The node restarted while it was answering.", 7)).toMatchObject({ status: "error", content: "Half", error: "The node restarted while it was answering." });
     expect(thread.target).toBeNull();
   });
 });
@@ -239,7 +239,7 @@ describe("a kept chat that changed elsewhere", () => {
     expect(keptDiffers(shown(chat), chat)).toBe(false);
   });
 
-  test("another device asked and was answered, retried, or stopped him: shown again", () => {
+  test("another device asked and was answered, retried, or stopped it: shown again", () => {
     expect(keptDiffers(shown(chat), [...chat, kept(3, "user", "And Saturday?"), kept(4, "assistant", "Saturday too.")])).toBe(true);
     expect(keptDiffers(shown(chat), [chat[0]!, kept(5, "assistant", "Friday it is.")])).toBe(true);
     expect(keptDiffers(shown([chat[0]!, kept(2, "assistant", "Not", "streaming")]), [chat[0]!, kept(2, "assistant", "Noted: Friday.", "stopped")])).toBe(true);
@@ -296,15 +296,15 @@ describe("small words", () => {
   });
 });
 
-describe("keys he asked for in a chat", () => {
+describe("keys it asked for in a chat", () => {
   const turn = (steps: Step[]): Turn => ({ id: 1, role: "assistant", content: "", steps, status: "done", fallbacks: 0, startedAt: 0 });
   const asked = (name: string, extra = ""): Step => ({ icon: "zap", text: "Ask the user for a credential", detail: `{"name":"${name}","purpose":"To open the pull request"${extra}} → Requested "${name}".`, state: "done", tool: `call_${name}`, toolName: "request_secret" });
 
-  test("each key named by his request_secret steps, once, in the order he asked", () => {
+  test("each key named by its request_secret steps, once, in the order it asked", () => {
     expect(keysAskedIn([turn([asked("github-token")]), turn([asked("deepseek"), asked("github-token")])])).toEqual(["github-token", "deepseek"]);
   });
 
-  test("only his requests' names: another tool's arguments, or words that only look like one, aren't keys he asked for", () => {
+  test("only its requests' names: another tool's arguments, or words that only look like one, aren't keys it asked for", () => {
     const other: Step = { icon: "zap", text: "Recall", detail: '{"name":"github-token"}', state: "done", tool: "call_x", toolName: "recall" };
     expect(keysAskedIn([turn([other])])).toEqual([]);
     expect(keysAskedIn([turn([{ ...asked("ok"), detail: '{"purpose":"a \\"name\\":\\"trick\\""}' }])])).toEqual([]);
@@ -312,15 +312,15 @@ describe("keys he asked for in a chat", () => {
   });
 });
 
-describe("connectors he asked for in a chat", () => {
+describe("connectors it asked for in a chat", () => {
   const turn = (steps: Step[]): Turn => ({ id: 1, role: "assistant", content: "", steps, status: "done", fallbacks: 0, startedAt: 0 });
   const asked = (connector: string): Step => ({ icon: "plug", text: "Ask the user for a connector", detail: `{"connector":"${connector}","why":"To read the invoices"} → Asked for ${connector}.`, state: "done", tool: `call_${connector}`, toolName: "connector_request" });
 
-  test("each connector named by his connector_request steps, once, in the order he asked", () => {
+  test("each connector named by its connector_request steps, once, in the order it asked", () => {
     expect(connectorsAskedIn([turn([asked("gmail")]), turn([asked("slack"), asked("gmail")])])).toEqual(["gmail", "slack"]);
   });
 
-  test("only his requests' connectors: a call to one, or a name no connector can have, isn't a request", () => {
+  test("only its requests' connectors: a call to one, or a name no connector can have, isn't a request", () => {
     const call: Step = { icon: "plug", text: "Call a connector tool", detail: '{"connector":"github","tool":"issues"}', state: "done", tool: "call_x", toolName: "connector_call" };
     expect(connectorsAskedIn([turn([call])])).toEqual([]);
     expect(connectorsAskedIn([turn([asked("Not A Connector")])])).toEqual([]);

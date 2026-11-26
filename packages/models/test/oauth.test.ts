@@ -12,7 +12,7 @@ import { accessToken, authFor, forgetAccess, keyState, readKeep, sendConnectorRe
 function vault() {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   return new Vault(store, identity);
 }
 
@@ -23,7 +23,7 @@ const mail = (provider: "google" | "microsoft" = "google") =>
     origin: "https://mail.example.test",
     auth: { secret: "mailbox", scheme: "oauth", oauth: { provider, scopes: ["mail.read", "offline_access"] } },
     tools: { inbox: { description: "Your inbox.", method: "GET", path: "/inbox", class: "read" } },
-    access: { only: "galahad", allowed: [] },
+    access: { only: "primary", allowed: [] },
     private: true,
   });
 

@@ -13,9 +13,9 @@ const cache = {
   addAll: async () => {},
 };
 const pages: Record<string, () => Response> = {
-  "/": () => new Response("<!doctype html><title>Galahad</title>", { headers: { "content-type": "text/html; charset=utf-8" } }),
-  "/index.html": () => new Response("<!doctype html><title>Galahad</title>", { headers: { "content-type": "text/html; charset=utf-8" } }),
-  "/bank/callback": () => new Response("<!doctype html><title>Galahad</title>", { headers: { "content-type": "text/html; charset=utf-8" } }),
+  "/": () => new Response("<!doctype html><title>Invincible</title>", { headers: { "content-type": "text/html; charset=utf-8" } }),
+  "/index.html": () => new Response("<!doctype html><title>Invincible</title>", { headers: { "content-type": "text/html; charset=utf-8" } }),
+  "/oauth/callback": () => new Response("<!doctype html><title>Invincible</title>", { headers: { "content-type": "text/html; charset=utf-8" } }),
   "/sw.js": () => new Response("self.addEventListener('fetch', () => {})", { headers: { "content-type": "text/javascript; charset=utf-8" } }),
   "/manifest.webmanifest": () => new Response("{}", { headers: { "content-type": "application/manifest+json" } }),
 };
@@ -80,13 +80,13 @@ async function navigate(path: string): Promise<Response> {
 describe("opening the app offline", () => {
   test("the app's own page is what's kept, and only it", async () => {
     expect((await navigate("/")).status).toBe(200);
-    expect(await stored.get("/")!.clone().text()).toContain("<title>Galahad</title>");
-    // A script, the manifest or the bank's return opened in a tab is shown, never kept as the app.
-    for (const path of ["/sw.js", "/manifest.webmanifest", "/bank/callback?code=fake-code&state=fake-state"]) {
+    expect(await stored.get("/")!.clone().text()).toContain("<title>Invincible</title>");
+    // A script, the manifest or a sign-in's return opened in a tab is shown, never kept as the app.
+    for (const path of ["/sw.js", "/manifest.webmanifest", "/oauth/callback?code=fake-code&state=fake-state"]) {
       stored.set("/", pages["/"]!());
       expect((await navigate(path)).status).toBe(200);
       const kept = stored.get("/")!;
-      expect(await kept.clone().text()).toContain("<title>Galahad</title>");
+      expect(await kept.clone().text()).toContain("<title>Invincible</title>");
       expect(kept.url).not.toContain("fake-code");
     }
     stored.delete("/");
@@ -112,25 +112,25 @@ async function tap(): Promise<{ closed: boolean }> {
 }
 
 const CHAT = "cv_1234567890123456789012";
-const finished = { v: 1, kind: "finished", title: "Galahad has finished", body: "A chat you left him working in has his answer.", open: "chat", conversation: CHAT, tag: "t-AbCdEfGhIjKlMnOpQrStUv" };
+const finished = { v: 1, kind: "finished", title: "Your agent has finished", body: "A chat you left it working in has its answer.", open: "chat", conversation: CHAT, tag: "t-AbCdEfGhIjKlMnOpQrStUv" };
 
-describe("he comes to you: a push becomes a notification", () => {
+describe("it comes to you: a push becomes a notification", () => {
   test("a payload of ours is shown as it is: its title, its one line, where it opens", async () => {
     shown.length = 0;
     await push(finished);
     expect(shown).toHaveLength(1);
-    expect(shown[0]!.title).toBe("Galahad has finished");
+    expect(shown[0]!.title).toBe("Your agent has finished");
     // News is told quietly: no sound, and told again it replaces itself without a word (PLAN #59).
-    expect(shown[0]!.options).toMatchObject({ body: "A chat you left him working in has his answer.", tag: "t-AbCdEfGhIjKlMnOpQrStUv", silent: true, renotify: false, icon: "/icon-192.png", data: { open: "chat", conversation: CHAT } });
+    expect(shown[0]!.options).toMatchObject({ body: "A chat you left it working in has its answer.", tag: "t-AbCdEfGhIjKlMnOpQrStUv", silent: true, renotify: false, icon: "/icon-192.png", data: { open: "chat", conversation: CHAT } });
     // In Android's status bar, the field in white: the system draws a badge from its alpha alone, so the tile would be a white square.
     expect(shown[0]!.options.badge).toBe("/icon-mono-96.png");
     // No picture: its words are the message, and a picture would only decorate it.
     expect(shown[0]!.options.image).toBeUndefined();
     // What needs you lets you know, every time, even replacing its own.
-    await push({ v: 1, kind: "needs-you", title: "Galahad: this needs you", body: "Something in your Inbox needs you.", open: "inbox", tag: "t-0123456789abcdefghijkl" });
+    await push({ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox", tag: "t-0123456789abcdefghijkl" });
     expect(shown[1]!.options).toMatchObject({ silent: false, renotify: true, data: { open: "inbox" } });
     for (const kind of ["told", "limit"]) {
-      await push({ v: 1, kind, title: "Galahad", body: "x", open: "inbox", tag: "t-0123456789abcdefghijkl" });
+      await push({ v: 1, kind, title: "Your agent", body: "x", open: "inbox", tag: "t-0123456789abcdefghijkl" });
       expect(shown.at(-1)!.options).toMatchObject({ silent: true, renotify: false });
     }
     // Anything that isn't one of ours is the plain one, which may need you: it lets you know.
@@ -154,7 +154,7 @@ describe("he comes to you: a push becomes a notification", () => {
       shown.length = 0;
       await push(data);
       expect(shown).toHaveLength(1);
-      expect(shown[0]!.title).toBe("Galahad");
+      expect(shown[0]!.title).toBe("Invincible");
       expect(shown[0]!.options).toMatchObject({ body: "Something needs you. Open the app to see it.", data: { open: "inbox" } });
     }
     // Data that isn't even JSON (reading it throws): the plain one, still.
@@ -166,7 +166,7 @@ describe("he comes to you: a push becomes a notification", () => {
         },
       },
     });
-    expect(shown.map((s) => s.title)).toEqual(["Galahad"]);
+    expect(shown.map((s) => s.title)).toEqual(["Invincible"]);
   });
 });
 
@@ -174,10 +174,10 @@ describe("the number on the app's icon", () => {
   test("starts from the count a page last set, and a push about something new that waits for you adds one", async () => {
     badges.length = 0;
     await dispatch("message", { data: { type: "invincible:badge", count: 2 } });
-    await push({ v: 1, kind: "approval", title: "Galahad: approve this?", body: "Push to main", open: "inbox", tag: "t-approval0123456789abcd" });
+    await push({ v: 1, kind: "approval", title: "Your agent: approve this?", body: "Push to main", open: "inbox", tag: "t-approval0123456789abcd" });
     expect(badges).toEqual([3]);
     // The same thing told again, and news that doesn't wait for you, add nothing.
-    await push({ v: 1, kind: "approval", title: "Galahad: approve this?", body: "Push to main", open: "inbox", tag: "t-approval0123456789abcd" });
+    await push({ v: 1, kind: "approval", title: "Your agent: approve this?", body: "Push to main", open: "inbox", tag: "t-approval0123456789abcd" });
     await push(finished);
     expect(badges).toEqual([3]);
     // A push that can't be read is still something that needs you.
@@ -185,7 +185,7 @@ describe("the number on the app's icon", () => {
     expect(badges).toEqual([3, 4]);
     // A page that has seen the Inbox sets it again: the next push counts from there.
     await dispatch("message", { data: { type: "invincible:badge", count: 0 } });
-    await push({ v: 1, kind: "question", title: "Galahad asks", body: "Which branch?", open: "chat", conversation: CHAT, tag: "t-question0123456789abcd" });
+    await push({ v: 1, kind: "question", title: "Your agent asks", body: "Which branch?", open: "chat", conversation: CHAT, tag: "t-question0123456789abcd" });
     expect(badges).toEqual([3, 4, 1]);
   });
 
@@ -193,7 +193,7 @@ describe("the number on the app's icon", () => {
     await dispatch("message", { data: { type: "invincible:badge", count: 5 } });
     for (const data of [{ type: "invincible:badge", count: -1 }, { type: "invincible:badge", count: "9" }, { type: "something-else", count: 9 }, null]) await dispatch("message", { data });
     badges.length = 0;
-    await push({ v: 1, kind: "needs-you", title: "Galahad: this needs you", body: "low on disk", open: "inbox", tag: "t-needsyou0123456789abcd" });
+    await push({ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "low on disk", open: "inbox", tag: "t-needsyou0123456789abcd" });
     expect(badges).toEqual([6]);
   });
 });
@@ -217,8 +217,8 @@ describe("a tap opens the app at the right place", () => {
     windows = [];
     for (const [payload, url] of [
       [finished, `/#/chat?c=${CHAT}`],
-      [{ v: 1, kind: "needs-you", title: "Galahad: this needs you", body: "x", open: "inbox", tag: "t-0123456789abcdefghijkl" }, "/#/inbox"],
-      [{ v: 1, kind: "finished", title: "Quest done", body: "A quest you started has ended.", open: "overview", tag: "t-0123456789abcdefghijkm" }, "/#/overview"],
+      [{ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "x", open: "inbox", tag: "t-0123456789abcdefghijkl" }, "/#/inbox"],
+      [{ v: 1, kind: "finished", title: "Run done", body: "A run you started has ended.", open: "overview", tag: "t-0123456789abcdefghijkm" }, "/#/overview"],
     ] as const) {
       shown.length = 0;
       opened.length = 0;
@@ -254,7 +254,7 @@ describe("a tap opens the app at the right place", () => {
       ["text", "/#/inbox"],
       [{ open: "chat", conversation: "../x" }, "/#/chat"],
       [{ open: "overview", conversation: CHAT }, "/#/overview"],
-      // A notification from before his journal was removed, still in the tray: the Inbox.
+      // A notification from before its journal was removed, still in the tray: the Inbox.
       [{ open: "journal" }, "/#/inbox"],
     ];
     for (const [data, url] of cases) {

@@ -8,12 +8,12 @@ import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { AGENTS, CLAUDE, CODEX, OWN_SIGN_IN, agentModelName, chooseAgentModels, type AgentDriver } from "../src/agents.ts";
 import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
 import { GatewayTokens, handleGateway } from "../src/gateway.ts";
-import { type QuestEvent, type QuestRole, runQuest } from "../src/quest.ts";
+import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
 import { CLAUDE_BRIDGE, CODEX_BRIDGE } from "../src/vendor-cli.ts";
 
 /*
  * The vendors' own CLIs as harnesses: Claude Code and Codex, each run headless by a bridge inside the
- * knight's VM. Nothing here runs a real CLI: each test puts a stand-in executable of the same name on
+ * agent's VM. Nothing here runs a real CLI: each test puts a stand-in executable of the same name on
  * PATH. The two fixtures are the streams the real CLIs printed on 13 November 2026 (claude 2.1.311,
  * codex 0.167.2) for one short prompt, with every id, path and account value replaced; the other
  * streams (a spent allowance, a failed tool, a very long line) are written here on those shapes and
@@ -29,7 +29,7 @@ const FIXTURE = {
   claude: readFileSync(new URL("./fixtures/claude-code-2.1.311.jsonl", import.meta.url), "utf8"),
   codex: readFileSync(new URL("./fixtures/codex-0.167.2.jsonl", import.meta.url), "utf8"),
 };
-/** Every variable Galahad's gateway lease puts in a knight's environment. */
+/** Every variable the primary's gateway lease puts in an agent's environment. */
 const GATEWAY_VARS = ["INVINCIBLE_GATEWAY", "INVINCIBLE_TOKEN", "INVINCIBLE_REPO_URL", "INVINCIBLE_SEARCH", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"];
 /** What a sign-in looks like, so a test can say it never got anywhere (fake, like every key here). */
 const FAKE_SIGN_IN = "sk-ant-oat01-FAKE-not-a-token-0000000000000000";
@@ -65,7 +65,7 @@ if args[:2] == ["auth", "status"]:
     record({"asked": "status", "env": dict(os.environ)})
     if signed:
         # As the real command prints it: who is signed in, to what. None of this may leave the VM.
-        print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "knight@example.invalid", "orgId": "org-FAKE-0000", "orgName": "Fake Org Ltd", "subscriptionType": "max"}, indent=2))
+        print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "agent@example.invalid", "orgId": "org-FAKE-0000", "orgName": "Fake Org Ltd", "subscriptionType": "max"}, indent=2))
         sys.exit(0)
     print(json.dumps({"loggedIn": False, "authMethod": "none", "apiProvider": "firstParty"}, indent=2))
     sys.exit(1)
@@ -199,11 +199,11 @@ const TOOLS = {
 };
 
 /**
- * A knight's VM in miniature: the bridge, the stand-in CLI on PATH (or none), its sign-in state, and a gateway
+ * An agent's VM in miniature: the bridge, the stand-in CLI on PATH (or none), its sign-in state, and a gateway
  * lease. `engram`: the bridge as its driver writes it for a task that has the VM's notes store, under that project.
  */
 function vm(tool: keyof typeof TOOLS, options: { installed?: boolean; signedIn?: boolean; apiKey?: boolean; engram?: string } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), `galahad-${tool}-`));
+  const dir = mkdtempSync(join(tmpdir(), `primary-${tool}-`));
   dirs.push(dir);
   const bin = join(dir, "bin"), home = join(dir, "home"), work = join(dir, "work");
   for (const made of [bin, home, work]) mkdirSync(made);
@@ -296,7 +296,7 @@ describe("Claude Code, on its own sign-in", () => {
     expect(started.prompt).toBe("Fix it ‘now’");
   });
 
-  test("it is never pointed at Galahad's gateway: every gateway variable is gone from its environment, and the rest is the VM's own", async () => {
+  test("it is never pointed at your agent's gateway: every gateway variable is gone from its environment, and the rest is the VM's own", async () => {
     const box = vm("claude");
     await box.run(OWN);
     const [started] = box.runs();
@@ -406,7 +406,7 @@ describe("Claude Code, on its own sign-in", () => {
     const box = vm("claude", { installed: false });
     const run = await box.run(OWN);
     expect(run.exit).toBe(1);
-    expect(run.events).toEqual([{ type: "error", message: "Claude Code is not installed in this VM; its owner installs it there (Galahad never does)" }]);
+    expect(run.events).toEqual([{ type: "error", message: "Claude Code is not installed in this VM; its owner installs it there (Invincible never does)" }]);
     expect(readdirSync(box.bin)).toEqual(["signed-in"]);
   });
 });
@@ -536,7 +536,7 @@ describe("Codex, on its own sign-in", () => {
     expect(out.runs()).toEqual([]);
     const missing = await vm("codex", { installed: false }).run(OWN);
     expect(missing.exit).toBe(1);
-    expect(missing.events).toEqual([{ type: "error", message: "Codex is not installed in this VM; its owner installs it there (Galahad never does)" }]);
+    expect(missing.events).toEqual([{ type: "error", message: "Codex is not installed in this VM; its owner installs it there (Invincible never does)" }]);
   });
 });
 
@@ -574,7 +574,7 @@ describe("what a tool says of its sign-in", () => {
     expect(claude.run.exit).toBe(0);
     expect(JSON.parse(claude.run.stdout)).toEqual({ type: "status", installed: true, signedIn: true, method: "claude.ai" });
     expect(claude.told).toEqual({ signedIn: true, method: "claude.ai" });
-    for (const told of ["knight@example.invalid", "org-FAKE-0000", "Fake Org", "max"]) expect(claude.run.stdout + claude.run.stderr).not.toContain(told);
+    for (const told of ["agent@example.invalid", "org-FAKE-0000", "Fake Org", "max"]) expect(claude.run.stdout + claude.run.stderr).not.toContain(told);
     const codex = await status("codex");
     expect(JSON.parse(codex.run.stdout)).toEqual({ type: "status", installed: true, signedIn: true, method: "chatgpt" });
     expect(codex.told).toEqual({ signedIn: true, method: "chatgpt" });
@@ -610,7 +610,7 @@ describe("what a tool says of its sign-in", () => {
       expect(read("")).toEqual({ signedIn: false });
       expect(read("command completed")).toEqual({ signedIn: false });
       expect(read('{"type":"status","installed":true,"signedIn":"yes"}')).toEqual({ signedIn: false });
-      expect(read('{"type":"status","installed":true,"signedIn":true,"method":"knight@example.invalid"}')).toEqual({ signedIn: true });
+      expect(read('{"type":"status","installed":true,"signedIn":true,"method":"agent@example.invalid"}')).toEqual({ signedIn: true });
       expect(read('{"type":"status","installed":true,"signedIn":true,"method":"x; rm -rf /"}')).toEqual({ signedIn: true });
       expect(read('noise\n{"type":"status","installed":true,"signedIn":true,"method":"api_key"}\n')).toEqual({ signedIn: true, method: "api_key" });
     }
@@ -630,7 +630,7 @@ describe("the vendors' tools and the notes store", () => {
     "-c", 'mcp_servers.engram.env={ENGRAM_DATA_DIR="/work/.memory/engram",ENGRAM_NO_UPDATE_CHECK="1"}',
   ];
 
-  test("Claude Code is pointed at a file of Galahad's own with --mcp-config: one stdio server, on every run, new or resumed, on its sign-in or through the gateway", async () => {
+  test("Claude Code is pointed at a file of your agent's own with --mcp-config: one stdio server, on every run, new or resumed, on its sign-in or through the gateway", async () => {
     const files = CLAUDE.files([], "you-project");
     expect(Object.keys(files)).toEqual(["/work/.agent/claude-code.py", MCP_FILE]);
     expect(JSON.parse(files[MCP_FILE]!)).toEqual({ mcpServers: { engram: { type: "stdio", command: ENGRAM_BIN, args: engramArgv("you-project").slice(1), env: { ENGRAM_DATA_DIR: "/work/.memory/engram", ENGRAM_NO_UPDATE_CHECK: "1" } } } });
@@ -713,11 +713,11 @@ function sandbox(script: { lines: object[]; exit: number }[]) {
 }
 
 describe("a sign-in and the roster together", () => {
-  const replies = (): Record<QuestRole, string[]> => ({ planner: ["1. Fix calc.py.\nDone when: the test passes."], engineer: [], reviewer: ["PASS"] });
+  const replies = (): Record<RunRole, string[]> => ({ planner: ["1. Fix calc.py.\nDone when: the test passes."], engineer: [], reviewer: ["PASS"] });
   const models = [OWN_SIGN_IN, { provider: "anthropic", model: "claude-opus-5-5" }];
-  const quest = async (driver: AgentDriver, box: ReturnType<typeof sandbox>, events: QuestEvent[]) => {
+  const run = async (driver: AgentDriver, box: ReturnType<typeof sandbox>, events: RunEvent[]) => {
     const said = replies();
-    return runQuest(
+    return runLoop(
       { goal: "make the test pass", environment: "a sandbox", agent: { driver, models, minutes: 30, workdir: "/work/repo" } },
       { ask: async (role) => ({ text: said[role].shift()!, model: `test/${role}` }), exec: box.exec, emit: (event) => events.push(event), sleep: async () => {} },
     );
@@ -728,8 +728,8 @@ describe("a sign-in and the roster together", () => {
       { lines: [{ type: "error", message: "Claude Code's allowance is spent; it resets 2026-01-01 04:00 UTC" }], exit: 1 },
       { lines: [{ type: "session", id: SESSION }, { type: "text", text: "The test passes now." }], exit: 0 },
     ]);
-    const events: QuestEvent[] = [];
-    expect((await quest(CLAUDE, box, events)).status).toBe("done");
+    const events: RunEvent[] = [];
+    expect((await run(CLAUDE, box, events)).status).toBe("done");
     expect(box.launches).toHaveLength(2);
     expect(box.launches[0]).toContain("claude-code.py --own");
     expect(box.launches[0]).not.toContain("--provider");
@@ -738,7 +738,7 @@ describe("a sign-in and the roster together", () => {
     expect(box.launches[1]).toContain("claude-opus-5-5");
     expect(box.launches[1]).not.toContain("--own");
     expect(box.launches[1]).not.toContain("--session");
-    // No session came of the first run, so the second is given the whole quest, not "continue".
+    // No session came of the first run, so the second is given the whole run, not "continue".
     expect(box.prompt(box.launches[1]!)).toBe(box.prompt(box.launches[0]!));
     expect(events.find((event) => event.type === "retry")).toMatchObject({ role: "engineer", attempt: 1, error: "its own sign-in: Claude Code's allowance is spent; it resets 2026-01-01 04:00 UTC\nit exited with 1" });
     for (const command of box.launches) expect(Bun.spawnSync(["bash", "-n", "-c", command]).stderr.toString()).toBe("");
@@ -749,8 +749,8 @@ describe("a sign-in and the roster together", () => {
       { lines: [{ type: "session", id: SESSION }, { type: "tool", tool: "shell", input: "python3 test_calc.py", output: "AssertionError", ok: false }, { type: "error", message: "Codex stopped: You've hit your usage limit. Try again at 3:45 PM." }], exit: 1 },
       { lines: [{ type: "text", text: "The test passes now." }], exit: 0 },
     ]);
-    const events: QuestEvent[] = [];
-    expect((await quest(CODEX, box, events)).status).toBe("done");
+    const events: RunEvent[] = [];
+    expect((await run(CODEX, box, events)).status).toBe("done");
     expect(box.launches[0]).toContain("codex.py --own");
     expect(box.launches[1]).toContain("codex.py --provider");
     expect(box.launches[1]).toContain(`--session`);
@@ -762,7 +762,7 @@ describe("a sign-in and the roster together", () => {
   });
 });
 
-describe("a subscription's sign-in never reaches Galahad", () => {
+describe("a subscription's sign-in never reaches your agent", () => {
   test("no shipped source names where either tool keeps its sign-in: nothing reads, copies or moves one", () => {
     const kept = [".credentials.json", "CLAUDE_CODE_OAUTH", "auth.json", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "CODEX_HOME", "CLAUDE_CONFIG_DIR"];
     const root = new URL("../../../", import.meta.url).pathname;

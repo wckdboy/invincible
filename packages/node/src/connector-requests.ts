@@ -15,10 +15,10 @@ export const MOST_REQUESTS = 20;
 export interface ConnectorRequest {
   id: string;
   connector: string;
-  /** It's installed and Galahad's alone: this asks to use it (connector access), not for it to be added. */
+  /** It's installed and the primary's alone: this asks to use it (connector access), not for it to be added. */
   access: boolean;
   why: string;
-  /** Who asked: the asker's label (galahad, a knight's, an agent's) or its kind. */
+  /** Who asked: the asker's label (primary, an agent's, an agent's) or its kind. */
   by: string;
   at: number;
   expires: number;

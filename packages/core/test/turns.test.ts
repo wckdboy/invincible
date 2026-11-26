@@ -24,7 +24,7 @@ describe("a chat's state at a glance", () => {
     expect(chatStateWords({ state: "working", queued: 2, held: null, needs: null })).toBe("Working · 2 queued");
     expect(chatStateWords({ state: "waiting", queued: 0, held: null, needs: { approvals: 2, keys: 1, question: true } })).toBe("Needs you: 2 approvals and a key");
     expect(chatStateWords({ state: "waiting", queued: 0, held: null, needs: { ...none, question: true } })).toBe("Needs you: an answer");
-    expect(chatStateWords({ state: "queued", queued: 1, held: "stopped", needs: null })).toBe("1 queued, held (you stopped him)");
+    expect(chatStateWords({ state: "queued", queued: 1, held: "stopped", needs: null })).toBe("1 queued, held (you stopped it)");
     expect(chatStateWords({ state: "queued", queued: 3, held: null, needs: null })).toBe("3 queued");
     expect(chatStateWords({ state: "stopped", queued: 0, held: null, needs: null })).toBe("Stopped");
     expect(chatStateWords({ state: "failed", queued: 0, held: null, needs: null })).toBe("Failed");

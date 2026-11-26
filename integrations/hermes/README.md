@@ -1,6 +1,6 @@
 # Hermes compatibility
 
-Invincible can use Hermes as a sandbox engineering worker (`--agent hermes`) and as a
+Invincible can use Hermes as a sandbox engineering worker (`--harness hermes`) and as a
 native memory provider for a separately installed, local Hermes. These are separate
 connections with separate credentials.
 
@@ -79,7 +79,7 @@ built-in memory hook automatically writes, replaces or deletes anything.
 
 This provider is for Hermes running beside the local Invincible daemon. A VM's
 loopback is the VM itself, and its gateway token is not an arm token. VM workers
-receive memory context from their supervising teammate; this plugin does not
+receive memory context from their supervising agent; this plugin does not
 expose the daemon's normal memory API to them.
 
 Run the standalone offline memory-provider checks with `python3 -B integrations/hermes/test_memory_provider.py`. The plugin directory itself imports Hermes's `agent.memory_provider` ABI, so recursive unittest discovery also tries to import that installed-only package. These checks do not require an installed Hermes or model credentials.

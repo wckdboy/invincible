@@ -6,7 +6,7 @@ import { buildAssets } from "../src/assets.ts";
 const STATIC_IMPORT = /\bimport\s*[{*"']|\bimport\s+[\w$]/;
 
 describe("the PWA bundle", () => {
-  test("a page he made runs its code in a frame of its own: sandboxed, nothing from the network, framed by the app alone", async () => {
+  test("a page it made runs its code in a frame of its own: sandboxed, nothing from the network, framed by the app alone", async () => {
     const assets = await buildAssets();
     const frame = assets.serve("/frame.html");
     const policy = frame.headers.get("content-security-policy") ?? "";
@@ -47,13 +47,13 @@ describe("the PWA bundle", () => {
     }
 
     const manifest = JSON.parse(await assets.serve("/manifest.webmanifest").text());
-    expect(manifest.name).toBe("Galahad");
+    expect(manifest.name).toBe("Invincible");
     expect(manifest.display).toBe("standalone");
     // One app however its address is written later: its identity is its own, not derived from where it starts.
     expect(manifest.id).toBe("/");
     // Holding the icon (Android) offers the three places.
     expect(manifest.shortcuts.map((shortcut: { url: string }) => shortcut.url)).toEqual(["/#/chat", "/#/team", "/#/inbox"]);
-    // Its icon is Galahad's field, rendered (scripts/field-icon.ts): pictures at the sizes installers take.
+    // Its icon is the primary's field, rendered (scripts/field-icon.ts): pictures at the sizes installers take.
     expect(manifest.icons[0].src).toBe("/icon-192.png");
     expect(manifest.icons.some((icon: { purpose: string }) => icon.purpose === "maskable")).toBe(true);
     for (const icon of manifest.icons as { src: string }[]) expect(assets.has(icon.src)).toBe(true);
@@ -90,9 +90,9 @@ describe("the PWA bundle", () => {
     expect(new Uint8Array(await assets.serve("/icon-mono-96.png").arrayBuffer())[25]).toBe(6);
   });
 
-  test("no drawing of a face is served: what was under /knights/ is gone", async () => {
+  test("no drawing of a face is served: what was under /agents/ is gone", async () => {
     const assets = await buildAssets();
-    for (const path of ["/knights/", "/knights/galahad.webp", "/knights/invincible-helm.webp", "/knights/../index.html"]) expect(assets.has(path)).toBe(false);
+    for (const path of ["/agents/", "/agents/primary.webp", "/agents/invincible-helm.webp", "/agents/../index.html"]) expect(assets.has(path)).toBe(false);
   });
 
   test("the app's typeface is its own: Geist, served from the node with its licence beside it, never fetched elsewhere", async () => {

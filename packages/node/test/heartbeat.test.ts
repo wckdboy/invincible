@@ -161,7 +161,7 @@ describe("notices follow the findings", () => {
     const a = newNodeIdentity();
     const b = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, a, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, a, { fleetName: "homelab", nodeName: "ultra" });
     enrollDevice(store, a, { device: b.id, name: "laptop", kind: "node", box: b64u(b.boxPublic) });
     return { a, b, store };
   }

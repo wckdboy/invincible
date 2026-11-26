@@ -1,7 +1,7 @@
 import type { SandboxNetwork } from "@invincible/core";
 
 /*
- * A sandbox is where a knight works: an unprivileged, resource-capped container
+ * A sandbox is where an agent works: an unprivileged, resource-capped container
  * with its own workspace and nothing else of the host. This module is pure: it
  * turns a spec into `docker` arguments, so the security posture is unit-tested.
  */
@@ -29,7 +29,7 @@ export const NETWORKS = {
 
 export interface SandboxSpec {
   id: string;
-  quest: string;
+  run: string;
   node: string;
   image: string;
   network: SandboxNetwork;
@@ -61,14 +61,14 @@ export const KEEPER = "invincible-sandbox-image";
 /** The Lab: mathematics, physics and engineering tools (sandbox/lab/Dockerfile). */
 export const LAB_IMAGE = "invincible/lab:1";
 
-/** The knights' desktop: the workshop with a display, a window manager and a browser (sandbox/desktop/Dockerfile). Built after the workshop image, which it is made from. */
+/** The agents' desktop: the workshop with a display, a window manager and a browser (sandbox/desktop/Dockerfile). Built after the workshop image, which it is made from. */
 export const DESKTOP_IMAGE = "invincible/desktop:1";
-/** Claude Code in the workshop image, for trials alone (sandbox/claude-code): tagged by its pinned release. */
+/** Claude Code in the workshop image, for evals alone (sandbox/claude-code): tagged by its pinned release. */
 export const CLAUDE_CODE_IMAGE = "invincible/claude-code:2.1.319";
 
 /**
- * Galahad's own images: where each is built from (under the sandbox directory) and the keeper that holds it. `base`:
- * the one of his own it is made from, which is in no registry, so it is never pulled, and is made first when it's gone.
+ * The primary's own images: where each is built from (under the sandbox directory) and the keeper that holds it. `base`:
+ * the one of its own it is made from, which is in no registry, so it is never pulled, and is made first when it's gone.
  */
 export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: string; base?: string }>> = {
   [DEFAULT_IMAGE]: { context: ".", keeper: KEEPER },
@@ -78,7 +78,7 @@ export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: stri
 };
 
 /**
- * The images of his own every release has made: what a host is taken to make when its release says nothing of its
+ * The images of its own every release has made: what a host is taken to make when its release says nothing of its
  * images (it is older than saying), so a sandbox in an image newer than that host goes where it is made.
  */
 export const FIRST_IMAGES: readonly string[] = [DEFAULT_IMAGE, LAB_IMAGE, DESKTOP_IMAGE];
@@ -90,7 +90,7 @@ export function labels(spec: SandboxSpec): Record<string, string> {
   return {
     [LABEL]: "1",
     [`${LABEL}.id`]: spec.id,
-    [`${LABEL}.quest`]: spec.quest,
+    [`${LABEL}.run`]: spec.run,
     [`${LABEL}.node`]: spec.node,
     [`${LABEL}.network`]: spec.network,
     [`${LABEL}.ephemeral`]: String(spec.ephemeral),
@@ -115,7 +115,7 @@ export function runArgs(spec: SandboxSpec): string[] {
     "--name",
     containerName(spec.id),
     "--hostname",
-    "knight",
+    "agent",
     "--init",
     // Nobody inside is root, nothing can gain privileges, the kernel surface is minimal.
     "--user",
@@ -124,7 +124,7 @@ export function runArgs(spec: SandboxSpec): string[] {
     "ALL",
     "--security-opt",
     "no-new-privileges:true",
-    // The image is immutable; the knight writes only to its workspace and /tmp.
+    // The image is immutable; the agent writes only to its workspace and /tmp.
     "--read-only",
     "--tmpfs",
     "/tmp:rw,nosuid,nodev,size=2g,mode=1777",
@@ -134,7 +134,7 @@ export function runArgs(spec: SandboxSpec): string[] {
     "/work",
     "--env",
     "HOME=/work",
-    // Bounded resources: a runaway knight cannot starve the host.
+    // Bounded resources: a runaway agent cannot starve the host.
     "--cpus",
     String(spec.cpus),
     "--memory",

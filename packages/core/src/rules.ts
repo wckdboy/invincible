@@ -1,15 +1,15 @@
 import { z } from "zod";
 
 /*
- * Your rules (PLAN #23): tripwires on the commands his work runs, and checks after them. A rule is data you write,
+ * Your rules (PLAN #23): tripwires on the commands its work runs, and checks after them. A rule is data you write,
  * never a model's judgment and never code an agent wrote: globs matched against a command's words, a piece of text it
  * must hold, and what happens to a command that matches. Only you write them: the mind refuses one that isn't your
  * word, from a full node (rule.set, rule.removed; the last writer wins, by name), so every replica holds the same rules.
  *
- * Before a command (`on: "command"`), the quest loop checks them for each command it runs, each of a parallel batch,
- * and each gate (brain's tripwires.ts). `halt`: the quest or task stops, saying which rule. `refuse`: that command
+ * Before a command (`on: "command"`), the run loop checks them for each command it runs, each of a parallel batch,
+ * and each gate (brain's tripwires.ts). `halt`: the run or task stops, saying which rule. `refuse`: that command
  * isn't run, the engineer is told which rule refused it and why, and the work goes on. After a command (`on: "after"`):
- * `check`, once one that matches has run and exited 0, runs your command where his work runs, and he is told at once if
+ * `check`, once one that matches has run and exited 0, runs your command where its work runs, and it is told at once if
  * it fails (a gate at the moment of the change, not at the end); `tell`, once one that matches has run however it
  * ended, tells you (a notice in your Inbox, and a notification of its own kind: once for each rule and task).
  */
@@ -39,8 +39,8 @@ export const RuleGlob = z.string().min(1).max(100).refine(oneLine, "a glob is on
 export const RuleText = z.string().min(1).max(200).refine(oneLine, "one line of text");
 
 /**
- * The command a check runs after one its rule matches: yours, one line (join several with && or ;), run where his work
- * runs, as his own commands are.
+ * The command a check runs after one its rule matches: yours, one line (join several with && or ;), run where its work
+ * runs, as its own commands are.
  */
 export const RuleCheck = z.string().trim().min(1).max(1000).refine(oneLine, "a check is one line: join commands with && or ;");
 
@@ -72,9 +72,9 @@ export type Tripwire = Extract<Rule, { on: "command" }>;
 /** A rule after a command: a check, or one that tells you. */
 export type RuleAfter = Extract<Rule, { on: "after" }>;
 
-/** A rule with its name, as the quest loop checks it. */
+/** A rule with its name, as the run loop checks it. */
 export type NamedRule = Rule & { name: string };
-/** A check with its name, as the quest loop runs it. */
+/** A check with its name, as the run loop runs it. */
 export type NamedCheck = Extract<Rule, { does: "check" }> & { name: string };
 /** A rule that tells you, with its name. */
 export type NamedTell = Extract<Rule, { does: "tell" }> & { name: string };
@@ -105,19 +105,19 @@ export function ruleOf(input: RuleInput): Rule {
 
 /** A command a rule of yours that tells matched, said to the node (ruleTold), which checks the rule matches it, then tells you. */
 export const RuleToldInput = z.strictObject({
-  quest: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/),
+  run: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/),
   rule: RuleName,
   command: z.string().min(1).max(100_000),
   exitCode: z.number().int(),
 });
 export type RuleToldInput = z.infer<typeof RuleToldInput>;
 
-/** A rule stopped a command of a quest's, said to the node for the ledger (ruleTripped); the node checks the rule stops it. */
+/** A rule stopped a command of a run's, said to the node for the ledger (ruleTripped); the node checks the rule stops it. */
 export const RuleTrippedInput = z.strictObject({
-  quest: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/),
+  run: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/),
   rule: RuleName,
   command: z.string().min(1).max(100_000),
-  /** It was one of the quest's gates. */
+  /** It was one of the run's gates. */
   gate: z.boolean().optional(),
 });
 export type RuleTrippedInput = z.infer<typeof RuleTrippedInput>;

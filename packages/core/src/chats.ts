@@ -11,7 +11,7 @@ import type { AnswerStatus, ChatNeeds, ChatState, QueuedMessage, QueueHold, Turn
  * deletes it. Only you read it (never an agent).
  *
  * A project is a workspace that every node knows (the mind, `project.set`): a name,
- * the instructions Galahad follows in its chats, an optional repository. Its chats and
+ * the instructions the primary follows in its chats, an optional repository. Its chats and
  * the memories made in them are grouped under it.
  */
 
@@ -31,12 +31,12 @@ export interface ProjectView {
   name: string;
   instructions: string;
   repo: string | null;
-  /** Where its work is kept on his computer (`projectCheckout`): the Build view's files, changes and branch are that folder's. */
+  /** Where its work is kept on its computer (`projectCheckout`): the Build view's files, changes and branch are that folder's. */
   checkout: string;
   updatedAt: number;
 }
 
-/** A project's checkout on Galahad's computer: one folder per project, under /work. */
+/** A project's checkout on the primary's computer: one folder per project, under /work. */
 export const projectCheckout = (id: string): string => `/work/projects/${id}`;
 
 /** A branch's name as git takes one (its own check runs too): letters, digits and . _ / -, never starting with - . or /. */
@@ -77,7 +77,7 @@ export type StoredStep =
   | { kind: "model"; ref: string }
   | { kind: "fallback"; from: string; error: string }
   | { kind: "tool"; id: string; name: string; title: string; input: string; ok: boolean | null; summary: string | null }
-  /** Archived entries Galahad was given as context for this answer. */
+  /** Archived entries the primary was given as context for this answer. */
   | { kind: "archive"; entries: { id: string; title: string; kind: string; trust: string }[] };
 
 export interface StoredMessage {
@@ -87,31 +87,31 @@ export interface StoredMessage {
   /** Your files with it, as kept on the node (a message of yours alone). */
   attachments?: AttachmentRef[];
   /**
-   * A look of his own (look_later), not your words: the message that starts the turn he takes when it comes, with
-   * when he set it and his note (its `content` is the note as the model is given it).
+   * A look of its own (look_later), not your words: the message that starts the turn it takes when it comes, with
+   * when it set it and its note (its `content` is the note as the model is given it).
    */
   look?: { set: number; note: string };
   /** Assistant answers: which model, what it did, how it ended. */
   model: string | null;
   steps: StoredStep[];
-  /** "steered": you sent a message while he was answering; the turn went on with it, in the next answer. */
+  /** "steered": you sent a message while it was answering; the turn went on with it, in the next answer. */
   status: AnswerStatus;
   error: string | null;
   createdAt: number;
   endedAt: number | null;
 }
 
-/** A look he set himself, to look at something again later in a chat of yours: it comes back there as a turn of his. */
+/** A look it set itself, to look at something again later in a chat of yours: it comes back there as a turn of its. */
 export interface LookView {
   id: string;
   conversation: string;
-  /** When he looks (ms). */
+  /** When it looks (ms). */
   at: number;
-  /** What he means to look at, in his words. */
+  /** What it means to look at, in its words. */
   note: string;
-  /** When he set it (ms). */
+  /** When it set it (ms). */
   set: number;
-  /** The zone its time was given in (the one he was told then). */
+  /** The zone its time was given in (the one it was told then). */
   zone: string;
   state: "waiting" | "done" | "cancelled" | "failed";
   /** Why it was called off or failed (null: neither). */
@@ -138,22 +138,22 @@ export const LookLaterInput = z
   .refine((x) => (x.in === undefined) !== (x.at === undefined), "give in or at, one of them");
 export const CancelLookInput = z.strictObject({ id: LookId, turn: LookTurn.optional() });
 
-/** A knight's task he gave from a chat of yours that hasn't ended: its row above that chat's message box, with its Stop. */
+/** An agent's task it gave from a chat of yours that hasn't ended: its row above that chat's message box, with its Stop. */
 export interface UnderwayTask {
   id: string;
   title: string;
-  /** The knight's handle, and its name. */
+  /** The agent's handle, and its name. */
   assignee: string;
   name: string;
   status: TeamWorkStatus;
   progress: string;
-  /** The knight's own conversation with you, where it works. */
+  /** The agent's own conversation with you, where it works. */
   room: string;
   createdAt: number;
   updatedAt: number;
 }
 
-/** What is under way in a chat of yours: the tasks he gave knights there that haven't ended, and his looks that wait. */
+/** What is under way in a chat of yours: the tasks it gave agents there that haven't ended, and its looks that wait. */
 export interface UnderwayView {
   tasks: UnderwayTask[];
   looks: LookView[];
@@ -177,7 +177,7 @@ export interface ConversationSummary {
   held: QueueHold | null;
   /** What it waits on you for (null: nothing). */
   needs: ChatNeeds | null;
-  /** An answer of his ended in it since you last read it, on any device (email's unread). An answer that ended while a
+  /** An answer of its ended in it since you last read it, on any device (email's unread). An answer that ended while a
    * device was watching it was read there. Absent from an older node. */
   unread?: boolean;
 }

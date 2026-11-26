@@ -11,10 +11,10 @@ import { loopRecords } from "../src/loops.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * His heartbeat and self-action, against a real daemon in a temp home with a stand-in
+ * Its heartbeat and self-action, against a real daemon in a temp home with a stand-in
  * model and a stand-in service: the founding node's default loop, the owner's switch
- * (and that agents can't touch it), a fix he makes himself, and a fleet that still
- * holds the loop of a task this version no longer has (his journal's).
+ * (and that agents can't touch it), a fix it makes itself, and a fleet that still
+ * holds the loop of a task this version no longer has (its journal's).
  */
 
 const caps: Capabilities = {
@@ -73,13 +73,13 @@ const arm = async (label: string) => (await json<{ token: string }>(await call("
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "life-node" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "life-node" });
   store.close();
   home.writeConfig({ v: 1, name: "life-node", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 60_000 });
   expect((await call("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${model.port}/v1` })).status).toBe(200);
   for (const role of ["swift", "planner"]) expect((await call("setRoster", { role, models: ["stand-in/m"] })).status).toBe(200);
-  // His compute plan is already on record (his first heartbeat would record it, as one more thing he did himself).
+  // Its compute plan is already on record (its first heartbeat would record it, as one more thing it did itself).
   daemon.compute.adapt();
 });
 
@@ -124,7 +124,7 @@ describe("the owner's self-action switch", () => {
 });
 
 describe("after a heartbeat", () => {
-  test("a read-only loop that went wrong once is checked again by Galahad himself, and that's in the ledger as his own", async () => {
+  test("a read-only loop that went wrong once is checked again by your agent itself, and that's in the ledger as its own", async () => {
     const manifest = {
       id: "site",
       label: "Site",
@@ -140,13 +140,13 @@ describe("after a heartbeat", () => {
     await json(await call("runLoop", { name: "heartbeat" }));
     await daemon.loops.settled("heartbeat");
     await daemon.loops.settled("site");
-    // He ran it again, and this time it was fine.
+    // It ran it again, and this time it was fine.
     expect(hits).toBe(2);
     expect(daemon.store.loopRuns("site", 1)[0]!.body.status).toBe("ok");
     const beat = daemon.store.loopRuns("heartbeat", 1)[0]!.body;
-    expect(beat.summary).toContain("Fixed himself: Ran loop site again after one bad run");
+    expect(beat.summary).toContain("Fixed itself: Ran loop site again after one bad run");
     const view = await json<SelfActionView>(await call("selfAction", undefined));
-    expect(view.recent[0]).toMatchObject({ class: "read", resource: "self-action", quest: "galahad.self", detail: "Ran loop site again after one bad run" });
+    expect(view.recent[0]).toMatchObject({ class: "read", resource: "self-action", run: "primary.self", detail: "Ran loop site again after one bad run" });
     expect(view.recent[0]!.target).toMatch(/^retry-loop:site:/);
 
     // A second heartbeat leaves it alone: one retry for one bad run.
@@ -155,7 +155,7 @@ describe("after a heartbeat", () => {
     expect(hits).toBe(2);
   });
 
-  test("with self-action off he only reports", async () => {
+  test("with self-action off it only reports", async () => {
     await json(await call("setSelfAction", { on: false }));
     hits = 0;
     await json(await call("runLoop", { name: "site" }));
@@ -165,19 +165,19 @@ describe("after a heartbeat", () => {
     await daemon.loops.settled("heartbeat");
     await daemon.loops.settled("site");
     expect(hits).toBe(1);
-    expect(daemon.store.loopRuns("heartbeat", 1)[0]!.body.summary).not.toContain("Fixed himself");
+    expect(daemon.store.loopRuns("heartbeat", 1)[0]!.body.summary).not.toContain("Fixed itself");
     await json(await call("setSelfAction", { on: true }));
   });
 });
 
-describe("a fleet that still holds his journal's loop, and what he wrote", () => {
+describe("a fleet that still holds its journal's loop, and what it wrote", () => {
   test("the loop is listed and says its task no longer exists; it never runs, the heartbeat goes on, and it's yours to remove", async () => {
     // As the founding node of an older version left it in the mind.
-    daemon.store.emit(daemon.identity, "loop.set", { name: "reflect", schedule: "30 21 * * *", tz: "Europe/Copenhagen", on: daemon.identity.id, enabled: true, task: { kind: "reflect", budget: 6000 }, label: "Galahad's journal" });
+    daemon.store.emit(daemon.identity, "loop.set", { name: "reflect", schedule: "30 21 * * *", tz: "Europe/Copenhagen", on: daemon.identity.id, enabled: true, task: { kind: "reflect", budget: 6000 }, label: "Your agent's journal" });
     const { loops } = await json<{ loops: LoopView[] }>(await call("loops", undefined));
     const old = loops.find((l) => l.name === "reflect")!;
-    expect(old).toMatchObject({ name: "reflect", schedule: "30 21 * * *", enabled: true, task: null, label: "Galahad's journal", last: null, running: false });
-    expect(old.problem).toContain("its task no longer exists (his journal");
+    expect(old).toMatchObject({ name: "reflect", schedule: "30 21 * * *", enabled: true, task: null, label: "Your agent's journal", last: null, running: false });
+    expect(old.problem).toContain("its task no longer exists (its journal");
     expect(old.problem).toContain("invincible loop rm reflect");
     // By hand it's refused, in the same words; nothing was run or recorded.
     const refused = await call("runLoop", { name: "reflect" });
@@ -196,7 +196,7 @@ describe("a fleet that still holds his journal's loop, and what he wrote", () =>
     expect(loopRecords(daemon.store).some((l) => l.name === "reflect")).toBe(false);
   });
 
-  test("what his journal kept is still his memory: recalled like any other, and nothing lists it as a journal", async () => {
+  test("what its journal kept is still its memory: recalled like any other, and nothing lists it as a journal", async () => {
     daemon.store.remember(daemon.identity, "Journal, 2026-11-11:\nThe site went down once and came back.\nLearned: the site wobbles now and then.", { tags: ["journal", "reflection", "day:2026-11-11"], prov: { trust: "agent", source: "reflection" } });
     const { memories } = await json<{ memories: { text: string; tags: string[]; trust: string }[] }>(await call("recall", { q: "site wobbles" }));
     expect(memories[0]).toMatchObject({ trust: "agent", tags: ["journal", "reflection", "day:2026-11-11"] });

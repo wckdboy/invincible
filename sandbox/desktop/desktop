@@ -1,5 +1,5 @@
 #!/bin/sh
-# A knight's desktop: a display, a window manager and a browser in its own VM, and this one command to
+# An agent's desktop: a display, a window manager and a browser in its own VM, and this one command to
 # operate them. Every command but `help`, `status` and `stop` brings the desktop up first if it isn't.
 # Nothing here is reachable from outside the VM: the display takes no network connections and the
 # browser's debugging port (through which `text` reads a page) listens on loopback only.

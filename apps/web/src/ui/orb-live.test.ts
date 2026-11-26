@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { seat, workerAvatar } from "./avatar.ts";
-import { appMark, knightFace, orb } from "./orb.ts";
+import { appMark, agentFace, orb } from "./orb.ts";
 
 /*
- * The orbs on a canvas (26 November 2026: Galahad's field, and each knight's), drawn on one that records what is drawn
+ * The orbs on a canvas (26 November 2026: the primary's field, and each agent's), drawn on one that records what is drawn
  * on it, without a browser: light added to light on a dark page, ink on a light one; still where they are many, where
- * motion is reduced, and once a knight has come to rest; moving slowly where they are looked at.
+ * motion is reduced, and once an agent has come to rest; moving slowly where they are looked at.
  */
 
 /** A 2D context that keeps the name of every call made on it, and every blend it is set to. (A gradient it makes takes
@@ -121,16 +121,16 @@ const canvasOf = (node: Node_) => node.children.find((child) => child.tag === "c
 const canvasIn = (node: Node_): Node_ | undefined => (node.tag === "canvas" ? node : node.children.map(canvasIn).find(Boolean));
 const count = (calls: string[], name: string) => calls.filter((call) => call === name).length;
 
-describe("his orb", () => {
-  test("in a mood, a canvas its own size, sharp on the screen: his field and his beam added as light", () => {
-    const drawn = orb({ size: 168, mood: "working", label: "Galahad: at work", key: "test:sharp" }) as unknown as Node_;
+describe("its orb", () => {
+  test("in a mood, a canvas its own size, sharp on the screen: its field and its beam added as light", () => {
+    const drawn = orb({ size: 168, mood: "working", label: "Your agent: at work", key: "test:sharp" }) as unknown as Node_;
     expect(drawn.attrs.class).toBe("orb orb-live");
-    expect([drawn.attrs["data-mood"], drawn.attrs.role, drawn.attrs["aria-label"]]).toEqual(["working", "img", "Galahad: at work"]);
+    expect([drawn.attrs["data-mood"], drawn.attrs.role, drawn.attrs["aria-label"]]).toEqual(["working", "img", "Your agent: at work"]);
     const canvas = canvasOf(drawn)!;
     // Nothing reaches past it: its canvas is its own square, at twice the pixels on this screen.
     expect([canvas.className, canvas.style.width, canvas.width, canvas.attrs["aria-hidden"]]).toEqual(["orb-canvas", "168px", 336, "true"]);
     // Drawn at once, so it never shows empty: its lines as strokes (a few dozen, gathered by colour, a glow and a line
-    // each), added as light, and his beam: each half one fill, its glow and its blade (no ring: none is drawn round him).
+    // each), added as light, and its beam: each half one fill, its glow and its blade (no ring: none is drawn round it).
     expect(canvas.blends).toContain("lighter");
     expect(count(canvas.calls, "stroke")).toBeGreaterThan(10);
     expect(count(canvas.calls, "stroke")).toBeLessThan(400);
@@ -139,12 +139,12 @@ describe("his orb", () => {
     expect(frames.length).toBeGreaterThan(0);
   });
 
-  test("on a light page, ink: nothing is added as light, his beam in ink too", () => {
+  test("on a light page, ink: nothing is added as light, its beam in ink too", () => {
     root.dataset.theme = "light";
     const canvas = canvasOf(orb({ size: 50, mood: "idle", key: "test:paper" }) as unknown as Node_)!;
     expect(canvas.blends).not.toContain("lighter");
     expect(count(canvas.calls, "stroke")).toBeGreaterThan(5);
-    // Each half of his beam, once (no glow under it on paper).
+    // Each half of its beam, once (no glow under it on paper).
     expect(count(canvas.calls, "createLinearGradient")).toBe(2);
   });
 
@@ -169,7 +169,7 @@ describe("his orb", () => {
     expect(frames).toEqual([]);
   });
 
-  test("with no canvas to draw on, his box alone, as a knight's", () => {
+  test("with no canvas to draw on, its box alone, as an agent's", () => {
     stub("window", undefined);
     expect((orb({ size: 28, mood: "working" }) as unknown as Node_).children).toEqual([]);
   });
@@ -223,7 +223,7 @@ describe("his orb", () => {
 });
 
 describe("the app's mark", () => {
-  test("his field alone, still and on nothing, light on a dark page and ink on a light one: no beam, no frames", () => {
+  test("its field alone, still and on nothing, light on a dark page and ink on a light one: no beam, no frames", () => {
     const dark = appMark(20) as unknown as Node_;
     expect([dark.attrs.class, dark.attrs.style, dark.attrs["aria-hidden"]]).toEqual(["orb app-mark", "--orb-size:20px", "true"]);
     root.dataset.theme = "light";
@@ -237,17 +237,17 @@ describe("the app's mark", () => {
   });
 });
 
-describe("a knight's face", () => {
-  test("never with a beam: his alone", () => {
-    knightFace({ id: "gareth", size: 50, mood: "working", key: "test:no-beam" });
-    knightFace({ id: "ada", size: 34 });
+describe("an agent's face", () => {
+  test("never with a beam: its alone", () => {
+    agentFace({ id: "max", size: 50, mood: "working", key: "test:no-beam" });
+    agentFace({ id: "ada", size: 34 });
     for (const node of made.filter((one) => one.tag === "canvas")) expect(count(node.calls, "createLinearGradient")).toBe(0);
   });
 
   test("still unless it works: at rest, in a row or in the history, drawn once and never asking for a frame", () => {
-    for (const face of [knightFace({ id: "gareth", size: 34, mood: "idle", key: "test:idle" }), knightFace({ id: "gareth", size: 34 }), workerAvatar({ id: "gareth", name: "Gareth", still: true })]) {
+    for (const face of [agentFace({ id: "max", size: 34, mood: "idle", key: "test:idle" }), agentFace({ id: "max", size: 34 }), workerAvatar({ id: "max", name: "Max", still: true })]) {
       const canvas = canvasIn(face as unknown as Node_)!;
-      expect([canvas.className, count(canvas.calls, "drawImage")]).toEqual(["knight-orb-canvas", 1]);
+      expect([canvas.className, count(canvas.calls, "drawImage")]).toEqual(["agent-orb-canvas", 1]);
     }
     const before = asked;
     run(1000);
@@ -257,13 +257,13 @@ describe("a knight's face", () => {
   });
 
   test("at work it turns; given rest again, it comes to rest and asks for no more frames", () => {
-    const working = knightFace({ id: "gareth", size: 34, mood: "working", key: "test:rest" }) as unknown as Node_;
-    expect(working.children[0]!.className).toBe("knight-orb-canvas");
+    const working = agentFace({ id: "max", size: 34, mood: "working", key: "test:rest" }) as unknown as Node_;
+    expect(working.children[0]!.className).toBe("agent-orb-canvas");
     expect(frames.length).toBeGreaterThan(0);
     for (let ms = 1000; ms < 2000; ms += 1000 / 60) run(ms);
     // Its work ends: drawn again at rest, on the same course, it slows to a stop, then nothing more.
     working.children[0]!.isConnected = false;
-    const resting = canvasOf(knightFace({ id: "gareth", size: 34, mood: "idle", key: "test:rest" }) as unknown as Node_)!;
+    const resting = canvasOf(agentFace({ id: "max", size: 34, mood: "idle", key: "test:rest" }) as unknown as Node_)!;
     for (let ms = 2000; ms < 12_000; ms += 1000 / 60) run(ms);
     const settled = resting.calls.length;
     for (let ms = 12_000; ms < 13_000; ms += 1000 / 60) run(ms);
@@ -272,19 +272,19 @@ describe("a knight's face", () => {
   });
 });
 
-describe("a knight's seat", () => {
+describe("an agent's seat", () => {
   test("its face, still, with no ring and no lights round it; its state on the seat and in its name", () => {
-    const live = seat({ id: "gareth", name: "Gareth", state: "working", expression: "working", size: 40 }) as unknown as Node_;
+    const live = seat({ id: "max", name: "Max", state: "working", expression: "working", size: 40 }) as unknown as Node_;
     expect(live.children.map((child) => child.attrs.class ?? child.className)).toEqual(["worker-avatar"]);
     expect(live.attrs["data-state"]).toBe("working");
     const face = live.children[0]!.children[0]!;
-    expect([face.attrs.class, face.attrs["aria-label"]]).toEqual(["knight-orb", "Gareth · Working"]);
+    expect([face.attrs.class, face.attrs["aria-label"]]).toEqual(["agent-orb", "Max · Working"]);
     run(1000);
     expect(frames).toEqual([]);
   });
 
-  test("Galahad's seat is his orb, still, in the room a face and its seat take", () => {
-    const drawn = seat({ id: "galahad", name: "Galahad", state: "needs", size: 40 }) as unknown as Node_;
+  test("Your agent's seat is its orb, still, in the room a face and its seat take", () => {
+    const drawn = seat({ id: "primary", name: "Your agent", state: "needs", size: 40 }) as unknown as Node_;
     expect([drawn.children[0]!.attrs.class, drawn.children[0]!.attrs["data-tone"], drawn.children[0]!.attrs["data-mood"], drawn.children[0]!.attrs.style]).toEqual(["orb", "warn", undefined, "--orb-size:48px"]);
     run(1000);
     expect(frames).toEqual([]);

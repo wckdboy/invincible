@@ -42,7 +42,7 @@ export class ContainerVolumes implements Workspaces {
     return true;
   }
 
-  /** `retain`: a knight's, kept whatever becomes of its VM. A volume's labels are fixed as it is made, so it is said here. */
+  /** `retain`: an agent's, kept whatever becomes of its VM. A volume's labels are fixed as it is made, so it is said here. */
   async create(id: string, gib: number, opts: { retain?: boolean } = {}): Promise<string> {
     if (!/^[0-9a-f]{10}$/.test(id) || !Number.isInteger(gib) || gib < 1 || gib > MAX_WORKSPACE_GB) throw new WorkspaceError("bad workspace request");
     const made = await this.run(containerVolumeCreateArgs(id, gib, opts.retain === true), 60_000);
@@ -66,11 +66,11 @@ export class ContainerVolumes implements Workspaces {
     if (volume.labels[`${LABEL}.retained`] !== "1") throw new WorkspaceError("this workspace wasn't made to be kept, and a volume's labels can't be changed once it is made");
   }
 
-  /** Never a kept one (a knight's): only its owner's removal takes that (removeRetained). */
+  /** Never a kept one (an agent's): only its owner's removal takes that (removeRetained). */
   async remove(id: string): Promise<void> {
     const volume = await this.find(id);
     if (!volume) return;
-    if (volume.labels[`${LABEL}.retained`] === "1") throw new WorkspaceError("a knight's workspace is kept: only its owner's removal takes it");
+    if (volume.labels[`${LABEL}.retained`] === "1") throw new WorkspaceError("an agent's workspace is kept: only its owner's removal takes it");
     await this.delete(id);
   }
 

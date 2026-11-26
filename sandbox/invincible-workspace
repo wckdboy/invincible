@@ -1,7 +1,7 @@
 #!/bin/sh
 # invincible-workspace: the one privileged step of a sandbox's workspace.
 #
-# Each sandbox's /work is its own ext4 image of a fixed size, so a runaway knight
+# Each sandbox's /work is its own ext4 image of a fixed size, so a runaway agent
 # fills its own workspace and never the host's disk. Mounting needs root; the
 # Invincible node doesn't have it (its service runs with NoNewPrivileges), so systemd
 # starts this script, as root, once per connection on /run/invincible-workspace.sock,

@@ -39,7 +39,7 @@ export function measuredFacts(c: Calibration, node: Pick<ComputeNodeView, "capac
   return facts;
 }
 
-/** "14 of 32 threads · 91 of 182 GB": what he may use of the machine. */
+/** "14 of 32 threads · 91 of 182 GB": what it may use of the machine. */
 export function ceilingText(node: Pick<ComputeNodeView, "body" | "capacity">): string {
   if (!node.body || !node.capacity) return "Not known yet";
   return `${node.capacity.cores} of ${plural(node.body.cores, "thread")} · ${node.capacity.memoryGb} of ${gbText(Math.round(node.body.memoryGb))}`;
@@ -55,7 +55,7 @@ export function ceilingOwner(node: Pick<ComputeNodeView, "limit" | "capacity">):
   if (limit?.cores !== undefined) yours.push(plural(limit.cores, "thread"));
   if (limit?.memoryGb !== undefined) yours.push(gbText(limit.memoryGb));
   const whose = yours.length ? `Your ceiling: ${yours.join(", ")}${yours.length === 1 ? (limit?.cores !== undefined ? " (memory: the default half)" : " (threads: the default half)") : ""}` : "The default: half of the machine";
-  return node.capacity && !node.capacity.measured ? `${whose} · he counts one sandbox's worth until it's measured` : whose;
+  return node.capacity && !node.capacity.measured ? `${whose} · it counts one sandbox's worth until it's measured` : whose;
 }
 
 /** A node's slots in words, and how full they are (null: not known, or none). */
@@ -66,8 +66,8 @@ export function slotsText(node: Pick<ComputeNodeView, "body" | "capacity" | "use
   if (slots <= 0) return { text: "No sandboxes: your ceiling", waiting: 0, fraction: null };
   const capped = node.limit?.sandboxes !== undefined && node.limit.sandboxes <= slots ? " (your ceiling)" : "";
   if (!node.use) return { text: `${plural(slots, "slot")}${capped} · in use: not known`, waiting: 0, fraction: null };
-  // Knights' own VMs hold their threads and memory, and no slot: said beside the slots, never among them.
-  const kept = node.use.kept ? ` · ${plural(node.use.kept, "knight's VM", "knights' VMs")} besides` : "";
+  // Agents' own VMs hold their threads and memory, and no slot: said beside the slots, never among them.
+  const kept = node.use.kept ? ` · ${plural(node.use.kept, "agent's VM", "agents' VMs")} besides` : "";
   return { text: `${node.use.sandboxes} of ${plural(slots, "slot")} in use${capped}${kept}`, waiting: node.use.queued, fraction: Math.min(1, node.use.sandboxes / slots) };
 }
 
@@ -110,7 +110,7 @@ export function effortText(view: Pick<ComputeView, "policy" | "plan">): string {
 /** "2 of 12 used today". */
 export const budgetText = (budget: ComputeView["budget"]): string => `${budget.usedToday} of ${budget.perDay} used today`;
 
-/** One attempt of a quest in hand, in a line: "Attempt 2 · at the forge · The engineer is thinking". */
+/** One attempt of a run in hand, in a line: "Attempt 2 · at the forge · The engineer is thinking". */
 export function attemptLine(a: EffortWork["attempts"][number]): string {
   return [`Attempt ${a.index}`, `at the ${a.station}`, a.active ? a.doing : "between steps"].filter(Boolean).join(" · ");
 }

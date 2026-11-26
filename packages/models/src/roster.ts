@@ -1,4 +1,4 @@
-import { TeammateRole, type ThinkingEffort } from "@invincible/core";
+import { AgentRole, type ThinkingEffort } from "@invincible/core";
 import type { LedgerStore } from "@invincible/ledger";
 import { providerRecord } from "./providers.ts";
 
@@ -42,7 +42,7 @@ export interface RoleSpec {
 }
 
 /*
- * The work's defaults, the cheaper open models first (your word, 23 November 2026: "Galahad should mainly use the
+ * The work's defaults, the cheaper open models first (your word, 23 November 2026: "The primary should mainly use the
  * coding plans and the cheaper but still near frontier open models from china/or hosted in europe"): DeepSeek's and
  * Z.ai's from China, Mistral's from Europe; then the frontier closed ones, as fallbacks: Anthropic's, Claude through
  * the two routers, OpenAI's and xAI's, each as its own pages name it (read 21 November 2026: OpenAI's guide calls
@@ -55,14 +55,14 @@ const WORK = ["deepseek/deepseek-v4-pro", "zai/glm-5.3", "mistral/mistral-large-
 
 /**
  * The coding plans' models, first for the engineer's work once you add a plan's key: its allowance is paid for already.
- * Each is asked only what its vendor's terms allow (providers.ts CodingPlan.allows): OpenCode Go his own coding and the
- * coding tools', Z.ai's and MiMo's the coding tools' alone, and never his talk with you.
+ * Each is asked only what its vendor's terms allow (providers.ts CodingPlan.allows): OpenCode Go its own coding and the
+ * coding tools', Z.ai's and MiMo's the coding tools' alone, and never its talk with you.
  */
 const PLANS = ["opencode-go/deepseek-v4-pro", "opencode-go/glm-5.3", "zai-coding/glm-5.3", "mimo-token/mimo-v2.6-pro"];
 
 export const ROLES: Record<string, RoleSpec> = {
   planner: {
-    description: "decomposes quests, makes judgment calls, talks to you",
+    description: "decomposes runs, makes judgment calls, talks to you",
     defaults: WORK,
     effort: "high",
   },
@@ -82,11 +82,11 @@ export const ROLES: Record<string, RoleSpec> = {
     defaults: [],
     effort: "low",
   },
-  // A knight's eyes (Computer Use): the model its desktop's `look` puts a screenshot and a question to, through the
-  // gateway, from the knight's own VM. None until you name one: it must take images, and to be clicked on it must
-  // answer a place in the screenshot's own pixels (measured, not assumed: TRIALS.md).
+  // An agent's eyes (Computer Use): the model its desktop's `look` puts a screenshot and a question to, through the
+  // gateway, from the agent's own VM. None until you name one: it must take images, and to be clicked on it must
+  // answer a place in the screenshot's own pixels (measured, not assumed: EVALS.md).
   eyes: {
-    description: "looks at a knight's screen: says what is on it, and where, in pixels (Computer Use)",
+    description: "looks at an agent's screen: says what is on it, and where, in pixels (Computer Use)",
     defaults: [],
     effort: "low",
   },
@@ -104,14 +104,14 @@ export const CHORES: Record<string, string> = {
   fold: "sums up a long chat, or a room's conversation, into its story; the swift role does it until you hire models for this",
 };
 
-/** Built-in roles that aren't a knight's to work on: the independent check of its work, and the tools'. */
-const NOT_FOR_KNIGHTS = new Set(["reviewer", "decider", "eyes", "embedder"]);
+/** Built-in roles that aren't an agent's to work on: the independent check of its work, and the tools'. */
+const NOT_FOR_AGENTS = new Set(["reviewer", "decider", "eyes", "embedder"]);
 
 /**
- * The role a knight's work runs on (its tasks, its harness): its own, unless that is the reviewer's or a tool's, when
- * it is the engineer's. A knight may talk on the reviewer's models; the reviewer never does the work it checks.
+ * The role an agent's work runs on (its tasks, its harness): its own, unless that is the reviewer's or a tool's, when
+ * it is the engineer's. An agent may talk on the reviewer's models; the reviewer never does the work it checks.
  */
-export const workRole = (role: string): string => (NOT_FOR_KNIGHTS.has(role) ? "engineer" : role);
+export const workRole = (role: string): string => (NOT_FOR_AGENTS.has(role) ? "engineer" : role);
 
 /**
  * The role a chore runs on (`fold`: a long chat or a room's conversation summed up into its story): the role named after
@@ -126,7 +126,7 @@ export function roleModels(store: LedgerStore, role: string): string[] {
   const configured = store.lww<string[]>(`roster:${role}`)?.value;
   if (configured?.length) return configured;
   if (ROLES[role]) return setUp(store, ROLES[role].defaults);
-  // A role nobody hired (a knight made with a role of its own, or one you since removed): the engineer's models as
+  // A role nobody hired (an agent made with a role of its own, or one you since removed): the engineer's models as
   // you set them. (Its built-in default would be a model you may hold no key for.)
   return roleModels(store, "engineer");
 }
@@ -148,8 +148,8 @@ export interface RosterRole {
   effort: Effort | "auto";
   /** A role you made (not built in, not a chore's): yours to remove. */
   custom: boolean;
-  /** A knight may work on it: the planner, engineer and swift roles, and the roles you made. */
-  forKnights: boolean;
+  /** An agent may work on it: the planner, engineer and swift roles, and the roles you made. */
+  forAgents: boolean;
 }
 
 export function roster(store: LedgerStore): Record<string, RosterRole> {
@@ -170,7 +170,7 @@ export function roster(store: LedgerStore): Record<string, RosterRole> {
             description: ROLES[role]?.description ?? chore ?? "a role you made",
             effort: pinnedEffort(store, role) ?? "auto",
             custom: !builtIn && !chore,
-            forKnights: !chore && !NOT_FOR_KNIGHTS.has(role) && TeammateRole.safeParse(role).success,
+            forAgents: !chore && !NOT_FOR_AGENTS.has(role) && AgentRole.safeParse(role).success,
           },
         ],
       ];

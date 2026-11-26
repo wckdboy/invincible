@@ -211,7 +211,7 @@ let phone: { id: string; call: Caller };
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "keep" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startNode();
@@ -255,7 +255,7 @@ describe("a turn outlives the connection that started it", () => {
     // The page goes away mid-answer (a locked phone, a lost signal).
     dropped.abort();
     await first.done;
-    // He's still working: nobody is watching, and it says so.
+    // It's still working: nobody is watching, and it says so.
     await until(async () => (await listed()).turns[0]?.watchers === 0);
     const running = (await listed()).turns;
     expect(running).toMatchObject([{ id: turn.id, conversation: turn.conversation, state: "running", watchers: 0, step: "Answering", watchable: true, title: "Tell me a story." }]);
@@ -356,13 +356,13 @@ describe("the same chats on every device", () => {
     const asked = await ask(phone.call, "Plan Friday.", { save: true }, dropped.signal);
     await asked.seen("text");
     const id = asked.turn().conversation!;
-    // The phone is put away before he finishes.
+    // The phone is put away before it finishes.
     dropped.abort();
     await asked.done;
     await until(async () => (await listed()).turns[0]?.watchers === 0);
     pace.go();
     await idle();
-    // New on this device and on the phone alike (his ring is green while it is).
+    // New on this device and on the phone alike (its ring is green while it is).
     expect((await listed()).unread).toEqual([expect.objectContaining({ id, title: "Plan Friday." })]);
     expect((await listed(phone.call)).unread.map((c) => c.id)).toEqual([id]);
     expect((await summaries()).find((c) => c.id === id)?.unread).toBe(true);
@@ -397,7 +397,7 @@ describe("limits, said plainly", () => {
     const id = a.turn().conversation!;
     const busy = await admin("chat", { conversation: id, messages: [{ role: "user", content: "Second, at once." }] });
     expect(busy.status).toBe(409);
-    expect(((await busy.json()) as { error: string }).error).toBe("He's still working in this chat. Steer him (your message reaches him now), queue it (it's sent when he finishes), or stop him first.");
+    expect(((await busy.json()) as { error: string }).error).toBe("It's still working in this chat. Steer it (your message reaches it now), queue it (it's sent when it finishes), or stop it first.");
     expect((await chatOf(id)).messages).toHaveLength(2);
     const b = await ask(admin, "Second.", { save: true });
     const c = await ask(admin, "Third.");
@@ -418,7 +418,7 @@ describe("limits, said plainly", () => {
 });
 
 describe("the queue", () => {
-  test("queued while he works: visible, editable, removable, sent in order when the turn ends; Send now steers", async () => {
+  test("queued while it works: visible, editable, removable, sent in order when the turn ends; Send now steers", async () => {
     const pace = paced("Working on one", ".");
     script = [pace.reply, say("Two is done."), say("Four is done.")];
     const first = await ask(admin, "Do one.", { save: true });
@@ -433,7 +433,7 @@ describe("the queue", () => {
       ["Do three.", "phone"],
       ["Do for.", "a terminal on keep"],
     ]);
-    // Edited and removed while he works; any of your devices sees the same queue.
+    // Edited and removed while it works; any of your devices sees the same queue.
     const edited = await json<{ queue: QueuedMessage[] }>(admin("editQueued", { conversation: id, id: q3.queue[2]!.id, text: "Do four." }));
     expect(edited.queue[2]!.text).toBe("Do four.");
     const removed = await json<{ queue: QueuedMessage[] }>(phone.call("removeQueued", { conversation: id, id: q3.queue[1]!.id }));
@@ -442,7 +442,7 @@ describe("the queue", () => {
     expect((await summaries()).find((c) => c.id === id)).toMatchObject({ state: "working", queued: 2, held: null });
     expect(((await (await admin("editQueued", { conversation: id, id: 987_654, text: "x" })).json()) as { error: string }).error).toMatch(/no longer queued/);
 
-    // He finishes: each queued message becomes the next turn, in order, with nobody attached.
+    // It finishes: each queued message becomes the next turn, in order, with nobody attached.
     pace.go();
     await first.done;
     await until(async () => (await chatOf(id)).messages.length === 6 && (await chatOf(id)).turn === null);
@@ -562,7 +562,7 @@ describe("the queue", () => {
 });
 
 describe("steering", () => {
-  test("a steer that arrives during a tool call: the tool finishes and is reported, the next isn't run, then he's told", async () => {
+  test("a steer that arrives during a tool call: the tool finishes and is reported, the next isn't run, then it's told", async () => {
     armSlow();
     reached.length = 0;
     script = [
@@ -586,15 +586,15 @@ describe("steering", () => {
     expect(results[1]).toMatchObject({ id: "call_quick", ok: false, summary: "not run: your new message came first" });
     // The quick look never reached the service.
     expect(reached).toEqual(["GET /slow"]);
-    // The model saw: both calls answered (one for real, one "not run"), his own pause, then your message.
+    // The model saw: both calls answered (one for real, one "not run"), its own pause, then your message.
     const sent = bodies.at(-1).messages;
     expect(sent.slice(-4)).toEqual([
       { role: "tool", tool_call_id: "call_slow", content: expect.stringContaining('"report":"ready"') },
-      { role: "tool", tool_call_id: "call_quick", content: expect.stringContaining("Error: Not run: a new message from your liege arrived before this call started") },
-      { role: "assistant", content: "(I paused here: my liege sent a new message.)" },
+      { role: "tool", tool_call_id: "call_quick", content: expect.stringContaining("Error: Not run: a new message from the owner arrived before this call started") },
+      { role: "assistant", content: "(I paused here: the owner sent a new message.)" },
       { role: "user", content: "Only the report: skip the look." },
     ]);
-    // And it's in the kept chat where it reached him.
+    // And it's in the kept chat where it reached it.
     const kept = await chatOf(turn.conversation!);
     expect(kept.messages.map((m) => [m.role, m.status])).toEqual([
       ["user", "done"],
@@ -609,13 +609,13 @@ describe("steering", () => {
     expect(kept.messages[2]!.content).toBe("Only the report: skip the look.");
   });
 
-  test("once he has finished, a steer is refused: it's a new message", async () => {
+  test("once it has finished, a steer is refused: it's a new message", async () => {
     script = [say("Done.")];
     const first = await ask(admin, "Quick one.", { save: true });
     await first.done;
     const late = await admin("steerTurn", { turn: first.turn().id, text: "One more thing." });
     expect(late.status).toBe(409);
-    expect(((await late.json()) as { error: string }).error).toBe("He has finished that turn. Send it as a new message.");
+    expect(((await late.json()) as { error: string }).error).toBe("It has finished that turn. Send it as a new message.");
   });
 });
 
@@ -642,13 +642,13 @@ describe("a steered or queued message is your message, and checked like one", ()
     expect(JSON.stringify(bodies)).not.toContain(FAKE_KEY);
   });
 
-  test("the private-data rule holds across a steer: once he has read a private connector in a turn, no message of yours in that turn lets it out or into the mind", async () => {
+  test("the private-data rule holds across a steer: once it has read a private connector in a turn, no message of yours in that turn lets it out or into the mind", async () => {
     // A connector whose reads are private, as your mail's are, at a stand-in of its own.
     const diary = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json({ entry: "The code is 98765." }) });
     try {
       const manifest = { id: "diary", label: "Diary", origin: `http://127.0.0.1:${diary.port}`, private: true, tools: { read: { description: "Read it.", method: "GET", path: "/diary", class: "read" } } };
       expect((await admin("setConnector", { id: "diary", manifest })).status).toBe(200);
-      // He reads it; while he's answering you steer him to write it down; the tool is still refused.
+      // It reads it; while it's answering you steer it to write it down; the tool is still refused.
       const pace = paced("Your diary says: ", "(never said)");
       script = [callTools({ id: "call_diary", name: "connector_call", args: { connector: "diary", tool: "read", why: "you asked" } }), pace.reply, callTools({ id: "call_keep", name: "remember", args: { text: "The owner's code is 98765" } }), say("I can't keep that: it came from your diary.")];
       const first = await ask(admin, "What's in my diary?", { save: true });
@@ -712,10 +712,10 @@ describe("a steered or queued message is your message, and checked like one", ()
     expect(own).not.toContain('"type":"turn"');
     expect(own).toContain("Hello, agent.");
 
-    // The phone knows he's working in it.
+    // The phone knows it's working in it.
     const seen = (await listed(phone.call)).turns;
     expect(seen).toMatchObject([{ id: turn.id, state: "running", watchable: true }]);
-    // It may stop him.
+    // It may stop it.
     expect(await json(phone.call("stopTurn", { turn: turn.id }))).toMatchObject({ stopped: true });
     await first.done;
     pace.go();
@@ -744,7 +744,7 @@ describe("a steered or queued message is your message, and checked like one", ()
 describe("a side question", () => {
   const asideOf = (w: ReturnType<typeof watch>) => (w.events.find((e) => e.type === "aside") as Extract<ChatStreamEvent, { type: "aside" }>).id;
 
-  test("answered from the work in hand without changing its course, apart from the turn; brought back, it steers him", async () => {
+  test("answered from the work in hand without changing its course, apart from the turn; brought back, it steers it", async () => {
     armSlow();
     reached.length = 0;
     script = [callTools({ id: "call_slow", name: "connector_call", args: { connector: "forge", tool: "slow", args: {} } })];
@@ -756,24 +756,24 @@ describe("a side question", () => {
     const before = first.events.length;
 
     // The aside: its own model call, with no tools, from the same context.
-    script = [say("He is fetching the report from the forge; it hasn't come back yet.")];
-    const aside = watch(await admin("askAside", { conversation: id, question: "What is he waiting on?" }));
+    script = [say("It is fetching the report from the forge; it hasn't come back yet.")];
+    const aside = watch(await admin("askAside", { conversation: id, question: "What is it waiting on?" }));
     await aside.done;
     expect(aside.types()).toEqual(["aside", "model", "text", "done"]);
-    expect(aside.text()).toBe("He is fetching the report from the forge; it hasn't come back yet.");
+    expect(aside.text()).toBe("It is fetching the report from the forge; it hasn't come back yet.");
     const sideCall = bodies.at(-1);
     expect(sideCall.tools).toBeUndefined();
     const sideMessages = sideCall.messages.filter((m: any) => m.role !== "system");
     expect(sideMessages.map((m: any) => m.role)).toEqual(["user", "assistant", "user"]);
     expect(sideMessages[0].content).toBe("Fetch the report and summarise it.");
     expect(sideMessages[2].content).toContain('- Call a connector tool {"connector":"forge","tool":"slow","args":{}}');
-    expect(sideMessages[2].content).toContain("The aside: What is he waiting on?");
+    expect(sideMessages[2].content).toContain("The aside: What is it waiting on?");
     // The working turn saw none of it: nothing new in its stream, nothing in the kept chat, nothing waiting to steer.
     expect(first.events.length).toBe(before);
     expect((await chatOf(id)).messages).toHaveLength(2);
     expect((await listed()).turns[0]).toMatchObject({ steering: 0 });
 
-    // Bring back: now it's your message to him, and reaches him at the next safe point.
+    // Bring back: now it's your message to it, and reaches it at the next safe point.
     expect(await json(admin("bringBack", { aside: asideOf(aside) }))).toEqual({ how: "steered" });
     expect((await admin("bringBack", { aside: asideOf(aside) })).status).toBe(404);
     script = [say("Summary: the report is ready.")];
@@ -781,8 +781,8 @@ describe("a side question", () => {
     await first.done;
     expect(first.types()).toEqual(["turn", "conversation", "model", "tool", "tool_result", "steer", "text", "done"]);
     const steer = first.events.find((e) => e.type === "steer") as Extract<ChatStreamEvent, { type: "steer" }>;
-    expect(steer.text).toContain("My aside: What is he waiting on?");
-    expect(steer.text).toContain("Your answer: He is fetching the report from the forge");
+    expect(steer.text).toContain("My aside: What is it waiting on?");
+    expect(steer.text).toContain("Your answer: It is fetching the report from the forge");
     expect((await chatOf(id)).messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
   });
 
@@ -849,12 +849,12 @@ describe("from a terminal (invincible ask, turns, queue)", () => {
     return { io, onInterrupt, out: () => out.join(""), err: () => err.join(""), ctrlC: () => press() };
   }
 
-  test("ask watches a turn the node owns: his words, which turn it is, and that it outlives the terminal", async () => {
+  test("ask watches a turn the node owns: its words, which turn it is, and that it outlives the terminal", async () => {
     script = [say("Dry and cold.")];
     const t = terminal();
     expect(await askCommand(cli(), "How's the weather?", {}, t.io, t.onInterrupt)).toBe(0);
     expect(t.out()).toBe("Dry and cold.\n");
-    expect(t.err()).toMatch(/\[turn tn_[A-Za-z0-9_-]{22} · he goes on working if this terminal goes away; Ctrl-C stops him\]/);
+    expect(t.err()).toMatch(/\[turn tn_[A-Za-z0-9_-]{22} · it goes on working if this terminal goes away; Ctrl-C stops it\]/);
     expect(t.err()).toMatch(/\[chat cv_/);
   });
 
@@ -872,7 +872,7 @@ describe("from a terminal (invincible ask, turns, queue)", () => {
     pace.go();
   });
 
-  test("--detach starts it and leaves; he works on, and the answer is in the chat", async () => {
+  test("--detach starts it and leaves; it works on, and the answer is in the chat", async () => {
     const pace = paced("Working ", "alone.");
     script = [pace.reply];
     const t = terminal();
@@ -881,7 +881,7 @@ describe("from a terminal (invincible ask, turns, queue)", () => {
     const [, turn, id] = /(tn_[A-Za-z0-9_-]{22}) in chat (cv_[A-Za-z0-9_-]{22})/.exec(t.err())!;
     expect(t.err()).toContain(`invincible turn watch ${turn}`);
     await until(async () => (await listed()).turns.some((x) => x.id === turn && x.watchers === 0));
-    // From another terminal: what he's on, then watching it to its end.
+    // From another terminal: what it's on, then watching it to its end.
     const list = terminal();
     await turnsCommand(cli(), undefined, [], list.io);
     expect(list.out()).toContain(`● ${turn} · Do this while I'm away. (${id}) · planner`);
@@ -896,7 +896,7 @@ describe("from a terminal (invincible ask, turns, queue)", () => {
     expect((await chatOf(id!)).messages[1]).toMatchObject({ content: "Working alone.", status: "done" });
   });
 
-  test("while he works in a chat: a plain ask says what you can do; --queue keeps it; --steer tells him now and follows to the end", async () => {
+  test("while it works in a chat: a plain ask says what you can do; --queue keeps it; --steer tells it now and follows to the end", async () => {
     const pace = paced("On the first thing", " (never said)");
     script = [pace.reply, say("The second thing instead."), say("And the queued one.")];
     const started = terminal();
@@ -904,7 +904,7 @@ describe("from a terminal (invincible ask, turns, queue)", () => {
     const id = /in chat (cv_[A-Za-z0-9_-]{22})/.exec(started.err())![1]!;
     await until(async () => (await chatOf(id)).turn?.step === "Answering");
 
-    await expect(askCommand(cli(), "And another.", { chat: id }, terminal().io)).rejects.toThrow(/still working in this chat\. Steer him .* queue it .* or stop him first/);
+    await expect(askCommand(cli(), "And another.", { chat: id }, terminal().io)).rejects.toThrow(/still working in this chat\. Steer it .* queue it .* or stop it first/);
     await expect(askCommand(cli(), "x", { steer: true }, terminal().io)).rejects.toThrow(/go with --chat/);
     await expect(askCommand(cli(), "x", { chat: id, steer: true, queue: true }, terminal().io)).rejects.toThrow(/one of --steer, --queue or --aside/);
 
@@ -918,8 +918,8 @@ describe("from a terminal (invincible ask, turns, queue)", () => {
 
     const steered = terminal();
     expect(await askCommand(cli(), "The second thing instead, please.", { chat: id, steer: true }, steered.io, steered.onInterrupt)).toBe(0);
-    expect(steered.err()).toContain("[told him: it reaches him at his next safe point");
-    expect(steered.err()).toContain("↳ your message reached him: The second thing instead, please.");
+    expect(steered.err()).toContain("[told it: it reaches it at its next safe point");
+    expect(steered.err()).toContain("↳ your message reached it: The second thing instead, please.");
     expect(steered.out()).toBe("On the first thingThe second thing instead.\n");
     // The queued one went by itself once that turn ended.
     await until(async () => (await chatOf(id)).messages.length === 6 && (await chatOf(id)).turn === null);
@@ -936,24 +936,24 @@ describe("from a terminal (invincible ask, turns, queue)", () => {
     await askCommand(cli(), "Second.", { chat: id, queue: true }, terminal().io);
     const stopped = terminal();
     await turnsCommand(cli(), "stop", [id], stopped.io);
-    expect(stopped.out()).toContain("Stopped. What he'd said is kept; anything queued behind it is held until you resume.");
+    expect(stopped.out()).toContain("Stopped. What it'd said is kept; anything queued behind it is held until you resume.");
     pace.go();
     await until(async () => (await chatOf(id)).held === "stopped");
     const held = terminal();
     await queueCommand(cli(), id, undefined, [], held.io);
-    expect(held.out()).toContain("1 queued, held: you stopped him. Nothing is sent until you resume (or send one now).");
+    expect(held.out()).toContain("1 queued, held: you stopped it. Nothing is sent until you resume (or send one now).");
     const all = terminal();
     await turnsCommand(cli(), undefined, [], all.io);
-    expect(all.out()).toContain(`First. (${id}): 1 queued, held (you stopped him)`);
+    expect(all.out()).toContain(`First. (${id}): 1 queued, held (you stopped it)`);
     const resumed = terminal();
     await queueCommand(cli(), id, "resume", [], resumed.io);
-    expect(resumed.out()).toMatch(/Resumed: he's on the next one \(tn_/);
+    expect(resumed.out()).toMatch(/Resumed: it's on the next one \(tn_/);
     await until(async () => (await chatOf(id)).turn === null && (await chatOf(id)).messages.length === 4);
     expect((await chatOf(id)).messages.at(-1)!.content).toBe("Second, done.");
     await expect(queueCommand(cli(), id, "rm", ["3"], terminal().io)).rejects.toThrow(/no message 3 in that queue/);
   });
 
-  test("--aside asks on the side and adds nothing; --bring hands it to him", async () => {
+  test("--aside asks on the side and adds nothing; --bring hands it to it", async () => {
     script = [say("Dry and cold."), say("In Copenhagen.")];
     const first = terminal();
     await askCommand(cli(), "The weather?", {}, first.io, first.onInterrupt);
@@ -967,18 +967,18 @@ describe("from a terminal (invincible ask, turns, queue)", () => {
   });
 });
 
-describe("where he is, at a glance", () => {
-  test("waiting on you: an approval he filed in the chat, until you answer it; and an answer that ends by asking", async () => {
+describe("where it is, at a glance", () => {
+  test("waiting on you: an approval it filed in the chat, until you answer it; and an answer that ends by asking", async () => {
     script = [callTools({ id: "call_post", name: "connector_call", args: { connector: "forge", tool: "post", args: { text: "hello" }, why: "you asked" } }), say("I've filed it for your approval.")];
     const first = await ask(admin, "Post hello on the forge.", { save: true });
     await first.done;
     const id = first.turn().conversation!;
-    // Nobody approved it for him because nobody was there: it waits in the outbox.
+    // Nobody approved it for it because nobody was there: it waits in the outbox.
     expect(reached.filter((r) => r.startsWith("POST"))).toEqual([]);
     expect((await summaries()).find((c) => c.id === id)).toMatchObject({ state: "waiting", needs: { approvals: 1, keys: 0, question: false } });
     const { actions } = await json<{ actions: { id: string; state: string; by: string }[] }>(admin("actions"));
     const filed = actions.find((a) => a.state === "waiting")!;
-    expect(filed.by).toBe("arm:galahad");
+    expect(filed.by).toBe("arm:primary");
     await json(admin("decideAction", { id: filed.id, approve: false }));
     expect((await summaries()).find((c) => c.id === id)).toMatchObject({ state: "done", needs: null });
 

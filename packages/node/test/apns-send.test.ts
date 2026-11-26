@@ -28,7 +28,7 @@ beforeAll(async () => {
   const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
   const der = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
   // As the secure prompt hands it over: the .p8's text on one line.
-  key = { teamId: "TEAM000001", keyId: "KEY0000001", topic: "org.example.galahad", key: `${"-".repeat(5)}BEGIN PRIVATE KEY${"-".repeat(5)}${btoa(String.fromCharCode(...der))}${"-".repeat(5)}END PRIVATE KEY${"-".repeat(5)}` };
+  key = { teamId: "TEAM000001", keyId: "KEY0000001", topic: "org.example.primary", key: `${"-".repeat(5)}BEGIN PRIVATE KEY${"-".repeat(5)}${btoa(String.fromCharCode(...der))}${"-".repeat(5)}END PRIVATE KEY${"-".repeat(5)}` };
   publicKey = pair.publicKey;
   server = http2.createServer();
   server.on("stream", (stream: http2.ServerHttp2Stream, headers: http2.IncomingHttpHeaders) => {
@@ -67,7 +67,7 @@ describe("a notification to the iPhone app", () => {
     expect(outcome).toEqual({ ok: true, gone: false, status: 200, error: null, attempts: 1 });
     const [request] = seen;
     expect(request!.headers[":path"]).toBe(`/3/device/${TOKEN}`);
-    expect(request!.headers["apns-topic"]).toBe("org.example.galahad");
+    expect(request!.headers["apns-topic"]).toBe("org.example.primary");
     expect(request!.headers["apns-push-type"]).toBe("alert");
     expect(request!.headers["apns-priority"]).toBe("10");
     expect(request!.headers["apns-expiration"]).toBe(String(1_800_000_000 + 3600));
@@ -83,7 +83,7 @@ describe("a notification to the iPhone app", () => {
 
   test("news is passive: no sound, no lighting the screen, held by a Focus or a Scheduled Summary (PLAN #59)", async () => {
     const { sender: apple } = sender();
-    const news = { ...PAYLOAD, kind: "finished" as const, title: "Galahad has finished", body: "A chat you left him working in has his answer." };
+    const news = { ...PAYLOAD, kind: "finished" as const, title: "Your agent has finished", body: "A chat you left it working in has its answer." };
     await apple.send({ endpoint: appleEndpoint("production", TOKEN), p256dh: "", auth: "" }, news, { ttlSeconds: 3600, urgency: "low" });
     expect(seen[0]!.headers["apns-priority"]).toBe("5");
     expect(seen[0]!.body.aps).toEqual({ alert: { title: news.title, body: news.body }, "interruption-level": "passive", "thread-id": "finished" });
@@ -106,7 +106,7 @@ describe("a notification to the iPhone app", () => {
   test("anything that looks like a secret never leaves: the general notification goes instead", async () => {
     const { sender: apple } = sender();
     await apple.send({ endpoint: appleEndpoint("production", TOKEN), p256dh: "", auth: "" }, { ...PAYLOAD, body: `sk-ant-api03-${"FAKE".repeat(8)}` }, DELIVERY);
-    expect(seen[0]!.body.aps.alert).toEqual({ title: "Galahad", body: "Something needs you. Open the app to see it." });
+    expect(seen[0]!.body.aps.alert).toEqual({ title: "Invincible", body: "Something needs you. Open the app to see it." });
     apple.close();
   });
 

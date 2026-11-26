@@ -47,9 +47,9 @@ describe("a chat's story", () => {
     }
     expect(chats.told(kept.id)).toMatchObject({ story: null });
     expect(chats.told(kept.id).recent.map((m) => m.content)).toEqual(["question 0", "answer 0", "question 1", "answer 1", "question 2", "answer 2"]);
-    chats.keepStory(kept.id, "You asked twice; he answered twice.", ids[2]! - 1);
+    chats.keepStory(kept.id, "You asked twice; it answered twice.", ids[2]! - 1);
     const told = chats.told(kept.id);
-    expect(told.story).toEqual({ text: "You asked twice; he answered twice.", through: ids[2]! - 1 });
+    expect(told.story).toEqual({ text: "You asked twice; it answered twice.", through: ids[2]! - 1 });
     expect(told.recent.map((m) => m.content)).toEqual(["question 2", "answer 2"]);
     // Told again, it replaces what it said.
     chats.keepStory(kept.id, "Folded further.", ids[2]!);

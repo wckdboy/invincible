@@ -12,20 +12,20 @@ import { arrive, badge, button, callout, card, chipInput, copyField, count, disc
 import { bannerPill, connectionBanner } from "../src/ui/banner.ts";
 import { type ConfirmOptions, confirmAction, openSheet } from "../src/ui/dialog.ts";
 import { seat, stateChip } from "../src/ui/avatar.ts";
-import type { KnightState } from "../src/lib/knight-state.ts";
+import type { AgentState } from "../src/lib/agent-state.ts";
 import { h, Scope } from "../src/ui/dom.ts";
 import { icon } from "../src/ui/icons.ts";
 import { selector } from "../src/ui/selector.ts";
-import { knightFace, orb } from "../src/ui/orb.ts";
+import { agentFace, orb } from "../src/ui/orb.ts";
 import { toast, toastCard, type ToastOptions } from "../src/ui/toast.ts";
 import type { Ctx } from "../src/context.ts";
 import { questionCard } from "../src/views/inbox.ts";
 import { findingRow } from "../src/views/loops.ts";
 
 const TONES: Tone[] = ["ok", "warn", "danger", "info", "accent", "agent", "neutral", "needs"];
-/** Each state a knight can be in, with the face it shows in it. */
-const SEATED: [KnightState, "working" | "asking" | "concerned" | "resting" | "waiting" | "pleased" | "idle"][] = [["working", "working"], ["needs", "asking"], ["failed", "concerned"], ["paused", "resting"], ["queued", "waiting"], ["verified", "pleased"], ["resting", "idle"]];
-const chip = (state: KnightState) => stateChip(state) ?? h("span", { class: "tiny subtle" }, "at rest: no chip");
+/** Each state an agent can be in, with the face it shows in it. */
+const SEATED: [AgentState, "working" | "asking" | "concerned" | "resting" | "waiting" | "pleased" | "idle"][] = [["working", "working"], ["needs", "asking"], ["failed", "concerned"], ["paused", "resting"], ["queued", "waiting"], ["verified", "pleased"], ["resting", "idle"]];
+const chip = (state: AgentState) => stateChip(state) ?? h("span", { class: "tiny subtle" }, "at rest: no chip");
 const scope = new Scope();
 
 /** One component: its name as code calls it, what it's for, and its states side by side. */
@@ -53,7 +53,7 @@ function sheetInPlace(): HTMLElement {
   const name = h("input", { class: "input", placeholder: "Release plan", autocomplete: "off", autocorrect: "off", spellcheck: "false" });
   const sheet = openSheet({
     title: "New project",
-    description: "Instructions he follows in every chat of it.",
+    description: "Instructions it follows in every chat of it.",
     body: [field("Name", name, { hint: "Shown in the chat's menu." }), field("Instructions", h("textarea", { class: "textarea", rows: 3 }))],
     footer: [button("Cancel"), button("Make project", { variant: "primary" })],
   });
@@ -77,14 +77,14 @@ function confirmInPlace(options: ConfirmOptions): HTMLElement {
 const toasts = (...each: [string, ToastOptions][]) => h("div", { class: "gallery-toasts" }, ...each.map(([title, options]) => toastCard(title, options)));
 // The banner as the shell raises it under its top bar (ui/banner.ts), here in the page's flow.
 const banner = (said: Parameters<typeof bannerPill>[0]) => h("div", { class: "gallery-banner" }, bannerPill(said));
-// The Roundtable's strip while its updates are paused (views/team.ts).
+// The agents' strip while its updates are paused (views/team.ts).
 const teamNotice = h("div", { class: "team-notice", role: "status" }, icon("offline", { size: 14 }), h("span", { class: "grow" }, "Updates paused. What you see may be out of date."), button("Retry", { size: "sm" }));
-// The card at the top of the Inbox while he can't reach this device (views/notifications.ts reachNote), each way it reads.
+// The card at the top of the Inbox while it can't reach this device (views/notifications.ts reachNote), each way it reads.
 const reachOff = h(
   "div",
   { class: "reach-note" },
   callout("warn", h("div", { class: "stack tight" }, h("div", {}, "They were on until 18 Nov: Apple's push service stopped taking them.")), {
-    title: "He can't reach this device when Galahad is closed.",
+    title: "It can't reach this device when Invincible is closed.",
     icon: "bell",
     actions: [button("Turn on notifications", { size: "sm", variant: "primary", icon: "bell" }), button("Not now", { size: "sm", variant: "ghost" })],
   }),
@@ -92,7 +92,7 @@ const reachOff = h(
 const reachOn = h(
   "div",
   { class: "reach-note" },
-  callout("ok", h("div", { class: "stack tight" }, h("div", {}, "He can reach this device when Galahad is closed. Send a test to see one arrive.")), { title: "Notifications are on", actions: button("Send a test", { size: "sm", icon: "bell" }) }),
+  callout("ok", h("div", { class: "stack tight" }, h("div", {}, "It can reach this device when Invincible is closed. Send a test to see one arrive.")), { title: "Notifications are on", actions: button("Send a test", { size: "sm", icon: "bell" }) }),
 );
 // The Inbox's notices, as its "Noticed" section lists them (views/inbox.ts, views/loops.ts findingRow).
 const notices = card(
@@ -127,12 +127,12 @@ const tryThem = h(
   button("Three at once", {
     onClick: () => {
       toast("Copied");
-      setTimeout(() => toast("Galahad asks your leave", { lead: orb({ size: 28 }), description: "github.pr.create: wckdboy/galahad", action: { label: "Review", run: () => {} } }), 160);
+      setTimeout(() => toast("Your agent asks for your approval", { lead: orb({ size: 28 }), description: "github.pr.create: wckdboy/invincible", action: { label: "Review", run: () => {} } }), 160);
       setTimeout(() => toast("Couldn't dismiss it", { tone: "error", description: "The node didn't answer." }), 320);
     },
   }),
-  button("Lose Galahad", { onClick: () => reach(false) }),
-  button("Reach him again", { onClick: () => reach(true) }),
+  button("Lose your agent", { onClick: () => reach(false) }),
+  button("Reach it again", { onClick: () => reach(true) }),
   button("A confirmation", { onClick: () => void confirmAction({ title: "Revoke Owner's iPhone?", body: "It is cut off at once and must be paired again.", confirmLabel: "Revoke", typeToConfirm: "Owner's iPhone" }) }),
 );
 
@@ -182,7 +182,7 @@ const page = h(
       "card()",
       "Content on raised ground; its head, rows and foot start at one leading edge.",
       state("padded", card({}, h("p", {}, "A card's content sits at --card-pad from its edge, as a stack."), note("And a note under it."))),
-      state("head and foot", card({ title: "Autonomy", icon: "shield", actions: h("span", { class: "tiny subtle" }, "last 24 h"), foot: note("Set by the oath. Only you can amend it.") }, h("p", { class: "small" }, "What he may do alone, and what asks you."))),
+      state("head and foot", card({ title: "Autonomy", icon: "shield", actions: h("span", { class: "tiny subtle" }, "last 24 h"), foot: note("Set by the policy. Only you can amend it.") }, h("p", { class: "small" }, "What it may do alone, and what asks you."))),
       state("toned", card({ tone: "accent" }, h("p", { class: "small" }, "Yours.")), card({ tone: "warn" }, h("p", { class: "small" }, "Wants a look.")), card({ tone: "danger" }, h("p", { class: "small" }, "Destructive."))),
     ),
 
@@ -202,13 +202,13 @@ const page = h(
             leadTone: "ok",
             top: true,
             title: h("span", { class: "row wrap" }, h("span", { class: "mono" }, "github.pr.create"), badge("sent", "ok")),
-            sub: h("span", { class: "mono" }, "wckdboy/galahad#212"),
+            sub: h("span", { class: "mono" }, "wckdboy/invincible#212"),
             meta: [h("span", {}, "asked by the loop nightly"), h("span", {}, "1 h ago")],
             body: h("details", { class: "process", open: true }, h("summary", {}, icon("chevron-right", { size: 14, class: "chev" }), "Receipt"), h("pre", { class: "result process-body" }, "201 Created · pull request 212")),
           }),
         ]),
       ),
-      state("none yet", list([], { empty: { icon: "repeat", title: "No loops yet", body: "Work he does on a schedule appears here." } })),
+      state("none yet", list([], { empty: { icon: "repeat", title: "No loops yet", body: "Work it does on a schedule appears here." } })),
     ),
 
     shown(
@@ -240,9 +240,9 @@ const page = h(
 
     shown(
       "seat() · stateChip()",
-      "A knight in its seat: its face, still, its state said beside it by the chip, in words and its colour; and the mark of the one who leads.",
-      state("each state, on a row's face", h("div", { class: "gallery-seats" }, ...SEATED.map(([each, expression]) => h("div", { class: "stack snug gallery-seat" }, seat({ id: "percival", name: "Percival", state: each, expression, size: 32 }), chip(each))))),
-      state("on a card, and as a portrait", h("div", { class: "row wrap" }, seat({ id: "percival", name: "Percival", state: "working", expression: "working", size: 84 }), seat({ id: "gareth", name: "Gareth", state: "needs", expression: "asking", size: 104 }))),
+      "An agent in its seat: its face, still, its state said beside it by the chip, in words and its colour; and the mark of the one who leads.",
+      state("each state, on a row's face", h("div", { class: "gallery-seats" }, ...SEATED.map(([each, expression]) => h("div", { class: "stack snug gallery-seat" }, seat({ id: "ivo", name: "Ivo", state: each, expression, size: 32 }), chip(each))))),
+      state("on a card, and as a portrait", h("div", { class: "row wrap" }, seat({ id: "ivo", name: "Ivo", state: "working", expression: "working", size: 84 }), seat({ id: "max", name: "Max", state: "needs", expression: "asking", size: 104 }))),
     ),
 
     shown(
@@ -264,7 +264,7 @@ const page = h(
       "Figures in tabular numerals; a meter turns amber past its line.",
       state("tiles", h("div", { class: "grid stats" }, statTile({ label: "Nodes online", icon: "server", value: ["2", h("span", { class: "of" }, " / 3")], note: [dot("warn"), "1 offline"] }), statTile({ label: "Inbox", icon: "inbox", value: "0", note: "nothing needs you" }))),
       state("meters", h("div", { class: "stack" }, meter(0.42, undefined, "Disk"), meter(0.91, "var(--warn)", "Disk"))),
-      state("facts", kv([["Name", "Owner's iPhone"], ["Device key", h("span", { class: "mono" }, "b3f1…09ac")]]), meta(h("span", {}, "quest q-17"), h("span", {}, "on keep"), h("span", {}, "12:04"))),
+      state("facts", kv([["Name", "Owner's iPhone"], ["Device key", h("span", { class: "mono" }, "b3f1…09ac")]]), meta(h("span", {}, "run q-17"), h("span", {}, "on keep"), h("span", {}, "12:04"))),
     ),
 
     shown(
@@ -310,18 +310,18 @@ const page = h(
       state("each tone", toasts(["Copied", {}], ["Sealed", { tone: "ok", description: "Every full node can use it. No model ever sees it." }], ["No disk limit here", { tone: "warn", description: "A sandbox can fill this host's disk." }], ["Couldn't dismiss it", { tone: "error", description: "The node didn't answer." }])),
       state("with an action", toasts(["Owner's iPad asks to join", { description: "Compare the six-digit code before you approve.", action: { label: "Review", run: () => {} } }])),
       state(
-        "about a knight, or him: their orb, still",
+        "about an agent, or it: their orb, still",
         toasts(
-          ["Ada's work is verified", { tone: "ok", lead: knightFace({ id: "ada", size: 28 }), description: "Its gates passed, and a reviewer that didn't write it agreed.", action: { label: "Review", run: () => {} } }],
-          ["Galahad asks your leave", { lead: orb({ size: 28 }), description: "github.pr.create: wckdboy/galahad", action: { label: "Review", run: () => {} } }],
+          ["Ada's work is verified", { tone: "ok", lead: agentFace({ id: "ada", size: 28 }), description: "Its gates passed, and a reviewer that didn't write it agreed.", action: { label: "Review", run: () => {} } }],
+          ["Your agent asks for your approval", { lead: orb({ size: 28 }), description: "github.pr.create: wckdboy/invincible", action: { label: "Review", run: () => {} } }],
         ),
       ),
     ),
 
     shown(
       "The banner",
-      "Under the top bar, over the page, while Galahad can't be reached; for a moment once he is again, then gone. Nothing under it moves.",
-      state("can't reach him: trying again, a slow line of light along its foot", banner("unreachable")),
+      "Under the top bar, over the page, while your agent can't be reached; for a moment once it is again, then gone. Nothing under it moves.",
+      state("can't reach it: trying again, a slow line of light along its foot", banner("unreachable")),
       state("offline: no error", banner("offline")),
       state("reached again, for a moment", banner("reconnected")),
     ),
@@ -337,8 +337,8 @@ const page = h(
         h(
           "article",
           { class: "alert-card gallery-alert-card", "data-tone": "needs" },
-          h("div", { class: "row tight tiny subtle" }, knightFace({ id: "ada", size: 20 }), "Ada · Fix the flaky link test"),
-          h("p", { class: "small" }, "Outward · ", h("span", { class: "mono" }, "github.pr.create"), " wckdboy/galahad"),
+          h("div", { class: "row tight tiny subtle" }, agentFace({ id: "ada", size: 20 }), "Ada · Fix the flaky link test"),
+          h("p", { class: "small" }, "Outward · ", h("span", { class: "mono" }, "github.pr.create"), " wckdboy/invincible"),
           h("div", { class: "row wrap" }, button("Allow once", { size: "sm", variant: "primary" }), button("Deny", { size: "sm" })),
         ),
       ),
@@ -353,11 +353,11 @@ const page = h(
 
     shown(
       "Notices",
-      "What the node noticed, the Roundtable's strip while its updates are paused, and the card that says he can't reach this device.",
+      "What the node noticed, the agents' strip while its updates are paused, and the card that says it can't reach this device.",
       state("the Inbox's notices", notices),
-      state("the Roundtable's strip", teamNotice),
-      state("he can't reach this device", reachOff),
-      state("and once he can", reachOn),
+      state("the agents' strip", teamNotice),
+      state("it can't reach this device", reachOff),
+      state("and once it can", reachOn),
     ),
 
     section("See them move", { note: "The screenshots are taken with motion reduced; these raise the real thing." }, tryThem),
@@ -385,7 +385,7 @@ const css = h(
    .gallery-toasts { display: flex; flex-direction: column; gap: var(--sp-2); max-width: 380px; }
    .gallery-toasts .toast { position: relative; inset: auto; transform: none; opacity: 1; }`,
 );
-for (const [label, demo] of [["A toast", "toast"], ["Three at once", "three"], ["Lose Galahad", "lose"], ["Reach him again", "reach"], ["A confirmation", "confirm"]]) {
+for (const [label, demo] of [["A toast", "toast"], ["Three at once", "three"], ["Lose your agent", "lose"], ["Reach it again", "reach"], ["A confirmation", "confirm"]]) {
   const button = [...tryThem.querySelectorAll("button")].find((each) => each.textContent === label);
   if (button) button.dataset.demo = demo;
 }

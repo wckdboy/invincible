@@ -1,11 +1,11 @@
 /*
  * The mandate's north star (docs/MANDATE.md; PLAN #28): human interventions per completed task. Each time you step in on
- * a knight's task is counted on it by how; these say what that comes to. Nothing here depends on anything, so the PWA
+ * an agent's task is counted on it by how; these say what that comes to. Nothing here depends on anything, so the PWA
  * takes it alone (@invincible/core/interventions).
  */
 
 /**
- * How you step in on a knight's task: an approve card its work raised and you answered, a message of yours in its room
+ * How you step in on an agent's task: an approve card its work raised and you answered, a message of yours in its room
  * while it worked, its desktop taken over, the task paused or stopped, resumed, given again, or rewritten (given
  * again with a different goal or gates). The audit's steers are
  * not yours, and giving it the first time is the ask itself.

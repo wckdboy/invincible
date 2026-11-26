@@ -23,7 +23,7 @@ import type { Measure } from "../src/compute/service.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
 import { LocalClient } from "../src/loop-tasks.ts";
-import { runNodeQuest } from "../src/quest-cli.ts";
+import { runOnNode } from "../src/run-cli.ts";
 import { fakeDocker } from "./fake-docker.ts";
 import { freePort } from "./ports.ts";
 
@@ -32,7 +32,7 @@ import { freePort } from "./ports.ts";
  * sandbox host's own logic runs above it) and for the models (an OpenAI-compatible
  * server that plays planner, engineer and reviewer). The node calibrates itself when
  * it starts, carries no more sandboxes than its ceiling, queues the rest where you
- * can see them, and a quest at effort 3 runs three attempts in parallel and takes
+ * can see them, and a run at effort 3 runs three attempts in parallel and takes
  * the reviewer's pick.
  */
 
@@ -88,7 +88,7 @@ const models = Bun.serve({
     } else if (first.startsWith("You are reviewing")) {
       role = "reviewer";
       text = "PASS\nThe file is there.";
-    } else if (first.startsWith("Quest:")) {
+    } else if (first.startsWith("Run:")) {
       role = "engineer";
       thinking += 1;
       peakThinking = Math.max(peakThinking, thinking);
@@ -132,7 +132,7 @@ const client = () => new LocalClient(`http://127.0.0.1:${port}`, home.adminToken
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   docker.onExec = () => ({ code: 0, stdout: "hi\n" });
@@ -163,11 +163,11 @@ describe("knowing the compute", () => {
     expect(node.capacity!.reasons.join("\n")).toMatch(/half; the rest stays with whatever else this machine runs/);
     expect(node.use).toMatchObject({ sandboxes: 0, queued: 0 });
     expect(node.free).toBe(3);
-    // It's in the ledger as his own, and he says what he counts.
+    // It's in the ledger as its own, and it says what it counts.
     const { entries } = await call<{ entries: LedgerEntry[] }>("ledger");
     const entry = entries.find((e) => e.resource === "self-action" && e.target === "calibrate:joined")!;
-    expect(entry).toMatchObject({ quest: "galahad.self", class: "create", verdict: "allow" });
-    expect(entries.find((e) => e.resource === "compute" && e.target === "calibration:ultra")!.detail).toMatch(/he counts 12 threads, 64 GB, 3 sandbox slot/);
+    expect(entry).toMatchObject({ run: "primary.self", class: "create", verdict: "allow" });
+    expect(entries.find((e) => e.resource === "compute" && e.target === "calibration:ultra")!.detail).toMatch(/it counts 12 threads, 64 GB, 3 sandbox slot/);
   });
 
   test("on demand: you ask, it measures again; an agent can't", async () => {
@@ -194,14 +194,14 @@ describe("capacity, with a ceiling the owner sets", () => {
     await call("setComputeLimit", { node: "ultra", sandboxes: 1 });
     expect((await self()).capacity!.sandboxes).toBe(1);
     const peak = docker.peak();
-    const first = (await call<{ sandbox: SandboxView }>("createSandbox", { network: "isolated", quest: "q-first" })).sandbox;
+    const first = (await call<{ sandbox: SandboxView }>("createSandbox", { network: "isolated", run: "q-first" })).sandbox;
     let second: SandboxView | null = null;
-    const waiting = call<{ sandbox: SandboxView }>("createSandbox", { network: "isolated", quest: "q-second" }).then((r) => (second = r.sandbox));
+    const waiting = call<{ sandbox: SandboxView }>("createSandbox", { network: "isolated", run: "q-second" }).then((r) => (second = r.sandbox));
     await until(async () => (await self()).use!.queued === 1);
     const node = await self();
     expect(node.use).toMatchObject({ sandboxes: 1, queued: 1 });
     expect(node.free).toBe(0);
-    expect(node.queue).toMatchObject([{ quest: "q-second", cpus: 4, memoryGb: 8 }]);
+    expect(node.queue).toMatchObject([{ run: "q-second", cpus: 4, memoryGb: 8 }]);
     expect(node.queue[0]!.why).toMatch(/every slot is in use \(1 of 1 sandboxes\)/);
     expect(second).toBeNull();
     expect(docker.running()).toBe(1);
@@ -248,7 +248,7 @@ describe("effort that scales", () => {
   test("effort 1: one engineer in one sandbox, as ever", async () => {
     asked.length = 0;
     const before = docker.peak();
-    const { outcome, effort } = await runNodeQuest(client(), { goal: "write hi to a file", network: "isolated", effort: 1 });
+    const { outcome, effort } = await runOnNode(client(), { goal: "write hi to a file", network: "isolated", effort: 1 });
     expect(outcome).toMatchObject({ status: "done", summary: "Done by attempt 1." });
     expect(effort).toBeUndefined();
     expect(asked.filter((a) => a.role === "pick")).toHaveLength(0);
@@ -265,7 +265,7 @@ describe("effort that scales", () => {
     const grants: EffortGrant[] = [];
     const started: number[] = [];
     let running = 0;
-    const { outcome, effort, quest } = await runNodeQuest(
+    const { outcome, effort, run } = await runOnNode(
       client(),
       { goal: "write hi to a file", network: "isolated", effort: 3 },
       {
@@ -294,7 +294,7 @@ describe("effort that scales", () => {
     expect(effort!.pick).toMatchObject({ index: 2, by: "reviewer", model: "stand-in/judge" });
     expect(effort!.attempts).toEqual([1, 2, 3].map((index) => ({ index, status: "done" })));
     expect(outcome).toMatchObject({ status: "done", summary: "Done by attempt 2." });
-    // The census showed the quest's three attempts at work, each where its work was, on the node.
+    // The census showed the run's three attempts at work, each where its work was, on the node.
     const work = seen.flatMap((s) => s.work);
     expect(work.every((q) => q.effort === 3 && q.label === "write hi to a file")).toBe(true);
     const attempts = work.flatMap((q) => q.attempts);
@@ -306,9 +306,9 @@ describe("effort that scales", () => {
     expect((await self()).use).toMatchObject({ sandboxes: 0, queued: 0 });
     expect(daemon.compute.work()).toEqual([]);
     const { entries } = await call<{ entries: LedgerEntry[] }>("ledger");
-    expect(entries.filter((e) => e.resource === ATTEMPT_RESOURCE).map((e) => e.target).sort()).toEqual([`${quest}#2`, `${quest}#3`]);
+    expect(entries.filter((e) => e.resource === ATTEMPT_RESOURCE).map((e) => e.target).sort()).toEqual([`${run}#2`, `${run}#3`]);
     expect((await census()).budget).toEqual({ perDay: 12, usedToday: 2 });
-    // The quest is remembered with what its effort was.
+    // The run is remembered with what its effort was.
     const { memories } = await call<{ memories: { text: string }[] }>("recall", { q: "Effort" });
     expect(memories[0]!.text).toMatch(/Effort 3: attempt 1 done, attempt 2 done, attempt 3 done\. Taken: attempt 2/);
   });
@@ -317,28 +317,28 @@ describe("effort that scales", () => {
     // Two extra attempts were spent. A budget of three leaves one: auto runs two.
     await call("setComputePolicy", { attemptsPerDay: 3 });
     const grants: EffortGrant[] = [];
-    const two = await runNodeQuest(client(), { goal: "write hi again", network: "isolated", effort: "auto" }, { effort: (e) => void (e.type === "granted" && grants.push(e.grant)) });
+    const two = await runOnNode(client(), { goal: "write hi again", network: "isolated", effort: "auto" }, { effort: (e) => void (e.type === "granted" && grants.push(e.grant)) });
     expect(grants[0]).toMatchObject({ attempts: 2, asked: "auto" });
     expect(grants[0]!.reasons.join(" ")).toMatch(/budget leaves 1 extra attempt/);
     expect(two.effort!.attempts).toHaveLength(2);
     // Spent: auto is one attempt now, and says why. An agent asking for three gets one, too.
-    const spent = await call<EffortGrant>("effort", { quest: "q-spent", effort: "auto" });
+    const spent = await call<EffortGrant>("effort", { run: "q-spent", effort: "auto" });
     expect(spent).toMatchObject({ attempts: 1, budget: { perDay: 3, usedToday: 3 } });
     expect(spent.reasons.join(" ")).toMatch(/budget of 3 extra attempts is spent/);
     const { token } = await call<{ token: string }>("mintArm", { label: "hermes" });
-    expect(await call<EffortGrant>("effort", { quest: "q-agent", effort: 3 }, token)).toMatchObject({ attempts: 1, quest: "arm.hermes.q-agent" });
-    // Asked twice for the same quest: the same answer, and nothing more is spent.
-    expect(await call<EffortGrant>("effort", { quest: "q-spent", effort: "auto" })).toEqual(spent);
+    expect(await call<EffortGrant>("effort", { run: "q-agent", effort: 3 }, token)).toMatchObject({ attempts: 1, run: "arm.hermes.q-agent" });
+    // Asked twice for the same run: the same answer, and nothing more is spent.
+    expect(await call<EffortGrant>("effort", { run: "q-spent", effort: "auto" })).toEqual(spent);
 
     // You name three with one slot as the ceiling: three attempts, one sandbox at a time.
     await call("setComputeLimit", { node: "ultra", sandboxes: 1 });
-    const one = await call<EffortGrant>("effort", { quest: "q-one-slot", effort: 3 });
+    const one = await call<EffortGrant>("effort", { run: "q-one-slot", effort: 3 });
     expect(one).toMatchObject({ attempts: 1 });
     expect(one.reasons.join(" ")).toMatch(/ultra carries 1 sandbox at all/);
     await call("setComputeLimit", { node: "ultra", reset: true, sandboxes: 2 });
     const peak = docker.peak();
     let most = 0;
-    const yours = await runNodeQuest(
+    const yours = await runOnNode(
       client(),
       { goal: "write hi a third time", network: "isolated", effort: 2 },
       { emit: (event) => void (event.type === "command" && (most = Math.max(most, docker.running()))) },
@@ -353,17 +353,17 @@ describe("effort that scales", () => {
 });
 
 describe("adapting when the compute changes", () => {
-  test("after a heartbeat he records his defaults and tells you in a line what changed; then again when a ceiling changes", async () => {
+  test("after a heartbeat it records its defaults and tells you in a line what changed; then again when a ceiling changes", async () => {
     await until(async () => (await self()).due === null);
     await call("runLoop", { name: "heartbeat" });
     await daemon.loops.settled("heartbeat");
     const first = (await call<{ notices: NoticeView[] }>("notices")).notices.find((n) => n.key === "compute-adapted")!;
-    expect(first).toMatchObject({ severity: "info", source: "compute", title: "Galahad took stock of his compute" });
+    expect(first).toMatchObject({ severity: "info", source: "compute", title: "Your agent took stock of its compute" });
     expect(first.body).toContain("ultra carries 3 sandbox slots, 8 model calls at once (measured 12.0 reference cores' worth).");
     expect(first.body).toContain("Default effort 3");
     expect((await census()).adapted!.changes[0]).toContain("ultra carries 3 sandbox slots");
     const beat = daemon.store.loopRuns("heartbeat", 1)[0]!.body;
-    expect(beat.summary).toContain("Fixed himself: Re-derived his compute defaults: ultra carries 3 sandbox slots");
+    expect(beat.summary).toContain("Fixed itself: Re-derived its compute defaults: ultra carries 3 sandbox slots");
 
     // Nothing changed: the next heartbeat writes nothing about it.
     const events = daemon.store.eventCount();
@@ -373,13 +373,13 @@ describe("adapting when the compute changes", () => {
     expect(daemon.store.loopRuns("heartbeat", 1)[0]!.body.summary).not.toContain("compute");
     expect(daemon.store.eventCount()).toBeLessThan(events + 4);
 
-    // You give him more of the machine: it measures again, and the next heartbeat says what that changed.
+    // You give it more of the machine: it measures again, and the next heartbeat says what that changed.
     await call("setComputeLimit", { node: "ultra", cores: 24 });
     await until(async () => (await self()).capacity!.sandboxes === 4);
     await call("runLoop", { name: "heartbeat" });
     await daemon.loops.settled("heartbeat");
     const second = (await call<{ notices: NoticeView[] }>("notices")).notices.find((n) => n.key === "compute-adapted")!;
-    expect(second.title).toBe("Galahad adapted to a change in his compute");
+    expect(second.title).toBe("Your agent adapted to a change in its compute");
     expect(second.body).toContain("ultra: 3 → 4 sandbox slots.");
     expect(second.dismissed).toBe(false);
     await call("setComputeLimit", { node: "ultra", reset: true });

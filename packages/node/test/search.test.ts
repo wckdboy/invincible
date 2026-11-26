@@ -7,7 +7,7 @@ import { gatewayEnv, type LedgerEntryInput } from "@invincible/sandbox";
 import { handleSandboxSearch, SearchError, searchWeb } from "../src/search.ts";
 
 /*
- * Web search: Galahad's own SearXNG, through the node. Results are trimmed to what's
+ * Web search: the primary's own SearXNG, through the node. Results are trimmed to what's
  * useful; sandboxes search through their gateway with a token that carries the search
  * scope; the `websearch` command is the same in both images.
  */

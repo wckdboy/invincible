@@ -17,7 +17,7 @@ function base(): DoctorFacts {
     now: NOW,
     quick: false,
     offline: false,
-    self: { id: "n_self", name: "ultra", fleetName: "camelot", active: true, role: "full", alwaysOn: true, startedAt: NOW - 3 * 86_400_000 },
+    self: { id: "n_self", name: "ultra", fleetName: "homelab", active: true, role: "full", alwaysOn: true, startedAt: NOW - 3 * 86_400_000 },
     keys: { keystore: "file", keyFile: { exists: true, mode: 0o600 }, home: { exists: true, mode: 0o700 }, adminToken: { exists: true, mode: 0o600 } },
     mind: { events: 1000, integrity: "ok", head: null, forks: [], newestEventAt: NOW - 1000, timeSynced: true, peers: [], backup: null },
     vault: { unlocked: true, secrets: 3, requests: [] },
@@ -86,7 +86,7 @@ describe("a role whose model's provider refused its key", () => {
     facts.roles.push({ role: "plan-coder", custom: true, chats: true, models: [{ ref: "mimo-token/mimo-v2.6-pro", problem: null, plan: true }, { ref: "zai-coding/glm-5.3", problem: null, plan: true }], probe: null });
     facts.refused = [{ provider: "mimo-token", at: NOW, said: "401: Invalid API Key" }];
     const checks = diagnose(facts);
-    expect(byId(checks, "role.plan-coder")).toMatchObject({ state: "ok", line: "plan-coder: zai-coding/glm-5.3 does the work of the knights on it (a coding plan: it is asked nothing else, so not a word)" });
+    expect(byId(checks, "role.plan-coder")).toMatchObject({ state: "ok", line: "plan-coder: zai-coding/glm-5.3 does the work of the agents on it (a coding plan: it is asked nothing else, so not a word)" });
     expect(hasId(checks, "role.plan-coder.plan")).toBe(false);
     expect(checks.filter((c) => c.line.includes("mimo-token")).map((c) => c.id)).toEqual(["models.key.mimo-token"]);
   });
@@ -103,7 +103,7 @@ describe("a role whose model's provider refused its key", () => {
   });
 
   test("a full check asks the refused model its word, and when it is refused again the model behind it is named, as ok", () => {
-    // (Percival's review, 22 November 2026: the probe line named the refused model, a second needs-you for one cause.)
+    // (Ivo's review, 22 November 2026: the probe line named the refused model, a second needs-you for one cause.)
     const facts = base();
     facts.roles[0] = { role: "planner", chats: true, models: [{ ref: "deepseek/deepseek-chat", problem: null }, { ref: "mistral/mistral-large-latest", problem: null }], probe: { ref: "deepseek/deepseek-chat", ok: false, ms: 300, error: "deepseek → 401: Authentication Fails" } };
     facts.refused = [{ provider: "deepseek", at: NOW, said: "401: Authentication Fails" }];
@@ -120,7 +120,7 @@ describe("a role whose model's provider refused its key", () => {
     const facts = base();
     facts.roles[1] = { role: "engineer", chats: true, models: [{ ref: "deepseek/deepseek-chat", problem: null }, { ref: "zai-coding/glm-5.3", problem: null, plan: true }], probe: null };
     facts.refused = [{ provider: "deepseek", at: NOW, said: "401: Authentication Fails" }];
-    expect(byId(diagnose(facts), "role.engineer")).toMatchObject({ state: "ok", line: "engineer: zai-coding/glm-5.3 does his coding (a coding plan: it is asked nothing else, so not a word)" });
+    expect(byId(diagnose(facts), "role.engineer")).toMatchObject({ state: "ok", line: "engineer: zai-coding/glm-5.3 does its coding (a coding plan: it is asked nothing else, so not a word)" });
   });
 
   test("a role whose every model's key was refused: nobody can play it, said with why, a coding role's not as outside coding", () => {
@@ -144,7 +144,7 @@ describe("a refusal from before the key was last set", () => {
     const id = "mimo-token";
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     const baseUrl = "https://plan.invalid/v1";
     vault.set(id, ["FAKE", "mimo", "key"].join("-"), { provider: id, origin: new URL(baseUrl).origin });

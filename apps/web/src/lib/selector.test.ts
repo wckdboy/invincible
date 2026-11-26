@@ -16,7 +16,7 @@ const projects: ChoiceGroup = {
   label: "Project",
   options: [
     { value: "", label: "No project", selected: true },
-    { value: "galahad", label: "Galahad" },
+    { value: "garden", label: "Garden" },
     { value: "homelab", label: "Home lab" },
   ],
 };

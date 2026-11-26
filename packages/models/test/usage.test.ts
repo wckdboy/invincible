@@ -12,7 +12,7 @@ import { anthropicUsage, chat, type ChatTools, openAIConversation, openAIUsage }
 function brain(models: string[], baseUrl = "http://127.0.0.1:9/v1") {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "local", kind: "openai", baseUrl });
   for (const role of ["planner", "reviewer"]) store.emit(identity, "roster.set", { role, models });

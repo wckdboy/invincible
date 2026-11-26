@@ -16,7 +16,7 @@ import type { RouteName } from "./api.ts";
  *  - `fleet`: a device joined, left or changed, or a node went on- or offline; not a node's load or round trip, nor
  *    the mind's count of events.
  *  - `turns`: a turn began or ended, or your chats changed; not each step a turn takes.
- *  - `quests`: a quest began or ended, changed its state or fell silent; not each step it reports.
+ *  - `runs`: a run began or ended, changed its state or fell silent; not each step it reports.
  */
 
 /** What the stream tells of: each the name of a route a device reads, a GET under one scope. */
@@ -31,7 +31,7 @@ export const LIVE_TOPICS = [
   "screenSessions",
   "questions",
   "notices",
-  "quests",
+  "runs",
   "team",
   "turns",
 ] as const satisfies readonly RouteName[];

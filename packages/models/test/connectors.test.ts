@@ -6,7 +6,7 @@ import { CATALOG, type DiscoveredTool, excerpt, keyState, MAX_RESPONSE_BYTES, me
 function vault() {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   return new Vault(store, identity);
 }
 
@@ -38,7 +38,7 @@ describe("the connector catalog", () => {
     }
   });
 
-  test("Cloudflare: creating buckets is Galahad's to do; deleting one asks", () => {
+  test("Cloudflare: creating buckets is your agent's to do; deleting one asks", () => {
     const cf = CATALOG.cloudflare!.manifest.tools;
     expect(cf["r2.bucket.create"]!.class).toBe("create");
     expect(cf["r2.bucket.delete"]!.class).toBe("delete");
@@ -52,7 +52,7 @@ describe("GitHub: pull requests and CI", () => {
   const github = ConnectorManifest.parse(CATALOG.github!.manifest);
   const url = (tool: string, args: Record<string, string | number>) => buildRequest(github, tool, args).url;
 
-  test("a pull request, its files, reviews and line comments, and a commit's checks with what they reported, are his to read", () => {
+  test("a pull request, its files, reviews and line comments, and a commit's checks with what they reported, are its to read", () => {
     const pr = { owner: "amiriteorg", repo: "invincible", number: 12 };
     expect(url("pull", pr)).toBe("https://api.github.com/repos/amiriteorg/invincible/pulls/12");
     expect(url("pull.files", { ...pr, per_page: 100 })).toBe("https://api.github.com/repos/amiriteorg/invincible/pulls/12/files?per_page=100");
@@ -81,7 +81,7 @@ describe("sending a request", () => {
     expect(keyState(v, forge)).toBe("missing");
     v.set("forge", KEY, { provider: "forge", origin: "https://api.forge.test" });
     expect(keyState(v, forge)).toBe("ready");
-    const { seen, fetch } = recorder(() => Response.json({ login: "galahad" }));
+    const { seen, fetch } = recorder(() => Response.json({ login: "primary" }));
     const result = await sendConnectorRequest({ vault: v, fetch }, forge, buildRequest(forge, "me"));
     expect(result).toMatchObject({ ok: true, status: 200 });
     expect(seen[0]!.headers.get("authorization")).toBe(`Bearer ${KEY}`);

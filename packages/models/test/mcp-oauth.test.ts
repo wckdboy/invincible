@@ -47,7 +47,7 @@ describe("signing in to an MCP server", () => {
     expect(started.pending).toMatchObject({ server: SERVER, authServer: AUTH, client: { client_id: "client-123" } });
   });
 
-  test("Galahad registers with no secret where the server allows it; one that takes only clients with a secret gets one asked for, and it is kept", async () => {
+  test("Your agent registers with no secret where the server allows it; one that takes only clients with a secret gets one asked for, and it is kept", async () => {
     expect([clientAuthMethod(undefined), clientAuthMethod([]), clientAuthMethod(["none", "client_secret_basic"])]).toEqual(["none", "none", "none"]);
     expect([clientAuthMethod(["client_secret_basic", "client_secret_post"]), clientAuthMethod(["client_secret_basic"]), clientAuthMethod(["private_key_jwt"])]).toEqual(["client_secret_post", "client_secret_basic", "client_secret_post"]);
     const open = hosted({ metadata: { token_endpoint_auth_methods_supported: ["none"] } });
@@ -65,7 +65,7 @@ describe("signing in to an MCP server", () => {
     expect(new URL(started.url).origin).toBe("https://mcp.example.test");
   });
 
-  test("refused: an authorization server off https, a sign-in page off https, one that won't let Galahad register", async () => {
+  test("refused: an authorization server off https, a sign-in page off https, one that won't let your agent register", async () => {
     await expect(startMcpSignIn({ server: SERVER, redirect: BACK, state: "s", scopes: [], fetch: hosted({ resource: { resource: SERVER, authorization_servers: ["http://auth.example.test"] } }).fetch })).rejects.toThrow("isn't on https");
     await expect(startMcpSignIn({ server: SERVER, redirect: BACK, state: "s", scopes: [], fetch: hosted({ metadata: { authorization_endpoint: "http://auth.example.test/authorize" } }).fetch })).rejects.toThrow("isn't on https");
     await expect(startMcpSignIn({ server: SERVER, redirect: BACK, state: "s", scopes: [], fetch: hosted({ metadata: { registration_endpoint: undefined } }).fetch })).rejects.toThrow("give it a key instead");
@@ -75,7 +75,7 @@ describe("signing in to an MCP server", () => {
 const vault = () => {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   return new Vault(store, identity);
 };
 const issues = ConnectorManifest.parse({ id: "issues", label: "Issues", origin: "https://mcp.example.test", auth: { secret: "issues", scheme: "oauth", oauth: { provider: "mcp", scopes: [] } }, mcp: { path: "/mcp" }, tools: {} });

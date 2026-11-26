@@ -4,7 +4,7 @@ import { readAgentSkill, type SkillDoc } from "@invincible/core";
  * Skills from elsewhere (PLAN #34): an Agent Skill's folder on GitHub (its SKILL.md: a name, when to use it, then
  * instructions in Markdown), taken in as text alone. Only its SKILL.md is read, from GitHub's raw files at the address
  * you gave and nowhere it might send us; nothing in the folder runs, and nothing else in it (scripts, other files) is
- * taken in. It becomes a skill that waits for your approval, as his untrusted ones do: no model is given it before you
+ * taken in. It becomes a skill that waits for your approval, as its untrusted ones do: no model is given it before you
  * have read it and said yes, and then only as a note, fenced as data.
  */
 
@@ -100,7 +100,7 @@ async function capped(response: Response, max: number): Promise<string | null> {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
-/** Read an Agent Skill's SKILL.md from its folder on GitHub, as a skill of his: words, nothing that runs. */
+/** Read an Agent Skill's SKILL.md from its folder on GitHub, as a skill of its: words, nothing that runs. */
 export async function fetchAgentSkill(url: string, o: { fetch?: typeof fetch; base?: string } = {}): Promise<{ doc: SkillDoc; where: string; source: string; shortened: boolean }> {
   const at = skillAddress(url);
   const target = o.base ? at.raw.replace(RAW_GITHUB, o.base) : at.raw;

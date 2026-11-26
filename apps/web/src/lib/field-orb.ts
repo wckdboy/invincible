@@ -1,16 +1,16 @@
-import { blendHex, knightColors } from "@invincible/core/avatar";
+import { blendHex, agentColors } from "@invincible/core/avatar";
 import { AURUM, FIELD_RIM, project, type FieldColours } from "./field.ts";
 import { ORB_LONGEST_STEP, orbRand, orbSeed, type OrbMood } from "./orb-motion.ts";
 
 /*
- * The orbs as fields (26 November 2026): Galahad's field (lib/field.ts) is every orb, his in gold with his beam of light
- * through it, each knight's in its own colours. The owner's words: the glyph spheres "still look a little strange/not
+ * The orbs as fields (26 November 2026): the primary's field (lib/field.ts) is every orb, its in gold with its beam of light
+ * through it, each agent's in its own colours. The owner's words: the glyph spheres "still look a little strange/not
  * cool enough, and almost like nipples", and "i dont want them to be too visually distractin"; then, of the heads-up ring
- * he had worn round his field, "remove the old mark around galahad. make the primary agent distinct in some other cool
+ * it had worn round its field, "remove the old mark around [the primary]. make the primary agent distinct in some other cool
  * way". So a field has no bright middle (its core stays dark), no regular lattice of dots (the icon's rounds said a
- * lattice on a sphere reads as a disco ball), and no ring round it, his or a knight's; it is still where it is one of
+ * lattice on a sphere reads as a disco ball), and no ring round it, its or an agent's; it is still where it is one of
  * many, and moves slowly where it is the one you are looking at. Pure: whose field an orb is, how it is drawn at a size,
- * his beam, how it moves in each mood, its embers and its ink on a light page. The PWA draws it (ui/orb.ts); the Apple
+ * its beam, how it moves in each mood, its embers and its ink on a light page. The PWA draws it (ui/orb.ts); the Apple
  * and Android apps will draw the same, held to these numbers by the vectors (apps/apple/scripts/vectors.ts).
  */
 
@@ -23,19 +23,19 @@ export interface FieldIdentity {
   colours: FieldColours;
 }
 
-/** Galahad's: the icon's own field, in gold. */
-export const GALAHAD_FIELD: Readonly<FieldIdentity> = { seed: 11, tilt: [0.42, 0.3, -0.18], lines: 46, colours: AURUM };
+/** The primary's: the icon's own field, in gold. */
+export const PRIMARY_FIELD: Readonly<FieldIdentity> = { seed: 11, tilt: [0.42, 0.3, -0.18], lines: 46, colours: AURUM };
 
 /**
- * A knight's: its colours are core's knightColors (the one you chose for it, or its handle's): its key light its tint
- * lit and its tint, its rim its second colour. Its handle gives the rest: 12 to 20 lines (fewer than his 46, so it reads
+ * An agent's: its colours are core's agentColors (the one you chose for it, or its handle's): its key light its tint
+ * lit and its tint, its rim its second colour. Its handle gives the rest: 12 to 20 lines (fewer than its 46, so it reads
  * at 14 px), their longitudes and widths (its seed), and its lean: its axis turned up to about 40 degrees either way in
  * the picture, and leaning towards you by 0.25 to 0.5 (the sine of its angle with the picture), so it is always seen
  * from the side, never end on (a ring round a dark middle) or flat.
  */
-export function knightField(id: string, profile?: unknown): FieldIdentity {
+export function agentField(id: string, profile?: unknown): FieldIdentity {
   const handle = String(id ?? "");
-  const colours = knightColors(handle, profile);
+  const colours = agentColors(handle, profile);
   const seed = orbSeed(handle);
   const ay = -0.5 + orbRand(seed, 0, 61);
   const az = -0.65 + 1.3 * orbRand(seed, 0, 62);
@@ -57,19 +57,19 @@ export interface FieldLook {
   zoom: number;
 }
 
-/** A field at a size. His (`galahad`) keeps fewer of his 46 lines where he is small, so it reads at 18 px; every field
- * fills its square alike (his no longer drawn in, clear of a ring). The larger, the more points along a line (so its dots
+/** A field at a size. Its (`primary`) keeps fewer of its 46 lines where it is small, so it reads at 18 px; every field
+ * fills its square alike (its no longer drawn in, clear of a ring). The larger, the more points along a line (so its dots
  * stay close), and the smaller, the bolder. */
-export function fieldLook(identity: FieldIdentity, size: number, galahad: boolean): FieldLook {
+export function fieldLook(identity: FieldIdentity, size: number, primary: boolean): FieldLook {
   const s = Number.isFinite(size) ? Math.max(8, size) : 36;
-  const lines = galahad ? Math.min(identity.lines, s < 30 ? 26 : s < 56 ? 34 : 46) : identity.lines;
+  const lines = primary ? Math.min(identity.lines, s < 30 ? 26 : s < 56 ? 34 : 46) : identity.lines;
   return { lines, steps: Math.round(Math.max(20, Math.min(96, s * 0.55))), weight: s <= 24 ? 1.5 : s <= 48 ? 1.25 : 1, zoom: 0.94 };
 }
 
 /**
- * His beam: what marks him out, now his heads-up ring has gone (the owner's word, 26 November 2026: "make the primary
- * agent distinct in some other cool way"). A beam of light along his field's own axis, out of both its poles, as a
- * pulsar's jets go: no knight has one. Each half runs from `from` to `to` of the field's units out
+ * Its beam: what marks it out, now its heads-up ring has gone (the owner's word, 26 November 2026: "make the primary
+ * agent distinct in some other cool way"). A beam of light along its field's own axis, out of both its poles, as a
+ * pulsar's jets go: no agent has one. Each half runs from `from` to `to` of the field's units out
  * of its middle (so the core, r < 0.32, stays dark), `width` of the orb's width across at its root (never under a pixel),
  * narrowing to nothing at its tip, its light fading as it goes (beamAt). On a dark page its light is added as the
  * field's is, with a close glow `glow.width` times as wide and `glow.alpha` as strong (no fog); on a light page it is ink,
@@ -77,7 +77,7 @@ export function fieldLook(identity: FieldIdentity, size: number, galahad: boolea
  * Its outline is taken at `steps` steps along it. The field turns about it; it shines as the field does, never past its
  * light at rest (breathing while something waits, dimmer while queued or paused, its tip red-brown when its work failed).
  */
-export const GALAHAD_BEAM = { from: 0.36, to: 1.72, width: 1 / 40, steps: 16, glow: { width: 3.2, alpha: 0.2 }, ink: { width: 1.3, alpha: 1.2 } } as const;
+export const PRIMARY_BEAM = { from: 0.36, to: 1.72, width: 1 / 40, steps: 16, glow: { width: 3.2, alpha: 0.2 }, ink: { width: 1.3, alpha: 1.2 } } as const;
 
 /** A direction in the field's own space turned as its lean turns its points (lib/field.ts' fieldAt: Rx·Ry·Rz). */
 function leaned([x0, y0, z0]: [number, number, number], [ax, ay, az]: [number, number, number]): [number, number, number] {
@@ -90,8 +90,8 @@ function leaned([x0, y0, z0]: [number, number, number], [ax, ay, az]: [number, n
   return [x, y3, z3];
 }
 
-/** His beam in an orb's square at a zoom (its middle 0, its edge 1; x right, y down, as an ember's): each half's root
- * and tip, along his axis (lib/field.ts' camera, as his points are seen), the upper half first. */
+/** Its beam in an orb's square at a zoom (its middle 0, its edge 1; x right, y down, as an ember's): each half's root
+ * and tip, along its axis (lib/field.ts' camera, as its points are seen), the upper half first. */
 export function beamLine(identity: FieldIdentity, zoom: number): { root: [number, number]; tip: [number, number] }[] {
   const axis = leaned([0, 1, 0], identity.tilt);
   const seen = (k: number): [number, number] => {
@@ -99,14 +99,14 @@ export function beamLine(identity: FieldIdentity, zoom: number): { root: [number
     const q = project({ x: axis[0] * k * 1.05, y: axis[1] * k * 1.05, z: axis[2] * k * 1.05, rgb: [0, 0, 0], size: 0 }, 2, { zoom });
     return [q.x - 1, q.y - 1];
   };
-  const L = GALAHAD_BEAM;
+  const L = PRIMARY_BEAM;
   const halves = [1, -1].map((dir) => ({ root: seen(dir * L.from), tip: seen(dir * L.to) }));
   return halves[0]!.tip[1] <= halves[1]!.tip[1] ? halves : [halves[1]!, halves[0]!];
 }
 
-/** Along a half of his beam, `u` of the way from its root (0) to its tip (1): its width as a share of the root's (it
- * narrows to a point), how much of its light is left, and how far its colour has gone from his key's lit gold (0) through
- * his gold (0.5) to his rim's copper (1). */
+/** Along a half of its beam, `u` of the way from its root (0) to its tip (1): its width as a share of the root's (it
+ * narrows to a point), how much of its light is left, and how far its colour has gone from its key's lit gold (0) through
+ * its gold (0.5) to its rim's copper (1). */
 export function beamAt(u: number): { width: number; light: number; hue: number } {
   const t = Math.max(0, Math.min(1, u));
   return { width: Math.pow(1 - t, 0.55), light: Math.pow(1 - t, 1.1), hue: t };
@@ -120,7 +120,7 @@ export function beamAt(u: number): { width: number; light: number; hue: number }
  * - turn: radians a second it turns about its own axis (0.1 is a turn a minute).
  * - glow: how bright it is, 1 as at rest.
  * - breath: a slow breath of brightness, its seconds and its depth (0.2 is a fifth brighter and dimmer), or none.
- * - embers: whether a few embers drift off its rim and fade (his orb's alone).
+ * - embers: whether a few embers drift off its rim and fade (its orb's alone).
  * - rim: how far its burning rim has dimmed towards red-brown, 0 to 1.
  */
 export interface FieldMotion {
@@ -131,7 +131,7 @@ export interface FieldMotion {
   rim: number;
 }
 
-/** Galahad's moods: at rest it turns slowly; at work a little quicker, embers drifting off its rim; waiting on you it
+/** The primary's moods: at rest it turns slowly; at work a little quicker, embers drifting off its rim; waiting on you it
  * breathes; queued and paused it dims and slows (paused stops); done, it settles; failed, its rim dims to red-brown. */
 export const FIELD_MOTION: Readonly<Record<OrbMood, FieldMotion>> = {
   idle: { turn: 0.1, glow: 1, breath: null, embers: false, rim: 0 },
@@ -143,12 +143,12 @@ export const FIELD_MOTION: Readonly<Record<OrbMood, FieldMotion>> = {
   failed: { turn: 0.03, glow: 0.88, breath: null, embers: false, rim: 1 },
 };
 
-/** A knight's: it moves only while it works (your word, 26 November 2026: still in rows, moving only in its own
- * thread's header while it works), turning as his does at work, with no embers; in every other mood it comes to rest,
+/** An agent's: it moves only while it works (your word, 26 November 2026: still in rows, moving only in its own
+ * thread's header while it works), turning as its does at work, with no embers; in every other mood it comes to rest,
  * in that mood's light. */
-export function fieldMotion(mood: OrbMood, knight: boolean): FieldMotion {
+export function fieldMotion(mood: OrbMood, agent: boolean): FieldMotion {
   const m = FIELD_MOTION[mood] ?? FIELD_MOTION.idle;
-  if (!knight) return m;
+  if (!agent) return m;
   return mood === "working" ? { ...m, embers: false } : { ...m, turn: 0, breath: null, embers: false };
 }
 
@@ -231,9 +231,9 @@ export interface FieldFrame {
 }
 
 /**
- * His embers: how many; each lives 2.8 to 4.4 seconds (then another sets out); where they set out (a share of the way
+ * Its embers: how many; each lives 2.8 to 4.4 seconds (then another sets out); where they set out (a share of the way
  * from the middle to the edge of the orb's square) and how far each drifts; how much they rise as they go; how far
- * round from the rim's burning side they may set out (degrees either way); and their radius. Always inside his square.
+ * round from the rim's burning side they may set out (degrees either way); and their radius. Always inside its square.
  */
 export const FIELD_EMBERS = { count: 7, life: [2.8, 4.4], from: [0.56, 0.64], drift: [0.1, 0.2], rise: 0.06, spread: 70, size: [0.016, 0.028] } as const;
 /** Where the rim burns, in degrees clockwise from the top (lib/field.ts' rim light, seen from the front: lower right). */

@@ -3,11 +3,11 @@ import { type Place, placesFor, placesIndex } from "../lib/nav.ts";
 import { button, list, listRow, section } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { h, isMac } from "../ui/dom.ts";
-import { giveToRoundtable } from "./team-forms.ts";
+import { giveToAgents } from "./team-forms.ts";
 
 /*
  * Everything else, under "…" (your words, 26 November 2026: on a phone no tab bar, "a '…' sheet for everything else";
- * the wide screen's rail went with it, its places here and in the command palette): the Roundtable, where the knights and
+ * the wide screen's rail went with it, its places here and in the command palette): the agents, where the agents and
  * their rooms are, then every place More lists, each with a line saying what is there, only what this device may see.
  * A sheet on every screen (a bottom sheet on a phone); More (#/more) is the same index as a page.
  */
@@ -24,10 +24,10 @@ export function placeRow(place: Place, waiting = 0): HTMLElement {
   });
 }
 
-/** The index as sections: the Roundtable on its own, then More's headings. */
+/** The index as sections: the agents on its own, then More's headings. */
 export function placesSections(ctx: Ctx): HTMLElement[] {
   const waiting = ctx.live.inboxCount.value;
-  return placesIndex(placesFor(ctx.can)).map((group) => (group.heading ? section(group.heading, {}, list(group.places.map((place) => placeRow(place, waiting)), { nav: group.heading })) : list(group.places.map((place) => placeRow(place, waiting)), { nav: "The Roundtable" })));
+  return placesIndex(placesFor(ctx.can)).map((group) => (group.heading ? section(group.heading, {}, list(group.places.map((place) => placeRow(place, waiting)), { nav: group.heading })) : list(group.places.map((place) => placeRow(place, waiting)), { nav: "The agents" })));
 }
 
 /** Opens the index under "…": a search and a task to give at its head, then every place. */
@@ -43,7 +43,7 @@ export function openPlaces(ctx: Ctx, from?: Element): void {
         "div",
         { class: "row wrap" },
         button("Search", { icon: "search", label: `Search and commands (${isMac() ? "⌘" : "Ctrl"}+K)`, onClick: () => (sheet.close(), ctx.palette(undefined, from)) }),
-        canGive ? button("Give a task", { icon: "layers", onClick: () => (sheet.close(), giveToRoundtable(ctx)) }) : null,
+        canGive ? button("Give a task", { icon: "layers", onClick: () => (sheet.close(), giveToAgents(ctx)) }) : null,
         // (What the rail's Add was: the palette, on everything this device may add, a key, an MCP server, a loop…)
         button("Add…", { icon: "plus", title: "Add a key, an MCP server, a connector, a loop and more", onClick: () => (sheet.close(), ctx.palette("Add ", from)) }),
       ),

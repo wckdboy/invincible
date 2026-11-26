@@ -243,7 +243,7 @@ UNIT
     fi
   fi
 
-  # Sandbox host: build (or refresh, from cache) the knights' image before the node starts.
+  # Sandbox host: build (or refresh, from cache) the agents' image before the node starts.
   if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
     if runuser -u "$SVC" -- env -i HOME="$SVC_HOME" PATH="$SYSTEM_PATH" docker build -q -t invincible/sandbox:1 "$APP/sandbox" >/dev/null; then
       echo "→ sandbox image ready (invincible/sandbox:1)"
@@ -256,7 +256,7 @@ UNIT
       else
         echo "Lab image build failed; sandboxes still work, without the Lab" >&2
       fi
-      # The knights' desktop (a display, a window manager, a browser): made from the image above, a minute or two the first time.
+      # The agents' desktop (a display, a window manager, a browser): made from the image above, a minute or two the first time.
       if runuser -u "$SVC" -- env -i HOME="$SVC_HOME" PATH="$SYSTEM_PATH" docker build -q -t invincible/desktop:1 "$APP/sandbox/desktop" >/dev/null; then
         DESK=$(docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 --mount type=volume,dst=/work \
           --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --network none invincible/desktop:1 desktop start 2>&1 | tail -1)
@@ -393,25 +393,25 @@ UNIT
 
   systemctl daemon-reload
   systemctl enable invincible.service >/dev/null 2>&1
-  # Restarting the node cuts off any quest or investigation it is driving. Wait for running
+  # Restarting the node cuts off any run or investigation it is driving. Wait for running
   # ones to finish (their sandboxes go when they end), up to 30 minutes, then go ahead.
-  running_quests() {
+  running_runs() {
     command -v docker >/dev/null || return 0
-    docker ps --filter label=dev.invincible=1 --format '{{.Label "dev.invincible.quest"}}' 2>/dev/null | grep -c -E '^(q-|inv-|arm\.loop\.)' || true
+    docker ps --filter label=dev.invincible=1 --format '{{.Label "dev.invincible.run"}}' 2>/dev/null | grep -c -E '^(q-|inv-|arm\.loop\.)' || true
   }
-  # A knight's task runs in its own VM, which is always there: ask the node (as it runs now) which are running.
+  # An agent's task runs in its own VM, which is always there: ask the node (as it runs now) which are running.
   # (A restart interrupts them and holds their rooms; on 14 November 2026 a deploy did, mid-review.)
   running_tasks() {
     [[ -x /usr/local/bin/invincible ]] || { echo 0; return; }
-    timeout 30 /usr/local/bin/invincible roundtable 2>/dev/null | grep -c -E '^task-[a-z0-9_-]+ · running · ' || true
+    timeout 30 /usr/local/bin/invincible agents 2>/dev/null | grep -c -E '^task-[a-z0-9_-]+ · running · ' || true
   }
   WAITED=0
-  while [[ $(( $(running_quests) + $(running_tasks) )) -gt 0 && $WAITED -lt 1800 ]]; do
-    [[ $WAITED == 0 ]] && echo "→ waiting for $(running_quests) running quest(s) and $(running_tasks) knight task(s) to finish before restarting the node (up to 30 min)"
+  while [[ $(( $(running_runs) + $(running_tasks) )) -gt 0 && $WAITED -lt 1800 ]]; do
+    [[ $WAITED == 0 ]] && echo "→ waiting for $(running_runs) running run(s) and $(running_tasks) agent task(s) to finish before restarting the node (up to 30 min)"
     sleep 15
     WAITED=$((WAITED + 15))
   done
-  [[ $(( $(running_quests) + $(running_tasks) )) -gt 0 ]] && echo "$(running_quests) quest(s) and $(running_tasks) knight task(s) still running after 30 min; restarting anyway (they'll be cut off: a knight's task is interrupted and its room held)" >&2
+  [[ $(( $(running_runs) + $(running_tasks) )) -gt 0 ]] && echo "$(running_runs) run(s) and $(running_tasks) agent task(s) still running after 30 min; restarting anyway (they'll be cut off: an agent's task is interrupted and its room held)" >&2
   systemctl restart invincible.service
   if [[ $EXPOSE != 0 ]]; then
     # `tailscale serve` blocks while waiting for Serve/HTTPS to be enabled for the
@@ -475,7 +475,7 @@ RELEASE="$HOME/invincible/releases/$REV"
 mkdir -p "$HOME/invincible/releases"
 rm -rf "$RELEASE"
 cp -a "$STAGE" "$RELEASE"
-# The release knows which commit it is (git archive ships no .git): trials record it.
+# The release knows which commit it is (git archive ships no .git): evals record it.
 echo "$REV" > "$RELEASE/REVISION"
 cd "$RELEASE"
 bun install --frozen-lockfile >/dev/null

@@ -5,12 +5,12 @@ import { conversationFor } from "./responses.ts";
 import { type ModelsContext, chat } from "./chat.ts";
 import { offersModel, onPlan, resolveProvider, whyNoKey } from "./providers.ts";
 import { parseRef } from "./roster.ts";
-import { parseAction, runQuest } from "./quest.ts";
+import { parseAction, runLoop } from "./run.ts";
 
 /*
  * Checking what a model can do, before it is given work that needs it (core/model-checks.ts says what a check is):
  *
- * - the quest loop's format: the opening of two small quests, exactly as a quest's engineer is briefed, with a
+ * - the run loop's format: the opening of two small runs, exactly as a run's engineer is briefed, with a
  *   stand-in for the sandbox; counted are the replies that held a command (or said DONE or GIVE UP);
  * - reading a screen: a page drawn once by Chrome (assets/check-card), its largest heading asked for;
  * - placing a click: the centres of eight things on that page, asked for in its pixels, each judged by whether
@@ -29,8 +29,8 @@ const CARD = JSON.parse(readFileSync(here("card.json"), "utf8")) as {
 };
 const PICTURE: ToolImage = { mediaType: "image/jpeg", data: readFileSync(here("card.jpg")).toString("base64"), alt: "A screenshot of a web page: the Harbour quarterly ledger, with a top bar, buttons, a search field and a table." };
 
-/** The two small quests the format is checked on: what they ask is beside the point, only how he answers. */
-const QUESTS = [
+/** The two small runs the format is checked on: what they ask is beside the point, only how it answers. */
+const RUNS = [
   "In /work, write count.ts exporting countWords(text): how many words a text has, split on runs of whitespace. Check it with bun.",
   "In /work, write a file named today.txt holding the word ledger, then show that it is there.",
 ];
@@ -39,8 +39,8 @@ export type CheckPart = "format" | "reads" | "places";
 
 /**
  * A VM's eyes (core's chooseEyes): the first model named for the role that can be used there, yours to name; with none
- * named, the checked model that sees best among the ones he offers (providers.ts offersModel), so a check of a model
- * he doesn't offer never puts it on the role.
+ * named, the checked model that sees best among the ones it offers (providers.ts offersModel), so a check of a model
+ * it doesn't offer never puts it on the role.
  */
 export const eyesOf = (named: readonly string[], checks: readonly { ref: string; check: ModelCheck }[], usable: (ref: string) => boolean): string | null =>
   chooseEyes(named, checks.filter(({ ref }) => offersModel(ref)), usable);
@@ -141,17 +141,17 @@ async function withPicture(ctx: ModelsContext, ref: string, question: string, si
   return text;
 }
 
-/** The opening of two small quests, as a quest's engineer is briefed: how many of its replies held a command. */
+/** The opening of two small runs, as a run's engineer is briefed: how many of its replies held a command. */
 async function checkFormat(given: ModelsContext, ref: string, signal?: AbortSignal): Promise<{ replies: number; good: number }> {
   // (What it costs is the check's, not an engineer's.)
   const ctx: ModelsContext = { ...given, spent: (call) => given.spent?.({ ...call, role: "check" }) };
   let replies = 0;
   let good = 0;
-  for (const goal of QUESTS) {
+  for (const goal of RUNS) {
     const stop = new AbortController();
     const ended = signal ? AbortSignal.any([signal, stop.signal]) : stop.signal;
     let failure: Error | null = null;
-    await runQuest(
+    await runLoop(
       { goal, environment: "A Linux sandbox; your workspace is /work. Bun and Python are installed.", plan: "1. Write the file.\n2. Show that it works.\nDone when: running it shows the right result.", maxSteps: 3, maxRevisions: 0, commandTimeoutSec: 60 },
       {
         ask: async (role, messages: ChatMessage[]) => {

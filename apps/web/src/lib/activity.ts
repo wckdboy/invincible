@@ -16,7 +16,7 @@ export interface LedgerFilter {
 
 /** Everything a row shows, as one lowercase text: what the search looks through. */
 function rowText(entry: LedgerEntry, deviceName: string): string {
-  return [entry.resource, entry.target, entry.quest ?? "", entry.reason ?? "", entry.detail ?? "", deviceName, CLASS_LABEL[entry.class] ?? entry.class, VERDICT_LABEL[entry.verdict] ?? entry.verdict]
+  return [entry.resource, entry.target, entry.run ?? "", entry.reason ?? "", entry.detail ?? "", deviceName, CLASS_LABEL[entry.class] ?? entry.class, VERDICT_LABEL[entry.verdict] ?? entry.verdict]
     .join("\n")
     .toLowerCase();
 }

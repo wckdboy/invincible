@@ -5,7 +5,7 @@ import type { Calibration, ComputeLimit, ComputeNodeView, ComputeView, EffortAsk
  * functions of packages/core/src/compute.ts); this shapes input and prints.
  *
  *   invincible compute                          the census: what each node measured, its ceiling, slots in use and
- *                                            waiting, his plan, the day's budget, what more compute would buy
+ *                                            waiting, its plan, the day's budget, what more compute would buy
  *   invincible compute calibrate [node]         a node measures itself now
  *   invincible compute limit <node> [--cores n] [--mem gb] [--sandboxes n] [--model-calls n] [--reset]
  *   invincible compute effort [auto|1|2|3] [--budget n]
@@ -61,7 +61,7 @@ function nodeLines(n: ComputeNodeView, now: number): string[] {
   const lines = [`${bold(n.name)} ${dim(`${n.self ? "this node" : n.online ? "online" : "offline"}${n.due ? ` · due to measure itself (${n.due === "joined" ? "it never has" : "its body, its ceiling or the benchmark changed"})` : ""}`)}`];
   if (!n.body || !n.capacity) return [...lines, dim("  no capability profile yet")];
   lines.push(`  measured  ${n.calibration ? `${measuredLine(n.calibration, n.capacity)} ${dim(`· ${ago(n.calibration.at, now)}`)}` : dim(`not yet: invincible compute calibrate ${n.name}`)}`);
-  lines.push(`  ceiling   ${n.capacity.cores} of ${n.body.cores} threads and ${n.capacity.memoryGb} of ${Math.round(n.body.memoryGb)} GB are his to use ${dim(`· ${limitLine(n.limit)}`)}`);
+  lines.push(`  ceiling   ${n.capacity.cores} of ${n.body.cores} threads and ${n.capacity.memoryGb} of ${Math.round(n.body.memoryGb)} GB are its to use ${dim(`· ${limitLine(n.limit)}`)}`);
   const slots = n.capacity.sandboxes;
   const use = n.use;
   lines.push(
@@ -69,11 +69,11 @@ function nodeLines(n: ComputeNodeView, now: number): string[] {
       !n.body.sandboxHost
         ? dim("no sandboxes (not a sandbox host)")
         : use
-          ? `${bar(use.sandboxes, slots)}${use.sandboxes} of ${plural(slots, "sandbox", "sandboxes")} in use${use.queued ? ` · ${bold(`${use.queued} waiting`)}` : ""}${use.kept ? dim(` · and ${plural(use.kept, "knight's VM", "knights' VMs")}, which take no slot`) : ""}`
+          ? `${bar(use.sandboxes, slots)}${use.sandboxes} of ${plural(slots, "sandbox", "sandboxes")} in use${use.queued ? ` · ${bold(`${use.queued} waiting`)}` : ""}${use.kept ? dim(` · and ${plural(use.kept, "agent's VM", "agents' VMs")}, which take no slot`) : ""}`
           : `${plural(slots, "sandbox", "sandboxes")} ${dim("(in use: not known)")}`
     }${use ? ` · ${use.modelCalls} of ${plural(n.capacity.modelCalls, "model call")}${use.modelQueued ? ` (${use.modelQueued} waiting)` : ""}` : ` · ${plural(n.capacity.modelCalls, "model call")}`}`,
   );
-  for (const q of n.queue) lines.push(dim(`            waiting: ${q.quest} (${q.cpus} threads, ${q.memoryGb} GB) since ${new Date(q.since).toLocaleTimeString()}: ${q.why}`));
+  for (const q of n.queue) lines.push(dim(`            waiting: ${q.run} (${q.cpus} threads, ${q.memoryGb} GB) since ${new Date(q.since).toLocaleTimeString()}: ${q.why}`));
   for (const reason of n.capacity.reasons) lines.push(dim(`            ${reason}`));
   return lines;
 }
@@ -87,7 +87,7 @@ export function describeCompute(view: ComputeView, now = Date.now()): string {
   const waiting = known.reduce((sum, n) => sum + n.use!.queued, 0);
   const effort = view.policy.effort === "auto" ? `auto (up to ${view.plan.effort})` : String(view.policy.effort);
   const lines = [
-    `${bold("Compute")} ${dim("what the fleet carries; he uses what he's given and acquires nothing")}`,
+    `${bold("Compute")} ${dim("what the fleet carries; it uses what it's given and acquires nothing")}`,
     `  ${inUse} of ${plural(slots, "sandbox slot")} in use${waiting ? ` · ${bold(`${waiting} waiting`)}` : " · nothing waiting"} · effort ${effort} · ${view.budget.usedToday} of ${plural(view.budget.perDay, "extra attempt")} used in the last day`,
     "",
   ];
@@ -95,7 +95,7 @@ export function describeCompute(view: ComputeView, now = Date.now()): string {
   if (view.work.length) {
     lines.push(bold("Work in hand"));
     for (const w of view.work) {
-      lines.push(`  ${w.quest}  effort ${w.effort}${w.asked === "auto" ? " (auto)" : ""} ${dim(`· asked by ${w.by}`)}${w.label ? `  ${w.label}` : ""}`);
+      lines.push(`  ${w.run}  effort ${w.effort}${w.asked === "auto" ? " (auto)" : ""} ${dim(`· asked by ${w.by}`)}${w.label ? `  ${w.label}` : ""}`);
       for (const a of w.attempts) lines.push(dim(`    attempt ${a.index}  at the ${a.station.padEnd(11)} ${a.active ? a.doing : "between steps"}${a.model ? ` · ${a.model}` : ""}${a.sandbox ? ` · sandbox ${a.sandbox}` : ""}`));
     }
     lines.push("");
@@ -106,13 +106,13 @@ export function describeCompute(view: ComputeView, now = Date.now()): string {
     lines.push("");
   }
   if (view.suggestions.length) {
-    lines.push(`${bold("He suggests")} ${dim("(yours to decide: he installs, downloads and hires nothing himself)")}`);
-    for (const s of view.suggestions) lines.push(`  - ${s.title.replace(/^Galahad suggests: /, "")}`, dim(`      ${s.body}`));
+    lines.push(`${bold("It suggests")} ${dim("(yours to decide: it installs, downloads and hires nothing itself)")}`);
+    for (const s of view.suggestions) lines.push(`  - ${s.title.replace(/^your agent suggests: /, "")}`, dim(`      ${s.body}`));
     lines.push("");
   }
   if (view.adapted) {
-    lines.push(dim(`His defaults were last re-derived ${ago(view.adapted.at, now)}${view.adapted.changes.length ? `: ${view.adapted.changes.join(" ")}` : "."}`));
-  } else lines.push(dim("His defaults aren't on record yet: his next heartbeat records them."));
+    lines.push(dim(`Its defaults were last re-derived ${ago(view.adapted.at, now)}${view.adapted.changes.length ? `: ${view.adapted.changes.join(" ")}` : "."}`));
+  } else lines.push(dim("Its defaults aren't on record yet: its next heartbeat records them."));
   lines.push(dim("invincible compute calibrate [node] · invincible compute limit <node> --cores n --mem gb · invincible compute effort auto|1|2|3 --budget n"));
   return lines.join("\n");
 }
@@ -130,7 +130,7 @@ export function parseEffort(raw: string | undefined): EffortAsk | undefined {
   if (raw === undefined) return undefined;
   if (raw === "auto") return "auto";
   if (raw === "1" || raw === "2" || raw === "3") return Number(raw) as 1 | 2 | 3;
-  throw new Error("--effort must be auto, 1, 2 or 3 (attempts at a quest at once)");
+  throw new Error("--effort must be auto, 1, 2 or 3 (attempts at a run at once)");
 }
 
 export async function computeCommand(api: ComputeApi, sub: string | undefined, rest: string[], flags: Flags): Promise<void> {
@@ -146,7 +146,7 @@ export async function computeCommand(api: ComputeApi, sub: string | undefined, r
       const done = await api.call<{ node: string; calibration: Calibration; capacity: NodeCapacity }>("calibrateCompute", on ? { on } : {});
       console.log(`${bold(done.node)} measured ${measuredLine(done.calibration, done.capacity)} ${dim(`in ${seconds(done.calibration.tookMs)}`)}`);
       if (done.calibration.note) console.log(dim(`  ${done.calibration.note}`));
-      console.log(`He counts ${plural(done.capacity.cores, "thread")}, ${done.capacity.memoryGb} GB: ${plural(done.capacity.sandboxes, "sandbox", "sandboxes")} and ${plural(done.capacity.modelCalls, "model call")} at once.`);
+      console.log(`It counts ${plural(done.capacity.cores, "thread")}, ${done.capacity.memoryGb} GB: ${plural(done.capacity.sandboxes, "sandbox", "sandboxes")} and ${plural(done.capacity.modelCalls, "model call")} at once.`);
       return;
     }
     case "limit": {
@@ -166,7 +166,7 @@ export async function computeCommand(api: ComputeApi, sub: string | undefined, r
       }
       const done = await api.call<{ node: string; limit: ComputeLimit; capacity: NodeCapacity | null }>("setComputeLimit", { node, ...given, ...(flags.reset ? { reset: true } : {}) });
       console.log(`${bold(done.node)}'s ceiling: ${limitLine(Object.keys(done.limit).length ? done.limit : null)}.`);
-      if (done.capacity) console.log(`He counts ${plural(done.capacity.cores, "thread")}, ${done.capacity.memoryGb} GB: ${plural(done.capacity.sandboxes, "sandbox", "sandboxes")} and ${plural(done.capacity.modelCalls, "model call")} at once.${cores !== undefined || flags.reset ? dim(" It measures itself again for the new ceiling.") : ""}`);
+      if (done.capacity) console.log(`It counts ${plural(done.capacity.cores, "thread")}, ${done.capacity.memoryGb} GB: ${plural(done.capacity.sandboxes, "sandbox", "sandboxes")} and ${plural(done.capacity.modelCalls, "model call")} at once.${cores !== undefined || flags.reset ? dim(" It measures itself again for the new ceiling.") : ""}`);
       return;
     }
     case "effort": {
@@ -178,7 +178,7 @@ export async function computeCommand(api: ComputeApi, sub: string | undefined, r
           : await api.call<{ policy: ComputeView["policy"]; budget: ComputeView["budget"] }>("setComputePolicy", { ...(effort !== undefined ? { effort } : {}), ...(budget !== undefined ? { attemptsPerDay: budget } : {}) });
       console.log(
         `Effort ${bold(String(done.policy.effort))}: ${
-          done.policy.effort === "auto" ? "he runs as many attempts at a quest as the free slots and the budget allow, up to 3" : done.policy.effort === 1 ? "one attempt at a quest, unless you name more" : `up to ${done.policy.effort} attempts at a quest when he chooses`
+          done.policy.effort === "auto" ? "it runs as many attempts at a run as the free slots and the budget allow, up to 3" : done.policy.effort === 1 ? "one attempt at a run, unless you name more" : `up to ${done.policy.effort} attempts at a run when it chooses`
         }.`,
       );
       console.log(`Budget: ${plural(done.budget.perDay, "extra attempt")} a day (${done.budget.usedToday} used in the last 24 hours). ${dim("A level you name yourself (invincible do --effort 3) stands whatever the budget.")}`);

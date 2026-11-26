@@ -4,8 +4,8 @@ import { dirname, join } from "node:path";
 
 /*
  * The node backs itself up: once a day each of its databases is copied whole, as it stands at one moment, into the
- * backups folder the doctor looks in. The mind is a living copy on every full node too, but the Roundtable (team.db:
- * the knights' conversations, tasks and steps), the chats and the archive's index live on their node alone.
+ * backups folder the doctor looks in. The ledger is a living copy on every full node too, but the agents (team.db:
+ * the agents' conversations, tasks and steps), the chats and the archive's index live on their node alone.
  *
  * A copy is SQLite's own (VACUUM INTO, from a connection that only reads), owner-only, named `<db>-nightly-<day>.db`.
  * Seven days are kept, and a Sunday's for four weeks; nothing else in the folder is ever touched (a copy you made by
@@ -14,8 +14,8 @@ import { dirname, join } from "node:path";
  */
 
 /** The databases a node keeps in its home. */
-export const BACKED_UP = ["mind", "team", "chats", "local", "push", "archive"] as const;
-const NIGHTLY = /^(mind|team|chats|local|push|archive)-nightly-(\d{8})\.db$/;
+export const BACKED_UP = ["ledger", "team", "chats", "local", "push", "archive"] as const;
+const NIGHTLY = /^(ledger|team|chats|local|push|archive)-nightly-(\d{8})\.db$/;
 /** How many of the newest days are kept, and how many Sundays besides. */
 export const KEEP = { days: 7, sundays: 4 } as const;
 
@@ -45,7 +45,7 @@ export function backupOnce(home: string, dir: string, now: number = Date.now()):
   const result: BackupResult = { day, made: [], removed: [], skipped: [] };
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const present = BACKED_UP.filter((db) => existsSync(join(home, `${db}.db`)));
-  // (Room for every copy, twice over, and a gigabyte to spare: a full disk would stop the mind's writes.)
+  // (Room for every copy, twice over, and a gigabyte to spare: a full disk would stop the ledger's writes.)
   const need = present.reduce((sum, db) => sum + statSync(join(home, `${db}.db`)).size, 0) * 2 + 2 ** 30;
   const free = (() => {
     try {

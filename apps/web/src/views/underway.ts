@@ -11,18 +11,18 @@ import { controlTeam } from "./team-forms.ts";
 
 /*
  * Above a chat's message box, what is under way there (your word, 24 November 2026, after OpenMausBot's hand-off rows):
- * each task he gave a knight from this chat that hasn't ended, its knight's face and how it stands, opened at a tap and
- * stopped with its own Stop; and each look he set himself here, when it comes and what at, called off with Cancel.
+ * each task it gave an agent from this chat that hasn't ended, its agent's face and how it stands, opened at a tap and
+ * stopped with its own Stop; and each look it set itself here, when it comes and what at, called off with Cancel.
  * Asked of the node when its live stream says the team or the chats changed (a task moved on, a look set, taken or
- * called off). While that stream is down: every few seconds while a task is under way or he is answering, just after a
- * look of his comes due (so it goes from here as he takes it), else every half minute.
+ * called off). While that stream is down: every few seconds while a task is under way or it is answering, just after a
+ * look of its comes due (so it goes from here as it takes it), else every half minute.
  */
 
 export interface Underway {
   el: HTMLElement;
-  /** The kept chat on screen (null: none, or a temporary one), and whether he is answering in it. */
+  /** The kept chat on screen (null: none, or a temporary one), and whether it is answering in it. */
   show(conversation: string | null, answering: boolean): void;
-  /** Ask again now (his answer ended, say). */
+  /** Ask again now (its answer ended, say). */
   refresh(): void;
   stop(): void;
 }
@@ -95,7 +95,7 @@ export function underway(ctx: Ctx): Underway {
           button("Cancel", {
             size: "sm",
             variant: "ghost",
-            title: "He won't look again then",
+            title: "It won't look again then",
             onClick: async () => {
               try {
                 await ctx.api.post("/api/looks/cancel", { id: look.id });

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { knightColors } from "@invincible/core/avatar";
-import { appMark, knightFace, orb, type OrbTone } from "./orb.ts";
+import { agentColors } from "@invincible/core/avatar";
+import { appMark, agentFace, orb, type OrbTone } from "./orb.ts";
 
 /** Captures the renderer's real createElement and createElementNS calls, without an HTML parser or a browser (and with
  * no canvas: what an orb is where there is nothing to draw it on). */
@@ -28,9 +28,9 @@ function draw<T>(make: () => T): T {
 }
 const walk = (node: Node_): Node_[] => [node, ...node.children.flatMap(walk)];
 
-// Your word, 23 November 2026: Galahad, the one you talk to, as a Jarvis-like orb; since 26 November 2026 his field, and
-// since the same evening his beam in place of the heads-up ring ("remove the old mark around galahad").
-describe("Galahad's orb, where there is no canvas", () => {
+// Your word, 23 November 2026: the primary, the one you talk to, as a Jarvis-like orb; since 26 November 2026 its field, and
+// since the same evening its beam in place of the heads-up ring ("remove the old mark around [the primary]").
+describe("Your agent's orb, where there is no canvas", () => {
   test("its box alone (no ring, no seat), its tone and its size, at any size and in any state", () => {
     for (const tone of ["neutral", "accent", "warn", "ok", "danger"] as OrbTone[]) {
       const node = draw(() => orb({ tone, size: 168 }) as unknown as Node_);
@@ -43,9 +43,9 @@ describe("Galahad's orb, where there is no canvas", () => {
     expect([odd!.attrs["data-tone"], tiny!.attrs.style, huge!.attrs.style]).toEqual(["neutral", "--orb-size:16px", "--orb-size:320px"]);
   });
 
-  test("named when it stands alone, decorative beside his name; in a mood it says so", () => {
-    const [named, plain, moving] = draw(() => [orb({ label: "Galahad: at work" }), orb({}), orb({ mood: "working" })] as unknown as Node_[]);
-    expect([named!.attrs.role, named!.attrs["aria-label"], named!.attrs["aria-hidden"]]).toEqual(["img", "Galahad: at work", undefined]);
+  test("named when it stands alone, decorative beside its name; in a mood it says so", () => {
+    const [named, plain, moving] = draw(() => [orb({ label: "Your agent: at work" }), orb({}), orb({ mood: "working" })] as unknown as Node_[]);
+    expect([named!.attrs.role, named!.attrs["aria-label"], named!.attrs["aria-hidden"]]).toEqual(["img", "Your agent: at work", undefined]);
     expect([plain!.attrs.role, plain!.attrs["aria-hidden"]]).toEqual([undefined, "true"]);
     // (With nothing to draw on, nothing moves: no "orb-live".)
     expect([moving!.attrs.class, moving!.attrs["data-mood"]]).toEqual(["orb", "working"]);
@@ -60,12 +60,12 @@ describe("the app's mark, where there is no canvas", () => {
   });
 });
 
-describe("a knight's face, where there is no canvas", () => {
+describe("an agent's face, where there is no canvas", () => {
   test("its colour, its size and its name, and nothing drawn", () => {
-    const face = draw(() => knightFace({ id: "ada", size: 34, label: "Ada · Working" }) as unknown as Node_);
-    expect([face.attrs.class, face.attrs.style, face.attrs["data-tint"], face.attrs.role, face.attrs["aria-label"]]).toEqual(["knight-orb", "--orb-size:34px", knightColors("ada").tint, "img", "Ada · Working"]);
+    const face = draw(() => agentFace({ id: "ada", size: 34, label: "Ada · Working" }) as unknown as Node_);
+    expect([face.attrs.class, face.attrs.style, face.attrs["data-tint"], face.attrs.role, face.attrs["aria-label"]]).toEqual(["agent-orb", "--orb-size:34px", agentColors("ada").tint, "img", "Ada · Working"]);
     expect(face.children).toEqual([]);
-    const decorative = draw(() => knightFace({ id: "ada", size: 900 }) as unknown as Node_);
+    const decorative = draw(() => agentFace({ id: "ada", size: 900 }) as unknown as Node_);
     expect([decorative.attrs["aria-hidden"], decorative.attrs.style]).toEqual(["true", "--orb-size:256px"]);
   });
 });

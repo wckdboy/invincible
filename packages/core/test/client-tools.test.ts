@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ChatMessage, routes } from "../src/index.ts";
 
 /*
- * Tools the caller runs itself (a quest's engineer: its shell and its files): the chat route offers them to the model
+ * Tools the caller runs itself (a run's engineer: its shell and its files): the chat route offers them to the model
  * and never runs one. An answer that calls them carries its calls (and what its provider needs back); the caller's next
  * message carries what they came to.
  */
@@ -32,7 +32,7 @@ describe("the caller's own tools in the chat contract", () => {
     expect(ChatMessage.safeParse({ role: "assistant", content: "", calls: [{ ...call, extra: true }] }).success).toBe(false);
   });
 
-  test("they go only without Galahad's own tools, and never in a kept chat", () => {
+  test("they go only without your agent's own tools, and never in a kept chat", () => {
     const chat = routes.chat.input;
     expect(chat.safeParse({ messages: asked, tools: false, clientTools: [tool] }).success).toBe(true);
     expect(chat.safeParse({ messages: asked, clientTools: [tool] }).success).toBe(false);

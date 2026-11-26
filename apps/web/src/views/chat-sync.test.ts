@@ -19,7 +19,7 @@ test("a chat another device answered while this one was on another page is read 
   /** Which writing of the chats the node holds. */
   let chats = "lz1.4";
   const asked: string[] = [];
-  const summary = { id, title: "Plans", project: null, role: "planner", pinned: false, bank: false, createdAt: 1, updatedAt: 1, count: 0, state: "done", queued: 0, held: null, needs: null };
+  const summary = { id, title: "Plans", project: null, role: "planner", pinned: false, createdAt: 1, updatedAt: 1, count: 0, state: "done", queued: 0, held: null, needs: null };
   const api = {
     peek: () => null,
     get: async (path: string) => (asked.push(`GET ${path}`), path === "/api/turns" ? { turns: [], chats } : { conversations: [summary] }),

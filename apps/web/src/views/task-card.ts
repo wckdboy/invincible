@@ -15,7 +15,7 @@ import { renderMarkdown } from "../ui/markdown.ts";
 /*
  * A task, as a card in a timeline: where it stands; while it runs, its latest lines as they happen;
  * once it has ended, whether it was verified, what its run came to, what it kept, and for work that
- * wasn't verified what the knight said and what can be done. What it says is lib/task-card.ts.
+ * wasn't verified what the agent said and what can be done. What it says is lib/task-card.ts.
  */
 
 /** As many of a running task's latest lines as its card shows. */
@@ -128,9 +128,9 @@ export interface CardOptions {
   /** The conversation the card is shown in: a task given in another says where. */
   room: string;
   roomName(id: string): string;
-  /** Whose the task is, in a room (a knight's own timeline needn't say). */
+  /** Whose the task is, in a room (an agent's own timeline needn't say). */
   assignee: string | null;
-  /** The name of the knight that proposed it, when one did. */
+  /** The name of the agent that proposed it, when one did. */
   proposer: string | null;
   dependencies: { id: string; title: string; satisfied: boolean }[];
   prices: Record<string, Price> | null;
@@ -147,7 +147,7 @@ export interface CardOptions {
 
 /**
  * The steps of a task another can be given from, asked of the node when you open them (POST /api/team/steps): each
- * command and when it ended, with Give again from here. Kept for a knight's task in a repository, on his own harness.
+ * command and when it ended, with Give again from here. Kept for an agent's task in a repository, on its own harness.
  */
 function stepsOf(api: Api, task: TeamTask, again: (step: number) => void, signal: AbortSignal): HTMLElement {
   const list = h("div", { class: "stack" }, h("p", { class: "tiny subtle" }, "Reading its steps…"));
@@ -159,7 +159,7 @@ function stepsOf(api: Api, task: TeamTask, again: (step: number) => void, signal
     api.post<{ steps: TeamCheckpoint[] }>("/api/team/steps", { task: task.id }, signal).then(
       ({ steps: kept }) => replace(list, kept.length
         ? kept.map((s) => h("div", { class: "row" }, h("span", { class: "tiny subtle tnum" }, `${s.step}.`), h("code", { class: "grow ellipsis" }, s.command), h("span", { class: "tiny subtle" }, relativeTime(s.at)), button("Give again from here", { size: "sm", variant: "ghost", icon: "retry", onClick: () => again(s.step) })))
-        : [h("p", { class: "tiny subtle" }, "No steps were kept: they are kept for a knight's task in a repository, on Galahad's own harness.")]),
+        : [h("p", { class: "tiny subtle" }, "No steps were kept: they are kept for an agent's task in a repository, on your agent's own harness.")]),
       (error) => { if (!isAbort(error)) replace(list, [h("p", { class: "tiny subtle" }, `Its steps couldn't be read: ${(error as Error).message}`)]); },
     );
   });

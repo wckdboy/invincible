@@ -171,7 +171,7 @@ describe("the log's running summaries equal the log", () => {
       const reference = replicaOf(fleet);
       reference.ingest(fleet.events);
       const referenceDigest = reference.digest();
-      for (let trial = 0; trial < 4; trial++) {
+      for (let evalCase = 0; evalCase < 4; evalCase++) {
         const replica = replicaOf(fleet);
         const delivery = shuffle([...fleet.events, ...fleet.events.filter(() => random() < 0.2)], random);
         while (delivery.length) {

@@ -4,7 +4,7 @@ import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { chat, countable, originOf, preset } from "../src/index.ts";
 
 /*
- * Work with a budget of yours (a knight's task given one, an outcome's looks) is measured at your prices, and a model
+ * Work with a budget of yours (an agent's task given one, an outcome's looks) is measured at your prices, and a model
  * you've set no price for counts as nothing: on one, the work would spend past its budget with nothing said. So such
  * work is given only to a model whose spend it can count, one you've priced (or its provider) or one on this machine,
  * and any other is passed over, saying why.
@@ -16,7 +16,7 @@ const OWN_KEY = "sk-FAKE-own-key-for-tests-0000";
 function mind(roster: Record<string, string[]>, prices: Record<string, { input: number; output: number }> = {}) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   const go = preset("opencode-go")!;
   vault.set("opencode-go", GO_KEY, { provider: "opencode-go", origin: originOf(go.baseUrl)! });

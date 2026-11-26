@@ -3,7 +3,7 @@ import { AGENT_SKILL_STEP, readAgentSkill, readSkillDoc, SKILL_BRIEF, SKILL_LIMI
 
 /*
  * Skills from elsewhere (PLAN #34): an Agent Skill's SKILL.md (its name and description between --- lines, then
- * instructions in Markdown), read as a skill of his. Text only: its instructions are its body, kept as they were
+ * instructions in Markdown), read as a skill of its. Text only: its instructions are its body, kept as they were
  * written, with nothing hidden in them.
  */
 
@@ -27,7 +27,7 @@ const PDF = [
   "For forms, read forms.md.",
 ].join("\n");
 
-describe("an Agent Skill, read as a skill of his", () => {
+describe("an Agent Skill, read as a skill of its", () => {
   test("its first heading is the title, its description when to use it, its instructions the body, kept as written", () => {
     const read = readAgentSkill(PDF, WHERE);
     if (!read.ok) throw new Error(read.why);
@@ -78,14 +78,14 @@ describe("an Agent Skill, read as a skill of his", () => {
     const read = readAgentSkill(PDF, WHERE);
     if (!read.ok) throw new Error(read.why);
     expect(skillInWords(read.doc)).toContain("Its instructions, as written where it came from:\n# PDF Processing Guide");
-    const line = JSON.parse(skillLine({ id: "sk_0123456789abcdef", version: "v".repeat(43), trust: "untrusted", by: skillFrom(WHERE), quest: null, at: Date.UTC(2026, 10, 20), record: "new", doc: read.doc }));
+    const line = JSON.parse(skillLine({ id: "sk_0123456789abcdef", version: "v".repeat(43), trust: "untrusted", by: skillFrom(WHERE), run: null, at: Date.UTC(2026, 10, 20), record: "new", doc: read.doc }));
     expect(line.instructions).toBe(read.doc.body);
     const leaky = readAgentSkill(`${PDF}\n\nexport GITHUB_TOKEN=${["ghp", "A".repeat(36)].join("_")}`, WHERE);
     expect(leaky.ok && skillSecret(leaky.doc)).toBeTruthy();
   });
 
   test("brief, as an engineer's every call has it: long instructions their opening, cut at a line's end, saying how much more the planner had; short ones whole", () => {
-    const offered = (body: string) => ({ id: "sk_0123456789abcdef", version: "v".repeat(43), trust: "untrusted" as const, by: skillFrom(WHERE), quest: null, at: 0, record: "new", doc: { title: "t", when: "w", steps: [AGENT_SKILL_STEP], proof: [], pitfalls: [], body } });
+    const offered = (body: string) => ({ id: "sk_0123456789abcdef", version: "v".repeat(43), trust: "untrusted" as const, by: skillFrom(WHERE), run: null, at: 0, record: "new", doc: { title: "t", when: "w", steps: [AGENT_SKILL_STEP], proof: [], pitfalls: [], body } });
     const long = Array.from({ length: 80 }, (_, i) => `Line ${i}: ${"x".repeat(40)}`).join("\n");
     const brief = JSON.parse(skillLine(offered(long), true)).instructions as string;
     const [opening, said] = brief.split("\n… ");

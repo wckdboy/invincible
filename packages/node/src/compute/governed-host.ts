@@ -4,7 +4,7 @@ import { CapacityError, type Governor } from "./governor.ts";
 
 /*
  * This node's sandbox host, behind its governor: every sandbox it creates, whoever
- * asks (a quest, an agent, the owner, a calibration), first takes a
+ * asks (a run, an agent, the owner, a calibration), first takes a
  * slot, and waits for one when the node is full. There is no other door: the node
  * holds only this host. A request for more than the ceiling gets the ceiling (a
  * sandbox's CPUs and memory are limits, not promises), and the ledger says so.
@@ -43,8 +43,8 @@ export class GovernedSandboxHost extends SandboxHost {
     const need = clampNeed(capacity, { cpus, memoryGb }, vm);
     let ticket: Awaited<ReturnType<Governor["acquire"]>>;
     try {
-      // A persistent one (a knight's own VM) takes no slot: it holds its memory of the ceiling, and its threads while it works.
-      ticket = await this.governed.governor.acquire(need, { quest: input.quest ?? "adhoc", kept: input.persistent }, wait.signal);
+      // A persistent one (an agent's own VM) takes no slot: it holds its memory of the ceiling, and its threads while it works.
+      ticket = await this.governed.governor.acquire(need, { run: input.run ?? "adhoc", kept: input.persistent }, wait.signal);
     } catch (error) {
       if (error instanceof CapacityError) throw new SandboxError(error.message, error.status);
       throw error;
@@ -59,7 +59,7 @@ export class GovernedSandboxHost extends SandboxHost {
     }
   }
 
-  /** A command in a knight's VM: its threads count against the ceiling while it runs, and a while after (the governor's `work`). */
+  /** A command in an agent's VM: its threads count against the ceiling while it runs, and a while after (the governor's `work`). */
   override async exec(id: string, cmd: string[], timeoutSec?: number): Promise<ExecResult> {
     const ended = this.governed.governor.work(id);
     try {
@@ -70,7 +70,7 @@ export class GovernedSandboxHost extends SandboxHost {
   }
 
   /**
-   * A terminal in a knight's VM: what you run there is work as much as its own commands are, so its threads count
+   * A terminal in an agent's VM: what you run there is work as much as its own commands are, so its threads count
    * against the ceiling from the moment it opens until a while after it closes.
    */
   override async terminal(id: string, size: { cols: number; rows: number }, onData: (bytes: Uint8Array) => void): ReturnType<SandboxHost["terminal"]> {
@@ -80,21 +80,21 @@ export class GovernedSandboxHost extends SandboxHost {
     return opened;
   }
 
-  /** What is done on a knight's desktop (yours, or Galahad's on his computer) is work in its VM too: a click opens a page, and the page runs. */
-  override async desktop(id: string, quest: string, action: DesktopAction): Promise<DesktopView> {
+  /** What is done on an agent's desktop (yours, or the primary's on its computer) is work in its VM too: a click opens a page, and the page runs. */
+  override async desktop(id: string, run: string, action: DesktopAction): Promise<DesktopView> {
     const ended = this.governed.governor.work(id);
     try {
-      return await super.desktop(id, quest, action);
+      return await super.desktop(id, run, action);
     } finally {
       ended();
     }
   }
 
-  /** A knight's VM grown while it runs: what it adds is held of the ceiling first, and given back if the VM doesn't take it. */
-  override async resizeTeam(id: string, quest: string, opts: Parameters<SandboxHost["resizeTeam"]>[2]): Promise<SandboxView> {
+  /** An agent's VM grown while it runs: what it adds is held of the ceiling first, and given back if the VM doesn't take it. */
+  override async resizeTeam(id: string, run: string, opts: Parameters<SandboxHost["resizeTeam"]>[2]): Promise<SandboxView> {
     let held: { cpus: number; memoryGb: number } | null = null;
     try {
-      return await super.resizeTeam(id, quest, {
+      return await super.resizeTeam(id, run, {
         ...opts,
         fits: (more) => {
           const why = this.governed.governor.grow(id, more);
@@ -108,7 +108,7 @@ export class GovernedSandboxHost extends SandboxHost {
     }
   }
 
-  override async destroy(id: string, opts: { approvedBy?: string; quest?: string } = {}): Promise<Decision> {
+  override async destroy(id: string, opts: { approvedBy?: string; run?: string } = {}): Promise<Decision> {
     const decision = await super.destroy(id, opts);
     if (decision.verdict === "allow") this.governed.governor.release(id);
     return decision;

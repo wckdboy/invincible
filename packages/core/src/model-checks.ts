@@ -1,7 +1,7 @@
 /*
- * What a model was seen to do when it was checked (packages/models/src/checks.ts): whether it follows the quest
+ * What a model was seen to do when it was checked (packages/models/src/checks.ts): whether it follows the run
  * loop's command format, reads a screen, and points at the right place on one. Evidence, not a label: the
- * Roundtable's rule (the best suited takes the task) applies to models too. Recorded in the mind (LWW by model,
+ * Agents' rule (the best suited takes the task) applies to models too. Recorded in the mind (LWW by model,
  * `model.checked`) and read leniently: a newer node that checks more never makes an older one lose what it knows.
  * Zod-free, so the app reads it as the node does.
  */
@@ -9,9 +9,9 @@
 export interface ModelCheck {
   /** When it was checked (ms). */
   at: number;
-  /** Galahad's revision that checked it. */
+  /** Invincible's revision that checked it. */
   version?: string;
-  /** The quest loop: of the replies it sent, how many held a command to run (or said DONE or GIVE UP). */
+  /** The run loop: of the replies it sent, how many held a command to run (or said DONE or GIVE UP). */
   format?: { replies: number; good: number };
   /** A screenshot's largest heading, read back: right or not, and what it said. */
   reads?: { ok: boolean; said: string };
@@ -46,7 +46,7 @@ export function readModelCheck(raw: unknown): ModelCheck | null {
   return check;
 }
 
-/** It follows the quest loop's format: at least four replies in five held a command. null: not checked. */
+/** It follows the run loop's format: at least four replies in five held a command. null: not checked. */
 export const followsFormat = (check: ModelCheck | null): boolean | null =>
   check?.format && check.format.replies ? check.format.good / check.format.replies >= 0.8 : null;
 
@@ -71,7 +71,7 @@ export function checkFacts(check: ModelCheck): string[] {
 }
 
 /**
- * The model that looks at a knight's screen: the first one named for the role (`eyes`) that can be used there; with
+ * The model that looks at an agent's screen: the first one named for the role (`eyes`) that can be used there; with
  * none named, the checked model that reads the screen and whose clicks all land, nearest the mark. Evidence chooses.
  */
 export function chooseEyes(named: readonly string[], checks: readonly { ref: string; check: ModelCheck }[], usable: (ref: string) => boolean): string | null {

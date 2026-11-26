@@ -4,8 +4,8 @@
  * A chat turn of yours runs on the node to its end whether or not any page is
  * listening: the page that started it, another device, or the same page after a
  * reload attaches to it and sees it from its start. Stopping is explicit, never a
- * side effect of a dropped connection. While he works, a new message of yours either
- * steers (he's told at the next safe point) or queues (kept on the node, sent as the
+ * side effect of a dropped connection. While it works, a new message of yours either
+ * steers (it's told at the next safe point) or queues (kept on the node, sent as the
  * next turn when this one ends). Both are your message, and go through everything an
  * ordinary one does.
  *
@@ -35,13 +35,13 @@ export interface TurnView {
   /** It is stopped at this time if it's still going (the node's limit for one turn). */
   deadline: number;
   model: string | null;
-  /** What he's doing now, in a line (null for a device that may not watch it). */
+  /** What it's doing now, in a line (null for a device that may not watch it). */
   step: string | null;
-  /** Tools he has used so far. */
+  /** Tools it has used so far. */
   tools: number;
   /** Your devices watching it right now (0: nobody's watching; it still spends model tokens). */
   watchers: number;
-  /** Messages of yours waiting for a safe point to reach him. */
+  /** Messages of yours waiting for a safe point to reach it. */
   steering: number;
   /** False: this device may not watch or steer it (a temporary chat's turn, started on another device). */
   watchable: boolean;
@@ -71,7 +71,7 @@ export interface QueuedMessage {
 }
 
 /**
- * Why a chat's queue is held (nothing is sent until you resume or discard): you stopped him;
+ * Why a chat's queue is held (nothing is sent until you resume or discard): you stopped it;
  * the turn before it failed; the node restarted; the device that queued the next message is
  * no longer paired, or may no longer chat.
  */
@@ -79,7 +79,7 @@ export type QueueHold = "stopped" | "error" | "restart" | "device";
 
 export const holdWords = (held: QueueHold): string =>
   held === "stopped"
-    ? "you stopped him"
+    ? "you stopped it"
     : held === "error"
       ? "the turn before them failed"
       : held === "restart"
@@ -88,18 +88,18 @@ export const holdWords = (held: QueueHold): string =>
 
 /** What a chat is waiting on you for. */
 export interface ChatNeeds {
-  /** Approvals he filed in it that you haven't answered. */
+  /** Approvals it filed in it that you haven't answered. */
   approvals: number;
-  /** Keys he asked for in it that you haven't given. */
+  /** Keys it asked for in it that you haven't given. */
   keys: number;
-  /** His last answer ended by asking you something. */
+  /** Its last answer ended by asking you something. */
   question: boolean;
 }
 
 /** A chat's state at a glance. */
 export type ChatState = "working" | "waiting" | "queued" | "stopped" | "failed" | "done";
 
-/** How a kept answer ended ("steered": you sent a message while he was answering, and the turn went on with it). */
+/** How a kept answer ended ("steered": you sent a message while it was answering, and the turn went on with it). */
 export type AnswerStatus = "done" | "error" | "stopped" | "steered" | "streaming";
 
 /**
@@ -154,7 +154,7 @@ export function mayDrain(chat: { running: boolean; held: QueueHold | null; queue
   return !chat.running && !chat.held && chat.queued > 0 && node.running < node.maxTurns;
 }
 
-/** Whether his answer ends by asking you something: its last line ends with a question mark. */
+/** Whether its answer ends by asking you something: its last line ends with a question mark. */
 export function endsWithQuestion(answer: string): boolean {
   const last = answer
     .trim()

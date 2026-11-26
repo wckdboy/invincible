@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, type GEvent, newNodeIdentity, registrationDigest, toolDigest, type TrialRecord } from "@invincible/core";
+import { b64u, type GEvent, newNodeIdentity, registrationDigest, toolDigest, type EvalRecord } from "@invincible/core";
 import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../src/index.ts";
 
 /*
@@ -30,7 +30,7 @@ function fleet() {
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const storeA = new LedgerStore(":memory:");
-  foundFleet(storeA, a, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(storeA, a, { fleetName: "homelab", nodeName: "ultra" });
   enrollDevice(storeA, a, { device: b.id, name: "laptop", kind: "node", box: b64u(b.boxPublic) });
   const storeB = new LedgerStore(":memory:");
   storeB.expectFleet(storeA.fleet!);
@@ -220,7 +220,7 @@ describe("standing orders in the log", () => {
     const { a, b, storeA, storeB } = fleet();
     storeA.emit(a, "connector.set", { id: "github", manifest: PR });
     storeA.emit(a, "order.set", order(orderId(2), { args: { owner: "amiriteorg", repo: "website" } }));
-    storeA.emit(a, "action.requested", request(actionId(11))); // repo galahad
+    storeA.emit(a, "action.requested", request(actionId(11))); // repo primary
     expect(() => storeA.emit(a, "order.applied", { order: orderId(2), action: actionId(11) })).toThrow(/doesn't cover/);
     expect(() => storeA.emit(a, "order.applied", { order: orderId(9), action: actionId(11) })).toThrow(/no such order/);
     storeA.emit(a, "order.set", order(orderId(3)));
@@ -307,9 +307,9 @@ describe("investigations in the log", () => {
   });
 });
 
-describe("trials in the log", () => {
-  const trialId = (n: number) => `tr_${String(n).padStart(22, "0")}`;
-  const record = (overrides: Partial<TrialRecord> = {}): TrialRecord => ({
+describe("evals in the log", () => {
+  const evalId = (n: number) => `tr_${String(n).padStart(22, "0")}`;
+  const record = (overrides: Partial<EvalRecord> = {}): EvalRecord => ({
     run: "r-abc",
     suite: "engineering",
     problem: "cantilever-beam",
@@ -332,21 +332,21 @@ describe("trials in the log", () => {
     const { a, b, storeA, storeB } = fleet();
     // A verdict the numbers don't support, or a score that isn't the share passed: refused.
     const inflated = record({ answers: [record().answers[0]!, { ...record().answers[1]!, ok: true }] });
-    expect(() => storeA.emit(a, "trial.scored", { id: trialId(1), ...inflated })).toThrow(/doesn't follow from its numbers/);
-    expect(() => storeA.emit(a, "trial.scored", { id: trialId(1), ...record({ score: 1 }) })).toThrow(/score doesn't follow/);
-    expect(() => storeA.emit(a, "trial.scored", { id: trialId(1), ...record({ status: "crashed" }) })).toThrow(/score doesn't follow/);
-    storeA.emit(a, "trial.scored", { id: trialId(1), ...record() });
-    expect(() => storeA.emit(a, "trial.scored", { id: trialId(1), ...record() })).toThrow(/already recorded/);
+    expect(() => storeA.emit(a, "eval.scored", { id: evalId(1), ...inflated })).toThrow(/doesn't follow from its numbers/);
+    expect(() => storeA.emit(a, "eval.scored", { id: evalId(1), ...record({ score: 1 }) })).toThrow(/score doesn't follow/);
+    expect(() => storeA.emit(a, "eval.scored", { id: evalId(1), ...record({ status: "crashed" }) })).toThrow(/score doesn't follow/);
+    storeA.emit(a, "eval.scored", { id: evalId(1), ...record() });
+    expect(() => storeA.emit(a, "eval.scored", { id: evalId(1), ...record() })).toThrow(/already recorded/);
     syncInto(storeA, storeB);
-    expect(storeB.lww<{ score: number }>(`trial:${trialId(1)}`)?.value?.score).toBe(0.5);
-    // Another node records its own trials.
-    storeB.emit(b, "trial.scored", { id: trialId(2), ...record({ status: "crashed", score: 0, answers: [], note: "no sandbox host" }) });
+    expect(storeB.lww<{ score: number }>(`eval:${evalId(1)}`)?.value?.score).toBe(0.5);
+    // Another node records its own evals.
+    storeB.emit(b, "eval.scored", { id: evalId(2), ...record({ status: "crashed", score: 0, answers: [], note: "no sandbox host" }) });
   });
 
   test("any order, one digest", () => {
     const { a, b, storeA, storeB } = fleet();
-    storeA.emit(a, "trial.scored", { id: trialId(3), ...record() });
-    storeB.emit(b, "trial.scored", { id: trialId(4), ...record({ run: "r-def", score: 1, answers: [record().answers[0]!] }) });
+    storeA.emit(a, "eval.scored", { id: evalId(3), ...record() });
+    storeB.emit(b, "eval.scored", { id: evalId(4), ...record({ run: "r-def", score: 1, answers: [record().answers[0]!] }) });
     syncInto(storeB, storeA);
     const digest = storeA.digest();
     const events = storeA.eventsSince({}, 100_000).events;

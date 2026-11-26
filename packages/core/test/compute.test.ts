@@ -30,7 +30,7 @@ import {
 
 /*
  * Compute, as pure functions: what a node may carry (its ceiling, what it measured),
- * whether one more piece of work fits now, how much effort a quest may spend, and
+ * whether one more piece of work fits now, how much effort a run may spend, and
  * what changes when the fleet does. Nothing here touches a machine.
  */
 
@@ -50,7 +50,7 @@ const measured = (body: ComputeBody, threads: number, delivered: number, extra: 
 const idle = (body: ComputeBody): HostLoad => ({ load: 0, cores: body.cores, freeMemoryGb: body.memoryGb * 0.9, totalMemoryGb: body.memoryGb, oursRecently: 0 });
 
 describe("the ceiling", () => {
-  test("by default he may use half of a machine, and says why", () => {
+  test("by default it may use half of a machine, and says why", () => {
     expect(ceilingThreads(ultra, null)).toBe(16);
     const capacity = deriveCapacity(ultra, measured(ultra, 16, 15.6), null);
     expect(capacity).toMatchObject({ cores: 16, memoryGb: 91, sandboxes: 4, modelCalls: MODEL_CALLS_DEFAULT, measured: true });
@@ -74,7 +74,7 @@ describe("the ceiling", () => {
   });
 
   test("slots come from what was measured, not from the core count", () => {
-    // 16 threads that only did 9.2 cores' worth (hyperthreads, a throttled or shared machine): he counts 9.
+    // 16 threads that only did 9.2 cores' worth (hyperthreads, a throttled or shared machine): it counts 9.
     const shared = deriveCapacity(ultra, measured(ultra, 16, 9.2), null);
     expect(shared.cores).toBe(9);
     expect(shared.sandboxes).toBe(2);
@@ -83,7 +83,7 @@ describe("the ceiling", () => {
     expect(shared.speed).toBeCloseTo(1, 5);
   });
 
-  test("not measured yet: one sandbox's worth, and he says so", () => {
+  test("not measured yet: one sandbox's worth, and it says so", () => {
     const capacity = deriveCapacity(ultra, null, null);
     expect(capacity).toMatchObject({ cores: 4, sandboxes: 1, measured: false, strength: null });
     expect(capacity.reasons.join("\n")).toMatch(/not measured yet/i);
@@ -124,10 +124,10 @@ describe("when to calibrate", () => {
     expect(calibrationDue({ ...ultra, memoryGb: 256 }, calibration, null)).toBe("changed");
     expect(calibrationDue({ ...ultra, gpu: [{ name: "RTX 5090", memoryGb: 32 }] }, calibration, null)).toBe("changed");
     expect(calibrationDue({ ...ultra, localModels: [{ runtime: "ollama", models: ["qwen3:8b"] }] }, calibration, null)).toBe("changed");
-    // A ceiling that changes how many threads he may use is measured again; one that only limits memory isn't.
+    // A ceiling that changes how many threads it may use is measured again; one that only limits memory isn't.
     expect(calibrationDue(ultra, calibration, { cores: 24 })).toBe("changed");
     expect(calibrationDue(ultra, calibration, { memoryGb: 64 })).toBeNull();
-    // Measured on fewer threads than he may use (the machine was busy): again, when it's quieter.
+    // Measured on fewer threads than it may use (the machine was busy): again, when it's quieter.
     expect(calibrationDue(ultra, measured(ultra, 5, 4.8), null)).toBe("changed");
   });
 
@@ -162,13 +162,13 @@ describe("admission: work fits, or it waits", () => {
     const full = admit(capacity, { sandboxes: 4, cores: 16, memoryGb: 32 }, slot, idle(ultra));
     expect(full).toMatchObject({ ok: false, busy: false });
     expect(!full.ok && full.why).toContain("4 of 4");
-    // Two big sandboxes use every core he may use: a third waits though a slot is free.
+    // Two big sandboxes use every core it may use: a third waits though a slot is free.
     expect(admit(capacity, { sandboxes: 2, cores: 16, memoryGb: 16 }, slot, idle(ultra))).toMatchObject({ ok: false });
     expect(admit(capacity, { sandboxes: 1, cores: 4, memoryGb: 88 }, slot, idle(ultra))).toMatchObject({ ok: false });
   });
 
   test("a sandbox that grows needs room for what it adds, not a slot: every slot taken doesn't stop it, the ceiling does", () => {
-    // Four sandboxes hold every slot, but only half the threads and a third of the memory he may use.
+    // Four sandboxes hold every slot, but only half the threads and a third of the memory it may use.
     const full = { sandboxes: 4, cores: 8, memoryGb: 30 };
     expect(admit(capacity, full, slot, idle(ultra))).toMatchObject({ ok: false });
     expect(admitGrowth(capacity, full, { cpus: 4, memoryGb: 8 }, idle(ultra))).toEqual({ ok: true });
@@ -180,17 +180,17 @@ describe("admission: work fits, or it waits", () => {
     expect(admitGrowth(capacity, full, { cpus: 4, memoryGb: 0 }, { ...idle(ultra), load: 27 })).toMatchObject({ ok: false, busy: true });
   });
 
-  test("he backs off while the machine is busy with other work", () => {
+  test("it backs off while the machine is busy with other work", () => {
     // 27 threads of other load: only 1.8 of the machine's threads are left under the reserve.
     const busy = admit(capacity, { sandboxes: 0, cores: 0, memoryGb: 0 }, slot, { ...idle(ultra), load: 27 });
     expect(busy).toMatchObject({ ok: false, busy: true });
-    // Load that is his own (four sandboxes he ran a moment ago) doesn't count against him.
+    // Load that is its own (four sandboxes it ran a moment ago) doesn't count against it.
     expect(admit(capacity, { sandboxes: 0, cores: 0, memoryGb: 0 }, slot, { ...idle(ultra), load: 27, oursRecently: 16 })).toEqual({ ok: true });
-    // The machine's memory nearly gone: he waits.
+    // The machine's memory nearly gone: it waits.
     expect(admit(capacity, { sandboxes: 0, cores: 0, memoryGb: 0 }, slot, { ...idle(ultra), freeMemoryGb: 12 })).toMatchObject({ ok: false, busy: true });
   });
 
-  test("even with the whole machine as his ceiling, a tenth stays the host's", () => {
+  test("even with the whole machine as its ceiling, a tenth stays the host's", () => {
     const whole = deriveCapacity(ultra, measured(ultra, 32, 20), { cores: 32, memoryGb: 182 });
     expect(whole.cores).toBe(20);
     const all = { ...whole, cores: 32, sandboxes: 8 };
@@ -213,7 +213,7 @@ describe("admission: work fits, or it waits", () => {
   });
 });
 
-describe("effort: how many attempts a quest may run at once", () => {
+describe("effort: how many attempts a run may run at once", () => {
   const policy = { effort: "auto" as const, attemptsPerDay: EFFORT_BUDGET_DEFAULT };
   const base = { policy, usedToday: 0, freeSlots: 4, slots: 4, freeModelCalls: 8, explicitOwner: false, host: "ultra" };
 
@@ -252,7 +252,7 @@ describe("effort: how many attempts a quest may run at once", () => {
   });
 });
 
-describe("the plan he derives, and what changed", () => {
+describe("the plan it derives, and what changed", () => {
   const node = (id: string, name: string, body: ComputeBody, delivered: number | null, limit: { cores?: number } | null = null) => {
     const calibration = delivered === null ? null : measured(body, ceilingThreads(body, limit), delivered);
     return { id, name, body, capacity: deriveCapacity(body, calibration, limit) };
@@ -265,7 +265,7 @@ describe("the plan he derives, and what changed", () => {
     expect(planChanges(null, plan)[0]).toContain("ultra");
   });
 
-  test("a node joins: more slots, a stronger host takes sandboxes first, and he says each in a line", () => {
+  test("a node joins: more slots, a stronger host takes sandboxes first, and it says each in a line", () => {
     const small: ComputeBody = { cores: 8, memoryGb: 32, gpu: [], sandboxHost: true, microVMs: false, localModels: [] };
     const before = derivePlan([node("n_small", "nuc", small, 4)]);
     expect(before.effort).toBe(1);
@@ -273,7 +273,7 @@ describe("the plan he derives, and what changed", () => {
     expect(after).toMatchObject({ sandboxHost: "n_ultra", effort: 3 });
     const changes = planChanges(before, after);
     expect(changes.some((c) => /^ultra joined: 4 sandbox slots/.test(c))).toBe(true);
-    expect(changes).toContain("Default effort 1 → 3: auto may now run up to 3 attempts at a quest at once.");
+    expect(changes).toContain("Default effort 1 → 3: auto may now run up to 3 attempts at a run at once.");
     expect(changes).toContain("Sandboxes go to ultra first now (the stronger host).");
     expect(planDigest(before)).not.toBe(planDigest(after));
   });
@@ -296,7 +296,7 @@ describe("the plan he derives, and what changed", () => {
   });
 });
 
-describe("what more compute would buy, and what he suggests (never does)", () => {
+describe("what more compute would buy, and what it suggests (never does)", () => {
   const capacity = deriveCapacity(ultra, measured(ultra, 16, 15.6), null);
 
   test("raising a default ceiling, and a second machine", () => {
@@ -313,7 +313,7 @@ describe("what more compute would buy, and what he suggests (never does)", () =>
     // A straight line from that is 5 slots on 24 threads: the most there could be, and said as that…
     expect(line).toMatch(/could carry up to 5 sandbox slots instead of 3/);
     expect(line).not.toMatch(/would carry|about 5/);
-    expect(line).toMatch(/he measures again on the new ceiling/);
+    expect(line).toMatch(/it measures again on the new ceiling/);
     // …because what it then measured there was 16.2 cores' worth: 4.
     const yours = { cores: 24 };
     expect(deriveCapacity(ultra, measured(ultra, 24, 16.2, { body: bodyFingerprint(ultra, yours) }), yours).sandboxes).toBe(4);
@@ -338,12 +338,12 @@ describe("what more compute would buy, and what he suggests (never does)", () =>
     expect(whatMoreBuys(raised, { effort: 3 } as ComputePlan).some((l) => /model calls/.test(l))).toBe(false);
   });
 
-  test("a GPU with no local runtime: he suggests one, and says the installing is yours", () => {
+  test("a GPU with no local runtime: it suggests one, and says the installing is yours", () => {
     const gpu: ComputeBody = { cores: 16, memoryGb: 64, gpu: [{ name: "RTX A4000", memoryGb: 16 }], sandboxHost: true, microVMs: false, localModels: [] };
     const suggestions = computeSuggestions([{ id: "n_gpu", name: "forge", body: gpu, calibration: null }], { swift: ["anthropic/claude-haiku-5-5"] });
     expect(suggestions).toHaveLength(1);
     expect(suggestions[0]).toMatchObject({ key: "compute-suggest:local-runtime:n_gpu" });
-    expect(suggestions[0]!.body).toMatch(/won't install or download anything himself/);
+    expect(suggestions[0]!.body).toMatch(/won't install or download anything itself/);
   });
 
   test("a machine that's away gets no suggestion: it can't be set up, measured or answer until it's back", () => {
@@ -357,7 +357,7 @@ describe("what more compute would buy, and what he suggests (never does)", () =>
     expect(computeSuggestions([{ id: "n_laptop", name: "laptop", body: gpu, calibration: null, online: true }], { swift: [] })).toHaveLength(1);
   });
 
-  test("a local model that measured well and isn't hired: he suggests the roster change, never makes it", () => {
+  test("a local model that measured well and isn't hired: it suggests the roster change, never makes it", () => {
     const body: ComputeBody = { ...ultra, localModels: [{ runtime: "ollama", models: ["qwen3:8b"] }] };
     const calibration = measured(body, 16, 15.6, { models: [{ runtime: "ollama", model: "qwen3:8b", tps: 41.3 }] });
     const suggested = computeSuggestions([{ id: "n_ultra", name: "ultra", body, calibration }], { swift: ["anthropic/claude-haiku-5-5"] });
@@ -372,27 +372,27 @@ describe("what more compute would buy, and what he suggests (never does)", () =>
 });
 
 describe("the Index per effort level", () => {
-  const trial = (run: string, score: number, status = "scored") => ({ run, status, score });
+  const evalCase = (run: string, score: number, status = "scored") => ({ run, status, score });
 
   test("more effort that clears the interval is said to help; one that doesn't is said not to", () => {
-    const low = Array.from({ length: 14 }, (_, i) => trial("r-one", i < 4 ? 1 : 0));
-    const high = Array.from({ length: 14 }, (_, i) => trial("r-three", i < 13 ? 1 : 0));
+    const low = Array.from({ length: 14 }, (_, i) => evalCase("r-one", i < 4 ? 1 : 0));
+    const high = Array.from({ length: 14 }, (_, i) => evalCase("r-three", i < 13 ? 1 : 0));
     const helped = effortReport([...low, ...high], { "r-three": 3 });
     expect(helped.levels.map((l) => [l.effort, l.n, l.runs])).toEqual([[1, 14, 1], [3, 14, 1]]);
     expect(helped.helps).toBe(true);
     expect(helped.verdict).toMatch(/measurably helps/);
 
-    const same = Array.from({ length: 14 }, (_, i) => trial("r-three", i < 5 ? 1 : 0));
+    const same = Array.from({ length: 14 }, (_, i) => evalCase("r-three", i < 5 ? 1 : 0));
     const flat = effortReport([...low, ...same], { "r-three": 3 });
     expect(flat.helps).toBe(false);
     expect(flat.verdict).toMatch(/no measurable difference/i);
   });
 
-  test("crashed trials aren't counted, and one level alone is no comparison", () => {
-    const only = effortReport([trial("r-a", 1), trial("r-a", 0), trial("r-a", 0, "crashed")], {});
+  test("crashed evals aren't counted, and one level alone is no comparison", () => {
+    const only = effortReport([evalCase("r-a", 1), evalCase("r-a", 0), evalCase("r-a", 0, "crashed")], {});
     expect(only.levels).toHaveLength(1);
     expect(only.levels[0]).toMatchObject({ effort: 1, n: 2 });
     expect(only.helps).toBeNull();
-    expect(only.verdict).toMatch(/invincible trial run --effort/);
+    expect(only.verdict).toMatch(/invincible eval run --effort/);
   });
 });

@@ -4,10 +4,10 @@ import { h, replace } from "./dom.ts";
 import { icon } from "./icons.ts";
 
 /*
- * The banner under the top bar that says Galahad can't be reached, or that this device is offline, and then for a
- * moment that he is reached again (lib/alerts.ts connectionCourse says when). It is a thin capsule floating over the
+ * The banner under the top bar that says the primary can't be reached, or that this device is offline, and then for a
+ * moment that it is reached again (lib/alerts.ts connectionCourse says when). It is a thin capsule floating over the
  * page, its place on the page taking no room, so nothing under it moves when it comes or goes. Offline is no error,
- * so it is grey; can't reach him is amber, and as the app tries again one slow line of light passes along its foot,
+ * so it is grey; can't reach it is amber, and as the app tries again one slow line of light passes along its foot,
  * once as it comes and once more at each Retry (nothing moves while it only waits); reached again it turns green where
  * it is, then goes. It drops in on a short spring, out of a slight blur, and leaves with a short fade; where motion is
  * reduced it only appears, goes, and has no line. Nothing in it blinks.
@@ -53,7 +53,7 @@ function sweepAgain(pill: HTMLElement): void {
 }
 
 /**
- * Makes `el` (the shell's banner, under the top bar: a polite live region) say whether Galahad is reached: `reach` takes
+ * Makes `el` (the shell's banner, under the top bar: a polite live region) say whether the primary is reached: `reach` takes
  * each word of it (lib/reach.ts, through the app's `online`). It listens for the browser going offline or coming back
  * until `signal` ends it (the shell's lifetime). `retry` asks the node again at once.
  */

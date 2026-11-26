@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { taskRecordFacts, TeamTaskRecord } from "../src/index.ts";
 
-/* What a knight's task came to, in words: the same at a terminal and in the app, from the record the runner kept. */
+/* What an agent's task came to, in words: the same at a terminal and in the app, from the record the runner kept. */
 
 const spent = [
   { role: "engineer", model: "plan/m", calls: 9, unknown: 0, input: 90_000, output: 4000, cached: 70_000, reasoning: 1500 },

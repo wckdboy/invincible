@@ -30,7 +30,7 @@ import { toast } from "../ui/toast.ts";
 
 /*
  * Artifacts: a sandbox's work products, kept after the sandbox is gone. Every
- * quest keeps its /work/out; you can keep any folder of a running sandbox. The
+ * run keeps its /work/out; you can keep any folder of a running sandbox. The
  * mind records each file's path, size and SHA-256; the node that holds the files
  * serves them. Here they're listed, previewed and saved, and every file fetched
  * is checked against its recorded SHA-256. Nothing is ever rendered as HTML:
@@ -65,7 +65,7 @@ function saveBytes(name: string, data: Uint8Array): void {
 }
 
 const KIND_ICON: Record<FileKind, IconName> = { markdown: "scroll", source: "code", text: "file", image: "eye", download: "download" };
-const where = (a: ArtifactView) => `Its files are on ${a.nodeName}. This node keeps only the record: open Galahad on ${a.nodeName} to preview or save them.`;
+const where = (a: ArtifactView) => `Its files are on ${a.nodeName}. This node keeps only the record: open your agent on ${a.nodeName} to preview or save them.`;
 
 /** One artifact: its files grouped by folder, previews, verified downloads, and (for you) Remove. */
 export function openArtifact(ctx: Ctx, a: ArtifactView): void {
@@ -250,7 +250,7 @@ export function openArtifact(ctx: Ctx, a: ArtifactView): void {
   const all = canDownloadAll(a) ? button("Download all", { size: "sm", icon: "download", disabled: elsewhere, onClick: (e) => void downloadAll(e.currentTarget as HTMLButtonElement) }) : null;
   const sheet = openSheet({
     title: a.label,
-    description: `${a.quest ? `From quest ${a.quest}` : "Kept by hand"} · ${relativeTime(a.savedAt)} · on ${a.nodeName}`,
+    description: `${a.run ? `From run ${a.run}` : "Kept by hand"} · ${relativeTime(a.savedAt)} · on ${a.nodeName}`,
     size: "wide",
     body: h(
       "div",
@@ -286,7 +286,7 @@ export function openArtifact(ctx: Ctx, a: ArtifactView): void {
 /** Keep a running sandbox's work (a folder under /work, by default /work/out) after it's gone. */
 export function openKeepWork(ctx: Ctx, sandbox: SandboxView, on: string | null): void {
   const folder = h("input", { class: "input mono", type: "text", value: "/work/out", autocomplete: "off", autocorrect: "off", spellcheck: "false", autocapitalize: "off", maxlength: 256 });
-  const label = h("input", { class: "input", type: "text", autocomplete: "off", maxlength: 200, placeholder: sandbox.quest || sandbox.name });
+  const label = h("input", { class: "input", type: "text", autocomplete: "off", maxlength: 200, placeholder: sandbox.run || sandbox.name });
   const status = h("div");
   const keep = button("Keep it", { variant: "primary", type: "submit", icon: "archive" });
   const body = h(
@@ -330,9 +330,9 @@ export function openKeepWork(ctx: Ctx, sandbox: SandboxView, on: string | null):
         });
       },
     },
-    field("Folder", folder, { hint: "A folder under /work. Quests write their results to /work/out." }),
+    field("Folder", folder, { hint: "A folder under /work. Runs write their results to /work/out." }),
     field("Label (optional)", label, { hint: "How it shows up under Artifacts." }),
-    callout("quiet", `Galahad copies the files out and keeps them on ${sandbox.node} after the sandbox is gone, up to 512 MB and 5,000 files, each with its SHA-256.`),
+    callout("quiet", `Your agent copies the files out and keeps them on ${sandbox.node} after the sandbox is gone, up to 512 MB and 5,000 files, each with its SHA-256.`),
     status,
     formActions(button("Cancel", { onClick: () => sheet.close() }), keep),
   );
@@ -355,7 +355,7 @@ export const artifactsView: View = (root, ctx, { scope, opts }) => {
         h(
           "div",
           { class: "meta" },
-          a.quest ? h("span", {}, "quest ", h("span", { class: "mono" }, a.quest)) : h("span", {}, "kept by hand"),
+          a.run ? h("span", {}, "run ", h("span", { class: "mono" }, a.run)) : h("span", {}, "kept by hand"),
           h("span", { title: absoluteTime(a.savedAt) }, relativeTime(a.savedAt)),
           h("span", { class: "tnum" }, `${plural(a.count, "file")} · ${bytesLabel(a.bytes)}`),
           a.here ? h("span", {}, `on ${a.nodeName}`) : null,
@@ -377,7 +377,7 @@ export const artifactsView: View = (root, ctx, { scope, opts }) => {
             : empty({
                 icon: "archive",
                 title: "Nothing kept yet",
-                body: "Every quest keeps what it writes to /work/out. You can also keep a running sandbox's work from Sandboxes.",
+                body: "Every run keeps what it writes to /work/out. You can also keep a running sandbox's work from Sandboxes.",
                 actions: ctx.can("sandbox") ? button("Open Sandboxes", { icon: "sandbox", onClick: () => ctx.navigate("sandboxes") }) : null,
               }),
         ),

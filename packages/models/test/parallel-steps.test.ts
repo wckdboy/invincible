@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage, ExecResult } from "@invincible/core";
-import { type QuestEvent, type QuestRole, runQuest } from "../src/quest.ts";
+import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
 
 /*
  * Parallel sub-steps: with effort, the engineer may send several commands that
@@ -13,13 +13,13 @@ const fence = "```";
 const sh = (...commands: string[]) => `Next.\n${commands.map((c) => `${fence}sh\n${c}\n${fence}`).join("\n")}`;
 
 function harness(engineer: string[], options: { parallelCommands?: number; maxSteps?: number } = {}) {
-  const queues: Record<QuestRole, string[]> = { planner: ["1. Do it."], engineer: [...engineer], reviewer: ["PASS"] };
-  const seen: { role: QuestRole; messages: ChatMessage[] }[] = [];
-  const events: QuestEvent[] = [];
+  const queues: Record<RunRole, string[]> = { planner: ["1. Do it."], engineer: [...engineer], reviewer: ["PASS"] };
+  const seen: { role: RunRole; messages: ChatMessage[] }[] = [];
+  const events: RunEvent[] = [];
   let running = 0;
   let peak = 0;
   const commands: string[] = [];
-  const run = runQuest(
+  const run = runLoop(
     { goal: "make it so", environment: "a test sandbox", ...options },
     {
       ask: async (role, messages) => {
@@ -74,7 +74,7 @@ describe("parallel sub-steps", () => {
     expect(budget.commands).toEqual(["a", "b", "c"]);
   });
 
-  test("a batch that fails the same way three turns in a row stops the quest, as one command does, whatever else runs beside it", async () => {
+  test("a batch that fails the same way three turns in a row stops the run, as one command does, whatever else runs beside it", async () => {
     // Both fail each turn, exactly as before: the loop breaker counts each command's turns in a row, not the last one alone.
     const both = harness([sh("check fail", "lint fail"), sh("check fail", "lint fail"), sh("check fail", "lint fail"), sh("check fail", "lint fail")], { parallelCommands: 2 });
     const stopped = await both.run;

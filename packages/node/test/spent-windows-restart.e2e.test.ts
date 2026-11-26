@@ -56,7 +56,7 @@ afterAll(async () => {
 test("a spent plan is still passed over, and still said in the meter, after the node starts again", async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
 

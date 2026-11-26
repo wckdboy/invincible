@@ -23,7 +23,7 @@ const manifest = (id: string, provider: "google" | "microsoft") =>
     origin: provider === "google" ? "https://gmail.example.test" : "https://graph.example.test",
     auth: { secret: id, scheme: "oauth", oauth: { provider, scopes: provider === "google" ? ["https://mail.example.test/modify", "openid", "email"] : ["Mail.ReadWrite", "offline_access", "openid"] } },
     tools: { inbox: { description: "Your inbox.", method: "GET", path: "/inbox", class: "read" } },
-    access: { only: "galahad", allowed: [] },
+    access: { only: "primary", allowed: [] },
     private: true,
   });
 
@@ -34,7 +34,7 @@ const drive = ConnectorManifest.parse({
   origin: "https://drive.example.test",
   auth: { secret: "drive", scheme: "oauth", oauth: { provider: "google", scopes: ["https://drive.example.test/drive.readonly", "https://drive.example.test/drive.file", "openid", "email"] } },
   tools: { files: { description: "Your files.", method: "GET", path: "/files", class: "read" } },
-  access: { only: "galahad", allowed: [] },
+  access: { only: "primary", allowed: [] },
   private: true,
 });
 
@@ -44,7 +44,7 @@ const idToken = (claims: Record<string, unknown>) => `e30.${Buffer.from(JSON.str
 function rig(answer: (url: string, form: URLSearchParams) => Response) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   const manifests = { gmail: manifest("gmail", "google"), outlook: manifest("outlook", "microsoft"), drive };
   const asked: { url: string; form: URLSearchParams }[] = [];
@@ -141,7 +141,7 @@ describe("Google: its consent page, and its return", () => {
     };
     const state = await begin();
     const back = await r.signIns.callback(new URLSearchParams({ state, code: "auth-code" }));
-    expect(back).toEqual({ ok: true, message: "Signed in to Gmail as you@example.com. You can close this page and go back to Galahad." });
+    expect(back).toEqual({ ok: true, message: "Signed in to Gmail as you@example.com. You can close this page and go back to Invincible." });
     expect(Object.fromEntries(r.asked.at(-1)!.form)).toMatchObject({ grant_type: "authorization_code", code: "auth-code", redirect_uri: "https://keep.example.test/oauth/callback", client_id: "client-id.apps.example", client_secret: "test-secret-FAKE" });
     expect(r.keep("gmail")).toMatchObject({ refresh: "test-refresh-FAKE-google", account: "you@example.com" });
     expect(await r.signIns.callback(new URLSearchParams({ state, code: "auth-code" }))).toMatchObject({ ok: false, message: expect.stringMatching(/expired or was already used/) });
@@ -168,9 +168,9 @@ describe("Google: its consent page, and its return", () => {
     };
     expect(await back("openid https://www.googleapis.com/auth/userinfo.email")).toEqual({ ok: false, message: "Google allowed none of what Google Drive asks for (drive.readonly, drive.file). Sign in again and tick each box. Nothing was kept." });
     expect(r.keep("drive")).toEqual({ client: "client-id.apps.example", secret: "test-secret-FAKE" });
-    expect(await back("https://drive.example.test/drive.file openid")).toEqual({ ok: true, message: "Signed in to Google Drive as you@example.com, but without drive.readonly: sign in again and tick its box to give it. You can close this page and go back to Galahad." });
+    expect(await back("https://drive.example.test/drive.file openid")).toEqual({ ok: true, message: "Signed in to Google Drive as you@example.com, but without drive.readonly: sign in again and tick its box to give it. You can close this page and go back to Invincible." });
     expect(r.keep("drive")).toMatchObject({ refresh: "test-refresh-FAKE-google", account: "you@example.com" });
-    expect(await back("https://drive.example.test/drive.readonly https://drive.example.test/drive.file openid")).toEqual({ ok: true, message: "Signed in to Google Drive as you@example.com. You can close this page and go back to Galahad." });
+    expect(await back("https://drive.example.test/drive.readonly https://drive.example.test/drive.file openid")).toEqual({ ok: true, message: "Signed in to Google Drive as you@example.com. You can close this page and go back to Invincible." });
     expect(r.said).toEqual(["signed in to drive, without drive.readonly", "signed in to drive"]);
   });
 });

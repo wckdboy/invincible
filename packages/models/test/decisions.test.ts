@@ -61,7 +61,7 @@ describe("the decider role", () => {
   function setup() {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     const vault = new Vault(store, identity);
     vault.set("cloudflare-ai", TOKEN, { provider: "cloudflare-ai", origin: "https://gateway.ai.cloudflare.com" });
     store.emit(identity, "provider.set", { id: "cloudflare-ai", kind: "openai", baseUrl: CF, secret: "cloudflare-ai" });

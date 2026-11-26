@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { AVATAR_EXPRESSIONS, KNIGHT_TINTS, knightColors } from "@invincible/core/avatar";
-import { avatarEditor, KNIGHT_CSS, seat, stateChip, workerAvatar, type WorkerAvatarOptions } from "./avatar.ts";
+import { AVATAR_EXPRESSIONS, AGENT_TINTS, agentColors } from "@invincible/core/avatar";
+import { avatarEditor, AGENT_CSS, seat, stateChip, workerAvatar, type WorkerAvatarOptions } from "./avatar.ts";
 
 /** Captures the renderer's real createElement and createElementNS calls, without an HTML parser or a browser (and with
- * no canvas, so a knight's orb is its box alone and Galahad's his ring and seat in SVG). */
+ * no canvas, so an agent's orb is its box alone and the primary's its ring and seat in SVG). */
 class Node_ {
   readonly attrs: Record<string, string> = {};
   readonly children: Node_[] = [];
@@ -33,10 +33,10 @@ function withDocument<T>(draw: () => T): T {
   finally { if (original) Object.defineProperty(globalThis, "document", original); else Reflect.deleteProperty(globalThis, "document"); }
 }
 const walk = (node: Node_): Node_[] => [node, ...node.children.flatMap(walk)];
-const orbOf = (node: Node_) => walk(node).find((child) => child.attrs.class === "knight-orb")!;
+const orbOf = (node: Node_) => walk(node).find((child) => child.attrs.class === "agent-orb")!;
 const HEX = /^#[0-9a-f]{6}$/i;
 
-describe("knights at the page's boundary", () => {
+describe("agents at the page's boundary", () => {
   test("nothing from a profile or a name reaches a URL, a style or a paint, but a colour checked to be six hex digits", () => {
     const name = '<image href="https://invalid.example/pixel" onload="alert(1)">';
     const profiles = [
@@ -50,7 +50,7 @@ describe("knights at the page's boundary", () => {
       expect(orbOf(node!).attrs["aria-label"]).toBe(`${name} · idle`);
       expect(node!.attrs["data-expression"]).toBe("idle");
       // A colour that isn't one is its handle's.
-      expect(orbOf(node!).attrs["data-tint"]).toBe(knightColors("ada").tint);
+      expect(orbOf(node!).attrs["data-tint"]).toBe(agentColors("ada").tint);
     }
     for (const drawn of render(...AVATAR_EXPRESSIONS.flatMap((expression) => [{ id: "ada", name, profile: profiles[0], expression, size: 96 }, { id: "ada", name, profile: { v: 2, color: "#3ABEFF" }, expression, size: 200 }]))) {
       for (const child of walk(drawn)) {
@@ -69,10 +69,10 @@ describe("knights at the page's boundary", () => {
   test("its colour is the one you chose for it, or its handle's; anything else colours nothing", () => {
     const [chosen, handle, look] = render({ id: "ada", name: "Ada", profile: { v: 2, color: "#3ABEFF" }, still: true }, { id: "ada", name: "Ada", still: true }, { id: "ada", name: "Ada", profile: { v: 1, form: "round", color: "#be7153" }, still: true });
     expect(orbOf(chosen!).attrs["data-tint"]).toBe("#3abeff");
-    expect(orbOf(handle!).attrs["data-tint"]).toBe(knightColors("ada").tint);
-    expect(orbOf(look!).attrs["data-tint"]).toBe(knightColors("ada").tint);
-    expect(KNIGHT_TINTS).toContain(orbOf(handle!).attrs["data-tint"] as never);
-    // Still, as a speaker in a conversation's history: named as the knight's orb, and doing nothing.
+    expect(orbOf(handle!).attrs["data-tint"]).toBe(agentColors("ada").tint);
+    expect(orbOf(look!).attrs["data-tint"]).toBe(agentColors("ada").tint);
+    expect(AGENT_TINTS).toContain(orbOf(handle!).attrs["data-tint"] as never);
+    // Still, as a speaker in a conversation's history: named as the agent's orb, and doing nothing.
     expect(orbOf(handle!).attrs["aria-label"]).toBe("Ada's orb");
   });
 
@@ -85,7 +85,7 @@ describe("knights at the page's boundary", () => {
   });
 });
 
-describe("a knight in its seat", () => {
+describe("an agent in its seat", () => {
   test("no ring: the face alone, still, at the size asked, its state kept on the seat and said in its name; the seat's size follows it", () => {
     const [working, resting, portrait, card] = withDocument(() => [
       seat({ id: "ada", name: "Ada", state: "working", expression: "working", size: 32 }),
@@ -104,18 +104,18 @@ describe("a knight in its seat", () => {
     expect(working!.attrs.style).toBeUndefined();
   });
 
-  test("Galahad's seat is his orb, in the room a face and its seat take; where he stands is kept on it", () => {
+  test("Your agent's seat is its orb, in the room a face and its seat take; where it stands is kept on it", () => {
     const [needs, resting, card] = withDocument(() => [
-      seat({ id: "galahad", name: "Galahad", state: "needs", expression: "asking", size: 32 }),
-      seat({ id: "galahad", name: "Galahad", size: 32 }),
-      seat({ id: "galahad", name: "Galahad", state: "working", size: 88 }),
+      seat({ id: "primary", name: "Your agent", state: "needs", expression: "asking", size: 32 }),
+      seat({ id: "primary", name: "Your agent", size: 32 }),
+      seat({ id: "primary", name: "Your agent", state: "working", size: 88 }),
     ] as unknown as Node_[]);
     expect([needs!.attrs.class, needs!.attrs["data-state"]]).toEqual(["seat seat-s seat-orb", "needs"]);
     const shown = (node: Node_) => node.children[0]!.attrs;
     expect([shown(needs!).class, shown(needs!)["data-tone"], shown(needs!).style]).toEqual(["orb", "warn", "--orb-size:40px"]);
     expect([shown(resting!)["data-tone"], shown(card!)["data-tone"], shown(card!).style]).toEqual(["neutral", "accent", "--orb-size:102px"]);
-    expect(shown(needs!)["aria-label"]).toBe("Galahad");
-    // Still in a seat: no mood. (No canvas here: his orb's box alone; no ring round him, nor a seat drawn on one.)
+    expect(shown(needs!)["aria-label"]).toBe("Your agent");
+    // Still in a seat: no mood. (No canvas here: its orb's box alone; no ring round it, nor a seat drawn on one.)
     expect(shown(card!)["data-mood"]).toBeUndefined();
     expect(walk(card!).map((child) => child.attrs.class).filter(Boolean)).toEqual(["seat seat-m seat-orb", "orb"]);
   });
@@ -130,7 +130,7 @@ describe("a knight in its seat", () => {
   });
 });
 
-describe("choosing a knight's colour", () => {
+describe("choosing an agent's colour", () => {
   test("untouched, it keeps what is saved; a swatch chooses that colour; its handle's colour lets it go", () => {
     const editor = withDocument(() => avatarEditor({ id: () => "ada", name: () => "Ada", profile: { v: 2, color: "#3abeff" } }));
     expect(editor.value()).toBeUndefined();
@@ -142,6 +142,6 @@ describe("choosing a knight's colour", () => {
 });
 
 test("a face moves by the orbs' one clock, which stops for reduced motion: its stylesheet animates nothing", () => {
-  expect(KNIGHT_CSS).not.toMatch(/\banimation\s*:/);
-  expect(KNIGHT_CSS).not.toContain("@keyframes");
+  expect(AGENT_CSS).not.toMatch(/\banimation\s*:/);
+  expect(AGENT_CSS).not.toContain("@keyframes");
 });

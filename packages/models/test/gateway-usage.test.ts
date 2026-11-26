@@ -97,7 +97,7 @@ describe("the gateway tells what a tool's call cost", () => {
   function node() {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     const vault = new Vault(store, identity);
     const baseUrl = `http://127.0.0.1:${provider.port}/v1`;
     vault.set("stand-in", KEY, { provider: "stand-in", origin: new URL(baseUrl).origin });

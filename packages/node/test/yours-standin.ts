@@ -1,28 +1,28 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { type ChatStreamEvent, type RouteName, routes, type TeamSnapshot, type TeamTask, type TeamTaskRecord, type Teammate, TrialRecord, trialProblem, type TrialView } from "@invincible/core";
-import type { YourCase } from "../src/trial-yours.ts";
+import { type ChatStreamEvent, type RouteName, routes, type TeamSnapshot, type TeamTask, type TeamTaskRecord, type Agent, EvalRecord, evalProblem, type EvalView } from "@invincible/core";
+import type { YourCase } from "../src/eval-yours.ts";
 
 /*
- * A stand-in node for trials of your own work. Its sandboxes are temporary directories where every command really
+ * A stand-in node for evals of your own work. Its sandboxes are temporary directories where every command really
  * runs (bash, git, the gates), with /work read as the sandbox's own /work; checking a repository out fetches the
  * commit from an invented repository on disk, as the git gateway would from GitHub; kept work is held in memory.
  * The models are stand-ins: the engineer runs the commands a test gives it, then says DONE.
  *
  * The invented repository, example/widgets: `total.sh` sums a file's numbers and is off by one; its test says so.
- * A later commit fixes it, as a knight's task did; that task's own change is the patch between the two.
+ * A later commit fixes it, as an agent's task did; that task's own change is the patch between the two.
  */
 
 export const WIDGETS = "https://github.com/example/widgets";
-export const KNIGHT_ARTIFACT = `art_${"k".repeat(22)}`;
+export const AGENT_ARTIFACT = `art_${"k".repeat(22)}`;
 /** The gates the invented task was given: its test (fails until the fix), one that passes already, one no fresh sandbox can pass. */
 export const GATES = { test: "sh test/total_test.sh", readme: "test -f README.md", tool: "command -v widgetfmt >/dev/null && widgetfmt --check ." };
 /** What fixes it, and what doesn't. */
 export const FIX = "sed -i.orig 's/print s + 1/print s/' total.sh && rm -f total.sh.orig";
 
 const git = (dir: string, ...args: string[]) => {
-  const run = Bun.spawnSync(["git", "-C", dir, "-c", "user.email=knight@example.invalid", "-c", "user.name=knight", ...args]);
+  const run = Bun.spawnSync(["git", "-C", dir, "-c", "user.email=agent@example.invalid", "-c", "user.name=agent", ...args]);
   if (run.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${run.stderr.toString()}`);
   return run.stdout.toString().trim();
 };
@@ -45,7 +45,7 @@ export function widgets(): { dir: string; base: string; fixed: string; patch: Ui
   return { dir, base, fixed, patch: new Uint8Array(patch), remove: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** What a knight's task's run took, made up. */
+/** What an agent's task's run took, made up. */
 export const runOf = (over: Partial<TeamTaskRecord> = {}): TeamTaskRecord => ({
   startedAt: 1_000,
   endedAt: 1_000 + 18 * 60_000,
@@ -56,11 +56,11 @@ export const runOf = (over: Partial<TeamTaskRecord> = {}): TeamTaskRecord => ({
   ...over,
 });
 
-/** A knight's task as the team's controller keeps it, made up. */
+/** An agent's task as the team's controller keeps it, made up. */
 export const taskOf = (over: Partial<TeamTask> = {}): TeamTask => ({
   id: "task-abc_def-1234",
-  room: "dm-gareth",
-  assignee: "gareth",
+  room: "dm-max",
+  assignee: "max",
   title: "Make the total the sum",
   goal: "total.sh adds one to every total. Make it print the sum.",
   dependsOn: [],
@@ -74,13 +74,13 @@ export const taskOf = (over: Partial<TeamTask> = {}): TeamTask => ({
   createdAt: 1_000,
   updatedAt: 2_000,
   record: runOf(),
-  changes: { artifact: KNIGHT_ARTIFACT, files: 1, base: "0".repeat(40) },
+  changes: { artifact: AGENT_ARTIFACT, files: 1, base: "0".repeat(40) },
   ...over,
 });
 
-export const knightOf = (over: Partial<Teammate> = {}): Teammate => ({
-  id: "gareth",
-  name: "Gareth",
+export const agentOf = (over: Partial<Agent> = {}): Agent => ({
+  id: "max",
+  name: "Max",
   instructions: "",
   role: "engineer",
   harness: "native",
@@ -96,19 +96,19 @@ export const knightOf = (over: Partial<Teammate> = {}): Teammate => ({
   ...over,
 });
 
-export const teamOf = (tasks: TeamTask[], teammates: Teammate[] = [knightOf()]): TeamSnapshot => ({ teammates, rooms: [], tasks, deliveries: [] });
+export const teamOf = (tasks: TeamTask[], agents: Agent[] = [agentOf()]): TeamSnapshot => ({ agents, rooms: [], tasks, deliveries: [] });
 
 /** The invented task as a case, at the repository's real first commit. */
 export const widgetsCase = (base: string, over: Partial<YourCase> = {}): YourCase => ({
   id: "task-abc-def-1234",
   task: "task-abc_def-1234",
   title: "Make the total the sum",
-  knight: "gareth",
+  agent: "max",
   goal: "total.sh adds one to every total. Make it print the sum.",
   gates: [GATES.test, GATES.readme],
   repository: WIDGETS,
   base,
-  artifact: KNIGHT_ARTIFACT,
+  artifact: AGENT_ARTIFACT,
   record: runOf(),
   ...over,
 });
@@ -149,7 +149,7 @@ export class YoursStandIn {
   readonly checkouts: any[] = [];
   readonly artifacts = new Map<string, Map<string, Uint8Array>>();
   readonly chats: any[] = [];
-  readonly recorded: TrialView[] = [];
+  readonly recorded: EvalView[] = [];
   readonly runs: any[] = [];
   /** What the engineer runs on its first turn (none: it only says DONE). */
   work: string | null = null;
@@ -160,18 +160,18 @@ export class YoursStandIn {
   constructor(
     /** Repository address → where it is on disk. */
     private readonly repositories: Record<string, string>,
-    knightsPatch?: Uint8Array,
+    agentsPatch?: Uint8Array,
   ) {
-    if (knightsPatch) this.artifacts.set(KNIGHT_ARTIFACT, new Map([["changes.patch", knightsPatch]]));
+    if (agentsPatch) this.artifacts.set(AGENT_ARTIFACT, new Map([["changes.patch", agentsPatch]]));
   }
 
   box(id: string): Box {
     return this.boxes.find((b) => b.id === id)!;
   }
 
-  /** The sandboxes made to grade (their quest's id starts g-), and those the engineer worked in (t-). */
-  graders = (): Box[] => this.boxes.filter((b) => String(b.input.quest).startsWith("g-"));
-  workshops = (): Box[] => this.boxes.filter((b) => String(b.input.quest).startsWith("t-"));
+  /** The sandboxes made to grade (their run's id starts g-), and those the engineer worked in (t-). */
+  graders = (): Box[] => this.boxes.filter((b) => String(b.input.run).startsWith("g-"));
+  workshops = (): Box[] => this.boxes.filter((b) => String(b.input.run).startsWith("t-"));
 
   remove(): void {
     for (const b of this.boxes) rmSync(b.dir, { recursive: true, force: true });
@@ -186,7 +186,7 @@ export class YoursStandIn {
         const dir = mkdtempSync(join(tmpdir(), "invincible-yours-box-"));
         mkdirSync(join(dir, "work"));
         this.boxes.push({ id, dir, input, commands: [] });
-        return { sandbox: { id, name: `galahad-${id}`, node: "n_ultra", quest: input.quest, image: "invincible/workshop:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, status: "running", ephemeral: true, providers: [] } } as T;
+        return { sandbox: { id, name: `primary-${id}`, node: "n_ultra", run: input.run, image: "invincible/workshop:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, status: "running", ephemeral: true, providers: [] } } as T;
       }
       case "checkoutRepository": {
         routes.checkoutRepository.input.parse(input);
@@ -214,32 +214,32 @@ export class YoursStandIn {
         if (!files.size) return { artifact: null } as T;
         const id = `art_${String(this.artifacts.size + 1).padStart(22, "0")}`;
         this.artifacts.set(id, files);
-        return { artifact: { id, label: input.label ?? "", quest: box.input.quest, sandbox: box.id, node: "n_ultra", nodeName: "ultra", bytes: 0, count: files.size, files: [...files.keys()].map((path) => ({ path, size: 0, sha256: "" })), savedAt: 0, here: true } } as T;
+        return { artifact: { id, label: input.label ?? "", run: box.input.run, sandbox: box.id, node: "n_ultra", nodeName: "ultra", bytes: 0, count: files.size, files: [...files.keys()].map((path) => ({ path, size: 0, sha256: "" })), savedAt: 0, here: true } } as T;
       }
       case "destroySandbox":
         this.destroyed.push(input.id);
         return {} as T;
-      case "recordTrial": {
-        const { spent, ...record } = routes.recordTrial.input.parse(input);
-        if (trialProblem(record)) throw new Error(`a replica would refuse it: ${trialProblem(record)}`);
-        const view = { ...TrialRecord.parse(record), id: `tr_${String(this.recorded.length).padStart(22, "0")}`, recordedAt: this.recorded.length, nodeName: "ultra", ...(spent ? { spent: { lines: spent } } : {}) };
+      case "recordEval": {
+        const { spent, ...record } = routes.recordEval.input.parse(input);
+        if (evalProblem(record)) throw new Error(`a replica would refuse it: ${evalProblem(record)}`);
+        const view = { ...EvalRecord.parse(record), id: `tr_${String(this.recorded.length).padStart(22, "0")}`, recordedAt: this.recorded.length, nodeName: "ultra", ...(spent ? { spent: { lines: spent } } : {}) };
         this.recorded.push(view);
-        return { trial: view } as T;
+        return { evalCase: view } as T;
       }
-      case "startTrialRun":
-        this.runs.push(routes.startTrialRun.input.parse(input));
+      case "startEvalRun":
+        this.runs.push(routes.startEvalRun.input.parse(input));
         return { run: input.run } as T;
       case "effort":
-        return { quest: input.quest, attempts: input.effort, asked: input.effort, host: "ultra", reasons: [], budget: { perDay: 12, usedToday: 0 } } as T;
+        return { run: input.run, attempts: input.effort, asked: input.effort, host: "ultra", reasons: [], budget: { perDay: 12, usedToday: 0 } } as T;
       case "team":
         return this.team as T;
-      case "trials":
-        return { trials: this.recorded, runs: {} } as T;
+      case "evals":
+        return { evals: this.recorded, runs: {} } as T;
       case "prices":
         return { prices: { "example/coder": { input: 1, output: 4 } } } as T;
       case "rules":
         return { rules: [] } as T;
-      case "questProgress":
+      case "runProgress":
         return {} as T;
       default:
         throw new Error(`unexpected call ${name}`);
@@ -261,7 +261,7 @@ export class YoursStandIn {
     if (first.startsWith("You are choosing between")) text = "PICK A\nOn the evidence.";
     else if (input.role === "planner") text = "1. Read total.sh and its test.\n2. Fix it.\nDone when: the gates pass.";
     else if (input.role === "engineer") {
-      // (Its first turn is the one it is only briefed for: every quest's, and every attempt's.)
+      // (Its first turn is the one it is only briefed for: every run's, and every attempt's.)
       text = input.messages.length === 1 && this.work ? `Doing the work.\n\`\`\`sh\n${this.work}\n\`\`\`` : "DONE\nThat is what I have.";
     } else text = "PASS\nThe gates passed and the change does what was asked.";
     yield { type: "text", text };

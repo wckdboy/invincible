@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { drawQuests, MACHINES, runComputeSim } from "./sim.ts";
+import { drawRuns, MACHINES, runComputeSim } from "./sim.ts";
 
 /*
  * The fleet's compute in virtual time, at a small size: the real census,
  * placement, slot admission and model-call rationing, with stand-in work.
- * `bun run bench compute` runs the same thing over whole trial runs and long
+ * `bun run bench compute` runs the same thing over whole eval runs and long
  * queues and reports what a machine buys.
  */
 
-describe("a queue of quests on a fleet (deterministic simulation)", () => {
+describe("a queue of runs on a fleet (deterministic simulation)", () => {
   test("no host is ever over its ceiling, a node told to take none gets none, nothing is lost or starved, and each host serves in turn", async () => {
     for (const effort of [1, 2, 3] as const) {
-      const r = await runComputeSim({ seed: 7, nodes: 8, quests: 20, effort, parallel: "slots" });
+      const r = await runComputeSim({ seed: 7, nodes: 8, runs: 20, effort, parallel: "slots" });
       expect(r.overCeiling).toBe(0);
       expect(r.onClosedNode).toBe(0);
       expect(r.ran.annex).toBe(0);
@@ -26,35 +26,35 @@ describe("a queue of quests on a fleet (deterministic simulation)", () => {
     }
   });
 
-  test("the same seed gives the same run; the fleet doesn't change the quests", async () => {
-    const a = await runComputeSim({ seed: 3, nodes: 4, quests: 16, effort: 2, parallel: "slots" });
-    const b = await runComputeSim({ seed: 3, nodes: 4, quests: 16, effort: 2, parallel: "slots" });
+  test("the same seed gives the same run; the fleet doesn't change the runs", async () => {
+    const a = await runComputeSim({ seed: 3, nodes: 4, runs: 16, effort: 2, parallel: "slots" });
+    const b = await runComputeSim({ seed: 3, nodes: 4, runs: 16, effort: 2, parallel: "slots" });
     expect({ ...b, placeMs: [], placeSpan: [0, 0] }).toEqual({ ...a, placeMs: [], placeSpan: [0, 0] });
-    expect(drawQuests(3, 16, 2)).toEqual(drawQuests(3, 16, 2));
-    expect(drawQuests(4, 16, 2)).not.toEqual(drawQuests(3, 16, 2));
-    // Every attempt at a quest is the same size of work.
-    for (const quest of drawQuests(3, 16, 3)) expect(new Set(quest.attempts.map((x) => JSON.stringify(x))).size).toBe(1);
+    expect(drawRuns(3, 16, 2)).toEqual(drawRuns(3, 16, 2));
+    expect(drawRuns(4, 16, 2)).not.toEqual(drawRuns(3, 16, 2));
+    // Every attempt at a run is the same size of work.
+    for (const run of drawRuns(3, 16, 3)) expect(new Set(run.attempts.map((x) => JSON.stringify(x))).size).toBe(1);
   });
 
-  test("more machines finish a queue sooner, and slots decide how many trials run at once", async () => {
+  test("more machines finish a queue sooner, and slots decide how many evals run at once", async () => {
     const times: number[] = [];
     for (const nodes of [1, 2, 8]) {
-      const r = await runComputeSim({ seed: 5, nodes, quests: 24, effort: 1, parallel: "slots" });
+      const r = await runComputeSim({ seed: 5, nodes, runs: 24, effort: 1, parallel: "slots" });
       expect(r.parallel).toBe(Math.min(24, r.slots));
       times.push(r.makespanS);
     }
     expect(times[1]!).toBeLessThan(times[0]! * 0.6);
     expect(times[2]!).toBeLessThan(times[1]!);
     // The slots the fleet's machines carry at their default ceilings (half of each), and the owner's two ceilings.
-    const eight = await runComputeSim({ seed: 5, nodes: 8, quests: 8, effort: 1, parallel: "slots" });
+    const eight = await runComputeSim({ seed: 5, nodes: 8, runs: 8, effort: 1, parallel: "slots" });
     expect(eight.slots).toBe(3 + 6 + 1 + 1 + 5 + 2 + 1 + 0);
     expect(MACHINES).toHaveLength(8);
-    // --parallel auto runs at most eight trials at once, whatever the slots.
-    expect((await runComputeSim({ seed: 5, nodes: 8, quests: 24, effort: 1, parallel: "auto" })).parallel).toBe(8);
+    // --parallel auto runs at most eight evals at once, whatever the slots.
+    expect((await runComputeSim({ seed: 5, nodes: 8, runs: 24, effort: 1, parallel: "auto" })).parallel).toBe(8);
   });
 
   test("placement counts what the asking node itself sent since a host reported: without it, a burst queues on one host while others stand idle", async () => {
-    const run = (extra: object) => runComputeSim({ seed: 11, nodes: 8, quests: 30, effort: 3, parallel: "slots", ...extra });
+    const run = (extra: object) => runComputeSim({ seed: 11, nodes: 8, runs: 30, effort: 3, parallel: "slots", ...extra });
     const now = await run({});
     const live = await run({ knowledge: "live" });
     const before = await run({ forgetSent: true });
@@ -72,7 +72,7 @@ describe("a queue of quests on a fleet (deterministic simulation)", () => {
   test("past the asked node's model calls, another machine buys little until that ceiling is raised", async () => {
     const nine = [...MACHINES, { ...MACHINES[1]!, name: "rack-two" }];
     const perHour = async (nodes: number, modelCalls?: number) => {
-      const r = await runComputeSim({ seed: 2, nodes, machines: nine, quests: 200, effort: 1, parallel: "slots", ...(modelCalls ? { modelCalls } : {}) });
+      const r = await runComputeSim({ seed: 2, nodes, machines: nine, runs: 200, effort: 1, parallel: "slots", ...(modelCalls ? { modelCalls } : {}) });
       return 200 / (r.makespanS / 3600);
     };
     const [eight, ninth, eightRaised, ninthRaised] = [await perHour(8), await perHour(9), await perHour(8, 32), await perHour(9, 32)];

@@ -9,7 +9,7 @@ import { calibrate, spawnBench } from "../src/compute/calibrate.ts";
 /*
  * Calibration: a node measures itself, within its ceiling and for a few seconds.
  * The measuring is injected here (a real run is at the end), so what's checked is
- * what he asks of the machine and what he makes of the answer.
+ * what it asks of the machine and what it makes of the answer.
  */
 
 const ultra: ComputeBody = { cores: 32, memoryGb: 182, gpu: [], sandboxHost: true, microVMs: true, localModels: [] };
@@ -21,7 +21,7 @@ function harness(over: { load?: number; limit?: { cores?: number } | null; bench
     calibrate(reason, {
       body: ultra,
       limit: over.limit ?? null,
-      dir: "/home/galahad/.invincible",
+      dir: "/home/primary/.invincible",
       load: () => over.load ?? 0.4,
       now: () => (now += 1_500),
       bench:
@@ -40,7 +40,7 @@ describe("a calibration", () => {
     const { run, asked } = harness();
     const c = await run("joined");
     expect(asked).toHaveLength(1);
-    expect(asked[0]).toMatchObject({ threads: 16, dir: "/home/galahad/.invincible" });
+    expect(asked[0]).toMatchObject({ threads: 16, dir: "/home/primary/.invincible" });
     expect(Calibration.parse(c)).toEqual(c);
     expect(c).toMatchObject({ reason: "joined", cpu: { single: 70_000, threads: 16, kernel: KERNEL }, memoryGbps: 9.5, disk: { writeMbps: 1200 }, body: bodyFingerprint(ultra, null) });
     // It says which kernel measured it, so it isn't taken again until the body, the ceiling or the kernel changes.
@@ -56,13 +56,13 @@ describe("a calibration", () => {
     expect(c.body).toBe(bodyFingerprint(ultra, { cores: 8 }));
   });
 
-  test("on a busy machine he measures on what's idle, and says so", async () => {
+  test("on a busy machine it measures on what's idle, and says so", async () => {
     const { run, asked } = harness({ load: 26.3 });
     const c = await run("asked");
     expect(asked[0]!.threads).toBe(5);
     expect(c.load).toBe(26.3);
     expect(c.note).toMatch(/busy/);
-    // He counts only what he measured: one sandbox's worth, until it's quieter.
+    // It counts only what it measured: one sandbox's worth, until it's quieter.
     expect(deriveCapacity(ultra, c, null).sandboxes).toBe(1);
   });
 

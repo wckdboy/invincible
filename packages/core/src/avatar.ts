@@ -1,31 +1,31 @@
-import type { Teammate, TeamTask, TeamDelivery } from "./team.ts";
+import type { Agent, TeamTask, TeamDelivery } from "./team.ts";
 
-/** Cosmetic identity only. This module stays schema-free for the apps. A knight is an orb (KNIGHT_TINTS, knightColors):
+/** Cosmetic identity only. This module stays schema-free for the apps. An agent is an orb (AGENT_TINTS, agentColors):
  * its colour one you chose (OrbProfile) or one picked by its handle. */
-/** What a knight can be seen doing (avatarExpression); its orb shows each one. */
+/** What an agent can be seen doing (avatarExpression); its orb shows each one. */
 export const AVATAR_EXPRESSIONS = ["idle", "thinking", "working", "reading", "browsing", "checking", "waiting", "asking", "pleased", "concerned", "resting"] as const;
 export type AvatarExpression = (typeof AVATAR_EXPRESSIONS)[number];
 
 const hexColor = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
 
 /**
- * A knight is an orb (your word, 25 November 2026: "drop the knight avatars, and just use custom/procedurally generated
+ * An agent is an orb (your word, 25 November 2026: "drop the agent avatars, and just use custom/procedurally generated
  * colored particle orbs"): a sphere of points of light, turning, in a colour of its own. Its colour is one you chose for
  * it (an OrbProfile, saved as its avatar), or else one of these 24, picked by its handle, the same on every device. Each
  * is OKLCH lightness 0.76 and chroma 0.15 (less where a screen can't show it), every 15 degrees round the hue circle
  * from 10.
  */
-export const KNIGHT_TINTS = [
+export const AGENT_TINTS = [
   "#fe879c", "#ff8a83", "#ff8d65", "#f99549", "#ed9e2f", "#dca81c", "#c8b222", "#afbc3a", "#91c456", "#6eca73", "#41ce90", "#0cceac",
   "#0dcbc3", "#11c8d8", "#04c4ed", "#3abeff", "#6fb6fe", "#8bafff", "#a2a8fe", "#b89ffe", "#ce94f8", "#e08ee5", "#ef89cf", "#fa86b6",
 ] as const;
 /** Each tint's name, as a colour picker says it. */
-export const KNIGHT_TINT_NAMES = [
+export const AGENT_TINT_NAMES = [
   "Rose", "Coral", "Salmon", "Orange", "Amber", "Gold", "Mustard", "Olive", "Lime", "Green", "Jade", "Mint",
   "Teal", "Turquoise", "Cyan", "Sky", "Azure", "Cornflower", "Periwinkle", "Lavender", "Violet", "Orchid", "Pink", "Blush",
 ] as const;
 
-/** A colour you chose for a knight's orb: a six-digit hex colour, and nothing else. */
+/** A colour you chose for an agent's orb: a six-digit hex colour, and nothing else. */
 export interface OrbProfile {
   v: 2;
   color: string;
@@ -56,7 +56,7 @@ export function nearestTint(color: string): number {
   const rgb = (hex: string) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
   const [r, g, b] = rgb(color.toLowerCase());
   let best = 0, bestApart = Infinity;
-  KNIGHT_TINTS.forEach((tint, n) => {
+  AGENT_TINTS.forEach((tint, n) => {
     const [tr, tg, tb] = rgb(tint);
     const apart = (r! - tr!) ** 2 + (g! - tg!) ** 2 + (b! - tb!) ** 2;
     if (apart < bestApart) [best, bestApart] = [n, apart];
@@ -64,10 +64,10 @@ export function nearestTint(color: string): number {
   return best;
 }
 
-/** A knight's orb's colours: its tint, the tint lit (45 % of the way to white) and in shadow (52 % of the way to black),
+/** An agent's orb's colours: its tint, the tint lit (45 % of the way to white) and in shadow (52 % of the way to black),
  * a second colour a few of its points are (the tint three to six steps on round the circle from its own), and whether
  * you chose its tint. */
-export interface KnightColors {
+export interface AgentColors {
   tint: string;
   light: string;
   deep: string;
@@ -75,18 +75,18 @@ export interface KnightColors {
   chosen: boolean;
 }
 
-export function knightColors(id: string, profile?: unknown): KnightColors {
+export function agentColors(id: string, profile?: unknown): AgentColors {
   const seed = handleSeed(String(id ?? ""));
   const chosen = isOrbProfile(profile) ? profile.color.toLowerCase() : null;
-  const at = chosen ? nearestTint(chosen) : seed % KNIGHT_TINTS.length;
-  const tint = chosen ?? KNIGHT_TINTS[at]!;
-  return { tint, light: blendHex(tint, "#ffffff", 0.45), deep: blendHex(tint, "#000000", 0.52), second: KNIGHT_TINTS[(at + 3 + ((seed >>> 8) % 4)) % KNIGHT_TINTS.length]!, chosen: chosen !== null };
+  const at = chosen ? nearestTint(chosen) : seed % AGENT_TINTS.length;
+  const tint = chosen ?? AGENT_TINTS[at]!;
+  return { tint, light: blendHex(tint, "#ffffff", 0.45), deep: blendHex(tint, "#000000", 0.52), second: AGENT_TINTS[(at + 3 + ((seed >>> 8) % 4)) % AGENT_TINTS.length]!, chosen: chosen !== null };
 }
 
 export interface AvatarActivity {
   /** `progress`, a task's latest line, where the caller has it: without it a running task is simply at work. */
   tasks: readonly (Pick<TeamTask, "assignee" | "status" | "verified" | "updatedAt"> & Partial<Pick<TeamTask, "progress">>)[];
-  deliveries: readonly Pick<TeamDelivery, "teammate" | "status" | "updatedAt">[];
+  deliveries: readonly Pick<TeamDelivery, "agent" | "status" | "updatedAt">[];
 }
 
 /**
@@ -107,9 +107,9 @@ export function taskStep(progress: string): Extract<AvatarExpression, "thinking"
 }
 
 /** Expressions describe observable work, never inferred mood or private text. */
-export function avatarExpression(member: Pick<Teammate, "id" | "enabled">, activity: AvatarActivity, now: number): AvatarExpression {
+export function avatarExpression(member: Pick<Agent, "id" | "enabled">, activity: AvatarActivity, now: number): AvatarExpression {
   const tasks = activity.tasks.filter((task) => task.assignee === member.id);
-  const deliveries = activity.deliveries.filter((delivery) => delivery.teammate === member.id);
+  const deliveries = activity.deliveries.filter((delivery) => delivery.agent === member.id);
   const running = tasks.find((task) => task.status === "running");
   if (running) return taskStep(running.progress ?? "");
   if (deliveries.some((delivery) => delivery.status === "running")) return "thinking";

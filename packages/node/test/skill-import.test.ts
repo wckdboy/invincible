@@ -90,15 +90,15 @@ describe("taking one in", () => {
   test("the skill it makes is untrusted, by where it came from, and waits: no model is given it before you approve it, then as a note with its instructions", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:", new HlcClock(() => Date.UTC(2026, 10, 20, 3)));
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     const skills = new SkillsService({ store, identity, log: () => {}, ledger: () => {}, role: () => null, ask: async () => ({ text: "NONE", model: "x" }), now: () => Date.UTC(2026, 10, 20, 3) });
     const found = await fetchAgentSkill("https://github.com/anthropics/skills/tree/main/skills/pdf", { fetch: stand(() => new Response(SKILL_MD)).fetch });
     const { skill, version } = skills.write({ doc: found.doc }, { kind: "import", from: found.where, source: found.source });
     expect(skill).toMatchObject({ title: "PDF forms", trust: "untrusted", by: "from:github.com/anthropics/skills/skills/pdf", state: "proposed", pending: version });
     expect(skills.detail(skill.id).history[0]).toMatchObject({ source: "https://github.com/anthropics/skills/tree/main/skills/pdf" });
-    expect(skills.forQuest("q-1", "fill in the PDF form")).toBeNull();
+    expect(skills.forRun("q-1", "fill in the PDF form")).toBeNull();
     skills.approve(skill.id, version);
-    const given = skills.forQuest("q-2", "fill in the PDF form");
+    const given = skills.forRun("q-2", "fill in the PDF form");
     expect(given?.skills).toEqual([{ id: skill.id, title: "PDF forms", trust: "untrusted" }]);
     expect(given?.text).toContain("python3 scripts/fields.py form.pdf");
     // Taken in again, it's another skill: one from elsewhere never changes one that's there.

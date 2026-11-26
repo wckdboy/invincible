@@ -3,7 +3,7 @@ import { sha256B64u } from "./crypto.ts";
 import { Trust } from "./events.ts";
 
 /*
- * The archive: everything Galahad made, was taught or thought of, kept for good and
+ * The archive: everything the primary made, was taught or thought of, kept for good and
  * learned from. Node-local (its own SQLite index and a blob store in the node's home,
  * never the mind's log), append-only and content-addressed: an entry's files are
  * stored once by SHA-256, and an entry's id follows from where it came from, so the
@@ -11,12 +11,12 @@ import { Trust } from "./events.ts";
  * tombstone so it never comes back.
  *
  * Entries are data. What strangers wrote (web pages, an agent's text) keeps its
- * trust, `untrusted`, everywhere it goes: search results, Galahad's context, summaries.
+ * trust, `untrusted`, everywhere it goes: search results, the primary's context, summaries.
  */
 
-/** Kinds Galahad archives today; an entry of any other kind (a newer node's, or one this version no longer archives) is kept and shown as it is. */
-/** (`trial`: a trial's record and what it kept. Searchable by you; never offered to a model as context: trials.ts.) */
-export const ARCHIVE_KINDS = ["model", "teaching", "idea", "artifact", "chat", "lesson", "trial"] as const;
+/** Kinds the primary archives today; an entry of any other kind (a newer node's, or one this version no longer archives) is kept and shown as it is. */
+/** (`eval`: an eval's record and what it kept. Searchable by you; never offered to a model as context: evals.ts.) */
+export const ARCHIVE_KINDS = ["model", "teaching", "idea", "artifact", "chat", "lesson", "eval"] as const;
 export type KnownArchiveKind = (typeof ARCHIVE_KINDS)[number];
 
 export const ArchiveKind = z.string().regex(/^[a-z][a-z0-9-]{1,31}$/, "a lowercase kind, e.g. idea");
@@ -78,7 +78,7 @@ export interface ArchiveFileView {
   sha256: string;
   size: number;
   type: string;
-  /** Text Galahad can read (and did index). */
+  /** Text the primary can read (and did index). */
   text: boolean;
 }
 
@@ -195,7 +195,7 @@ export interface ArchiveStatusView {
   paused: boolean;
 }
 
-/** One archived entry Galahad was given as context for an answer (shown with the answer's steps). */
+/** One archived entry the primary was given as context for an answer (shown with the answer's steps). */
 export interface ArchiveContextEntry {
   id: string;
   title: string;

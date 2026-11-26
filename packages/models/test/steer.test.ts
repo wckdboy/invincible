@@ -18,7 +18,7 @@ async function* chat(...args: Parameters<typeof chatWithUsage>): AsyncGenerator<
 function brain(models: string[], anthropic = false) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "local", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
   if (anthropic) {
@@ -123,7 +123,7 @@ describe("Steering: the owner's messages for an answer under way", () => {
     expect(steering.waiting).toBe(0);
   });
 
-  test("an answer that ended some other way hands back what never reached him", () => {
+  test("an answer that ended some other way hands back what never reached it", () => {
     const steering = new Steering();
     steering.offer("never delivered");
     expect(steering.close()).toEqual(["never delivered"]);
@@ -132,7 +132,7 @@ describe("Steering: the owner's messages for an answer under way", () => {
 });
 
 describe("steering an answer (OpenAI-compatible)", () => {
-  test("while he's writing: the model call ends, what he'd said stays said, and the turn goes on with your message", async () => {
+  test("while it's writing: the model call ends, what it'd said stays said, and the turn goes on with your message", async () => {
     const model = scripted([hangAfter("Your bank, as I recall, "), say("The weather: dry and cold.")]);
     const steering = new Steering();
     const events: ChatStreamEvent[] = [];
@@ -154,7 +154,7 @@ describe("steering an answer (OpenAI-compatible)", () => {
     expect(steering.offer("one more")).toBe(false);
   });
 
-  test("during a tool call: the tool finishes and is reported, the ones not started aren't run, then he's told", async () => {
+  test("during a tool call: the tool finishes and is reported, the ones not started aren't run, then it's told", async () => {
     const model = scripted([twoCalls, say("Only the first went out; I've stopped as you asked.")]);
     const { tools, runs, running, finish } = slowTools();
     const steering = new Steering();
@@ -173,7 +173,7 @@ describe("steering an answer (OpenAI-compatible)", () => {
     expect(types(events)).toEqual(["model", "tool", "tool_result", "tool", "tool_result", "steer", "text", "done"]);
     expect(events[2]).toEqual({ type: "tool_result", id: "call_1", name: "post", ok: true, summary: "posted" });
     expect(events[4]).toMatchObject({ type: "tool_result", id: "call_2", ok: false, summary: "not run: your new message came first" });
-    // Every call has its outcome (the real one, and "not run"), then his own pause, then your message.
+    // Every call has its outcome (the real one, and "not run"), then its own pause, then your message.
     const sent = model.bodies[1].messages;
     expect(sent.slice(-4)).toEqual([
       { role: "tool", tool_call_id: "call_1", content: 'posted {"text":"one"}' },
@@ -203,7 +203,7 @@ describe("steering an answer (OpenAI-compatible)", () => {
     ]);
   });
 
-  test("several messages at once reach him together, in order, each shown", async () => {
+  test("several messages at once reach it together, in order, each shown", async () => {
     const steering = new Steering();
     steering.offer("First: be brief.");
     steering.offer("Second: in Danish.");
@@ -240,7 +240,7 @@ describe("steering an answer (OpenAI-compatible)", () => {
     expect(events.at(-1)).toEqual({ type: "done", ref: "local/m" });
   });
 
-  test("a new message lets him look again: the same call that said the same twice runs once more after a steer", async () => {
+  test("a new message lets it look again: the same call that said the same twice runs once more after a steer", async () => {
     const call = (i: number) => openai({ choices: [{ delta: { tool_calls: [{ index: 0, id: `c${i}`, function: { name: "checks", arguments: '{"ref":"main"}' } }] } }] });
     const steering = new Steering();
     const model = scripted([call(0), call(1), call(2), call(3), say("Still running.")]);
@@ -352,7 +352,7 @@ describe("steering an answer (Anthropic, through the official SDK)", () => {
   });
 });
 
-describe("steering Claude while he's writing", () => {
+describe("steering Claude while it's writing", () => {
   /** Claude's stream: the message starts, some words come, and then it hangs until the request is aborted. */
   const hangingClaude = (text: string): Reply => (signal) => {
     const encoder = new TextEncoder();
@@ -372,7 +372,7 @@ describe("steering Claude while he's writing", () => {
     );
   };
 
-  test("the SDK's call is ended, what he'd said goes back as his, and he answers your message", async () => {
+  test("the SDK's call is ended, what it'd said goes back as its, and it answers your message", async () => {
     const model = scripted([hangingClaude("Your bank, as I recall, "), anthropicStream([{ type: "text", text: "" }], [[{ type: "text_delta", text: "Dry and cold." }]], "end_turn")]);
     const steering = new Steering();
     const events: ChatStreamEvent[] = [];
@@ -422,7 +422,7 @@ describe("how each provider format takes a message mid-answer", () => {
     expect(whole.content[0]).toMatchObject({ type: "thinking", signature: "sig-1" });
     expect(whole.content[1]).toMatchObject({ type: "text", text: "Dry and cold." });
     expect(yours).toEqual({ role: "user", content: "And tomorrow?" });
-    // A call cut short: only what he'd said, as plain text; with nothing said, a pause in his own words.
+    // A call cut short: only what it'd said, as plain text; with nothing said, a pause in its own words.
     conversation.interject(["And the day after?"], "Rain, mos");
     conversation.interject(["In Danish."], "");
     await drain(conversation.turn([]));
@@ -434,7 +434,7 @@ describe("how each provider format takes a message mid-answer", () => {
     ]);
   });
 
-  test("OpenAI-compatible: a call cut short keeps what he'd said; with nothing said, a pause in his own words", async () => {
+  test("OpenAI-compatible: a call cut short keeps what it'd said; with nothing said, a pause in its own words", async () => {
     const model = scripted([say("unused"), say("unused")]);
     const conversation = openAIConversation({ provider: provider("openai"), model: "m", system: "s", messages: ask("Weather?"), effort: "low", fetch: model.fetch });
     conversation.interject(["Be brief."], "Dry and");

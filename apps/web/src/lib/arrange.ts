@@ -1,10 +1,10 @@
 /*
- * Who sits where when the agents are shown. Pure (no DOM). Galahad is in no list of yours: he comes first, then the
- * knights as the node lists them (by handle).
+ * Who sits where when the agents are shown. Pure (no DOM). The primary is in no list of yours: it comes first, then the
+ * agents as the node lists them (by handle).
  */
 
-/** Galahad's handle at the Roundtable (core's TEAM_GALAHAD: the app takes only types from core's team module). */
-export const GALAHAD = "galahad";
+/** The primary's handle among the agents (core's TEAM_PRIMARY: the app takes only types from core's team module). */
+export const PRIMARY = "primary";
 
-/** Everyone at the table as they are shown: Galahad first, then the knights. */
-export const seating = (knights: readonly string[]): string[] => [GALAHAD, ...knights];
+/** Everyone at the table as they are shown: the primary first, then the agents. */
+export const seating = (agents: readonly string[]): string[] => [PRIMARY, ...agents];

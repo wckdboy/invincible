@@ -104,7 +104,7 @@ export class SignIns {
   /** The app you registered: its client id (and for Google its secret). A new client id ends the sign-in it had. */
   setApp(id: string, client: string, secret?: string): void {
     const { manifest, provider } = this.oauthOf(id);
-    if (provider === "mcp") throw new SignInError(400, `${manifest.label} needs no app of yours: Galahad registers itself when you sign in`);
+    if (provider === "mcp") throw new SignInError(400, `${manifest.label} needs no app of yours: Invincible registers itself when you sign in`);
     if (provider === "google" && !secret) throw new SignInError(400, "Google's web app has a client secret too: give both");
     const before = this.keep(manifest);
     const same = before?.client === client;
@@ -156,7 +156,7 @@ export class SignIns {
   }
 
   /**
-   * An MCP server's sign-in (brain mcp-oauth.ts): its authorization server found from it, Galahad registered there, and
+   * An MCP server's sign-in (brain mcp-oauth.ts): its authorization server found from it, the primary registered there, and
    * your browser sent to allow it, back to your app's /oauth/callback, as a Google sign-in is.
    */
   private async startMcp(manifest: ConnectorManifest, scopes: string[], redirect: string | undefined): Promise<Started> {
@@ -179,7 +179,7 @@ export class SignIns {
     const state = params.get("state") ?? "";
     const waited = this.waiting.get(state);
     this.waiting.delete(state);
-    if (!waited || waited.until <= this.now()) return { ok: false, message: "This sign-in has expired or was already used. Start it again from Galahad." };
+    if (!waited || waited.until <= this.now()) return { ok: false, message: "This sign-in has expired or was already used. Start it again from Invincible." };
     const error = params.get("error");
     const who = waited.mcp ? (this.d.manifest(waited.connector)?.label ?? waited.connector) : "Google";
     if (error) return { ok: false, message: `${who} said ${error.slice(0, 80)}. Nothing was kept.` };
@@ -188,7 +188,7 @@ export class SignIns {
     const { manifest, provider, scopes } = this.oauthOf(waited.connector);
     const keep = this.keep(manifest);
     // (Changed into an MCP server's between the start and now: that sign-in is its own.)
-    if (!code || !keep || provider === "mcp") return { ok: false, message: "Nothing came back to sign in with. Start it again from Galahad." };
+    if (!code || !keep || provider === "mcp") return { ok: false, message: "Nothing came back to sign in with. Start it again from Invincible." };
     try {
       const answer = await tokenRequest({ vault: this.d.vault, ...(this.d.fetch ? { fetch: this.d.fetch } : {}) }, endpointsOf(provider, this.d.endpoints).token, {
         grant_type: "authorization_code",
@@ -209,7 +209,7 @@ export class SignIns {
       this.d.log(`signed in to ${manifest.id}${without.length ? `, without ${without.join(", ")}` : ""}`);
       const one = without.length === 1;
       const short = without.length ? `, but without ${without.join(" and ")}: sign in again and tick ${one ? "its box" : "their boxes"} to give ${one ? "it" : "them"}` : "";
-      return { ok: true, message: `Signed in to ${manifest.label}${account ? ` as ${account}` : ""}${short}. You can close this page and go back to Galahad.` };
+      return { ok: true, message: `Signed in to ${manifest.label}${account ? ` as ${account}` : ""}${short}. You can close this page and go back to Invincible.` };
     } catch (e) {
       return { ok: false, message: `Google didn't take the sign-in (${e instanceof OAuthError ? e.message : "it couldn't be reached"}). Nothing was kept.` };
     }
@@ -217,13 +217,13 @@ export class SignIns {
 
   private async finishMcp(id: string, pending: McpPending, code: string | null, verifier: string, redirect: string): Promise<{ ok: boolean; message: string }> {
     const { manifest } = this.oauthOf(id);
-    if (!code) return { ok: false, message: "Nothing came back to sign in with. Start it again from Galahad." };
+    if (!code) return { ok: false, message: "Nothing came back to sign in with. Start it again from Invincible." };
     try {
       const keep = await finishMcpSignIn(pending, { code, verifier, redirect, now: this.now(), ...(this.d.fetch ? { fetch: this.d.fetch } : {}) });
       this.seal(manifest, keep);
       this.d.log(`signed in to ${manifest.id}`);
       this.d.signedIn?.(manifest.id);
-      return { ok: true, message: `Signed in to ${manifest.label}. Its tools are being listed now: you can close this page and go back to Galahad.` };
+      return { ok: true, message: `Signed in to ${manifest.label}. Its tools are being listed now: you can close this page and go back to Invincible.` };
     } catch (e) {
       return { ok: false, message: `${manifest.label} didn't take the sign-in (${e instanceof OAuthError ? e.message : String((e as Error)?.message ?? e).slice(0, 160)}). Nothing was kept.` };
     }

@@ -1,19 +1,19 @@
 import { moneyPrices, type Prices, usdLabel } from "@invincible/core/spend";
 import type { Ctx } from "../context.ts";
-import { GALAHAD } from "../lib/arrange.ts";
-import { besideChip, withState } from "../lib/knight-state.ts";
+import { PRIMARY } from "../lib/arrange.ts";
+import { besideChip, withState } from "../lib/agent-state.ts";
 import { teamHash } from "../lib/team.ts";
 import { spentSince } from "../lib/work.ts";
-import { roundtableView, setRoundtableView, type RoundtableView } from "../prefs.ts";
+import { agentsView, setAgentsView, type AgentsView } from "../prefs.ts";
 import { stateChip } from "../ui/avatar.ts";
 import { button, list, listRow, pageHead, section, segmented } from "../ui/controls.ts";
 import { cx, h, keepPlace, replace, type Scope } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { openSeat, type Seat, seatFace, type Table, tableOf, tableSources } from "./roster.ts";
-import { editKnight, editRoom, giveToRoundtable } from "./team-forms.ts";
+import { editAgent, editRoom, giveToAgents } from "./team-forms.ts";
 
 /*
- * The Roundtable's own page (#/team with no conversation open): everyone at the table, Galahad first, as a board of cards (each knight's portrait in its seat, its name and job, its state in a word, what it is doing
+ * The agents' own page (#/team with no conversation open): everyone at the table, the primary first, as a board of cards (each agent's portrait in its seat, its name and job, its state in a word, what it is doing
  * now) or as a list, this device's choice (a phone's is the list: your words, 26 November 2026, "workers, quietly: who
  * does what, and what it costs"); each with what its work cost this week at your prices; then the rooms. It reads what
  * the seats read (views/roster.ts's tableOf), and asks the node for your prices alone.
@@ -23,11 +23,11 @@ import { editKnight, editRoom, giveToRoundtable } from "./team-forms.ts";
 const PORTRAIT = 104;
 const FACE = 36;
 
-export function roundtableHome(ctx: Ctx, root: HTMLElement, scope: Scope): void {
+export function agentsHome(ctx: Ctx, root: HTMLElement, scope: Scope): void {
   const canEdit = ctx.can("fleet:admin");
   const narrow = matchMedia("(max-width: 959px)");
-  let view: RoundtableView = roundtableView();
-  /** Your prices, for what each knight's work cost this week (asked once; without them, nothing is said of money). */
+  let view: AgentsView = agentsView();
+  /** Your prices, for what each agent's work cost this week (asked once; without them, nothing is said of money). */
   let prices: Prices | null = null;
   if (ctx.can("mind:read")) {
     ctx.api.get<{ prices: Prices; plans?: string[] }>("/api/prices", scope.signal).then(
@@ -39,15 +39,15 @@ export function roundtableHome(ctx: Ctx, root: HTMLElement, scope: Scope): void 
       () => {},
     );
   }
-  /** This week's spend of a knight's work, in words ("$1.02 this week"), or nothing. */
+  /** This week's spend of an agent's work, in words ("$1.02 this week"), or nothing. */
   const weekWords = (seated: Seat, now: Table): string | null => {
-    if (!prices || seated.id === GALAHAD || !now.snapshot) return null;
+    if (!prices || seated.id === PRIMARY || !now.snapshot) return null;
     const spent = spentSince(now.snapshot.tasks, seated.id, Date.now() - 7 * 24 * 3600_000, prices);
     return spent ? `${spent.complete ? "" : "at least "}${usdLabel(spent.usd)} this week` : null;
   };
   let shown = "";
 
-  const body = h("div", { class: "roundtable-body" });
+  const body = h("div", { class: "agents-body" });
   const viewSwitch = segmented(
     [
       { value: "board", label: "Board" },
@@ -56,41 +56,41 @@ export function roundtableHome(ctx: Ctx, root: HTMLElement, scope: Scope): void 
     view,
     (next) => {
       view = next;
-      setRoundtableView(next);
+      setAgentsView(next);
       render();
     },
-    { label: "Show the knights as", small: true },
+    { label: "Show the agents as", small: true },
   );
-  const newKnight = button("New knight", { icon: "plus", onClick: () => void editKnight(ctx) });
-  const give = button("Give a task", { variant: "primary", icon: "layers", onClick: () => giveToRoundtable(ctx) });
+  const newAgent = button("New agent", { icon: "plus", onClick: () => void editAgent(ctx) });
+  const give = button("Give a task", { variant: "primary", icon: "layers", onClick: () => giveToAgents(ctx) });
   give.dataset.give = "";
   const page = h(
     "div",
-    { class: "page roundtable-home" },
-    pageHead("The Roundtable", "Your knights, and what each is doing now.", [viewSwitch.el, canEdit ? [newKnight, give] : null]),
+    { class: "page agents-home" },
+    pageHead("The agents", "Your agents, and what each is doing now.", [viewSwitch.el, canEdit ? [newAgent, give] : null]),
     body,
   );
 
-  /** What a seat is for, under its name: a knight's job, and Galahad's standing. */
-  const roleOf = (seated: Seat, now: Table): string => (seated.id === GALAHAD ? "First among equals" : (now.snapshot?.teammates.find((knight) => knight.id === seated.id)?.role ?? ""));
-  const keyOf = (seated: Seat): string => (seated.id === GALAHAD ? "galahad" : `person:${seated.id}`);
+  /** What a seat is for, under its name: an agent's job, and the primary's standing. */
+  const roleOf = (seated: Seat, now: Table): string => (seated.id === PRIMARY ? "First among equals" : (now.snapshot?.agents.find((agent) => agent.id === seated.id)?.role ?? ""));
+  const keyOf = (seated: Seat): string => (seated.id === PRIMARY ? "primary" : `person:${seated.id}`);
 
-  /** A knight on the board: a link to its timeline. */
+  /** An agent on the board: a link to its timeline. */
   function card(seated: Seat, now: Table): HTMLElement {
     const content = [
-      h("div", { class: "knight-card-portrait" }, seatFace(seated, PORTRAIT)),
-      h("div", { class: "knight-card-text" }, h("div", { class: "knight-card-head" }, h("h3", { class: "ellipsis" }, seated.name), stateChip(seated.state)), h("div", { class: "knight-card-role" }, [roleOf(seated, now), weekWords(seated, now)].filter(Boolean).join(" · ")), h("p", { class: "knight-card-line" }, besideChip(seated.line, seated.state))),
+      h("div", { class: "agent-card-portrait" }, seatFace(seated, PORTRAIT)),
+      h("div", { class: "agent-card-text" }, h("div", { class: "agent-card-head" }, h("h3", { class: "ellipsis" }, seated.name), stateChip(seated.state)), h("div", { class: "agent-card-role" }, [roleOf(seated, now), weekWords(seated, now)].filter(Boolean).join(" · ")), h("p", { class: "agent-card-line" }, besideChip(seated.line, seated.state))),
     ];
-    const attrs = { class: "card knight-card", "data-key": keyOf(seated), "data-state": seated.state, "data-needs": seated.needs ? "" : null };
+    const attrs = { class: "card agent-card", "data-key": keyOf(seated), "data-state": seated.state, "data-needs": seated.needs ? "" : null };
     const open = openSeat(ctx, seated);
     return h("a", { ...attrs, href: seated.href, draggable: "false", title: `${seated.name}: ${seated.line}`, "aria-label": `${withState(seated.name, seated.state)}: ${seated.line}`, ...(open ? { onclick: open } : {}) }, ...content);
   }
 
-  /** A knight in the list: the same, as a row. */
+  /** An agent in the list: the same, as a row. */
   function row(seated: Seat, now: Table): HTMLElement {
     const el = listRow({
       lead: seatFace(seated, FACE),
-      title: h("span", { class: "knight-row-title" }, h("span", { class: "ellipsis" }, seated.name), stateChip(seated.state)),
+      title: h("span", { class: "agent-row-title" }, h("span", { class: "ellipsis" }, seated.name), stateChip(seated.state)),
       sub: besideChip(seated.line, seated.state),
       meta: [h("span", {}, roleOf(seated, now)), weekWords(seated, now) ? h("span", { class: "tnum" }, weekWords(seated, now)) : null],
       key: keyOf(seated),
@@ -105,37 +105,37 @@ export function roundtableHome(ctx: Ctx, root: HTMLElement, scope: Scope): void 
 
   function render(): void {
     // A phone's is the list, with no choice of a board (its cards are a wide screen's).
-    view = narrow.matches ? "list" : roundtableView();
+    view = narrow.matches ? "list" : agentsView();
     viewSwitch.el.hidden = narrow.matches;
     const now = tableOf(ctx);
     if (!now.snapshot) return;
-    const knights = now.seats.length - 1;
+    const agents = now.seats.length - 1;
     const version = JSON.stringify([now.seats, now.rooms, view, Boolean(prices)]);
     if (version === shown && page.isConnected) return;
     shown = version;
     if (!page.isConnected) replace(root, page);
-    give.hidden = !knights;
+    give.hidden = !agents;
     body.dataset.view = view;
     const working = now.seats.filter((seated) => seated.state === "working").length;
     const waiting = now.seats.filter((seated) => seated.state === "needs" || seated.state === "failed").length;
-    const count = [String(knights), working ? `${working} working` : "", waiting ? `${waiting} ${waiting === 1 ? "needs" : "need"} you` : ""].filter(Boolean).join(" · ");
+    const count = [String(agents), working ? `${working} working` : "", waiting ? `${waiting} ${waiting === 1 ? "needs" : "need"} you` : ""].filter(Boolean).join(" · ");
     const seatNew = canEdit;
     keepPlace(body, () =>
       replace(
         body,
         section(
-          "Knights",
-          { count, ...(!knights && canEdit ? { note: "Seat a knight beside Galahad: a name, a lasting job and a workspace of its own." } : {}) },
+          "Agents",
+          { count, ...(!agents && canEdit ? { note: "Seat an agent beside your agent: a name, a lasting job and a workspace of its own." } : {}) },
           view === "board"
-            ? h("div", { class: "board" }, ...now.seats.map((seated) => card(seated, now)), seatNew ? h("button", { type: "button", class: "card knight-card knight-card-add", onclick: () => void editKnight(ctx) }, h("span", { class: "knight-card-plus" }, icon("plus", { size: 18 })), "Seat a knight") : null)
-            : list([...now.seats.map((seated) => row(seated, now)), seatNew ? listRow({ lead: "plus", title: "Seat a knight", sub: "A name, a lasting job and a workspace of its own", onClick: () => void editKnight(ctx) }) : null]),
+            ? h("div", { class: "board" }, ...now.seats.map((seated) => card(seated, now)), seatNew ? h("button", { type: "button", class: "card agent-card agent-card-add", onclick: () => void editAgent(ctx) }, h("span", { class: "agent-card-plus" }, icon("plus", { size: 18 })), "Seat an agent") : null)
+            : list([...now.seats.map((seated) => row(seated, now)), seatNew ? listRow({ lead: "plus", title: "Seat an agent", sub: "A name, a lasting job and a workspace of its own", onClick: () => void editAgent(ctx) }) : null]),
         ),
         section(
               "Rooms",
-              { count: now.rooms.length ? `${now.rooms.length}` : undefined, actions: canEdit && knights ? button("New room", { variant: "ghost", size: "sm", icon: "hash", onClick: () => editRoom(ctx) }) : null },
+              { count: now.rooms.length ? `${now.rooms.length}` : undefined, actions: canEdit && agents ? button("New room", { variant: "ghost", size: "sm", icon: "hash", onClick: () => editRoom(ctx) }) : null },
               list(
                 now.rooms.map((room) => listRow({ lead: "hash", title: room.name, sub: room.line, href: teamHash({ room: room.room! }), chevron: true, key: room.key })),
-                { empty: { icon: "hash", title: "No rooms yet", body: knights ? "A room is a conversation several knights share, Galahad among them." : "Seat a knight first: a room is where knights talk together." } },
+                { empty: { icon: "hash", title: "No rooms yet", body: agents ? "A room is a conversation several agents share, your agent among them." : "Seat an agent first: a room is where agents talk together." } },
               ),
             ),
       ),

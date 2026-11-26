@@ -13,7 +13,7 @@ import { freePort } from "./ports.ts";
 /*
  * A provider that refused its key is kept through a restart, as a spent allowance is (spent-windows-restart): the node
  * keeps it in its own database, and started again it still says it, until a call to that provider gets through. On 22
- * November 2026 the owner's MiMo key was refused at a knight's task's start, and nothing said so anywhere they look.
+ * November 2026 the owner's MiMo key was refused at an agent's task's start, and nothing said so anywhere they look.
  */
 
 const caps: Capabilities = {
@@ -48,7 +48,7 @@ afterAll(async () => {
 test("a refused key is still said after the node starts again, and forgotten there too once a call got through", async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
 

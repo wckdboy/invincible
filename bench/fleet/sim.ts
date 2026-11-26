@@ -302,7 +302,7 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
 
     const founder = makeNode(0, "n0");
     as(founder, () => {
-      foundFleet(founder.store, founder.identity, { fleetName: "camelot", nodeName: founder.name });
+      foundFleet(founder.store, founder.identity, { fleetName: "homelab", nodeName: founder.name });
       founder.store.emit(founder.identity, "node.profile", { endpoint: founder.endpoint, caps: caps(0) });
       founder.vault.set("deepseek", "sk-sim-not-a-real-key-0000000000");
       founder.vault.set("orcarouter", "sk-sim-not-a-real-key-1111111111");
@@ -370,7 +370,7 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
         const store = node.store;
         const roll = work();
         if (roll < 0.82) {
-          store.emit(node.identity, "ledger.recorded", { class: "create", resource: "sandbox.exec", target: `sb${(n % 97).toString(16)}`, verdict: "allow", quest: `q${n % 23}`, detail: `python3 -c "print(${n})"` });
+          store.emit(node.identity, "ledger.recorded", { class: "create", resource: "sandbox.exec", target: `sb${(n % 97).toString(16)}`, verdict: "allow", run: `q${n % 23}`, detail: `python3 -c "print(${n})"` });
         } else if (roll < 0.9) {
           node.slot += 1_800_000;
           store.emit(node.identity, "loop.ran", { loop: node.loop, run: `s${node.slot.toString(36)}`, slot: node.slot, status: "ok", started: node.slot, finished: node.slot + 1_000, summary: "All quiet." });

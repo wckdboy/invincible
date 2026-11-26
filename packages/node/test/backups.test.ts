@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writ
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { backupDirFor, backupOnce, BackupRunner, KEEP } from "../src/backups.ts";
+import { Home } from "../src/home.ts";
 
 /* The node's own daily backups (backups.ts), in a scratch home: real SQLite files, copied as SQLite copies them. */
 
@@ -15,7 +16,7 @@ function home() {
   dirs.push(root);
   const dir = join(root, "home");
   mkdirSync(dir);
-  for (const name of ["mind", "team"]) {
+  for (const name of ["ledger", "team"]) {
     const db = new Database(join(dir, `${name}.db`));
     db.exec("PRAGMA journal_mode=WAL; CREATE TABLE t(x TEXT); INSERT INTO t VALUES ('kept');");
     db.close();
@@ -28,7 +29,7 @@ test("once a day each of its databases is copied whole, owner-only, and a copy o
   const h = home();
   const out = join(h.root, "backups");
   const first = backupOnce(h.dir, out, at("2026-11-20"));
-  expect(first.made.map((p) => p.split("/").at(-1)).sort()).toEqual(["mind-nightly-20261120.db", "team-nightly-20261120.db"]);
+  expect(first.made.map((p) => p.split("/").at(-1)).sort()).toEqual(["ledger-nightly-20261120.db", "team-nightly-20261120.db"]);
   expect(first.skipped).toEqual([]);
   for (const path of first.made) {
     expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -41,11 +42,28 @@ test("once a day each of its databases is copied whole, owner-only, and a copy o
   expect(readdirSync(out).some((name) => name.endsWith(".partial"))).toBe(false);
 });
 
+// The ledger's file was renamed (mind.db became ledger.db) while the list of what is copied still said "mind": the
+// ledger, every event the node has, was then never backed up, and nothing said so. A home's own names decide it.
+test("the ledger and the node's own database are copied by the names a home gives them", () => {
+  const root = mkdtempSync(join(tmpdir(), "invincible-backups-"));
+  dirs.push(root);
+  const named = new Home(join(root, "home"));
+  named.ensureDir();
+  for (const path of [named.ledgerPath, named.localPath]) {
+    const db = new Database(path);
+    db.exec("CREATE TABLE t(x TEXT); INSERT INTO t VALUES ('kept');");
+    db.close();
+  }
+  const made = backupOnce(named.dir, join(root, "backups"), at("2026-11-20")).made.map((p) => p.split("/").at(-1));
+  const stem = (path: string) => path.split("/").at(-1)!.replace(/\.db$/, "");
+  expect(made.sort()).toEqual([`${stem(named.ledgerPath)}-nightly-20261120.db`, `${stem(named.localPath)}-nightly-20261120.db`].sort());
+});
+
 test("seven days are kept and a Sunday's for four weeks; a copy you made by hand is never touched", () => {
   const h = home();
   const out = join(h.root, "backups");
   mkdirSync(out);
-  writeFileSync(join(out, "mind-before-compute-20261111-230446.db"), "yours");
+  writeFileSync(join(out, "ledger-before-compute-20261111-230446.db"), "yours");
   // Forty days of copies, one a day.
   for (let d = 0; d < 40; d++) backupOnce(h.dir, out, at("2026-10-12") + d * 86_400_000);
   const days = [...new Set(readdirSync(out).flatMap((name) => name.match(/-nightly-(\d{8})\.db$/)?.slice(1) ?? []))].sort();
@@ -54,7 +72,7 @@ test("seven days are kept and a Sunday's for four weeks; a copy you made by hand
   const sundays = days.filter((d) => new Date(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}T00:00:00Z`).getUTCDay() === 0);
   expect(sundays).toEqual(["20261025", "20261101", "20261108", "20261115"]);
   expect(days.length).toBe(KEEP.days + 3);
-  expect(existsSync(join(out, "mind-before-compute-20261111-230446.db"))).toBe(true);
+  expect(existsSync(join(out, "ledger-before-compute-20261111-230446.db"))).toBe(true);
 });
 
 test("where they are kept: where you said, else beside the home where a backups folder is, else in it", () => {

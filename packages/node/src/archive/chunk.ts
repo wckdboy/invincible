@@ -146,9 +146,9 @@ export function chunkData(text: string): string[] {
   return [tidy(text).slice(0, CHUNK_TARGET + 600)].filter(Boolean);
 }
 
-/** A chat as it's archived: each message on its own, "You: …" or "Galahad: …", a blank line between. */
+/** A chat as it's archived: each message on its own, "You: …" or "The primary: …", a blank line between. */
 export const transcript = (messages: { role: "user" | "assistant"; content: string }[]): string =>
-  messages.map((m) => `${m.role === "user" ? "You" : "Galahad"}: ${m.content.trim()}`).join("\n\n");
+  messages.map((m) => `${m.role === "user" ? "You" : "Your agent"}: ${m.content.trim()}`).join("\n\n");
 
 /** A chat: one passage per exchange (your question and the answer), split if long. */
 export function chunkChat(text: string): string[] {

@@ -14,7 +14,7 @@ import { CLASS_INFO } from "./activity.ts";
 import { signInBlock } from "./sign-in.ts";
 
 /*
- * Remote MCP servers as connectors. Galahad lists a server's tools when you add
+ * Remote MCP servers as connectors. The primary lists a server's tools when you add
  * it (and again when you refresh), and you choose each tool's class: read, create
  * and modify run freely and are logged; outward and delete ask you first. What a
  * server says about its tools (descriptions, hints) is its claim, shown as data:
@@ -123,7 +123,7 @@ export async function saveClasses(ctx: Ctx, c: ConnectorView, changes: Record<st
       title: freed.length === 1 ? `Let ${freed[0]} run without asking?` : `Let ${freed.length} tools run without asking?`,
       body: [
         h("p", {}, h("span", { class: "mono" }, list(freed)), ` will run whenever an agent or a loop calls ${freed.length === 1 ? "it" : "them"}, without asking you. The ledger still records each call.`),
-        h("p", {}, "What the server says about its tools is only its claim. Choose this only for what you'd let Galahad do alone."),
+        h("p", {}, "What the server says about its tools is only its claim. Choose this only for what you'd let your agent do alone."),
       ],
       confirmLabel: "Save classes",
       tone: "primary",
@@ -242,7 +242,7 @@ export function openAddMcp(ctx: Ctx, installed: ConnectorView[], deps: McpDeps):
           ? "Sent as Authorization: Bearer, and only to this server. You'll seal the key next."
           : auth === "header"
             ? "Sent in a header of the server's choosing, and only to this server. You'll seal the key next."
-            : "You sign in as yourself, in your browser, next: no key and no app of yours. Galahad registers itself with the server then.";
+            : "You sign in as yourself, in your browser, next: no key and no app of yours. Your agent registers itself with the server then.";
   };
   const authControl = segmented(
     [
@@ -320,12 +320,12 @@ export function openAddMcp(ctx: Ctx, installed: ConnectorView[], deps: McpDeps):
         });
       },
     },
-    field("Address", address, { hint: "The server's endpoint (streamable HTTP). Galahad talks to it and nowhere else." }),
+    field("Address", address, { hint: "The server's endpoint (streamable HTTP). Your agent talks to it and nowhere else." }),
     h("div", { class: "fields" }, field("Id", id, { hint: "How agents and loops name it." }), field("Name (optional)", label)),
     h("div", { class: "stack tight" }, h("div", { class: "label" }, "Its key or sign-in"), h("div", {}, authControl.el), authHint),
     headerField,
     onlyField,
-    callout("quiet", "Galahad lists its tools once, and you choose what each may do. Its key, if it has one, goes into the vault and is only ever sent to this server."),
+    callout("quiet", "Your agent lists its tools once, and you choose what each may do. Its key, if it has one, goes into the vault and is only ever sent to this server."),
     status,
     h("div", { class: "row wrap", style: "justify-content:flex-end" }, button("Cancel", { onClick: () => sheet.close() }), connect),
   );
@@ -360,7 +360,7 @@ export function keyStep(ctx: Ctx, sheet: Sheet, connector: ConnectorView, url: s
     h(
       "div",
       { class: "stack loose" },
-      callout("info", `${connector.label} is installed without tools yet: it needs its key first. Galahad lists its tools as soon as the key is sealed.`, { title: "Add its key" }),
+      callout("info", `${connector.label} is installed without tools yet: it needs its key first. Your agent lists its tools as soon as the key is sealed.`, { title: "Add its key" }),
       deps.keyField(connector, onSealed),
       note,
       formActions(button("Later", { onClick: () => sheet.close() })),

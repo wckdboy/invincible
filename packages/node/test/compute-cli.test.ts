@@ -30,7 +30,7 @@ const ultra: ComputeNodeView = {
   capacity,
   use: { sandboxes: 2, cores: 8, memoryGb: 16, queued: 1, modelCalls: 3, modelQueued: 0 },
   free: 0,
-  queue: [{ quest: "q-abc123", cpus: 4, memoryGb: 8, since: NOW - 60_000, why: "8.0 of the 14 threads he may use are taken" }],
+  queue: [{ run: "q-abc123", cpus: 4, memoryGb: 8, since: NOW - 60_000, why: "8.0 of the 14 threads it may use are taken" }],
 };
 const plan = derivePlan([{ id: ultra.id, name: ultra.name, body, capacity }]);
 const view: ComputeView = {
@@ -40,9 +40,9 @@ const view: ComputeView = {
   budget: { perDay: 12, usedToday: 2 },
   plan,
   adapted: { at: NOW - 3_600_000, changes: ["ultra: 2 → 3 sandbox slots."] },
-  work: [{ quest: "q-xyz789", label: "compute the tip deflection", effort: 3, asked: "auto", by: "you", since: NOW, reasons: [], attempts: [{ index: 2, doing: "The engineer is thinking", station: "forge", model: "deepseek/deepseek-chat", sandbox: "0123456789", active: true, last: NOW }] }],
+  work: [{ run: "q-xyz789", label: "compute the tip deflection", effort: 3, asked: "auto", by: "you", since: NOW, reasons: [], attempts: [{ index: 2, doing: "The engineer is thinking", station: "forge", model: "deepseek/deepseek-chat", sandbox: "0123456789", active: true, last: NOW }] }],
   more: whatMoreBuys([{ name: "ultra", body, capacity, limit: null }], plan),
-  suggestions: [{ key: "compute-suggest:hire-local:n_ultra", title: "Galahad suggests: hire ollama/qwen3:8b for the swift role", body: "…invincible roster set swift ollama/qwen3:8b" }],
+  suggestions: [{ key: "compute-suggest:hire-local:n_ultra", title: "Your agent suggests: hire ollama/qwen3:8b for the swift role", body: "…invincible roster set swift ollama/qwen3:8b" }],
 };
 
 describe("invincible compute", () => {
@@ -61,25 +61,25 @@ describe("invincible compute", () => {
     expect(text).toContain("ollama/qwen3:8b 41.3 tokens/s");
     expect(text).toContain("3 days ago");
     // The ceiling, whose it is, and every reason.
-    expect(text).toContain("14 of 32 threads and 91 of 182 GB are his to use");
+    expect(text).toContain("14 of 32 threads and 91 of 182 GB are its to use");
     expect(text).toContain("the defaults (half of the machine)");
     expect(text).toContain("The default ceiling: 16 of 32 threads (half; the rest stays with whatever else this machine runs).");
-    expect(text).toContain("Measured: 16 threads did 14.2 cores' worth of work at once, so he counts 14.");
+    expect(text).toContain("Measured: 16 threads did 14.2 cores' worth of work at once, so it counts 14.");
     // The queue is visible, with why.
     expect(text).toContain("waiting: q-abc123 (4 threads, 8 GB)");
-    expect(text).toContain("8.0 of the 14 threads he may use are taken");
+    expect(text).toContain("8.0 of the 14 threads it may use are taken");
     // A node that hasn't measured itself, with your ceiling.
     expect(text).toContain("due to measure itself (it never has)");
     expect(text).toContain("not yet: invincible compute calibrate rack");
     expect(text).toContain("yours: 8 threads");
     expect(text).toContain("(in use: not known)");
-    // Work in hand, what more would buy, what he suggests, and when he last adapted.
+    // Work in hand, what more would buy, what it suggests, and when it last adapted.
     expect(text).toContain("q-xyz789  effort 3 (auto)");
     expect(text).toContain("attempt 2  at the forge");
     expect(text).toContain("What more compute would buy");
     expect(text).toContain("invincible compute limit ultra --cores 24");
     expect(text).toContain("hire ollama/qwen3:8b for the swift role");
-    expect(text).toContain("His defaults were last re-derived 60 minutes ago: ultra: 2 → 3 sandbox slots.");
+    expect(text).toContain("Its defaults were last re-derived 60 minutes ago: ultra: 2 → 3 sandbox slots.");
   });
 
   test("words for the pieces", () => {

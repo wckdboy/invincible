@@ -5,13 +5,13 @@ import { hashOf } from "../lib/nav.ts";
 import { type Attended, attended, type WorkRow } from "../lib/work.ts";
 import { cx, h } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
-import { knightFace } from "../ui/orb.ts";
+import { agentFace } from "../ui/orb.ts";
 import { signal, type Signal } from "../ui/signal.ts";
 
 /*
  * The work's rows, as every list of them draws them (a wide screen's sidebar, a phone's Home): a task in three lines, as
- * T3 Code's sidebar has it (your word, 26 November 2026: "project/tasks/coding t3code style for the knights"): its
- * project's badge and name with how it stands in a word in its state's colour; its title; its knight's orb, still, with
+ * T3 Code's sidebar has it (your word, 26 November 2026: "project/tasks/coding t3code style for the [agents]"): its
+ * project's badge and name with how it stands in a word in its state's colour; its title; its agent's orb, still, with
  * its name and what it is doing or what it came to. A row opens the task's own thread (#/task/<id>). What the rows say is
  * lib/work.ts's; this only draws them, and keeps what they are drawn from: the team, the approvals waiting, your projects'
  * names. Nothing is asked for per row.
@@ -42,13 +42,13 @@ export function workNow(ctx: Ctx): Attended | null {
 }
 
 /** A row's words, for a screen reader and a tooltip: what it is, where, how it stands and who is on it. */
-export const rowLabel = (row: WorkRow): string => [row.title, row.project.name, row.word, `${row.knight.name}${row.detail ? `: ${row.detail}` : ""}`, row.age ? `${row.age} ago` : null].filter(Boolean).join(", ");
+export const rowLabel = (row: WorkRow): string => [row.title, row.project.name, row.word, `${row.agent.name}${row.detail ? `: ${row.detail}` : ""}`, row.age ? `${row.age} ago` : null].filter(Boolean).join(", ");
 
 /** A project's badge: its letter on a small tile (other work's is an empty, dashed one). */
 export const projectTile = (project: WorkRow["project"]): HTMLElement => h("span", { class: cx("work-badge", !project.badge && "is-none"), "aria-hidden": "true" }, project.badge);
 
 /**
- * A task as a row of three lines. `face`: its knight's orb's size (14 to 18; still: only the orb in focus moves).
+ * A task as a row of three lines. `face`: its agent's orb's size (14 to 18; still: only the orb in focus moves).
  * `current`: it is the task open now.
  */
 export function workRow(row: WorkRow, opts: { face?: number; current?: boolean } = {}): HTMLAnchorElement {
@@ -78,8 +78,8 @@ export function workRow(row: WorkRow, opts: { face?: number; current?: boolean }
     h(
       "span",
       { class: "work-l3" },
-      knightFace({ id: row.knight.id, profile: row.knight.avatar, size: opts.face ?? 16 }),
-      h("span", { class: "work-knight" }, row.knight.name),
+      agentFace({ id: row.agent.id, profile: row.agent.avatar, size: opts.face ?? 16 }),
+      h("span", { class: "work-agent" }, row.agent.name),
       row.detail ? h("span", { class: cx("work-detail ellipsis", row.mono && "mono") }, row.detail) : null,
     ),
   );
@@ -87,4 +87,4 @@ export function workRow(row: WorkRow, opts: { face?: number; current?: boolean }
 
 /** What a list of rows is drawn as, to be compared before drawing it again (a row that says the same is not redrawn). */
 export const rowsVersion = (rows: readonly WorkRow[]): string =>
-  JSON.stringify(rows.map((row) => [row.id, row.title, row.word, row.tone, row.age, row.detail, row.state, row.project.name, row.knight.name, row.knight.avatar]));
+  JSON.stringify(rows.map((row) => [row.id, row.title, row.word, row.tone, row.age, row.detail, row.state, row.project.name, row.agent.name, row.agent.avatar]));

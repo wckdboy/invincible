@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { avatarExpression, blendHex, handleSeed, isOrbProfile, KNIGHT_TINTS, knightColors, nearestTint, taskStep, type AvatarActivity } from "../src/avatar.ts";
+import { avatarExpression, blendHex, handleSeed, isOrbProfile, AGENT_TINTS, agentColors, nearestTint, taskStep, type AvatarActivity } from "../src/avatar.ts";
 import { AvatarProfileSchema } from "../src/team.ts";
 
 describe("the browser helper", () => {
@@ -17,7 +17,7 @@ describe("expressions from observable work", () => {
   const now = 100_000;
   const member = { id: "ada", enabled: true };
   const task = (status: AvatarActivity["tasks"][number]["status"], extra: Partial<AvatarActivity["tasks"][number]> = {}) => ({ assignee: "ada", status, verified: false, updatedAt: now, progress: "", ...extra });
-  const delivery = (status: AvatarActivity["deliveries"][number]["status"], extra: Partial<AvatarActivity["deliveries"][number]> = {}) => ({ teammate: "ada", status, updatedAt: now, ...extra });
+  const delivery = (status: AvatarActivity["deliveries"][number]["status"], extra: Partial<AvatarActivity["deliveries"][number]> = {}) => ({ agent: "ada", status, updatedAt: now, ...extra });
 
   test("running work wins, then pause, queue, recent concern, and verified celebration", () => {
     const activity: AvatarActivity = { tasks: [task("done", { verified: true }), task("failed"), task("queued")], deliveries: [] };
@@ -36,7 +36,7 @@ describe("expressions from observable work", () => {
     expect(avatarExpression(member, activity, now + 30_000)).toBe("idle");
     expect(avatarExpression(member, activity, now - 1)).toBe("idle");
     expect(avatarExpression(member, { tasks: [task("done")], deliveries: [delivery("done")] }, now)).toBe("idle");
-    expect(avatarExpression(member, { tasks: [task("running", { assignee: "lin" })], deliveries: [delivery("running", { teammate: "lin" })] }, now)).toBe("idle");
+    expect(avatarExpression(member, { tasks: [task("running", { assignee: "lin" })], deliveries: [delivery("running", { agent: "lin" })] }, now)).toBe("idle");
     expect(avatarExpression(member, { tasks: [task("failed", { updatedAt: now - 30_000 })], deliveries: [] }, now)).toBe("idle");
   });
 
@@ -59,7 +59,7 @@ describe("expressions from observable work", () => {
     expect(at("Submitted for review · fixed the redirect")).toBe("checking");
     expect(at("Notes · Engram 1.0, project ada")).toBe("working");
     expect(at("")).toBe("working");
-    // The running task decides, whatever else of the knight's waits or has ended.
+    // The running task decides, whatever else of the agent's waits or has ended.
     expect(avatarExpression(member, { tasks: [task("failed"), task("running", { progress: "Exit 0 · ok" }), task("queued")], deliveries: [delivery("running")] }, now)).toBe("reading");
     expect(taskStep("  Plan · indented")).toBe("thinking");
   });
@@ -76,33 +76,33 @@ describe("expressions from observable work", () => {
   });
 });
 
-describe("a knight's orb", () => {
+describe("an agent's orb", () => {
   test("its colour is one of the 24 tints, picked by its handle: the same every time, and spread round the circle", () => {
-    expect(KNIGHT_TINTS).toHaveLength(24);
-    expect(new Set(KNIGHT_TINTS).size).toBe(24);
-    for (const tint of KNIGHT_TINTS) expect(tint).toMatch(/^#[0-9a-f]{6}$/);
-    const colors = knightColors("gareth");
-    expect(knightColors("gareth")).toEqual(colors);
-    expect(colors.tint).toBe(KNIGHT_TINTS[handleSeed("gareth") % 24]!);
+    expect(AGENT_TINTS).toHaveLength(24);
+    expect(new Set(AGENT_TINTS).size).toBe(24);
+    for (const tint of AGENT_TINTS) expect(tint).toMatch(/^#[0-9a-f]{6}$/);
+    const colors = agentColors("max");
+    expect(agentColors("max")).toEqual(colors);
+    expect(colors.tint).toBe(AGENT_TINTS[handleSeed("max") % 24]!);
     expect(colors.chosen).toBe(false);
     // Many handles reach every tint.
-    expect(new Set(Array.from({ length: 400 }, (_, n) => knightColors(`knight-${n}`).tint))).toEqual(new Set(KNIGHT_TINTS));
+    expect(new Set(Array.from({ length: 400 }, (_, n) => agentColors(`agent-${n}`).tint))).toEqual(new Set(AGENT_TINTS));
   });
 
   test("a colour you chose is its tint; anything else colours nothing", () => {
-    expect(knightColors("gareth", { v: 2, color: "#3ABEFF" })).toMatchObject({ tint: "#3abeff", chosen: true });
-    expect(knightColors("gareth", { v: 2, color: "#123456" })).toMatchObject({ tint: "#123456", chosen: true });
-    expect(knightColors("gareth", { v: 1, form: "round", color: "#be7153" })).toEqual(knightColors("gareth"));
-    for (const odd of [null, "blue", { v: 2, color: "url(x)" }, { v: 2, color: "#3abeff", form: "round" }, { v: 3, color: "#3abeff" }]) expect(knightColors("gareth", odd)).toEqual(knightColors("gareth"));
+    expect(agentColors("max", { v: 2, color: "#3ABEFF" })).toMatchObject({ tint: "#3abeff", chosen: true });
+    expect(agentColors("max", { v: 2, color: "#123456" })).toMatchObject({ tint: "#123456", chosen: true });
+    expect(agentColors("max", { v: 1, form: "round", color: "#be7153" })).toEqual(agentColors("max"));
+    for (const odd of [null, "blue", { v: 2, color: "url(x)" }, { v: 2, color: "#3abeff", form: "round" }, { v: 3, color: "#3abeff" }]) expect(agentColors("max", odd)).toEqual(agentColors("max"));
   });
 
   test("lit and shadowed in whole channels, and a second colour three to six tints on from its own", () => {
     expect(blendHex("#000000", "#ffffff", 0.5)).toBe("#808080");
     expect(blendHex("#3abeff", "#3abeff", 0.7)).toBe("#3abeff");
-    const { tint, light, deep, second } = knightColors("ada", { v: 2, color: "#ff8d65" });
+    const { tint, light, deep, second } = agentColors("ada", { v: 2, color: "#ff8d65" });
     expect(light).toBe(blendHex(tint, "#ffffff", 0.45));
     expect(deep).toBe(blendHex(tint, "#000000", 0.52));
-    const steps = (KNIGHT_TINTS.indexOf(second as never) - nearestTint(tint) + 24) % 24;
+    const steps = (AGENT_TINTS.indexOf(second as never) - nearestTint(tint) + 24) % 24;
     expect(steps).toBeGreaterThanOrEqual(3);
     expect(steps).toBeLessThanOrEqual(6);
     expect(nearestTint("#ff8d65")).toBe(2);

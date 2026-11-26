@@ -65,7 +65,7 @@ describe("invincible rule ls", () => {
     expect(out).toContain('no-push   refuses the command when it holds "git push"');
     expect(out).toContain("types     runs bunx tsc --noEmit after a command that succeeds, when a word matches *.ts");
     expect(out).toContain("later     a newer node's rule: this node doesn't understand it, and doesn't apply it");
-    expect(out).toContain("Tripwires are checked before every command of Galahad's quests");
+    expect(out).toContain("Tripwires are checked before every command of your agent's runs");
     expect(out).toContain("checks run after those commands, never after a gate");
     expect(out).toContain("A coding tool (OpenCode, Claude Code, Codex, Hermes) runs its own commands in its VM, where they aren't seen");
     // (No word is the same as ls.)

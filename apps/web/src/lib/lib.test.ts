@@ -47,7 +47,7 @@ describe("markdown-lite", () => {
   });
 
   test("a fence line may say more after its language, and an answer block written on one line is still that block", () => {
-    // How models write them (and his guide shows them): the JSON on the fence line, nothing inside.
+    // How models write them (and its guide shows them): the JSON on the fence line, nothing inside.
     expect(parseMarkdown('```choices ["15°", "30°"]\n```\n\nThen **one more**.')).toEqual([
       { t: "code", lang: "choices", v: '["15°", "30°"]', open: false },
       { t: "p", c: [text("Then "), { t: "strong", c: [text("one more")] }, text(".")] },
@@ -207,17 +207,17 @@ describe("text helpers", () => {
 
   test("a coding plan is said to be one, in a line that says who uses it, as its vendor's terms allow (what the CLI says too)", () => {
     const plan = (name: string, allows: { native: boolean; tools: "unattended" | "interactive" }) => ({ id: name, plan: { name, says: "", terms: "https://example.test/terms", models: ["m"], allows } });
-    // Made for coding agents that call as themselves: he and the knights code on it.
+    // Made for coding agents that call as themselves: it and the agents code on it.
     expect(planLine(plan("OpenCode Go", { native: true, tools: "unattended" }))).toBe(
-      "OpenCode Go is a coding plan: Galahad and the other knights code on it, and their coding tools use it. His talk with you never does.",
+      "OpenCode Go is a coding plan: your agent and the other agents code on it, and their coding tools use it. Its talk with you never does.",
     );
-    // Only inside the coding tools its terms name: never his own calls.
+    // Only inside the coding tools its terms name: never its own calls.
     expect(planLine(plan("GLM Coding Plan", { native: false, tools: "unattended" }))).toBe(
-      "GLM Coding Plan is a coding plan its terms allow only inside the coding tools they name: a knight's coding tool runs on it, and so does one you run yourself (invincible run). Galahad never calls it himself.",
+      "GLM Coding Plan is a coding plan its terms allow only inside the coding tools they name: an agent's coding tool runs on it, and so does one you run yourself (invincible run). Your agent never calls it itself.",
     );
-    // Interactive use only: a tool you run yourself, and nothing of his or the knights'.
+    // Interactive use only: a tool you run yourself, and nothing of its or the agents'.
     expect(planLine(plan("Kimi Code", { native: false, tools: "interactive" }))).toBe(
-      "Kimi Code is a coding plan for interactive use only, by its terms: it is lent to a coding tool you run yourself (invincible run), and never to Galahad or a knight's work.",
+      "Kimi Code is a coding plan for interactive use only, by its terms: it is lent to a coding tool you run yourself (invincible run), and never to your agent or an agent's work.",
     );
     expect(planLine({ id: "anthropic" })).toBeNull();
     expect(planLine(undefined)).toBeNull();
@@ -262,7 +262,7 @@ describe("text helpers", () => {
     expect(providerSetup(data, "mimo-token", "mimo-token", true)).toEqual({ request: { id: "mimo-token", secret: "mimo-token" }, say: "mimo-token is configured and ready." });
   });
 
-  test("a role's models as he uses them: his own in order, and the plans that do coding", () => {
+  test("a role's models as it uses them: its own in order, and the plans that do coding", () => {
     const presets = [{ id: "zai-coding", plan: { name: "GLM Coding Plan", says: "", terms: "", models: [], allows: { native: false, tools: "unattended" as const } } }, { id: "zai" }, { id: "anthropic" }];
     expect(roleParts(["zai-coding/glm-5.3", "anthropic/claude-opus-5-5", "zai/glm-5.3"], presets)).toEqual({ own: ["anthropic/claude-opus-5-5", "zai/glm-5.3"], plans: ["zai-coding/glm-5.3"] });
     expect(roleParts(["anthropic/claude-opus-5-5"], presets)).toEqual({ own: ["anthropic/claude-opus-5-5"], plans: [] });

@@ -5,7 +5,7 @@ import { lookAt, LookLaterError, lookMessage, LookRunner, lookTime } from "../sr
 import { TurnError, TurnHub, type TurnSpec } from "../src/turns.ts";
 
 /*
- * His own looks (looks.ts): when one comes, as he said it would; the message it comes back as, kept as his and never as
+ * Its own looks (looks.ts): when one comes, as it said it would; the message it comes back as, kept as its and never as
  * yours; and the runner that takes each once, waiting while its chat is busy, never one called off, and saying why it
  * couldn't take one.
  */
@@ -14,7 +14,7 @@ const T = Date.parse("2026-11-24T20:07:31Z");
 const phone: QueuedBy = { kind: "client", device: "phone-1" };
 
 describe("when a look comes", () => {
-  test("in a while, or at a time in the zone he was told: no sooner than a minute, no later than 30 days", () => {
+  test("in a while, or at a time in the zone it was told: no sooner than a minute, no later than 30 days", () => {
     expect(lookAt({ in: "2h" }, "UTC", T)).toBe(T + 2 * 3_600_000);
     expect(lookAt({ in: "45m" }, "UTC", T)).toBe(T + 45 * 60_000);
     expect(lookAt({ in: "1d" }, "UTC", T)).toBe(T + 86_400_000);
@@ -32,12 +32,12 @@ describe("when a look comes", () => {
     expect(lookTime(Date.parse("2026-11-25T08:00:00Z"), "Europe/Copenhagen", T)).toBe("Wed 25 Nov, 09:00");
   });
 
-  test("it comes back as his own note, not your words, with what to do; and says so when it is late", () => {
+  test("it comes back as its own note, not your words, with what to do; and says so when it is late", () => {
     const look = { set: T, note: "Did the deploy finish?", at: T + 3_600_000, zone: "Europe/Copenhagen" };
-    expect(lookMessage(look, T + 3_600_000)).toBe("(A look you set yourself at 21:07, not your liege's words: Did the deploy finish?) Look now, with your tools, and say what you found and what comes next: your liege reads it here.");
+    expect(lookMessage(look, T + 3_600_000)).toBe("(A look you set yourself at 21:07, not the owner's words: Did the deploy finish?) Look now, with your tools, and say what you found and what comes next: the owner reads it here.");
     // Half an hour late, the same evening; past midnight there, the day is said too.
     expect(lookMessage(look, T + 90 * 60_000)).toContain(" It came due at 22:07, while this node was away: it is late. Look now");
-    expect(lookMessage(look, T + 5 * 3_600_000)).toStartWith("(A look you set yourself at Tue 24 Nov, 21:07, not your liege's words: Did the deploy finish?) It came due at Tue 24 Nov, 22:07");
+    expect(lookMessage(look, T + 5 * 3_600_000)).toStartWith("(A look you set yourself at Tue 24 Nov, 21:07, not the owner's words: Did the deploy finish?) It came due at Tue 24 Nov, 22:07");
   });
 });
 
@@ -72,7 +72,7 @@ describe("the runner", () => {
     return { chats, turns, runner, started, chat, set, clock: (t: number) => void (now = t), refuseWith: (error: Error | null) => void (refuse = error) };
   }
 
-  test("a look that comes is a turn of his in its chat, its message kept as his; taken once", async () => {
+  test("a look that comes is a turn of its in its chat, its message kept as its; taken once", async () => {
     const w = world();
     const look = w.set(T + 3_600_000);
     w.runner.tick();
@@ -98,7 +98,7 @@ describe("the runner", () => {
     const off = w.set(T + 60_000, "Something else");
     w.chats.lookEnd(off.id, "cancelled", "called off by you");
     w.clock(T + 60_000);
-    w.refuseWith(new TurnError(409, "He's still working in this chat."));
+    w.refuseWith(new TurnError(409, "It's still working in this chat."));
     w.runner.tick();
     w.refuseWith(new TurnError(429, "This node is already working on 4 turns, its limit."));
     w.runner.tick();

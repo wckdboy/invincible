@@ -5,7 +5,7 @@
  * - SIGTERM or SIGHUP (a kill, a closed terminal): the tool is stopped with the same
  *   signal, and the token revoked, before invincible run exits.
  * - SIGINT (Ctrl+C): the terminal already sends it to the tool, which is in the
- *   foreground, and an interactive tool may take it as "cancel" and carry on. So galahad
+ *   foreground, and an interactive tool may take it as "cancel" and carry on. So primary
  *   run waits for the tool, as a shell does, instead of dying with the token still live.
  */
 

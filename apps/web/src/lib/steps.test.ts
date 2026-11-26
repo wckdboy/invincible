@@ -59,7 +59,7 @@ describe("a task's work, folded", () => {
     expect(stepGroups(trail("Running · bun test", "Exit 1 · fail")).map((g) => g.text)).toEqual(["Ran bun test · failed"]);
   });
 
-  test("a call is read as the knight's own tools say it: a read, an edit or a write; anything else is a command", () => {
+  test("a call is read as the agent's own tools say it: a read, an edit or a write; anything else is a command", () => {
     expect(commandKind("sed -n '1,200p' 'src/it'\\''s.ts'")).toEqual({ kind: "read", path: "src/it's.ts" });
     expect(commandKind(EDIT)).toEqual({ kind: "edit", path: "packages/link/sync.ts" });
     expect(commandKind("edit 'a.ts' --all <<'X'\n-a\n+b\nX")).toEqual({ kind: "edit", path: "a.ts" });
@@ -79,7 +79,7 @@ describe("a task's work, folded", () => {
   });
 });
 
-describe("what proves it, apart from what the knight says", () => {
+describe("what proves it, apart from what the agent says", () => {
   const GATES = ["bun test packages/link", "bun run typecheck"];
 
   test("each gate as its latest round left it, with how long it took and what it said", () => {

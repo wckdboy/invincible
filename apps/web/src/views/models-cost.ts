@@ -1,7 +1,7 @@
 import type { UsageView } from "@invincible/core";
 import { type Price, tokensLabel, usdLabel } from "@invincible/core/spend";
 import { type Ctx, errorMessage } from "../context.ts";
-import { priceLabel, type PriceRow, priceRows } from "../lib/trial-cost.ts";
+import { priceLabel, type PriceRow, priceRows } from "../lib/eval-cost.ts";
 import { badge, busy, button, callout, empty, field, section } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { h, replace } from "../ui/dom.ts";

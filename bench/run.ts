@@ -103,7 +103,7 @@ async function main(): Promise<number> {
   const machine = { name: machineName(), cores: os.cpus().length };
   const options = { full, qualityOnly: values.ci };
   const started = performance.now();
-  say(`Galahad scorecard · ${commit} · seed ${seed}${full ? " · full" : ""} · ${machine.name} (${machine.cores} threads)`);
+  say(`Invincible scorecard · ${commit} · seed ${seed}${full ? " · full" : ""} · ${machine.name} (${machine.cores} threads)`);
   say("");
 
   const results: Result[] = [];

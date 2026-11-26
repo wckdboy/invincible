@@ -6,7 +6,7 @@ import { ACP_BRIDGE, ACP_PROBE, acpDriver, driverFor, OWN_SIGN_IN } from "../src
 import { HERMES } from "../src/hermes.ts";
 
 /*
- * Any agent that speaks the Agent Client Protocol, as a knight's harness (PLAN #30): the bridge run in its VM against a
+ * Any agent that speaks the Agent Client Protocol, as an agent's harness (PLAN #30): the bridge run in its VM against a
  * stand-in agent, a real subprocess speaking ACP protocol 1's wire shapes. It proves what the bridge does with what an
  * agent says and asks, not what any agent's model would do.
  */
@@ -55,7 +55,7 @@ for raw in sys.stdin:
             answer = json.loads(sys.stdin.readline())
             record(answer)
             waiting.discard(answer.get("id"))
-        # More tools than Hermes' budget: a knight's ACP agent has none.
+        # More tools than Hermes' budget: an agent's ACP agent has none.
         for n in range(200):
             update({"sessionUpdate": "tool_call", "toolCallId": str(n), "title": "terminal", "kind": "execute", "rawInput": {"command": "true"}, "status": "pending"})
             update({"sessionUpdate": "tool_call_update", "toolCallId": str(n), "status": "completed", "rawOutput": "ok"})
@@ -89,7 +89,7 @@ function fixture() {
   return { dir, run, probe, trace };
 }
 
-describe("any ACP agent as a knight's harness", () => {
+describe("any ACP agent as an agent's harness", () => {
   test("it runs the command you named, gives what it asks once, answers nothing of the client's, and follows it to its end: every tool it ran, its last words", async () => {
     const box = fixture();
     const result = await box.run(["--provider", "gateway-provider", "--model", "test-model"]);

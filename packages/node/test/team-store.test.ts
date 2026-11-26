@@ -14,25 +14,25 @@ afterEach(() => { for (const store of stores.splice(0)) store.close(); for (cons
 const make = (path = ":memory:", now?: () => number) => { const store = new TeamStore(path, now); stores.push(store); return store; };
 const close = (store: TeamStore) => { store.close(); stores.splice(stores.indexOf(store), 1); };
 const setup = (store: TeamStore) => {
-  store.saveTeammate({ id: "ada", name: "Ada" }); store.saveTeammate({ id: "lin", name: "Lin" });
+  store.saveAgent({ id: "ada", name: "Ada" }); store.saveAgent({ id: "lin", name: "Lin" });
   store.saveRoom({ id: "workshop", name: "Workshop", members: ["ada", "lin"] });
 };
 
 describe("what is new to you", () => {
-  test("when you last looked at each knight's page and each room is kept, and only grows", () => {
+  test("when you last looked at each agent's page and each room is kept, and only grows", () => {
     let clock = 1_000;
     const store = make(":memory:", () => clock);
     setup(store);
     // A store made before anyone sat at the table has seen nothing: what ends there is new.
     expect(store.snapshot().seen).toEqual({});
     clock = 2_000;
-    store.see("knight:ada");
+    store.see("agent:ada");
     store.see("room:workshop");
-    expect(store.snapshot().seen).toEqual({ "knight:ada": 2_000, "room:workshop": 2_000 });
+    expect(store.snapshot().seen).toEqual({ "agent:ada": 2_000, "room:workshop": 2_000 });
     // A clock that went back never makes what you read new again.
     clock = 1_500;
-    store.see("knight:ada");
-    expect(store.snapshot().seen!["knight:ada"]).toBe(2_000);
+    store.see("agent:ada");
+    expect(store.snapshot().seen!["agent:ada"]).toBe(2_000);
   });
 
   test("a store from before it counts everything until then as seen", () => {
@@ -47,67 +47,67 @@ describe("what is new to you", () => {
     clock = 5_000;
     const reopened = make(path, () => clock);
     const seen = reopened.snapshot().seen!;
-    expect(seen).toMatchObject({ "knight:ada": 5_000, "knight:lin": 5_000, "room:workshop": 5_000 });
+    expect(seen).toMatchObject({ "agent:ada": 5_000, "agent:lin": 5_000, "room:workshop": 5_000 });
   });
 });
 
 describe("private team persistence", () => {
-  test("a knight's own models are kept through edits that leave them out and a reopen; none, or null, gives it its role's again", () => {
+  test("an agent's own models are kept through edits that leave them out and a reopen; none, or null, gives it its role's again", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-models-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
-    expect(store.saveTeammate({ id: "ada", name: "Ada" }).models).toBeUndefined();
-    expect(store.saveTeammate({ id: "ada", name: "Ada", models: ["ollama/mimo-v2.6:9b", "deepseek/deepseek-v4-pro"] }).models).toEqual(["ollama/mimo-v2.6:9b", "deepseek/deepseek-v4-pro"]);
-    store.saveTeammate({ id: "ada", name: "Augusta", role: "planner" }); close(store);
+    expect(store.saveAgent({ id: "ada", name: "Ada" }).models).toBeUndefined();
+    expect(store.saveAgent({ id: "ada", name: "Ada", models: ["ollama/mimo-v2.6:9b", "deepseek/deepseek-v4-pro"] }).models).toEqual(["ollama/mimo-v2.6:9b", "deepseek/deepseek-v4-pro"]);
+    store.saveAgent({ id: "ada", name: "Augusta", role: "planner" }); close(store);
     const reopened = make(path);
-    expect(reopened.teammate("ada")).toMatchObject({ name: "Augusta", role: "planner", models: ["ollama/mimo-v2.6:9b", "deepseek/deepseek-v4-pro"] });
-    expect(reopened.saveTeammate({ id: "ada", name: "Augusta", models: [] }).models).toBeUndefined();
-    reopened.saveTeammate({ id: "ada", name: "Augusta", models: ["ollama/qwen3.8:27b"] });
-    expect(reopened.saveTeammate({ id: "ada", name: "Augusta", models: null }).models).toBeUndefined();
+    expect(reopened.agent("ada")).toMatchObject({ name: "Augusta", role: "planner", models: ["ollama/mimo-v2.6:9b", "deepseek/deepseek-v4-pro"] });
+    expect(reopened.saveAgent({ id: "ada", name: "Augusta", models: [] }).models).toBeUndefined();
+    reopened.saveAgent({ id: "ada", name: "Augusta", models: ["ollama/qwen3.8:27b"] });
+    expect(reopened.saveAgent({ id: "ada", name: "Augusta", models: null }).models).toBeUndefined();
     // Never a wildcard, never more than eight, always provider/model.
-    for (const models of [["ollama/*"], ["mimo"], Array.from({ length: 9 }, (_, i) => `p/m${i}`)]) expect(() => reopened.saveTeammate({ id: "ada", name: "Augusta", models })).toThrow();
+    for (const models of [["ollama/*"], ["mimo"], Array.from({ length: 9 }, (_, i) => `p/m${i}`)]) expect(() => reopened.saveAgent({ id: "ada", name: "Augusta", models })).toThrow();
   });
 
   test("an orb's colour survives omitted edits and reopens; explicit null resets it to the handle's", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
     const avatar = { v: 2 as const, color: "#ffccdd" };
-    expect(store.saveTeammate({ id: "ada", name: "Ada" }).avatar).toBeUndefined();
-    expect(store.saveTeammate({ id: "ada", name: "Ada", avatar }).avatar).toEqual(avatar);
-    store.saveTeammate({ id: "ada", name: "Augusta" }); store.remember("ada", "Keep these notes.");
+    expect(store.saveAgent({ id: "ada", name: "Ada" }).avatar).toBeUndefined();
+    expect(store.saveAgent({ id: "ada", name: "Ada", avatar }).avatar).toEqual(avatar);
+    store.saveAgent({ id: "ada", name: "Augusta" }); store.remember("ada", "Keep these notes.");
     store.setWorkspace("ada", { node: "host", id: "0123456789" }); close(store);
     const reopened = make(path);
-    expect(reopened.teammate("ada")).toMatchObject({ name: "Augusta", avatar, memory: "Keep these notes.", workspace: { node: "host", id: "0123456789" } });
-    expect(() => reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: { ...avatar, color: "url(https://example.invalid/p)" } })).toThrow(TeamError);
-    expect(reopened.teammate("ada")?.avatar).toEqual(avatar);
-    expect(reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
+    expect(reopened.agent("ada")).toMatchObject({ name: "Augusta", avatar, memory: "Keep these notes.", workspace: { node: "host", id: "0123456789" } });
+    expect(() => reopened.saveAgent({ id: "ada", name: "Augusta", avatar: { ...avatar, color: "url(https://example.invalid/p)" } })).toThrow(TeamError);
+    expect(reopened.agent("ada")?.avatar).toEqual(avatar);
+    expect(reopened.saveAgent({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
   });
-  test("a colour chosen for a knight's orb is kept as it was chosen, through edits that leave it out and a reopen; a bad one is refused", () => {
+  test("a colour chosen for an agent's orb is kept as it was chosen, through edits that leave it out and a reopen; a bad one is refused", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
-    expect(store.saveTeammate({ id: "ada", name: "Ada", avatar: { v: 2, color: "#3ABEFF" } }).avatar).toEqual({ v: 2, color: "#3abeff" });
-    store.saveTeammate({ id: "ada", name: "Augusta" }); close(store);
+    expect(store.saveAgent({ id: "ada", name: "Ada", avatar: { v: 2, color: "#3ABEFF" } }).avatar).toEqual({ v: 2, color: "#3abeff" });
+    store.saveAgent({ id: "ada", name: "Augusta" }); close(store);
     const reopened = make(path);
-    expect(reopened.teammate("ada")?.avatar).toEqual({ v: 2, color: "#3abeff" });
+    expect(reopened.agent("ada")?.avatar).toEqual({ v: 2, color: "#3abeff" });
     for (const avatar of [{ v: 2, color: "blue" }, { v: 2, color: "#3abeff", form: "round" }, { v: 3, color: "#3abeff" }]) {
-      expect(() => reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: avatar as never })).toThrow(TeamError);
+      expect(() => reopened.saveAgent({ id: "ada", name: "Augusta", avatar: avatar as never })).toThrow(TeamError);
     }
-    expect(reopened.teammate("ada")?.avatar).toEqual({ v: 2, color: "#3abeff" });
-    expect(reopened.saveTeammate({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
+    expect(reopened.agent("ada")?.avatar).toEqual({ v: 2, color: "#3abeff" });
+    expect(reopened.saveAgent({ id: "ada", name: "Augusta", avatar: null }).avatar).toBeUndefined();
   });
   test("legacy records get deterministic appearances without rewriting their saved JSON", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-avatar-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
-    const { avatar: _unused, ...legacy } = store.saveTeammate({ id: "ada", name: "Ada", instructions: "Preserve this instruction." }); close(store);
+    const { avatar: _unused, ...legacy } = store.saveAgent({ id: "ada", name: "Ada", instructions: "Preserve this instruction." }); close(store);
     const raw = JSON.stringify(legacy);
     const db = new Database(path);
-    db.query("UPDATE team_teammates SET value=? WHERE id='ada'").run(raw);
+    db.query("UPDATE team_agents SET value=? WHERE id='ada'").run(raw);
     const reopened = make(path);
-    expect(reopened.teammate("ada")).toMatchObject({ instructions: "Preserve this instruction." });
-    expect(reopened.teammate("ada")!.avatar).toBeUndefined();
-    expect(db.query<{ value: string }, []>("SELECT value FROM team_teammates WHERE id='ada'").get()?.value).toBe(raw);
+    expect(reopened.agent("ada")).toMatchObject({ instructions: "Preserve this instruction." });
+    expect(reopened.agent("ada")!.avatar).toBeUndefined();
+    expect(db.query<{ value: string }, []>("SELECT value FROM team_agents WHERE id='ada'").get()?.value).toBe(raw);
     db.close();
   });
-  test("knights, memory, workspace, messages and queued work survive reopen; files stay private", () => {
+  test("agents, memory, workspace, messages and queued work survive reopen; files stay private", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir);
     const path = join(dir, "team.db");
     const store = make(path); setup(store);
@@ -116,7 +116,7 @@ describe("private team persistence", () => {
     store.post({ room: "workshop", text: "@ada @lin: discuss the fixture." });
     close(store);
     const reopened = make(path);
-    expect(reopened.teammate("ada")).toMatchObject({ memory: "The fixture uses Bun.", workspace: { node: "host", id: "0123456789" } });
+    expect(reopened.agent("ada")).toMatchObject({ memory: "The fixture uses Bun.", workspace: { node: "host", id: "0123456789" } });
     expect(reopened.messages("workshop")).toHaveLength(1);
     expect(reopened.queued()).toHaveLength(2);
     expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -142,24 +142,24 @@ describe("private team persistence", () => {
     const store = make(); setup(store);
     store.remember("ada", "My notes"); store.setWorkspace("ada", { node: "host", id: "0123456789" });
     const owner = store.post({ room: "workshop", text: "Hello" });
-    store.post({ room: "workshop", text: "Hello there" }, { teammate: "ada", chainId: owner.chainId });
-    store.saveTeammate({ id: "ada", name: "Augusta" });
-    expect(store.teammate("ada")).toMatchObject({ name: "Augusta", memory: "My notes", workspace: { node: "host", id: "0123456789" } });
+    store.post({ room: "workshop", text: "Hello there" }, { agent: "ada", chainId: owner.chainId });
+    store.saveAgent({ id: "ada", name: "Augusta" });
+    expect(store.agent("ada")).toMatchObject({ name: "Augusta", memory: "My notes", workspace: { node: "host", id: "0123456789" } });
     expect(store.messages("workshop").at(-1)?.speakerName).toBe("Ada");
-    expect(() => store.setWorkspace("lin", { node: "host", id: "0123456789" })).toThrow(/another knight/);
+    expect(() => store.setWorkspace("lin", { node: "host", id: "0123456789" })).toThrow(/another agent/);
   });
   test("provisioning intent survives reopen and neither its host nor a bound repository silently changes", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
-    store.saveTeammate({ id: "ada", name: "Ada", repository: "https://github.com/example/fixture.git" });
+    store.saveAgent({ id: "ada", name: "Ada", repository: "https://github.com/example/fixture.git" });
     store.planWorkspace("ada", "chosen-host"); close(store);
     const reopened = make(path);
-    expect(reopened.teammate("ada")).toMatchObject({ workspace: null, workspaceNode: "chosen-host" });
+    expect(reopened.agent("ada")).toMatchObject({ workspace: null, workspaceNode: "chosen-host" });
     expect(() => reopened.planWorkspace("ada", "another-host")).toThrow(/another host/);
     expect(() => reopened.setWorkspace("ada", { node: "another-host", id: "0123456789" })).toThrow(/another host/);
     reopened.setWorkspace("ada", { node: "chosen-host", id: "0123456789" });
-    expect(() => reopened.saveTeammate({ id: "ada", name: "Ada", repository: "https://github.com/example/different" })).toThrow(/already bound/);
-    expect(() => reopened.saveTeammate({ id: "ada", name: "Augusta", repository: "https://github.com/example/fixture.git" })).not.toThrow();
+    expect(() => reopened.saveAgent({ id: "ada", name: "Ada", repository: "https://github.com/example/different" })).toThrow(/already bound/);
+    expect(() => reopened.saveAgent({ id: "ada", name: "Augusta", repository: "https://github.com/example/fixture.git" })).not.toThrow();
   });
   test("a task keeps what it did as it happened: every progress line in order, with its time, readable from any point and after the task has ended", () => {
     // (Until 14 November 2026 a task held only its last line: one that failed left nothing to read, and nothing could follow one as it worked.)
@@ -210,16 +210,16 @@ describe("private team persistence", () => {
     for (let page = store.trail(task.id, last); page.entries.length; page = store.trail(task.id, last)) { last = page.entries.at(-1)!.n; pages++; }
     expect({ last, pages }).toEqual({ last: 702, pages: 3 });
   });
-  test("a knight whose VM has no repository may be given one; from then on it is bound like any other", () => {
-    // (Seen on ultra, 14 November 2026: the first knight was made without a repository, and with its VM made it could never have one.)
+  test("an agent whose VM has no repository may be given one; from then on it is bound like any other", () => {
+    // (Seen on ultra, 14 November 2026: the first agent was made without a repository, and with its VM made it could never have one.)
     const store = make(); setup(store);
     store.setWorkspace("lin", { node: "host", id: "0123456789" });
-    expect(store.teammate("lin")!.repository).toBeNull();
+    expect(store.agent("lin")!.repository).toBeNull();
     // Nothing of a repository is in that VM yet, so there is nothing a first one could orphan.
-    expect(store.saveTeammate({ id: "lin", name: "Lin", repository: "https://github.com/example/first" }).repository).toBe("https://github.com/example/first");
-    expect(store.teammate("lin")!.workspace).toEqual({ node: "host", id: "0123456789" });
-    expect(() => store.saveTeammate({ id: "lin", name: "Lin", repository: "https://github.com/example/second" })).toThrow(/already bound/);
-    expect(() => store.saveTeammate({ id: "lin", name: "Lin", repository: null })).toThrow(/already bound/);
+    expect(store.saveAgent({ id: "lin", name: "Lin", repository: "https://github.com/example/first" }).repository).toBe("https://github.com/example/first");
+    expect(store.agent("lin")!.workspace).toEqual({ node: "host", id: "0123456789" });
+    expect(() => store.saveAgent({ id: "lin", name: "Lin", repository: "https://github.com/example/second" })).toThrow(/already bound/);
+    expect(() => store.saveAgent({ id: "lin", name: "Lin", repository: null })).toThrow(/already bound/);
   });
 });
 
@@ -232,7 +232,7 @@ describe("team boundaries", () => {
     const running = store.createTask({ room: "workshop", assignee: "ada", title: "private active title", goal: "private active goal" }); store.claim(running.id);
     for (let n = 0; n < 3; n++) store.createTask({ room: "workshop", assignee: "ada", title: `private queued ${n}`, goal: "private goal" });
     store.post({ room: "workshop", text: "@ada @lin: private conversation" });
-    const delivery = store.queued().find((job) => job.kind === "delivery" && job.teammate === "lin")!; store.claim(delivery.id);
+    const delivery = store.queued().find((job) => job.kind === "delivery" && job.agent === "lin")!; store.claim(delivery.id);
     now += 120_000;
     const failed = store.createTask({ room: "workshop", assignee: "lin", title: "private failure", goal: "private goal" });
     store.finish(failed.id, "done", null, { verified: false, output: "private unverified claim" });
@@ -249,18 +249,18 @@ describe("team boundaries", () => {
     expect(activity.deliveries).toHaveLength(2);
     expect(JSON.stringify(activity)).not.toContain("private");
     expect(Object.keys(activity.tasks[0]!).sort()).toEqual(["assignee", "status", "updatedAt", "verified"]);
-    expect(Object.keys(activity.deliveries[0]!).sort()).toEqual(["status", "teammate", "updatedAt"]);
-    expect(avatarExpression(store.requireTeammate("ada"), activity, now)).toBe("working");
-    expect(avatarExpression(store.requireTeammate("lin"), activity, now)).toBe("thinking");
+    expect(Object.keys(activity.deliveries[0]!).sort()).toEqual(["agent", "status", "updatedAt"]);
+    expect(avatarExpression(store.requireAgent("ada"), activity, now)).toBe("working");
+    expect(avatarExpression(store.requireAgent("lin"), activity, now)).toBe("thinking");
     store.finish(delivery.id, "done");
-    expect(avatarExpression(store.requireTeammate("lin"), store.avatarActivity(), now)).toBe("concerned");
+    expect(avatarExpression(store.requireAgent("lin"), store.avatarActivity(), now)).toBe("concerned");
   });
   test("secrets are refused before input storage; errors and progress never retain them", () => {
     const store = make(); setup(store);
     const fake = "sk-ant-" + "obviouslyfaketest".repeat(3);
     expect(() => store.post({ room: "workshop", text: fake })).toThrow(TeamError);
     expect(() => store.remember("ada", fake)).toThrow(TeamError);
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", instructions: fake })).toThrow(TeamError);
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", instructions: fake })).toThrow(TeamError);
     const task = store.createTask({ room: "workshop", assignee: "ada", title: "Check", goal: "Check" });
     store.claim(task.id); store.progress(task.id, fake); store.finish(task.id, "failed", fake, { verified: false, output: fake });
     expect(JSON.stringify(store.snapshot())).not.toContain(fake);
@@ -287,12 +287,12 @@ describe("team boundaries", () => {
     expect(other.task(odd.id)!.record).toBeUndefined();
   });
   test("posts and delegated tasks cannot cross membership boundaries", () => {
-    const store = make(); setup(store); store.saveTeammate({ id: "outsider", name: "Outside" });
+    const store = make(); setup(store); store.saveAgent({ id: "outsider", name: "Outside" });
     const message = store.post({ room: "workshop", text: "@ada @lin: work" });
-    expect(() => store.post({ room: "workshop", text: "Pretend I am inside" }, { teammate: "outsider", chainId: message.chainId })).toThrow(/not a member/);
-    expect(() => store.post({ room: "workshop", text: "Fresh budget" }, { teammate: "ada" })).toThrow(/current conversation/);
+    expect(() => store.post({ room: "workshop", text: "Pretend I am inside" }, { agent: "outsider", chainId: message.chainId })).toThrow(/not a member/);
+    expect(() => store.post({ room: "workshop", text: "Fresh budget" }, { agent: "ada" })).toThrow(/current conversation/);
     expect(() => store.createTask({ room: "workshop", assignee: "outsider", title: "Work", goal: "Work" })).toThrow(/not a member/);
-    expect(() => store.createTask({ room: "workshop", assignee: "ada", title: "Work", goal: "Work" }, { teammate: "outsider", chainId: message.chainId })).toThrow(/not a member/);
+    expect(() => store.createTask({ room: "workshop", assignee: "ada", title: "Work", goal: "Work" }, { agent: "outsider", chainId: message.chainId })).toThrow(/not a member/);
   });
   test("direct conversation membership is immutable and owner DMs differ from peer DMs", () => {
     const store = make(); setup(store);
@@ -316,13 +316,13 @@ describe("team boundaries", () => {
   });
   test("turn budgets are reserved before execution and daily allowance does not reset across rooms", () => {
     let now = Date.UTC(2026, 10, 12, 12);
-    const store = make(":memory:", () => now); setup(store); store.saveTeammate({ id: "ada", name: "Ada", dailyTurns: 1 });
+    const store = make(":memory:", () => now); setup(store); store.saveAgent({ id: "ada", name: "Ada", dailyTurns: 1 });
     const first = store.createTask({ room: "workshop", assignee: "ada", title: "First", goal: "First" });
     const room = store.direct("ada");
     const second = store.createTask({ room: room.id, assignee: "ada", title: "Next", goal: "Next" });
     expect(store.claim(first.id)).toBe(true); expect(store.claim(second.id)).toBe(false);
     store.finish(first.id, "failed", "Failure still costs a turn");
-    expect(store.claim(second.id)).toBe(false); expect(store.teammate("ada")?.turnsToday).toBe(1);
+    expect(store.claim(second.id)).toBe(false); expect(store.agent("ada")?.turnsToday).toBe(1);
     now += 86_400_000;
     expect(store.claim(second.id)).toBe(true);
   });
@@ -363,8 +363,8 @@ describe("team boundaries", () => {
   });
 });
 
-describe("Galahad's own computer", () => {
-  test("its binding is kept as a knight's VM is, said in the snapshot, cleared when it goes, and survives a reopen", () => {
+describe("Your agent's own computer", () => {
+  test("its binding is kept as an agent's VM is, said in the snapshot, cleared when it goes, and survives a reopen", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-computer-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path);
     expect(store.computer()).toBeNull();
@@ -375,94 +375,94 @@ describe("Galahad's own computer", () => {
     const reopened = make(path);
     expect(reopened.computer()).toEqual({ node: "host", id: "0123456789" });
     expect(reopened.snapshot().computer).toEqual({ node: "host", id: "0123456789" });
-    // It is no knight: in no list of them.
-    expect(reopened.teammates().map((t) => t.id)).not.toContain("galahad");
+    // It is no agent: in no list of them.
+    expect(reopened.agents().map((t) => t.id)).not.toContain("primary");
     reopened.setComputer(null);
     expect(reopened.computer()).toBeNull();
   });
 });
 
-describe("the knights Galahad makes for himself", () => {
+describe("the agents your agent makes for itself", () => {
   const DAY = 24 * 3_600_000;
   const job = (id: string) => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "A lasting job." });
 
-  test("a knight he makes is a new one with the defaults, and says whose words its job is", () => {
+  test("an agent it makes is a new one with the defaults, and says whose words its job is", () => {
     const store = make(); setup(store);
-    const scout = store.recruit({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", role: "reviewer" }, "galahad");
-    expect(scout).toMatchObject({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", role: "reviewer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspace: null, workspaceNode: null, memory: "", createdBy: "galahad", instructionsBy: "galahad" });
+    const scout = store.recruit({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", role: "reviewer" }, "primary");
+    expect(scout).toMatchObject({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", role: "reviewer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspace: null, workspaceNode: null, memory: "", createdBy: "primary", instructionsBy: "primary" });
     // Never an existing worker: yours stay exactly as you left them.
-    const ada = store.teammate("ada");
+    const ada = store.agent("ada");
     expect(ada).toMatchObject({ createdBy: "owner", instructionsBy: "owner" });
-    expect(() => store.recruit({ id: "ada", name: "Impostor", instructions: "Take her place." }, "galahad")).toThrow(/already exists/);
-    expect(store.teammate("ada")).toEqual(ada);
-    // Its allowance, its state and its look are not his to choose; nor is a credential ever part of a job.
-    for (const extra of [{ dailyTurns: 1000 }, { enabled: false }, { avatar: { v: 2, color: "#3abeff" } }, { createdBy: "owner" }]) expect(() => store.recruit({ ...job("x"), ...extra } as never, "galahad")).toThrow(TeamError);
-    expect(() => store.recruit({ ...job("keys"), instructions: `Sign in with ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` }, "galahad")).toThrow(/credential/);
-    expect(store.teammates().map((t) => t.id)).toEqual(["ada", "lin", "scout"]);
+    expect(() => store.recruit({ id: "ada", name: "Impostor", instructions: "Take her place." }, "primary")).toThrow(/already exists/);
+    expect(store.agent("ada")).toEqual(ada);
+    // Its allowance, its state and its look are not its to choose; nor is a credential ever part of a job.
+    for (const extra of [{ dailyTurns: 1000 }, { enabled: false }, { avatar: { v: 2, color: "#3abeff" } }, { createdBy: "owner" }]) expect(() => store.recruit({ ...job("x"), ...extra } as never, "primary")).toThrow(TeamError);
+    expect(() => store.recruit({ ...job("keys"), instructions: `Sign in with ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` }, "primary")).toThrow(/credential/);
+    expect(store.agents().map((t) => t.id)).toEqual(["ada", "lin", "scout"]);
     // Its job becomes yours when you change its words, never by saving something else about it (the app sends
     // the whole profile with every save); who made it stays on record.
-    expect(store.saveTeammate({ id: "scout", name: "Scout the second" })).toMatchObject({ createdBy: "galahad", instructionsBy: "galahad" });
-    expect(store.saveTeammate({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", dailyTurns: 12, avatar: { v: 2, color: "#3abeff" } })).toMatchObject({ createdBy: "galahad", instructionsBy: "galahad", dailyTurns: 12 });
-    expect(store.saveTeammate({ id: "scout", name: "Scout", instructions: "Watch them weekly." })).toMatchObject({ createdBy: "galahad", instructionsBy: "owner" });
-    expect(store.saveTeammate({ id: "scout", name: "Scout", instructions: "Watch them weekly." })).toMatchObject({ createdBy: "galahad", instructionsBy: "owner" });
+    expect(store.saveAgent({ id: "scout", name: "Scout the second" })).toMatchObject({ createdBy: "primary", instructionsBy: "primary" });
+    expect(store.saveAgent({ id: "scout", name: "Scout", instructions: "Watch the dependency updates.", dailyTurns: 12, avatar: { v: 2, color: "#3abeff" } })).toMatchObject({ createdBy: "primary", instructionsBy: "primary", dailyTurns: 12 });
+    expect(store.saveAgent({ id: "scout", name: "Scout", instructions: "Watch them weekly." })).toMatchObject({ createdBy: "primary", instructionsBy: "owner" });
+    expect(store.saveAgent({ id: "scout", name: "Scout", instructions: "Watch them weekly." })).toMatchObject({ createdBy: "primary", instructionsBy: "owner" });
   });
 
-  test("he cannot give a knight a name that reads as another knight's; yours stay yours to name", () => {
+  test("it cannot give an agent a name that reads as another agent's; yours stay yours to name", () => {
     const store = make(); setup(store);
-    store.saveTeammate({ id: "ilya", name: "Ilya" });
-    store.saveTeammate({ id: "mona", name: "Mona Lisa" });
+    store.saveAgent({ id: "ilya", name: "Ilya" });
+    store.saveAgent({ id: "mona", name: "Mona Lisa" });
     // The same name, its capitals, a hyphen in it, l for I, rn for m: each would be taken for the worker that has it.
     for (const name of ["Ada", "ADA", "A-da", "llya", "ILYA", "RnonaLisa"]) {
-      expect(() => store.recruit({ ...job("double"), name }, "galahad")).toThrow(/reads like/);
+      expect(() => store.recruit({ ...job("double"), name }, "primary")).toThrow(/reads like/);
     }
     // (Letters of two scripts in one name never get this far: the boundary refuses them.)
-    expect(() => store.recruit({ ...job("double"), name: "\u0410d\u0430" }, "galahad")).toThrow(TeamError);
-    expect(store.teammate("double")).toBeFalsy();
+    expect(() => store.recruit({ ...job("double"), name: "\u0410d\u0430" }, "primary")).toThrow(TeamError);
+    expect(store.agent("double")).toBeFalsy();
     // Hardly drawn or not at all: a raised apostrophe, a long-vowel mark, a tatweel after the same letters.
-    for (const name of ["Ada\u02bc", "Ada\u30fc", "Ada\ua78c"]) expect(() => store.recruit({ ...job("double"), name }, "galahad")).toThrow(/reads like Ada/);
+    for (const name of ["Ada\u02bc", "Ada\u30fc", "Ada\ua78c"]) expect(() => store.recruit({ ...job("double"), name }, "primary")).toThrow(/reads like Ada/);
     // A capital L is not a capital I: Lan may stand beside Ian, and a small l may not.
-    store.saveTeammate({ id: "ian", name: "Ian" });
-    expect(() => store.recruit({ ...job("double"), name: "lan" }, "galahad")).toThrow(/reads like Ian/);
-    expect(store.recruit({ ...job("lan"), name: "Lan" }, "galahad").name).toBe("Lan");
-    expect(store.recruit({ ...job("double"), name: "Adah" }, "galahad")).toMatchObject({ id: "double", name: "Adah" });
-    // One he made is protected the same way, from him and from a worker that makes one.
+    store.saveAgent({ id: "ian", name: "Ian" });
+    expect(() => store.recruit({ ...job("double"), name: "lan" }, "primary")).toThrow(/reads like Ian/);
+    expect(store.recruit({ ...job("lan"), name: "Lan" }, "primary").name).toBe("Lan");
+    expect(store.recruit({ ...job("double"), name: "Adah" }, "primary")).toMatchObject({ id: "double", name: "Adah" });
+    // One it made is protected the same way, from it and from a worker that makes one.
     expect(() => store.recruit({ ...job("third"), name: "ADAH" }, "ada")).toThrow(/reads like Adah/);
-    expect(store.saveTeammate({ id: "twin", name: "Ada" }).name).toBe("Ada");
+    expect(store.saveAgent({ id: "twin", name: "Ada" }).name).toBe("Ada");
   });
 
   test("provenance survives a reopen, and an older record without it is yours", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-made-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
     store.recruit(job("scout"), "ada");
-    const { createdBy: _made, instructionsBy: _written, ...legacy } = store.teammate("lin")!; close(store);
+    const { createdBy: _made, instructionsBy: _written, ...legacy } = store.agent("lin")!; close(store);
     const db = new Database(path);
-    db.query("UPDATE team_teammates SET value=? WHERE id='lin'").run(JSON.stringify(legacy)); db.close();
+    db.query("UPDATE team_agents SET value=? WHERE id='lin'").run(JSON.stringify(legacy)); db.close();
     const reopened = make(path);
-    expect(reopened.teammate("scout")).toMatchObject({ createdBy: "ada", instructionsBy: "ada" });
-    expect(reopened.teammate("lin")).toMatchObject({ createdBy: "owner", instructionsBy: "owner" });
+    expect(reopened.agent("scout")).toMatchObject({ createdBy: "ada", instructionsBy: "ada" });
+    expect(reopened.agent("lin")).toMatchObject({ createdBy: "owner", instructionsBy: "owner" });
   });
 
-  test("he may make only a few in a day and never past the node's limit; yours never count against him", () => {
+  test("it may make only a few in a day and never past the node's limit; yours never count against it", () => {
     let now = Date.UTC(2026, 10, 13, 12);
     const store = make(":memory:", () => now);
-    for (let n = 0; n < 5; n++) store.saveTeammate({ id: `yours-${n}`, name: `Yours ${n}` });
-    for (let n = 0; n < TEAM_LIMITS.recruitsPerDay; n++) store.recruit(job(`his-${n}`), n % 2 ? "galahad" : "yours-0");
-    expect(() => store.recruit(job("one-more"), "galahad")).toThrow(/allowance/);
+    for (let n = 0; n < 5; n++) store.saveAgent({ id: `yours-${n}`, name: `Yours ${n}` });
+    for (let n = 0; n < TEAM_LIMITS.recruitsPerDay; n++) store.recruit(job(`its-${n}`), n % 2 ? "primary" : "yours-0");
+    expect(() => store.recruit(job("one-more"), "primary")).toThrow(/allowance/);
     expect(() => store.recruit(job("one-more"), "yours-1")).toThrow(/allowance/);
-    expect(store.teammate("one-more")).toBeNull();
-    expect(store.saveTeammate({ id: "yours-5", name: "Yours 5" }).createdBy).toBe("owner");
+    expect(store.agent("one-more")).toBeNull();
+    expect(store.saveAgent({ id: "yours-5", name: "Yours 5" }).createdBy).toBe("owner");
     now += DAY - 1;
-    expect(() => store.recruit(job("one-more"), "galahad")).toThrow(/allowance/);
+    expect(() => store.recruit(job("one-more"), "primary")).toThrow(/allowance/);
     now += 2;
-    expect(store.recruit(job("one-more"), "galahad").createdBy).toBe("galahad");
-    // The node's own limit holds for him as for you.
-    for (let n = store.teammates().length; n < TEAM_LIMITS.teammates; n++) store.saveTeammate({ id: `fill-${n}`, name: `Fill ${n}` });
+    expect(store.recruit(job("one-more"), "primary").createdBy).toBe("primary");
+    // The node's own limit holds for it as for you.
+    for (let n = store.agents().length; n < TEAM_LIMITS.agents; n++) store.saveAgent({ id: `fill-${n}`, name: `Fill ${n}` });
     now += DAY * 2;
-    expect(() => store.recruit(job("past-the-limit"), "galahad")).toThrow(new RegExp(`At most ${TEAM_LIMITS.teammates}`));
-    expect(store.teammates()).toHaveLength(TEAM_LIMITS.teammates);
+    expect(() => store.recruit(job("past-the-limit"), "primary")).toThrow(new RegExp(`At most ${TEAM_LIMITS.agents}`));
+    expect(store.agents()).toHaveLength(TEAM_LIMITS.agents);
   });
 
-  test("a knight made by a knight joins its maker's shared room at once; never a direct conversation; and all of it or none", () => {
+  test("an agent made by an agent joins its maker's shared room at once; never a direct conversation; and all of it or none", () => {
     const store = make(); setup(store);
     const made = store.recruit({ ...job("rev"), instructions: "Review Ada's diffs." }, "ada", "workshop");
     expect(made).toMatchObject({ createdBy: "ada", instructionsBy: "ada" });
@@ -470,80 +470,80 @@ describe("the knights Galahad makes for himself", () => {
     const direct = store.direct("lin");
     store.recruit(job("aide"), "lin", direct.id);
     expect(store.room(direct.id)!.members).toEqual(["lin"]);
-    expect(() => store.recruit(job("orphan"), "nobody")).toThrow(/No such knight/);
+    expect(() => store.recruit(job("orphan"), "nobody")).toThrow(/No such agent/);
     expect(() => store.recruit(job("lost"), "ada", "no-such-room")).toThrow(/No such team room/);
     // Nor into a room its maker is not in.
     store.saveRoom({ id: "private", name: "Private", members: ["lin"] });
     expect(() => store.recruit(job("intruder"), "ada", "private")).toThrow(/not a member/);
     expect(store.room("private")!.members).toEqual(["lin"]);
-    for (const id of ["orphan", "lost", "intruder"]) expect(store.teammate(id)).toBeNull();
+    for (const id of ["orphan", "lost", "intruder"]) expect(store.agent(id)).toBeNull();
   });
 
-  test("his own words reach a room as his, start their own bounded chain, and have a daily allowance of their own", () => {
+  test("its own words reach a room as its, start their own bounded chain, and have a daily allowance of their own", () => {
     let now = Date.UTC(2026, 10, 13, 12);
     const store = make(":memory:", () => now); setup(store);
-    const said = store.post({ room: "workshop", text: "Compare notes on the fixture." }, { galahad: true });
-    expect(said).toMatchObject({ speaker: "galahad", speakerName: "Galahad", text: "Compare notes on the fixture." });
-    expect(store.queued().map((queued) => queued.teammate).sort()).toEqual(["ada", "lin"]);
+    const said = store.post({ room: "workshop", text: "Compare notes on the fixture." }, { primary: true });
+    expect(said).toMatchObject({ speaker: "primary", speakerName: "Your agent", text: "Compare notes on the fixture." });
+    expect(store.queued().map((queued) => queued.agent).sort()).toEqual(["ada", "lin"]);
     expect(store.queued().every((queued) => queued.chainId === said.chainId)).toBe(true);
     const yours = store.post({ room: "workshop", text: "And tell me what you find." });
     expect(yours).toMatchObject({ speaker: "owner", speakerName: "You" });
     expect(yours.chainId).not.toBe(said.chainId);
-    expect(() => store.post({ room: "workshop", text: `The key is ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` }, { galahad: true })).toThrow(/credential/);
-    expect(() => store.post({ room: "no-such-room", text: "Anyone?" }, { galahad: true })).toThrow(/No such team room/);
+    expect(() => store.post({ room: "workshop", text: `The key is ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` }, { primary: true })).toThrow(/credential/);
+    expect(() => store.post({ room: "no-such-room", text: "Anyone?" }, { primary: true })).toThrow(/No such team room/);
     store.stopQueued({});
-    for (let n = 1; n < TEAM_LIMITS.saysPerDay; n++) { store.post({ room: "workshop", text: `Message ${n}.` }, { galahad: true }); store.stopQueued({}); }
-    expect(() => store.post({ room: "workshop", text: "One more." }, { galahad: true })).toThrow(/allowance/);
+    for (let n = 1; n < TEAM_LIMITS.saysPerDay; n++) { store.post({ room: "workshop", text: `Message ${n}.` }, { primary: true }); store.stopQueued({}); }
+    expect(() => store.post({ room: "workshop", text: "One more." }, { primary: true })).toThrow(/allowance/);
     expect(store.post({ room: "workshop", text: "You always can." }).speaker).toBe("owner");
     now += DAY + 1;
-    expect(store.post({ room: "workshop", text: "A new day." }, { galahad: true }).speaker).toBe("galahad");
+    expect(store.post({ room: "workshop", text: "A new day." }, { primary: true }).speaker).toBe("primary");
   });
 
-  test("his words never fill the queue: half of it is always left for yours", () => {
+  test("its words never fill the queue: half of it is always left for yours", () => {
     const store = make();
     const members = Array.from({ length: 16 }, (_, n) => `worker-${n}`);
-    for (const id of members) store.saveTeammate({ id, name: id });
+    for (const id of members) store.saveAgent({ id, name: id });
     store.saveRoom({ id: "hall", name: "Hall", members });
-    // A held room keeps what is said to it: nothing he sends there runs, and it would all stay queued.
+    // A held room keeps what is said to it: nothing it sends there runs, and it would all stay queued.
     store.pauseRoom("hall", true);
-    for (let n = 0; n < TEAM_LIMITS.pending / 2 / members.length; n++) store.post({ room: "hall", text: `Message ${n}.` }, { galahad: true });
+    for (let n = 0; n < TEAM_LIMITS.pending / 2 / members.length; n++) store.post({ room: "hall", text: `Message ${n}.` }, { primary: true });
     expect(store.queued()).toHaveLength(TEAM_LIMITS.pending / 2);
-    expect(() => store.post({ room: "hall", text: "One more." }, { galahad: true })).toThrow(/queue/);
+    expect(() => store.post({ room: "hall", text: "One more." }, { primary: true })).toThrow(/queue/);
     expect(store.queued()).toHaveLength(TEAM_LIMITS.pending / 2);
     expect(store.post({ room: "hall", text: "Yours still goes." }).speaker).toBe("owner");
   });
 
-  test("a message of his that is refused leaves nothing behind, not even the conversation it would have opened", () => {
+  test("a message of its that is refused leaves nothing behind, not even the conversation it would have opened", () => {
     const store = make(); setup(store);
-    expect(() => store.say({ teammate: "ada", text: `The key is ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` })).toThrow(/credential/);
-    expect(() => store.say({ teammate: "nobody", text: "Anyone?" })).toThrow(/No such knight/);
+    expect(() => store.say({ agent: "ada", text: `The key is ${"sk-ant-" + "obviouslyfaketest".repeat(3)}` })).toThrow(/credential/);
+    expect(() => store.say({ agent: "nobody", text: "Anyone?" })).toThrow(/No such agent/);
     expect(() => store.say({ text: "To nobody." } as never)).toThrow(TeamError);
     expect(store.rooms().map((room) => room.id)).toEqual(["workshop"]);
-    const said = store.say({ teammate: "ada", text: "Look into the flaky test." });
+    const said = store.say({ agent: "ada", text: "Look into the flaky test." });
     const direct = store.rooms().find((room) => room.direct)!;
     expect(direct.members).toEqual(["ada"]);
-    expect(said).toMatchObject({ room: direct.id, speaker: "galahad" });
-    expect(store.say({ room: "workshop", text: "Compare notes." })).toMatchObject({ room: "workshop", speaker: "galahad" });
+    expect(said).toMatchObject({ room: direct.id, speaker: "primary" });
+    expect(store.say({ room: "workshop", text: "Compare notes." })).toMatchObject({ room: "workshop", speaker: "primary" });
   });
 
-  test("his overview says who each knight is and what it is doing, never its working notes; a room's words only when asked", () => {
+  test("its overview says who each agent is and what it is doing, never its working notes; a room's words only when asked", () => {
     let now = Date.UTC(2026, 10, 13, 12);
     const store = make(":memory:", () => now); setup(store);
-    store.saveTeammate({ id: "ada", name: "Ada", instructions: `Implement small changes.\n${"More detail. ".repeat(60)}`, repository: "https://github.com/example/fixture" });
+    store.saveAgent({ id: "ada", name: "Ada", instructions: `Implement small changes.\n${"More detail. ".repeat(60)}`, repository: "https://github.com/example/fixture" });
     store.remember("ada", "private working note");
-    store.recruit(job("scout"), "galahad");
+    store.recruit(job("scout"), "primary");
     store.enable("lin", false);
     store.post({ room: "workshop", text: "@ada @lin: the newest question." });
-    store.claim(store.queued().find((queued) => queued.teammate === "ada")!.id);
+    store.claim(store.queued().find((queued) => queued.agent === "ada")!.id);
     const task = store.createTask({ room: "workshop", assignee: "ada", title: "Fix the parser", goal: "private goal text" });
     const view = store.overview();
-    expect(view.workers.map((w) => [w.id, w.state, w.madeBy])).toEqual([["ada", "working", "owner"], ["lin", "paused", "owner"], ["scout", "ready", "galahad"]]);
+    expect(view.workers.map((w) => [w.id, w.state, w.madeBy])).toEqual([["ada", "working", "owner"], ["lin", "paused", "owner"], ["scout", "ready", "primary"]]);
     expect(view.workers[0]).toMatchObject({ name: "Ada", role: "engineer", harness: "native", repository: "https://github.com/example/fixture", workspace: false, turnsToday: 1, dailyTurns: 40 });
     expect(view.workers[0]!.job.length).toBeLessThanOrEqual(400);
     expect(view.workers[0]!.job).toContain("Implement small changes.");
     expect(view.rooms).toEqual([{ id: "workshop", name: "Workshop", members: ["ada", "lin"], direct: false, paused: false, turnBudget: 8 }]);
     expect(view.room).toBeUndefined();
-    expect(view.spare).toEqual({ workers: TEAM_LIMITS.teammates - 3, today: TEAM_LIMITS.recruitsPerDay - 1 });
+    expect(view.spare).toEqual({ workers: TEAM_LIMITS.agents - 3, today: TEAM_LIMITS.recruitsPerDay - 1 });
     expect(JSON.stringify(view)).not.toContain("private");
     const room = store.overview("workshop").room!;
     expect(room).toMatchObject({ id: "workshop", name: "Workshop", members: ["ada", "lin"] });
@@ -559,14 +559,14 @@ describe("the knights Galahad makes for himself", () => {
   });
 });
 
-describe("removing a knight", () => {
+describe("removing an agent", () => {
   const DAY = 24 * 3_600_000;
   const job = (id: string) => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: "A lasting job." });
   /** One reply of a worker's in a room, as the service would record it: claimed, said, done. */
-  const reply = (store: TeamStore, teammate: string, room: string, text: string) => {
-    const delivery = store.queued().find((j) => j.teammate === teammate && j.room === room)!;
+  const reply = (store: TeamStore, agent: string, room: string, text: string) => {
+    const delivery = store.queued().find((j) => j.agent === agent && j.room === room)!;
     expect(store.claim(delivery.id)).toBe(true);
-    store.post({ room, text }, { teammate, chainId: delivery.chainId, output: true });
+    store.post({ room, text }, { agent, chainId: delivery.chainId, output: true });
     store.finish(delivery.id, "done");
   };
 
@@ -585,21 +585,21 @@ describe("removing a knight", () => {
     expect(store.remove("ada")).toMatchObject({ id: "ada", name: "Ada", enabled: false, removedAt: now });
 
     // Gone from the team, and said so wherever it is asked for.
-    expect(store.teammate("ada")).toBeNull();
-    expect(store.teammates().map((t) => t.id)).toEqual(["lin"]);
-    expect(() => store.requireTeammate("ada")).toThrow(/was removed/);
-    expect(store.snapshot().teammates.map((t) => t.id)).toEqual(["lin"]);
+    expect(store.agent("ada")).toBeNull();
+    expect(store.agents().map((t) => t.id)).toEqual(["lin"]);
+    expect(() => store.requireAgent("ada")).toThrow(/was removed/);
+    expect(store.snapshot().agents.map((t) => t.id)).toEqual(["lin"]);
     // (With where to read its direct conversations, yours with it first, since they are in no other list.)
     expect(store.snapshot().removed).toEqual([{ id: "ada", name: "Ada", removedAt: now, conversations: [dm.id, peers.id] }]);
     expect(store.overview().workers.map((w) => w.id)).toEqual(["lin"]);
     // What it had not started is stopped, and says why.
-    expect(store.queued().filter((j) => j.teammate === "ada")).toEqual([]);
-    expect(store.task(task.id)).toMatchObject({ status: "stopped", error: "Its knight was removed." });
+    expect(store.queued().filter((j) => j.agent === "ada")).toEqual([]);
+    expect(store.task(task.id)).toMatchObject({ status: "stopped", error: "Its agent was removed." });
     // The shared room goes on without it; what it said there is still its own.
     expect(store.room("workshop")!.members).toEqual(["lin"]);
     expect(store.messages("workshop").map((m) => [m.speaker, m.speakerName, m.text])).toContainEqual(["ada", "Ada", "On it."]);
     expect(store.post({ room: "workshop", text: "Carry on." }).text).toBe("Carry on.");
-    expect(store.queued().map((j) => j.teammate)).toEqual(expect.arrayContaining(["lin"]));
+    expect(store.queued().map((j) => j.agent)).toEqual(expect.arrayContaining(["lin"]));
     // Its direct conversations are kept to read, are no longer listed, and take no new words.
     expect(store.snapshot().rooms.map((r) => r.id)).toEqual(["workshop"]);
     expect(store.overview().rooms.map((r) => r.id)).toEqual(["workshop"]);
@@ -611,7 +611,7 @@ describe("removing a knight", () => {
 
     close(store);
     const reopened = make(path, () => now);
-    expect(reopened.teammate("ada")).toBeNull();
+    expect(reopened.agent("ada")).toBeNull();
     expect(reopened.snapshot().removed).toEqual([{ id: "ada", name: "Ada", removedAt: now, conversations: [dm.id, peers.id] }]);
     expect(reopened.room("workshop")!.members).toEqual(["lin"]);
   });
@@ -619,16 +619,16 @@ describe("removing a knight", () => {
   test("its handle is never anyone else's, so nothing new inherits its history; and it takes no further change", () => {
     const store = make(); setup(store);
     store.remove("ada");
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada" })).toThrow(/was removed/);
-    expect(() => store.recruit({ id: "ada", name: "Nova", instructions: "A job." }, "galahad")).toThrow(/was removed/);
+    expect(() => store.saveAgent({ id: "ada", name: "Ada" })).toThrow(/was removed/);
+    expect(() => store.recruit({ id: "ada", name: "Nova", instructions: "A job." }, "primary")).toThrow(/was removed/);
     // Its name is still in the record, where people read it.
-    expect(() => store.recruit({ id: "nova", name: "Ada", instructions: "A job." }, "galahad")).toThrow(/reads like Ada/);
+    expect(() => store.recruit({ id: "nova", name: "Ada", instructions: "A job." }, "primary")).toThrow(/reads like Ada/);
     expect(() => store.saveRoom({ name: "New room", members: ["ada", "lin"] })).toThrow(/was removed/);
     for (const change of [() => store.remove("ada"), () => store.remember("ada", "notes"), () => store.enable("ada", true), () => store.planWorkspace("ada", "host"), () => store.setWorkspace("ada", { node: "host", id: "0123456789" })]) {
       expect(change).toThrow(/was removed/);
     }
-    expect(() => store.remove("nobody")).toThrow(/No such knight/);
-    expect(store.teammates().map((t) => t.id)).toEqual(["lin"]);
+    expect(() => store.remove("nobody")).toThrow(/No such agent/);
+    expect(store.agents().map((t) => t.id)).toEqual(["lin"]);
   });
 
   test("a workspace or running work is never left behind: each refuses the removal, and nothing changes", () => {
@@ -637,10 +637,10 @@ describe("removing a knight", () => {
     expect(() => store.remove("ada")).toThrow(/workspace/);
     store.setWorkspace("ada", null);
     store.post({ room: "workshop", text: "@ada @lin: go." });
-    const running = store.queued().find((j) => j.teammate === "ada")!;
+    const running = store.queued().find((j) => j.agent === "ada")!;
     expect(store.claim(running.id)).toBe(true);
-    expect(() => store.remove("ada")).toThrow(/Stop this knight's work/);
-    expect(store.teammate("ada")).toMatchObject({ enabled: true });
+    expect(() => store.remove("ada")).toThrow(/Stop this agent's work/);
+    expect(store.agent("ada")).toMatchObject({ enabled: true });
     expect(store.room("workshop")!.members).toEqual(["ada", "lin"]);
     store.finish(running.id, "stopped", "Stopped by you.");
     expect(store.remove("ada").removedAt).toBeGreaterThan(0);
@@ -650,7 +650,7 @@ describe("removing a knight", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-remove-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
     const hers = store.createTask({ room: "workshop", assignee: "ada", title: "Hers", goal: "Do it." });
-    const his = store.createTask({ room: "workshop", assignee: "lin", title: "His", goal: "Do it." });
+    const his = store.createTask({ room: "workshop", assignee: "lin", title: "Its", goal: "Do it." });
     expect(store.claim(hers.id)).toBe(true);
     store.finish(hers.id, "interrupted", "Paused by you.");
     store.remove("ada");
@@ -667,52 +667,52 @@ describe("removing a knight", () => {
     const reopened = make(path);
     expect(reopened.queued().map((j) => j.id)).toEqual([hers.id, his.id]);
     expect(reopened.claim(hers.id)).toBe(false);
-    expect(reopened.task(hers.id)).toMatchObject({ status: "stopped", error: "Its knight was removed." });
+    expect(reopened.task(hers.id)).toMatchObject({ status: "stopped", error: "Its agent was removed." });
     expect(reopened.claim(his.id)).toBe(true);
   });
 
-  test("the day's allowance for making knights isn't given back; the node's limit counts those still here", () => {
+  test("the day's allowance for making agents isn't given back; the node's limit counts those still here", () => {
     let now = 5 * DAY;
     const store = make(":memory:", () => now);
-    store.saveTeammate({ id: "ada", name: "Ada" });
-    for (let n = 0; n < TEAM_LIMITS.recruitsPerDay; n++) store.recruit(job(`made-${n}`), "galahad");
+    store.saveAgent({ id: "ada", name: "Ada" });
+    for (let n = 0; n < TEAM_LIMITS.recruitsPerDay; n++) store.recruit(job(`made-${n}`), "primary");
     for (let n = 0; n < 3; n++) store.remove(`made-${n}`);
     expect(store.overview().spare.today).toBe(0);
-    expect(() => store.recruit(job("one-more"), "galahad")).toThrow(/allowance/);
+    expect(() => store.recruit(job("one-more"), "primary")).toThrow(/allowance/);
     now += DAY + 1;
-    expect(store.recruit(job("one-more"), "galahad").id).toBe("one-more");
+    expect(store.recruit(job("one-more"), "primary").id).toBe("one-more");
     // Yours fill the node; removing one makes room for one.
     const full = make();
-    for (let n = 0; n < TEAM_LIMITS.teammates; n++) full.saveTeammate({ id: `yours-${n}`, name: `Yours ${n}` });
-    expect(() => full.saveTeammate({ id: "extra", name: "Extra" })).toThrow(new RegExp(`At most ${TEAM_LIMITS.teammates}`));
+    for (let n = 0; n < TEAM_LIMITS.agents; n++) full.saveAgent({ id: `yours-${n}`, name: `Yours ${n}` });
+    expect(() => full.saveAgent({ id: "extra", name: "Extra" })).toThrow(new RegExp(`At most ${TEAM_LIMITS.agents}`));
     full.remove("yours-0");
     expect(full.overview().spare.workers).toBe(1);
-    expect(full.saveTeammate({ id: "extra", name: "Extra" }).id).toBe("extra");
+    expect(full.saveAgent({ id: "extra", name: "Extra" }).id).toBe("extra");
   });
 
-  test("a conversation it had with another knight is closed for that knight too: no words, no work, and no turn spent on it", () => {
+  test("a conversation it had with another agent is closed for that agent too: no words, no work, and no turn spent on it", () => {
     const store = make(); setup(store);
     const peers = store.direct("lin", "ada");
     // Ada had written to Lin there, and Lin's reply was still waiting when Ada was removed.
     const opened = store.post({ room: "workshop", text: "@ada @lin: talk it over." });
-    const adas = store.queued().find((j) => j.teammate === "ada")!;
+    const adas = store.queued().find((j) => j.agent === "ada")!;
     expect(store.claim(adas.id)).toBe(true);
-    store.post({ room: peers.id, text: "Between us." }, { teammate: "ada", chainId: opened.chainId });
+    store.post({ room: peers.id, text: "Between us." }, { agent: "ada", chainId: opened.chainId });
     store.finish(adas.id, "done");
-    const waiting = store.queued().find((j) => j.teammate === "lin" && j.room === peers.id)!;
-    const before = store.teammate("lin")!.turnsToday;
+    const waiting = store.queued().find((j) => j.agent === "lin" && j.room === peers.id)!;
+    const before = store.agent("lin")!.turnsToday;
     store.remove("ada");
-    expect(store.deliveries(peers.id).find((d) => d.id === waiting.id)).toMatchObject({ status: "stopped", error: "This conversation is kept to read: its knight was removed." });
+    expect(store.deliveries(peers.id).find((d) => d.id === waiting.id)).toMatchObject({ status: "stopped", error: "This conversation is kept to read: its agent was removed." });
     expect(store.claim(waiting.id)).toBe(false);
-    expect(store.teammate("lin")!.turnsToday).toBe(before);
+    expect(store.agent("lin")!.turnsToday).toBe(before);
     // Nothing new is taken there, from you or from the worker that is still here.
     expect(() => store.post({ room: peers.id, text: "Still there?" })).toThrow(/was removed/);
-    expect(() => store.post({ room: peers.id, text: "Hello?" }, { teammate: "lin", chainId: opened.chainId })).toThrow(/was removed/);
+    expect(() => store.post({ room: peers.id, text: "Hello?" }, { agent: "lin", chainId: opened.chainId })).toThrow(/was removed/);
     expect(() => store.createTask({ room: peers.id, assignee: "lin", title: "Alone", goal: "Do it." })).toThrow(/was removed/);
     expect(store.snapshot().tasks.filter((t) => t.room === peers.id)).toEqual([]);
     // What was said there stays, and Lin's own work elsewhere goes on.
     expect(store.roomView(peers.id).messages.map((m) => m.text)).toEqual(["Between us."]);
-    const elsewhere = store.queued().find((j) => j.teammate === "lin" && j.room === "workshop")!;
+    const elsewhere = store.queued().find((j) => j.agent === "lin" && j.room === "workshop")!;
     expect(store.claim(elsewhere.id)).toBe(true);
   });
 
@@ -721,11 +721,11 @@ describe("removing a knight", () => {
     const store = make(path); setup(store);
     const peers = store.direct("lin", "ada");
     const opened = store.post({ room: "workshop", text: "@ada @lin: talk." });
-    const adas = store.queued().find((j) => j.teammate === "ada")!;
+    const adas = store.queued().find((j) => j.agent === "ada")!;
     store.claim(adas.id);
-    store.post({ room: peers.id, text: "Between us." }, { teammate: "ada", chainId: opened.chainId });
+    store.post({ room: peers.id, text: "Between us." }, { agent: "ada", chainId: opened.chainId });
     store.finish(adas.id, "done");
-    const waiting = store.queued().find((j) => j.teammate === "lin" && j.room === peers.id)!;
+    const waiting = store.queued().find((j) => j.agent === "lin" && j.room === peers.id)!;
     store.remove("ada");
     close(store);
     const raw = new Database(path);
@@ -733,15 +733,15 @@ describe("removing a knight", () => {
     raw.close();
     const reopened = make(path);
     expect(reopened.claim(waiting.id)).toBe(false);
-    expect(reopened.deliveries(peers.id).find((d) => d.id === waiting.id)).toMatchObject({ status: "stopped", error: "This conversation is kept to read: its knight was removed." });
-    expect(reopened.teammate("lin")!.turnsToday).toBe(0);
+    expect(reopened.deliveries(peers.id).find((d) => d.id === waiting.id)).toMatchObject({ status: "stopped", error: "This conversation is kept to read: its agent was removed." });
+    expect(reopened.agent("lin")!.turnsToday).toBe(0);
   });
 
-  test("who made a knight stays on record after its maker is removed", () => {
+  test("who made an agent stays on record after its maker is removed", () => {
     const store = make(); setup(store);
     store.recruit(job("rev"), "ada", "workshop");
     store.remove("ada");
-    expect(store.teammate("rev")).toMatchObject({ createdBy: "ada", instructionsBy: "ada" });
+    expect(store.agent("rev")).toMatchObject({ createdBy: "ada", instructionsBy: "ada" });
     expect(store.room("workshop")!.members).toEqual(["lin", "rev"]);
   });
 });
@@ -750,7 +750,7 @@ describe("the notes store's switch", () => {
   test("on unless you turned it off: in a new team and in one from before there was a switch; your off is kept across a restart, and the snapshot says it only when it is on", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-team-engram-")); dirs.push(dir); const path = join(dir, "team.db");
     const store = make(path); setup(store);
-    // You asked for the knights to have it (15 November 2026): a team that never said no has it.
+    // You asked for the agents to have it (15 November 2026): a team that never said no has it.
     expect(store.engram()).toBe(true);
     expect(store.snapshot().engram).toBe(true);
     expect(store.setEngram(false)).toBe(false);
@@ -759,7 +759,7 @@ describe("the notes store's switch", () => {
     // Your no is kept across a restart, and a yes after it too.
     const reopened = make(path);
     expect(reopened.engram()).toBe(false);
-    expect(reopened.teammates().map((t) => t.id)).toEqual(["ada", "lin"]);
+    expect(reopened.agents().map((t) => t.id)).toEqual(["ada", "lin"]);
     expect(reopened.setEngram(true)).toBe(true);
     close(reopened);
     expect(make(path).engram()).toBe(true);
@@ -769,7 +769,7 @@ describe("the notes store's switch", () => {
     const raw = new Database(old); raw.exec("DROP TABLE team_settings"); raw.close();
     const opened = make(old);
     expect(opened.engram()).toBe(true);
-    expect(opened.teammates().map((t) => t.id)).toEqual(["ada", "lin"]);
+    expect(opened.agents().map((t) => t.id)).toEqual(["ada", "lin"]);
     // One where you had said no (as "off", the value the switch has always kept) stays off.
     const said = join(dir, "said-no.db");
     const no = make(said); setup(no); close(no);
@@ -783,12 +783,12 @@ describe("the notes store's switch", () => {
 
 test("a room's story is kept for it, replaced as it grows, and never holds a secret", () => {
   const store = new TeamStore(":memory:");
-  store.saveTeammate({ id: "ada", name: "Ada" });
+  store.saveAgent({ id: "ada", name: "Ada" });
   store.saveRoom({ id: "forge", name: "Forge", members: ["ada"] });
   expect(store.story("forge")).toBeNull();
   store.keepStory("forge", "Ada drafts the notes.", "message-1");
-  store.keepStory("forge", "Ada drafted the notes; Kay plans Monday.", "message-9");
-  expect(store.story("forge")).toMatchObject({ text: "Ada drafted the notes; Kay plans Monday.", through: "message-9" });
+  store.keepStory("forge", "Ada drafted the notes; Noa plans Monday.", "message-9");
+  expect(store.story("forge")).toMatchObject({ text: "Ada drafted the notes; Noa plans Monday.", through: "message-9" });
   const fake = "sk-ant-" + "obviouslyfaketest".repeat(3);
   store.keepStory("forge", `The key is ${fake}`, "message-10");
   expect(store.story("forge")?.text).not.toContain(fake);
@@ -798,7 +798,7 @@ test("a room's story is kept for it, replaced as it grows, and never holds a sec
 
 test("what was said is searched in the rooms asked, every word of the question, the latest first", () => {
   const store = new TeamStore(":memory:");
-  for (const id of ["ada", "lin"]) store.saveTeammate({ id, name: id });
+  for (const id of ["ada", "lin"]) store.saveAgent({ id, name: id });
   store.saveRoom({ id: "forge", name: "Forge", members: ["ada"] });
   store.saveRoom({ id: "quiet", name: "Quiet", members: ["lin"] });
   store.post({ room: "forge", text: "The release date is Monday." });
@@ -830,12 +830,12 @@ describe("each time you step in on a task (#28)", () => {
     expect(store.intervene("no-such-task", "stop", "stopped it")).toBe(false);
   });
 
-  test("the tasks in a state are found by a knight, a room or their id", () => {
+  test("the tasks in a state are found by an agent, a room or their id", () => {
     const store = make(); setup(store);
     const ada = store.createTask({ room: "workshop", assignee: "ada", title: "One", goal: "One" }); store.claim(ada.id);
     const lin = store.createTask({ room: "workshop", assignee: "lin", title: "Two", goal: "Two" }); store.claim(lin.id);
     const queued = store.createTask({ room: "workshop", assignee: "ada", title: "Three", goal: "Three" });
-    expect(store.tasksIn({ teammate: "ada" }, ["running"]).map((t) => t.id)).toEqual([ada.id]);
+    expect(store.tasksIn({ agent: "ada" }, ["running"]).map((t) => t.id)).toEqual([ada.id]);
     expect(store.tasksIn({ room: "workshop" }, ["running"]).map((t) => t.id)).toEqual([ada.id, lin.id]);
     expect(store.tasksIn({ task: queued.id }, ["running"])).toEqual([]);
     expect(store.tasksIn({ task: queued.id }, ["queued", "running"]).map((t) => t.id)).toEqual([queued.id]);
@@ -857,7 +857,7 @@ describe("each time you step in on a task (#28)", () => {
   });
 });
 
-describe("your files at the Roundtable", () => {
+describe("your files among the agents", () => {
   const picture = { id: "a".repeat(64), name: "screen.png", type: "image/png" as const, bytes: 2048 };
   const log = { id: "b".repeat(64), name: "build.log", type: "text/plain" as const, bytes: 300 };
 
@@ -879,8 +879,8 @@ describe("your files at the Roundtable", () => {
     const store = make(); setup(store);
     expect(() => store.post({ room: "workshop", text: "  " })).toThrow(TeamError);
     const chain = store.post({ room: "workshop", text: "@ada look" }).chainId;
-    expect(() => store.post({ room: "workshop", text: "Mine now", attachments: [picture] }, { teammate: "ada", chainId: chain })).toThrow("Only you bring files to the Roundtable.");
-    expect(() => store.post({ room: "workshop", text: "His", attachments: [picture] }, { galahad: true })).toThrow("Only you bring files to the Roundtable.");
+    expect(() => store.post({ room: "workshop", text: "Mine now", attachments: [picture] }, { agent: "ada", chainId: chain })).toThrow("Only you bring files to the agents.");
+    expect(() => store.post({ room: "workshop", text: "Its", attachments: [picture] }, { primary: true })).toThrow("Only you bring files to the agents.");
     expect(store.attachmentIds()).toEqual(new Set());
   });
 
@@ -896,56 +896,56 @@ describe("your files at the Roundtable", () => {
 });
 
 describe("sensitive mode", () => {
-  test("a knight is put in it with models of its own, and isn't let go of it by having them taken away", () => {
+  test("an agent is put in it with models of its own, and isn't let go of it by having them taken away", () => {
     const store = make(); setup(store);
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", sensitive: true })).toThrow("Sensitive mode holds a knight to models of its own: choose them first.");
-    expect(store.saveTeammate({ id: "ada", name: "Ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], sensitive: true })).toMatchObject({ models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], sensitive: true });
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", sensitive: true })).toThrow("Sensitive mode holds an agent to models of its own: choose them first.");
+    expect(store.saveAgent({ id: "ada", name: "Ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], sensitive: true })).toMatchObject({ models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], sensitive: true });
     // Saved again with something else about it, it stays in sensitive mode.
-    expect(store.saveTeammate({ id: "ada", name: "Ada Lovelace" })).toMatchObject({ sensitive: true });
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", models: null })).toThrow("Ada Lovelace is in sensitive mode, held to its own models: choose others, or turn sensitive mode off first.");
-    // Turned off, then its models may go: it works on its role's again, as any knight.
-    const off = store.saveTeammate({ id: "ada", name: "Ada", sensitive: false, models: null });
+    expect(store.saveAgent({ id: "ada", name: "Ada Lovelace" })).toMatchObject({ sensitive: true });
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", models: null })).toThrow("Ada Lovelace is in sensitive mode, held to its own models: choose others, or turn sensitive mode off first.");
+    // Turned off, then its models may go: it works on its role's again, as any agent.
+    const off = store.saveAgent({ id: "ada", name: "Ada", sensitive: false, models: null });
     expect(off.sensitive).toBeUndefined();
     expect(off.models).toBeUndefined();
   });
 
-  test("the work a knight in sensitive mode gives is held to its models, whoever does it; one in it is given none held to others; a knight it makes is in it too", () => {
+  test("the work an agent in sensitive mode gives is held to its models, whoever does it; one in it is given none held to others; an agent it makes is in it too", () => {
     const store = make(); setup(store);
-    store.saveTeammate({ id: "ada", name: "Ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated", "heabsy/heabsy/cyberheabsy"], sensitive: true });
+    store.saveAgent({ id: "ada", name: "Ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated", "heabsy/heabsy/cyberheabsy"], sensitive: true });
     const message = store.post({ room: "workshop", text: "@ada: plan it" });
-    const given = store.createTask({ room: "workshop", assignee: "lin", title: "Work", goal: "Work it out." }, { teammate: "ada", chainId: message.chainId });
+    const given = store.createTask({ room: "workshop", assignee: "lin", title: "Work", goal: "Work it out." }, { agent: "ada", chainId: message.chainId });
     expect(given.models).toEqual(["nearai/Qwen/Qwen3.8-27B-abliterated", "heabsy/heabsy/cyberheabsy"]);
     // Yours, for it: held to some of its models, or to none of your naming; never to another.
     expect(store.createTask({ room: "workshop", assignee: "ada", title: "One", goal: "Work it out.", models: ["heabsy/heabsy/cyberheabsy"] }).models).toEqual(["heabsy/heabsy/cyberheabsy"]);
     expect(store.createTask({ room: "workshop", assignee: "ada", title: "Two", goal: "Work it out." }).models).toBeUndefined();
     expect(() => store.createTask({ room: "workshop", assignee: "ada", title: "Three", goal: "Work it out.", models: ["anthropic/claude-opus-5-5"] })).toThrow("Ada is in sensitive mode, held to its own models (nearai/Qwen/Qwen3.8-27B-abliterated, heabsy/heabsy/cyberheabsy): a task held to anthropic/claude-opus-5-5 is never its");
-    // A task you hold to a model, for a knight not in sensitive mode: kept with it.
+    // A task you hold to a model, for an agent not in sensitive mode: kept with it.
     expect(store.task(store.createTask({ room: "workshop", assignee: "lin", title: "Four", goal: "Work it out.", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"] }).id)!.models).toEqual(["nearai/Qwen/Qwen3.8-27B-abliterated"]);
     const made = store.recruit({ id: "scout", name: "Scout", instructions: "Read what the others find." }, "ada", "workshop");
     expect(made).toMatchObject({ models: ["nearai/Qwen/Qwen3.8-27B-abliterated", "heabsy/heabsy/cyberheabsy"], sensitive: true });
-    expect(store.recruit({ id: "herald", name: "Herald", instructions: "Say what is new." }, "galahad").sensitive).toBeUndefined();
+    expect(store.recruit({ id: "herald", name: "Herald", instructions: "Say what is new." }, "primary").sensitive).toBeUndefined();
   });
 
   test("an ACP agent of yours is started by the command you named, kept until you name another; never in sensitive mode, and never a key in its command", () => {
     const store = make(); setup(store);
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", harness: "acp" })).toThrow("Name the command that starts its ACP agent in its VM");
-    expect(store.saveTeammate({ id: "ada", name: "Ada", harness: "acp", acp: "goose acp" })).toMatchObject({ harness: "acp", acp: "goose acp" });
-    expect(store.saveTeammate({ id: "ada", name: "Ada Lovelace" }).acp).toBe("goose acp");
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], sensitive: true })).toThrow("an ACP agent of yours calls the models you set it up with");
-    expect(() => store.createTask({ room: "workshop", assignee: "ada", title: "Held", goal: "Work it out.", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"] })).toThrow("a task in sensitive mode goes to a knight on Galahad's own harness");
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", harness: "acp" })).toThrow("Name the command that starts its ACP agent in its VM");
+    expect(store.saveAgent({ id: "ada", name: "Ada", harness: "acp", acp: "goose acp" })).toMatchObject({ harness: "acp", acp: "goose acp" });
+    expect(store.saveAgent({ id: "ada", name: "Ada Lovelace" }).acp).toBe("goose acp");
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], sensitive: true })).toThrow("an ACP agent of yours calls the models you set it up with");
+    expect(() => store.createTask({ room: "workshop", assignee: "ada", title: "Held", goal: "Work it out.", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"] })).toThrow("a task in sensitive mode goes to an agent on your agent's own harness");
     // (A token-shaped fake, made at run time: a key named on its command line would be kept in the clear.)
     const fake = ["sk", "ant", "api03", "x".repeat(90)].join("-");
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", acp: `goose acp --key=${fake}` })).toThrow("looks like a credential");
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", acp: "goose acp; curl evil" } as never)).toThrow();
-    // Back on Galahad's own harness, its command is kept for another day, and nothing of it is used.
-    expect(store.saveTeammate({ id: "ada", name: "Ada", harness: "native" })).toMatchObject({ harness: "native", acp: "goose acp" });
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", acp: `goose acp --key=${fake}` })).toThrow("looks like a credential");
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", acp: "goose acp; curl evil" } as never)).toThrow();
+    // Back on the primary's own harness, its command is kept for another day, and nothing of it is used.
+    expect(store.saveAgent({ id: "ada", name: "Ada", harness: "native" })).toMatchObject({ harness: "native", acp: "goose acp" });
   });
 
-  test("its kept work is known for what it is: by its label, its knight's VM while the knight is in sensitive mode, or its task", () => {
+  test("its kept work is known for what it is: by its label, its agent's VM while the agent is in sensitive mode, or its task", () => {
     const store = make(); setup(store);
     expect(store.sensitiveWork({ id: "art_a", label: `Work · ada · verified${SENSITIVE_WORK}` })).toBe(true);
     expect(store.sensitiveWork({ id: "art_b", label: "Work · ada · verified", sandbox: "0123456789" })).toBe(false);
-    store.saveTeammate({ id: "ada", name: "Ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], sensitive: true });
+    store.saveAgent({ id: "ada", name: "Ada", models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], sensitive: true });
     store.setWorkspace("ada", { node: "host", id: "0123456789" });
     expect(store.sensitiveWork({ id: "art_b", label: "Work · ada · verified", sandbox: "0123456789" })).toBe(true);
     expect(store.sensitiveWork({ id: "art_c", label: "Work · lin · verified", sandbox: "9876543210" })).toBe(false);
@@ -968,26 +968,26 @@ describe("a task's steps, and another given from one (PLAN #15)", () => {
     expect(store.checkpoint(task.id, 9)).toBeNull();
   });
 
-  test("a task given from a step is the same knight's, from a step that was kept; it says which, with that step's commit and command", () => {
+  test("a task given from a step is the same agent's, from a step that was kept; it says which, with that step's commit and command", () => {
     const store = make(); setup(store);
     const first = store.createTask({ room: "workshop", assignee: "ada", title: "Build", goal: "Build it." });
     store.keepCheckpoint(first.id, { step: 4, commit, command: "npm run build", at: 1 });
     const again = store.createTask({ room: "workshop", assignee: "ada", title: "Build", goal: "Build it, the other way.", from: { task: first.id, step: 4 } });
     expect(store.task(again.id)!.from).toEqual({ task: first.id, step: 4, commit, command: "npm run build" });
-    expect(() => store.createTask({ room: "workshop", assignee: "lin", title: "Build", goal: "Build it.", from: { task: first.id, step: 4 } })).toThrow("A task starts from a step of its own knight's work");
+    expect(() => store.createTask({ room: "workshop", assignee: "lin", title: "Build", goal: "Build it.", from: { task: first.id, step: 4 } })).toThrow("A task starts from a step of its own agent's work");
     expect(() => store.createTask({ room: "workshop", assignee: "ada", title: "Build", goal: "Build it.", from: { task: first.id, step: 5 } })).toThrow(`Task ${first.id} has no step 5 kept to start from.`);
     expect(() => store.createTask({ room: "workshop", assignee: "ada", title: "Build", goal: "Build it.", from: { task: "task-nosuchtask00", step: 1 } })).toThrow("No such task to start from.");
   });
 });
 
-describe("keys of yours a knight may use (PLAN #17)", () => {
+describe("keys of yours an agent may use (PLAN #17)", () => {
   test("kept as given, each once; kept through another save; none again with null", () => {
     const store = make(); setup(store);
     // (As it arrives, the header and the leave to write may be left out: their defaults are given.)
-    expect(store.saveTeammate({ id: "ada", name: "Ada", keys: [{ secret: "stripe" }] } as never).keys).toEqual([{ secret: "stripe", header: "authorization", write: false }]);
-    expect(store.saveTeammate({ id: "ada", name: "Ada Lovelace" }).keys).toEqual([{ secret: "stripe", header: "authorization", write: false }]);
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", keys: [{ secret: "stripe" }, { secret: "stripe", write: true }] } as never)).toThrow();
-    expect(() => store.saveTeammate({ id: "ada", name: "Ada", keys: [{ secret: "stripe", header: "cookie" }] } as never)).toThrow();
-    expect(store.saveTeammate({ id: "ada", name: "Ada", keys: null }).keys).toBeUndefined();
+    expect(store.saveAgent({ id: "ada", name: "Ada", keys: [{ secret: "stripe" }] } as never).keys).toEqual([{ secret: "stripe", header: "authorization", write: false }]);
+    expect(store.saveAgent({ id: "ada", name: "Ada Lovelace" }).keys).toEqual([{ secret: "stripe", header: "authorization", write: false }]);
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", keys: [{ secret: "stripe" }, { secret: "stripe", write: true }] } as never)).toThrow();
+    expect(() => store.saveAgent({ id: "ada", name: "Ada", keys: [{ secret: "stripe", header: "cookie" }] } as never)).toThrow();
+    expect(store.saveAgent({ id: "ada", name: "Ada", keys: null }).keys).toBeUndefined();
   });
 });

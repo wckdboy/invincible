@@ -58,7 +58,7 @@ async function signedFetch(identity: BrowserIdentity, method: "GET" | "POST", pa
   try {
     response = await fetch(`${location.origin}${path}`, {
       method,
-      // This device's time zone, for the time he says it is in an answer to you (beside the signature: only a hint).
+      // This device's time zone, for the time it says it is in an answer to you (beside the signature: only a hint).
       headers: { ...headers, ...zoneHeader(), ...(body === undefined ? {} : { "content-type": "application/json" }) },
       body: method === "GET" ? undefined : bytes,
       signal,
@@ -72,7 +72,7 @@ async function signedFetch(identity: BrowserIdentity, method: "GET" | "POST", pa
     // `tailscale serve` answering for a node that's restarting or down: the node is away, not refusing.
     onNetwork(false);
     await response.body?.cancel().catch(() => {});
-    throw new ApiError(response.status, `Galahad's node isn't answering (${response.status}). It may be restarting.`);
+    throw new ApiError(response.status, `Your agent's node isn't answering (${response.status}). It may be restarting.`);
   }
   onNetwork(true);
   if (!response.ok) {

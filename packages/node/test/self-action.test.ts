@@ -1,20 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { decide, retriedRuns, SELF_ACTION_KINDS, SELF_ACTION_QUEST, SELF_ACTION_RESOURCE, SELF_ACTIONS, SelfAction, selfActionTarget } from "@invincible/core";
+import { decide, retriedRuns, SELF_ACTION_KINDS, SELF_ACTION_RUN, SELF_ACTION_RESOURCE, SELF_ACTIONS, SelfAction, selfActionTarget } from "@invincible/core";
 import { OFFLINE_AFTER_MS } from "../src/heartbeat.ts";
 import { type LedgerWrite, MAX_SELF_ACTIONS, planSelfActions, RETRY_WITHIN_MS, runSelfAction, selfAct, SelfActionRefused, type SelfActionHands, type SelfSnapshot } from "../src/self-action.ts";
 
 /*
- * Self-action: after each heartbeat Galahad fixes what's on the allowlist himself, and
+ * Self-action: after each heartbeat the primary fixes what's on the allowlist itself, and
  * nothing else. Each kind is tested for when it's called for and when it isn't; the
  * allowlist refuses everything outside it; each fix is harmless or reversible and goes
- * through the node's own gate; and every one is in the ledger as his own.
+ * through the node's own gate; and every one is in the ledger as its own.
  */
 
 const NOW = Date.parse("2026-11-11T12:00:00Z");
 const MIN = 60_000;
 
 const calm = (over: Partial<SelfSnapshot> = {}): SelfSnapshot => ({ now: NOW, sandboxes: [], loops: [], retried: [], ...over });
-const overdue = (id: string, extra: Partial<{ ephemeral: boolean; expiresAt: number; quest: string }> = {}) => ({ id, expiresAt: NOW - OFFLINE_AFTER_MS - MIN, ephemeral: true, quest: "q-abc", ...extra });
+const overdue = (id: string, extra: Partial<{ ephemeral: boolean; expiresAt: number; run: string }> = {}) => ({ id, expiresAt: NOW - OFFLINE_AFTER_MS - MIN, ephemeral: true, run: "q-abc", ...extra });
 const failedOnce = (name = "site", extra: Partial<SelfSnapshot["loops"][number]> = {}) => ({
   name,
   readOnly: true,
@@ -26,13 +26,13 @@ const failedOnce = (name = "site", extra: Partial<SelfSnapshot["loops"][number]>
   ...extra,
 });
 
-/** Hands that only record what they were asked to do; the reaper goes through the real oath gate. */
+/** Hands that only record what they were asked to do; the reaper goes through the real approvals. */
 function hands() {
   const did: string[] = [];
   const h: SelfActionHands = {
-    reap: async (sandbox, quest) => {
-      did.push(`reap ${sandbox} for ${quest}`);
-      return decide({ class: "delete", resource: "docker.container", target: sandbox, createdBy: { quest, ephemeral: true }, quest });
+    reap: async (sandbox, run) => {
+      did.push(`reap ${sandbox} for ${run}`);
+      return decide({ class: "delete", resource: "docker.container", target: sandbox, createdBy: { run, ephemeral: true }, run });
     },
     retry: (loop) => void did.push(`retry ${loop}`),
   };
@@ -62,8 +62,8 @@ describe("what the plan calls for", () => {
     expect(planSelfActions(calm({ loops: [failedOnce()] }))).toEqual([{ kind: "retry-loop", loop: "site", after: "s1" }]);
     // Not three times, not even twice: two failures in a row are yours.
     expect(planSelfActions(calm({ loops: [failedOnce("site", { recent: [{ run: "m2", status: "failed", finished: NOW - MIN }, { run: "s1", status: "failed", finished: NOW - 10 * MIN }] })] }))).toEqual([]);
-    // A loop that does more than read (a quest, an outward call) is never run again on his own.
-    expect(planSelfActions(calm({ loops: [failedOnce("quest", { readOnly: false })] }))).toEqual([]);
+    // A loop that does more than read (a run, an outward call) is never run again on its own.
+    expect(planSelfActions(calm({ loops: [failedOnce("run", { readOnly: false })] }))).toEqual([]);
     expect(planSelfActions(calm({ loops: [failedOnce("site", { running: true })] }))).toEqual([]);
     // The same failed run is never retried twice.
     expect(planSelfActions(calm({ loops: [failedOnce()], retried: ["s1"] }))).toEqual([]);
@@ -87,7 +87,7 @@ describe("the allowlist", () => {
   test("is exactly four kinds, none outward, none needing you", () => {
     expect(SELF_ACTION_KINDS.sort()).toEqual(["adapt-compute", "calibrate", "reap-sandbox", "retry-loop"]);
     for (const kind of SELF_ACTION_KINDS) expect(["read", "create", "modify", "delete"]).toContain(SELF_ACTIONS[kind].class);
-    // The only delete is the oath's own exception: an ephemeral sandbox, on behalf of its quest.
+    // The only delete is the policy's own exception: an ephemeral sandbox, on behalf of its run.
     expect(SELF_ACTION_KINDS.filter((k) => SELF_ACTIONS[k].class === "delete")).toEqual(["reap-sandbox"]);
   });
 
@@ -105,10 +105,10 @@ describe("the allowlist", () => {
       { kind: "destroy-sandbox", sandbox: "a000000001", persistent: true },
       { kind: "reap-sandbox", sandbox: "a000000001", approvedBy: "owner" },
       { kind: "reap-sandbox", sandbox: "../../etc" },
-      { kind: "retry-loop", loop: "site", after: "s1", task: { kind: "quest" } },
+      { kind: "retry-loop", loop: "site", after: "s1", task: { kind: "run" } },
       // A kind the allowlist once had (the removed world's weather) is refused like any other.
       { kind: "refresh-weather" },
-      // Compute: he measures and re-derives; he never acquires, installs, downloads, hires or raises his own ceiling.
+      // Compute: it measures and re-derives; it never acquires, installs, downloads, hires or raises its own ceiling.
       { kind: "rent-gpu", provider: "anywhere", hours: 1 },
       { kind: "provision-node", cloud: "any" },
       { kind: "pull-model", runtime: "ollama", model: "qwen3:8b" },
@@ -131,12 +131,12 @@ describe("the allowlist", () => {
   test("an allowlisted kind runs only when the fresh state calls for exactly it", async () => {
     const { did, h } = hands();
     const ledger: LedgerWrite[] = [];
-    const fresh = calm({ sandboxes: [overdue("a000000001"), overdue("a000000002", { ephemeral: false })], loops: [failedOnce("site"), failedOnce("quest", { readOnly: false })] });
+    const fresh = calm({ sandboxes: [overdue("a000000001"), overdue("a000000002", { ephemeral: false })], loops: [failedOnce("site"), failedOnce("run", { readOnly: false })] });
     // A persistent sandbox, a sandbox that isn't there, a loop that does more than read, a run that isn't its latest.
     for (const action of [
       { kind: "reap-sandbox", sandbox: "a000000002" },
       { kind: "reap-sandbox", sandbox: "a00000000f" },
-      { kind: "retry-loop", loop: "quest", after: "s1" },
+      { kind: "retry-loop", loop: "run", after: "s1" },
       { kind: "retry-loop", loop: "site", after: "s0" },
     ]) {
       await expect(runSelfAction(action, fresh, h, (e) => void ledger.push(e))).rejects.toBeInstanceOf(SelfActionRefused);
@@ -147,7 +147,7 @@ describe("the allowlist", () => {
 });
 
 describe("each fix", () => {
-  test("is carried out by one hand, through the node's own gate, and recorded in the ledger as his own", async () => {
+  test("is carried out by one hand, through the node's own gate, and recorded in the ledger as its own", async () => {
     const { did, h } = hands();
     const ledger: LedgerWrite[] = [];
     const fresh = calm({ sandboxes: [overdue("a000000001")], loops: [failedOnce()] });
@@ -155,9 +155,9 @@ describe("each fix", () => {
     expect(did).toEqual(["reap a000000001 for q-abc", "retry site"]);
     expect(outcomes.map((o) => o.ok)).toEqual([true, true]);
     expect(outcomes.map((o) => o.title)).toEqual(["Removed sandbox a000000001, which had outlived its time", "Ran loop site again after one bad run"]);
-    expect(ledger.map((e) => [e.class, e.resource, e.target, e.verdict, e.quest])).toEqual([
-      ["delete", SELF_ACTION_RESOURCE, "reap-sandbox:a000000001", "allow", SELF_ACTION_QUEST],
-      ["read", SELF_ACTION_RESOURCE, "retry-loop:site:s1", "allow", SELF_ACTION_QUEST],
+    expect(ledger.map((e) => [e.class, e.resource, e.target, e.verdict, e.run])).toEqual([
+      ["delete", SELF_ACTION_RESOURCE, "reap-sandbox:a000000001", "allow", SELF_ACTION_RUN],
+      ["read", SELF_ACTION_RESOURCE, "retry-loop:site:s1", "allow", SELF_ACTION_RUN],
     ]);
     // The retried run is read back from the ledger, so the next heartbeat leaves it alone.
     expect(retriedRuns(ledger.map((e) => e.target))).toEqual(["s1"]);
@@ -168,25 +168,25 @@ describe("each fix", () => {
     const { did, h } = hands();
     const ledger: LedgerWrite[] = [];
     const first = calm({ sandboxes: [overdue("a000000001")], loops: [failedOnce()] });
-    // By the time he gets to it, the reaper got the sandbox and the loop ran.
+    // By the time it gets to it, the reaper got the sandbox and the loop ran.
     const later = calm({ sandboxes: [], loops: [failedOnce("site", { running: true })] });
     expect(await selfAct(first, async () => later, h, (e) => void ledger.push(e))).toEqual([]);
     expect(did).toEqual([]);
     expect(ledger).toEqual([]);
   });
 
-  test("the oath gate has the last word: if it says ask, nothing is removed and he says he tried", async () => {
+  test("approvals has the last word: if it says ask, nothing is removed and it says it tried", async () => {
     const ledger: LedgerWrite[] = [];
     const strict: SelfActionHands = {
       // The host's gate as if the sandbox were persistent after all.
-      reap: async (sandbox, quest) => decide({ class: "delete", resource: "docker.container", target: sandbox, createdBy: { quest, ephemeral: false }, quest }),
+      reap: async (sandbox, run) => decide({ class: "delete", resource: "docker.container", target: sandbox, createdBy: { run, ephemeral: false }, run }),
       retry: () => {},
     };
     const fresh = calm({ sandboxes: [overdue("a000000001")] });
     const [outcome] = await selfAct(fresh, async () => fresh, strict, (e) => void ledger.push(e));
     expect(outcome!.ok).toBe(false);
     expect(outcome!.title).toStartWith("Tried: removed sandbox a000000001");
-    expect(ledger[0]!.reason).toStartWith("Galahad's own fix didn't work: the oath gate said ask");
+    expect(ledger[0]!.reason).toStartWith("Your agent's own fix didn't work: approvals said ask");
   });
 
   test("a hand that fails is recorded as tried, never as fixed", async () => {
@@ -203,7 +203,7 @@ describe("each fix", () => {
     expect(ledger[0]!.reason).toContain("already running");
   });
 
-  test("compute: he measures the node he's on when it's due, and re-derives his defaults when the fleet's compute changed", async () => {
+  test("compute: it measures the node it's on when it's due, and re-derives its defaults when the fleet's compute changed", async () => {
     const compute = (over: Partial<NonNullable<SelfSnapshot["compute"]>> = {}): SelfSnapshot["compute"] => ({ canMeasure: true, due: null, lastAt: NOW - 5 * MIN, limitSetAt: null, adapts: true, planDigest: "d1", recordedDigest: "d1", ...over });
     expect(planSelfActions(calm({ compute: compute() }))).toEqual([]);
     // Never measured: now.
@@ -221,7 +221,7 @@ describe("each fix", () => {
 
     const { did, h } = hands();
     h.calibrate = async (why) => void did.push(`calibrate ${why}`);
-    h.adaptCompute = () => (did.push("adapt"), ["rack joined: 4 sandbox slots, 8 model calls at once (measured 15.6 reference cores' worth).", "Default effort 1 → 3: auto may now run up to 3 attempts at a quest at once."]);
+    h.adaptCompute = () => (did.push("adapt"), ["rack joined: 4 sandbox slots, 8 model calls at once (measured 15.6 reference cores' worth).", "Default effort 1 → 3: auto may now run up to 3 attempts at a run at once."]);
     const ledger: LedgerWrite[] = [];
     const state = calm({ compute: compute({ due: "joined", lastAt: null, planDigest: "d2" }) });
     const fixed = await selfAct(state, async () => state, h, (e) => void ledger.push(e));
@@ -229,9 +229,9 @@ describe("each fix", () => {
     expect(fixed.map((f) => f.ok)).toEqual([true, true]);
     // The line the owner reads says what changed.
     expect(fixed[1]!.title).toContain("rack joined: 4 sandbox slots");
-    expect(ledger.map((e) => [e.class, e.target, e.quest, e.resource])).toEqual([
-      ["create", "calibrate:joined", SELF_ACTION_QUEST, SELF_ACTION_RESOURCE],
-      ["modify", "adapt-compute:plan", SELF_ACTION_QUEST, SELF_ACTION_RESOURCE],
+    expect(ledger.map((e) => [e.class, e.target, e.run, e.resource])).toEqual([
+      ["create", "calibrate:joined", SELF_ACTION_RUN, SELF_ACTION_RESOURCE],
+      ["modify", "adapt-compute:plan", SELF_ACTION_RUN, SELF_ACTION_RESOURCE],
     ]);
     expect(ledger[1]!.detail).toContain("Default effort 1 → 3");
     // Without the hands (a node that can't), it's recorded as tried, never as done.

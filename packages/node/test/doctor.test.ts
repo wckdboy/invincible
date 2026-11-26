@@ -17,7 +17,7 @@ function healthy(): DoctorFacts {
     now: NOW,
     quick: false,
     offline: false,
-    self: { id: "n_self", name: "ultra", fleetName: "camelot", active: true, role: "full", alwaysOn: true, startedAt: NOW - 3 * DAY },
+    self: { id: "n_self", name: "ultra", fleetName: "homelab", active: true, role: "full", alwaysOn: true, startedAt: NOW - 3 * DAY },
     keys: { keystore: "file", keyFile: { exists: true, mode: 0o600 }, home: { exists: true, mode: 0o700 }, adminToken: { exists: true, mode: 0o600 } },
     mind: {
       events: 41_250,
@@ -218,7 +218,7 @@ describe("each fault gives its own line and advice", () => {
     expect(byId(diagnose(fresh), "role.planner").fix).toBe("Add a key for one of them (invincible key add), or hire a model you have a key for: invincible roster set planner <provider/model>.");
   });
 
-  test("the vault: locked, and keys he's waiting for", () => {
+  test("the vault: locked, and keys it's waiting for", () => {
     const locked = fault((f) => (f.vault.unlocked = false), "vault.open");
     expect(locked.state).toBe("broken");
     const asked = fault((f) => (f.vault.requests = ["github", "cloudflare"]), "vault.requests");
@@ -226,15 +226,15 @@ describe("each fault gives its own line and advice", () => {
     expect(asked.line).toContain("2 keys: github, cloudflare");
   });
 
-  test("models: a coding plan on a role does his coding and nothing else, and is never a model he lacks", () => {
-    // The roster `invincible key add` suggests for a plan: the plan first for the tools, a model of his own behind it.
+  test("models: a coding plan on a role does its coding and nothing else, and is never a model it lacks", () => {
+    // The roster `invincible key add` suggests for a plan: the plan first for the tools, a model of its own behind it.
     const planned = healthy();
     planned.roles[1]!.models = [{ ref: "zai-coding/glm-5.3", problem: null, plan: true }, ...planned.roles[1]!.models];
     const checks = diagnose(planned);
     expect(checks.some((c) => c.id === "role.engineer.first")).toBe(false);
     const engineer = byId(checks, "role.engineer");
     expect(engineer.state).toBe("ok");
-    expect(engineer.line).toContain("his coding and the knights' tools use zai-coding/glm-5.3");
+    expect(engineer.line).toContain("its coding and the agents' tools use zai-coding/glm-5.3");
     expect(engineer.line).not.toContain("zai-coding/glm-5.3 has what it needs");
     expect(engineer.line).not.toContain("zai-coding/glm-5.3 answered");
     // The engineer's work is all coding: a plan alone can play it, and is asked no word (a word is no coding).
@@ -243,7 +243,7 @@ describe("each fault gives its own line and advice", () => {
     only.roles[1]!.probe = null;
     const coder = byId(diagnose(only), "role.engineer");
     expect(coder.state).toBe("ok");
-    expect(coder.line).toBe("engineer: zai-coding/glm-5.3 does his coding (a coding plan: it is asked nothing else, so not a word)");
+    expect(coder.line).toBe("engineer: zai-coding/glm-5.3 does its coding (a coding plan: it is asked nothing else, so not a word)");
     // The planner also talks with you, which a plan doesn't do: alone on it, nobody answers you.
     const mute = fault((f) => {
       f.roles[0]!.models = [{ ref: "zai-coding/glm-5.3", problem: null, plan: true }];
@@ -253,7 +253,7 @@ describe("each fault gives its own line and advice", () => {
     expect(mute.line).toContain("coding plan");
     expect(mute.line).toContain("coding work only");
     expect(mute.fix).toContain("invincible roster set planner");
-    // A plan with no key is said once, as the tools' lack and not his: the role itself is still well.
+    // A plan with no key is said once, as the tools' lack and not its: the role itself is still well.
     const unkeyed = healthy();
     unkeyed.roles[1]!.models = [{ ref: "zai-coding/glm-5.3", problem: 'provider "zai-coding" has no key in the vault', plan: true }, { ref: "kimi-coding/k3", problem: 'provider "kimi-coding" is not configured', plan: true }, ...unkeyed.roles[1]!.models];
     const lack = byId(diagnose(unkeyed), "role.engineer.plan");
@@ -263,7 +263,7 @@ describe("each fault gives its own line and advice", () => {
     expect(lack.fix).toBe("Add the plan's key: invincible key add --provider zai-coding.");
     expect(byId(diagnose(unkeyed), "role.engineer").state).toBe("ok");
     expect(byId(diagnose(unkeyed), "role.engineer").line).not.toContain("tools use");
-    // A plan behind a model he lacks is still not the model that answers instead.
+    // A plan behind a model it lacks is still not the model that answers instead.
     const lacking = fault((f) => {
       f.roles[0]!.models = [{ ref: "anthropic/claude-opus-5-5", problem: 'provider "anthropic" has no key in the vault' }, { ref: "zai-coding/glm-5.3", problem: null, plan: true }];
       f.roles[0]!.probe = null;
@@ -272,12 +272,12 @@ describe("each fault gives its own line and advice", () => {
     expect(lacking.line).toContain("no model can play planner");
   });
 
-  test("models: a role you made is a knight's, whose talk and tasks are all coding, so coding plans alone play it", () => {
+  test("models: a role you made is an agent's, whose talk and tasks are all coding, so coding plans alone play it", () => {
     const mine = healthy();
     mine.roles.push({ role: "plan-coder", custom: true, chats: true, models: [{ ref: "mimo-token/mimo-v2.6-pro", problem: null, plan: true }, { ref: "opencode-go/deepseek-v4-pro", problem: null, plan: true }], probe: null });
     const check = byId(diagnose(mine), "role.plan-coder");
     expect(check.state).toBe("ok");
-    expect(check.line).toBe("plan-coder: mimo-token/mimo-v2.6-pro does the work of the knights on it (a coding plan: it is asked nothing else, so not a word)");
+    expect(check.line).toBe("plan-coder: mimo-token/mimo-v2.6-pro does the work of the agents on it (a coding plan: it is asked nothing else, so not a word)");
   });
 
   test("models: a VM's eyes are asked by its tools, so a plan they may use plays them alone; one they may not is said once, with whom to hire", () => {
@@ -311,7 +311,7 @@ describe("each fault gives its own line and advice", () => {
     }, "role.planner");
     expect(none.state).toBe("broken");
     expect(none.line).toContain("is not configured");
-    // A role that isn't one of the three a quest needs is yours to look at, not broken.
+    // A role that isn't one of the three a run needs is yours to look at, not broken.
     const swift = healthy();
     swift.roles.push({ role: "swift", chats: true, models: [{ ref: "ollama/*", problem: "its local runtime isn't running" }], probe: null });
     expect(byId(diagnose(swift), "role.swift").state).toBe("needs-you");
@@ -543,7 +543,7 @@ describe("each fault gives its own line and advice", () => {
     expect(fault((f) => (f.notify = { devices: 2, failing: [], keyProblem: "the key file is not a P-256 key" }), "notify.key").state).toBe("broken");
   });
 
-  test("notifications: he can't reach you is a finding for your Inbox once it matters; a node nobody uses isn't nagged", () => {
+  test("notifications: it can't reach you is a finding for your Inbox once it matters; a node nobody uses isn't nagged", () => {
     const reach = (notify: NonNullable<DoctorFacts["notify"]>) => {
       const facts = healthy();
       facts.notify = notify;
@@ -553,7 +553,7 @@ describe("each fault gives its own line and advice", () => {
       // A notice of its own (the line's id is notify.devices): it is never told as the failing device's is.
       key: `doctor:notify.reach:${healthy().self.id}`,
       severity: "warn",
-      title: "Galahad can't reach you when the app is closed",
+      title: "Your agent can't reach you when the app is closed",
       body: "No device of yours has notifications on, so what needs you waits here until you look. iPhone or iPad: More → Notifications. Web app: Settings → Notifications. Android: More → Notifications.",
     };
     // Nobody on, nothing lost and nothing waiting for an answer: said, but not a finding.
@@ -561,10 +561,10 @@ describe("each fault gives its own line and advice", () => {
     expect(reach({ devices: 0, failing: [], keyProblem: null, lost: 0, asks: 0 }).finding).toBeUndefined();
     // Something waits for your answer, or a device's subscription was dropped by its push service: it needs you.
     const asks = reach({ devices: 0, failing: [], keyProblem: null, lost: 0, asks: 2 });
-    expect(asks).toMatchObject({ state: "needs-you", line: "no device has notifications on, so he can't reach you when the app is closed, and 2 things wait for your answer" });
+    expect(asks).toMatchObject({ state: "needs-you", line: "no device has notifications on, so it can't reach you when the app is closed, and 2 things wait for your answer" });
     expect(asks.finding).toEqual(unreachable as never);
     const lost = reach({ devices: 0, failing: [], keyProblem: null, lost: 1, asks: 0 });
-    expect(lost).toMatchObject({ state: "needs-you", line: "no device has notifications on, so he can't reach you when the app is closed: a device's were dropped by its push service" });
+    expect(lost).toMatchObject({ state: "needs-you", line: "no device has notifications on, so it can't reach you when the app is closed: a device's were dropped by its push service" });
     expect(lost.fix).toContain("More → Notifications");
     expect(lost.finding).toEqual(unreachable as never);
     // Its words don't change while it stands (how many wait isn't in them), so an unchanged problem writes nothing.
@@ -626,25 +626,25 @@ describe("the report", () => {
   });
 });
 
-describe("a knight's own setup", () => {
+describe("an agent's own setup", () => {
   const check = (facts: DoctorFacts, id: string) => diagnose(facts).find((d) => d.id === id);
   test("in sensitive mode with none of its models usable here, its work can't run, and it never goes elsewhere: broken, with what to do", () => {
-    const facts = { ...healthy(), knights: [{ id: "ada", name: "Ada", sensitive: [{ ref: "nearai/Qwen/Qwen3.8-27B-abliterated", problem: 'provider "nearai" has no key in the vault' }], keys: [] }] };
-    const line = check(facts, "knight.ada.sensitive")!;
+    const facts = { ...healthy(), agents: [{ id: "ada", name: "Ada", sensitive: [{ ref: "nearai/Qwen/Qwen3.8-27B-abliterated", problem: 'provider "nearai" has no key in the vault' }], keys: [] }] };
+    const line = check(facts, "agent.ada.sensitive")!;
     expect(line).toMatchObject({ area: "models", state: "broken" });
     expect(line.line).toContain("Ada is in sensitive mode, and none of its models can be used here");
     expect(line.fix).toContain("invincible key add --provider");
     expect(line.finding).toMatchObject({ severity: "warn", title: "Ada can't work in sensitive mode" });
     // With one that can, it is well, and says how many can't.
-    const some = { ...healthy(), knights: [{ id: "ada", name: "Ada", sensitive: [{ ref: "nearai/a", problem: null }, { ref: "heabsy/b", problem: "no key" }], keys: [] }] };
-    expect(check(some, "knight.ada.sensitive")).toMatchObject({ state: "ok", line: "Ada is in sensitive mode, on nearai/a (1 model of its own can't be used here)" });
+    const some = { ...healthy(), agents: [{ id: "ada", name: "Ada", sensitive: [{ ref: "nearai/a", problem: null }, { ref: "heabsy/b", problem: "no key" }], keys: [] }] };
+    expect(check(some, "agent.ada.sensitive")).toMatchObject({ state: "ok", line: "Ada is in sensitive mode, on nearai/a (1 model of its own can't be used here)" });
   });
 
-  test("a key of yours given to a knight that can go nowhere now needs you; one that can is well", () => {
-    const facts = { ...healthy(), knights: [{ id: "ada", name: "Ada", sensitive: null, keys: [{ secret: "stripe", problem: null }, { secret: "acme", problem: "acme is pinned to no address, so there is nowhere it may go" }] }] };
-    expect(check(facts, "knight.ada.key.stripe")).toMatchObject({ area: "vault", state: "ok" });
-    expect(check(facts, "knight.ada.key.acme")).toMatchObject({ area: "vault", state: "needs-you", fix: "Pin it again (invincible secret set acme --base-url https://…), or take it back (invincible roundtable keys ada rm acme)." });
-    // A node with no Roundtable, or no knight set up so, says nothing of knights.
-    expect(diagnose(healthy()).some((d) => d.id.startsWith("knight."))).toBe(false);
+  test("a key of yours given to an agent that can go nowhere now needs you; one that can is well", () => {
+    const facts = { ...healthy(), agents: [{ id: "ada", name: "Ada", sensitive: null, keys: [{ secret: "stripe", problem: null }, { secret: "acme", problem: "acme is pinned to no address, so there is nowhere it may go" }] }] };
+    expect(check(facts, "agent.ada.key.stripe")).toMatchObject({ area: "vault", state: "ok" });
+    expect(check(facts, "agent.ada.key.acme")).toMatchObject({ area: "vault", state: "needs-you", fix: "Pin it again (invincible secret set acme --base-url https://…), or take it back (invincible agents keys ada rm acme)." });
+    // A node with no Agents, or no agent set up so, says nothing of agents.
+    expect(diagnose(healthy()).some((d) => d.id.startsWith("agent."))).toBe(false);
   });
 });

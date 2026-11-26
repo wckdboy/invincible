@@ -5,7 +5,7 @@ import { carryOf, chat, conversationFor, RefusalError, type ResolvedProvider, sp
 
 /*
  * OpenAI's own models through its Responses API: GPT-6.2 Astra calls no tool through Chat Completions (OpenAI's own
- * docs, read 22 November 2026), so on api.openai.com Galahad speaks Responses, statelessly, its reasoning given back
+ * docs, read 22 November 2026), so on api.openai.com the primary speaks Responses, statelessly, its reasoning given back
  * encrypted to the model it came from. The endpoint here is a stand-in that streams events in the documented shapes;
  * no real OpenAI call is made (none is on this fleet: unverified against the live API).
  */
@@ -49,35 +49,35 @@ describe("OpenAI's own API, through Responses", () => {
         { type: "response.output_item.done", output_index: 0, item: REASONING },
         { type: "response.output_item.added", output_index: 1, item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "recall", arguments: "" } },
         { type: "response.function_call_arguments.delta", item_id: "fc_1", output_index: 1, delta: '{"query":' },
-        { type: "response.function_call_arguments.delta", item_id: "fc_1", output_index: 1, delta: '"the oath"}' },
-        { type: "response.function_call_arguments.done", item_id: "fc_1", output_index: 1, arguments: '{"query":"the oath"}' },
-        { type: "response.output_item.done", output_index: 1, item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "recall", arguments: '{"query":"the oath"}' } },
+        { type: "response.function_call_arguments.delta", item_id: "fc_1", output_index: 1, delta: '"the policy"}' },
+        { type: "response.function_call_arguments.done", item_id: "fc_1", output_index: 1, arguments: '{"query":"the policy"}' },
+        { type: "response.output_item.done", output_index: 1, item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "recall", arguments: '{"query":"the policy"}' } },
         completed(),
       ),
       stream({ type: "response.output_text.delta", item_id: "msg_1", output_index: 0, delta: "Courteous, " }, { type: "response.output_text.delta", item_id: "msg_1", output_index: 0, delta: "candid, bound." }, completed()),
     );
-    const c = conversationFor({ provider: OPENAI, model: "gpt-6.2-astra", system: "You are Galahad.", context: "Today: Sunday.", messages: [{ role: "user", content: "What is your oath?", effort: "high" }], effort: "medium", fetch });
+    const c = conversationFor({ provider: OPENAI, model: "gpt-6.2-astra", system: "You are your agent.", context: "Today: Sunday.", messages: [{ role: "user", content: "What is your policy?", effort: "high" }], effort: "medium", fetch });
     const first = await drain(c.turn([{ name: "recall", description: "Search what you keep.", inputSchema: { type: "object", properties: { query: { type: "string" } } } }]));
-    expect(first.end).toEqual({ calls: [{ id: "call_1", name: "recall", input: { query: "the oath" } }], truncated: false });
+    expect(first.end).toEqual({ calls: [{ id: "call_1", name: "recall", input: { query: "the policy" } }], truncated: false });
     expect(c.spent!()).toEqual({ input: 1200, output: 300, cached: 1000, reasoning: 200 });
     // As OpenAI asks of a call it doesn't keep: Responses, stateless, its reasoning to be given back, a flat function tool.
     expect(asked[0]!.url).toBe("https://api.openai.com/v1/responses");
     expect(asked[0]!.body).toMatchObject({
       model: "gpt-6.2-astra",
-      instructions: "You are Galahad.\n\nToday: Sunday.",
-      input: [{ role: "user", content: "What is your oath?" }],
+      instructions: "You are your agent.\n\nToday: Sunday.",
+      input: [{ role: "user", content: "What is your policy?" }],
       stream: true,
       store: false,
       include: ["reasoning.encrypted_content"],
       reasoning: { effort: "high" },
       tools: [{ type: "function", name: "recall", description: "Search what you keep.", parameters: { type: "object", properties: { query: { type: "string" } } }, strict: false }],
     });
-    c.answer([{ id: "call_1", content: "I keep the oath of courtesy." }]);
+    c.answer([{ id: "call_1", content: "I keep the policy of courtesy." }]);
     const second = await drain(c.turn([]));
     expect(second).toEqual({ said: "Courteous, candid, bound.", end: { calls: [], truncated: false, detail: "status: completed" } });
     // Its output goes back as it came, every item in its order (OpenAI: "preserve every item in the response's output").
-    const CALL = { type: "function_call", id: "fc_1", call_id: "call_1", name: "recall", arguments: '{"query":"the oath"}' };
-    expect(asked[1]!.body.input).toEqual([{ role: "user", content: "What is your oath?" }, REASONING, CALL, { type: "function_call_output", call_id: "call_1", output: "I keep the oath of courtesy." }]);
+    const CALL = { type: "function_call", id: "fc_1", call_id: "call_1", name: "recall", arguments: '{"query":"the policy"}' };
+    expect(asked[1]!.body.input).toEqual([{ role: "user", content: "What is your policy?" }, REASONING, CALL, { type: "function_call_output", call_id: "call_1", output: "I keep the policy of courtesy." }]);
     // And goes on with the answer that called, to this model alone.
     expect(JSON.parse(c.carry!()!)).toMatchObject({ provider: "openai", model: "gpt-6.2-astra", blocks: [REASONING, CALL] });
   });
@@ -85,8 +85,8 @@ describe("OpenAI's own API, through Responses", () => {
   test("a tool turn kept in the chat's history goes back with its reasoning to the model it came from, and without to another", async () => {
     const carry = carryOf("openai", "gpt-6.2-astra", { blocks: [REASONING] });
     const history = [
-      { role: "user" as const, content: "What is your oath?" },
-      { role: "assistant" as const, content: "", calls: [{ id: "call_1", name: "recall", input: { query: "the oath" } }], carry },
+      { role: "user" as const, content: "What is your policy?" },
+      { role: "assistant" as const, content: "", calls: [{ id: "call_1", name: "recall", input: { query: "the policy" } }], carry },
       { role: "user" as const, content: "", results: [{ id: "call_1", content: "Courtesy." }] },
     ];
     const bodies: Record<string, any>[] = [];
@@ -95,8 +95,8 @@ describe("OpenAI's own API, through Responses", () => {
       return stream(completed());
     }) as typeof globalThis.fetch;
     for (const model of ["gpt-6.2-astra", "gpt-6.2-sol"]) await drain(conversationFor({ provider: OPENAI, model, system: "s", messages: history, effort: "medium", fetch }).turn([]));
-    expect(bodies[0]!.input).toEqual([{ role: "user", content: "What is your oath?" }, REASONING, { type: "function_call", call_id: "call_1", name: "recall", arguments: '{"query":"the oath"}' }, { type: "function_call_output", call_id: "call_1", output: "Courtesy." }]);
-    expect(bodies[1]!.input).toEqual([{ role: "user", content: "What is your oath?" }, { type: "function_call", call_id: "call_1", name: "recall", arguments: '{"query":"the oath"}' }, { type: "function_call_output", call_id: "call_1", output: "Courtesy." }]);
+    expect(bodies[0]!.input).toEqual([{ role: "user", content: "What is your policy?" }, REASONING, { type: "function_call", call_id: "call_1", name: "recall", arguments: '{"query":"the policy"}' }, { type: "function_call_output", call_id: "call_1", output: "Courtesy." }]);
+    expect(bodies[1]!.input).toEqual([{ role: "user", content: "What is your policy?" }, { type: "function_call", call_id: "call_1", name: "recall", arguments: '{"query":"the policy"}' }, { type: "function_call_output", call_id: "call_1", output: "Courtesy." }]);
   });
 
   test("an answer's words and their phase go back as they came, never said twice", async () => {
@@ -146,7 +146,7 @@ describe("OpenAI's own API, through Responses", () => {
   test("chat asks OpenAI's own API through Responses, and any other OpenAI-compatible one as ever", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     vault.set("openai", OPENAI.apiKey!, { provider: "openai", origin: "https://api.openai.com" });
     store.emit(identity, "provider.set", { id: "openai", kind: "openai", baseUrl: "https://api.openai.com/v1", secret: "openai" });

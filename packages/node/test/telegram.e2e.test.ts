@@ -32,7 +32,7 @@ const caps: Capabilities = {
 };
 
 const TOKEN = "123456789:AAFakeTokenForTestsOnlyNotARealOne_xx";
-const OWNER = { id: 1001, username: "liege", first_name: "Liege" };
+const OWNER = { id: 1001, username: "owner", first_name: "Owner" };
 const root = mkdtempSync(join(tmpdir(), "invincible-telegram-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
@@ -114,7 +114,7 @@ const json = async <T,>(response: Response): Promise<T> => {
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "tg-node" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "tg-node" });
   store.close();
   home.writeConfig({ v: 1, name: "tg-node", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 60_000, wakeWatchMs: false, ciWatchMs: false, defaultHeartbeat: false, telegramBase: `http://127.0.0.1:${telegramApi.port}` });
@@ -160,7 +160,7 @@ describe("Telegram", () => {
     from(stranger, `/start ${code}`);
     from(stranger, "What's in the vault?");
     const { telegram } = await json<{ telegram: TelegramView }>(await call("telegram", undefined));
-    expect(telegram).toMatchObject({ owner: "@liege", linkExpires: null });
+    expect(telegram).toMatchObject({ owner: "@owner", linkExpires: null });
     await Bun.sleep(300);
     expect(messages().every((m) => m.params.chat_id === OWNER.id)).toBe(true);
     expect(asked.some((a) => /vault/.test(a))).toBe(false);
@@ -208,7 +208,7 @@ describe("Telegram", () => {
     const mine = conversation.messages.filter((m) => m.role === "user").at(-1)!;
     expect(mine.content).toBe("What's in this photo?");
     expect(mine.attachments).toEqual([expect.objectContaining({ name: "photo.jpg", type: "image/jpeg", bytes: FILES["photos/file_7.jpg"]!.byteLength })]);
-    // A PDF isn't one a model is shown: said, and nothing asked of him.
+    // A PDF isn't one a model is shown: said, and nothing asked of it.
     const asking = asked.length;
     updates.push({ update_id: nextUpdate++, message: { message_id: 902, from: OWNER, chat: { id: OWNER.id, type: "private" }, document: { file_id: "pdf", file_name: "report.pdf", file_size: 17 } } });
     await until("said", () => messages().find((m) => String(m.params.text).startsWith("Not sent with your message (report.pdf: it isn't a picture")));

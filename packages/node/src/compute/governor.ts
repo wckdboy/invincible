@@ -3,7 +3,7 @@ import { admit, admitGrowth, type ComputeUsage, type ComputeUse, type HostLoad, 
 /*
  * The governor: this node's slots. A sandbox is admitted only when it fits inside
  * the ceiling (the owner's, or the default half) and the machine itself has room
- * (he backs off while other work is using it); otherwise it waits its turn, first
+ * (it backs off while other work is using it); otherwise it waits its turn, first
  * come, first served. Nothing here runs anything: it only says when.
  *
  * What's in use is what the node's own sandboxes hold (Docker's list is the truth,
@@ -37,7 +37,7 @@ export interface Ticket {
 }
 
 /**
- * How long a knight's VM counts as at work after its last command ended: it thinks between commands, and a sandbox
+ * How long an agent's VM counts as at work after its last command ended: it thinks between commands, and a sandbox
  * admitted into that pause would find it working again. After this it rests, and its threads are free.
  */
 export const KEPT_WORK_MS = 3 * 60_000;
@@ -46,7 +46,7 @@ interface Held {
   cpus: number;
   memoryGb: number;
   /**
-   * A knight's own VM, kept between its tasks: never a slot; its memory of the ceiling all along, its threads only while
+   * An agent's own VM, kept between its tasks: never a slot; its memory of the ceiling all along, its threads only while
    * it works (a command runs in it, or ran less than KEPT_WORK_MS ago) or is being made. Resting, it uses none.
    */
   kept: boolean;
@@ -62,7 +62,7 @@ interface Held {
 
 interface Waiting {
   need: { cpus: number; memoryGb: number };
-  quest: string;
+  run: string;
   kept: boolean;
   since: number;
   why: string;
@@ -76,7 +76,7 @@ interface ModelWaiting {
   cleanup(): void;
 }
 
-/** His own load is remembered this long: the machine's load average takes about as long to forget it. */
+/** Its own load is remembered this long: the machine's load average takes about as long to forget it. */
 const OURS_FOR_MS = 90_000;
 
 export class Governor {
@@ -98,8 +98,8 @@ export class Governor {
   }
 
   /**
-   * What his sandboxes hold now: every one's memory, the threads of all but knights' VMs at rest, and the slots of those
-   * that aren't knights' own VMs.
+   * What its sandboxes hold now: every one's memory, the threads of all but agents' VMs at rest, and the slots of those
+   * that aren't agents' own VMs.
    */
   use(): ComputeUse {
     let cores = 0;
@@ -118,7 +118,7 @@ export class Governor {
   }
 
   /**
-   * A command runs in a knight's VM: its threads count against the ceiling from now until KEPT_WORK_MS after it ends.
+   * A command runs in an agent's VM: its threads count against the ceiling from now until KEPT_WORK_MS after it ends.
    * It never waits (the VM is there, and its work is under way); new work sees the less room. Returns how to say it
    * ended (once is enough). Anything that isn't a kept VM it holds is left as it is: its threads are held anyway.
    */
@@ -147,10 +147,10 @@ export class Governor {
 
   /** What waits for a slot, oldest first, and why. */
   queue(): QueuedWork[] {
-    return this.waiting.map((w) => ({ quest: w.quest, cpus: w.need.cpus, memoryGb: w.need.memoryGb, since: w.since, why: w.why }));
+    return this.waiting.map((w) => ({ run: w.run, cpus: w.need.cpus, memoryGb: w.need.memoryGb, since: w.since, why: w.why }));
   }
 
-  /** The machine now, with the threads his own sandboxes held lately (their load isn't the host's). */
+  /** The machine now, with the threads its own sandboxes held lately (their load isn't the host's). */
   hostNow(): HostLoad | null {
     const host = this.opts.host();
     if (!host) return null;
@@ -179,7 +179,7 @@ export class Governor {
   grow(id: string, more: { cpus: number; memoryGb: number }): string | null {
     const held = this.held.get(id);
     if (!held) return "this node holds no such sandbox";
-    // A knight's VM at rest holds no threads now, but holds them all again once it works: its own count, as at work.
+    // An agent's VM at rest holds no threads now, but holds them all again once it works: its own count, as at work.
     const used = this.use();
     if (held.kept && !held.creating && !this.working(held)) used.cores += held.cpus;
     const verdict = admitGrowth(this.opts.capacity(), used, more, this.hostNow());
@@ -204,7 +204,7 @@ export class Governor {
    * A slot for one sandbox: resolves when it fits (at once, when it does), in turn. Rejects when the wait
    * outlasts `maxWaitMs`, the caller goes away, or this node takes no sandboxes at all.
    */
-  acquire(need: { cpus: number; memoryGb: number }, meta: { quest: string; kept?: boolean }, signal?: AbortSignal): Promise<Ticket> {
+  acquire(need: { cpus: number; memoryGb: number }, meta: { run: string; kept?: boolean }, signal?: AbortSignal): Promise<Ticket> {
     if (this.opts.capacity().sandboxes <= 0) return Promise.reject(new CapacityError("this node takes no sandboxes (its ceiling is none)", 409));
     if (signal?.aborted) return Promise.reject(new CapacityError("the caller gave up waiting for a slot", 499));
     return new Promise<Ticket>((resolve, reject) => {
@@ -223,7 +223,7 @@ export class Governor {
       };
       const entry: Waiting = {
         need,
-        quest: meta.quest,
+        run: meta.run,
         kept: meta.kept === true,
         since,
         why: "",
@@ -260,7 +260,7 @@ export class Governor {
     let admitted = false;
     while (this.waiting.length) {
       const head = this.waiting[0]!;
-      // A knight's own VM needs room for what it holds, and no slot.
+      // An agent's own VM needs room for what it holds, and no slot.
       const verdict = admit(this.opts.capacity(), this.use(), head.need, this.hostNow(), { slot: !head.kept });
       if (!verdict.ok) {
         head.why = verdict.why;
@@ -332,7 +332,7 @@ export class Governor {
   }
 
   /**
-   * One model call. A background call (a quest's, an agent's) waits while every slot is taken; yours
+   * One model call. A background call (a run's, an agent's) waits while every slot is taken; yours
    * (`wait: false`) never waits and isn't counted against them. Returns how to leave (idempotent).
    */
   enterModel(opts: { wait: boolean }, signal?: AbortSignal): Promise<() => void> {

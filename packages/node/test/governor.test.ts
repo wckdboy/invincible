@@ -23,17 +23,17 @@ function governor(over: { capacity?: () => NodeCapacity; host?: () => typeof idl
 describe("sandbox slots", () => {
   test("what fits runs; the next waits, and takes the slot when one is freed", async () => {
     const { g } = governor();
-    const a = await g.acquire(slot, { quest: "q-a" });
-    const b = await g.acquire(slot, { quest: "q-b" });
+    const a = await g.acquire(slot, { run: "q-a" });
+    const b = await g.acquire(slot, { run: "q-b" });
     let third = "waiting";
-    const c = g.acquire(slot, { quest: "q-c" }).then((ticket) => {
+    const c = g.acquire(slot, { run: "q-c" }).then((ticket) => {
       third = "running";
       return ticket;
     });
     await settle();
     expect(third).toBe("waiting");
     expect(g.usage()).toMatchObject({ sandboxes: 2, cores: 8, memoryGb: 16, queued: 1 });
-    expect(g.queue()).toMatchObject([{ quest: "q-c", cpus: 4, memoryGb: 8 }]);
+    expect(g.queue()).toMatchObject([{ run: "q-c", cpus: 4, memoryGb: 8 }]);
     expect(g.queue()[0]!.why).toMatch(/every slot is in use/);
     g.release(a);
     await c;
@@ -46,10 +46,10 @@ describe("sandbox slots", () => {
 
   test("first come, first served: a small request doesn't jump one that's waiting", async () => {
     const { g } = governor({ capacity: () => capacity({ sandboxes: 4 }) });
-    const big = await g.acquire({ cpus: 6, memoryGb: 8 }, { quest: "big" });
+    const big = await g.acquire({ cpus: 6, memoryGb: 8 }, { run: "big" });
     const order: string[] = [];
-    const second = g.acquire({ cpus: 4, memoryGb: 4 }, { quest: "second" }).then((t) => (order.push("second"), t));
-    const small = g.acquire({ cpus: 1, memoryGb: 1 }, { quest: "small" }).then((t) => (order.push("small"), t));
+    const second = g.acquire({ cpus: 4, memoryGb: 4 }, { run: "second" }).then((t) => (order.push("second"), t));
+    const small = g.acquire({ cpus: 1, memoryGb: 1 }, { run: "small" }).then((t) => (order.push("small"), t));
     await settle();
     expect(order).toEqual([]); // 1 CPU would fit, but it's behind "second"
     g.release(big);
@@ -59,17 +59,17 @@ describe("sandbox slots", () => {
 
   test("a sandbox it holds grows within the ceiling, at once or not at all, and what it gives back is given back", async () => {
     const { g, changes } = governor({ capacity: () => capacity({ sandboxes: 2 }) });
-    const a = await g.acquire({ cpus: 2, memoryGb: 4 }, { quest: "knight" });
+    const a = await g.acquire({ cpus: 2, memoryGb: 4 }, { run: "agent" });
     g.bind(a, "0123456789");
     const before = changes();
     expect(g.grow("0123456789", { cpus: 2, memoryGb: 4 })).toBeNull();
     expect(g.usage()).toMatchObject({ sandboxes: 1, cores: 4, memoryGb: 8 });
     expect(changes()).toBeGreaterThan(before);
     // Past the ceiling (8 threads): refused with the reason, and nothing held for it.
-    expect(g.grow("0123456789", { cpus: 6, memoryGb: 0 })).toMatch(/threads he may use/);
+    expect(g.grow("0123456789", { cpus: 6, memoryGb: 0 })).toMatch(/threads it may use/);
     expect(g.usage()).toMatchObject({ cores: 4, memoryGb: 8 });
     // Every slot taken doesn't stop a sandbox that is already one of them from growing.
-    const b = await g.acquire({ cpus: 1, memoryGb: 1 }, { quest: "other" });
+    const b = await g.acquire({ cpus: 1, memoryGb: 1 }, { run: "other" });
     expect(g.grow("0123456789", { cpus: 2, memoryGb: 2 })).toBeNull();
     expect(g.grow("ffffffffff", { cpus: 1, memoryGb: 1 })).toMatch(/no such sandbox/);
     g.shrink("0123456789", { cpus: 2, memoryGb: 2 });
@@ -79,12 +79,12 @@ describe("sandbox slots", () => {
     expect(g.usage()).toMatchObject({ sandboxes: 0, cores: 0, memoryGb: 0 });
   });
 
-  test("a knight's VM at rest grows only within the ceiling: the threads it holds at work count, though it holds none now", async () => {
+  test("an agent's VM at rest grows only within the ceiling: the threads it holds at work count, though it holds none now", async () => {
     const { g } = governor({ capacity: () => capacity({ cores: 8, memoryGb: 16, sandboxes: 2 }) });
-    g.bind(await g.acquire({ cpus: 2, memoryGb: 4 }, { quest: "arm.team.abcdef0123.ada", kept: true }), "ada");
+    g.bind(await g.acquire({ cpus: 2, memoryGb: 4 }, { run: "arm.team.abcdef0123.ada", kept: true }), "ada");
     expect(g.usage()).toMatchObject({ kept: 1, cores: 0, memoryGb: 4 });
     // Its 2 threads and 7 more would be 9 once it works: past the ceiling of 8, as a new VM that size would be.
-    expect(g.grow("ada", { cpus: 7, memoryGb: 0 })).toMatch(/threads he may use/);
+    expect(g.grow("ada", { cpus: 7, memoryGb: 0 })).toMatch(/threads it may use/);
     // Up to the ceiling it grows, and still holds no threads while it rests.
     expect(g.grow("ada", { cpus: 6, memoryGb: 0 })).toBeNull();
     expect(g.usage()).toMatchObject({ kept: 1, cores: 0, memoryGb: 4 });
@@ -92,10 +92,10 @@ describe("sandbox slots", () => {
     expect(g.usage().cores).toBe(8);
   });
 
-  test("a knight's own VM takes no slot, and holds its memory of the ceiling; its threads only while it works, and a while after", async () => {
+  test("an agent's own VM takes no slot, and holds its memory of the ceiling; its threads only while it works, and a while after", async () => {
     let t = 1_000_000;
     const { g } = governor({ capacity: () => capacity({ cores: 12, memoryGb: 32, sandboxes: 2 }), now: () => t });
-    for (const knight of ["ada", "lin", "sam"]) g.bind(await g.acquire({ cpus: 2, memoryGb: 4 }, { quest: `arm.team.abcdef0123.${knight}`, kept: true }), knight);
+    for (const agent of ["ada", "lin", "sam"]) g.bind(await g.acquire({ cpus: 2, memoryGb: 4 }, { run: `arm.team.abcdef0123.${agent}`, kept: true }), agent);
     // Resting: its memory is held, its threads are not (it isn't using them).
     expect(g.usage()).toMatchObject({ sandboxes: 0, kept: 3, cores: 0, memoryGb: 12 });
     // At work: its threads count while a command runs in it, and for a while after the last one ends (it thinks between them).
@@ -108,8 +108,8 @@ describe("sandbox slots", () => {
     t += 2;
     expect(g.usage().cores).toBe(0);
     // Every slot is still there for work, and the ceiling bounds it: what runs in a slot holds its threads all along.
-    const a = await g.acquire({ cpus: 2, memoryGb: 4 }, { quest: "q-a" });
-    await g.acquire({ cpus: 2, memoryGb: 4 }, { quest: "q-b" });
+    const a = await g.acquire({ cpus: 2, memoryGb: 4 }, { run: "q-a" });
+    await g.acquire({ cpus: 2, memoryGb: 4 }, { run: "q-b" });
     expect(g.usage()).toMatchObject({ sandboxes: 2, kept: 3, cores: 4, memoryGb: 20 });
     // Work in a sandbox that isn't a kept VM, or in one it doesn't hold, changes nothing.
     g.work(a.id)();
@@ -117,26 +117,26 @@ describe("sandbox slots", () => {
     expect(g.usage().cores).toBe(4);
   });
 
-  test("resting knights never keep work waiting; working ones hold their threads, and what doesn't fit beside them waits until they rest", async () => {
+  test("resting agents never keep work waiting; working ones hold their threads, and what doesn't fit beside them waits until they rest", async () => {
     let t = 1_000_000;
-    // The owner's server on 16 November 2026: a ceiling of 16 threads, four knights' VMs of 2 threads and Galahad's
+    // The owner's server on 16 November 2026: a ceiling of 16 threads, four agents' VMs of 2 threads and the primary's
     // of 1, each with a microVM's own thread and 2 GB. Every thread but 2 was held, so no sandbox could start.
     const { g } = governor({ capacity: () => capacity({ cores: 16, memoryGb: 91, sandboxes: 4 }), now: () => t, retryMs: 5 });
     g.adopt([
       ...["k1", "k2", "k3", "k4"].map((id) => ({ id, cpus: 2, memoryGb: 4, isolation: "vm" as const, kept: true })),
-      { id: "galahad", cpus: 1, memoryGb: 4, isolation: "vm" as const, kept: true },
+      { id: "primary", cpus: 1, memoryGb: 4, isolation: "vm" as const, kept: true },
     ]);
     expect(g.usage()).toMatchObject({ sandboxes: 0, kept: 5, cores: 0, memoryGb: 30 });
-    // They rest: a quest's sandbox is admitted at once.
-    g.release(await g.acquire(slot, { quest: "q-a" }));
+    // They rest: a run's sandbox is admitted at once.
+    g.release(await g.acquire(slot, { run: "q-a" }));
     // Three at work hold 9 threads: one sandbox fits beside them, and the next would pass 16, so it waits.
     const ends = ["k1", "k2", "k3"].map((id) => g.work(id));
-    await g.acquire(slot, { quest: "q-b" });
+    await g.acquire(slot, { run: "q-b" });
     let admitted = false;
-    const next = g.acquire(slot, { quest: "q-c" }).then(() => void (admitted = true));
+    const next = g.acquire(slot, { run: "q-c" }).then(() => void (admitted = true));
     await settle();
     expect(admitted).toBe(false);
-    expect(g.queue()[0]!.why).toMatch(/threads he may use/);
+    expect(g.queue()[0]!.why).toMatch(/threads it may use/);
     // They finish and rest: once the while has passed, the governor looks again by itself and admits it.
     for (const end of ends) end();
     t += KEPT_WORK_MS + 1;
@@ -154,7 +154,7 @@ describe("sandbox slots", () => {
 
   test("a sandbox is known by its id once it exists, and released by it", async () => {
     const { g } = governor();
-    const ticket = await g.acquire(slot, { quest: "q" });
+    const ticket = await g.acquire(slot, { run: "q" });
     g.bind(ticket, "0123456789");
     expect(g.usage().sandboxes).toBe(1);
     g.release("0123456789");
@@ -172,7 +172,7 @@ describe("sandbox slots", () => {
     // A microVM's overhead is counted on top of its limits.
     expect(g.usage()).toMatchObject({ sandboxes: 2, cores: 7, memoryGb: 14 });
     let admitted = false;
-    const waiting = g.acquire(slot, { quest: "q" }).then((t) => ((admitted = true), t));
+    const waiting = g.acquire(slot, { run: "q" }).then((t) => ((admitted = true), t));
     await settle();
     expect(admitted).toBe(false);
     // One being created isn't in Docker's list yet: an adoption never drops it.
@@ -183,11 +183,11 @@ describe("sandbox slots", () => {
     expect(g.usage().sandboxes).toBe(2);
   });
 
-  test("he waits while the machine is busy, and goes on when it eases", async () => {
+  test("it waits while the machine is busy, and goes on when it eases", async () => {
     let load = 15;
     const { g } = governor({ host: () => ({ ...idle, load }) });
     let admitted = false;
-    const waiting = g.acquire(slot, { quest: "q" }).then((t) => ((admitted = true), t));
+    const waiting = g.acquire(slot, { run: "q" }).then((t) => ((admitted = true), t));
     await Bun.sleep(20);
     expect(admitted).toBe(false);
     expect(g.queue()[0]!.why).toMatch(/busy with other work/);
@@ -196,29 +196,29 @@ describe("sandbox slots", () => {
     expect(admitted).toBe(true);
   });
 
-  test("load that is his own doesn't hold him back: what his sandboxes held a moment ago is remembered", async () => {
+  test("load that is its own doesn't hold it back: what its sandboxes held a moment ago is remembered", async () => {
     let now = 1_000_000;
     let load = 0;
     const { g } = governor({ host: () => ({ ...idle, cores: 8, load }), capacity: () => capacity({ cores: 4, sandboxes: 1 }), now: () => now });
-    const first = await g.acquire(slot, { quest: "one" });
-    load = 4; // his own sandbox, flat out
+    const first = await g.acquire(slot, { run: "one" });
+    load = 4; // its own sandbox, flat out
     g.release(first);
     now += 5_000; // the load average hasn't decayed yet
-    const next = await g.acquire(slot, { quest: "two" });
+    const next = await g.acquire(slot, { run: "two" });
     g.release(next);
     // Two minutes later that load would be someone else's.
     now += 120_000;
     let admitted = false;
-    void g.acquire(slot, { quest: "three" }).then(() => (admitted = true));
+    void g.acquire(slot, { run: "three" }).then(() => (admitted = true));
     await Bun.sleep(15);
     expect(admitted).toBe(false);
   });
 
   test("a wait has an end: the caller hears why", async () => {
     const { g } = governor({ maxWaitMs: 20 });
-    await g.acquire(slot, { quest: "a" });
-    await g.acquire(slot, { quest: "b" });
-    const waited = g.acquire(slot, { quest: "c" });
+    await g.acquire(slot, { run: "a" });
+    await g.acquire(slot, { run: "b" });
+    const waited = g.acquire(slot, { run: "c" });
     await expect(waited).rejects.toBeInstanceOf(CapacityError);
     await expect(waited).rejects.toThrow(/every slot is in use/);
     expect(g.usage().queued).toBe(0);
@@ -226,31 +226,31 @@ describe("sandbox slots", () => {
 
   test("a caller that goes away leaves the queue", async () => {
     const { g } = governor();
-    await g.acquire(slot, { quest: "a" });
-    await g.acquire(slot, { quest: "b" });
+    await g.acquire(slot, { run: "a" });
+    await g.acquire(slot, { run: "b" });
     const gone = new AbortController();
-    const waited = g.acquire(slot, { quest: "c" }, gone.signal);
+    const waited = g.acquire(slot, { run: "c" }, gone.signal);
     await settle();
     gone.abort();
     await expect(waited).rejects.toThrow(/gave up waiting/);
     expect(g.usage().queued).toBe(0);
     const already = new AbortController();
     already.abort();
-    await expect(g.acquire(slot, { quest: "d" }, already.signal)).rejects.toThrow(/gave up waiting/);
+    await expect(g.acquire(slot, { run: "d" }, already.signal)).rejects.toThrow(/gave up waiting/);
   });
 
   test("a node that takes no sandboxes refuses at once instead of queueing forever", async () => {
     const { g } = governor({ capacity: () => capacity({ sandboxes: 0 }) });
-    await expect(g.acquire(slot, { quest: "q" })).rejects.toThrow(/takes no sandboxes/);
+    await expect(g.acquire(slot, { run: "q" })).rejects.toThrow(/takes no sandboxes/);
   });
 
   test("a ceiling lowered while work runs admits nothing new until it fits again", async () => {
     let sandboxes = 2;
     const { g } = governor({ capacity: () => capacity({ sandboxes }) });
-    const a = await g.acquire(slot, { quest: "a" });
+    const a = await g.acquire(slot, { run: "a" });
     sandboxes = 1;
     let admitted = false;
-    const waiting = g.acquire(slot, { quest: "b" }).then((t) => ((admitted = true), t));
+    const waiting = g.acquire(slot, { run: "b" }).then((t) => ((admitted = true), t));
     await settle();
     expect(admitted).toBe(false);
     g.release(a);
@@ -260,7 +260,7 @@ describe("sandbox slots", () => {
 
   test("watchers hear of every change", async () => {
     const { g, changes } = governor();
-    const ticket = await g.acquire(slot, { quest: "q" });
+    const ticket = await g.acquire(slot, { run: "q" });
     g.release(ticket);
     expect(changes()).toBeGreaterThanOrEqual(2);
   });

@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { DATA_GLYPHS, dataGlyph, GLYPH_LADDER, KNIGHT_SPHERE, knightArcs, orbSphere, paperShades, SPHERE_FLASH, SPHERE_TURN, sphereFrame, sphereGlyph, spherePoints, sphereShades } from "./orb-sphere.ts";
+import { DATA_GLYPHS, dataGlyph, GLYPH_LADDER, AGENT_SPHERE, agentArcs, orbSphere, paperShades, SPHERE_FLASH, SPHERE_TURN, sphereFrame, sphereGlyph, spherePoints, sphereShades } from "./orb-sphere.ts";
 import { ORB_MOODS, orbSeed } from "./orb-motion.ts";
 
 // Your words, 25 November 2026: "custom/procedurally generated colored particle orbs", "use glyph and randomness on the
 // orbs, like Jarvis/Ultron in the movies, and my other project Phren", "slow and calming movement".
 describe("an orb's sphere of glyphs", () => {
   test("each handle makes its own sphere, the same every time, within its bounds", () => {
-    const gareth = orbSphere("gareth");
-    expect(orbSphere("gareth")).toEqual(gareth);
-    expect(gareth.seed).toBe(orbSeed("gareth"));
-    const many = Array.from({ length: 300 }, (_, n) => orbSphere(`knight-${n}`));
+    const max = orbSphere("max");
+    expect(orbSphere("max")).toEqual(max);
+    expect(max.seed).toBe(orbSeed("max"));
+    const many = Array.from({ length: 300 }, (_, n) => orbSphere(`agent-${n}`));
     for (const sphere of many) {
       expect(sphere.tilt).toBeGreaterThanOrEqual(12);
       expect(sphere.tilt).toBeLessThan(32);
@@ -25,8 +25,8 @@ describe("an orb's sphere of glyphs", () => {
   test("its points are spread over the whole sphere, top to bottom, some of them its second colour; finer the larger", () => {
     const sphere = orbSphere("ada");
     for (const level of ["badge", "seat", "full"] as const) {
-      const points = spherePoints(sphere, KNIGHT_SPHERE[level].count);
-      expect(points).toHaveLength(KNIGHT_SPHERE[level].count);
+      const points = spherePoints(sphere, AGENT_SPHERE[level].count);
+      expect(points).toHaveLength(AGENT_SPHERE[level].count);
       for (const p of points) {
         expect(Math.abs(Math.hypot(p.x, p.y, p.z) - 1)).toBeLessThan(1e-12);
         expect(p.size).toBeGreaterThanOrEqual(0.7);
@@ -35,18 +35,18 @@ describe("an orb's sphere of glyphs", () => {
       const ys = points.map((p) => p.y);
       expect([...ys].sort((a, b) => b - a)).toEqual(ys);
     }
-    expect(KNIGHT_SPHERE.badge.count < KNIGHT_SPHERE.seat.count && KNIGHT_SPHERE.seat.count < KNIGHT_SPHERE.full.count).toBe(true);
-    expect(KNIGHT_SPHERE.badge.glyph > KNIGHT_SPHERE.seat.glyph && KNIGHT_SPHERE.seat.glyph > KNIGHT_SPHERE.full.glyph).toBe(true);
+    expect(AGENT_SPHERE.badge.count < AGENT_SPHERE.seat.count && AGENT_SPHERE.seat.count < AGENT_SPHERE.full.count).toBe(true);
+    expect(AGENT_SPHERE.badge.glyph > AGENT_SPHERE.seat.glyph && AGENT_SPHERE.seat.glyph > AGENT_SPHERE.full.glyph).toBe(true);
     // A face's sphere stays inside its square, and inside its arcs where it has them (a card's size and larger).
-    for (const look of Object.values(KNIGHT_SPHERE)) expect(look.r + (1.15 * look.glyph) / 2).toBeLessThanOrEqual(100);
-    for (const level of ["seat", "full"] as const) expect(KNIGHT_SPHERE[level].r + (1.15 * KNIGHT_SPHERE[level].glyph) / 2).toBeLessThan(89);
+    for (const look of Object.values(AGENT_SPHERE)) expect(look.r + (1.15 * look.glyph) / 2).toBeLessThanOrEqual(100);
+    for (const level of ["seat", "full"] as const) expect(AGENT_SPHERE[level].r + (1.15 * AGENT_SPHERE[level].glyph) / 2).toBeLessThan(89);
   });
 
   test("its glyphs are the ladder's, by how near: the faint at the back, the dense at the front; now and then data", () => {
     expect(GLYPH_LADDER).toHaveLength(6);
     for (const level of GLYPH_LADDER) expect(level).toHaveLength(3);
     expect(DATA_GLYPHS).toBe("0123456789ABCDEF");
-    const seed = orbSeed("gareth");
+    const seed = orbSeed("max");
     for (let level = 0; level < 6; level++) {
       const seen = new Set<string>();
       for (let t = 0; t < 400; t += 0.7) {
@@ -92,7 +92,7 @@ describe("an orb's sphere of glyphs", () => {
   });
 
   test("seen at a moment: back to front, the nearer larger and more opaque, inside its radius; on paper, opaque further back", () => {
-    const sphere = orbSphere("gareth");
+    const sphere = orbSphere("max");
     const points = spherePoints(sphere, 72);
     const options = { angle: 123.4, radius: 72, scale: 1.02, glyph: 24, t: 31.5, mood: "idle" as const };
     const shown = sphereFrame(sphere, points, options);
@@ -134,13 +134,13 @@ describe("an orb's sphere of glyphs", () => {
     expect(lum(dark[0]!)).toBeLessThan(lum(dark[5]!));
   });
 
-  test("a knight's own arcs: one or two at a card's size and larger, none on a small face, each its handle's", () => {
-    const sphere = orbSphere("gareth");
-    expect(knightArcs(sphere, "badge")).toEqual([]);
-    const arcs = knightArcs(sphere, "seat");
+  test("an agent's own arcs: one or two at a card's size and larger, none on a small face, each its handle's", () => {
+    const sphere = orbSphere("max");
+    expect(agentArcs(sphere, "badge")).toEqual([]);
+    const arcs = agentArcs(sphere, "seat");
     expect(arcs.length).toBeGreaterThanOrEqual(1);
     expect(arcs.length).toBeLessThanOrEqual(2);
-    expect(knightArcs(sphere, "full")).toEqual(arcs);
+    expect(agentArcs(sphere, "full")).toEqual(arcs);
     for (const arc of arcs) {
       expect(arc.length).toBeGreaterThanOrEqual(50);
       expect(arc.length).toBeLessThan(180);
@@ -149,14 +149,14 @@ describe("an orb's sphere of glyphs", () => {
       expect([1, 2]).toContain(Math.abs(arc.speed));
       expect(arc.r + arc.width / 2).toBeLessThanOrEqual(100);
     }
-    const counts = new Set(Array.from({ length: 50 }, (_, n) => knightArcs(orbSphere(`k${n}`), "seat").length));
+    const counts = new Set(Array.from({ length: 50 }, (_, n) => agentArcs(orbSphere(`k${n}`), "seat").length));
     expect(counts).toEqual(new Set([1, 2]));
   });
 
-  test("a knight's arcs never jump: where its ring comes round to 0, each arc is where it would have been", () => {
+  test("an agent's arcs never jump: where its ring comes round to 0, each arc is where it would have been", () => {
     const at = (arc: { from: number; speed: number }, ring: number) => (((arc.from + arc.speed * ring) % 360) + 360) % 360;
     for (let n = 0; n < 200; n++) {
-      for (const arc of knightArcs(orbSphere(`knight-${n}`), "seat")) {
+      for (const arc of agentArcs(orbSphere(`agent-${n}`), "seat")) {
         // The ring at 359.9 degrees, then a tenth of a degree on (0 again): the arc moves by its speed's tenth, no more.
         const moved = Math.abs(at(arc, 0) - at(arc, 359.9));
         expect(Math.min(moved, 360 - moved)).toBeLessThanOrEqual(Math.abs(arc.speed) * 0.1 + 1e-9);
@@ -164,8 +164,8 @@ describe("an orb's sphere of glyphs", () => {
     }
   });
 
-  test("Galahad's data ring: about the share of its places lit, each a hex digit changing on a slow beat", () => {
-    const seed = orbSeed("galahad");
+  test("Your agent's data ring: about the share of its places lit, each a hex digit changing on a slow beat", () => {
+    const seed = orbSeed("primary");
     const lit = Array.from({ length: 480 }, (_, k) => dataGlyph(seed, k, 0, 0.62)).filter(Boolean).length / 480;
     expect(lit).toBeGreaterThan(0.5);
     expect(lit).toBeLessThan(0.74);

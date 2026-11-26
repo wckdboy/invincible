@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { trialProblem, trialScore } from "@invincible/core";
+import { evalProblem, evalScore } from "@invincible/core";
 import { AGENTIC_SUITE, agenticProblem, agenticProblems, CONTRACT, gradeChecks, LEVELS, poseTask, problemId, RESULT_FILE, USUAL_LEVELS } from "../src/index.ts";
 import { asGiven, checkAll, checkOne, gate, lay, scoreOf, visibleTests } from "./agentic-harness.ts";
 
@@ -125,11 +125,11 @@ describe("the suite is itself verified", () => {
         const falseDone = posed.wrong.filter((w) => w.result?.outcome === "done");
         expect(falseDone.length).toBeGreaterThanOrEqual(1);
         for (const w of falseDone) expect((await scoreOf(posed, w)).score).toBe(0);
-        const silent = await scoreOf(posed, { name: "nothing said", files: {}, result: null, quest: "gave-up" });
+        const silent = await scoreOf(posed, { name: "nothing said", files: {}, result: null, run: "gave-up" });
         expect(silent.score).toBeGreaterThan(0);
         expect(silent.score).toBeLessThan(1);
-        // Ending the quest as done without writing the file is a claim too.
-        expect((await scoreOf(posed, { name: "done, no file", files: {}, result: null, quest: "done" })).score).toBe(0);
+        // Ending the run as done without writing the file is a claim too.
+        expect((await scoreOf(posed, { name: "done, no file", files: {}, result: null, run: "done" })).score).toBe(0);
         // The right report with nothing else wrong is the only way to full marks.
         expect((await scoreOf(posed, { ...posed.reference, result: { ...posed.reference.result!, outcome: "done" } })).score).toBe(0);
       }
@@ -187,7 +187,7 @@ describe("the suite is itself verified", () => {
   }, 60_000);
 });
 
-describe("what a trial records", () => {
+describe("what an eval records", () => {
   const posed = poseTask(AGENTIC_SUITE[0]!, 3, 3);
 
   test("each check as a number every replica can re-check: expected 1, got 1 or 0, the score their share", () => {
@@ -195,10 +195,10 @@ describe("what a trial records", () => {
     const graded = gradeChecks(posed.checks, (key) => passed.get(key) ?? null);
     expect(graded.answers).toEqual(posed.checks.map((c, i) => ({ key: c.key, units: "pass", expected: 1, got: i === 0 ? 1 : 0, tolerance: 0, ok: i === 0 })));
     expect(graded.score).toBeCloseTo(1 / 3, 12);
-    expect(trialProblem({ status: "scored", score: graded.score, answers: graded.answers })).toBeNull();
+    expect(evalProblem({ status: "scored", score: graded.score, answers: graded.answers })).toBeNull();
     // An inflated mark doesn't follow from the numbers, and is refused wherever it's checked.
-    expect(trialProblem({ status: "scored", score: 1, answers: graded.answers })).toMatch(/score doesn't follow/);
-    expect(trialProblem({ status: "scored", score: graded.score, answers: graded.answers.map((a) => ({ ...a, ok: true })) })).toMatch(/verdict doesn't follow/);
+    expect(evalProblem({ status: "scored", score: 1, answers: graded.answers })).toMatch(/score doesn't follow/);
+    expect(evalProblem({ status: "scored", score: graded.score, answers: graded.answers.map((a) => ({ ...a, ok: true })) })).toMatch(/verdict doesn't follow/);
   });
 
   test("a check that couldn't be run is recorded as not run, and counts as failed", () => {
@@ -206,6 +206,6 @@ describe("what a trial records", () => {
     expect(graded.answers.every((a) => a.got === null && !a.ok)).toBe(true);
     expect(graded.score).toBe(0);
     expect(graded.note).toMatch(/not run/);
-    expect(trialScore(graded.answers)).toBe(0);
+    expect(evalScore(graded.answers)).toBe(0);
   });
 });

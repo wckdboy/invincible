@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { type ArtifactView, type AwayView, b64u, type LookView, type ChatStreamEvent, decodeInvite, encodeQr, type FleetView, type InvestigationView, qrToTerminal, type RouteName, routes, type SandboxView, type ScreenSessionView, type ScreenStatus, type ScreenView, type TeamOutcome, type SlackView, SLACK_APP_MANIFEST, type TelegramView, type TrialView, type QuestionView, plainLine, type LiveEvent } from "@invincible/core";
+import { type ArtifactView, type AwayView, b64u, type LookView, type ChatStreamEvent, decodeInvite, encodeQr, type FleetView, type InvestigationView, qrToTerminal, type RouteName, routes, type SandboxView, type ScreenSessionView, type ScreenStatus, type ScreenView, type TeamOutcome, type SlackView, SLACK_APP_MANIFEST, type TelegramView, type EvalView, type QuestionView, plainLine, type LiveEvent } from "@invincible/core";
 import { onPlan, planOf, sseData } from "@invincible/models";
 import { requestPairing, signedPost, type SyncPage, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
@@ -23,14 +23,14 @@ import { skillsCommand } from "./skills-cli.ts";
 import { ruleCommand } from "./rule-cli.ts";
 import { qampCommand } from "./qamp-cli.ts";
 import { computeCommand, parseEffort } from "./compute-cli.ts";
-import { checkGates, githubConnector, githubRepo, investigateFromCli, questFromCli, shipBranch } from "./quest-cli.ts";
-import { askCommand, questsCommand, queueCommand, queueLines, turnLine, turnsCommand } from "./turn-cli.ts";
+import { checkGates, githubConnector, githubRepo, investigateFromCli, runFromCli, shipBranch } from "./run-cli.ts";
+import { askCommand, runsCommand, queueCommand, queueLines, turnLine, turnsCommand } from "./turn-cli.ts";
 import { ABOUT_YOU_TAG, chatStateWords, checkFacts, type MemoryView, type ModelCheck, THINKING_EFFORTS } from "@invincible/core";
 import { ShipManifest } from "./ship.ts";
 import type { ConversationSummary, ConversationView, ProjectGitView, ProjectView, ProviderView, TeamChangesView } from "@invincible/core";
 import { runWithToken } from "./run-tool.ts";
 import { streamedError } from "./server.ts";
-import { priceCommand, trialCommand, usageCommand, UsageError } from "./trial-commands.ts";
+import { priceCommand, evalCommand, usageCommand, UsageError } from "./eval-commands.ts";
 import { doctorCommand, stoppedReport } from "./doctor-cli.ts";
 import { firewallCommand, systemFirewallDeps } from "./firewall-cli.ts";
 import { sandboxSetup, type SetupNode, setupWords, systemSetupDeps } from "./sandbox-setup.ts";
@@ -44,98 +44,98 @@ const HELP = `invincible (or inv) — one mind, many bodies
 
 Start here (invincible.sh's installer founds the fleet and keeps the node running where it can; otherwise: serve)
   key add                           a provider's key, typed into a hidden prompt: Anthropic's, OpenAI's, OpenRouter's,
-                                    DeepSeek's … his roles answer on it at once
-  ask "Good morning, Galahad."      a word with him
+                                    DeepSeek's … its roles answer on it at once
+  ask "Good morning, your agent."      a word with it
   invite --client                   pair your phone or browser (the app does the rest)
-  roundtable add <id> --name <name> a knight of your own, with a lasting job and a VM of its own
+  agents add <id> --name <name> an agent of your own, with a lasting job and a VM of its own
   doctor                            what's wrong here, and what to do about it
 
-The Roundtable (your knights beside Galahad, none beneath another: each with a lasting job, a room and verified work in a VM
-of its own; "roundtable" and "team" are the same command)
-  roundtable                        knights, rooms and tasks (those Galahad seated say so:
-                                    ask him in chat to seat and brief a knight)
-  roundtable add <id> --name <name> [--instructions text] [--role planner] [--agent native|opencode|hermes|claude|codex|acp]
+The agents (your agents beside your agent, none beneath another: each with a lasting job, a room and verified work in a VM
+of its own; "agents" and "team" are the same command)
+  agents                        agents, rooms and tasks (those your agent made say so:
+                                    ask it in chat to seat and brief an agent)
+  agents add <id> --name <name> [--instructions text] [--role planner] [--harness native|opencode|hermes|claude|codex|acp]
                                     [--acp "<command>"] [--repo https://github.com/owner/repo] [--limit daily-turns]
-                                    --agent acp runs any agent that speaks the Agent Client Protocol, started in its VM
+                                    --harness acp runs any agent that speaks the Agent Client Protocol, started in its VM
                                     by the command you name (--acp "goose acp", "gemini --acp", "opencode acp")
-  roundtable models <id> [provider/model…] [--role]
-                                    a knight's own models, in place of its role's: its conversations, its tasks' work
+  agents models <id> [provider/model…] [--role]
+                                    an agent's own models, in place of its role's: its conversations, its tasks' work
                                     and its harness run on them, in order (a local model on whichever node serves it);
                                     with none named, what it works on and what you may choose; --role gives it back
-  roundtable sensitive <id> [on [provider/model…] | off]
+  agents sensitive <id> [on [provider/model…] | off]
                                     sensitive mode: every call of its work (its plan, its review, its conversations,
                                     its coding tool) on its own models and nothing else, never a fallback; with no
                                     on/off, whether it is
-  roundtable dm <id> [message]       open/read a direct chat, or send a message
-  roundtable room <name> <member…>   create a shared room (--limit bounds its coordination chain)
-  roundtable chat <room> [message]   read a room, or send a message; work continues on the node
-  roundtable task <room> <assignee> <goal> [--after task-id,task-id] [--gate command] [--budget-usd 0.5]
+  agents dm <id> [message]       open/read a direct chat, or send a message
+  agents room <name> <member…>   create a shared room (--limit bounds its coordination chain)
+  agents chat <room> [message]   read a room, or send a message; work continues on the node
+  agents task <room> <assignee> <goal> [--after task-id,task-id] [--gate command] [--budget-usd 0.5]
                                     [--sensitive] [--models provider/model,…]: sensitive mode for this task alone,
-                                    on the models named, or with none named its knight's own
-  roundtable keys <id> [add <secret> [--header x-api-key] [--write] | rm <secret>]
+                                    on the models named, or with none named its agent's own
+  agents keys <id> [add <secret> [--header x-api-key] [--write] | rm <secret>]
                                     keys of yours it may use but never see: its scripts call $INVINCIBLE_KEYS/<secret>/…
                                     and the gateway puts the key in, at the key's pinned address alone (invincible secret
                                     set <secret> --base-url https://api.example.com); reads only unless --write
-  roundtable export <id> [--out file.md]
-                                    a knight as a file you carry: its job and how it works, never its memory or a key
-  roundtable import <file.md> [--id <new id>] [-y]
-                                    a knight file in as a new knight here, shown first; the keys it had, yours to give
-  roundtable steps <task-id>          the steps of a knight's task in a repository, each kept as it ended
-  roundtable again <task-id> [--from <step>] ["<goal>"]
+  agents export <id> [--out file.md]
+                                    an agent as a file you carry: its job and how it works, never its memory or a key
+  agents import <file.md> [--id <new id>] [-y]
+                                    an agent file in as a new agent here, shown first; the keys it had, yours to give
+  agents steps <task-id>          the steps of an agent's task in a repository, each kept as it ended
+  agents again <task-id> [--from <step>] ["<goal>"]
                                     give a task again (your stepping in, counted on it): from its start, or from
                                     one of its steps, its workspace as it stood then and what came after set aside
-  roundtable give "<goal>" [--gate command]... [--title text] [--desktop] [--repo url] [--budget-usd 0.5]
-                                    a task for the Roundtable: the knight best suited to it takes it (free, its work
+  agents give "<goal>" [--gate command]... [--title text] [--desktop] [--repo url] [--budget-usd 0.5]
+                                    a task for the agents: the agent best suited to it takes it (free, its work
                                     verified before, its job about this, a desktop or the repository it needs) and
                                     says why; the others' standing is shown beneath
-  outcome [ls]                     outcomes Galahad owns: each one's room, budget and spend, tasks and plan
-  outcome add "<title>" --goal "…" --knight <id>… --budget-usd 20 [--done "…"] [--report-hour 9] [--tz Zone]
-                                    he owns it for days or weeks: plans it in its own room, gives those knights
-                                    tasks on his own within its budget, reports daily, asks you there
+  outcome [ls]                     outcomes your agent owns: each one's room, budget and spend, tasks and plan
+  outcome add "<title>" --goal "…" --agent <id>… --budget-usd 20 [--done "…"] [--report-hour 9] [--tz Zone]
+                                    it owns it for days or weeks: plans it in its own room, gives those agents
+                                    tasks on its own within its budget, reports daily, asks you there
   outcome pause|resume|stop <id>   stopping it stops its waiting work
   outcome budget <id> <usd|+usd>   its budget: a new total, or +usd on top; one that had spent what it may goes on
-  roundtable files <knight> [/work/path]  a folder of its workspace (its VM's /work; galahad: his computer's)
-  roundtable read <knight> </work/path>  one file of it (anything like a key redacted)
-  roundtable changes <knight> [--task <id>] [--files]  what its latest task (or that one) changed: files, then the diff
-  roundtable trail <task-id> [--follow]  what a task did, as it happened: its plan, each command and what it printed,
+  agents files <agent> [/work/path]  a folder of its workspace (its VM's /work; primary: its computer's)
+  agents read <agent> </work/path>  one file of it (anything like a key redacted)
+  agents changes <agent> [--task <id>] [--files]  what its latest task (or that one) changed: files, then the diff
+  agents trail <task-id> [--follow]  what a task did, as it happened: its plan, each command and what it printed,
                                     the gates, the review; --follow keeps reading until the task has ended
-  roundtable provision <id> [--on node] [--cpus 1 --mem 2 --disk 20] [--network online|gateway] [--desktop]
+  agents provision <id> [--on node] [--cpus 1 --mem 2 --disk 20] [--network online|gateway] [--desktop]
                                     its VM: online (the default) it can reach the internet, gateway only the models;
                                     --desktop: with a display, a window manager and a browser, for work that needs a
                                     screen (at least 4 GB; in the VM, desktop help lists what operates it)
-  roundtable provision <id> --remake [--network online|gateway] [--desktop|--no-desktop]
+  agents provision <id> --remake [--network online|gateway] [--desktop|--no-desktop]
                                     its VM made again from the image as it is now (a fix to the image, a newer tool):
                                     the same VM and everything in /work, a new container; not while it is working.
                                     --desktop gives a VM that has none a desktop; --no-desktop takes it away
-  roundtable provision galahad       his own computer: made, made again and given more as a knight's VM is
-  roundtable resize <id> [--cpus 4] [--mem 8] [--disk 40]
+  agents provision primary       its own computer: made, made again and given more as an agent's VM is
+  agents resize <id> [--cpus 4] [--mem 8] [--disk 40]
                                     more threads, memory or disk for its VM while it runs, nothing stopped and
                                     its work kept; never less (a smaller size takes effect when it is made again).
                                     On a Mac a VM pauses to take more threads or memory, and its disk can't grow
-  roundtable memory <id> [text]      read or replace that knight's notes
-  roundtable engram [on|off]         the VMs' notes store (Engram): say whether it is on, or turn it on or off.
-                                    On (the default), a knight's harness can search and keep notes in its own
+  agents memory <id> [text]      read or replace that agent's notes
+  agents engram [on|off]         the VMs' notes store (Engram): say whether it is on, or turn it on or off.
+                                    On (the default), an agent's harness can search and keep notes in its own
                                     VM, where the VM's image has the pinned Engram; off, nothing is given
-  roundtable ci [on|off]             failing checks, or a review asking for changes, on a pull request of a knight's
-                                    work: say whether they go back to that knight, or turn it on or off. On, it gets
+  agents ci [on|off]             failing checks, or a review asking for changes, on a pull request of an agent's
+                                    work: say whether they go back to that agent, or turn it on or off. On, it gets
                                     the fix on that branch (once a failing commit or review, three at most), whose
-                                    push Galahad approves in a repository you gave the knight; off (the default), they
+                                    push your agent approves in a repository you gave the agent; off (the default), they
                                     are yours, though an outcome gives its own back within its budget
-  roundtable backlog [on|off]        work for idle knights: one with a repository and nothing to do is given the next
-                                    step of its repository's plan, a task a day at most, on Galahad's own yes within its
-                                    budget ($3 at most); one that may spend more than is left of your budget (galahad
-                                    usage budget) waits for you (invincible roundtable approve <task>); on until you turn it off
-  roundtable avatar <id> [--color #rrggbb | --reset]
-                                    a knight is an orb: choose its colour, or let it go back to the one its
+  agents backlog [on|off]        work for idle agents: one with a repository and nothing to do is given the next
+                                    step of its repository's plan, a task a day at most, on your agent's own yes within its
+                                    budget ($3 at most); one that may spend more than is left of your budget (primary
+                                    usage budget) waits for you (invincible agents approve <task>); on until you turn it off
+  agents avatar <id> [--color #rrggbb | --reset]
+                                    an agent is an orb: choose its colour, or let it go back to the one its
                                     handle gives it; with neither, its orb's colours are printed
-  roundtable pause|resume|stop <room|knight|task> <id>
-  roundtable remove <id> [--destroy-workspace] [--yes]
-                                    remove a knight for good: it leaves its rooms and does no more work; what it
+  agents pause|resume|stop <room|agent|task> <id>
+  agents remove <id> [--destroy-workspace] [--yes]
+                                    remove an agent for good: it leaves its rooms and does no more work; what it
                                     said stays to read, and its handle is never used again. One with a VM is removed
                                     only with --destroy-workspace, which destroys that VM and everything in /work
 
 Set up
-  init [--name laptop] [--fleet camelot] [--port 7400]     found a fleet on this machine
+  init [--name laptop] [--fleet homelab] [--port 7400]     found a fleet on this machine
   join <invite> [--name server] [--port 7400]              join a fleet with an invite
   serve                                                    run this node (daemon)
   expose [--https 443]                                     publish the PWA over HTTPS on your tailnet (tailscale serve)
@@ -147,22 +147,22 @@ Set up
   status                                                   fleet, peers, capabilities
   live                                                     what your devices are told as it changes: which of what they
                                                            show changed (their live stream), until Ctrl-C
-  away [--since 6h]                                        while you were away: tasks that ended, his outcomes' questions,
+  away [--since 6h]                                        while you were away: tasks that ended, its outcomes' questions,
                                                            loops that failed, what waits on you (default: the last day)
-  looks [cancel <id>]                                      what he set himself to look at again later, in your chats
+  looks [cancel <id>]                                      what it set itself to look at again later, in your chats
 
 Mind
   remember <text> [--tag t]      recall [query]
-  about [add <fact> | keep <id> [--text …] | rm <id>]   what he knows of you: kept facts go with every answer
-  search "<words>" [--page 2]    search the web through Galahad's own SearXNG (also: websearch, in sandboxes)
+  about [add <fact> | keep <id> [--text …] | rm <id>]   what it knows of you: kept facts go with every answer
+  search "<words>" [--page 2]    search the web through your agent's own SearXNG (also: websearch, in sandboxes)
   decide "<state>" --question "…" [--options a,b,c | --levels low,mid,high]
                                   a typed decision from the decider role (TypeSafe's Jev): yes/no, a choice, a score
 
 Chat apps
-  telegram                        whether a bot of yours talks to Galahad through this node, and which account it answers
+  telegram                        whether a bot of yours talks to your agent through this node, and which account it answers
   telegram connect                link a bot (its token from @BotFather, hidden); send it the code from your own account
   telegram disconnect             its device revoked, its token deleted; its chats stay yours
-  slack                           whether an app of yours talks to Galahad through this node, and which account it answers
+  slack                           whether an app of yours talks to your agent through this node, and which account it answers
   slack manifest                  the app to make at api.slack.com/apps (From a manifest): Socket Mode, your DMs alone
   slack connect                   link it (its two tokens, hidden); send it the code in a DM from your own account
   slack disconnect                its device revoked, its tokens deleted; its chats stay yours
@@ -172,7 +172,7 @@ Keys & models (keys are typed into a hidden prompt — never into chat, never on
                                   the provider is auto-detected when the key's form says whose it is
   secret set <name> | secret list | secret rm <name> | vault rotate
   secret request <name> --reason "…"   ask for a credential; fill it later from any device
-  secret dismiss <name>           dismiss a request: out of the Inbox until he asks for it again
+  secret dismiss <name>           dismiss a request: out of the Inbox until it asks for it again
   run [--providers a,b] -- <cmd>  run a tool (opencode, claude, codex…) on a scoped gateway token
   provider add <id> [--preset p] [--base-url url] [--kind openai|anthropic] [--secret name]
   provider list | provider models <id> | provider presets
@@ -183,35 +183,35 @@ Keys & models (keys are typed into a hidden prompt — never into chat, never on
   ask [--role planner] [--model provider/model] [--project id] [--chat id] [--temp] [--detach] <prompt>
                                   kept in your chat history (the app's too) unless --temp; --chat goes on with one.
                                   The turn runs on the node: Ctrl-C stops it; a terminal that goes away stops
-                                  nothing; --detach starts it and leaves him to it (the answer is in the chat)
+                                  nothing; --detach starts it and leaves it to it (the answer is in the chat)
   ask --attach <file> [--attach <file>]... [<prompt>]
                                   files with your message: pictures (PNG, JPEG, WebP, GIF; a model that sees is shown
-                                  them, another told they're there) and text (a log, code: given to him as data)
-  ask --chat <id> --steer <msg>   he's working in that chat: tell him now (it reaches him at his next safe point)
-  ask --chat <id> --queue <msg>   … or keep it on the node, to send as the next turn when he's done
+                                  them, another told they're there) and text (a log, code: given to it as data)
+  ask --chat <id> --steer <msg>   it's working in that chat: tell it now (it reaches it at its next safe point)
+  ask --chat <id> --queue <msg>   … or keep it on the node, to send as the next turn when it's done
   ask --chat <id> --aside <question> [--bring]
-                                  a side question about that chat: answered apart, without his tools, added to
-                                  nothing; --bring hands it to him after all
+                                  a side question about that chat: answered apart, without its tools, added to
+                                  nothing; --bring hands it to it after all
   turns | turn watch <turn|chat> | turn stop <turn|chat>
-                                  the turns he's working on now (what each has cost, who's watching, when it
+                                  the turns it's working on now (what each has cost, who's watching, when it
                                   stops by itself); watch one from its start; stop one
   queue <chat> [add "<msg>" | edit <n> "<msg>" | rm <n|all> | send <n> | resume]
                                   your messages queued behind a chat; after a stop, a failure or a restart
                                   they're held until you resume
-  quests [--all]                  the quests in hand on this node: plan, the step he's on, each gate's last result
+  runs [--all]                  the runs in hand on this node: plan, the step it's on, each gate's last result
   chats [--project id] | chat <id> | chat rm <id>
   skills [--all] | skills show <id> | skills approve <id> [-y]
-                                  his skills: how he did work that passed review, kept as notes he's given again
+                                  its skills: how it did work that passed review, kept as notes it's given again
                                   (data, never run). One that read the outside world waits for your approval
   skills lock|unlock|retire|restore <id> | skills rollback <id> [-y]
-                                  locked: he uses it, never changes it; retired: kept, never offered; one version back
+                                  locked: it uses it, never changes it; retired: kept, never offered; one version back
   skills write [<id>] --title "…" --when "…" --step "…" [--proof "cmd => expect"] [--pitfall "…"] | --file skill.json
-                                  write one yourself, or a new version of one (yours: he never edits them)
+                                  write one yourself, or a new version of one (yours: it never edits them)
   skills import <github folder>   an Agent Skill's SKILL.md taken in as text (nothing in its folder runs), waiting for you
-  skills budget [<tokens a day>]  what he may spend a day distilling skills from passed quests (0: off)
+  skills budget [<tokens a day>]  what it may spend a day distilling skills from passed runs (0: off)
   projects | project set <id> --name "…" [--instructions "…" | --instructions-file f] [--repo url] | project rm <id>
   project git|changes|clone <id> · project branch <id> <name> [--new] · project commit <id> --message "…"
-                                  a project's checkout on his computer, as the Mac's Build view has it: its branch and
+                                  a project's checkout on its computer, as the Mac's Build view has it: its branch and
                                   commits, what changed, its first clone, a branch to switch to or start, a commit
   token mint --label opencode [--providers deepseek,anthropic] [--ttl 60] [--max 1000]
 
@@ -220,37 +220,37 @@ Work
                                   the scientific method: hypothesis and predictions registered before anything
                                   runs, a verified experiment in the Lab, an independent method review
   findings | finding <id>         what investigations concluded (supported, refuted, inconclusive) and why
-  trial run [problem|domain …] [--suite engineering|agentic|reviewer|yours] [--level 1..4] [--hardest 5] [--repeat 1]
+  eval run [problem|domain …] [--suite engineering|agentic|reviewer|yours] [--level 1..4] [--hardest 5] [--repeat 1]
             [--parallel auto|n] [--effort 1|2|3] [--seed n] [--net …] [--vm|--container]
-                                  the Trials: problems posed from a seed, worked as quests, graded by a program: the
-                                  Galahad Index. engineering: exact answers, in the Lab. agentic: real work in a small
+                                  the Evals: problems posed from a seed, worked as runs, graded by a program: the
+                                  Eval Index. engineering: exact answers, in the Lab. agentic: real work in a small
                                   repository, graded by hidden tests in a fresh sandbox (--level turns the difficulty).
-                                  reviewer: a quest's evidence with a known answer, put to the reviewer. yours: your
-                                  knights' tasks that passed review, worked again from the commit each began at and
-                                  graded by its own gates; named by task id or knight, else the --hardest 5. --effort
-                                  makes that many attempts a trial (the reviewer takes one before anything is graded)
+                                  reviewer: a run's evidence with a known answer, put to the reviewer. yours: your
+                                  agents' tasks that passed review, worked again from the commit each began at and
+                                  graded by its own gates; named by task id or agent, else the --hardest 5. --effort
+                                  makes that many attempts an eval (the reviewer takes one before anything is graded)
      … --pin <role>=<provider/model> [--pin …] --variant <name[:switch=value,…]> --budget 2M --budget-usd 5
                                   hold a role to one model; run under a named set of harness switches; stop cleanly
                                   when the budget is spent (it says first what past runs of these problems cost)
-  trial sweep <planner|engineer|reviewer> <provider/model> [<provider/model> …] [--suite s] [--only problem,…]
+  eval sweep <planner|engineer|reviewer> <provider/model> [<provider/model> …] [--suite s] [--only problem,…]
                                   the same seeded tasks once per candidate, that role held to it: which model is best
                                   in the role, which is best for its cost, and how sure that is
-  trial ab <variant> <variant> [problem …] [--suite s]
+  eval ab <variant> <variant> [problem …] [--suite s]
                                   the same seeded tasks under two variants of the harness: measurably helps, measurably
-                                  hurts, or no measurable difference, with what each cost (trial variants lists them)
-  trial compare <run> <run>       two recorded runs, the second against the first, by the same rule
-  trial estimate [problem …] [--suite s] [--repeat n] [--effort n]   what such a run would cost, going by past runs
-  trials [--suite s] [--all] | trial <id|run> | trial problems [--suite s] [--level n] | trial variants
+                                  hurts, or no measurable difference, with what each cost (eval variants lists them)
+  eval compare <run> <run>       two recorded runs, the second against the first, by the same rule
+  eval estimate [problem …] [--suite s] [--repeat n] [--effort n]   what such a run would cost, going by past runs
+  evals [--suite s] [--all] | eval <id|run> | eval problems [--suite s] [--level n] | eval variants
                                   the Index per run with what it cost (tokens, time, money, and the quality each
                                   bought), per effort, per model in each role, per variant; each answer or hidden check;
-                                  trial problems --suite yours: your cases, with what each took when it was done
+                                  eval problems --suite yours: your cases, with what each took when it was done
   price | price set <provider/model | provider/*> <$/M in> <$/M out> [--cached x] | price rm <provider/model>
                                   your prices, per million tokens: tokens are always counted, money only where
                                   you've stated a price
   usage [--days 30]               this node's model calls: tokens by model, role, who asked and day, and the meter
   usage budget <usd|off> [--per day|month]  your budget for them, a line to watch (a month's unless --per day)
   do "<goal>" [--net isolated|gateway|online] [--on ultra] [--steps 30] [--timeout 300] [--keep] [--effort auto|1|2|3]
-                                  a quest: plan → work in a fresh sandbox → independent review → remembered.
+                                  a run: plan → work in a fresh sandbox → independent review → remembered.
                                   --effort spends more compute for a better answer: that many attempts at once,
                                   each in its own sandbox and reviewed, the best taken by the independent
                                   reviewer on the evidence alone (auto: what the free slots and the budget allow)
@@ -260,19 +260,19 @@ Work
                                   attempt's together: past four fifths the work is told to wrap up, and once
                                   it is spent the work stops
      … --gate "<command>" [--gate …] [--no-planner-gates]
-                                  done means this passes: each gate runs in the quest's sandbox when the
+                                  done means this passes: each gate runs in the run's sandbox when the
                                   engineer says DONE, and every one must exit 0 before the reviewer is asked
                                   (a failing gate sends the work back; one that never passes: never done).
                                   The planner may add gates of its own, marked as its proposal; yours stay
                                   exactly as given (--no-planner-gates: yours only)
-  do --agent opencode "<goal>" [--minutes 60] [--repo https://…] [--net gateway|online]
+  do --harness opencode "<goal>" [--minutes 60] [--repo https://…] [--net gateway|online]
                                   the same, with a full coding agent doing the work for up to --minutes
                                   (models through the gateway; --repo clones first and keeps a patch:
                                   GitHub repositories, private ones too, through the read-only git gateway)
      … --repo https://github.com/o/r --ship [--title …] [--base main] [--draft]
                                   once the reviewer passes it, ask you to open a pull request (Inbox)
   ship <artifact> --title "…" [--body …] [--base main] [--branch invincible/…] [--draft] [--ask] [-y]
-                                  open a pull request from a quest's kept changes (the node commits them on
+                                  open a pull request from a run's kept changes (the node commits them on
                                   a new branch with the connector's key; the sandbox never holds it)
   place [--docker] [--vm] [--gpu] [--mem 16] [--tools git,opencode] [--long] [--untrusted] [--interactive]
   sandbox run [--on ultra] [--net gateway|online|isolated] [--cpus 4] [--mem 8] [--disk 20] [--ttl 120] [--vm|--container] [--lab|--desktop]
@@ -280,28 +280,28 @@ Work
   sandbox ls [--on ultra] | sandbox exec <id> [--on ultra] -- <command…> | sandbox rm <id> [--on ultra]
   sandbox save <id> [/work/dir] [--label …]   keep a sandbox's work (default /work/out) after it's gone
   sandbox build [--on ultra] [--lab|--desktop]
-                                  build the sandbox image (or the Lab, or the knights' desktop) on a host
+                                  build the sandbox image (or the Lab, or the agents' desktop) on a host
   sandbox setup [status] [--json]
-                                  a Mac given its knights' VMs: Apple's container (its signed installer, checked, when
+                                  a Mac given its agents' VMs: Apple's container (its signed installer, checked, when
                                   it has none), its service and kernel, the sandbox firewall, the node restarted to host
                                   VMs, the image, and a VM made to be sure. It asks for your password once, and leaves
                                   what holds as it is. status changes nothing: it says what holds and what doesn't
-  terminal <knight|sandbox>       a shell in that knight's VM (or that sandbox) on a real terminal: what a vendor's
+  terminal <agent|sandbox>       a shell in that agent's VM (or that sandbox) on a real terminal: what a vendor's
                                   sign-in or a coding tool's screen needs. Ctrl-] leaves and closes it; so does exit
   terminal ls | terminal attach <terminal> | terminal close <terminal>
                                   the terminals open on this node (one opened in the app can be taken up here, and
                                   leaving it leaves it open)
-  artifacts | artifact <id> [file] [--out dir]   what quests and sandboxes kept; print a file or save them all
-  ledger [--limit 30]             what Galahad did, and the oath's verdict on each action
+  artifacts | artifact <id> [file] [--out dir]   what runs and sandboxes kept; print a file or save them all
+  ledger [--limit 30]             what your agent did, and the policy's verdict on each action
 
-Compute (he uses the machines you enrolled, within a ceiling you set; he never acquires any)
+Compute (it uses the machines you enrolled, within a ceiling you set; it never acquires any)
   compute                         the census: what each node measured, its ceiling, slots in use and waiting,
-                                  his plan, the day's budget, and what more compute would buy
+                                  its plan, the day's budget, and what more compute would buy
   compute calibrate [node]        a node measures itself now (a few seconds, low priority, within its ceiling)
   compute limit <node> [--cores n] [--mem gb] [--sandboxes n] [--model-calls n] [--reset]
-                                  the ceiling: what he may use of that machine (default: half of it)
+                                  the ceiling: what it may use of that machine (default: half of it)
   compute effort [auto|1|2|3] [--budget n]
-                                  how much he spends on a quest by himself, and the day's budget of extra attempts
+                                  how much it spends on a run by itself, and the day's budget of extra attempts
 
 Archive (this node's: everything kept for good, searched by words and meaning)
   archive                         entries, passages embedded, the backlog, the embedder, the last integrity check, disk
@@ -318,7 +318,7 @@ Loops (work on a schedule or when something happens, on one node; every run is r
   loop add <name> (--every 30m | --cron "0 7 * * 1-5" | --at "2026-11-25 09:00" | --in 2h) [--tz Europe/Copenhagen]
        [--on ultra] [--label text]   --at and --in run it once (your terminal's zone unless --tz), then never again
        --heartbeat [--checklist "…"]                    look around; notices in your inbox
-     | --quest "<goal>" [--net isolated|gateway|online] [--steps 20] [--gate "<command>" …]
+     | --run "<goal>" [--net isolated|gateway|online] [--steps 20] [--gate "<command>" …]
      | --call <connector>.<tool> [--arg key=value …]   outward tools file an approval instead
      | --tell [--say "…"]                              tell you: a notice each run, your loop's name on your phone
        [--wake …]… [--cooldown 10m]    what else wakes it (no schedule: only that), as data, never orders:
@@ -327,19 +327,19 @@ Loops (work on a schedule or when something happens, on one node; every run is r
          --wake "github <owner>/<repo> [ci.failed,pushed,issue.opened,pr.opened] [branch]"
                                         a failed CI run (the default), a push, a new issue or pull request
   loop set <name> [same options]  change a loop (what you leave out stays), e.g. loop set heartbeat --every 1h; --no-wakes
-  loop drafts                     loops Galahad drafted when you asked for one in chat (they run nothing until added)
-  loop add --draft <id> [--on n]  add a draft as he drafted it · loop dismiss <id>: drop it
+  loop drafts                     loops your agent drafted when you asked for one in chat (they run nothing until added)
+  loop add --draft <id> [--on n]  add a draft as it drafted it · loop dismiss <id>: drop it
   heartbeat                       run the heartbeat's checks now and print what they find
-  self-action [on|off]            whether he fixes what's safe himself after each heartbeat (on by default):
-                                  the allowlist, and what he fixed lately
+  self-action [on|off]            whether it fixes what's safe itself after each heartbeat (on by default):
+                                  the allowlist, and what it fixed lately
   notices [--all] | notice dismiss <key>
 
-Notifications (he comes to you: Web Push to your own paired devices, encrypted to each browser)
-  notify                          the devices he can reach, what he tells you, quiet hours, the day's limit, and
+Notifications (it comes to you: Web Push to your own paired devices, encrypted to each browser)
+  notify                          the devices it can reach, what it tells you, quiet hours, the day's limit, and
                                   what was sent today. A device is turned on from that device: the app's
                                   Settings → Notifications (on an iPhone, from the Home Screen app)
   notify test [device]            one test notification, to every device or the one named
-  notify kinds [<kind> on|off …]  what he tells you: needs-you, approval, finished, question, told (all on)
+  notify kinds [<kind> on|off …]  what it tells you: needs-you, approval, finished, question, told (all on)
   notify quiet [on|off|HH:MM-HH:MM] [--tz Europe/Copenhagen]
                                   quiet hours (22:00-07:00, the node's own time zone until you give one): everything but an alert waits,
                                   then one message says what waited
@@ -357,7 +357,7 @@ Connectors (manifests, not code: keys stay in the vault; outward and delete ask 
   connector refresh <id> [--class tool=class …]   list an MCP server's tools again (your classes stay)
   connector call <id>.<tool> [--arg key=value …] [--why "…"]
   connector requests | connector dismiss <id>      what an agent asked you to connect (it never installs one)
-  connector allow|disallow <id> <agent>           let an agent use a connector that's Galahad's alone (mail), or stop it
+  connector allow|disallow <id> <agent>           let an agent use a connector that's your agent's alone (mail), or stop it
   connector app <id> --client-id <id>             a connector that signs in (Gmail, Outlook): the app you registered
   connector signin <id> [--redirect <url>]        sign in as you (Google returns to <your app>/oauth/callback) · connector signout <id>
   secret set <name> --connector <id>                    a connector's key, pinned to its origin
@@ -373,30 +373,30 @@ Standing orders (your answer in advance: one tool, narrow arguments, an expiry)
   order add --from <action-id> [--arg key=pattern] [--free key]   approve it, and answer alike next time
                                   * matches anything; deletes are pinned exactly; at most a year
 
-Tripwires and checks (your rules on the commands his work runs: data, never a model's judgment)
+Tripwires and checks (your rules on the commands its work runs: data, never a model's judgment)
   rule ls | rule rm <name>
   rule add <name> --halt|--refuse <glob>… [--contains text]
                                   a command with a word that matches a glob (and that holds the text) halts the work, or
-                                  isn't run and he is told why: * any run but /, ** any run, ? one character ('*.lock',
-                                  '.env*', 'migrations/**', rm). Checked before every command of his quests and of a
-                                  knight's task on his own runner, and every gate; a coding tool's own commands in its
+                                  isn't run and it is told why: * any run but /, ** any run, ? one character ('*.lock',
+                                  '.env*', 'migrations/**', rm). Checked before every command of its runs and of a
+                                  agent's task on its own runner, and every gate; a coding tool's own commands in its
                                   VM aren't seen. Quote globs; one that begins with - goes after --
                                   (rule add no-force --refuse -- --force)
   rule add <name> --check "<command>" <glob>… [--contains text]
-                                  after a command that matches has run and exited 0, your command runs where his work
-                                  runs, and he is told at once if it fails (rule add types --check "bunx tsc --noEmit" '*.ts')
+                                  after a command that matches has run and exited 0, your command runs where its work
+                                  runs, and it is told at once if it fails (rule add types --check "bunx tsc --noEmit" '*.ts')
   rule add <name> --tell <glob>… [--contains text]
                                   after a command that matches has run, however it ended, you are told: a notice in your
                                   Inbox and a notification, once for each task (rule add pushes --tell git --contains push)
 
 Agents (MCP, ACP)
   mcp install claude|opencode|codex|hermes [--label name] [--apply]
-                                  give a coding agent Galahad's mind and sandboxes (least privilege)
+                                  give a coding agent your agent's memory and sandboxes (least privilege)
   mcp --arm <label> [--tools a,b] the MCP server itself (stdio; started by the agent, not by you); --tools: those
                                   tools alone, of what the arm may use
-  acp install [--label name]      a credential for an ACP client that may only chat (nothing of yours in his answers
+  acp install [--label name]      a credential for an ACP client that may only chat (nothing of yours in its answers
                                   there), and the command the client runs
-  acp --arm <label>               Galahad himself as an ACP agent (stdio; started by the client, not by you)
+  acp --arm <label>               your agent itself as an ACP agent (stdio; started by the client, not by you)
   arms | arms revoke <label>      list or revoke agent credentials
   qamp grant <did:key:z6Mk…> [--tools fleet,compute,place,ledger] [--ttl 1h]
                                   an agent on another of your machines (one that runs no node: Claude Code on a laptop)
@@ -409,11 +409,11 @@ Maintenance
   awake on|off|status             a Mac set to stay on (a Mac mini serving the fleet) is kept from sleeping while its
                                   node runs, and counts as always on (no battery); a laptop on its battery never is
   screen [status|allow|look] [--on <node>] [--out shot.jpg]
-                                  a Mac's own screen, for Galahad (a Mac whose node runs from the Galahad app): its
-                                  size and what macOS lets him do with it; allow shows macOS's prompts on that Mac
+                                  a Mac's own screen, for your agent (a Mac whose node runs from the Invincible app): its
+                                  size and what macOS lets it do with it; allow shows macOS's prompts on that Mac
                                   (you turn both on there, once); look saves a picture of it
   screen sessions | screen approve|deny|end <session>
-                                  his asks to use a Mac itself (each asks you first, for so many minutes from your
+                                  its asks to use a Mac itself (each asks you first, for so many minutes from your
                                   answer): where each stands, your answer, and ending one sooner
   firewall [status|rules|install|remove]
                                   a Mac's sandbox firewall (pf, from a helper of root's): a gateway sandbox reaches
@@ -560,12 +560,12 @@ async function main(): Promise<void> {
       label: { type: "string" },
       role: { type: "string" },
       model: { type: "string" },
-      // (Sensitive mode for a task alone: its knight's own models, or those named with --models.)
+      // (Sensitive mode for a task alone: its agent's own models, or those named with --models.)
       sensitive: { type: "boolean" },
       models: { type: "string" },
-      // (The command that starts a knight's ACP agent: roundtable add --agent acp --acp "goose acp".)
+      // (The command that starts an agent's ACP agent: agents add --harness acp --acp "goose acp".)
       acp: { type: "string" },
-      // (A key a knight may use but never see: roundtable keys <knight> add <secret> [--header x-api-key] [--write].)
+      // (A key an agent may use but never see: agents keys <agent> add <secret> [--header x-api-key] [--write].)
       header: { type: "string" },
       write: { type: "boolean" },
       tag: { type: "string", multiple: true },
@@ -592,7 +592,7 @@ async function main(): Promise<void> {
       "no-qr": { type: "boolean" },
       on: { type: "string" },
       net: { type: "string" },
-      // (A knight's VM: `roundtable provision <id> --network gateway`. Undeclared, it was read as a switch and its VM made online.)
+      // (An agent's VM: `agents provision <id> --network gateway`. Undeclared, it was read as a switch and its VM made online.)
       network: { type: "string" },
       cpus: { type: "string" },
       image: { type: "string" },
@@ -613,16 +613,16 @@ async function main(): Promise<void> {
       cooldown: { type: "string" },
       // A loop that tells you: --tell, with your words --say "…".
       say: { type: "string" },
-      // An outcome he owns: outcome add "<title>" --goal "…" --knight id… --budget-usd 20 [--done "…"] [--report-hour 9].
+      // An outcome it owns: outcome add "<title>" --goal "…" --agent id… --budget-usd 20 [--done "…"] [--report-hour 9].
       goal: { type: "string" },
       done: { type: "string" },
-      knight: { type: "string", multiple: true },
+      agent: { type: "string", multiple: true },
       "report-hour": { type: "string" },
       tz: { type: "string" },
       heartbeat: { type: "boolean" },
       checklist: { type: "string" },
       budget: { type: "string" },
-      quest: { type: "string" },
+      run: { type: "string" },
       call: { type: "string" },
       arg: { type: "string", multiple: true },
       edit: { type: "string", multiple: true },
@@ -643,10 +643,10 @@ async function main(): Promise<void> {
       repeat: { type: "string" },
       parallel: { type: "string" },
       seed: { type: "string" },
-      // The Trials: `trial run --suite agentic --level 3 --pin engineer=p/m --variant no-gates --budget 2M --budget-usd 5`; `price set … --cached 0.3`.
+      // The Evals: `eval run --suite agentic --level 3 --pin engineer=p/m --variant no-gates --budget 2M --budget-usd 5`; `price set … --cached 0.3`.
       suite: { type: "string" },
       level: { type: "string" },
-      // `trial run --suite yours --hardest 8`: how many of your own cases a run takes, hardest first.
+      // `eval run --suite yours --hardest 8`: how many of your own cases a run takes, hardest first.
       hardest: { type: "string" },
       pin: { type: "string", multiple: true },
       variant: { type: "string" },
@@ -662,7 +662,7 @@ async function main(): Promise<void> {
       aspsp: { type: "string" },
       options: { type: "string" },
       levels: { type: "string" },
-      agent: { type: "string" },
+      harness: { type: "string" },
       minutes: { type: "string" },
       repo: { type: "string" },
       ship: { type: "boolean" },
@@ -688,11 +688,11 @@ async function main(): Promise<void> {
       check: { type: "string" },
       tell: { type: "boolean" },
       contains: { type: "string" },
-      // Quests: gates ("done means this command passes").
+      // Runs: gates ("done means this command passes").
       gate: { type: "string", multiple: true },
       "no-planner-gates": { type: "boolean" },
       fenced: { type: "boolean" },
-      // Turns the node owns: what `ask` does while he's working in a chat, and leaving him to it.
+      // Turns the node owns: what `ask` does while it's working in a chat, and leaving it to it.
       steer: { type: "boolean" },
       queue: { type: "boolean" },
       aside: { type: "boolean" },
@@ -709,7 +709,7 @@ async function main(): Promise<void> {
       follow: { type: "boolean" },
       // usage budget <usd> [--per day|month]
       per: { type: "string" },
-      // roundtable changes <knight> [--task <id>] [--files]: a task of its by name, and the files without the diff.
+      // agents changes <agent> [--task <id>] [--files]: a task of its by name, and the files without the diff.
       task: { type: "string" },
       files: { type: "boolean" },
       // project commit <id> --message "…" · project branch <id> <name> [--new]
@@ -723,7 +723,7 @@ async function main(): Promise<void> {
       until: { type: "string" },
       text: { type: "string" },
       summaries: { type: "boolean" },
-      // His skills: `skills write --title … --when … --step … --proof "cmd => expect" --pitfall … | --file skill.json`.
+      // Its skills: `skills write --title … --when … --step … --proof "cmd => expect" --pitfall … | --file skill.json`.
       when: { type: "string" },
       step: { type: "string", multiple: true },
       proof: { type: "string", multiple: true },
@@ -758,7 +758,7 @@ async function main(): Promise<void> {
       const keystorePref = (str("keystore") ?? loadEnv().INVINCIBLE_KEYSTORE ?? "os") as "os" | "file";
       const { identity, keystore } = await home.createIdentity(keystorePref);
       const store = new LedgerStore(home.ledgerPath);
-      const fleet = foundFleet(store, identity, { fleetName: str("fleet") ?? "camelot", nodeName });
+      const fleet = foundFleet(store, identity, { fleetName: str("fleet") ?? "homelab", nodeName });
       store.close();
       home.writeConfig({ v: 1, name: nodeName, fleet, port: Number(str("port") ?? 7400), keystore, advertise: str("advertise") ?? null });
       home.adminToken();
@@ -900,7 +900,7 @@ Next:
     }
     case "approve":
     case "reject": {
-      if (!sub || !rest[0]) fail(`usage: galahad ${command} <invite> <device>`);
+      if (!sub || !rest[0]) fail(`usage: invincible ${command} <invite> <device>`);
       await new Admin(home).call(command === "approve" ? "approvePairing" : "rejectPairing", { invite: sub, device: rest[0] });
       console.log(command === "approve" ? "Approved." : "Rejected.");
       return;
@@ -947,7 +947,7 @@ Next:
     }
 
     case "looks": {
-      // His own looks (looks.ts): what he set himself to look at again, in your chats, until it comes.
+      // Its own looks (looks.ts): what it set itself to look at again, in your chats, until it comes.
       const admin = new Admin(home);
       if (sub === "cancel") {
         if (!rest[0]) fail("usage: invincible looks cancel <id>");
@@ -957,8 +957,8 @@ Next:
       }
       if (sub) fail("usage: invincible looks [cancel <id>]");
       const { looks } = await admin.call<{ looks: LookView[] }>("looks");
-      if (!looks.length) console.log(dim("No looks of his wait. He sets one in a chat when something isn't done yet (a deploy, a reply), and looks again then."));
-      // When, as he said it: in the zone he was told, never this machine's locale.
+      if (!looks.length) console.log(dim("No looks of its wait. It sets one in a chat when something isn't done yet (a deploy, a reply), and looks again then."));
+      // When, as it said it: in the zone it was told, never this machine's locale.
       for (const look of looks) console.log(`  ${bold(lookTime(look.at, look.zone, Date.now()))}  ${look.note}  ${dim(`${look.id} · ${look.zone}`)}`);
       return;
     }
@@ -1012,7 +1012,7 @@ Next:
       return;
     }
     case "about": {
-      // What he knows of you: the facts you kept (they go with every answer of his) and the ones he proposed (they wait for you).
+      // What it knows of you: the facts you kept (they go with every answer of its) and the ones it proposed (they wait for you).
       const admin = new Admin(home);
       const facts = async () => (await admin.call("aboutYou")) as { kept: MemoryView[]; proposed: MemoryView[] };
       const which = async (ref: string | undefined): Promise<MemoryView> => {
@@ -1024,10 +1024,10 @@ Next:
       };
       if (!sub || sub === "ls") {
         const { kept, proposed } = await facts();
-        if (!kept.length && !proposed.length) console.log("He keeps nothing about you yet. Tell him in chat, or: invincible about add <fact>");
-        if (kept.length) console.log(bold("Kept: with every answer of his"));
+        if (!kept.length && !proposed.length) console.log("It keeps nothing about you yet. Tell it in chat, or: invincible about add <fact>");
+        if (kept.length) console.log(bold("Kept: with every answer of its"));
         for (const m of kept) console.log(`  ${dim(m.id.slice(0, 12))}  ${m.text}`);
-        if (proposed.length) console.log(bold("Proposed by him: waiting for you"));
+        if (proposed.length) console.log(bold("Proposed by it: waiting for you"));
         for (const m of proposed) console.log(`  ${dim(m.id.slice(0, 12))}  ${m.text}`);
         if (proposed.length) console.log(dim("  invincible about keep <id> [--text …] keeps one (in your words) · invincible about rm <id> drops it"));
         return;
@@ -1036,18 +1036,18 @@ Next:
         const text = rest.join(" ").trim();
         if (!text) fail("usage: invincible about add <fact>");
         await admin.call("remember", { text, tags: [ABOUT_YOU_TAG] });
-        console.log("Kept: it goes with every answer of his.");
+        console.log("Kept: it goes with every answer of its.");
         return;
       }
       if (sub === "keep") {
         const fact = await which(rest[0]);
         await admin.call("keepAboutYou", { id: fact.id, ...(str("text") ? { text: str("text") } : {}) });
-        console.log("Kept: it goes with every answer of his.");
+        console.log("Kept: it goes with every answer of its.");
         return;
       }
       if (sub === "rm") {
         await admin.call("forget", { id: (await which(rest[0])).id });
-        console.log("Removed: it goes with his answers no more.");
+        console.log("Removed: it goes with its answers no more.");
         return;
       }
       fail("usage: invincible about [add <fact> | keep <id> [--text …] | rm <id>]");
@@ -1134,7 +1134,7 @@ Next:
       if (sub === "set") {
         if (!rest[0]) fail("usage: invincible secret set <name>");
         const value = await readSecret(`Value for ${rest[0]} (hidden): `);
-        // (--base-url pins it to that address: the one place it may ever be sent, as for a knight's key, PLAN #17.)
+        // (--base-url pins it to that address: the one place it may ever be sent, as for an agent's key, PLAN #17.)
         await admin.call("setSecret", { name: rest[0], value, provider: str("provider"), label: str("label"), connector: str("connector"), ...(str("base-url") ? { baseUrl: str("base-url") } : {}) });
         console.log(str("base-url") ? `Sealed into the vault, pinned to ${new URL(str("base-url")!).origin}.` : "Sealed into the vault.");
       } else if (sub === "rm") {
@@ -1149,7 +1149,7 @@ Next:
       } else if (sub === "dismiss") {
         if (!rest[0]) fail("usage: invincible secret dismiss <name>");
         await admin.call("dismissSecretRequest", { name: rest[0] });
-        console.log("Dismissed: it's back in your Inbox only if he asks for it again.");
+        console.log("Dismissed: it's back in your Inbox only if it asks for it again.");
       } else {
         const [{ secrets, unlocked }, { requests }] = await Promise.all([admin.call("secrets"), admin.call("secretRequests")]);
         if (!unlocked) console.log(dim("(this node cannot decrypt the vault)"));
@@ -1185,7 +1185,7 @@ Next:
         OPENAI_API_KEY: minted.token,
       };
       delete env.ANTHROPIC_API_KEY;
-      process.stderr.write(dim(`[galahad] ${cmd[0]} gets a scoped gateway token (revoked on exit); real keys stay in the vault\n`));
+      process.stderr.write(dim(`[invincible] ${cmd[0]} gets a scoped gateway token (revoked on exit); real keys stay in the vault\n`));
       // Revoked when the tool exits, however invincible run is stopped (see run-tool.ts).
       const start = () => Bun.spawn(cmd, { env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
       process.exit(await runWithToken(start, () => admin.call("revokeToken", { hash: minted.info.hash })));
@@ -1226,7 +1226,7 @@ Next:
       }
       if (sub === "allow") {
         say(await admin.call<ScreenStatus>("screenAllow", at));
-        console.log(dim("On that Mac, System Settings → Privacy & Security: turn Galahad on in Screen & System Audio Recording, and in Accessibility. Then invincible screen says both are allowed."));
+        console.log(dim("On that Mac, System Settings → Privacy & Security: turn your agent on in Screen & System Audio Recording, and in Accessibility. Then invincible screen says both are allowed."));
         return;
       }
       if (sub === "look") {
@@ -1238,9 +1238,9 @@ Next:
       }
       if (sub === "sessions") {
         const { sessions } = await admin.call<{ sessions: ScreenSessionView[] }>("screenSessions");
-        if (!sessions.length) console.log("He hasn't asked to use a Mac itself.");
+        if (!sessions.length) console.log("It hasn't asked to use a Mac itself.");
         for (const s of sessions) {
-          const until = s.state === "allowed" && s.until ? ` · his until ${new Date(s.until).toLocaleTimeString()}` : s.state === "waiting" ? ` · answer by ${new Date(s.answerBy).toLocaleTimeString()}` : "";
+          const until = s.state === "allowed" && s.until ? ` · its until ${new Date(s.until).toLocaleTimeString()}` : s.state === "waiting" ? ` · answer by ${new Date(s.answerBy).toLocaleTimeString()}` : "";
           console.log(`${s.id}  ${s.state.padEnd(8)} ${s.nodeName} · ${s.minutes} minutes${until}\n  ${dim(s.why)}`);
         }
         return;
@@ -1248,13 +1248,13 @@ Next:
       if (sub === "approve" || sub === "deny") {
         if (!rest[0]) fail(`usage: invincible screen ${sub} <session>`);
         const { session } = await admin.call<{ session: ScreenSessionView }>("decideScreen", { id: rest[0], allow: sub === "approve" });
-        console.log(session.state === "allowed" ? `Allowed: Galahad may use ${session.nodeName} itself until ${new Date(session.until!).toLocaleTimeString()}. invincible screen end ${session.id} ends it sooner.` : "Said no: nothing of it is his.");
+        console.log(session.state === "allowed" ? `Allowed: your agent may use ${session.nodeName} itself until ${new Date(session.until!).toLocaleTimeString()}. invincible screen end ${session.id} ends it sooner.` : "Said no: nothing of it is its.");
         return;
       }
       if (sub === "end") {
         if (!rest[0]) fail("usage: invincible screen end <session>");
         await admin.call("endScreen", { id: rest[0] });
-        console.log("Ended: nothing of that Mac is his now.");
+        console.log("Ended: nothing of that Mac is its now.");
         return;
       }
       fail("usage: invincible screen [status|allow|look] [--on <node>] [--out shot.jpg] | screen sessions | screen approve|deny|end <session>");
@@ -1325,14 +1325,14 @@ Next:
         return;
       }
       if (sub === "rm") {
-        // A role you made goes (not while a knight works on it: the node says which); a built-in one goes back to its defaults.
+        // A role you made goes (not while an agent works on it: the node says which); a built-in one goes back to its defaults.
         if (rest.length !== 1) fail("usage: invincible roster rm <role>");
         const { roster } = await admin.call<{ roster: Record<string, unknown> }>("setRoster", { role: rest[0], models: [] });
         console.log(roster[rest[0]!] ? `${rest[0]} is back to its default models.` : `${rest[0]} is removed.`);
         return;
       }
       if (sub === "check") {
-        // What each model can do, measured: the quest loop's format, reading a screen, placing a click (about eight calls each).
+        // What each model can do, measured: the run loop's format, reading a screen, placing a click (about eight calls each).
         if (!rest.length) fail("usage: invincible roster check <provider/model>... [--only format,reads,places]");
         const only = typeof flags.only === "string" ? flags.only.split(",").map((p) => p.trim()).filter(Boolean) : [];
         for (const model of rest) {
@@ -1346,7 +1346,7 @@ Next:
       // (A coding plan's window is its id's, every model of it; any other provider's is its one model's: windowScope.)
       const spentUntilOf = (ref: string) => spent.find((w) => ref === w.provider || ref.startsWith(`${w.provider}/`));
       for (const [role, spec] of Object.entries(roster)) {
-        // (A coding plan's model does his coding and the knights': he passes it over for anything else.)
+        // (A coding plan's model does its coding and the agents': it passes it over for anything else.)
         const shown = (ref: string) => {
           const window = spentUntilOf(ref);
           return [ref, onPlan(ref) ? dim("(coding only)") : "", window ? dim(`(spent until ${new Date(window.until).toISOString().slice(11, 16)} UTC)`) : ""].filter(Boolean).join(" ");
@@ -1368,7 +1368,7 @@ Next:
       const text = [sub, ...rest].filter(Boolean).join(" ");
       const attach = (flags.attach as string[] | undefined) ?? [];
       if (!text && !attach.length) fail("usage: invincible ask [--chat <id> [--steer | --queue | --aside [--bring]]] [--project <id>] [--temp] [--detach] [--attach file]... <prompt>");
-      // The turn runs on the node (turn-cli.ts): this terminal watches it, Ctrl-C stops it, --detach leaves him to it.
+      // The turn runs on the node (turn-cli.ts): this terminal watches it, Ctrl-C stops it, --detach leaves it to it.
       const code = await askCommand(new Admin(home), text, {
         role: str("role"),
         model: str("model"),
@@ -1395,8 +1395,8 @@ Next:
       await queueCommand(new Admin(home), sub, rest[0], rest.slice(1));
       return;
 
-    case "quests":
-      await questsCommand(new Admin(home), Boolean(flags.all));
+    case "runs":
+      await runsCommand(new Admin(home), Boolean(flags.all));
       return;
 
     case "chats": {
@@ -1426,20 +1426,20 @@ Next:
       console.log(`${bold(conversation.title)}  ${dim(`${conversation.id}${conversation.project ? ` · project ${conversation.project}` : ""}`)}\n`);
       const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
       for (const m of conversation.messages) {
-        // A look of his come back is his own note, as every app shows it: never your words.
-        if (m.role === "user" && m.look) console.log(`${dim(`He looked again, as he said at ${lookTime(m.look.set, here, Date.now())} he would: ${m.look.note}`)}\n`);
+        // A look of its come back is its own note, as every app shows it: never your words.
+        if (m.role === "user" && m.look) console.log(`${dim(`It looked again, as it said at ${lookTime(m.look.set, here, Date.now())} it would: ${m.look.note}`)}\n`);
         else if (m.role === "user") console.log(`${bold("You:")} ${m.content}\n`);
         else {
           const tools = m.steps.filter((s) => s.kind === "tool").map((s) => (s.kind === "tool" ? s.title : ""));
-          console.log(`${bold("Galahad:")} ${m.content || dim(`(${m.status}${m.error ? `: ${m.error}` : ""})`)}`);
+          console.log(`${bold("Your agent:")} ${m.content || dim(`(${m.status}${m.error ? `: ${m.error}` : ""})`)}`);
           console.log(dim(`  ${[m.model, tools.length ? `tools: ${tools.join(", ")}` : null].filter(Boolean).join(" · ")}\n`));
         }
       }
-      // What he's doing in it now, and what you queued behind it.
-      if (conversation.turn) console.log(`${bold("He's working on it now:")} ${turnLine(conversation.turn, Date.now())}\n${dim(`  invincible turn watch ${conversation.turn.id} · invincible turn stop ${conversation.turn.id} · invincible ask --chat ${conversation.id} --steer|--queue "…"`)}\n`);
+      // What it's doing in it now, and what you queued behind it.
+      if (conversation.turn) console.log(`${bold("It's working on it now:")} ${turnLine(conversation.turn, Date.now())}\n${dim(`  invincible turn watch ${conversation.turn.id} · invincible turn stop ${conversation.turn.id} · invincible ask --chat ${conversation.id} --steer|--queue "…"`)}\n`);
       if (conversation.queue.length) console.log(`${queueLines(conversation.queue, conversation.held).join("\n")}\n${dim(`  invincible queue ${conversation.id} [resume | rm <n|all> | send <n>]`)}\n`);
       console.log(dim(`Go on with: invincible ask --chat ${conversation.id} "…"`));
-      // Read here: what he answered in it is no longer new, on any device.
+      // Read here: what it answered in it is no longer new, on any device.
       if (conversation.unread) await admin.call("seeConversation", { id: conversation.id }).catch(() => {});
       return;
     }
@@ -1460,7 +1460,7 @@ Next:
           const { projects } = await admin.call<{ projects: ProjectView[] }>("projects");
           const project = projects.find((p) => p.id === id);
           if (!project) fail(`no project ${id}`);
-          const changes = await admin.call<TeamChangesView>("teamChanges", { id: "galahad", path: project!.checkout });
+          const changes = await admin.call<TeamChangesView>("teamChanges", { id: "primary", path: project!.checkout });
           if (!changes.files.length && !changes.untracked.length) console.log(`Nothing changed in ${project!.checkout} since its last commit.`);
           for (const f of changes.files) console.log(`  ${f.status}  ${f.path}${f.added === null ? dim("  binary") : dim(`  +${f.added} −${f.removed}`)}`);
           for (const f of changes.untracked) console.log(`  ?  ${f}`);
@@ -1474,7 +1474,7 @@ Next:
               : sub === "branch"
                 ? await admin.call<ProjectGitView>("projectBranch", { id, branch: rest[1] ?? fail("usage: invincible project branch <id> <name> [--new]"), create: flags.new === true })
                 : await admin.call<ProjectGitView>("projectCommit", { id, message: str("message") ?? fail('usage: invincible project commit <id> --message "…"') });
-        if (view.state === "missing") console.log(`${view.checkout} isn't there yet: invincible project clone ${id}, or ask Galahad to start it.`);
+        if (view.state === "missing") console.log(`${view.checkout} isn't there yet: invincible project clone ${id}, or ask your agent to start it.`);
         else if (view.state === "not-a-repository") console.log(`${view.checkout} is there, but it isn't a git repository.`);
         else {
           const against = view.upstream ? dim(` · ${view.ahead ?? 0} ahead, ${view.behind ?? 0} behind ${view.upstream}`) : "";
@@ -1522,17 +1522,17 @@ Next:
 
     case "do": {
       const goal = [sub, ...rest].filter(Boolean).join(" ").trim();
-      if (!goal) fail('usage: invincible do [--net isolated|gateway|online] [--vm|--container] [--lab] [--on node] [--steps 30] [--timeout 300] [--keep] [--budget-usd 2] [--agent opencode --minutes 60 --repo url] "<goal>"');
+      if (!goal) fail('usage: invincible do [--net isolated|gateway|online] [--vm|--container] [--lab] [--on node] [--steps 30] [--timeout 300] [--keep] [--budget-usd 2] [--harness opencode --minutes 60 --repo url] "<goal>"');
       const budgetUsd = str("budget-usd") === undefined ? undefined : Number(str("budget-usd"));
       if (budgetUsd !== undefined && (!Number.isFinite(budgetUsd) || budgetUsd <= 0 || budgetUsd > 100)) fail("--budget-usd takes an amount in US dollars above 0 and at most 100, e.g. --budget-usd 2");
-      const agentName = str("agent");
+      const agentName = str("harness");
       // An agent calls models itself, so it needs at least the gateway.
       const network = str("net") ?? (agentName ? "gateway" : "isolated");
       if (!["isolated", "gateway", "online"].includes(network)) fail("--net must be isolated, gateway or online");
       const minutes = Number(str("minutes") ?? 60);
       if (agentName && (!Number.isInteger(minutes) || minutes < 1 || minutes > 7 * 24 * 60)) fail("--minutes must be a whole number from 1 to 10080");
       const repo = str("repo");
-      if (repo && !agentName) fail("--repo goes with --agent");
+      if (repo && !agentName) fail("--repo goes with --harness");
       if (repo && !/^https:\/\/[A-Za-z0-9._~:/?#!$&()*+,;=%-]+$/.test(repo)) fail("--repo must be an https:// URL (no user or password in it)");
       if (flags.ship && !(repo && githubRepo(repo))) fail("--ship needs --repo https://github.com/<owner>/<repo>");
       let effort: ReturnType<typeof parseEffort>;
@@ -1544,7 +1544,7 @@ Next:
       } catch (error) {
         fail((error as Error).message);
       }
-      const outcome = await questFromCli(new Admin(home), {
+      const outcome = await runFromCli(new Admin(home), {
         goal,
         ...(gates.length ? { gates } : {}),
         // The planner may propose gates of its own (marked as its proposal) unless you say yours only.
@@ -1556,7 +1556,7 @@ Next:
         maxSteps: str("steps") ? Number(str("steps")) : undefined,
         commandTimeoutSec: str("timeout") ? Number(str("timeout")) : undefined,
         keep: Boolean(flags.keep),
-        // The engineer's own tools, several calls a turn (measured +7 over the fenced loop, level with OpenCode: TRIALS.md);
+        // The engineer's own tools, several calls a turn (measured +7 over the fenced loop, level with OpenCode: EVALS.md);
         // --fenced keeps one shell command a reply.
         ...(flags.fenced ? {} : { tools: true }),
         ...(budgetUsd !== undefined ? { budgetUsd } : {}),
@@ -1676,7 +1676,7 @@ Evidence: invincible artifact ${i!.artifact}`));
       try {
         shipment = ShipManifest.parse(JSON.parse(new TextDecoder().decode((await admin.bytes("artifactFile", { id, path: "ship/manifest.json" })).bytes)));
       } catch (error) {
-        fail(`${id} holds no shipment (ship/manifest.json): only a quest on a clone (--repo) leaves one. ${(error as Error).message}`);
+        fail(`${id} holds no shipment (ship/manifest.json): only a run on a clone (--repo) leaves one. ${(error as Error).message}`);
       }
       const where = githubRepo(shipment!.remote);
       if (!where) fail(`the work was done on ${shipment!.remote}, which isn't a github.com repository`);
@@ -1708,11 +1708,11 @@ Evidence: invincible artifact ${i!.artifact}`));
       return;
     }
 
-    case "trials":
-    case "trial": {
-      // The Trials' commands (trial-commands.ts): suites, pins, variants, budgets and the reports.
+    case "evals":
+    case "eval": {
+      // The Evals' commands (eval-commands.ts): suites, pins, variants, budgets and the reports.
       try {
-        process.exit(await trialCommand({ command, sub, rest, flags, node: () => new Admin(home), ...(isolation() ? { isolation: isolation()! } : {}) }));
+        process.exit(await evalCommand({ command, sub, rest, flags, node: () => new Admin(home), ...(isolation() ? { isolation: isolation()! } : {}) }));
       } catch (error) {
         if (error instanceof UsageError) fail(error.message);
         throw error;
@@ -1749,7 +1749,7 @@ Evidence: invincible artifact ${i!.artifact}`));
 
     case "sandbox": {
       if (sub === "setup") {
-        // A Mac given what its knights' VMs need (sandbox-setup.ts); a node of its own isn't needed for its first steps.
+        // A Mac given what its agents' VMs need (sandbox-setup.ts); a node of its own isn't needed for its first steps.
         const json = !!flags.json;
         const node = (): SetupNode | null => (home.exists() ? { name: home.readConfig().name, call: (route, input) => new Admin(home).call(route, input) } : null);
         if (rest[0] && rest[0] !== "status") fail("usage: invincible sandbox setup [status] [--json]");
@@ -1777,7 +1777,7 @@ Evidence: invincible artifact ${i!.artifact}`));
         for (const s of sandboxes) {
           const left = Math.max(0, Math.round((s.expiresAt - Date.now()) / 60_000));
           console.log(
-            `  ${s.id}  ${s.status.padEnd(8)} ${shape(s).padEnd(9)} ${s.network.padEnd(8)} ${String(s.cpus).padStart(3)} cpu ${String(s.memoryGb).padStart(4)} GB  ${diskOf(s)}  ${s.ephemeral ? `${left} min left` : "persistent"}  ${dim(s.quest)}`,
+            `  ${s.id}  ${s.status.padEnd(8)} ${shape(s).padEnd(9)} ${s.network.padEnd(8)} ${String(s.cpus).padStart(3)} cpu ${String(s.memoryGb).padStart(4)} GB  ${diskOf(s)}  ${s.ephemeral ? `${left} min left` : "persistent"}  ${dim(s.run)}`,
           );
         }
         return;
@@ -1852,10 +1852,10 @@ Evidence: invincible artifact ${i!.artifact}`));
       const size = (bytes: number) => (bytes < 2 ** 20 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 2 ** 20).toFixed(1)} MB`);
       const id = command === "artifact" ? sub : undefined;
       if (!id) {
-        if (!artifacts.length) console.log("Nothing kept yet. Quests keep /work/out; `invincible sandbox save <id>` keeps any sandbox's.");
+        if (!artifacts.length) console.log("Nothing kept yet. Runs keep /work/out; `invincible sandbox save <id>` keeps any sandbox's.");
         for (const a of artifacts) {
           console.log(`  ${a.id}  ${new Date(a.savedAt).toLocaleString()}  ${String(a.count).padStart(4)} file(s) ${size(a.bytes).padStart(8)}  ${a.nodeName}${a.here ? "" : dim(" (elsewhere)")}`);
-          console.log(`      ${a.label}${a.quest ? dim(` · ${a.quest}`) : ""}`);
+          console.log(`      ${a.label}${a.run ? dim(` · ${a.run}`) : ""}`);
         }
         return;
       }
@@ -1883,7 +1883,7 @@ Evidence: invincible artifact ${i!.artifact}`));
         console.log(`Saved ${wanted.length} file(s) to ${out}, each checked against its recorded SHA-256.${artifact!.count > artifact!.files.length ? dim(` (${artifact!.count - artifact!.files.length} more aren't listed in the mind; fetch them by name)`) : ""}`);
         return;
       }
-      console.log(`${bold(artifact!.label)}  ${dim(`${artifact!.id} · ${artifact!.count} file(s) · ${size(artifact!.bytes)} · on ${artifact!.nodeName}${artifact!.quest ? ` · ${artifact!.quest}` : ""}`)}`);
+      console.log(`${bold(artifact!.label)}  ${dim(`${artifact!.id} · ${artifact!.count} file(s) · ${size(artifact!.bytes)} · on ${artifact!.nodeName}${artifact!.run ? ` · ${artifact!.run}` : ""}`)}`);
       for (const f of artifact!.files) console.log(`  ${f.path.padEnd(48)} ${size(f.size).padStart(8)}  ${dim(f.sha256.slice(0, 12))}`);
       console.log(dim(`\n  invincible artifact ${id} <file>  ·  invincible artifact ${id} --out ./results`));
       return;
@@ -1924,7 +1924,7 @@ Evidence: invincible artifact ${i!.artifact}`));
       const bunPath = process.execPath;
       console.log(`${bold(`Arm "${label}" ready`)} · scopes: ${minted.info.scopes.join(", ")}\n  token: ${tokenPath} (0600; never shown, never in chat)\n`);
       if (target === "claude") {
-        const command = ["claude", "mcp", "add", "--scope", "user", "galahad", "--", bunPath, ...args];
+        const command = ["claude", "mcp", "add", "--scope", "user", "primary", "--", bunPath, ...args];
         if (flags.apply) {
           const proc = Bun.spawn(command, { stdout: "inherit", stderr: "inherit" });
           if ((await proc.exited) !== 0) fail("`claude mcp add` failed; run the command below yourself");
@@ -1937,7 +1937,7 @@ Evidence: invincible artifact ${i!.artifact}`));
           `Add to opencode.json (project) or ~/.config/opencode/opencode.json:\n\n${JSON.stringify({ mcp: { invincible: { type: "local", command: [bunPath, ...args], enabled: true } } }, null, 2)}\n`,
         );
       } else if (target === "codex") {
-        console.log(`Add to ~/.codex/config.toml:\n\n[mcp_servers.galahad]\ncommand = ${JSON.stringify(bunPath)}\nargs = ${JSON.stringify(args)}\n`);
+        console.log(`Add to ~/.codex/config.toml:\n\n[mcp_servers.invincible]\ncommand = ${JSON.stringify(bunPath)}\nargs = ${JSON.stringify(args)}\n`);
       } else {
         console.log(
           `Add to your Hermes config (mcp_servers):\n\nmcp_servers:\n  invincible:\n    command: ${JSON.stringify(bunPath)}\n    args: ${JSON.stringify(args)}\n\n${dim("Check Hermes's MCP docs for the exact key in your version.")}`,
@@ -1948,7 +1948,7 @@ Evidence: invincible artifact ${i!.artifact}`));
 
     case "acp": {
       if (sub !== "install") {
-        // Galahad as an ACP agent (acp-agent.ts): stdout belongs to the protocol, so nothing else may print there.
+        // The primary as an ACP agent (acp-agent.ts): stdout belongs to the protocol, so nothing else may print there.
         const config = home.readConfig();
         const base = `http://127.0.0.1:${loadEnv().INVINCIBLE_PORT ?? config.port}`;
         const token = home.readArmToken(str("arm") ?? "acp");
@@ -1957,13 +1957,13 @@ Evidence: invincible artifact ${i!.artifact}`));
       }
       if (rest.length) fail("usage: invincible acp install [--label name]");
       const label = str("label") ?? "acp";
-      // What an ACP client shows may be read by others: his answers there carry nothing of yours, and he can do nothing
+      // What an ACP client shows may be read by others: its answers there carry nothing of yours, and it can do nothing
       // there but answer.
       const minted = await new Admin(home).call<{ token: string; info: { scopes: string[] } }>("mintArm", { label, scopes: ["chat"] });
       const tokenPath = home.writeArmToken(label, minted.token);
       const args = [fileURLToPath(import.meta.url), "acp", "--arm", label, ...(flags.home ? ["--home", home.dir] : [])];
       console.log(`${bold(`Arm "${label}" ready`)} · scopes: ${minted.info.scopes.join(", ")}\n  token: ${tokenPath} (0600; never shown, never in chat)\n`);
-      console.log(`An ACP client runs him on this machine with this command and these arguments:\n\n  ${process.execPath} ${args.join(" ")}`);
+      console.log(`An ACP client runs it on this machine with this command and these arguments:\n\n  ${process.execPath} ${args.join(" ")}`);
       return;
     }
 
@@ -2079,32 +2079,32 @@ Evidence: invincible artifact ${i!.artifact}`));
       const show = (o: TeamOutcome) => {
         const left = Math.max(0, o.budgetUsd - o.spentUsd - o.committedUsd);
         console.log(`${bold(o.title)} ${dim(o.id)} · ${o.status}${o.ended ? ` (${o.ended})` : ""}`);
-        console.log(`  ${o.knights.map((k) => `@${k}`).join(" ")} · spent $${o.spentUsd.toFixed(2)} of $${o.budgetUsd}, held $${o.committedUsd.toFixed(2)}, left $${left.toFixed(2)} · tasks ${o.tasks.done} done, ${o.tasks.running} running, ${o.tasks.queued} waiting, ${o.tasks.failed} not done`);
+        console.log(`  ${o.agents.map((k) => `@${k}`).join(" ")} · spent $${o.spentUsd.toFixed(2)} of $${o.budgetUsd}, held $${o.committedUsd.toFixed(2)}, left $${left.toFixed(2)} · tasks ${o.tasks.done} done, ${o.tasks.running} running, ${o.tasks.queued} waiting, ${o.tasks.failed} not done`);
         console.log(o.northStar.perCompleted === null ? "  none of its tasks done yet" : `  you stepped in ${o.northStar.perCompleted.toFixed(1)} times per completed task (${o.northStar.completed} done)`);
         if (o.notes) console.log(dim(`  plan: ${o.notes.split("\n")[0]!.slice(0, 140)}`));
-        console.log(dim(`  follow it: invincible roundtable chat ${o.room}`));
+        console.log(dim(`  follow it: invincible agents chat ${o.room}`));
       };
       if (!sub || sub === "ls") {
         const { outcomes } = await admin.call<{ outcomes: TeamOutcome[] }>("teamOutcomes");
-        if (!outcomes.length) console.log('No outcomes yet. invincible outcome add "<title>" --goal "…" --knight <id> --budget-usd 20');
+        if (!outcomes.length) console.log('No outcomes yet. invincible outcome add "<title>" --goal "…" --agent <id> --budget-usd 20');
         for (const o of outcomes) show(o);
         return;
       }
       if (sub === "add") {
         const title = rest.join(" ").trim();
-        const knights = Array.isArray(flags.knight) ? (flags.knight as string[]) : flags.knight ? [String(flags.knight)] : [];
+        const agents = Array.isArray(flags.agent) ? (flags.agent as string[]) : flags.agent ? [String(flags.agent)] : [];
         const budgetUsd = Number(str("budget-usd"));
-        if (!title || !str("goal") || !knights.length || !Number.isFinite(budgetUsd)) fail('usage: invincible outcome add "<title>" --goal "…" --knight <id> [--knight <id>…] --budget-usd 20 [--done "…"] [--report-hour 9] [--tz Zone]');
+        if (!title || !str("goal") || !agents.length || !Number.isFinite(budgetUsd)) fail('usage: invincible outcome add "<title>" --goal "…" --agent <id> [--agent <id>…] --budget-usd 20 [--done "…"] [--report-hour 9] [--tz Zone]');
         const { outcome } = await admin.call<{ outcome: TeamOutcome }>("setTeamOutcome", {
           title,
           goal: str("goal"),
-          knights,
+          agents,
           budgetUsd,
           ...(str("done") ? { done: str("done") } : {}),
           ...(str("report-hour") ? { reportHour: Number(str("report-hour")) } : {}),
           ...(str("tz") ? { tz: str("tz") } : {}),
         });
-        console.log("He owns it now. He works it in its own room, within its budget, and asks you there when a choice is yours.");
+        console.log("It owns it now. It works it in its own room, within its budget, and asks you there when a choice is yours.");
         show(outcome);
         return;
       }
@@ -2132,7 +2132,7 @@ Evidence: invincible artifact ${i!.artifact}`));
       fail("usage: invincible outcome [ls | add | pause | resume | stop | budget]");
       return;
     }
-    case "roundtable":
+    case "agents":
     case "team":
       await teamCommand(new Admin(home), sub, rest, flags, console.log, confirm, process.stdout.isTTY ? process.stdout.columns : undefined);
       return;

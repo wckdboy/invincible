@@ -60,7 +60,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   const parsed = Env.safeParse(source);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  ${i.path.join(".")}: ${i.message}`).join("\n");
-    throw new Error(`invalid Galahad environment:\n${issues}`);
+    throw new Error(`invalid Invincible environment:\n${issues}`);
   }
   return parsed.data;
 }

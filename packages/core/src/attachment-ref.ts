@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ATTACHMENT_LIMITS, ATTACHMENT_TYPES } from "./attachments.ts";
 
 /**
- * What a message of yours may carry, in your chat or at the Roundtable (packages/node/src/uploads.ts): pictures (PNG,
+ * What a message of yours may carry, in your chat or among the agents (packages/node/src/uploads.ts): pictures (PNG,
  * JPEG, WebP, GIF, as their bytes say), which a model that sees is shown, and text (UTF-8: a log, a file of code,
  * notes), which goes with the message fenced as data, its name saying what it is. Each is kept on the node by the
  * SHA-256 of its bytes.

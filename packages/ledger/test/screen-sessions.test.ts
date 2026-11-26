@@ -8,7 +8,7 @@ import { enrollDevice, foundFleet, LedgerStore } from "../src/index.ts";
 
 /*
  * Sessions on a Mac's own screen in the mind (screen.asked, screen.decided, screen.ended; docs/MAC.md, M4): asked for
- * Galahad by a full node, allowed or not by you alone (the first answer stands), and ended once, by you or by him.
+ * the primary by a full node, allowed or not by you alone (the first answer stands), and ended once, by you or by it.
  * Every replica applies them the same way, so they converge like everything else: any order, duplicates, a rebuild;
  * and a replica that held them before it knew them applies them once it is upgraded.
  */
@@ -47,7 +47,7 @@ function fleet(now?: () => number): { a: NodeIdentity; b: NodeIdentity; storeA: 
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const storeA = new LedgerStore(":memory:", now ? new HlcClock(now) : undefined);
-  foundFleet(storeA, a, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(storeA, a, { fleetName: "homelab", nodeName: "ultra" });
   enrollDevice(storeA, a, { device: b.id, name: "mini", kind: "node", box: b64u(b.boxPublic) });
   const storeB = new LedgerStore(":memory:", now ? new HlcClock(now) : undefined);
   storeB.expectFleet(storeA.fleet!);
@@ -177,7 +177,7 @@ describe("screen sessions in the mind", () => {
       const a = newNodeIdentity();
       const b = newNodeIdentity();
       const store = new LedgerStore(path);
-      foundFleet(store, a, { fleetName: "camelot", nodeName: "ultra" });
+      foundFleet(store, a, { fleetName: "homelab", nodeName: "ultra" });
       enrollDevice(store, a, { device: b.id, name: "mini", kind: "node", box: b64u(b.boxPublic) });
       const allowed = ask(store, a, b);
       store.emit(a, "screen.decided", { id: allowed, verdict: "allowed" }, YOURS);

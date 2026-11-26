@@ -1,20 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { KNIGHT_TINTS, knightColors } from "@invincible/core/avatar";
+import { AGENT_TINTS, agentColors } from "@invincible/core/avatar";
 import { AURUM, fieldPoints, project } from "./field.ts";
 import {
   FIELD_EASE, FIELD_EMBERS, FIELD_MOTION, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldSettled, fieldStep, fieldStill, fieldTone,
-  GALAHAD_FIELD, GALAHAD_BEAM, knightField, beamAt, beamLine, RIM_ANGLE, RIM_DIM, type FieldClock, type FieldMotion,
+  PRIMARY_FIELD, PRIMARY_BEAM, agentField, beamAt, beamLine, RIM_ANGLE, RIM_DIM, type FieldClock, type FieldMotion,
 } from "./field-orb.ts";
 import { ORB_LONGEST_STEP, ORB_MOODS } from "./orb-motion.ts";
 
 /*
- * The orbs as fields (26 November 2026): Galahad's in gold with his beam through it, each knight's in its own colours;
+ * The orbs as fields (26 November 2026): the primary's in gold with its beam through it, each agent's in its own colours;
  * calm, still where they are many, moving only where they are looked at (the owner's words: "almost like nipples", "i
- * dont want them to be too visually distractin", "slow and calming movement", "remove the old mark around galahad. make
+ * dont want them to be too visually distractin", "slow and calming movement", "remove the old mark around [the primary]. make
  * the primary agent distinct in some other cool way").
  */
 
-const HANDLES = ["ada", "gareth", "percival", "kay", "lin", "bors", "", "Will’s “iPad” \\ 🛡️", ...Array.from({ length: 200 }, (_, i) => `h${i}`)];
+const HANDLES = ["ada", "max", "ivo", "noa", "lin", "eli", "", "Will’s “iPad” \\ 🛡️", ...Array.from({ length: 200 }, (_, i) => `h${i}`)];
 
 /** How light a colour looks (relative luminance, 0 to 1). */
 function luminance([r, g, b]: [number, number, number]): number {
@@ -32,26 +32,26 @@ function run(clock: FieldClock, motion: FieldMotion, seconds: number): FieldCloc
 }
 
 describe("whose field an orb is", () => {
-  test("his is the icon's own, in gold", () => {
-    expect(GALAHAD_FIELD).toEqual({ seed: 11, tilt: [0.42, 0.3, -0.18], lines: 46, colours: AURUM });
+  test("its is the icon's own, in gold", () => {
+    expect(PRIMARY_FIELD).toEqual({ seed: 11, tilt: [0.42, 0.3, -0.18], lines: 46, colours: AURUM });
   });
 
-  test("a knight's colours are core's: its key its tint lit and its tint, its rim its second; the one you chose, or its handle's", () => {
+  test("an agent's colours are core's: its key its tint lit and its tint, its rim its second; the one you chose, or its handle's", () => {
     for (const handle of HANDLES.slice(0, 8)) {
-      const colours = knightColors(handle);
-      expect(knightField(handle).colours).toEqual({ key: [colours.light, colours.tint], rim: colours.second });
+      const colours = agentColors(handle);
+      expect(agentField(handle).colours).toEqual({ key: [colours.light, colours.tint], rim: colours.second });
     }
-    expect(knightField("ada", { v: 2, color: "#3ABEFF" }).colours.key[1]).toBe("#3abeff");
+    expect(agentField("ada", { v: 2, color: "#3ABEFF" }).colours.key[1]).toBe("#3abeff");
     // Anything else colours nothing: its handle's.
-    expect(knightField("ada", { v: 2, color: "url(https://invalid.example/x)" }).colours).toEqual(knightField("ada").colours);
-    expect(KNIGHT_TINTS).toContain(knightField("ada").colours.key[1] as never);
+    expect(agentField("ada", { v: 2, color: "url(https://invalid.example/x)" }).colours).toEqual(agentField("ada").colours);
+    expect(AGENT_TINTS).toContain(agentField("ada").colours.key[1] as never);
   });
 
   test("its handle gives its own lines, longitudes and lean, the same every time; never seen end on or flat", () => {
     const seen = new Set<string>();
     for (const handle of HANDLES) {
-      const field = knightField(handle);
-      expect(field).toEqual(knightField(handle));
+      const field = agentField(handle);
+      expect(field).toEqual(agentField(handle));
       expect(field.lines).toBeGreaterThanOrEqual(12);
       expect(field.lines).toBeLessThanOrEqual(20);
       expect(Number.isInteger(field.seed) && field.seed >= 1 && field.seed <= 2147483646).toBe(true);
@@ -67,9 +67,9 @@ describe("whose field an orb is", () => {
 });
 
 describe("how a field is drawn at a size", () => {
-  test("in his ring, fewer of his lines where he is small; a knight keeps its own; the more points along a line the larger", () => {
-    expect([16, 29, 30, 55, 56, 320].map((size) => fieldLook(GALAHAD_FIELD, size, true).lines)).toEqual([26, 26, 34, 34, 46, 46]);
-    const ada = knightField("ada");
+  test("in its ring, fewer of its lines where it is small; an agent keeps its own; the more points along a line the larger", () => {
+    expect([16, 29, 30, 55, 56, 320].map((size) => fieldLook(PRIMARY_FIELD, size, true).lines)).toEqual([26, 26, 34, 34, 46, 46]);
+    const ada = agentField("ada");
     for (const size of [14, 34, 160]) expect(fieldLook(ada, size, false).lines).toBe(ada.lines);
     const steps = [14, 18, 34, 50, 96, 160, 320].map((size) => fieldLook(ada, size, false).steps);
     expect(steps).toEqual([...steps].sort((a, b) => a - b));
@@ -78,44 +78,44 @@ describe("how a field is drawn at a size", () => {
     expect([18, 34, 160].map((size) => fieldLook(ada, size, false).weight)).toEqual([1.5, 1.25, 1]);
   });
 
-  test("every field stays inside its square, his as a knight's, at every size and turn", () => {
-    const reach = (identity: typeof GALAHAD_FIELD, size: number, galahad: boolean, turn: number) => {
-      const look = fieldLook(identity, size, galahad);
+  test("every field stays inside its square, its as an agent's, at every size and turn", () => {
+    const reach = (identity: typeof PRIMARY_FIELD, size: number, primary: boolean, turn: number) => {
+      const look = fieldLook(identity, size, primary);
       const points = fieldPoints({ lines: look.lines, steps: look.steps, tilt: identity.tilt, seed: identity.seed, colours: identity.colours, weight: look.weight, turn });
       return Math.max(...points.map((p) => {
         const q = project(p, 1, { zoom: look.zoom });
         return Math.hypot(q.x - 0.5, q.y - 0.5);
       }));
     };
-    for (const size of [16, 34, 50, 160]) for (const turn of [0, 1, 2.5, 4, 5.5]) expect(reach(GALAHAD_FIELD, size, true, turn)).toBeLessThan(0.48);
-    for (const handle of HANDLES.slice(0, 60)) for (const turn of [0, 2, 4]) expect(reach(knightField(handle), 34, false, turn)).toBeLessThan(0.46);
+    for (const size of [16, 34, 50, 160]) for (const turn of [0, 1, 2.5, 4, 5.5]) expect(reach(PRIMARY_FIELD, size, true, turn)).toBeLessThan(0.48);
+    for (const handle of HANDLES.slice(0, 60)) for (const turn of [0, 2, 4]) expect(reach(agentField(handle), 34, false, turn)).toBeLessThan(0.46);
   });
 
-  test("his beam: out of both his poles along his axis, his dark core kept, its tips inside his square", () => {
+  test("its beam: out of both its poles along its axis, its dark core kept, its tips inside its square", () => {
     for (const zoom of [0.94, 0.86, 1]) {
-      const [upper, lower] = beamLine(GALAHAD_FIELD, zoom) as [{ root: [number, number]; tip: [number, number] }, { root: [number, number]; tip: [number, number] }];
+      const [upper, lower] = beamLine(PRIMARY_FIELD, zoom) as [{ root: [number, number]; tip: [number, number] }, { root: [number, number]; tip: [number, number] }];
       const way = (half: typeof upper) => [half.tip[0] - half.root[0], half.tip[1] - half.root[1]] as const;
       const [a, b] = [way(upper), way(lower)];
-      // One line through his middle: its halves point opposite ways, the upper one up (y is down in the square).
+      // One line through its middle: its halves point opposite ways, the upper one up (y is down in the square).
       expect((a[0] * b[0] + a[1] * b[1]) / (Math.hypot(...a) * Math.hypot(...b))).toBeLessThan(-0.99);
       expect(upper.tip[1]).toBeLessThan(upper.root[1]);
-      // Through his poles, so it stands up across his lobes, never lying along them.
+      // Through its poles, so it stands up across its lobes, never lying along them.
       expect(Math.abs(a[1])).toBeGreaterThan(2 * Math.abs(a[0]));
       for (const half of [upper, lower]) {
-        // Rooted outside his core (which stays dark), its tip short of the square's edge.
+        // Rooted outside its core (which stays dark), its tip short of the square's edge.
         expect(Math.hypot(...half.root)).toBeGreaterThan(0.1);
         expect(Math.hypot(...half.tip)).toBeLessThan(0.9);
         expect(Math.hypot(...half.tip)).toBeGreaterThan(2.5 * Math.hypot(...half.root));
       }
     }
-    // The same for the same zoom: it is his field's, not drawn by hand.
-    expect(beamLine(GALAHAD_FIELD, 0.94)).toEqual(beamLine(GALAHAD_FIELD, 0.94));
-    // A pixel across at its root at the smallest orb (16 px: its floor), and slim where he is large (160 px: four).
-    expect(16 * GALAHAD_BEAM.width).toBeLessThan(1);
-    expect(160 * GALAHAD_BEAM.width).toBeCloseTo(4, 6);
+    // The same for the same zoom: it is its field's, not drawn by hand.
+    expect(beamLine(PRIMARY_FIELD, 0.94)).toEqual(beamLine(PRIMARY_FIELD, 0.94));
+    // A pixel across at its root at the smallest orb (16 px: its floor), and slim where it is large (160 px: four).
+    expect(16 * PRIMARY_BEAM.width).toBeLessThan(1);
+    expect(160 * PRIMARY_BEAM.width).toBeCloseTo(4, 6);
   });
 
-  test("along his beam: it narrows to a point and fades to nothing, from his lit gold to his rim's copper", () => {
+  test("along its beam: it narrows to a point and fades to nothing, from its lit gold to its rim's copper", () => {
     expect(beamAt(0)).toEqual({ width: 1, light: 1, hue: 0 });
     expect(beamAt(1)).toEqual({ width: 0, light: 0, hue: 1 });
     // Held to its ends either side.
@@ -148,7 +148,7 @@ describe("how it moves", () => {
     expect(FIELD_MOTION.waiting.breath).not.toBeNull();
   });
 
-  test("a knight moves only while it works, and never sends off embers", () => {
+  test("an agent moves only while it works, and never sends off embers", () => {
     for (const mood of ORB_MOODS) {
       const motion = fieldMotion(mood, true);
       expect(motion.embers).toBe(false);
@@ -181,7 +181,7 @@ describe("how it moves", () => {
     expect(back.turn).toBeCloseTo(FIELD_MOTION.working.turn * ORB_LONGEST_STEP, 12);
   });
 
-  test("as few frames as look smooth: none once a knight has come to rest", () => {
+  test("as few frames as look smooth: none once an agent has come to rest", () => {
     const resting = fieldMotion("idle", true);
     let clock = run(fieldClock(FIELD_MOTION.working), resting, 0.2);
     expect(fieldFps(clock, resting)).toBe(30);
@@ -200,7 +200,7 @@ describe("how it moves", () => {
     expect(fieldStill(FIELD_MOTION.failed)).toEqual({ turn: 0, glow: FIELD_MOTION.failed.glow, rim: 1, embers: [] });
   });
 
-  test("his embers drift off the burning rim, inside his square, fading in and out; the same for the same moment", () => {
+  test("its embers drift off the burning rim, inside its square, fading in and out; the same for the same moment", () => {
     const working = fieldClock(FIELD_MOTION.working);
     expect(fieldFrame(working, 3).embers).toEqual([]);
     expect(fieldFrame(fieldClock(FIELD_MOTION.idle), 3, { embers: true }).embers).toEqual([]);
@@ -247,7 +247,7 @@ describe("its colours", () => {
 
   test("on a light page, ink: darker than its light, readable on the page, as opaque as it is lit", () => {
     for (const handle of HANDLES.slice(0, 40)) {
-      const inks = fieldInks(knightField(handle).colours);
+      const inks = fieldInks(agentField(handle).colours);
       // At least 3 to 1 against the light page's ground (#fafafa) where it is fully lit, as a graphic needs.
       for (const ink of [inks.key, inks.rim]) expect((luminance([250, 250, 250]) + 0.05) / (luminance(ink) + 0.05)).toBeGreaterThan(3);
     }

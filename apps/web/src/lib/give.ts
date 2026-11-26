@@ -1,9 +1,9 @@
 import type { TeamGiveInput } from "@invincible/core/team";
 
 /*
- * Giving a task (pure: no DOM). The commands that prove it is done, as typed; a task given to the Roundtable
- * as the node takes it (POST /api/team/give); and its answer in words: which knight took it and why, and how
- * each of the others stood. The Roundtable is a technocracy: the knight best suited to a task takes it.
+ * Giving a task (pure: no DOM). The commands that prove it is done, as typed; a task given to the agents
+ * as the node takes it (POST /api/team/give); and its answer in words: which agent took it and why, and how
+ * each of the others stood. The agent best suited to a task takes it.
  */
 
 const GATES = 16;
@@ -31,7 +31,7 @@ export function budgetFrom(text: string): { usd: number | null } | { error: stri
   return { usd };
 }
 
-/** A task for the Roundtable, as the node takes it: only what was given. */
+/** A task for the agents, as the node takes it: only what was given. */
 export function giveInput(form: { goal: string; title: string; gates: string[]; desktop: boolean; repository: string; budgetUsd?: number | null }): TeamGiveInput {
   const title = form.title.trim();
   const repository = form.repository.trim();
@@ -45,7 +45,7 @@ export function giveInput(form: { goal: string; title: string; gates: string[]; 
   };
 }
 
-/** The node's answer to a task given to the Roundtable. */
+/** The node's answer to a task given to the agents. */
 export interface Given {
   task: { id: string; room: string };
   choice: { id: string; name: string; reasons: string[] };
@@ -60,7 +60,7 @@ export function givenTo(answer: Given): { id: string; name: string; room: string
     room: answer.task.room,
     why: answer.choice.reasons.join(" · "),
     others: answer.considered
-      .filter((knight) => knight.id !== answer.choice.id)
-      .map((knight) => ({ id: knight.id, name: knight.name, line: `${knight.eligible ? "" : "can't take it: "}${knight.why.join(" · ")}`, could: knight.eligible })),
+      .filter((agent) => agent.id !== answer.choice.id)
+      .map((agent) => ({ id: agent.id, name: agent.name, line: `${agent.eligible ? "" : "can't take it: "}${agent.why.join(" · ")}`, could: agent.eligible })),
   };
 }

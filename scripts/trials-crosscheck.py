@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Check the trial suite's exact answers by independent methods, in the Lab.
+"""Check the eval suite's exact answers by independent methods, in the Lab.
 
-    bun scripts/trials-cases.ts 25 > cases.json
-    docker run --rm -i -v "$PWD/scripts:/s:ro" invincible/lab:1 python3 /s/trials-crosscheck.py < cases.json
+    bun scripts/evals-cases.ts 25 > cases.json
+    docker run --rm -i -v "$PWD/scripts:/s:ro" invincible/lab:1 python3 /s/evals-crosscheck.py < cases.json
 
-Each problem is re-solved a different way from packages/models/src/trial-suite.ts:
+Each problem is re-solved a different way from packages/models/src/eval-suite.ts:
 beam finite elements, generalized eigenproblems, ODE integration, a PDE solve by
 the method of lines, double Fourier series, Lambert W, and a CAD kernel. The lid-driven
 cavity is checked separately (it needs a CFD study, not a formula). Exit 1 if any
-answer differs by more than a tenth of its trial tolerance (or 1e-4 relative).
+answer differs by more than a tenth of its eval tolerance (or 1e-4 relative).
 """
 import json
 import math
@@ -285,7 +285,7 @@ CHECKS = {
     "oblique-hole-plate": oblique_plate,
 }
 
-# What each independent method can resolve (relative); the trial tolerances are wider.
+# What each independent method can resolve (relative); the eval tolerances are wider.
 RESOLUTION = {"x_max_m": 2e-5, "tau_max_mpa": 1e-4, "q_fraction": 1e-4}
 
 

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { DEFAULT_IMAGE, DESKTOP_IMAGE, OWN_IMAGES, SandboxHost, type DockerRunner } from "../src/index.ts";
 
 /*
- * Galahad's own images. One made from another of his (the desktop from the workshop's) names a base that is in no
+ * The primary's own images. One made from another of its (the desktop from the workshop's) names a base that is in no
  * registry, and `docker build --pull` looks for it there: "pull access denied for invincible/sandbox", as on ultra on
  * 21 November 2026. So the node couldn't make the desktop image again once it was pruned, nor build it when asked.
  * Such an image is built without --pull, after its base, which is made first when it's gone too.
@@ -28,7 +28,7 @@ function host(built: Set<string>) {
   return { sandboxes, builds: () => calls.filter((args) => args[0] === "build") };
 }
 
-test("an image made from another of his names that one as its base, and only such an image names one", () => {
+test("an image made from another of its names that one as its base, and only such an image names one", () => {
   for (const [image, own] of Object.entries(OWN_IMAGES)) {
     const from = baseOf(own.context);
     expect({ image, base: own.base ?? null }).toEqual({ image, base: from in OWN_IMAGES ? from : null });
@@ -36,7 +36,7 @@ test("an image made from another of his names that one as its base, and only suc
   expect(OWN_IMAGES[DESKTOP_IMAGE]!.base).toBe(DEFAULT_IMAGE);
 });
 
-test("an image from a registry's base is built with --pull; one from his own base, without", async () => {
+test("an image from a registry's base is built with --pull; one from its own base, without", async () => {
   const h = host(new Set());
   await h.sandboxes.build("/opt/invincible/sandbox", undefined, DEFAULT_IMAGE);
   await h.sandboxes.build("/opt/invincible/sandbox/desktop", undefined, DESKTOP_IMAGE);

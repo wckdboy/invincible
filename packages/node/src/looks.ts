@@ -3,10 +3,10 @@ import type { ChatStore, KeptLook } from "./chats.ts";
 import { type TurnHub, TurnError, type TurnSpec } from "./turns.ts";
 
 /*
- * His own looks (your word, 24 November 2026: "add it. In the end I want Galahad to become fully autonomous"): as he
- * answers in a chat of yours, he may set himself a time to look at something again (a deploy, a run, a reply) instead
- * of asking you to come back. The look waits in the chat store; when its time comes it becomes a turn of his in that
- * chat, with his note as the message that starts it (shown as his, never as yours), run as the device whose turn set
+ * Its own looks (your word, 24 November 2026: "add it. In the end I want [the primary] to become fully autonomous"): as it
+ * answers in a chat of yours, it may set itself a time to look at something again (a deploy, a run, a reply) instead
+ * of asking you to come back. The look waits in the chat store; when its time comes it becomes a turn of its in that
+ * chat, with its note as the message that starts it (shown as its, never as yours), run as the device whose turn set
  * it as that device stands then (revoked since, or no longer allowed to chat, and it doesn't run). What the answer that
  * set it held of yours (a private connector's data), its turn starts holding: nothing that can carry data out
  * runs in it. A look whose chat is busy waits for the turn there to end; one that came due while this node was away is
@@ -44,10 +44,10 @@ export function lookTime(at: number, zone: string, now: number): string {
   return `${day}, ${clock}`;
 }
 
-/** The message a look comes back as, for the model and kept in the chat as his: when he set it, his note, what to do. */
+/** The message a look comes back as, for the model and kept in the chat as its: when it set it, its note, what to do. */
 export function lookMessage(look: { set: number; note: string; at: number; zone: string }, now: number): string {
   const late = now - look.at > 10 * 60_000 ? ` It came due at ${lookTime(look.at, look.zone, now)}, while this node was away: it is late.` : "";
-  return `(A look you set yourself at ${lookTime(look.set, look.zone, now)}, not your liege's words: ${look.note})${late} Look now, with your tools, and say what you found and what comes next: your liege reads it here.`;
+  return `(A look you set yourself at ${lookTime(look.set, look.zone, now)}, not the owner's words: ${look.note})${late} Look now, with your tools, and say what you found and what comes next: the owner reads it here.`;
 }
 
 export interface LookRunnerOptions {
@@ -57,7 +57,7 @@ export interface LookRunnerOptions {
   log?: (message: string) => void;
 }
 
-/** Takes his looks when they come: each a turn of his in its chat, once. */
+/** Takes its looks when they come: each a turn of its in its chat, once. */
 export class LookRunner {
   private readonly now: () => number;
   private prepare: ((look: KeptLook) => TurnSpec) | null = null;

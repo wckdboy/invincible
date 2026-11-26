@@ -33,9 +33,9 @@ export interface Live {
   fleet: Signal<FleetView | null>;
   pairings: Signal<PairingView[]>;
   secretRequests: Signal<SecretRequestView[]>;
-  /** The oath's outbox: actions waiting for your answer, and recently decided ones. */
+  /** The policy's outbox: actions waiting for your answer, and recently decided ones. */
   actions: Signal<ActionView[]>;
-  /** His asks to use a Mac itself, and his sessions there. */
+  /** Its asks to use a Mac itself, and its sessions there. */
   screenSessions: Signal<ScreenSessionView[]>;
   refreshScreenSessions(): Promise<void>;
   /** MCP servers' questions to you, mid-call: each holds its call until you answer, say no, or its time runs out. */
@@ -43,18 +43,18 @@ export interface Live {
   refreshQuestions(): Promise<void>;
   /** What the heartbeat found, dismissed ones included (the Inbox shows the open ones). */
   notices: Signal<NoticeView[]>;
-  /** Loops Galahad drafted when you asked for one in chat, waiting for you to add or dismiss. */
+  /** Loops the primary drafted when you asked for one in chat, waiting for you to add or dismiss. */
   loopDrafts: Signal<LoopDraftView[]>;
   /** Connectors an agent asked you for. */
   connectorRequests: Signal<ConnectorRequestView[]>;
-  /** Facts about you he proposed, waiting for you to keep or drop (what you kept goes with every answer). */
+  /** Facts about you it proposed, waiting for you to keep or drop (what you kept goes with every answer). */
   aboutYou: Signal<MemoryView[]>;
   refreshAboutYou(): Promise<void>;
   online: Signal<boolean>;
   /** The inbox has been asked at least once (until then, "nothing needs you" would be a guess). */
   inboxLoaded: Signal<boolean>;
   inboxCount: Signal<number>;
-  /** The knights, their rooms and their work, as the node last gave them (null: not yet, or not this device's to read). Set anew at every asking. */
+  /** The agents, their rooms and their work, as the node last gave them (null: not yet, or not this device's to read). Set anew at every asking. */
   team: Signal<TeamSnapshot | null>;
   /** Why the last asking for the team failed (null: it didn't). */
   teamProblem: Signal<unknown>;

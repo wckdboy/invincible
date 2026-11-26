@@ -8,11 +8,11 @@ import { ARM_DEFAULT_SCOPES } from "./arms.ts";
 import { INSTRUCTIONS, type ToolApi, toolsFor } from "./tools.ts";
 
 /*
- * Galahad's mind as an MCP server, for any agent harness: Claude Code, OpenCode,
+ * The primary's memory as an MCP server, for any agent harness: Claude Code, OpenCode,
  * Codex, Hermes, T3 Code. It runs on the same machine as a node, speaks to it over
  * loopback with an *arm token* (least privilege: memory, sandboxes, ledger, secret
  * requests; never the vault, devices or keys), and is launched by the harness. Its tools
- * are Galahad's own (tools.ts), the same ones his chat uses:
+ * are the primary's own (tools.ts), the same ones its chat uses:
  *
  *   bun <repo>/packages/node/src/cli.ts mcp --arm claude-code
  */
@@ -38,7 +38,7 @@ class ArmClient implements ToolApi {
       });
     } catch {
       if (this.signal?.aborted) throw new Error("the caller cancelled this call");
-      throw new Error(`no Galahad node is running at ${this.base}; start it with \`invincible serve\``);
+      throw new Error(`no Invincible node is running at ${this.base}; start it with \`invincible serve\``);
     }
     const body = (await response.json().catch(() => ({}))) as { error?: string; status?: number };
     if (!response.ok) throw new Error(body.error ?? `${response.status} ${response.statusText}`);
@@ -79,7 +79,7 @@ export interface McpOptions {
 
 export function createMcpServer(opts: McpOptions): McpServer {
   const api = new ArmClient(opts.base, opts.token);
-  const server = new McpServer({ name: "invincible", title: "Galahad", version: opts.version }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "invincible", title: "Invincible", version: opts.version }, { instructions: INSTRUCTIONS });
 
   for (const t of toolsFor(opts.scopes ?? ARM_DEFAULT_SCOPES).filter((t) => !opts.only || opts.only.includes(t.name))) {
     server.registerTool(t.name, { title: t.title, description: t.description, inputSchema: t.input, ...(t.annotations ? { annotations: t.annotations } : {}) }, async (args: unknown, extra: { signal?: AbortSignal }) => {
@@ -90,18 +90,18 @@ export function createMcpServer(opts: McpOptions): McpServer {
         // A picture goes as MCP image content, after its words.
         return { content: [{ type: "text" as const, text: result.text }, ...(result.images ?? []).map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mediaType }))] };
       } catch (error) {
-        return { content: [{ type: "text" as const, text: `Galahad: ${(error as Error).message}` }], isError: true };
+        return { content: [{ type: "text" as const, text: `Invincible: ${(error as Error).message}` }], isError: true };
       }
     });
   }
 
-  const oathPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../docs/OATH.md");
+  const policyPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../docs/POLICY.md");
   server.registerResource(
-    "oath",
-    "galahad://oath",
-    { title: "The Oath of Galahad", description: "Character, duties and hard limits every agent working for this user is bound by.", mimeType: "text/markdown" },
+    "policy",
+    "invincible://policy",
+    { title: "Invincible's policy", description: "Character, duties and hard limits every agent working for this user is bound by.", mimeType: "text/markdown" },
     async (uri) => ({
-      contents: [{ uri: uri.href, mimeType: "text/markdown", text: existsSync(oathPath) ? readFileSync(oathPath, "utf8") : "(the Oath is not available on this node)" }],
+      contents: [{ uri: uri.href, mimeType: "text/markdown", text: existsSync(policyPath) ? readFileSync(policyPath, "utf8") : "(the Policy is not available on this node)" }],
     }),
   );
 

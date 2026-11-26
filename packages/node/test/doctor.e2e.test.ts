@@ -27,7 +27,7 @@ import { freePort } from "./ports.ts";
 // (A machine with no KVM, said whole: its sandbox host makes no microVMs, whatever the machine running this test can.)
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "doctor-test", cores: 16, cpu: "test", memoryGb: 64, hasBattery: false, gpu: [], docker: true, vm: { kvm: false, tools: [] }, tools: ["docker"], localModels: [], tailscale: null, sandbox: { image: true, networks: true, vm: false } };
 
-const root = mkdtempSync(join(tmpdir(), "galahad-doctor-"));
+const root = mkdtempSync(join(tmpdir(), "primary-doctor-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
 const proxyPort = freePort();
@@ -166,7 +166,7 @@ async function until(done: () => boolean | Promise<boolean>, timeoutMs = 8000): 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort, log: () => {}, loopIntervalMs: 60_000, docker: runner, measure, system, archiveIntervalMs: false });
@@ -232,12 +232,12 @@ describe("a healthy node", () => {
     expect(check(quick, "sandbox.start").state).toBe("skipped");
     await doctor();
     const { entries } = await json<{ entries: LedgerEntry[] }>(admin("ledger"));
-    const mine = entries.filter((e) => e.quest === "galahad.doctor");
+    const mine = entries.filter((e) => e.run === "primary.doctor");
     expect(mine.length).toBeGreaterThan(0);
     expect(new Set(mine.map((e) => e.verdict))).toEqual(new Set(["allow"]));
     // Everything written since is one of those ledger lines.
     const written = daemon.store.eventCount() - before;
-    const fresh = entries.filter((e) => e.quest === "galahad.doctor").length;
+    const fresh = entries.filter((e) => e.run === "primary.doctor").length;
     expect(written).toBeLessThanOrEqual(fresh);
     expect((await json<{ sandboxes: unknown[] }>(admin("sandboxes", {}))).sandboxes).toEqual([]);
   });
@@ -264,7 +264,7 @@ describe("a healthy node", () => {
     const lines: string[] = [];
     expect(await doctorCommand(api, { offline: true }, () => stoppedReport(home, "x"), (line) => lines.push(line))).toBeLessThan(2);
     expect(lines.some((l) => l.includes("broken"))).toBe(false);
-    expect(lines[0]).toContain("Galahad's doctor on ultra · offline");
+    expect(lines[0]).toContain("Your agent's doctor on ultra · offline");
     expect(lines).toContain("The mind");
     expect(lines.some((l) => l.includes("ok        the mind's database passes SQLite's integrity check"))).toBe(true);
     const out: string[] = [];
@@ -331,7 +331,7 @@ describe("faults the owner's server has had, each with its own line and advice",
     }
   });
 
-  test("a VM's eyes on a coding plan its tools may use are well, not a model he lacks; on one for a tool you run yourself, they can't see", async () => {
+  test("a VM's eyes on a coding plan its tools may use are well, not a model it lacks; on one for a tool you run yourself, they can't see", async () => {
     // Two plans with their keys in the vault (fakes, made here), as `invincible key add` leaves them.
     for (const id of ["opencode-go", "kimi-coding"]) {
       await json(admin("setSecret", { name: id, value: `FAKE-${id}-${"0".repeat(24)}`, provider: id }));
@@ -458,7 +458,7 @@ describe("with no node running", () => {
     const stoppedHome = new Home(join(root, "stopped"));
     const { identity, keystore } = await stoppedHome.createIdentity("file");
     const store = new LedgerStore(stoppedHome.ledgerPath);
-    const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "sleeper" });
+    const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "sleeper" });
     store.close();
     stoppedHome.writeConfig({ v: 1, name: "sleeper", fleet, port: freePort(), keystore, advertise: "127.0.0.1" });
     const lines: string[] = [];

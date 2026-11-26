@@ -39,20 +39,20 @@ export function stackPlaces(heights: readonly number[], shown = TOAST_SHOWN, gap
   return places;
 }
 
-/* ---------- the banner: whether Galahad can be reached ---------- */
+/* ---------- the banner: whether the primary can be reached ---------- */
 
-/** What the banner says: this device is offline; Galahad can't be reached; he is reached again. */
+/** What the banner says: this device is offline; the primary can't be reached; it is reached again. */
 export type Connection = "offline" | "unreachable" | "reconnected";
 
 /** Each, as the banner says it: its tone, its words, whether it offers Retry, and whether the app is trying again
  * meanwhile (its line of light). Offline is no error: nothing is tried until the device is online again. */
 export const CONNECTION: Record<Connection, { tone: "neutral" | "warn" | "ok"; text: string; retry: boolean; trying: boolean }> = {
   offline: { tone: "neutral", text: "You're offline. The app is cached; live data returns when you reconnect.", retry: true, trying: false },
-  unreachable: { tone: "warn", text: "Can't reach Galahad right now. What you see may be out of date.", retry: true, trying: true },
+  unreachable: { tone: "warn", text: "Can't reach your agent right now. What you see may be out of date.", retry: true, trying: true },
   reconnected: { tone: "ok", text: "Reconnected", retry: false, trying: false },
 };
 
-/** How long it says he's reached again before it goes, in ms. */
+/** How long it says it's reached again before it goes, in ms. */
 export const RECONNECTED_MS = 1800;
 
 export interface CourseOptions {
@@ -67,8 +67,8 @@ export interface CourseOptions {
 }
 
 /**
- * The banner's course. `reach` is each word from the app (lib/reach.ts) whether Galahad is reached; `network` the
- * browser's going offline or coming back. It says he can't be reached (or that this device is offline) while that
+ * The banner's course. `reach` is each word from the app (lib/reach.ts) whether the primary is reached; `network` the
+ * browser's going offline or coming back. It says it can't be reached (or that this device is offline) while that
  * lasts, then "Reconnected" for a moment, then goes; while all is well it says nothing.
  */
 export function connectionCourse(o: CourseOptions): { reach(reached: boolean): void; network(): void } {

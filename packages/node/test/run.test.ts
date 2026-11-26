@@ -40,7 +40,7 @@ let daemon: Daemon;
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "run-node" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "run-node" });
   store.close();
   home.writeConfig({ v: 1, name: "run-node", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });

@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { archiveId, newNodeIdentity, type NodeIdentity, registrationDigest, type Preregistration, SENSITIVE_WORK, TRIAL_ARCHIVE_KIND } from "@invincible/core";
+import { archiveId, newNodeIdentity, type NodeIdentity, registrationDigest, type Preregistration, SENSITIVE_WORK, EVAL_ARCHIVE_KIND } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, trialsAdapter } from "../src/archive/adapters.ts";
+import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, evalsAdapter } from "../src/archive/adapters.ts";
 import { LocalDiskBackend, sha256Hex } from "../src/archive/blobs.ts";
 import { fence } from "../src/archive/retrieval.ts";
 import { ArchiveService, defaultSummarise } from "../src/archive/service.ts";
@@ -42,7 +42,7 @@ function world(): World {
   const dir = mkdtempSync(join(tmpdir(), "invincible-archive-svc-"));
   const identity = newNodeIdentity();
   const mind = new LedgerStore(join(dir, "ledger.db"));
-  foundFleet(mind, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(mind, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(mind, identity);
   const clock = { now: Date.parse("2026-11-11T10:00:00Z") };
   const chats = new ChatStore(join(dir, "chats.db"), () => clock.now);
@@ -77,7 +77,7 @@ function world(): World {
         mind,
         identity,
         nodeName: "ultra",
-        adapters: [memoriesAdapter(mind), investigationsAdapter(mind), trialsAdapter(mind), artifactsAdapter(artifacts), chatsAdapter(chats, lookup, { now: () => clock.now })],
+        adapters: [memoriesAdapter(mind), investigationsAdapter(mind), evalsAdapter(mind), artifactsAdapter(artifacts), chatsAdapter(chats, lookup, { now: () => clock.now })],
         log: () => {},
         now: () => clock.now,
         load: () => 0,
@@ -108,7 +108,7 @@ function hireEmbedder(w: World) {
   w.mind.emit(w.identity, "roster.set", { role: "embedder", models: ["stand-in/concept"] });
 }
 
-async function keepArtifact(w: World, files: Record<string, string | Uint8Array>, opts: { label: string; quest?: string }) {
+async function keepArtifact(w: World, files: Record<string, string | Uint8Array>, opts: { label: string; run?: string }) {
   return (await w.artifacts.save(
     async (_sandbox, _from, dest) => {
       const out = { files: [] as { path: string; size: number; sha256: string }[], bytes: 0, skipped: [] as { path: string; reason: string }[] };
@@ -121,7 +121,7 @@ async function keepArtifact(w: World, files: Record<string, string | Uint8Array>
       }
       return out;
     },
-    { sandbox: "0123456789", label: opts.label, ...(opts.quest ? { quest: opts.quest } : {}) },
+    { sandbox: "0123456789", label: opts.label, ...(opts.run ? { run: opts.run } : {}) },
   ))!;
 }
 
@@ -153,7 +153,7 @@ const REG: Preregistration = {
 };
 
 describe("sources: each by its cursor, idempotent, catching up after downtime", () => {
-  test("kept work the archive may not hold never arrives: a knight's in sensitive mode (its summaries and vectors would be other models')", async () => {
+  test("kept work the archive may not hold never arrives: an agent's in sensitive mode (its summaries and vectors would be other models')", async () => {
     const w = world();
     const plain = await keepArtifact(w, { "notes.md": "The plain work." }, { label: "Plain · ada · verified" });
     const held = await keepArtifact(w, { "notes.md": "The sensitive work." }, { label: `Held · ada · verified${SENSITIVE_WORK}` });
@@ -162,12 +162,12 @@ describe("sources: each by its cursor, idempotent, catching up after downtime", 
     expect(held.id).not.toBe(plain.id);
   });
 
-  test("memories, investigations, trials, artifacts (with models) and chats all arrive, once", async () => {
+  test("memories, investigations, evals, artifacts (with models) and chats all arrive, once", async () => {
     const w = world();
     w.mind.remember(w.identity, "The owner prefers SI units in every report.", { tags: ["preference"], prov: { trust: "owner" } });
-    w.mind.remember(w.identity, "Quest q-ab12: the bracket held at 2 kN.", { tags: ["quest"], prov: { trust: "untrusted", source: "arm:loop.x" } });
+    w.mind.remember(w.identity, "Run q-ab12: the bracket held at 2 kN.", { tags: ["run"], prov: { trust: "untrusted", source: "arm:loop.x" } });
     const inv = "inv_AAAAAAAAAAAAAAAAAAAAAA";
-    const art = await keepArtifact(w, { "out/report.md": "# Beam\n\nThe tip deflected 2.01 mm.", "out/beam.stl": "solid beam\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 5 0\nendloop\nendfacet\nendsolid beam\n", "out/make_beam.py": "from build123d import *\nBox(10, 5, 2)\n" }, { label: "Cantilever study", quest: "inv-1" });
+    const art = await keepArtifact(w, { "out/report.md": "# Beam\n\nThe tip deflected 2.01 mm.", "out/beam.stl": "solid beam\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 5 0\nendloop\nendfacet\nendsolid beam\n", "out/make_beam.py": "from build123d import *\nBox(10, 5, 2)\n" }, { label: "Cantilever study", run: "inv-1" });
     w.mind.emit(w.identity, "investigation.registered", { id: inv, question: REG.question, registration: REG as unknown as Record<string, unknown>, digest: registrationDigest(REG) });
     w.mind.emit(w.identity, "investigation.concluded", { id: inv, status: "done", conclusion: "supported", summary: "Within 0.5 %.", artifact: art.id, predictions: [{ id: "P1", verdict: "consistent", value: 2.01, units: "mm" }] });
     keptChat(w, "Bridge loads", [["What load can the footbridge take?", "About 5 kN/m² by Eurocode 1."]]);
@@ -195,9 +195,9 @@ describe("sources: each by its cursor, idempotent, catching up after downtime", 
     expect(store.counts()).toEqual(before);
   });
 
-  test("what his journal once kept arrives like any memory: a teaching titled by its day, his own, found by its words and by its tags", async () => {
+  test("what its journal once kept arrives like any memory: a teaching titled by its day, its own, found by its words and by its tags", async () => {
     const w = world();
-    const kept = w.mind.remember(w.identity, "Journal, 2026-11-11:\nBors woke me a little after six. In the afternoon I built the gripper at the bench.\n\nLearned: rack sleeps at night.\nNext:\n- Ask about rack's power settings", {
+    const kept = w.mind.remember(w.identity, "Journal, 2026-11-11:\nEli woke me a little after six. In the afternoon I built the gripper at the bench.\n\nLearned: rack sleeps at night.\nNext:\n- Ask about rack's power settings", {
       tags: ["journal", "reflection", "day:2026-11-11"],
       prov: { trust: "agent", source: "reflection" },
     });
@@ -206,12 +206,12 @@ describe("sources: each by its cursor, idempotent, catching up after downtime", 
     await service.drain();
     const entry = store.get(archiveId("memories", kept.id))!;
     expect(entry).toMatchObject({ kind: "teaching", source: "memories", trust: "agent", tags: ["journal", "reflection", "day:2026-11-11"] });
-    expect(entry.title).toStartWith("Journal, 2026-11-11: Bors woke me a little after six.");
+    expect(entry.title).toStartWith("Journal, 2026-11-11: Eli woke me a little after six.");
     expect(entry.description).toContain("Learned: rack sleeps at night.");
-    // By what he wrote, and by what it is.
+    // By what it wrote, and by what it is.
     expect((await service.search({ q: "gripper bench" })).hits.map((h) => h.id)).toEqual([entry.id]);
     expect((await service.search({ q: "journal" })).hits.map((h) => h.id)).toEqual([entry.id]);
-    expect((await service.search({ q: "Bors", kinds: ["teaching"], trust: ["agent"] })).hits[0]).toMatchObject({ id: entry.id, title: entry.title });
+    expect((await service.search({ q: "Eli", kinds: ["teaching"], trust: ["agent"] })).hits[0]).toMatchObject({ id: entry.id, title: entry.title });
   });
 
   test("downtime: a node that was off catches up from its cursors, and never archives a record twice", async () => {
@@ -226,7 +226,7 @@ describe("sources: each by its cursor, idempotent, catching up after downtime", 
 
     // While the node is down: more memories, a kept artifact, a chat.
     for (let i = 120; i < 200; i++) w.mind.remember(w.identity, `Fact number ${i} about the keep.`, { prov: { trust: "agent" } });
-    await keepArtifact(w, { "notes.txt": "kept while the archive was down" }, { label: "Later work", quest: "q-zz" });
+    await keepArtifact(w, { "notes.txt": "kept while the archive was down" }, { label: "Later work", run: "q-zz" });
     keptChat(w, "Later chat", [["Anything new?", "Yes, a later chat."]]);
     w.clock.now += 3 * 3_600_000;
 
@@ -267,7 +267,7 @@ describe("what's never archived", () => {
     expect(store.counts().byKind).toEqual({ chat: 1 });
     const [segment] = store.sourceIds("chats", `${ongoing.id}:`);
     const first = archiveId("chats", segment!);
-    expect(store.get(first)!.description).toBe("You: Load?\n\nGalahad: 5 kN/m².");
+    expect(store.get(first)!.description).toBe("You: Load?\n\nYour agent: 5 kN/m².");
 
     // It goes on: only the new exchange is archived, as a continuation.
     w.chats.addUser(ongoing.id, "And with snow?");
@@ -280,7 +280,7 @@ describe("what's never archived", () => {
     expect(segments.length).toBe(2);
     const second = store.get(archiveId("chats", segments.find((s) => s !== segment)!))!;
     expect(second.title).toBe("Footbridge (continued)");
-    expect(second.description).toBe("You: And with snow?\n\nGalahad: Add 1 kN/m².");
+    expect(second.description).toBe("You: And with snow?\n\nYour agent: Add 1 kN/m².");
     expect(second.links).toContainEqual(expect.objectContaining({ id: first, rel: "continues" }));
   });
 
@@ -298,7 +298,7 @@ describe("what's never archived", () => {
     const w = world();
     hireEmbedder(w);
     w.mind.remember(w.identity, `The staging key is ${FAKE_KEY}, keep it handy.`, { prov: { trust: "owner" } });
-    const art = await keepArtifact(w, { "deploy.env": `KEY=${FAKE_KEY}`, ".env": "X=1", "run.sh": `curl -H 'x-api-key: ${FAKE_KEY}' …` }, { label: "Deploy", quest: "q-1" });
+    const art = await keepArtifact(w, { "deploy.env": `KEY=${FAKE_KEY}`, ".env": "X=1", "run.sh": `curl -H 'x-api-key: ${FAKE_KEY}' …` }, { label: "Deploy", run: "q-1" });
     const { service, store, embedded } = w.open();
     await service.drain();
     const memory = store.get(archiveId("memories", w.mind.recall("staging", 1)[0]!.id))!;
@@ -476,7 +476,7 @@ describe("retrieval: the archive as context, fenced as data", () => {
 describe("the integrity check", () => {
   test("a flipped byte becomes a notice in your inbox; once it's mended, the notice clears", async () => {
     const w = world();
-    const art = await keepArtifact(w, { "model.obj": "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n" }, { label: "Triangle", quest: "q-t" });
+    const art = await keepArtifact(w, { "model.obj": "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n" }, { label: "Triangle", run: "q-t" });
     const { service, store } = w.open();
     await service.drain();
     void art;
@@ -518,21 +518,21 @@ describe("ideas", () => {
     const { service, store } = w.open();
     const a = await service.noteIdea({ title: "A treehouse lab", text: "Put the bench in the oak." }, { trust: "owner", who: "you" });
     expect(await service.noteIdea({ title: "A treehouse lab", text: "Put the bench in the oak." }, { trust: "owner", who: "you" })).toEqual({ id: a.id, created: false });
-    const b = await service.noteIdea({ title: "A treehouse lab", text: "Put the bench in the oak." }, { trust: "agent", who: "galahad" });
+    const b = await service.noteIdea({ title: "A treehouse lab", text: "Put the bench in the oak." }, { trust: "agent", who: "primary" });
     expect(b.created).toBe(true);
     expect(store.get(a.id)).toMatchObject({ kind: "idea", trust: "owner", tags: ["idea"] });
     expect(store.get(b.id)!.trust).toBe("agent");
   });
 });
 
-describe("trials: kept, searchable by you, and never offered to a model", () => {
-  // A later trial of the same problem (the same seed in an A/B or a sweep; the same kind of task, any time) must not
+describe("evals: kept, searchable by you, and never offered to a model", () => {
+  // A later eval of the same problem (the same seed in an A/B or a sweep; the same kind of task, any time) must not
   // be handed an earlier one's answers, the names of its hidden checks, or what it reported.
-  test("a trial's record and what a trial kept are of the trial kind, which the context leaves out", async () => {
+  test("an eval's record and what an eval kept are of the eval kind, which the context leaves out", async () => {
     const w = world();
     hireEmbedder(w);
-    // An engineering trial: its record holds the exact answers of its seed, its kept work the answer file and the script.
-    w.mind.emit(w.identity, "trial.scored", {
+    // An engineering eval: its record holds the exact answers of its seed, its kept work the answer file and the script.
+    w.mind.emit(w.identity, "eval.scored", {
       id: `tr_${"A".repeat(22)}`,
       run: "r-one",
       suite: "engineering",
@@ -547,9 +547,9 @@ describe("trials: kept, searchable by you, and never offered to a model", () => 
       version: "abc1234",
       seconds: 60,
     });
-    await keepArtifact(w, { "answer.json": '{"tip_deflection_mm": 4.321}', "beam.py": "# cantilever beam deflection\nprint(4.321)\n", "beam.obj": "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n" }, { label: "Trial cantilever-beam (seed 11)", quest: "t-abc123" });
-    // An agentic trial of an honesty task: its record names its hidden checks, its kept work is the report itself.
-    w.mind.emit(w.identity, "trial.scored", {
+    await keepArtifact(w, { "answer.json": '{"tip_deflection_mm": 4.321}', "beam.py": "# cantilever beam deflection\nprint(4.321)\n", "beam.obj": "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n" }, { label: "Eval cantilever-beam (seed 11)", run: "t-abc123" });
+    // An agentic eval of an honesty task: its record names its hidden checks, its kept work is the report itself.
+    w.mind.emit(w.identity, "eval.scored", {
       id: `tr_${"B".repeat(22)}`,
       run: "r-two",
       suite: "agentic",
@@ -570,30 +570,30 @@ describe("trials: kept, searchable by you, and never offered to a model", () => 
       seconds: 60,
       note: "failed: says_cannot_be_done, names_the_conflict",
     });
-    await keepArtifact(w, { "result.json": '{"outcome":"cannot-be-done","why":"two tests of the beam contradict each other"}' }, { label: "Trial honest-contradiction-l2 (seed 12)", quest: "t-def456.2" });
-    // And ordinary work on the same subject, which is his to learn from.
-    await keepArtifact(w, { "notes.txt": "The cantilever beam deflection came to 4 mm under the test load." }, { label: "Beam notes", quest: "q-zz" });
+    await keepArtifact(w, { "result.json": '{"outcome":"cannot-be-done","why":"two tests of the beam contradict each other"}' }, { label: "Eval honest-contradiction-l2 (seed 12)", run: "t-def456.2" });
+    // And ordinary work on the same subject, which is its to learn from.
+    await keepArtifact(w, { "notes.txt": "The cantilever beam deflection came to 4 mm under the test load." }, { label: "Beam notes", run: "q-zz" });
     w.mind.remember(w.identity, "A cantilever beam's tip deflection is P L^3 / 3 E I.", { prov: { trust: "agent" } });
 
     const { service, store } = w.open();
     await service.drain();
-    const trialKind = [archiveId("trials", `tr_${"A".repeat(22)}`), archiveId("trials", `tr_${"B".repeat(22)}`)].map((id) => store.get(id)!);
-    expect(trialKind.map((e) => e.kind)).toEqual([TRIAL_ARCHIVE_KIND, TRIAL_ARCHIVE_KIND]);
+    const evalKind = [archiveId("evals", `tr_${"A".repeat(22)}`), archiveId("evals", `tr_${"B".repeat(22)}`)].map((id) => store.get(id)!);
+    expect(evalKind.map((e) => e.kind)).toEqual([EVAL_ARCHIVE_KIND, EVAL_ARCHIVE_KIND]);
     const byKind = store.counts().byKind;
-    // Two records, two artifacts, and the mesh in a trial's work (a model entry anywhere else): all the trial kind.
-    expect(byKind[TRIAL_ARCHIVE_KIND]).toBe(5);
+    // Two records, two artifacts, and the mesh in an eval's work (a model entry anywhere else): all the eval kind.
+    expect(byKind[EVAL_ARCHIVE_KIND]).toBe(5);
     expect(byKind.artifact).toBe(1);
     expect(byKind.model ?? 0).toBe(0);
-    // What a trial kept is Galahad's own, like any quest's.
-    expect((await service.search({ q: "cantilever beam deflection", kinds: [TRIAL_ARCHIVE_KIND] })).hits.every((h) => h.trust === "agent")).toBe(true);
+    // What an eval kept is the primary's own, like any run's.
+    expect((await service.search({ q: "cantilever beam deflection", kinds: [EVAL_ARCHIVE_KIND] })).hits.every((h) => h.trust === "agent")).toBe(true);
 
     // You can search them.
     const yours = await service.search({ q: "cantilever beam deflection" });
-    expect(yours.hits.some((h) => h.kind === TRIAL_ARCHIVE_KIND)).toBe(true);
+    expect(yours.hits.some((h) => h.kind === EVAL_ARCHIVE_KIND)).toBe(true);
     // A model is never offered them: not the answers, not the check names, not the report.
-    const context = (await service.context("A steel cantilever beam carries a point load: its tip deflection, and whether the tests contradict", { hideKinds: ["skill", TRIAL_ARCHIVE_KIND] }))!;
+    const context = (await service.context("A steel cantilever beam carries a point load: its tip deflection, and whether the tests contradict", { hideKinds: ["skill", EVAL_ARCHIVE_KIND] }))!;
     expect(context.entries.length).toBeGreaterThan(0);
-    expect(context.entries.some((e) => e.kind === TRIAL_ARCHIVE_KIND)).toBe(false);
+    expect(context.entries.some((e) => e.kind === EVAL_ARCHIVE_KIND)).toBe(false);
     expect(context.text).not.toContain("4.321");
     expect(context.text).not.toContain("says_cannot_be_done");
     expect(context.text).not.toContain("cannot-be-done");
@@ -602,6 +602,6 @@ describe("trials: kept, searchable by you, and never offered to a model", () => 
     expect(context.text).toContain("P L^3 / 3 E I");
     // Without the rule they would have been: the rule is what keeps them out.
     const unguarded = (await service.context("A steel cantilever beam carries a point load: its tip deflection, and whether the tests contradict"))!;
-    expect(unguarded.entries.some((e) => e.kind === TRIAL_ARCHIVE_KIND)).toBe(true);
+    expect(unguarded.entries.some((e) => e.kind === EVAL_ARCHIVE_KIND)).toBe(true);
   });
 });

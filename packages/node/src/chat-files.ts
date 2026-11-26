@@ -1,7 +1,7 @@
 import { ATTACHMENT_LIMITS, type AttachmentRef, type ClientIdentity, pictureType, signRequest } from "@invincible/core";
 
 /*
- * A file you sent Galahad through a chat app (a photo, a screenshot, a log), kept on your node as an attachment of your
+ * A file you sent the primary through a chat app (a photo, a screenshot, a log), kept on your node as an attachment of your
  * message, the way the apps keep one (uploadAttachment): by what its bytes are, never by what it says it is. A picture
  * in one of the four kinds a model is shown, or text; anything else stays in the chat app, and you're told why.
  */
@@ -25,7 +25,7 @@ export function fileKind(bytes: Uint8Array): AttachmentRef["type"] | null {
 /** Why a file can't go with your message, in a line; null when it can. */
 export function refusedFile(bytes: Uint8Array): string | null {
   const kind = fileKind(bytes);
-  if (!kind) return "it isn't a picture Galahad is shown (PNG, JPEG, WebP or GIF) or text";
+  if (!kind) return "it isn't a picture your agent is shown (PNG, JPEG, WebP or GIF) or text";
   if (kind === "text/plain" ? bytes.byteLength > ATTACHMENT_LIMITS.textBytes : bytes.byteLength > ATTACHMENT_LIMITS.imageBytes) return `it's over ${kind === "text/plain" ? "256 KB" : "5 MB"}`;
   return null;
 }

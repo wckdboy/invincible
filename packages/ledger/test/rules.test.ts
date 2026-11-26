@@ -48,7 +48,7 @@ function fleet(now?: () => number): { a: NodeIdentity; b: NodeIdentity; storeA: 
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const storeA = new LedgerStore(":memory:", now ? new HlcClock(now) : undefined);
-  foundFleet(storeA, a, { fleetName: "camelot", nodeName: "laptop" });
+  foundFleet(storeA, a, { fleetName: "homelab", nodeName: "laptop" });
   enrollDevice(storeA, a, { device: b.id, name: "server", kind: "node", box: b64u(b.boxPublic) });
   const storeB = new LedgerStore(":memory:", now ? new HlcClock(now) : undefined);
   storeB.expectFleet(storeA.fleet!);
@@ -206,7 +206,7 @@ describe("your rules in the mind", () => {
       const path = join(dir, "ledger.db");
       const a = newNodeIdentity();
       const store = new LedgerStore(path);
-      foundFleet(store, a, { fleetName: "camelot", nodeName: "laptop" });
+      foundFleet(store, a, { fleetName: "homelab", nodeName: "laptop" });
       store.remember(a, "before any rule");
       set(store, a, "no-locks");
       set(store, a, "no-env", { on: "command", does: "refuse", words: [".env*"] });
@@ -242,7 +242,7 @@ describe("your rules in the mind", () => {
       const path = join(dir, "ledger.db");
       const a = newNodeIdentity();
       const store = new LedgerStore(path);
-      foundFleet(store, a, { fleetName: "camelot", nodeName: "laptop" });
+      foundFleet(store, a, { fleetName: "homelab", nodeName: "laptop" });
       set(store, a, "no-locks");
       set(store, a, "no-push", { on: "command", does: "refuse", words: [], contains: "git push" });
       store.emit(a, "rule.removed", { name: "no-push" }, YOURS);

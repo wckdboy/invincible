@@ -1,10 +1,10 @@
 /*
- * A knight's desktop, watched and taken over from the app (POST /api/team/desktop): whether its VM has one, where
- * a tap on the picture lands on the knight's own screen, what counts as an address for its browser, the picture
+ * An agent's desktop, watched and taken over from the app (POST /api/team/desktop): whether its VM has one, where
+ * a tap on the picture lands on the agent's own screen, what counts as an address for its browser, the picture
  * the node sends as an image's source, and the node's refusal that a VM has no desktop. Pure (no DOM).
  */
 
-/** One thing done on a knight's desktop, as the node takes it (core's DesktopAction, without its schema). */
+/** One thing done on an agent's desktop, as the node takes it (core's DesktopAction, without its schema). */
 export type DesktopDo =
   | { do: "click"; x: number; y: number }
   | { do: "scroll"; direction: "up" | "down"; times?: number }
@@ -31,7 +31,7 @@ export const DESKTOP_KEYS = [
 export const hasDesktop = (workspace: { image: string } | null | undefined): boolean => Boolean(workspace?.image.includes("desktop"));
 
 /**
- * A tap on the picture as a place on the knight's screen, in the screen's own pixels: the picture may be drawn at
+ * A tap on the picture as a place on the agent's screen, in the screen's own pixels: the picture may be drawn at
  * any size, anywhere on the page. Null for a tap beside it (or on a picture not drawn yet).
  */
 export function screenPoint(tap: { x: number; y: number }, shown: { left: number; top: number; width: number; height: number }, screen: { width: number; height: number }): { x: number; y: number } | null {

@@ -53,15 +53,15 @@ export const settingsView: View = (root, ctx, { scope }) => {
     { label: "Motion" },
   );
 
-  // What Enter does when you send a message while he's working (the other is Ctrl or ⌘ with Enter, or its own button).
+  // What Enter does when you send a message while it's working (the other is Ctrl or ⌘ with Enter, or its own button).
   const enter = segmented<ChatEnterPref>(
     [
-      { value: "steer", label: "Steers him" },
+      { value: "steer", label: "Steers it" },
       { value: "queue", label: "Queues it" },
     ],
     chatEnter(),
     setChatEnter,
-    { label: "Enter while he works" },
+    { label: "Enter while it works" },
   );
 
   const row = (label: string, hint: string, control: HTMLElement) => listRow({ title: label, sub: hint, trail: control, wrap: true });
@@ -72,7 +72,7 @@ export const settingsView: View = (root, ctx, { scope }) => {
     h(
       "div",
       { class: "page narrow" },
-      pageHead("Settings", "How Galahad looks on this device, and what this device may do."),
+      pageHead("Settings", "How your agent looks on this device, and what this device may do."),
       section("Appearance", {}, list([row("Theme", "Follows your system unless you choose.", theme.el), row("Motion", "Reduced keeps every change instant.", motion.el)])),
       ctx.can("chat")
         ? section(
@@ -80,14 +80,14 @@ export const settingsView: View = (root, ctx, { scope }) => {
             {},
             list([
               row(
-                "Enter while he works",
-                "Steer: your message reaches him now, at his next safe point. Queue: it's kept on the node and sent when he's done. Ctrl or ⌘ with Enter does the other; on a phone each has its own button.",
+                "Enter while it works",
+                "Steer: your message reaches it now, at its next safe point. Queue: it's kept on the node and sent when it's done. Ctrl or ⌘ with Enter does the other; on a phone each has its own button.",
                 enter.el,
               ),
             ]),
           )
         : null,
-      // He comes to you: notifications on this device, what he tells you and when he stays silent.
+      // It comes to you: notifications on this device, what it tells you and when it stays silent.
       notificationsSection(ctx, scope),
       section(
         "This device",
@@ -126,7 +126,7 @@ export const settingsView: View = (root, ctx, { scope }) => {
         {},
         list([
           listRow({ lead: "key", top: true, title: "A device key", sub: "In IndexedDB, created non-extractable: it can sign, but nothing can read it out, not even this page." }),
-          listRow({ lead: "settings", top: true, title: "Display preferences", sub: "Theme, motion, sidebar, chat role, what Enter does while he works, which kept chat you had open (its id, never a word of it), and how the Roundtable is laid out here (a board or a list, the sidebar's folded sections, a knight's side panel), in localStorage. Nothing else." }),
+          listRow({ lead: "settings", top: true, title: "Display preferences", sub: "Theme, motion, sidebar, chat role, what Enter does while it works, which kept chat you had open (its id, never a word of it), and how the agents are laid out here (a board or a list, the sidebar's folded sections, an agent's side panel), in localStorage. Nothing else." }),
           listRow({ lead: "bell", top: true, title: "A push subscription, once you turn notifications on", sub: "Made by your browser, with keys only it can read with; the node is handed its address and public key, as this device's. Turning notifications off removes it in both places." }),
           listRow({ lead: "chat", top: true, title: "Chats: not on this device", sub: "Kept privately on the node you talk to, with what you queued behind them, and deleted there when you delete them; temporary chats aren't kept at all. Keys you paste are never kept." }),
         ]),
@@ -142,7 +142,7 @@ export const settingsView: View = (root, ctx, { scope }) => {
         list([
           listRow({
             lead: appMark(40),
-            title: "Galahad",
+            title: "Invincible",
             sub: `App ${APP_VERSION} · served by ${ctx.whoami.nodeName} · one mind, many bodies`,
             trail: button("Shortcuts", { size: "sm", variant: "ghost", icon: "command", onClick: () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" })) }),
           }),

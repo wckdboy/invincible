@@ -77,7 +77,7 @@ async function until(what: () => boolean, ms = 5000): Promise<void> {
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const mind = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(mind, identity, { fleetName: "camelot", nodeName: "keep" });
+  const fleet = foundFleet(mind, identity, { fleetName: "homelab", nodeName: "keep" });
   mind.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, {

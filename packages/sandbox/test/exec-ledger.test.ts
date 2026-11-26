@@ -11,7 +11,7 @@ function hostWithLedger() {
     [LABEL]: "1",
     [`${LABEL}.id`]: ID,
     [`${LABEL}.node`]: "test",
-    [`${LABEL}.quest`]: "test.quest",
+    [`${LABEL}.run`]: "test.run",
     [`${LABEL}.network`]: "isolated",
     [`${LABEL}.ephemeral`]: "true",
     [`${LABEL}.isolation`]: "container",
@@ -38,9 +38,9 @@ function hostWithLedger() {
 describe("SandboxHost.exec ledger detail", () => {
   test("a command within the limit is written whole, exactly as today", async () => {
     const { host, ledger } = hostWithLedger();
-    await host.exec(ID, ["echo", "hello", "knight"]);
+    await host.exec(ID, ["echo", "hello", "agent"]);
     expect(ledger).toHaveLength(1);
-    expect(ledger[0]!.detail).toBe(`echo hello knight${EXIT_SUFFIX}`);
+    expect(ledger[0]!.detail).toBe(`echo hello agent${EXIT_SUFFIX}`);
   });
 
   test("a command longer than the limit keeps its beginning and end, and says how many characters were left out", async () => {

@@ -10,9 +10,9 @@ import { intBelow, rng, subSeed } from "../lib.ts";
 /*
  * A week of notifications, in virtual time (docs/BENCHMARKS.md, notify): the real rules (core's notify.ts) and the real
  * notifier (NotifyService, with its own push.db in memory) look every virtual minute at what a node holds, while a
- * seeded week happens to it: approvals and keys he asks for, his own looks (some ending by asking you), chats you left
- * him working in, CI failures a knight is already fixing and ones that are yours, the tells of a loop and a rule, an
- * outcome's reports and questions, a node that goes offline, an alert in the night, and knights' tasks that end.
+ * seeded week happens to it: approvals and keys it asks for, its own looks (some ending by asking you), chats you left
+ * it working in, CI failures an agent is already fixing and ones that are yours, the tells of a loop and a rule, an
+ * outcome's reports and questions, a node that goes offline, an alert in the night, and agents' tasks that end.
  *
  * The owner lives in Copenhagen and the node in London, as the owner's do. They have two devices: the iPhone app and the
  * web app on a laptop. Midweek the iPhone's token goes (Apple answers that it no longer knows it), and on Friday the
@@ -50,7 +50,7 @@ export interface NotifySimResult {
   buzzes: number;
   /** Every delivery that arrived, quiet or not. */
   delivered: number;
-  /** Knights' tasks that ended verified: the north star's denominator. */
+  /** Agents' tasks that ended verified: the north star's denominator. */
   completed: number;
   asks: number;
   answered: number;
@@ -62,13 +62,13 @@ export interface NotifySimResult {
   answerMinutes: number[];
   /** Buzzes in the owner's night (22:00 to 07:00 their time) that weren't alerts. */
   nightBuzzes: number;
-  /** Buzzes about something that resolved without the owner (a CI failure a knight fixed, a node back online). */
+  /** Buzzes about something that resolved without the owner (a CI failure an agent fixed, a node back online). */
   selfResolvedBuzzes: number;
   /** A notification that replaced another (the same tag) on a device while that one told of an ask still waiting. */
   summaryOverwroteAsk: number;
   /** The same thing told as new again while it stood. */
   duplicates: number;
-  /** Buzzes that told of what his own judgment raised (a look or an outcome that ends by asking you). */
+  /** Buzzes that told of what its own judgment raised (a look or an outcome that ends by asking you). */
   modelBuzzes: number;
   problems: string[];
 }
@@ -135,7 +135,7 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
   const running: LiveTurn[] = [];
   const summaries = new Map<string, { title: string; waits: { actions: string[]; secrets: string[]; question: boolean } | null }>();
   const asks = new Map<string, Ask>();
-  /** What resolved without the owner, and what his own judgment raised. */
+  /** What resolved without the owner, and what its own judgment raised. */
   const selfResolved = new Set<string>();
   const modelKeys = new Set<string>();
   let completed = 0;
@@ -193,7 +193,7 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
     connectorRequests: () => connectors.filter((c) => c.ask.state === "waiting").map((c) => c.id),
     turns: { running: () => running, view: () => ({ watchers: 0 }) },
     chats: { summary: (id: string) => (summaries.get(id) ?? null) as never },
-    quests: { list: () => [], onChange: () => () => {} },
+    runs: { list: () => [], onChange: () => () => {} },
   };
   const service = new NotifyService({ mind, nodeName: "ultra", db, sender, allowed: [], sources, ledger: () => {}, log: () => {}, now: () => now, tickMs: false });
 
@@ -274,7 +274,7 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
         asks.set(ask.key, ask);
       });
     }
-    // A key he asks for, every other day; a connector, once in the week, which you leave standing (it lapses a week on).
+    // A key it asks for, every other day; a connector, once in the week, which you leave standing (it lapses a week on).
     if (day % 2 === 1) {
       const kr = draw(`keys.${day}`);
       const name = `sim-key-${day}`;
@@ -293,7 +293,7 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
       });
     }
 
-    // His looks: each a turn of his in a chat of yours that nobody watches; some end by asking you.
+    // Its looks: each a turn of its in a chat of yours that nobody watches; some end by asking you.
     const lk = draw(`looks.${day}`);
     for (let i = 0, n = 4 + intBelow(lk, 5); i < n; i++) {
       const start = localAt(day, between(lk, 6, 24));
@@ -302,21 +302,21 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
       const waiting = !question && roll < 0.3;
       turn(start, 1 + intBelow(lk, 9), { look: true, question, waiting });
     }
-    // Chats you left him working in.
+    // Chats you left it working in.
     const ch = draw(`chats.${day}`);
     for (let i = 0, n = 1 + intBelow(ch, 3); i < n; i++) turn(localAt(day, between(ch, 8, 23)), 2 + intBelow(ch, 20), { look: false, question: ch() < 0.15, waiting: false });
 
-    // Knights' tasks that end verified.
+    // Agents' tasks that end verified.
     const tk = draw(`tasks.${day}`);
     for (let i = 0, n = 5 + intBelow(tk, 6); i < n; i++) at(localAt(day, between(tk, 0, 24)), 2, () => void (completed += 1));
 
-    // CI failures on weekdays: most go back to the knight whose work it was, who fixes them; some are yours.
+    // CI failures on weekdays: most go back to the agent whose work it was, who fixes them; some are yours.
     if (weekday) {
       const ci = draw(`ci.${day}`);
       const fixing = ci() < 0.7;
       const key = `ci:sim-${day}`;
       const raised = localAt(day, between(ci, 9, 18));
-      // As ci-watch raises it: a note while the knight's fix is under way, a warning when it's yours.
+      // As ci-watch raises it: a note while the agent's fix is under way, a warning when it's yours.
       at(raised, 1, () => raise({ key, severity: fixing ? "info" : "warn", title: `CI failed on owner/repo#${10 + day}`, source: "ci" }));
       if (fixing) {
         selfResolved.add(`notice:${key}`);
@@ -340,12 +340,12 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
       at(localAt(day, between(tl, 9, 19)), 1, () => raise({ key, severity: "info", title: "Your rule pushes: a command it matches has run", source: "rule:pushes" }));
     }
 
-    // An outcome of his: its daily report (the same key every day), and now and then a question for you.
+    // An outcome of its: its daily report (the same key every day), and now and then a question for you.
     const oc = draw(`outcome.${day}`);
     at(localAt(day, 18 * 60 + intBelow(oc, 60)), 1, () => {
       const report = notices.find((n) => n.key === "outcome:out-simulated00:report");
       if (report) report.dismissed = false;
-      else raise({ key: "outcome:out-simulated00:report", severity: "info", title: "Books: his daily report", source: "outcome:out-simulated00" });
+      else raise({ key: "outcome:out-simulated00:report", severity: "info", title: "Books: its daily report", source: "outcome:out-simulated00" });
     });
     if (oc() < 0.4) {
       const key = `outcome:out-simulated00:ask:${day}`;
@@ -486,7 +486,7 @@ export async function runNotifySim(o: NotifySimOptions): Promise<NotifySimResult
       const sounded = !passive(d.delivery) && d.payload.kind !== "test" && d.payload.kind !== "limit";
       if (!sounded) continue;
       buzzes += 1;
-      if (night(now) && d.payload.title !== "Galahad: alert") nightBuzzes += 1;
+      if (night(now) && d.payload.title !== "Your agent: alert") nightBuzzes += 1;
       if ([...newly].some((key) => modelKeys.has(key))) modelBuzzes += 1;
       buzzed.push(newly);
       schedule(d.device, now + (2 + intBelow(ownerRandom, 39)) * MINUTE);

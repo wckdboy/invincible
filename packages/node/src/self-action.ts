@@ -1,17 +1,17 @@
-import { RECALIBRATE_AFTER_MS, SELF_ACTION_QUEST, SELF_ACTION_RESOURCE, SELF_ACTIONS, SelfAction, selfActionTarget, selfActionTitle } from "@invincible/core";
+import { RECALIBRATE_AFTER_MS, SELF_ACTION_RUN, SELF_ACTION_RESOURCE, SELF_ACTIONS, SelfAction, selfActionTarget, selfActionTitle } from "@invincible/core";
 import { OFFLINE_AFTER_MS } from "./heartbeat.ts";
 
 /*
- * After each heartbeat, Galahad fixes what's on the self-action allowlist himself
+ * After each heartbeat, the primary fixes what's on the self-action allowlist itself
  * (packages/core/src/self-action.ts) and leaves everything else to you as notices
- * and approvals, as the oath says.
+ * and approvals, as the policy says.
  *
  *   plan     pure: a snapshot of this node in, the fixes it calls for out;
  *   act      each fix is parsed against the allowlist (anything else is refused),
  *            checked again against a fresh snapshot (it must be exactly a fix the
- *            plan calls for now), carried out by the node's own hands (the oath
+ *            plan calls for now), carried out by the node's own hands (the policy
  *            gate still decides a sandbox's removal), and recorded in the ledger
- *            as his own.
+ *            as its own.
  *
  * Nothing here can reach a connector, the vault, devices, the roster, or
  * anything that needs fleet:admin: the hands below are all it has.
@@ -21,12 +21,12 @@ import { OFFLINE_AFTER_MS } from "./heartbeat.ts";
 export interface SelfSnapshot {
   now: number;
   /** This node's sandboxes (null: not a sandbox host, or Docker didn't answer). */
-  sandboxes: { id: string; expiresAt: number; ephemeral: boolean; quest: string }[] | null;
+  sandboxes: { id: string; expiresAt: number; ephemeral: boolean; run: string }[] | null;
   /** Loops this node runs: whether they only read, whether one is running now, their latest runs (newest first). */
   loops: { name: string; readOnly: boolean; running: boolean; recent: { run: string; status: string; finished: number }[] }[];
-  /** Failed runs he has already run again (from the ledger), so none is retried twice. */
+  /** Failed runs it has already run again (from the ledger), so none is retried twice. */
   retried: string[];
-  /** This node's compute (absent: nothing about it is his to fix here). */
+  /** This node's compute (absent: nothing about it is its to fix here). */
   compute?: {
     /** It can measure itself here. */
     canMeasure: boolean;
@@ -77,13 +77,13 @@ export function planSelfActions(s: SelfSnapshot): SelfAction[] {
 
 /** The node's hands for the allowlist, and nothing else. */
 export interface SelfActionHands {
-  /** Destroy one sandbox through the oath gate, on behalf of the quest that made it. */
-  reap(sandbox: string, quest: string): Promise<{ verdict: string; reason: string }>;
+  /** Destroy one sandbox through approvals, on behalf of the run that made it. */
+  reap(sandbox: string, run: string): Promise<{ verdict: string; reason: string }>;
   /** Start one run of a loop now (it doesn't count as its scheduled run). */
   retry(loop: string): void;
   /** Measure this node (a few seconds, low priority, within its ceiling) and record it. */
   calibrate?(why: "joined" | "changed"): Promise<void>;
-  /** Record his compute defaults as the mind gives them now; returns what changed, a line each. */
+  /** Record its compute defaults as the mind gives them now; returns what changed, a line each. */
   adaptCompute?(): string[] | null;
 }
 
@@ -93,7 +93,7 @@ export interface LedgerWrite {
   target: string;
   verdict: "allow";
   reason: string;
-  quest: string;
+  run: string;
   detail: string;
 }
 
@@ -110,7 +110,7 @@ const same = (a: SelfAction, b: SelfAction): boolean => JSON.stringify(a) === JS
 
 /**
  * Carries out one fix, or refuses it: it must parse as an allowlisted action and be exactly one the
- * plan calls for in `fresh` (taken just before). Recorded in the ledger as his own either way it ran.
+ * plan calls for in `fresh` (taken just before). Recorded in the ledger as its own either way it ran.
  */
 export async function runSelfAction(raw: unknown, fresh: SelfSnapshot, hands: SelfActionHands, ledger: (entry: LedgerWrite) => void): Promise<SelfActionOutcome> {
   const parsed = SelfAction.safeParse(raw);
@@ -124,10 +124,10 @@ export async function runSelfAction(raw: unknown, fresh: SelfSnapshot, hands: Se
     switch (action.kind) {
       case "reap-sandbox": {
         const box = fresh.sandboxes!.find((b) => b.id === action.sandbox)!;
-        const decision = await hands.reap(box.id, box.quest);
+        const decision = await hands.reap(box.id, box.run);
         if (decision.verdict !== "allow") {
           ok = false;
-          why = `the oath gate said ${decision.verdict}: ${decision.reason}`;
+          why = `approvals said ${decision.verdict}: ${decision.reason}`;
         }
         break;
       }
@@ -155,8 +155,8 @@ export async function runSelfAction(raw: unknown, fresh: SelfSnapshot, hands: Se
     resource: SELF_ACTION_RESOURCE,
     target: selfActionTarget(action),
     verdict: "allow",
-    reason: ok ? `Galahad's own fix after the heartbeat: ${SELF_ACTIONS[action.kind].why}` : `Galahad's own fix didn't work: ${why}`,
-    quest: SELF_ACTION_QUEST,
+    reason: ok ? `Your agent's own fix after the heartbeat: ${SELF_ACTIONS[action.kind].why}` : `Your agent's own fix didn't work: ${why}`,
+    run: SELF_ACTION_RUN,
     detail: title,
   });
   return { action, ok, title: ok ? title : `Tried: ${title.charAt(0).toLowerCase()}${title.slice(1)} (${why})` };

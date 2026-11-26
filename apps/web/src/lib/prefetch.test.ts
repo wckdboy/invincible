@@ -9,7 +9,7 @@ test("a place's first reads, and a room's conversation, asked for ahead of the t
   expect(readsFor("#/loops", all)).toEqual(["/api/loops", "/api/self-action"]);
   expect(readsFor("#/overview", all)).toContainEqual({ post: "/api/doctor", body: { quick: true } });
   expect(readsFor("#/team?room=forge&tab=work", all)).toEqual([{ post: "/api/team/room", body: { id: "forge" } }]);
-  expect(readsFor("#/roundtable?room=r_ada", all)).toEqual([{ post: "/api/team/room", body: { id: "r_ada" } }]);
+  expect(readsFor("#/agents?room=r_ada", all)).toEqual([{ post: "/api/team/room", body: { id: "r_ada" } }]);
   // A place with nothing to read ahead (its data is live already), and an address that isn't a place.
   expect(readsFor("#/inbox", all)).toEqual([]);
   expect(readsFor("#/nowhere", all)).toEqual([]);

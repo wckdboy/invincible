@@ -2,7 +2,7 @@ import type { Rule, RuleView } from "@invincible/core";
 import type { Api } from "./loop-cli.ts";
 
 /*
- * `invincible rule`: your tripwires on the commands his work runs, your checks after them, and the rules that tell you one
+ * `invincible rule`: your tripwires on the commands its work runs, your checks after them, and the rules that tell you one
  * has run (core's rules.ts). Thin: the node checks every rule and keeps them in the mind; this shapes what you type and
  * prints what it holds.
  */
@@ -18,7 +18,7 @@ const USAGE = `usage: invincible rule ls | rule add <name> --halt|--refuse|--che
 
 /** What they cover, and what they can't see. */
 const COVERS = [
-  "Tripwires are checked before every command of Galahad's quests (invincible do, his loops', a trial's) and of a knight's task on his own runner, and before every gate; checks run after those commands, never after a gate; a rule that tells you does so once for each task, in your Inbox and as a notification (invincible notify kinds told off: the Inbox alone).",
+  "Tripwires are checked before every command of your agent's runs (invincible do, its loops', an eval's) and of an agent's task on its own runner, and before every gate; checks run after those commands, never after a gate; a rule that tells you does so once for each task, in your Inbox and as a notification (invincible notify kinds told off: the Inbox alone).",
   "A coding tool (OpenCode, Claude Code, Codex, Hermes) runs its own commands in its VM, where they aren't seen: only its gates are checked.",
 ];
 

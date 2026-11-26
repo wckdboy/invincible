@@ -10,7 +10,7 @@ import { cleanSkillText, SKILL_LIMITS, skillAuthor, type SkillDetail, type Skill
 export interface SkillGroups {
   /** A proposed skill, or a new version of one in use: each needs your answer. */
   waiting: SkillView[];
-  /** In use and stale: what he may be given. */
+  /** In use and stale: what it may be given. */
   inUse: SkillView[];
   retired: SkillView[];
 }
@@ -35,22 +35,22 @@ export function stateBadge(s: Pick<SkillView, "state">): { label: string; tone: 
 /** Why a version waits, or doesn't, in a sentence for its page. */
 export function trustWords(v: Pick<SkillVersionView, "trust" | "approvedAt" | "by">): string {
   if (v.trust === "owner") return "Your own words.";
-  if (v.trust === "agent") return "His own note, from a quest of his that passed review with no network. He was the only one who could shape it.";
+  if (v.trust === "agent") return "Its own note, from a run of its that passed review with no network. It was the only one who could shape it.";
   return v.approvedAt
-    ? "Shaped by what was read from outside. You read and approved this exact version; he's given it as data, marked untrusted."
+    ? "Shaped by what was read from outside. You read and approved this exact version; it's given it as data, marked untrusted."
     : "Shaped by what was read from outside (the web, a repository, a chat, another agent). It's given to no model until you approve this exact version.";
 }
 
 /** Where a version came from, as the node recorded it: who wrote it, from what, and why it's untrusted when it is. */
-export function originWords(v: Pick<SkillVersionView, "by" | "quest" | "source">): string {
+export function originWords(v: Pick<SkillVersionView, "by" | "run" | "source">): string {
   const who = skillAuthor(v.by);
   // An Agent Skill's folder you had taken in: its SKILL.md, read as text.
   if (v.by.startsWith("from:")) return `Taken in from ${v.source ?? who}: its SKILL.md, read as text. Nothing in its folder ran or was taken in besides.`;
   const written = `Written by ${who}`;
-  if (!v.source) return v.quest ? `${written}, from quest ${v.quest}.` : `${written}.`;
-  // "quest:q-1 (its sandbox was online; …)" → the quest, then the node's reasons.
-  const quest = /^quest:(\S+)(?: \((.*)\))?$/s.exec(v.source);
-  if (quest) return `${written}, from quest ${quest[1]}.${quest[2] ? ` Untrusted because ${quest[2]}.` : ""}`;
+  if (!v.source) return v.run ? `${written}, from run ${v.run}.` : `${written}.`;
+  // "run:q-1 (its sandbox was online; …)" → the run, then the node's reasons.
+  const run = /^run:(\S+)(?: \((.*)\))?$/s.exec(v.source);
+  if (run) return `${written}, from run ${run[1]}.${run[2] ? ` Untrusted because ${run[2]}.` : ""}`;
   if (v.source.startsWith("arm:")) return `Proposed by the agent ${v.source.slice(4)}.`;
   return `${written} (${v.source}).`;
 }
@@ -68,8 +68,8 @@ export function waitingVersion(skill: SkillDetail): SkillVersionView | null {
 
 /** The day's budget for distilling, in a line. */
 export function budgetLine(budget: SkillsView["budget"]): string {
-  if (budget.tokensPerDay === 0) return "He distils no skills from quests: the budget is 0.";
-  return `${budget.usedToday.toLocaleString("en-GB")} of ${budget.tokensPerDay.toLocaleString("en-GB")} tokens used in the last day for distilling skills (one bounded call per passed quest).`;
+  if (budget.tokensPerDay === 0) return "It distils no skills from runs: the budget is 0.";
+  return `${budget.usedToday.toLocaleString("en-GB")} of ${budget.tokensPerDay.toLocaleString("en-GB")} tokens used in the last day for distilling skills (one bounded call per passed run).`;
 }
 
 /* ---------- the editor: a skill as plain text fields ---------- */

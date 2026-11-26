@@ -46,7 +46,7 @@ describe("what a node measured", () => {
 });
 
 describe("the ceiling and the slots", () => {
-  test("what he may use, and whose ceiling it is", () => {
+  test("what it may use, and whose ceiling it is", () => {
     expect(ceilingText(node())).toBe("14 of 32 threads · 91 of 182 GB");
     expect(ceilingText(node({ body: null }))).toBe("Not known yet");
     expect(ceilingOwner(node())).toBe("The default: half of the machine");
@@ -57,8 +57,8 @@ describe("the ceiling and the slots", () => {
     expect(ceilingOwner(node({ limit: { memoryGb: 48 } }))).toBe("Your ceiling: 48 GB (threads: the default half)");
     // A ceiling on the sandboxes alone doesn't make the threads yours.
     expect(ceilingOwner(node({ limit: { sandboxes: 2 } }))).toBe("The default: half of the machine");
-    // Not measured yet: he counts less than the ceiling, and says so.
-    expect(ceilingOwner(node({ limit: { cores: 12 }, capacity: capacity({ measured: false, cores: 4 }) }))).toBe("Your ceiling: 12 threads (memory: the default half) · he counts one sandbox's worth until it's measured");
+    // Not measured yet: it counts less than the ceiling, and says so.
+    expect(ceilingOwner(node({ limit: { cores: 12 }, capacity: capacity({ measured: false, cores: 4 }) }))).toBe("Your ceiling: 12 threads (memory: the default half) · it counts one sandbox's worth until it's measured");
   });
 
   test("slots in use, waiting, unknown, none", () => {
@@ -69,8 +69,8 @@ describe("the ceiling and the slots", () => {
     expect(slotsText(node({ capacity: capacity({ sandboxes: 0 }) })).text).toBe("No sandboxes: your ceiling");
     expect(slotsText(node({ capacity: capacity({ sandboxes: 1 }), use: use(0) })).text).toBe("0 of 1 slot in use");
     expect(slotsText(node({ capacity: capacity({ sandboxes: 2 }), limit: { sandboxes: 2 }, use: use(2, 1) })).text).toBe("2 of 2 slots in use (your ceiling)");
-    expect(slotsText(node({ use: { ...use(1), kept: 4 } })).text).toBe("1 of 3 slots in use · 4 knights' VMs besides");
-    expect(slotsText(node({ use: { ...use(0), kept: 1 } })).text).toBe("0 of 3 slots in use · 1 knight's VM besides");
+    expect(slotsText(node({ use: { ...use(1), kept: 4 } })).text).toBe("1 of 3 slots in use · 4 agents' VMs besides");
+    expect(slotsText(node({ use: { ...use(0), kept: 1 } })).text).toBe("0 of 3 slots in use · 1 agent's VM besides");
     expect(modelCallsText(node())).toBe("2 of 8 model calls");
     expect(modelCallsText(node({ use: null }))).toBe("8 model calls");
   });

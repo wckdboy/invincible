@@ -10,7 +10,7 @@ import { type DigestTopic, isTimeZone, type NotifyItem, type NotifyPayload, type
  *                  and the two keys messages are encrypted to. The endpoint is a
  *                  capability, so it lives here and nowhere else: not in the mind, not
  *                  in a log line, not in any answer a route gives.
- *   settings       what he sends and when he stays silent (kinds, quiet hours, the limit), and
+ *   settings       what it sends and when it stays silent (kinds, quiet hours, the limit), and
  *                  the devices that came back after nobody could be reached, until each is
  *                  told what waited (`catch-up:<device>`).
  *   told           what was already told, so a finding is told once and not again while
@@ -25,7 +25,7 @@ import { type DigestTopic, isTimeZone, type NotifyItem, type NotifyPayload, type
  *   presence       when each of your devices last asked the node anything, and the time zone it
  *                  said it was in (a hint, outside what's signed): your day is read in the zone
  *                  your devices say, and news goes to the device you used last.
- *   asks           each ask that was told (an approval, a question, a key or connector he needs):
+ *   asks           each ask that was told (an approval, a question, a key or connector it needs):
  *                  when, when it lapses, and the reminders it was given.
  *   digest         what went to the day's digest instead of being told on its own (by key and
  *                  topic, never its words), until the digest says it.
@@ -468,7 +468,7 @@ export class NotifyStore {
     return this.db.query<{ at: number | null }, []>(`SELECT MAX(at) AS at FROM sent WHERE kind IN ${NEWS}`).get()?.at ?? null;
   }
 
-  /** How many things his own judgment raised were told on a day. */
+  /** How many things its own judgment raised were told on a day. */
   modelOn(day: string): number {
     return Number(this.setting(`model-told:${day}`) ?? 0) || 0;
   }

@@ -53,7 +53,7 @@ afterAll(() => {
 describe("keeping a sandbox's work", () => {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const ledger: { resource: string; class: string }[] = [];
   const artifacts = new ArtifactStore({ store, identity, dir: temp(), ledger: (e) => ledger.push(e) });
 
@@ -61,9 +61,9 @@ describe("keeping a sandbox's work", () => {
     const kept = await artifacts.save(collector({ "report.md": "# Beam\nδ = 1.67 mm\n", "plots/mode1.png": "PNG…", "data/u.csv": "x,u\n0,0\n" }), {
       sandbox: "0123456789",
       label: "Cantilever check",
-      quest: "q-1",
+      run: "q-1",
     });
-    expect(kept).toMatchObject({ label: "Cantilever check", quest: "q-1", sandbox: "0123456789", count: 3, here: true, nodeName: "ultra" });
+    expect(kept).toMatchObject({ label: "Cantilever check", run: "q-1", sandbox: "0123456789", count: 3, here: true, nodeName: "ultra" });
     expect(kept!.files.find((f) => f.path === "report.md")!.sha256).toBe(sha("# Beam\nδ = 1.67 mm\n"));
     expect(store.lww<{ count: number }>(`artifact:${kept!.id}`)?.value?.count).toBe(3);
     expect(ledger.at(-1)).toMatchObject({ resource: "artifact", class: "create" });
@@ -136,7 +136,7 @@ describe("artifacts over the API", () => {
   beforeAll(async () => {
     const { identity, keystore } = await home.createIdentity("file");
     const store = new LedgerStore(home.ledgerPath);
-    const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     store.close();
     home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
     daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
@@ -201,7 +201,7 @@ describe("artifacts over the API", () => {
     expect(list.investigations.find((i) => i.id === registered.id)).toMatchObject({ status: "done", conclusion: "supported", predictions: [{ id: "P1", value: 2.088791 }] });
   });
 
-  test("trials: recorded by you (never by an agent), and only when the marks add up", async () => {
+  test("evals: recorded by you (never by an agent), and only when the marks add up", async () => {
     const record = {
       run: "r-api",
       suite: "engineering",
@@ -220,16 +220,16 @@ describe("artifacts over the API", () => {
       seconds: 120,
     };
     // The thing being measured can't write its own marks.
-    expect((await send(armToken, "recordTrial", record)).status).toBe(403);
-    const inflated = await send(home.adminToken(), "recordTrial", { ...record, score: 1 });
+    expect((await send(armToken, "recordEval", record)).status).toBe(403);
+    const inflated = await send(home.adminToken(), "recordEval", { ...record, score: 1 });
     expect(inflated.status).toBe(400);
     expect(await inflated.text()).toMatch(/score doesn't follow/);
-    const ok = await send(home.adminToken(), "recordTrial", record);
+    const ok = await send(home.adminToken(), "recordEval", record);
     expect(ok.status).toBe(200);
-    const { trial } = (await ok.json()) as { trial: { id: string } };
-    expect(trial.id).toMatch(/^tr_/);
-    const list = (await (await send(armToken, "trials")).json()) as { trials: { id: string; nodeName: string; score: number }[] };
-    expect(list.trials.find((t) => t.id === trial.id)).toMatchObject({ nodeName: "ultra", score: 0.5 });
+    const { evalCase } = (await ok.json()) as { evalCase: { id: string } };
+    expect(evalCase.id).toMatch(/^tr_/);
+    const list = (await (await send(armToken, "evals")).json()) as { evals: { id: string; nodeName: string; score: number }[] };
+    expect(list.evals.find((t) => t.id === evalCase.id)).toMatchObject({ nodeName: "ultra", score: 0.5 });
   });
 
   test("this node isn't a sandbox host: saving says so", async () => {

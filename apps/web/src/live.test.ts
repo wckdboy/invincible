@@ -54,7 +54,7 @@ function clock() {
 }
 
 const ANSWERS: Record<string, unknown> = {
-  "/api/fleet": { fleet: "f", name: "camelot", self: "n_1", devices: [], peers: [], events: 1, digest: "d" },
+  "/api/fleet": { fleet: "f", name: "homelab", self: "n_1", devices: [], peers: [], events: 1, digest: "d" },
   "/api/pairings": { pairings: [] },
   "/api/secret-requests": { requests: [] },
   "/api/loops/drafts": { drafts: [] },
@@ -64,7 +64,7 @@ const ANSWERS: Record<string, unknown> = {
   "/api/screen/sessions": { sessions: [] },
   "/api/questions": { questions: [] },
   "/api/notices": { notices: [] },
-  "/api/team": { teammates: [], rooms: [], tasks: [], deliveries: [] },
+  "/api/team": { agents: [], rooms: [], tasks: [], deliveries: [] },
 };
 
 function app() {
@@ -133,7 +133,7 @@ describe("what the shell shows, kept by the node's live stream", () => {
     stream.changed("team");
     await c.advance(5_000);
     expect(asked).toEqual([]);
-    // The Roundtable comes on screen: read at once, then as it changes.
+    // The agents comes on screen: read at once, then as it changes.
     live.watchTeam(2_000);
     await c.flush();
     expect(asked).toEqual(["/api/team"]);

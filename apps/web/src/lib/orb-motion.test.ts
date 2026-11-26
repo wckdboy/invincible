@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { orbToneOfState } from "./orb.ts";
-import { STATES, type KnightState } from "./knight-state.ts";
+import { STATES, type AgentState } from "./agent-state.ts";
 import {
   ORB_ARRIVE, ORB_BURST, ORB_BURST_MOTES, ORB_LONGEST_STEP, ORB_MOODS, ORB_MOTION, ORB_STAGES, ORB_STILL,
   orbBursts, orbClock, orbFps, orbFrame, orbMoodOfExpression, orbMoodOfState, orbRand, orbSeed, orbStep, shownMotes, type OrbClock, type OrbMood,
@@ -16,8 +16,8 @@ const apart = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs
 
 // Your word, 24 November 2026: "cool orbs/particles, pulsing/moving when doing a task, sitting idle, waiting, done".
 describe("how the orb moves", () => {
-  test("every state a knight can be in has a mood: at work, sitting idle, waiting, done, and the rest", () => {
-    const states = Object.keys(STATES) as KnightState[];
+  test("every state an agent can be in has a mood: at work, sitting idle, waiting, done, and the rest", () => {
+    const states = Object.keys(STATES) as AgentState[];
     expect(Object.fromEntries(states.map((state) => [state, orbMoodOfState(state)]))).toEqual({
       working: "working", needs: "waiting", failed: "failed", paused: "paused", queued: "queued", verified: "done", unread: "done", resting: "idle",
     });
@@ -162,7 +162,7 @@ describe("how the orb moves", () => {
     expect(shownMotes(frame, ORB_STAGES.seat)).toHaveLength(Math.round(frame.motes.length * 0.6) + Math.round(frame.leaving.length * 0.6));
   });
 
-  test("it is drawn as few times a second as look smooth: fast at work or arriving, slow otherwise, twice as often on his welcome", () => {
+  test("it is drawn as few times a second as look smooth: fast at work or arriving, slow otherwise, twice as often on its welcome", () => {
     expect([orbFps("working", "ring", null), orbFps("idle", "ring", null), orbFps("waiting", "seat", null), orbFps("done", "badge", 0.4), orbFps("done", "badge", ORB_BURST)]).toEqual([30, 15, 15, 30, 15]);
     expect([orbFps("working", "full", null), orbFps("idle", "full", null), orbFps("failed", "full", 1)]).toEqual([60, 30, 60]);
   });

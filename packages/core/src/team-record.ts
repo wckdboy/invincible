@@ -1,7 +1,7 @@
 import { costOf, type Prices, spendTotal, tokensLabel, type UsageLine, usdLabel } from "./spend.ts";
 
 /*
- * What a knight's task came to, in words: the same from the same record at a terminal and in the
+ * What an agent's task came to, in words: the same from the same record at a terminal and in the
  * app. No dependencies (no zod): the PWA imports this directly (@invincible/core/team-record).
  */
 

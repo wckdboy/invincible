@@ -103,7 +103,7 @@ const lines = () => daemon.store.ledger(200).map((e) => e.body).filter((b) => b.
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await start();
@@ -194,7 +194,7 @@ describe("its arm at the door", () => {
       expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["fleet"]);
       const fleet = await client.callTool({ name: "fleet", arguments: {} });
       expect(fleet.isError).toBeFalsy();
-      expect((fleet.content as { text: string }[])[0]!.text).toStartWith('Fleet "camelot"');
+      expect((fleet.content as { text: string }[])[0]!.text).toStartWith('Fleet "homelab"');
       const token = withToken(() => home.readArmToken(grant.label));
       const who = await token<{ kind: string; scopes: string[] }>("whoami");
       expect([who.status, who.body.kind, who.body.scopes]).toEqual([200, "arm", ["mind:read"]]);
@@ -205,7 +205,7 @@ describe("its arm at the door", () => {
       expect((await admin("qampRevoke", { id: grant.id })).body).toEqual({ revoked: 1 });
       const after = await client.callTool({ name: "fleet", arguments: {} });
       expect(after.isError).toBe(true);
-      expect((after.content as { text: string }[])[0]!.text).toBe("Galahad: sign the request with an enrolled device key");
+      expect((after.content as { text: string }[])[0]!.text).toBe("Invincible: sign the request with an enrolled device key");
       expect((await withToken(() => tokenText)("whoami")).status).toBe(401);
       expect(existsSync(home.armTokenPath(grant.label))).toBe(false);
       expect(qamp.bridges.at(-1)!.signals).toEqual(["SIGTERM"]);

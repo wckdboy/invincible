@@ -9,7 +9,7 @@ import type { BenchOptions, BenchResult } from "./bench.ts";
  * placement and slots use those numbers instead of guessing from a core count.
  *
  * Pure orchestration: the benchmark, the sandbox start and the model's speed are
- * injected, so a test checks what he asks of the machine without running one.
+ * injected, so a test checks what it asks of the machine without running one.
  */
 
 /** How long each CPU part of the benchmark runs. */
@@ -40,10 +40,10 @@ export async function calibrate(reason: CalibrationReason, deps: CalibrateDeps):
   const notes: string[] = [];
   const ceiling = ceilingThreads(deps.body, deps.limit);
   const load = Math.max(0, deps.load());
-  // Only what's idle: other work on the machine keeps its threads while he measures.
+  // Only what's idle: other work on the machine keeps its threads while it measures.
   const idle = Math.max(1, Math.floor(deps.body.cores - load));
   const threads = Math.min(ceiling, idle);
-  if (threads < ceiling) notes.push(`The machine was busy (load ${round1(load)} of ${deps.body.cores} threads): measured on ${threads} of the ${ceiling} threads he may use, and he measures again when it's quieter.`);
+  if (threads < ceiling) notes.push(`The machine was busy (load ${round1(load)} of ${deps.body.cores} threads): measured on ${threads} of the ${ceiling} threads it may use, and it measures again when it's quieter.`);
   const measured = await deps.bench({ threads, windowMs: BENCH_WINDOW_MS, dir: deps.dir });
   if (!(measured.single > 0) || !(measured.multi > 0)) throw new Error("the benchmark measured nothing");
 

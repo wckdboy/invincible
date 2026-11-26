@@ -1,9 +1,9 @@
-import { answerOk, type TrialAnswer, trialScore } from "@invincible/core";
+import { answerOk, type EvalAnswer, evalScore } from "@invincible/core";
 import { type Check, js } from "./kit.ts";
 
 /*
- * Between the node and a sandbox, for agentic trials: putting a repository into one,
- * taking what was left out of one, and the record a graded trial makes. Everything
+ * Between the node and a sandbox, for agentic evals: putting a repository into one,
+ * taking what was left out of one, and the record a graded eval makes. Everything
  * travels as shell commands through the sandbox's ordinary exec (the only door there
  * is), with payloads in base64 so nothing needs quoting; `bun` in the sandbox does
  * the unpacking and the packing.
@@ -12,10 +12,10 @@ import { type Check, js } from "./kit.ts";
  * test can do the same thing without a shell.
  */
 
-export const MARK = "# invincible-trial:";
+export const MARK = "# invincible-eval:";
 
 const b64 = (text: string): string => Buffer.from(text, "utf8").toString("base64");
-const SCRATCH = "/tmp/.invincible-trial";
+const SCRATCH = "/tmp/.invincible-eval";
 /** A command's argument is at most 100,000 characters at the node's door: payloads go in pieces well under it. */
 const CHUNK = 60_000;
 
@@ -105,30 +105,30 @@ export function readTree(stdout: string): { files: Record<string, string>; skipp
 }
 
 /** Where a fresh sandbox holds what is graded, and the hidden checks beside it. */
-export const GRADE = { root: "/work/grade", repo: "/work/grade/repo", script: "/work/grade/check.mjs", result: "/work/grade/result.json", quest: "/work/grade/quest.json" } as const;
+export const GRADE = { root: "/work/grade", repo: "/work/grade/repo", script: "/work/grade/check.mjs", result: "/work/grade/result.json", run: "/work/grade/run.json" } as const;
 
 /** The command that runs one hidden check, and what its output must hold for the check to have passed. */
 export function checkCommand(key: string, token: string): { command: string; passed(result: { exitCode: number; stdout: string }): boolean } {
   return {
-    command: `${MARK}check ${key} ${token}\ncd ${GRADE.root} && bun ${GRADE.script} ${GRADE.repo} ${GRADE.result} ${GRADE.quest} ${key} ${token}`,
+    command: `${MARK}check ${key} ${token}\ncd ${GRADE.root} && bun ${GRADE.script} ${GRADE.repo} ${GRADE.result} ${GRADE.run} ${key} ${token}`,
     // Exit 0 alone isn't enough: a module that exits the process when it's imported prints no such line.
     passed: (result) => result.exitCode === 0 && result.stdout.split(/\r?\n/).includes(`PASS ${key} ${token}`),
   };
 }
 
 export interface GradedChecks {
-  answers: TrialAnswer[];
+  answers: EvalAnswer[];
   score: number;
   note?: string;
 }
 
 /**
- * A trial's record of its hidden checks: each an answer every replica can re-check (expected 1, got 1 when it
+ * An eval's record of its hidden checks: each an answer every replica can re-check (expected 1, got 1 when it
  * passed, 0 when it failed, nothing when it couldn't be run), the score their share. `passed`: true, false, or
  * null for a check that wasn't run.
  */
 export function gradeChecks(checks: readonly Pick<Check, "key">[], passed: (key: string) => boolean | null): GradedChecks {
-  const answers = checks.map((check): TrialAnswer => {
+  const answers = checks.map((check): EvalAnswer => {
     const verdict = passed(check.key);
     const got = verdict === null ? null : verdict ? 1 : 0;
     return { key: check.key, units: "pass", expected: 1, got, tolerance: 0, ok: answerOk(got, 1, 0) };
@@ -136,5 +136,5 @@ export function gradeChecks(checks: readonly Pick<Check, "key">[], passed: (key:
   const unrun = answers.filter((a) => a.got === null).map((a) => a.key);
   const failed = answers.filter((a) => a.got === 0).map((a) => a.key);
   const note = unrun.length ? `not run: ${unrun.join(", ")}` : failed.length ? `failed: ${failed.join(", ")}` : undefined;
-  return { answers, score: trialScore(answers), ...(note ? { note: note.slice(0, 1000) } : {}) };
+  return { answers, score: evalScore(answers), ...(note ? { note: note.slice(0, 1000) } : {}) };
 }

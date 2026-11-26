@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, MAC_VM_OVERHEAD, type NodeCapacity, newNodeIdentity, SELF_ACTION_QUEST, VM_OVERHEAD } from "@invincible/core";
+import { b64u, MAC_VM_OVERHEAD, type NodeCapacity, newNodeIdentity, SELF_ACTION_RUN, VM_OVERHEAD } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import type { CreateInput, LedgerEntryInput, SpawnTerminal } from "@invincible/sandbox";
 import type { Capabilities } from "../src/capabilities.ts";
@@ -46,40 +46,40 @@ function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWait
 describe("every sandbox takes a slot first", () => {
   test("within the ceiling it starts; past it, it waits, and starts when one ends", async () => {
     const { sandbox, governor, docker } = host();
-    const a = await sandbox.create(request({ quest: "q-a" }));
-    const b = await sandbox.create(request({ quest: "q-b" }));
+    const a = await sandbox.create(request({ run: "q-a" }));
+    const b = await sandbox.create(request({ run: "q-b" }));
     let third: string | null = null;
-    const waiting = sandbox.create(request({ quest: "q-c" })).then((s) => (third = s.id));
+    const waiting = sandbox.create(request({ run: "q-c" })).then((s) => (third = s.id));
     await Bun.sleep(20);
     expect(third).toBeNull();
     expect(docker.running()).toBe(2);
-    expect(governor.queue()).toMatchObject([{ quest: "q-c" }]);
-    // Its own cleanup (the oath lets a quest remove its ephemeral sandbox) frees the slot.
-    expect((await sandbox.destroy(a.id, { quest: "q-a" })).verdict).toBe("allow");
+    expect(governor.queue()).toMatchObject([{ run: "q-c" }]);
+    // Its own cleanup (the policy lets a run remove its ephemeral sandbox) frees the slot.
+    expect((await sandbox.destroy(a.id, { run: "q-a" })).verdict).toBe("allow");
     await waiting;
     expect(third).not.toBeNull();
     expect(docker.peak()).toBe(2);
-    // A destroy the oath doesn't allow frees nothing.
-    expect((await sandbox.destroy(b.id, { quest: "someone-else" })).verdict).toBe("ask");
+    // A destroy the policy doesn't allow frees nothing.
+    expect((await sandbox.destroy(b.id, { run: "someone-else" })).verdict).toBe("ask");
     expect(governor.usage().sandboxes).toBe(2);
   });
 
-  test("a persistent sandbox (a knight's own VM) takes no slot, and is held by its size (its threads while it works); Docker's list says so again after a restart", async () => {
+  test("a persistent sandbox (an agent's own VM) takes no slot, and is held by its size (its threads while it works); Docker's list says so again after a restart", async () => {
     const { sandbox, governor } = host({ capacity: () => capacity({ cores: 32, memoryGb: 64 }) });
-    for (const knight of ["ada", "lin", "sam"]) await sandbox.create(request({ quest: `arm.team.abcdef0123.${knight}`, persistent: true, cpus: 1, memoryGb: 2 }));
+    for (const agent of ["ada", "lin", "sam"]) await sandbox.create(request({ run: `arm.team.abcdef0123.${agent}`, persistent: true, cpus: 1, memoryGb: 2 }));
     expect(governor.usage()).toMatchObject({ sandboxes: 0, kept: 3, cores: 0, memoryGb: 6 });
     // Both slots are still there for work that comes and goes.
-    await sandbox.create(request({ quest: "q-a" }));
-    await sandbox.create(request({ quest: "q-b" }));
+    await sandbox.create(request({ run: "q-a" }));
+    await sandbox.create(request({ run: "q-b" }));
     expect(governor.usage()).toMatchObject({ sandboxes: 2, kept: 3 });
     await sandbox.reconcile();
     expect(governor.usage()).toMatchObject({ sandboxes: 2, kept: 3, cores: 8, memoryGb: 22 });
   });
 
-  test("a command in a knight's VM holds its threads of the ceiling while it runs, and a while after; one in a quest's sandbox changes nothing", async () => {
+  test("a command in an agent's VM holds its threads of the ceiling while it runs, and a while after; one in a run's sandbox changes nothing", async () => {
     const { sandbox, governor, docker } = host({ capacity: () => capacity({ cores: 32, memoryGb: 64 }) });
-    const vm = await sandbox.create(request({ quest: "arm.team.abcdef0123.ada", persistent: true, cpus: 2, memoryGb: 2 }));
-    const quest = await sandbox.create(request({ quest: "q-a" }));
+    const vm = await sandbox.create(request({ run: "arm.team.abcdef0123.ada", persistent: true, cpus: 2, memoryGb: 2 }));
+    const run = await sandbox.create(request({ run: "q-a" }));
     expect(governor.usage()).toMatchObject({ kept: 1, sandboxes: 1, cores: 4, memoryGb: 10 });
     let during = -1;
     docker.onExec = () => {
@@ -89,17 +89,17 @@ describe("every sandbox takes a slot first", () => {
     await sandbox.exec(vm.id, ["true"], 30);
     expect(during).toBe(6);
     expect(governor.usage().cores).toBe(6);
-    await sandbox.exec(quest.id, ["true"], 30);
+    await sandbox.exec(run.id, ["true"], 30);
     expect(governor.usage().cores).toBe(6);
   });
 
-  test("a terminal into a knight's VM holds its threads while it is open, and a while after; what is done on its desktop does too", async () => {
+  test("a terminal into an agent's VM holds its threads while it is open, and a while after; what is done on its desktop does too", async () => {
     let clock = 1_000_000;
     let hangUp!: (code: number) => void;
     const shell = { write() {}, resize() {}, kill: () => hangUp(0), exited: new Promise<number>((resolve) => (hangUp = resolve)) };
     const { sandbox, governor, docker } = host({ microVMs: true, capacity: () => capacity({ cores: 32, memoryGb: 64 }), now: () => clock, spawnTerminal: () => shell });
-    const quest = "arm.team.abcdef0123.ada";
-    const vm = await sandbox.create(request({ quest, persistent: true, cpus: 2, memoryGb: 2, isolation: "vm" }));
+    const run = "arm.team.abcdef0123.ada";
+    const vm = await sandbox.create(request({ run, persistent: true, cpus: 2, memoryGb: 2, isolation: "vm" }));
     const threads = 2 + VM_OVERHEAD.cpus;
     expect(governor.usage().cores).toBe(0);
 
@@ -116,7 +116,7 @@ describe("every sandbox takes a slot first", () => {
 
     let during = -1;
     docker.onExec = () => ((during = governor.usage().cores), { code: 0, stdout: "c2hvdA==" });
-    await sandbox.desktop(vm.id, quest, { do: "click", x: 10, y: 20 });
+    await sandbox.desktop(vm.id, run, { do: "click", x: 10, y: 20 });
     expect(during).toBe(threads);
     expect(governor.usage().cores).toBe(threads);
     clock += KEPT_WORK_MS;
@@ -167,7 +167,7 @@ describe("every sandbox takes a slot first", () => {
 describe("Docker's list is the truth, read carefully", () => {
   test("sandboxes from before a restart hold their slots; when Docker can't say, nothing is freed", async () => {
     const first = host();
-    await first.sandbox.create(request({ quest: "q-old" }));
+    await first.sandbox.create(request({ run: "q-old" }));
     // A new node process over the same Docker: it knows nothing until it asks.
     const governor = new Governor({ capacity: () => capacity(), host: () => null });
     let down = false;
@@ -194,7 +194,7 @@ describe("Docker's list is the truth, read carefully", () => {
   test("a list asked for before a sandbox came to be never frees its slot", async () => {
     const { governor } = host();
     const asked = governor.mark();
-    const ticket = await governor.acquire({ cpus: 4, memoryGb: 8 }, { quest: "q" });
+    const ticket = await governor.acquire({ cpus: 4, memoryGb: 8 }, { run: "q" });
     governor.bind(ticket, "cccccccccc");
     // Docker's answer arrives now, from before it existed.
     governor.adopt([], asked);
@@ -214,10 +214,10 @@ describe("what a calibration measures of this node, through the same door", () =
     expect(starts.every((s) => s.startMs >= 10)).toBe(true);
     expect(docker.running()).toBe(0);
     expect(governor.usage().sandboxes).toBe(0);
-    // His own, small, and in the ledger under his own quest.
-    expect(ledger.filter((e) => e.resource === "docker.container" && e.class === "create").every((e) => e.quest === SELF_ACTION_QUEST && /1 cpu · 1 GB/.test(e.detail ?? ""))).toBe(true);
+    // Its own, small, and in the ledger under its own run.
+    expect(ledger.filter((e) => e.resource === "docker.container" && e.class === "create").every((e) => e.run === SELF_ACTION_RUN && /1 cpu · 1 GB/.test(e.detail ?? ""))).toBe(true);
     expect(ledger.filter((e) => e.class === "delete" && e.verdict === "allow")).toHaveLength(2);
-    // Full: he doesn't queue behind real work, nor in front of it.
+    // Full: it doesn't queue behind real work, nor in front of it.
     await sandbox.create(request());
     await sandbox.create(request());
     expect(await sandboxStart(sandbox, governor, () => capacity())).toEqual([]);
@@ -227,7 +227,7 @@ describe("what a calibration measures of this node, through the same door", () =
   test("a local model's speed: only a runtime on this machine, never one that was repointed elsewhere", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     void b64u;
     const vault = new Vault(store, identity);
     const asked: string[] = [];
@@ -266,7 +266,7 @@ describe("what a calibration measures of this node, through the same door", () =
     // Only an embedding model: nothing to measure, nothing asked.
     asked.length = 0;
     expect(await modelSpeed({ store, vault, fetch: fetchStub }, { localModels: [{ runtime: "ollama", models: ["qwen3-embedding:0.6b"] }] } as Capabilities, enter)).toEqual([]);
-    // "ollama" repointed at a service elsewhere, with a key of its own there: measuring himself never calls out.
+    // "ollama" repointed at a service elsewhere, with a key of its own there: measuring itself never calls out.
     vault.set("ollama", "sk-fake-not-a-real-key-0000000000", { provider: "ollama", origin: "https://models.example.com" });
     store.emit(identity, "provider.set", { id: "ollama", kind: "openai", baseUrl: "https://models.example.com/v1", secret: "ollama" });
     expect(await modelSpeed({ store, vault, fetch: fetchStub }, caps, enter)).toEqual([]);
@@ -320,10 +320,10 @@ describe("on a Mac (Apple's container), behind the same governor", () => {
 
   test("an isolated sandbox is refused there at once, never after waiting for a slot", async () => {
     const { sandbox, governor } = mac();
-    await sandbox.create(request({ network: "gateway", quest: "q-1" }));
-    await sandbox.create(request({ network: "gateway", quest: "q-2" }));
-    // Every slot taken: a sandbox Galahad could make would wait; one a Mac can't make is told so now.
-    await expect(sandbox.create(request({ network: "isolated", quest: "q-3" }))).rejects.toThrow(/no network at all/);
+    await sandbox.create(request({ network: "gateway", run: "q-1" }));
+    await sandbox.create(request({ network: "gateway", run: "q-2" }));
+    // Every slot taken: a sandbox the primary could make would wait; one a Mac can't make is told so now.
+    await expect(sandbox.create(request({ network: "isolated", run: "q-3" }))).rejects.toThrow(/no network at all/);
     expect(governor.queue()).toEqual([]);
     expect(governor.usage().sandboxes).toBe(2);
   });

@@ -17,7 +17,7 @@ function base(): DoctorFacts {
     now: NOW,
     quick: false,
     offline: false,
-    self: { id: "n_self", name: "ultra", fleetName: "camelot", active: true, role: "full", alwaysOn: true, startedAt: NOW - 3 * 86_400_000 },
+    self: { id: "n_self", name: "ultra", fleetName: "homelab", active: true, role: "full", alwaysOn: true, startedAt: NOW - 3 * 86_400_000 },
     keys: { keystore: "file", keyFile: { exists: true, mode: 0o600 }, home: { exists: true, mode: 0o700 }, adminToken: { exists: true, mode: 0o600 } },
     mind: { events: 1000, integrity: "ok", head: null, forks: [], newestEventAt: NOW - 1000, timeSynced: true, peers: [], backup: null },
     vault: { unlocked: true, secrets: 3, requests: [] },
@@ -125,7 +125,7 @@ describe("an allowance window that ends by itself", () => {
     const coder = byId(diagnose(facts), "role.plan-coder");
     expect(coder.line).toBe(`no model can play plan-coder: opencode-go/deepseek-v4-pro (${SPENT_PROBLEM})`);
     expect(hasId(diagnose(facts), "role.plan-coder.plan")).toBe(false);
-    // Nothing to add a key for: the window ends by itself (Percival's review, 22 November 2026).
+    // Nothing to add a key for: the window ends by itself (Ivo's review, 22 November 2026).
     expect(coder.fix).toBe("It comes back by itself when its allowance resets (said above). To have plan-coder played before then: invincible roster set plan-coder <provider/model>.");
   });
 });

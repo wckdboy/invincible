@@ -46,7 +46,7 @@ function fleet(): { a: NodeIdentity; b: NodeIdentity; storeA: LedgerStore; store
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const storeA = new LedgerStore(":memory:");
-  foundFleet(storeA, a, { fleetName: "camelot", nodeName: "laptop" });
+  foundFleet(storeA, a, { fleetName: "homelab", nodeName: "laptop" });
   enrollDevice(storeA, a, { device: b.id, name: "server", kind: "node", box: b64u(b.boxPublic) });
   const storeB = new LedgerStore(":memory:");
   storeB.expectFleet(storeA.fleet!);

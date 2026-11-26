@@ -10,7 +10,7 @@ import { sandboxSetup, type SetupDeps, type SetupLine, type SetupNode, setupRoot
  */
 
 const HOME = "/Users/someone";
-const CLI = ["/Applications/Galahad.app/Contents/Helpers/bun", "/Applications/Galahad.app/Contents/Resources/node/packages/node/src/cli.ts"];
+const CLI = ["/Applications/your agent.app/Contents/Helpers/bun", "/Applications/your agent.app/Contents/Resources/node/packages/node/src/cli.ts"];
 
 interface Mac {
   installed?: boolean;
@@ -155,9 +155,9 @@ describe("invincible sandbox setup", () => {
       ["vm", "done"],
     ]);
     expect(last.container!.said).toBe("1.7.1 is installed");
-    // Once, for both, naming both: through sudo or macOS's own prompt, never Galahad's.
+    // Once, for both, naming both: through sudo or macOS's own prompt, never the primary's.
     expect(t.asked).toHaveLength(1);
-    expect(t.asked[0]!.why).toBe("Galahad needs your password to install Apple's container and the sandbox firewall, for its knights' VMs.");
+    expect(t.asked[0]!.why).toBe("Your agent needs your password to install Apple's container and the sandbox firewall, for its agents' VMs.");
     expect(t.asked[0]!.script).toBe(setupRootScript({ pkg: `${t.folders[0]}/container-1.7.1-installer-signed.pkg`, firewall: true }, CLI));
     // Fetched into a folder of its own, removed after.
     expect(t.removed).toEqual(t.folders);
@@ -186,7 +186,7 @@ describe("invincible sandbox setup", () => {
       ["container", "done", "1.7.1 is installed"],
       ["firewall", "done", "on: a gateway sandbox reaches the gateway alone, an online one its resolver and the internet, and no sandbox another"],
       ["service", "done", "running, with its kernel"],
-      ["node", "done", "it hosts knights' VMs"],
+      ["node", "done", "it hosts agents' VMs"],
       ["image", "done", "built"],
       ["vm", "done", "VMs start here, through the firewall"],
     ]);
@@ -258,7 +258,7 @@ describe("invincible sandbox setup", () => {
     const t = mac({ installed: true, running: true, kernel: true, image: true, node: { hosting: true } });
     expect(await sandboxSetup(t.deps)).toBe(0);
     expect(t.folders).toEqual([]);
-    expect(t.asked).toEqual([{ script: setupRootScript({ pkg: null, firewall: true }, CLI), why: "Galahad needs your password to install the sandbox firewall, for its knights' VMs." }]);
+    expect(t.asked).toEqual([{ script: setupRootScript({ pkg: null, firewall: true }, CLI), why: "Your agent needs your password to install the sandbox firewall, for its agents' VMs." }]);
     expect(t.asked[0]!.script).not.toContain("installer");
     expect(t.last().firewall!.said).toBe("installed: it is on once the node's networks are up");
   });
@@ -359,14 +359,14 @@ describe("what root runs", () => {
   });
 
   test("a path is a word to the shell, whatever is in it", () => {
-    expect(shellQuote("/Users/o'brien/Applications/Galahad.app")).toBe(`'/Users/o'\\''brien/Applications/Galahad.app'`);
+    expect(shellQuote("/Users/o'brien/Applications/your agent.app")).toBe(`'/Users/o'\\''brien/Applications/your agent.app'`);
     expect(setupRootScript({ pkg: null, firewall: true }, ["/a b/bun", "/c$d/cli.ts"])).toBe("set -e\n'/a b/bun' '/c$d/cli.ts' firewall install");
   });
 
   test("macOS's prompt is given the script and why as arguments, never as AppleScript's source", () => {
-    const args = promptArgs(`echo "it's"; id -u`, "Galahad needs your password.");
+    const args = promptArgs(`echo "it's"; id -u`, "Your agent needs your password.");
     expect(args.slice(0, 7)).toEqual(["/usr/bin/osascript", "-e", "on run argv", "-e", "do shell script (item 1 of argv) with prompt (item 2 of argv) with administrator privileges without altering line endings", "-e", "end run"]);
-    expect(args.slice(7)).toEqual([`echo "it's"; id -u`, "Galahad needs your password."]);
+    expect(args.slice(7)).toEqual([`echo "it's"; id -u`, "Your agent needs your password."]);
     expect(cancelledPrompt("0:181: execution error: User canceled. (-128)\n")).toBe(true);
     expect(cancelledPrompt("0:181: execution error: The administrator user name or password was incorrect. (-60007)")).toBe(false);
   });

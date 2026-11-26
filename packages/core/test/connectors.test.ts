@@ -35,7 +35,7 @@ const withTool = (tool: Record<string, unknown>, extra: Record<string, unknown> 
   ConnectorManifest.safeParse({ ...base, ...extra, tools: { t: { description: "t", ...tool } } });
 
 describe("connector manifests", () => {
-  test("the HTTP method bounds the oath class a tool may claim", () => {
+  test("the HTTP method bounds the policy class a tool may claim", () => {
     expect(withTool({ method: "GET", path: "/x", class: "read" }).success).toBe(true);
     expect(withTool({ method: "GET", path: "/x", class: "delete" }).success).toBe(false);
     expect(withTool({ method: "DELETE", path: "/x", class: "modify" }).success).toBe(false);
@@ -181,7 +181,7 @@ describe("MCP connectors", () => {
 
 describe("native tools", () => {
   const ship = {
-    description: "Ship a quest's changes as a pull request.",
+    description: "Ship a run's changes as a pull request.",
     native: "github.ship" as const,
     method: "POST" as const,
     path: "/repos/{owner}/{repo}/pulls",
@@ -208,6 +208,6 @@ describe("native tools", () => {
     expect(buildCall(github, "ship", args)).toEqual({ kind: "native", native: "github.ship", args, class: "outward", target: "POST /repos/amiriteorg/invincible/pulls (ship)" });
     expect(() => buildCall(github, "ship", { ...args, branch: "main" })).toThrow(/branch doesn't match/);
     expect(() => buildCall(github, "ship", { ...args, force: true })).toThrow(/takes no "force"/);
-    expect(() => buildRequest(github, "ship", args)).toThrow(/carried out by Galahad/);
+    expect(() => buildRequest(github, "ship", args)).toThrow(/carried out by your agent/);
   });
 });

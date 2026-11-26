@@ -1,5 +1,5 @@
 import { type ModelsContext, chat, isEmbeddingModel, resolveProvider } from "@invincible/models";
-import { freeSlots, type NodeCapacity, SELF_ACTION_QUEST } from "@invincible/core";
+import { freeSlots, type NodeCapacity, SELF_ACTION_RUN } from "@invincible/core";
 import type { SandboxHost } from "@invincible/sandbox";
 import type { Capabilities } from "../capabilities.ts";
 import type { Governor } from "./governor.ts";
@@ -13,7 +13,7 @@ import type { Governor } from "./governor.ts";
  */
 
 /** The calibration's own sandbox: as small as a sandbox gets, gone as soon as it has started. */
-const PROBE = { cpus: 1, memoryGb: 1, ttlMinutes: 5, persistent: false, quest: SELF_ACTION_QUEST } as const;
+const PROBE = { cpus: 1, memoryGb: 1, ttlMinutes: 5, persistent: false, run: SELF_ACTION_RUN } as const;
 
 /**
  * How long a sandbox takes from asked-for to running its first command, for each kind this host has (a Mac's are
@@ -30,8 +30,8 @@ export async function sandboxStart(host: SandboxHost, governor: Governor, capaci
       const ran = await host.exec(sandbox.id, ["true"], 30);
       if (ran.exitCode === 0) out.push({ kind, startMs: Math.round(performance.now() - started) });
     } finally {
-      // His own, ephemeral, made for this: the oath lets him remove it.
-      await host.destroy(sandbox.id, { quest: SELF_ACTION_QUEST }).catch(() => {});
+      // Its own, ephemeral, made for this: the policy lets it remove it.
+      await host.destroy(sandbox.id, { run: SELF_ACTION_RUN }).catch(() => {});
     }
   }
   return out;
@@ -46,7 +46,7 @@ const MODEL_CHARS = 600;
  * Tokens a second (about four characters each) from the first chat model each local runtime serves on this
  * node. A runtime that isn't running, or serves only an embedding model, isn't measured. Nor is one whose
  * provider no longer points at this machine (someone repointed "ollama" at a service elsewhere): measuring
- * himself never calls out, and never spends a provider's quota.
+ * itself never calls out, and never spends a provider's quota.
  */
 export async function modelSpeed(ctx: ModelsContext, caps: Capabilities | null, enter: Governor["enterModel"]): Promise<{ runtime: string; model: string; tps: number }[]> {
   const out: { runtime: string; model: string; tps: number }[] = [];

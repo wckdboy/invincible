@@ -1,10 +1,10 @@
 /*
  * UI preferences, the only thing this app keeps in localStorage: theme, motion,
- * sidebar state, the last chat role, what Enter does while Galahad is working,
- * which kept chat you had open (its id only), how the Roundtable is laid out on
- * this device (a board or a list, a knight's side panel shown), which of the
+ * sidebar state, the last chat role, what Enter does while the primary is working,
+ * which kept chat you had open (its id only), how the agents are laid out on
+ * this device (a board or a list, an agent's side panel shown), which of the
  * work's sections are open, whether a task's details card is shown, when it last showed you what happened while you were away (a
- * time), and when you put away the card that says he can't reach this device (a
+ * time), and when you put away the card that says it can't reach this device (a
  * time). Never secrets, never a word of a chat, never anything else from the
  * server. boot.ts reads the same keys before paint.
  */
@@ -19,10 +19,10 @@ const KEYS = {
   role: "invincible:chat-role",
   enter: "invincible:chat-enter",
   chat: "invincible:open-chat",
-  roundtable: "invincible:roundtable-view",
+  agents: "invincible:agents-view",
   work: "invincible:work-open",
   details: "invincible:task-details",
-  panel: "invincible:knight-panel",
+  panel: "invincible:agent-panel",
   away: "invincible:away-seen",
   reach: "invincible:reach-put-away",
 } as const;
@@ -105,13 +105,13 @@ export function setSidebarCollapsed(collapsed: boolean): void {
 export const lastRole = (): string | null => read("role");
 export const rememberRole = (role: string): void => write("role", role);
 
-/** What Enter does while he's working, on this device: steer (the default: he's told now) or queue (sent when he's done). */
+/** What Enter does while it's working, on this device: steer (the default: it's told now) or queue (sent when it's done). */
 export type ChatEnterPref = "steer" | "queue";
 export const chatEnter = (): ChatEnterPref => (read("enter") === "queue" ? "queue" : "steer");
 export const setChatEnter = (pref: ChatEnterPref): void => write("enter", pref === "steer" ? null : pref);
 
 /**
- * The kept chat you had open (its id, never a word of it), so the app comes back to it, and to the turn he's
+ * The kept chat you had open (its id, never a word of it), so the app comes back to it, and to the turn it's
  * working on in it, after a reload: where you were, like the last page.
  */
 export const openChatId = (): string | null => {
@@ -127,17 +127,17 @@ export const awaySince = (now = Date.now()): number => {
 };
 export const markAwaySeen = (at = Date.now()): void => write("away", String(at));
 
-/** When you put away the card that says he can't reach this device (Not now), or null (lib/push.ts reachDismissed). */
+/** When you put away the card that says it can't reach this device (Not now), or null (lib/push.ts reachDismissed). */
 export const reachPutAway = (): number | null => {
   const at = Number(read("reach"));
   return Number.isFinite(at) && at > 0 ? at : null;
 };
 export const putReachAway = (at = Date.now()): void => write("reach", String(at));
 
-/** How the Roundtable's own page shows the knights on this device: as a board of cards (the default) or as a list. */
-export type RoundtableView = "board" | "list";
-export const roundtableView = (): RoundtableView => (read("roundtable") === "list" ? "list" : "board");
-export const setRoundtableView = (view: RoundtableView): void => write("roundtable", view === "board" ? null : view);
+/** How the agents' own page shows the agents on this device: as a board of cards (the default) or as a list. */
+export type AgentsView = "board" | "list";
+export const agentsView = (): AgentsView => (read("agents") === "list" ? "list" : "board");
+export const setAgentsView = (view: AgentsView): void => write("agents", view === "board" ? null : view);
 
 /** The work's sections opened on this device (the sidebar's, and Home's settled ones): what is at work and what is
  * settled are folded until you open them. */
@@ -150,9 +150,9 @@ export function setWorkOpen(section: WorkFold, opened: boolean): void {
   write("work", now.size ? [...now].sort().join(",") : null);
 }
 
-/** Whether a knight's page shows its side panel beside the timeline on a wide screen (it does unless you hid it). */
-export const knightPanelShown = (): boolean => read("panel") !== "hidden";
-export const setKnightPanelShown = (shown: boolean): void => write("panel", shown ? null : "hidden");
+/** Whether an agent's page shows its side panel beside the timeline on a wide screen (it does unless you hid it). */
+export const agentPanelShown = (): boolean => read("panel") !== "hidden";
+export const setAgentPanelShown = (shown: boolean): void => write("panel", shown ? null : "hidden");
 
 /** Whether a task's details card shows beside its thread on a wide screen: as you last left it, else where there is room
  * for it (1200 px and wider). */

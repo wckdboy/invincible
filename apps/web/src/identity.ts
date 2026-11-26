@@ -14,7 +14,7 @@ export interface BrowserIdentity {
   name: string;
 }
 
-const DB = "galahad";
+const DB = "invincible";
 const STORE = "identity";
 const KEY = "self";
 
@@ -105,7 +105,7 @@ export function defaultDeviceName(ua: string = navigator.userAgent, app: boolean
         : /Safari\//.test(ua)
           ? "Safari"
           : "Browser";
-  return `${app ? "Galahad app" : browser} on ${platform}`;
+  return `${app ? "Invincible app" : browser} on ${platform}`;
 }
 
 export async function createIdentity(name = defaultDeviceName()): Promise<BrowserIdentity> {

@@ -110,17 +110,17 @@ describe("a rule, as the log holds it", () => {
   });
 });
 
-test("a tell is said to the node with the quest, the command, whole, and how it ended", () => {
-  expect(RuleToldInput.safeParse({ quest: "q-m1abc", rule: "pushes", command: "git push origin main", exitCode: 0 }).success).toBe(true);
-  expect(RuleToldInput.safeParse({ quest: "q-m1abc", rule: "pushes", command: "git push origin main", exitCode: 128 }).success).toBe(true);
-  expect(RuleToldInput.safeParse({ quest: "q-m1abc", rule: "pushes", command: "git push origin main" }).success).toBe(false);
-  expect(RuleToldInput.safeParse({ quest: "q-m1abc", rule: "pushes", command: "git push", exitCode: 0.5 }).success).toBe(false);
-  expect(RuleToldInput.safeParse({ quest: "q-m1abc", rule: "pushes", command: "git push", exitCode: 0, body: "x" }).success).toBe(false);
+test("a tell is said to the node with the run, the command, whole, and how it ended", () => {
+  expect(RuleToldInput.safeParse({ run: "q-m1abc", rule: "pushes", command: "git push origin main", exitCode: 0 }).success).toBe(true);
+  expect(RuleToldInput.safeParse({ run: "q-m1abc", rule: "pushes", command: "git push origin main", exitCode: 128 }).success).toBe(true);
+  expect(RuleToldInput.safeParse({ run: "q-m1abc", rule: "pushes", command: "git push origin main" }).success).toBe(false);
+  expect(RuleToldInput.safeParse({ run: "q-m1abc", rule: "pushes", command: "git push", exitCode: 0.5 }).success).toBe(false);
+  expect(RuleToldInput.safeParse({ run: "q-m1abc", rule: "pushes", command: "git push", exitCode: 0, body: "x" }).success).toBe(false);
 });
 
-test("a trip is said to the node with the quest it stopped and the command, whole", () => {
-  expect(RuleTrippedInput.safeParse({ quest: "q-m1abc", rule: "no-locks", command: "rm bun.lock" }).success).toBe(true);
-  expect(RuleTrippedInput.safeParse({ quest: "q-m1abc", rule: "no-locks", command: "bun test", gate: true }).success).toBe(true);
-  expect(RuleTrippedInput.safeParse({ quest: "q m1abc", rule: "no-locks", command: "rm bun.lock" }).success).toBe(false);
-  expect(RuleTrippedInput.safeParse({ quest: "q-m1abc", rule: "no-locks", command: "" }).success).toBe(false);
+test("a trip is said to the node with the run it stopped and the command, whole", () => {
+  expect(RuleTrippedInput.safeParse({ run: "q-m1abc", rule: "no-locks", command: "rm bun.lock" }).success).toBe(true);
+  expect(RuleTrippedInput.safeParse({ run: "q-m1abc", rule: "no-locks", command: "bun test", gate: true }).success).toBe(true);
+  expect(RuleTrippedInput.safeParse({ run: "q m1abc", rule: "no-locks", command: "rm bun.lock" }).success).toBe(false);
+  expect(RuleTrippedInput.safeParse({ run: "q-m1abc", rule: "no-locks", command: "" }).success).toBe(false);
 });

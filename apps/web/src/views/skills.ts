@@ -12,7 +12,7 @@ import { toast } from "../ui/toast.ts";
 import { trustBadge } from "./memory.ts";
 
 /*
- * His skills (#/skills): how he did a kind of work that passed review, kept as notes he
+ * Its skills (#/skills): how it did a kind of work that passed review, kept as notes it
  * is given again. Each is a page: when to use it, the steps, what proves it worked, the
  * pitfalls, where it came from and its track record. What waits for you comes first, in
  * full, with Approve beside it: an untrusted skill is given to no model before that.
@@ -69,7 +69,7 @@ async function approve(ctx: Ctx, skill: SkillDetail, version: SkillVersionView):
     body: [
       h("p", { class: "wrap-anywhere plain" }, version.doc?.title ?? skill.title),
       h("p", {}, originWords(version)),
-      h("p", {}, "Approved, he's given it as a note when it bears on a quest or a question: data, fenced, still marked untrusted. It never runs anything by itself, and you can retire it or roll it back."),
+      h("p", {}, "Approved, it's given it as a note when it bears on a run or a question: data, fenced, still marked untrusted. It never runs anything by itself, and you can retire it or roll it back."),
     ],
     confirmLabel: "Approve",
     tone: "primary",
@@ -82,7 +82,7 @@ async function approve(ctx: Ctx, skill: SkillDetail, version: SkillVersionView):
 export function openSkillEditor(ctx: Ctx, existing?: { id: string; doc: SkillDoc | null; by: string }): void {
   const form = formOf(existing?.doc ?? null);
   const title = h("input", { class: "input", id: "skill-title", maxlength: SKILL_LIMITS.title, placeholder: "What kind of work this is", autocomplete: "off" });
-  const whenTo = h("textarea", { class: "textarea", id: "skill-when", rows: 2, maxlength: SKILL_LIMITS.when, placeholder: "When he should reach for it" });
+  const whenTo = h("textarea", { class: "textarea", id: "skill-when", rows: 2, maxlength: SKILL_LIMITS.when, placeholder: "When it should reach for it" });
   const steps = h("textarea", { class: "textarea", id: "skill-steps", rows: 6, placeholder: "One step a line, in plain words" });
   const proof = h("textarea", { class: "textarea mono", id: "skill-proof", rows: 3, placeholder: "bun test => 0 fail", autocorrect: "off", spellcheck: "false" });
   const pitfalls = h("textarea", { class: "textarea", id: "skill-pitfalls", rows: 3, placeholder: "One a line: what goes wrong, and how to tell" });
@@ -120,16 +120,16 @@ export function openSkillEditor(ctx: Ctx, existing?: { id: string; doc: SkillDoc
     },
     field("Title", title),
     field("When to use it", whenTo),
-    field("Steps", steps, { hint: `One a line, up to ${SKILL_LIMITS.steps}. Words he reads: nothing here runs by itself.` }),
+    field("Steps", steps, { hint: `One a line, up to ${SKILL_LIMITS.steps}. Words it reads: nothing here runs by itself.` }),
     field("What proves it worked (optional)", proof, { hint: 'One a line: a command, "=>", and what to expect of it.' }),
     field("Pitfalls (optional)", pitfalls),
-    existing && existing.by !== "owner" ? callout("quiet", `This version is by ${skillAuthor(existing.by)}. Saving makes the skill yours: he uses it, and never changes what you wrote. The earlier versions stay in its history.`) : null,
+    existing && existing.by !== "owner" ? callout("quiet", `This version is by ${skillAuthor(existing.by)}. Saving makes the skill yours: it uses it, and never changes what you wrote. The earlier versions stay in its history.`) : null,
     existing?.doc?.body ? callout("quiet", "Its instructions, as it was taken in with them, stay as they are.") : null,
     status,
   );
   const sheet = openSheet({
     title: existing ? "Edit this skill" : "Write a skill",
-    description: "Yours: he's given it as a note when it bears on his work. Plain words only; no keys or passwords, they belong in the vault.",
+    description: "Yours: it's given it as a note when it bears on its work. Plain words only; no keys or passwords, they belong in the vault.",
     size: "wide",
     body,
     footer: [button("Cancel", { onClick: () => sheet.close() }), save],
@@ -170,7 +170,7 @@ export function openSkillImport(ctx: Ctx): void {
   );
   const sheet = openSheet({
     title: "Take in a skill",
-    description: "From a folder of Agent Skills on GitHub, as words he reads.",
+    description: "From a folder of Agent Skills on GitHub, as words it reads.",
     body,
     footer: [button("Cancel", { onClick: () => sheet.close() }), take],
     initialFocus: () => url,
@@ -236,7 +236,7 @@ async function openSkill(ctx: Ctx, id: string, title: string): Promise<void> {
               "section",
               { class: "skill-part" },
               h("h4", {}, "Used in"),
-              h("ul", { class: "skill-record" }, ...skill.record.slice(0, 12).map((u) => h("li", {}, h("span", { class: "mono" }, u.quest.startsWith("chat:") ? "a chat answer" : u.quest), u.status ? badge(u.status === "done" ? "passed review" : u.status, u.status === "done" ? "ok" : "neutral") : null, when(u.at)))),
+              h("ul", { class: "skill-record" }, ...skill.record.slice(0, 12).map((u) => h("li", {}, h("span", { class: "mono" }, u.run.startsWith("chat:") ? "a chat answer" : u.run), u.status ? badge(u.status === "done" ? "passed review" : u.status, u.status === "done" ? "ok" : "neutral") : null, when(u.at)))),
             )
           : null,
         h(
@@ -273,7 +273,7 @@ async function openSkill(ctx: Ctx, id: string, title: string): Promise<void> {
           })
         : null,
       own && skill.state !== "retired"
-        ? button(skill.locked ? "Unlock" : "Lock", { icon: "shield", title: skill.locked ? "He may revise it again, if he wrote it" : "He may use it, but not change it", onClick: () => void again(act(ctx, "/api/skills/lock", { id, locked: !skill.locked }, skill.locked ? "Unlocked" : "Locked: he uses it, and can't change it")) })
+        ? button(skill.locked ? "Unlock" : "Lock", { icon: "shield", title: skill.locked ? "It may revise it again, if it wrote it" : "It may use it, but not change it", onClick: () => void again(act(ctx, "/api/skills/lock", { id, locked: !skill.locked }, skill.locked ? "Unlocked" : "Locked: it uses it, and can't change it")) })
         : null,
       own
         ? skill.state === "retired"
@@ -332,7 +332,7 @@ export const skillsView: View = (root, ctx, { scope, opts }) => {
               ? button("Decline it", { icon: "undo", onClick: () => void act(ctx, "/api/skills/rollback", { id: skill.id }, "Declined: the version in use stays") })
               : button("Retire", { icon: "archive", title: "Kept in the mind, and offered to nobody", onClick: () => void act(ctx, "/api/skills/retire", { id: skill.id, retired: true }, "Retired: kept, and offered to nobody") }),
             h("span", { class: "grow" }),
-            h("span", { class: "tiny subtle" }, "Read it all first: once approved, he's given it as a note."),
+            h("span", { class: "tiny subtle" }, "Read it all first: once approved, it's given it as a note."),
           )
         : h("footer", { class: "skill-foot tiny subtle" }, "This device can't approve skills (it was paired without fleet:admin)."),
     );
@@ -376,7 +376,7 @@ export const skillsView: View = (root, ctx, { scope, opts }) => {
               const save = button("Save", { variant: "primary", type: "submit" });
               const sheet = openSheet({
                 title: "Budget for distilling skills",
-                description: "When a quest of his passes its review, the cheapest usable role may write one skill from its evidence, in one bounded call. This is the most it may spend in a day; 0 turns it off.",
+                description: "When a run of its passes its review, the cheapest usable role may write one skill from its evidence, in one bounded call. This is the most it may spend in a day; 0 turns it off.",
                 size: "small",
                 body: h(
                   "form",
@@ -391,7 +391,7 @@ export const skillsView: View = (root, ctx, { scope, opts }) => {
                           await ctx.api.post("/api/skills/budget", { tokensPerDay });
                           sheet.close();
                           changed();
-                          toast(tokensPerDay === 0 ? "He distils no skills now" : "Budget saved", { tone: "ok" });
+                          toast(tokensPerDay === 0 ? "It distils no skills now" : "Budget saved", { tone: "ok" });
                         } catch (error) {
                           replace(status, callout("danger", errorMessage(error)));
                         }
@@ -432,7 +432,7 @@ export const skillsView: View = (root, ctx, { scope, opts }) => {
             : empty({
                 icon: "scroll",
                 title: cards.length ? "None in use yet" : "No skills yet",
-                body: "He learns one when a quest of his passes its independent review: one short note on how that kind of work went, from the commands that ran and the plan. You can write one yourself, too.",
+                body: "It learns one when a run of its passes its independent review: one short note on how that kind of work went, from the commands that ran and the plan. You can write one yourself, too.",
                 actions: ctx.can("mind:write") ? button("Write a skill", { variant: "primary", icon: "plus", onClick: () => openSkillEditor(ctx) }) : null,
                 compact: cards.length > 0,
               }),
@@ -456,8 +456,8 @@ export const skillsView: View = (root, ctx, { scope, opts }) => {
       replace(
         list,
         isUnavailable(error)
-          ? empty({ icon: "scroll", title: "His skills aren't on this node yet", body: "They arrive with an update.", compact: true })
-          : errorState("Couldn't open his skills", error, () => void load()),
+          ? empty({ icon: "scroll", title: "Its skills aren't on this node yet", body: "They arrive with an update.", compact: true })
+          : errorState("Couldn't open its skills", error, () => void load()),
       );
     }
   }
@@ -469,7 +469,7 @@ export const skillsView: View = (root, ctx, { scope, opts }) => {
       { class: "page narrow" },
       pageHead(
         "Skills",
-        "How he did a kind of work that passed its review, kept as notes he's given again when they bear on what he's doing. A skill is words he reads: nothing in one runs. One shaped by the outside world waits here for you first.",
+        "How it did a kind of work that passed its review, kept as notes it's given again when they bear on what it's doing. A skill is words it reads: nothing in one runs. One shaped by the outside world waits here for you first.",
         h(
           "div",
           { class: "row" },
@@ -477,7 +477,7 @@ export const skillsView: View = (root, ctx, { scope, opts }) => {
           ctx.can("mind:write") ? button("Write a skill", { variant: "primary", icon: "plus", onClick: () => openSkillEditor(ctx) }) : null,
         ),
       ),
-      // Shown whole once his skills have answered: the budget and what waits for you came in above those in use.
+      // Shown whole once its skills have answered: the budget and what waits for you came in above those in use.
       pageBody(budgetSlot, waitingSlot, section("In use", {}, list), retiredSlot),
     ),
   );

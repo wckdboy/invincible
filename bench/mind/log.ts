@@ -69,7 +69,7 @@ export function buildLog(n: number): BenchLog {
     let body: unknown;
     if (k < 0.85) {
       kind = "ledger.recorded";
-      body = { class: "create", resource: "sandbox.exec", target: `sb${(i % 997).toString(16)}`, verdict: "allow", quest: `q${i % 50}`, detail: `python3 -c "print(${i})"` };
+      body = { class: "create", resource: "sandbox.exec", target: `sb${(i % 997).toString(16)}`, verdict: "allow", run: `q${i % 50}`, detail: `python3 -c "print(${i})"` };
     } else if (k < 0.93) {
       const slot = (slots.get(loop) ?? 1_700_000_000_000) + 1_800_000;
       slots.set(loop, slot);

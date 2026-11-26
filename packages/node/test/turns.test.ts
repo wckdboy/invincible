@@ -324,7 +324,7 @@ describe("a stop always ends", () => {
     expect(turn.state).toBe("stopped");
   });
 
-  test("a chat deleted while he works in it: the turn stops, and nothing is written for a chat that's gone", async () => {
+  test("a chat deleted while it works in it: the turn stops, and nothing is written for a chat that's gone", async () => {
     const t = setup();
     const id = t.chat();
     const turn = t.hub.start(t.spec(id, "A long one."));
@@ -384,7 +384,7 @@ describe("limits, said plainly", () => {
 });
 
 describe("steering a turn", () => {
-  test("the message becomes part of the kept chat where it reached him: answer so far, your message, the rest", async () => {
+  test("the message becomes part of the kept chat where it reached it: answer so far, your message, the rest", async () => {
     const t = setup();
     const id = t.chat();
     const turn = t.hub.start(t.spec(id, "What do you know about my bank?"));
@@ -410,7 +410,7 @@ describe("steering a turn", () => {
     expect(turn.firstAnswer).toBe(t.chats.get(id)!.messages[1]!.id);
   });
 
-  test("a steer before he'd said or done anything leaves no empty answer behind", async () => {
+  test("a steer before it'd said or done anything leaves no empty answer behind", async () => {
     const t = setup();
     const id = t.chat();
     const turn = t.hub.start(t.spec(id, "Plan my week."));
@@ -429,7 +429,7 @@ describe("steering a turn", () => {
     expect(t.chats.get(id)!.messages.at(-1)!.steps).toEqual([{ kind: "model", ref: "test/m" }]);
   });
 
-  test("once he has finished, a steer is refused: it's a new turn's", async () => {
+  test("once it has finished, a steer is refused: it's a new turn's", async () => {
     const t = setup();
     const turn = t.hub.start(t.spec(t.chat(), "hi"));
     t.answers[0]!.end();
@@ -438,7 +438,7 @@ describe("steering a turn", () => {
     expect(() => t.hub.steer("tn_nope", "x", admin)).toThrow(TurnError);
   });
 
-  test("a steer that never reached him (he was stopped first) isn't lost: it's queued, first in line and held", async () => {
+  test("a steer that never reached it (it was stopped first) isn't lost: it's queued, first in line and held", async () => {
     const t = setup();
     const id = t.chat();
     const turn = t.hub.start(t.spec(id, "Post the report."));
@@ -544,7 +544,7 @@ describe("the queue", () => {
     expect(t.chats.queue(id).map((q) => q.text)).toEqual(["Three."]);
     t.hub.stop(first.id);
     await first.ended;
-    // The steer never reached him: it's back in the queue, first, held with the other.
+    // The steer never reached it: it's back in the queue, first, held with the other.
     expect(t.chats.queue(id).map((q) => q.text)).toEqual(["Two.", "Three."]);
     expect(t.chats.held(id)).toBe("stopped");
     const sent = t.hub.sendNow(id, b.id, phone);
@@ -657,7 +657,7 @@ describe("when the node stops, and comes back", () => {
 });
 
 describe("a chat store from before read and unread", () => {
-  test("counts everything he answered before it as read; what he answers after is new", () => {
+  test("counts everything it answered before it as read; what it answers after is new", () => {
     const path = `${process.env.TEMP ?? "/tmp"}/invincible-unread-${Date.now()}-${Math.random().toString(36).slice(2)}.db`;
     let clock = 1_000;
     const before = new ChatStore(path, () => clock++);
@@ -665,7 +665,7 @@ describe("a chat store from before read and unread", () => {
     before.addUser(id, "Hello?");
     before.finishAnswer(id, before.startAnswer(id), { content: "Hi.", model: null, steps: [], status: "done", error: null });
     before.close();
-    // As an older node left it: no columns for when he answered, or when you read it.
+    // As an older node left it: no columns for when it answered, or when you read it.
     const raw = new Database(path);
     raw.exec("ALTER TABLE conversations DROP COLUMN seen_at; ALTER TABLE conversations DROP COLUMN answered_at;");
     raw.close();
@@ -693,14 +693,14 @@ describe("a side question", () => {
     const messages = asideMessages(turn.spec.messages, sofar, "How many pages was it?");
     expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
     expect(messages[1]!.content).toBe("Fetching it now.");
-    expect(messages[2]!.content).toContain("An aside from your liege, while the work above goes on.");
+    expect(messages[2]!.content).toContain("An aside from the owner, while the work above goes on.");
     expect(messages[2]!.content).toContain('- Call a connector {"tool":"report"} → 42 pages');
     expect(messages[2]!.content).toMatch(/not an instruction to change course/);
     expect(messages[2]!.content.endsWith("The aside: How many pages was it?")).toBe(true);
     t.answers[0]!.end();
   });
 
-  test("after a steer, what was cut and the steer are part of it; only what he's done since counts as now", async () => {
+  test("after a steer, what was cut and the steer are part of it; only what it's done since counts as now", async () => {
     const t = setup();
     const turn = t.hub.start(t.spec(null, "Plan the week."));
     t.answers[0]!.say("Monday: ");

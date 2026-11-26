@@ -4,9 +4,9 @@ import { connectorCommand } from "../src/loop-cli.ts";
 
 /* `invincible connector requests` and `connector dismiss` at a terminal, against what the node would answer. */
 
-const github: ConnectorRequestView = { id: "cr_AAAAAAAAAAAAAAAAAAAAAA", connector: "github", access: false, agent: "team.0a1b2c3d4e.kay", label: "GitHub", why: "To read the failing checks on your pull request.", by: "Kay", at: 1, expires: 2 };
-const slack: ConnectorRequestView = { id: "cr_BBBBBBBBBBBBBBBBBBBBBB", connector: "slack", access: false, agent: "galahad", label: null, why: "To post the release notes.", by: "Galahad", at: 1, expires: 2 };
-const gmail: ConnectorRequestView = { id: "cr_CCCCCCCCCCCCCCCCCCCCCC", connector: "gmail", access: true, agent: "team.0a1b2c3d4e.kay", label: "Gmail", why: "To find the invoice you forwarded.", by: "Kay", at: 1, expires: 2 };
+const github: ConnectorRequestView = { id: "cr_AAAAAAAAAAAAAAAAAAAAAA", connector: "github", access: false, agent: "team.0a1b2c3d4e.noa", label: "GitHub", why: "To read the failing checks on your pull request.", by: "Noa", at: 1, expires: 2 };
+const slack: ConnectorRequestView = { id: "cr_BBBBBBBBBBBBBBBBBBBBBB", connector: "slack", access: false, agent: "primary", label: null, why: "To post the release notes.", by: "Your agent", at: 1, expires: 2 };
+const gmail: ConnectorRequestView = { id: "cr_CCCCCCCCCCCCCCCCCCCCCC", connector: "gmail", access: true, agent: "team.0a1b2c3d4e.noa", label: "Gmail", why: "To find the invoice you forwarded.", by: "Noa", at: 1, expires: 2 };
 
 function node(requests: ConnectorRequestView[] = [github, slack]) {
   const asked: { name: RouteName; input: unknown }[] = [];
@@ -31,13 +31,13 @@ async function printed(run: () => Promise<void>): Promise<string[]> {
   return lines;
 }
 
-test("what agents asked you to connect: who asked, which and why, and how to add each (one Galahad ships, or as an MCP server)", async () => {
+test("what agents asked you to connect: who asked, which and why, and how to add each (one your agent ships, or as an MCP server)", async () => {
   const { api, asked } = node();
   const text = (await printed(() => connectorCommand(api, "requests", [], {}))).join("\n");
-  expect(text).toContain("cr_AAAAAAAAAAAAAAAAAAAAAA  GitHub, asked by Kay");
+  expect(text).toContain("cr_AAAAAAAAAAAAAAAAAAAAAA  GitHub, asked by Noa");
   expect(text).toContain("why: To read the failing checks on your pull request.");
   expect(text).toContain("add it: invincible connector add github");
-  expect(text).toContain("cr_BBBBBBBBBBBBBBBBBBBBBB  slack, asked by Galahad");
+  expect(text).toContain("cr_BBBBBBBBBBBBBBBBBBBBBB  slack, asked by your agent");
   expect(text).toContain("invincible connector add slack --mcp <url>");
   expect(text).toContain("invincible connector dismiss <id>");
   expect(asked.map((a) => a.name)).toEqual(["connectorRequests"]);
@@ -51,13 +51,13 @@ test("with none asked it says so; dismissing one sends its id and adds nothing",
   await expect(connectorCommand(api, "dismiss", [], {})).rejects.toThrow(/usage: invincible connector dismiss <request id>/);
 });
 
-test("an agent asking to use one that's Galahad's alone: who, which and why, and the line that lets them", async () => {
+test("an agent asking to use one that's your agent's alone: who, which and why, and the line that lets them", async () => {
   const { api, asked } = node([gmail]);
   const text = (await printed(() => connectorCommand(api, "requests", [], {}))).join("\n");
-  expect(text).toContain("cr_CCCCCCCCCCCCCCCCCCCCCC  Gmail, Kay asks to use it");
-  expect(text).toContain("let them: invincible connector allow gmail team.0a1b2c3d4e.kay");
-  await printed(() => connectorCommand({ ...api, call: async <T,>(name: RouteName, input?: unknown) => (asked.push({ name, input }), { connector: { label: "Gmail" } } as T) }, "allow", ["gmail", "team.0a1b2c3d4e.kay"], {}));
-  expect(asked.at(-1)).toEqual({ name: "setConnectorAccess", input: { id: "gmail", agent: "team.0a1b2c3d4e.kay", allow: true } });
+  expect(text).toContain("cr_CCCCCCCCCCCCCCCCCCCCCC  Gmail, Noa asks to use it");
+  expect(text).toContain("let them: invincible connector allow gmail team.0a1b2c3d4e.noa");
+  await printed(() => connectorCommand({ ...api, call: async <T,>(name: RouteName, input?: unknown) => (asked.push({ name, input }), { connector: { label: "Gmail" } } as T) }, "allow", ["gmail", "team.0a1b2c3d4e.noa"], {}));
+  expect(asked.at(-1)).toEqual({ name: "setConnectorAccess", input: { id: "gmail", agent: "team.0a1b2c3d4e.noa", allow: true } });
 });
 
 

@@ -44,13 +44,13 @@ describe("a Cloudflare token, checked whoever owns it", () => {
   test("an account's token, refused at the user's address, is checked at the account's: the answer says whose", async () => {
     const cf = service({
       "/client/v4/user/tokens/verify": refused,
-      "/client/v4/accounts?per_page=50": { status: 200, json: { success: true, result: [{ id: OTHER, name: "Elsewhere" }, { id: ACCOUNT, name: "Camelot" }] } },
+      "/client/v4/accounts?per_page=50": { status: 200, json: { success: true, result: [{ id: OTHER, name: "Elsewhere" }, { id: ACCOUNT, name: "Homelab" }] } },
       [`/client/v4/accounts/${OTHER}/tokens/verify`]: refused,
       [`/client/v4/accounts/${ACCOUNT}/tokens/verify`]: active("tok-account"),
     });
     expect(result(await verify(cf.send))).toEqual({
       status: 200,
-      value: { owner: "account", account: { id: ACCOUNT, name: "Camelot" }, id: "tok-account", status: "active", expires: "2027-01-01T00:00:00Z" },
+      value: { owner: "account", account: { id: ACCOUNT, name: "Homelab" }, id: "tok-account", status: "active", expires: "2027-01-01T00:00:00Z" },
     });
     expect(cf.asked).toEqual([
       "GET /client/v4/user/tokens/verify",

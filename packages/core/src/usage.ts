@@ -28,11 +28,11 @@ export const MAX_SPEND_LINES = 24;
 export const SpendLines = z.array(UsageLineSchema).max(MAX_SPEND_LINES);
 
 /**
- * What a trial spent: its model calls by role and model. Recorded beside the trial (`trial.spent`), open in
+ * What an eval spent: its model calls by role and model. Recorded beside the eval (`eval.spent`), open in
  * the log, read leniently: the Index per token, per second and per dollar is computed from it on every replica.
  */
-export const TrialSpent = z.object({ lines: SpendLines });
-export type TrialSpent = z.infer<typeof TrialSpent>;
+export const EvalSpent = z.object({ lines: SpendLines });
+export type EvalSpent = z.infer<typeof EvalSpent>;
 
 /** A model a price is for: `<provider>/<model>`, or `<provider>/*` for everything that provider serves. */
 export const PricedModel = z
@@ -60,7 +60,7 @@ export function pricesOf(store: { lwwPrefix<T>(prefix: string): readonly { key: 
 export interface UsageRow extends UsageLine {
   /** UTC day, YYYY-MM-DD. */
   day: string;
-  /** you · arm:<label> (a loop's quest is arm:loop.<name>) · galahad (his own upkeep: the heartbeat's words, skills, the archive). */
+  /** you · arm:<label> (a loop's run is arm:loop.<name>) · primary (its own upkeep: the heartbeat's words, skills, the archive). */
   who: string;
 }
 

@@ -3,7 +3,7 @@ import type { NodeIdentity } from "@invincible/core";
 import type { LedgerStore } from "@invincible/ledger";
 
 /*
- * The heartbeat: Galahad's regular look around. Cheap, deterministic checks of the
+ * The heartbeat: the primary's regular look around. Cheap, deterministic checks of the
  * fleet and of the body it runs on; anything that needs you becomes a notice in
  * your inbox, and clears itself when the cause goes away. A dismissed notice stays
  * quiet until it changes. Optionally, a checklist you write is read by a model,
@@ -42,7 +42,7 @@ export interface HeartbeatSnapshot {
   /** Standing orders that are still meant to apply (not revoked, not expired). */
   orders: { id: string; label: string; tool: string; stale: boolean; until: number }[];
   disk: { freeGb: number; totalGb: number } | null;
-  /** The fleet's compute: nodes that joined a while ago and haven't measured themselves, and what he'd suggest (never do). */
+  /** The fleet's compute: nodes that joined a while ago and haven't measured themselves, and what it'd suggest (never do). */
   compute?: { unmeasured: { id: string; name: string }[]; suggestions: { key: string; title: string; body: string }[] } | null;
 }
 
@@ -168,7 +168,7 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
       key: `sandbox-image:${s.self.id}`,
       severity: "info",
       title: `The sandbox image is missing on ${s.self.name}`,
-      body: "Something removed it (image pruning?). Galahad rebuilds it the next time a sandbox is needed, or now with invincible sandbox build.",
+      body: "Something removed it (image pruning?). Your agent rebuilds it the next time a sandbox is needed, or now with invincible sandbox build.",
       node: s.self.id,
     });
   }
@@ -196,7 +196,7 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
       key: `compute-unmeasured:${node.id}`,
       severity: "info",
       title: `${node.name} hasn't measured itself`,
-      body: `He counts one sandbox slot on it until it has. Ask it to: invincible compute calibrate ${node.name} (it takes a few seconds, at low priority).`,
+      body: `It counts one sandbox slot on it until it has. Ask it to: invincible compute calibrate ${node.name} (it takes a few seconds, at low priority).`,
     });
   }
   // What more compute could do, as suggestions: installing, downloading and hiring are yours.

@@ -2,7 +2,7 @@ import type { TeamMessage, TeamRoom, TeamTask, TeamTaskInput } from "@invincible
 import { taskEnd } from "./task-card.ts";
 
 /*
- * A knight is one timeline: what was said and the tasks it was given, in the order they
+ * An agent is one timeline: what was said and the tasks it was given, in the order they
  * happened. Pure (no DOM). A task sits where it was given and stays there while it runs
  * and after it ends, so nothing in the timeline moves under you.
  */
@@ -22,10 +22,10 @@ export function timeline(messages: readonly TeamMessage[], tasks: readonly TeamT
   return [...said, ...given].sort((a, b) => a.at - b.at);
 }
 
-/** The tasks a conversation's timeline holds: for a knight's own, every task given to it, wherever; for a room, the room's. */
+/** The tasks a conversation's timeline holds: for an agent's own, every task given to it, wherever; for a room, the room's. */
 export function timelineTasks(room: Pick<TeamRoom, "id" | "direct" | "members">, all: readonly TeamTask[]): TeamTask[] {
-  const knight = room.direct && room.members.length === 1 ? room.members[0] : null;
-  return all.filter((task) => (knight ? task.assignee === knight : task.room === room.id));
+  const agent = room.direct && room.members.length === 1 ? room.members[0] : null;
+  return all.filter((task) => (agent ? task.assignee === agent : task.room === room.id));
 }
 
 /** The same task, given again as a new one: what was asked, of whom and where, and which it gives again (your stepping in,
@@ -39,7 +39,7 @@ const cut = (text: string, max: number): string => (text.length > max ? `${text.
 
 /**
  * What a task given again is asked: what was asked before, and when it ran and wasn't verified, what came of it (why,
- * what the knight said of its work, and what the independent review said), so the next try starts from there. Only the
+ * what the agent said of its work, and what the independent review said), so the next try starts from there. Only the
  * latest try's is kept; a task stopped, cut off or verified is asked again as it was.
  */
 export function againGoal(task: Pick<TeamTask, "id" | "goal" | "status" | "verified" | "error" | "output">): string {

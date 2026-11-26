@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { CHECKOUT_SCRIPT, containerName, LABEL, SandboxHost, type LedgerEntryInput, type TokenMinter } from "../src/index.ts";
 
 /*
- * A commit of a repository put in a trial's sandbox through the git gateway (a trial of your own work starts from
+ * A commit of a repository put in an eval's sandbox through the git gateway (an eval of your own work starts from
  * the commit its task began at). Docker is a stand-in that answers each command; no container, file or credential
  * is real. What's held: the lease reads one repository, lives inside the sandbox only for the fetch, never appears in
  * a command, an answer or the ledger, and is revoked once the fetch is over, whatever happened.
@@ -17,14 +17,14 @@ const ROOT = "/work/tasks/task-abc_def-1234";
 const WIDGETS = { connector: "github", owner: "example", repo: "widgets" };
 const lease = (n: number) => `test-only-checkout-lease-${n}`;
 
-function trialHost(opts: { labels?: Record<string, string>; status?: string; fetch?: { code: number; stdout?: string; stderr?: string }; failWrite?: boolean } = {}) {
+function evalHost(opts: { labels?: Record<string, string>; status?: string; fetch?: { code: number; stdout?: string; stderr?: string }; failWrite?: boolean } = {}) {
   const commands: string[][] = [];
   const minted: Parameters<TokenMinter["mint"]>[0][] = [];
   const revoked: string[] = [];
   const ledger: LedgerEntryInput[] = [];
   const events: string[] = [];
   const labels = {
-    [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.quest`]: "g-mwk1abc",
+    [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.run`]: "g-mwk1abc",
     [`${LABEL}.network`]: "online", [`${LABEL}.ephemeral`]: "true", [`${LABEL}.isolation`]: "vm", [`${LABEL}.providers`]: "search",
     ...opts.labels,
   };
@@ -57,14 +57,14 @@ function trialHost(opts: { labels?: Record<string, string>; status?: string; fet
   return { host, commands, minted, revoked, ledger, events };
 }
 
-describe("a repository checked out in a trial's sandbox", () => {
+describe("a repository checked out in an eval's sandbox", () => {
   test("its commit is fetched through the git gateway on a lease for that repository alone, read inside the sandbox and revoked after", async () => {
-    const f = trialHost();
+    const f = evalHost();
     expect(await f.host.checkoutRepository(ID, WIDGETS, BASE, ROOT)).toEqual({ commit: BASE });
     // One lease, for the one repository: short, and good for a fetch's few requests.
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["git:github:example:widgets"], ttlMinutes: 15, maxRequests: 100 }]);
     expect(f.events).toEqual(["mint", "write", "fetch", "revoke:test-only-checkout-hash-1"]);
-    // Written inside the sandbox as the knights' lease is: JSON in /work/.invincible-gateway.json, never a shell's configuration.
+    // Written inside the sandbox as the agents' lease is: JSON in /work/.invincible-gateway.json, never a shell's configuration.
     const write = f.commands.find((args) => args[0] === "exec" && args.at(-1) !== BASE)!;
     expect(write.slice(0, 5)).toEqual(["exec", "--interactive", "--workdir", "/work", containerName(ID)]);
     const env = JSON.parse(Buffer.from(write.at(-1)!, "base64").toString());
@@ -75,7 +75,7 @@ describe("a repository checked out in a trial's sandbox", () => {
     expect(fetch.join(" ")).not.toContain(lease(1));
     expect(fetch.join(" ")).toContain("/work/.invincible-gateway.json");
     // The ledger says what was read, where; never the lease or its hash.
-    expect(f.ledger).toEqual([expect.objectContaining({ class: "read", resource: "sandbox.checkout", target: containerName(ID), quest: "g-mwk1abc", verdict: "allow" })]);
+    expect(f.ledger).toEqual([expect.objectContaining({ class: "read", resource: "sandbox.checkout", target: containerName(ID), run: "g-mwk1abc", verdict: "allow" })]);
     expect(f.ledger[0]!.detail).toContain("example/widgets");
     expect(JSON.stringify(f.ledger)).not.toContain(lease(1));
     expect(JSON.stringify(f.ledger)).not.toContain("test-only-checkout-hash");
@@ -83,7 +83,7 @@ describe("a repository checked out in a trial's sandbox", () => {
 
   test("a commit that can't be fetched is said, and the lease is revoked all the same", async () => {
     // (Something printed the lease beside git's own words: what comes back says what git said, never the lease.)
-    const f = trialHost({ fetch: { code: 1, stderr: `warning: shallow fetch\nfatal: remote error: upload-pack: not our ref ${BASE} (${lease(1)})` } });
+    const f = evalHost({ fetch: { code: 1, stderr: `warning: shallow fetch\nfatal: remote error: upload-pack: not our ref ${BASE} (${lease(1)})` } });
     const refused = await f.host.checkoutRepository(ID, WIDGETS, BASE, ROOT).then(() => null, (error: Error & { status?: number }) => error);
     expect(refused?.status).toBe(424);
     expect(refused?.message).toMatch(/^couldn't fetch 0123456789ab of example\/widgets: fatal: remote error: upload-pack: not our ref/);
@@ -93,19 +93,19 @@ describe("a repository checked out in a trial's sandbox", () => {
   });
 
   test("a lease that can't be written is revoked at once, and nothing is fetched", async () => {
-    const f = trialHost({ failWrite: true });
+    const f = evalHost({ failWrite: true });
     await expect(f.host.checkoutRepository(ID, WIDGETS, BASE, ROOT)).rejects.toMatchObject({ status: 424 });
     expect(f.events).toEqual(["mint", "write", "revoke:test-only-checkout-hash-1"]);
   });
 
   const refused: { name: string; labels?: Record<string, string>; status?: string; code: number; id?: string }[] = [
     { name: "a sandbox that isn't there", id: "9876543210", code: 404 },
-    { name: "a knight's VM (it is given its repository as it is prepared)", labels: { [`${LABEL}.ephemeral`]: "false", [`${LABEL}.quest`]: "arm.team.abcdef0123.gareth" }, code: 409 },
+    { name: "an agent's VM (it is given its repository as it is prepared)", labels: { [`${LABEL}.ephemeral`]: "false", [`${LABEL}.run`]: "arm.team.abcdef0123.max" }, code: 409 },
     { name: "a sandbox with no network (it can't reach the gateway)", labels: { [`${LABEL}.network`]: "isolated" }, code: 409 },
     { name: "a sandbox that has stopped", status: "exited", code: 409 },
   ];
   test.each(refused)("refused before any lease: $name", async ({ labels, status, code, id }) => {
-    const f = trialHost({ ...(labels ? { labels } : {}), ...(status ? { status } : {}) });
+    const f = evalHost({ ...(labels ? { labels } : {}), ...(status ? { status } : {}) });
     await expect(f.host.checkoutRepository(id ?? ID, WIDGETS, BASE, ROOT)).rejects.toMatchObject({ status: code });
     expect(f.minted).toEqual([]);
     expect(f.commands.some((args) => args[0] === "exec")).toBe(false);

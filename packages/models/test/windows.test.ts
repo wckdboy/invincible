@@ -36,7 +36,7 @@ describe("reading a spent allowance from a provider's refusal", () => {
 function brain() {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "plan", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
   store.emit(identity, "provider.set", { id: "spare", kind: "openai", baseUrl: "http://localhost:9/v1" });

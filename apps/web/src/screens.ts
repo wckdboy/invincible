@@ -31,7 +31,7 @@ export function trustStrip(): HTMLElement {
   );
 }
 
-const footer = () => h("footer", { class: "solo-foot" }, h("span", {}, "Galahad · one mind, many bodies"));
+const footer = () => h("footer", { class: "solo-foot" }, h("span", {}, "Invincible · one mind, many bodies"));
 
 /** The invite inside whatever was pasted: a whole #pair= link, or just the invite itself. */
 export function inviteFrom(text: string): string | null {
@@ -45,7 +45,7 @@ export function inviteFrom(text: string): string | null {
 const installed = runningAsApp;
 
 export function renderWelcome(root: HTMLElement, identity: BrowserIdentity | null, onInvite?: (invite: string) => void): void {
-  document.title = "Welcome · Galahad";
+  document.title = "Welcome · Invincible";
   const field = h("input", { class: "input", type: "url", id: "invite-link", placeholder: "https://…#pair=gi1.…", autocomplete: "off", autocapitalize: "off", autocorrect: "off", spellcheck: "false" });
   const problem = h("div", { class: "hint", "aria-live": "polite" });
   const pasteForm = onInvite
@@ -83,7 +83,7 @@ export function renderWelcome(root: HTMLElement, identity: BrowserIdentity | nul
         : note === "home-screen-first"
           ? callout(
               "info",
-              "In Safari, tap Share (in the ⋯ menu on iOS 26), then Add to Home Screen (under More if it isn't listed), and open Galahad from there to pair it. The app on your Home Screen keeps its own key, apart from Safari's, and only it can get notifications: paired here first, you'd pair it twice.",
+              "In Safari, tap Share (in the ⋯ menu on iOS 26), then Add to Home Screen (under More if it isn't listed), and open your agent from there to pair it. The app on your Home Screen keeps its own key, apart from Safari's, and only it can get notifications: paired here first, you'd pair it twice.",
               { title: "On an iPhone, add it to your Home Screen first" },
             )
           : null,
@@ -108,7 +108,7 @@ export function renderWelcome(root: HTMLElement, identity: BrowserIdentity | nul
 }
 
 export function renderRevoked(root: HTMLElement): void {
-  document.title = "Not recognised · Galahad";
+  document.title = "Not recognised · Invincible";
   const forget = button("Forget this browser's key", {
     variant: "primary",
     onClick: async () => {
@@ -139,7 +139,7 @@ export function renderRevoked(root: HTMLElement): void {
 }
 
 export function renderInsecure(root: HTMLElement): void {
-  document.title = "Secure connection needed · Galahad";
+  document.title = "Secure connection needed · Invincible";
   replace(
     root,
     solo(
@@ -158,7 +158,7 @@ export const retryDelayMs = (attempt: number): number => Math.min(30_000, 3000 *
  * comes back or the app is brought to the front), so a node restart heals by itself.
  */
 export function renderUnreachable(root: HTMLElement, message: string, retry: () => void, attempt = 0): void {
-  document.title = "Unreachable · Galahad";
+  document.title = "Unreachable · Invincible";
   const offline = !navigator.onLine;
   const lifetime = new AbortController();
   let left = Math.round(retryDelayMs(attempt) / 1000);
@@ -185,7 +185,7 @@ export function renderUnreachable(root: HTMLElement, message: string, retry: () 
     root,
     solo(
       hero(
-        offline ? "You're offline." : "Galahad can't be reached just now.",
+        offline ? "You're offline." : "Your agent can't be reached just now.",
         offline ? "The app is cached on this device; your fleet's live data returns when you reconnect." : "The node may be restarting, or your tailnet may be down. This page keeps trying.",
       ),
       h(
@@ -202,7 +202,7 @@ export function renderUnreachable(root: HTMLElement, message: string, retry: () 
 
 /** The browser's storage didn't answer: the key is almost certainly still there, so pairing again is the wrong advice. */
 export function renderKeyStoreUnavailable(root: HTMLElement, message: string): void {
-  document.title = "Key unavailable · Galahad";
+  document.title = "Key unavailable · Invincible";
   replace(
     root,
     solo(
@@ -220,7 +220,7 @@ export function renderKeyStoreUnavailable(root: HTMLElement, message: string): v
 }
 
 export function renderClockSkew(root: HTMLElement, skewMs: number, retry: () => void): void {
-  document.title = "Check the clock · Galahad";
+  document.title = "Check the clock · Invincible";
   const minutes = Math.max(1, Math.round(Math.abs(skewMs) / 60_000));
   replace(
     root,

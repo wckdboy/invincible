@@ -170,14 +170,14 @@ const json = (status: number, error: string) =>
 /*
  * A plan's allowance spent, as a tool hears it. Told by its provider to try again in a day and a half, OpenCode 2.3.0
  * waits fifteen minutes and asks again, for as long as that lasts, and Codex 0.169.0 waits all of it; told 402, each ends
- * within seconds, as Claude Code does either way, and the next model on a knight's list takes over (measured 21 Nov
+ * within seconds, as Claude Code does either way, and the next model on an agent's list takes over (measured 21 Nov
  * 2026). So a window that ends later than WAIT_OUT_MS is said as a spent quota, with no time to wait for, in words that
  * Hermes too takes as final (it reads "usage limit" or "quota" beside "resets in" as a wait). A shorter one stays the
  * provider's 429 and retry-after, for the tool's own retry on the same model.
  */
 const WAIT_OUT_MS = 60_000;
 const spent = (provider: string, window: SpentWindow, windows: SpentWindows) =>
-  json(402, `${provider}'s allowance is spent until ${clockUtc(window.until)} UTC (${spanWords(window.until - windows.now())} from now), as its provider said: Galahad's gateway passes it over until then.`);
+  json(402, `${provider}'s allowance is spent until ${clockUtc(window.until)} UTC (${spanWords(window.until - windows.now())} from now), as its provider said: the gateway passes it over until then.`);
 
 /** Handles `/gw/<provider>/<rest>` by forwarding to the provider with the real key. */
 export async function handleGateway(request: Request, ctx: GatewayContext): Promise<Response> {
@@ -194,7 +194,7 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
 
   // A plan for interactive use only is lent to a tool you run yourself (invincible run), never to unattended work.
   if (planOf(providerId)?.allows.tools === "interactive" && !(ctx.tokens.labelOf(token) ?? "").startsWith("run:")) {
-    return json(403, `${providerId} is a coding plan for interactive use only (its vendor's terms): it is lent to a tool you run yourself (invincible run), never to a knight's or a quest's unattended work`);
+    return json(403, `${providerId} is a coding plan for interactive use only (its vendor's terms): it is lent to a tool you run yourself (invincible run), never to an agent's or a run's unattended work`);
   }
   // The one place a coding plan's key is handed over: to a tool, calling as itself.
   const provider = resolveProvider(ctx.store, ctx.vault, providerId, "tool");

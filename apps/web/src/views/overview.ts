@@ -15,8 +15,8 @@ import { isOnline, openInvite } from "./fleet.ts";
 import { openAddKey, vaultChanged } from "./vault.ts";
 
 /*
- * Is everything well, does anything need me, what has Galahad been doing: the figures, what he has in hand, what he did
- * lately, and the doctor's look. Each node's health is the Fleet's (a tile goes there), the oath's autonomy is Activity's.
+ * Is everything well, does anything need me, what has the primary been doing: the figures, what it has in hand, what it did
+ * lately, and the doctor's look. Each node's health is the Fleet's (a tile goes there), the policy's autonomy is Activity's.
  */
 
 export const overviewView: View = (root, ctx, { scope }) => {
@@ -33,7 +33,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
     const tiles: HTMLElement[] = [];
     // Every tile keeps its place while what it says loads, as the Vault's and the meter's do: put in once its part had
     // answered, a tile made a new row of them on a laptop and moved everything under it (the PWA's layout bench, on a
-    // machine busy with other work, 22 November 2026: the Roundtable answered after the page was there).
+    // machine busy with other work, 22 November 2026: the agents answered after the page was there).
     const waiting = (label: string, icon: "server" | "memory" | "user") => statTile({ label, icon, value: "–", note: "loading…" });
     if (!fleet && ctx.can("mind:read")) tiles.push(waiting("Nodes online", "server"));
     if (fleet) {
@@ -68,8 +68,8 @@ export const overviewView: View = (root, ctx, { scope }) => {
     else if (usage === null && ctx.can("mind:read")) tiles.push(statTile({ label: "Usage", icon: "gauge", value: "–", note: ["loading…", meterSlot()] }));
     if (fleet) tiles.push(statTile({ label: "Mind", icon: "memory", value: fleet.events.toLocaleString(), note: "events in the shared mind", href: "#/memory" }));
     else if (ctx.can("mind:read")) tiles.push(waiting("Mind", "memory"));
-    // The mandate's north star (#28): how often you stepped in on the knights' work, per task done and verified. Said
-    // whenever the Roundtable can be, a dash while no task has ended, so its tile is there from the start.
+    // The mandate's north star (#28): how often you stepped in on the agents' work, per task done and verified. Said
+    // whenever the agents can be, a dash while no task has ended, so its tile is there from the start.
     const team = ctx.live.team.value;
     const star = team?.northStar;
     if (star?.ended) {
@@ -82,7 +82,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
           href: "#/team",
         }),
       );
-    } else if (team) tiles.push(statTile({ label: "You stepped in", icon: "user", value: "–", note: "no knight's task has ended in 30 days", href: "#/team" }));
+    } else if (team) tiles.push(statTile({ label: "You stepped in", icon: "user", value: "–", note: "no agent's task has ended in 30 days", href: "#/team" }));
     else if (ctx.can("chat") && !ctx.live.teamProblem.value) tiles.push(waiting("You stepped in", "user"));
     replace(stats, ...tiles);
   }
@@ -121,7 +121,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
       recent,
       latest.length
         ? h("div", { class: "timeline" }, ...latest.map((e) => ledgerItem(ctx, e, true)))
-        : empty({ icon: "activity", title: "Quiet so far", body: "What Galahad creates, changes or sends will show up here.", compact: true }),
+        : empty({ icon: "activity", title: "Quiet so far", body: "What your agent creates, changes or sends will show up here.", compact: true }),
     );
   }
 
@@ -145,7 +145,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
         empty({
           icon: "scroll",
           title: isUnavailable(error) ? "The ledger arrives with an upcoming update" : "Couldn't read recent activity",
-          body: isUnavailable(error) ? "The oath already gates every action; soon you'll see each one here." : String((error as Error).message ?? error),
+          body: isUnavailable(error) ? "The policy already gates every action; soon you'll see each one here." : String((error as Error).message ?? error),
           compact: true,
         }),
       );
@@ -173,7 +173,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
       "div",
       { class: "page" },
       pageHead(`${greeting()}.`, lede, actions),
-      // Shown whole once its parts have answered: what he has in hand comes first, and would push the rest down.
+      // Shown whole once its parts have answered: what it has in hand comes first, and would push the rest down.
       pageBody(
         stats,
         h(
@@ -182,7 +182,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
           h(
             "div",
             { class: "stack loose" },
-            // What he's working on now: the turns the node is running, and the quests in hand with their plan and gates.
+            // What it's working on now: the turns the node is running, and the runs in hand with their plan and gates.
             inHandSection(ctx, scope),
             section("Recent activity", { actions: linkButton("View all", "#/activity", { variant: "ghost", size: "sm", next: true }) }, recent),
           ),
@@ -198,7 +198,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
   );
   scope.add(ctx.live.inboxCount.subscribe(() => renderStats(ctx.live.fleet.value)));
   scope.add(ctx.live.team.subscribe(() => keepPlace(root, () => renderStats(ctx.live.fleet.value))));
-  // (Its tile waits for the Roundtable, which a phone doesn't watch from here: asked once, and a failure takes the tile.)
+  // (Its tile waits for the agents, which a phone doesn't watch from here: asked once, and a failure takes the tile.)
   scope.add(ctx.live.teamProblem.subscribe(() => keepPlace(root, () => renderStats(ctx.live.fleet.value))));
   if (ctx.can("chat") && !ctx.live.team.value) void ctx.live.refreshTeam();
   scope.add(vaultChanged.subscribe(() => void loadVault()));

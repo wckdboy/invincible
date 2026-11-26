@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Scope } from "./scopes.ts";
 
 /*
- * Q-AMP grants (PLAN #58, its first phase): an agent on another of your machines calls a few of Galahad's tools on a
+ * Q-AMP grants (PLAN #58, its first phase): an agent on another of your machines calls a few of the primary's tools on a
  * node over Q-AMP (QUIC), under a grant you made. A grant is bound to the agent's own key, ends by itself, and can be
  * revoked. The node keeps each one as three things: an arm of its own (`qamp.<id>`, checked at the node's door on every
  * call), a delegation chain from the node's bridge key to the agent's key, and a bridge (`qamp serve --mcp-stdio`) that

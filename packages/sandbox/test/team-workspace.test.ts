@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { containerName, LABEL, NETWORKS, SandboxHost, type LedgerEntryInput, type TokenMinter, type Workspaces, type WorkspaceStats } from "../src/index.ts";
 
 const ID = "0123456789";
-const QUEST = "arm.team.abcdef0123.builder";
+const RUN = "arm.team.abcdef0123.builder";
 const OLD_LEASE = "test-only-old-lease-hash";
 const lease = (n: number) => `test-only-gateway-lease-${n}`;
 /** Where the helper mounted the VM's disk on the host. */
@@ -10,7 +10,7 @@ const DISK = `/var/lib/invincible-workspaces/${ID}/mnt`;
 const REMADE = { providers: ["openai"], approvedBy: "test-owner" };
 
 /** Docker/helper stand-ins: no containers, mounts, host files, or real credentials. */
-function teammateHost(opts: {
+function agentHost(opts: {
   status?: string;
   labels?: Record<string, string>;
   missing?: boolean;
@@ -58,7 +58,7 @@ function teammateHost(opts: {
   let held: { NanoCpus: number; Memory: number } | undefined;
   if (opts.legacyHelper) { delete workspaces.mount; delete workspaces.retain; }
   const labels = {
-    [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.quest`]: QUEST,
+    [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.run`]: RUN,
     [`${LABEL}.network`]: "gateway", [`${LABEL}.ephemeral`]: "false", [`${LABEL}.isolation`]: "vm",
     [`${LABEL}.providers`]: "openai", [`${LABEL}.disk`]: "20", ...opts.labels,
   };
@@ -117,11 +117,11 @@ function teammateHost(opts: {
   return { host, commands, events, all, ledger, minted, revoked, extended, stored };
 }
 
-describe("persistent teammate workspaces", () => {
+describe("persistent agent workspaces", () => {
   test("resume remounts and starts the exact existing VM, then rotates a bounded scoped lease", async () => {
-    const f = teammateHost();
-    const resumed = await f.host.prepareTeam(ID, QUEST, { connector: "github", owner: "example", repo: "project" });
-    expect(resumed).toMatchObject({ id: ID, quest: QUEST, status: "running", ephemeral: false, isolation: "vm" });
+    const f = agentHost();
+    const resumed = await f.host.prepareTeam(ID, RUN, { connector: "github", owner: "example", repo: "project" });
+    expect(resumed).toMatchObject({ id: ID, run: RUN, status: "running", ephemeral: false, isolation: "vm" });
     expect(f.events).toEqual([`retain:${ID}`, `mount:${ID}`, "start", `revoke:${OLD_LEASE}`, "mint", "write"]);
     expect(f.commands.find((args) => args[0] === "start")).toEqual(["start", containerName(ID)]);
     expect(f.commands.some((args) => ["run", "create", "volume"].includes(args[0]!))).toBe(false);
@@ -136,100 +136,100 @@ describe("persistent teammate workspaces", () => {
     expect(visible).not.toContain(lease(1));
     expect(visible).not.toContain("test-only-hash-1");
     expect(visible).not.toContain(payload);
-    expect(f.ledger).toEqual([expect.objectContaining({ resource: "sandbox.team-ready", quest: QUEST, verdict: "allow" })]);
+    expect(f.ledger).toEqual([expect.objectContaining({ resource: "sandbox.team-ready", run: RUN, verdict: "allow" })]);
   });
 
   test("each task's lease covers the providers it is given now: a key added since the VM was made reaches it, without making it again", async () => {
-    const f = teammateHost({ status: "running" });
-    await f.host.prepareTeam(ID, QUEST, undefined, ["openai", "zai-coding"]);
+    const f = agentHost({ status: "running" });
+    await f.host.prepareTeam(ID, RUN, undefined, ["openai", "zai-coding"]);
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["openai", "zai-coding"], ttlMinutes: 30, maxRequests: 500 }]);
     // Given none, it covers what the VM was made with, as it did.
-    await f.host.prepareTeam(ID, QUEST);
+    await f.host.prepareTeam(ID, RUN);
     expect(f.minted.at(-1)!.providers).toEqual(["openai"]);
   });
 
-  test("the keys of yours its knight may use are on its lease, for the key gateway alone, and its VM is told where that is", async () => {
-    const f = teammateHost({ status: "running" });
-    await f.host.prepareTeam(ID, QUEST, undefined, ["openai"], undefined, ["key:stripe:authorization:read"]);
+  test("the keys of yours its agent may use are on its lease, for the key gateway alone, and its VM is told where that is", async () => {
+    const f = agentHost({ status: "running" });
+    await f.host.prepareTeam(ID, RUN, undefined, ["openai"], undefined, ["key:stripe:authorization:read"]);
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["openai", "key:stripe:authorization:read"], ttlMinutes: 30, maxRequests: 500 }]);
     // (Without one, nothing of the key gateway is in its lease.)
-    await f.host.prepareTeam(ID, QUEST, undefined, ["openai"]);
+    await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
     expect(f.minted.at(-1)!.providers).toEqual(["openai"]);
   });
 
   test("work in sensitive mode is leased its models alone, and the ledger says so", async () => {
-    const f = teammateHost({ status: "running" });
-    await f.host.prepareTeam(ID, QUEST, undefined, ["nearai"], ["nearai/Qwen/Qwen3.8-27B-abliterated"]);
+    const f = agentHost({ status: "running" });
+    await f.host.prepareTeam(ID, RUN, undefined, ["nearai"], ["nearai/Qwen/Qwen3.8-27B-abliterated"]);
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["nearai"], models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], ttlMinutes: 30, maxRequests: 500 }]);
     expect(f.ledger.at(-1)!.detail).toBe("existing VM resumed; model access capped at 30 minutes and 500 requests, in sensitive mode: nearai/Qwen/Qwen3.8-27B-abliterated alone");
   });
 
   test("renewal revokes the persisted prior lease and then each superseded lease", async () => {
-    const f = teammateHost({ status: "running" });
-    await f.host.prepareTeam(ID, QUEST);
-    await f.host.prepareTeam(ID, QUEST);
+    const f = agentHost({ status: "running" });
+    await f.host.prepareTeam(ID, RUN);
+    await f.host.prepareTeam(ID, RUN);
     expect(f.revoked).toEqual([OLD_LEASE, "test-only-hash-1"]);
     expect(f.stored.get(ID)).toBe("test-only-hash-2");
     expect(f.commands.some((args) => args[0] === "start")).toBe(false);
     expect(f.minted.every((scope) => scope.ttlMinutes === 30 && scope.maxRequests === 500)).toBe(true);
   });
 
-  test("kept while its task runs: the same lease, thirty minutes more and 500 more requests, and nothing else; never another knight's, nor one it no longer has", async () => {
-    const f = teammateHost({ status: "running" });
-    await f.host.prepareTeam(ID, QUEST);
+  test("kept while its task runs: the same lease, thirty minutes more and 500 more requests, and nothing else; never another agent's, nor one it no longer has", async () => {
+    const f = agentHost({ status: "running" });
+    await f.host.prepareTeam(ID, RUN);
     const before = f.all.length;
-    expect(await f.host.renewTeam(ID, QUEST)).toBe(true);
+    expect(await f.host.renewTeam(ID, RUN)).toBe(true);
     expect(f.extended).toEqual([{ hash: "test-only-hash-1", ttlMinutes: 30, maxRequests: 500 }]);
     // No new lease, nothing revoked, nothing written in the VM or started: whatever holds it works on.
     expect(f.all.slice(before)).toEqual(["extend:test-only-hash-1"]);
     expect(f.stored.get(ID)).toBe("test-only-hash-1");
     await expect(f.host.renewTeam(ID, "arm.team.abcdef0123.other")).rejects.toMatchObject({ status: 403 });
-    await expect(f.host.renewTeam("9876543210", QUEST)).rejects.toMatchObject({ status: 404 });
+    await expect(f.host.renewTeam("9876543210", RUN)).rejects.toMatchObject({ status: 404 });
     // A lease that was revoked, or that it no longer has, isn't brought back.
     f.revoked.push("test-only-hash-1");
-    expect(await f.host.renewTeam(ID, QUEST)).toBe(false);
+    expect(await f.host.renewTeam(ID, RUN)).toBe(false);
     f.stored.delete(ID);
-    expect(await f.host.renewTeam(ID, QUEST)).toBe(false);
+    expect(await f.host.renewTeam(ID, RUN)).toBe(false);
     expect(f.minted).toHaveLength(1);
   });
 
   test("a missing VM is never replaced during resume", async () => {
-    const f = teammateHost({ missing: true });
-    await expect(f.host.prepareTeam(ID, QUEST)).rejects.toMatchObject({ status: 404 });
+    const f = agentHost({ missing: true });
+    await expect(f.host.prepareTeam(ID, RUN)).rejects.toMatchObject({ status: 404 });
     expect(f.events).toEqual([]);
     expect(f.commands.some((args) => ["run", "create", "start", "exec", "volume"].includes(args[0]!))).toBe(false);
   });
 
-  const refusedResumes: { name: string; id: string; quest: string; labels: Record<string, string>; status: number }[] = [
-    { name: "another VM id", id: "9876543210", quest: QUEST, labels: {}, status: 404 },
-    { name: "another teammate", id: ID, quest: "arm.team.abcdef0123.other", labels: {}, status: 403 },
-    { name: "another controller", id: ID, quest: "arm.team.9876543210.builder", labels: {}, status: 403 },
-    { name: "an unscoped legacy quest", id: ID, quest: "arm.team.builder", labels: { [`${LABEL}.quest`]: "arm.team.builder" }, status: 403 },
-    { name: "a non-team quest", id: ID, quest: "arm.other", labels: { [`${LABEL}.quest`]: "arm.other" }, status: 403 },
-    { name: "an ephemeral VM", id: ID, quest: QUEST, labels: { [`${LABEL}.ephemeral`]: "true" }, status: 403 },
-    { name: "a persistent container", id: ID, quest: QUEST, labels: { [`${LABEL}.isolation`]: "container" }, status: 403 },
+  const refusedResumes: { name: string; id: string; run: string; labels: Record<string, string>; status: number }[] = [
+    { name: "another VM id", id: "9876543210", run: RUN, labels: {}, status: 404 },
+    { name: "another agent", id: ID, run: "arm.team.abcdef0123.other", labels: {}, status: 403 },
+    { name: "another controller", id: ID, run: "arm.team.9876543210.builder", labels: {}, status: 403 },
+    { name: "an unscoped legacy run", id: ID, run: "arm.team.builder", labels: { [`${LABEL}.run`]: "arm.team.builder" }, status: 403 },
+    { name: "a non-team run", id: ID, run: "arm.other", labels: { [`${LABEL}.run`]: "arm.other" }, status: 403 },
+    { name: "an ephemeral VM", id: ID, run: RUN, labels: { [`${LABEL}.ephemeral`]: "true" }, status: 403 },
+    { name: "a persistent container", id: ID, run: RUN, labels: { [`${LABEL}.isolation`]: "container" }, status: 403 },
   ];
-  test.each(refusedResumes)("resume refuses $name before workspace or credential mutations", async ({ id, quest, labels, status }) => {
-    const f = teammateHost({ labels });
-    await expect(f.host.prepareTeam(id, quest)).rejects.toMatchObject({ status });
+  test.each(refusedResumes)("resume refuses $name before workspace or credential mutations", async ({ id, run, labels, status }) => {
+    const f = agentHost({ labels });
+    await expect(f.host.prepareTeam(id, run)).rejects.toMatchObject({ status });
     expect(f.events).toEqual([]);
     expect(f.stored.get(ID)).toBe(OLD_LEASE);
   });
 
   test.each(["created", "exited"])("a %s VM can resume; an unsupported state cannot", async (status) => {
-    const f = teammateHost({ status });
-    expect((await f.host.prepareTeam(ID, QUEST)).status).toBe("running");
+    const f = agentHost({ status });
+    expect((await f.host.prepareTeam(ID, RUN)).status).toBe("running");
     expect(f.events).toContain("start");
-    const paused = teammateHost({ status: "paused" });
-    await expect(paused.host.prepareTeam(ID, QUEST)).rejects.toMatchObject({ status: 409 });
+    const paused = agentHost({ status: "paused" });
+    await expect(paused.host.prepareTeam(ID, RUN)).rejects.toMatchObject({ status: 409 });
     expect(paused.minted).toEqual([]);
     expect(paused.commands.some((args) => ["start", "exec"].includes(args[0]!))).toBe(false);
   });
 
   test("an old helper or unavailable disk refuses resume without starting a VM or minting access", async () => {
     for (const options of [{ legacyHelper: true }, { failure: "mount" as const }, { failure: "start" as const }]) {
-      const f = teammateHost(options);
-      await expect(f.host.prepareTeam(ID, QUEST)).rejects.toThrow();
+      const f = agentHost(options);
+      await expect(f.host.prepareTeam(ID, RUN)).rejects.toThrow();
       expect(f.minted).toEqual([]);
       expect(f.commands.some((args) => args[0] === "exec")).toBe(false);
       if (options.failure !== "start") expect(f.commands.some((args) => args[0] === "start")).toBe(false);
@@ -237,9 +237,9 @@ describe("persistent teammate workspaces", () => {
   });
 
   test.each(["write", "throw-write"] as const)("a %s failure revokes the new lease and exposes no token", async (failure) => {
-    const f = teammateHost({ failure });
+    const f = agentHost({ failure });
     let thrown: unknown;
-    try { await f.host.prepareTeam(ID, QUEST); } catch (error) { thrown = error; }
+    try { await f.host.prepareTeam(ID, RUN); } catch (error) { thrown = error; }
     expect(thrown).toBeInstanceOf(Error);
     expect(f.revoked).toEqual([OLD_LEASE, "test-only-hash-1"]);
     expect(String(thrown)).not.toContain(lease(1));
@@ -248,8 +248,8 @@ describe("persistent teammate workspaces", () => {
   });
 
   test("only owner-approved destruction removes retained workspace data", async () => {
-    const f = teammateHost();
-    expect((await f.host.destroy(ID, { quest: QUEST })).verdict).toBe("ask");
+    const f = agentHost();
+    expect((await f.host.destroy(ID, { run: RUN })).verdict).toBe("ask");
     expect(f.events).toEqual([]);
     expect(f.commands.some((args) => args[0] === "rm")).toBe(false);
     expect((await f.host.destroy(ID, { approvedBy: "test-owner" })).verdict).toBe("allow");
@@ -258,10 +258,10 @@ describe("persistent teammate workspaces", () => {
     expect(f.ledger.at(-1)?.verdict).toBe("approved");
   });
 
-  test("a knight's VM is made again from its image as it is now: the same VM and disk, a new lease, and the old container goes only once the new one runs", async () => {
-    const f = teammateHost({ status: "running", labels: { [`${LABEL}.cpus`]: "2", [`${LABEL}.memory`]: "4", [`${LABEL}.created`]: "1000", [`${LABEL}.expires`]: "604801000" } });
-    const remade = await f.host.remakeTeam(ID, QUEST, REMADE);
-    expect(remade).toMatchObject({ id: ID, quest: QUEST, ephemeral: false, isolation: "vm" });
+  test("an agent's VM is made again from its image as it is now: the same VM and disk, a new lease, and the old container goes only once the new one runs", async () => {
+    const f = agentHost({ status: "running", labels: { [`${LABEL}.cpus`]: "2", [`${LABEL}.memory`]: "4", [`${LABEL}.created`]: "1000", [`${LABEL}.expires`]: "604801000" } });
+    const remade = await f.host.remakeTeam(ID, RUN, REMADE);
+    expect(remade).toMatchObject({ id: ID, run: RUN, ephemeral: false, isolation: "vm" });
     const name = containerName(ID);
     expect(f.all).toEqual([`retain:${ID}`, "stop", `rename:${name}>${name}-replaced`, `mount:${ID}`, "mint", "run", `rm:${name}-replaced`, `revoke:${OLD_LEASE}`]);
     const run = f.commands.find((args) => args[0] === "run")!;
@@ -270,7 +270,7 @@ describe("persistent teammate workspaces", () => {
     expect(after("--name")).toBe(name);
     expect(run).toContain(`type=bind,src=${DISK},dst=/work`);
     expect([after("--cpus"), after("--memory"), after("--runtime"), after("--network")]).toEqual(["2", "4096m", "io.containerd.kata.v2", NETWORKS.gateway.name]);
-    for (const label of [`${LABEL}.id=${ID}`, `${LABEL}.quest=${QUEST}`, `${LABEL}.ephemeral=false`, `${LABEL}.created=1000`, `${LABEL}.expires=604801000`, `${LABEL}.disk=20`, `${LABEL}.isolation=vm`, `${LABEL}.providers=openai`]) expect(run).toContain(label);
+    for (const label of [`${LABEL}.id=${ID}`, `${LABEL}.run=${RUN}`, `${LABEL}.ephemeral=false`, `${LABEL}.created=1000`, `${LABEL}.expires=604801000`, `${LABEL}.disk=20`, `${LABEL}.isolation=vm`, `${LABEL}.providers=openai`]) expect(run).toContain(label);
     // From the image by its name, which is the image as it is built now.
     expect(run.slice(-3)).toEqual(["invincible/sandbox:1", "sleep", "infinity"]);
     // The container that was is removed, and nothing of its disk: no volumes flag, no word to the helper to remove.
@@ -280,15 +280,15 @@ describe("persistent teammate workspaces", () => {
     expect(run).toContain(`INVINCIBLE_TOKEN=${lease(1)}`);
     expect(f.stored.get(ID)).toBe("test-only-hash-1");
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["openai"], ttlMinutes: 7 * 24 * 60, maxRequests: 100_000 }]);
-    expect(f.ledger).toEqual([expect.objectContaining({ class: "modify", resource: "docker.container", target: name, verdict: "approved", quest: QUEST, detail: expect.stringContaining("made again from invincible/sandbox:1") })]);
+    expect(f.ledger).toEqual([expect.objectContaining({ class: "modify", resource: "docker.container", target: name, verdict: "approved", run: RUN, detail: expect.stringContaining("made again from invincible/sandbox:1") })]);
     expect(JSON.stringify({ remade, ledger: f.ledger })).not.toContain(lease(1));
   });
 
   test("a VM that will not start again is put back as it was, and the lease it had still holds", async () => {
-    const f = teammateHost({ status: "running", failure: "run" });
+    const f = agentHost({ status: "running", failure: "run" });
     const name = containerName(ID);
     let thrown: unknown;
-    try { await f.host.remakeTeam(ID, QUEST, REMADE); } catch (error) { thrown = error; }
+    try { await f.host.remakeTeam(ID, RUN, REMADE); } catch (error) { thrown = error; }
     expect(thrown).toMatchObject({ status: 424 });
     expect(String(thrown)).toContain("as it was");
     expect(String(thrown)).not.toContain(lease(1));
@@ -297,14 +297,14 @@ describe("persistent teammate workspaces", () => {
     expect(f.stored.get(ID)).toBe(OLD_LEASE);
     expect(f.ledger).toEqual([]);
     // One that was not running is left stopped.
-    const stopped = teammateHost({ status: "exited", failure: "run" });
-    await expect(stopped.host.remakeTeam(ID, QUEST, REMADE)).rejects.toMatchObject({ status: 424 });
+    const stopped = agentHost({ status: "exited", failure: "run" });
+    await expect(stopped.host.remakeTeam(ID, RUN, REMADE)).rejects.toMatchObject({ status: 424 });
     expect(stopped.all).not.toContain("start");
   });
 
   test("its network can change with it, which nothing else can do to a microVM", async () => {
-    const f = teammateHost({ status: "running" });
-    await f.host.remakeTeam(ID, QUEST, { ...REMADE, network: "online" });
+    const f = agentHost({ status: "running" });
+    await f.host.remakeTeam(ID, RUN, { ...REMADE, network: "online" });
     const run = f.commands.find((args) => args[0] === "run")!;
     expect(run.filter((_, i) => run[i - 1] === "--network")).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
     expect(run).toContain(`${LABEL}.network=online`);
@@ -312,8 +312,8 @@ describe("persistent teammate workspaces", () => {
 
   test("made again, a VM can be given a desktop or have it taken away; unasked it keeps the image it has", async () => {
     const image = async (desktop?: boolean) => {
-      const f = teammateHost({ status: "running" });
-      await f.host.remakeTeam(ID, QUEST, { ...REMADE, ...(desktop === undefined ? {} : { desktop }) });
+      const f = agentHost({ status: "running" });
+      await f.host.remakeTeam(ID, RUN, { ...REMADE, ...(desktop === undefined ? {} : { desktop }) });
       return { run: f.commands.find((args) => args[0] === "run")!.at(-3), ledger: f.ledger.at(-1)!.detail };
     };
     expect(await image()).toMatchObject({ run: "invincible/sandbox:1" });
@@ -322,23 +322,23 @@ describe("persistent teammate workspaces", () => {
   });
 
   test("a remake that was cut short is taken up again: the container that was set aside gets its name back first", async () => {
-    const f = teammateHost({ status: "exited", setAside: true });
+    const f = agentHost({ status: "exited", setAside: true });
     const name = containerName(ID);
-    await f.host.remakeTeam(ID, QUEST, REMADE);
+    await f.host.remakeTeam(ID, RUN, REMADE);
     expect(f.all.slice(0, 2)).toEqual([`rename:${name}-replaced>${name}`, `retain:${ID}`]);
     expect(f.all.at(-2)).toBe(`rm:${name}-replaced`);
   });
 
-  test.each(refusedResumes)("making again refuses $name before anything is touched", async ({ id, quest, labels, status }) => {
-    const f = teammateHost({ labels });
-    await expect(f.host.remakeTeam(id, quest, REMADE)).rejects.toMatchObject({ status });
+  test.each(refusedResumes)("making again refuses $name before anything is touched", async ({ id, run, labels, status }) => {
+    const f = agentHost({ labels });
+    await expect(f.host.remakeTeam(id, run, REMADE)).rejects.toMatchObject({ status });
     expect(f.all).toEqual([]);
     expect(f.stored.get(ID)).toBe(OLD_LEASE);
   });
 
   test("an old helper, or a disk whose place can't be told, refuses before anything is touched", async () => {
-    const f = teammateHost({ legacyHelper: true });
-    await expect(f.host.remakeTeam(ID, QUEST, REMADE)).rejects.toMatchObject({ status: 424 });
+    const f = agentHost({ legacyHelper: true });
+    await expect(f.host.remakeTeam(ID, RUN, REMADE)).rejects.toMatchObject({ status: 424 });
     expect(f.commands.some((args) => ["stop", "rename", "run", "rm"].includes(args[0]!))).toBe(false);
     expect(f.minted).toEqual([]);
   });
@@ -363,7 +363,7 @@ describe("persistent teammate workspaces", () => {
   });
 });
 
-describe("a knight's VM grows while it runs", () => {
+describe("an agent's VM grows while it runs", () => {
   const GIB = 2 ** 30;
   const running = (images = 20) => ({
     status: "running",
@@ -373,8 +373,8 @@ describe("a knight's VM grows while it runs", () => {
   const GROWN = { approvedBy: "test-owner" };
 
   test("threads and memory are hot-added, the disk grows where it is mounted, and nothing in it stops", async () => {
-    const { host, commands, events, all, ledger } = teammateHost(running());
-    const grown = await host.resizeTeam(ID, QUEST, { cpus: 4, memoryGb: 8, diskGb: 60, ...GROWN });
+    const { host, commands, events, all, ledger } = agentHost(running());
+    const grown = await host.resizeTeam(ID, RUN, { cpus: 4, memoryGb: 8, diskGb: 60, ...GROWN });
     expect(commands.filter((c) => c[0] === "update")).toEqual([["update", "--cpus", "4", "--memory", "8192m", "--memory-swap", "8192m", containerName(ID)]]);
     expect(events).toContain(`grow:${ID}:60`);
     expect(all.filter((step) => ["stop", "run", "start"].includes(step) || step.startsWith("rename") || step.startsWith("rm:"))).toEqual([]);
@@ -383,23 +383,23 @@ describe("a knight's VM grows while it runs", () => {
   });
 
   test("only what is asked grows: more disk alone touches no thread, more threads alone no disk", async () => {
-    const disk = teammateHost(running());
-    expect(await disk.host.resizeTeam(ID, QUEST, { diskGb: 40, ...GROWN })).toMatchObject({ cpus: 1, memoryGb: 2, disk: { limitGb: 40 } });
+    const disk = agentHost(running());
+    expect(await disk.host.resizeTeam(ID, RUN, { diskGb: 40, ...GROWN })).toMatchObject({ cpus: 1, memoryGb: 2, disk: { limitGb: 40 } });
     expect(disk.commands.some((c) => c[0] === "update")).toBe(false);
-    const threads = teammateHost(running());
-    expect(await threads.host.resizeTeam(ID, QUEST, { cpus: 2, ...GROWN })).toMatchObject({ cpus: 2, memoryGb: 2, disk: { limitGb: 20 } });
+    const threads = agentHost(running());
+    expect(await threads.host.resizeTeam(ID, RUN, { cpus: 2, ...GROWN })).toMatchObject({ cpus: 2, memoryGb: 2, disk: { limitGb: 20 } });
     expect(threads.events.some((e) => e.startsWith("grow:"))).toBe(false);
   });
 
-  test("never smaller, never past the node's disk limit or its budget, never another quest's VM; nothing changes when refused", async () => {
-    const { host, commands, events, ledger } = teammateHost(running());
-    await expect(host.resizeTeam(ID, QUEST, { cpus: 0.5, ...GROWN })).rejects.toThrow(/only grows/);
-    await expect(host.resizeTeam(ID, QUEST, { memoryGb: 1, ...GROWN })).rejects.toThrow(/only grows/);
-    await expect(host.resizeTeam(ID, QUEST, { diskGb: 10, ...GROWN })).rejects.toThrow(/only grows/);
-    await expect(host.resizeTeam(ID, QUEST, { diskGb: 500, ...GROWN })).rejects.toThrow(/at most 200 GB/);
-    await expect(host.resizeTeam(ID, "arm.team.abcdef0123.other", { cpus: 2, ...GROWN })).rejects.toThrow(/not this teammate's/);
-    const full = teammateHost({ ...running(), stats: { totalBytes: 1800 * GIB, freeBytes: 40 * GIB, images: [{ id: ID, sizeBytes: 20 * GIB, usedBytes: 5 * GIB, mounted: true, createdAt: 0, retained: true }] } });
-    await expect(full.host.resizeTeam(ID, QUEST, { diskGb: 100, ...GROWN })).rejects.toThrow(/doesn't fit/);
+  test("never smaller, never past the node's disk limit or its budget, never another run's VM; nothing changes when refused", async () => {
+    const { host, commands, events, ledger } = agentHost(running());
+    await expect(host.resizeTeam(ID, RUN, { cpus: 0.5, ...GROWN })).rejects.toThrow(/only grows/);
+    await expect(host.resizeTeam(ID, RUN, { memoryGb: 1, ...GROWN })).rejects.toThrow(/only grows/);
+    await expect(host.resizeTeam(ID, RUN, { diskGb: 10, ...GROWN })).rejects.toThrow(/only grows/);
+    await expect(host.resizeTeam(ID, RUN, { diskGb: 500, ...GROWN })).rejects.toThrow(/at most 200 GB/);
+    await expect(host.resizeTeam(ID, "arm.team.abcdef0123.other", { cpus: 2, ...GROWN })).rejects.toThrow(/not this agent's/);
+    const full = agentHost({ ...running(), stats: { totalBytes: 1800 * GIB, freeBytes: 40 * GIB, images: [{ id: ID, sizeBytes: 20 * GIB, usedBytes: 5 * GIB, mounted: true, createdAt: 0, retained: true }] } });
+    await expect(full.host.resizeTeam(ID, RUN, { diskGb: 100, ...GROWN })).rejects.toThrow(/doesn't fit/);
     expect(full.events.some((e) => e.startsWith("grow:"))).toBe(false);
     expect(commands.some((c) => c[0] === "update")).toBe(false);
     expect(events.some((e) => e.startsWith("grow:"))).toBe(false);
@@ -407,23 +407,23 @@ describe("a knight's VM grows while it runs", () => {
   });
 
   test("a disk that can't grow leaves its threads and memory as they were: Docker is never asked, so giving them back is true", async () => {
-    const { host, commands, ledger } = teammateHost({ ...running(), failure: "grow" });
-    await expect(host.resizeTeam(ID, QUEST, { cpus: 4, memoryGb: 8, diskGb: 60, ...GROWN })).rejects.toThrow(/could not grow the disk/);
+    const { host, commands, ledger } = agentHost({ ...running(), failure: "grow" });
+    await expect(host.resizeTeam(ID, RUN, { cpus: 4, memoryGb: 8, diskGb: 60, ...GROWN })).rejects.toThrow(/could not grow the disk/);
     expect(commands.some((c) => c[0] === "update")).toBe(false);
     expect(ledger).toEqual([]);
   });
 
   test("threads that can't be added after the disk grew: the disk stays grown, and the ledger and the error both say so", async () => {
-    const { host, events, ledger } = teammateHost({ ...running(), failure: "update" });
-    await expect(host.resizeTeam(ID, QUEST, { cpus: 4, memoryGb: 8, diskGb: 60, ...GROWN })).rejects.toThrow(/its disk did grow, to 60 GB/);
+    const { host, events, ledger } = agentHost({ ...running(), failure: "update" });
+    await expect(host.resizeTeam(ID, RUN, { cpus: 4, memoryGb: 8, diskGb: 60, ...GROWN })).rejects.toThrow(/its disk did grow, to 60 GB/);
     expect(events).toContain(`grow:${ID}:60`);
     expect(ledger.at(-1)).toMatchObject({ class: "modify", detail: "grown while it runs: 1 cpu · 2 GB · 60 GB disk" });
   });
 
   test("what the node's ceiling can't hold is refused before Docker is asked", async () => {
-    const { host, commands } = teammateHost(running());
+    const { host, commands } = agentHost(running());
     const asked: unknown[] = [];
-    await expect(host.resizeTeam(ID, QUEST, { cpus: 16, ...GROWN, fits: (more) => { asked.push(more); return "12 of the 16 threads he may use are taken, and this needs 15"; } })).rejects.toThrow(/12 of the 16 threads/);
+    await expect(host.resizeTeam(ID, RUN, { cpus: 16, ...GROWN, fits: (more) => { asked.push(more); return "12 of the 16 threads it may use are taken, and this needs 15"; } })).rejects.toThrow(/12 of the 16 threads/);
     expect(asked).toEqual([{ cpus: 15, memoryGb: 0 }]);
     expect(commands.some((c) => c[0] === "update")).toBe(false);
   });

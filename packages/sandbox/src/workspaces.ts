@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 
 /*
  * Disk limits for sandboxes. Each sandbox's /work is its own fixed-size ext4 image
- * (sparse: it takes only what's written), so a runaway knight fills its own
+ * (sparse: it takes only what's written), so a runaway agent fills its own
  * workspace, never the host's disk. Mounting needs root, which the node doesn't
  * have; a tiny root helper (sandbox/invincible-workspace, started by systemd per
  * connection) does exactly that, on a socket only the invincible user can open.
@@ -28,12 +28,12 @@ export interface Workspaces {
   available(): Promise<boolean>;
   /**
    * Creates and mounts an empty workspace; returns its host path (on a Mac, its volume's name). `retain`: it is a
-   * persistent teammate's, kept from the start (the helper is told by `retain` after; a Mac's volume only as it is made).
+   * persistent agent's, kept from the start (the helper is told by `retain` after; a Mac's volume only as it is made).
    */
   create(id: string, gib: number, opts?: { retain?: boolean }): Promise<string>;
   /** Remount existing data after a host restart; never creates an empty image. */
   mount?(id: string): Promise<void>;
-  /** Protect a persistent teammate's data even if its container is lost. */
+  /** Protect a persistent agent's data even if its container is lost. */
   retain?(id: string): Promise<void>;
   /** Make a workspace bigger, where it is mounted (its sandbox running) or not; never smaller. */
   grow?(id: string, gib: number): Promise<void>;
@@ -166,7 +166,7 @@ export class WorkspaceHelper implements Workspaces {
 
   async stats(): Promise<WorkspaceStats> {
     // Old helpers keep their original five-column protocol. They cannot create
-    // retained teammate workspaces, but existing ephemeral sandboxes still work.
+    // retained agent workspaces, but existing ephemeral sandboxes still work.
     let answer: string;
     try { answer = await this.ask("stats-v2"); }
     catch (error) {

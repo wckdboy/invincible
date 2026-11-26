@@ -23,12 +23,12 @@ import type { Capabilities } from "../../packages/node/src/capabilities.ts";
 import { Governor } from "../../packages/node/src/compute/governor.ts";
 import { ComputeService } from "../../packages/node/src/compute/service.ts";
 import { Dispatched, fleetCandidates, sandboxHost } from "../../packages/node/src/placement.ts";
-import { planParallel } from "../../packages/node/src/trial-cli.ts";
+import { planParallel } from "../../packages/node/src/eval-cli.ts";
 import { intBelow, rng, subSeed } from "../lib.ts";
 
 /*
  * A fleet's compute in one process and in virtual time: a queue of independent
- * quests (the Trials' shape), run the way `invincible trial run` runs them, on fleets
+ * runs (the Evals' shape), run the way `invincible eval run` runs them, on fleets
  * of machines of different measured strengths. What decides is the real code: a
  * real mind holds each node's profile, its calibration and the owner's ceilings;
  * the real census (ComputeService) derives what each carries; the real placement
@@ -38,7 +38,7 @@ import { intBelow, rng, subSeed } from "../lib.ts";
  * Only the work is a stand-in: a sandbox and a model call take a seeded, known
  * time. Nothing sleeps: time is a number.
  *
- * A quest here: its sandbox (placed, then a slot on its host), then a plan, a
+ * A run here: its sandbox (placed, then a slot on its host), then a plan, a
  * number of steps (the engineer thinks: a model call; then a command runs in the
  * sandbox: the host's processor), then the review. With effort E, E attempts at
  * once, each its own sandbox, and one more call to pick.
@@ -84,9 +84,9 @@ export interface ComputeSimOptions {
   /** The fleet: the first `nodes` of MACHINES, or its own list. */
   nodes: number;
   machines?: readonly Machine[];
-  quests: number;
+  runs: number;
   effort: 1 | 2 | 3;
-  /** Trials at once: "auto" (what `invincible trial run` does by default), or as many as the slots carry. */
+  /** Evals at once: "auto" (what `invincible eval run` does by default), or as many as the slots carry. */
   parallel: "auto" | "slots";
   /**
    * What the asking node knows of the other hosts' slots: "synced" (as old as their last sync, the real thing),
@@ -104,20 +104,20 @@ export interface ComputeSimResult {
   /** Sandbox slots in the fleet, and model calls at once on the asking node. */
   slots: number;
   modelCalls: number;
-  /** Trials at once, as planned. */
+  /** Evals at once, as planned. */
   parallel: number;
-  /** Virtual seconds from the first quest's start to the last one's end. */
+  /** Virtual seconds from the first run's start to the last one's end. */
   makespanS: number;
   /**
    * No schedule could finish sooner: the work spread perfectly over every slot (each sandbox on the fastest
-   * host), the thinking over every model call, and no quest shorter than itself.
+   * host), the thinking over every model call, and no run shorter than itself.
    */
   lowerBoundS: number;
   /** Instants at which a host held more than it may: sandboxes, threads or memory over its ceiling. */
   overCeiling: number;
   /** Sandboxes on a node whose ceiling takes none. */
   onClosedNode: number;
-  /** Attempts lost waiting for a slot past the limit, and quests that never finished. */
+  /** Attempts lost waiting for a slot past the limit, and runs that never finished. */
   lost: number;
   unfinished: number;
   /** A sandbox admitted on a host before one that asked earlier. */
@@ -149,7 +149,7 @@ interface Host {
   ran: number;
 }
 
-interface Quest {
+interface Run {
   /** Each attempt: its steps as [think seconds, work in reference-core seconds]. */
   attempts: { plan: number; steps: [number, number][]; review: number }[];
   pick: number;
@@ -174,12 +174,12 @@ const capsOf = (m: Machine): Capabilities => ({
 
 const bytes32 = (random: () => number): Uint8Array => Uint8Array.from({ length: 32 }, () => intBelow(random, 256));
 
-/** The quests of a run: the same for the same seed, whatever fleet runs them. */
-export function drawQuests(seed: number, count: number, effort: number): Quest[] {
-  const random = rng(subSeed(seed, "compute-quests"));
+/** The runs of a run: the same for the same seed, whatever fleet runs them. */
+export function drawRuns(seed: number, count: number, effort: number): Run[] {
+  const random = rng(subSeed(seed, "compute-runs"));
   const between = (lo: number, hi: number): number => lo + Math.floor(random() * (hi - lo + 1));
   return Array.from({ length: count }, () => ({
-    // Every attempt at a quest is the same size of work (they differ in models, not in the problem).
+    // Every attempt at a run is the same size of work (they differ in models, not in the problem).
     attempts: (() => {
       const plan = between(8, 30);
       const steps = Array.from({ length: between(6, 14) }, (): [number, number] => [between(8, 40), between(2, 60)]);
@@ -292,9 +292,9 @@ export async function runComputeSim(options: ComputeSimOptions): Promise<Compute
 
     /* ---------- the run ---------- */
 
-    const quests = drawQuests(options.seed, options.quests, options.effort);
+    const runs = drawRuns(options.seed, options.runs, options.effort);
     const census = { nodes: service.nodes() };
-    const parallel = planParallel(census, options.parallel === "auto" ? "auto" : options.quests, options.effort, quests.length).parallel;
+    const parallel = planParallel(census, options.parallel === "auto" ? "auto" : options.runs, options.effort, runs.length).parallel;
     const need = (h: Host) => clampNeed(h.capacity, { cpus: SLOT_CPUS, memoryGb: SLOT_MEMORY_GB }, null);
     const waits: number[] = [];
     let lost = 0;
@@ -303,7 +303,7 @@ export async function runComputeSim(options: ComputeSimOptions): Promise<Compute
     /** What the asking node did on other hosts since each last reported: placement's own bookkeeping, as the server keeps it. */
     const dispatched = knowledge === "live" || options.forgetSent ? undefined : new Dispatched();
 
-    /** A model call on the asking node: waits its turn for a slot, as a quest's calls do. */
+    /** A model call on the asking node: waits its turn for a slot, as a run's calls do. */
     const think = async (seconds: number): Promise<void> => {
       const leave = await hosts[0]!.governor.enterModel({ wait: true });
       await sleep(seconds);
@@ -311,7 +311,7 @@ export async function runComputeSim(options: ComputeSimOptions): Promise<Compute
     };
 
     /** One attempt: its sandbox where placement puts it, then its plan, steps and review. False: lost waiting for a slot. */
-    const attempt = async (quest: number, index: number, work: Quest["attempts"][number]): Promise<boolean> => {
+    const attempt = async (run: number, index: number, work: Run["attempts"][number]): Promise<boolean> => {
       // Where: asked of the node as `createSandbox` is, for work nobody pinned (server.ts: placeSandbox, then onNode).
       const chosen = sandboxHost(fleetCandidates({ devices: store.devices(), self: self.id, selfCaps: capsOf(machines[0]!), statuses: peers(), compute: service.nodes(), ...(dispatched ? { dispatched } : {}) }));
       if (!chosen) throw new Error("no sandbox host in the fleet");
@@ -326,7 +326,7 @@ export async function runComputeSim(options: ComputeSimOptions): Promise<Compute
       at(MAX_WAIT_S, () => waiting && gaveUp.abort());
       let ticket: Awaited<ReturnType<Governor["acquire"]>>;
       try {
-        ticket = await host.governor.acquire(need(host), { quest: `q${quest}#${index}` }, gaveUp.signal);
+        ticket = await host.governor.acquire(need(host), { run: `q${run}#${index}` }, gaveUp.signal);
       } catch {
         waiting = false;
         never?.();
@@ -352,12 +352,12 @@ export async function runComputeSim(options: ComputeSimOptions): Promise<Compute
 
     let next = 0;
     const worker = async (): Promise<void> => {
-      while (next < quests.length) {
+      while (next < runs.length) {
         const index = next++;
-        const quest = quests[index]!;
-        const done = await Promise.all(quest.attempts.map((work, a) => attempt(index, a + 1, work)));
+        const run = runs[index]!;
+        const done = await Promise.all(run.attempts.map((work, a) => attempt(index, a + 1, work)));
         // Several passed their own review: the reviewer picks.
-        if (done.filter(Boolean).length > 1) await think(quest.pick);
+        if (done.filter(Boolean).length > 1) await think(run.pick);
         if (done.some(Boolean)) finished++;
       }
     };
@@ -386,17 +386,17 @@ export async function runComputeSim(options: ComputeSimOptions): Promise<Compute
     let slotSeconds = 0;
     let thinkSeconds = 0;
     let longest = 0;
-    for (const quest of quests) {
-      let questLongest = 0;
-      for (const a of quest.attempts) {
+    for (const run of runs) {
+      let runLongest = 0;
+      for (const a of run.attempts) {
         const thinking = a.plan + a.review + a.steps.reduce((sum, [s]) => sum + s, 0);
         const working = a.steps.reduce((sum, [, w]) => sum + w, 0) / fastest;
         slotSeconds += START_S + thinking + working;
         thinkSeconds += thinking;
-        questLongest = Math.max(questLongest, START_S + thinking + working);
+        runLongest = Math.max(runLongest, START_S + thinking + working);
       }
-      if (quest.attempts.length > 1) thinkSeconds += quest.pick;
-      longest = Math.max(longest, questLongest + (quest.attempts.length > 1 ? quest.pick : 0));
+      if (run.attempts.length > 1) thinkSeconds += run.pick;
+      longest = Math.max(longest, runLongest + (run.attempts.length > 1 ? run.pick : 0));
     }
     const lowerBoundS = Math.max(slotSeconds / Math.min(slots, parallel * options.effort), thinkSeconds / modelCalls, longest);
 
@@ -426,7 +426,7 @@ export async function runComputeSim(options: ComputeSimOptions): Promise<Compute
       overCeiling,
       onClosedNode,
       lost,
-      unfinished: quests.length - finished,
+      unfinished: runs.length - finished,
       queueJumps,
       maxWaitS: Math.max(0, ...waits),
       meanWaitS: waits.length ? waits.reduce((a, b) => a + b, 0) / waits.length : 0,

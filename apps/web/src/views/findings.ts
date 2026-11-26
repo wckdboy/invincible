@@ -2,7 +2,7 @@ import type { InvestigationView } from "@invincible/core";
 import { isUnavailable } from "../api.ts";
 import type { Ctx, View } from "../context.ts";
 import { absoluteTime, relativeTime } from "../lib/time.ts";
-import { findingState, predictionLines } from "../lib/trials.ts";
+import { findingState, predictionLines } from "../lib/evals.ts";
 import { badge, button, callout, copyField, empty, errorState, pageHead, section, skeletonRows, type Tone } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { h, keepPlace, replace } from "../ui/dom.ts";

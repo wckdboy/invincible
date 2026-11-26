@@ -7,7 +7,7 @@ import { isConversationId, isNotifyTag, NOTIFY_BODY_MAX, NOTIFY_KINDS, NOTIFY_TI
 export * from "./notify-payload.ts";
 
 /*
- * He comes to you: notifications to your own paired devices (Web Push; webpush.ts).
+ * It comes to you: notifications to your own paired devices (Web Push; webpush.ts).
  *
  * This file is the contract and the rules, all pure: the kinds and their switches, quiet
  * hours and the day's limits, what a notification may say (a short title, one line, where
@@ -23,10 +23,10 @@ export * from "./notify-payload.ts";
 /* ---------- kinds, and the owner's switches ---------- */
 
 export const NOTIFY_KIND_INFO: Record<NotifyKind, { label: string; hint: string; on: boolean }> = {
-  "needs-you": { label: "Something needs you", hint: "A warning or an alert from his heartbeat: once per finding, not again while it stands.", on: true },
-  approval: { label: "An approval is waiting", hint: "Something he or an agent wants to send or delete, filed for your answer.", on: true },
-  finished: { label: "He has finished", hint: "A chat turn nobody was watching, or a quest you started: done, unverified, gave up or failed. News is told quietly, together, to the device you used last.", on: true },
-  question: { label: "He has a question", hint: "An answer that ends by asking you, or a key or connector he needs.", on: true },
+  "needs-you": { label: "Something needs you", hint: "A warning or an alert from its heartbeat: once per finding, not again while it stands.", on: true },
+  approval: { label: "An approval is waiting", hint: "Something it or an agent wants to send or delete, filed for your answer.", on: true },
+  finished: { label: "It has finished", hint: "A chat turn nobody was watching, or a run you started: done, unverified, gave up or failed. News is told quietly, together, to the device you used last.", on: true },
+  question: { label: "It has a question", hint: "An answer that ends by asking you, or a key or connector it needs.", on: true },
   told: { label: "Your rules tell you", hint: "A command a rule of yours matches has run (invincible rule add … --tell): once for each rule and task.", on: true },
 };
 
@@ -44,7 +44,7 @@ export interface NotifyPrefs {
   quiet: QuietHours;
   /** At most this many notifications a day; when it's reached, one last message says so. */
   perDay: number;
-  /** One quiet message a day of what happened that he didn't tell you of, at `at` in your own time (your word, 25 November 2026: 08:00). */
+  /** One quiet message a day of what happened that it didn't tell you of, at `at` in your own time (your word, 25 November 2026: 08:00). */
   digest: { on: boolean; at: string };
 }
 
@@ -104,7 +104,7 @@ export function notifyDay(now: number, tz: string): string {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
-/* ---------- what he may say: one item per thing worth telling ---------- */
+/* ---------- what it may say: one item per thing worth telling ---------- */
 
 /**
  * How loudly a thing is told (PLAN #59): now, at once, to every device, with a budget of its own (an ask that lapses or
@@ -116,10 +116,10 @@ export type NotifyTier = "now" | "soon" | "digest";
 export const NOTIFY_TIERS: readonly NotifyTier[] = ["now", "soon", "digest"];
 
 /** What a digest counts each thing as (`digestMessage`). */
-export type DigestTopic = "look" | "chat" | "quest" | "tell" | "report" | "ci" | "backlog" | "note" | "asked" | "lapsed";
+export type DigestTopic = "look" | "chat" | "run" | "tell" | "report" | "ci" | "backlog" | "note" | "asked" | "lapsed";
 
 export interface NotifyItem {
-  /** Told once: "notice:<key>", "action:<id>", "secret:<name>", "turn:<id>", "quest:<id>". */
+  /** Told once: "notice:<key>", "action:<id>", "secret:<name>", "turn:<id>", "run:<id>". */
   key: string;
   kind: NotifyKind;
   /** An alert isn't held by quiet hours. */
@@ -134,7 +134,7 @@ export interface NotifyItem {
   action?: { id: string; approvable: boolean };
   /** How loudly (`tierOf`; an item kept from before tiers is read by its kind: `itemTier`). */
   tier?: NotifyTier;
-  /** Raised by his own judgment (a turn that ends asking you, an outcome's question): a small budget of its own a day. */
+  /** Raised by its own judgment (a turn that ends asking you, an outcome's question): a small budget of its own a day. */
   model?: boolean;
   /** What the digest counts it as, when it goes there. */
   topic?: DigestTopic;
@@ -150,7 +150,7 @@ export function notifyLine(text: string, max = NOTIFY_BODY_MAX): string | null {
 }
 
 /*
- * Fixed words only (your word, 25 November 2026): a notification never carries a chat's title, a quest's goal, a
+ * Fixed words only (your word, 25 November 2026): a notification never carries a chat's title, a run's goal, a
  * name you gave (a node, a loop, a rule, a device) or anything a model wrote, whichever service carries it. Apple
  * reads what it carries to an iPhone; Web Push and UnifiedPush are sealed to the device, and carry the same fixed
  * words. The app shows the real words once it has fetched them over its own signed connection.
@@ -159,7 +159,7 @@ export function notifyLine(text: string, max = NOTIFY_BODY_MAX): string | null {
 /** Where a thing comes from, as far as how loudly it's told: what the node itself wrote, never a model's words. */
 export type NotifyOrigin =
   | { from: "notice"; key: string; severity: string; source: string }
-  | { from: "action" | "screen" | "question" | "secret" | "connector" | "quest" }
+  | { from: "action" | "screen" | "question" | "secret" | "connector" | "run" }
   | { from: "turn"; look: boolean; question: boolean; waiting: boolean };
 
 /** Sources whose findings are the node's own, about what only you can fix (its heartbeat and doctor, the archive, compute, CI that's yours). */
@@ -170,12 +170,12 @@ const OUTCOME_SOURCE = /^outcome:out-[a-z0-9_-]{12}$/;
 const LOOP_SOURCE = /^loop:[a-z0-9][a-z0-9._-]{0,39}$/;
 
 /**
- * How loudly, by rules (PLAN #59). Now: every ask (an approval, his ask to use a Mac, a service's question, a key or a
- * connector he needs), every alert, and a warning the node raised that only you can fix. Soon: news of work you asked
- * for (a chat you left him in, a quest you ran, your rules' and loops' tells, a loop that failed, an outcome's end), and
- * what his own judgment raises (a turn that ends asking you or waiting on your answer, an outcome's question), which is
- * `model` and has a small budget of its own. The digest: his own looks that ended without needing you, a CI failure
- * a knight is already fixing, an outcome's daily report, backlog proposals, and every other note.
+ * How loudly, by rules (PLAN #59). Now: every ask (an approval, its ask to use a Mac, a service's question, a key or a
+ * connector it needs), every alert, and a warning the node raised that only you can fix. Soon: news of work you asked
+ * for (a chat you left it in, a run you ran, your rules' and loops' tells, a loop that failed, an outcome's end), and
+ * what its own judgment raises (a turn that ends asking you or waiting on your answer, an outcome's question), which is
+ * `model` and has a small budget of its own. The digest: its own looks that ended without needing you, a CI failure
+ * an agent is already fixing, an outcome's daily report, backlog proposals, and every other note.
  */
 export function tierOf(origin: NotifyOrigin): { tier: NotifyTier; model: boolean; topic: DigestTopic } {
   switch (origin.from) {
@@ -185,8 +185,8 @@ export function tierOf(origin: NotifyOrigin): { tier: NotifyTier; model: boolean
     case "secret":
     case "connector":
       return { tier: "now", model: false, topic: "note" };
-    case "quest":
-      return { tier: "soon", model: false, topic: "quest" };
+    case "run":
+      return { tier: "soon", model: false, topic: "run" };
     case "turn": {
       const asks = origin.question || origin.waiting;
       if (origin.look && !asks) return { tier: "digest", model: false, topic: "look" };
@@ -199,7 +199,7 @@ export function tierOf(origin: NotifyOrigin): { tier: NotifyTier; model: boolean
         if (source === "heartbeat" && key.startsWith("loop-failing:")) return { tier: "soon", model: false, topic: "tell" };
         if (NODE_SOURCES.has(source)) return { tier: "now", model: false, topic: source === "ci" ? "ci" : "note" };
         if (LOOP_SOURCE.test(source)) return { tier: "soon", model: false, topic: "tell" };
-        // An outcome's question, and any warning from a source whose words are a model's: his judgment, never Now.
+        // An outcome's question, and any warning from a source whose words are a model's: its judgment, never Now.
         return { tier: "soon", model: true, topic: "asked" };
       }
       if (TELL_SOURCE.test(source) || RULE_SOURCE.test(source)) return { tier: "soon", model: false, topic: "tell" };
@@ -230,16 +230,16 @@ export function noticeItem(n: { key: string; severity: string; title: string; so
   const where = placed({ from: "notice", key: n.key, severity: n.severity, source: n.source });
   if (n.severity !== "info") {
     const alert = n.severity === "alert";
-    return { key, kind: "needs-you", alert, title: alert ? "Galahad: alert" : "Galahad: this needs you", body: "Something in your Inbox needs you.", open: "inbox", needs: ["mind:read"], ...where };
+    return { key, kind: "needs-you", alert, title: alert ? "Your agent: alert" : "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox", needs: ["mind:read"], ...where };
   }
-  // A loop that tells you, a command a rule of yours matches (once for each rule and task), an outcome's news, his
+  // A loop that tells you, a command a rule of yours matches (once for each rule and task), an outcome's news, its
   // proposal from your backlog: what woke it and what was said (often others' words, or a model's) stay in the Inbox.
   const told = (title: string, body: string): NotifyItem => ({ key, kind: "told", alert: false, title, body, open: "inbox", needs: ["mind:read"], ...where });
-  if (TELL_SOURCE.test(n.source)) return told("Galahad: a loop of yours", "What you asked to be told about has happened. The Inbox says what.");
-  if (RULE_SOURCE.test(n.source)) return told("Galahad: a rule of yours", "A command it matches has run. The Inbox says which, where and how it ended.");
-  if (OUTCOME_SOURCE.test(n.source)) return told("Galahad: an outcome of yours", "There's news of it: his words are in its room and your Inbox.");
-  if (n.source === "backlog") return told("Galahad: work for a knight", "He proposes a task from your backlog that may spend more than is left of your budget. It starts when you approve it.");
-  return told("Galahad: a note", "There's a note in your Inbox.");
+  if (TELL_SOURCE.test(n.source)) return told("Your agent: a loop of yours", "What you asked to be told about has happened. The Inbox says what.");
+  if (RULE_SOURCE.test(n.source)) return told("Your agent: a rule of yours", "A command it matches has run. The Inbox says which, where and how it ended.");
+  if (OUTCOME_SOURCE.test(n.source)) return told("Your agent: an outcome of yours", "There's news of it: its words are in its room and your Inbox.");
+  if (n.source === "backlog") return told("Your agent: work for an agent", "It proposes a task from your backlog that may spend more than is left of your budget. It starts when you approve it.");
+  return told("Your agent: a note", "There's a note in your Inbox.");
 }
 
 /** How long an action must have waited before it's told: one that a standing order answers at once never is. */
@@ -252,7 +252,7 @@ export function actionItem(a: { id: string; connector: string; tool: string; sta
     key: `action:${a.id}`,
     kind: "approval",
     alert: false,
-    title: "Galahad asks your approval",
+    title: "Your agent asks your approval",
     body: a.class === "delete" ? "A delete is waiting for your answer in the Inbox." : "An action is waiting for your answer in the Inbox.",
     open: "inbox",
     needs: ["mind:read"],
@@ -274,8 +274,8 @@ export function questionItem(q: { id: string; connector: string; askedAt: number
     key: `question:${q.id}`,
     kind: "question",
     alert: false,
-    // Every notification is his (your word, 23 November 2026: he is the one you hear from), a service's question too.
-    title: "Galahad: a service asks you",
+    // Every notification is its (your word, 23 November 2026: it is the one you hear from), a service's question too.
+    title: "Your agent: a service asks you",
     body: "A service asks you something in the Inbox; its call waits for your answer.",
     open: "inbox",
     needs: ["mind:read"],
@@ -285,7 +285,7 @@ export function questionItem(q: { id: string; connector: string; askedAt: number
 }
 
 /**
- * Galahad asks to use a Mac itself (docs/MAC.md, M4): for how long, never which Mac (its name is yours) or what for (his
+ * The primary asks to use a Mac itself (docs/MAC.md, M4): for how long, never which Mac (its name is yours) or what for (its
  * words). Like an approval, it settles a moment first: one you answered at once isn't told.
  */
 export function screenItem(s: { id: string; nodeName: string; minutes: number; state: string; askedAt: number; answerBy?: number }, now: number): NotifyItem | null {
@@ -295,7 +295,7 @@ export function screenItem(s: { id: string; nodeName: string; minutes: number; s
     key: `screen:${s.id}`,
     kind: "approval",
     alert: false,
-    title: "Galahad asks your approval",
+    title: "Your agent asks your approval",
     body: minutes ? `To use a Mac itself for ${minutes} minutes: your answer is in the Inbox.` : "To use a Mac itself: your answer is in the Inbox.",
     open: "inbox",
     needs: ["mind:read"],
@@ -305,12 +305,12 @@ export function screenItem(s: { id: string; nodeName: string; minutes: number; s
 }
 
 /**
- * A key he asked for. Neither its name nor what it's for is shown: whoever asked (an agent may) chose both, and a
+ * A key it asked for. Neither its name nor what it's for is shown: whoever asked (an agent may) chose both, and a
  * name is words enough to say something ("call-this-number-now"). The Inbox says which.
  */
 export function secretItem(name: string): NotifyItem | null {
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(name)) return null;
-  return { key: `secret:${name}`, kind: "question", alert: false, title: "Galahad asks for a key", body: "He needs a key to go on. The Inbox says which; he learns only that it's there.", open: "inbox", needs: ["vault:read"], ...placed({ from: "secret" }) };
+  return { key: `secret:${name}`, kind: "question", alert: false, title: "Your agent asks for a key", body: "It needs a key to go on. The Inbox says which; it learns only that it's there.", open: "inbox", needs: ["vault:read"], ...placed({ from: "secret" }) };
 }
 
 /**
@@ -319,24 +319,24 @@ export function secretItem(name: string): NotifyItem | null {
  */
 export function connectorItem(id: string): NotifyItem | null {
   if (!/^cr_[A-Za-z0-9_-]{22}$/.test(id)) return null;
-  return { key: `connector:${id}`, kind: "question", alert: false, title: "Galahad asks for a connector", body: "He needs a connector to go on. The Inbox says which.", open: "inbox", needs: ["brain:write"], ...placed({ from: "connector" }) };
+  return { key: `connector:${id}`, kind: "question", alert: false, title: "Your agent asks for a connector", body: "It needs a connector to go on. The Inbox says which.", open: "inbox", needs: ["brain:write"], ...placed({ from: "connector" }) };
 }
 
 /**
  * A chat turn that ended with nobody watching: finished, couldn't finish, or ended by asking you. Never the chat's title
- * (your first message, or the name you gave it): the app opens the chat. One of his own looks that ended without needing
+ * (your first message, or the name you gave it): the app opens the chat. One of its own looks that ended without needing
  * you goes to the digest.
  */
 export function turnItem(t: { id: string; conversation: string; state: "done" | "error"; question: boolean; waiting: boolean; look?: boolean }): NotifyItem | null {
   if (!isConversationId(t.conversation)) return null;
   const asks = t.state === "done" && t.question;
-  const where = t.look ? "A chat he looked in again" : "A chat you left him working in";
+  const where = t.look ? "A chat it looked in again" : "A chat you left it working in";
   return {
     key: `turn:${t.id}`,
     kind: asks ? "question" : "finished",
     alert: false,
-    title: t.state === "error" ? "Galahad couldn't finish" : asks ? "Galahad has a question for you" : "Galahad has finished",
-    body: notifyClean(t.state === "error" ? `${where} ended with an error. Nothing is retried.` : t.waiting ? `${where}: it waits on your answer in the Inbox.` : asks ? `${where} ends by asking you something.` : `${where} has his answer.`, NOTIFY_BODY_MAX),
+    title: t.state === "error" ? "Your agent couldn't finish" : asks ? "Your agent has a question for you" : "Your agent has finished",
+    body: notifyClean(t.state === "error" ? `${where} ended with an error. Nothing is retried.` : t.waiting ? `${where}: it waits on your answer in the Inbox.` : asks ? `${where} ends by asking you something.` : `${where} has its answer.`, NOTIFY_BODY_MAX),
     open: "chat",
     conversation: t.conversation,
     needs: ["chat"],
@@ -344,22 +344,22 @@ export function turnItem(t: { id: string; conversation: string; state: "done" | 
   };
 }
 
-const QUEST_ENDS: Record<string, string> = { done: "Quest done", unverified: "Quest ended unverified", "gave-up": "Quest gave up", failed: "Quest failed" };
+const RUN_ENDS: Record<string, string> = { done: "Run done", unverified: "Run ended unverified", "gave-up": "Run gave up", failed: "Run failed" };
 
-/** A quest you started that has ended, said as it ended. One you stopped yourself isn't news. Never its goal (your words). */
-export function questItem(q: { quest: string; goal: string; state: string }): NotifyItem | null {
-  const title = QUEST_ENDS[q.state];
-  if (!title || !/^[A-Za-z0-9._:-]{1,64}$/.test(q.quest)) return null;
-  return { key: `quest:${q.quest}`, kind: "finished", alert: false, title, body: "A quest you started has ended.", open: "overview", needs: ["mind:read"], ...placed({ from: "quest" }) };
+/** A run you started that has ended, said as it ended. One you stopped yourself isn't news. Never its goal (your words). */
+export function runItem(q: { run: string; goal: string; state: string }): NotifyItem | null {
+  const title = RUN_ENDS[q.state];
+  if (!title || !/^[A-Za-z0-9._:-]{1,64}$/.test(q.run)) return null;
+  return { key: `run:${q.run}`, kind: "finished", alert: false, title, body: "A run you started has ended.", open: "overview", needs: ["mind:read"], ...placed({ from: "run" }) };
 }
 
-/* ---------- when he speaks, and when he stays silent ---------- */
+/* ---------- when it speaks, and when it stays silent ---------- */
 
 /** Between two messages that aren't alerts: what comes in meanwhile is told together. */
 export const NOTIFY_GAP_MS = 60_000;
 /** News (the soon tier) is told at most this often, unless it rides along with something told now. */
 export const NEWS_GAP_MS = 30 * 60_000;
-/** What his own judgment raises (a turn that ends asking you, an outcome's question) is told at most this often a day; past it, the digest says how often he asked. */
+/** What its own judgment raises (a turn that ends asking you, an outcome's question) is told at most this often a day; past it, the digest says how often it asked. */
 export const MODEL_PER_DAY = 3;
 
 export interface NotifyPlan {
@@ -399,7 +399,7 @@ export const limitReached = (prefs: NotifyPrefs, sentToday: number): boolean => 
  *    every device; quiet hours hold all but alerts. The day's limit holds everything, alerts too; its last one or two
  *    (`alertReserve`) are for alerts alone.
  *  - soon (news): quietly, with what else is new, at most every half hour, or along with something told now; held
- *    by quiet hours; at most `newsBudget` messages of news alone a day, the rest to the digest. What his own
+ *    by quiet hours; at most `newsBudget` messages of news alone a day, the rest to the digest. What its own
  *    judgment raised (`model`) has `MODEL_PER_DAY`; past it, to the digest.
  *  - digest: never told on its own; it's counted in the day's digest (`digest`).
  *
@@ -416,7 +416,7 @@ export function planNotifications(input: {
   /** Messages of news alone sent today, and when the last one went. */
   newsToday?: number;
   lastNewsAt?: number | null;
-  /** What his own judgment raised that was told today. */
+  /** What its own judgment raised that was told today. */
   modelToday?: number;
 }): NotifyPlan {
   const untold = input.items.filter((item) => {
@@ -426,7 +426,7 @@ export function planNotifications(input: {
   // The digest's own, whatever the switches say: it counts what happened; the switches are about what buzzes.
   const digest = untold.filter((item) => itemTier(item) === "digest");
   const fresh = untold.filter((item) => itemTier(item) !== "digest" && input.prefs.kinds[item.kind]);
-  // His own judgment, past its budget: the digest says how often he asked.
+  // Its own judgment, past its budget: the digest says how often it asked.
   let modelLeft = MODEL_PER_DAY - (input.modelToday ?? 0);
   const asked: NotifyItem[] = [];
   const candidates = fresh.filter((item) => {
@@ -493,9 +493,9 @@ export function notifyMessage(items: readonly NotifyItem[], salt = ""): NotifyPa
   const parts = [
     count("needs-you") ? counted(count("needs-you"), "1 thing needs you", "% things need you") : null,
     count("approval") ? counted(count("approval"), "1 approval is waiting", "% approvals are waiting") : null,
-    count("question") ? counted(count("question"), "he has a question", "he has % questions") : null,
-    count("finished") ? counted(count("finished"), "he finished 1 piece of work", "he finished % pieces of work") : null,
-    count("told") ? counted(count("told"), "he has news you asked for", "he has % pieces of news you asked for") : null,
+    count("question") ? counted(count("question"), "it has a question", "it has % questions") : null,
+    count("finished") ? counted(count("finished"), "it finished 1 piece of work", "it finished % pieces of work") : null,
+    count("told") ? counted(count("told"), "it has news you asked for", "it has % pieces of news you asked for") : null,
   ].filter((part): part is string => part !== null);
   const body = parts.join(", ");
   // One place when they all open the same one; otherwise the Inbox, where what needs you is.
@@ -504,7 +504,7 @@ export function notifyMessage(items: readonly NotifyItem[], salt = ""): NotifyPa
   return {
     v: 1,
     kind: news ? quietKind() : "summary",
-    title: items.some((item) => item.alert) ? "Galahad: alert" : `Galahad: ${items.length} things`,
+    title: items.some((item) => item.alert) ? "Your agent: alert" : `Your agent: ${items.length} things`,
     body: notifyClean(`${body.charAt(0).toUpperCase()}${body.slice(1)}.`, NOTIFY_BODY_MAX),
     open: open === "chat" ? "overview" : open,
     tag: tagOf(`summary:${news ? "news" : "now"}:${items[0]!.key}`, salt),
@@ -519,7 +519,7 @@ export function notifyMessage(items: readonly NotifyItem[], salt = ""): NotifyPa
  */
 export function tagOf(key: string, salt = ""): string {
   const tag = `t-${b64u(sha256(utf8(`${salt}\n${key}`))).slice(0, 22)}`;
-  return isNotifyTag(tag) ? tag : "galahad";
+  return isNotifyTag(tag) ? tag : "primary";
 }
 
 /* ---------- reminders, before an ask lapses ---------- */
@@ -548,7 +548,7 @@ const quietSpan = (quiet: QuietHours): number => {
  * Whether an ask still waiting is told again now (PLAN #59): never in quiet hours, never past its lapse, at most twice,
  * two hours apart at least. The first when it has waited four hours since it was told; the last an hour before it
  * lapses, or, when it lapses in the night, in the hour before the night begins. An ask that doesn't lapse (a key or a
- * connector he needs) has the first alone.
+ * connector it needs) has the first alone.
  */
 export function reminderDue(ask: { toldAt: number; expires: number | null; reminded: number; lastRemindedAt: number | null }, now: number, quiet: QuietHours): boolean {
   if (ask.reminded >= REMINDERS_MAX) return false;
@@ -564,10 +564,10 @@ export function reminderDue(ask: { toldAt: number; expires: number | null; remin
 
 const WAITS: Record<string, string> = {
   action: "An approval still waits for your answer.",
-  screen: "His ask to use a Mac still waits for your answer.",
+  screen: "Its ask to use a Mac still waits for your answer.",
   question: "A service's question still waits for your answer.",
-  secret: "He still needs a key to go on. The Inbox says which.",
-  connector: "He still needs a connector to go on. The Inbox says which.",
+  secret: "It still needs a key to go on. The Inbox says which.",
+  connector: "It still needs a connector to go on. The Inbox says which.",
 };
 
 /** A time of day as a reminder says it: "14:05" today in your zone, "Thu 09:05" on another day. */
@@ -587,7 +587,7 @@ export function lapseTime(at: number, now: number, tz: string): string {
 export function reminderMessage(item: Pick<NotifyItem, "key" | "kind" | "expires">, now: number, tz: string, salt = ""): NotifyPayload {
   const what = WAITS[item.key.slice(0, item.key.indexOf(":"))] ?? "Something still waits for your answer.";
   const lapse = item.expires && item.expires > now ? ` No answer by ${lapseTime(item.expires, now, tz)} means no.` : "";
-  return { v: 1, kind: item.kind, title: "Galahad: still waiting", body: notifyClean(`${what}${lapse}`, NOTIFY_BODY_MAX), open: "inbox", tag: tagOf(item.key, salt) };
+  return { v: 1, kind: item.kind, title: "Your agent: still waiting", body: notifyClean(`${what}${lapse}`, NOTIFY_BODY_MAX), open: "inbox", tag: tagOf(item.key, salt) };
 }
 
 /**
@@ -599,15 +599,15 @@ export function remindersMessage(items: readonly Pick<NotifyItem, "key" | "kind"
   if (items.length === 1) return reminderMessage(items[0]!, now, tz, salt);
   const lapses = items.map((item) => item.expires).filter((at): at is number => typeof at === "number" && at > now);
   const first = lapses.length ? ` The first lapses at ${lapseTime(Math.min(...lapses), now, tz)}; no answer is no.` : " The Inbox has them.";
-  return { v: 1, kind: "summary", title: "Galahad: still waiting", body: notifyClean(`${items.length} asks still wait for your answer.${first}`, NOTIFY_BODY_MAX), open: "inbox", tag: tagOf(`reminders:${items[0]!.key}`, salt) };
+  return { v: 1, kind: "summary", title: "Your agent: still waiting", body: notifyClean(`${items.length} asks still wait for your answer.${first}`, NOTIFY_BODY_MAX), open: "inbox", tag: tagOf(`reminders:${items[0]!.key}`, salt) };
 }
 
 /* ---------- the day's digest ---------- */
 
-/** What the digest counts, since the last one. Knights' tasks are read from the node at send time; the rest is what went to the digest instead of buzzing. */
+/** What the digest counts, since the last one. Agents' tasks are read from the node at send time; the rest is what went to the digest instead of buzzing. */
 export interface DigestCounts {
   topics: Partial<Record<DigestTopic, number>>;
-  /** Knights' tasks that ended: verified, and not. */
+  /** Agents' tasks that ended: verified, and not. */
   verified: number;
   unverified: number;
   /** Asks that stand now. */
@@ -623,7 +623,7 @@ export function digestDue(prefs: NotifyPrefs, now: number, saidOn: string | null
 }
 
 /**
- * The digest: one quiet message a day of what happened that he didn't buzz you for, in counts and fixed words, most
+ * The digest: one quiet message a day of what happened that it didn't buzz you for, in counts and fixed words, most
  * telling first, and what still waits. Nothing happened, nothing is said (null). It opens the Overview, and replaces
  * yesterday's.
  */
@@ -636,9 +636,9 @@ export function digestMessage(c: DigestCounts, salt = ""): NotifyPayload | null 
   add(t.lapsed, "1 ask lapsed unanswered", "% asks lapsed unanswered");
   add(c.verified, "1 task verified", "% tasks verified");
   add(c.unverified, "1 task didn't pass", "% tasks didn't pass");
-  add(t.asked, "1 more question of his", "% more questions of his");
-  add((t.chat ?? 0) + (t.quest ?? 0) + (t.tell ?? 0), "1 more piece of news", "% more pieces of news");
-  add(t.look, "1 look of his", "% looks of his");
+  add(t.asked, "1 more question of its", "% more questions of its");
+  add((t.chat ?? 0) + (t.run ?? 0) + (t.tell ?? 0), "1 more piece of news", "% more pieces of news");
+  add(t.look, "1 look of its", "% looks of its");
   add(t.report, "1 outcome report", "% outcome reports");
   add(t.ci, "1 CI fix under way", "% CI fixes under way");
   add(t.backlog, "1 backlog proposal", "% backlog proposals");
@@ -652,14 +652,14 @@ export function digestMessage(c: DigestCounts, salt = ""): NotifyPayload | null 
     list = next;
   }
   if (!list) list = parts[0]!;
-  return { v: 1, kind: "finished", title: "Galahad: while you were away", body: notifyClean(`${list.charAt(0).toUpperCase()}${list.slice(1)}.${waits}`, NOTIFY_BODY_MAX), open: "overview", tag: tagOf("digest", salt) };
+  return { v: 1, kind: "finished", title: "Your agent: while you were away", body: notifyClean(`${list.charAt(0).toUpperCase()}${list.slice(1)}.${waits}`, NOTIFY_BODY_MAX), open: "overview", tag: tagOf("digest", salt) };
 }
 
 /* ---------- what waited while nobody could be reached ---------- */
 
 /**
- * What a catch-up counts: what stands and needs you now (approvals, questions, keys and connectors he needs, warnings
- * only you can fix, and alerts). News (a turn that ended, a quest, a rule's tell, a loop that failed) isn't caught up:
+ * What a catch-up counts: what stands and needs you now (approvals, questions, keys and connectors it needs, warnings
+ * only you can fix, and alerts). News (a turn that ended, a run, a rule's tell, a loop that failed) isn't caught up:
  * it was news then.
  */
 const CATCH_UP_KINDS: ReadonlySet<NotifyKind> = new Set(["needs-you", "approval", "question"]);
@@ -698,8 +698,8 @@ export function catchUpMessage(items: readonly NotifyItem[], salt = ""): NotifyP
   return {
     v: 1,
     kind: "summary",
-    title: notifyClean(`Galahad: ${counted(n, "1 thing waits", "% things wait")} for you`, NOTIFY_TITLE_MAX),
-    body: notifyClean(`While he couldn't reach you: ${list}. The Inbox has ${n === 1 ? "it" : "them"}.`, NOTIFY_BODY_MAX),
+    title: notifyClean(`Your agent: ${counted(n, "1 thing waits", "% things wait")} for you`, NOTIFY_TITLE_MAX),
+    body: notifyClean(`While it couldn't reach you: ${list}. The Inbox has ${n === 1 ? "it" : "them"}.`, NOTIFY_BODY_MAX),
     open: "inbox",
     tag: tagOf("catch-up", salt),
   };
@@ -710,11 +710,11 @@ export function limitMessage(perDay: number): NotifyPayload {
   const reserve = alertReserve(perDay);
   const sent = perDay - reserve;
   const rest = reserve ? "Until tomorrow only an alert reaches you; the rest waits in your Inbox." : "The rest waits in your Inbox.";
-  return { v: 1, kind: "limit", title: "Galahad: quiet until tomorrow", body: `That's ${sent} ${sent === 1 ? "notification" : "notifications"} today. ${rest}`, open: "inbox", tag: "limit" };
+  return { v: 1, kind: "limit", title: "Your agent: quiet until tomorrow", body: `That's ${sent} ${sent === 1 ? "notification" : "notifications"} today. ${rest}`, open: "inbox", tag: "limit" };
 }
 
 /** Your test: fixed words (the device's name is yours), to the device that asked or every device. */
-export const testMessage = (_device?: string): NotifyPayload => ({ v: 1, kind: "test", title: "Galahad", body: "This is a test. Notifications reach this device.", open: "settings", tag: "test" });
+export const testMessage = (_device?: string): NotifyPayload => ({ v: 1, kind: "test", title: "Invincible", body: "This is a test. Notifications reach this device.", open: "settings", tag: "test" });
 
 /* ---------- where a notification may be sent: push services, and nothing else ---------- */
 
@@ -811,7 +811,7 @@ export interface NotifyView {
   /** The device asking, when its subscription was lost rather than turned off (null: it wasn't, or asked from a terminal).
    * Its app may turn it on again by itself: it restores your own choice, which still stands. */
   lost: NotifyLostView | null;
-  /** How many devices he can reach now: turned on, and not failing (a device whose last sends failed isn't counted). */
+  /** How many devices it can reach now: turned on, and not failing (a device whose last sends failed isn't counted). */
   reachable: number;
   /** Today, in the quiet hours' zone: what was sent, and how much of the day's limit is used. */
   today: { day: string; sent: NotifySentView[]; count: number; limit: number };
@@ -826,7 +826,7 @@ export interface NotifyView {
  * What a native app (iPhone, iPad, Mac, Android) does about its notifications when it opens, from the OS's leave and
  * the node's word (Apple's own advice: register at every launch, since tokens change). renew: hand the node this
  * device's subscription again, asking nothing (it's on, or its push service dropped it: your own choice, which still
- * stands) · turn-on: a card saying he can't reach this device, with Turn on (the OS asks from your tap) · settings: a
+ * stands) · turn-on: a card saying it can't reach this device, with Turn on (the OS asks from your tap) · settings: a
  * card saying the OS blocks them, with Open Settings · none. A device you turned off while another reaches you isn't
  * nagged; one turned off elsewhere that still thought itself on (`localOn`) is told so.
  */

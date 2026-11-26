@@ -47,14 +47,14 @@ import {
 } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
-import { GALAHAD_ARM } from "./arms.ts";
+import { PRIMARY_ARM } from "./arms.ts";
 
 /*
- * Connector calls, through the oath gate:
+ * Connector calls, through approvals:
  *
  *   read, create, modify   run now, ledgered
  *   outward, delete        you asking = the approval: run now, ledgered as approved
- *                          an agent asking (arm, loop, quest): an action request in your
+ *                          an agent asking (arm, loop, run): an action request in your
  *                          inbox; nothing is sent until you approve it
  *
  * Approved actions leave through an outbox. The node that filed the request is the
@@ -64,13 +64,13 @@ import { GALAHAD_ARM } from "./arms.ts";
  *
  * A standing order is your answer given in advance. An agent's call that one covers
  * is still filed as an action (so you see it), answered by the order on the spot,
- * and sent through the same outbox. So is one that is Galahad's own to approve (your
- * word, 23 November 2026: oath.ts ownApproval): his, or his knights' or loops', and
- * none of monetary, legal or destructive; it is answered as his, and says so.
+ * and sent through the same outbox. So is one that is the primary's own to approve (your
+ * word, 23 November 2026: policy.ts ownApproval): its, or its agents' or loops', and
+ * none of monetary, legal or destructive; it is answered as its, and says so.
  */
 
-/** Who calls: you, or an agent; `yours` is an agent's call made on your word (you tapped Ship it), which you approve, never he. */
-export type Caller = { kind: "owner"; device: string } | { kind: "agent"; by: string; quest?: string; yours?: true };
+/** Who calls: you, or an agent; `yours` is an agent's call made on your word (you tapped Ship it), which you approve, never it. */
+export type Caller = { kind: "owner"; device: string } | { kind: "agent"; by: string; run?: string; yours?: true };
 
 export type CallOutcome =
   | { status: "done"; class: string; target: string; result: ConnectorResult; order?: { id: string; label: string }; own?: string; action?: string; private?: true }
@@ -105,7 +105,7 @@ export interface ConnectorServiceOptions {
   now?: () => number;
   /** The native tools this node can carry out (a call to another is refused). */
   natives?: Partial<Record<NativeName, NativeTool>>;
-  /** The repositories you gave your knights (as you gave them): his and their work there is his to approve (ownApproval). Absent: none. */
+  /** The repositories you gave your agents (as you gave them): its and their work there is its to approve (ownApproval). Absent: none. */
   repositories?: () => readonly string[];
   /** Where Google's and Microsoft's sign-ins are reached (tests: a stand-in). */
   oauthEndpoints?: Partial<OAuthEndpoints>;
@@ -120,11 +120,11 @@ export interface ConnectorServiceOptions {
 export const ACTION_TTL_MS = 24 * 60 * 60_000;
 
 /**
- * Galahad's own callers, whose calls he may approve himself: him (his chat's tools, and the node's work for him), his
- * knights' work as the node carries it out, and his loops; no token you mint can take these names (arms.ts). Not a
- * tool you run with a token of its own (arm:…), another node, or you asking to be asked (quest).
+ * The primary's own callers, whose calls it may approve itself: it (its chat's tools, and the node's work for it), its
+ * agents' work as the node carries it out, and its loops; no token you mint can take these names (arms.ts). Not a
+ * tool you run with a token of its own (arm:…), another node, or you asking to be asked (run).
  */
-const isHis = (by: string): boolean => by === GALAHAD_ARM || by === `arm:${GALAHAD_ARM}` || by.startsWith("team.") || by.startsWith("loop:");
+const isHis = (by: string): boolean => by === PRIMARY_ARM || by === `arm:${PRIMARY_ARM}` || by.startsWith("team.") || by.startsWith("loop:");
 
 export class ConnectorService {
   private readonly now: () => number;
@@ -147,9 +147,9 @@ export class ConnectorService {
 
   async call(input: { connector: string; tool: string; args?: Record<string, ArgValue>; why?: string }, caller: Caller): Promise<CallOutcome> {
     const manifest = this.manifest(input.connector);
-    // One that's Galahad's alone (mail): him, you, your loops and quests, and the agents you allowed; any other asks first.
+    // One that's the primary's alone (mail): it, you, your loops and runs, and the agents you allowed; any other asks first.
     if (caller.kind === "agent" && !mayCall(manifest.access, caller.by)) {
-      throw new ConnectorCallError(403, `${manifest.label} is Galahad's alone: ask your liege to let you use it (connector_request), and use it once they do`);
+      throw new ConnectorCallError(403, `${manifest.label} is your agent's alone: ask the owner to let you use it (connector_request), and use it once they do`);
     }
     const args = ConnectorArgs.parse(input.args ?? {});
     // Arguments leave this machine (and approvals replicate in plaintext): no keys in them, however deep. The service's
@@ -165,8 +165,8 @@ export class ConnectorService {
       throw new ConnectorCallError(400, (error as Error).message);
     }
     const resource = `connector.${manifest.id}`;
-    const quest = caller.kind === "agent" ? caller.quest : undefined;
-    const decision = decide({ class: request.class, resource, target: request.target, ...(quest ? { quest } : {}) });
+    const run = caller.kind === "agent" ? caller.run : undefined;
+    const decision = decide({ class: request.class, resource, target: request.target, ...(run ? { run } : {}) });
     if (decision.verdict === "deny") throw new ConnectorCallError(403, decision.reason);
 
     if (decision.verdict === "ask" && caller.kind === "agent") {
@@ -203,15 +203,15 @@ export class ConnectorService {
       const tool = manifest.tools[input.tool];
       const own = tool && !isMcpTool(tool) && isHis(caller.by) && !caller.yours ? ownApproval({ class: request.class, origin: manifest.origin, ...(tool.native ? { native: tool.native } : {}), method: tool.method, path: tool.path, args }, this.o.repositories?.() ?? []) : null;
       if (own) {
-        this.o.store.emit(this.o.identity, "action.decided", { id, verdict: "approved", note: `Galahad approved it himself: ${own}`.slice(0, 500) }, { trust: "agent" });
+        this.o.store.emit(this.o.identity, "action.decided", { id, verdict: "approved", note: `Your agent approved it itself: ${own}`.slice(0, 500) }, { trust: "agent" });
         const filed = this.actions(10_000).find((a) => a.id === id);
         if (filed?.state === "approved") {
-          const sent = await this.sendApproved(filed, `on Galahad's own approval: ${own}`);
+          const sent = await this.sendApproved(filed, `on your agent's own approval: ${own}`);
           if (!sent.result) throw new ConnectorCallError(sent.status ?? 502, sent.receipt);
           return { status: "done", class: request.class, target: request.target, result: sent.result, own, action: id };
         }
       }
-      this.o.ledger({ class: request.class, resource, target: request.target, verdict: "ask", reason: decision.reason, quest, detail: `action ${id}, asked by ${caller.by}` });
+      this.o.ledger({ class: request.class, resource, target: request.target, verdict: "ask", reason: decision.reason, run, detail: `action ${id}, asked by ${caller.by}` });
       return { status: "asked", action: id, class: request.class, target: request.target, expires };
     }
 
@@ -223,7 +223,7 @@ export class ConnectorService {
       target: request.target,
       verdict: approved ? "approved" : "allow",
       reason: approved ? "you asked for it" : decision.reason,
-      quest,
+      run,
       detail: `${caller.kind === "owner" ? "by you" : `by ${caller.by}`} · ${excerpt(result, 300)}`.slice(0, 2000),
     });
     return { status: "done", class: request.class, target: request.target, result, ...(manifest.private ? { private: true as const } : {}) };
@@ -237,7 +237,7 @@ export class ConnectorService {
   async describe(input: { connector: string; tool: string }, caller: Caller): Promise<ConnectorToolDefinition> {
     const manifest = this.manifest(input.connector);
     if (caller.kind === "agent" && !mayCall(manifest.access, caller.by)) {
-      throw new ConnectorCallError(403, `${manifest.label} is Galahad's alone: ask your liege to let you use it (connector_request), and use it once they do`);
+      throw new ConnectorCallError(403, `${manifest.label} is your agent's alone: ask the owner to let you use it (connector_request), and use it once they do`);
     }
     const tool = Object.hasOwn(manifest.tools, input.tool) ? manifest.tools[input.tool]! : null;
     if (!tool) throw new ConnectorCallError(404, `${manifest.id} has no tool "${input.tool}" (it has: ${Object.keys(manifest.tools).join(", ") || "none yet"})`);
@@ -389,7 +389,7 @@ export class ConnectorService {
 
   /**
    * Your yes to your own version of a request: text it already has replaced by yours, checked as any call's arguments
-   * are (the tool's own terms, no key in them, what the oath allows). Yours is filed anew under the same asker and
+   * are (the tool's own terms, no key in them, what the policy allows). Yours is filed anew under the same asker and
    * approved in the same step; the one it was asked as is declined, saying which it became. All in kinds every
    * replica knows, and only for a request this node filed, so the node that sends yours is the one that would have
    * sent the first (one filed elsewhere is edited there).
@@ -718,7 +718,7 @@ export class ConnectorService {
     this.o.store.emit(this.o.identity, "order.set", { id, ...terms, digest: toolDigest(manifest, input.tool)!, label }, { trust: "owner", ...(via ? { via } : {}) });
     this.o.ledger({
       class: "modify",
-      resource: "oath.order",
+      resource: "policy.order",
       target: `${manifest.id}.${input.tool}`,
       verdict: "allow",
       reason: "you signed a standing order",
@@ -736,7 +736,7 @@ export class ConnectorService {
     this.o.store.emit(this.o.identity, "order.revoked", { id });
     this.o.ledger({
       class: "modify",
-      resource: "oath.order",
+      resource: "policy.order",
       target: `${order.connector}.${order.tool}`,
       verdict: "allow",
       reason: "you revoked a standing order",

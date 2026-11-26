@@ -1,11 +1,11 @@
 import { type ChatStreamEvent, type ExecResult, nodeIdentity } from "../../packages/core/src/index.ts";
 import { chat, type ChatTools } from "../../packages/models/src/chat.ts";
-import { type QuestRole, runQuest } from "../../packages/models/src/quest.ts";
+import { type RunRole, runLoop } from "../../packages/models/src/run.ts";
 import { foundFleet, LedgerStore, Vault } from "../../packages/ledger/src/index.ts";
 import { intBelow, rng, subSeed, type Suite } from "../lib.ts";
 
 /*
- * The harness's own overhead: the chat loop and the quest runner driven by
+ * The harness's own overhead: the chat loop and the run runner driven by
  * scripted stand-in models that answer at once, and tools and commands that
  * return at once. Whatever time is left is the harness's: building the prompt,
  * redacting, parsing a reply, keeping the trail, compacting. A change that makes
@@ -24,8 +24,8 @@ const say = (text: string): Response => sse({ choices: [{ delta: { content: text
 
 export const suite: Suite = {
   name: "harness-overhead",
-  about: "the chat loop and the quest runner with models that answer at once: the time the harness itself adds",
-  headline: ["harness.chat.rounds-run", "harness.quest.steps-run", "harness.chat.tool-round", "harness.chat.plain-answer", "harness.quest.step"],
+  about: "the chat loop and the run runner with models that answer at once: the time the harness itself adds",
+  headline: ["harness.chat.rounds-run", "harness.run.steps-run", "harness.chat.tool-round", "harness.chat.plain-answer", "harness.run.step"],
   async run(ctx) {
     const keys = rng(subSeed(ctx.seed, "harness-keys"));
     const identity = nodeIdentity(Uint8Array.from({ length: 32 }, () => intBelow(keys, 256)), Uint8Array.from({ length: 32 }, () => intBelow(keys, 256)));
@@ -60,25 +60,25 @@ export const suite: Suite = {
       await ctx.timeAsync("harness.chat.tool-round", () => answer(withRounds(), true), { n: 9, warm: 2, per: ROUNDS, note: `one tool round of an answer with ${ROUNDS} (the model and the tool return at once)` });
       await ctx.timeAsync("harness.chat.plain-answer", () => answer([() => say("About twenty seconds.")], false), { n: 15, warm: 3, note: "an answer with no tools: the prompt built, one reply streamed" });
 
-      // A quest: a plan, twelve commands, DONE, a review that passes.
+      // A run: a plan, twelve commands, DONE, a review that passes.
       const sh = (command: string): string => `Next step.\n\`\`\`sh\n${command}\n\`\`\``;
       const output = "ok\n".repeat(40);
-      const quest = async (): Promise<{ status: string; steps: number }> => {
-        const script: Record<QuestRole, string[]> = {
+      const run = async (): Promise<{ status: string; steps: number }> => {
+        const script: Record<RunRole, string[]> = {
           planner: ["1. Build it.\n2. Test it.\nDone when: the tests pass."],
           engineer: [...Array.from({ length: STEPS }, (_, i) => sh(`make step-${i} && ./check.sh ${i}`)), "DONE\nBuilt and tested; the checks pass."],
           reviewer: ["PASS\nThe commands and their output bear it out."],
         };
-        const outcome = await runQuest(
+        const outcome = await runLoop(
           { goal: "build the project and show its tests pass", environment: "a test sandbox with make and a shell" },
           { ask: async (role) => ({ text: script[role].shift() ?? "DONE", model: `stand-in/${role}` }), exec: async (): Promise<ExecResult> => ({ exitCode: 0, stdout: output, stderr: "", durationMs: 1, truncated: false }), sleep: async () => {} },
         );
         return { status: outcome.status, steps: outcome.steps };
       };
-      const ran = await quest();
-      ctx.quality("harness.quest.steps-run", ran.steps, "steps", "higher", { note: `of ${STEPS} scripted commands, each run and observed` });
-      ctx.quality("harness.quest.done", ran.status === "done" ? 1 : 0, "", "higher", { note: "planned, worked, reviewed and passed" });
-      await ctx.timeAsync("harness.quest.step", quest, { n: 9, warm: 2, per: STEPS, note: `one step of a quest of ${STEPS} (the reply parsed, the command "run", its output observed and kept for the review)` });
+      const ran = await run();
+      ctx.quality("harness.run.steps-run", ran.steps, "steps", "higher", { note: `of ${STEPS} scripted commands, each run and observed` });
+      ctx.quality("harness.run.done", ran.status === "done" ? 1 : 0, "", "higher", { note: "planned, worked, reviewed and passed" });
+      await ctx.timeAsync("harness.run.step", run, { n: 9, warm: 2, per: STEPS, note: `one step of a run of ${STEPS} (the reply parsed, the command "run", its output observed and kept for the review)` });
     } finally {
       store.close();
     }

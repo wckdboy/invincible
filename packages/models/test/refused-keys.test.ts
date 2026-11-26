@@ -65,7 +65,7 @@ describe("a provider that refused its key", () => {
     });
   });
 
-  test("a 403's words of an author or a token limit aren't of the key (Percival's review, 22 November 2026)", () => {
+  test("a 403's words of an author or a token limit aren't of the key (Ivo's review, 22 November 2026)", () => {
     const refusals = new RefusedKeys();
     refusals.now = () => NOW;
     expect(refusals.note("forge", 'forge → 403 {"error":{"message":"you are not the author of this resource"}}')).toBeNull();
@@ -126,7 +126,7 @@ describe("a provider that refused its key", () => {
 function gateway(id = "mimo-token") {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   const baseUrl = "https://plan.invalid/v1";
   vault.set(id, ["FAKE", id, "key"].join("-"), { provider: id, origin: new URL(baseUrl).origin });
@@ -208,7 +208,7 @@ describe("through chat", () => {
     const id = "deepseek";
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     const baseUrl = "https://deepseek.invalid/v1";
     vault.set(id, key, { provider: id, origin: new URL(baseUrl).origin });

@@ -35,7 +35,7 @@ import {
   type PlanNode,
   policyOf,
   redact,
-  SELF_ACTION_QUEST,
+  SELF_ACTION_RUN,
   whatMoreBuys,
 } from "@invincible/core";
 import { roster } from "@invincible/models";
@@ -46,12 +46,12 @@ import type { Governor } from "./governor.ts";
 
 /*
  * Compute on this node: the census (every node's body, what it measured, its
- * ceiling, what its work holds now), this node's own calibration, the plan he
- * derives and records when the fleet's compute changes, how much effort a quest may
+ * ceiling, what its work holds now), this node's own calibration, the plan it
+ * derives and records when the fleet's compute changes, how much effort a run may
  * spend, and the attempts at work.
  *
- * Everything he does here is internal and reversible: he measures the machine he's
- * on, counts, and records what he derived. He never provisions, rents, installs or
+ * Everything it does here is internal and reversible: it measures the machine it's
+ * on, counts, and records what it derived. It never provisions, rents, installs or
  * downloads anything, and nothing here can reach a machine the owner didn't enroll.
  */
 
@@ -121,7 +121,7 @@ interface AttemptState {
 }
 
 interface Tracked {
-  quest: string;
+  run: string;
   label: string;
   effort: EffortLevel;
   asked: EffortAsk;
@@ -132,8 +132,8 @@ interface Tracked {
   attempts: Map<number, AttemptState>;
 }
 
-/** Quests whose effort was granted are remembered this long without a call (a quest's longest silence is one command's time limit). */
-const QUEST_KEPT_MS = 2 * 60 * 60_000;
+/** Runs whose effort was granted are remembered this long without a call (a run's longest silence is one command's time limit). */
+const RUN_KEPT_MS = 2 * 60 * 60_000;
 const MAX_TRACKED = 64;
 
 const clean = (text: string, max: number): string =>
@@ -224,7 +224,7 @@ export class ComputeService {
     return derivePlan(nodes.flatMap((n): PlanNode[] => (n.body && n.capacity ? [{ id: n.id, name: n.name, body: n.body, capacity: n.capacity }] : [])));
   }
 
-  /** His defaults, derived now from the mind (every node derives the same). */
+  /** Its defaults, derived now from the mind (every node derives the same). */
   planNow(): ComputePlan {
     return this.planOf(this.nodes());
   }
@@ -236,7 +236,7 @@ export class ComputeService {
     return { at: value.at, digest: value.digest, plan: plan.success ? plan.data : null, changes: value.changes ?? [] };
   }
 
-  /** What the heartbeat reads: the suggestions he'd make, and nodes that should have measured themselves by now. */
+  /** What the heartbeat reads: the suggestions it'd make, and nodes that should have measured themselves by now. */
   suggestions(nodes = this.nodes()) {
     const models = Object.fromEntries(Object.entries(roster(this.deps.store)).map(([role, spec]) => [role, spec.models]));
     return computeSuggestions(nodes.flatMap((n) => (n.body ? [{ id: n.id, name: n.name, body: n.body, calibration: n.calibration, online: n.online }] : [])), models);
@@ -278,7 +278,7 @@ export class ComputeService {
 
   /**
    * Measure this node now and record it. One at a time: callers that arrive while one runs get that one.
-   * `by`: who asked, for the ledger ("you", or his own upkeep).
+   * `by`: who asked, for the ledger ("you", or its own upkeep).
    */
   calibrate(reason: CalibrationReason, by: string): Promise<Calibration> {
     if (this.calibrating) return this.calibrating;
@@ -296,8 +296,8 @@ export class ComputeService {
         target: `calibration:${this.deps.nodeName}`.slice(0, 256),
         verdict: "allow",
         reason: `${this.deps.nodeName} measured itself (${reason}), asked by ${by}`.slice(0, 500),
-        quest: SELF_ACTION_QUEST,
-        detail: `${calibration.cpu.threads} thread(s) did ${(calibration.cpu.multi / calibration.cpu.single).toFixed(1)} cores' worth in ${calibration.tookMs} ms · he counts ${capacity.cores} threads, ${capacity.memoryGb} GB, ${capacity.sandboxes} sandbox slot(s)`,
+        run: SELF_ACTION_RUN,
+        detail: `${calibration.cpu.threads} thread(s) did ${(calibration.cpu.multi / calibration.cpu.single).toFixed(1)} cores' worth in ${calibration.tookMs} ms · it counts ${capacity.cores} threads, ${capacity.memoryGb} GB, ${capacity.sandboxes} sandbox slot(s)`,
       });
       return calibration;
     })().finally(() => {
@@ -308,13 +308,13 @@ export class ComputeService {
 
   /* ---------- the plan: re-derived when the fleet's compute changes ---------- */
 
-  /** Whether his recorded plan is still what the mind gives. */
+  /** Whether its recorded plan is still what the mind gives. */
   planDrift(): { digest: string; recorded: string | null } {
     return { digest: planDigest(this.planNow()), recorded: this.recorded()?.digest ?? null };
   }
 
   /**
-   * Record the plan as it is now, if it isn't what he last recorded, and tell the owner in a line each what
+   * Record the plan as it is now, if it isn't what it last recorded, and tell the owner in a line each what
    * changed (a notice; an unchanged plan writes nothing). Returns the lines, or null when nothing changed.
    */
   adapt(): string[] | null {
@@ -329,7 +329,7 @@ export class ComputeService {
       this.deps.store.emit(this.deps.identity, "notice.raised", {
         key: "compute-adapted",
         severity: "info",
-        title: recorded ? "Galahad adapted to a change in his compute" : "Galahad took stock of his compute",
+        title: recorded ? "Your agent adapted to a change in its compute" : "Your agent took stock of its compute",
         body: `${changes.join("\n")}\nHis own defaults, re-derived: a ceiling of yours overrides them (invincible compute limit <node> …).`.slice(0, 2000),
         source: "compute",
         at,
@@ -340,7 +340,7 @@ export class ComputeService {
 
   /* ---------- effort ---------- */
 
-  /** The room there is for a quest's sandboxes: on one node, or on every sandbox host that's online. */
+  /** The room there is for a run's sandboxes: on one node, or on every sandbox host that's online. */
   room(on?: string): { name: string; slots: number; free: number } {
     const nodes = this.nodes().filter((n) => (on ? n.id === on : n.online) && (n.capacity?.sandboxes ?? 0) > 0);
     if (!nodes.length) return { name: on ? (this.deps.store.device(on)?.name ?? "that node") : "the fleet", slots: 0, free: 0 };
@@ -353,12 +353,12 @@ export class ComputeService {
   }
 
   /**
-   * How many attempts a quest runs at once. Each extra attempt is recorded in the ledger (that's what the
-   * day's budget counts), once per quest: asking again for the same quest gives the same answer.
+   * How many attempts a run runs at once. Each extra attempt is recorded in the ledger (that's what the
+   * day's budget counts), once per run: asking again for the same run gives the same answer.
    */
-  grant(input: { quest: string; effort: EffortAsk; on?: string; label?: string }, who: { by: string; owner: boolean }): EffortGrant {
+  grant(input: { run: string; effort: EffortAsk; on?: string; label?: string }, who: { by: string; owner: boolean }): EffortGrant {
     this.sweep();
-    const known = this.tracked.get(input.quest);
+    const known = this.tracked.get(input.run);
     if (known) return known.grant;
     const room = this.room(input.on);
     const policy = this.policy();
@@ -379,34 +379,34 @@ export class ComputeService {
       this.deps.ledger({
         class: "create",
         resource: ATTEMPT_RESOURCE,
-        target: `${input.quest}#${i}`,
+        target: `${input.run}#${i}`,
         verdict: "allow",
-        reason: `attempt ${i} of ${decision.attempts} at one quest (effort ${input.effort}), asked by ${who.by}`.slice(0, 500),
-        quest: input.quest.slice(0, 64),
+        reason: `attempt ${i} of ${decision.attempts} at one run (effort ${input.effort}), asked by ${who.by}`.slice(0, 500),
+        run: input.run.slice(0, 64),
         ...(label ? { detail: label } : {}),
       });
     }
-    const grant: EffortGrant = { quest: input.quest, attempts: decision.attempts, asked: input.effort, host: room.slots ? room.name : null, reasons: decision.reasons, budget: { perDay: policy.attemptsPerDay, usedToday: usedToday + decision.attempts - 1 } };
-    this.tracked.set(input.quest, { quest: input.quest, label, effort: decision.attempts, asked: input.effort, by: who.by, since: this.now(), reasons: decision.reasons, grant, attempts: new Map() });
+    const grant: EffortGrant = { run: input.run, attempts: decision.attempts, asked: input.effort, host: room.slots ? room.name : null, reasons: decision.reasons, budget: { perDay: policy.attemptsPerDay, usedToday: usedToday + decision.attempts - 1 } };
+    this.tracked.set(input.run, { run: input.run, label, effort: decision.attempts, asked: input.effort, by: who.by, since: this.now(), reasons: decision.reasons, grant, attempts: new Map() });
     while (this.tracked.size > MAX_TRACKED) this.tracked.delete(this.tracked.keys().next().value!);
     return grant;
   }
 
-  /* ---------- helpers at work: the attempts of quests in hand ---------- */
+  /* ---------- helpers at work: the attempts of runs in hand ---------- */
 
-  /** An attempt's call starts (a model thinking, a command running). Returns how to say it ended. Unknown quests are ignored. */
+  /** An attempt's call starts (a model thinking, a command running). Returns how to say it ended. Unknown runs are ignored. */
   attemptBegin(tag: AttemptTag, what: { station: AttemptStation; doing: string; model?: string | null }): () => void {
-    const quest = this.tracked.get(tag.quest);
-    if (!quest || tag.index > quest.effort) return () => {};
+    const run = this.tracked.get(tag.run);
+    if (!run || tag.index > run.effort) return () => {};
     const now = this.now();
-    const was = quest.attempts.get(tag.index);
-    const state: AttemptState = was ?? { index: tag.index, of: quest.effort, station: what.station, doing: "", model: null, sandbox: null, node: null, active: 0, since: now, last: now };
+    const was = run.attempts.get(tag.index);
+    const state: AttemptState = was ?? { index: tag.index, of: run.effort, station: what.station, doing: "", model: null, sandbox: null, node: null, active: 0, since: now, last: now };
     state.station = what.station;
     state.doing = clean(what.doing, 120);
     if (what.model !== undefined) state.model = what.model;
     state.active += 1;
     state.last = now;
-    quest.attempts.set(tag.index, state);
+    run.attempts.set(tag.index, state);
     let ended = false;
     return () => {
       if (ended) return;
@@ -416,67 +416,67 @@ export class ComputeService {
     };
   }
 
-  /** Whether a call is a helper's: one of several attempts at a quest whose effort was granted here. */
+  /** Whether a call is a helper's: one of several attempts at a run whose effort was granted here. */
   isHelper(tag: AttemptTag): boolean {
-    const quest = this.tracked.get(tag.quest);
-    return !!quest && quest.effort > 1 && tag.index <= quest.effort;
+    const run = this.tracked.get(tag.run);
+    return !!run && run.effort > 1 && tag.index <= run.effort;
   }
 
   /** The model an attempt's call is being answered by (for the census; never shown to the reviewer). */
   attemptModel(tag: AttemptTag, model: string): void {
-    const state = this.tracked.get(tag.quest)?.attempts.get(tag.index);
+    const state = this.tracked.get(tag.run)?.attempts.get(tag.index);
     if (state) state.model = model.slice(0, 120);
   }
 
   /** An attempt's sandbox exists: its commands are its own from here on. */
   attemptSandbox(tag: AttemptTag, sandbox: string, node: string): void {
-    const quest = this.tracked.get(tag.quest);
-    if (!quest || tag.index > quest.effort) return;
+    const run = this.tracked.get(tag.run);
+    if (!run || tag.index > run.effort) return;
     const now = this.now();
-    const state = quest.attempts.get(tag.index) ?? { index: tag.index, of: quest.effort, station: "forge" as AttemptStation, doing: "Setting up its sandbox", model: null, sandbox: null, node: null, active: 0, since: now, last: now };
+    const state = run.attempts.get(tag.index) ?? { index: tag.index, of: run.effort, station: "forge" as AttemptStation, doing: "Setting up its sandbox", model: null, sandbox: null, node: null, active: 0, since: now, last: now };
     state.sandbox = sandbox;
     state.node = node.slice(0, 64);
     state.last = now;
-    quest.attempts.set(tag.index, state);
+    run.attempts.set(tag.index, state);
   }
 
   /** Which attempt a sandbox is, if any. */
   attemptOf(sandbox: string): AttemptTag | null {
-    for (const quest of this.tracked.values()) {
-      for (const a of quest.attempts.values()) if (a.sandbox === sandbox) return { quest: quest.quest, index: a.index, of: a.of };
+    for (const run of this.tracked.values()) {
+      for (const a of run.attempts.values()) if (a.sandbox === sandbox) return { run: run.run, index: a.index, of: a.of };
     }
     return null;
   }
 
   /** A sandbox is gone: the attempt it was has finished. */
   sandboxGone(sandbox: string): void {
-    for (const quest of this.tracked.values()) {
-      for (const [index, a] of quest.attempts) {
+    for (const run of this.tracked.values()) {
+      for (const [index, a] of run.attempts) {
         if (a.sandbox !== sandbox) continue;
-        quest.attempts.delete(index);
+        run.attempts.delete(index);
       }
     }
   }
 
-  /** Attempts that went quiet have finished; quests nobody has spoken for in a long while are forgotten. */
+  /** Attempts that went quiet have finished; runs nobody has spoken for in a long while are forgotten. */
   sweep(): void {
     const now = this.now();
-    for (const [id, quest] of this.tracked) {
-      for (const [index, a] of quest.attempts) {
+    for (const [id, run] of this.tracked) {
+      for (const [index, a] of run.attempts) {
         if (a.active > 0 || now - a.last < ATTEMPT_IDLE_MS) continue;
-        quest.attempts.delete(index);
+        run.attempts.delete(index);
       }
-      const last = Math.max(quest.since, ...[...quest.attempts.values()].map((a) => a.last));
-      if (!quest.attempts.size && now - last > QUEST_KEPT_MS) this.tracked.delete(id);
+      const last = Math.max(run.since, ...[...run.attempts.values()].map((a) => a.last));
+      if (!run.attempts.size && now - last > RUN_KEPT_MS) this.tracked.delete(id);
     }
   }
 
-  /** Quests in hand whose attempts are at work now. */
+  /** Runs in hand whose attempts are at work now. */
   work(): EffortWork[] {
     return [...this.tracked.values()]
       .filter((q) => q.attempts.size > 0)
       .map((q) => ({
-        quest: q.quest,
+        run: q.run,
         label: q.label,
         effort: q.effort,
         asked: q.asked,

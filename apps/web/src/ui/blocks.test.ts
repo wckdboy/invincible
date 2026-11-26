@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { domainOf, framed, niceTicks } from "./blocks.ts";
 
 /*
- * What an answer shows beyond words (blocks.ts): a chart's scale, and a page's frame, which must let nothing he
- * wrote reach the network or Galahad.
+ * What an answer shows beyond words (blocks.ts): a chart's scale, and a page's frame, which must let nothing it
+ * wrote reach the network or the primary.
  */
 
 describe("a chart's scale", () => {

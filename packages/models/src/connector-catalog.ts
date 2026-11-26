@@ -1,10 +1,10 @@
 import type { ConnectorManifest } from "@invincible/core";
 
 /*
- * Connectors that ship with Galahad. Each is only a manifest: install one with
+ * Connectors that ship with the primary. Each is only a manifest: install one with
  * `invincible connector add <id>`, put its key in the vault, and every node can use it.
- * Tools that change the world outside are classed outward or delete, so Galahad
- * asks you before each one; reading and creating are his to do (and logged).
+ * Tools that change the world outside are classed outward or delete, so the primary
+ * asks you before each one; reading and creating are its to do (and logged).
  */
 
 export interface CatalogEntry {
@@ -159,14 +159,14 @@ export const CATALOG: Record<string, CatalogEntry> = {
           class: "create",
         },
         "issue.create": {
-          description: "Open an issue. Others see it: Galahad asks first.",
+          description: "Open an issue. Others see it: your agent asks first.",
           method: "POST",
           path: "/repos/{owner}/{repo}/issues",
           params: { owner, repo, title: { type: "string", required: true }, body: { type: "string" } },
           class: "outward",
         },
         "pr.create": {
-          description: "Open a pull request from head into base. Others see it: Galahad asks first, unless a standing order covers it.",
+          description: "Open a pull request from head into base. Others see it: your agent asks first, unless a standing order covers it.",
           method: "POST",
           path: "/repos/{owner}/{repo}/pulls",
           params: {
@@ -182,7 +182,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
         },
         ship: {
           description:
-            "Ship a quest's changes: commit them on a new invincible/… branch (never an existing one) and open a pull request. Others see it: Galahad asks first, unless a standing order covers it.",
+            "Ship a run's changes: commit them on a new invincible/… branch (never an existing one) and open a pull request. Others see it: your agent asks first, unless a standing order covers it.",
           native: "github.ship",
           method: "POST",
           path: "/repos/{owner}/{repo}/pulls",
@@ -200,7 +200,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
         },
         "ship.update": {
           description:
-            "Push a fix onto a pull request's invincible/… branch: one commit on top, only while the branch stands where the fixing work began, never forced. The pull request updates. Others see it: Galahad asks first, unless a standing order covers it.",
+            "Push a fix onto a pull request's invincible/… branch: one commit on top, only while the branch stands where the fixing work began, never forced. The pull request updates. Others see it: your agent asks first, unless a standing order covers it.",
           native: "github.ship.update",
           method: "PATCH",
           path: "/repos/{owner}/{repo}/git/refs/heads/{branch}",
@@ -215,7 +215,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
           class: "outward",
         },
         "issue.comment": {
-          description: "Comment on an issue or pull request. Others see it: Galahad asks first.",
+          description: "Comment on an issue or pull request. Others see it: your agent asks first.",
           method: "POST",
           path: "/repos/{owner}/{repo}/issues/{number}/comments",
           params: { owner, repo, number: { type: "integer", required: true }, body: { type: "string", required: true } },
@@ -223,7 +223,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
         },
         // Never APPROVE: an approval is your word on your account, and branch protection counts it.
         "pull.review": {
-          description: "Review a pull request: a comment, or a request for changes. Others see it: Galahad asks first. (Approving stays yours.)",
+          description: "Review a pull request: a comment, or a request for changes. Others see it: your agent asks first. (Approving stays yours.)",
           method: "POST",
           path: "/repos/{owner}/{repo}/pulls/{number}/reviews",
           params: { owner, repo, number, event: { type: "string", enum: ["COMMENT", "REQUEST_CHANGES"], required: true }, body: { type: "string", required: true } },
@@ -320,18 +320,18 @@ export const CATALOG: Record<string, CatalogEntry> = {
     manifest: {
       id: "gmail",
       label: "Gmail",
-      description: "Your mail at Google: search, read, draft, archive; sending and trashing ask you first. Galahad's alone, and what it reads stays in the answer that read it.",
+      description: "Your mail at Google: search, read, draft, archive; sending and trashing ask you first. Your agent's alone, and what it reads stays in the answer that read it.",
       origin: "https://gmail.googleapis.com",
       auth: { secret: "gmail", scheme: "oauth", oauth: { provider: "google", scopes: ["https://www.googleapis.com/auth/gmail.modify", "openid", "email"] } },
       tools: {
         search: { description: "Find messages, with Gmail's own search words (from:anna is:unread newer_than:7d); without any, the inbox's latest.", native: "gmail.search", method: "GET", path: "/gmail/v1/users/me/messages", params: { query, limit }, class: "read" },
         read: { description: "One message: who, when, its subject, its words and what it has attached.", native: "gmail.read", method: "GET", path: "/gmail/v1/users/me/messages/{id}", params: { id: gmailId }, class: "read" },
         draft: { description: "A draft in your Drafts, unsent: a new message, or a reply (replyTo) in its thread.", native: "gmail.draft", method: "POST", path: "/gmail/v1/users/me/drafts", params: compose, class: "create" },
-        send: { description: "Send a message, or a reply (replyTo) in its thread. Others read it: Galahad asks first.", native: "gmail.send", method: "POST", path: "/gmail/v1/users/me/messages/send", params: compose, class: "outward" },
+        send: { description: "Send a message, or a reply (replyTo) in its thread. Others read it: your agent asks first.", native: "gmail.send", method: "POST", path: "/gmail/v1/users/me/messages/send", params: compose, class: "outward" },
         archive: { description: "Out of the inbox, into All Mail (back any time).", native: "gmail.archive", method: "POST", path: "/gmail/v1/users/me/messages/{id}/modify", params: { id: gmailId }, class: "modify" },
-        trash: { description: "Into Trash, where Gmail keeps it 30 days. Galahad asks first.", native: "gmail.trash", method: "POST", path: "/gmail/v1/users/me/messages/{id}/trash", params: { id: gmailId }, class: "delete" },
+        trash: { description: "Into Trash, where Gmail keeps it 30 days. Your agent asks first.", native: "gmail.trash", method: "POST", path: "/gmail/v1/users/me/messages/{id}/trash", params: { id: gmailId }, class: "delete" },
       },
-      access: { only: "galahad", allowed: [] },
+      access: { only: "primary", allowed: [] },
       private: true,
     },
   },
@@ -342,22 +342,22 @@ export const CATALOG: Record<string, CatalogEntry> = {
     manifest: {
       id: "outlook",
       label: "Outlook",
-      description: "Your mail at Microsoft (Outlook.com, Microsoft 365): search, read, draft, archive; sending and trashing ask you first. Galahad's alone, and what it reads stays in the answer that read it.",
+      description: "Your mail at Microsoft (Outlook.com, Microsoft 365): search, read, draft, archive; sending and trashing ask you first. Your agent's alone, and what it reads stays in the answer that read it.",
       origin: "https://graph.microsoft.com",
       auth: { secret: "outlook", scheme: "oauth", oauth: { provider: "microsoft", scopes: ["offline_access", "openid", "email", "profile", "User.Read", "Mail.ReadWrite", "Mail.Send"] } },
       tools: {
         search: { description: "Find messages by their words; without any, the inbox's latest.", native: "outlook.search", method: "GET", path: "/v1.0/me/messages", params: { query, limit }, class: "read" },
         read: { description: "One message: who, when, its subject, its words and whether it has attachments.", native: "outlook.read", method: "GET", path: "/v1.0/me/messages/{id}", params: { id: outlookId }, class: "read" },
         draft: { description: "A draft in your Drafts, unsent: a new message, or a reply (replyTo) in its conversation.", native: "outlook.draft", method: "POST", path: "/v1.0/me/messages", params: compose, class: "create" },
-        send: { description: "Send a message, or a reply (replyTo) in its conversation. Others read it: Galahad asks first.", native: "outlook.send", method: "POST", path: "/v1.0/me/sendMail", params: compose, class: "outward" },
+        send: { description: "Send a message, or a reply (replyTo) in its conversation. Others read it: your agent asks first.", native: "outlook.send", method: "POST", path: "/v1.0/me/sendMail", params: compose, class: "outward" },
         archive: { description: "Out of the inbox, into Archive (back any time).", native: "outlook.archive", method: "POST", path: "/v1.0/me/messages/{id}/move", params: { id: outlookId }, class: "modify" },
-        trash: { description: "Into Deleted Items. Galahad asks first.", native: "outlook.trash", method: "POST", path: "/v1.0/me/messages/{id}/move", params: { id: outlookId }, class: "delete" },
+        trash: { description: "Into Deleted Items. Your agent asks first.", native: "outlook.trash", method: "POST", path: "/v1.0/me/messages/{id}/move", params: { id: outlookId }, class: "delete" },
       },
-      access: { only: "galahad", allowed: [] },
+      access: { only: "primary", allowed: [] },
       private: true,
     },
   },
-  // All of your Drive to read (drive.readonly): Galahad writes, changes and deletes nothing there.
+  // All of your Drive to read (drive.readonly): the primary writes, changes and deletes nothing there.
   gdrive: {
     // A file's or a folder's id, and a page's token.
     ids: /^[A-Za-z0-9_-]{32,200}$/,
@@ -365,7 +365,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
     manifest: {
       id: "gdrive",
       label: "Google Drive",
-      description: "Your Drive, to read: find files anywhere in it and in shared drives, look one up, read a Google Doc or Sheet. It writes nothing there. Galahad's alone, and what it reads stays in the answer that read it, as the mail's does.",
+      description: "Your Drive, to read: find files anywhere in it and in shared drives, look one up, read a Google Doc or Sheet. It writes nothing there. Your agent's alone, and what it reads stays in the answer that read it, as the mail's does.",
       origin: "https://www.googleapis.com",
       auth: { secret: "gdrive", scheme: "oauth", oauth: { provider: "google", scopes: ["https://www.googleapis.com/auth/drive.readonly", "openid", "email"] } },
       tools: {
@@ -401,7 +401,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
           class: "read",
         },
       },
-      access: { only: "galahad", allowed: [] },
+      access: { only: "primary", allowed: [] },
       private: true,
     },
   },

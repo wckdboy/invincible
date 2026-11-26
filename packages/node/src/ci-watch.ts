@@ -8,8 +8,8 @@ import type { LedgerStore } from "@invincible/ledger";
  * every few minutes (github.checks: a read, logged like any other, never asked about). Once every check has ended:
  *   all passed: nothing to tell, and a failure it told you about is cleared (a later push fixed it); it stops looking;
  *   one failed: a notice in your Inbox names the pull request and each failing check, with what each reported
- *     against the code (github.check.annotations: the file, the line, the message), for you or a knight to fix;
- *     where the work was a knight's, it may go back to that knight, and the notice says whether (ci-back.ts).
+ *     against the code (github.check.annotations: the file, the line, the message), for you or an agent to fix;
+ *     where the work was an agent's, it may go back to that agent, and the notice says whether (ci-back.ts).
  * A fix pushed onto the branch keeps it followed, under the same notice. It writes nothing to GitHub and sends
  * nothing anywhere. What CI printed is someone else's text: it is shown as data, bounded, and a line that looks
  * like a key is left out.
@@ -128,11 +128,11 @@ export interface CiWatchOptions {
   shipped: () => ShippedPull[];
   /** One GitHub read through the connector the pull request was shipped by (<connector>.<tool>), as the node's own. */
   call: (tool: "checks" | "check.annotations" | "pull" | "pull.reviews" | "pull.comments", args: Record<string, string | number>, connector: string) => Promise<{ ok: boolean; status: number; body: string }>;
-  /** A review that asks for changes on a knight's work (ci-back.ts): whether a pull request's are worth reading, and each one read. */
+  /** A review that asks for changes on an agent's work (ci-back.ts): whether a pull request's are worth reading, and each one read. */
   reviews?: { wanted: (pull: ShippedPull) => boolean; asked: (pull: ShippedPull, review: CiReview) => void };
   /**
-   * Whether its failure goes back to the knight whose work it was: what the notice says of that (ci-back.ts), or nothing,
-   * and whether a fix is under way (then the notice is a note, for the day's digest: a knight is on it; PLAN #59).
+   * Whether its failure goes back to the agent whose work it was: what the notice says of that (ci-back.ts), or nothing,
+   * and whether a fix is under way (then the notice is a note, for the day's digest: an agent is on it; PLAN #59).
    */
   back?: (pull: ShippedPull, failure: CiFailure) => { said: string; fixing: boolean } | null;
   now?: () => number;
@@ -331,7 +331,7 @@ export class CiWatch {
       this.o.log(`ci: ${pull.owner}/${pull.repo} ${pull.branch}: not given back (${(error as Error).message})`);
     }
     const body = [`${failing.length} of ${total} checks failed: ${names.join(", ")}.`, ...(back ? [back.said] : []), ...lines].join("\n").slice(0, 600);
-    // A knight is fixing it: a note (the day's digest counts it), not a warning that needs you. Yours: a warning.
+    // An agent is fixing it: a note (the day's digest counts it), not a warning that needs you. Yours: a warning.
     const severity = back?.fixing ? "info" : "warn";
     const current = this.o.store.lww<{ title: string; body: string; severity: string } | null>(`notice:${key}`)?.value;
     if (current && current.title === title && current.body === body && current.severity === severity) return;

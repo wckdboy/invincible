@@ -198,7 +198,7 @@ describe("convergence with misbehaving signers", () => {
       reference.ingest(events);
       reference.rebuild();
       const want = snapshot(reference);
-      for (let trial = 0; trial < 3; trial++) {
+      for (let evalCase = 0; evalCase < 3; evalCase++) {
         const replica = new LedgerStore(":memory:");
         replica.expectFleet(fleet);
         const delivery = shuffle([...events, ...events.filter(() => random() < 0.1)], random);
@@ -206,7 +206,7 @@ describe("convergence with misbehaving signers", () => {
         expect(snapshot(replica)).toEqual(want);
       }
       // As sync delivers: each device's events in its own order, the devices interleaved at random.
-      for (let trial = 0; trial < 3; trial++) {
+      for (let evalCase = 0; evalCase < 3; evalCase++) {
         const replica = new LedgerStore(":memory:");
         replica.expectFleet(fleet);
         const lanes = new Map<string, GEvent[]>();

@@ -40,7 +40,7 @@ describe("standing orders: where a call went", () => {
     expect(pathArgs("POST /repos/a/b/issues/42/comments", { owner: "a", repo: "b", number: 42, body: "hi" })).toEqual(["owner", "repo", "number"]);
     expect(pathArgs("POST /api/services/light/turn_on", { domain: "light", service: "turn_on", entity_id: "light.desk" })).toEqual(["domain", "service"]);
     expect(pathArgs("DELETE /buckets/my%20bucket", { name: "my bucket" })).toEqual(["name"]);
-    expect(pathArgs("GET /search?q=galahad", { q: "galahad" })).toEqual([]);
+    expect(pathArgs("GET /search?q=primary", { q: "primary" })).toEqual([]);
   });
 
   test("a call's rows: where it went comes first and starts exact, the rest free; a delete pins everything", () => {
@@ -59,7 +59,7 @@ describe("standing orders: where a call went", () => {
   });
 
   test("an MCP call has no path: nothing is read from its target, and lists stay free", () => {
-    expect(pathArgs(issue.target, { ...issue.args, title: "galahad\"}" })).toEqual([]);
+    expect(pathArgs(issue.target, { ...issue.args, title: "primary\"}" })).toEqual([]);
     expect(rowsFromCall(issue).map((r) => [r.name, r.mode, r.pinnable])).toEqual([
       ["labels", "any", false],
       ["repo", "any", true],
@@ -115,12 +115,12 @@ describe("standing orders: where a call went", () => {
 
 describe("standing orders: rows into terms", () => {
   test("exact and pattern rows become args; free rows are omitted, or named * when every call carries them", () => {
-    const read = rowsToArgs([row("owner", "exact", "amiriteorg", true), row("repo", "any", "galahad", true), row("head", "pattern", "feat/*"), row("title", "any", "x", false, true), row("body", "any", "")], "outward");
+    const read = rowsToArgs([row("owner", "exact", "amiriteorg", true), row("repo", "any", "primary", true), row("head", "pattern", "feat/*"), row("title", "any", "x", false, true), row("body", "any", "")], "outward");
     expect(read).toEqual({ args: { owner: "amiriteorg", repo: "*", head: "feat/*", title: "*" }, free: ["repo", "title", "body"] });
   });
 
   test("where it goes: at least one path argument stays exact", () => {
-    const read = rowsToArgs([row("owner", "pattern", "amirite*", true), row("repo", "any", "galahad", true)], "outward");
+    const read = rowsToArgs([row("owner", "pattern", "amirite*", true), row("repo", "any", "primary", true)], "outward");
     expect(read).toMatchObject({ row: "owner" });
     expect("problem" in read && read.problem).toContain("at least one of owner or repo");
     expect(rowsToArgs([row("name", "any", "", true)], "outward")).toMatchObject({ problem: expect.stringContaining("Pin name") });
@@ -137,7 +137,7 @@ describe("standing orders: rows into terms", () => {
 
   test("a delete names exactly one thing", () => {
     expect(rowsToArgs([row("name", "exact", "invincible-scratch", true)], "delete")).toEqual({ args: { name: "invincible-scratch" }, free: [] });
-    expect(rowsToArgs([row("name", "pattern", "galahad-*", true)], "delete")).toMatchObject({ problem: expect.stringContaining("can't have a *") });
+    expect(rowsToArgs([row("name", "pattern", "primary-*", true)], "delete")).toMatchObject({ problem: expect.stringContaining("can't have a *") });
     expect(rowsToArgs([row("name", "any", "", true)], "delete")).toMatchObject({ problem: expect.stringContaining("exact value") });
     expect(rowsToArgs([row("name", "exact", "a", true), row("force", "any", "")], "delete")).toEqual({ args: { name: "a" }, free: ["force"] });
     expect(rowsToArgs([row("labels", "any", "", false, true, false)], "delete")).toMatchObject({ problem: expect.stringContaining("can't pin") });
@@ -147,7 +147,7 @@ describe("standing orders: rows into terms", () => {
     expect(rowsToArgs([row("repo", "pattern", "amiriteorg/*"), row("labels", "any", "", false, true, false)], "outward")).toEqual({ args: { repo: "amiriteorg/*" }, free: ["labels"] });
   });
 
-  test("callers: names separated by commas or spaces, deduplicated; empty means any of Galahad's agents", () => {
+  test("callers: names separated by commas or spaces, deduplicated; empty means any of your agent's agents", () => {
     expect(parseCallers("")).toEqual({ callers: null });
     expect(parseCallers(" claude-code, loop:release  claude-code ")).toEqual({ callers: ["claude-code", "loop:release"] });
     expect(parseCallers(Array.from({ length: 17 }, (_, i) => `a${i}`).join(","))).toMatchObject({ problem: expect.stringContaining("at most 16") });
@@ -168,7 +168,7 @@ describe("standing orders in plain words", () => {
     expect(patternWords("*-tmp")).toBe("ends with -tmp");
     expect(patternWords("*rc*")).toBe("contains rc");
     expect(patternWords("v*-rc*")).toBe("matches v*-rc*");
-    expect(patternWords("Galahad *")).toBe("starts with “Galahad ”");
+    expect(patternWords("Release *")).toBe("starts with “Release ”");
   });
 
   test("the preview sentence says who, what, how narrow and until when", () => {
@@ -178,12 +178,12 @@ describe("standing orders in plain words", () => {
       "Only claude-code may use github.pr.create without asking you for owner amiriteorg and head starting with feat/, with any repo, base and title, until Dec 10. Each call still shows up in your inbox.",
     );
     expect(orderSentence({ connector: "forge", tool: "bucket.delete", args: { name: "invincible-scratch" }, callers: null, until: "Nov 17" })).toBe(
-      "Any of Galahad's agents may use forge.bucket.delete without asking you for name invincible-scratch, until Nov 17. Each call still shows up in your inbox.",
+      "Any of your agents may use forge.bucket.delete without asking you for name invincible-scratch, until Nov 17. Each call still shows up in your inbox.",
     );
     expect(orderSentence({ connector: "forge", tool: "post", args: {}, free: ["text"], callers: ["a", "b"], until: "Feb 8" })).toBe(
       "Only a or b may use forge.post without asking you, with any text, until Feb 8. Each call still shows up in your inbox.",
     );
-    expect(whoWords([])).toBe("Any of Galahad's agents");
+    expect(whoWords([])).toBe("Any of your agents");
   });
 
   test("a label to start from names the tool and where the call went", () => {

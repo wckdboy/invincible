@@ -184,8 +184,8 @@ export interface Conversation {
    * The owner's message(s) for the answer under way, at a safe point: never between a tool call and its
    * outcome. `partial` is what the call it cut short had said (maybe nothing); null when no call was cut
    * short: the last turn ended whole (it goes back as it came), or tool outcomes were just handed back.
-   * Every provider takes an assistant message and then a user's, so that's what this is: what he said (or
-   * a pause in his own words), then your message.
+   * Every provider takes an assistant message and then a user's, so that's what this is: what it said (or
+   * a pause in its own words), then your message.
    */
   interject(texts: string[], partial: string | null): void;
   /**
@@ -198,8 +198,8 @@ export interface Conversation {
   carry?(): string | undefined;
 }
 
-/** What stands for his side of the conversation when a message arrives and he hadn't said anything yet. */
-export const INTERJECTED = "(I paused here: my liege sent a new message.)";
+/** What stands for its side of the conversation when a message arrives and it hadn't said anything yet. */
+export const INTERJECTED = "(I paused here: the owner sent a new message.)";
 
 /** Models that accept Anthropic's server-side refusal fallback ("default" routing). */
 const SERVER_FALLBACK_MODELS = new Set(["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"]);
@@ -364,7 +364,7 @@ type OpenAIMessage =
 interface OpenAIChunk {
   choices?: {
     delta?: {
-      /** A string from most; a list of parts from some (Mistral's larger models: text parts, and thinking parts that aren't his words). */
+      /** A string from most; a list of parts from some (Mistral's larger models: text parts, and thinking parts that aren't its words). */
       content?: string | { type?: string; text?: unknown }[] | null;
       reasoning_content?: string | null;
       tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string | Record<string, unknown> } }[];
@@ -450,7 +450,7 @@ export function openAIConversation(input: CompletionInput): Conversation {
       const post = (askUsage: boolean, askEffort: boolean): Promise<Response> =>
         (input.fetch ?? fetch)(`${input.provider.baseUrl}/chat/completions`, {
           method: "POST",
-          // (To a coding plan he says who he is, and which conversation this is: selfHeaders.)
+          // (To a coding plan it says who it is, and which conversation this is: selfHeaders.)
           headers: { "content-type": "application/json", ...keyHeaders(input.provider), ...selfHeaders(input.provider, session) },
           body: JSON.stringify({
             model: input.model,

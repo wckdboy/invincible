@@ -7,8 +7,8 @@ import { icon, type IconName } from "./icons.ts";
  * fanning out on hover or focus. Timers pause while you're reading. Errors stay longer and are announced
  * assertively; everything else politely.
  *
- * Their look (26 November 2026, to sit with Galahad's field): a precise surface with a hairline edge, its tone in that
- * edge and in a faint light behind its mark, never a coloured slab; one about a knight or Galahad may lead with their
+ * Their look (26 November 2026, to sit with the primary's field): a precise surface with a hairline edge, its tone in that
+ * edge and in a faint light behind its mark, never a coloured slab; one about an agent or the primary may lead with their
  * orb, small and still. One comes into focus as it rises (a few pixels, out of a slight blur, with a whisper of
  * scale) and leaves with a short fade and drop. Where motion is reduced it only appears, and goes.
  *
@@ -25,7 +25,7 @@ export interface ToastOptions {
   action?: { label: string; run: () => void };
   /** ms; 0 keeps it until dismissed. */
   duration?: number;
-  /** Who it is about, in place of the tone's mark: a knight's face or Galahad's orb (ui/orb.ts knightFace, orb), 28 px
+  /** Who it is about, in place of the tone's mark: an agent's face or the primary's orb (ui/orb.ts agentFace, orb), 28 px
    * and still, its name in the title beside it. */
   lead?: HTMLElement;
 }
@@ -68,7 +68,7 @@ function ensureToaster(): HTMLElement {
     if (from instanceof HTMLElement && !toaster?.contains(from)) cameFrom = from;
   });
   toaster.addEventListener("focusout", resume);
-  // Esc puts away the toast you are on (and nothing else hears it: it doesn't also stop him).
+  // Esc puts away the toast you are on (and nothing else hears it: it doesn't also stop it).
   toaster.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     const item = live.find((each) => each.el.contains(event.target as Node));

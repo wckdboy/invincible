@@ -212,7 +212,7 @@ export class ArchiveService {
 
   // ---- Ideas ---------------------------------------------------------------------
 
-  /** An idea, kept: yours (owner), Galahad's (agent) or an outside agent's (untrusted). Noting the same one twice is a no-op. */
+  /** An idea, kept: yours (owner), the primary's (agent) or an outside agent's (untrusted). Noting the same one twice is a no-op. */
   async noteIdea(input: { title: string; text: string; tags?: string[] }, by: { trust: Trust; who: string }): Promise<{ id: string; created: boolean }> {
     const sourceId = sha256B64u(`${by.who}\u0000${input.title}\u0000${input.text}`).slice(0, 24);
     const result = await this.store.ingest({
@@ -411,7 +411,7 @@ export class ArchiveService {
   }
 
   /**
-   * What Galahad is given from the archive for a question: the most relevant entries
+   * What the primary is given from the archive for a question: the most relevant entries
    * above a bar (by meaning: cosine similarity; by words: at least half the question's
    * terms), fenced as data. Null when nothing clears the bar.
    */

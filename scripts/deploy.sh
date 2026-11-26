@@ -7,7 +7,7 @@
 # repoint the symlink + restart); the current release and the two before it are kept.
 #
 # usage:
-#   scripts/deploy.sh <ssh-target> --found camelot [--name server]  first node of a new fleet
+#   scripts/deploy.sh <ssh-target> --found homelab [--name server]  first node of a new fleet
 #   scripts/deploy.sh <ssh-target> --join <invite> [--name server]  join an existing fleet
 #   scripts/deploy.sh <ssh-target>                                  update an existing node
 # root targets only (Invincible then runs as a dedicated `invincible` user, never as root):

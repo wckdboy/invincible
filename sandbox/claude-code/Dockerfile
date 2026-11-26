@@ -1,9 +1,9 @@
-# For trials alone (invincible trial … --variant …:agent=claude): the workshop image (../Dockerfile) with Claude Code,
+# For evals alone (invincible eval … --variant …:agent=claude): the workshop image (../Dockerfile) with Claude Code,
 # pinned and checked, so that a run can put Anthropic's own harness and Invincible's to the same tasks on the same model.
 # It runs on a roster model through the gateway, by Claude Code's documented way to another endpoint, on the
-# sandbox's scoped token: no sign-in, no subscription, no key. A knight's VM never gets it from Invincible
+# sandbox's scoped token: no sign-in, no subscription, no key. An agent's VM never gets it from Invincible
 # (packages/models/src/vendor-cli.ts): there, its owner installs and signs in the tool. Built on a sandbox host the
-# first time a trial needs it, after the workshop image it is made from. Same rules: unprivileged uid 1000, read-only
+# first time an eval needs it, after the workshop image it is made from. Same rules: unprivileged uid 1000, read-only
 # at runtime, no capabilities.
 FROM invincible/sandbox:1
 
@@ -19,7 +19,7 @@ RUN case "${TARGETARCH:-amd64}" in amd64) platform=linux-x64 sum="${CLAUDE_CODE_
  && curl -fsSL -o /tmp/claude "https://downloads.claude.ai/claude-code-releases/${CLAUDE_CODE_VERSION}/${platform}/claude" \
  && echo "${sum}  /tmp/claude" | sha256sum -c - \
  && install -m 0755 /tmp/claude /usr/local/bin/claude && rm /tmp/claude
-# It never updates itself past the pin, nor reports on itself: a trial's sandbox reaches its models and nothing else.
+# It never updates itself past the pin, nor reports on itself: an eval's sandbox reaches its models and nothing else.
 ENV DISABLE_UPDATES=1 \
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 

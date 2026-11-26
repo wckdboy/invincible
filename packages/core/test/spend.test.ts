@@ -6,7 +6,7 @@ import {
   costIndex,
   costOf,
   describeVariant,
-  galahadIndex,
+  evalIndex,
   mergeSpend,
   moneyPrices,
   parseVariant,
@@ -18,8 +18,8 @@ import {
   spendLabel,
   spendTotal,
   tokensLabel,
-  TrialRunSettings,
-  TrialSpent,
+  EvalRunSettings,
+  EvalSpent,
   type UsageLine,
   usdLabel,
   VARIANTS,
@@ -118,24 +118,24 @@ describe("money, only where a price is stated", () => {
     expect(spendLabel([line({ input: 48_210, cached: 12_000, output: 3_912, reasoning: 900 })], prices)).toBe("48.2k tokens in (12.0k cached), 3,912 out (900 reasoning) · 1 call · $0.17");
   });
 
-  test("the contracts: a price is for provider/model or provider/*; what a trial spent is read leniently", () => {
+  test("the contracts: a price is for provider/model or provider/*; what an eval spent is read leniently", () => {
     expect(PricedModel.safeParse("deepseek/deepseek-v4-pro").success).toBe(true);
     expect(PricedModel.safeParse("ollama/*").success).toBe(true);
     expect(PricedModel.safeParse("no-provider").success).toBe(false);
     expect(PriceSchema.parse({ input: 1, output: 2, currency: "USD" })).toEqual({ input: 1, output: 2 });
     expect(PriceSchema.safeParse({ input: -1, output: 2 }).success).toBe(false);
-    expect(TrialSpent.parse({ lines: [line()], more: "from a newer node" })).toEqual({ lines: [line()] });
-    expect(TrialSpent.safeParse({ lines: [{ ...line(), prompt: "never" }] }).success).toBe(false);
+    expect(EvalSpent.parse({ lines: [line()], more: "from a newer node" })).toEqual({ lines: [line()] });
+    expect(EvalSpent.safeParse({ lines: [{ ...line(), prompt: "never" }] }).success).toBe(false);
   });
 });
 
 describe("the Index beside what it cost", () => {
-  const trial = (score: number, tokens: number | null, seconds = 600, usd: number | null = null) => ({ status: "scored", score, seconds, tokens, usd });
+  const evalCase = (score: number, tokens: number | null, seconds = 600, usd: number | null = null) => ({ status: "scored", score, seconds, tokens, usd });
 
   test("quality per million tokens, per hour and per dollar, each with an interval that's the same every time", () => {
-    const trials = [trial(1, 400_000, 600, 0.8), trial(0, 500_000, 900, 1.1), trial(1, 300_000, 500, 0.5), trial(0.5, 450_000, 700, 0.9), trial(1, 350_000, 650, 0.7)];
-    const index = costIndex(trials);
-    expect(index.quality).toEqual(galahadIndex([1, 0, 1, 0.5, 1]));
+    const evals = [evalCase(1, 400_000, 600, 0.8), evalCase(0, 500_000, 900, 1.1), evalCase(1, 300_000, 500, 0.5), evalCase(0.5, 450_000, 700, 0.9), evalCase(1, 350_000, 650, 0.7)];
+    const index = costIndex(evals);
+    expect(index.quality).toEqual(evalIndex([1, 0, 1, 0.5, 1]));
     expect(index.perMTok!.mean).toBeCloseTo(3.5 / 2.0, 12);
     expect(index.perHour!.mean).toBeCloseTo(3.5 / (3350 / 3600), 12);
     expect(index.perUsd!.mean).toBeCloseTo(3.5 / 4.0, 12);
@@ -146,22 +146,22 @@ describe("the Index beside what it cost", () => {
     }
     expect(index.tokens).toBe(2_000_000);
     expect(index.usd).toBeCloseTo(4, 12);
-    expect(costIndex(trials)).toEqual(index);
+    expect(costIndex(evals)).toEqual(index);
   });
 
-  test("a trial whose cost isn't known is left out of that figure, and the figure says how many it rests on; nothing known: null", () => {
-    const index = costIndex([trial(1, 400_000), trial(0, null), trial(1, 300_000)]);
+  test("an eval whose cost isn't known is left out of that figure, and the figure says how many it rests on; nothing known: null", () => {
+    const index = costIndex([evalCase(1, 400_000), evalCase(0, null), evalCase(1, 300_000)]);
     expect(index.perMTok!.n).toBe(2);
     expect(index.perMTok!.mean).toBeCloseTo(2 / 0.7, 12);
     expect(index.perUsd).toBeNull();
     expect(index.usd).toBeNull();
-    expect(costIndex([trial(1, null), trial(0, null)]).perMTok).toBeNull();
+    expect(costIndex([evalCase(1, null), evalCase(0, null)]).perMTok).toBeNull();
     expect(ratioIndex([])).toBeNull();
-    // Crashed trials say nothing about ability or its cost.
+    // Crashed evals say nothing about ability or its cost.
     expect(costIndex([{ status: "crashed", score: 0, seconds: 5, tokens: 10, usd: 1 }]).quality.n).toBe(0);
   });
 
-  test("a trial's tokens count only when every call reported them; its money only when every one is priced too", () => {
+  test("an eval's tokens count only when every call reported them; its money only when every one is priced too", () => {
     const prices = { "p/m": { input: 1, output: 1 } };
     const t = (lines: UsageLine[]) => costed({ status: "scored", score: 1, seconds: 60, spent: { lines } }, prices);
     expect(t([line()])).toMatchObject({ tokens: 1100, usd: 0.0011 });
@@ -223,10 +223,10 @@ describe("a run's settings, and variants of the harness", () => {
     expect(() => parseVariant("mine:escalate=up")).toThrow(/escalate is on or off/);
   });
 
-  test("saying the quest's constraints again every ten commands is a switch of its own: off in the baseline, on in the variant named for it", () => {
+  test("saying the run's constraints again every ten commands is a switch of its own: off in the baseline, on in the variant named for it", () => {
     expect(VARIANTS.baseline!.remind).toBe(false);
     expect(parseVariant("remind")).toEqual({ name: "remind", options: { ...VARIANTS.baseline!, remind: true } });
-    expect(describeVariant(VARIANTS.remind!)).toBe("the quest's constraints said again every ten commands");
+    expect(describeVariant(VARIANTS.remind!)).toBe("the run's constraints said again every ten commands");
     for (const [name, options] of Object.entries(VARIANTS)) expect([name, options.remind]).toEqual([name, name === "remind"]);
     expect(parseVariant("mine:remind=on,escalate=on").options).toEqual({ ...VARIANTS.baseline!, remind: true, escalate: true });
     expect(() => parseVariant("mine:remind=often")).toThrow(/remind is on or off/);
@@ -260,7 +260,7 @@ describe("a run's settings, and variants of the harness", () => {
     for (const [name, options] of Object.entries(VARIANTS)) expect([name, options.tools]).toEqual([name, name === "tools"]);
   });
 
-  test("a coding tool alone is three switches, each its own: who does the work, a plan, a reviewer; the opencode variant turns all of Galahad off", () => {
+  test("a coding tool alone is three switches, each its own: who does the work, a plan, a reviewer; the opencode variant turns all of your agent off", () => {
     expect([VARIANTS.baseline!.agent, VARIANTS.baseline!.planner, VARIANTS.baseline!.review]).toEqual([null, true, true]);
     expect(VARIANTS.opencode).toEqual({ ...VARIANTS.bare!, agent: "opencode", planner: false, review: false });
     expect(describeVariant(VARIANTS.opencode!)).toBe("gates off, no archive context, no revisions, opencode does the work, no plan, no reviewer");
@@ -276,22 +276,22 @@ describe("a run's settings, and variants of the harness", () => {
   test("a run recorded before a switch existed still reads as it was run (a new switch off, its planner and reviewer on): nothing recorded is refused or changed by a new one", () => {
     // A run's settings as the log holds them from before 14 November 2026: six switches, no notes store.
     const old = { effort: 1, parallel: 2, variant: { name: "no-gates", options: { gates: false, plannerGates: false, effort: 1 as const, skills: false, archive: true, revisions: 2 } }, seed: 9, group: "g-old1" };
-    const read = TrialRunSettings.parse(old);
+    const read = EvalRunSettings.parse(old);
     expect(read.variant).toEqual({ name: "no-gates", options: { ...old.variant.options, engram: false, diff: false, escalate: false, remind: false, keepReads: false, tools: false, contract: false, agent: null, planner: true, review: true } });
     expect(read.variant!.options).toEqual(VARIANTS["no-gates"]!);
     expect(describeVariant(read.variant!.options)).toBe("gates off");
     // An older terminal's request to start a run names six switches too: taken, with the store off.
-    const asked = routes.startTrialRun.input.parse({ run: "r-old1", suite: "agentic", effort: 1, variant: old.variant });
+    const asked = routes.startEvalRun.input.parse({ run: "r-old1", suite: "agentic", effort: 1, variant: old.variant });
     expect(asked.variant!.options.engram).toBe(false);
     expect(asked.variant!.options.diff).toBe(false);
     expect(asked.variant!.options.escalate).toBe(false);
     // Still strict about what it doesn't know.
-    expect(routes.startTrialRun.input.safeParse({ run: "r-old1", suite: "agentic", effort: 1, variant: { name: "x", options: { ...old.variant.options, warp: true } } }).success).toBe(false);
+    expect(routes.startEvalRun.input.safeParse({ run: "r-old1", suite: "agentic", effort: 1, variant: { name: "x", options: { ...old.variant.options, warp: true } } }).success).toBe(false);
   });
 
   test("settings are read leniently: what a newer node adds is left out, never refused", () => {
-    const read = TrialRunSettings.parse({ effort: 2, parallel: 4, pins: { engineer: "p/m" }, variant: { name: "mine", options: { ...VARIANTS.baseline!, warp: 9 } }, seed: 7, group: "g-abc", budget: { tokens: 1000 }, later: true });
+    const read = EvalRunSettings.parse({ effort: 2, parallel: 4, pins: { engineer: "p/m" }, variant: { name: "mine", options: { ...VARIANTS.baseline!, warp: 9 } }, seed: 7, group: "g-abc", budget: { tokens: 1000 }, later: true });
     expect(read).toEqual({ effort: 2, parallel: 4, pins: { engineer: "p/m" }, variant: { name: "mine", options: VARIANTS.baseline! }, seed: 7, group: "g-abc", budget: { tokens: 1000 } });
-    expect(TrialRunSettings.parse({ effort: 3 })).toEqual({ effort: 3 });
+    expect(EvalRunSettings.parse({ effort: 3 })).toEqual({ effort: 3 });
   });
 });

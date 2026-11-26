@@ -8,21 +8,21 @@ import { type Ctx, errorMessage, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
-import { knightOfCaller } from "../lib/roster.ts";
+import { agentOfCaller } from "../lib/roster.ts";
 import { costWords, type GateRow, liveStep, type Proof, proofOf, type StepGroup, stepGroups, summaryWords, workedFor, workSummary } from "../lib/steps.ts";
 import { sensitiveLine, steppedLine, taskActions, taskEnd } from "../lib/task-card.ts";
 import { teamSpeaker } from "../lib/team.ts";
 import { giveAgain } from "../lib/timeline.ts";
 import { relativeTime } from "../lib/time.ts";
 import { emptyTrail, takeTrail, type Trail, trailNext, type TrailPage } from "../lib/trail.ts";
-import { byAttention, projectsOfKnights, seenOnOpen, shortSpan, taskState } from "../lib/work.ts";
+import { byAttention, projectsOfAgents, seenOnOpen, shortSpan, taskState } from "../lib/work.ts";
 import { setTaskDetailsShown, taskDetailsShown } from "../prefs.ts";
 import { button, callout, dot, empty, errorState, skeletonBlock } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { cx, h, keepPlace, replace, type Child } from "../ui/dom.ts";
 import { icon, type IconName } from "../ui/icons.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
-import { knightFace, orb } from "../ui/orb.ts";
+import { agentFace, orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
 import { askItem } from "./needs.ts";
 import { controlTeam, giveTask, shipTask } from "./team-forms.ts";
@@ -32,24 +32,24 @@ import { openWorkspace } from "./workspace.ts";
 
 /*
  * A task as a thread of its own (#/task/<id>; your words, 26 November 2026: "project/tasks/coding t3code style for the
- * knights"), as T3 Code has a thread: what it is in a crumb (its project, its title), the brief and who gave it, its
- * knight's work folded into steps ("Worked for 6m 12s ›": read 6 files, edited 3, ran 14 commands; while it works, the
- * steps as they come and one live line), an outward step asking in place, what the knight said, and then, apart from
- * the knight's words and in its own colour, what proves it (the Verified card: each gate's command and how it ended, the
+ * [agents]"), as T3 Code has a thread: what it is in a crumb (its project, its title), the brief and who gave it, its
+ * agent's work folded into steps ("Worked for 6m 12s ›": read 6 files, edited 3, ran 14 commands; while it works, the
+ * steps as they come and one live line), an outward step asking in place, what the agent said, and then, apart from
+ * the agent's words and in its own colour, what proves it (the Verified card: each gate's command and how it ended, the
  * reviewer that didn't write it, its changes, its cost, and Ship it). Beside it on a wide screen, and in a sheet on a
- * phone, its details: the knight's VM, where its work began, its changes, its gates as they run, the reviewer, its cost
+ * phone, its details: the agent's VM, where its work began, its changes, its gates as they run, the reviewer, its cost
  * against its budget, and what waits on it.
  *
- * Everything is what the app already reads: the team (the task, its knight, what depends on it), the task's trail
- * (POST /api/team/trail: the runner's own lines, never the knight's account; lib/steps.ts reads them), its conversation
+ * Everything is what the app already reads: the team (the task, its agent, what depends on it), the task's trail
+ * (POST /api/team/trail: the runner's own lines, never the agent's account; lib/steps.ts reads them), its conversation
  * (POST /api/team/room), its changes (POST /api/team/changes, where this device may look into a VM), your prices.
  */
 
 /** A running task's new lines are asked for this often while it is on screen and the app is in front. */
 const EVERY_MS = 1500;
 
-/** The knight's own conversation (its direct room), where its Workspace is. */
-const directRoom = (snapshot: TeamSnapshot, knight: string): TeamRoom | undefined => snapshot.rooms.find((room) => room.direct && room.members.length === 1 && room.members[0] === knight);
+/** The agent's own conversation (its direct room), where its Workspace is. */
+const directRoom = (snapshot: TeamSnapshot, agent: string): TeamRoom | undefined => snapshot.rooms.find((room) => room.direct && room.members.length === 1 && room.members[0] === agent);
 
 /** What was said in the task's conversation from when it was given until the next task given there. */
 function conversationOf(room: TeamRoomView | null, task: TeamTask): TeamMessage[] {
@@ -58,12 +58,12 @@ function conversationOf(room: TeamRoomView | null, task: TeamTask): TeamMessage[
   return room.messages.filter((message) => message.createdAt >= task.createdAt && message.createdAt < next && message.speaker !== "system");
 }
 
-/** Who gave it, and how, in a line (the dispatch): Galahad or you to the Roundtable, a knight's proposal, or by name. */
-function dispatchWords(task: TeamTask, knight: string, proposer: string | null): string {
+/** Who gave it, and how, in a line (the dispatch): the primary or you to the agents, an agent's proposal, or by name. */
+function dispatchWords(task: TeamTask, agent: string, proposer: string | null): string {
   if (task.proposedBy) return task.status === "proposed" ? `${proposer ?? task.proposedBy} proposes it: it starts when you approve it.` : `${proposer ?? task.proposedBy} proposed it, and it was approved.`;
-  if (task.givenBy === "galahad") return `Galahad gave it to the Roundtable, and ${knight} took it as best suited.`;
-  if (task.givenBy === "owner") return `You gave it to the Roundtable, and ${knight} took it as best suited.`;
-  return `Given to ${knight} by name.`;
+  if (task.givenBy === "primary") return `Your agent gave it to the agents, and ${agent} took it as best suited.`;
+  if (task.givenBy === "owner") return `You gave it to the agents, and ${agent} took it as best suited.`;
+  return `Given to ${agent} by name.`;
 }
 
 const GATE_ICON: Record<GateRow["state"], IconName> = { passed: "check", failed: "x", running: "play", waiting: "clock" };
@@ -105,7 +105,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   const liveLine = h("div", { class: "thread-live", role: "status", hidden: true });
   const details = h("aside", { class: "thread-details", "aria-label": "The task's details" });
 
-  // ---- the message box: words to the knight, in the task's conversation ----
+  // ---- the message box: words to the agent, in the task's conversation ----
   const input = h("textarea", { rows: 1, maxlength: TEAM_LIMITS.message, placeholder: "Message…", "aria-label": "Message", autocomplete: "off", enterkeyhint: "send" });
   const hint = h("span", { class: "hint grow ellipsis" });
   const problem = h("div", { class: "team-send-error", role: "status" });
@@ -129,16 +129,16 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   replace(head, h("a", { class: "btn ghost sm icon-only pane-back", href: "#/home", "aria-label": "Home" }, icon("chevron-left", { size: 16 })), h("div", { class: "grow stack snug", "aria-hidden": "true" }, h("div", { class: "skeleton thread-head-name" }), h("div", { class: "skeleton sk-line thread-head-line" })));
   replace(thread, skeletonBlock(64), skeletonBlock(160));
 
-  /** The task, its knight and its project, as the team has them now (null: not yet known, or no such task). */
+  /** The task, its agent and its project, as the team has them now (null: not yet known, or no such task). */
   const now = () => {
     const snapshot = ctx.live.team.value;
     if (!snapshot || !id) return null;
     const task = snapshot.tasks.find((one) => one.id === id);
     if (!task) return null;
-    const knight = snapshot.teammates.find((person) => person.id === task.assignee);
-    const name = knight?.name ?? snapshot.removed?.find((person) => person.id === task.assignee)?.name ?? task.assignee;
-    const project = projectsOfKnights(snapshot.teammates, projectNames.value)(task.assignee);
-    return { snapshot, task, knight, name, project };
+    const agent = snapshot.agents.find((person) => person.id === task.assignee);
+    const name = agent?.name ?? snapshot.removed?.find((person) => person.id === task.assignee)?.name ?? task.assignee;
+    const project = projectsOfAgents(snapshot.agents, projectNames.value)(task.assignee);
+    return { snapshot, task, agent, name, project };
   };
   type Now = NonNullable<ReturnType<typeof now>>;
 
@@ -205,7 +205,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   function readChanges(n: Now): void {
     // Looking into a VM is a sandbox device's; asked once, and again when the work has moved on (ended, or kept).
     const at = `${n.task.status}/${n.task.changes?.artifact ?? ""}`;
-    if (!ctx.can("sandbox") || !n.knight?.repository || changesAt === at || n.task.status === "proposed" || n.task.status === "queued") return;
+    if (!ctx.can("sandbox") || !n.agent?.repository || changesAt === at || n.task.status === "proposed" || n.task.status === "queued") return;
     changesAt = at;
     ctx.api.post<TeamChangesView>("/api/team/changes", { id: n.task.assignee, task: n.task.id }, scope.signal).then(
       (answer) => {
@@ -232,10 +232,10 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
       // The team couldn't be read: said so, with a way to ask again (not "no such task", which it can't know yet).
       if (!snapshot) {
         replace(head, backHome(), h("div", { class: "thread-crumb grow" }, h("h1", { class: "thread-title" }, "The work can't be read just now")));
-        replace(thread, errorState("Couldn't reach the Roundtable", ctx.live.teamProblem.value, () => void ctx.live.refreshTeam()));
+        replace(thread, errorState("Couldn't reach the agents", ctx.live.teamProblem.value, () => void ctx.live.refreshTeam()));
         return;
       }
-      // No such task here (given on another node, or its knight removed), or none at all yet: said where the thread is.
+      // No such task here (given on another node, or its agent removed), or none at all yet: said where the thread is.
       composerWrap.hidden = true;
       liveLine.hidden = true;
       details.hidden = true;
@@ -246,7 +246,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
         empty({
           icon: "layers",
           title: id ? "Nothing to show" : "Nothing given yet",
-          body: id ? "It may have been given on another node, or its knight was removed. Home has the work, by what needs you." : "Each task you or Galahad give a knight has a thread of its own here.",
+          body: id ? "It may have been given on another node, or its agent was removed. Home has the work, by what needs you." : "Each task you or your agent give an agent has a thread of its own here.",
           actions: h("a", { class: "btn", href: "#/home" }, "Home"),
         }),
       );
@@ -288,13 +288,13 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
 
   function drawHead(n: Now, force = false): void {
     const working = n.task.status === "running";
-    const version = JSON.stringify([n.task.title, n.project, n.name, n.knight?.avatar, working, shownDetails, wide.matches]);
+    const version = JSON.stringify([n.task.title, n.project, n.name, n.agent?.avatar, working, shownDetails, wide.matches]);
     if (version === headVersion && !force) return;
     headVersion = version;
     const direct = directRoom(n.snapshot, n.task.assignee);
     const state = taskState(n.task);
-    // The knight's orb: moving while it works (the orb in focus), still otherwise.
-    const face = h("span", { class: "thread-head-face" }, knightFace({ id: n.task.assignee, profile: n.knight?.avatar, size: 28, mood: working ? orbMoodOfState("working") : undefined, label: `${n.name}${working ? ", working" : ""}`, key: `task:${n.task.assignee}` }));
+    // The agent's orb: moving while it works (the orb in focus), still otherwise.
+    const face = h("span", { class: "thread-head-face" }, agentFace({ id: n.task.assignee, profile: n.agent?.avatar, size: 28, mood: working ? orbMoodOfState("working") : undefined, label: `${n.name}${working ? ", working" : ""}`, key: `task:${n.task.assignee}` }));
     keepPlace(head, () =>
       replace(
         head,
@@ -310,8 +310,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
         h(
           "div",
           { class: "actions thread-head-acts" },
-          // Its knight's desktop and terminal, watched and taken over, in its Workspace.
-          direct && n.knight?.workspace ? h("a", { class: "btn ghost sm thread-workspace", href: hashOf("team", { room: direct.id, teamTab: "workspace" }), title: `${n.name}'s Workspace: its desktop to watch and take over, a terminal, its files` }, icon("monitor", { size: 15 }), h("span", { class: "label" }, "Workspace")) : null,
+          // Its agent's desktop and terminal, watched and taken over, in its Workspace.
+          direct && n.agent?.workspace ? h("a", { class: "btn ghost sm thread-workspace", href: hashOf("team", { room: direct.id, teamTab: "workspace" }), title: `${n.name}'s Workspace: its desktop to watch and take over, a terminal, its files` }, icon("monitor", { size: 15 }), h("span", { class: "label" }, "Workspace")) : null,
           detailsToggle(),
         ),
         face,
@@ -337,7 +337,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     );
   };
 
-  /** What proves it, apart from what the knight says: the Verified card, or why it isn't verified. */
+  /** What proves it, apart from what the agent says: the Verified card, or why it isn't verified. */
   function proofCard(n: Now, proof: Proof): HTMLElement | null {
     const task = n.task;
     if (task.status !== "done" && task.status !== "failed") return null;
@@ -387,7 +387,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
           ? h(
               "span",
               { class: "proof-changes" },
-              n.knight && ctx.can("sandbox") ? h("button", { type: "button", class: "link-button", onclick: () => openWorkspace(ctx, { id: task.assignee, name: n.name }, "changes", task.id) }, `${files} file${files === 1 ? "" : "s"} · Review`, icon("chevron-right", { size: 12 })) : `${files} file${files === 1 ? "" : "s"} kept`,
+              n.agent && ctx.can("sandbox") ? h("button", { type: "button", class: "link-button", onclick: () => openWorkspace(ctx, { id: task.assignee, name: n.name }, "changes", task.id) }, `${files} file${files === 1 ? "" : "s"} · Review`, icon("chevron-right", { size: 12 })) : `${files} file${files === 1 ? "" : "s"} kept`,
               added !== null ? h("span", { class: "tnum proof-diff" }, " ", h("span", { "data-tone": "ok", class: "toned" }, `+${added}`), " ", h("span", { "data-tone": "failed", class: "toned" }, `−${removed}`)) : null,
             )
           : h("span", { class: "subtle" }, "No changes kept"),
@@ -424,7 +424,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const summary = workSummary(entries, task.record);
     const proof = proofOf(task, entries);
     const running = task.status === "running";
-    const asks = running ? ctx.live.actions.value.filter((action) => isWaiting(action) && knightOfCaller(action.by) === task.assignee) : [];
+    const asks = running ? ctx.live.actions.value.filter((action) => isWaiting(action) && agentOfCaller(action.by) === task.assignee) : [];
     const said = taskEnd(task)?.said ?? null;
     const talk = conversationOf(room, task);
     const dependents = n.snapshot.tasks.filter((other) => other.dependsOn.includes(task.id));
@@ -432,10 +432,10 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const version = JSON.stringify([task, entries.length, entries.at(-1)?.n, asks.map((a) => a.id), talk.map((m) => m.id), Boolean(prices), changes?.files.length, n.name, n.project.name, dependents.map((d) => [d.id, d.status]), Math.floor(Date.now() / 60_000)]);
     if (version === threadVersion && !force) return;
     threadVersion = version;
-    const proposer = task.proposedBy ? (n.snapshot.teammates.find((person) => person.id === task.proposedBy)?.name ?? (task.proposedBy === "galahad" ? "Galahad" : task.proposedBy)) : null;
+    const proposer = task.proposedBy ? (n.snapshot.agents.find((person) => person.id === task.proposedBy)?.name ?? (task.proposedBy === "primary" ? "Your agent" : task.proposedBy)) : null;
     const nearEnd = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
     const startedAgo = shortSpan(Date.now() - task.createdAt);
-    const facts = [sensitiveLine(task), steppedLine(task), task.outcome ? "A step of an outcome Galahad owns" : null, task.fix ? `It fixes pull request ${task.fix.pr ? `#${task.fix.pr}` : task.fix.branch}` : null, task.from ? `Started where step ${task.from.step} of another task left its files` : null].filter(Boolean);
+    const facts = [sensitiveLine(task), steppedLine(task), task.outcome ? "A step of an outcome your agent owns" : null, task.fix ? `It fixes pull request ${task.fix.pr ? `#${task.fix.pr}` : task.fix.branch}` : null, task.from ? `Started where step ${task.from.step} of another task left its files` : null].filter(Boolean);
     const work: Child[] = [];
     if (groups.length) {
       const list = h("ol", { class: "thread-steps" }, ...groups.map(groupEl));
@@ -455,7 +455,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
       replace(
         thread,
         // Who gave it, and how; then the brief itself.
-        h("p", { class: "thread-dispatch" }, task.givenBy === "galahad" || task.proposedBy === "galahad" ? orb({ size: 18 }) : icon(task.proposedBy ? "lightbulb" : "layers", { size: 15 }), h("span", {}, dispatchWords(task, n.name, proposer), " ", h("time", { class: "subtle", datetime: new Date(task.createdAt).toISOString(), title: new Date(task.createdAt).toLocaleString() }, relativeTime(task.createdAt)))),
+        h("p", { class: "thread-dispatch" }, task.givenBy === "primary" || task.proposedBy === "primary" ? orb({ size: 18 }) : icon(task.proposedBy ? "lightbulb" : "layers", { size: 15 }), h("span", {}, dispatchWords(task, n.name, proposer), " ", h("time", { class: "subtle", datetime: new Date(task.createdAt).toISOString(), title: new Date(task.createdAt).toLocaleString() }, relativeTime(task.createdAt)))),
         h("section", { class: "thread-brief", "aria-label": "The brief" }, h("p", { class: "pre-wrap" }, task.goal)),
         facts.length ? h("p", { class: "thread-facts subtle" }, facts.join(" · ")) : null,
         dependents.length ? h("p", { class: "thread-facts subtle" }, `${dependents.map((other) => `“${other.title}”`).join(", ")} ${dependents.length === 1 ? "waits" : "wait"} on it.`) : null,
@@ -474,13 +474,13 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
         task.status === "queued" && canAct
           ? h("div", { class: "thread-ask" }, button("Stop it", { variant: "ghost", size: "sm", icon: "stop", onClick: () => void controlTeam(ctx, { task: task.id, action: "stop" }) }))
           : null,
-        // What the knight said of it: its own words, never the proof.
-        said ? h("section", { class: "thread-said", "aria-label": `What ${n.name} said` }, h("div", { class: "thread-said-by" }, knightFace({ id: task.assignee, profile: n.knight?.avatar, size: 16 }), h("strong", {}, n.name), h("span", { class: "subtle" }, " said")), h("div", { class: "md" }, renderMarkdown(said))) : null,
+        // What the agent said of it: its own words, never the proof.
+        said ? h("section", { class: "thread-said", "aria-label": `What ${n.name} said` }, h("div", { class: "thread-said-by" }, agentFace({ id: task.assignee, profile: n.agent?.avatar, size: 16 }), h("strong", {}, n.name), h("span", { class: "subtle" }, " said")), h("div", { class: "md" }, renderMarkdown(said))) : null,
         proofCard(n, proof),
-        // What was said in its conversation since: your words and the knight's replies.
+        // What was said in its conversation since: your words and the agent's replies.
         ...talk.map((message) => {
           const owner = message.speaker === "owner";
-          const speaker = teamSpeaker(message, n.snapshot.teammates);
+          const speaker = teamSpeaker(message, n.snapshot.agents);
           return h(
             "article",
             { class: cx("thread-message", owner && "owner"), "aria-label": `${speaker} said` },
@@ -513,12 +513,12 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     liveTick = setInterval(() => (since.textContent = clock(Date.now() - step.since)), 1000);
   }
 
-  /** The details: the knight's VM, where its work began, its changes, its gates as they run, the reviewer, its cost, what
+  /** The details: the agent's VM, where its work began, its changes, its gates as they run, the reviewer, its cost, what
    * waits on it. Beside the thread on a wide screen; a sheet on a phone. */
   function detailsBody(n: Now): HTMLElement {
     const task = n.task;
     const proof = proofOf(task, trail.entries);
-    const vm = n.knight?.workspace ?? null;
+    const vm = n.agent?.workspace ?? null;
     const node = vm ? (vm.node === ctx.whoami.node ? "this node" : (ctx.live.fleet.value?.devices.find((device) => device.id === vm.node)?.name ?? "another node")) : null;
     const direct = directRoom(n.snapshot, task.assignee);
     const added = changes ? changes.files.reduce((sum, file) => sum + (file.added ?? 0), 0) : null;
@@ -528,7 +528,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const kv = (iconName: IconName | HTMLElement, value: Child, end: Child = null, label?: string) =>
       h("div", { class: "td-row", "aria-label": label ?? null }, h("span", { class: "td-icon", "aria-hidden": "true" }, typeof iconName === "string" ? icon(iconName, { size: 14 }) : iconName), h("span", { class: "td-value ellipsis" }, value), end ? h("span", { class: "td-end" }, end) : null);
     const reviewerWords = { passed: "passed it", "sent back": "sent it back", reading: "is reading it", waits: "waits for the gates", none: "not reached" }[proof.reviewer];
-    const shipWords = task.shipped ? (task.shipped.pr ? `Pull request #${task.shipped.pr}` : "Shipped") : task.status === "done" && task.verified && task.changes && !task.fix ? "Ready to ship" : task.fix ? `Onto ${task.fix.branch} when verified` : task.changes || n.knight?.repository ? "Ship it when verified" : "Nothing to ship: no repository";
+    const shipWords = task.shipped ? (task.shipped.pr ? `Pull request #${task.shipped.pr}` : "Shipped") : task.status === "done" && task.verified && task.changes && !task.fix ? "Ready to ship" : task.fix ? `Onto ${task.fix.branch} when verified` : task.changes || n.agent?.repository ? "Ship it when verified" : "Nothing to ship: no repository";
     return h(
       "div",
       { class: "td" },
@@ -547,12 +547,12 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
               )
             : null,
         ),
-        kv("code", task.fix ? h("span", { class: "mono" }, task.fix.branch) : task.changes ? h("span", { class: "mono" }, `from ${task.changes.base.slice(0, 10)}`) : h("span", { class: "subtle" }, n.knight?.repository ? "its repository, as fetched" : "no repository"), task.from ? `step ${task.from.step}` : null),
+        kv("code", task.fix ? h("span", { class: "mono" }, task.fix.branch) : task.changes ? h("span", { class: "mono" }, `from ${task.changes.base.slice(0, 10)}`) : h("span", { class: "subtle" }, n.agent?.repository ? "its repository, as fetched" : "no repository"), task.from ? `step ${task.from.step}` : null),
         kv(
           "file",
           fileCount !== null ? `Changes · ${fileCount} file${fileCount === 1 ? "" : "s"}` : h("span", { class: "subtle" }, task.status === "running" ? "Changes as it works" : "No changes kept"),
           added !== null && fileCount
-            ? n.knight && ctx.can("sandbox")
+            ? n.agent && ctx.can("sandbox")
               ? h("button", { type: "button", class: "link-button tnum", onclick: () => openWorkspace(ctx, { id: task.assignee, name: n.name }, "changes", task.id) }, h("span", { "data-tone": "ok", class: "toned" }, `+${added}`), " ", h("span", { "data-tone": "failed", class: "toned" }, `−${removed}`), icon("chevron-right", { size: 12 }))
               : h("span", { class: "tnum" }, `+${added} −${removed}`)
             : null,
@@ -577,7 +577,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
         "div",
         { class: "td-sec" },
         h("div", { class: "td-label" }, h("span", {}, "This task"), h("span", { class: "tnum" }, prices || !task.record ? costWords(task, prices ?? {}) || "no budget" : "")),
-        ...dependents.map((other) => kv(knightFace({ id: other.assignee, profile: n.snapshot.teammates.find((person) => person.id === other.assignee)?.avatar, size: 16 }), `“${other.title}” waits on it`, other.status, `“${other.title}” waits on it`)),
+        ...dependents.map((other) => kv(agentFace({ id: other.assignee, profile: n.snapshot.agents.find((person) => person.id === other.assignee)?.avatar, size: 16 }), `“${other.title}” waits on it`, other.status, `“${other.title}” waits on it`)),
         kv("external", shipWords, task.shipped ? h("a", { href: task.shipped.url, target: "_blank", rel: "noopener noreferrer" }, "Open") : null),
       ),
     );
@@ -588,7 +588,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     if (!n || !trailRead) return;
     details.hidden = !wide.matches || !shownDetails;
     if (details.hidden) return;
-    const version = JSON.stringify([n.task, trail.after, Boolean(prices), changes?.files.length, n.knight?.workspace, n.snapshot.tasks.filter((other) => other.dependsOn.includes(n.task.id)).map((other) => [other.id, other.status])]);
+    const version = JSON.stringify([n.task, trail.after, Boolean(prices), changes?.files.length, n.agent?.workspace, n.snapshot.tasks.filter((other) => other.dependsOn.includes(n.task.id)).map((other) => [other.id, other.status])]);
     if (version === detailsVersion && !force) return;
     detailsVersion = version;
     keepPlace(details, () => replace(details, detailsBody(n)));
@@ -646,7 +646,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   function markRead(n: Now): void {
     if (document.hidden || !trailRead) return;
     const mark = seenOnOpen(n.task.id, n.snapshot);
-    const asked = JSON.stringify([mark, n.snapshot.seen?.[`knight:${n.task.assignee}`]]);
+    const asked = JSON.stringify([mark, n.snapshot.seen?.[`agent:${n.task.assignee}`]]);
     if (!mark || asked === marked) return;
     marked = asked;
     void ctx.api.post("/api/team/seen", mark).then(() => ctx.live.refreshTeam(), () => {});

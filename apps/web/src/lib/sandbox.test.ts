@@ -46,8 +46,8 @@ describe("a Mac's sandboxes (Apple's container)", () => {
     expect(isolationPlan("auto", "gateway", mini).send).toBeUndefined();
   });
 
-  test("an isolated one isn't made on a Mac: placed by Galahad it goes to a Linux host, and on the Mac itself it is refused", () => {
-    expect(isolationPlan("auto", "isolated", mini).note).toBe("mini is a Mac, which makes no sandbox with no network at all: placed by Galahad, it goes to a Linux host with Docker; asked of mini, it is refused.");
+  test("an isolated one isn't made on a Mac: placed by your agent it goes to a Linux host, and on the Mac itself it is refused", () => {
+    expect(isolationPlan("auto", "isolated", mini).note).toBe("mini is a Mac, which makes no sandbox with no network at all: placed by your agent, it goes to a Linux host with Docker; asked of mini, it is refused.");
   });
 
   test("a Mac with container makes sandboxes; one without, as before, only with Docker", () => {
@@ -92,7 +92,7 @@ describe("sandbox disks", () => {
 
 describe("what a sandbox may reach through its gateway", () => {
   test("web search is named for what it is, not shown as models", () => {
-    expect(gatewayUse("search")).toEqual({ kind: "search", label: "web search", title: "May search the web through Galahad's own search engine" });
+    expect(gatewayUse("search")).toEqual({ kind: "search", label: "web search", title: "May search the web through your agent's own search engine" });
     expect(gatewayUse("anthropic")).toEqual({ kind: "models", label: "anthropic", title: "May use anthropic's models (your key stays in the vault)" });
   });
 });

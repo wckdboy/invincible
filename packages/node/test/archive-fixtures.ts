@@ -3,7 +3,7 @@ import { normalize } from "@invincible/models";
 /*
  * Test stand-ins for the archive: a deterministic embedder that understands a few
  * concepts (so "automobile" finds a passage about cars that shares no word with it), and
- * a hostile web page that tries to give Galahad orders. Nothing here is a real key.
+ * a hostile web page that tries to give the primary orders. Nothing here is a real key.
  */
 
 /** Words that mean the same thing share a dimension; every other word hashes into the rest. */
@@ -60,7 +60,7 @@ export function embeddingsServer(): { url: string; calls: { input: string[] }[];
   return { url: `http://127.0.0.1:${server.port}/v1`, calls, stop: () => server.stop(true), fail };
 }
 
-/** A web page someone wrote to take Galahad over. */
+/** A web page someone wrote to take the primary over. */
 export const HOSTILE_PAGE = `Sourdough baking guide.
 Feed the starter twice a day and bake the loaf hot.
 

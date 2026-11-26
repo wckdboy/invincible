@@ -4,7 +4,7 @@ import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../src/inde
 
 /*
  * What model calls cost, in the log: your prices (the latest for each model stands)
- * and what a trial spent (once, beside its trial, by the node that ran it). Who may
+ * and what an eval spent (once, beside its eval, by the node that ran it). Who may
  * write each, and that every replica agrees whatever order they arrive in.
  */
 
@@ -41,7 +41,7 @@ function fleet(now?: () => number) {
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const storeA = new LedgerStore(":memory:", now ? new HlcClock(now) : undefined);
-  foundFleet(storeA, a, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(storeA, a, { fleetName: "homelab", nodeName: "ultra" });
   enrollDevice(storeA, a, { device: b.id, name: "rack", kind: "node", box: b64u(b.boxPublic) });
   const storeB = new LedgerStore(":memory:", now ? new HlcClock(now) : undefined);
   storeB.expectFleet(storeA.fleet!);
@@ -49,7 +49,7 @@ function fleet(now?: () => number) {
   return { a, b, storeA, storeB };
 }
 
-const trialId = (n: number) => `tr_${String(n).padStart(22, "0")}`;
+const evalId = (n: number) => `tr_${String(n).padStart(22, "0")}`;
 const record = (run = "r-abc") => ({
   run,
   suite: "engineering",
@@ -110,24 +110,24 @@ describe("what a model was seen to do", () => {
   });
 });
 
-describe("what a trial spent", () => {
-  test("recorded once, beside its trial, by the node that ran it", () => {
+describe("what an eval spent", () => {
+  test("recorded once, beside its eval, by the node that ran it", () => {
     const { a, b, storeA, storeB } = fleet();
-    // No trial yet: nothing to be beside.
-    expect(() => storeA.emit(a, "trial.spent", { trial: trialId(1), spent: lines(900) })).toThrow(/no such trial/);
-    storeA.emit(a, "trial.scored", { id: trialId(1), ...record() });
-    storeA.emit(a, "trial.spent", { trial: trialId(1), spent: lines(900) });
+    // No eval yet: nothing to be beside.
+    expect(() => storeA.emit(a, "eval.spent", { evalCase: evalId(1), spent: lines(900) })).toThrow(/no such eval/);
+    storeA.emit(a, "eval.scored", { id: evalId(1), ...record() });
+    storeA.emit(a, "eval.spent", { evalCase: evalId(1), spent: lines(900) });
     // The first stands.
-    expect(() => storeA.emit(a, "trial.spent", { trial: trialId(1), spent: lines(5) })).toThrow(/already recorded/);
+    expect(() => storeA.emit(a, "eval.spent", { evalCase: evalId(1), spent: lines(5) })).toThrow(/already recorded/);
     syncInto(storeA, storeB);
-    // Another node can't say what this node's trial cost.
-    storeA.emit(a, "trial.scored", { id: trialId(2), ...record() });
+    // Another node can't say what this node's eval cost.
+    storeA.emit(a, "eval.scored", { id: evalId(2), ...record() });
     syncInto(storeA, storeB);
-    expect(() => storeB.emit(b, "trial.spent", { trial: trialId(2), spent: lines(1) })).toThrow(/only the node that ran a trial/);
-    expect(storeB.lww<{ lines: { input: number }[] }>(`trial-spent:${trialId(1)}`)?.value?.lines[0]?.input).toBe(900);
-    expect(storeB.lww(`trial-spent:${trialId(2)}`)).toBeNull();
-    // The trial itself is untouched by it: a node that doesn't know the kind still has the trial.
-    expect(storeB.lww<{ score: number }>(`trial:${trialId(1)}`)?.value?.score).toBe(1);
+    expect(() => storeB.emit(b, "eval.spent", { evalCase: evalId(2), spent: lines(1) })).toThrow(/only the node that ran an eval/);
+    expect(storeB.lww<{ lines: { input: number }[] }>(`eval-spent:${evalId(1)}`)?.value?.lines[0]?.input).toBe(900);
+    expect(storeB.lww(`eval-spent:${evalId(2)}`)).toBeNull();
+    // The eval itself is untouched by it: a node that doesn't know the kind still has the eval.
+    expect(storeB.lww<{ score: number }>(`eval:${evalId(1)}`)?.value?.score).toBe(1);
   });
 });
 
@@ -148,18 +148,18 @@ describe("convergence", () => {
         store.emit(id, "price.set", { model: "deepseek/deepseek-v4-pro", price: { input: 0.5 + i / 10, output: 2 } });
         store.emit(id, "price.set", { model: `local-${name}/*`, price: { input: 0, output: 0 } });
         if (i % 3 === 2) store.emit(id, "price.removed", { model: `local-${name}/*` });
-        const id1 = trialId(++n);
-        store.emit(id, "trial.scored", { id: id1, ...record(`r-${name}${i}`) });
-        if (i % 2 === 0) store.emit(id, "trial.spent", { trial: id1, spent: lines(1000 + n) });
+        const id1 = evalId(++n);
+        store.emit(id, "eval.scored", { id: id1, ...record(`r-${name}${i}`) });
+        if (i % 2 === 0) store.emit(id, "eval.spent", { evalCase: id1, spent: lines(1000 + n) });
         store.remember(id, `note ${i}`);
       }
     }
     // A node is revoked while its run is still being counted: what it had said by then stands, nothing after.
     syncInto(storeC, storeA);
     revokeDevice(storeA, a, c.id, "retired");
-    const late = trialId(++n);
-    storeC.emit(c, "trial.scored", { id: late, ...record("r-late") });
-    storeC.emit(c, "trial.spent", { trial: late, spent: lines(1) });
+    const late = evalId(++n);
+    storeC.emit(c, "eval.scored", { id: late, ...record("r-late") });
+    storeC.emit(c, "eval.spent", { evalCase: late, spent: lines(1) });
     const all = (store: LedgerStore): GEvent[] => store.eventsSince({}, 100_000).events;
     return { storeA, everything: [...all(storeA), ...all(storeB), ...all(storeC)], late };
   }
@@ -177,10 +177,10 @@ describe("convergence", () => {
       reference ??= replica.digest();
       expect(replica.digest()).toBe(reference);
       if (seed === 1) {
-        expect(replica.lwwPrefix("trial-spent:")).toHaveLength(9);
+        expect(replica.lwwPrefix("eval-spent:")).toHaveLength(9);
         expect(replica.lww("price:deepseek/deepseek-v4-pro")?.value).not.toBeNull();
         // What a revoked node said after it was revoked counts for nothing, here as anywhere.
-        expect(replica.lww(`trial-spent:${late}`)).toBeNull();
+        expect(replica.lww(`eval-spent:${late}`)).toBeNull();
         replica.rebuild();
         expect(replica.digest()).toBe(reference);
       }

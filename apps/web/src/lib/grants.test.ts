@@ -6,7 +6,7 @@ describe("a Q-AMP grant in the app", () => {
   test("its arm is known by the prefix the node gives it, and no other", () => {
     expect(isGrantArm(qampArm("0a1b2c3d4e"))).toBe(true);
     expect(isGrantArm(`${QAMP_ARM_PREFIX}x`)).toBe(true);
-    for (const label of ["claude-code", "opencode", "qampy", "loop.heartbeat", "team.percival"]) expect([label, isGrantArm(label)]).toEqual([label, false]);
+    for (const label of ["claude-code", "opencode", "qampy", "loop.heartbeat", "team.ivo"]) expect([label, isGrantArm(label)]).toEqual([label, false]);
   });
 
   test("its agent's key, short in a row", () => {

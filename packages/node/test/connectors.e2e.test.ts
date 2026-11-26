@@ -94,14 +94,14 @@ beforeAll(async () => {
       if (url.pathname === "/echo") return Response.json({ youSent: req.headers.get("authorization") });
       if (req.method === "POST") return Response.json({ created: true }, { status: 201 });
       if (req.method === "DELETE") return new Response(null, { status: 204 });
-      return Response.json({ login: "galahad" });
+      return Response.json({ login: "primary" });
     },
   });
   origin = `http://127.0.0.1:${upstream.port}`;
 
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
@@ -133,7 +133,7 @@ describe("connectors", () => {
     expect(installed.body.connector.tools.find((t) => t.name === "post")).toMatchObject({ class: "outward", asks: true });
   });
 
-  test("every connector Galahad ships installs, and so does one more GitHub owner: the vault name a manifest gives is a name, not a key", async () => {
+  test("every connector your agent ships installs, and so does one more GitHub owner: the vault name a manifest gives is a name, not a key", async () => {
     // Cloudflare and Home Assistant were refused as "a password assignment": the check for pasted keys read
     // "secret":"cloudflare" (the name of its vault entry) as one. GitHub only passed because its name is short.
     for (const [id, extra] of [["cloudflare", {}], ["home-assistant", { origin: "http://homeassistant.local:8123" }], ["gmail", {}], ["outlook", {}]] as const) {
@@ -151,13 +151,13 @@ describe("connectors", () => {
     expect(pasted.status).toBe(422);
   });
 
-  test("one that's Galahad's alone (mail): another agent asks first; you allow it, it may; you stop it, it asks again", async () => {
-    const mailbox = { ...manifest("mailbox"), label: "Mailbox", auth: { secret: "mailbox", scheme: "bearer" }, access: { only: "galahad", allowed: [] }, private: true };
+  test("one that's your agent's alone (mail): another agent asks first; you allow it, it may; you stop it, it asks again", async () => {
+    const mailbox = { ...manifest("mailbox"), label: "Mailbox", auth: { secret: "mailbox", scheme: "bearer" }, access: { only: "primary", allowed: [] }, private: true };
     expect((await admin("setConnector", { id: "mailbox", manifest: mailbox })).status).toBe(200);
     const listed = (await admin<{ connectors: ConnectorView[] }>("connectors")).body.connectors.find((c) => c.id === "mailbox")!;
-    expect(listed).toMatchObject({ access: { only: "galahad", allowed: [] }, private: true });
+    expect(listed).toMatchObject({ access: { only: "primary", allowed: [] }, private: true });
     const refused = await arm("callConnector", { connector: "mailbox", tool: "me" });
-    expect([refused.status, refused.body.error]).toEqual([403, "Mailbox is Galahad's alone: ask your liege to let you use it (connector_request), and use it once they do"]);
+    expect([refused.status, refused.body.error]).toEqual([403, "Mailbox is your agent's alone: ask the owner to let you use it (connector_request), and use it once they do"]);
     // It asks to use it: the request says so, and who.
     expect((await arm("requestConnector", { connector: "mailbox", why: "To read the invoice you forwarded." })).status).toBe(200);
     const asked = (await admin<{ requests: { connector: string; access: boolean; agent: string; id: string }[] }>("connectorRequests")).body.requests.find((r) => r.connector === "mailbox")!;
@@ -166,7 +166,7 @@ describe("connectors", () => {
     expect((await arm("setConnectorAccess", { id: "mailbox", agent: "test-arm", allow: true })).status).toBe(403);
     expect((await admin("setConnectorAccess", { id: "mailbox", agent: "test-arm", allow: true })).status).toBe(200);
     expect((await admin<{ requests: { connector: string }[] }>("connectorRequests")).body.requests.some((r) => r.connector === "mailbox")).toBe(false);
-    // Allowed, it gets past who may: here only to its missing key (424), never to "Galahad's alone" (403).
+    // Allowed, it gets past who may: here only to its missing key (424), never to "The primary's alone" (403).
     expect((await arm("callConnector", { connector: "mailbox", tool: "me" })).status).toBe(424);
     expect((await admin("setConnectorAccess", { id: "mailbox", agent: "test-arm", allow: false })).status).toBe(200);
     expect((await arm("callConnector", { connector: "mailbox", tool: "me" })).status).toBe(403);
@@ -191,7 +191,7 @@ describe("connectors", () => {
     expect((await admin<{ connectors: ConnectorView[] }>("connectors")).body.connectors.find((c) => c.id === "forge")!.key).toBe("ready");
     const me = await arm<{ status: string; result: { status: number; body: string } }>("callConnector", { connector: "forge", tool: "me" });
     expect(me.body.status).toBe("done");
-    expect(JSON.parse(me.body.result.body)).toEqual({ login: "galahad" });
+    expect(JSON.parse(me.body.result.body)).toEqual({ login: "primary" });
     expect(hits.at(-1)).toMatchObject({ method: "GET", path: "/user", auth: `Bearer ${KEY}` });
     const { entries } = (await admin<{ entries: { resource: string; verdict: string; class: string; detail: string }[] }>("ledger")).body;
     expect(entries[0]).toMatchObject({ resource: "connector.forge", class: "read", verdict: "allow" });
@@ -222,7 +222,7 @@ describe("connectors", () => {
     await admin("removeConnector", { id: "gdrive" });
   });
 
-  test("creating is Galahad's to do: an agent's create runs at once", async () => {
+  test("creating is your agent's to do: an agent's create runs at once", async () => {
     const created = await arm<{ status: string }>("callConnector", { connector: "forge", tool: "bucket.create", args: { name: "invincible-cache" } });
     expect(created.body.status).toBe("done");
     expect(hits.at(-1)).toMatchObject({ method: "POST", path: "/buckets", body: JSON.stringify({ name: "invincible-cache" }) });
@@ -319,7 +319,7 @@ describe("while you were away (PLAN #37)", () => {
 describe("standing orders", () => {
   test("only you sign them, and they must be narrow", async () => {
     expect((await arm("setOrder", { connector: "forge", tool: "post", args: {}, label: "anything" })).status).toBe(403);
-    const wide = await admin("setOrder", { connector: "forge", tool: "bucket.delete", args: { name: "galahad-*" }, label: "scratch buckets" });
+    const wide = await admin("setOrder", { connector: "forge", tool: "bucket.delete", args: { name: "primary-*" }, label: "scratch buckets" });
     expect(wide.status).toBe(400);
     expect(wide.body.error).toMatch(/names exactly one thing/);
     const reads = await admin("setOrder", { connector: "forge", tool: "me", args: {}, label: "reads" });
@@ -408,7 +408,7 @@ describe("the outbox survives a crash without sending twice", () => {
   test("a send that was in flight when the node died is reported, never retried", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "solo" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "solo" });
     const vault = new Vault(store, identity);
     vault.set("forge", KEY, { provider: "forge", origin });
     store.emit(identity, "connector.set", { id: "forge", manifest: manifest() });
@@ -442,7 +442,7 @@ describe("an approval has a send deadline", () => {
     const f = newNodeIdentity();
     const g = newNodeIdentity();
     const storeF = new LedgerStore(":memory:", new HlcClock(() => clocks.f));
-    foundFleet(storeF, f, { fleetName: "camelot", nodeName: "filer" });
+    foundFleet(storeF, f, { fleetName: "homelab", nodeName: "filer" });
     enrollDevice(storeF, f, { device: g.id, name: "answerer", kind: "node", box: b64u(g.boxPublic) });
     const vault = new Vault(storeF, f);
     vault.set("forge", KEY, { provider: "forge", origin });
@@ -577,7 +577,7 @@ describe("an approval has a send deadline", () => {
 });
 
 describe("loops over the API", () => {
-  test("the founding node gives Galahad a heartbeat, on an always-on node", async () => {
+  test("the founding node gives your agent a heartbeat, on an always-on node", async () => {
     const { loops } = (await admin<{ loops: LoopView[] }>("loops")).body;
     const beat = loops.find((l) => l.name === "heartbeat")!;
     expect(beat).toMatchObject({ schedule: "every 30m", enabled: true, onName: "ultra", task: { kind: "heartbeat" }, running: false });
@@ -600,7 +600,7 @@ describe("loops over the API", () => {
     expect((await admin<{ notices: NoticeView[] }>("notices")).body.notices.find((n) => n.key === "no-model:planner")!.dismissed).toBe(true);
   });
 
-  test("a VM's eyes on a coding plan its tools may use aren't a model he lacks; on one for a tool you run yourself, the heartbeat says why", async () => {
+  test("a VM's eyes on a coding plan its tools may use aren't a model it lacks; on one for a tool you run yourself, the heartbeat says why", async () => {
     // Two plans with their keys in the vault (fakes, made here), as `invincible key add` leaves them.
     for (const id of ["opencode-go", "kimi-coding"]) {
       expect((await admin("setSecret", { name: id, value: `FAKE-${id}-${"0".repeat(24)}`, provider: id })).status).toBe(200);
@@ -638,15 +638,15 @@ describe("loops over the API", () => {
     }
   });
 
-  test("a role you made, played by a coding plan, is its knights' coding: the heartbeat finds no model missing, as the doctor says", async () => {
+  test("a role you made, played by a coding plan, is its agents' coding: the heartbeat finds no model missing, as the doctor says", async () => {
     // On the owner's node (22 November 2026) the heartbeat said every half hour that no model could play plan-coder, a
-    // role made for a knight's OpenCode on the owner's plans, while the doctor said it was well.
+    // role made for an agent's OpenCode on the owner's plans, while the doctor said it was well.
     expect((await admin("setSecret", { name: "opencode-go", value: `FAKE-opencode-go-${"0".repeat(24)}`, provider: "opencode-go" })).status).toBe(200);
     expect((await admin("setProvider", { id: "opencode-go", secret: "opencode-go" })).status).toBe(200);
     try {
       await admin("setRoster", { role: "plan-coder", models: ["opencode-go/glm-5.3"] });
       expect((await admin<{ findings: { key: string }[] }>("heartbeat", {})).body.findings.map((f) => f.key)).not.toContain("no-model:plan-coder");
-      // A chore's role is no knight's coding: on a plan alone it still can't be played (folding a long chat into its story).
+      // A chore's role is no agent's coding: on a plan alone it still can't be played (folding a long chat into its story).
       await admin("setRoster", { role: "fold", models: ["opencode-go/glm-5.3"] });
       const chore = (await admin<{ findings: { key: string; body: string }[] }>("heartbeat", {})).body.findings.find((f) => f.key === "no-model:fold");
       expect(chore?.body).toContain("can't play fold");
@@ -692,13 +692,13 @@ describe("loops over the API", () => {
   });
 
   test("loops are checked before they're written", async () => {
-    const quest = (goal: string) => ({ kind: "quest", goal, network: "isolated" });
-    expect((await admin("setLoop", { name: "x", schedule: "every 5s", task: quest("hi") })).status).toBe(400);
-    expect((await admin("setLoop", { name: "x", schedule: "0 0 31 2 *", task: quest("hi") })).body.error).toMatch(/never runs/);
-    expect((await admin("setLoop", { name: "x", schedule: "@daily", tz: "Mars/Olympus", task: quest("hi") })).body.error).toMatch(/time zone/);
+    const run = (goal: string) => ({ kind: "run", goal, network: "isolated" });
+    expect((await admin("setLoop", { name: "x", schedule: "every 5s", task: run("hi") })).status).toBe(400);
+    expect((await admin("setLoop", { name: "x", schedule: "0 0 31 2 *", task: run("hi") })).body.error).toMatch(/never runs/);
+    expect((await admin("setLoop", { name: "x", schedule: "@daily", tz: "Mars/Olympus", task: run("hi") })).body.error).toMatch(/time zone/);
     expect((await admin("setLoop", { name: "x", schedule: "@daily" })).body.error).toMatch(/needs a schedule and a task/);
-    expect((await admin("setLoop", { name: "x", schedule: "@daily", task: quest("use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123") })).status).toBe(422);
-    expect((await admin("setLoop", { name: "Bad Name", schedule: "@daily", task: quest("hi") })).status).toBe(400);
+    expect((await admin("setLoop", { name: "x", schedule: "@daily", task: run("use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123") })).status).toBe(422);
+    expect((await admin("setLoop", { name: "Bad Name", schedule: "@daily", task: run("hi") })).status).toBe(400);
     expect((await admin("runLoop", { name: "nope" })).status).toBe(404);
     // Agents can see loops but not define or run them.
     expect((await arm("loops")).status).toBe(200);

@@ -70,7 +70,7 @@ describe("a node stopping", () => {
   test("refuses new requests at once, finishes the chat under way, keeps it, then closes", async () => {
     const { identity, keystore } = await home.createIdentity("file");
     const store = new LedgerStore(home.ledgerPath);
-    const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "stopper" });
+    const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "stopper" });
     store.close();
     home.writeConfig({ v: 1, name: "stopper", fleet, port, keystore, advertise: "127.0.0.1" });
     let daemon = await start();

@@ -87,7 +87,7 @@ function tick(now: number): void {
   for (const mover of movers.values()) {
     if (!mover.el.isConnected) {
       // One that was on the page and has left it is forgotten. One not yet put on it is looked for ten times a second
-      // for five seconds, not at every frame: each frame the page draws runs its other animations too (the knights'
+      // for five seconds, not at every frame: each frame the page draws runs its other animations too (the agents'
       // eyes, on every seat).
       if (!mover.seen && now - mover.last >= LOOK_EVERY - 6) {
         mover.last = now;

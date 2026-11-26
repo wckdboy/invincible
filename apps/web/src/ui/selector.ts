@@ -6,7 +6,7 @@ import { icon, type IconName } from "./icons.ts";
 
 /*
  * The smart selector: one compact control that says what's chosen now in plain
- * words ("Planner · Opus 5.5 · Galahad"), and opens the choices grouped, the likely
+ * words ("Planner · Opus 5.5 · the primary"), and opens the choices grouped, the likely
  * ones first. A popover under the control with a fine pointer, a bottom sheet on
  * phones. Type to filter (or, without a search field, to jump), arrows to move,
  * Enter to choose, Escape to close. Groups choose one, toggle many, or run an

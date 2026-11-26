@@ -1,6 +1,6 @@
 /*
  * Which file a shell command shows, and which files it changes: read conservatively from the command's words, for
- * the quest loop to tell a file's contents a later command made stale (quest.ts compact). Anything it can't read for
+ * the run loop to tell a file's contents a later command made stale (run.ts compact). Anything it can't read for
  * certain (a pipe into a read, a glob, a substitution) names nothing, so nothing is called stale by a guess.
  */
 
@@ -235,7 +235,7 @@ function pythonStrings(script: string): { text: string; formatted: boolean }[] {
 
 /**
  * What a Python script given inline (`python3 - <<'PY'`, `python3 -c '…'`, after a `cd`) may have changed: nothing when
- * it writes nothing; else the paths its strings name, when it does nothing but read and write files (the way a knight
+ * it writes nothing; else the paths its strings name, when it does nothing but read and write files (the way an agent
  * edits code: `sub("packages/core/src/team.ts", old, new)`); anything when it may run or find something by itself, builds
  * a path from a formatted string, or writes without naming a path. Null when the command is anything else.
  */
@@ -294,7 +294,7 @@ export function changesOf(command: string): "nothing" | "anything" | string[] {
 const TEST_FILE = /[._-](test|spec)s?\.[A-Za-z0-9]+$|(^|\/)test_[^/]+\.[A-Za-z0-9]+$|(^|\/)(tests?|specs?|__tests__)\/(.+\/)?[^/]+\.[A-Za-z0-9]+$/;
 
 /**
- * The test files a gate names, word for word: the contract its work may not change (quest.ts locks them). A bare test
+ * The test files a gate names, word for word: the contract its work may not change (run.ts locks them). A bare test
  * run, a folder or a pattern names none, so a task that must change a test can, when its gate doesn't name it.
  */
 export function testFilesOf(command: string): string[] {

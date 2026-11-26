@@ -3,8 +3,8 @@ import { z } from "zod";
 /*
  * The scorecard: what one benchmark suite measured in one run (`bun run bench`,
  * docs/BENCHMARKS.md). It is the contract between whatever measures (the suites
- * under bench/) and whatever reads (the report, CI's gate, and later Galahad
- * himself).
+ * under bench/) and whatever reads (the report, CI's gate, and later the primary
+ * itself).
  *
  * Two kinds of metric, kept apart:
  *

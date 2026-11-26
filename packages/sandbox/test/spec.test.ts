@@ -4,7 +4,7 @@ import { chooseIsolation, execArgs, gatewayEnv, KATA_RUNTIME, microVMsAvailable,
 
 const base: SandboxSpec = {
   id: "0123456789",
-  quest: "q1",
+  run: "q1",
   node: "n_test",
   image: "invincible/sandbox:1",
   network: "gateway",
@@ -99,10 +99,10 @@ describe("sandbox hardening", () => {
     expect(vmResolvConf("nameserver 1.2.3.4; rm -rf /")).toMatch(/^nameserver 1\.1\.1\.1/);
   });
 
-  test("is labelled for ownership, quest, expiry and ephemerality", () => {
+  test("is labelled for ownership, run, expiry and ephemerality", () => {
     const labels = args.filter((_, i) => args[i - 1] === "--label");
     expect(labels).toContain("dev.invincible=1");
-    expect(labels).toContain("dev.invincible.quest=q1");
+    expect(labels).toContain("dev.invincible.run=q1");
     expect(labels).toContain("dev.invincible.ephemeral=true");
     expect(labels).toContain(`dev.invincible.expires=${1_000 + 120 * 60_000}`);
   });

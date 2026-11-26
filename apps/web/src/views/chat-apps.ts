@@ -21,7 +21,7 @@ interface LinkCode {
 
 export function chatAppsSection(ctx: Ctx): { el: HTMLElement; refresh: () => Promise<void> } {
   const body = h("div", { class: "stack" }, skeletonBlock(120));
-  const el = section("Chat apps", { note: "Talk to Galahad from a chat app you already use. Approvals stay here." }, body);
+  const el = section("Chat apps", { note: "Talk to your agent from a chat app you already use. Approvals stay here." }, body);
   el.hidden = !ctx.can("mind:read");
   let code: LinkCode | null = null;
   let slackCode: LinkCode | null = null;

@@ -10,7 +10,7 @@ const KINDS = new Map([
 const NAMED = new Map([
   ["heartbeat", "The heartbeat"],
   ["ci", "CI"],
-  ["compute", "His compute"],
+  ["compute", "Its compute"],
 ]);
 
 /** Where a notice came from, as you'd say it: "rule:pushes" is "Your rule pushes"; one this app doesn't know, as it is. */

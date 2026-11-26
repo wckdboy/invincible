@@ -3,7 +3,7 @@ import { desktopAddress, DESKTOP_KEYS, hasDesktop, saysNoDesktop, screenPoint, s
 
 const SCREEN = { width: 1280, height: 800 };
 
-describe("a tap on the picture, as a place on the knight's screen", () => {
+describe("a tap on the picture, as a place on the agent's screen", () => {
   test("the picture drawn at its own size: a tap is where it is", () => {
     const shown = { left: 0, top: 0, width: 1280, height: 800 };
     expect(screenPoint({ x: 0, y: 0 }, shown, SCREEN)).toEqual({ x: 0, y: 0 });
@@ -40,7 +40,7 @@ describe("a tap on the picture, as a place on the knight's screen", () => {
   });
 });
 
-describe("an address for the knight's browser", () => {
+describe("an address for the agent's browser", () => {
   test("a whole address is taken as it is; a bare host gets https", () => {
     expect(desktopAddress("https://example.com/a?b=c")).toBe("https://example.com/a?b=c");
     expect(desktopAddress("  http://localhost:3000  ")).toBe("http://localhost:3000");
@@ -64,9 +64,9 @@ describe("whether a VM has a desktop", () => {
   });
 
   test("the node's refusal that a VM has none is told apart from every other", () => {
-    expect(saysNoDesktop({ status: 424, message: "this teammate's VM has no desktop: have it made again with one (invincible knights provision <id> --remake --desktop)" })).toBe(true);
+    expect(saysNoDesktop({ status: 424, message: "this agent's VM has no desktop: have it made again with one (invincible agents provision <id> --remake --desktop)" })).toBe(true);
     expect(saysNoDesktop({ status: 424, message: "the desktop could not do that: exit 1" })).toBe(false);
-    expect(saysNoDesktop({ status: 409, message: "the teammate's VM is exited" })).toBe(false);
+    expect(saysNoDesktop({ status: 409, message: "the agent's VM is exited" })).toBe(false);
     expect(saysNoDesktop({ status: 500, message: "has no desktop" })).toBe(false);
     expect(saysNoDesktop(new Error("has no desktop"))).toBe(false);
     expect(saysNoDesktop(null)).toBe(false);

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { findSecrets } from "@invincible/core";
-import { parseVerdict, poseReview, reviewDomain, REVIEWER_CASES, runQuest } from "../src/index.ts";
+import { parseVerdict, poseReview, reviewDomain, REVIEWER_CASES, runLoop } from "../src/index.ts";
 
 /*
- * The reviewer's cases: a quest's evidence with a known answer. What's checked here is
+ * The reviewer's cases: a run's evidence with a known answer. What's checked here is
  * the cases themselves: that each is the same from the same seed, that the question
- * is word for word what a real quest asks its reviewer, and that each case that should
+ * is word for word what a real run asks its reviewer, and that each case that should
  * be sent back really shows its fault in the evidence (and each that should pass
  * doesn't).
  */
@@ -49,17 +49,17 @@ describe("the cases", () => {
     }
   });
 
-  test("the question is word for word what a quest asks its reviewer of the same evidence", async () => {
+  test("the question is word for word what a run asks its reviewer of the same evidence", async () => {
     for (const c of REVIEWER_CASES) {
       const { evidence, question } = poseReview(c, 21);
-      // A real quest whose engineer runs exactly the case's commands and says exactly its summary.
+      // A real run whose engineer runs exactly the case's commands and says exactly its summary.
       const replies = [...evidence.steps.map((s) => `Next.\n\`\`\`sh\n${s.command}\n\`\`\``), `DONE\n${evidence.summary}`];
       const outputs = [...evidence.steps];
       const gates = evidence.gates?.at(-1)?.map((g) => g.command) ?? [];
       const gateRuns = evidence.gates ? evidence.gates.map((round) => [...round]) : [];
       let asked = "";
       let engineer = 0;
-      await runQuest(
+      await runLoop(
         { goal: evidence.goal, environment: "a sandbox", plan: evidence.plan, gates, maxRevisions: gateRuns.length },
         {
           ask: async (role, messages) => {
@@ -71,7 +71,7 @@ describe("the cases", () => {
             return { text: replies[Math.min(engineer++, replies.length - 1)]!, model: "stand-in/engineer" };
           },
           exec: async (command) => {
-            // What a quest shows of a command that printed nothing.
+            // What a run shows of a command that printed nothing.
             const printed = (excerpt: string) => (excerpt === "(no output)" ? "" : excerpt);
             const gate = gateRuns[0]?.find((g) => g.command === command);
             if (gate) {
@@ -86,13 +86,13 @@ describe("the cases", () => {
           },
         },
       );
-      // The case has no evidence commands to print "now" unless it says so; everything before that is the quest's own words.
+      // The case has no evidence commands to print "now" unless it says so; everything before that is the run's own words.
       const upTo = (text: string) => text.split("\n\nWhat these commands print now")[0]!.replace(/ · \d+ ms/g, "");
       expect({ id: c.id, question: upTo(asked) }).toEqual({ id: c.id, question: upTo(question) });
       expect(question.startsWith("You are reviewing another engineer's work, independently.")).toBe(true);
       expect(question).toContain("Reply with PASS on the first line");
-      // What it judges by: the quest's asks, and what nothing there asks for goes after a PASS (measured: TRIALS.md).
-      expect(question).toContain("Judge it by what the quest asks");
+      // What it judges by: the run's asks, and what nothing there asks for goes after a PASS (measured: EVALS.md).
+      expect(question).toContain("Judge it by what the run asks");
       expect(question).toContain("say those after PASS, as notes");
     }
   });
@@ -153,7 +153,7 @@ describe("the cases", () => {
         const diff = evidence.steps.find((s) => /git diff(?! --stat)/.test(s.command))!.excerpt;
         expect(diff).toMatch(/^--- a\/src\//m);
         expect({ fn, right: needs[fn]!.test(diff) }).toEqual({ fn, right: true });
-        // The line taken out is in the file as he read it before the change.
+        // The line taken out is in the file as it read it before the change.
         const removed = /^-( {2}.*)$/m.exec(diff)![1]!;
         expect(evidence.steps.some((s) => /\bcat\b/.test(s.command) && !s.command.includes("<<") && s.excerpt.includes(removed))).toBe(true);
         fixed.add(fn);
@@ -162,7 +162,7 @@ describe("the cases", () => {
     expect([...fixed].sort()).toEqual(["clampPage", "parseDuration", "slugify", "titleCase"]);
   });
 
-  test("the verdict is read as a quest reads it: anything that isn't a clear PASS sends the work back", () => {
+  test("the verdict is read as a run reads it: anything that isn't a clear PASS sends the work back", () => {
     expect(parseVerdict("PASS\nFine.").verdict).toBe("pass");
     expect(parseVerdict("REVISE\nThe test was changed.").verdict).toBe("revise");
     expect(parseVerdict("Looks good to me, I think it passes.").verdict).toBe("revise");

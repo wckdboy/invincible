@@ -65,8 +65,8 @@ describe("your chats", () => {
       steps: [
         { kind: "fallback", from: "anthropic/claude-opus-5-5", error: "no key" },
         { kind: "model", ref: "orcarouter/anthropic/claude-opus-5.5" },
-        { kind: "tool", id: "t1", name: "bank_transactions", title: "Bank transactions", input: '{"limit":1}', ok: true, summary: "648 characters of data" },
-        { kind: "tool", id: "t2", name: "web_search", title: "Search the web", input: "", ok: false, summary: "refused: bank data is in this answer" },
+        { kind: "tool", id: "t1", name: "gmail_search", title: "Search mail", input: '{"limit":1}', ok: true, summary: "648 characters of data" },
+        { kind: "tool", id: "t2", name: "web_search", title: "Search the web", input: "", ok: false, summary: "refused: gmail's private data is in this answer" },
       ],
       status: "done",
       error: null,
@@ -77,8 +77,8 @@ describe("your chats", () => {
       ["asked", "Asked as planner", "done", ""],
       ["fallback", "anthropic/claude-opus-5-5 didn't answer", "warn", "no key"],
       ["model", "Thinking with orcarouter/anthropic/claude-opus-5.5", "done", ""],
-      ["tool", "Bank transactions", "done", '{"limit":1} → 648 characters of data'],
-      ["tool", "Search the web", "warn", "refused: bank data is in this answer"],
+      ["tool", "Search mail", "done", '{"limit":1} → 648 characters of data'],
+      ["tool", "Search the web", "warn", "refused: gmail's private data is in this answer"],
       ["answer", "Answering", "done", ""],
     ]);
     expect(stepsOf({ ...answer, content: "", steps: [], status: "stopped" }, "swift").map((s) => s.kind)).toEqual(["asked", "stopped"]);
@@ -94,7 +94,7 @@ describe("project ids", () => {
   });
 });
 
-describe("the conversation Galahad's row opens", () => {
+describe("the conversation your agent's row opens", () => {
   test("is the one last active, whatever order the node lists them in, and a pin doesn't make one more recent", () => {
     const list = [chat({ id: "cv_old", updatedAt: now - 5 * HOUR, pinned: true }), chat({ id: "cv_latest", updatedAt: now - HOUR }), chat({ id: "cv_middle", updatedAt: now - 2 * HOUR })];
     expect(mostRecent(list)?.id).toBe("cv_latest");
@@ -106,7 +106,7 @@ describe("the conversation Galahad's row opens", () => {
 });
 
 describe("a chat's one menu", () => {
-  test("a new chat and every kept one are always in it: his history is never hidden", () => {
+  test("a new chat and every kept one are always in it: its history is never hidden", () => {
     expect(CHATS_MENU.map((action) => [action.value, action.label])).toEqual([["new", "New chat"], ["history", "All chats…"]]);
   });
   const values = (chat: Parameters<typeof chatActions>[0]) => chatActions(chat).map((action) => action.value);
@@ -117,7 +117,7 @@ describe("a chat's one menu", () => {
     expect(actions.find((action) => action.value === "delete")!.meta).toBe("For good, on keep");
     expect(chatActions({ kept: true, pinned: true, aside: true, node: "keep" }).find((action) => action.value === "pin")!.label).toBe("Unpin");
   });
-  test("a temporary chat he's working in can only be asked about on the side; a new chat has nothing to do yet", () => {
+  test("a temporary chat it's working in can only be asked about on the side; a new chat has nothing to do yet", () => {
     expect(values({ kept: false, pinned: false, aside: true, node: "keep" })).toEqual(["aside"]);
     expect(values({ kept: false, pinned: false, aside: false, node: "keep" })).toEqual([]);
   });

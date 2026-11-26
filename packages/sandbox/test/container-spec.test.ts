@@ -37,7 +37,7 @@ import {
 
 const base: SandboxSpec = {
   id: "0123456789",
-  quest: "q1",
+  run: "q1",
   node: "n_test",
   image: "invincible/sandbox:1",
   network: "gateway",
@@ -90,7 +90,7 @@ describe("a sandbox on a Mac: the hardening flags", () => {
 
   test("it is labelled as Docker's are, and with its image, which a VM made again is made from", () => {
     const labels = all(args, "--label");
-    for (const label of ["dev.invincible=1", "dev.invincible.id=0123456789", "dev.invincible.quest=q1", "dev.invincible.node=n_test", "dev.invincible.ephemeral=true", "dev.invincible.isolation=vm", "dev.invincible.image=invincible/sandbox:1", `dev.invincible.expires=${1_000 + 120 * 60_000}`]) {
+    for (const label of ["dev.invincible=1", "dev.invincible.id=0123456789", "dev.invincible.run=q1", "dev.invincible.node=n_test", "dev.invincible.ephemeral=true", "dev.invincible.isolation=vm", "dev.invincible.image=invincible/sandbox:1", `dev.invincible.expires=${1_000 + 120 * 60_000}`]) {
       expect(labels).toContain(label);
     }
     expect(args.slice(-3)).toEqual(["invincible/sandbox:1", "sleep", "infinity"]);
@@ -121,7 +121,7 @@ describe("a sandbox on a Mac: the hardening flags", () => {
 });
 
 describe("a sandbox on a Mac: its networks", () => {
-  test("online is Galahad's own NAT network, as on Docker, and the gateway network beside it, egress first", () => {
+  test("online is your agent's own NAT network, as on Docker, and the gateway network beside it, egress first", () => {
     expect(all(containerRunArgs({ ...base, network: "online" }), "--network")).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
     expect(containerRunArgs({ ...base, network: "online" })).not.toContain("--no-dns");
   });
@@ -188,7 +188,7 @@ describe("the other commands", () => {
     expect(containerBuildArgs("invincible/sandbox:1", "/opt/invincible/sandbox")).toEqual(["build", "--pull", "--platform", "linux/arm64", "--tag", "invincible/sandbox:1", "/opt/invincible/sandbox"]);
   });
 
-  test("a workspace is a volume of a fixed size, labelled as its sandbox's; a knight's is marked to be kept", () => {
+  test("a workspace is a volume of a fixed size, labelled as its sandbox's; an agent's is marked to be kept", () => {
     expect(containerVolumeCreateArgs("0123456789", 20, false)).toEqual(["volume", "create", "-s", "20G", "--label", "dev.invincible=1", "--label", "dev.invincible.id=0123456789", "invincible-sbx-0123456789-work"]);
     expect(containerVolumeCreateArgs("0123456789", 40, true)).toContain("dev.invincible.retained=1");
   });

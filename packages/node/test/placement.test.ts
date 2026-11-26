@@ -219,7 +219,7 @@ describe("a Mac with Apple's container", () => {
     expect(sandboxRefusals([mini], { network: "online", desktop: true })).toEqual([{ name: "mini", reason: CONTAINER_CANNOT.desktop }]);
   });
 
-  test("a knight's VM leans to a host whose VMs grow while they run; a Mac's line says its VMs pause to grow, and room still decides", () => {
+  test("an agent's VM leans to a host whose VMs grow while they run; a Mac's line says its VMs pause to grow, and room still decides", () => {
     const mini = node("mini", mac(), { delivered: 8 }, { free: 2 });
     const ultra = node("ultra", caps({ cores: 16, sandbox: { image: true, networks: true, vm: true } }), { delivered: 8 }, { free: 2 });
     const kept = sandboxHost([mini, ultra], { network: "online", kept: true })!;
@@ -235,8 +235,8 @@ describe("a Mac with Apple's container", () => {
   });
 });
 
-describe("a sandbox in an image of Galahad's own", () => {
-  // (A host's release says which of his images it makes. One from before hosts said is taken to make the four every release had.)
+describe("a sandbox in an image of your agent's own", () => {
+  // (A host's release says which of its images it makes. One from before hosts said is taken to make the four every release had.)
   const linux = (images?: string[]) => caps({ cores: 16, sandbox: { image: true, networks: true, vm: true, ...(images ? { images } : {}) } });
 
   test("goes to a host whose release makes it, past one older than that image, however it ranks; with none, the reason says why", () => {
@@ -249,7 +249,7 @@ describe("a sandbox in an image of Galahad's own", () => {
     ]);
   });
 
-  test("an image every release has made, or one that isn't his (pulled where it is made, as ever), goes where it ranks", () => {
+  test("an image every release has made, or one that isn't its (pulled where it is made, as ever), goes where it ranks", () => {
     const older = node("older", linux(), { delivered: 40 }, { free: 4 });
     const ultra = node("ultra", linux(Object.keys(OWN_IMAGES)), { delivered: 8 }, { free: 1 });
     for (const image of [DEFAULT_IMAGE, "debian:trixie-slim"]) expect(sandboxHost([older, ultra], { network: "gateway", image })?.name).toBe("older");

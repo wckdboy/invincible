@@ -40,8 +40,8 @@ describe("where each toast stands in the stack", () => {
 });
 
 /*
- * The banner under the top bar: it says Galahad can't be reached (or that this device is offline) while that lasts,
- * and that he is reached again for a moment once he is, then goes.
+ * The banner under the top bar: it says the primary can't be reached (or that this device is offline) while that lasts,
+ * and that it is reached again for a moment once it is, then goes.
  */
 
 /** A banner's course with its clock in hand: `later()` runs what's due; `browser` is whether the device is online. */
@@ -65,15 +65,15 @@ function course({ online = true } = {}) {
   return { c, said, timers, later, browser };
 }
 
-describe("the banner that says whether Galahad can be reached", () => {
-  test("while he can, it says nothing", () => {
+describe("the banner that says whether your agent can be reached", () => {
+  test("while it can, it says nothing", () => {
     const b = course();
     b.c.reach(true);
     b.c.network();
     expect(b.said).toEqual([]);
   });
 
-  test("it says he can't be reached, or that this device is offline, as the browser stands", () => {
+  test("it says it can't be reached, or that this device is offline, as the browser stands", () => {
     const online = course();
     online.c.reach(false);
     expect(online.said).toEqual(["unreachable"]);
@@ -82,7 +82,7 @@ describe("the banner that says whether Galahad can be reached", () => {
     expect(offline.said).toEqual(["offline"]);
   });
 
-  test("once he is reached again it says so for a moment, then goes", () => {
+  test("once it is reached again it says so for a moment, then goes", () => {
     const b = course();
     b.c.reach(false);
     b.c.reach(true);
@@ -94,7 +94,7 @@ describe("the banner that says whether Galahad can be reached", () => {
     expect(b.said).toEqual(["unreachable", "reconnected", "gone"]);
   });
 
-  test("lost again while it says he's back: it says so, and doesn't go", () => {
+  test("lost again while it says it's back: it says so, and doesn't go", () => {
     const b = course();
     b.c.reach(false);
     b.c.reach(true);
@@ -111,7 +111,7 @@ describe("the banner that says whether Galahad can be reached", () => {
     b.browser.online = true;
     b.c.network();
     expect(b.said).toEqual(["unreachable", "offline", "unreachable"]);
-    // Once it says he's back, or has gone, the browser's word changes nothing.
+    // Once it says it's back, or has gone, the browser's word changes nothing.
     b.c.reach(true);
     b.browser.online = false;
     b.c.network();
@@ -120,7 +120,7 @@ describe("the banner that says whether Galahad can be reached", () => {
     expect(b.said).toEqual(["unreachable", "offline", "unreachable", "reconnected", "gone"]);
   });
 
-  test("what each says: offline is no error, can't reach him tries again, and back is good news with nothing to do", () => {
+  test("what each says: offline is no error, can't reach it tries again, and back is good news with nothing to do", () => {
     const how = (said: Connection) => ({ tone: CONNECTION[said].tone, trying: CONNECTION[said].trying, retry: CONNECTION[said].retry });
     expect(how("offline")).toEqual({ tone: "neutral", trying: false, retry: true });
     expect(how("unreachable")).toEqual({ tone: "warn", trying: true, retry: true });

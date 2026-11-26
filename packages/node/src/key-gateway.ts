@@ -4,13 +4,13 @@ import type { Vault } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
 
 /*
- * Keys a knight uses but never sees (PLAN #17). A knight's script calls an API you gave it a key for through the
+ * Keys an agent uses but never sees (PLAN #17). An agent's script calls an API you gave it a key for through the
  * gateway, with its VM's gateway token where the key would go:
  *
  *   curl -H "Authorization: Bearer $INVINCIBLE_TOKEN" "$INVINCIBLE_KEYS/stripe/v1/charges"
  *
  * and the call leaves for the key's pinned address with the vault's key put in, in the header you chose. The key never
- * enters the VM. The token is good for the keys you gave its knight alone (scope `key:<secret>:<header>:<read|write>`),
+ * enters the VM. The token is good for the keys you gave its agent alone (scope `key:<secret>:<header>:<read|write>`),
  * for reads alone unless you said writes too, and only at the key's own address: no other host, no redirect followed.
  * Every call is a line in the ledger.
  */
@@ -36,17 +36,17 @@ export interface KeyGatewayContext {
 }
 
 /**
- * Whether a secret can be given to a knight: in the vault, pinned to an https address, and nobody else's purpose. A
+ * Whether a secret can be given to an agent: in the vault, pinned to an https address, and nobody else's purpose. A
  * model provider's key goes through the model gateway (its metering, its plan's terms, sensitive mode), and a
- * connector's through Galahad's own calls (a push waits for your approval): a script never takes them past those.
+ * connector's through the primary's own calls (a push waits for your approval): a script never takes them past those.
  * Null: it can be; else why not.
  */
 export function ungivable(vault: Pick<Vault, "info">, secret: string): string | null {
   const info = vault.info(secret);
   if (!info) return `there is no secret ${secret} in the vault: invincible secret set ${secret} --base-url https://api.example.com`;
-  if (info.provider) return `${secret} is ${info.provider}'s key, used where Galahad holds its terms (the model gateway, a connector's calls): make a key of its own for the knight`;
+  if (info.provider) return `${secret} is ${info.provider}'s key, used where your agent holds its terms (the model gateway, a connector's calls): make a key of its own for the agent`;
   if (!info.origin) return `${secret} is pinned to no address, so there is nowhere it may go: set it again with its API's address (invincible secret set ${secret} --base-url https://…)`;
-  if (!info.origin.startsWith("https://")) return `${secret} is pinned to ${info.origin}: a key a knight uses goes over https only`;
+  if (!info.origin.startsWith("https://")) return `${secret} is pinned to ${info.origin}: a key an agent uses goes over https only`;
   return null;
 }
 
@@ -72,11 +72,11 @@ export async function handleKeyGateway(req: Request, ctx: KeyGatewayContext): Pr
     }
   }
   const scope = (ctx.tokens.scopesOf(token) ?? []).find((s) => s.startsWith(`key:${name}:`) && SCOPE.test(s));
-  if (!scope) return json(401, token ? `this knight was given no key ${name}` : "no gateway token: send $INVINCIBLE_TOKEN where the key would go");
+  if (!scope) return json(401, token ? `this agent was given no key ${name}` : "no gateway token: send $INVINCIBLE_TOKEN where the key would go");
   const verdict = ctx.tokens.consume(token, scope);
   if (!verdict.ok) return json(401, verdict.reason);
   const [, , header, mode] = scope.match(SCOPE)!;
-  if (mode !== "write" && !READS.has(req.method)) return json(403, `your liege gave this knight the key ${name} to read with: a ${req.method} changes something, and waits for leave to write (invincible roundtable keys <knight> add ${name} --write)`);
+  if (mode !== "write" && !READS.has(req.method)) return json(403, `the owner gave this agent the key ${name} to read with: a ${req.method} changes something, and waits for leave to write (invincible agents keys <agent> add ${name} --write)`);
 
   // Its address and its value, as the vault holds them now: a key unpinned, or given to a provider since, goes nowhere.
   const why = ungivable(ctx.vault, name);
@@ -94,9 +94,9 @@ export async function handleKeyGateway(req: Request, ctx: KeyGatewayContext): Pr
   headers.set(header!, header === "authorization" ? `Bearer ${key}` : key);
   const target = `${origin}${rest}${url.search}`;
   const body = READS.has(req.method) ? undefined : await req.arrayBuffer();
-  // (Which VM's lease called it: a knight's page counts its uses by that.)
+  // (Which VM's lease called it: an agent's page counts its uses by that.)
   const by = ctx.tokens.labelOf(token);
-  ctx.ledger?.({ class: READS.has(req.method) ? "read" : "modify", resource: `key.${name}`, target: `${req.method} ${origin}${rest}`, verdict: "allow", reason: "a knight's script used a key you gave it, through the key gateway", ...(by ? { detail: by } : {}) });
+  ctx.ledger?.({ class: READS.has(req.method) ? "read" : "modify", resource: `key.${name}`, target: `${req.method} ${origin}${rest}`, verdict: "allow", reason: "an agent's script used a key you gave it, through the key gateway", ...(by ? { detail: by } : {}) });
   let upstream: Response;
   try {
     // The key is pinned to its address: never a Location header followed to another.

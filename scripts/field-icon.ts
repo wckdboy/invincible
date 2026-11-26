@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /*
- * Galahad's icon, drawn as light: his field (apps/web/src/lib/field.ts) rendered the way the chosen picture was (26
+ * Invincible's icon, drawn as light: its field (apps/web/src/lib/field.ts) rendered the way the chosen picture was (26
  * November 2026, "field aurum"): each point a soft sprite added in linear light, the bright parts bloomed in five
  * widening blurs, tone-mapped by ACES filmic and written as sRGB. Pure TypeScript and Bun's zlib: no browser, no WebGL,
  * no dependency, and the same pixels on every machine. scripts/brand.ts and apps/apple/scripts/brand.ts call it; on
@@ -269,7 +269,7 @@ export function png(img: Uint8Array, size: number): Uint8Array {
   const opaque = img.every((v, i) => i % 4 !== 3 || v === 255), channels = opaque ? 3 : 4, stride = size * channels;
   // Each row filtered the way that leaves it smallest (PNG's five, by the usual measure: the least sum of its bytes as
   // signed values), as an encoder does: a glow compresses to a fraction of what it does unfiltered, and nothing is lost.
-  const raw = new Uint8Array(size * (stride + 1)), row = new Uint8Array(stride), prev = new Uint8Array(stride), trial = new Uint8Array(stride);
+  const raw = new Uint8Array(size * (stride + 1)), row = new Uint8Array(stride), prev = new Uint8Array(stride), evalCase = new Uint8Array(stride);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) for (let c = 0; c < channels; c++) row[x * channels + c] = img[(y * size + x) * 4 + c]!;
     let best = 0, bestCost = Infinity;
@@ -279,13 +279,13 @@ export function png(img: Uint8Array, size: number): Uint8Array {
         const a = i >= channels ? row[i - channels]! : 0, b = prev[i]!, cc = i >= channels ? prev[i - channels]! : 0;
         const pred = f === 0 ? 0 : f === 1 ? a : f === 2 ? b : f === 3 ? (a + b) >> 1 : (() => { const p = a + b - cc, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - cc); return pa <= pb && pa <= pc ? a : pb <= pc ? b : cc; })();
         const v = (row[i]! - pred) & 0xff;
-        trial[i] = v;
+        evalCase[i] = v;
         cost += v < 128 ? v : 256 - v;
       }
       if (cost < bestCost) {
         bestCost = cost;
         best = f;
-        raw.set(trial, y * (stride + 1) + 1);
+        raw.set(evalCase, y * (stride + 1) + 1);
       }
     }
     raw[y * (stride + 1)] = best;

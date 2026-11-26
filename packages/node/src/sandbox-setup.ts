@@ -19,7 +19,7 @@ import {
 import { type AsRoot, shellQuote, systemAsRoot } from "./as-root.ts";
 
 /*
- * `invincible sandbox setup`: what a Mac's knights' VMs need, given to it (docs/MAC.md, *Give its knights VMs*), as the
+ * `invincible sandbox setup`: what a Mac's agents' VMs need, given to it (docs/MAC.md, *Give its agents VMs*), as the
  * app's step 3 and This Mac give it, and as you would in Terminal:
  *
  *   container  Apple's container: its signed installer at the release this driver was checked against, fetched from
@@ -200,7 +200,7 @@ export async function sandboxSetup(deps: SetupDeps, opts: { check?: boolean } = 
       }
       if (!found || !wallHolds) {
         const both = !found && !wallHolds;
-        const why = `Galahad needs your password to install ${both ? "Apple's container and the sandbox firewall" : !found ? "Apple's container" : "the sandbox firewall"}, for its knights' VMs.`;
+        const why = `Your agent needs your password to install ${both ? "Apple's container and the sandbox firewall" : !found ? "Apple's container" : "the sandbox firewall"}, for its agents' VMs.`;
         if (!found) say("container", "working", "checked: it is the installer Apple published. Installing it (macOS asks for your password)…");
         if (!wallHolds) say("firewall", "working", "installing it (macOS asks for your password)…");
         const ran = await deps.asRoot(setupRootScript({ pkg, firewall: !wallHolds }, deps.cli), why);
@@ -259,7 +259,7 @@ export async function sandboxSetup(deps: SetupDeps, opts: { check?: boolean } = 
     say("node", "failed", "it isn't running: start it, then set this up again");
     return after("node");
   }
-  if (hosting) say("node", "done", "it hosts knights' VMs");
+  if (hosting) say("node", "done", "it hosts agents' VMs");
   else if (check) say("node", "todo", "it doesn't host VMs yet: it is restarted, and finds container as it starts");
   else {
     say("node", "working", "restarting it, so it finds container…");
@@ -277,7 +277,7 @@ export async function sandboxSetup(deps: SetupDeps, opts: { check?: boolean } = 
       say("node", "failed", "it restarted, and doesn't host VMs: its log says why (invincible doctor too)");
       return after("node");
     }
-    say("node", "done", "it hosts knights' VMs");
+    say("node", "done", "it hosts agents' VMs");
   }
 
   // The sandbox image, built by the node.

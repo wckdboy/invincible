@@ -19,7 +19,7 @@ export const AGENTIC_SUITE: readonly AgenticTask[] = [tangledTotal, slowRollup, 
 
 /**
  * The level each task is posed at unless a run says otherwise. They start in the middle of the dial; the
- * first calibration run (docs/TRIALS.md) moves each to where the roster scores between a third and two thirds.
+ * first calibration run (docs/EVALS.md) moves each to where the roster scores between a third and two thirds.
  */
 export const USUAL_LEVELS: Readonly<Record<string, number>> = Object.fromEntries(AGENTIC_SUITE.map((task) => [task.id, USUAL_LEVEL]));
 

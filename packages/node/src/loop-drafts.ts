@@ -3,9 +3,9 @@ import { randomBytes } from "node:crypto";
 import type { LoopTask, LoopWake } from "@invincible/core";
 
 /*
- * Loops Galahad drafted when you asked for one in chat (core api.ts, LoopDraftInput). A draft is only a suggestion
+ * Loops the primary drafted when you asked for one in chat (core api.ts, LoopDraftInput). A draft is only a suggestion
  * waiting in your Inbox: it never runs, and it becomes a loop only when you add it through setLoop, as any loop is
- * made. Kept in this node's own database (local.db), never in the mind's log: what he proposed and you didn't take
+ * made. Kept in this node's own database (local.db), never in the mind's log: what it proposed and you didn't take
  * leaves no trace in every replica. A week unanswered and it's gone; at most a few wait at once, the oldest giving way.
  */
 

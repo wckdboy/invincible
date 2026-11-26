@@ -6,7 +6,7 @@ import { pinnedEffort, roleModels, ROLES, roster, workRole } from "../src/index.
 function mind() {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const hire = (role: string, models: string[]) => store.emit(identity, "roster.set", { role, models });
   const pin = (role: string, effort: "auto" | "low" | "medium" | "high" | "xhigh" | "max") => store.emit(identity, "roster.effort", { role, effort });
   /** A provider set up, as `invincible key add` (or the app) leaves it: a record naming where it is and its key. */
@@ -34,7 +34,7 @@ describe("a role you haven't set", () => {
     expect(roleModels(store, "researcher")).toEqual(["deepseek/deepseek-v4-pro", "anthropic/claude-opus-5-5"]);
   });
 
-  test("a coding plan's key puts its models first for the engineer's work, and only there: his talk with you is never a plan's", () => {
+  test("a coding plan's key puts its models first for the engineer's work, and only there: its talk with you is never a plan's", () => {
     const { store, setUp } = mind();
     setUp("deepseek", "https://api.deepseek.com");
     setUp("opencode-go", "https://opencode.ai/inference/go/openai/v1");
@@ -52,17 +52,17 @@ describe("a role you haven't set", () => {
   });
 });
 
-describe("the role a knight's work runs on", () => {
+describe("the role an agent's work runs on", () => {
   test("its own, unless that is the reviewer's or a tool's: then the engineer's", () => {
     expect(["frontend", "engineer", "planner", "swift", "reviewer", "eyes", "decider", "embedder"].map(workRole)).toEqual(["frontend", "engineer", "planner", "swift", "engineer", "engineer", "engineer", "engineer"]);
   });
 });
 
 describe("roles you make", () => {
-  test("a role you made is listed with its models, for knights to work on, and removing it takes it off the list", () => {
+  test("a role you made is listed with its models, for agents to work on, and removing it takes it off the list", () => {
     const { store, hire } = mind();
     hire("frontend", ["orcarouter/anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro"]);
-    expect(roster(store).frontend).toMatchObject({ models: ["orcarouter/anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro"], configured: true, custom: true, forKnights: true });
+    expect(roster(store).frontend).toMatchObject({ models: ["orcarouter/anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro"], configured: true, custom: true, forAgents: true });
     expect(roleModels(store, "frontend")).toEqual(["orcarouter/anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro"]);
     hire("frontend", []);
     expect(roster(store).frontend).toBeUndefined();
@@ -72,7 +72,7 @@ describe("roles you make", () => {
     const { store, hire } = mind();
     hire("engineer", ["deepseek/deepseek-v4-pro"]);
     hire("engineer", []);
-    expect(roster(store).engineer).toMatchObject({ configured: false, custom: false, forKnights: true });
+    expect(roster(store).engineer).toMatchObject({ configured: false, custom: false, forAgents: true });
   });
 
   test("a role nobody hired answers with the engineer's models as you set them, not with a built-in default", () => {
@@ -81,17 +81,17 @@ describe("roles you make", () => {
     expect(roleModels(store, "researcher")).toEqual(["deepseek/deepseek-v4-pro", "opencode-go/glm-5.3"]);
   });
 
-  test("knights work on the planner, engineer, swift and your own roles; the reviewer, tools and chores are not theirs", () => {
+  test("agents work on the planner, engineer, swift and your own roles; the reviewer, tools and chores are not theirs", () => {
     const { store, hire } = mind();
     hire("fold", ["deepseek/deepseek-flash"]);
     hire("Odd.Name", ["deepseek/deepseek-v4-pro"]);
     const listed = roster(store);
-    expect(Object.entries(listed).filter(([, spec]) => spec.forKnights).map(([role]) => role).sort()).toEqual(["engineer", "planner", "swift"]);
+    expect(Object.entries(listed).filter(([, spec]) => spec.forAgents).map(([role]) => role).sort()).toEqual(["engineer", "planner", "swift"]);
     // A chore is described as one, not as a role you made.
-    expect(listed.fold).toMatchObject({ custom: false, forKnights: false });
+    expect(listed.fold).toMatchObject({ custom: false, forAgents: false });
     expect(listed.fold!.description).toContain("story");
-    // A name a knight can't carry is still yours to hire models for.
-    expect(listed["Odd.Name"]).toMatchObject({ custom: true, forKnights: false });
+    // A name an agent can't carry is still yours to hire models for.
+    expect(listed["Odd.Name"]).toMatchObject({ custom: true, forAgents: false });
   });
 });
 

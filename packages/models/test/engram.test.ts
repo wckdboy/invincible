@@ -17,7 +17,7 @@ import {
 } from "../src/engram.ts";
 
 /*
- * Engram in a knight's VM, as far as Galahad says anything to it: where the binary and its store are, the four
+ * Engram in an agent's VM, as far as the primary says anything to it: where the binary and its store are, the four
  * tools a harness is given, the command that starts it, and the project its notes are kept under. Nothing here
  * runs Engram: what it answers was read from the real binary (3.7.2) and is written out below.
  */
@@ -31,7 +31,7 @@ describe("the notes store's fragments", () => {
     expect(engramArgv("a").join(" ")).not.toMatch(/agent|admin|mem_(context|session|judge|compare|consolidate|delete|merge|pin|capture|save_prompt)/);
   });
 
-  test("its store is on the knight's own disk, its update check is off, and nothing of it is pointed outside the VM", () => {
+  test("its store is on the agent's own disk, its update check is off, and nothing of it is pointed outside the VM", () => {
     expect(ENGRAM_DATA_DIR).toBe("/work/.memory/engram");
     expect({ ...ENGRAM_ENV }).toEqual({ ENGRAM_DATA_DIR: "/work/.memory/engram", ENGRAM_NO_UPDATE_CHECK: "1" });
     // (Not the default ~/.engram: a folder of that name inside a project is Engram's own, for what it syncs through git.)
@@ -50,7 +50,7 @@ describe("the notes store's fragments", () => {
     expect(() => engramProject(`x${"y".repeat(500)}!`)).toThrow(/^.{0,120}$/);
   });
 
-  test("a knight with a repository keeps its notes under the repository's name, one without under its own handle", () => {
+  test("an agent with a repository keeps its notes under the repository's name, one without under its own handle", () => {
     expect(engramProjectFor("https://github.com/you/project", "ada")).toBe("you-project");
     expect(engramProjectFor("https://github.com/WCKDai/Poly.Core_X", "ada")).toBe("wckdai-poly-core-x");
     expect(engramProjectFor("https://github.com/you/project/", "ada")).toBe("you-project");
@@ -138,7 +138,7 @@ describe("what a task is told about its notes", () => {
   });
 });
 
-describe("the knights' image", () => {
+describe("the agents' image", () => {
   const dockerfile = readFileSync(new URL("../../../sandbox/Dockerfile", import.meta.url), "utf8");
   /** The one RUN that fetches it, as a single line. */
   const fetched = dockerfile.replace(/\\\n/g, " ").split("\n").find((line) => line.startsWith("RUN") && line.includes("engram")) ?? "";
@@ -163,7 +163,7 @@ describe("the knights' image", () => {
     expect(fetched).not.toMatch(/latest|\| *(ba)?sh\b/);
   });
 
-  test("puts it where the drivers look, with its store on the knight's disk and its update check off, as root's files (read-only to the knight)", () => {
+  test("puts it where the drivers look, with its store on the agent's disk and its update check off, as root's files (read-only to the agent)", () => {
     expect(ENGRAM_BIN).toBe("/opt/engram/bin/engram");
     expect(dockerfile).toContain("ENV PATH=/opt/engram/bin:$PATH\n");
     expect(dockerfile).toContain(`ENV ENGRAM_DATA_DIR=${ENGRAM_DATA_DIR}\n`);

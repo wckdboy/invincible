@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { moneyPrices } from "@invincible/core";
 import { PLAN_PROVIDERS } from "@invincible/models";
-import { meterLine } from "../src/trial-commands.ts";
+import { meterLine } from "../src/eval-commands.ts";
 import { UsageStore } from "../src/usage.ts";
 
 /* A meter's numbers: this period's calls at your prices, against your budget (a line to watch, never a stop). */
@@ -19,9 +19,9 @@ describe("the usage meter", () => {
   // Your word, 23 November 2026: a daily budget of a couple of dollars, outside the coding plans.
   test("a coding plan's calls are paid for already: never money, never against your budget, priced by you or not", () => {
     const usage = store(at("2026-11-23T09:00:00Z"));
-    usage.note("galahad", "engineer", "opencode-go/glm-5.3", { input: 2_000_000, output: 200_000, cached: 0, reasoning: 0 });
-    usage.note("galahad", "engineer", "mimo-token/mimo-v2.6-pro", { input: 3_000_000, output: 100_000, cached: 0, reasoning: 0 });
-    usage.note("galahad", "planner", "deepseek/deepseek-v4-pro", { input: 1_000_000, output: 250_000, cached: 0, reasoning: 0 });
+    usage.note("primary", "engineer", "opencode-go/glm-5.3", { input: 2_000_000, output: 200_000, cached: 0, reasoning: 0 });
+    usage.note("primary", "engineer", "mimo-token/mimo-v2.6-pro", { input: 3_000_000, output: 100_000, cached: 0, reasoning: 0 });
+    usage.note("primary", "planner", "deepseek/deepseek-v4-pro", { input: 1_000_000, output: 250_000, cached: 0, reasoning: 0 });
     usage.setBudget({ usd: 2, per: "day" });
     const meter = usage.meter("ultra", moneyPrices(PRICES, PLAN_PROVIDERS));
     // DeepSeek's $1.00 is money; GLM on OpenCode Go (priced by you at $2.80) and MiMo's plan (no price) are not.

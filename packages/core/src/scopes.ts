@@ -11,7 +11,7 @@ export const SCOPES = [
   "chat",
   "vault:read", // secret names + metadata only
   "vault:write", // add / replace / delete / rotate
-  "brain:write", // providers, roster, loops and connectors: how Galahad thinks and acts on his own
+  "brain:write", // providers, roster, loops and connectors: how the primary thinks and acts on its own
   "gateway:mint", // mint scoped model-gateway tokens for arms
   "fleet:admin", // invite, approve, revoke devices; decide approvals; dismiss notices (never an agent's)
   "sandbox", // create, use and destroy sandboxes on sandbox hosts

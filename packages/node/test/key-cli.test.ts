@@ -40,19 +40,19 @@ test("a key whose form says whose it is is sealed for that provider and the prov
   expect(lines).toContain('Key stored and provider "anthropic" configured. Every full node can now use it.');
   expect(lines).toContain("It will only ever be sent to https://pinned.example.test.");
   expect(lines).not.toContain("coding plan");
-  // His roles name its model: nothing more to do.
-  expect(lines).not.toContain("None of his roles");
+  // Its roles name its model: nothing more to do.
+  expect(lines).not.toContain("None of its roles");
 });
 
-test("a key his roles name no model of says how to hire one; one they name says nothing more", async () => {
+test("a key its roles name no model of says how to hire one; one they name says nothing more", async () => {
   // OpenAI's form is told, and pinned to its own address; the roster named here has none of its models.
   const openai = await run("sk-proj-FAKE-key-for-tests-0000000000");
   expect(openai.calls[1]!.input).toEqual({ id: "openai", baseUrl: "https://api.openai.com/v1", kind: "openai", secret: "openai" });
-  expect(openai.lines).toContain("None of his roles has a model of openai's yet: hire one with invincible roster set planner openai/<model>");
+  expect(openai.lines).toContain("None of its roles has a model of openai's yet: hire one with invincible roster set planner openai/<model>");
   expect(openai.lines).toContain("invincible provider models openai lists what it serves");
   // A role's defaults on a provider you set up are what it runs on (roster.ts): the node says DeepSeek's model is named.
   const deepseek = await run("sk-FAKE0000000000000000000000000000", { provider: "deepseek" }, ["deepseek/deepseek-v4-pro"]);
-  expect(deepseek.lines).not.toContain("None of his roles");
+  expect(deepseek.lines).not.toContain("None of its roles");
 });
 
 test("a subscription's sign-in is told from a key before anything is sent anywhere, whatever provider was named", async () => {
@@ -84,8 +84,8 @@ test("a coding plan is said to be one: what its key is for, where its terms are,
   expect(lines).toContain('Key stored and provider "zai-coding" configured.');
   expect(lines).toContain("GLM Coding Plan is a coding plan");
   // What it does is what its terms allow: Z.ai's, only inside the coding tools it names.
-  expect(lines).toContain("whose terms allow it only inside the coding tools they name: Galahad never calls it himself");
-  expect(lines).toContain("His talk with you, his loops and his heartbeat never use it");
+  expect(lines).toContain("whose terms allow it only inside the coding tools they name: your agent never calls it itself");
+  expect(lines).toContain("Its talk with you, its loops and its heartbeat never use it");
   // What its vendor says it is for, in the vendor's words, and where.
   expect(lines).toContain('"for general-purpose API access or any scenarios outside such tools');
   expect(lines).toContain("https://docs.z.ai/legal-agreement/subscription-terms");
@@ -95,12 +95,12 @@ test("a coding plan is said to be one: what its key is for, where its terms are,
   expect(lines).not.toContain(PLAN_KEY);
 });
 
-test("a plan for interactive use only says so, and how to use it: never put first for coding, since nothing of his may run on it", () => {
+test("a plan for interactive use only says so, and how to use it: never put first for coding, since nothing of its may run on it", () => {
   const lines = planAdvice("kimi-coding", preset("kimi-coding")!.plan!, ["opencode-go/glm-5.3"]).join("\n");
   expect(lines).toContain("Kimi Code is a coding plan for interactive use only, by its terms: it is lent to a tool you run yourself (invincible run --providers kimi-coding -- <tool>)");
   expect(lines).not.toContain("roster set engineer");
-  // OpenCode Go's terms allow a coding agent's own calls: it codes on it himself.
-  expect(planAdvice("opencode-go", preset("opencode-go")!.plan!, []).join("\n")).toContain("Galahad and the other knights code on it themselves, as Galahad");
+  // OpenCode Go's terms allow a coding agent's own calls: it codes on it itself.
+  expect(planAdvice("opencode-go", preset("opencode-go")!.plan!, []).join("\n")).toContain("Your agent and the other agents code on it themselves, as your agent");
 });
 
 test("a plan the engineer's roster already has is not offered again", async () => {

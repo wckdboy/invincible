@@ -51,15 +51,15 @@ const unmarked = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (
 describe("prompt caching", () => {
   test("on Anthropic's own API, each call marks the tools and system prompt, and the conversation so far, for its cache", async () => {
     const model = scripted([toolCall, answer("Posted.")]);
-    const conversation = anthropicConversation({ provider: provider("https://api.anthropic.com"), model: "claude-opus-5-5", system: "Who he is.", context: "What he recalled.", messages: ask("Post hi."), effort: "low", fetch: model.fetch });
+    const conversation = anthropicConversation({ provider: provider("https://api.anthropic.com"), model: "claude-opus-5-5", system: "Who it is.", context: "What it recalled.", messages: ask("Post hi."), effort: "low", fetch: model.fetch });
     await drain(conversation.turn([post]));
     conversation.answer([{ id: "toolu_1", content: "posted" }]);
     await drain(conversation.turn([post]));
     const [first, second] = model.bodies;
-    // The tools and the system prompt end at the first mark; what he recalled comes after it, unmarked.
+    // The tools and the system prompt end at the first mark; what it recalled comes after it, unmarked.
     expect(first.system).toEqual([
-      { type: "text", text: "Who he is.", cache_control: { type: "ephemeral" } },
-      { type: "text", text: "What he recalled." },
+      { type: "text", text: "Who it is.", cache_control: { type: "ephemeral" } },
+      { type: "text", text: "What it recalled." },
     ]);
     // The conversation so far: the API marks its last block itself, so the mark moves on as it grows.
     expect(first.cache_control).toEqual({ type: "ephemeral" });
@@ -72,23 +72,23 @@ describe("prompt caching", () => {
 
   test("an Anthropic-compatible endpoint that isn't Anthropic's is sent what it was before: one system prompt and no marks", async () => {
     const model = scripted([answer("Hi.")]);
-    const conversation = anthropicConversation({ provider: provider("https://anthropic.test"), model: "claude-opus-5-5", system: "Who he is.", context: "What he recalled.", messages: ask("Hi"), effort: "low", fetch: model.fetch });
+    const conversation = anthropicConversation({ provider: provider("https://anthropic.test"), model: "claude-opus-5-5", system: "Who it is.", context: "What it recalled.", messages: ask("Hi"), effort: "low", fetch: model.fetch });
     await drain(conversation.turn([post]));
-    expect(model.bodies[0].system).toBe("Who he is.\n\nWhat he recalled.");
+    expect(model.bodies[0].system).toBe("Who it is.\n\nWhat it recalled.");
     expect(JSON.stringify(model.bodies[0])).not.toContain("cache_control");
   });
 
-  test("an OpenAI-compatible provider caches by prefix on its own: its system message is the prompt, then what he recalled", async () => {
+  test("an OpenAI-compatible provider caches by prefix on its own: its system message is the prompt, then what it recalled", async () => {
     const model = scripted([() => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: "Hi." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } })]);
-    const conversation = openAIConversation({ provider: provider("http://127.0.0.1:9/v1", "openai"), model: "m", system: "Who he is.", context: "What he recalled.", messages: ask("Hi"), effort: "low", fetch: model.fetch });
+    const conversation = openAIConversation({ provider: provider("http://127.0.0.1:9/v1", "openai"), model: "m", system: "Who it is.", context: "What it recalled.", messages: ask("Hi"), effort: "low", fetch: model.fetch });
     await drain(conversation.turn([]));
-    expect(model.bodies[0].messages[0]).toEqual({ role: "system", content: "Who he is.\n\nWhat he recalled." });
+    expect(model.bodies[0].messages[0]).toEqual({ role: "system", content: "Who it is.\n\nWhat it recalled." });
   });
 
   test("a chat's recalled memories go after the cached part, so a new question reads the persona and tools from the cache", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     vault.set("claude", "test-anthropic-key-FAKE-0000", { provider: "claude", origin: "https://api.anthropic.com" });
     store.emit(identity, "provider.set", { id: "claude", kind: "anthropic", baseUrl: "https://api.anthropic.com", secret: "claude" });
@@ -111,7 +111,7 @@ describe("prompt caching", () => {
 });
 
 /*
- * How hard Claude thinks, step by step (your word, 19 November 2026: "never fixed, always adaptable"): a quest's loop
+ * How hard Claude thinks, step by step (your word, 19 November 2026: "never fixed, always adaptable"): a run's loop
  * says each turn's level on its message (roster.ts STEP_EFFORT). Changing the call's own level from one turn to the
  * next would start the cache again, so on Anthropic's own API the call keeps the first level and each change is a
  * system message of its own (beta mid-conversation-output-config-2026-07-01): what was sent before is sent again as it was.
@@ -137,9 +137,9 @@ describe("how hard it thinks, step by step, with the cache kept", () => {
 
   test("each change of level is said where it happens, by a system message with no words; the call's own is the first, every time", async () => {
     const model = heard([answer("Next."), answer("Next.")]);
-    const first = anthropicConversation({ provider: provider("https://api.anthropic.com"), model: "claude-opus-5-5", system: "Who he is.", messages: turns.slice(0, 3), effort: "xhigh", fetch: model.fetch });
+    const first = anthropicConversation({ provider: provider("https://api.anthropic.com"), model: "claude-opus-5-5", system: "Who it is.", messages: turns.slice(0, 3), effort: "xhigh", fetch: model.fetch });
     await drain(first.turn([]));
-    const second = anthropicConversation({ provider: provider("https://api.anthropic.com"), model: "claude-opus-5-5", system: "Who he is.", messages: turns, effort: "xhigh", fetch: model.fetch });
+    const second = anthropicConversation({ provider: provider("https://api.anthropic.com"), model: "claude-opus-5-5", system: "Who it is.", messages: turns, effort: "xhigh", fetch: model.fetch });
     await drain(second.turn([]));
     const [a, b] = model.calls;
     expect(a!.body.output_config).toEqual({ effort: "high" });
@@ -154,7 +154,7 @@ describe("how hard it thinks, step by step, with the cache kept", () => {
   test("a model that can't take a change inside a conversation, or an endpoint that isn't Anthropic's, thinks at the first level throughout", async () => {
     for (const [baseUrl, model] of [["https://api.anthropic.com", "claude-opus-4-8"], ["https://anthropic.test", "claude-opus-5-5"]] as const) {
       const heardIt = heard([answer("Next.")]);
-      const conversation = anthropicConversation({ provider: provider(baseUrl), model, system: "Who he is.", messages: turns, effort: "xhigh", fetch: heardIt.fetch });
+      const conversation = anthropicConversation({ provider: provider(baseUrl), model, system: "Who it is.", messages: turns, effort: "xhigh", fetch: heardIt.fetch });
       await drain(conversation.turn([]));
       const [call] = heardIt.calls;
       expect(call!.body.output_config).toEqual({ effort: "high" });
@@ -165,7 +165,7 @@ describe("how hard it thinks, step by step, with the cache kept", () => {
 
   test("a call whose messages say no level thinks at the role's, as ever", async () => {
     const model = heard([answer("Hi.")]);
-    const conversation = anthropicConversation({ provider: provider("https://api.anthropic.com"), model: "claude-opus-5-5", system: "Who he is.", messages: ask("Hi"), effort: "low", fetch: model.fetch });
+    const conversation = anthropicConversation({ provider: provider("https://api.anthropic.com"), model: "claude-opus-5-5", system: "Who it is.", messages: ask("Hi"), effort: "low", fetch: model.fetch });
     await drain(conversation.turn([]));
     expect(model.calls[0]!.body.output_config).toEqual({ effort: "low" });
     expect(model.calls[0]!.betas).not.toContain("mid-conversation-output-config");
@@ -174,7 +174,7 @@ describe("how hard it thinks, step by step, with the cache kept", () => {
   test("a role you pinned to a level thinks at it whatever its messages say: invincible roster effort <role> <level>", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     vault.set("claude", "test-anthropic-key-FAKE-0000", { provider: "claude", origin: "https://api.anthropic.com" });
     store.emit(identity, "provider.set", { id: "claude", kind: "anthropic", baseUrl: "https://api.anthropic.com", secret: "claude" });

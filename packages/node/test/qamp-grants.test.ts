@@ -8,7 +8,7 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
 import { ArmTokens } from "../src/arms.ts";
 import { Home } from "../src/home.ts";
 import { grantScopes, mayGrant, QampGrantError, QampGrants, type QampProcess, type QampRunner, unspecified } from "../src/qamp-grants.ts";
-import { type GalahadTool, TOOLS } from "../src/tools.ts";
+import { type PrimaryTool, TOOLS } from "../src/tools.ts";
 
 /*
  * A grant to an agent on another machine, with a stand-in for Q-AMP's binary: what each step asks of `qamp`, what it
@@ -128,7 +128,7 @@ afterEach(async () => {
 });
 
 describe("who may grant", () => {
-  test("you, at a terminal or on a paired device of yours with fleet:admin; never an agent, a knight, Galahad himself or another node", () => {
+  test("you, at a terminal or on a paired device of yours with fleet:admin; never an agent, an agent, your agent itself or another node", () => {
     expect(mayGrant(you)).toBe(true);
     expect(mayGrant({ kind: "client", scopes: ["mind:read", "fleet:admin"] })).toBe(true);
     for (const p of [
@@ -138,8 +138,8 @@ describe("who may grant", () => {
       { kind: "arm" as const, label: "claude-code", scopes: ["mind:read", "mind:write"] },
       // Even an arm that somehow held fleet:admin: an arm is an agent.
       { kind: "arm" as const, label: "claude-code", scopes: OWNER_SCOPES },
-      { kind: "arm" as const, label: "galahad", scopes: ["mind:read", "mind:write", "sandbox", "chat"] },
-      { kind: "arm" as const, label: "team.percival", scopes: ["mind:read", "mind:write", "sandbox", "connect"] },
+      { kind: "arm" as const, label: "primary", scopes: ["mind:read", "mind:write", "sandbox", "chat"] },
+      { kind: "arm" as const, label: "team.ivo", scopes: ["mind:read", "mind:write", "sandbox", "connect"] },
       { kind: "arm" as const, label: "qamp.0a1b2c3d4e", scopes: ["mind:read"] },
     ]) {
       expect([p.kind, p.label, mayGrant(p)]).toEqual([p.kind, p.label, false]);
@@ -163,8 +163,8 @@ describe("a grant's scopes", () => {
     expect(grantScopes(["fleet", "compute", "place", "ledger"])).toEqual(["mind:read"]);
   });
 
-  test("one no arm may hold is refused, not trimmed; so is a tool of Galahad's own, and one that doesn't exist", () => {
-    const listAgents: GalahadTool = { name: "list_agents", title: "t", description: "d", input: {}, routes: ["arms"], run: async () => "" };
+  test("one no arm may hold is refused, not trimmed; so is a tool of your agent's own, and one that doesn't exist", () => {
+    const listAgents: PrimaryTool = { name: "list_agents", title: "t", description: "d", input: {}, routes: ["arms"], run: async () => "" };
     const table = [...TOOLS, listAgents];
     const refused = (() => {
       try {
@@ -175,8 +175,8 @@ describe("a grant's scopes", () => {
     })();
     expect(refused?.status).toBe(400);
     expect(refused?.message).toBe("refused: fleet, list_agents would need fleet:admin, which no agent may ever hold");
-    expect(() => grantScopes(["team"])).toThrow("team is Galahad's own: no agent is ever given it");
-    expect(() => grantScopes(["about_you"])).toThrow("about_you is Galahad's own");
+    expect(() => grantScopes(["team"])).toThrow("team is your agent's own: no agent is ever given it");
+    expect(() => grantScopes(["about_you"])).toThrow("about_you is your agent's own");
     expect(() => grantScopes(["no_such_tool"])).toThrow("there's no tool named no_such_tool");
   });
 
@@ -205,10 +205,10 @@ describe("a grant made", () => {
     expect(qamp.runs[0]).toEqual(["keygen", "--out", key]);
     expect(statSync(key).mode & 0o777).toBe(0o600);
     expect(statSync(join(home.dir, "qamp")).mode & 0o777).toBe(0o700);
-    expect(qamp.runs[1]).toEqual(["delegate", "--key", key, "--to", AGENT, "--cmd", "/tool/galahad", "--ttl", "3600"]);
+    expect(qamp.runs[1]).toEqual(["delegate", "--key", key, "--to", AGENT, "--cmd", "/tool/invincible", "--ttl", "3600"]);
     const bridge = qamp.bridges[0]!;
     expect(bridge.args).toEqual([
-      "serve", "--key", key, "--listen", "127.0.0.1:17781", "--allow", AGENT, "--mcp-stdio", "--only", "fleet,compute", "--prefix", "galahad",
+      "serve", "--key", key, "--listen", "127.0.0.1:17781", "--allow", AGENT, "--mcp-stdio", "--only", "fleet,compute", "--prefix", "invincible",
       "--", "/fake/bun", "/fake/cli.ts", "mcp", "--arm", grant.label, "--tools", "fleet,compute", "--home", home.dir,
     ]);
     // Its environment is what its MCP server needs to reach this node, nothing else of the daemon's.

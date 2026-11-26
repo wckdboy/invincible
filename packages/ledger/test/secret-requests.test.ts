@@ -7,7 +7,7 @@ import { b64u, type GEvent, newNodeIdentity, type NodeIdentity } from "@invincib
 import { enrollDevice, foundFleet, LedgerStore, Vault } from "../src/index.ts";
 
 /*
- * Key requests you dismiss (secret.request.dismissed): out of your Inbox until he asks again. The newer of an ask and a
+ * Key requests you dismiss (secret.request.dismissed): out of your Inbox until it asks again. The newer of an ask and a
  * dismissal stands on every replica, in any order, with duplicates and after a rebuild; and a replica that held a
  * dismissal before it knew the kind applies it once it is upgraded.
  */
@@ -46,7 +46,7 @@ function fleet(): { a: NodeIdentity; b: NodeIdentity; storeA: LedgerStore; store
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const storeA = new LedgerStore(":memory:");
-  foundFleet(storeA, a, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(storeA, a, { fleetName: "homelab", nodeName: "ultra" });
   enrollDevice(storeA, a, { device: b.id, name: "mini", kind: "node", box: b64u(b.boxPublic) });
   const storeB = new LedgerStore(":memory:");
   storeB.expectFleet(storeA.fleet!);
@@ -75,7 +75,7 @@ describe("key requests you dismiss", () => {
     expect(ultra.dismissRequest("github")).toBe(false);
     expect(ultra.dismissRequest("weather")).toBe(false);
 
-    // He asks again: it's open again, with what he says it's for now.
+    // It asks again: it's open again, with what it says it's for now.
     ultra.request("github", "to merge the release branch", "github");
     syncInto(storeA, storeB);
     expect(open(mini)).toEqual(["deepseek: to ask a second model", "github: to merge the release branch"]);
@@ -129,7 +129,7 @@ describe("key requests you dismiss", () => {
       const path = join(dir, "ledger.db");
       const a = newNodeIdentity();
       let store = new LedgerStore(path);
-      foundFleet(store, a, { fleetName: "camelot", nodeName: "ultra" });
+      foundFleet(store, a, { fleetName: "homelab", nodeName: "ultra" });
       new Vault(store, a).request("github", "to open a pull request");
       store.close();
       // What the older code holds for the ask, which it applied: the dismissal after it, it kept but didn't know.

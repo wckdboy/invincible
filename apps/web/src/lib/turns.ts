@@ -4,18 +4,18 @@ import { archiveStep, stepsOf } from "./chats.ts";
 
 /*
  * Turns the node owns, as the app shows them. Pure functions (no DOM), unit-tested:
- * what sending does while he works (steer or queue), a chat's state as a badge, and
+ * what sending does while it works (steer or queue), a chat's state as a badge, and
  * how a turn's stream becomes the thread on screen, from its start or (after a reload,
  * a dropped connection, on another device) rebuilt from what the node replays.
  */
 
 /* ---------- the composer: steer or queue ---------- */
 
-/** What Enter does while he's working, on this device. */
+/** What Enter does while it's working, on this device. */
 export type EnterPref = "steer" | "queue";
 
 /**
- * What sending does. With nothing running, it sends. While he works, Enter does what this device
+ * What sending does. With nothing running, it sends. While it works, Enter does what this device
  * chose and the modifier (Ctrl or ⌘ with Enter) does the other; where a message can't be queued
  * (a temporary chat is kept nowhere, so there's nowhere to keep it), both steer.
  */
@@ -32,8 +32,8 @@ export function composerHint(input: { busy: boolean; enter: EnterPref; canQueue:
   if (input.coarse) return "";
   if (!input.busy) return "Enter to send · Shift+Enter for a new line";
   const mod = input.mac ? "⌘" : "Ctrl";
-  if (!input.canQueue) return "Enter steers him now · Esc stops him";
-  return input.enter === "steer" ? `Enter steers him now · ${mod}+Enter queues it · Esc stops him` : `Enter queues it · ${mod}+Enter steers him now · Esc stops him`;
+  if (!input.canQueue) return "Enter steers it now · Esc stops it";
+  return input.enter === "steer" ? `Enter steers it now · ${mod}+Enter queues it · Esc stops it` : `Enter queues it · ${mod}+Enter steers it now · Esc stops it`;
 }
 
 /** A side question typed into the composer: "/btw how long will this take?" (null: it isn't one). */
@@ -47,7 +47,7 @@ export function asideOf(text: string): string | null {
 export interface StateBadge {
   text: string;
   tone: "accent" | "warn" | "danger" | "info" | "neutral";
-  /** He's working in it right now. */
+  /** It's working in it right now. */
   live: boolean;
 }
 
@@ -73,7 +73,7 @@ export interface Step {
   toolName?: string;
 }
 
-/** One argument of a tool's steps in these turns, each value that fits `shape` once, in the order he asked. */
+/** One argument of a tool's steps in these turns, each value that fits `shape` once, in the order it asked. */
 function askedIn(turns: Turn[], toolName: string, argument: string, shape: RegExp): string[] {
   const values: string[] = [];
   for (const turn of turns) {
@@ -93,12 +93,12 @@ function askedIn(turns: Turn[], toolName: string, argument: string, shape: RegEx
   return values;
 }
 
-/** The keys he asked for in these turns (his request_secret steps, by the name each named), once each, in the order he asked. */
+/** The keys it asked for in these turns (its request_secret steps, by the name each named), once each, in the order it asked. */
 export function keysAskedIn(turns: Turn[]): string[] {
   return askedIn(turns, "request_secret", "name", /^[A-Za-z0-9._:-]{1,128}$/);
 }
 
-/** The connectors he asked for in these turns (his connector_request steps, by the connector each named), once each, in order. */
+/** The connectors it asked for in these turns (its connector_request steps, by the connector each named), once each, in order. */
 export function connectorsAskedIn(turns: Turn[]): string[] {
   return askedIn(turns, "connector_request", "connector", /^[a-z][a-z0-9-]{0,39}$/);
 }
@@ -111,13 +111,13 @@ export interface Turn {
   content: string;
   /** Your files with it (your turns), as the node keeps them. */
   attachments?: AttachmentRef[];
-  /** A look of his come back (a "user" turn that isn't yours): when he set it, and his note. */
+  /** A look of its come back (a "user" turn that isn't yours): when it set it, and its note. */
   look?: { set: number; note: string };
   /** The roster role that answered (assistant turns). */
   as?: string;
   model?: string;
   steps: Step[];
-  /** "steered": you sent a message while he was answering; the turn went on in the next answer. */
+  /** "steered": you sent a message while it was answering; the turn went on in the next answer. */
   status: "streaming" | "done" | "error" | "stopped" | "steered";
   error?: string;
   fallbacks: number;
@@ -139,7 +139,7 @@ const STEP_ICON: Record<string, string> = { asked: "arrow-up", model: "models", 
 /** A kept message as a turn on screen, with its answer's steps. */
 /**
  * Whether a kept chat holds what isn't on screen: a message more or fewer, another in a place, or one that ended or
- * changed since (another device asked in it, retried, or stopped him). By the node's own ids, states and words; a turn
+ * changed since (another device asked in it, retried, or stopped it). By the node's own ids, states and words; a turn
  * of this device's not yet told its kept id is matched by its words and state (redrawing it would only move the screen).
  */
 export function keptDiffers(shown: readonly Pick<Turn, "sid" | "status" | "content">[], kept: readonly Pick<StoredMessage, "id" | "status" | "content">[]): boolean {
@@ -273,13 +273,13 @@ export function applyEvent(thread: Thread, event: ChatStreamEvent, now: number):
       return turn;
     }
     case "steer": {
-      // Your message reached him: the answer so far stands as it is, your message follows, a new answer begins.
+      // Your message reached it: the answer so far stands as it is, your message follows, a new answer begins.
       const empty = !turn.content.trim() && !turn.steps.some((s) => s.tool);
       if (empty) thread.turns.splice(thread.turns.indexOf(turn), 1);
       else {
         turn.status = "steered";
         turn.endedAt = now;
-        step(turn, { icon: "arrow-up", text: "Your message reached him here", state: "done" });
+        step(turn, { icon: "arrow-up", text: "Your message reached it here", state: "done" });
       }
       thread.turns.push({ id: thread.nextId++, role: "user", content: event.text, steps: [], status: "done", fallbacks: 0, startedAt: now });
       const next = blank(thread, turn.as ?? "planner", now, turn.model);

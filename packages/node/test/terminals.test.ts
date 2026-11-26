@@ -36,7 +36,7 @@ function standIn() {
       },
       exited,
     };
-    return { name: `box-${sandbox}`, quest: "owner", process };
+    return { name: `box-${sandbox}`, run: "owner", process };
   };
   return { made, start };
 }
@@ -49,7 +49,7 @@ function terminals(start: TerminalsOptions["start"], now = () => Date.now()) {
 
 describe("a terminal", () => {
   test("a real one: what you type reaches the shell, what it prints comes back, and a resize reaches it", async () => {
-    const { service } = terminals(async (_sandbox, size, onData) => ({ name: "local", quest: null, process: spawnTerminal(["sh"], size, onData) }));
+    const { service } = terminals(async (_sandbox, size, onData) => ({ name: "local", run: null, process: spawnTerminal(["sh"], size, onData) }));
     const opened = await service.open("0123456789", { cols: 100, rows: 30 });
     expect(opened).toMatchObject({ sandbox: "0123456789", name: "local", cols: 100, rows: 30, exitCode: null });
     const seen: TerminalEvent[] = [];
@@ -66,7 +66,7 @@ describe("a terminal", () => {
   });
 
   test("closing a real one ends its shell at once, though an interactive shell ignores SIGTERM", async () => {
-    const { service, ledger } = terminals(async (_sandbox, size, onData) => ({ name: "local", quest: null, process: spawnTerminal(["sh"], size, onData) }));
+    const { service, ledger } = terminals(async (_sandbox, size, onData) => ({ name: "local", run: null, process: spawnTerminal(["sh"], size, onData) }));
     const opened = await service.open("0123456789", { cols: 80, rows: 24 });
     const seen: TerminalEvent[] = [];
     service.watch(opened.id, (event) => void seen.push(event));
@@ -183,7 +183,7 @@ describe("what is kept of it", () => {
     service.close(opened.id);
     await Bun.sleep(0);
     expect(made[0]!.killed).toBe(true);
-    expect(ledger.map((e) => [e.resource, e.class, e.verdict, e.target, e.quest, e.detail])).toEqual([
+    expect(ledger.map((e) => [e.resource, e.class, e.verdict, e.target, e.run, e.detail])).toEqual([
       ["sandbox.terminal", "modify", "allow", "box-0123456789", "owner", "opened (80×24)"],
       ["sandbox.terminal", "modify", "allow", "box-0123456789", "owner", "closed after 0m 0s: you closed it"],
     ]);

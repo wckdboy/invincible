@@ -13,7 +13,7 @@ import { Home } from "../src/home.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * Galahad's tools for an agent on another machine, end to end with Q-AMP's real, pinned binary and a real node in a
+ * The primary's tools for an agent on another machine, end to end with Q-AMP's real, pinned binary and a real node in a
  * temporary home, on loopback: a grant made from the CLI; the agent lists and calls the granted tool through the bridge;
  * a tool not granted, a stranger's key, an expired chain and a chain from another key are each refused where Q-AMP
  * refuses them; and after a revoke the agent's very next call is refused.
@@ -66,7 +66,7 @@ async function qamp(args: string[], limitMs = 15_000): Promise<{ code: number | 
   return { code: proc.exitCode, out, err };
 }
 
-async function galahad(args: string[]): Promise<{ code: number | null; out: string; err: string }> {
+async function primary(args: string[]): Promise<{ code: number | null; out: string; err: string }> {
   const proc = Bun.spawn([process.execPath, cli, ...args, "--home", home.dir], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { ...process.env, INVINCIBLE_KEYSTORE: "file" } });
   const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   await proc.exited;
@@ -85,7 +85,7 @@ describe.skipIf(missing !== null)("an agent on another machine, over Q-AMP's rea
     home = new Home(join(root, "node"));
     const { identity, keystore } = await home.createIdentity("file");
     const store = new LedgerStore(home.ledgerPath);
-    const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     store.close();
     home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
     // The node runs the binary INVINCIBLE_QAMP_BIN names, as a node does; its bridges on loopback, on ports of the tests' own.
@@ -104,13 +104,13 @@ describe.skipIf(missing !== null)("an agent on another machine, over Q-AMP's rea
   test("the binary is the pinned one, and its did:key names the public key its key file holds", async () => {
     expect(createHash("sha256").update(readFileSync(bin!)).digest("hex")).toBe(pin!);
     expect((await qamp(["--version"])).out.trim()).toBe("qamp 0.1.0");
-    // Q-AMP's encoding against Galahad's reading of it: the key file is qamp-sk1.<the seed, base64url>.
+    // Q-AMP's encoding against the primary's reading of it: the key file is qamp-sk1.<the seed, base64url>.
     const seed = fromB64u(readFileSync(agentKey, "utf8").trim().slice("qamp-sk1.".length));
     expect(ed25519OfDidKey(agent)).toEqual(signingPublicKey(seed));
   });
 
   test("granted from the CLI: the agent lists the granted tool alone, and calls it through the bridge", async () => {
-    const granted = await galahad(["qamp", "grant", agent, "--tools", "fleet", "--ttl", "10m"]);
+    const granted = await primary(["qamp", "grant", agent, "--tools", "fleet", "--ttl", "10m"]);
     expect(granted.err).toBe("");
     expect(granted.code).toBe(0);
     const line = /qamp mcp (qamp:\/\/\S+) --key <the agent's key file> --proof (qdt1\.[A-Za-z0-9_-]+)/.exec(granted.out);
@@ -123,7 +123,7 @@ describe.skipIf(missing !== null)("an agent on another machine, over Q-AMP's rea
     expect(manifest.tools.map((t) => t.name)).toEqual(["invincible/fleet"]);
     const called = await qamp(["call", made.url, "invincible/fleet", "--key", agentKey, "--proof", made.proof]);
     expect(called.code).toBe(0);
-    expect(called.out).toStartWith('Fleet "camelot"');
+    expect(called.out).toStartWith('Fleet "homelab"');
     expect(called.out).toContain("- ultra (node, this node)");
   }, 30_000);
 
@@ -145,12 +145,12 @@ describe.skipIf(missing !== null)("an agent on another machine, over Q-AMP's rea
 
   test("an expired chain, a chain from a key that isn't the bridge's, and none at all are refused: UNAUTHORIZED", async () => {
     const bridgeKey = join(home.dir, "qamp", "bridge.qamp-key");
-    const short = (await qamp(["delegate", "--key", bridgeKey, "--to", agent, "--cmd", "/tool/galahad", "--ttl", "1"])).out.trim();
+    const short = (await qamp(["delegate", "--key", bridgeKey, "--to", agent, "--cmd", "/tool/invincible", "--ttl", "1"])).out.trim();
     await Bun.sleep(2_100);
     expect((await qamp(["call", made.url, "invincible/fleet", "--key", agentKey, "--proof", short])).err.trim()).toBe("Error: remote error UNAUTHORIZED: token 0 has expired");
     const rogueKey = join(root, "rogue.qamp-key");
     await qamp(["keygen", "--out", rogueKey]);
-    const rogue = (await qamp(["delegate", "--key", rogueKey, "--to", agent, "--cmd", "/tool/galahad", "--ttl", "60"])).out.trim();
+    const rogue = (await qamp(["delegate", "--key", rogueKey, "--to", agent, "--cmd", "/tool/invincible", "--ttl", "60"])).out.trim();
     expect((await qamp(["call", made.url, "invincible/fleet", "--key", agentKey, "--proof", rogue])).err.trim()).toBe("Error: remote error UNAUTHORIZED: the chain does not start at a trusted root");
     expect((await qamp(["call", made.url, "invincible/fleet", "--key", agentKey])).err.trim()).toBe("Error: remote error UNAUTHORIZED: no proof: the invoker is not a trusted root and the tool is not public");
   }, 30_000);
@@ -162,7 +162,7 @@ describe.skipIf(missing !== null)("an agent on another machine, over Q-AMP's rea
       expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["invincible.fleet"]);
       const before = await client.callTool({ name: "invincible.fleet", arguments: {} });
       expect(before.isError).toBeFalsy();
-      expect((before.content as { text: string }[])[0]!.text).toStartWith('Fleet "camelot"');
+      expect((before.content as { text: string }[])[0]!.text).toStartWith('Fleet "homelab"');
 
       expect(await admin<{ revoked: number }>("qampRevoke", { id: made.id })).toEqual({ revoked: 1 });
       const after = await client.callTool({ name: "invincible.fleet", arguments: {} });

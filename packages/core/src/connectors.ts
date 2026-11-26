@@ -3,10 +3,10 @@ import { canonical, type Json } from "./canonical.ts";
 import { findSecrets } from "./secret-scan.ts";
 
 /*
- * Connectors: how Galahad reaches the services you use (GitHub, Cloudflare,
+ * Connectors: how the primary reaches the services you use (GitHub, Cloudflare,
  * Home Assistant…). A connector is a manifest, data rather than code: one pinned
  * origin, the vault secret it authenticates with, and a set of tools. Each tool is
- * one HTTP request template plus its oath class, which decides whether Galahad
+ * one HTTP request template plus its policy class, which decides whether the primary
  * may simply do it (read, create, modify) or must ask you first (outward, delete).
  *
  * The node that runs a call injects the key on the way out, and only to the origin
@@ -43,11 +43,11 @@ export type ConnectorParam = z.infer<typeof ConnectorParam>;
 export const ToolClass = z.enum(["read", "create", "modify", "outward", "delete"]);
 
 /**
- * Tools Galahad implements himself, each bound to the one origin it may talk to, with the
+ * Tools the primary implements itself, each bound to the one origin it may talk to, with the
  * connector's own key (the node's natives). A manifest can name one; it can't define one.
  */
 export const NATIVE_TOOLS = {
-  /** Commit a quest's kept changes on a new branch and open a pull request (GitHub's Git Data API). */
+  /** Commit a run's kept changes on a new branch and open a pull request (GitHub's Git Data API). */
   "github.ship": "https://api.github.com",
   /** A fix to a pull request already shipped: one commit on top of its branch, moved forward from exactly where the fix began. */
   "github.ship.update": "https://api.github.com",
@@ -80,9 +80,9 @@ export const ConnectorTool = z.strictObject({
     .max(300)
     .regex(/^\/[A-Za-z0-9._~\-/{}:@!$&'()*+,;=%]*$/, "an absolute path such as /repos/{owner}/{repo}"),
   params: z.record(ParamName, ConnectorParam).optional(),
-  /** The oath class: read, create and modify run freely (logged); outward and delete ask you first. */
+  /** The policy class: read, create and modify run freely (logged); outward and delete ask you first. */
   class: ToolClass,
-  /** Carried out by Galahad himself (several requests, one approval); method and path say where it acts. */
+  /** Carried out by the primary itself (several requests, one approval); method and path say where it acts. */
   native: NativeName.optional(),
 });
 export type ConnectorTool = z.infer<typeof ConnectorTool>;
@@ -138,7 +138,7 @@ export const ConnectorAuth = z.strictObject({
   optional: z.boolean().optional(),
   /**
    * scheme oauth: whose sign-in, and what it asks you to allow. mcp: an MCP server's own (its authorization server found
-   * from the server, Galahad registered there as a client of its own: brain mcp-oauth.ts), asking what it names when
+   * from the server, the primary registered there as a client of its own: brain mcp-oauth.ts), asking what it names when
    * no scopes are given here.
    */
   oauth: z
@@ -150,27 +150,27 @@ export const ConnectorAuth = z.strictObject({
     .optional(),
 });
 
-/** An agent as a connector's access names it: its label (Galahad's own is galahad; a knight's, team.…). */
+/** An agent as a connector's access names it: its label (The primary's own is primary; an agent's, team.…). */
 export const AgentLabel = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);
 
 /**
- * Who may call a connector beyond you, your loops and your quests. Absent, every agent: Galahad, the knights, agents
- * over MCP. "galahad": Galahad himself and the agents you allowed, by label; any other asks first (connector_request).
+ * Who may call a connector beyond you, your loops and your runs. Absent, every agent: the primary, the agents, agents
+ * over MCP. "primary": the primary itself and the agents you allowed, by label; any other asks first (connector_request).
  */
 export const ConnectorAccess = z.strictObject({
-  only: z.literal("galahad"),
+  only: z.literal("primary"),
   allowed: z.array(AgentLabel).max(64),
 });
 export type ConnectorAccess = z.infer<typeof ConnectorAccess>;
 
 /**
  * Whether a caller may use a connector: `by` as a connector call names its caller (arm:<label>, node:<name> for your
- * loops, quest for your quests). You are never asked this: a call of yours is yours.
+ * loops, run for your runs). You are never asked this: a call of yours is yours.
  */
 export function mayCall(access: ConnectorAccess | undefined, by: string): boolean {
   if (!access || !by.startsWith("arm:")) return true;
   const label = by.slice(4);
-  return label === "galahad" || access.allowed.includes(label);
+  return label === "primary" || access.allowed.includes(label);
 }
 
 export const ConnectorManifest = z
@@ -200,7 +200,7 @@ export const ConnectorManifest = z
     tools: z.record(ToolName, z.union([ConnectorTool, McpTool])),
     access: ConnectorAccess.optional(),
     /**
-     * What it reads is yours alone (mail): once its data is in an answer, nothing that could carry it out of Galahad, or
+     * What it reads is yours alone (mail): once its data is in an answer, nothing that could carry it out of the primary, or
      * write it into the shared mind, runs for the rest of that answer, its own tools aside.
      */
     private: z.boolean().optional(),
@@ -351,7 +351,7 @@ function checkValue(name: string, param: ConnectorParam, value: ArgValue): ArgVa
 /** Turn a tool call into exactly one request to the connector's origin, or refuse. */
 export function buildRequest(manifest: ConnectorManifest, toolName: string, args: Record<string, ArgValue> = {}): BuiltRequest {
   const built = buildHttpOrNative(manifest, toolName, args);
-  if (built.kind === "native") throw new ConnectorError(`${manifest.id}.${toolName} is carried out by Galahad, not as one request`);
+  if (built.kind === "native") throw new ConnectorError(`${manifest.id}.${toolName} is carried out by your agent, not as one request`);
   return built;
 }
 

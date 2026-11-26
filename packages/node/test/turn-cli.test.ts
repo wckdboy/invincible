@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { ChatStreamEvent, QuestView, TurnView } from "@invincible/core";
-import { type Io, printTurn, questLines, queueLines, turnLine } from "../src/turn-cli.ts";
+import type { ChatStreamEvent, RunView, TurnView } from "@invincible/core";
+import { type Io, printTurn, runLines, queueLines, turnLine } from "../src/turn-cli.ts";
 
 const now = 10_000_000;
 const turn = (over: Partial<TurnView> = {}): TurnView => ({
@@ -22,17 +22,17 @@ const turn = (over: Partial<TurnView> = {}): TurnView => ({
 });
 
 describe("a running turn in a line", () => {
-  test("which chat, what he's doing, what it has cost, who's watching, when it stops by itself", () => {
+  test("which chat, what it's doing, what it has cost, who's watching, when it stops by itself", () => {
     expect(turnLine(turn(), now)).toBe("tn_aaaaaaaaaaaaaaaaaaaaaa · The report (cv_bbbbbbbbbbbbbbbbbbbbbb) · planner · 3 min so far · Answering · 2 tools · nobody watching · stops by itself in 27 min");
     expect(turnLine(turn({ conversation: null, title: null, tools: 0, watchers: 2, steering: 1, step: null }), now)).toBe(
-      "tn_aaaaaaaaaaaaaaaaaaaaaa · a temporary chat · planner · 3 min so far · starting · 1 of your messages waiting to reach him · 2 watching · stops by itself in 27 min",
+      "tn_aaaaaaaaaaaaaaaaaaaaaa · a temporary chat · planner · 3 min so far · starting · 1 of your messages waiting to reach it · 2 watching · stops by itself in 27 min",
     );
     expect(turnLine(turn({ watchable: false, step: null, model: null, watchers: 1 }), now)).toContain("started on another device: not shown to this one · 2 tools · 1 watching");
   });
 });
 
 describe("a running turn's own words", () => {
-  test("its chat's title and the step he is on are plain in the line", () => {
+  test("its chat's title and the step it is on are plain in the line", () => {
     const line = turnLine(turn({ title: "The\u001b[2K report\nfake · line", step: "Recalling\u001b[1A\r memories\u0007" }), now);
     expect(line).toContain("The[2K report fake · line (cv_bbbbbbbbbbbbbbbbbbbbbb)");
     expect(line).toContain(" · Recalling[1A memories · ");
@@ -47,14 +47,14 @@ describe("a chat's queue in words", () => {
   ];
   test("in order, numbered as you'd name them; held says why and what lets it go", () => {
     expect(queueLines(queue, null)).toEqual(["2 queued: each is sent as the next turn when the one before it ends well.", "  1. Then tidy up the branch.  (from phone)", "  2. And tell me when it's done."]);
-    expect(queueLines(queue, "stopped")[0]).toBe("2 queued, held: you stopped him. Nothing is sent until you resume (or send one now).");
+    expect(queueLines(queue, "stopped")[0]).toBe("2 queued, held: you stopped it. Nothing is sent until you resume (or send one now).");
     expect(queueLines([], null)).toEqual(["Nothing queued."]);
   });
 });
 
-describe("a quest in hand in words", () => {
-  const quest = (over: Partial<QuestView> = {}): QuestView => ({
-    quest: "q-abc",
+describe("a run in hand in words", () => {
+  const run = (over: Partial<RunView> = {}): RunView => ({
+    run: "q-abc",
     by: "you",
     goal: "Write the report",
     state: "working",
@@ -73,8 +73,8 @@ describe("a quest in hand in words", () => {
     ...over,
   });
 
-  test("where it stands, the plan, the step he's on, each gate's last result and whose it is", () => {
-    expect(questLines(quest())).toEqual([
+  test("where it stands, the plan, the step it's on, each gate's last result and whose it is", () => {
+    expect(runLines(run())).toEqual([
       "Write the report  (q-abc · run by you)",
       "  working · command 3 of 30 · sent back 1 time",
       "  now: $ cat notes.md",
@@ -87,24 +87,24 @@ describe("a quest in hand in words", () => {
   });
 
   test("an attempt says which; a silent one says so; an ended one shows how, not what it was doing", () => {
-    expect(questLines(quest({ attempt: { of: "q-abc", index: 2, attempts: 3 }, quest: "q-abc.2" }))[0]).toBe("Write the report  (q-abc.2 · attempt 2 of 3 · run by you)");
-    expect(questLines(quest({ silent: true }))[1]).toContain("no word from its runner for a while");
-    const ended = questLines(quest({ state: "unverified", revisions: 2, summary: "Wrote it, but the gate never passed.", gates: [{ command: "false", by: "owner", exitCode: 1 }] }), { plan: false });
+    expect(runLines(run({ attempt: { of: "q-abc", index: 2, attempts: 3 }, run: "q-abc.2" }))[0]).toBe("Write the report  (q-abc.2 · attempt 2 of 3 · run by you)");
+    expect(runLines(run({ silent: true }))[1]).toContain("no word from its runner for a while");
+    const ended = runLines(run({ state: "unverified", revisions: 2, summary: "Wrote it, but the gate never passed.", gates: [{ command: "false", by: "owner", exitCode: 1 }] }), { plan: false });
     expect(ended).toEqual(["Write the report  (q-abc · run by you)", "  finished, but not accepted · command 3 of 30 · sent back 2 times", "  gate 1: failed (exit 1)  $ false  (yours)", "  Wrote it, but the gate never passed."]);
   });
   test("its goal, what it is doing and its plan are a model's or an agent's words: plain, each on the line it was given", () => {
-    const lines = questLines(quest({ goal: "Write\u001b[2J the report\r\nq-zzz · run by you", doing: "$ cat notes\u001b[1A.md\u0007", plan: "1. Read\u001b[31m the notes.\r\n2. Write it.\u2028Done when: it exists.\u202e" }));
+    const lines = runLines(run({ goal: "Write\u001b[2J the report\r\nq-zzz · run by you", doing: "$ cat notes\u001b[1A.md\u0007", plan: "1. Read\u001b[31m the notes.\r\n2. Write it.\u2028Done when: it exists.\u202e" }));
     expect(lines.slice(0, 2)).toEqual(["Write[2J the report q-zzz · run by you  (q-abc · run by you)", "  working · command 3 of 30 · sent back 1 time"]);
     expect(lines.slice(2, 6)).toEqual(["  now: $ cat notes[1A.md", "    1. Read[31m the notes.", "    2. Write it.", "    Done when: it exists."]);
     for (const line of lines) expect(line).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202e]/);
   });
   test("a gate's command and a summary in a line carry nothing hidden", () => {
-    const ended = questLines(quest({ state: "unverified", summary: "Wrote it\u001b[1A\u202e.", gates: [{ command: "test -s out\u001b[2K", by: "owner", exitCode: 0 }] }), { plan: false });
+    const ended = runLines(run({ state: "unverified", summary: "Wrote it\u001b[1A\u202e.", gates: [{ command: "test -s out\u001b[2K", by: "owner", exitCode: 0 }] }), { plan: false });
     expect(ended.slice(2)).toEqual(["  gate 1: passed  $ test -s out[2K  (yours)", "  Wrote it[1A."]);
   });
 });
 
-describe("his words at a terminal", () => {
+describe("its words at a terminal", () => {
   // What a terminal acts on rather than shows: escapes, carriage returns, bells, backspaces, the one-character CSI.
   const STEERS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
   const shown = async (events: ChatStreamEvent[]) => {
@@ -125,7 +125,7 @@ describe("his words at a terminal", () => {
     expect(out).not.toMatch(STEERS);
   });
 
-  test("what he does beside it is plain too: a tool's title, what it was given, how it went, what came from the archive, why a model was skipped", async () => {
+  test("what it does beside it is plain too: a tool's title, what it was given, how it went, what came from the archive, why a model was skipped", async () => {
     const { err, result } = await shown([
       { type: "tool", id: "t1", name: "recall", title: "Recalling\u001b[1A", input: "the round\u001b]0;x\u0007 table" },
       { type: "tool_result", id: "t1", name: "recall", ok: true, summary: "3 memories\r\u001b[2Kall gates passed" },
@@ -135,7 +135,7 @@ describe("his words at a terminal", () => {
       { type: "error", error: "it broke" },
     ]);
     expect(err).not.toMatch(STEERS);
-    expect(err).toBe("→ Recalling[1A the round]0;x table\n  ✓ 3 memories [2Kall gates passed\n[from the archive: ar_1 Notes[31m fake · line (untrusted)]\n[skipped a/b: 429[2J too many]\n\n↳ your message reached him: and[1A check the gate\n");
+    expect(err).toBe("→ Recalling[1A the round]0;x table\n  ✓ 3 memories [2Kall gates passed\n[from the archive: ar_1 Notes[31m fake · line (untrusted)]\n[skipped a/b: 429[2J too many]\n\n↳ your message reached it: and[1A check the gate\n");
     expect(result).toEqual({ how: "error", error: "it broke" });
   });
 

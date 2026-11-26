@@ -10,7 +10,7 @@ import { OrderId, OrderTerms } from "./orders.ts";
 import { RuleName } from "./rules.ts";
 import { Scope } from "./scopes.ts";
 import { SkillId, SkillVersionId } from "./skills-input.ts";
-import { TrialId, TrialRecord, TrialRunId } from "./trials.ts";
+import { EvalId, EvalRecord, EvalRunId } from "./evals.ts";
 
 /** How hard a model thinks for an answer (Anthropic's `effort`; other providers' models choose for themselves). */
 export const THINKING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -59,7 +59,7 @@ export const LoopName = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,39}$/, "lowerca
 export const ConnectorId = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/, "lowercase letters, digits and - (max 40)");
 export const NoticeKey = z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/);
 export const ActionId = z.string().regex(/^a_[A-Za-z0-9_-]{22}$/);
-/** A session on a Mac's own screen that Galahad asked for (docs/MAC.md, M4). */
+/** A session on a Mac's own screen that the primary asked for (docs/MAC.md, M4). */
 export const ScreenSessionId = z.string().regex(/^sc_[A-Za-z0-9_-]{22}$/);
 /** The longest a session on a Mac's own screen is allowed for at once, in minutes. */
 export const SCREEN_SESSION_MAX_MINUTES = 120;
@@ -106,13 +106,13 @@ export const Bodies = {
   "vault.grant": z.strictObject({ kid: B64, device: DeviceRef, box: SealedBoxSchema }),
   "secret.set": z.strictObject({ name: Name, kid: B64, nonce: B64, ct: B64, meta: SecretMeta }),
   "secret.deleted": z.strictObject({ name: Name }),
-  /** Galahad asks you for a credential; you fill it in the vault, he never sees it. */
+  /** The primary asks you for a credential; you fill it in the vault, it never sees it. */
   "secret.requested": z.strictObject({
     name: Name,
     provider: Name.optional(),
     purpose: z.string().min(1).max(500),
   }),
-  /** You dismissed a request (it no longer matters, or you won't give it): it leaves your Inbox until he asks again. */
+  /** You dismissed a request (it no longer matters, or you won't give it): it leaves your Inbox until it asks again. */
   "secret.request.dismissed": z.strictObject({ name: Name }),
   "memory.added": z.strictObject({
     text: z.string().min(1).max(20_000),
@@ -138,7 +138,7 @@ export const Bodies = {
     target: z.string().min(1).max(256),
     verdict: z.enum(["allow", "ask", "deny", "approved"]),
     reason: z.string().max(500).optional(),
-    quest: z.string().max(64).optional(),
+    run: z.string().max(64).optional(),
     detail: z.string().max(2000).optional(),
   }),
   "roster.set": z.strictObject({ role: Name, models: z.array(z.string().min(1).max(256)).max(16) }),
@@ -147,7 +147,7 @@ export const Bodies = {
    * STEP_EFFORT), or one level you chose, whatever the step. A kind of its own, so a node from before it keeps it unread.
    */
   "roster.effort": z.strictObject({ role: Name, effort: z.enum(["auto", ...THINKING_EFFORTS]) }),
-  /** A loop: work Galahad does on a schedule, on one named node (LWW by name). */
+  /** A loop: work the primary does on a schedule, on one named node (LWW by name). */
   "loop.set": z.strictObject({
     name: LoopName,
     schedule: z.string().min(1).max(128),
@@ -190,10 +190,10 @@ export const Bodies = {
   "notice.dismissed": z.strictObject({ key: NoticeKey }),
   "connector.set": z.strictObject({ id: ConnectorId, manifest: Open }),
   "connector.removed": z.strictObject({ id: ConnectorId }),
-  /** A project: a workspace every node knows (LWW by id). Its instructions steer Galahad, so only you set them. */
+  /** A project: a workspace every node knows (LWW by id). Its instructions steer the primary, so only you set them. */
   "project.set": z.strictObject({ id: ProjectId, name: z.string().min(1).max(80), instructions: z.string().max(8000), repo: z.string().url().max(300).optional() }),
   "project.removed": z.strictObject({ id: ProjectId }),
-  /** The outbox: an action the oath says to ask about, recorded before anything is sent. */
+  /** The outbox: an action the policy says to ask about, recorded before anything is sent. */
   "action.requested": z.strictObject({
     id: ActionId,
     connector: ConnectorId,
@@ -201,7 +201,7 @@ export const Bodies = {
     args: Open,
     class: z.enum(["read", "create", "modify", "outward", "delete"]),
     target: z.string().min(1).max(256),
-    /** Who asked: an arm, a loop or a quest. */
+    /** Who asked: an arm, a loop or a run. */
     by: z.string().min(1).max(100),
     why: z.string().max(500).optional(),
     expires: z.number().int(),
@@ -212,13 +212,13 @@ export const Bodies = {
   "action.done": z.strictObject({ id: ActionId, ok: z.boolean(), status: z.number().int().optional(), receipt: z.string().max(2000) }),
 
   /**
-   * Galahad asks to use a Mac's own screen and shell (docs/MAC.md, M4): which Mac (`node`), what for, for how many
-   * minutes. Filed by a full node; nothing is his until you allow it.
+   * The primary asks to use a Mac's own screen and shell (docs/MAC.md, M4): which Mac (`node`), what for, for how many
+   * minutes. Filed by a full node; nothing is its until you allow it.
    */
   "screen.asked": z.strictObject({ id: ScreenSessionId, node: DeviceRef, why: z.string().min(1).max(500), minutes: z.number().int().min(1).max(SCREEN_SESSION_MAX_MINUTES) }),
   /** Your answer, your word alone: allowed (for its minutes, from this answer) or not. The first answer stands. */
   "screen.decided": z.strictObject({ id: ScreenSessionId, verdict: z.enum(["allowed", "denied"]) }),
-  /** A session over before its time: ended by you, or by him once he's done. Once. */
+  /** A session over before its time: ended by you, or by it once it's done. Once. */
   "screen.ended": z.strictObject({ id: ScreenSessionId }),
   /** A standing order: your answer in advance to calls that match it (see orders.ts). Immutable: revoke and sign anew. */
   "order.set": OrderTerms.extend({ id: OrderId }),
@@ -232,7 +232,7 @@ export const Bodies = {
   "artifact.saved": z.strictObject({
     id: ArtifactId,
     label: z.string().min(1).max(200),
-    quest: z.string().max(64).optional(),
+    run: z.string().max(64).optional(),
     sandbox: z.string().regex(/^[0-9a-f]{10}$/).optional(),
     bytes: z.number().int().min(0),
     count: z.number().int().min(0),
@@ -261,13 +261,13 @@ export const Bodies = {
     artifact: ArtifactId.optional(),
     predictions: z.array(PredictionOutcome).max(16).optional(),
   }),
-  /** A trial's score, recorded once by the node that ran it; every replica checks it follows from the numbers (trials.ts). */
-  "trial.scored": TrialRecord.extend({ id: TrialId }),
+  /** An eval's score, recorded once by the node that ran it; every replica checks it follows from the numbers (evals.ts). */
+  "eval.scored": EvalRecord.extend({ id: EvalId }),
   /**
-   * A trial run's settings (its effort: attempts per trial), recorded once when it starts by the node that
-   * runs it; the first stands. Open in the log (trials.ts TrialRunSettings): the Index per effort reads it.
+   * An eval run's settings (its effort: attempts per eval), recorded once when it starts by the node that
+   * runs it; the first stands. Open in the log (evals.ts EvalRunSettings): the Index per effort reads it.
    */
-  "trial.run": z.strictObject({ run: TrialRunId, suite: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/), settings: Open }),
+  "eval.run": z.strictObject({ run: EvalRunId, suite: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/), settings: Open }),
   /**
    * A node's own measurement of itself (compute.ts Calibration): the signer is the node measured, and its
    * latest stands. Open in the log, so a newer node that measures more never makes an older one refuse it.
@@ -275,9 +275,9 @@ export const Bodies = {
   "compute.calibrated": z.strictObject({ measured: Open }),
   /** The owner's ceiling for one node (compute.ts ComputeLimit; the latest stands; empty: the defaults again). */
   "compute.limit": z.strictObject({ node: DeviceRef, limit: Open }),
-  /** How he spends compute on a quest: the level auto may reach and the day's budget of extra attempts (compute.ts ComputePolicy). */
+  /** How it spends compute on a run: the level auto may reach and the day's budget of extra attempts (compute.ts ComputePolicy). */
   "compute.policy": z.strictObject({ policy: Open }),
-  /** His defaults, re-derived when the fleet's compute changed (compute.ts ComputePlan), and what changed, a line each. */
+  /** Its defaults, re-derived when the fleet's compute changed (compute.ts ComputePlan), and what changed, a line each. */
   "compute.adapted": z.strictObject({
     at: z.number().int(),
     digest: z.string().regex(/^[A-Za-z0-9_-]{22}$/),
@@ -285,45 +285,45 @@ export const Bodies = {
     changes: z.array(z.string().max(400)).max(24),
   }),
   /*
-   * Skills (skills.ts): how he did a kind of work, as words he reads. Every replica applies the same rules
+   * Skills (skills.ts): how it did a kind of work, as words it reads. Every replica applies the same rules
    * on replay (who may revise what, what a lock holds), so no node can record a change they don't allow.
    */
   /**
    * A version of a skill: the first makes the skill, a later one revises it. Its words are open in the log
    * (a field a newer node adds never makes an older one refuse it); its trust is the event's `prov`.
-   * `by`: owner, galahad, or arm:<label>. `quest`: the quest it was distilled from.
+   * `by`: owner, primary, or arm:<label>. `run`: the run it was distilled from.
    */
-  "skill.written": z.strictObject({ skill: SkillId, doc: Open, by: z.string().min(1).max(100), quest: z.string().max(64).optional() }),
+  "skill.written": z.strictObject({ skill: SkillId, doc: Open, by: z.string().min(1).max(100), run: z.string().max(64).optional() }),
   /** You approved exactly this version: an untrusted one is given to a model only after that. The first approval stands. */
   "skill.approved": z.strictObject({ skill: SkillId, version: SkillVersionId }),
   /** A mark on a skill, the latest standing (locked, retired: yours; stale: the tidy-up's). A mark this node doesn't know is kept and ignored. */
   "skill.marked": z.strictObject({ skill: SkillId, mark: z.string().regex(/^[a-z][a-z-]{0,31}$/), on: z.boolean() }),
   /** One step back: the version before `from` is the skill's head again (`from` must be the head, so a rollback never undoes what you didn't see). */
   "skill.reverted": z.strictObject({ skill: SkillId, from: SkillVersionId }),
-  /** A skill was given to a quest's planner (or, `chat:…`, to an answer): counted once per quest. */
-  "skill.used": z.strictObject({ skill: SkillId, version: SkillVersionId, quest: z.string().min(1).max(100) }),
-  /** How the quest that used it ended (done: its review passed). The first word stands. */
-  "skill.outcome": z.strictObject({ skill: SkillId, quest: z.string().min(1).max(100), status: z.string().regex(/^[a-z][a-z-]{0,31}$/) }),
+  /** A skill was given to a run's planner (or, `chat:…`, to an answer): counted once per run. */
+  "skill.used": z.strictObject({ skill: SkillId, version: SkillVersionId, run: z.string().min(1).max(100) }),
+  /** How the run that used it ended (done: its review passed). The first word stands. */
+  "skill.outcome": z.strictObject({ skill: SkillId, run: z.string().min(1).max(100), status: z.string().regex(/^[a-z][a-z-]{0,31}$/) }),
   /*
    * What model calls cost (usage.ts, spend.ts). Per-call counts stay on the node that made the call (its own
-   * usage table, never the log); only what every replica must agree on is here: your prices, and what a trial
+   * usage table, never the log); only what every replica must agree on is here: your prices, and what an eval
    * spent, because the Index per token and per dollar is computed from it everywhere.
    */
   /** Your price for a model, US dollars per million tokens (usage.ts PriceSchema; LWW by model). Open in the log, read leniently. */
   "price.set": z.strictObject({ model: z.string().min(3).max(256), price: Open }),
   "price.removed": z.strictObject({ model: z.string().min(3).max(256) }),
   /**
-   * What a model was seen to do when it was checked (model-checks.ts: the quest loop's format, reading a screen,
+   * What a model was seen to do when it was checked (model-checks.ts: the run loop's format, reading a screen,
    * placing a click), so every node chooses by the same evidence. LWW by model; open in the log, read leniently.
    */
   "model.checked": z.strictObject({ model: z.string().min(3).max(256), check: Open }),
   /**
-   * What a trial's model calls came to, by role and model (usage.ts TrialSpent): counts as the providers reported
-   * them, never a prompt or an answer. Recorded once, by the node that recorded the trial; the first stands.
+   * What an eval's model calls came to, by role and model (usage.ts EvalSpent): counts as the providers reported
+   * them, never a prompt or an answer. Recorded once, by the node that recorded the eval; the first stands.
    */
-  "trial.spent": z.strictObject({ trial: TrialId, spent: Open }),
+  "eval.spent": z.strictObject({ evalCase: EvalId, spent: Open }),
   /*
-   * Your rules (rules.ts): tripwires on the commands his work runs. Yours alone: every replica refuses one that isn't
+   * Your rules (rules.ts): tripwires on the commands its work runs. Yours alone: every replica refuses one that isn't
    * your word (its prov's trust) or wasn't written by a full node. The last writer wins, by name.
    */
   /** A rule, set or replaced. Open in the log: a newer node's rule never makes this one refuse the event (core's readRule reads it). */

@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { activeScreenSession, SCREEN_ANSWER_MINUTES, type ScreenSessionFacts, screenSessionState } from "../src/index.ts";
 
 /*
- * Where a session on a Mac's own screen stands (screen.ts), the same on every node and in every app: his only once you
- * allow it, for its minutes counted from your answer, until you or he ends it; an ask you don't answer lapses.
+ * Where a session on a Mac's own screen stands (screen.ts), the same on every node and in every app: its only once you
+ * allow it, for its minutes counted from your answer, until you or it ends it; an ask you don't answer lapses.
  */
 
 const T = 1_800_000_000_000;
@@ -17,7 +17,7 @@ describe("a screen session", () => {
     expect(screenSessionState(asked(), T).answerBy).toBe(T + SCREEN_ANSWER_MINUTES * MIN);
   });
 
-  test("allowed, it is his for its minutes from your answer (not from his ask), then over", () => {
+  test("allowed, it is its for its minutes from your answer (not from its ask), then over", () => {
     const allowed = asked({ decision: { verdict: "allowed", at: T + 10 * MIN, via: "c_phone" } });
     expect(screenSessionState(allowed, T + 39 * MIN)).toEqual({ state: "allowed", answerBy: T + 15 * MIN, until: T + 40 * MIN });
     expect(screenSessionState(allowed, T + 40 * MIN).state).toBe("over");
@@ -30,7 +30,7 @@ describe("a screen session", () => {
     expect(screenSessionState(asked({ endedAt: T + MIN }), T + 2 * MIN).state).toBe("ended");
   });
 
-  test("the session that lets him use a Mac now: allowed, on that Mac, and the newest answer if two overlap", () => {
+  test("the session that lets it use a Mac now: allowed, on that Mac, and the newest answer if two overlap", () => {
     const older = asked({ id: "sc_old", decision: { verdict: "allowed", at: T, via: null } });
     const newer = asked({ id: "sc_new", decision: { verdict: "allowed", at: T + 5 * MIN, via: null } });
     const elsewhere = asked({ id: "sc_ultra", node: "n_ultra", decision: { verdict: "allowed", at: T + 6 * MIN, via: null } });

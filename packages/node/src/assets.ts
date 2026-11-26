@@ -22,7 +22,7 @@ const CSP = [
 ].join("; ");
 
 /**
- * Where a page Galahad made runs its code, when you press Run (frame.html, ui/blocks.ts): its own origin (a sandbox),
+ * Where a page the primary made runs its code, when you press Run (frame.html, ui/blocks.ts): its own origin (a sandbox),
  * its own scripts and nothing from the network, and framed by the app alone. The app's own policy would refuse the
  * page's scripts, which is why it isn't a srcdoc frame: one of those inherits the policy of the page that holds it.
  */
@@ -110,7 +110,7 @@ export async function buildAssets(webDir = join(REPO_ROOT, "apps/web")): Promise
       body: readFileSync(join(src, "manifest.webmanifest")),
       type: "application/manifest+json",
     });
-    // The icons: Galahad's field in gold, rendered as light by `bun scripts/brand.ts --png` (pictures, not drawings: the
+    // The icons: the primary's field in gold, rendered as light by `bun scripts/brand.ts --png` (pictures, not drawings: the
     // favicon is icon-64.png).
     for (const name of ["apple-touch-icon.png", "icon-64.png", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "icon-mono-96.png"]) {
       files.set(`/${name}`, { body: new Uint8Array(readFileSync(join(src, name))), type: "image/png" });
@@ -121,7 +121,7 @@ export async function buildAssets(webDir = join(REPO_ROOT, "apps/web")): Promise
     }
   } catch (error) {
     const message = String((error as Error).message ?? error).replace(/[<>&]/g, "");
-    files.set("/", { body: `<!doctype html><title>Galahad</title><p>The PWA failed to build: ${message}</p>`, type: "text/html" });
+    files.set("/", { body: `<!doctype html><title>your agent</title><p>The PWA failed to build: ${message}</p>`, type: "text/html" });
   }
   const prepared = new Map<string, Prepared>();
   return {

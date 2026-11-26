@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { escapeHtml, escapeSlack, inlineHtml, inlineSlack, SLACK_CHUNK, slackAnswer, TELEGRAM_CHUNK, telegramAnswer } from "../src/chat-format.ts";
 
-/* His answer as a chat app shows it: its own markup, choices as buttons, blocks in words, and pieces short enough to send. */
+/* Its answer as a chat app shows it: its own markup, choices as buttons, blocks in words, and pieces short enough to send. */
 
 describe("an answer in Telegram", () => {
   test("bold, italic, code and links; anything else is escaped, never markup", () => {

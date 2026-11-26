@@ -16,10 +16,10 @@
       old style until it's removed and added again.
     -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Galahad" />
+    <meta name="apple-mobile-web-app-title" content="Invincible" />
     <meta name="referrer" content="no-referrer" />
-    <meta name="description" content="Galahad: one mind, many bodies. Your autonomous knight and engineer." />
-    <title>Galahad</title>
+    <meta name="description" content="Your agent: one mind, many bodies. Your autonomous agent and engineer." />
+    <title>Invincible</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon-64.png" type="image/png" sizes="64x64" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -27,7 +27,7 @@
     <script src="/boot.js"></script>
     <style>
       /* ==========================================================================
-         Galahad design tokens. The full system is documented in docs/DESIGN.md.
+         Invincible design tokens. The full system is documented in docs/DESIGN.md.
          One token list for both themes via light-dark(); the theme override only
          flips color-scheme, so native controls and scrollbars follow too.
          ========================================================================== */
@@ -80,7 +80,7 @@
         --glow: light-dark(rgb(10 10 11 / 0.045), rgb(255 255 255 / 0.065));
         --glow-hero: light-dark(rgb(10 10 11 / 0.07), rgb(255 255 255 / 0.12));
 
-        /* What is going on at the Roundtable (lib/knight-state.ts), one colour each and the Apple app's too (Brand.swift):
+        /* What is going on among the agents (lib/agent-state.ts), one colour each and the Apple app's too (Brand.swift):
            blue at work, amber for what waits on you (and only that), red for a failure; green (--ok) for what ended and is
            new to you. No pair can be mistaken with full colour vision, light or dark; the words beside them say the rest. */
         --work: light-dark(#0a5fcc, #58a6ff);
@@ -136,7 +136,7 @@
         --control-h-sm: 28px;
         --topbar-h: 52px;
         --sidebar-w: 268px;
-        /* The phone's tab bar went (26 November 2026: Home is Galahad, "…" holds the rest): nothing is kept clear for it. */
+        /* The phone's tab bar went (26 November 2026: Home is your agent, "…" holds the rest): nothing is kept clear for it. */
         --tabbar-h: 0px;
         --page-max: 1120px;
         --safe-top: env(safe-area-inset-top, 0px);
@@ -208,7 +208,7 @@
       .tnum, .badge, time { font-variant-numeric: tabular-nums; }
       .mono { font-family: var(--font-mono); font-size: 0.92em; }
       .muted { color: var(--text-2); }
-      /* Words that report something gone wrong (a trial's false "done"), in the danger tone. */
+      /* Words that report something gone wrong (an eval's false "done"), in the danger tone. */
       .danger-text { color: var(--danger); }
       .warn-text { color: var(--warn); }
       /* A link that reads as the words around it (the top bar's "Answering"). */
@@ -294,7 +294,7 @@
         }
       }
 
-      /* ---------- the sidebar (a wide screen): the mark, search, Galahad pinned, the work by attention, its foot ---------- */
+      /* ---------- the sidebar (a wide screen): the mark, search, your agent pinned, the work by attention, its foot ---------- */
       .side-head { display: flex; align-items: center; gap: 2px; min-height: 32px; padding: 0 2px 0 var(--sp-2); }
       .side-mark { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; height: 32px; color: var(--text); text-decoration: none; }
       .wordmark-text { font-size: var(--fs-12); font-weight: 650; letter-spacing: 0.2em; text-transform: uppercase; }
@@ -307,24 +307,24 @@
       .search-trigger .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .search-trigger .kbds { margin-left: auto; display: flex; gap: 2px; }
       .side-search { flex: none; margin: var(--sp-2) 0 var(--sp-3); }
-      /* Galahad, pinned: his orb, his name, his line; it opens his own conversation. */
-      .side-galahad {
+      /* Your agent, pinned: its orb, its name, its line; it opens its own conversation. */
+      .side-primary {
         flex: none; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 0 10px; margin-bottom: var(--sp-1);
         padding: 9px 8px 9px 10px; border-radius: var(--r-lg); background: var(--surface); color: var(--text); text-decoration: none;
         box-shadow: var(--shadow-1), inset 0 0 0 1px var(--border); -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
         transition: box-shadow var(--d-1) var(--ease-out), background-color var(--d-1) var(--ease-out);
       }
-      .side-galahad:hover { box-shadow: var(--shadow-1), inset 0 0 0 1px var(--border-strong); }
-      .side-galahad:active { background: var(--surface-2); }
-      .side-galahad[aria-current="page"] { box-shadow: var(--shadow-1), inset 0 0 0 1px var(--accent-border); }
-      .side-galahad-orb { display: grid; place-items: center; width: 34px; height: 34px; }
-      .side-galahad-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
-      .side-galahad-text > strong { font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.005em; }
-      .side-galahad-line { font-size: var(--fs-12); color: var(--text-3); }
-      .side-galahad-line[data-tone="warn"] { color: var(--needs); }
-      .side-galahad-line[data-tone="accent"] { color: var(--work); }
-      .side-galahad-line[data-tone="ok"] { color: var(--ok); }
-      .side-galahad > .btn[hidden] { display: none; }
+      .side-primary:hover { box-shadow: var(--shadow-1), inset 0 0 0 1px var(--border-strong); }
+      .side-primary:active { background: var(--surface-2); }
+      .side-primary[aria-current="page"] { box-shadow: var(--shadow-1), inset 0 0 0 1px var(--accent-border); }
+      .side-primary-orb { display: grid; place-items: center; width: 34px; height: 34px; }
+      .side-primary-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+      .side-primary-text > strong { font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.005em; }
+      .side-primary-line { font-size: var(--fs-12); color: var(--text-3); }
+      .side-primary-line[data-tone="warn"] { color: var(--needs); }
+      .side-primary-line[data-tone="accent"] { color: var(--work); }
+      .side-primary-line[data-tone="ok"] { color: var(--ok); }
+      .side-primary > .btn[hidden] { display: none; }
       .side-work { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2) var(--sp-3); scrollbar-width: thin; }
       .side-section { display: flex; flex-direction: column; gap: 1px; }
       .side-section + .side-section { margin-top: var(--sp-1); }
@@ -370,18 +370,18 @@
       /* How it stands, in a word in its state's colour (the word says it: colour is never the only telling). */
       .work-word { flex: none; display: inline-flex; align-items: center; gap: 3px; margin-left: auto; font-weight: 600; color: var(--tone, var(--text-2)); }
       .work-age { flex: none; min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
-      /* A knight's orb where the work shows it (ui/orb.ts knightFace, still): sized here, as the face's own sheet is only
+      /* An agent's orb where the work shows it (ui/orb.ts agentFace, still): sized here, as the face's own sheet is only
          given to the page with a seat's. */
-      :is(.work-row, .need, .thread-page, .td, .thread-said-by) .knight-orb { display: block; flex: none; width: var(--orb-size, 16px); height: var(--orb-size, 16px); }
-      :is(.work-row, .need, .thread-page, .td, .thread-said-by) .knight-orb > :is(svg, canvas) { display: block; width: 100%; height: 100%; }
-      .work-knight { flex: none; color: var(--text-2); }
+      :is(.work-row, .need, .thread-page, .td, .thread-said-by) .agent-orb { display: block; flex: none; width: var(--orb-size, 16px); height: var(--orb-size, 16px); }
+      :is(.work-row, .need, .thread-page, .td, .thread-said-by) .agent-orb > :is(svg, canvas) { display: block; width: 100%; height: 100%; }
+      .work-agent { flex: none; color: var(--text-2); }
       .work-detail { min-width: 0; }
       .work-detail.mono { font-family: var(--font-mono); font-size: 11.5px; }
       /* At work, quietly (it needs nothing from you): its title and its orb fade, its words keep their contrast. */
       .work-row[data-attention="working"]:not([aria-current="page"]):not(:hover) .work-l2 { color: var(--text-2); font-weight: 500; }
-      .work-row[data-attention="working"]:not([aria-current="page"]):not(:hover) .knight-orb { opacity: 0.62; }
+      .work-row[data-attention="working"]:not([aria-current="page"]):not(:hover) .agent-orb { opacity: 0.62; }
 
-      /* ---------- Home (views/home.ts): Galahad, what needs you, the work, his message box ---------- */
+      /* ---------- Home (views/home.ts): your agent, what needs you, the work, its message box ---------- */
       .shell[data-pane="home"] { --topbar-h: 0px; }
       .shell[data-pane="home"] .topbar { display: none; }
       .shell[data-pane="home"] main.view { padding: 0; }
@@ -416,7 +416,7 @@
       .need { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px 12px; }
       .need + .need { border-top: 1px solid var(--border); }
       .need-who { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--fs-12); color: var(--text-3); }
-      .need-who > .knight-orb { flex: none; }
+      .need-who > .agent-orb { flex: none; }
       .need-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); }
       .need-what { font-size: var(--fs-14); line-height: 1.4; overflow-wrap: anywhere; }
       .need-what .mono { font-size: var(--fs-13); }
@@ -446,7 +446,7 @@
       .home-fold:active { background: var(--surface-3); }
       .home-empty, .home-note { padding: var(--sp-6) calc(var(--sp-4) + var(--safe-right)) var(--sp-6) calc(var(--sp-4) + var(--safe-left)); border-top: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-14); line-height: 1.5; }
       .home-empty p { max-width: 52ch; margin-bottom: var(--sp-3); }
-      /* His message box, docked at the foot; the list fades out under it. */
+      /* Its message box, docked at the foot; the list fades out under it. */
       .home-dock {
         position: sticky; bottom: 0; z-index: 15; margin-top: auto; pointer-events: none;
         padding: var(--sp-8) calc(var(--sp-3) + var(--safe-right)) calc(var(--safe-bottom) + var(--sp-3)) calc(var(--sp-3) + var(--safe-left));
@@ -474,7 +474,7 @@
 
       /* A way back to the roster, where a timeline is the whole screen. (Two classes: .btn would show it.) */
       .btn.pane-back { display: none; }
-      /* A timeline (his, a knight's, a room's) has no top bar and no bar under it: its header is whose it is. */
+      /* A timeline (its, an agent's, a room's) has no top bar and no bar under it: its header is whose it is. */
       .shell[data-pane="timeline"] { --topbar-h: 0px; --tabbar-h: 0px; }
       .shell[data-pane="timeline"] .topbar { display: none; }
       @media (max-width: 959px) {
@@ -499,10 +499,10 @@
       .activity-pill { padding-right: var(--sp-1); }
       .topbar .actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-1); }
 
-      /* The banner: Galahad can't be reached, or this device is offline, then for a moment that he is reached again
+      /* The banner: your agent can't be reached, or this device is offline, then for a moment that it is reached again
          (ui/banner.ts). A thin capsule hanging under the top bar over the page; its place takes no room, so nothing under
          it moves when it comes or goes (--banner-top: where it hangs, the top bar's foot unless a page without one says).
-         Offline is grey, no error; can't reach him is amber, and while the app tries again one slow line of light runs
+         Offline is grey, no error; can't reach it is amber, and while the app tries again one slow line of light runs
          along its foot; reached again it turns green where it is. Nothing blinks. */
       .banner { position: sticky; top: calc(var(--safe-top) + var(--banner-top, var(--topbar-h))); z-index: 21; height: 0; display: flex; align-items: flex-start; justify-content: center; pointer-events: none; }
       .banner-pill {
@@ -1106,7 +1106,7 @@
       .toaster:not(:hover):not(:focus-within) .toast:not([data-front]) > * { opacity: 0; }
       .toast-lead { flex: none; display: grid; place-items: center; width: 20px; height: 20px; color: var(--tone, var(--text-2)); }
       @media (max-width: 639px) { .toast-lead { height: 22px; } }
-      /* A knight's face or his orb: who it is about, still, beside their name in the title. */
+      /* An agent's face or its orb: who it is about, still, beside their name in the title. */
       .toast-lead.is-face { width: 28px; height: 28px; margin: -4px 0; }
       .toast-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
       .toast-title { font-weight: 600; letter-spacing: -0.005em; }
@@ -1148,7 +1148,7 @@
       .tok-meta { color: var(--text-3); font-weight: 600; }
       .tok-added-text { color: light-dark(#116329, #7ee2a8); }
       .tok-removed-text { color: light-dark(#82071e, #ffa198); }
-      /* A knight's workspace, read (views/workspace.ts): its folders, files and changed files as rows to open. */
+      /* An agent's workspace, read (views/workspace.ts): its folders, files and changed files as rows to open. */
       button.workspace-entry { width: 100%; text-align: left; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; gap: 10px; }
       button.workspace-entry:hover:not(:disabled) { background: var(--surface-2); }
       button.workspace-entry:disabled { cursor: default; opacity: 0.6; }
@@ -1288,7 +1288,7 @@
       .thread-said-by { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--text-2); }
       .thread-said-by > strong { color: var(--text); font-weight: 600; }
       .thread-said > .md { font-size: var(--fs-14); line-height: 1.6; }
-      /* What proves it, apart from the knight's words: its own ground and edge in its verdict's colour. */
+      /* What proves it, apart from the agent's words: its own ground and edge in its verdict's colour. */
       .proof { --verdict: var(--ok); display: flex; flex-direction: column; margin-top: var(--sp-1); border-radius: 14px; background: var(--surface); overflow: hidden; box-shadow: var(--shadow-1), inset 0 0 0 1px color-mix(in srgb, var(--verdict) 42%, var(--border)); }
       .proof[data-verdict="failed"] { --verdict: var(--failed); }
       .proof > * + * { border-top: 1px solid color-mix(in srgb, var(--verdict) 16%, var(--border)); }
@@ -1369,13 +1369,13 @@
 
       .task-card-title { min-width: 0; color: inherit; text-decoration: none; }
       .task-card-title:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
-      /* ---------- The Roundtable: a knight's (or a room's) timeline, its task cards, a knight's Workspace ---------- */
+      /* ---------- The agents: an agent's (or a room's) timeline, its task cards, an agent's Workspace ---------- */
       .shell[data-route="team"] main.view { padding: 0; }
       .team-layout { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-h) - var(--tabbar-h) - var(--safe-bottom)); min-height: 320px; }
       .team-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
       .team-body { display: flex; flex: 1; min-height: 0; }
       .team-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-      /* A knight's side panel, beside its timeline from 1200 px (views/team.ts renderSide): the knight in its seat and what
+      /* An agent's side panel, beside its timeline from 1200 px (views/team.ts renderSide): the agent in its seat and what
          it is doing, its tasks, its workspace, its working notes. Shown unless hidden on this device; never on a phone. */
       .team-side, .btn.side-toggle { display: none; }
       @media (min-width: 1200px) {
@@ -1403,9 +1403,9 @@
       .team-content { min-height: 0; overflow: auto; overscroll-behavior: contain; flex: 1; }
       .team-panel { padding: var(--sp-6); max-width: 980px; margin: 0 auto; }
       .team-panel h3 { font-size: var(--fs-15); }
-      /* The Roundtable's strip (its updates paused; an outcome's bar): sunken, a hairline under it, its words quiet; the
+      /* The agents' strip (its updates paused; an outcome's bar): sunken, a hairline under it, its words quiet; the
          amber is its mark's alone. */
-      /* Updates paused: the banner's capsule, hanging under the Roundtable's head over its timeline. Its place takes no
+      /* Updates paused: the banner's capsule, hanging under the agents' head over its timeline. Its place takes no
          room, so nothing under it moves when it comes or goes. */
       .team-notice { position: relative; z-index: 21; height: 0; display: flex; justify-content: center; pointer-events: none; }
       .team-thread { display: flex; flex-direction: column; gap: var(--sp-5); padding: var(--sp-6); max-width: 880px; margin: 0 auto; }
@@ -1425,29 +1425,29 @@
       .team-live { display: flex; flex-wrap: wrap; gap: var(--sp-3); min-height: 0; margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-12); }
       .team-live:empty, .team-send-error:empty { display: none; }
       .team-send-error { margin-bottom: var(--sp-2); }
-      /* The Roundtable's own page on a wide screen (views/board.ts): everyone at the table as a board of cards, or a list,
-         in your order, who leads first; then the rooms. A card is its knight's portrait in its seat (live eyes, its
+      /* The agents' own page on a wide screen (views/board.ts): everyone at the table as a board of cards, or a list,
+         in your order, who leads first; then the rooms. A card is its agent's portrait in its seat (live eyes, its
          state's ring), its name and job, its state in a word, and what it is doing now, two lines at most. */
-      .roundtable-home { max-width: 1440px; padding: var(--sp-6) var(--sp-8) var(--sp-12); }
-      .roundtable-body { position: relative; display: flex; flex-direction: column; gap: var(--page-gap); min-width: 0; }
+      .agents-home { max-width: 1440px; padding: var(--sp-6) var(--sp-8) var(--sp-12); }
+      .agents-body { position: relative; display: flex; flex-direction: column; gap: var(--page-gap); min-width: 0; }
       .board { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); }
-      .knight-card { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5) var(--card-pad) var(--card-pad); color: inherit; text-decoration: none; transition: border-color var(--d-1) var(--ease-out), transform var(--d-1) var(--ease-out); }
-      a.knight-card:hover { border-color: var(--border-strong); }
-      a.knight-card:active { transform: scale(0.99); }
-      .knight-card-portrait { display: grid; place-items: center; }
+      .agent-card { position: relative; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5) var(--card-pad) var(--card-pad); color: inherit; text-decoration: none; transition: border-color var(--d-1) var(--ease-out), transform var(--d-1) var(--ease-out); }
+      a.agent-card:hover { border-color: var(--border-strong); }
+      a.agent-card:active { transform: scale(0.99); }
+      .agent-card-portrait { display: grid; place-items: center; }
       /* Who leads wears its mark in the card's corner, clear of its portrait's ring. */
-      .knight-card > .lead-mark { position: absolute; top: var(--sp-3); left: var(--sp-3); }
-      .knight-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-      .knight-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
-      .knight-card-head h3 { min-width: 0; font-size: var(--fs-15); font-weight: 650; }
-      .knight-card-head > .state-chip { margin-left: auto; flex: none; }
-      .knight-card-role { color: var(--text-3); font-size: var(--fs-12); }
-      .knight-card-line { margin-top: var(--sp-1); min-height: calc(2 * 1.45 * var(--fs-13)); color: var(--text-2); font-size: var(--fs-13); line-height: 1.45; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-      .knight-card-arrange { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-1); margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--border); }
-      .knight-card-add { align-items: center; justify-content: center; gap: var(--sp-2); min-height: 248px; border-style: dashed; box-shadow: none; background: none; color: var(--text-2); font: inherit; font-weight: 500; cursor: pointer; }
-      .knight-card-add:hover { border-color: var(--border-strong); color: var(--text); }
-      .knight-card-plus { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
-      .knight-row-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .agent-card > .lead-mark { position: absolute; top: var(--sp-3); left: var(--sp-3); }
+      .agent-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .agent-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .agent-card-head h3 { min-width: 0; font-size: var(--fs-15); font-weight: 650; }
+      .agent-card-head > .state-chip { margin-left: auto; flex: none; }
+      .agent-card-role { color: var(--text-3); font-size: var(--fs-12); }
+      .agent-card-line { margin-top: var(--sp-1); min-height: calc(2 * 1.45 * var(--fs-13)); color: var(--text-2); font-size: var(--fs-13); line-height: 1.45; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .agent-card-arrange { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-1); margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--border); }
+      .agent-card-add { align-items: center; justify-content: center; gap: var(--sp-2); min-height: 248px; border-style: dashed; box-shadow: none; background: none; color: var(--text-2); font: inherit; font-weight: 500; cursor: pointer; }
+      .agent-card-add:hover { border-color: var(--border-strong); color: var(--text); }
+      .agent-card-plus { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
+      .agent-row-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
       .team-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sp-4); }
       .team-fieldset { border: 0; padding: 0; margin: 0; }
       .team-fieldset legend { font-size: var(--fs-13); font-weight: 600; margin-bottom: var(--sp-2); }
@@ -1473,7 +1473,7 @@
       .team-task-details > summary { color: var(--text-2); font-size: var(--fs-12); cursor: pointer; padding: 3px 0; }
       .team-task-details[open] > summary { margin-bottom: var(--sp-3); }
       .team-output { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; padding: var(--sp-3); background: var(--bg-sunken); border-radius: var(--r-md); font: var(--fs-12)/1.6 var(--font-mono); }
-      /* A knight's desktop in its Workspace: its screen as a picture (a click on it clicks there), then the ways to take it over. */
+      /* An agent's desktop in its Workspace: its screen as a picture (a click on it clicks there), then the ways to take it over. */
       .desktop h3 { font-size: var(--fs-15); }
       .desktop-shot { aspect-ratio: 16 / 10; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-sunken); }
       .desktop-shot img { display: block; width: 100%; height: 100%; cursor: crosshair; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
@@ -1481,7 +1481,7 @@
       .desktop-line { display: flex; align-items: center; gap: var(--sp-2); }
       .desktop-line .input { flex: 1; min-width: 0; }
       .desktop-slot:empty { display: none; }
-      /* A task given to the Roundtable: who took it and why, then how each of the others stood. */
+      /* A task given to the agents: who took it and why, then how each of the others stood. */
       .give-choice { display: flex; align-items: center; gap: var(--sp-3); }
       .give-choice h3 { font-size: var(--fs-18); font-weight: 650; letter-spacing: -0.015em; }
       .team-person-summary { display: flex; align-items: flex-start; gap: var(--sp-3); }
@@ -1501,25 +1501,25 @@
       .team-head .workspace-toggle[aria-pressed="true"] { --btn-bg: var(--surface-3); }
       :root[data-keyboard="open"] .team-layout { height: calc(100dvh - var(--topbar-h)); }
       @media (pointer: coarse) { .team-member-choice, .team-task-details > summary { min-height: 44px; } }
-      /* A knight in its seat (ui/avatar.ts seat()): its face, still, in the room its ring once took (so a row keeps its
+      /* An agent in its seat (ui/avatar.ts seat()): its face, still, in the room its ring once took (so a row keeps its
          height). No ring and no disc round it since 26 November 2026 (a ring round a lit middle read as a nipple): its
          state is said beside it, in words and its colour. */
       .seat { --seat-pad: 4px; position: relative; display: inline-grid; place-items: center; flex: none; padding: var(--seat-pad); }
       .seat.seat-m { --seat-pad: 7px; }
       .seat.seat-l { --seat-pad: 9px; }
-      /* Galahad's seat is his orb (ui/avatar.ts seat()): his field and beam take the whole of the seat's room. */
+      /* The primary's seat is its orb (ui/avatar.ts seat()): its field and beam take the whole of the seat's room. */
       .seat.seat-orb { padding: 0; }
-      /* A state in words in a badge (ui/avatar.ts stateChip(), a chat's, a quest's, a loop's): working's carries a live dot. */
+      /* A state in words in a badge (ui/avatar.ts stateChip(), a chat's, a run's, a loop's): working's carries a live dot. */
       .badge .dot { width: 6px; height: 6px; }
-      /* The one who leads the Roundtable (ui/avatar.ts leadMark()): beside its name, small, in ink, in words. */
+      /* The one who leads the agents (ui/avatar.ts leadMark()): beside its name, small, in ink, in words. */
       .lead-mark {
         display: inline-flex; align-items: center; flex: none; height: 18px; padding: 0 6px; border-radius: var(--r-full); border: 1px solid var(--accent-border);
         color: var(--text); font-size: var(--fs-11); font-weight: 600; line-height: 1; letter-spacing: 0.01em; white-space: nowrap;
       }
-      /* The knights' faces (ui/avatar.ts): drawn whole in SVG and never moving. Galahad's own is in ink, whatever the theme. */
+      /* The agents' faces (ui/avatar.ts): drawn whole in SVG and never moving. Your agent's own is in ink, whatever the theme. */
       .worker-avatar { display: block; flex: none; }
-      .worker-avatar[data-galahad] { color: var(--accent); }
-      .worker-avatar[data-galahad] .worker-avatar-ink { color: var(--on-accent); }
+      .worker-avatar[data-primary] { color: var(--accent); }
+      .worker-avatar[data-primary] .worker-avatar-ink { color: var(--on-accent); }
       .avatar-editor { min-width: 0; margin: 0; padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-lg); display: flex; flex-direction: column; gap: var(--sp-4); }
       .avatar-editor legend { padding: 0 6px; color: var(--text-2); font-size: var(--fs-13); font-weight: 600; }
       .avatar-editor-stage { display: flex; align-items: center; gap: var(--sp-4); }
@@ -1535,8 +1535,8 @@
       /* ---------- chat ---------- */
       .chat { display: flex; flex-direction: column; max-width: 820px; margin: 0 auto; min-height: calc(100dvh - var(--tabbar-h) - var(--safe-bottom)); }
       @media (min-width: 960px) { .chat { min-height: 100dvh; } }
-      /* The chat's header is Galahad himself, and on this page it takes the top bar's place: his face and what he's
-         doing now in a line (a tap shows what he has in hand), then your chats, a new one, and the chat's one menu. */
+      /* The chat's header is your agent itself, and on this page it takes the top bar's place: its face and what it's
+         doing now in a line (a tap shows what it has in hand), then your chats, a new one, and the chat's one menu. */
       .shell[data-route="chat"] main.view { padding-top: 0; }
       .shell[data-route="chat"] .main-col { overflow-x: clip; }
       .chat-head { position: sticky; top: 0; z-index: 6; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: calc(var(--safe-top) + 6px) 0 6px; margin-bottom: var(--sp-3); }
@@ -1663,8 +1663,8 @@
       .jump-anchor { position: relative; }
       .btn.jump { position: absolute; left: 50%; top: -40px; transform: translateX(-50%); box-shadow: var(--shadow-2); }
       .btn.jump:active:not(:disabled) { transform: translateX(-50%) scale(0.97); }
-      /* A key he asked for in this chat, sealed right here (views/chat.ts). */
-      /* What is under way in a chat (views/underway.ts): his knights' tasks given there, his looks that wait. */
+      /* A key it asked for in this chat, sealed right here (views/chat.ts). */
+      /* What is under way in a chat (views/underway.ts): its agents' tasks given there, its looks that wait. */
       .underway { display: flex; flex-direction: column; margin-bottom: var(--sp-2); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-2); overflow: hidden; }
       .underway[hidden] { display: none; }
       .underway-row { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 8px 6px 10px; min-height: 44px; }
@@ -1676,15 +1676,15 @@
       .underway-who { font-size: var(--fs-13); font-weight: 600; }
       .underway-what { font-size: var(--fs-12); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .underway-row[data-kind="look"] .underway-what { color: var(--text-2); font-size: var(--fs-13); white-space: normal; }
-      /* A look of his come back: his own note in the thread, not a message of yours. */
+      /* A look of its come back: its own note in the thread, not a message of yours. */
       .turn.look { justify-content: center; align-items: center; gap: 6px; color: var(--text-3); font-size: var(--fs-13); text-align: center; padding: 2px var(--sp-4); }
       .key-asks { display: flex; flex-direction: column; gap: var(--sp-2); }
       .key-asks:not(:empty) { margin-bottom: var(--sp-2); }
       .key-asks .card { box-shadow: var(--shadow-2); }
-      /* While he works: steer or queue (the one Enter does is in ink), and Stop. */
+      /* While it works: steer or queue (the one Enter does is in ink), and Stop. */
       .composer .composer-bar .btn.sm { flex: none; }
       @media (pointer: coarse) { .composer .composer-bar .btn.sm:not(.icon-only) { height: 40px; padding: 0 14px; font-size: var(--fs-13); } }
-      /* What's waiting while he works: steers on their way, the queue (held or not), and what unattended work may do. */
+      /* What's waiting while it works: steers on their way, the queue (held or not), and what unattended work may do. */
       .chat-queue { display: flex; flex-direction: column; gap: 6px; margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-2); font-size: var(--fs-13); min-width: 0; }
       .chat-queue-head { display: flex; align-items: center; gap: 8px; color: var(--text-2); min-width: 0; }
       .chat-queue-head > svg { flex: none; color: var(--text-3); }
@@ -1714,7 +1714,7 @@
       /* A chat's state in a list: working (with a spinner), needs you, queued, stopped, failed. */
       .chat-state { flex: none; max-width: 48%; overflow: hidden; text-overflow: ellipsis; gap: 5px; }
       .chat-state .spinner { border-width: 1.5px; }
-      /* In hand (Overview): the turns the node is running, and each quest's plan, step and gates. */
+      /* In hand (Overview): the turns the node is running, and each run's plan, step and gates. */
       .in-hand .section { gap: var(--sp-2); }
       .in-hand-turn .meta { flex-wrap: wrap; row-gap: 2px; }
       .in-hand-doing { display: flex; align-items: center; gap: 6px; color: var(--text-2); min-width: 0; font-family: var(--font-mono); font-size: var(--fs-12); }
@@ -1753,7 +1753,7 @@
       .doctor-note.error { color: var(--danger); font-size: var(--fs-13); }
       @media (pointer: coarse) { .doctor-all > summary { min-height: 44px; display: flex; align-items: center; } }
 
-      /* Settings → Notifications: this device's switch, what he tells you, when he stays silent. */
+      /* Settings → Notifications: this device's switch, what it tells you, when it stays silent. */
       .notify-row { gap: var(--sp-3); }
       .notify-row.wrap { flex-wrap: wrap; }
       .notify-row > .switch { flex: 1 1 240px; min-width: 0; align-items: flex-start; }
@@ -1777,15 +1777,15 @@
       .suggestion:hover { border-color: var(--border-strong); background: var(--surface-2); color: var(--text); }
       .chat-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: var(--sp-2); margin: auto 0; padding: var(--sp-10) 0; }
       .chat-hero h2 { font-size: var(--fs-20); font-weight: 650; letter-spacing: -0.02em; }
-      .hero-galahad { display: grid; place-items: center; margin-bottom: var(--sp-1); }
-      .hero-galahad .worker-avatar { animation: emblem-in var(--d-sheet) var(--ease-out); }
-      /* The orbs (ui/orb.ts): Galahad's field in gold with his beam of light through it, a knight's in its own colours, the
-         app's mark (his field alone), each drawn on a canvas its own size: still where it is one of many, moving slowly where
+      .hero-primary { display: grid; place-items: center; margin-bottom: var(--sp-1); }
+      .hero-primary .worker-avatar { animation: emblem-in var(--d-sheet) var(--ease-out); }
+      /* The orbs (ui/orb.ts): your agent's field in gold with its beam of light through it, an agent's in its own colours, the
+         app's mark (its field alone), each drawn on a canvas its own size: still where it is one of many, moving slowly where
          it is the one you look at (lib/field-orb.ts). */
       .orb { display: inline-grid; place-items: center; flex: none; width: var(--orb-size); height: var(--orb-size); }
       .orb > svg, .orb > canvas { display: block; width: 100%; height: 100%; }
-      /* What he asks you, under his orb (views/galahad-asks.ts): the Inbox's own cards, read left to right. */
-      .galahad-asks { width: 100%; max-width: 640px; text-align: left; margin-top: var(--sp-2); }
+      /* What it asks you, under its orb (views/primary-asks.ts): the Inbox's own cards, read left to right. */
+      .primary-asks { width: 100%; max-width: 640px; text-align: left; margin-top: var(--sp-2); }
       .chat-hero p { color: var(--text-2); max-width: 46ch; }
 
       /* ---------- timeline (ledger) ---------- */
@@ -1906,7 +1906,7 @@
       .reorder .r-item .r-index { font: 600 11px var(--font-mono); color: var(--text-3); width: 16px; }
       .reorder .r-item:first-child { border-color: var(--accent-border); }
       .reorder .r-item:first-child .r-index { color: var(--accent); }
-      /* Words Galahad (or an agent) wrote, shown as a quotation: data, never instructions. */
+      /* Words your agent (or an agent) wrote, shown as a quotation: data, never instructions. */
       .quote { padding: 2px 0 2px 12px; border-left: 2px solid var(--border-strong); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
       /* A tool's answer or a receipt: verbatim, scrollable, never parsed. */
       /* A kept picture, previewed: never wider than its sheet, on sunken ground (a transparent one shows its edges). */
@@ -1927,7 +1927,7 @@
       }
       @media print { .sidebar, .topbar, .toaster { display: none !important; } }
 
-      /* ---------- his skills: each a page of notes ---------- */
+      /* ---------- its skills: each a page of notes ---------- */
       .skills-budget { display: flex; align-items: center; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-12); }
       .skill-page { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
       .card.skill-page { padding: var(--sp-5) var(--sp-6); }
@@ -1962,9 +1962,9 @@
   </head>
   <body>
     <div id="app">
-      <div class="boot" role="status" aria-label="Galahad is starting"><img src="/icon-192.png" alt="" /></div>
+      <div class="boot" role="status" aria-label="Invincible is starting"><img src="/icon-192.png" alt="" /></div>
     </div>
-    <noscript><div class="solo"><div class="solo-card"><div class="card"><p>Galahad needs JavaScript enabled.</p></div></div></div></noscript>
+    <noscript><div class="solo"><div class="solo-card"><div class="card"><p>Invincible needs JavaScript enabled.</p></div></div></div></noscript>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

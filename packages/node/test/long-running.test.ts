@@ -26,13 +26,13 @@ describe("long-running responses", () => {
   test("slow failures arrive as { error, status }, which clients unwrap", async () => {
     const response = await longRunning(
       Bun.sleep(60).then(() => {
-        throw new Boom("ultra: the oath requires approval");
+        throw new Boom("ultra: the policy requires approval");
       }),
       10,
       20,
     );
     const body = JSON.parse(await response.text());
-    expect(streamedError(body)).toEqual({ error: "ultra: the oath requires approval", status: 500 });
+    expect(streamedError(body)).toEqual({ error: "ultra: the policy requires approval", status: 500 });
     expect(streamedError({ exitCode: 0, stdout: "" })).toBeNull();
   });
 

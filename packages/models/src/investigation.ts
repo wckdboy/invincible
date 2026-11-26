@@ -1,8 +1,8 @@
 import { type ChatMessage, type Conclusion, Preregistration, redact, Results } from "@invincible/core";
-import { type QuestDeps, type QuestOutcome, type QuestReview, runQuest } from "./quest.ts";
+import { type RunDeps, type RunOutcome, type RunReview, runLoop } from "./run.ts";
 
 /*
- * An investigation: the scientific method as a quest.
+ * An investigation: the scientific method as a run.
  *
  *   1. formulate   the planner turns a question into a pre-registration: a hypothesis,
  *                  an alternative, falsifiable predictions (each with what would refute
@@ -16,7 +16,7 @@ import { type QuestDeps, type QuestOutcome, type QuestReview, runQuest } from ".
  *                  and the evidence read straight from the sandbox: SUPPORTED, REFUTED,
  *                  INCONCLUSIVE, or REVISE when the method falls short
  *
- * Pure orchestration, like runQuest: models, the sandbox and the registry are injected.
+ * Pure orchestration, like runRun: models, the sandbox and the registry are injected.
  */
 
 const JSON_FENCE = /```(?:json)?\s*\n([\s\S]*?)```/;
@@ -98,7 +98,7 @@ export const EVIDENCE_COMMANDS = [
 ];
 
 /** The reviewer judges the method against the registration, from the evidence. */
-export function methodReview(registration: Preregistration): QuestReview {
+export function methodReview(registration: Preregistration): RunReview {
   return {
     prompt: ({ plan, steps, summary, evidence }) => `You are an independent reviewer of a pre-registered investigation. Judge the method, then the conclusion, strictly and only from the evidence. Claims without evidence don't count.
 
@@ -133,7 +133,7 @@ REVISE: the method falls short (say exactly what to fix)`,
   };
 }
 
-export interface InvestigationDeps extends QuestDeps {
+export interface InvestigationDeps extends RunDeps {
   /** Record the pre-registration (immutably) before anything runs; returns its id. */
   register(registration: Preregistration): Promise<string>;
 }
@@ -149,7 +149,7 @@ export interface InvestigationOptions {
 export interface InvestigationOutcome {
   id: string | null;
   registration: Preregistration | null;
-  outcome: QuestOutcome;
+  outcome: RunOutcome;
   /** supported · refuted · inconclusive, when the review reached one. */
   conclusion: Conclusion | null;
 }
@@ -168,13 +168,13 @@ export async function investigate(options: InvestigationOptions, deps: Investiga
     }
   }
   if (!registration) {
-    const outcome: QuestOutcome = { status: "gave-up", summary: "The planner couldn't write a valid pre-registration.", steps: 0, revisions: 0, plan: "" };
+    const outcome: RunOutcome = { status: "gave-up", summary: "The planner couldn't write a valid pre-registration.", steps: 0, revisions: 0, plan: "" };
     return { id: null, registration: null, outcome, conclusion: null };
   }
   const id = await deps.register(registration);
   const plan = renderPreregistration(registration);
   deps.emit?.({ type: "plan", text: `Registered as ${id} before anything ran:\n${plan}`, model: "pre-registration" });
-  const outcome = await runQuest(
+  const outcome = await runLoop(
     {
       goal: `Carry out the pre-registered investigation: ${registration.question}`,
       environment: options.environment,

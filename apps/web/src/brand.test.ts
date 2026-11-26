@@ -15,7 +15,7 @@ function header(path: string): { width: number; height: number; type: number } {
 }
 
 // The owner's, 26 November 2026: "field aurum", then "maybe less fog, so it reads clearer".
-describe("the app icon: Galahad's field in gold, rendered as light", () => {
+describe("the app icon: your agent's field in gold, rendered as light", () => {
   test("the same pixels every time, on every machine: no randomness the seed doesn't give", () => {
     const a = renderField(48), b = renderField(48);
     expect(a.rgb.every((v, i) => v === b.rgb[i])).toBe(true);

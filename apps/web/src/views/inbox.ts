@@ -22,7 +22,7 @@ import { secretRequestCard } from "./vault.ts";
 
 /*
  * Everything that needs the owner, in one place: devices asking to join,
- * credentials Galahad asked for, actions his oath makes him ask about, and
+ * credentials the primary asked for, actions its policy makes it ask about, and
  * what the heartbeat noticed. Approvals scale with stakes: a phone is one click
  * after comparing codes; a machine asks once more; an outward action is shown
  * in full and confirmed; a delete makes you type what it deletes.
@@ -42,7 +42,7 @@ const STATE: Record<ActionView["state"], { label: string; tone: Tone }> = {
 function askedBy(by: string): HTMLElement {
   const [kind, ...rest] = by.split(":");
   const who = rest.join(":");
-  const words: Record<string, string> = { loop: "the loop", arm: "the arm", node: "the node", quest: "the quest" };
+  const words: Record<string, string> = { loop: "the loop", arm: "the arm", node: "the node", run: "the run" };
   return words[kind!] && who ? h("span", {}, `${words[kind!]} `, h("span", { class: "mono" }, who)) : h("span", { class: "mono" }, by);
 }
 
@@ -71,7 +71,7 @@ function keptWork(ctx: Ctx, action: ActionView): HTMLElement | null {
   );
 }
 
-/** A loop Galahad drafted when you asked for one in chat: it runs nothing until you add it here (or dismiss it). */
+/** A loop the primary drafted when you asked for one in chat: it runs nothing until you add it here (or dismiss it). */
 export function loopDraftCard(ctx: Ctx, draft: LoopDraftView): HTMLElement {
   const outcome = h("div");
   const mayAdd = ctx.can("brain:write");
@@ -107,14 +107,14 @@ export function loopDraftCard(ctx: Ctx, draft: LoopDraftView): HTMLElement {
   add.addEventListener("click", () => void answer(add, true));
   dismiss.addEventListener("click", () => void answer(dismiss, false));
   return card(
-    { tone: "accent", label: `Galahad drafted a loop: ${draft.label ?? draft.name}` },
+    { tone: "accent", label: `Your agent drafted a loop: ${draft.label ?? draft.name}` },
     listRow({
       lead: "repeat",
       leadTone: "agent",
       top: true,
       title: h("span", { class: "row wrap" }, h("span", {}, draft.label ?? draft.name), h("span", { class: "mono tiny subtle" }, draft.name)),
       sub: `${draft.schedule === "never" ? "Only when woken" : `${draft.schedule}${draft.tz !== "UTC" ? ` (${draft.tz})` : ""}`}${draft.on ? ` on ${draft.on}` : ""}`,
-      meta: [h("span", {}, `Drafted by ${draft.by === "galahad" ? "Galahad" : draft.by}`), h("span", { title: new Date(draft.at).toLocaleString() }, relativeTime(draft.at))],
+      meta: [h("span", {}, `Drafted by ${draft.by === "primary" ? "your agent" : draft.by}`), h("span", { title: new Date(draft.at).toLocaleString() }, relativeTime(draft.at))],
     }),
     h("p", { class: "small muted wrap-anywhere" }, describeTask(draft.task)),
     draft.wakes.length ? h("p", { class: "small muted wrap-anywhere" }, describeWakes(draft.wakes, draft.cooldownMs)) : null,
@@ -231,7 +231,7 @@ export function allowSimilar(ctx: Ctx, action: ActionView): void {
   });
 }
 
-/** An approval waiting for you, as the Inbox shows it, and Galahad's welcome too (galahad-asks.ts). Nothing leaves until you approve it. */
+/** An approval waiting for you, as the Inbox shows it, and the primary's welcome too (primary-asks.ts). Nothing leaves until you approve it. */
 export function actionCard(ctx: Ctx, action: ActionView): HTMLElement {
   const info = CLASS_INFO[action.class as ActionClass];
   const destructive = action.class === "delete";
@@ -254,7 +254,7 @@ export function actionCard(ctx: Ctx, action: ActionView): HTMLElement {
   similar.addEventListener("click", () => allowSimilar(ctx, action));
 
   return card(
-    { tone: destructive ? "danger" : "accent", label: `Galahad asks to ${info?.label.toLowerCase() ?? action.class}: ${action.target}` },
+    { tone: destructive ? "danger" : "accent", label: `Your agent asks to ${info?.label.toLowerCase() ?? action.class}: ${action.target}` },
     listRow({
       lead: "mark",
       leadTone: "agent",
@@ -271,7 +271,7 @@ export function actionCard(ctx: Ctx, action: ActionView): HTMLElement {
       ". No answer means no. ",
       destructive
         ? "Deleting anything persistent asks you, unless a standing order of yours names exactly this."
-        : "Outward actions (posting, sending, pushing, the physical world) ask you, unless a standing order of yours covers them, or they are his knights' work in the repositories you gave them, which he approves himself.",
+        : "Outward actions (posting, sending, pushing, the physical world) ask you, unless a standing order of yours covers them, or they are its agents' work in the repositories you gave them, which it approves itself.",
     ),
     admin
       ? formActions(decline, similar, edit, approve)
@@ -281,8 +281,8 @@ export function actionCard(ctx: Ctx, action: ActionView): HTMLElement {
 }
 
 /**
- * His ask to use a Mac itself (docs/MAC.md, M4), or his session there while it lasts: what for (his words), for how
- * long, and your answer: let him (asked once more, saying what it gives him), say no, or end it sooner.
+ * Its ask to use a Mac itself (docs/MAC.md, M4), or its session there while it lasts: what for (its words), for how
+ * long, and your answer: let it (asked once more, saying what it gives it), say no, or end it sooner.
  */
 export function screenSessionCard(ctx: Ctx, s: ScreenSessionView): HTMLElement {
   const outcome = h("div");
@@ -301,33 +301,33 @@ export function screenSessionCard(ctx: Ctx, s: ScreenSessionView): HTMLElement {
   }
   if (s.state === "allowed") {
     const end = button("End now", { variant: "danger", icon: "x" });
-    end.addEventListener("click", () => void answer("/api/screen/end", { id: s.id }, end, "Ended: nothing of that Mac is his now."));
+    end.addEventListener("click", () => void answer("/api/screen/end", { id: s.id }, end, "Ended: nothing of that Mac is its now."));
     return card(
-      { tone: "warn", label: `Galahad is using ${s.nodeName} itself` },
-      listRow({ lead: "mark", leadTone: "agent", top: true, title: `Galahad is using ${s.nodeName} itself`, sub: `Until ${clock(s.until!)}, or until you end it.`, meta: [h("span", { title: new Date(s.until!).toLocaleString() }, `ends ${relativeTime(s.until!)}`)] }),
+      { tone: "warn", label: `Your agent is using ${s.nodeName} itself` },
+      listRow({ lead: "mark", leadTone: "agent", top: true, title: `Your agent is using ${s.nodeName} itself`, sub: `Until ${clock(s.until!)}, or until you end it.`, meta: [h("span", { title: new Date(s.until!).toLocaleString() }, `ends ${relativeTime(s.until!)}`)] }),
       h("div", { class: "quote small" }, s.why),
       admin ? formActions(end) : callout("quiet", h("span", {}, "This device can't end it (no fleet:admin scope): ", h("code", {}, `invincible screen end ${s.id}`))),
       outcome,
     );
   }
-  const yes = button("Let him…", { variant: "primary", icon: "check" });
+  const yes = button("Let it…", { variant: "primary", icon: "check" });
   const no = button("Not now", { icon: "x" });
   yes.addEventListener("click", async () => {
     const ok = await confirmAction({
-      title: `Let Galahad use ${s.nodeName} itself?`,
+      title: `Let your agent use ${s.nodeName} itself?`,
       body: [
-        h("p", {}, `For ${s.minutes} minutes from now: he sees its screen, uses its apps and runs commands as its user, held to your rules. You can watch it and end it any time.`),
-        h("p", {}, "That account holds the node's keys, so a misled model could act as you there: let him only for work you want done that way."),
+        h("p", {}, `For ${s.minutes} minutes from now: it sees its screen, uses its apps and runs commands as its user, held to your rules. You can watch it and end it any time.`),
+        h("p", {}, "That account holds the node's keys, so a misled model could act as you there: let it only for work you want done that way."),
       ],
-      confirmLabel: `Let him, for ${s.minutes} minutes`,
+      confirmLabel: `Let it, for ${s.minutes} minutes`,
       tone: "primary",
     });
     if (ok) await answer("/api/screen/decide", { id: s.id, allow: true }, yes, `Allowed for ${s.minutes} minutes.`);
   });
-  no.addEventListener("click", () => void answer("/api/screen/decide", { id: s.id, allow: false }, no, "Said no: nothing of it is his."));
+  no.addEventListener("click", () => void answer("/api/screen/decide", { id: s.id, allow: false }, no, "Said no: nothing of it is its."));
   return card(
-    { tone: "accent", label: `Galahad asks to use ${s.nodeName} itself` },
-    listRow({ lead: "mark", leadTone: "agent", top: true, title: `Galahad asks to use ${s.nodeName} itself`, sub: `For ${s.minutes} minutes, if you let him.`, meta: [h("span", { title: new Date(s.askedAt).toLocaleString() }, relativeTime(s.askedAt))] }),
+    { tone: "accent", label: `Your agent asks to use ${s.nodeName} itself` },
+    listRow({ lead: "mark", leadTone: "agent", top: true, title: `Your agent asks to use ${s.nodeName} itself`, sub: `For ${s.minutes} minutes, if you let it.`, meta: [h("span", { title: new Date(s.askedAt).toLocaleString() }, relativeTime(s.askedAt))] }),
     h("div", { class: "quote small" }, s.why),
     note(`Answer by ${clock(s.answerBy)}. No answer means no.`),
     admin ? formActions(no, yes) : callout("quiet", h("span", {}, "This device can't answer (no fleet:admin scope): ", h("code", {}, `invincible screen approve ${s.id}`))),
@@ -410,7 +410,7 @@ function decidedRow(ctx: Ctx, action: ActionView): HTMLElement {
         : action.decidedVia && !action.self
           ? h("span", {}, `answered from ${deviceName(ctx, action.decidedVia)}`)
           : null,
-      // What you said with it; for one you edited, which it was sent as; for one he approved himself, why (it says so).
+      // What you said with it; for one you edited, which it was sent as; for one it approved itself, why (it says so).
       action.note ? h("span", { class: "wrap-anywhere" }, action.note) : null,
     ],
     body: action.receipt ? h("details", { class: "process" }, h("summary", { "data-key": `receipt:${action.id}` }, icon("chevron-right", { size: 14, class: "chev" }), "Receipt"), h("pre", { class: "result process-body" }, action.receipt)) : null,
@@ -561,7 +561,7 @@ export const inboxView: View = (root, ctx, { scope }) => {
             empty({
               icon: "check-circle",
               title: "Nothing needs you",
-              body: "When a device asks to join, Galahad needs a credential or a connector, or wants to do something his oath says to ask about, or the heartbeat spots trouble, it waits here.",
+              body: "When a device asks to join, your agent needs a credential or a connector, or wants to do something its policy says to ask about, or the heartbeat spots trouble, it waits here.",
               actions: admin ? button("Pair a device", { icon: "plus", onClick: () => openInvite(ctx, "client") }) : null,
             }),
           )
@@ -570,31 +570,31 @@ export const inboxView: View = (root, ctx, { scope }) => {
   };
 
   const pairingsSection = section("Devices asking to join", {}, pairingsBox);
-  const screenSection = section("His use of a Mac itself", {}, screenBox);
-  const questionsSection = section("Services ask you", { note: "An MCP server asked you something in the middle of a call of Galahad's. Only you answer it, never a model; what you send goes to that service alone." }, questionsBox);
+  const screenSection = section("Its use of a Mac itself", {}, screenBox);
+  const questionsSection = section("Services ask you", { note: "An MCP server asked you something in the middle of a call of your agent's. Only you answer it, never a model; what you send goes to that service alone." }, questionsBox);
   const actionsSection = section(
-    "Galahad asks your leave",
-    { note: "What spends money, speaks for you, or can't be undone (anything outward, every delete) waits for you unless a standing order answers it; his knights' work in the repositories you gave them he approves himself. Approved, it's sent once; no answer in 24 hours means no." },
+    "Your agent asks for your approval",
+    { note: "What spends money, speaks for you, or can't be undone (anything outward, every delete) waits for you unless a standing order answers it; its agents' work in the repositories you gave them it approves itself. Approved, it's sent once; no answer in 24 hours means no." },
     actionsBox,
   );
-  const requestsSection = section("Credentials Galahad asked for", {}, requestsBox);
+  const requestsSection = section("Credentials your agent asked for", {}, requestsBox);
   const go = (text: string, place: string) => linkButton(text, `#/${place}`, { variant: "ghost", size: "sm", next: true });
   const connectorsSection = section(
     "Connectors asked for",
-    { actions: go("Connectors", "connectors"), note: "A service Galahad or a knight needs and doesn't have. Asking installs nothing; once you add it, every one of them can use it." },
+    { actions: go("Connectors", "connectors"), note: "A service your agent or an agent needs and doesn't have. Asking installs nothing; once you add it, every one of them can use it." },
     connectorsBox,
   );
-  const draftsSection = section("Loops Galahad drafted", { actions: go("Loops", "loops"), note: "You asked in chat for something on a schedule. Each runs only once you add it." }, draftsBox);
+  const draftsSection = section("Loops your agent drafted", { actions: go("Loops", "loops"), note: "You asked in chat for something on a schedule. Each runs only once you add it." }, draftsBox);
   const aboutYouBox = h("div", { class: "card rows" });
   const aboutYouSection = section(
-    "Facts he noticed about you",
-    { actions: go("Memory", "memory"), note: "Each goes with every answer of his once you keep it, in your words if you like. Until then it is only his note." },
+    "Facts it noticed about you",
+    { actions: go("Memory", "memory"), note: "Each goes with every answer of its once you keep it, in your words if you like. Until then it is only its note." },
     aboutYouBox,
   );
   const noticesSection = section("Noticed", { actions: go("Loops", "loops") }, noticesBox);
   // Kept across re-renders so it stays open while the outbox changes.
   const history = disclosure(historySummary, { flush: true, hidden: true }, historyRows);
-  // First, while it matters: that he can't reach this device when Galahad is closed, and the one thing to do.
+  // First, while it matters: that it can't reach this device when the primary is closed, and the one thing to do.
   const reach = reachNote(ctx, scope);
 
   replace(

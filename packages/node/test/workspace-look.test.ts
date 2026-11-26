@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { WorkPath } from "@invincible/core";
 import { CHANGES_SCRIPT, changesView, fileView, filesView, LIST_LIMIT, LIST_SCRIPT, LookError, READ_LIMIT, READ_SCRIPT } from "../src/workspace-look.ts";
 
-/* The scripts run here as they run in a knight's VM (Python 3, the path as an argument), on a folder made for each test. */
+/* The scripts run here as they run in an agent's VM (Python 3, the path as an argument), on a folder made for each test. */
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const folder = () => { const dir = mkdtempSync(join(tmpdir(), "invincible-look-")); dirs.push(dir); return dir; };
@@ -23,7 +23,7 @@ const git = (dir: string, ...args: string[]) => {
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
 const FAKE_KEY = `sk-ant-api03-${"A".repeat(93)}AA`;
 
-describe("a knight's workspace, looked into", () => {
+describe("an agent's workspace, looked into", () => {
   test("a folder: folders first, each entry with its kind and size; one that isn't there, or isn't a folder, says so", () => {
     const dir = folder();
     mkdirSync(join(dir, "src"));

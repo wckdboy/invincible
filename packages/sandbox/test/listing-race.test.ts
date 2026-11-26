@@ -3,9 +3,9 @@ import { containerName, LABEL, SandboxHost, type DockerRunner } from "../src/ind
 
 /*
  * A host lists its sandboxes with `docker ps`, then inspects them in one call. A sandbox removed between the two (another
- * quest's, ending) makes `docker inspect` exit 1, though it still prints every other one. That was read as "Docker
+ * run's, ending) makes `docker inspect` exit 1, though it still prints every other one. That was read as "Docker
  * couldn't say", so the listing came back empty and a sandbox in use read as missing: on ultra on 21 November 2026, four
- * trials at a time, one crashed on its first command with "no such sandbox on this node".
+ * evals at a time, one crashed on its first command with "no such sandbox on this node".
  */
 
 const LIVE = "0123456789";
@@ -13,7 +13,7 @@ const GONE = "9876543210";
 
 function host(inspectAnswer: { code: number; stderr: string }) {
   const labels = (id: string) => ({
-    [LABEL]: "1", [`${LABEL}.id`]: id, [`${LABEL}.node`]: "test", [`${LABEL}.quest`]: "test.quest",
+    [LABEL]: "1", [`${LABEL}.id`]: id, [`${LABEL}.node`]: "test", [`${LABEL}.run`]: "test.run",
     [`${LABEL}.network`]: "gateway", [`${LABEL}.ephemeral`]: "true", [`${LABEL}.isolation`]: "vm",
   });
   const runner: DockerRunner = async (args) => {

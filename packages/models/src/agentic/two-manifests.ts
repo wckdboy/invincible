@@ -305,7 +305,7 @@ test("out/reconciled.json has the four lists, as README.md describes them", () =
 const EXPECTED = ${JSON.stringify(expected)};
 const DATA = ${JSON.stringify({ "data/warehouse.csv": fingerprint(warehouseCsv), "data/carrier.csv": fingerprint(carrierCsv) })};
 ${ORACLE}
-/** What he wrote, read; the data and the test as given, untouched. */
+/** What it wrote, read; the data and the test as given, untouched. */
 const answer = () => {
   testsIntact();
   for (const [file, print] of Object.entries(DATA)) assert.equal(fingerprint(read(file)), print, "the data was changed: " + file);

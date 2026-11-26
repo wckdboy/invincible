@@ -9,10 +9,10 @@ import { z } from "zod";
  * secure_delete overwrites what it held. Only you read it; the server decides who
  * "you" is (see the conversation routes).
  *
- * It also keeps what you queued behind a chat while Galahad worked (your messages,
+ * It also keeps what you queued behind a chat while the primary worked (your messages,
  * in order, until their turn comes), so a queue survives a reload and a restart; the
- * looks he set himself in a chat (looks.ts), until they come; and which knights' tasks
- * he gave from each chat, for its row of what is under way.
+ * looks it set itself in a chat (looks.ts), until they come; and which agents' tasks
+ * it gave from each chat, for its row of what is under way.
  */
 
 interface ConversationRow {
@@ -28,9 +28,9 @@ interface ConversationRow {
   queue_held: QueueHold | null;
   waiting: string | null;
   last: AnswerStatus | null;
-  /** When his latest answer in it ended (null: none has). */
+  /** When its latest answer in it ended (null: none has). */
   answered_at: number | null;
-  /** When you last read it: up to his answer that ended then (null: never). */
+  /** When you last read it: up to its answer that ended then (null: never). */
   seen_at: number | null;
 }
 
@@ -46,7 +46,7 @@ interface MessageRow {
   error: string | null;
   created_at: number;
   ended_at: number | null;
-  /** A look of his: when he set it, and his note (null: a message of yours, or his answer). */
+  /** A look of its: when it set it, and its note (null: a message of yours, or its answer). */
   look_set: number | null;
   look_note: string | null;
 }
@@ -163,7 +163,7 @@ const summaryOf = (r: ConversationRow): KeptSummary => ({
   queued: r.queued,
   held: r.queued > 0 ? r.queue_held : null,
   needs: null,
-  // An answer of his ended after you last read it: new to you, on every device, until you read it on one.
+  // An answer of its ended after you last read it: new to you, on every device, until you read it on one.
   unread: r.answered_at !== null && r.answered_at > (r.seen_at ?? 0),
   last: r.last,
   waits: waitsOf(r.waiting),
@@ -247,8 +247,8 @@ export class ChatStore {
     const columns = new Set(this.db.query<{ name: string }, []>("PRAGMA table_info(conversations)").all().map((c) => c.name));
     if (!columns.has("queue_held")) this.db.exec("ALTER TABLE conversations ADD COLUMN queue_held TEXT");
     if (!columns.has("waiting")) this.db.exec("ALTER TABLE conversations ADD COLUMN waiting TEXT");
-    // A database from before read and unread: when his latest answer in each chat ended, and when you last read it.
-    // Everything he answered before then counts as read.
+    // A database from before read and unread: when its latest answer in each chat ended, and when you last read it.
+    // Everything it answered before then counts as read.
     if (!columns.has("answered_at")) {
       this.db.exec("ALTER TABLE conversations ADD COLUMN answered_at INTEGER");
       this.db.exec("UPDATE conversations SET answered_at = (SELECT MAX(m.ended_at) FROM messages m WHERE m.conversation = conversations.id AND m.role = 'assistant')");
@@ -260,7 +260,7 @@ export class ChatStore {
     // A database from before attachments: a message of yours may carry files (kept on the node: uploads.ts).
     const fields = new Set(this.db.query<{ name: string }, []>("PRAGMA table_info(messages)").all().map((c) => c.name));
     if (!fields.has("attachments")) this.db.exec("ALTER TABLE messages ADD COLUMN attachments TEXT");
-    // A database from before his looks: a message may be one of his, which starts the turn a look of his comes back as.
+    // A database from before its looks: a message may be one of its, which starts the turn a look of its comes back as.
     if (!fields.has("look_set")) this.db.exec("ALTER TABLE messages ADD COLUMN look_set INTEGER; ALTER TABLE messages ADD COLUMN look_note TEXT;");
     // An answer the node was writing when it stopped can't finish any more.
     this.db.exec("UPDATE messages SET status = 'stopped' WHERE status = 'streaming'");
@@ -361,7 +361,7 @@ export class ChatStore {
   }
 
   /** A message of yours. Whatever the turn before it left waiting on you is no longer where the chat stands. */
-  /** A message that starts a turn: yours, or one of his looks coming back (`look`: when he set it, and his note). */
+  /** A message that starts a turn: yours, or one of its looks coming back (`look`: when it set it, and its note). */
   addUser(id: string, content: string, attachments?: readonly AttachmentRef[], look?: { set: number; note: string }): number {
     const at = this.now();
     const row = this.db
@@ -379,7 +379,7 @@ export class ChatStore {
     return this.db.query<{ id: number }, [string, number]>("INSERT INTO messages (conversation, role, content, status, created_at) VALUES (?, 'assistant', '', 'streaming', ?) RETURNING id").get(id, this.now())!.id;
   }
 
-  /** His answer, ended. `read`: a device was watching it to its end, so it was read there; otherwise it's new to you. */
+  /** Its answer, ended. `read`: a device was watching it to its end, so it was read there; otherwise it's new to you. */
   finishAnswer(conversation: string, message: number, answer: { content: string; model: string | null; steps: StoredStep[]; status: "done" | "error" | "stopped" | "steered"; error: string | null }, read = false): void {
     const at = this.now();
     this.db
@@ -390,7 +390,7 @@ export class ChatStore {
     this.touch(conversation);
   }
 
-  /** You read it: what he has answered in it so far is no longer new. True when that changed anything. */
+  /** You read it: what it has answered in it so far is no longer new. True when that changed anything. */
   see(id: string): boolean {
     return this.db.query("UPDATE conversations SET seen_at = answered_at WHERE id = ? AND answered_at > COALESCE(seen_at, 0)").run(id).changes > 0;
   }
@@ -403,7 +403,7 @@ export class ChatStore {
       .map((r) => ({ id: r.id, title: r.title, answeredAt: r.answered_at }));
   }
 
-  /** An answer that never came to anything (you steered before he'd said or done a thing): it isn't kept. */
+  /** An answer that never came to anything (you steered before it'd said or done a thing): it isn't kept. */
   dropAnswer(conversation: string, message: number): void {
     this.db.query("DELETE FROM messages WHERE id = ? AND conversation = ? AND role = 'assistant'").run(message, conversation);
   }
@@ -443,7 +443,7 @@ export class ChatStore {
   /* ---------- the queue: your messages waiting for their turn ---------- */
 
   /** A chat's queued messages, in the order they'll be sent. */
-  /** A look he set in a chat, waiting until it comes. */
+  /** A look it set in a chat, waiting until it comes. */
   lookAdd(look: { conversation: string; at: number; note: string; zone: string; by: QueuedBy; held: LookHeld | null }): KeptLook {
     const id = `lk_${randomId(12)}`;
     this.db
@@ -457,7 +457,7 @@ export class ChatStore {
     return row ? lookOf(row) : null;
   }
 
-  /** His looks that wait, soonest first: in one chat, or in all. */
+  /** Its looks that wait, soonest first: in one chat, or in all. */
   looksWaiting(conversation?: string): KeptLook[] {
     const rows = conversation
       ? this.db.query<LookRow, [string]>("SELECT * FROM looks WHERE state = 'waiting' AND conversation = ? ORDER BY at, id").all(conversation)
@@ -465,7 +465,7 @@ export class ChatStore {
     return rows.map(lookOf);
   }
 
-  /** His looks whose time has come, soonest first. */
+  /** Its looks whose time has come, soonest first. */
   looksDue(now: number): KeptLook[] {
     return this.db.query<LookRow, [number]>("SELECT * FROM looks WHERE state = 'waiting' AND at <= ? ORDER BY at, id LIMIT 50").all(now).map(lookOf);
   }
@@ -475,13 +475,13 @@ export class ChatStore {
     return this.db.query("UPDATE looks SET state = ?, why = ?, ended_at = ? WHERE id = ? AND state = 'waiting'").run(state, why, this.now(), id).changes > 0;
   }
 
-  /** A knight's task he gave from a chat (its row above that chat's message box while it's under way). */
+  /** An agent's task it gave from a chat (its row above that chat's message box while it's under way). */
   handoff(conversation: string, task: string): void {
     if (!this.summary(conversation)) return;
     this.db.query("INSERT OR IGNORE INTO handoffs (conversation, task, at) VALUES (?, ?, ?)").run(conversation, task, this.now());
   }
 
-  /** The tasks he gave from a chat, newest first. */
+  /** The tasks it gave from a chat, newest first. */
   handoffs(conversation: string, limit = 50): string[] {
     return this.db.query<{ task: string }, [string, number]>("SELECT task FROM handoffs WHERE conversation = ? ORDER BY at DESC, task LIMIT ?").all(conversation, limit).map((row) => row.task);
   }
@@ -490,7 +490,7 @@ export class ChatStore {
     return this.db.query<QueueRow, [string]>("SELECT * FROM queue WHERE conversation = ? ORDER BY ord, id").all(conversation).map(queuedOf);
   }
 
-  /** Queue a message behind a chat (`front`: ahead of the others, for one that was already on its way to him). */
+  /** Queue a message behind a chat (`front`: ahead of the others, for one that was already on its way to it). */
   queueAdd(conversation: string, message: { text: string; role: string | null; by: QueuedBy }, front = false): Queued {
     const edge = this.db.query<{ lo: number | null; hi: number | null }, [string]>("SELECT MIN(ord) AS lo, MAX(ord) AS hi FROM queue WHERE conversation = ?").get(conversation)!;
     const ord = front ? (edge.lo ?? 0) - 1 : (edge.hi ?? 0) + 1;

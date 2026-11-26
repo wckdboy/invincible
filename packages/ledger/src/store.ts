@@ -22,7 +22,7 @@ import {
   sha256B64u,
   signEvent,
   toolDigest,
-  trialProblem,
+  evalProblem,
   type NodeIdentity,
 } from "@invincible/core";
 
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS v_slots (loop TEXT NOT NULL, device TEXT NOT NULL, sl
 -- events are judged by a replay, never incrementally.
 CREATE TABLE IF NOT EXISTS v_chainbad (device TEXT PRIMARY KEY);
 -- Skills (core's skills.ts): each skill with its head and its track record, every version ever written
--- (never deleted), and the quests and answers each was given to. Their marks (locked, retired, stale) are
+-- (never deleted), and the runs and answers each was given to. Their marks (locked, retired, stale) are
 -- in v_lww as skill-mark:<skill>:<mark>.
 CREATE TABLE IF NOT EXISTS v_skills (
   id TEXT PRIMARY KEY, head TEXT NOT NULL, created_hlc TEXT NOT NULL, touched_hlc TEXT NOT NULL,
@@ -131,11 +131,11 @@ CREATE TABLE IF NOT EXISTS v_skills (
 );
 CREATE TABLE IF NOT EXISTS v_skill_versions (
   id TEXT PRIMARY KEY, skill TEXT NOT NULL, n INTEGER NOT NULL, prev TEXT, doc TEXT NOT NULL, trust TEXT NOT NULL,
-  author TEXT NOT NULL, quest TEXT, via TEXT, source TEXT, hlc TEXT NOT NULL, approved_hlc TEXT
+  author TEXT NOT NULL, run TEXT, via TEXT, source TEXT, hlc TEXT NOT NULL, approved_hlc TEXT
 );
 CREATE INDEX IF NOT EXISTS v_skill_versions_skill ON v_skill_versions (skill, n);
 CREATE TABLE IF NOT EXISTS v_skill_uses (
-  skill TEXT NOT NULL, quest TEXT NOT NULL, version TEXT NOT NULL, hlc TEXT NOT NULL, status TEXT, PRIMARY KEY (skill, quest)
+  skill TEXT NOT NULL, run TEXT NOT NULL, version TEXT NOT NULL, hlc TEXT NOT NULL, status TEXT, PRIMARY KEY (skill, run)
 );
 `;
 
@@ -143,8 +143,8 @@ const VIEW_TABLES = ["v_state", "v_devices", "v_memories", "v_memories_fts", "v_
 
 /** Who wrote a skill's version, as its event says (core's skills.ts). */
 const SKILL_OWNER = "owner";
-const SKILL_GALAHAD = "galahad";
-/** A use that is a chat answer's, not a quest's: it has no review to pass. */
+const SKILL_PRIMARY = "primary";
+/** A use that is a chat answer's, not a run's: it has no review to pass. */
 const SKILL_CHAT = "chat:";
 
 /** What one ingest adds to log_devices, written once at its end. */
@@ -968,7 +968,7 @@ export class LedgerStore {
         if (!this.lww(`action:${body.id}`)) return "no such action";
         // The first decision stands: an approval can't be flipped after the fact, nor a refusal.
         if (this.lww(`action-decision:${body.id}`)) return "action already decided";
-        // One recorded as an agent's, not yours, is Galahad's own approval (oath.ts ownApproval): it says so where it shows.
+        // One recorded as an agent's, not yours, is the primary's own approval (policy.ts ownApproval): it says so where it shows.
         this.putLww(`action-decision:${body.id}`, event, { ...body, ...(event.prov?.via ? { via: event.prov.via } : {}), ...(event.prov?.trust === "agent" ? { self: true } : {}) } as Json);
         return null;
       }
@@ -1000,31 +1000,31 @@ export class LedgerStore {
         this.putLww(`investigation-result:${body.id}`, event, body as Json);
         return null;
       }
-      case "trial.scored": {
-        if (!isFullNode(signer)) return "only full nodes run trials";
-        const body = bodyOf(event, "trial.scored");
-        if (this.lww(`trial:${body.id}`)) return "trial already recorded";
+      case "eval.scored": {
+        if (!isFullNode(signer)) return "only full nodes run evals";
+        const body = bodyOf(event, "eval.scored");
+        if (this.lww(`eval:${body.id}`)) return "eval already recorded";
         // The verdicts and the score must follow from the numbers: nobody inflates a mark.
-        const problem = trialProblem(body);
+        const problem = evalProblem(body);
         if (problem) return problem;
-        this.putLww(`trial:${body.id}`, event, body as Json);
+        this.putLww(`eval:${body.id}`, event, body as Json);
         return null;
       }
-      case "trial.run": {
-        if (!isFullNode(signer)) return "only full nodes run trials";
-        const body = bodyOf(event, "trial.run");
-        if (this.lww(`trial-run:${body.run}`)) return "run already recorded";
-        this.putLww(`trial-run:${body.run}`, event, body as Json);
+      case "eval.run": {
+        if (!isFullNode(signer)) return "only full nodes run evals";
+        const body = bodyOf(event, "eval.run");
+        if (this.lww(`eval-run:${body.run}`)) return "run already recorded";
+        this.putLww(`eval-run:${body.run}`, event, body as Json);
         return null;
       }
-      case "trial.spent": {
-        // What a trial's model calls came to: once, by the node that recorded the trial (which is in the log before this).
-        const body = bodyOf(event, "trial.spent");
-        const trial = this.lww(`trial:${body.trial}`);
-        if (!trial?.value) return "no such trial";
-        if (trial.device !== event.device) return "only the node that ran a trial records what it spent";
-        if (this.lww(`trial-spent:${body.trial}`)) return "already recorded";
-        this.putLww(`trial-spent:${body.trial}`, event, body.spent as Json);
+      case "eval.spent": {
+        // What an eval's model calls came to: once, by the node that recorded the eval (which is in the log before this).
+        const body = bodyOf(event, "eval.spent");
+        const evalCase = this.lww(`eval:${body.evalCase}`);
+        if (!evalCase?.value) return "no such eval";
+        if (evalCase.device !== event.device) return "only the node that ran an eval records what it spent";
+        if (this.lww(`eval-spent:${body.evalCase}`)) return "already recorded";
+        this.putLww(`eval-spent:${body.evalCase}`, event, body.spent as Json);
         return null;
       }
       case "price.set": {
@@ -1118,8 +1118,8 @@ export class LedgerStore {
         this.putLww(`action-decision:${body.action}`, event, { id: body.action, verdict: "approved", order: body.order, note: `standing order: ${order.label}` });
         return null;
       }
-      // Sessions on a Mac's own screen (docs/MAC.md, M4): asked for him by a full node, allowed or not by you alone (the
-      // first answer stands), and ended once, by you or by him; how long one lasts is counted from your answer.
+      // Sessions on a Mac's own screen (docs/MAC.md, M4): asked for it by a full node, allowed or not by you alone (the
+      // first answer stands), and ended once, by you or by it; how long one lasts is counted from your answer.
       case "screen.asked": {
         if (!isFullNode(signer)) return "only full nodes may ask for a screen session";
         const body = bodyOf(event, "screen.asked");
@@ -1163,23 +1163,23 @@ export class LedgerStore {
         // Without a word on its trust, it's a stranger's.
         const trust = event.prov?.trust ?? "untrusted";
         if ((trust === "owner") !== (body.by === SKILL_OWNER)) return "only your own words are yours";
-        if (trust === "agent" && body.by !== SKILL_GALAHAD) return "only his own reviewed work is trusted as his";
+        if (trust === "agent" && body.by !== SKILL_PRIMARY) return "only its own reviewed work is trusted as its";
         const skill = this.db.query<{ head: string }, [string]>("SELECT head FROM v_skills WHERE id = ?").get(body.skill);
-        const insert = this.db.query("INSERT INTO v_skill_versions (id, skill, n, prev, doc, trust, author, quest, via, source, hlc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        const insert = this.db.query("INSERT INTO v_skill_versions (id, skill, n, prev, doc, trust, author, run, via, source, hlc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         if (!skill) {
-          insert.run(event.id, body.skill, 1, null, canonical(body.doc as Json), trust, body.by, body.quest ?? null, event.prov?.via ?? null, event.prov?.source ?? null, event.hlc);
+          insert.run(event.id, body.skill, 1, null, canonical(body.doc as Json), trust, body.by, body.run ?? null, event.prov?.via ?? null, event.prov?.source ?? null, event.hlc);
           this.db.query("INSERT INTO v_skills (id, head, created_hlc, touched_hlc) VALUES (?, ?, ?, ?)").run(body.skill, event.id, event.hlc, event.hlc);
           return null;
         }
         if (trust !== "owner") {
-          // You change any skill. He changes only what he wrote, and nothing you locked; another agent proposes, never revises.
-          if (body.by !== SKILL_GALAHAD) return "only you and Galahad revise a skill";
+          // You change any skill. It changes only what it wrote, and nothing you locked; another agent proposes, never revises.
+          if (body.by !== SKILL_PRIMARY) return "only you and your agent revise a skill";
           if (this.skillMarked(body.skill, "locked")) return "the skill is locked";
           const head = this.db.query<{ author: string }, [string]>("SELECT author FROM v_skill_versions WHERE id = ?").get(skill.head);
-          if (head?.author !== SKILL_GALAHAD) return "he revises only skills he wrote";
+          if (head?.author !== SKILL_PRIMARY) return "it revises only skills it wrote";
         }
         const n = this.db.query<{ n: number }, [string]>("SELECT MAX(n) AS n FROM v_skill_versions WHERE skill = ?").get(body.skill)!.n + 1;
-        insert.run(event.id, body.skill, n, skill.head, canonical(body.doc as Json), trust, body.by, body.quest ?? null, event.prov?.via ?? null, event.prov?.source ?? null, event.hlc);
+        insert.run(event.id, body.skill, n, skill.head, canonical(body.doc as Json), trust, body.by, body.run ?? null, event.prov?.via ?? null, event.prov?.source ?? null, event.hlc);
         this.db.query("UPDATE v_skills SET head = ?, touched_hlc = ? WHERE id = ?").run(event.id, event.hlc, body.skill);
         return null;
       }
@@ -1219,24 +1219,24 @@ export class LedgerStore {
         const body = bodyOf(event, "skill.used");
         const version = this.db.query<{ skill: string; trust: string; approved_hlc: string | null }, [string]>("SELECT skill, trust, approved_hlc FROM v_skill_versions WHERE id = ?").get(body.version);
         if (!version || version.skill !== body.skill) return "no such version of that skill";
-        // What was given to a model must have been his to be given: every replica checks it again.
+        // What was given to a model must have been its to be given: every replica checks it again.
         if (version.trust === "untrusted" && !version.approved_hlc) return "that version was not approved";
         if (this.skillMarked(body.skill, "retired")) return "the skill is retired";
-        if (this.db.query("SELECT 1 FROM v_skill_uses WHERE skill = ? AND quest = ?").get(body.skill, body.quest)) return "already counted";
-        this.db.query("INSERT INTO v_skill_uses (skill, quest, version, hlc) VALUES (?, ?, ?, ?)").run(body.skill, body.quest, body.version, event.hlc);
-        const chat = body.quest.startsWith(SKILL_CHAT);
+        if (this.db.query("SELECT 1 FROM v_skill_uses WHERE skill = ? AND run = ?").get(body.skill, body.run)) return "already counted";
+        this.db.query("INSERT INTO v_skill_uses (skill, run, version, hlc) VALUES (?, ?, ?, ?)").run(body.skill, body.run, body.version, event.hlc);
+        const chat = body.run.startsWith(SKILL_CHAT);
         this.db.query(`UPDATE v_skills SET ${chat ? "chats = chats + 1" : "uses = uses + 1"}, used_hlc = ?, touched_hlc = ? WHERE id = ?`).run(event.hlc, event.hlc, body.skill);
         return null;
       }
       case "skill.outcome": {
-        if (!isFullNode(signer)) return "only full nodes record a quest's outcome";
+        if (!isFullNode(signer)) return "only full nodes record a run's outcome";
         const body = bodyOf(event, "skill.outcome");
-        if (body.quest.startsWith(SKILL_CHAT)) return "a chat answer has no review";
-        const use = this.db.query<{ status: string | null }, [string, string]>("SELECT status FROM v_skill_uses WHERE skill = ? AND quest = ?").get(body.skill, body.quest);
-        if (!use) return "that quest didn't use the skill";
+        if (body.run.startsWith(SKILL_CHAT)) return "a chat answer has no review";
+        const use = this.db.query<{ status: string | null }, [string, string]>("SELECT status FROM v_skill_uses WHERE skill = ? AND run = ?").get(body.skill, body.run);
+        if (!use) return "that run didn't use the skill";
         if (use.status) return "already recorded";
-        this.db.query("UPDATE v_skill_uses SET status = ? WHERE skill = ? AND quest = ?").run(body.status, body.skill, body.quest);
-        // Its review passed, or it didn't. A quest you stopped (or an ending this node doesn't know) says nothing about the skill.
+        this.db.query("UPDATE v_skill_uses SET status = ? WHERE skill = ? AND run = ?").run(body.status, body.skill, body.run);
+        // Its review passed, or it didn't. A run you stopped (or an ending this node doesn't know) says nothing about the skill.
         const counted = body.status === "done" ? "passed" : body.status === "unverified" || body.status === "gave-up" ? "failed" : null;
         if (counted) this.db.query(`UPDATE v_skills SET ${counted} = ${counted} + 1 WHERE id = ?`).run(body.skill);
         return null;
@@ -1369,7 +1369,7 @@ export class LedgerStore {
 
   // ---- screen sessions ---------------------------------------------------------
 
-  /** Every session on a Mac's own screen Galahad asked for, the newest first, with your answer and its end. */
+  /** Every session on a Mac's own screen the primary asked for, the newest first, with your answer and its end. */
   screenSessions(): ScreenSessionRecord[] {
     return this.lwwPrefix<{ id: string; node: string; why: string; minutes: number }>("screen:")
       .map((entry) => {
@@ -1431,19 +1431,19 @@ export class LedgerStore {
     };
   }
 
-  /** The quests and answers a skill was given to, newest first. */
+  /** The runs and answers a skill was given to, newest first. */
   skillUses(skill: string, limit = 50): SkillUseRecord[] {
-    return this.db.query<SkillUseRecord, [string, number]>("SELECT skill, quest, version, hlc, status FROM v_skill_uses WHERE skill = ? ORDER BY hlc DESC, quest LIMIT ?").all(skill, limit);
+    return this.db.query<SkillUseRecord, [string, number]>("SELECT skill, run, version, hlc, status FROM v_skill_uses WHERE skill = ? ORDER BY hlc DESC, run LIMIT ?").all(skill, limit);
   }
 
-  /** The skills one quest was given. */
-  skillsUsedBy(quest: string): SkillUseRecord[] {
-    return this.db.query<SkillUseRecord, [string]>("SELECT skill, quest, version, hlc, status FROM v_skill_uses WHERE quest = ? ORDER BY hlc, skill").all(quest);
+  /** The skills one run was given. */
+  skillsUsedBy(run: string): SkillUseRecord[] {
+    return this.db.query<SkillUseRecord, [string]>("SELECT skill, run, version, hlc, status FROM v_skill_uses WHERE run = ? ORDER BY hlc, skill").all(run);
   }
 
   /** The latest uses of any skill, newest first. */
   recentSkillUses(limit = 20): SkillUseRecord[] {
-    return this.db.query<SkillUseRecord, [number]>("SELECT skill, quest, version, hlc, status FROM v_skill_uses ORDER BY hlc DESC, skill, quest LIMIT ?").all(limit);
+    return this.db.query<SkillUseRecord, [number]>("SELECT skill, run, version, hlc, status FROM v_skill_uses ORDER BY hlc DESC, skill, run LIMIT ?").all(limit);
   }
 
   /** Accepted ledger entries of one resource since `sinceMs` (by their own clocks), newest first: a day's spend is summed from these. */
@@ -1609,7 +1609,7 @@ export class LedgerStore {
         ? {
             skills: this.db.query("SELECT * FROM v_skills ORDER BY id").all(),
             skillVersions: this.db.query("SELECT * FROM v_skill_versions ORDER BY id").all(),
-            skillUses: this.db.query("SELECT * FROM v_skill_uses ORDER BY skill, quest").all(),
+            skillUses: this.db.query("SELECT * FROM v_skill_uses ORDER BY skill, run").all(),
           }
         : {}),
     };
@@ -1634,7 +1634,7 @@ export interface ScreenSessionRecord {
   why: string;
   minutes: number;
   askedAt: number;
-  /** The node that asked for him. */
+  /** The node that asked for it. */
   askedBy: string;
   decision: { verdict: "allowed" | "denied"; at: number; via: string | null } | null;
   endedAt: number | null;
@@ -1650,9 +1650,9 @@ export interface SkillVersionRecord {
   doc: Json;
   trust: string;
   by: string;
-  quest: string | null;
+  run: string | null;
   via: string | null;
-  /** Where it came from, as its event says (the quest and why it's untrusted, the agent that proposed it). */
+  /** Where it came from, as its event says (the run and why it's untrusted, the agent that proposed it). */
   source: string | null;
   hlc: string;
   approvedHlc: string | null;
@@ -1679,7 +1679,7 @@ export interface SkillRecord {
 
 export interface SkillUseRecord {
   skill: string;
-  quest: string;
+  run: string;
   version: string;
   hlc: string;
   status: string | null;
@@ -1705,7 +1705,7 @@ interface SkillVersionRow {
   doc: string;
   trust: string;
   author: string;
-  quest: string | null;
+  run: string | null;
   via: string | null;
   source: string | null;
   hlc: string;
@@ -1720,7 +1720,7 @@ const toSkillVersion = (row: SkillVersionRow): SkillVersionRecord => ({
   doc: JSON.parse(row.doc) as Json,
   trust: row.trust,
   by: row.author,
-  quest: row.quest,
+  run: row.run,
   via: row.via,
   source: row.source,
   hlc: row.hlc,

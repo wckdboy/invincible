@@ -15,7 +15,7 @@ const draft: LoopDraftView = {
   cooldownMs: null,
   label: "Open pull requests, each weekday",
   why: "You asked to see the open pull requests every weekday at 8.",
-  by: "galahad",
+  by: "primary",
   at: 1,
   expires: 2,
   replaces: false,
@@ -57,10 +57,10 @@ test("the drafts are listed with what each would do and why, and how to add or d
   expect(lines.join("\n")).toContain("call github.pulls owner=amiriteorg repo=invincible");
   expect(lines.join("\n")).toContain("why: You asked to see the open pull requests every weekday at 8.");
   expect(lines.at(-1)).toContain("invincible loop add --draft <id>");
-  expect(await printed(() => loopCommand(node([]).api, "drafts", [], {}))).toEqual(["No drafts. Ask Galahad in chat for something on a schedule, and his draft waits here for you."]);
+  expect(await printed(() => loopCommand(node([]).api, "drafts", [], {}))).toEqual(["No drafts. Ask your agent in chat for something on a schedule, and its draft waits here for you."]);
 });
 
-test("a draft is added as he drafted it, naming the draft so it leaves the Inbox; where it runs may still be given", async () => {
+test("a draft is added as it drafted it, naming the draft so it leaves the Inbox; where it runs may still be given", async () => {
   const { api, asked } = node();
   await printed(() => loopCommand(api, "add", [], { draft: draft.id, on: "ultra" }));
   expect(asked.at(-1)).toEqual({
@@ -93,10 +93,10 @@ test("what wakes a loop, as you'd say it at a terminal", () => {
 
 test("a loop with something to wake it and no schedule runs only when woken; its webhook's secret is shown once, with how to sign", async () => {
   const { api, asked } = node([draft], "a".repeat(64));
-  const lines = await printed(() => loopCommand(api, "add", ["deploys"], { wake: ["webhook"], quest: "Read what the deploy said and tell me if it failed", cooldown: "15m" }));
+  const lines = await printed(() => loopCommand(api, "add", ["deploys"], { wake: ["webhook"], run: "Read what the deploy said and tell me if it failed", cooldown: "15m" }));
   expect(asked.at(-1)).toEqual({
     name: "setLoop",
-    input: { name: "deploys", schedule: "never", task: { kind: "quest", goal: "Read what the deploy said and tell me if it failed", network: "isolated" }, wakes: [{ kind: "webhook" }], cooldownMs: 15 * 60_000 },
+    input: { name: "deploys", schedule: "never", task: { kind: "run", goal: "Read what the deploy said and tell me if it failed", network: "isolated" }, wakes: [{ kind: "webhook" }], cooldownMs: 15 * 60_000 },
   });
   const out = lines.join("\n");
   expect(out).toContain("deploys: only when woken on keep");
@@ -133,7 +133,7 @@ test("a loop that tells you: --tell, and your words with --say", async () => {
   expect(asked.at(-1)!.input).toMatchObject({ name: "boss-mail", schedule: "never", task: { kind: "tell", text: "Your boss wrote" }, wakes: [{ kind: "mail", connector: "gmail", query: "from:boss@example.com" }] });
   await printed(() => loopCommand(api, "add", ["plants"], { cron: "0 9 * * 1", tell: true }));
   expect(asked.at(-1)!.input).toMatchObject({ name: "plants", schedule: "0 9 * * 1", task: { kind: "tell" } });
-  await expect(loopCommand(api, "add", ["both"], { every: "1h", tell: true, heartbeat: true })).rejects.toThrow(/give one of --heartbeat, --quest, --call or --tell/);
+  await expect(loopCommand(api, "add", ["both"], { every: "1h", tell: true, heartbeat: true })).rejects.toThrow(/give one of --heartbeat, --run, --call or --tell/);
 });
 
 test("a reminder once: --at a time in your zone (this terminal's unless --tz), or --in a while from now", async () => {

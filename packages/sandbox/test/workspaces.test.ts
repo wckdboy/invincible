@@ -193,15 +193,15 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
     try {
       expect(ask(`mount ${id}`)).toBe("error existing workspace is missing");
       expect(existsSync(join(root, `${id}.img`))).toBe(false);
-      writeFileSync(join(root, `${id}.img`), "existing teammate work");
+      writeFileSync(join(root, `${id}.img`), "existing agent work");
       mkdirSync(join(root, id));
       expect(ask(`mount ${id}`)).toBe("ok");
       expect(readFileSync(trace, "utf8")).toBe(`-o loop,nodev,nosuid,discard ${root}/${id}.img ${root}/${id}\n`);
-      expect(readFileSync(join(root, `${id}.img`), "utf8")).toBe("existing teammate work");
+      expect(readFileSync(join(root, `${id}.img`), "utf8")).toBe("existing agent work");
       expect(ask(`retain ${id}`)).toBe("ok");
       expect(existsSync(join(root, `${id}.keep`))).toBe(true);
       expect(ask(`remove ${id}`)).toBe("error retained workspace needs owner-approved removal");
-      expect(readFileSync(join(root, `${id}.img`), "utf8")).toBe("existing teammate work");
+      expect(readFileSync(join(root, `${id}.img`), "utf8")).toBe("existing agent work");
       expect(existsSync(join(root, id))).toBe(true);
       expect(ask(`remove-owned ${id}`)).toBe("ok");
       expect([id, `${id}.img`, `${id}.keep`].some((name) => existsSync(join(root, name)))).toBe(false);
@@ -248,7 +248,7 @@ describe.skipIf(!unixSockets)("the installed helper's retention rules", () => {
     const img = join(root, `${id}.img`);
     try {
       expect(ask(`grow ${id} 3`, { mounted: true }).said).toBe("error existing workspace is missing");
-      writeFileSync(img, "teammate work");
+      writeFileSync(img, "agent work");
       mkdirSync(join(root, id));
       // Mounted: the image, its loop device, then the filesystem, while the sandbox runs.
       expect(ask(`grow ${id} 3`, { mounted: true })).toEqual({ said: "ok", calls: [`truncate -s 3G ${img}`, "losetup -c /dev/loop7", "resize2fs /dev/loop7"] });

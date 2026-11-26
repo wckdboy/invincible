@@ -1,4 +1,4 @@
-import { archiveId, type ConversationSummary, isTrialQuest, Preregistration, type StoredMessage, type StoredStep, TRIAL_ARCHIVE_KIND, type TrialRecord, type Trust } from "@invincible/core";
+import { archiveId, type ConversationSummary, isEvalRun, Preregistration, type StoredMessage, type StoredStep, EVAL_ARCHIVE_KIND, type EvalRecord, type Trust } from "@invincible/core";
 import type { LedgerStore } from "@invincible/ledger";
 import type { ArtifactStore } from "../artifacts.ts";
 import { asText, extOf, mightBeModel, modelFacts, transcript } from "./chunk.ts";
@@ -56,11 +56,11 @@ function after<T>(items: { key: string; item: T }[], cursor: string | null, limi
   return { batch: sorted.slice(0, limit), more: sorted.length > limit };
 }
 
-// ---- Teachings: memories, investigations, trials --------------------------------------
+// ---- Teachings: memories, investigations, evals --------------------------------------
 
 /**
- * Memories, through recall: everything Galahad was told to remember and remembered on
- * his own, with its trust (your own words are `owner`). Newest first from the mind, so
+ * Memories, through recall: everything the primary was told to remember and remembered on
+ * its own, with its trust (your own words are `owner`). Newest first from the mind, so
  * the adapter reads back until it reaches its cursor; a daily sweep finds a memory that
  * synced in late with an older clock.
  */
@@ -157,27 +157,27 @@ export function investigationsAdapter(mind: Pick<LedgerStore, "lwwPrefix" | "lww
 }
 
 /**
- * Trials: graded by a program against the exact answer, so the record itself is Galahad's (agent). Kept as kind
- * `trial`, which is never offered to a model as context: a record holds the answers of its seed and the names of
+ * Evals: graded by a program against the exact answer, so the record itself is the primary's (agent). Kept as kind
+ * `eval`, which is never offered to a model as context: a record holds the answers of its seed and the names of
  * its hidden checks.
  */
-export function trialsAdapter(mind: Pick<LedgerStore, "lwwPrefix">): ArchiveAdapter {
+export function evalsAdapter(mind: Pick<LedgerStore, "lwwPrefix">): ArchiveAdapter {
   return {
-    name: "trials",
+    name: "evals",
     sweepEveryMs: DAY,
     async pull(cursor, limit) {
-      const trials = mind.lwwPrefix<TrialRecord & { id: string }>("trial:").flatMap((e) => (e.value ? [{ key: `${e.hlc}:${e.value.id}`, item: { t: e.value, at: hlcMs(e.hlc) } }] : []));
-      const { batch, more } = after(trials, cursor, limit);
+      const evals = mind.lwwPrefix<EvalRecord & { id: string }>("eval:").flatMap((e) => (e.value ? [{ key: `${e.hlc}:${e.value.id}`, item: { t: e.value, at: hlcMs(e.hlc) } }] : []));
+      const { batch, more } = after(evals, cursor, limit);
       return {
         entries: batch.map(({ item: { t, at } }) => ({
-          kind: TRIAL_ARCHIVE_KIND,
-          source: "trials",
+          kind: EVAL_ARCHIVE_KIND,
+          source: "evals",
           sourceId: t.id,
-          title: `Trial: ${t.title} (${Math.round(t.score * 100)} %)`,
+          title: `Eval: ${t.title} (${Math.round(t.score * 100)} %)`,
           description: [
             `${t.title} (${t.suite}/${t.problem}, ${t.domain}), seed ${t.seed}: ${t.status}, score ${t.score.toFixed(2)}.`,
             t.answers.map((a) => `- ${a.key}: got ${a.got ?? "nothing"} ${a.units}, exact ${a.expected} ± ${a.tolerance} → ${a.ok ? "within tolerance" : "off"}`).join("\n"),
-            t.quest ? `Quest: ${t.quest.status} after ${t.quest.steps} steps and ${t.quest.revisions} revisions.` : null,
+            t.outcome ? `Outcome: ${t.outcome.status} after ${t.outcome.steps} steps and ${t.outcome.revisions} revisions.` : null,
             t.models.length ? `Models: ${t.models.join(", ")}.` : null,
             t.note ? `Note: ${t.note}` : null,
           ]
@@ -185,8 +185,8 @@ export function trialsAdapter(mind: Pick<LedgerStore, "lwwPrefix">): ArchiveAdap
             .join("\n"),
           trust: "agent" as const,
           createdAt: at,
-          tags: ["trial", t.domain, t.problem],
-          meta: { trial: t.id, run: t.run, score: t.score, version: t.version, ...(t.artifact ? { artifact: t.artifact } : {}) },
+          tags: ["eval", t.domain, t.problem],
+          meta: { evalCase: t.id, run: t.run, score: t.score, version: t.version, ...(t.artifact ? { artifact: t.artifact } : {}) },
           links: t.artifact ? [{ rel: "evidence", to: archiveId("artifacts", t.artifact) }] : [],
         })),
         cursor: batch.at(-1)?.key ?? cursor,
@@ -204,15 +204,15 @@ const FACTS_BYTES = 64 * 2 ** 20;
 /**
  * Kept work: every artifact this node holds is copied in (its files streamed, by
  * SHA-256), and each model file in it (CAD, meshes, robots, notebooks, scripts that
- * build models) becomes a `model` entry of its own, part of the artifact. Galahad's own
- * quests and investigations are `agent`; an outside agent's sandbox work is `untrusted`.
+ * build models) becomes a `model` entry of its own, part of the artifact. The primary's own
+ * runs and investigations are `agent`; an outside agent's sandbox work is `untrusted`.
  */
 export function artifactsAdapter(artifacts: Pick<ArtifactStore, "list" | "filesOf" | "locate" | "read">, kept: (artifact: { id: string; label: string; sandbox?: string | null }) => boolean = () => true): ArchiveAdapter {
   return {
     name: "artifacts",
     sweepEveryMs: DAY,
     async pull(cursor, limit) {
-      // (`kept`: what the archive may hold. A knight's work in sensitive mode it never does: daemon.ts.)
+      // (`kept`: what the archive may hold. An agent's work in sensitive mode it never does: daemon.ts.)
       const here = artifacts.list().filter((a) => a.here && kept(a));
       const { batch, more } = after(
         here.map((a) => ({ key: `${pad(a.savedAt)}:${a.id}`, item: a })),
@@ -222,9 +222,9 @@ export function artifactsAdapter(artifacts: Pick<ArtifactStore, "list" | "filesO
       const entries: IncomingEntry[] = [];
       for (const { item: a } of batch) {
         const files = artifacts.filesOf(a.id) ?? a.files;
-        const trust: Trust = /^(q-|inv-|t-)/.test(a.quest ?? "") ? "agent" : "untrusted";
-        // What a trial kept (its answers, its scripts, its report) is a trial's, whatever it is made of: never context for a model.
-        const ofTrial = isTrialQuest(a.quest);
+        const trust: Trust = /^(q-|inv-|t-)/.test(a.run ?? "") ? "agent" : "untrusted";
+        // What an eval kept (its answers, its scripts, its report) is an eval's, whatever it is made of: never context for a model.
+        const ofEval = isEvalRun(a.run);
         const id = archiveId("artifacts", a.id);
         const incoming: IncomingFile[] = [];
         for (const f of files) {
@@ -235,18 +235,18 @@ export function artifactsAdapter(artifacts: Pick<ArtifactStore, "list" | "filesO
           }
         }
         entries.push({
-          kind: ofTrial ? TRIAL_ARCHIVE_KIND : "artifact",
+          kind: ofEval ? EVAL_ARCHIVE_KIND : "artifact",
           source: "artifacts",
           sourceId: a.id,
           title: a.label,
           description: [
-            `Work kept from sandbox ${a.sandbox ?? "?"}${a.quest ? ` (quest ${a.quest})` : ""} on ${a.nodeName}: ${a.count} file(s), ${a.bytes} bytes.`,
+            `Work kept from sandbox ${a.sandbox ?? "?"}${a.run ? ` (run ${a.run})` : ""} on ${a.nodeName}: ${a.count} file(s), ${a.bytes} bytes.`,
             `Files:\n${files.slice(0, 200).map((f) => `- ${f.path} (${f.size} bytes)`).join("\n")}${files.length > 200 ? `\n… ${files.length - 200} more` : ""}`,
           ].join("\n\n"),
           trust,
           createdAt: a.savedAt,
-          tags: ["artifact", ...(a.quest ? [a.quest.replace(/[^\p{L}\p{N} ._:/-]/gu, "-")] : [])],
-          meta: { artifact: a.id, quest: a.quest, sandbox: a.sandbox, bytes: a.bytes, count: a.count },
+          tags: ["artifact", ...(a.run ? [a.run.replace(/[^\p{L}\p{N} ._:/-]/gu, "-")] : [])],
+          meta: { artifact: a.id, run: a.run, sandbox: a.sandbox, bytes: a.bytes, count: a.count },
           files: incoming,
         });
         for (const f of files) {
@@ -262,7 +262,7 @@ export function artifactsAdapter(artifacts: Pick<ArtifactStore, "list" | "filesO
           if (!facts) continue;
           const name = f.path.split("/").at(-1)!;
           entries.push({
-            kind: ofTrial ? TRIAL_ARCHIVE_KIND : "model",
+            kind: ofEval ? EVAL_ARCHIVE_KIND : "model",
             source: "artifacts",
             sourceId: `${a.id}/${f.path}`,
             title: `${name} (${facts.format})`,
@@ -326,7 +326,7 @@ export function chatsAdapter(chats: ChatSource, archive: ArchiveLookup, opts: { 
           sourceId: `${chat.id}:${end}`,
           title: previous ? `${chat.title} (continued)` : chat.title,
           description: transcript(fresh.map((m) => ({ role: m.role, content: m.content }))),
-          // Galahad's record of a conversation; strangers' words in it when his tools read the outside.
+          // The primary's record of a conversation; strangers' words in it when its tools read the outside.
           trust: outside ? "untrusted" : "agent",
           createdAt: fresh[0]!.createdAt,
           tags: ["chat", ...(chat.project ? [`project:${chat.project}`] : [])],
@@ -339,14 +339,14 @@ export function chatsAdapter(chats: ChatSource, archive: ArchiveLookup, opts: { 
   };
 }
 
-// ---- Skills: how he did a kind of work, as the mind keeps them ---------------------------
+// ---- Skills: how it did a kind of work, as the mind keeps them ---------------------------
 
 /**
- * His skills (skills.ts), a version at a time, once a version is his to use: trusted as written (yours, or
- * his own from an isolated quest that passed review), or untrusted and approved by you. A version that waits
+ * Its skills (skills.ts), a version at a time, once a version is its to use: trusted as written (yours, or
+ * its own from an isolated run that passed review), or untrusted and approved by you. A version that waits
  * for you isn't archived: the archive is searched by models. Each as its words in plain text, with who wrote
- * it and from which quest; a later version is an entry of its own. The archive's own context never offers
- * them (he is given skills through their own fence, by where each stands now); a search finds them as records.
+ * it and from which run; a later version is an entry of its own. The archive's own context never offers
+ * them (it is given skills through their own fence, by where each stands now); a search finds them as records.
  */
 export function skillsAdapter(mind: Pick<LedgerStore, "skills">): ArchiveAdapter {
   return {
@@ -356,7 +356,7 @@ export function skillsAdapter(mind: Pick<LedgerStore, "skills">): ArchiveAdapter
       const usable = mind.skills().flatMap((record) =>
         skillVersions(record).flatMap((v) => {
           if (!v.doc || !versionUsable(v)) return [];
-          // Ordered by when it became his to use: your approval, for an untrusted one.
+          // Ordered by when it became its to use: your approval, for an untrusted one.
           return [{ key: `${pad(v.approvedAt ?? v.at)}:${v.id}`, item: { record, v, doc: v.doc } }];
         }),
       );
@@ -369,11 +369,11 @@ export function skillsAdapter(mind: Pick<LedgerStore, "skills">): ArchiveAdapter
           title: doc.title,
           description: [
             skillInWords(doc),
-            `Written by ${skillAuthor(v.by)}${v.quest ? ` from quest ${v.quest}` : ""} (version ${v.n} of ${record.id})${v.trust === "untrusted" ? "; shaped by what was read from outside, and approved by you" : ""}.`,
+            `Written by ${skillAuthor(v.by)}${v.run ? ` from run ${v.run}` : ""} (version ${v.n} of ${record.id})${v.trust === "untrusted" ? "; shaped by what was read from outside, and approved by you" : ""}.`,
           ].join("\n\n"),
           trust: v.trust,
           createdAt: v.at,
-          tags: ["skill", ...(v.quest ? [v.quest] : [])],
+          tags: ["skill", ...(v.run ? [v.run] : [])],
           meta: { skill: record.id, version: v.n, by: v.by },
         })),
         cursor: batch.at(-1)?.key ?? cursor,

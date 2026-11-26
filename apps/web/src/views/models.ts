@@ -18,7 +18,7 @@ import { openAddKey } from "./vault.ts";
  */
 
 const NAME_RE = /^[A-Za-z0-9._:-]{1,128}$/;
-/** A role you make: a name a knight can carry (core's TeammateRole). */
+/** A role you make: a name an agent can carry (core's AgentRole). */
 const ROLE_NAME_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const REF_RE = /^[^/\s]+\/\S+$/;
 const ROLE_ICON: Record<string, IconName> = { planner: "compass", engineer: "code", reviewer: "review", swift: "zap" };
@@ -43,7 +43,7 @@ export const modelsView: View = (root, ctx, { scope }) => {
 
   /** A role in one row: who it is, the models it hires in order, and Change. */
   function roleRow(role: string, spec: RoleSpec): HTMLElement {
-    // His own models answer, in order; a coding plan's do coding (his quests, the knights' work) and nothing else.
+    // Its own models answer, in order; a coding plan's do coding (its runs, the agents' work) and nothing else.
     const { own, plans } = roleParts(spec.models, presets);
     const tools = plans.length ? h("span", { class: "subtle" }, `${own.length ? " · " : ""}coding: ${plans.join(", ")}`) : null;
     const chain = own.length
@@ -68,9 +68,9 @@ export const modelsView: View = (root, ctx, { scope }) => {
 
   /**
    * The role's models in order, in a sheet: move, remove, add, then Save. Without a role, a new one of yours: its name
-   * first. A role you made can be removed here (the node refuses while a knight works on it, and says which).
+   * first. A role you made can be removed here (the node refuses while an agent works on it, and says which).
    */
-  function openRole(existing?: string, spec: RoleSpec = { models: [], configured: false, description: "", custom: true, forKnights: true }): void {
+  function openRole(existing?: string, spec: RoleSpec = { models: [], configured: false, description: "", custom: true, forAgents: true }): void {
     let role = existing ?? "";
     let models = [...spec.models];
     const name = existing ? null : h("input", { class: "input mono", type: "text", placeholder: "frontend", maxlength: 40, autocomplete: "off", autocapitalize: "off", autocorrect: "off", spellcheck: "false", "aria-label": "The role's name" });
@@ -81,11 +81,11 @@ export const modelsView: View = (root, ctx, { scope }) => {
     const removeRole = existing && spec.custom ? button("Remove role", { variant: "danger", icon: "trash" }) : null;
 
     function render(focus?: string): void {
-      // (Which of them answer, and in what order: his own. A coding plan's do coding, in their own order.)
+      // (Which of them answer, and in what order: its own. A coding plan's do coding, in their own order.)
       const { own } = roleParts(models, presets);
       const part = (ref: string): string => {
         const at = own.indexOf(ref);
-        return at < 0 ? "a coding plan: it does coding (his quests, the knights' work) and answers nothing else" : at === 0 ? "answers first" : `fallback ${at}`;
+        return at < 0 ? "a coding plan: it does coding (its runs, the agents' work) and answers nothing else" : at === 0 ? "answers first" : `fallback ${at}`;
       };
       replace(
         list,
@@ -129,7 +129,7 @@ export const modelsView: View = (root, ctx, { scope }) => {
       void busy(save, async () => {
         if (name) {
           role = name.value.trim();
-          // A knight carries it by this name: lowercase letters, digits and hyphens, and not one the roster has.
+          // An agent carries it by this name: lowercase letters, digits and hyphens, and not one the roster has.
           if (!ROLE_NAME_RE.test(role)) return void toast("Name it in lowercase letters, digits and hyphens", { tone: "warn", description: "Starting with a letter, at most 40: frontend, cheap-coder." });
           if (roster[role]) return void toast(`There is a ${role} role already`, { tone: "warn", description: "Change its models from its own row." });
           if (!models.length) return void toast("Give it a model", { tone: "warn", description: "A role with no model can't answer." });
@@ -141,7 +141,7 @@ export const modelsView: View = (root, ctx, { scope }) => {
           roster = result.roster;
           sheet.close();
           renderRoster();
-          toast(existing ? `${role} updated on every node` : `${role} made: give it to a knight from its editor`, { tone: "ok" });
+          toast(existing ? `${role} updated on every node` : `${role} made: give it to an agent from its editor`, { tone: "ok" });
         } catch (error) {
           toast("Couldn't save the roster", { tone: "error", description: errorMessage(error) });
         }
@@ -149,7 +149,7 @@ export const modelsView: View = (root, ctx, { scope }) => {
     );
     removeRole?.addEventListener("click", () =>
       void busy(removeRole, async () => {
-        if (!(await confirmAction({ title: `Remove ${role}?`, body: [h("p", {}, "Its models stay where else you hired them. A knight that works on it must be given another role first.")], confirmLabel: "Remove" }))) return;
+        if (!(await confirmAction({ title: `Remove ${role}?`, body: [h("p", {}, "Its models stay where else you hired them. An agent that works on it must be given another role first.")], confirmLabel: "Remove" }))) return;
         try {
           roster = (await ctx.api.post<{ roster: Record<string, RoleSpec> }>("/api/roster", { role, models: [] })).roster;
           sheet.close();
@@ -165,7 +165,7 @@ export const modelsView: View = (root, ctx, { scope }) => {
       title: existing ? `Models for ${existing}` : "A role of yours",
       description: existing
         ? "The first answers; the rest are fallbacks, tried in order. provider/* means whatever that local runtime serves."
-        : "A name, and the models that answer for it in order. A knight you give it to does its work on them; its plan and the independent review stay the planner's and the reviewer's.",
+        : "A name, and the models that answer for it in order. An agent you give it to does its work on them; its plan and the independent review stay the planner's and the reviewer's.",
       body: [
         name ? field("Name", name, { hint: "Lowercase letters, digits and hyphens: frontend, cheap-coder." }) : null,
         list,

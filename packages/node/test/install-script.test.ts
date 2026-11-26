@@ -34,7 +34,7 @@ function plan(name: string, args: string[], before?: (home: string) => void) {
 }
 
 test("on a machine new to it, it says it would fetch this commit, install its own Bun in its own folder, add the command and found a fleet; and changes nothing", () => {
-  const { code, said, home } = plan("fresh", ["--name", "laptop", "--fleet", "camelot"]);
+  const { code, said, home } = plan("fresh", ["--name", "laptop", "--fleet", "homelab"]);
   expect(code).toBe(0);
   expect(said).toContain("--plan: nothing below is done");
   expect(said).toContain(`would: install the pinned Bun into ${home}/.local/share/invincible/bun`);
@@ -42,7 +42,7 @@ test("on a machine new to it, it says it would fetch this commit, install its ow
   expect(said).not.toContain(`${home}/.bun`);
   expect(said).toContain(`would: write ${home}/.local/bin/invincible`);
   expect(said).toContain(`would: link ${home}/.local/bin/inv to it`);
-  expect(said).toContain("would: invincible init --name laptop --fleet camelot");
+  expect(said).toContain("would: invincible init --name laptop --fleet homelab");
   expect(readdirSync(home)).toEqual([]);
 });
 

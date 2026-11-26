@@ -6,8 +6,8 @@ import type { Suite } from "../lib.ts";
 
 /*
  * What moves on the PWA's screens once they are there. apps/web/measure/first-load.ts --shifts opens every place (and
- * Galahad's, a knight's and a room's timeline) in a headless Chrome paired with a throwaway node that holds the same
- * stand-in fleet every time (knights, a room, tasks running, verified and given up, trials, a kept chat, a key he asked
+ * the primary's, an agent's and a room's timeline) in a headless Chrome paired with a throwaway node that holds the same
+ * stand-in fleet every time (agents, a room, tasks running, verified and given up, evals, a kept chat, a key it asked
  * for), as a returning visit opens it, on a laptop's screen and a phone's, and sums every layout shift from its first
  * frame until 3 s after it is usable: the place's cumulative layout shift. Nothing touches the page meanwhile.
  *

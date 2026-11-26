@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { newNodeIdentity, type Teammate, type TeamRoom, type TeamTask } from "@invincible/core";
+import { newNodeIdentity, type Agent, type TeamRoom, type TeamTask } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { teamRuntime, type TeamRuntimeDeps } from "../src/team-runtime.ts";
 import type { TeamRunContext } from "../src/team.ts";
@@ -7,7 +7,7 @@ import type { TeamRunContext } from "../src/team.ts";
 const stores: LedgerStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
 
-const member: Teammate = { id: "ada", name: "Ada", instructions: "Keep changes small.", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: "host", workspace: { node: "host", id: "0123456789" }, memory: "private working note", createdAt: 1, updatedAt: 1 };
+const member: Agent = { id: "ada", name: "Ada", instructions: "Keep changes small.", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: "host", workspace: { node: "host", id: "0123456789" }, memory: "private working note", createdAt: 1, updatedAt: 1 };
 const room: TeamRoom = { id: "forge", name: "Forge", members: ["ada"], direct: false, turnBudget: 4, paused: false, createdAt: 1, updatedAt: 1 };
 const task: TeamTask = { id: "task-abcdefghijkl", room: room.id, assignee: member.id, title: "Build", goal: "Build and verify the change.", dependsOn: [], gates: ["bun test required-check"], status: "running", verified: false, progress: "", output: "", error: null, chainId: "chain-test", createdAt: 1, updatedAt: 1 };
 const result = () => ({ stdout: "ok", stderr: "", exitCode: 0, durationMs: 1, truncated: false }) as const;
@@ -33,15 +33,15 @@ function fixture(script: object[], overrides: Partial<TeamRuntimeDeps> = {}) {
     exec: async (_m, _command) => result(),
     prepare: async () => {},
     tools: () => ({ specs: [], describe: () => ({ title: "unused", input: "" }), run: async () => { throw new Error("unexpected external tool"); } }),
-    models: () => [], memories: () => "Shared knowledge.", teammate: () => member,
+    models: () => [], memories: () => "Shared knowledge.", agent: () => member,
     dependencies: () => [], stopWorker: async () => {}, ...overrides,
   };
-  const context: TeamRunContext = { signal: new AbortController().signal, chainId: task.chainId, send: () => { throw new Error("unexpected send"); }, remember: () => { throw new Error("unexpected local note"); }, delegate: () => { throw new Error("unexpected task"); }, recruit: () => { throw new Error("unexpected knight"); }, emit: () => {} };
+  const context: TeamRunContext = { signal: new AbortController().signal, chainId: task.chainId, send: () => { throw new Error("unexpected send"); }, remember: () => { throw new Error("unexpected local note"); }, delegate: () => { throw new Error("unexpected task"); }, recruit: () => { throw new Error("unexpected agent"); }, emit: () => {} };
   const setRoster = (role: string, models: string[]) => void store.emit(identity, "roster.set", { role, models });
   return { runtime: teamRuntime(deps), context, bodies, held: () => held, setRoster };
 }
 
-test("a knight's task whose engineer answered on the reviewer's first model is reviewed by the reviewer's next model", async () => {
+test("an agent's task whose engineer answered on the reviewer's first model is reviewed by the reviewer's next model", async () => {
   const f = fixture([say("1. Make the change."), say("```sh\necho built\n```"), say("DONE\nBuilt."), say("PASS\nFine.")]);
   f.setRoster("engineer", ["local/er"]);
   f.setRoster("reviewer", ["local/er", "local/rv"]);

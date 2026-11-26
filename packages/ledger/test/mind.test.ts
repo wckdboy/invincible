@@ -53,7 +53,7 @@ function twoNodeFleet(): Fleet {
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const storeA = new LedgerStore(":memory:");
-  foundFleet(storeA, a, { fleetName: "camelot", nodeName: "laptop" });
+  foundFleet(storeA, a, { fleetName: "homelab", nodeName: "laptop" });
   enrollDevice(storeA, a, { device: b.id, name: "server", kind: "node", box: b64u(b.boxPublic) });
   const storeB = joinedReplica(storeA);
   syncInto(storeA, storeB);
@@ -122,7 +122,7 @@ describe("one mind, many replicas", () => {
   test("rebuilding from the log reproduces the exact same state", () => {
     const { a, b, storeA, storeB } = twoNodeFleet();
     new Vault(storeA, a).set("orcarouter", "sk-orca-0123456789abcdef");
-    storeB.remember(b, "galahad is courteous");
+    storeB.remember(b, "primary is courteous");
     syncInto(storeB, storeA);
     const before = storeA.digest();
     storeA.rebuild();

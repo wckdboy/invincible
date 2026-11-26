@@ -16,7 +16,7 @@ import {
 import type { LedgerStore } from "@invincible/ledger";
 
 /*
- * Loops: work Galahad does on a schedule, or when something happens. A loop lives
+ * Loops: work the primary does on a schedule, or when something happens. A loop lives
  * in the mind (so every device sees it and its history) and names exactly one node
  * that runs it, so it never runs twice. That node's runner wakes every few seconds,
  * finds loops that are due, and runs each one at most once per slot:
@@ -122,7 +122,7 @@ export function loopRecords(store: LedgerStore): LoopRecord[] {
   });
 }
 
-/** Whether every heartbeat loop lets him fix what's safe himself (on unless one says `selfAction: false`). */
+/** Whether every heartbeat loop lets it fix what's safe itself (on unless one says `selfAction: false`). */
 export function selfActionOn(store: LedgerStore): { on: boolean; heartbeats: string[] } {
   const beats = loopRecords(store).filter((l) => l.task?.kind === "heartbeat");
   return { on: beats.every((l) => l.task?.kind !== "heartbeat" || l.task.selfAction !== false), heartbeats: beats.map((l) => l.name) };

@@ -1,7 +1,7 @@
 import { svg } from "./dom.ts";
 
 /*
- * Galahad's icon set: drawn for this app on a 24px grid, 1.75px strokes with
+ * Invincible's icon set: drawn for this app on a 24px grid, 1.75px strokes with
  * round caps and joins, built with createElementNS from constant path data.
  * A path prefixed with "!" is filled instead of stroked.
  */
@@ -14,7 +14,7 @@ const ICONS = {
   // The mark until the new identity's (Phase 1): your agent as an orb seen from afar, a ring round a lit core.
   mark: [circle(12, 12, 7.25), `!${circle(12, 12, 2.75)}`],
   // The agents: three of them, apart.
-  roundtable: [circle(12, 6.75, 2.75), circle(6, 17, 2.75), circle(18, 17, 2.75)],
+  agents: [circle(12, 6.75, 2.75), circle(6, 17, 2.75), circle(18, 17, 2.75)],
   overview: [rect(3.5, 3.5, 7, 7, 1.75), rect(13.5, 3.5, 7, 7, 1.75), rect(3.5, 13.5, 7, 7, 1.75), circle(17, 17, 3.5)],
   inbox: ["M3.5 13.5h4.25l1.5 2.5h5.5l1.5-2.5h4.25", "M6.6 5h10.8a1.5 1.5 0 0 1 1.45 1.1L20.5 13v5a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18v-5l1.65-6.9A1.5 1.5 0 0 1 6.6 5z"],
   chat: ["M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9.5A1.5 1.5 0 0 1 19 17h-7.5l-4.25 3.25V17H5a1.5 1.5 0 0 1-1.5-1.5V6A1.5 1.5 0 0 1 5 4.5z"],
@@ -78,7 +78,7 @@ const ICONS = {
   code: ["M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5", "M13.5 5l-3 14"],
   review: [circle(10.75, 10.75, 6.25), "M15.5 15.5 20 20", "M8.25 10.75l1.75 1.75 3.25-3.25"],
   sidebar: [rect(3.25, 4.5, 17.5, 15, 2.25), "M9.5 4.5v15"],
-  // The sidebar's mirror: a panel at the right (a knight's, beside its timeline).
+  // The sidebar's mirror: a panel at the right (an agent's, beside its timeline).
   panel: [rect(3.25, 4.5, 17.5, 15, 2.25), "M14.5 4.5v15"],
   hash: ["M9.5 4 7.5 20M16.5 4l-2 16M4.5 9h15.5M4 15h15.5"],
   cpu: [rect(6.5, 6.5, 11, 11, 2), "M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3"],
@@ -92,7 +92,7 @@ const ICONS = {
   "play-circle": [circle(12, 12, 8.75), "M10 8.75v6.5l5.25-3.25z"],
   /** Loops: work on a schedule, round and round. */
   repeat: ["M16.5 3.5l3 3-3 3", "M4.5 11.25V10a3.5 3.5 0 0 1 3.5-3.5h11.5", "M7.5 20.5l-3-3 3-3", "M19.5 12.75V14a3.5 3.5 0 0 1-3.5 3.5H4.5"],
-  /** Connectors: how Galahad plugs into the services you use. */
+  /** Connectors: how the primary plugs into the services you use. */
   plug: ["M9.25 3.5v4M14.75 3.5v4", "M6.5 7.5h11v3.75a5.5 5.5 0 0 1-5.5 5.5 5.5 5.5 0 0 1-5.5-5.5z", "M12 16.75v3.75"],
   /** Artifacts: a sandbox's work, kept in a box after it's gone. */
   archive: [rect(3.5, 4.5, 17, 4.5, 1.25), "M5 9v9a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18V9", "M10 12.75h4"],

@@ -83,7 +83,7 @@ export function parseCommand(line: string): ParsedCommand {
 export interface KeyPreset {
   id: string;
   keyPrefixes?: string[];
-  /** A coding plan, when the preset is one (the node says so), and what its vendor's terms let Galahad do with it. */
+  /** A coding plan, when the preset is one (the node says so), and what its vendor's terms let the primary do with it. */
   plan?: { name: string; says: string; terms: string; models: string[]; allows: { native: boolean; tools: "unattended" | "interactive" } };
 }
 
@@ -102,12 +102,12 @@ export function detectSignIn(key: string, signIns: readonly SignInForm[] | undef
 export function planLine(preset: KeyPreset | undefined): string | null {
   const plan = preset?.plan;
   if (!plan) return null;
-  if (plan.allows.native) return `${plan.name} is a coding plan: Galahad and the other knights code on it, and their coding tools use it. His talk with you never does.`;
-  if (plan.allows.tools === "unattended") return `${plan.name} is a coding plan its terms allow only inside the coding tools they name: a knight's coding tool runs on it, and so does one you run yourself (invincible run). Galahad never calls it himself.`;
-  return `${plan.name} is a coding plan for interactive use only, by its terms: it is lent to a coding tool you run yourself (invincible run), and never to Galahad or a knight's work.`;
+  if (plan.allows.native) return `${plan.name} is a coding plan: your agent and the other agents code on it, and their coding tools use it. Its talk with you never does.`;
+  if (plan.allows.tools === "unattended") return `${plan.name} is a coding plan its terms allow only inside the coding tools they name: an agent's coding tool runs on it, and so does one you run yourself (invincible run). Your agent never calls it itself.`;
+  return `${plan.name} is a coding plan for interactive use only, by its terms: it is lent to a coding tool you run yourself (invincible run), and never to your agent or an agent's work.`;
 }
 
-/** A role's models as he uses them: his own in the roster's order (the first answers), and the coding plans' models, which do coding and answer nothing else. */
+/** A role's models as it uses them: its own in the roster's order (the first answers), and the coding plans' models, which do coding and answer nothing else. */
 export function roleParts(models: readonly string[], presets: readonly KeyPreset[]): { own: string[]; plans: string[] } {
   const onPlan = (ref: string): boolean => presets.some((p) => p.plan && ref.startsWith(`${p.id}/`));
   return { own: models.filter((ref) => !onPlan(ref)), plans: models.filter(onPlan) };

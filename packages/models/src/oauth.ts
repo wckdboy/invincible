@@ -52,7 +52,7 @@ export interface OAuthKeep {
   /** An MCP server's access token when it gave no lasting sign-in, and when it lapses (ms since the epoch). */
   access?: string;
   expires?: number;
-  /** Its secret goes in the token request's header, as the server took it when Galahad registered (client_secret_basic). */
+  /** Its secret goes in the token request's header, as the server took it when the primary registered (client_secret_basic). */
   basic?: boolean;
 }
 
@@ -141,7 +141,7 @@ export async function accessToken(ctx: OAuthContext, manifest: ConnectorManifest
   const provider = auth.oauth.provider;
   // (An MCP server's sign-in is renewed only where it was pinned when you signed in, for that server alone.)
   if (provider === "mcp" && !keep.token) throw new OAuthError(`${manifest.label}'s sign-in has no address to be renewed at: sign in again from its card in Connectors`);
-  // (Its secret in the body, or, where the server took it so when Galahad registered, in the header: RFC 6749 2.3.1.)
+  // (Its secret in the body, or, where the server took it so when the primary registered, in the header: RFC 6749 2.3.1.)
   const basic = keep.secret && keep.basic ? { authorization: `Basic ${Buffer.from(`${encodeURIComponent(keep.client)}:${encodeURIComponent(keep.secret)}`).toString("base64")}` } : null;
   const answer = await tokenRequest(ctx, provider === "mcp" ? keep.token! : endpointsOf(provider, ctx.endpoints).token, {
     grant_type: "refresh_token",

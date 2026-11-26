@@ -1,4 +1,4 @@
-# The workshop where Invincible's knights work. Built on each sandbox host by
+# The workshop where Invincible's agents work. Built on each sandbox host by
 # `invincible sandbox build`. Runs unprivileged (uid 1000), read-only at runtime,
 # with all capabilities dropped; see packages/sandbox/src/spec.ts.
 FROM debian:trixie-slim
@@ -8,7 +8,7 @@ RUN apt-get update \
       ca-certificates curl git unzip jq ripgrep procps python3 python3-venv build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# Pinned toolchain, installed system-wide and readable by the knight.
+# Pinned toolchain, installed system-wide and readable by the agent.
 ENV BUN_INSTALL=/opt/bun
 ENV PATH=/opt/bun/bin:$PATH
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4" && chmod -R a+rX /opt/bun
@@ -18,7 +18,7 @@ RUN curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.4" && chmod -R a+rX /o
 ARG TARGETARCH
 # Node.js, its long-term-support release, for what a repository's own scripts and gates run with it (`npm test`,
 # `npx tsc`, `node build.js`): bun is no node. On 19 and 21 November 2026 real tasks' gates exited 127 for want of it
-# (a knight installed it in its VM itself; a trial of its task couldn't be graded). Pinned, and checked against the
+# (an agent installed it in its VM itself; an eval of its task couldn't be graded). Pinned, and checked against the
 # SHA-256 in that release's SHASUMS256.txt, whose signature by a Node release key was checked when it was pinned
 # (26.13.1, the 10 November security release). Global installs go to the workspace: the image is read-only.
 ARG NODE_VERSION=26.13.1
@@ -32,7 +32,7 @@ RUN case "${TARGETARCH:-amd64}" in amd64) asset=x64 sum="${NODE_SHA256}" ;; arm6
 ENV PATH=/opt/node/bin:$PATH
 ENV NPM_CONFIG_PREFIX=/work/.local
 
-# OpenCode, the coding agent for long quests (invincible do --agent opencode). Pinned, and
+# OpenCode, the coding agent for long runs (invincible do --harness opencode). Pinned, and
 # checked against its SHA-256 for the platform (each GitHub's own digest of the asset); it
 # reaches models only through Invincible's gateway.
 ARG OPENCODE_VERSION=2.2.6
@@ -45,9 +45,9 @@ RUN case "${TARGETARCH:-amd64}" in amd64) asset=x64 sum="${OPENCODE_SHA256}" ;; 
  && chmod 0755 /opt/opencode/bin/opencode && rm /tmp/opencode.tgz
 ENV PATH=/opt/opencode/bin:$PATH
 
-# Engram, the notes store a knight's harness may be given (invincible roundtable engram on). Pinned, and
+# Engram, the notes store an agent's harness may be given (invincible agents engram on). Pinned, and
 # checked against its SHA-256. A newer one migrates a store when it first opens it, so a bump says what
-# becomes of the stores there are. Its store is on the knight's own disk and its update check is off;
+# becomes of the stores there are. Its store is on the agent's own disk and its update check is off;
 # nothing here starts it (a harness does, for the length of a run: packages/models/src/engram.ts).
 ARG ENGRAM_VERSION=3.7.2
 ARG ENGRAM_SHA256=8db9d5db1c1574b8b830aac4ffbe86c024014aed6b9a3f0406ac3361a152cdf0
@@ -61,7 +61,7 @@ ENV PATH=/opt/engram/bin:$PATH
 ENV ENGRAM_DATA_DIR=/work/.memory/engram
 ENV ENGRAM_NO_UPDATE_CHECK=1
 
-# A login shell sets PATH afresh (/etc/profile), and a knight's commands run in one: this puts the tools
+# A login shell sets PATH afresh (/etc/profile), and an agent's commands run in one: this puts the tools
 # above back on it (tools-path.sh says why; a directory added to the PATH here is added there too).
 COPY tools-path.sh /etc/profile.d/invincible-tools.sh
 RUN chmod 0644 /etc/profile.d/invincible-tools.sh
@@ -70,7 +70,7 @@ RUN chmod 0644 /etc/profile.d/invincible-tools.sh
 COPY websearch /usr/local/bin/websearch
 RUN chmod 0755 /usr/local/bin/websearch
 
-RUN useradd --uid 1000 --create-home --home-dir /home/knight --shell /bin/bash knight \
+RUN useradd --uid 1000 --create-home --home-dir /home/agent --shell /bin/bash agent \
  && mkdir -p /work && chown 1000:1000 /work
 
 USER 1000:1000

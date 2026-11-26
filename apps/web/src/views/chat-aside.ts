@@ -10,19 +10,19 @@ import { toast } from "../ui/toast.ts";
 /*
  * A side question: something you ask about the work in hand without changing its
  * course. It's answered in this sheet, apart from the chat, from what the chat holds
- * and what he's said and done so far in this turn, without his tools. The working
+ * and what it's said and done so far in this turn, without its tools. The working
  * turn never sees it, and it joins nothing, unless you choose Bring back.
  */
 
 export function openAside(api: Api, about: { conversation: string } | { turn: string }, opts: { question?: string; working: boolean; onBroughtBack(): void }): void {
-  const input = h("textarea", { class: "textarea", rows: 2, maxlength: 4000, placeholder: opts.working ? "e.g. What is he waiting on?" : "e.g. Which file was that in?", "aria-label": "Your side question" }) as HTMLTextAreaElement;
+  const input = h("textarea", { class: "textarea", rows: 2, maxlength: 4000, placeholder: opts.working ? "e.g. What is it waiting on?" : "e.g. Which file was that in?", "aria-label": "Your side question" }) as HTMLTextAreaElement;
   input.value = opts.question ?? "";
   const answerBox = h("div", { class: "aside-answer", "aria-live": "polite" });
   const note = h("div", { role: "alert" });
   const ask = button("Ask", { variant: "primary", onClick: () => void run() });
   const bring = button("Bring back", {
     icon: "arrow-up",
-    title: opts.working ? "Hand the question and its answer to him: it reaches him at his next safe point" : "Add the question and its answer to the chat",
+    title: opts.working ? "Hand the question and its answer to it: it reaches it at its next safe point" : "Add the question and its answer to the chat",
     onClick: () => void bringBack(),
   });
   bring.hidden = true;
@@ -32,7 +32,7 @@ export function openAside(api: Api, about: { conversation: string } | { turn: st
   const sheet = openSheet({
     title: "Ask on the side",
     description: opts.working
-      ? "Answered apart, from this chat and what he's said and done so far in this turn. It doesn't change what he's doing, and he never sees it unless you bring it back."
+      ? "Answered apart, from this chat and what it's said and done so far in this turn. It doesn't change what it's doing, and it never sees it unless you bring it back."
       : "Answered apart, from what this chat holds. It isn't added to the chat unless you bring it back.",
     body: [input, note, answerBox],
     footer: [button("Close", { variant: "ghost", onClick: () => sheet.close() }), bring, ask],
@@ -76,7 +76,7 @@ export function openAside(api: Api, about: { conversation: string } | { turn: st
     }
     if (failed) {
       aside = null;
-      return replace(note, callout("danger", failed, { title: "He couldn't answer on the side" }));
+      return replace(note, callout("danger", failed, { title: "It couldn't answer on the side" }));
     }
     draw(false);
     replace(ask, "Ask again");
@@ -89,7 +89,7 @@ export function openAside(api: Api, about: { conversation: string } | { turn: st
     try {
       const { how } = await api.post<{ how: "steered" | "kept" }>("/api/turns/aside/bring", { aside });
       sheet.close();
-      toast(how === "steered" ? "Brought back: it reaches him at his next safe point" : "Brought back: it's in the chat now");
+      toast(how === "steered" ? "Brought back: it reaches it at its next safe point" : "Brought back: it's in the chat now");
       opts.onBroughtBack();
     } catch (error) {
       bring.disabled = false;

@@ -1,7 +1,7 @@
 import type { OrbLevel } from "./orb.ts";
 
 /*
- * How Galahad's orb and a knight's seat move (your word, 24 November 2026: "cool orbs/particles, pulsing/moving when
+ * How the primary's orb and an agent's seat move (your word, 24 November 2026: "cool orbs/particles, pulsing/moving when
  * doing a task, sitting idle, waiting, done"), as data and one pure function of time. The Apple app and the Android app
  * draw a frame from it, held to it by the vectors (apps/apple/scripts/vectors.ts). Since 26 November 2026 the PWA draws
  * fields (lib/field-orb.ts, whose moods are these moods) and takes from here only the moods of a state and of an
@@ -20,7 +20,7 @@ import type { OrbLevel } from "./orb.ts";
  * ring turns a few degrees a second, and a mood arrives over more than a second. This replaces the stillness asked for
  * on 18 November 2026, on your later word. Nothing moves when the device asks for
  * reduced motion: the still orb (lib/orb.ts) is drawn then, which is this function's frame with nothing under way.
- * Nothing here comes from a name's meaning, a profile or a model; a knight's handle only seeds where its motes start.
+ * Nothing here comes from a name's meaning, a profile or a model; an agent's handle only seeds where its motes start.
  */
 
 export type OrbMood = "idle" | "working" | "waiting" | "queued" | "paused" | "done" | "failed";
@@ -34,7 +34,7 @@ export interface OrbMotion {
   /** Degrees a second the display's rings turn (negative: the other way). Three rings turn: the outer ring with its
    * notches, the ticks with their marks, and the segments. */
   turn: { ring: number; ticks: number; segments: number };
-  /** A light running round the inner ring (on a knight's seat, round its own ring): degrees a second, and the length of
+  /** A light running round the inner ring (on an agent's seat, round its own ring): degrees a second, and the length of
    * its tail in degrees. */
   comet: { speed: number; tail: number } | null;
   /** Seconds between two waves sent out from its edge. */
@@ -45,8 +45,8 @@ export interface OrbMotion {
    * - sway: how far each strays across its band, as a share of the band.
    * - flow: round (orbit), streaming in from outside (inward), or running down its sides (fall). */
   motes: { count: number; speed: number; sway: number; flow: "orbit" | "inward" | "fall" };
-  /** How strongly a knight's ring glows round it in this mood, 0 to 1 (the glow breathes with it). Galahad's own glow
-   * is his orb's halo. */
+  /** How strongly an agent's ring glows round it in this mood, 0 to 1 (the glow breathes with it). The primary's own glow
+   * is its orb's halo. */
   aura: number;
 }
 
@@ -68,15 +68,15 @@ export const ORB_BURST = 2.6;
 export const ORB_BURST_MOTES = 12;
 
 /**
- * Where a knight stands at the Roundtable (lib/knight-state.ts' state), as its seat moves. Work is working. Needing you
+ * Where an agent stands among the agents (lib/agent-state.ts' state), as its seat moves. Work is working. Needing you
  * is waiting. Verified and new are done. Failed, paused and queued are their own moods. At rest is idle.
  */
 const STATE_MOODS: Readonly<Record<string, OrbMood>> = { working: "working", needs: "waiting", failed: "failed", paused: "paused", queued: "queued", verified: "done", unread: "done" };
 export const orbMoodOfState = (state: string | undefined): OrbMood => (state && Object.hasOwn(STATE_MOODS, state) ? STATE_MOODS[state]! : "idle");
 
 /**
- * What a knight is doing where only that is known (core's avatarExpression), as its orb's mood: thinking, at work,
- * reading, browsing and checking are work; waiting is queued; asking your leave waits on you; pleased is done;
+ * What an agent is doing where only that is known (core's avatarExpression), as its orb's mood: thinking, at work,
+ * reading, browsing and checking are work; waiting is queued; asking for your approval waits on you; pleased is done;
  * concerned is failed; resting is paused; idle is idle.
  */
 const EXPRESSION_MOODS: Readonly<Record<string, OrbMood>> = {
@@ -109,7 +109,7 @@ export interface OrbMote {
  *   its mood's, so a ring speeds up and slows down rather than jumping to its new pace.
  * - tail: its light's tail, in degrees, kept while the light fades after a mood without one.
  * - breath: how far through a breath it is, 0 to 1.
- * - swell, light, aura: its swell, how bright its light is (0 to 1), and how strongly a knight's ring glows, each easing
+ * - swell, light, aura: its swell, how bright its light is (0 to 1), and how strongly an agent's ring glows, each easing
  *   to its mood's. */
 export interface OrbClock {
   ring: number;
@@ -173,7 +173,7 @@ export function orbStep(clock: OrbClock, mood: OrbMood, dt: number): OrbClock {
 /** A moment of an orb:
  * - scale: the sphere's size about its middle.
  * - glow: its glow, as a share of the still one's.
- * - aura: how strongly a knight's ring glows round it now, 0 to 1: its mood's, breathing with its glow.
+ * - aura: how strongly an agent's ring glows round it now, 0 to 1: its mood's, breathing with its glow.
  * - ring, ticks, segments: degrees each turning ring is turned.
  * - comet: its light's head and tail in degrees, and how bright it is; none once it has faded.
  * - ripples: how far each wave under way has gone, from 0 at its edge to 1 at its reach, the newest first.
@@ -198,7 +198,7 @@ export interface OrbFrame {
 export const ORB_STILL: OrbFrame = { scale: 1, glow: 1, aura: 0, ring: 0, ticks: 0, segments: 0, comet: null, ripples: [], motes: [], leaving: [], sparks: [] };
 
 export interface OrbFrameOptions {
-  /** Whose orb: where its motes start and how fast each goes (orbSeed of a knight's handle; Galahad's own is 0). */
+  /** Whose orb: where its motes start and how fast each goes (orbSeed of an agent's handle; the primary's own is 0). */
   seed?: number;
   /** Seconds since it arrived at this mood. Left out (or null): long ago, settled. */
   since?: number | null;
@@ -294,8 +294,8 @@ function moodMotes(mood: OrbMood, seed: number, t: number, share: number): OrbMo
   return motes;
 }
 
-/** Where a frame's moving parts are drawn, at each size of orb and round a knight's face. Units are those of the orb's
- * square, which is 200 wide and centred on its middle; on a knight's seat, 100 is its ring's outer edge.
+/** Where a frame's moving parts are drawn, at each size of orb and round an agent's face. Units are those of the orb's
+ * square, which is 200 wide and centred on its middle; on an agent's seat, 100 is its ring's outer edge.
  * - reach: how far from the middle anything is drawn. Past 100 it draws outside its square, and nothing round it moves
  *   for that.
  * - band: where its motes go, from and to.
@@ -303,7 +303,7 @@ function moodMotes(mood: OrbMood, seed: number, t: number, share: number): OrbMo
  * - share: how many of a mood's motes it shows.
  * - waves: where its waves set out and how far they reach.
  * - wave: how wide a wave's line is as it sets out (it thins as it goes).
- * - comet: the ring its light runs round, and how wide; none on a knight's seat, whose light runs round its own ring. */
+ * - comet: the ring its light runs round, and how wide; none on an agent's seat, whose light runs round its own ring. */
 export interface OrbStage {
   reach: number;
   band: readonly [from: number, to: number];
@@ -342,8 +342,8 @@ export const ORB_MOVES = {
 
 /**
  * How many frames a second an orb is drawn at: as few as look smooth, since every frame costs a phone its battery and a
- * page its other animations' work (a knight's eyes are redrawn with every frame the page draws). At work, or arriving
- * at a mood (a burst, a fade), the light runs fast: 30. A slow breath and drifting motes look the same at 15. His
+ * page its other animations' work (an agent's eyes are redrawn with every frame the page draws). At work, or arriving
+ * at a mood (a burst, a fade), the light runs fast: 30. A slow breath and drifting motes look the same at 15. Its
  * welcome's orb, the largest, at twice these.
  */
 export function orbFps(mood: OrbMood, level: OrbLevel | "ring", since: number | null): number {

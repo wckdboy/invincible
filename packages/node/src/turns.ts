@@ -26,13 +26,13 @@ import { TOOLS } from "./tools.ts";
  * the only thing that stops it: when the owner says so, when it runs into the node's
  * limit for one turn, or when the node itself stops. A dropped connection stops nothing.
  *
- * It also owns what the owner says while he works: a steer is offered to the running
+ * It also owns what the owner says while it works: a steer is offered to the running
  * turn (chat() takes it at a safe point), a queued message waits in the chat store and
  * becomes the next turn when the one before it ends well. A turn that was stopped or
  * failed, and a node that restarted, hold the queue until the owner resumes it:
- * nothing of the owner's goes on unattended that the owner didn't leave running. His
- * own looks (looks.ts) are his, on the owner's word of 24 November 2026: each comes
- * back as a turn of his once, its message kept as his.
+ * nothing of the owner's goes on unattended that the owner didn't leave running. Its
+ * own looks (looks.ts) are its, on the owner's word of 24 November 2026: each comes
+ * back as a turn of its once, its message kept as its.
  *
  * Bounded: so many turns at once, so long each, so many messages queued; each queued
  * message is sent once, and nothing is ever tried again by itself.
@@ -96,14 +96,14 @@ export class TurnError extends Error {
 /** A turn, prepared: who asked, what it may come to hold, and how to run it. */
 export interface TurnSpec {
   by: QueuedBy;
-  /** Its asker may command the team, so it has the tools to the knights: only a device that may command the team steers it. */
+  /** Its asker may command the team, so it has the tools to the agents: only a device that may command the team steers it. */
   team?: boolean;
   role: string;
   /** The kept chat it belongs to (null: a temporary chat, kept nowhere). */
   conversation: { id: string; title: string; project: string | null } | null;
-  /** The owner's message that starts it (or, for a look of his coming back, his note as the model is given it). */
+  /** The owner's message that starts it (or, for a look of its coming back, its note as the model is given it). */
   question: string;
-  /** A look of his coming back (looks.ts): when he set it, and his note. Its message is kept as his, not the owner's. */
+  /** A look of its coming back (looks.ts): when it set it, and its note. Its message is kept as its, not the owner's. */
   look?: { set: number; note: string };
   /** The files it carries, kept on the node (uploads.ts). */
   attachments?: AttachmentRef[];
@@ -153,7 +153,7 @@ export interface LiveTurn {
 interface Live extends LiveTurn {
   controller: AbortController;
   steering: Steering;
-  /** Who offered each message that's been handed to `steering`, in order (what never reaches him goes back as theirs). */
+  /** Who offered each message that's been handed to `steering`, in order (what never reaches it goes back as theirs). */
   offered: { text: string; by: QueuedBy }[];
   steers: number;
   /** Everything that happened, for whoever attaches (text runs joined). */
@@ -182,9 +182,9 @@ const plural = (n: number, one: string, many: string): string => `${n} ${n === 1
 export interface TurnSoFar {
   /** Answers cut by a steer, and the steers, in order. */
   exchange: ChatMessage[];
-  /** What he's said since the last of them. */
+  /** What it's said since the last of them. */
   said: string;
-  /** Each step he's taken since, in a line: the tool, what it was asked, how it went. */
+  /** Each step it's taken since, in a line: the tool, what it was asked, how it went. */
   steps: string[];
 }
 
@@ -199,7 +199,7 @@ export function asideMessages(held: readonly ChatMessage[], working: TurnSoFar |
   const steps = working?.steps.length ? `\n\nWhat you have done so far in this turn:\n${working.steps.map((s) => `- ${s}`).join("\n")}` : "";
   messages.push({
     role: "user",
-    content: `An aside from your liege${working ? ", while the work above goes on" : ", about the conversation above"}. Answer it briefly and directly from what is here. It is a question, not an instruction to change course, and you have no tools for it: say so if answering would need one.${steps}\n\nThe aside: ${question}`,
+    content: `An aside from the owner${working ? ", while the work above goes on" : ", about the conversation above"}. Answer it briefly and directly from what is here. It is a question, not an instruction to change course, and you have no tools for it: say so if answering would need one.${steps}\n\nThe aside: ${question}`,
   });
   // Every provider wants the two voices in turn: neighbours of one voice are joined.
   const turned: ChatMessage[] = [];
@@ -281,7 +281,7 @@ export class TurnHub {
   admit(conversation: string | null): void {
     if (this.closed) throw new TurnError(503, "This node is stopping: it takes no new turns.");
     if (conversation && this.runningIn(conversation)) {
-      throw new TurnError(409, "He's still working in this chat. Steer him (your message reaches him now), queue it (it's sent when he finishes), or stop him first.");
+      throw new TurnError(409, "It's still working in this chat. Steer it (your message reaches it now), queue it (it's sent when it finishes), or stop it first.");
     }
     const running = this.running().length;
     if (running >= this.limit.maxTurns) {
@@ -361,7 +361,7 @@ export class TurnHub {
 
   /**
    * What a turn has said and done since its question, for a side question about it: the exchange so far
-   * (an answer cut by a steer, the steer), then what he's said and each step he's taken since.
+   * (an answer cut by a steer, the steer), then what it's said and each step it's taken since.
    */
   sofar(live: LiveTurn): TurnSoFar {
     const exchange: ChatMessage[] = [];
@@ -389,12 +389,12 @@ export class TurnHub {
     return true;
   }
 
-  /** The owner's message for a running turn: it reaches him at the next safe point. */
+  /** The owner's message for a running turn: it reaches it at the next safe point. */
   steer(id: string, text: string, by: QueuedBy): void {
     const turn = this.turns.get(id);
-    if (!turn || turn.state !== "running" || turn.stop) throw new TurnError(409, "He has finished that turn. Send it as a new message.");
-    if (turn.steers >= this.limit.maxSteers) throw new TurnError(429, `This turn has already been steered ${turn.steers} times, its limit. Queue the message, or stop him and ask again.`);
-    if (!turn.steering.offer(text)) throw new TurnError(409, "He has finished that turn. Send it as a new message.");
+    if (!turn || turn.state !== "running" || turn.stop) throw new TurnError(409, "It has finished that turn. Send it as a new message.");
+    if (turn.steers >= this.limit.maxSteers) throw new TurnError(429, `This turn has already been steered ${turn.steers} times, its limit. Queue the message, or stop it and ask again.`);
+    if (!turn.steering.offer(text)) throw new TurnError(409, "It has finished that turn. Send it as a new message.");
     turn.steers += 1;
     turn.offered.push({ text, by });
   }
@@ -405,7 +405,7 @@ export class TurnHub {
   enqueue(conversation: string, message: { text: string; role: string | null; by: QueuedBy }): { queued: Queued; started: LiveTurn | null } {
     const { chats } = this.opts;
     if (chats.queue(conversation).length >= this.limit.maxQueued) {
-      throw new TurnError(429, `${this.limit.maxQueued} messages are already queued behind this chat, the limit. Remove one, or wait for him to get to them.`);
+      throw new TurnError(429, `${this.limit.maxQueued} messages are already queued behind this chat, the limit. Remove one, or wait for it to get to them.`);
     }
     const queued = chats.queueAdd(conversation, message);
     this.pump();
@@ -568,7 +568,7 @@ export class TurnHub {
     this.emit(turn, event);
   }
 
-  /** A steer reached him: the answer so far is kept as it stands, the owner's message follows it, and a new answer begins. */
+  /** A steer reached it: the answer so far is kept as it stands, the owner's message follows it, and a new answer begins. */
   private segment(turn: Live, text: string): void {
     const c = turn.spec.conversation;
     const before = turn.answer;
@@ -601,7 +601,7 @@ export class TurnHub {
     if (turn.windDown) clearTimeout(turn.windDown);
     turn.windDown = null;
     const { chats } = this.opts;
-    // A chat deleted while he worked in it has nowhere to keep the answer (deleting it is what stopped him).
+    // A chat deleted while it worked in it has nowhere to keep the answer (deleting it is what stopped it).
     const c = turn.spec.conversation && chats.summary(turn.spec.conversation.id) ? turn.spec.conversation : null;
     const stopped = turn.completed ? null : turn.stop;
     if (stopped === "limit") {
@@ -612,7 +612,7 @@ export class TurnHub {
     } else if (stopped) this.emit(turn, { type: "stopped", reason: stopped });
     const state: TurnState = stopped && stopped !== "limit" ? "stopped" : turn.answer.error ? "error" : "done";
 
-    // What never reached him isn't lost: in a kept chat it's queued, first in line; otherwise it's handed back.
+    // What never reached it isn't lost: in a kept chat it's queued, first in line; otherwise it's handed back.
     const left = turn.steering.close();
     if (left.length) {
       const theirs = turn.offered.slice(-left.length);

@@ -9,7 +9,7 @@ import { fakeContainer } from "./fake-container.ts";
  */
 
 const GIB = 2 ** 30;
-const ASK: CreateInput = { network: "gateway", cpus: 2, memoryGb: 4, ttlMinutes: 30, persistent: false, quest: "q-mac" };
+const ASK: CreateInput = { network: "gateway", cpus: 2, memoryGb: 4, ttlMinutes: 30, persistent: false, run: "q-mac" };
 
 function macHost(over: Partial<SandboxHostOptions> = {}, disk = { totalBytes: 1000 * GIB, freeBytes: 900 * GIB }) {
   const fake = fakeContainer();
@@ -69,14 +69,14 @@ describe("a sandbox on a Mac", () => {
     expect(vm.volume).toBe(volume);
     expect(vm.args).toContain("--read-only");
     expect(vm.networks).toEqual([NETWORKS.gateway.name]);
-    expect(made).toMatchObject({ node: "n_mac", network: "gateway", isolation: "vm", status: "running", cpus: 2, memoryGb: 4, image: "invincible/sandbox:1", ephemeral: true, quest: "q-mac", disk: { limitGb: 20 } });
-    expect(m.ledger).toContainEqual(expect.objectContaining({ class: "create", resource: "docker.container", target: `invincible-sbx-${made.id}`, verdict: "allow", quest: "q-mac", detail: "microVM · gateway · 2 cpu · 4 GB · 20 GB disk · invincible/sandbox:1" }));
+    expect(made).toMatchObject({ node: "n_mac", network: "gateway", isolation: "vm", status: "running", cpus: 2, memoryGb: 4, image: "invincible/sandbox:1", ephemeral: true, run: "q-mac", disk: { limitGb: 20 } });
+    expect(m.ledger).toContainEqual(expect.objectContaining({ class: "create", resource: "docker.container", target: `invincible-sbx-${made.id}`, verdict: "allow", run: "q-mac", detail: "microVM · gateway · 2 cpu · 4 GB · 20 GB disk · invincible/sandbox:1" }));
     // A second sandbox finds the networks there.
     await m.host.create(ASK);
     expect(commands(m.fake.calls, "network").filter((c) => c[1] === "create")).toHaveLength(2);
   });
 
-  test("online joins Galahad's own NAT network and the gateway's, egress first, as on Docker", async () => {
+  test("online joins your agent's own NAT network and the gateway's, egress first, as on Docker", async () => {
     const m = macHost();
     const made = await m.host.create({ ...ASK, network: "online" });
     expect(m.fake.vms.get(`invincible-sbx-${made.id}`)!.networks).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
@@ -130,7 +130,7 @@ describe("a sandbox on a Mac", () => {
     const args = m.fake.vms.get(`invincible-sbx-${made.id}`)!.args;
     expect(args).toContain("INVINCIBLE_TOKEN=test-only-token-1");
     expect(args).toContain(`OPENAI_BASE_URL=http://${NETWORKS.gateway.gateway}:7402/gw/deepseek`);
-    await m.host.destroy(made.id, { quest: "q-mac" });
+    await m.host.destroy(made.id, { run: "q-mac" });
     expect(m.revoked).toEqual(["test-only-hash-1"]);
   });
 
@@ -148,20 +148,20 @@ describe("a sandbox on a Mac", () => {
     expect(await m.host.listed()).toBeNull();
   });
 
-  test("removed through the oath gate: its own quest removes it, the VM then its volume; anyone else is asked", async () => {
+  test("removed through approvals: its own run removes it, the VM then its volume; anyone else is asked", async () => {
     const m = macHost();
     const made = await m.host.create(ASK);
-    const asked = await m.host.destroy(made.id, { quest: "another-quest" });
+    const asked = await m.host.destroy(made.id, { run: "another-run" });
     expect(asked.verdict).toBe("ask");
     expect(m.fake.vms.has(`invincible-sbx-${made.id}`)).toBe(true);
-    const removed = await m.host.destroy(made.id, { quest: "q-mac" });
+    const removed = await m.host.destroy(made.id, { run: "q-mac" });
     expect(removed.verdict).toBe("allow");
     const order = m.fake.calls.filter((c) => (c[0] === "delete" || (c[0] === "volume" && c[1] === "delete")));
     expect(order).toEqual([["delete", "--force", `invincible-sbx-${made.id}`], ["volume", "delete", `invincible-sbx-${made.id}-work`]]);
     // (The networks' keepers stay: they are no sandboxes.)
     expect([...m.fake.vms.keys()]).toEqual([KEEPERS.gateway, KEEPERS.online]);
     expect(m.fake.volumes.size).toBe(0);
-    expect(m.ledger.at(-1)).toMatchObject({ class: "delete", resource: "docker.container", verdict: "allow", quest: "q-mac" });
+    expect(m.ledger.at(-1)).toMatchObject({ class: "delete", resource: "docker.container", verdict: "allow", run: "q-mac" });
   });
 
   test("one that won't start leaves nothing behind: its VM, its volume and its lease go, and the error says why", async () => {
@@ -210,11 +210,11 @@ describe("a sandbox on a Mac", () => {
     expect((await m.host.status()).networks).toEqual({ gateway: true, online: true });
   });
 
-  test("the reaper removes an expired sandbox, and a volume whose VM is gone; a knight's volume stays", async () => {
+  test("the reaper removes an expired sandbox, and a volume whose VM is gone; an agent's volume stays", async () => {
     let now = 1_000_000;
     const m = macHost({ now: () => now });
     const made = await m.host.create(ASK);
-    // A knight's workspace whose VM was lost, and an ordinary one: both from long ago.
+    // An agent's workspace whose VM was lost, and an ordinary one: both from long ago.
     await m.fake.runner(["volume", "create", "-s", "20G", "--label", "dev.invincible=1", "--label", "dev.invincible.id=aaaaaaaaaa", "--label", "dev.invincible.retained=1", "invincible-sbx-aaaaaaaaaa-work"], 1000);
     await m.fake.runner(["volume", "create", "-s", "20G", "--label", "dev.invincible=1", "--label", "dev.invincible.id=bbbbbbbbbb", "invincible-sbx-bbbbbbbbbb-work"], 1000);
     now = Date.parse("2026-11-17T00:00:00Z") + 31 * 60_000;
@@ -226,7 +226,7 @@ describe("a sandbox on a Mac", () => {
 });
 
 describe("its workspaces: container's volumes", () => {
-  test("a volume of a fixed size, labelled as its sandbox's; a knight's is kept, and only its owner's removal takes it", async () => {
+  test("a volume of a fixed size, labelled as its sandbox's; an agent's is kept, and only its owner's removal takes it", async () => {
     const fake = fakeContainer();
     const volumes = new ContainerVolumes(fake.runner, () => ({ totalBytes: 100 * GIB, freeBytes: 60 * GIB }));
     expect(await volumes.create("0123456789", 20)).toBe("invincible-sbx-0123456789-work");

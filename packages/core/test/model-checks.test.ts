@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { checkFacts, followsFormat, placesClicks, readModelCheck, readsScreens } from "../src/model-checks.ts";
 
 /*
- * What a model was seen to do when it was checked: whether it follows the quest loop's command format, reads a
+ * What a model was seen to do when it was checked: whether it follows the run loop's command format, reads a
  * screen, and points at the right place on one. Read leniently from the mind (a newer node may check more).
  */
 
@@ -32,7 +32,7 @@ describe("a model's check", () => {
 
 import { chooseEyes } from "../src/model-checks.ts";
 
-describe("a knight's eyes", () => {
+describe("an agent's eyes", () => {
   const check = (landed: number, off: number, reads = true) => ({ at: 1, reads: { ok: reads, said: "x" }, places: { targets: 8, landed, meanErrorPx: off } });
   const checks = [
     { ref: "go/qwen", check: check(1, 140) },

@@ -2,7 +2,7 @@ import type { ConnectorResult } from "@invincible/models";
 import type { NativeTool } from "./connectors.ts";
 
 /*
- * Cloudflare's token check, as one of Galahad's own tools (a native): an API token is a user's (My Profile → API Tokens)
+ * Cloudflare's token check, as one of the primary's own tools (a native): an API token is a user's (My Profile → API Tokens)
  * or an account's (Manage Account → Account API Tokens), and Cloudflare checks each at its own address. A user's
  * address refuses an account's token (401, "Invalid API Token") although every call it may make works, so the user's
  * address is asked first, then each account the token can see; the answer says which it is. Read only.

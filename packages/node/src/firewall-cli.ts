@@ -51,7 +51,7 @@ export const systemFirewallDeps = (): FirewallDeps => ({
     chmodSync(path, mode);
   },
   place(path, text, mode) {
-    const beside = `${path}.galahad-${process.pid}`;
+    const beside = `${path}.invincible-${process.pid}`;
     writeFileSync(beside, text, { mode, flag: "wx" });
     chownSync(beside, 0, 0);
     chmodSync(beside, mode);

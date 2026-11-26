@@ -3,7 +3,7 @@ import { growthExponent } from "../suites/fleet.ts";
 import { runFleetSim } from "./sim.ts";
 
 /*
- * The deterministic multi-node simulation (docs/TRIALS.md, L0), at a small size:
+ * The deterministic multi-node simulation (docs/EVALS.md, L0), at a small size:
  * real replicas, the real sync engine and the real door over a network that
  * delays, reorders, duplicates, drops and partitions, with a node away for a
  * long while, clocks ahead inside and beyond the five minutes, a revoked device

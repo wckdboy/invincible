@@ -36,7 +36,7 @@ function init(): void {
   navigator.serviceWorker.addEventListener("message", (event: MessageEvent) => {
     if (offered || (event.data as { type?: string } | null)?.type !== "invincible:updated") return;
     offered = true;
-    toast("A new version of Galahad is ready", { action: { label: "Reload", run: () => location.reload() }, duration: 0 });
+    toast("A new version of your agent is ready", { action: { label: "Reload", run: () => location.reload() }, duration: 0 });
   });
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
     /* offline shell is a convenience, not a requirement */
@@ -83,7 +83,7 @@ async function boot(): Promise<void> {
         renderPairing(root, identity, inviteText, () => void boot());
       } catch {
         // A cached app may point at a pairing bundle the node has since replaced.
-        renderPairFailed(root, "Galahad was just updated. Reload this page to continue pairing.");
+        renderPairFailed(root, "Your agent was just updated. Reload this page to continue pairing.");
       }
       return;
     }
@@ -117,7 +117,7 @@ async function boot(): Promise<void> {
   }
   if (shared) handShared(shared);
   // Notifications: the node's copy of this device's subscription is kept current (never asks, never turns on what you
-  // turned off; one its push service dropped is made again). Begun before the views, whose card says he can't reach
+  // turned off; one its push service dropped is made again). Begun before the views, whose card says it can't reach
   // this device only once this is done.
   void syncPush(api);
   // What was answered on another device meanwhile is taken down here when the app is looked at again.

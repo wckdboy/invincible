@@ -62,7 +62,7 @@ describe("the mail and GitHub watcher", () => {
     const a = newNodeIdentity();
     const b = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, a, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, a, { fleetName: "homelab", nodeName: "ultra" });
     enrollDevice(store, a, { device: b.id, name: "mini", kind: "node", box: b64u(b.boxPublic) });
     const answers: Record<string, unknown> = {};
     const reads: { connector: string; tool: string; args: Record<string, string | number>; by: string }[] = [];
@@ -132,7 +132,7 @@ describe("the mail and GitHub watcher", () => {
     const w = world();
     w.loop("ci", [{ kind: "github", owner: "amiriteorg", repo: "invincible", on: ["ci.failed", "pushed"], branch: "main" }]);
     w.loop("boss", [{ kind: "mail", connector: "gmail" }]);
-    const run = (id: number) => ({ id, name: "CI", head_branch: "main", head_sha: "e48747a9ae25", html_url: `https://github.com/amiriteorg/invincible/actions/runs/${id}`, event: "push", display_title: "His guide" });
+    const run = (id: number) => ({ id, name: "CI", head_branch: "main", head_sha: "e48747a9ae25", html_url: `https://github.com/amiriteorg/invincible/actions/runs/${id}`, event: "push", display_title: "Its guide" });
     w.answers["github.runs"] = { workflow_runs: [run(1)] };
     w.answers["github.repo"] = { pushed_at: "2026-11-18T10:00:00Z" };
     await w.watcher.poll();

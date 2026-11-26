@@ -6,7 +6,7 @@ import { cappedBytes, keepFile } from "./chat-files.ts";
 import { slackAnswer } from "./chat-format.ts";
 
 /*
- * Slack (PLAN #19): talk to Galahad from Slack, through an app of yours in your workspace. The node you connect it on
+ * Slack (PLAN #19): talk to the primary from Slack, through an app of yours in your workspace. The node you connect it on
  * opens the app's Socket Mode connection itself (outbound: nothing of yours is opened to the internet), and answers
  * through its own API as a device of its own, "Slack", paired with chat and mind:read only and revoked like any device.
  * The app's two tokens and the device's key are sealed in the vault. Only your own Slack account is answered, and only
@@ -19,7 +19,7 @@ export const SLACK_API = "https://slack.com/api";
 export const SLACK_APP_SECRET = "slack:app";
 export const SLACK_BOT_SECRET = "slack:bot";
 export const SLACK_DEVICE_SECRET = "slack:device";
-/** What the gateway's device may do: chat, and read what chat reads. Nothing that changes how he works, no keys. */
+/** What the gateway's device may do: chat, and read what chat reads. Nothing that changes how it works, no keys. */
 export const SLACK_SCOPES: Scope[] = ["chat", "mind:read"];
 export const SLACK_LINK_MS = 15 * 60_000;
 /** Unambiguous letters and digits for the link code (no 0/O, 1/I/L). */
@@ -374,7 +374,7 @@ export class SlackGateway {
       if (!link || !sent || link.expires <= this.now() || sent !== link.code) return;
       this.put("owner", { id: event.user, name: await this.nameOf(event.user) });
       this.put("link", null);
-      await this.send(event.channel, "Linked: you talk to Galahad here now, as a device of yours that may chat (revoke it in the app's devices). *new* on its own starts a new chat.");
+      await this.send(event.channel, "Linked: you talk to your agent here now, as a device of yours that may chat (revoke it in the app's devices). *new* on its own starts a new chat.");
       return;
     }
     if (event.user !== owner.id) return;
@@ -440,11 +440,11 @@ export class SlackGateway {
     }
   }
 
-  /** Your words to Galahad, as the gateway's device, in this conversation's chat of yours; his answer back. */
+  /** Your words to the primary, as the gateway's device, in this conversation's chat of yours; its answer back. */
   private async ask(channel: string, text: string, thread?: string, yours?: string, attachments: AttachmentRef[] = []): Promise<void> {
     const device = this.device();
     if (!device) return;
-    // While he works, 👀 on your message (it stands still), taken off when he answers.
+    // While it works, 👀 on your message (it stands still), taken off when it answers.
     if (yours) await this.call("reactions.add", { channel, timestamp: yours, name: "eyes" }).catch(() => {});
     let answer = "";
     let failed: string | null = null;
@@ -474,7 +474,7 @@ export class SlackGateway {
       if (yours) await this.call("reactions.remove", { channel, timestamp: yours, name: "eyes" }).catch(() => {});
     }
     if (!answer.trim()) {
-      await this.send(channel, failed ? `He couldn't answer: ${failed}` : "He had nothing to say to that.", thread);
+      await this.send(channel, failed ? `It couldn't answer: ${failed}` : "It had nothing to say to that.", thread);
       return;
     }
     const { chunks, choices } = slackAnswer(answer);

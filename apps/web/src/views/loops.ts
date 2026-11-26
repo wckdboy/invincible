@@ -1,7 +1,7 @@
 import type { ConnectorView, FindingView, LoopRunView, LoopTask, LoopView, LoopWake, SelfActionView } from "@invincible/core";
 import { findSecrets } from "@invincible/core/secret-scan";
 import { type Ctx, errorMessage, type View } from "../context.ts";
-import { gatesFromText } from "../lib/quests.ts";
+import { gatesFromText } from "../lib/runs.ts";
 import { describeSchedule, onceSoon, scheduleProblem } from "../lib/schedule.ts";
 import { describeWake, describeWakes } from "../lib/wakes.ts";
 import { shortId } from "../lib/text.ts";
@@ -19,7 +19,7 @@ import { NETWORK } from "./sandboxes.ts";
 import { tripwiresSection } from "./tripwires.ts";
 
 /*
- * Loops: work Galahad does on a schedule ("every 30m", or a cron line in a time
+ * Loops: work the primary does on a schedule ("every 30m", or a cron line in a time
  * zone). Each lives in the mind, so every device sees it and its history, and
  * names exactly one node that runs it, so it never runs twice. A node that was
  * away runs a missed loop once; a run cut short by a crash is recorded as
@@ -49,7 +49,7 @@ export const SEVERITY: Record<FindingView["severity"], { label: string; tone: To
 
 const KIND: Record<LoopTask["kind"], { label: string; icon: IconName }> = {
   heartbeat: { label: "Heartbeat", icon: "activity" },
-  quest: { label: "Quest", icon: "compass" },
+  run: { label: "Run", icon: "compass" },
   call: { label: "Connector", icon: "plug" },
   tell: { label: "Tell me", icon: "bell" },
 };
@@ -89,11 +89,11 @@ export function describeTask(task: LoopTask | null): string {
   if (!task) return "A task this node can't read.";
   if (task.kind === "heartbeat") {
     const what = task.checklist ? "Heartbeat: checks the fleet, then reads your checklist." : "Heartbeat: checks the fleet and the machine it runs on.";
-    return `${what}${task.selfAction === false ? " Only reports: self-action is off." : " Then fixes what's safe himself."}`;
+    return `${what}${task.selfAction === false ? " Only reports: self-action is off." : " Then fixes what's safe itself."}`;
   }
-  if (task.kind === "quest") {
+  if (task.kind === "run") {
     const gates = task.gates?.length ? ` Done means ${task.gates.length === 1 ? "this passes" : `these ${task.gates.length} pass`}: ${clip(task.gates.join(" · "), 160)}` : "";
-    return `Quest, ${NETWORK[task.network]?.label.toLowerCase() ?? task.network}: ${clip(task.goal, 160)}${gates}`;
+    return `Run, ${NETWORK[task.network]?.label.toLowerCase() ?? task.network}: ${clip(task.goal, 160)}${gates}`;
   }
   if (task.kind === "tell") return `Tells you${task.text ? `: ${clip(task.text, 160)}` : ", with what woke it"}: a notice in your Inbox, and your loop's name on your phone.`;
   const args = Object.entries(task.args ?? {}).map(([k, v]) => `${k}=${String(v)}`).join(" ");
@@ -197,7 +197,7 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
   const where = h(
     "select",
     { class: "select" },
-    existing ? null : h("option", { value: "" }, "Galahad chooses"),
+    existing ? null : h("option", { value: "" }, "Your agent chooses"),
     existing && !nodes.some((n) => n.id === existing.on) ? h("option", { value: existing.on, selected: true }, `${existing.onName ?? shortId(existing.on)} (unavailable)`) : null,
     ...nodes.map((n) => h("option", { value: n.id, selected: n.id === existing?.on }, n.name)),
   );
@@ -294,8 +294,8 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
   );
 
   const goal = h("textarea", { class: "textarea", rows: 4, maxlength: 4000, placeholder: "e.g. Read the open issues in wckdboy/invincible and summarise what changed this week." });
-  let network: NetworkMode = task0?.kind === "quest" ? task0.network : "isolated";
-  if (task0?.kind === "quest") goal.value = task0.goal;
+  let network: NetworkMode = task0?.kind === "run" ? task0.network : "isolated";
+  if (task0?.kind === "run") goal.value = task0.goal;
   const netExplain = h("div");
   const syncNet = () =>
     replace(netExplain, h("div", { class: "net-explain", "data-tone": NETWORK[network].tone }, icon(NETWORK[network].icon, { size: 16 }), h("div", {}, h("strong", {}, NETWORK[network].label), ". ", NETWORK[network].explain)));
@@ -311,13 +311,13 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
   syncNet();
   // Gates: "done means this command passes", one shell command a line.
   const gatesField = h("textarea", { class: "textarea mono", rows: 2, autocorrect: "off", spellcheck: false, autocapitalize: "off", autocomplete: "off", placeholder: "e.g. test -s /work/out/summary.md" });
-  if (task0?.kind === "quest" && task0.gates?.length) gatesField.value = task0.gates.join("\n");
-  const questPanel = h(
+  if (task0?.kind === "run" && task0.gates?.length) gatesField.value = task0.gates.join("\n");
+  const runPanel = h(
     "div",
     { class: "stack" },
-    field("Goal", goal, { hint: "Each run is a fresh quest in its own sandbox: plan, work, an independent review, remembered." }),
+    field("Goal", goal, { hint: "Each run is a fresh run in its own sandbox: plan, work, an independent review, remembered." }),
     field("Gates (optional)", gatesField, {
-      hint: "Done means these pass: one shell command a line, run in the quest's sandbox when the engineer says he's done. Every one must exit 0 before the reviewer is asked; a run whose gates never pass is never done.",
+      hint: "Done means these pass: one shell command a line, run in the run's sandbox when the engineer says it's done. Every one must exit 0 before the reviewer is asked; a run whose gates never pass is never done.",
     }),
     h("div", { class: "stack tight" }, h("div", { class: "label" }, "Network"), networkControl.el, netExplain),
   );
@@ -360,7 +360,7 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
     h("p", { class: "small muted" }, "No model, no sandbox: each run is a notice in your Inbox with what woke it, and your phone says this loop's name. Put it with something to wake it (\"tell me when my boss emails\"), or a schedule: Once for a reminder."),
     field("What to say (optional)", tellText),
   );
-  const panels: Record<LoopTask["kind"], HTMLElement> = { heartbeat: heartbeatPanel, quest: questPanel, call: callPanel, tell: tellPanel };
+  const panels: Record<LoopTask["kind"], HTMLElement> = { heartbeat: heartbeatPanel, run: runPanel, call: callPanel, tell: tellPanel };
   const showKind = () => {
     for (const [k, panel] of Object.entries(panels)) panel.hidden = k !== kind;
   };
@@ -382,13 +382,13 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
       const off = task0?.kind === "heartbeat" && task0.selfAction === false;
       return { task: { kind: "heartbeat", ...(text ? { checklist: text } : {}), ...(off ? { selfAction: false } : {}) } };
     }
-    if (kind === "quest") {
+    if (kind === "run") {
       const text = goal.value.trim();
-      if (!text) return { problem: "Give the quest a goal.", focus: goal };
-      const maxSteps = task0?.kind === "quest" ? task0.maxSteps : undefined;
+      if (!text) return { problem: "Give the run a goal.", focus: goal };
+      const maxSteps = task0?.kind === "run" ? task0.maxSteps : undefined;
       const typed = gatesFromText(gatesField.value);
       if ("problem" in typed) return { problem: typed.problem, focus: gatesField };
-      return { task: { kind: "quest", goal: text, network, ...(maxSteps ? { maxSteps } : {}), ...(typed.gates.length ? { gates: typed.gates } : {}) } };
+      return { task: { kind: "run", goal: text, network, ...(maxSteps ? { maxSteps } : {}), ...(typed.gates.length ? { gates: typed.gates } : {}) } };
     }
     if (kind === "tell") {
       const text = tellText.value.trim();
@@ -484,14 +484,14 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
     h("div", { class: "stack tight" }, h("div", { class: "label" }, "What it does"), kindControl.el),
     existing && !task0 ? callout("warn", "This node can't read the loop's current task. Saving replaces it with what you choose here.") : null,
     heartbeatPanel,
-    questPanel,
+    runPanel,
     callPanel,
     status,
     formActions(button("Cancel", { onClick: () => sheet.close() }), save),
   );
   const sheet = openSheet({
     title: existing ? `Change ${existing.name}` : "Add a loop",
-    description: "Work Galahad does on a schedule or when something happens, on one node.",
+    description: "Work your agent does on a schedule or when something happens, on one node.",
     body: form,
     size: "wide",
     initialFocus: () => (existing ? schedule : name),
@@ -710,7 +710,7 @@ export const loopsView: View = (root, ctx, { scope, opts }) => {
           empty({
             icon: "repeat",
             title: "No loops yet",
-            body: "A loop runs a heartbeat, a quest or a connector call on a schedule, on one node. A missed run happens once when its node is back.",
+            body: "A loop runs a heartbeat, a run or a connector call on a schedule, on one node. A missed run happens once when its node is back.",
             // (The page's own Add loop is its primary action.)
             actions: write ? button("Add a loop", { icon: "plus", onClick: () => openLoopSheet(ctx) }) : null,
           }),
@@ -778,18 +778,18 @@ export const loopsView: View = (root, ctx, { scope, opts }) => {
     });
   }
 
-  // ---------- self-action: the owner's one switch, the allowlist, and what he fixed lately ----------
+  // ---------- self-action: the owner's one switch, the allowlist, and what it fixed lately ----------
   const selfBox = h("div", {}, skeletonBlock(96));
   let selfSignature = "";
   function renderSelf(view: SelfActionView): void {
     const toggle = switchControl(
-      "Galahad fixes what's safe himself",
+      "Your agent fixes what's safe itself",
       view.on,
       (on) =>
         void (async () => {
           try {
             const next = await ctx.api.post<SelfActionView>("/api/self-action", { on });
-            toast(on ? "Self-action is on" : "Self-action is off", { tone: "ok", description: on ? "After each heartbeat he fixes what's on the list himself, and asks you about the rest." : "He only reports now: every finding waits for you." });
+            toast(on ? "Self-action is on" : "Self-action is off", { tone: "ok", description: on ? "After each heartbeat it fixes what's on the list itself, and asks you about the rest." : "It only reports now: every finding waits for you." });
             selfSignature = "";
             renderSelf(next);
             loopsChanged.update((n) => n + 1);
@@ -807,14 +807,14 @@ export const loopsView: View = (root, ctx, { scope, opts }) => {
     const recent = view.recent.length
       ? list(
           view.recent.slice(0, 6).map((e) => {
-            const failed = e.reason?.startsWith("Galahad's own fix didn't") ?? false;
+            const failed = e.reason?.startsWith("Your agent's own fix didn't") ?? false;
             const at = Number(e.hlc.slice(0, 15));
             return listRow({ lead: failed ? "alert" : "check-circle", leadTone: failed ? "warn" : "ok", title: `${failed ? "Tried" : "Fixed"}: ${e.detail ?? e.target}`, meta: [h("span", { title: absoluteTime(at) }, relativeTime(at))] });
           }),
           { flat: true },
         )
       : note("Nothing fixed yet.");
-    replace(selfBox, card({}, toggle, h("div", { class: "stack tight" }, h("div", { class: "label" }, "What he may fix"), allow), h("div", { class: "stack tight" }, h("div", { class: "label" }, "Lately"), recent)));
+    replace(selfBox, card({}, toggle, h("div", { class: "stack tight" }, h("div", { class: "label" }, "What it may fix"), allow), h("div", { class: "stack tight" }, h("div", { class: "label" }, "Lately"), recent)));
   }
   async function refreshSelf(): Promise<void> {
     try {
@@ -830,7 +830,7 @@ export const loopsView: View = (root, ctx, { scope, opts }) => {
     }
   }
 
-  // Your tripwires on the commands his work runs: what he may never do, beside what he does on his own and may fix.
+  // Your tripwires on the commands its work runs: what it may never do, beside what it does on its own and may fix.
   const tripwires = tripwiresSection(ctx, scope);
 
   const checkButton = button("Check now", { icon: "review", onClick: () => void check(checkButton) });
@@ -841,12 +841,12 @@ export const loopsView: View = (root, ctx, { scope, opts }) => {
       { class: "page narrow" },
       pageHead(
         "Loops",
-        "Work Galahad does on a schedule, each loop on exactly one node. A missed run happens once when its node is back; a run cut short is never repeated.",
+        "Work your agent does on a schedule, each loop on exactly one node. A missed run happens once when its node is back; a run cut short is never repeated.",
         [checkButton, write ? button("Add loop", { variant: "primary", icon: "plus", onClick: () => openLoopSheet(ctx) }) : null],
       ),
       write ? null : callout("quiet", "This device can see loops but not change or run them (no brain:write scope)."),
       checkBox,
-      // The loops, what he may fix after them, and your tripwires: shown whole once all have answered (each pushed the one before).
+      // The loops, what it may fix after them, and your tripwires: shown whole once all have answered (each pushed the one before).
       pageBody(section("Loops", {}, listBox), section("Self-action", {}, selfBox), tripwires.el),
     ),
   );

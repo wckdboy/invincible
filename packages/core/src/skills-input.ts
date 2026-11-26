@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { findSecrets } from "./secret-scan.ts";
-import { cleanSkillBody, cleanSkillText, type QuestEvidence as Evidence, SKILL_ID, SKILL_LIMITS, SKILL_VERSION, SKILLS_BUDGET_MAX, type SkillDoc, skillSecret } from "./skills.ts";
+import { cleanSkillBody, cleanSkillText, type RunEvidence as Evidence, SKILL_ID, SKILL_LIMITS, SKILL_VERSION, SKILLS_BUDGET_MAX, type SkillDoc, skillSecret } from "./skills.ts";
 
 /*
  * What the node takes in about skills, checked at the boundary (skills.ts has the record
@@ -60,13 +60,13 @@ export function readSkillDoc(v: unknown): SkillDoc | null {
   return parsed.success ? parsed.data : null;
 }
 
-const QuestRef = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/);
+const RunRef = z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/);
 const ExitCode = z.number().int().min(-1).max(255);
 
-/** A quest's evidence (skills.ts QuestEvidence), as its runner sends it. */
-export const QuestEvidenceInput = z.strictObject({
-  quest: QuestRef,
-  sandbox: QuestRef.optional(),
+/** A run's evidence (skills.ts RunEvidence), as its runner sends it. */
+export const RunEvidenceInput = z.strictObject({
+  run: RunRef,
+  sandbox: RunRef.optional(),
   goal: z.string().min(1).max(4000),
   status: z.enum(["done", "unverified", "gave-up", "stopped"]),
   network: z.enum(["isolated", "gateway", "online"]),
@@ -77,7 +77,7 @@ export const QuestEvidenceInput = z.strictObject({
   gates: z.array(z.strictObject({ command: z.string().max(1000), exitCode: ExitCode })).max(16).optional(),
 }) satisfies z.ZodType<Evidence>;
 
-/** What the distiller answered: a skill (and the one of his it would revise), or nothing, and why. */
+/** What the distiller answered: a skill (and the one of its it would revise), or nothing, and why. */
 export type Distilled = { doc: SkillDoc; revises: string | null; droppedProofs: number } | { doc: null; why: string };
 
 /**

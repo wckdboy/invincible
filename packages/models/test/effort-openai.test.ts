@@ -3,7 +3,7 @@ import { effortOf, openAIConversation, preset } from "../src/index.ts";
 
 /*
  * How hard an OpenAI-compatible model thinks. DeepSeek's chat completions take `reasoning_effort`
- * ("none" disables thinking; low / high / max enable it), mapped from Galahad's five levels by its
+ * ("none" disables thinking; low / high / max enable it), mapped from the primary's five levels by its
  * preset (low→low, medium→high, high→high, xhigh→max, max→max). A gateway's models each take their
  * own levels (OpenCode Go's, Z.ai's GLM): a level is asked as the lowest of a model's at or above it,
  * else its highest. Every other provider, and a model its preset doesn't name, is asked as now, with
@@ -41,7 +41,7 @@ const deepseek = { id: "deepseek", kind: "openai" as const, baseUrl: "http://127
 const opencodeGo = { id: "opencode-go", kind: "openai" as const, baseUrl: "http://127.0.0.1:9/go/v1", apiKey: null, local: true };
 const zai = { id: "zai", kind: "openai" as const, baseUrl: "http://127.0.0.1:9/zai/v4", apiKey: null, local: true };
 const LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
-/** What a model is sent at each of Galahad's five levels, low to max (undefined: no level). */
+/** What a model is sent at each of the primary's five levels, low to max (undefined: no level). */
 async function sentAt(provider: typeof deepseek, modelId: string): Promise<(string | undefined)[]> {
   const sent: (string | undefined)[] = [];
   for (const level of LEVELS) {
@@ -55,7 +55,7 @@ async function sentAt(provider: typeof deepseek, modelId: string): Promise<(stri
 const openai = { id: "openai", kind: "openai" as const, baseUrl: "http://127.0.0.1:9/v1", apiKey: null, local: true };
 
 describe("a provider that takes a thinking level", () => {
-  test("DeepSeek is asked reasoning_effort mapped from each of Galahad's levels", async () => {
+  test("DeepSeek is asked reasoning_effort mapped from each of your agent's levels", async () => {
     const mapped = [["low", "low"], ["medium", "high"], ["high", "high"], ["xhigh", "max"], ["max", "max"]] as const;
     for (const [level, sent] of mapped) {
       const model = scripted([whole(words("ok"), stop)]);

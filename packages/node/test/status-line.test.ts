@@ -27,7 +27,7 @@ async function said(answers: Record<string, unknown>): Promise<string> {
 const quiet = { loops: { loops: [] }, notices: { notices: [] }, actions: { actions: [] } };
 
 describe("invincible status: what needs you", () => {
-  test("a key he asked for needs you: the line never says nothing does", async () => {
+  test("a key it asked for needs you: the line never says nothing does", async () => {
     const line = await said({ ...quiet, secretRequests: { requests: [{ name: "stack-overflow", purpose: "its MCP server" }] } });
     expect(line).not.toContain("nothing needs you");
     expect(line).toContain("1 key asked for (invincible secret list)");
@@ -64,7 +64,7 @@ describe("invincible status: what needs you", () => {
     expect(await said({ loops: { loops: [] } })).toContain("nothing needs you");
   });
 
-  test("his answers you haven't read are news, not something that needs you", async () => {
+  test("its answers you haven't read are news, not something that needs you", async () => {
     const line = await said({ ...quiet, turns: { turns: [], unread: [{ id: "cv_a", title: "Release", answeredAt: 1 }, { id: "cv_b", title: "Plan", answeredAt: 2 }] } });
     expect(line).toContain("nothing needs you");
     expect(line).toContain("2 new answers (invincible chats)");

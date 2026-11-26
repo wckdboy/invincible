@@ -6,13 +6,13 @@ import { h, replace } from "../ui/dom.ts";
 import { toast } from "../ui/toast.ts";
 
 /*
- * The bar over an outcome's room (PLAN #43): Galahad owns it; where it stands (its spend against its budget, its tasks),
- * the first line of his plan, and yours to pause, resume, stop or give more budget (one that spent what it may goes on).
- * The room below is where he reports and asks.
+ * The bar over an outcome's room (PLAN #43): the primary owns it; where it stands (its spend against its budget, its tasks),
+ * the first line of its plan, and yours to pause, resume, stop or give more budget (one that spent what it may goes on).
+ * The room below is where it reports and asks.
  */
 
 const STATUS: Record<TeamOutcome["status"], { label: string; tone: Tone }> = {
-  active: { label: "He's working it", tone: "info" },
+  active: { label: "It's working it", tone: "info" },
   paused: { label: "Paused", tone: "warn" },
   done: { label: "Done", tone: "ok" },
   stopped: { label: "Stopped", tone: "neutral" },
@@ -96,7 +96,7 @@ export function outcomeBar(ctx: Ctx, room: string, signal: AbortSignal): { el: H
         });
         const sheet = openSheet({
           title: `Budget for ${outcome.title}`,
-          description: `Spent ${usd_(outcome.spentUsd)}${outcome.committedUsd ? `, ${usd_(outcome.committedUsd)} held for waiting work` : ""}, of ${usd_(outcome.budgetUsd)}.${outcome.status === "spent" ? " It had spent what it may: a larger budget and he takes it up again." : ""}`,
+          description: `Spent ${usd_(outcome.spentUsd)}${outcome.committedUsd ? `, ${usd_(outcome.committedUsd)} held for waiting work` : ""}, of ${usd_(outcome.budgetUsd)}.${outcome.status === "spent" ? " It had spent what it may: a larger budget and it takes it up again." : ""}`,
           body: [field("Its budget, in all (US dollars)", amount), problem],
           footer: save,
         });
@@ -107,7 +107,7 @@ export function outcomeBar(ctx: Ctx, room: string, signal: AbortSignal): { el: H
       h(
         "div",
         { class: "grow stack snug" },
-        h("div", { class: "row wrap" }, h("strong", {}, "Galahad owns this outcome"), badge(st.label, st.tone)),
+        h("div", { class: "row wrap" }, h("strong", {}, "Your agent owns this outcome"), badge(st.label, st.tone)),
         h(
           "span",
           { class: "small muted tnum" },

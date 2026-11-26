@@ -6,18 +6,18 @@ import { QAMP_ARM_PREFIX, QAMP_PORTS, QAMP_TOOLS, QampDid, type QampGrantMade, t
 import type { LedgerEntryInput } from "@invincible/sandbox";
 import { ARM_FORBIDDEN_SCOPES, type ArmTokens } from "./arms.ts";
 import type { Home } from "./home.ts";
-import { type GalahadTool, TOOLS, toolScopes } from "./tools.ts";
+import { type PrimaryTool, TOOLS, toolScopes } from "./tools.ts";
 
 /*
  * Grants to agents on your other machines, over Q-AMP (PLAN #58, its first phase; docs/SECURITY.md, "Q-AMP grants").
  *
- * An agent on a machine that runs no node (Claude Code on the MacBook, say) calls a few of Galahad's tools on this
+ * An agent on a machine that runs no node (Claude Code on the MacBook, say) calls a few of the primary's tools on this
  * node, over one QUIC connection. A grant is one act of yours, and it makes three things:
  *
  *   1. an arm, `qamp.<id>`, holding the scopes its tools' routes need and nothing more. A scope no arm may hold is
  *      refused, never trimmed. Its token is a 0600 file in this node's home, and the bridge's MCP server holds it:
  *      the agent never does. The node's door checks it on every call, as for any arm (loopback only).
- *   2. a delegation chain from this node's bridge key to the agent's key, for `/tool/galahad`, ending when the grant
+ *   2. a delegation chain from this node's bridge key to the agent's key, for `/tool/invincible`, ending when the grant
  *      does. It is useless without the agent's private key. The bridge key is made once, here, and is never the
  *      node's own key, which stays in the daemon.
  *   3. a bridge, `qamp serve --mcp-stdio`, on this node's tailnet address (never 0.0.0.0) and a port of its own. It
@@ -49,21 +49,21 @@ export interface GrantPrincipal {
 
 /**
  * Who may grant, list and revoke: you alone, at a terminal or on a paired device of yours that holds fleet:admin.
- * Never an agent (Galahad's own principal and the knights' are arms), and never another node, which holds every scope
+ * Never an agent (The primary's own principal and the agents' are arms), and never another node, which holds every scope
  * and still isn't you: as for your rules and standing orders.
  */
 export const mayGrant = (p: GrantPrincipal): boolean => (p.kind === "admin" || p.kind === "client") && p.scopes.includes("fleet:admin");
 
 /**
  * The scopes a grant's arm holds: every route its tools call, each route's one scope. A scope no arm may ever hold is
- * refused, not trimmed; so is a tool only Galahad himself may use. (`table`: the tools, for tests.)
+ * refused, not trimmed; so is a tool only the primary itself may use. (`table`: the tools, for tests.)
  */
-export function grantScopes(tools: readonly string[], table: readonly GalahadTool[] = TOOLS): Scope[] {
+export function grantScopes(tools: readonly string[], table: readonly PrimaryTool[] = TOOLS): Scope[] {
   const scopes = new Set<Scope>();
   for (const name of tools) {
     const tool = table.find((t) => t.name === name);
     if (!tool) throw new QampGrantError(400, `there's no tool named ${name}`);
-    if (tool.own) throw new QampGrantError(400, `${name} is Galahad's own: no agent is ever given it`);
+    if (tool.own) throw new QampGrantError(400, `${name} is your agent's own: no agent is ever given it`);
     for (const scope of toolScopes(tool)) scopes.add(scope as Scope);
   }
   const forbidden = [...scopes].filter((s) => ARM_FORBIDDEN_SCOPES.includes(s));
@@ -352,7 +352,7 @@ export class QampGrants {
   grant(input: { agent: string; tools: QampTool[]; ttlSeconds: number }, by: GrantPrincipal): Promise<QampGrantMade> {
     return this.serial(async () => {
       if (this.closing) throw new QampGrantError(503, "this node is stopping");
-      if (!mayGrant(by)) throw new QampGrantError(403, "only you grant an agent on another machine Galahad's tools");
+      if (!mayGrant(by)) throw new QampGrantError(403, "only you grant an agent on another machine your agent's tools");
       const unknown = input.tools.filter((t) => !(QAMP_TOOLS as readonly string[]).includes(t));
       if (unknown.length) throw new QampGrantError(400, `${unknown.join(", ")} can't be granted`);
       const scopes = grantScopes(input.tools);
@@ -374,10 +374,10 @@ export class QampGrants {
       try {
         this.opts.home.writeArmToken(label, token);
         this.line({ class: "create", target: label, reason: "you granted an agent on another machine these tools, for a while", detail: `agent ${input.agent} · tools ${input.tools.join(", ")} · scopes ${scopes.join(", ")} · until ${until}` });
-        const chain = await this.opts.runner.run(["delegate", "--key", this.keyPath, "--to", input.agent, "--cmd", "/tool/galahad", "--ttl", String(input.ttlSeconds)]);
+        const chain = await this.opts.runner.run(["delegate", "--key", this.keyPath, "--to", input.agent, "--cmd", "/tool/invincible", "--ttl", String(input.ttlSeconds)]);
         const proof = chain.stdout.trim();
         if (chain.code !== 0 || !/^qdt1\.[A-Za-z0-9_-]+$/.test(proof)) throw new QampGrantError(500, `its chain wasn't issued: ${chain.stderr.trim().slice(0, 300) || "qamp printed no qdt1. chain"}`);
-        this.line({ class: "create", target: label, reason: "its delegation chain: from this node's bridge key to the agent's key, for /tool/galahad, useless without the agent's private key", detail: `to ${input.agent} · ends ${until}` });
+        this.line({ class: "create", target: label, reason: "its delegation chain: from this node's bridge key to the agent's key, for /tool/invincible, useless without the agent's private key", detail: `to ${input.agent} · ends ${until}` });
         this.opts.db
           .query("INSERT INTO qamp_grants (id, agent, tools, scopes, port, bridge, created_at, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
           .run(id, input.agent, JSON.stringify(input.tools), JSON.stringify(scopes), port, bridge, createdAt, endsAt);
@@ -419,7 +419,7 @@ export class QampGrants {
       "--allow", row.agent,
       "--mcp-stdio",
       "--only", tools.join(","),
-      "--prefix", "galahad",
+      "--prefix", "invincible",
       "--", ...this.opts.mcpCommand(label, tools),
     ];
     // What its MCP server needs to reach this node, and nothing else of the daemon's environment.

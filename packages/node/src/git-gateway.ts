@@ -9,10 +9,10 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
  *   git -c http.extraHeader="Authorization: Bearer gw_…" clone http://<gateway>/git/<connector>/<owner>/<repo>.git
  *
  * The token is minted for one repository through one connector (provider
- * `git:<connector>:<owner>:<repo>`), for the quest's lifetime, only through gateway:mint
+ * `git:<connector>:<owner>:<repo>`), for the run's lifetime, only through gateway:mint
  * (a sandbox's providers can't name one: the contract reserves git:…); the node adds the
  * connector's key on the way to github.com. Pushing is refused: changes leave as a
- * shipment, through the oath gate (github.ship).
+ * shipment, through approvals (github.ship).
  */
 
 /** Where each connector origin's repositories are served over git (fixed in code: a manifest can't point a key elsewhere). */
@@ -57,7 +57,7 @@ export async function handleGitGateway(req: Request, ctx: GitGatewayContext): Pr
     return text(424, (error as Error).message);
   }
 
-  const headers = new Headers({ "user-agent": "git/2 (galahad)" });
+  const headers = new Headers({ "user-agent": "git/2 (invincible)" });
   for (const name of ["accept", "content-type", "content-encoding", "git-protocol"]) {
     const value = req.headers.get(name);
     if (value) headers.set(name, value);

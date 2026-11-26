@@ -5,7 +5,7 @@ import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { checkModel } from "../src/checks.ts";
 
 /*
- * Checking what a model can do, before it is given work that needs it: the quest loop's format (one command a
+ * Checking what a model can do, before it is given work that needs it: the run loop's format (one command a
  * reply), reading a screen, and placing a click on one. On 14 November 2026 kimi-k3.1-pro sent a reply with no
  * command in two turns of three, and qwen3.8-max read a screen but answered places on its own 0 to 1000 scale:
  * neither was known until a task failed. The test screen is a page drawn once by Chrome, its targets measured by
@@ -18,7 +18,7 @@ const card = JSON.parse(readFileSync(new URL("../assets/check-card/card.json", i
 function model(answer: (body: { messages: { role: string; content: unknown }[] }, picture: boolean) => Response | string) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "stand-in", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
   const asked: { picture: boolean }[] = [];
@@ -94,7 +94,7 @@ describe("choosing by what a model was seen to do", () => {
   function roster(role: string, models: string[], checked: Record<string, Record<string, unknown>>) {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     store.emit(identity, "provider.set", { id: "odd", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
     store.emit(identity, "provider.set", { id: "able", kind: "openai", baseUrl: "http://localhost:9/v1" });
@@ -116,19 +116,19 @@ describe("choosing by what a model was seen to do", () => {
     return events;
   };
 
-  test("the quest loop's engineer passes over a model checked as not following its format, and says why; another role, a pinned model, or the only one is still asked", async () => {
-    const loop = { role: "engineer", coding: true, messages: [{ role: "user" as const, content: "Quest: make it so" }] };
+  test("the run loop's engineer passes over a model checked as not following its format, and says why; another role, a pinned model, or the only one is still asked", async () => {
+    const loop = { role: "engineer", coding: true, messages: [{ role: "user" as const, content: "Run: make it so" }] };
     const r = roster("engineer", ["odd/m", "able/m"], { "odd/m": NOT_FORMAT });
     const events = await run(r, loop);
     expect(r.asked).toEqual(["able"]);
-    expect(events.find((e) => e.type === "fallback")).toEqual({ type: "fallback", from: "odd/m", error: "it doesn't follow the quest loop's command format (commands in 8 of 25 replies when it was checked): passed over for this loop" });
+    expect(events.find((e) => e.type === "fallback")).toEqual({ type: "fallback", from: "odd/m", error: "it doesn't follow the run loop's command format (commands in 8 of 25 replies when it was checked): passed over for this loop" });
     // Asked for its own answer in another role, or held to that model by name, it is asked as ever.
     const planner = roster("planner", ["odd/m", "able/m"], { "odd/m": NOT_FORMAT });
     await run(planner, { role: "planner", messages: [{ role: "user", content: "Plan it" }] });
     expect(planner.asked).toEqual(["odd"]);
-    // Another role's models doing the loop's turns (a quest that escalated: loop) are held to its format all the same.
+    // Another role's models doing the loop's turns (a run that escalated: loop) are held to its format all the same.
     const escalated = roster("planner", ["odd/m", "able/m"], { "odd/m": NOT_FORMAT });
-    await run(escalated, { role: "planner", coding: true, loop: true, messages: [{ role: "user", content: "Quest: make it so" }] });
+    await run(escalated, { role: "planner", coding: true, loop: true, messages: [{ role: "user", content: "Run: make it so" }] });
     expect(escalated.asked).toEqual(["able"]);
     const pinned = roster("engineer", ["able/m"], { "odd/m": NOT_FORMAT });
     await run(pinned, { ...loop, model: "odd/m" });

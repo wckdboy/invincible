@@ -94,7 +94,7 @@ describe("RFC 8291: message encryption for Web Push", () => {
 
   test("a round trip: encrypted on the node's side, decrypted as a browser would", async () => {
     const browser = await browserSubscription();
-    const message = utf8(JSON.stringify({ v: 1, k: "needs-you", t: "Galahad: needs you", b: "ultra is low on disk", o: "inbox" }));
+    const message = utf8(JSON.stringify({ v: 1, k: "needs-you", t: "Your agent: needs you", b: "ultra is low on disk", o: "inbox" }));
     const body = encryptPush({ p256dh: browser.p256dh, auth: browser.auth }, message);
     expect(new TextDecoder().decode(await browserDecrypt(body, browser.keys.privateKey, browser.p256dh, browser.auth))).toBe(new TextDecoder().decode(message));
     // A fresh sender key and salt each time: the same message never encrypts the same way twice.
@@ -112,8 +112,8 @@ describe("RFC 8291: message encryption for Web Push", () => {
 
   test("padded: a short message and a long one are the same size on the wire, and both read back whole", async () => {
     const browser = await browserSubscription();
-    const short = utf8('{"v":1,"kind":"test","title":"Galahad","body":"Hi.","open":"settings","tag":"test"}');
-    const long = utf8(JSON.stringify({ v: 1, kind: "needs-you", title: "Galahad: this needs you", body: "x".repeat(140), open: "inbox", tag: "t-0123456789abcdefghijkl" }));
+    const short = utf8('{"v":1,"kind":"test","title":"Your agent","body":"Hi.","open":"settings","tag":"test"}');
+    const long = utf8(JSON.stringify({ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "x".repeat(140), open: "inbox", tag: "t-0123456789abcdefghijkl" }));
     const a = encryptPush({ p256dh: browser.p256dh, auth: browser.auth }, short, { padTo: 1024 });
     const b = encryptPush({ p256dh: browser.p256dh, auth: browser.auth }, long, { padTo: 1024 });
     expect(a.length).toBe(b.length);

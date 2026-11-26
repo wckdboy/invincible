@@ -129,8 +129,8 @@ describe("events", () => {
     expect(() => parseEvent(bad)).toThrow();
   });
   test("unknown kinds are stored for forward compatibility", () => {
-    const future = signEvent({ ...unsigned, fleet: b64u(randomBytes(32)), kind: "quest.started", body: { any: "thing" } }, node);
-    expect(parseEvent(future).kind).toBe("quest.started");
+    const future = signEvent({ ...unsigned, fleet: b64u(randomBytes(32)), kind: "run.started", body: { any: "thing" } }, node);
+    expect(parseEvent(future).kind).toBe("run.started");
   });
 });
 

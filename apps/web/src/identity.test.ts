@@ -92,8 +92,8 @@ describe("a new device's name", () => {
 
   test("an installed app is its own device, and named as the app: never the browser it was added from", async () => {
     const { defaultDeviceName } = await import("./identity.ts");
-    expect(defaultDeviceName(IPHONE, true)).toBe("Galahad app on iPhone");
-    expect(defaultDeviceName(ANDROID, true)).toBe("Galahad app on Android");
-    expect(defaultDeviceName(MAC, true)).toBe("Galahad app on Mac");
+    expect(defaultDeviceName(IPHONE, true)).toBe("Invincible app on iPhone");
+    expect(defaultDeviceName(ANDROID, true)).toBe("Invincible app on Android");
+    expect(defaultDeviceName(MAC, true)).toBe("Invincible app on Mac");
   });
 });

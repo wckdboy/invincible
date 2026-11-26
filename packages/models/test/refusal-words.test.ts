@@ -32,7 +32,7 @@ describe("a chat that falls back", () => {
   function brain(answer: () => Response) {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     // (On this machine, so neither needs a key here.)
     store.emit(identity, "provider.set", { id: "gateway", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });

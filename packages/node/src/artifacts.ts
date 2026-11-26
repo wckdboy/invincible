@@ -5,7 +5,7 @@ import type { LedgerStore } from "@invincible/ledger";
 import type { ExtractLimits, ExtractResult, LedgerEntryInput } from "@invincible/sandbox";
 
 /*
- * Artifacts: a sandbox's work products, kept after the sandbox is gone. A quest
+ * Artifacts: a sandbox's work products, kept after the sandbox is gone. A run
  * writes reports, plots, data and models to /work/out; the node copies that out
  * (through the hostile-archive extractor in @invincible/sandbox), keeps the files in
  * its home, and records in the mind what they are: paths, sizes, SHA-256s. Any
@@ -106,7 +106,7 @@ export class ArtifactStore {
   }
 
   /** Copy a sandbox's directory out and record it. Null when there was nothing to keep. */
-  async save(collect: Collect, input: { sandbox: string; path?: string; label?: string; quest?: string }): Promise<ArtifactView | null> {
+  async save(collect: Collect, input: { sandbox: string; path?: string; label?: string; run?: string }): Promise<ArtifactView | null> {
     const left = ARTIFACT_BUDGET_BYTES - this.usedBytes();
     if (left <= 0) throw new ArtifactError(507, `this node keeps ${Math.round(ARTIFACT_BUDGET_BYTES / 2 ** 30)} GB of artifacts already; remove some first`);
     const id = `art_${randomId(16)}`;
@@ -139,7 +139,7 @@ export class ArtifactStore {
     this.o.store.emit(this.o.identity, "artifact.saved", {
       id,
       label,
-      ...(input.quest ? { quest: input.quest.slice(0, 64) } : {}),
+      ...(input.run ? { run: input.run.slice(0, 64) } : {}),
       sandbox: input.sandbox,
       bytes: result.bytes,
       count: result.files.length,
@@ -150,7 +150,7 @@ export class ArtifactStore {
       resource: "artifact",
       target: id,
       verdict: "allow",
-      ...(input.quest ? { quest: input.quest } : {}),
+      ...(input.run ? { run: input.run } : {}),
       detail: `${result.files.length} file(s), ${result.bytes} bytes from sandbox ${input.sandbox}${result.skipped.length ? ` · refused ${result.skipped.length} (links, devices or unsafe paths)` : ""}`,
     });
     return this.get(id)!;
@@ -158,14 +158,14 @@ export class ArtifactStore {
 
   list(): ArtifactView[] {
     return this.o.store
-      .lwwPrefix<{ id: string; label: string; quest?: string; sandbox?: string; bytes: number; count: number; files: Manifest["files"] }>("artifact:")
+      .lwwPrefix<{ id: string; label: string; run?: string; sandbox?: string; bytes: number; count: number; files: Manifest["files"] }>("artifact:")
       .map((entry) => {
         const body = entry.value!;
         const local = entry.device === this.o.identity.id ? this.manifest(body.id) : null;
         return {
           id: body.id,
           label: body.label,
-          quest: body.quest ?? null,
+          run: body.run ?? null,
           sandbox: body.sandbox ?? null,
           node: entry.device,
           nodeName: this.o.store.device(entry.device)?.name ?? entry.device.slice(0, 12),

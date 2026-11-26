@@ -6,7 +6,7 @@ import { cappedBytes, keepFile } from "./chat-files.ts";
 import { telegramAnswer } from "./chat-format.ts";
 
 /*
- * Telegram (PLAN #19): talk to Galahad from Telegram, through a bot of yours. The node you connect it on asks Telegram
+ * Telegram (PLAN #19): talk to the primary from Telegram, through a bot of yours. The node you connect it on asks Telegram
  * for what was sent (long polling: nothing of yours is opened to the internet), and answers through its own API as a
  * device of its own, "Telegram", paired with chat and mind:read only and revoked like any device. The bot's token and
  * the device's key are sealed in the vault. Only your own Telegram account is answered: it is linked once, by a code
@@ -17,7 +17,7 @@ import { telegramAnswer } from "./chat-format.ts";
 export const TELEGRAM_API = "https://api.telegram.org";
 export const TELEGRAM_TOKEN_SECRET = "telegram:bot";
 export const TELEGRAM_DEVICE_SECRET = "telegram:device";
-/** What the gateway's device may do: chat, and read what chat reads. Nothing that changes how he works, no keys. */
+/** What the gateway's device may do: chat, and read what chat reads. Nothing that changes how it works, no keys. */
 export const TELEGRAM_SCOPES: Scope[] = ["chat", "mind:read"];
 export const TELEGRAM_LINK_MS = 15 * 60_000;
 const POLL_SECONDS = 50;
@@ -228,7 +228,7 @@ export class TelegramGateway {
       const name = message.from.username ? `@${message.from.username}` : (message.from.first_name ?? String(message.from.id));
       this.put("owner", { id: message.from.id, name });
       this.put("link", null);
-      await this.send(message.chat.id, "Linked: this chat talks to Galahad now, as a device of yours that may chat (revoke it in the app's devices). /new starts a new chat.");
+      await this.send(message.chat.id, "Linked: this chat talks to your agent now, as a device of yours that may chat (revoke it in the app's devices). /new starts a new chat.");
       return;
     }
     if (message.from.id !== owner.id) return;
@@ -238,7 +238,7 @@ export class TelegramGateway {
       return;
     }
     if (/^\/start(@\w+)?(\s|$)/.test(text)) {
-      await this.send(message.chat.id, "Galahad here. Write to me as you would in the app. /new starts a new chat.");
+      await this.send(message.chat.id, "Invincible here. Write to me as you would in the app. /new starts a new chat.");
       return;
     }
     // A photo (its largest size a message may carry) or a file, its caption the words with it.
@@ -283,7 +283,7 @@ export class TelegramGateway {
     }
   }
 
-  /** Your words to Galahad, as the gateway's device, in this Telegram chat's chat of yours; his answer back. */
+  /** Your words to the primary, as the gateway's device, in this Telegram chat's chat of yours; its answer back. */
   private async ask(chatId: number, text: string, attachments: AttachmentRef[] = []): Promise<void> {
     const device = this.device();
     if (!device) return;
@@ -317,7 +317,7 @@ export class TelegramGateway {
       clearInterval(typing);
     }
     if (!answer.trim()) {
-      await this.send(chatId, failed ? `He couldn't answer: ${failed}` : "He had nothing to say to that.");
+      await this.send(chatId, failed ? `It couldn't answer: ${failed}` : "It had nothing to say to that.");
       return;
     }
     const { chunks, choices } = telegramAnswer(answer);

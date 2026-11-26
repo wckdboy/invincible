@@ -1,7 +1,7 @@
 import { artifactTitle, compactNumber, isBlockKind, readArtifact, readChart, readChoices, readStats, readSteps } from "@invincible/core/blocks";
 
 /*
- * His answer, as a chat app shows it: in its own markup (Telegram's HTML, Slack's mrkdwn: bold, italic, code, links,
+ * Its answer, as a chat app shows it: in its own markup (Telegram's HTML, Slack's mrkdwn: bold, italic, code, links,
  * nothing else), the choices of a choices block as buttons, a plan's steps as marked lines, figures as lines, a chart
  * or a page as a line that says it's in the app. Fences are read as the apps read them (a block on one line too).
  * Anything else stays the text it is, escaped.
@@ -149,7 +149,7 @@ function blockText(d: Dialect, kind: string, body: string, choices: string[][]):
   return d.pre(body);
 }
 
-/** His answer in a chat app's own markup. */
+/** Its answer in a chat app's own markup. */
 function chatAnswer(d: Dialect, markdown: string): ChatAnswer {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   const blocks: string[] = [];
@@ -188,9 +188,9 @@ function chatAnswer(d: Dialect, markdown: string): ChatAnswer {
   return { chunks: chunked(d, blocks.filter((b) => b.trim())), choices: choices.at(-1) ?? [] };
 }
 
-/** His answer as Telegram takes it. */
+/** Its answer as Telegram takes it. */
 export const telegramAnswer = (markdown: string): ChatAnswer => chatAnswer(TELEGRAM, markdown);
-/** His answer as Slack takes it. */
+/** Its answer as Slack takes it. */
 export const slackAnswer = (markdown: string): ChatAnswer => chatAnswer(SLACK, markdown);
 
 /** One line of a paragraph: a heading in bold, a list item with its bullet, a quote kept as one. */

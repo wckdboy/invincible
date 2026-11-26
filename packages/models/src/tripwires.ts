@@ -3,7 +3,7 @@ import { commandWords, readOf } from "./shell-paths.ts";
 
 /*
  * Your rules (core's rules.ts) against a command: tripwires before it runs, checks after. A rule's globs are matched
- * against the command's words (shell-paths' commandWords) and its piece of text against the whole command; the quest
+ * against the command's words (shell-paths' commandWords) and its piece of text against the whole command; the run
  * loop halts the work or refuses the command, or runs your checks once it has run, on what this says. Deterministic:
  * no model is asked, and nothing is run here.
  *

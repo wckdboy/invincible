@@ -13,7 +13,7 @@ import { chat, type ChatTools, MAX_REFUSAL_RETRIES } from "../src/index.ts";
 function brain(models: string[]) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "local", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
   store.emit(identity, "roster.set", { role: "planner", models });
@@ -74,7 +74,7 @@ describe("an answer with no words in it", () => {
     expect(errorOf(events)).toMatch(/stopped arriving before it was finished/);
   });
 
-  test("after his tools ran, a reply that ends cleanly with nothing said is an error that says what did arrive", async () => {
+  test("after its tools ran, a reply that ends cleanly with nothing said is an error that says what did arrive", async () => {
     const t = tools();
     const model = scripted([
       whole(...calls("c1", { text: "one" })),
@@ -89,7 +89,7 @@ describe("an answer with no words in it", () => {
     expect(errorOf(events)).toMatch(/reasoning/);
   });
 
-  test("he may end without another word when he has already spoken in this answer", async () => {
+  test("it may end without another word when it has already spoken in this answer", async () => {
     const t = tools();
     const model = scripted([whole(words("Posting it now."), ...calls("c1", { text: "one" })), whole(stop)]);
     const events = await all(chat({ ...brain(["local/a"]), fetch: model.fetch }, { messages: ask("Post it"), tools: t }));
@@ -98,7 +98,7 @@ describe("an answer with no words in it", () => {
     expect(errorOf(events)).toBe("");
   });
 
-  test("a reply his provider's filter ended is asked for again: what was done stays done, and nothing runs twice", async () => {
+  test("a reply its provider's filter ended is asked for again: what was done stays done, and nothing runs twice", async () => {
     const t = tools();
     const filtered = whole({ choices: [{ delta: {}, finish_reason: "content_filter" }] });
     const model = scripted([whole(...calls("c1", { text: "one" })), filtered, whole(words("All posted."), stop)]);
@@ -111,7 +111,7 @@ describe("an answer with no words in it", () => {
     expect(model.bodies[2].messages).toEqual(model.bodies[1].messages);
   });
 
-  test("ended by the filter again and again: the answer ends saying he declined, and is never kept as done", async () => {
+  test("ended by the filter again and again: the answer ends saying it declined, and is never kept as done", async () => {
     const t = tools();
     const filtered = whole({ choices: [{ delta: {}, finish_reason: "content_filter" }] });
     const model = scripted([whole(...calls("c1", { text: "one" })), filtered, filtered, filtered, whole(words("Too late."), stop)]);
@@ -123,7 +123,7 @@ describe("an answer with no words in it", () => {
     expect(textOf(events)).toBe("");
   });
 
-  test("a reply the filter cut after he had begun to speak is not asked for again (he would say it twice)", async () => {
+  test("a reply the filter cut after it had begun to speak is not asked for again (it would say it twice)", async () => {
     const model = scripted([whole(words("The first half, and"), { choices: [{ delta: {}, finish_reason: "content_filter" }] }), whole(words("never asked"), stop)]);
     const events = await all(chat({ ...brain(["local/a"]), fetch: model.fetch }, { messages: ask("Go on") }));
     expect(model.bodies).toHaveLength(1);
@@ -139,7 +139,7 @@ describe("an answer with no words in it", () => {
     expect(model.bodies.map((b) => b.model)).toEqual(["a", "a", "a", "b"]);
   });
 
-  test("declined for good after he has only looked: the next model takes the answer over, and may look again", async () => {
+  test("declined for good after it has only looked: the next model takes the answer over, and may look again", async () => {
     const t = { ...tools(), readOnly: () => true };
     const filtered = whole({ choices: [{ delta: {}, finish_reason: "content_filter" }] });
     const model = scripted([
@@ -197,20 +197,20 @@ describe("an answer with no words in it", () => {
 });
 
 describe("a provider that sends its words in parts", () => {
-  test("text parts are his words, in order; a thinking part is not; every text event is a string", async () => {
+  test("text parts are its words, in order; a thinking part is not; every text event is a string", async () => {
     // Mistral's larger models stream `content` as a list of parts (a terminal crashed printing one).
     const model = scripted([
       whole(
         { choices: [{ delta: { content: [{ type: "thinking", thinking: [{ type: "text", text: "Let me see." }] }] } }] },
         { choices: [{ delta: { content: [{ type: "text", text: "Good " }] } }] },
-        { choices: [{ delta: { content: [{ type: "text", text: "morning" }, { type: "text", text: ", my liege." }] } }] },
+        { choices: [{ delta: { content: [{ type: "text", text: "morning" }, { type: "text", text: ", the owner." }] } }] },
         { choices: [{ delta: { content: "" } }] },
         stop,
       ),
     ]);
     const events = await all(chat({ ...brain(["local/a"]), fetch: model.fetch }, { messages: ask("Greet me") }));
     for (const e of events) if (e.type === "text") expect(typeof e.text).toBe("string");
-    expect(textOf(events)).toBe("Good morning, my liege.");
+    expect(textOf(events)).toBe("Good morning, the owner.");
     expect(types(events).at(-1)).toBe("done");
   });
 
@@ -225,7 +225,7 @@ describe("a provider that sends its words in parts", () => {
 });
 
 // A call asked with no tools (a review, an audit) whose model answers with a call anyway: on Ultra, 22 November 2026,
-// a knight's audit failed twice so ("undefined is not an object (evaluating 'tools.describe')"), and was asked again
+// an agent's audit failed twice so ("undefined is not an object (evaluating 'tools.describe')"), and was asked again
 // after fifteen seconds and a minute. A call it wasn't offered is never run: its words are the answer, and a reply
 // with nothing else in it is one with no words, which the next model takes over.
 describe("a model that asks for a tool it wasn't offered", () => {

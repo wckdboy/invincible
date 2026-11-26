@@ -16,7 +16,7 @@ import { type Capabilities, isAlwaysOn } from "./capabilities.ts";
  *  - a Mac with Apple's container hosts sandboxes, each a VM of its own; what it can't make goes elsewhere
  */
 
-/** A sandbox as placement reads it: what it asks of a host, and whether it is kept (a knight's own VM, which may be given more). */
+/** A sandbox as placement reads it: what it asks of a host, and whether it is kept (an agent's own VM, which may be given more). */
 export type SandboxNeeds = SandboxAsk & { kept?: boolean };
 
 /** A Mac whose sandboxes are Apple's container's: every one a VM of its own. */
@@ -129,12 +129,12 @@ export function fleetCandidates(fleet: {
 /**
  * The host for a sandbox nobody pinned to a node: the best-ranked candidate that hosts sandboxes at all and can make
  * this one (a Mac makes no isolated sandbox, no desktop, no Lab: its `cannot`), the one with room, by what
- * each measured; when every host is full, the one with the shortest queue. A knight's own VM leans a little to a host
+ * each measured; when every host is full, the one with the shortest queue. An agent's own VM leans a little to a host
  * whose VMs grow while they run (a Mac's pause to), and its reasons say which. Null: none online can.
  */
 /**
- * Why a host doesn't make the image of Galahad's own a sandbox names, or null: what it said it makes, or, its release
- * older than saying, what every release made (a Mac's, the workshop's). An image not his is pulled where it's made.
+ * Why a host doesn't make the image of the primary's own a sandbox names, or null: what it said it makes, or, its release
+ * older than saying, what every release made (a Mac's, the workshop's). An image not its is pulled where it's made.
  */
 function unmadeImage(needs: SandboxNeeds, sandbox: NonNullable<Capabilities["sandbox"]>): string | null {
   if (!needs.image || !OWN_IMAGES[needs.image]) return null;

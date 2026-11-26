@@ -2,10 +2,10 @@ import { type ProjectGitView, redact } from "@invincible/core";
 import { LookError } from "./workspace-look.ts";
 
 /*
- * The Build view's git (docs/BUILD.md): a project's checkout on Galahad's computer (core's `projectCheckout`), as git
+ * The Build view's git (docs/BUILD.md): a project's checkout on the primary's computer (core's `projectCheckout`), as git
  * has it, and what you do to it from there: switch to or start a branch, commit what changed, clone it the first time.
  * Yours alone (the routes are owner-only). As with looking into a workspace (workspace-look.ts), each is one of these
- * fixed scripts, run in his VM with Python as its own user, its only input the folder, a branch's name, a message or the
+ * fixed scripts, run in its VM with Python as its own user, its only input the folder, a branch's name, a message or the
  * repository's address given as arguments (never in the script's text, and never through a shell); what comes back is
  * checked here, and anything git says is redacted before it leaves the node.
  */
@@ -47,11 +47,11 @@ if g('check-ref-format','--branch',name).returncode!=0:
 r=g('switch',*(['-c',name] if create else [name]))
 print(json.dumps({"ok":r.returncode==0,"said":(r.stderr or r.stdout).decode(errors='replace')[-600:]}))`;
 
-/** `python3 -c COMMIT <checkout> <message>`: everything changed or new, committed; as Galahad where the checkout has no author set. */
+/** `python3 -c COMMIT <checkout> <message>`: everything changed or new, committed; as the primary where the checkout has no author set. */
 export const COMMIT_SCRIPT = `import json,subprocess,sys
 root,message=sys.argv[1],sys.argv[2]
 g=lambda *a: subprocess.run(['git','-C',root,*a],capture_output=True,timeout=120)
-who=[] if g('config','user.email').stdout.strip() else ['-c','user.name=Galahad','-c','user.email=galahad@localhost']
+who=[] if g('config','user.email').stdout.strip() else ['-c','user.name=Invincible','-c','user.email=invincible@localhost']
 g('add','-A')
 r=g(*who,'commit','-m',message)
 print(json.dumps({"ok":r.returncode==0,"said":(r.stdout if r.returncode==0 else (r.stdout+r.stderr)).decode(errors='replace')[-600:]}))`;

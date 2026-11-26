@@ -43,7 +43,7 @@ test("never brought back: one that lapsed, or was revoked, stays so", () => {
 });
 
 /*
- * Sensitive mode's lease (a knight's, or a task's): good for its models alone, whatever its providers serve. A provider
+ * Sensitive mode's lease (an agent's, or a task's): good for its models alone, whatever its providers serve. A provider
  * that serves other vendors' models too (NEAR AI Cloud does) serves the VM only those it is held to.
  */
 const KEY = ["FAKE", "sensitive", "lease", "key"].join("-");
@@ -61,7 +61,7 @@ afterAll(async () => await upstream.stop(true));
 function gateway(models?: string[]) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   const baseUrl = `http://127.0.0.1:${upstream.port}/v1`;
   vault.set("nearai", KEY, { provider: "nearai", origin: new URL(baseUrl).origin });

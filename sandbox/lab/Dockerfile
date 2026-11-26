@@ -37,7 +37,7 @@ COPY openfoam /usr/local/bin/openfoam
 COPY websearch /usr/local/bin/websearch
 RUN chmod 0755 /usr/local/bin/lab-check /usr/local/bin/openfoam /usr/local/bin/websearch
 
-RUN useradd --uid 1000 --create-home --home-dir /home/knight --shell /bin/bash knight \
+RUN useradd --uid 1000 --create-home --home-dir /home/agent --shell /bin/bash agent \
  && mkdir -p /work && chown 1000:1000 /work
 
 # Headless plots. The root is read-only and /tmp is noexec, so caches that hold compiled

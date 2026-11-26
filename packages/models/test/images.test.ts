@@ -16,7 +16,7 @@ const PICTURE: ToolImage = { mediaType: "image/png", data: "iVBORw0KGgoFAKEPNG",
 function brain(models: string[]) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "local", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
   store.emit(identity, "provider.set", { id: "ollama", kind: "openai", baseUrl: "http://127.0.0.1:11434/v1" });
@@ -121,9 +121,9 @@ describe("pictures in tool results", () => {
 });
 
 describe("pictures you attach to a message", () => {
-  const SHOT: ToolImage = { mediaType: "image/jpeg", data: "/9j/FAKEJPEG", alt: "screenshot.jpg, attached by your liege" };
-  const LATER: ToolImage = { mediaType: "image/gif", data: "R0lGODlhFAKEGIF", alt: "spinner.gif, attached by your liege" };
-  // Your earlier message carried a picture, his answer came, and your new one carries another with no words.
+  const SHOT: ToolImage = { mediaType: "image/jpeg", data: "/9j/FAKEJPEG", alt: "screenshot.jpg, attached by the owner" };
+  const LATER: ToolImage = { mediaType: "image/gif", data: "R0lGODlhFAKEGIF", alt: "spinner.gif, attached by the owner" };
+  // Your earlier message carried a picture, its answer came, and your new one carries another with no words.
   const told = [
     { role: "user" as const, content: "Why does this fail?", images: [SHOT] },
     { role: "assistant" as const, content: "The test can't reach the database." },
@@ -153,8 +153,8 @@ describe("pictures you attach to a message", () => {
     const model = scripted([say("I can't see it.")]);
     await collect(chat({ ...brain(["local/m"]), fetch: model.fetch }, { messages: told }));
     const [, first, , last] = model.bodies[0].messages;
-    expect(first).toEqual({ role: "user", content: "Why does this fail?\n\n[A picture is attached here (screenshot.jpg, attached by your liege), but this model can't see pictures.]" });
-    expect(last.content).toBe("[A picture is attached here (spinner.gif, attached by your liege), but this model can't see pictures.]");
+    expect(first).toEqual({ role: "user", content: "Why does this fail?\n\n[A picture is attached here (screenshot.jpg, attached by the owner), but this model can't see pictures.]" });
+    expect(last.content).toBe("[A picture is attached here (spinner.gif, attached by the owner), but this model can't see pictures.]");
     expect(JSON.stringify(model.bodies[0])).not.toContain(SHOT.data);
   });
 });

@@ -3,7 +3,7 @@ import type { AgentDriver, AgentEvent } from "./agents.ts";
 import { ENGRAM_ENV, engramArgv } from "./engram.ts";
 
 /*
- * The Agent Client Protocol (ACP, protocol 1), Galahad's side of it: a client that runs INSIDE the knight's VM, on the
+ * The Agent Client Protocol (ACP, protocol 1), the primary's side of it: a client that runs INSIDE the agent's VM, on the
  * standard library alone, starts an agent that speaks ACP on stdio, opens or loads its session, gives it the task's
  * message and follows what it does. No host tool, owner configuration, provider key or arm token is in it. Hermes is
  * one such agent (hermes.ts); acpDriver is any other you name (Gemini CLI, Goose, OpenCode's own ACP server, an
@@ -42,19 +42,19 @@ def gateway_environment(path, agent):
     values = {k: os.environ.get(k, "") for k in ("OPENAI_API_KEY", "INVINCIBLE_GATEWAY")}
     if path.exists():
         if path.stat().st_size > 16384:
-            raise RuntimeError("Galahad gateway environment file is too large")
+            raise RuntimeError("Invincible gateway environment file is too large")
         try:
             fresh = json.loads(path.read_text())
         except (ValueError, OSError):
-            raise RuntimeError("Galahad gateway environment file is invalid") from None
+            raise RuntimeError("Invincible gateway environment file is invalid") from None
         if not isinstance(fresh, dict) or any(not isinstance(fresh.get(k), str) or not fresh[k] for k in values):
-            raise RuntimeError("Galahad gateway environment file is incomplete")
+            raise RuntimeError("Invincible gateway environment file is incomplete")
         values.update({k: fresh[k] for k in values})
     if not all(values.values()):
-        raise RuntimeError(agent + " needs this workspace's Galahad gateway endpoint and token")
+        raise RuntimeError(agent + " needs this workspace's Invincible gateway endpoint and token")
     url = urlsplit(values["INVINCIBLE_GATEWAY"])
     if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password or url.query or url.fragment:
-        raise RuntimeError("Galahad gateway endpoint is invalid")
+        raise RuntimeError("Invincible gateway endpoint is invalid")
     return values
 
 class Client:
@@ -102,7 +102,7 @@ class Client:
             if method == "session/request_permission":
                 self.send({"jsonrpc": "2.0", "id": message["id"], "result": self.permission(params)})
             else:
-                self.send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "Galahad exposes no client resources"}})
+                self.send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32601, "message": "Invincible exposes no client resources"}})
             return
         # session/load replays history before its response: never count replayed work.
         if method != "session/update" or not self.active or params.get("sessionId") != self.session:
@@ -173,7 +173,7 @@ class Client:
         for sig in (signal.SIGTERM, signal.SIGINT):
             signal.signal(sig, self.cancel)
         initialized = self.request("initialize", {"protocolVersion": 1, "clientCapabilities": {},
-                                   "clientInfo": {"name": "galahad", "version": "1"}}, timeout)
+                                   "clientInfo": {"name": "invincible", "version": "1"}}, timeout)
         if not isinstance(initialized, dict) or initialized.get("protocolVersion") != 1:
             raise RuntimeError(self.agent + " ACP protocol version 1 is required")
         return initialized
@@ -224,11 +224,11 @@ if __name__ == "__main__":
 `;
 
 /**
- * Any agent you name: the command that starts it in its ACP mode, run in the knight's VM as you set it up there (its
- * own sign-in or its own configuration, in the VM's HOME). The model of the knight's role is offered to it two ways:
+ * Any agent you name: the command that starts it in its ACP mode, run in the agent's VM as you set it up there (its
+ * own sign-in or its own configuration, in the VM's HOME). The model of the agent's role is offered to it two ways:
  * the gateway's address and token in the variables most agents read (OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_MODEL), and by name
  * where it lists the models it can run on (session/set_model). A session it can load again is kept for the next run.
- * No tool budget and no time limit of the bridge's own: a knight is audited, not capped, and the run's deadline and
+ * No tool budget and no time limit of the bridge's own: an agent is audited, not capped, and the run's deadline and
  * you stop it.
  */
 const GENERIC = String.raw`
@@ -356,7 +356,7 @@ try:
 except (FileNotFoundError, PermissionError):
     sys.exit(argv[0] + " isn't installed in this VM")
 try:
-    p.stdin.write((json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1, "clientCapabilities": {}, "clientInfo": {"name": "galahad", "version": "1"}}}) + "\n").encode())
+    p.stdin.write((json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1, "clientCapabilities": {}, "clientInfo": {"name": "invincible", "version": "1"}}}) + "\n").encode())
     p.stdin.flush()
     end, buf = time.monotonic() + 20, b""
     while time.monotonic() < end:

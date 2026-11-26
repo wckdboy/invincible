@@ -255,7 +255,7 @@ function orderForm(options: {
   const days = daysControl(sync);
 
   let only = true;
-  const callersInput = h("input", { class: "input mono", type: "text", autocomplete: "off", autocorrect: "off", spellcheck: "false", autocapitalize: "off", placeholder: "Any of Galahad's agents" });
+  const callersInput = h("input", { class: "input mono", type: "text", autocomplete: "off", autocorrect: "off", spellcheck: "false", autocapitalize: "off", placeholder: "Any of your agents" });
   callersInput.addEventListener("input", sync);
   const who = (): { callers: string[] | null } | { problem: string } =>
     options.who.kind === "only" ? { callers: only ? [options.who.caller] : null } : parseCallers(callersInput.value);
@@ -268,10 +268,10 @@ function orderForm(options: {
             only = checked;
             sync();
           },
-          { hint: "Off: any of Galahad's agents and loops may use it." },
+          { hint: "Off: any of your agents and loops may use it." },
         )
       : field("Who may use it", callersInput, {
-          hint: "Agent names such as claude-code, or loop.<name> for a loop, separated by commas; * matches any run of characters. Empty: any of Galahad's agents.",
+          hint: "Agent names such as claude-code, or loop.<name> for a loop, separated by commas; * matches any run of characters. Empty: any of your agents.",
         });
 
   const label = h("input", { class: "input", type: "text", autocomplete: "off", maxlength: MAX_LABEL, value: options.label });

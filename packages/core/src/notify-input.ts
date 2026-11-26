@@ -51,7 +51,7 @@ export type ApplePushKeyInput = z.infer<typeof ApplePushKeyInput>;
 
 const Clock = z.string().regex(CLOCK, "a time of day, HH:MM");
 
-/** What he sends and when he stays silent: any part of it; what's left out stays as it is. Every kind is a switch (a test
+/** What it sends and when it stays silent: any part of it; what's left out stays as it is. Every kind is a switch (a test
  * holds this list to NOTIFY_KINDS: `told` was once left out, and the node refused the switch its apps offered), and so
  * is the day's digest. */
 export const NotifyPrefsInput = z.strictObject({

@@ -3,10 +3,10 @@ import { type ClientCall, type ExecResult, redact } from "@invincible/core";
 import type { ToolSpec } from "./adapters.ts";
 
 /*
- * The engineer's own tools (QuestOptions.tools): a shell, and a file's reading, editing and writing, called as tools and
+ * The engineer's own tools (RunOptions.tools): a shell, and a file's reading, editing and writing, called as tools and
  * several in a turn, as the coding agents that do best work (OpenCode, Claude Code, Codex), in place of one shell
- * command a reply. Each runs in the quest's sandbox through the one thing a quest has there, a shell command
- * (QuestDeps.exec), and each is said as a shell command: what your tripwires, checks and tells are matched against, and
+ * command a reply. Each runs in the run's sandbox through the one thing a run has there, a shell command
+ * (RunDeps.exec), and each is said as a shell command: what your tripwires, checks and tells are matched against, and
  * what the reviewer reads. A file goes in and out as base64, so its bytes are never read as anything else.
  */
 
@@ -67,7 +67,7 @@ export const ENGINEER_TOOLS: ToolSpec[] = [
   },
 ];
 
-/** A call as the quest runs it: said as a command (for your rules and the trail), and run in the sandbox. */
+/** A call as the run runs it: said as a command (for your rules and the trail), and run in the sandbox. */
 export interface EngineerStep {
   said: string;
   /** Runs it: what the sandbox said (its exit code above all) and what the engineer is told of it, redacted. */
@@ -213,7 +213,7 @@ function readTold(path: string, from: number, result: ExecResult): string {
  * overwritten. Over CHUNK_BYTES, the bytes go in several commands.
  */
 async function putFile(exec: Exec, timeoutSec: number, path: string, bytes: Buffer, unchanged: string | null): Promise<ExecResult> {
-  const at = `f=${quote(path)}; t="$f.galahad-new"`;
+  const at = `f=${quote(path)}; t="$f.invincible-new"`;
   const guard = unchanged ? `[ "$(sha256sum < "$f" | cut -c1-64)" = '${unchanged}' ] || { echo "It changed while it was being edited: read it again." >&2; exit 1; }; ` : "";
   const place = 'cat "$t" > "$f"; s=$?; rm -f "$t"; exit $s';
   if (bytes.length <= CHUNK_BYTES) return await safely(exec, `${at}; ${guard}mkdir -p "$(dirname "$f")" && printf %s '${bytes.toString("base64")}' | base64 -d > "$t" && ${place}`, timeoutSec);

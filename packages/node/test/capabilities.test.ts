@@ -17,7 +17,7 @@ describe("the local runtimes a node looks for", () => {
 /*
  * The node looks at its own body every five minutes, on a timer. Bun ends the process
  * on an unhandled rejection, so a refresh that fails must be a line in the log, never
- * the end of the node (and of every chat, quest and loop it was running).
+ * the end of the node (and of every chat, run and loop it was running).
  */
 describe("a capability refresh that fails", () => {
   const caps = { os: "linux", hasBattery: false } as Capabilities;

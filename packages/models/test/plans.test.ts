@@ -6,10 +6,10 @@ import { chat, chooseAgentModels, decide, detectProvider, embed, eyesOf, Gateway
 
 /*
  * Coding plans and sign-ins. A coding plan is a subscription whose key is for coding (its terms
- * say so), not for calling the API from any program for anything. Galahad and the knights are
- * a coding tool: he calls a plan himself for coding work, under his own name; he lends it to the
- * other coding tools in the knights' VMs through the gateway, each calling as itself; and nothing
- * else he does (his talk with you, his loops, embeddings, decisions) is handed its key. A
+ * say so), not for calling the API from any program for anything. The primary and the agents are
+ * a coding tool: it calls a plan itself for coding work, under its own name; it lends it to the
+ * other coding tools in the agents' VMs through the gateway, each calling as itself; and nothing
+ * else it does (its talk with you, its loops, embeddings, decisions) is handed its key. A
  * subscription's sign-in is not a key at all, and is never sent to an API from here.
  */
 
@@ -20,7 +20,7 @@ const GO_KEY = "sk-FAKE-opencode-go-key-for-tests-0000";
 function mind(roster: Record<string, string[]>) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   const plan = preset("zai-coding")!;
   vault.set("zai-coding", PLAN_KEY, { provider: "zai-coding", origin: originOf(plan.baseUrl)! });
@@ -92,7 +92,7 @@ describe("a model the owner wants on no role is offered for none (gpt-6-luna, 16
     expect(offersModel("own/anything")).toBe(true);
   });
 
-  test("a knight's eyes are chosen by evidence only among the models he offers; a model named for the role is yours, and stands", () => {
+  test("an agent's eyes are chosen by evidence only among the models it offers; a model named for the role is yours, and stands", () => {
     const sees = (meanErrorPx: number) => ({ at: 1, reads: { ok: true, said: "x" }, places: { targets: 8, landed: 8, meanErrorPx } });
     const checks = [{ ref: "opencode-go/gpt-6-luna", check: sees(1) }, { ref: "opencode-go/glm-5.3", check: sees(9) }];
     expect(eyesOf([], checks, () => true)).toBe("opencode-go/glm-5.3");
@@ -101,21 +101,21 @@ describe("a model the owner wants on no role is offered for none (gpt-6-luna, 16
   });
 });
 
-describe("coding is what a coding plan is for: he codes on it himself, as himself", () => {
-  test("a quest's or a knight's work goes to the plan first, in the roster's order, under his own name", async () => {
+describe("coding is what a coding plan is for: it codes on it itself, as itself", () => {
+  test("a run's or an agent's work goes to the plan first, in the roster's order, under its own name", async () => {
     const { seen, fetch } = recorded();
     const events = await all(chat({ ...mind({ engineer: ["opencode-go/glm-5.3", "own/m"] }), fetch }, { role: "engineer", messages: ask, coding: true }));
     expect(events.map((e) => e.type)).toEqual(["model", "text", "done"]);
     expect(events[0]).toEqual({ type: "model", ref: "opencode-go/glm-5.3" });
     expect(seen.map((s) => s.url)).toEqual(["https://opencode.ai/inference/go/openai/v1/chat/completions"]);
     expect(seen[0]!.headers.get("authorization")).toBe(`Bearer ${GO_KEY}`);
-    // He says who he is: his own name, and no other tool's.
+    // It says who it is: its own name, and no other tool's.
     const agent = seen[0]!.headers.get("user-agent") ?? "";
-    expect(agent).toMatch(/^Galahad\b/);
+    expect(agent).toMatch(/^Invincible\b/);
     expect(agent).not.toMatch(/opencode|claude|codex|kimi|cline|roo|cursor|hermes/i);
   });
 
-  test("a model of his own is called as it always was: he names himself only to a plan", async () => {
+  test("a model of its own is called as it always was: it names itself only to a plan", async () => {
     const { seen, fetch } = recorded();
     await all(chat({ ...mind({ engineer: ["own/m"] }), fetch }, { role: "engineer", messages: ask, coding: true }));
     expect(seen[0]!.headers.has("user-agent")).toBe(false);
@@ -130,13 +130,13 @@ describe("coding is what a coding plan is for: he codes on it himself, as himsel
 });
 
 describe("each plan is held to what its own vendor's terms allow (read 16 November 2026)", () => {
-  test("what each allows: his own coding calls only where the vendor's words permit a coding agent's own calls; a tool's unattended use only where it isn't forbidden", () => {
+  test("what each allows: its own coding calls only where the vendor's words permit a coding agent's own calls; a tool's unattended use only where it isn't forbidden", () => {
     expect(Object.fromEntries(PRESETS.filter((p) => p.plan).map((p) => [p.id, p.plan!.allows]))).toEqual({
       // "designed for OpenCode and other coding agents", calling as themselves.
       "opencode-go": { native: true, tools: "unattended" },
       // Not "directly invoking model APIs from your own applications": only inside the coding tools it names.
       "zai-coding": { native: false, tools: "unattended" },
-      // "for interactive use only": a tool you run yourself, never a knight's or a quest's unattended work.
+      // "for interactive use only": a tool you run yourself, never an agent's or a run's unattended work.
       "kimi-coding": { native: false, tools: "interactive" },
       "alibaba-coding": { native: false, tools: "interactive" },
       "alibaba-token": { native: false, tools: "interactive" },
@@ -145,7 +145,7 @@ describe("each plan is held to what its own vendor's terms allow (read 16 Novemb
       // "designed for individual, interactive developer use": read as interactive, the stricter way, until it says otherwise.
       "minimax-mplan": { native: false, tools: "interactive" },
       // Only in programming tools, "such as OpenClaw, OpenCode, etc.", never "automated scripts": a coding tool in a
-      // knight's VM, but not his own calls, which no list of theirs names.
+      // agent's VM, but not its own calls, which no list of theirs names.
       "mimo-token": { native: false, tools: "unattended" },
       // Only inside the AI coding tools they name ("Not available for API calls"), with no rule that a person must be there.
       "volcengine-coding": { native: false, tools: "unattended" },
@@ -154,7 +154,7 @@ describe("each plan is held to what its own vendor's terms allow (read 16 Novemb
     });
   });
 
-  test("a plan whose terms forbid his own calls is never handed to them: his coding passes it over, saying why, and the next model answers", async () => {
+  test("a plan whose terms forbid its own calls is never handed to them: its coding passes it over, saying why, and the next model answers", async () => {
     const { seen, fetch } = recorded();
     const events = await all(chat({ ...mind({ engineer: ["zai-coding/glm-5.3", "own/m"] }), fetch }, { role: "engineer", messages: ask, coding: true }));
     expect(events.find((e) => e.type === "fallback")).toEqual({ type: "fallback", from: "zai-coding/glm-5.3", error: expect.stringContaining("its vendor's terms allow it only inside the coding tools they name") });
@@ -165,49 +165,49 @@ describe("each plan is held to what its own vendor's terms allow (read 16 Novemb
     expect(resolveProvider(store, vault, "zai-coding", "tool")!.apiKey).toBe(PLAN_KEY);
   });
 
-  test("a plan for interactive use only is lent to a tool you run yourself, never to a knight's VM or a quest's sandbox", async () => {
+  test("a plan for interactive use only is lent to a tool you run yourself, never to an agent's VM or a run's sandbox", async () => {
     const { store, vault } = mind({});
     const tokens = new GatewayTokens(new Database(":memory:"));
     const { seen, fetch } = recorded();
     const call = (token: string) => handleGateway(new Request("http://gw/gw/kimi-coding/chat/completions", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" }), { store, vault, tokens, fetch });
     const yours = tokens.mint({ label: "run:claude", providers: ["kimi-coding"], ttlMinutes: 10, maxRequests: 5 }).token;
-    const knights = tokens.mint({ label: "sandbox:0123456789", providers: ["kimi-coding"], ttlMinutes: 10, maxRequests: 5 }).token;
+    const agents = tokens.mint({ label: "sandbox:0123456789", providers: ["kimi-coding"], ttlMinutes: 10, maxRequests: 5 }).token;
     expect((await call(yours)).status).toBe(200);
-    const refused = await call(knights);
+    const refused = await call(agents);
     expect(refused.status).toBe(403);
     expect(await refused.text()).toContain("for interactive use only");
     expect(seen).toHaveLength(1);
-    // Nor is it chosen for a knight's coding tool to run on.
+    // Nor is it chosen for an agent's coding tool to run on.
     expect(chooseAgentModels(["kimi-coding/kimi-for-coding", "own/m"], [{ id: "kimi-coding", kind: "openai", hasKey: true }, { id: "own", kind: "openai", hasKey: true }])).toEqual([{ provider: "own", model: "m" }]);
   });
 });
 
 describe("a plan that routes a conversation by its session is told which conversation this is", () => {
   const SESSION = "x-opencode-session";
-  const quest = [{ role: "user" as const, content: "Quest: fix the report" }];
+  const run = [{ role: "user" as const, content: "Run: fix the report" }];
 
-  test("OpenCode Go refuses a call without one: each conversation of his has a session, the same through its turns and another for another conversation", async () => {
+  test("OpenCode Go refuses a call without one: each conversation of its has a session, the same through its turns and another for another conversation", async () => {
     const { seen, fetch } = recorded();
     const ctx = { ...mind({ engineer: ["opencode-go/glm-5.3", "opencode-go/kimi-k3.1-pro"] }), fetch };
-    await all(chat(ctx, { role: "engineer", messages: quest, coding: true }));
+    await all(chat(ctx, { role: "engineer", messages: run, coding: true }));
     // The same conversation a turn later: what followed is added, and its beginning is as it was.
-    await all(chat(ctx, { role: "engineer", messages: [...quest, { role: "assistant", content: "```sh\nls\n```" }, { role: "user", content: "exit 0 · 3 ms\nREADME.md" }], coding: true }));
-    await all(chat(ctx, { role: "engineer", messages: [{ role: "user", content: "Quest: another one" }], coding: true }));
-    // Another model on the same quest is another conversation.
-    await all(chat(ctx, { role: "engineer", model: "opencode-go/kimi-k3.1-pro", messages: quest, coding: true }));
+    await all(chat(ctx, { role: "engineer", messages: [...run, { role: "assistant", content: "```sh\nls\n```" }, { role: "user", content: "exit 0 · 3 ms\nREADME.md" }], coding: true }));
+    await all(chat(ctx, { role: "engineer", messages: [{ role: "user", content: "Run: another one" }], coding: true }));
+    // Another model on the same run is another conversation.
+    await all(chat(ctx, { role: "engineer", model: "opencode-go/kimi-k3.1-pro", messages: run, coding: true }));
     const sessions = seen.map((s) => s.headers.get(SESSION));
     expect(sessions[0]).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
     expect(sessions[1]).toBe(sessions[0]);
     expect(sessions[2]).not.toBe(sessions[0]);
     expect(sessions[3]).not.toBe(sessions[0]);
     // An id, and nothing of what was asked or of the key.
-    expect(sessions.join(" ")).not.toMatch(/Quest|report|FAKE/);
-    expect(seen.every((s) => s.headers.get("user-agent")?.startsWith("Galahad"))).toBe(true);
+    expect(sessions.join(" ")).not.toMatch(/Run|report|FAKE/);
+    expect(seen.every((s) => s.headers.get("user-agent")?.startsWith("Invincible"))).toBe(true);
   });
 
-  test("no other provider is sent it: a plan that names no such header, or a model of his own", async () => {
+  test("no other provider is sent it: a plan that names no such header, or a model of its own", async () => {
     const { seen, fetch } = recorded();
-    await all(chat({ ...mind({ engineer: ["own/m"] }), fetch }, { role: "engineer", messages: quest, coding: true }));
+    await all(chat({ ...mind({ engineer: ["own/m"] }), fetch }, { role: "engineer", messages: run, coding: true }));
     expect(seen.map((s) => s.headers.has(SESSION))).toEqual([false]);
   });
 
@@ -244,7 +244,7 @@ describe("a plan whose allowance is spent says so", () => {
     const events = await all(chat({ ...mind({ engineer: ["own/m"] }), fetch: spentFetch }, { role: "reviewer", model: "opencode-go/kimi-k3.1-pro", messages: ask, coding: true }));
     const error = events.find((e) => e.type === "error") as { type: "error"; error: string };
     expect(error.error).toContain("no model in the roster could answer");
-    // Why, for each model that was asked: a trial that crashes on this says what to do about it, not only that it crashed.
+    // Why, for each model that was asked: an eval that crashes on this says what to do about it, not only that it crashed.
     expect(error.error).toContain("opencode-go/kimi-k3.1-pro");
     expect(error.error).toContain("usage limit reached (5-hour, resets in 1h 37m)");
     expect(error.error.length).toBeLessThan(900);
@@ -260,15 +260,15 @@ describe("a plan whose allowance is spent says so", () => {
   test("a node with no provider set up at all says what to do once, not once a model", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "fresh" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "fresh" });
     const events = await all(chat({ store, vault: new Vault(store, identity), fetch: spentFetch }, { messages: ask }));
     const error = events.find((e) => e.type === "error") as { type: "error"; error: string };
     expect(error.error).toBe("no model can answer yet: none of deepseek, zai, mistral, anthropic, openrouter, orcarouter, openai, xai is set up here. Add a key for one of them (invincible key add), or hire a model you have a key for (invincible roster set <role> <provider/model>)");
   });
 });
 
-describe("outside coding he never answers with a coding plan", () => {
-  test("a role with a plan's model and one of his own: he answers with his own, and nothing is sent to the plan", async () => {
+describe("outside coding it never answers with a coding plan", () => {
+  test("a role with a plan's model and one of its own: it answers with its own, and nothing is sent to the plan", async () => {
     const { seen, fetch } = recorded();
     const events = await all(chat({ ...mind({ planner: ["zai-coding/glm-5.3", "own/m"] }), fetch }, { messages: ask }));
     expect(events.map((e) => e.type)).toEqual(["model", "text", "done"]);
@@ -277,7 +277,7 @@ describe("outside coding he never answers with a coding plan", () => {
     expect(seen.some((s) => [...s.headers.values()].some((v) => v.includes(PLAN_KEY)))).toBe(false);
   });
 
-  test("a role with nothing but a plan's model says why he can't answer, and still sends nothing", async () => {
+  test("a role with nothing but a plan's model says why it can't answer, and still sends nothing", async () => {
     const { seen, fetch } = recorded();
     const events = await all(chat({ ...mind({ planner: ["zai-coding/glm-5.3"] }), fetch }, { messages: ask }));
     expect(events.map((e) => e.type)).toEqual(["error"]);
@@ -287,7 +287,7 @@ describe("outside coding he never answers with a coding plan", () => {
     expect(seen).toEqual([]);
   });
 
-  test("held to a plan's model by name (a trial's pin, a chat's choice), the same", async () => {
+  test("held to a plan's model by name (an eval's pin, a chat's choice), the same", async () => {
     const { seen, fetch } = recorded();
     const events = await all(chat({ ...mind({ planner: ["own/m"] }), fetch }, { messages: ask, model: "zai-coding/glm-5.3" }));
     expect(events.map((e) => e.type)).toEqual(["error"]);
@@ -302,14 +302,14 @@ describe("outside coding he never answers with a coding plan", () => {
     expect(seen.map((s) => new URL(s.url).origin)).toEqual(["https://models.example.test"]);
   });
 
-  test("nothing he does himself is handed a plan's key: it is given to a tool, through the gateway, and to nothing else", async () => {
+  test("nothing it does itself is handed a plan's key: it is given to a tool, through the gateway, and to nothing else", async () => {
     const { store, vault } = mind({ embedder: ["zai-coding/embedding-3"], decider: ["zai-coding/glm-5.3"] });
     expect(resolveProvider(store, vault, "zai-coding")).toMatchObject({ id: "zai-coding", apiKey: null });
     expect(resolveProvider(store, vault, "zai-coding", "tool")!.apiKey).toBe(PLAN_KEY);
-    // His own coding calls get a plan's key only where its terms allow them (OpenCode Go's do; Z.ai's don't).
+    // Its own coding calls get a plan's key only where its terms allow them (OpenCode Go's do; Z.ai's don't).
     expect(resolveProvider(store, vault, "zai-coding", "coding")!.apiKey).toBeNull();
     expect(resolveProvider(store, vault, "opencode-go", "coding")!.apiKey).toBe(GO_KEY);
-    // A provider of his own is his to call, as ever.
+    // A provider of its own is its to call, as ever.
     expect(resolveProvider(store, vault, "own")!.apiKey).toBe(OWN_KEY);
     const { seen, fetch } = recorded();
     await expect(embed({ store, vault, fetch }, ["a line"], { as: "query" })).rejects.toThrow(/coding plan/);
@@ -318,7 +318,7 @@ describe("outside coding he never answers with a coding plan", () => {
   });
 });
 
-describe("a coding plan serves the coding tools in the knights' VMs", () => {
+describe("a coding plan serves the coding tools in the agents' VMs", () => {
   test("the harness's models are the engineer's, plans among them, in the roster's order", () => {
     const providers = [
       { id: "zai-coding", kind: "openai", hasKey: true },

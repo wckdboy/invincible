@@ -10,10 +10,10 @@ import type { OrbLevel } from "./orb.ts";
  * at the front), the nearer ones larger, lighter and more opaque. Each glyph changes, now and then, on a slow beat of its
  * own, fading a little as it does; and once in a while a few become data (a hex digit), more often while it works. Its
  * handle makes it its own: how far it leans, which way it turns, where it starts, which points are its second colour,
- * and which glyphs it shows when. Its colours are core's knightColors for a knight, and his state's for Galahad
+ * and which glyphs it shows when. Its colours are core's agentColors for an agent, and its state's for the primary
  * (lib/orb.ts). Pure: everything in the orb's square, 200 wide and centred on its middle (y down).
  *
- * The PWA no longer draws it (26 November 2026: every orb is Galahad's field, lib/field-orb.ts; the owner's word on the
+ * The PWA no longer draws it (26 November 2026: every orb is the primary's field, lib/field-orb.ts; the owner's word on the
  * glyph spheres was "almost like nipples"). The Apple and Android apps still do, held to these by the vectors
  * (apps/apple/scripts/vectors.ts), until they port the field (PLAN #60); then it goes.
  */
@@ -45,8 +45,8 @@ export interface SphereLook {
   nucleus: number;
 }
 
-/** A knight's face's sphere, at each size. */
-export const KNIGHT_SPHERE: Readonly<Record<OrbLevel, SphereLook>> = {
+/** An agent's face's sphere, at each size. */
+export const AGENT_SPHERE: Readonly<Record<OrbLevel, SphereLook>> = {
   badge: { count: 30, glyph: 32, r: 74, nucleus: 24 },
   seat: { count: 72, glyph: 24, r: 72, nucleus: 20 },
   full: { count: 150, glyph: 16, r: 68, nucleus: 17 },
@@ -169,10 +169,10 @@ export function paperShades(ink: string, deep: string): string[] {
   return [blendHex(ink, "#ffffff", 0.6), blendHex(ink, "#ffffff", 0.4), blendHex(ink, "#ffffff", 0.18), ink, blendHex(ink, deep, 0.3), blendHex(ink, deep, 0.55)];
 }
 
-/** One of a knight's own arcs round its face (Jarvis's rings, each knight's its own): its radius and width, where it
+/** One of an agent's own arcs round its face (Jarvis's rings, each agent's its own): its radius and width, where it
  * starts and how long it is (degrees), and how fast it turns against its ring's turning: once or twice as fast, either
  * way, a whole number so that where the ring comes round to 0 the arc goes on smoothly. */
-export interface KnightArc {
+export interface AgentArc {
   r: number;
   width: number;
   from: number;
@@ -180,8 +180,8 @@ export interface KnightArc {
   speed: number;
 }
 
-/** A knight's arcs at a size: one or two, of lengths and paces its handle gives it; none on a small face. */
-export function knightArcs(sphere: OrbSphere, level: OrbLevel): KnightArc[] {
+/** An agent's arcs at a size: one or two, of lengths and paces its handle gives it; none on a small face. */
+export function agentArcs(sphere: OrbSphere, level: OrbLevel): AgentArc[] {
   if (level === "badge") return [];
   const count = 1 + Math.floor(2 * orbRand(sphere.seed, 0, 40));
   return Array.from({ length: count }, (_, k) => ({
@@ -193,7 +193,7 @@ export function knightArcs(sphere: OrbSphere, level: OrbLevel): KnightArc[] {
   }));
 }
 
-/** One place of Galahad's data ring at `t`: whether it is lit (about `share` of them are, by his handle), its hex digit,
+/** One place of the primary's data ring at `t`: whether it is lit (about `share` of them are, by its handle), its hex digit,
  * changing on a slow beat of its own (2.5 to 7 seconds), and how bright it is (0.45 to 0.85). */
 export function dataGlyph(seed: number, k: number, t: number, share: number): { char: string; alpha: number } | null {
   if (orbRand(seed, k, 50) >= share) return null;

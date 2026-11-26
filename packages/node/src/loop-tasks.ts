@@ -11,17 +11,17 @@ import { CODING_ROLES, TOOL_ROLES } from "./doctor.ts";
 import { assess, checklistPrompt, diskOf, type Finding, type HeartbeatSnapshot, readChecklistReply, reconcile } from "./heartbeat.ts";
 import { hlcMs, loopRecords, type RunContext, type RunnableLoop, type RunResult, selfActionOn } from "./loops.ts";
 import { selfAct, type SelfActionOutcome, type SelfSnapshot } from "./self-action.ts";
-import { type NodeClient, runNodeQuest } from "./quest-cli.ts";
-import { learnedLines } from "./skills-quest.ts";
+import { type NodeClient, runOnNode } from "./run-cli.ts";
+import { learnedLines } from "./skills-run.ts";
 import { streamedError } from "./server.ts";
 import { wokenData } from "./wakes.ts";
 
-/** A quest's goal is at most this long (core's LoopTask), what woke its run included. */
-const QUEST_GOAL_CHARS = 4000;
+/** A run's goal is at most this long (core's LoopTask), what woke its run included. */
+const RUN_GOAL_CHARS = 4000;
 
 /*
- * What each kind of loop does when it runs. A loop acts as Galahad on his own,
- * never as you: a quest loop works through a short-lived arm token (its sandboxes
+ * What each kind of loop does when it runs. A loop acts as the primary on its own,
+ * never as you: a run loop works through a short-lived arm token (its sandboxes
  * are its own and ephemeral, and it can't touch the vault, devices or the roster),
  * and a connector call from a loop is an agent's call, so anything outward asks you.
  */
@@ -47,13 +47,13 @@ export interface LoopTaskDeps {
   runLoop?: (name: string) => void;
   /** Whether one of this node's loops is running now. */
   isRunning?: (name: string) => boolean;
-  /** This node's compute: its calibration and the fleet's plan (self-action), what he'd suggest (the heartbeat). */
+  /** This node's compute: its calibration and the fleet's plan (self-action), what it'd suggest (the heartbeat). */
   compute?: ComputeService;
-  /** His skills (skills.ts; set by the daemon): the tidy-up that goes with the heartbeat. */
+  /** Its skills (skills.ts; set by the daemon): the tidy-up that goes with the heartbeat. */
   skills?: { tidy(mark?: boolean): { stale: number; merges: number } };
   /** What a quick look by the doctor finds that the heartbeat doesn't check itself (doctor.ts; set by the daemon). */
   doctor?: () => Promise<{ key: string; severity: Finding["severity"]; title: string; body: string }[]>;
-  /** Told of each model call his upkeep makes here, for this node's count of them (usage.ts; set by the daemon). */
+  /** Told of each model call its upkeep makes here, for this node's count of them (usage.ts; set by the daemon). */
   spent?: (call: { role: string; ref: string; usage: Usage | null }) => void;
 }
 
@@ -111,8 +111,8 @@ function roleUsable(deps: LoopTaskDeps, models: string[]): boolean {
 }
 
 /**
- * Whether anyone can play a role, for what it does (the doctor's rule): his own words need a model of his own, while a
- * coding plan the knights' tools may use can play a role that is all coding (the engineer, the reviewer) or a VM's
+ * Whether anyone can play a role, for what it does (the doctor's rule): its own words need a model of its own, while a
+ * coding plan the agents' tools may use can play a role that is all coding (the engineer, the reviewer) or a VM's
  * eyes, which only its tools ask, and only when its terms let a VM's tools use it unattended.
  */
 function rolePlayable(deps: LoopTaskDeps, role: string, models: string[], custom = false): boolean {
@@ -122,7 +122,7 @@ function rolePlayable(deps: LoopTaskDeps, role: string, models: string[], custom
 
 /**
  * Whether a coding plan's terms let it play a role at all, keyed here or not: one that is all coding (a role you made
- * among them: only knights work on it, and their conversations and tasks are coding work, as the doctor reads it), or a
+ * among them: only agents work on it, and their conversations and tasks are coding work, as the doctor reads it), or a
  * VM's eyes when its tools may use it unattended.
  */
 function planMayPlay(role: string, ref: string, custom = false): boolean {
@@ -131,10 +131,10 @@ function planMayPlay(role: string, ref: string, custom = false): boolean {
   return TOOL_ROLES.has(role) && planOf(ref.slice(0, ref.indexOf("/")))?.allows.tools === "unattended";
 }
 
-/** The roles his background writing tries, cheapest first. */
+/** The roles its background writing tries, cheapest first. */
 const CHEAPEST_FIRST = ["swift", "reviewer", "planner", "engineer"] as const;
 
-/** The cheapest role with a usable model, or null: what his background writing runs on. */
+/** The cheapest role with a usable model, or null: what its background writing runs on. */
 export function cheapestRole(deps: LoopTaskDeps): string | null {
   const models = roster(deps.store);
   return CHEAPEST_FIRST.find((role) => models[role] && roleUsable(deps, models[role]!.models)) ?? null;
@@ -219,7 +219,7 @@ function quietly<T>(deps: LoopTaskDeps, what: string, read: () => T): T | null {
   }
 }
 
-/** Compute, as the heartbeat sees it: nodes that should have measured themselves by now, and what he'd suggest. */
+/** Compute, as the heartbeat sees it: nodes that should have measured themselves by now, and what it'd suggest. */
 function computeOf(deps: LoopTaskDeps, now: number): HeartbeatSnapshot["compute"] {
   return quietly(deps, "compute (heartbeat)", () => {
     const nodes = deps.compute!.nodes();
@@ -232,7 +232,7 @@ function computeOf(deps: LoopTaskDeps, now: number): HeartbeatSnapshot["compute"
   });
 }
 
-/** Recent activity for the checklist model: what Galahad did, as data. */
+/** Recent activity for the checklist model: what the primary did, as data. */
 function recentActivity(store: LedgerStore): string {
   const ledger = store.ledger(8).map((e) => `- ${e.body.class} ${e.body.resource} ${e.body.target}: ${e.body.verdict}`);
   const runs = store
@@ -255,7 +255,7 @@ async function askSwift(deps: LoopTaskDeps, prompt: string, signal: AbortSignal)
 export async function beat(deps: LoopTaskDeps, checklist: string | undefined, signal: AbortSignal, selfAction = true): Promise<RunResult & { findings: Finding[]; fixed: SelfActionOutcome[] }> {
   const now = (deps.now ?? Date.now)();
   let findings = await lookAround(deps);
-  // What's on the allowlist he fixes himself; then he looks again, so a fixed problem never becomes a notice.
+  // What's on the allowlist it fixes itself; then it looks again, so a fixed problem never becomes a notice.
   const fixed = selfAction ? await selfAct(await selfSnapshot(deps), () => selfSnapshot(deps), selfHands(deps), (entry) => void deps.store.emit(deps.identity, "ledger.recorded", entry)) : [];
   if (fixed.some((f) => f.ok)) findings = await lookAround(deps);
   let note = "";
@@ -273,7 +273,7 @@ export async function beat(deps: LoopTaskDeps, checklist: string | undefined, si
     ? `${findings.length} finding${findings.length === 1 ? "" : "s"}: ${findings.map((f) => f.title).join("; ")}`
     : "All quiet.";
   const changes = raised || cleared ? ` (${raised} raised, ${cleared} cleared)` : "";
-  const fixes = fixed.length ? ` Fixed himself: ${fixed.map((f) => f.title).join("; ")}.` : "";
+  const fixes = fixed.length ? ` Fixed itself: ${fixed.map((f) => f.title).join("; ")}.` : "";
   return { status: serious.length ? "attention" : "ok", summary: `${summary}${changes}${fixes}${note}`.slice(0, 2000), findings, fixed };
 }
 
@@ -290,7 +290,7 @@ export async function selfSnapshot(deps: LoopTaskDeps): Promise<SelfSnapshot> {
   const sandboxes = deps.sandbox ? await deps.sandbox.list().catch(() => null) : null;
   return {
     now,
-    sandboxes: sandboxes?.map((s) => ({ id: s.id, expiresAt: s.expiresAt, ephemeral: s.ephemeral, quest: s.quest })) ?? null,
+    sandboxes: sandboxes?.map((s) => ({ id: s.id, expiresAt: s.expiresAt, ephemeral: s.ephemeral, run: s.run })) ?? null,
     loops: loopRecords(deps.store)
       .filter((l) => l.on === deps.identity.id && l.enabled && l.task)
       .map((l) => ({
@@ -327,9 +327,9 @@ export async function computeUpkeep(deps: LoopTaskDeps): Promise<SelfActionOutco
 
 function selfHands(deps: LoopTaskDeps) {
   return {
-    reap: async (sandbox: string, quest: string) => {
+    reap: async (sandbox: string, run: string) => {
       if (!deps.sandbox) throw new Error("this node is not a sandbox host");
-      return deps.sandbox.destroy(sandbox, { quest });
+      return deps.sandbox.destroy(sandbox, { run });
     },
     retry: (loop: string) => {
       if (!deps.runLoop) throw new Error("loops can't be run from here");
@@ -337,7 +337,7 @@ function selfHands(deps: LoopTaskDeps) {
     },
     calibrate: async (why: "joined" | "changed") => {
       if (!deps.compute) throw new Error("no compute here");
-      await deps.compute.calibrate(why, "his own upkeep");
+      await deps.compute.calibrate(why, "its own upkeep");
     },
     adaptCompute: () => {
       if (!deps.compute) throw new Error("no compute here");
@@ -352,7 +352,7 @@ export function loopExecutor(deps: LoopTaskDeps) {
     switch (task.kind) {
       case "heartbeat": {
         const result = await beat(deps, task.checklist, ctx.signal, task.selfAction !== false);
-        // His skills' tidy-up goes with the heartbeat (skills.ts): the long-unused are marked stale (never with
+        // Its skills' tidy-up goes with the heartbeat (skills.ts): the long-unused are marked stale (never with
         // self-action off), near-duplicates are suggested to you. It merges, retires and deletes nothing.
         const tidied = quietly(deps, "skills (tidy-up)", () => deps.skills?.tidy(task.selfAction !== false) ?? null);
         return tidied?.stale ? { ...result, summary: `${result.summary} Marked ${tidied.stale} skill${tidied.stale === 1 ? "" : "s"} stale.`.slice(0, 2000) } : result;
@@ -363,7 +363,7 @@ export function loopExecutor(deps: LoopTaskDeps) {
       case "call": {
         const outcome = await deps.connectors.call(
           { connector: task.connector, tool: task.tool, args: task.args ?? {} },
-          { kind: "agent", by: `loop:${loop.name}`, quest: `loop.${loop.name}` },
+          { kind: "agent", by: `loop:${loop.name}`, run: `loop.${loop.name}` },
         );
         if (outcome.status === "asked") {
           return { status: "attention", summary: `${task.connector}.${task.tool} needs your approval: action ${outcome.action} is in your inbox.` };
@@ -371,16 +371,16 @@ export function loopExecutor(deps: LoopTaskDeps) {
         const took = `${outcome.result.durationMs} ms`;
         return { status: outcome.result.ok ? "ok" : "attention", summary: `${task.connector}.${task.tool} → ${excerpt(outcome.result, 240)} (${took})` };
       }
-      case "quest": {
+      case "run": {
         // The loop works as an arm: least privilege, its own ephemeral sandboxes, untrusted memories.
         const label = `loop.${loop.name}`;
         const { token } = deps.arms.mint(label, ["mind:read", "mind:write", "sandbox", "chat"]);
         try {
           const client = new LocalClient(`http://127.0.0.1:${deps.port}`, token);
-          // Your gates go with it as you gave them; on his own, the planner proposes none of its own.
+          // Your gates go with it as you gave them; on its own, the planner proposes none of its own.
           // What woke it goes with its goal as data from outside, within the goal's own limit (wakes.ts).
-          const goal = `${task.goal}${wokenData(ctx.woken, QUEST_GOAL_CHARS - task.goal.length)}`;
-          const { outcome, learned, usage } = await runNodeQuest(client, { goal, network: task.network, maxSteps: task.maxSteps, ...(task.gates?.length ? { gates: task.gates } : {}) }, { signal: ctx.signal });
+          const goal = `${task.goal}${wokenData(ctx.woken, RUN_GOAL_CHARS - task.goal.length)}`;
+          const { outcome, learned, usage } = await runOnNode(client, { goal, network: task.network, maxSteps: task.maxSteps, ...(task.gates?.length ? { gates: task.gates } : {}) }, { signal: ctx.signal });
           const gated = outcome.gates?.some((g) => g.exitCode !== 0) ?? false;
           const review = outcome.status !== "done" && outcome.review ? ` ${gated ? "Never reviewed:" : "Reviewer:"} ${outcome.review.trim()}` : "";
           return {

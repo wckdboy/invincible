@@ -6,7 +6,7 @@ import { costOf, mergeSpend, type Price, spendTotal, type Usage, type UsageBudge
  * model, how many calls and their tokens as the providers reported them. Node-local
  * (the home's local database, never the mind's log): it is telemetry about this
  * node's calls, a row per day and model, and nothing any replica decides on. What must
- * be the same everywhere (your prices, what a trial spent) is in the log instead.
+ * be the same everywhere (your prices, what an eval spent) is in the log instead.
  *
  * Counts only. Nothing of a prompt or an answer ever reaches this table.
  */

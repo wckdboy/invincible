@@ -10,7 +10,7 @@ import { Home } from "../src/home.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * Galahad as an ACP agent, end to end: `invincible acp install` mints a credential that may only chat, and `invincible acp`,
+ * The primary as an ACP agent, end to end: `invincible acp install` mints a credential that may only chat, and `invincible acp`,
  * as an ACP client starts it, answers a prompt through the node. A real daemon; a stand-in model.
  */
 
@@ -40,7 +40,7 @@ const env = () => ({ ...process.env, INVINCIBLE_KEYSTORE: "file" });
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "acp-node" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "acp-node" });
   store.close();
   home.writeConfig({ v: 1, name: "acp-node", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
@@ -53,14 +53,14 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("installed for an ACP client, he answers a prompt through his node, with nothing but chat", async () => {
+test("installed for an ACP client, it answers a prompt through its node, with nothing but chat", async () => {
   const install = Bun.spawn([process.execPath, CLI, "acp", "install", "--home", home.dir], { env: env(), stdout: "pipe", stderr: "pipe" });
   const [shown, installErr, installed] = await Promise.all([new Response(install.stdout).text(), new Response(install.stderr).text(), install.exited]);
   expect(installed, installErr).toBe(0);
   expect(shown).toContain('Arm "acp" ready · scopes: chat');
   expect(shown).toContain(`${CLI} acp --arm acp --home ${home.dir}`);
 
-  // As a client starts him: the protocol on stdio.
+  // As a client starts it: the protocol on stdio.
   const agent = Bun.spawn([process.execPath, CLI, "acp", "--arm", "acp", "--home", home.dir], {
     env: env(),
     stdin: "pipe",
@@ -94,10 +94,10 @@ test("installed for an ACP client, he answers a prompt through his node, with no
   send(3, "session/prompt", { sessionId, prompt: [{ type: "text", text: TURN }] });
   expect((await answer(3)).result).toEqual({ stopReason: "end_turn" });
 
-  // His words streamed back to the client as he wrote them.
+  // Its words streamed back to the client as it wrote them.
   const said = out.filter((m) => m.method === "session/update" && m.params.update.sessionUpdate === "agent_message_chunk").map((m) => m.params.update.content.text).join("");
   expect(said).toBe("It deploys with scripts/deploy.sh.");
-  // He was asked what was prompted, and was offered nothing that reaches past the chat.
+  // It was asked what was prompted, and was offered nothing that reaches past the chat.
   const asked = bodies.at(-1);
   expect(JSON.stringify(asked.messages)).toContain(TURN);
   for (const tool of (asked.tools ?? []) as { function: { name: string } }[]) expect(["decide", "loop_draft"]).toContain(tool.function.name);

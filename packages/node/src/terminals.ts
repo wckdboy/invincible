@@ -22,14 +22,14 @@ type Size = { cols: number; rows: number };
 
 export interface TerminalsOptions {
   /** Starts a shell on a terminal in that sandbox, its output to `onData` (SandboxHost.terminal). */
-  start: (sandbox: string, size: Size, onData: (bytes: Uint8Array) => void) => Promise<{ name: string; quest: string | null; process: TerminalProcess }>;
+  start: (sandbox: string, size: Size, onData: (bytes: Uint8Array) => void) => Promise<{ name: string; run: string | null; process: TerminalProcess }>;
   ledger: (entry: LedgerEntryInput) => void;
   now?: () => number;
 }
 
 interface Held {
   view: TerminalView;
-  quest: string | null;
+  run: string | null;
   process: TerminalProcess;
   shown: Uint8Array[];
   shownBytes: number;
@@ -70,7 +70,7 @@ export class Terminals {
       const at = this.now();
       terminal = {
         view: { id: `tm_${randomId(12)}`, sandbox, name: started.name, cols: size.cols, rows: size.rows, opened: at, exitCode: null, watchers: 0 },
-        quest: started.quest,
+        run: started.run,
         process: started.process,
         shown: [],
         shownBytes: 0,
@@ -192,7 +192,7 @@ export class Terminals {
 
   private note(terminal: Held, detail: string): void {
     try {
-      this.opts.ledger({ class: "modify", resource: "sandbox.terminal", target: terminal.view.name, verdict: "allow", ...(terminal.quest ? { quest: terminal.quest } : {}), detail });
+      this.opts.ledger({ class: "modify", resource: "sandbox.terminal", target: terminal.view.name, verdict: "allow", ...(terminal.run ? { run: terminal.run } : {}), detail });
     } catch {
       // (A shell that ends as the node closes its mind: there is nowhere left to write it.)
     }

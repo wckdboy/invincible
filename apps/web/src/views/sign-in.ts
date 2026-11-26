@@ -158,7 +158,7 @@ export function signInBlock(ctx: Ctx, c: ConnectorView, opts: { onSignedIn?: () 
     lines.push(
       h("p", { class: "small" }, c.key === "ready"
         ? "Signed in. Each call carries a short-lived token the node gets for it, sent to this server alone; your sign-in never leaves your nodes, and no model sees either."
-        : `It signs in as you, in your browser: no key and no app of yours. Galahad registers itself with ${who} when you do, and its tools are listed then.`),
+        : `It signs in as you, in your browser: no key and no app of yours. Your agent registers itself with ${who} when you do, and its tools are listed then.`),
     );
     return h("div", { class: "stack tight" }, ...lines, h("div", { class: "row wrap" }, c.key !== "ready" && may.sign ? signIn : null, c.key === "ready" && may.sign ? signOut : null), status);
   }

@@ -28,9 +28,9 @@ import {
   planNotifications,
   type PushSubscriptionInput,
   pushService,
-  questInHand,
-  questItem,
-  type QuestView,
+  runInHand,
+  runItem,
+  type RunView,
   randomId,
   redact,
   reminderDue,
@@ -54,10 +54,10 @@ import type { LiveTurn } from "./turns.ts";
 const appleService = (environment: ApplePushEnvironment): string => (environment === "production" ? "Apple" : "Apple (a development build)");
 
 /*
- * He comes to you. The node's own events become notifications on the owner's paired
+ * It comes to you. The node's own events become notifications on the owner's paired
  * devices, through one door: `tick()`. It looks at what stands (findings that need you,
- * approvals waiting, keys he asked for) and at what happened (a turn
- * that ended unwatched, a quest you started), asks the pure rules in
+ * approvals waiting, keys it asked for) and at what happened (a turn
+ * that ended unwatched, a run you started), asks the pure rules in
  * core's notify.ts what may be told now and how loudly, and delivers that as one message a
  * device: what needs you now to every device, news quietly to the device you used last, the
  * rest in the day's digest. An ask still unanswered is reminded before it lapses, and what was
@@ -83,17 +83,17 @@ export interface NotifySources {
   actions(): { id: string; connector: string; tool: string; state: string; requestedAt: string; expires: number; class?: string }[];
   /** MCP servers' questions waiting for your answer, mid-call (questions.ts). */
   questions?(): { id: string; connector: string; askedAt: number; expires: number }[];
-  /** His asks to use a Mac itself, where each stands (core's screen.ts), and by when an answer is due. */
+  /** Its asks to use a Mac itself, where each stands (core's screen.ts), and by when an answer is due. */
   screenSessions?(): { id: string; nodeName: string; minutes: number; state: string; askedAt: number; answerBy?: number }[];
-  /** Knights' tasks that ended since then, verified and not: what the day's digest counts first. */
+  /** Agents' tasks that ended since then, verified and not: what the day's digest counts first. */
   tasksEnded?(since: number): { verified: number; unverified: number };
-  /** The keys he's waiting for, by name. */
+  /** The keys it's waiting for, by name. */
   secretRequests(): string[];
   /** The connectors agents asked for and you haven't added, by request id. */
   connectorRequests(): string[];
   turns: { running(): LiveTurn[]; view(turn: LiveTurn, watchable: boolean): { watchers: number } };
   chats: { summary(id: string): KeptSummary | null };
-  quests: { list(): QuestView[]; onChange(fn: () => void): () => void };
+  runs: { list(): RunView[]; onChange(fn: () => void): () => void };
 }
 
 /** What sends: browsers' push services (push-send.ts) and Apple's, for the iPhone app (apns-send.ts), by the subscription. */
@@ -115,7 +115,7 @@ export interface NotifyOptions {
   ledger: (entry: LedgerEntryInput) => void;
   log: (message: string) => void;
   now?: () => number;
-  /** How often he looks (default 15 s); false: only when told to (tests drive it). */
+  /** How often it looks (default 15 s); false: only when told to (tests drive it). */
   tickMs?: number | false;
 }
 
@@ -133,11 +133,11 @@ const TOLD_KEEP_MS = 48 * HOUR;
 export const TEST_EVERY_MS = 5_000;
 export const TESTS_PER_DAY = 20;
 const TURN_POLL_MS = 1_000;
-const QUEST_ID = /^[A-Za-z0-9._:-]{1,64}$/;
+const RUN_ID = /^[A-Za-z0-9._:-]{1,64}$/;
 
 /** A device whose sends have failed this many times running keeps failing: it can't be reached (the doctor says so). */
 export const FAILING_AFTER = 2;
-/** Whether he can reach a device through its subscription now: its sends aren't failing. */
+/** Whether it can reach a device through its subscription now: its sends aren't failing. */
 const reaches = (sub: Subscription): boolean => sub.failures < FAILING_AFTER;
 /**
  * The doctor's own findings about reaching you (doctor.ts, its notify.devices line, notices of the heartbeat's): never
@@ -145,7 +145,7 @@ const reaches = (sub: Subscription): boolean => sub.failures < FAILING_AFTER;
  */
 const ABOUT_REACHING_YOU = /^notice:doctor:notify\./;
 /**
- * The one that says he can't reach you at all: for your Inbox, never a notification. The node that raises it has no
+ * The one that says it can't reach you at all: for your Inbox, never a notification. The node that raises it has no
  * device to tell, and from another node (which can reach you) it would say what isn't so.
  */
 const CANT_REACH_YOU = /^doctor:notify\.reach:/;
@@ -180,11 +180,11 @@ export class NotifyService {
   private again = false;
   private stopped = false;
   private readonly abort = new AbortController();
-  private stopQuests: (() => void) | null = null;
-  /** Turns he's watching to their end: how many were watching each at the last look. */
+  private stopRuns: (() => void) | null = null;
+  /** Turns it's watching to their end: how many were watching each at the last look. */
   private readonly turns = new Map<string, { watchers: number }>();
-  /** Quests of yours seen in hand, by the quest they belong to. */
-  private readonly quests = new Set<string>();
+  /** Runs of yours seen in hand, by the run they belong to. */
+  private readonly runs = new Set<string>();
   private keyProblem: string | null = null;
   private tagSalt: string | null = null;
   /** When each device's presence was last written, and from which zone (so every request doesn't write it). */
@@ -198,7 +198,7 @@ export class NotifyService {
 
   start(): void {
     if (this.stopped || this.timer) return;
-    this.stopQuests = this.o.sources.quests.onChange(() => this.lookAtQuests());
+    this.stopRuns = this.o.sources.runs.onChange(() => this.lookAtRuns());
     this.poll = setInterval(() => this.lookAtTurns(), TURN_POLL_MS);
     if (this.o.tickMs !== false) this.timer = setInterval(() => void this.tick(), this.o.tickMs ?? 15_000);
   }
@@ -209,7 +209,7 @@ export class NotifyService {
     if (this.timer) clearInterval(this.timer);
     if (this.poll) clearInterval(this.poll);
     if (this.soon) clearTimeout(this.soon);
-    this.stopQuests?.();
+    this.stopRuns?.();
     await this.ticking?.catch(() => {});
     this.o.sender.close?.();
   }
@@ -234,7 +234,7 @@ export class NotifyService {
     return (this.tagSalt = salt);
   }
 
-  /* ---------- what happened: turns that end unwatched, quests you started ---------- */
+  /* ---------- what happened: turns that end unwatched, runs you started ---------- */
 
   /** Called every second: follows each running turn to its end, remembering whether anyone was watching. */
   lookAtTurns(): void {
@@ -268,29 +268,29 @@ export class NotifyService {
     this.nudge();
   }
 
-  /** A quest you run (from a terminal) that was in hand and has ended. With effort: once every attempt has. */
-  lookAtQuests(): void {
+  /** A run you run (from a terminal) that was in hand and has ended. With effort: once every attempt has. */
+  lookAtRuns(): void {
     if (this.stopped) return;
-    // "you" is how the node names a quest run from your terminal or device. A node enrolled under that very name
-    // would be named the same, and a quest's goal is shown as your words: with such a node, nothing is told.
+    // "you" is how the node names a run run from your terminal or device. A node enrolled under that very name
+    // would be named the same, and a run's goal is shown as your words: with such a node, nothing is told.
     if (this.o.mind.devices().some((d) => d.kind === "node" && d.name === "you")) return;
-    const mine = this.o.sources.quests.list().filter((q) => q.by === "you");
-    const groups = new Map<string, QuestView[]>();
-    for (const quest of mine) {
-      const id = quest.attempt?.of ?? quest.quest;
-      groups.set(id, [...(groups.get(id) ?? []), quest]);
+    const mine = this.o.sources.runs.list().filter((q) => q.by === "you");
+    const groups = new Map<string, RunView[]>();
+    for (const run of mine) {
+      const id = run.attempt?.of ?? run.run;
+      groups.set(id, [...(groups.get(id) ?? []), run]);
     }
-    for (const [id, quests] of groups) {
-      if (!QUEST_ID.test(id)) continue;
-      if (quests.some((q) => questInHand(q.state))) {
-        this.quests.add(id);
+    for (const [id, runs] of groups) {
+      if (!RUN_ID.test(id)) continue;
+      if (runs.some((q) => runInHand(q.state))) {
+        this.runs.add(id);
         continue;
       }
-      if (!this.quests.delete(id)) continue; // never seen in hand here: old news
-      // The best any attempt reached, as the quest's own outcome is.
+      if (!this.runs.delete(id)) continue; // never seen in hand here: old news
+      // The best any attempt reached, as the run's own outcome is.
       const order = ["done", "unverified", "gave-up", "failed", "stopped"];
-      const best = [...quests].sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state))[0]!;
-      const item = questItem({ quest: id, goal: best.goal, state: best.state });
+      const best = [...runs].sort((a, b) => order.indexOf(a.state) - order.indexOf(b.state))[0]!;
+      const item = runItem({ run: id, goal: best.goal, state: best.state });
       if (!item) continue;
       this.o.db.addPending(item);
       this.nudge();
@@ -461,7 +461,7 @@ export class NotifyService {
 
   /**
    * The day's digest (your word, 25 November 2026: at 08:00 in your own time): what went to it instead of buzzing, the
-   * knights' tasks that ended and the asks that still wait, in counts and fixed words, once a day, quietly, to the device
+   * agents' tasks that ended and the asks that still wait, in counts and fixed words, once a day, quietly, to the device
    * you used last. Nothing to say, nothing said. It doesn't count against the day's limit.
    */
   private async digest(now: number, prefs: NotifyPrefs, day: string, standing: readonly NotifyItem[], devices: readonly Reached[]): Promise<void> {
@@ -482,7 +482,7 @@ export class NotifyService {
     try {
       tasks = this.o.sources.tasksEnded?.(since) ?? tasks;
     } catch (error) {
-      this.o.log(`notifications: knights' tasks not read for the digest (${redact(String((error as Error).message)).slice(0, 160)})`);
+      this.o.log(`notifications: agents' tasks not read for the digest (${redact(String((error as Error).message)).slice(0, 160)})`);
     }
     const payload = digestMessage({ topics: db.digestTopics(), ...tasks, open: standing.filter(isAsk).length }, this.salt());
     db.setSetting("digest-said", (state.saidOn = day));
@@ -492,10 +492,10 @@ export class NotifyService {
     const to = this.lastUsed(devices);
     const said = await Promise.all(to.map(async (device) => ({ name: device.name, ok: await this.send(device, payload, { ttlSeconds: 12 * 3600, urgency: "low" }) })));
     db.logSent(day, "digest", said.map((s) => s.name), said.some((s) => s.ok));
-    this.o.ledger({ class: "outward", resource: "notify", target: "digest", verdict: "approved", reason: "you turned notifications on for these devices", quest: "galahad.self", detail: `to ${said.map((s) => s.name).join(", ")}`.slice(0, 500) });
+    this.o.ledger({ class: "outward", resource: "notify", target: "digest", verdict: "approved", reason: "you turned notifications on for these devices", run: "primary.self", detail: `to ${said.map((s) => s.name).join(", ")}`.slice(0, 500) });
   }
 
-  /** The device you used last, if you used it within a day and he can reach it: news goes there alone. Otherwise every device. */
+  /** The device you used last, if you used it within a day and it can reach it: news goes there alone. Otherwise every device. */
   private lastUsed(devices: readonly Reached[]): Reached[] {
     const reachable = new Map(devices.filter((d) => reaches(d.sub)).map((d) => [d.sub.device, d]));
     const now = this.now();
@@ -568,7 +568,7 @@ export class NotifyService {
     }
   }
 
-  /** Whether a device turning on now comes back to nobody he could reach: then it's told what waited. */
+  /** Whether a device turning on now comes back to nobody it could reach: then it's told what waited. */
   private comesBack(): boolean {
     return !this.devices().some((d) => reaches(d.sub));
   }
@@ -644,10 +644,10 @@ export class NotifyService {
     this.logged(day, notifyMessage(items, this.salt())!.kind, sent.map((s) => s.name), sent.some((s) => s.ok));
   }
 
-  /** What was sent, counted against the day; and his own act, in the ledger: what kind and to which devices, never what it said. */
+  /** What was sent, counted against the day; and its own act, in the ledger: what kind and to which devices, never what it said. */
   private logged(day: string, kind: NotifyPayload["kind"] | "reminder", names: string[], ok: boolean): void {
     this.o.db.logSent(day, kind, names, ok);
-    this.o.ledger({ class: "outward", resource: "notify", target: kind, verdict: "approved", reason: "you turned notifications on for these devices", quest: "galahad.self", detail: `to ${names.join(", ")}`.slice(0, 500) });
+    this.o.ledger({ class: "outward", resource: "notify", target: kind, verdict: "approved", reason: "you turned notifications on for these devices", run: "primary.self", detail: `to ${names.join(", ")}`.slice(0, 500) });
   }
 
   /* ---------- the owner's own acts: this device on and off, the settings, a test ---------- */
@@ -762,7 +762,7 @@ export class NotifyService {
       }),
     );
     this.o.db.logSent(notifyDay(now, zone), "test", sent.map((s) => s.device), sent.some((s) => s.ok));
-    this.o.ledger({ class: "outward", resource: "notify", target: "test", verdict: "approved", reason: "you asked for a test", quest: "galahad.self", detail: `to ${sent.map((s) => s.device).join(", ")}`.slice(0, 500) });
+    this.o.ledger({ class: "outward", resource: "notify", target: "test", verdict: "approved", reason: "you asked for a test", run: "primary.self", detail: `to ${sent.map((s) => s.device).join(", ")}`.slice(0, 500) });
     return { sent };
   }
 
@@ -814,7 +814,7 @@ export class NotifyService {
 
   /**
    * For the doctor: whether anyone can be reached, a device whose sends keep failing, how many devices' subscriptions
-   * were lost, and how many things wait for your answer (approvals, questions, keys and connectors he needs, of the
+   * were lost, and how many things wait for your answer (approvals, questions, keys and connectors it needs, of the
    * kinds you have on): with nobody to reach, either is worth a word in your Inbox.
    */
   doctorFacts(): { devices: number; failing: { device: string; error: string }[]; keyProblem: string | null; lost: number; asks: number } {

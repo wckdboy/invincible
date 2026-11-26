@@ -1,12 +1,12 @@
 /*
- * Whether the app says it can reach Galahad. One request that failed (a busy node's slow answer, a hiccup in the proxy
+ * Whether the app says it can reach the primary. One request that failed (a busy node's slow answer, a hiccup in the proxy
  * in front of it) is doubted, not believed: the node is asked once more a moment later, and only if it doesn't answer
  * then either does the app say it can't be reached. Before, one failure raised the banner that says so at once, which
  * pushed the page down and said what wasn't so. The browser saying it's offline is taken at its word, at once.
  */
 
 export interface ReachOptions {
-  /** Says so: true, reached; false, the banner that says Galahad can't be reached. */
+  /** Says so: true, reached; false, the banner that says the primary can't be reached. */
   set(ok: boolean): void;
   /** What it says now. */
   says(): boolean;

@@ -2,8 +2,8 @@ import { interventionWords } from "@invincible/core/interventions";
 import type { TeamTask } from "@invincible/core/team";
 
 /*
- * What a task's card says, in words (pure: no DOM). Where it stands, how it ended and why, what the knight
- * said of it, what can be done with it, who gave it to the Roundtable, and what it kept. The card shows these;
+ * What a task's card says, in words (pure: no DOM). Where it stands, how it ended and why, what the agent
+ * said of it, what can be done with it, who gave it to the agents, and what it kept. The card shows these;
  * views/task-card.ts draws them.
  */
 
@@ -22,8 +22,8 @@ export function taskBadge(task: Pick<TeamTask, "status" | "verified">): { text: 
   }
 }
 
-/** How a knight's quest can end, as the runner records it on a task that wasn't verified. */
-const QUEST_ENDS: Readonly<Record<string, string>> = {
+/** How an agent's run can end, as the runner records it on a task that wasn't verified. */
+const RUN_ENDS: Readonly<Record<string, string>> = {
   "gave-up": "It gave up.",
   unverified: "Not verified: its gates or the independent review did not pass.",
   stopped: "It stopped before the work was done.",
@@ -32,11 +32,11 @@ const QUEST_ENDS: Readonly<Record<string, string>> = {
 /** When nothing was recorded of why. */
 const UNSAID: Readonly<Record<string, string>> = { failed: "It failed without saying why.", stopped: "Stopped.", interrupted: "Interrupted. Review it before resuming.", done: "The work was not independently verified." };
 
-/** As much of what the knight said as a card shows. */
+/** As much of what the agent said as a card shows. */
 const SAID = 1000;
 
 /**
- * How a task ended: why it wasn't verified (null: it was), and what the knight said of it, its own summary before the
+ * How a task ended: why it wasn't verified (null: it was), and what the agent said of it, its own summary before the
  * runner's lines (null: nothing). Null for work still in hand.
  */
 export function taskEnd(task: Pick<TeamTask, "status" | "verified" | "error" | "output">): { why: string | null; said: string | null } | null {
@@ -45,7 +45,7 @@ export function taskEnd(task: Pick<TeamTask, "status" | "verified" | "error" | "
   const said = !summary || summary.startsWith("Review:") ? null : summary.length > SAID ? `${summary.slice(0, SAID - 1)}…` : summary;
   if (task.status === "done" && task.verified) return { why: null, said };
   const error = task.error?.trim();
-  return { why: (error && (QUEST_ENDS[error] ?? error)) || UNSAID[task.status]!, said };
+  return { why: (error && (RUN_ENDS[error] ?? error)) || UNSAID[task.status]!, said };
 }
 
 export type TaskAction = "approve" | "decline" | "stop" | "resume" | "again" | "ship";
@@ -59,11 +59,11 @@ export function taskActions(task: Pick<TeamTask, "status" | "verified" | "change
   return ["resume", "again"];
 }
 
-/** Who gave a task to the Roundtable rather than to a knight by name (null: it was given by name). */
+/** Who gave a task to the agents rather than to an agent by name (null: it was given by name). */
 export const givenLine = (task: Pick<TeamTask, "givenBy">): string | null =>
-  task.givenBy === "owner" ? "Given to the Roundtable by you" : task.givenBy === "galahad" ? "Given to the Roundtable by Galahad" : null;
+  task.givenBy === "owner" ? "Given to the agents by you" : task.givenBy === "primary" ? "Given to the agents by your agent" : null;
 
-/** Who wrote a task, when a knight did (null: you or Galahad gave it): `proposer` is that knight's name. */
+/** Who wrote a task, when an agent did (null: you or the primary gave it): `proposer` is that agent's name. */
 export const proposedLine = (task: Pick<TeamTask, "proposedBy" | "status">, proposer: string | null): string | null =>
   !task.proposedBy ? null : task.status === "proposed" ? `${proposer ?? task.proposedBy} proposes this: it starts when you approve it` : `Proposed by ${proposer ?? task.proposedBy}`;
 

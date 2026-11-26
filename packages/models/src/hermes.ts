@@ -3,7 +3,7 @@ import { ACP_CLIENT, ACP_ENTRY, notesServer, readBridge, withNotes } from "./acp
 export { readBridge } from "./acp.ts";
 
 /*
- * Hermes' supported ACP protocol works on v0.21.1, whose CLI predates stream-json. Its bridge is Galahad's ACP client
+ * Hermes' supported ACP protocol works on v0.21.1, whose CLI predates stream-json. Its bridge is the primary's ACP client
  * (acp.ts), Python's standard library alone, run INSIDE the assigned sandbox: no host tools, owner config, provider
  * keys or arm tokens. Its profile and ACP session database survive subsequent runs in that workspace.
  */
@@ -70,7 +70,7 @@ def main():
     parser.add_argument("--home", default="/work/.hermes")
     parser.add_argument("--prompt", default="/work/.agent/prompt.md")
     parser.add_argument("--gateway-env", default="/work/.invincible-gateway.json")
-    # A knight is audited, never capped (your ruling, 17 and 19 November 2026): no tool budget and no time limit of the
+    # An agent is audited, never capped (your ruling, 17 and 19 November 2026): no tool budget and no time limit of the
     # bridge's own unless one is asked for. The run's deadline, its audits and you stop it.
     parser.add_argument("--max-tools", type=int, default=0)
     parser.add_argument("--max-seconds", type=int, default=0)

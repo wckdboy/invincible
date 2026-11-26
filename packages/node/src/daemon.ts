@@ -16,10 +16,10 @@ import { GovernedSandboxHost } from "./compute/governed-host.ts";
 import { Governor } from "./compute/governor.ts";
 import { modelSpeed, sandboxStart } from "./compute/measure.ts";
 import { ComputeService, liveHost, type Measure } from "./compute/service.ts";
-import { ArmTokens, GALAHAD_ARM } from "./arms.ts";
+import { ArmTokens, PRIMARY_ARM } from "./arms.ts";
 import { QampGrants, type QampRunner, qampRunner } from "./qamp-grants.ts";
 import { ArtifactStore } from "./artifacts.ts";
-import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, skillsAdapter, trialsAdapter } from "./archive/adapters.ts";
+import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, skillsAdapter, evalsAdapter } from "./archive/adapters.ts";
 import { LocalDiskBackend } from "./archive/blobs.ts";
 import { ArchiveService } from "./archive/service.ts";
 import { backupDirFor, BackupRunner } from "./backups.ts";
@@ -30,7 +30,7 @@ import type { TeamService } from "./team.ts";
 import { type HubLimits, TurnHub } from "./turns.ts";
 import { LookRunner } from "./looks.ts";
 import { Uploads } from "./uploads.ts";
-import { QuestBoard } from "./quests.ts";
+import { RunBoard } from "./runs.ts";
 import { skillAsker, SkillsService } from "./skills.ts";
 import { buildAssets } from "./assets.ts";
 import { type Capabilities, isAlwaysOn, presence, probeCapabilities } from "./capabilities.ts";
@@ -77,7 +77,7 @@ export interface Daemon {
   compute: ComputeService;
   /** The chat turns this node runs for you, and what you queued behind your chats. */
   turns: TurnHub;
-  /** His own looks, taken when they come (looks.ts). */
+  /** Its own looks, taken when they come (looks.ts). */
   looks: LookRunner;
   /** Your chats, on this node. */
   chats: ChatStore;
@@ -99,7 +99,7 @@ export interface DaemonOptions {
   capabilities?: Capabilities;
   /** How often the loop runner wakes (default 15 s). */
   loopIntervalMs?: number;
-  /** How often his looks that came are looked for (ms; false: never, for tests that take them by hand). */
+  /** How often its looks that came are looked for (ms; false: never, for tests that take them by hand). */
   lookIntervalMs?: number | false;
   /** How often the pull requests this node shipped have their checks read (false: never, for tests). */
   ciWatchMs?: number | false;
@@ -149,7 +149,7 @@ export interface DaemonOptions {
   system?: DoctorSystem;
   /**
    * Notifications (tests): push services to allow beyond the known ones (a stand-in on this machine, by its whole
-   * origin), how often he looks (false: only when the test says), his clock, and how a pause before a retry passes.
+   * origin), how often it looks (false: only when the test says), its clock, and how a pause before a retry passes.
    */
   push?: { allow?: string[]; tickMs?: number | false; now?: () => number; sleep?: (ms: number) => Promise<void>; apple?: { development?: string; production?: string } };
   /** How Q-AMP's binary is run for grants (tests: a stand-in). Default: <home>/bin/qamp, or INVINCIBLE_QAMP_BIN. */
@@ -160,7 +160,7 @@ export interface DaemonOptions {
 }
 
 /**
- * The fleet's founder gives Galahad a heartbeat once: every 30 minutes on an
+ * The fleet's founder gives the primary a heartbeat once: every 30 minutes on an
  * always-on node. Never again after that, so a heartbeat you removed stays removed.
  */
 function ensureHeartbeat(store: LedgerStore, identity: NodeIdentity, caps: Capabilities): void {
@@ -175,7 +175,7 @@ function ensureHeartbeat(store: LedgerStore, identity: NodeIdentity, caps: Capab
     on: server?.id ?? identity.id,
     enabled: true,
     task: { kind: "heartbeat" },
-    label: "Galahad's regular look around",
+    label: "Your agent's regular look around",
   });
 }
 
@@ -220,7 +220,7 @@ export async function refreshCapabilities(
 export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise<Daemon> {
   // The doctor reads the lines of this log that read like trouble (in memory, redacted when kept).
   const trouble = new TroubleLog();
-  const say = opts.log ?? ((message: string) => console.log(`[galahad] ${message}`));
+  const say = opts.log ?? ((message: string) => console.log(`[invincible] ${message}`));
   const log = (message: string): void => {
     trouble.note(message);
     say(message);
@@ -250,8 +250,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   refusedKeys.restore(usage.refusedKeys());
   refusedKeys.kept = (refusal) => usage.keepRefusedKey(refusal);
   refusedKeys.forgot = (provider) => usage.forgetRefusedKey(provider);
-  /** His own upkeep's calls (the heartbeat's words, his skills, the archive), counted as his. */
-  const upkeepSpent: NonNullable<ModelsContext["spent"]> = (call) => usage.note("galahad", call.role, call.ref, call.usage);
+  /** Its own upkeep's calls (the heartbeat's words, its skills, the archive), counted as its. */
+  const upkeepSpent: NonNullable<ModelsContext["spent"]> = (call) => usage.note("primary", call.role, call.ref, call.usage);
 
   const port = env.INVINCIBLE_PORT ?? config.port;
   // A Mac set to stay on is kept from sleeping while the node runs, and says so in its capabilities (isAlwaysOn).
@@ -441,7 +441,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       ...opts.turnLimits,
     },
   });
-  // His own looks: set as he answers in a chat of yours, each a turn of his there when it comes (looks.ts).
+  // Its own looks: set as it answers in a chat of yours, each a turn of its there when it comes (looks.ts).
   const looks = new LookRunner({ chats, turns, log });
   // ---- The archive: node-local, its own database and blob store in the home, never the mind's log.
   const archiveStore = new ArchiveStore(join(home.dir, "archive.db"), new LocalDiskBackend(env.INVINCIBLE_ARCHIVE_DIR ?? join(home.dir, "archive")));
@@ -456,11 +456,11 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     adapters: [
       memoriesAdapter(store),
       investigationsAdapter(store),
-      trialsAdapter(store),
-      // A knight's work in sensitive mode stays out of it: its summaries and its passages' vectors are other models' (heldModels).
+      evalsAdapter(store),
+      // An agent's work in sensitive mode stays out of it: its summaries and its passages' vectors are other models' (heldModels).
       artifactsAdapter(artifacts, (a) => !team.store.sensitiveWork(a)),
       chatsAdapter(chats, { has: (s, id) => archiveStore.has(s, id), sourceIds: (s, prefix) => archiveStore.sourceIds(s, prefix) }),
-      // His skills (skills.ts): each version, once it's his to use.
+      // Its skills (skills.ts): each version, once it's its to use.
       skillsAdapter(store),
     ],
   });
@@ -471,7 +471,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
 
   // MCP servers' questions mid-call (questions.ts): each waits in your Inbox for you, and its call with it.
   const questions = new Questions({ log });
-  const connectors = new ConnectorService({ store, vault, identity, local, ledger, log, fetch: opts.fetch, ask: (connector, params, signal) => questions.ask(connector, params, signal), ...(opts.oauthEndpoints ? { oauthEndpoints: opts.oauthEndpoints } : {}), natives: { "github.ship": shipNative(artifacts), "github.ship.update": shipNative(artifacts, true), ...gmailNatives, ...outlookNatives, ...cloudflareNatives }, repositories: () => team.store.teammates().flatMap((k) => (k.repository ? [k.repository] : [])) });
+  const connectors = new ConnectorService({ store, vault, identity, local, ledger, log, fetch: opts.fetch, ask: (connector, params, signal) => questions.ask(connector, params, signal), ...(opts.oauthEndpoints ? { oauthEndpoints: opts.oauthEndpoints } : {}), natives: { "github.ship": shipNative(artifacts), "github.ship.update": shipNative(artifacts, true), ...gmailNatives, ...outlookNatives, ...cloudflareNatives }, repositories: () => team.store.agents().flatMap((k) => (k.repository ? [k.repository] : [])) });
   const taskDeps: LoopTaskDeps = {
     store,
     vault,
@@ -497,7 +497,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const upkeep = (): void => {
     if (stopping) return;
     if (upkeeping) {
-      // Something changed while he was looking: one more look when this one ends.
+      // Something changed while it was looking: one more look when this one ends.
       lookAgain = true;
       return;
     }
@@ -537,13 +537,13 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   // Self-action's hands.
   taskDeps.runLoop = (name) => void loops.runNow(name);
   taskDeps.isRunning = (name) => loops.isRunning(name);
-  // The quests in hand on this node, as whoever runs each reports them (quests.ts).
-  const quests = new QuestBoard();
-  // His skills (skills.ts): learned from quests that passed review, offered as data, tidied with the heartbeat.
+  // The runs in hand on this node, as whoever runs each reports them (runs.ts).
+  const runs = new RunBoard();
+  // Its skills (skills.ts): learned from runs that passed review, offered as data, tidied with the heartbeat.
   const skills = new SkillsService({ store, identity, log, ledger, role: () => cheapestRole(taskDeps), ask: skillAsker({ store, vault, governor, fetch: opts.fetch, spent: upkeepSpent }) });
   taskDeps.skills = skills;
 
-  // ---- Notifications: he comes to you, on your own paired devices. Node-local: its own private database in the
+  // ---- Notifications: it comes to you, on your own paired devices. Node-local: its own private database in the
   // home; this node's VAPID key where its device keys are (made at its first use, never logged or put in the mind).
   const notifyDb = new NotifyStore(join(home.dir, "push.db"), opts.push?.now);
   let pushKey: ReturnType<Home["pushKey"]> | null = null;
@@ -585,7 +585,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
         const installed = new Set(installedConnectors(store).map((c) => c.id));
         return connectorRequests.list().filter((r) => !installed.has(r.connector)).map((r) => r.id);
       },
-      // What the day's digest counts first: knights' tasks that ended since the last one, verified and not.
+      // What the day's digest counts first: agents' tasks that ended since the last one, verified and not.
       tasksEnded: (since) => {
         const ended = team.store.tasks().filter((t) => (t.status === "done" || t.status === "failed" || t.status === "stopped") && t.updatedAt > since);
         const verified = ended.filter((t) => t.status === "done" && t.verified).length;
@@ -593,7 +593,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       },
       turns,
       chats,
-      quests,
+      runs,
     },
     ledger,
     log,
@@ -627,7 +627,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     ...(env.INVINCIBLE_BACKUP_DIR ? { backupDir: env.INVINCIBLE_BACKUP_DIR } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     notify: () => notify.doctorFacts(),
-    knights: () => team.store.teammates(),
+    agents: () => team.store.agents(),
   };
   // The heartbeat takes from a quick look what it doesn't check itself (a clock out of step, the app not published, …).
   taskDeps.doctor = () => heartbeatFromDoctor(doctorDeps);
@@ -673,7 +673,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     turns,
     looks,
     team,
-    quests,
+    runs,
     archive,
     skills,
     usage,
@@ -753,7 +753,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     }
   }
   loops.start(opts.loopIntervalMs);
-  // His own looks (looks.ts): each a turn of his in the chat he set it in, when it comes.
+  // Its own looks (looks.ts): each a turn of its in the chat it set it in, when it comes.
   if (opts.lookIntervalMs !== false) looks.start(opts.lookIntervalMs);
   // What else wakes its loops (wakes.ts): new mail and GitHub events, read every few minutes as each loop; webhooks
   // come in through the server.
@@ -789,7 +789,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       if (outcome.status !== "done") throw new Error(`${connector}.${tool} asked for approval, which a read never does`);
       return outcome.result;
     },
-    // A knight's work that fails its checks, or that a review asks changes of, may go back to that knight (ci-back.ts).
+    // An agent's work that fails its checks, or that a review asks changes of, may go back to that agent (ci-back.ts).
     back: (pull, failure) => giveBack(ciBack, pull, failure),
     reviews: { wanted: (pull) => wantsReviews(ciBack, pull), asked: (pull, review) => reviewBack(ciBack, pull, review) },
   });
@@ -854,7 +854,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       looks.stop();
       governor.close();
       await upkeeping;
-      // He tells nobody anything more; a send under way is cut off.
+      // It tells nobody anything more; a send under way is cut off.
       await notify.stop();
       // The archive starts nothing new, and its round under way (an embedding call) is cut off.
       await archive.stop();

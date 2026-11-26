@@ -8,7 +8,7 @@ import { ALIASES, goToOf, hashOf, homeOf, keyedOf, landingOf, moreIndex, PLACES,
  * second one): an address is a contract, and what a device may see follows its scopes as it did. */
 const BEFORE: Record<string, [scope: AnyScope | null, alsoFor?: AnyScope]> = {
   overview: [null], inbox: [null], chat: ["chat"], team: ["chat"], projects: ["mind:read"], memory: ["mind:read"], skills: ["mind:read"],
-  activity: ["mind:read"], loops: ["mind:read"], artifacts: ["mind:read"], archive: ["mind:read"], findings: ["mind:read"], trials: ["mind:read"],
+  activity: ["mind:read"], loops: ["mind:read"], artifacts: ["mind:read"], archive: ["mind:read"], findings: ["mind:read"], evals: ["mind:read"],
   fleet: ["mind:read"], sandboxes: ["sandbox", "fleet:admin"], vault: ["vault:read"], models: ["mind:read"],
   connectors: ["mind:read"], settings: [null],
 };
@@ -20,10 +20,10 @@ const ids = (places: readonly { id: string }[]) => places.map((place) => place.i
 const TASK = "task-abcdef012345";
 
 describe("the app's places", () => {
-  test("every address the app had still opens: a place, or a second name of one (#/work is Home's, #/roundtable the Roundtable's)", () => {
+  test("every address the app had still opens: a place, or a second name of one (#/work is Home's, #/agents the agents')", () => {
     expect(ids(PLACES).filter((id) => !ADDED.includes(id)).sort()).toEqual(Object.keys(BEFORE).sort());
     for (const id of ADDED.filter((id) => id !== "more")) expect([id, PLACES.find((place) => place.id === id)?.scope]).toEqual([id, "chat"]);
-    expect(ALIASES).toEqual({ roundtable: "team", work: "home" });
+    expect(ALIASES).toEqual({ agents: "team", work: "home" });
     const all = device(...OWNER);
     for (const hash of ["#/work", "#/work?project=x", "#/home"]) expect([hash, routeOf(hash, all)]).toEqual([hash, "home"]);
   });
@@ -36,19 +36,19 @@ describe("the app's places", () => {
     }
   });
 
-  test("Home comes first, then Galahad's own conversation, then the Roundtable", () => {
+  test("Home comes first, then your agent's own conversation, then the agents", () => {
     expect(ids(primaryOf(device(...OWNER)))).toEqual(["home", "chat", "team"]);
-    expect(primaryOf(device(...OWNER)).map((place) => place.label)).toEqual(["Home", "Galahad", "Roundtable"]);
+    expect(primaryOf(device(...OWNER)).map((place) => place.label)).toEqual(["Home", "Your agent", "Agents"]);
   });
 
-  test("#/roundtable is the Roundtable's address as well as #/team; nothing else has a second name but #/work", () => {
+  test("#/agents is the agents' address as well as #/team; nothing else has a second name but #/work", () => {
     const all = device(...OWNER);
-    for (const hash of ["#/roundtable", "#/roundtable?room=forge", "#/team", "#/team?room=forge&tab=workspace"]) expect([hash, routeOf(hash, all)]).toEqual([hash, "team"]);
+    for (const hash of ["#/agents", "#/agents?room=forge", "#/team", "#/team?room=forge&tab=workspace"]) expect([hash, routeOf(hash, all)]).toEqual([hash, "team"]);
     expect(routeOf("#/fleet", all)).toBe("fleet");
     expect(routeOf("#/chat?c=cv_abc", all)).toBe("chat");
-    for (const hash of ["", "#/", "#/nowhere", "#/roundtables", "#/works", "#pair=abc"]) expect([hash, routeOf(hash, all)]).toEqual([hash, null]);
-    // A device that may not see the Roundtable (or Home) doesn't reach it by its other name either.
-    expect(routeOf("#/roundtable", device("mind:read"))).toBeNull();
+    for (const hash of ["", "#/", "#/nowhere", "#/agentss", "#/works", "#pair=abc"]) expect([hash, routeOf(hash, all)]).toEqual([hash, null]);
+    // A device that may not see the agents (or Home) doesn't reach it by its other name either.
+    expect(routeOf("#/agents", device("mind:read"))).toBeNull();
     expect(routeOf("#/work", device("mind:read"))).toBeNull();
   });
 
@@ -65,7 +65,7 @@ describe("the app's places", () => {
     expect(hashOf("fleet")).toBe("#/fleet");
     expect(landingOf("task", `#/task/${TASK}`)).toBe(`#/task/${TASK}`);
     expect(landingOf("task", "#/task/nope")).toBe("#/task");
-    expect(landingOf("team", "#/roundtable?room=forge&tab=work")).toBe("#/team?room=forge");
+    expect(landingOf("team", "#/agents?room=forge&tab=work")).toBe("#/team?room=forge");
     expect(landingOf("home", "#/work")).toBe("#/home");
     expect(landingOf("chat", "#/chat?c=cv_abc")).toBe("#/chat");
   });
@@ -88,8 +88,8 @@ describe("the app's places", () => {
     expect(index.every((group) => group.places.length > 0)).toBe(true);
   });
 
-  // Your words, 26 November 2026: "agent first (Galahad)"; on a phone, no tab bar: Home is Galahad.
-  test("a phone opens on Home and a wide screen on Galahad's conversation; a device that may not chat opens on its Inbox", () => {
+  // Your words, 26 November 2026: "agent first ([the primary])"; on a phone, no tab bar: Home is the primary.
+  test("a phone opens on Home and a wide screen on your agent's conversation; a device that may not chat opens on its Inbox", () => {
     expect(homeOf(device(...OWNER), { narrow: true })).toBe("home");
     expect(homeOf(device(...OWNER), { narrow: false })).toBe("chat");
     for (const narrow of [true, false]) {
@@ -105,15 +105,15 @@ describe("the app's places", () => {
     for (const shortcut of manifest.shortcuts) expect([shortcut.url, routeOf(shortcut.url.replace(/^\//, ""), device(...OWNER))]).not.toEqual([shortcut.url, null]);
   });
 
-  test("the index under “…” has every place but Home, Galahad and a task's thread: the Roundtable first, then More's headings", () => {
+  test("the index under “…” has every place but Home, your agent and a task's thread: the agents first, then More's headings", () => {
     const index = placesIndex(device(...OWNER));
     expect(index[0]).toEqual({ heading: null, places: PLACES.filter((place) => place.id === "team") });
     expect(index.slice(1)).toEqual(moreIndex(device(...OWNER)));
     const listed = index.flatMap((group) => ids(group.places));
     expect(new Set(listed).size).toBe(listed.length);
-    // Nothing this device may see is out of reach: what isn't listed is a tap away anywhere (Home, Galahad), or a row's.
+    // Nothing this device may see is out of reach: what isn't listed is a tap away anywhere (Home, the primary), or a row's.
     expect(ids(device(...OWNER)).filter((id) => !listed.includes(id)).sort()).toEqual(["chat", "home", "more", "task"]);
-    // A device that may only read sees only what it may open, and no Roundtable.
+    // A device that may only read sees only what it may open, and no Agents.
     expect(placesIndex(device("mind:read")).every((group) => group.heading !== null)).toBe(true);
   });
 

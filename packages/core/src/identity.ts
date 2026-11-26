@@ -14,7 +14,7 @@ import {
 
 /**
  * Device ids are self-certifying: the id *is* the public key.
- *   n_<ed25519 pub>  → a Galahad node (signs log events and link requests)
+ *   n_<ed25519 pub>  → an Invincible node (signs log events and link requests)
  *   c_<p256 pub>     → a client such as the PWA (signs API requests only)
  */
 export type DeviceId = string;

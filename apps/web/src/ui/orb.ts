@@ -1,6 +1,6 @@
 import { fieldAt, fieldBuffer, fieldLight, fieldModel, type FieldBuffer, type FieldModel } from "../lib/field.ts";
 import {
-  FIELD_STROKE, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldStep, fieldStill, fieldTone, GALAHAD_FIELD, GALAHAD_BEAM, knightField, beamAt, beamLine, strokeLight,
+  FIELD_STROKE, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldStep, fieldStill, fieldTone, PRIMARY_FIELD, PRIMARY_BEAM, agentField, beamAt, beamLine, strokeLight,
   type FieldClock, type FieldFrame, type FieldIdentity, type FieldInks, type FieldLook, type FieldMotion,
 } from "../lib/field-orb.ts";
 import type { FieldColours } from "../lib/field.ts";
@@ -10,17 +10,17 @@ import { h } from "./dom.ts";
 import { motionAllowed, move } from "./motion.ts";
 
 /*
- * The orbs (26 November 2026): every orb is Galahad's field (lib/field.ts, lib/field-orb.ts). His is in gold, with his
- * beam of light through it along his axis (your word, 23 November 2026: he is the one you talk to, "a Jarvis … like
- * visual, the orb graphic"; and 26 November, of the heads-up ring he wore until then: "remove the old mark around galahad.
- * make the primary agent distinct in some other cool way"); a knight's is in its own colours, with no beam (knightFace).
- * The app's own mark is his field alone (appMark). Each point of a field is a dot of light added to the others on a dark
+ * The orbs (26 November 2026): every orb is the primary's field (lib/field.ts, lib/field-orb.ts). Its is in gold, with its
+ * beam of light through it along its axis (your word, 23 November 2026: it is the one you talk to, "a Jarvis … like
+ * visual, the orb graphic"; and 26 November, of the heads-up ring it wore until then: "remove the old mark around [the primary].
+ * make the primary agent distinct in some other cool way"); an agent's is in its own colours, with no beam (agentFace).
+ * The app's own mark is its field alone (appMark). Each point of a field is a dot of light added to the others on a dark
  * page (a canvas's "lighter"), with a close, faint glow of its own and no fog; on a light page it is ink. Where it is one
  * of many (a row, a conversation's history) an orb is still, and drawn once; where it is the one you are looking at, it
  * moves as its mood does (lib/field-orb.ts' FIELD_MOTION: slowly; your words of 25 and 26 November 2026, "slow and
  * calming movement", "i dont want them to be too visually distractin"), on the page's one clock (ui/motion.ts), only
  * while on screen, and never where motion is reduced. Nothing in it comes from a name's meaning, a profile's words or a
- * model: a knight's colour is one you chose or its handle's, and its handle gives its field.
+ * model: an agent's colour is one you chose or its handle's, and its handle gives its field.
  */
 
 export type { OrbTone };
@@ -28,45 +28,45 @@ export type { OrbTone };
 export interface OrbOptions {
   /** Its width and height in CSS pixels (16 to 320; 36 when left out). */
   size?: number;
-  /** Where he stands (lib/now.ts' tone): kept on the orb as `data-tone`. His field is gold in every state; his mood
-   * moves it, and the words beside him say where he stands. */
+  /** Where it stands (lib/now.ts' tone): kept on the orb as `data-tone`. Its field is gold in every state; its mood
+   * moves it, and the words beside it say where it stands. */
   tone?: OrbTone;
-  /** Its accessible name ("Galahad: at work"). Leave it out beside the word "Galahad": the orb is then decorative. */
+  /** Its accessible name ("The primary: at work"). Leave it out beside the word "The primary": the orb is then decorative. */
   label?: string;
-  /** What he is doing: it moves as that mood does while motion is allowed. Left out: still. */
+  /** What it is doing: it moves as that mood does while motion is allowed. Left out: still. */
   mood?: OrbMood;
   /** Which orb it is, so one drawn again (a new state, its page drawn anew) carries on where it was, and a change of mood
-   * eases rather than starting afresh. His own when left out: all his orbs move as one. */
+   * eases rather than starting afresh. Its own when left out: all its orbs move as one. */
   key?: string;
 }
 
-/** Galahad's orb: his field in gold, his beam through it. */
+/** The primary's orb: its field in gold, its beam through it. */
 export function orb(options: OrbOptions = {}): HTMLElement {
   const size = Number.isFinite(options.size) ? Math.round(Math.max(16, Math.min(320, options.size!))) : 36;
   const tone = orbTone(options.tone);
   const named = options.label ? { role: "img", "aria-label": options.label } : { "aria-hidden": "true" };
-  const canvas = fieldCanvas(size, { identity: GALAHAD_FIELD, beam: true, knight: false, mood: options.mood, key: options.key ?? "galahad" });
+  const canvas = fieldCanvas(size, { identity: PRIMARY_FIELD, beam: true, agent: false, mood: options.mood, key: options.key ?? "primary" });
   const box = { class: options.mood && canvas ? "orb orb-live" : "orb", "data-tone": tone, ...(options.mood ? { "data-mood": options.mood } : {}), style: `--orb-size:${size}px`, ...named };
-  // (Where there is no canvas to draw on, its box alone, as a knight's.)
+  // (Where there is no canvas to draw on, its box alone, as an agent's.)
   return h("span", box, canvas);
 }
 
 /**
  * The app's mark where a page shows it (the sidebar's head, a phone's way Home, Settings' About): the app icon's field,
- * his in gold, alone (no beam: that is his as the one you talk to), still, and on nothing, so it sits on a light page as
+ * its in gold, alone (no beam: that is its as the one you talk to), still, and on nothing, so it sits on a light page as
  * on a dark one (your word, 26 November 2026: "make sure the app icon is transparent so it works in dark and white mode"):
  * light added to light on a dark page, ink on a light one, as every orb is. Decorative: what it is in is named.
  */
 export function appMark(size: number): HTMLElement {
   const px = Number.isFinite(size) ? Math.round(Math.max(16, Math.min(320, size))) : 20;
-  const canvas = fieldCanvas(px, { identity: GALAHAD_FIELD, beam: false, knight: false, mood: undefined, key: "invincible:mark" });
+  const canvas = fieldCanvas(px, { identity: PRIMARY_FIELD, beam: false, agent: false, mood: undefined, key: "invincible:mark" });
   return h("span", { class: "orb app-mark", style: `--orb-size:${px}px`, "aria-hidden": "true" }, canvas);
 }
 
-/** A knight's face options: whose (its handle), its saved avatar (a colour you chose for it, core's knightColors), its
+/** An agent's face options: whose (its handle), its saved avatar (a colour you chose for it, core's agentColors), its
  * size in CSS pixels, and its mood (lib/orb-motion.ts; left out, still: in a row, or as a speaker in a conversation's
  * history). */
-export interface KnightFaceOptions {
+export interface AgentFaceOptions {
   id: string;
   profile?: unknown;
   size: number;
@@ -78,29 +78,29 @@ export interface KnightFaceOptions {
 }
 
 /**
- * A knight's face: its field in its own colours (lib/field-orb.ts' knightField: the colour you chose or its handle's, and
+ * An agent's face: its field in its own colours (lib/field-orb.ts' agentField: the colour you chose or its handle's, and
  * its handle's lines and lean, the same on every device). It moves only while it works (your word, 26 November 2026),
  * turning slowly; in any other mood it is still, in that mood's light (dimmer while paused or queued, its rim red-brown
  * when its work failed). Drawn once wherever it is still.
  */
-export function knightFace(options: KnightFaceOptions): HTMLElement {
+export function agentFace(options: AgentFaceOptions): HTMLElement {
   const size = Number.isFinite(options.size) ? Math.round(Math.max(16, Math.min(256, options.size))) : 40;
   const id = String(options.id ?? "");
-  const identity = knightField(id, options.profile);
+  const identity = agentField(id, options.profile);
   const named = options.label ? { role: "img", "aria-label": options.label } : { "aria-hidden": "true" };
-  const canvas = fieldCanvas(size, { identity, beam: false, knight: true, mood: options.mood, key: options.key ?? `face:${id}` });
-  if (canvas) canvas.className = "knight-orb-canvas";
-  return h("span", { class: "knight-orb", style: `--orb-size:${size}px`, "data-tint": identity.colours.key[1], ...named }, canvas);
+  const canvas = fieldCanvas(size, { identity, beam: false, agent: true, mood: options.mood, key: options.key ?? `face:${id}` });
+  if (canvas) canvas.className = "agent-orb-canvas";
+  return h("span", { class: "agent-orb", style: `--orb-size:${size}px`, "data-tint": identity.colours.key[1], ...named }, canvas);
 }
 
 // ---- an orb on its canvas ---------------------------------------------------------------------------------------------
 
-/** What is drawn: whose field, with his beam or not, a knight's (which moves only while it works) or his (with embers),
+/** What is drawn: whose field, with its beam or not, an agent's (which moves only while it works) or its (with embers),
  * in what mood (none: still), and on what course. */
 interface Spec {
   identity: FieldIdentity;
   beam: boolean;
-  knight: boolean;
+  agent: boolean;
   mood: OrbMood | undefined;
   key: string;
 }
@@ -113,9 +113,9 @@ function fieldCanvas(size: number, spec: Spec): HTMLCanvasElement | null {
   const { canvas, g, dpr } = prepared;
   canvas.className = "orb-canvas";
   const px = canvas.width;
-  const look = fieldLook(spec.identity, size, !spec.knight);
-  const motion = spec.mood ? fieldMotion(spec.mood, spec.knight) : STILL;
-  // Still: no mood (a row, the history), or a mood with nothing to move (a knight not at work) and no course under way
+  const look = fieldLook(spec.identity, size, !spec.agent);
+  const motion = spec.mood ? fieldMotion(spec.mood, spec.agent) : STILL;
+  // Still: no mood (a row, the history), or a mood with nothing to move (an agent not at work) and no course under way
   // to come to rest from. Drawn once, in its mood's light.
   if (!spec.mood || (!moves(motion) && !courses.has(spec.key))) {
     const frame = fieldStill(motion);
@@ -127,7 +127,7 @@ function fieldCanvas(size: number, spec: Spec): HTMLCanvasElement | null {
   const course = keep(spec.key, motion);
   const seed = orbSeed(spec.key);
   const draw = (t: number, moving: boolean) => {
-    const frame = moving ? advance(course, t, seed, !spec.knight) : { ...fieldStill(course.motion), turn: course.clock.turn };
+    const frame = moving ? advance(course, t, seed, !spec.agent) : { ...fieldStill(course.motion), turn: course.clock.turn };
     drawField(g, px, dpr, size, spec, look, frame, paper());
   };
   draw(now(), motionAllowed());
@@ -228,8 +228,8 @@ const toned: [number, number, number] = [0, 0, 0];
  * A frame of a field on `g`, a square `px` device pixels wide (`size` CSS pixels at `dpr`): its lines turned as the frame
  * says, as continuous strokes from point to point, each in its light as the icon shows it (lib/field-orb.ts' fieldTone),
  * added to the others on a dark page ("lighter") with a close, faint glow under them; on a light page, in ink. The
- * strokes of one colour and brightness are one path, so a frame is a few dozen draws, not one for each point; his beam
- * goes under the lines. Then his embers.
+ * strokes of one colour and brightness are one path, so a frame is a few dozen draws, not one for each point; its beam
+ * goes under the lines. Then its embers.
  */
 function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: number, spec: Spec, look: FieldLook, frame: FieldFrame, onPaper: boolean): void {
   g.setTransform(1, 0, 0, 1, 0, 0);
@@ -291,7 +291,7 @@ function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: n
   g.lineJoin = "round";
   g.globalCompositeOperation = onPaper ? "source-over" : "lighter";
   for (const pass of onPaper ? (["line"] as const) : (["glow", "line"] as const)) {
-    // His beam, under his lines (on a light page they cross over it; on a dark one light adds alike either way).
+    // Its beam, under its lines (on a light page they cross over it; on a dark one light adds alike either way).
     if (pass === "line" && spec.beam) beam(g, px, dpr, size, look.zoom, colours, glow, inks);
     for (const [kind, held] of paths) {
       const level = (kind & 0xf) / (LEVELS - 1);
@@ -325,13 +325,13 @@ function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: n
 }
 
 /**
- * His beam (lib/field-orb.ts' GALAHAD_BEAM, beamLine, beamAt): each half one blade, from its root out of his core to
- * its tip, narrowing to a point and fading as it goes, filled along its length with his lit gold going to his gold and
- * then his rim's copper (its light added, over a close glow), or on a light page his inks; as bright as his field is now
+ * Its beam (lib/field-orb.ts' PRIMARY_BEAM, beamLine, beamAt): each half one blade, from its root out of its core to
+ * its tip, narrowing to a point and fading as it goes, filled along its length with its lit gold going to its gold and
+ * then its rim's copper (its light added, over a close glow), or on a light page its inks; as bright as its field is now
  * (`glow`). One path and one fill a half and a pass, so no seam shows where light is added to light.
  */
 function beam(g: CanvasRenderingContext2D, px: number, dpr: number, size: number, zoom: number, colours: FieldColours, glow: number, inks: FieldInks | null): void {
-  const L = GALAHAD_BEAM;
+  const L = PRIMARY_BEAM;
   const half = px / 2;
   // Half its width at its root, in device pixels: never under half a pixel (a pixel across).
   const root = Math.max(0.5, (size * L.width) / 2) * dpr;
@@ -341,7 +341,7 @@ function beam(g: CanvasRenderingContext2D, px: number, dpr: number, size: number
   const lit = hex(colours.key[0]), gold = hex(colours.key[1]), rim = hex(colours.rim);
   const colourAt = (hue: number) => (inks ? mix(inks.key, inks.rim, hue) : hue <= 0.5 ? mix(lit, gold, hue * 2) : mix(gold, rim, (hue - 0.5) * 2));
   const STOPS = 8;
-  for (const blade of beamLine(GALAHAD_FIELD, zoom)) {
+  for (const blade of beamLine(PRIMARY_FIELD, zoom)) {
     const x0 = half + blade.root[0] * half, y0 = half + blade.root[1] * half;
     const x1 = half + blade.tip[0] * half, y1 = half + blade.tip[1] * half;
     const length = Math.hypot(x1 - x0, y1 - y0) || 1;
@@ -397,7 +397,7 @@ function emberLight(colours: { key: [string, string]; rim: string }): [number, n
   return [0, 1, 2].map((c) => a[c]! + (b[c]! - a[c]!) / 3) as [number, number, number];
 }
 
-/** A still orb's picture, drawn once and stamped from then on wherever the same orb is still (a knight in twenty rows is
+/** A still orb's picture, drawn once and stamped from then on wherever the same orb is still (an agent in twenty rows is
  * drawn once). The latest forty kept, small ones only. */
 const stills = new Map<string, HTMLCanvasElement>();
 function stamp(g: CanvasRenderingContext2D, px: number, key: string, paint: (target: CanvasRenderingContext2D) => void): void {

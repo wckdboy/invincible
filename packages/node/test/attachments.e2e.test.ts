@@ -66,7 +66,7 @@ const LOG = new TextEncoder().encode("FAIL db.test.ts\n  connect ECONNREFUSED 12
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "keep" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {} });
@@ -106,11 +106,11 @@ describe("files you attach to a message", () => {
     expect(asked.role).toBe("user");
     expect(asked.content.at(-1)).toEqual({ type: "image_url", image_url: { url: `data:image/png;base64,${Buffer.from(PNG).toString("base64")}` } });
     const words = asked.content[0].text as string;
-    expect(words).toStartWith("Why does this fail?\n\nYour liege attached a file to this message: test.log.");
+    expect(words).toStartWith("Why does this fail?\n\nThe owner attached a file to this message: test.log.");
     expect(words).toContain(`<file-${log.id.slice(0, 16)}>\nFAIL db.test.ts\n  connect ECONNREFUSED 127.0.0.1:5432\n\n</file-${log.id.slice(0, 16)}>`);
   });
 
-  test("go with a call of yours without tools as well (a quest you run), which lives with its request", async () => {
+  test("go with a call of yours without tools as well (a run you run), which lives with its request", async () => {
     bodies.length = 0;
     await ask({ tools: false, messages: [{ role: "user", content: "What is in it?", attachments: [shot] }] });
     expect(bodies.at(-1).messages.at(-1).content).toEqual([
@@ -173,7 +173,7 @@ describe("files you attach to a message", () => {
     expect(await askCommand(cli, "Read these.", { temp: true, attach: [join(files, "screen.png"), join(files, "notes.md")] }, io)).toBe(0);
     expect(err[0]).toBe(`[attached: screen.png (1 KB), notes.md (1 KB)]\n`);
     const asked = bodies.at(-1).messages.at(-1);
-    expect(asked.content[0].text).toContain("Your liege attached a file to this message: notes.md.");
+    expect(asked.content[0].text).toContain("The owner attached a file to this message: notes.md.");
     expect(asked.content.at(-1).type).toBe("image_url");
     await expect(askCommand(cli, "And this?", { temp: true, attach: [join(files, "core.dump")] }, io)).rejects.toThrow("core.dump is neither a picture (PNG, JPEG, WebP, GIF) nor text: only those go with a message");
     await expect(askCommand(cli, "x", { chat: "cv_xxxxxxxxxxxxxxxxxxxxxx", steer: true, attach: [join(files, "notes.md")] }, io)).rejects.toThrow("--attach goes with a message of yours");

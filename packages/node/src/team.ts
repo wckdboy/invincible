@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
-  TEAM_GALAHAD, TEAM_LIMITS, TeamControlInput, TeamRoomId, type TeamSayInput, TeammateId,
-  type Teammate, type TeammateInput, type TeamRecruitInput, type TeamRoom, type TeamRoomInput, type TeamPostInput, type TeamWorkspace,
+  TEAM_PRIMARY, TEAM_LIMITS, TeamControlInput, TeamRoomId, type TeamSayInput, AgentId,
+  type Agent, type AgentInput, type TeamRecruitInput, type TeamRoom, type TeamRoomInput, type TeamPostInput, type TeamWorkspace,
   type TeamMessage, type TeamTask, type TeamTaskChanges, type TeamTaskInput, type TeamTaskRecord, type TeamTrailEntry, type TeamSnapshot, type TeamRoomView, type TeamOverview, type TeamSeenInput,
   type InterventionKind, type TeamWorkStatus, type TeamTaskFix, type TeamTaskShipped,
 } from "../../core/src/team.ts";
@@ -12,18 +12,18 @@ export { TeamError } from "./team-store.ts";
 export interface TeamRunContext {
   signal: AbortSignal;
   chainId: string;
-  /** The sender is this callback's teammate, never a field supplied by a model. */
-  send(to: { room: string } | { teammate: string }, text: string): TeamMessage;
-  /** Replaces only this teammate's private working notes. */
-  remember(text: string): Teammate;
+  /** The sender is this callback's agent, never a field supplied by a model. */
+  send(to: { room: string } | { agent: string }, text: string): TeamMessage;
+  /** Replaces only this agent's private working notes. */
+  remember(text: string): Agent;
   /** Delegation stays in the current room and in the current causal budget. */
   delegate(task: Omit<TeamTaskInput, "room">): TeamTask;
   /** A new worker, made by this one (never a field a model supplies): it joins this room unless the room is a
    * direct conversation, and what it then does here spends this same causal budget. */
-  recruit(worker: TeamRecruitInput): Teammate;
+  recruit(worker: TeamRecruitInput): Agent;
   emit(progress: string): void;
   /**
-   * Before anything that changes something (a message, notes, a task proposed, a knight made, a command in its VM, a
+   * Before anything that changes something (a message, notes, a task proposed, an agent made, a command in its VM, a
    * connector's action): a reply a planned restart cuts off after this waits for you, instead of being taken up again
    * by itself and doing it twice (TeamStore.interruptForRestart).
    */
@@ -32,28 +32,28 @@ export interface TeamRunContext {
 
 export interface TeamServiceOptions {
   store: TeamStore;
-  respond(teammate: Teammate, room: TeamRoom, history: TeamMessage[], context: TeamRunContext): Promise<string | { text: string }>;
-  executeTask(teammate: Teammate, task: TeamTask, context: TeamRunContext): Promise<{ verified: boolean; output: string; error?: string; record?: TeamTaskRecord; changes?: TeamTaskChanges }>;
-  /** Galahad's answer in a room he was asked in (TeamStore.post says when): his words, posted for him. Absent: he
-   * sits in no room on this node, and what was for him waits. */
+  respond(agent: Agent, room: TeamRoom, history: TeamMessage[], context: TeamRunContext): Promise<string | { text: string }>;
+  executeTask(agent: Agent, task: TeamTask, context: TeamRunContext): Promise<{ verified: boolean; output: string; error?: string; record?: TeamTaskRecord; changes?: TeamTaskChanges }>;
+  /** The primary's answer in a room it was asked in (TeamStore.post says when): its words, posted for it. Absent: it
+   * sits in no room on this node, and what was for it waits. */
   answer?(room: TeamRoom, history: TeamMessage[], ask: { asker: TeamAsker; trigger: TeamMessage | null }, signal: AbortSignal): Promise<string>;
   concurrency?: number;
   timeoutMs?: number;
-  /** A task's own limit (work in a repository takes longer than a reply); absent: the same as `timeoutMs`; null: none (a knight's task, which its audit watches instead). */
+  /** A task's own limit (work in a repository takes longer than a reply); absent: the same as `timeoutMs`; null: none (an agent's task, which its audit watches instead). */
   taskTimeoutMs?: number | null;
   /** Shutdown waits this long for callbacks to settle, then leaves their persisted state interrupted. */
   shutdownGraceMs?: number;
   /** How long work a planned restart cut off waits before it is taken up again by itself: until whatever it was running
-   * in its knight's VM has surely met its own deadline there (team-runtime's TEAM_COMMAND_SECONDS). Absent: at once. */
+   * in its agent's VM has surely met its own deadline there (team-runtime's TEAM_COMMAND_SECONDS). Absent: at once. */
   restartWaitMs?: number;
   /** How often the controller looks again at what has come due (a daily budget, work a restart cut off): 15 s. */
   tickMs?: number;
   onChange?(): void;
-  /** A knight seated by Galahad (in your conversation) or by another knight (in its room): for the record. */
-  onRecruit?(made: Teammate): void;
+  /** An agent seated by the primary (in your conversation) or by another agent (in its room): for the record. */
+  onRecruit?(made: Agent): void;
   /** A task's run has ended, however it ended (an outcome it is a step of looks again: outcomes.ts). */
   onTaskEnded?(task: TeamTask): void;
-  /** What is left of your usage budget now, in US dollars (usage.ts meter; null: you set none): what he starts on his own yes must fit it. */
+  /** What is left of your usage budget now, in US dollars (usage.ts meter; null: you set none): what it starts on its own yes must fit it. */
   budgetLeft?(): number | null;
 }
 
@@ -64,17 +64,17 @@ interface Active {
   timer: ReturnType<typeof setTimeout> | null;
 }
 
-/** Galahad answers in this many rooms at once, and takes this long at most over one answer. */
+/** The primary answers in this many rooms at once, and takes this long at most over one answer. */
 const ANSWERS = { atOnce: 3, timeoutMs: 10 * 60_000 } as const;
 
-const Destination = z.union([z.strictObject({ room: TeamRoomId }), z.strictObject({ teammate: TeammateId })]);
-const selected = (job: TeamJob, select: TeamSelection): boolean => (!select.room || job.room === select.room) && (!select.teammate || job.teammate === select.teammate) && (!select.task || job.id === select.task);
+const Destination = z.union([z.strictObject({ room: TeamRoomId }), z.strictObject({ agent: AgentId })]);
+const selected = (job: TeamJob, select: TeamSelection): boolean => (!select.room || job.room === select.room) && (!select.agent || job.agent === select.agent) && (!select.task || job.id === select.task);
 
-/** A single controller schedules named teammates. The injected runner owns models and VM transport;
+/** A single controller schedules named agents. The injected runner owns models and VM transport;
  * this service owns identity, delivery, persistence, budgets, dependencies and exclusive access. */
 export class TeamService {
   private readonly active = new Map<string, Active>();
-  /** His answers under way, by answer. */
+  /** Its answers under way, by answer. */
   private readonly answering = new Map<string, { answer: TeamAnswer; controller: AbortController; done: Promise<void> }>();
   /** Workers on their way out: between the pause and the record's retirement nothing may bring one back. */
   private readonly removing = new Set<string>();
@@ -94,36 +94,36 @@ export class TeamService {
 
   get store(): TeamStore { return this.options.store; }
   /** Who is at work now: a fresh projection, with no database or output payloads. */
-  activeWork(): readonly { teammate: string; room: string; kind: "delivery" | "task" }[] {
-    return [...this.active.values()].map(({ job }) => ({ teammate: job.teammate, room: job.room, kind: job.kind }));
+  activeWork(): readonly { agent: string; room: string; kind: "delivery" | "task" }[] {
+    return [...this.active.values()].map(({ job }) => ({ agent: job.agent, room: job.room, kind: job.kind }));
   }
   snapshot(): TeamSnapshot { return this.store.snapshot(); }
   room(id: string): TeamRoomView { return this.store.roomView(id); }
-  /** You looked at a knight's page or a room (one that is here). */
+  /** You looked at an agent's page or a room (one that is here). */
   see(input: TeamSeenInput): void {
-    if ("knight" in input) {
-      if (!this.store.teammate(input.knight)) throw new TeamError(404, "No such knight at the table.");
-      this.store.see(`knight:${input.knight}`);
+    if ("agent" in input) {
+      if (!this.store.agent(input.agent)) throw new TeamError(404, "No such agent at the table.");
+      this.store.see(`agent:${input.agent}`);
     } else {
       this.store.requireRoom(input.room);
       this.store.see(`room:${input.room}`);
     }
   }
   messages(room: string, limit?: number): TeamMessage[] { return this.store.messages(room, limit); }
-  saveTeammate(input: TeammateInput): Teammate {
+  saveAgent(input: AgentInput): Agent {
     this.accepting();
     this.steady((input as { id?: unknown } | null)?.id);
-    const saved = this.store.saveTeammate(input);
-    if (!saved.enabled) this.cancel({ teammate: saved.id }, "interrupted", "Paused by you.");
+    const saved = this.store.saveAgent(input);
+    if (!saved.enabled) this.cancel({ agent: saved.id }, "interrupted", "Paused by you.");
     this.changed(); this.kick();
     return saved;
   }
   /**
-   * You stepped in (#28): on a task by its id, or on the work running now of a knight or a room. Counted on each such task
+   * You stepped in (#28): on a task by its id, or on the work running now of an agent or a room. Counted on each such task
    * by how, with a line on its trail; the caller is a route that only you may call.
    */
   steppedIn(on: TeamSelection, kind: InterventionKind, text: string): void {
-    if (!on.task && !on.teammate && !on.room) return;
+    if (!on.task && !on.agent && !on.room) return;
     const tasks = on.task ? [on.task] : this.store.tasksIn(on, ["running"]).map((task) => task.id);
     let counted = false;
     for (const task of tasks) counted = this.store.intervene(task, kind, text) || counted;
@@ -139,29 +139,29 @@ export class TeamService {
     this.store.markShipped(task, shipped);
     this.changed();
   }
-  setWorkspace(id: string, binding: TeamWorkspace | null): Teammate {
+  setWorkspace(id: string, binding: TeamWorkspace | null): Agent {
     this.accepting();
     this.steady(id);
-    if (this.active.has(id) && this.store.requireTeammate(id).workspace) throw new TeamError(409, "Stop this knight's work before changing its workspace.");
+    if (this.active.has(id) && this.store.requireAgent(id).workspace) throw new TeamError(409, "Stop this agent's work before changing its workspace.");
     const saved = this.store.setWorkspace(id, binding);
     this.changed();
     return saved;
   }
-  remember(id: string, text: string): Teammate { this.accepting(); const saved = this.store.remember(id, text); this.changed(); return saved; }
-  /** Galahad's own computer bound, or no longer: yours to make, as a knight's VM is. */
+  remember(id: string, text: string): Agent { this.accepting(); const saved = this.store.remember(id, text); this.changed(); return saved; }
+  /** The primary's own computer bound, or no longer: yours to make, as an agent's VM is. */
   setComputer(binding: TeamWorkspace | null): TeamWorkspace | null { this.accepting(); const saved = this.store.setComputer(binding); this.changed(); return saved; }
-  /** The VMs' notes store, for every knight here: a task reads the switch as it starts, so one that is running is not changed. */
+  /** The VMs' notes store, for every agent here: a task reads the switch as it starts, so one that is running is not changed. */
   setEngram(on: boolean): boolean { this.accepting(); const set = this.store.setEngram(on); this.changed(); return set; }
-  /** Whether failing checks go back to the knight whose work it was, outside an outcome too (ci-back.ts reads it when they fail). */
+  /** Whether failing checks go back to the agent whose work it was, outside an outcome too (ci-back.ts reads it when they fail). */
   setCiBack(on: boolean): boolean { this.accepting(); const set = this.store.setCiBack(on); this.changed(); return set; }
   setBacklog(on: boolean): boolean { this.accepting(); const set = this.store.setBacklog(on); this.changed(); return set; }
-  /** Work Galahad offers a knight from your backlog (backlog.ts): proposed, it starts when he approves it himself, or you do. */
-  proposeTask(input: TeamTaskInput): TeamTask { this.accepting(); const task = this.store.createTask(input, { givenBy: TEAM_GALAHAD, propose: true }); this.changed(); return task; }
+  /** Work the primary offers an agent from your backlog (backlog.ts): proposed, it starts when it approves it itself, or you do. */
+  proposeTask(input: TeamTaskInput): TeamTask { this.accepting(); const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, propose: true }); this.changed(); return task; }
   /**
-   * A proposed task, his own from your backlog or a knight's from a room, started on his own yes (your word, 23 November
-   * 2026: he approves his own decisions and his knights'; what is monetary asks you): only when it names its budget, at
+   * A proposed task, its own from your backlog or an agent's from a room, started on its own yes (your word, 23 November
+   * 2026: it approves its own decisions and its agents'; what is monetary asks you): only when it names its budget, at
    * most TEAM_LIMITS.ownTaskUsd, and that fits what is left of yours, if you set one. It waits its turn like any task,
-   * and its trail says whose yes it was and why. Null when it isn't his to approve: it waits for yours.
+   * and its trail says whose yes it was and why. Null when it isn't its to approve: it waits for yours.
    */
   approveOwn(task: string, why: string): TeamTask | null {
     this.accepting();
@@ -170,52 +170,52 @@ export class TeamService {
     const left = this.options.budgetLeft?.() ?? null;
     if (proposed?.status !== "proposed" || budget === undefined || budget > TEAM_LIMITS.ownTaskUsd || (left !== null && left < budget)) return null;
     const approved = this.store.approve(task);
-    this.store.noteTask(task, `Approved by Galahad himself: ${why}, within its budget of $${budget}${left === null ? "" : `, and of the $${left.toFixed(2)} left of yours`}`.slice(0, 500));
+    this.store.noteTask(task, `Approved by your agent itself: ${why}, within its budget of $${budget}${left === null ? "" : `, and of the $${left.toFixed(2)} left of yours`}`.slice(0, 500));
     this.changed();
     this.kick();
     return approved;
   }
-  /** One he proposed, taken back before you answered it (backlog.ts: its step done, or another first): it never ran. */
+  /** One it proposed, taken back before you answered it (backlog.ts: its step done, or another first): it never ran. */
   withdrawProposal(task: string, why: string): void {
     this.accepting();
     if (this.store.task(task)?.status !== "proposed") return;
     this.store.finish(task, "stopped", why);
     this.changed();
   }
-  planWorkspace(id: string, node: string): Teammate {
+  planWorkspace(id: string, node: string): Agent {
     this.accepting();
     this.steady(id);
-    if (this.active.has(id) && this.store.requireTeammate(id).workspace) throw new TeamError(409, "Stop this knight's work before provisioning its workspace.");
+    if (this.active.has(id) && this.store.requireAgent(id).workspace) throw new TeamError(409, "Stop this agent's work before provisioning its workspace.");
     const saved = this.store.planWorkspace(id, node); this.changed(); return saved;
   }
   saveRoom(input: TeamRoomInput): TeamRoom {
     this.accepting();
     const saved = this.store.saveRoom(input);
-    for (const work of this.active.values()) if (work.job.room === saved.id && !saved.members.includes(work.job.teammate)) this.cancel({ teammate: work.job.teammate, room: saved.id }, "stopped", "Removed from this room.");
+    for (const work of this.active.values()) if (work.job.room === saved.id && !saved.members.includes(work.job.agent)) this.cancel({ agent: work.job.agent, room: saved.id }, "stopped", "Removed from this room.");
     this.changed(); this.kick();
     return saved;
   }
-  direct(teammate: string): TeamRoom { this.accepting(); const room = this.store.direct(teammate); this.changed(); return room; }
-  /** Your words to a room, from the device you wrote on (`asker`), whose own scopes Galahad answers with. */
-  post(input: TeamPostInput, asker?: Exclude<TeamAsker, { kind: "knight" }>): TeamMessage { this.accepting(); const message = this.store.post(input, asker ? { asker } : {}); this.changed(); this.kick(); return message; }
-  /** His workers as Galahad himself reads them. */
+  direct(agent: string): TeamRoom { this.accepting(); const room = this.store.direct(agent); this.changed(); return room; }
+  /** Your words to a room, from the device you wrote on (`asker`), whose own scopes the primary answers with. */
+  post(input: TeamPostInput, asker?: Exclude<TeamAsker, { kind: "agent" }>): TeamMessage { this.accepting(); const message = this.store.post(input, asker ? { asker } : {}); this.changed(); this.kick(); return message; }
+  /** Its workers as the primary itself reads them. */
   overview(room?: string): TeamOverview { return this.store.overview(room); }
-  /** What was said in the conversations a knight is part of (its own with you and other knights included) that holds every word of `query`. */
-  search(teammate: string, query: string): { room: string; speaker: string; speakerName: string; text: string; at: string }[] {
-    const rooms = this.store.rooms().filter((room) => room.members.includes(teammate)).map((room) => room.id);
+  /** What was said in the conversations an agent is part of (its own with you and other agents included) that holds every word of `query`. */
+  search(agent: string, query: string): { room: string; speaker: string; speakerName: string; text: string; at: string }[] {
+    const rooms = this.store.rooms().filter((room) => room.members.includes(agent)).map((room) => room.id);
     return this.store.searchMessages(rooms, query).map(({ room, speaker, speakerName, text, createdAt }) => ({ room, speaker, speakerName, text: text.length > 600 ? `${text.slice(0, 599)}…` : text, at: new Date(createdAt).toISOString() }));
   }
   /** A room's story so far, and keeping it told anew (TeamStore.story). */
   story(room: string): { text: string; through: string } | null { return this.store.story(room); }
   keepStory(room: string, text: string, through: string): void { this.accepting(); this.store.keepStory(room, text, through); }
-  /** Galahad himself, from your conversation with him: a new worker of his own. */
-  recruit(input: TeamRecruitInput): Teammate {
+  /** The primary itself, from your conversation with it: a new worker of its own. */
+  recruit(input: TeamRecruitInput): Agent {
     this.accepting();
-    const made = this.store.recruit(input, TEAM_GALAHAD);
+    const made = this.store.recruit(input, TEAM_PRIMARY);
     this.recruited(made);
     return made;
   }
-  /** Galahad himself, from your conversation with him: his words to one worker (where you talk with it too) or to a room. */
+  /** The primary itself, from your conversation with it: its words to one worker (where you talk with it too) or to a room. */
   say(input: TeamSayInput): TeamMessage {
     this.accepting();
     const message = this.store.say(input);
@@ -253,13 +253,13 @@ export class TeamService {
       active.timer = null;
       active.controller.abort(new Error("The node is restarting."));
     }
-    // An answer of his is never given twice: one cut off is said to be, and is yours to ask for again.
+    // An answer of its is never given twice: one cut off is said to be, and is yours to ask for again.
     for (const { answer, controller } of this.answering.values()) {
-      this.store.finishAnswer(answer.id, "interrupted", "The node restarted while Galahad was answering. Ask him again.");
+      this.store.finishAnswer(answer.id, "interrupted", "The node restarted while your agent was answering. Ask it again.");
       controller.abort(new Error("The node is restarting."));
     }
     this.changed();
-    // A runner that ignores cancellation keeps its teammate's lock until it really ends. Shutdown itself is bounded.
+    // A runner that ignores cancellation keeps its agent's lock until it really ends. Shutdown itself is bounded.
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([Promise.all([...this.active.values(), ...this.answering.values()].map((a) => a.done)), new Promise<void>((resolve) => { timer = setTimeout(resolve, this.options.shutdownGraceMs ?? 10_000); })]);
     if (timer) clearTimeout(timer);
@@ -269,7 +269,7 @@ export class TeamService {
   task(id: string): TeamTask | null {
     return this.store.task(id);
   }
-  /** The tasks in any of these states: one by its id, a knight's or a room's. */
+  /** The tasks in any of these states: one by its id, an agent's or a room's. */
   tasksIn(select: TeamSelection, statuses: readonly TeamWorkStatus[]): TeamTask[] {
     return this.store.tasksIn(select, statuses);
   }
@@ -283,9 +283,9 @@ export class TeamService {
   control(raw: TeamControlInput): TeamSnapshot {
     this.accepting();
     const input = teamInput(TeamControlInput, raw);
-    const select: TeamSelection = { ...(input.room ? { room: input.room } : {}), ...(input.teammate ? { teammate: input.teammate } : {}), ...(input.task ? { task: input.task } : {}) };
+    const select: TeamSelection = { ...(input.room ? { room: input.room } : {}), ...(input.agent ? { agent: input.agent } : {}), ...(input.task ? { task: input.task } : {}) };
     if (input.room) this.store.requireRoom(input.room);
-    if (input.teammate) { this.store.requireTeammate(input.teammate); this.steady(input.teammate); }
+    if (input.agent) { this.store.requireAgent(input.agent); this.steady(input.agent); }
     if (input.task && !this.store.task(input.task)) throw new TeamError(404, "No such team task.");
     if (input.action === "approve") {
       this.store.approve(input.task!);
@@ -296,11 +296,11 @@ export class TeamService {
       // A callback may still be winding down its VM command. It cannot be overlapped by a retry.
       if ([...this.active.values()].some((a) => selected(a.job, select))) throw new TeamError(409, "This work is still stopping. Wait for its current command to finish.");
       if (input.room) this.store.pauseRoom(input.room, false);
-      if (input.teammate) this.store.enable(input.teammate, true);
+      if (input.agent) this.store.enable(input.agent, true);
       this.store.resume(select);
     } else {
       if (input.room) this.store.pauseRoom(input.room, true);
-      if (input.teammate) this.store.enable(input.teammate, false);
+      if (input.agent) this.store.enable(input.agent, false);
       const state = input.action === "pause" ? "interrupted" : "stopped";
       this.cancel(select, state, input.action === "pause" ? "Paused by you." : "Stopped by you.");
       this.store.holdRestarts(select, state, input.action === "pause" ? "Paused by you." : "Stopped by you.");
@@ -318,15 +318,15 @@ export class TeamService {
    * release fails the worker stays too, paused and still bound. Only then is its record retired
    * (TeamStore.remove), so neither running work nor a workspace is ever left behind by it.
    */
-  async remove(id: string, options: { release?(member: Teammate): Promise<void>; waitMs?: number } = {}): Promise<Teammate> {
+  async remove(id: string, options: { release?(member: Agent): Promise<void>; waitMs?: number } = {}): Promise<Agent> {
     this.accepting();
-    const member = this.store.requireTeammate(id);
+    const member = this.store.requireAgent(id);
     this.steady(id);
     if (member.workspace && !options.release) throw new TeamError(409, `${member.name} has a persistent workspace. Removing ${member.name} destroys it and everything in it: say so, or pause ${member.name} instead.`);
     this.removing.add(id);
     try {
       this.store.enable(id, false);
-      this.cancel({ teammate: id }, "stopped", "Stopped to remove its knight.");
+      this.cancel({ agent: id }, "stopped", "Stopped to remove its agent.");
       const winding = this.active.get(id);
       if (winding) {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -334,11 +334,11 @@ export class TeamService {
         if (timer) clearTimeout(timer);
         this.accepting();
       }
-      // A callback may still be winding down its VM command: its teammate's record and workspace must outlast it.
-      if (this.active.has(id)) throw new TeamError(409, "This knight's work is still stopping. It is paused now: remove it once its current command has finished.");
-      const bound = this.store.requireTeammate(id);
+      // A callback may still be winding down its VM command: its agent's record and workspace must outlast it.
+      if (this.active.has(id)) throw new TeamError(409, "This agent's work is still stopping. It is paused now: remove it once its current command has finished.");
+      const bound = this.store.requireAgent(id);
       if (options.release) await options.release(bound);
-      else if (bound.workspace) throw new TeamError(409, "This knight has a workspace and nothing was given to release it.");
+      else if (bound.workspace) throw new TeamError(409, "This agent has a workspace and nothing was given to release it.");
       // What was released is gone: the record follows it at once, even if the controller has begun to stop meanwhile.
       if (bound.workspace) this.store.setWorkspace(id, null);
       return this.store.remove(id);
@@ -360,9 +360,9 @@ export class TeamService {
   }
 
   private accepting(): void { if (this.stopping) throw new TeamError(409, "This team controller has stopped."); }
-  private steady(id: unknown): void { if (typeof id === "string" && this.removing.has(id)) throw new TeamError(409, "This knight is being removed."); }
+  private steady(id: unknown): void { if (typeof id === "string" && this.removing.has(id)) throw new TeamError(409, "This agent is being removed."); }
   private changed(): void { try { this.options.onChange?.(); } catch { /* an observer cannot stop the scheduler */ } }
-  private recruited(made: Teammate): void {
+  private recruited(made: Agent): void {
     try { this.options.onRecruit?.(made); } catch { /* nor undo what was made */ }
     this.changed(); this.kick();
   }
@@ -373,11 +373,11 @@ export class TeamService {
   }
   private pump(): void {
     if (!this.running) return;
-    // A knight whose cut-off work waits out a restart may still have its last command running in its VM.
+    // An agent whose cut-off work waits out a restart may still have its last command running in its VM.
     const waiting = this.store.restartWaits();
     for (const job of this.store.queued()) {
       if (this.active.size >= this.concurrency) break;
-      if (this.active.has(job.teammate) || waiting.has(job.teammate) || !this.store.claim(job.id)) continue;
+      if (this.active.has(job.agent) || waiting.has(job.agent) || !this.store.claim(job.id)) continue;
       this.launch(job);
     }
     if (!this.options.answer) return;
@@ -394,8 +394,8 @@ export class TeamService {
       active.timer = null;
       active.controller.abort(new Error(error));
     }
-    // His answer in a room stops with the room: a knight's or a task's stopping leaves it be.
-    if (!select.teammate && !select.task) {
+    // Its answer in a room stops with the room: an agent's or a task's stopping leaves it be.
+    if (!select.agent && !select.task) {
       for (const { answer, controller } of this.answering.values()) {
         if (select.room && answer.room !== select.room) continue;
         this.store.finishAnswer(answer.id, status, error);
@@ -404,7 +404,7 @@ export class TeamService {
     }
     this.changed();
   }
-  /** His answer, asked of the injected `answer` and posted in its room. One that fails says so there; one you stopped,
+  /** Its answer, asked of the injected `answer` and posted in its room. One that fails says so there; one you stopped,
    * or the node cut off, says nothing (its record does). */
   private answerIn(answer: TeamAnswer): void {
     const controller = new AbortController();
@@ -436,7 +436,7 @@ export class TeamService {
   private launch(job: TeamJob): void {
     const controller = new AbortController();
     const active: Active = { job, controller, done: Promise.resolve(), timer: null };
-    this.active.set(job.teammate, active);
+    this.active.set(job.agent, active);
     // (A task with no limit of time has no clock: its audit watches it instead.)
     const limit = job.kind === "task" ? this.taskTimeoutMs : this.timeoutMs;
     if (limit !== null) active.timer = setTimeout(() => {
@@ -450,7 +450,7 @@ export class TeamService {
       if (this.running) this.store.finish(job.id, "failed", String((error as Error).message ?? error));
     }).finally(() => {
       if (active.timer) clearTimeout(active.timer);
-      this.active.delete(job.teammate);
+      this.active.delete(job.agent);
       if (this.running) { this.changed(); this.kick(); }
       // (After a bounded shutdown the store is closed: nobody is told, as no observer is.)
       if (this.running && job.kind === "task") {
@@ -469,10 +469,10 @@ export class TeamService {
   private async run(job: TeamJob, signal: AbortSignal): Promise<void> {
     let calls = 0;
     const current = () => {
-      if (signal.aborted || this.store.job(job.id)?.status !== "running") throw new TeamError(409, "This knight's work has stopped.");
-      const member = this.store.requireTeammate(job.teammate);
+      if (signal.aborted || this.store.job(job.id)?.status !== "running") throw new TeamError(409, "This agent's work has stopped.");
+      const member = this.store.requireAgent(job.agent);
       const room = this.store.requireRoom(job.room);
-      if (!member.enabled || room.paused || !room.members.includes(member.id)) throw new TeamError(403, "This knight may no longer act in this room.");
+      if (!member.enabled || room.paused || !room.members.includes(member.id)) throw new TeamError(403, "This agent may no longer act in this room.");
     };
     const budget = () => { current(); if (++calls > 64) throw new TeamError(429, "This turn reached its team action limit."); this.store.acted(job.id); };
     const context: TeamRunContext = {
@@ -483,33 +483,33 @@ export class TeamService {
         budget();
         const target = teamInput(Destination, raw);
         teamText(text);
-        const room = "room" in target ? this.store.requireRoom(target.room) : this.store.direct(target.teammate, job.teammate);
-        const message = this.store.post({ room: room.id, text }, { teammate: job.teammate, chainId: job.chainId });
+        const room = "room" in target ? this.store.requireRoom(target.room) : this.store.direct(target.agent, job.agent);
+        const message = this.store.post({ room: room.id, text }, { agent: job.agent, chainId: job.chainId });
         this.changed(); this.kick(); return message;
       },
-      remember: (text) => { budget(); const saved = this.store.remember(job.teammate, text); this.changed(); return saved; },
+      remember: (text) => { budget(); const saved = this.store.remember(job.agent, text); this.changed(); return saved; },
       delegate: (task) => {
         budget();
-        const saved = this.store.createTask({ ...task, room: job.room }, { teammate: job.teammate, chainId: job.chainId });
-        // A knight's proposal within a budget it names is his to approve (approveOwn); any other waits for you.
-        const given = saved.status === "proposed" ? this.approveOwn(saved.id, `proposed by @${job.teammate} in ${this.store.room(job.room)?.name ?? job.room}`) : null;
+        const saved = this.store.createTask({ ...task, room: job.room }, { agent: job.agent, chainId: job.chainId });
+        // An agent's proposal within a budget it names is its to approve (approveOwn); any other waits for you.
+        const given = saved.status === "proposed" ? this.approveOwn(saved.id, `proposed by @${job.agent} in ${this.store.room(job.room)?.name ?? job.room}`) : null;
         this.changed(); this.kick(); return given ?? saved;
       },
-      recruit: (worker) => { budget(); const made = this.store.recruit(worker, job.teammate, job.room); this.recruited(made); return made; },
+      recruit: (worker) => { budget(); const made = this.store.recruit(worker, job.agent, job.room); this.recruited(made); return made; },
       emit: (progress) => { current(); this.store.progress(job.id, progress); this.changed(); },
     };
     current();
-    const teammate = this.store.requireTeammate(job.teammate);
+    const agent = this.store.requireAgent(job.agent);
     const room = this.store.requireRoom(job.room);
     if (job.kind === "delivery") {
-      const response = await this.options.respond(teammate, room, this.store.messages(room.id), context);
+      const response = await this.options.respond(agent, room, this.store.messages(room.id), context);
       current();
       const text = teamOutput(typeof response === "string" ? response : response.text, TEAM_LIMITS.message).trim();
-      if (text) this.store.post({ room: room.id, text }, { teammate: teammate.id, chainId: job.chainId, output: true });
+      if (text) this.store.post({ room: room.id, text }, { agent: agent.id, chainId: job.chainId, output: true });
       this.store.finish(job.id, "done");
     } else {
       const task = this.store.task(job.id)!;
-      const outcome = await this.options.executeTask(teammate, task, context);
+      const outcome = await this.options.executeTask(agent, task, context);
       current();
       this.store.finish(job.id, outcome.verified ? "done" : "failed", outcome.error ?? (outcome.verified ? null : "The work was not independently verified."), outcome);
     }

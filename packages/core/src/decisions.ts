@@ -4,7 +4,7 @@ import { z } from "zod";
  * Decisions: typed answers about a state, from a decision model (TypeSafe's System
  * One, e.g. Jev) rather than generated text. Each question is a yes/no ("noul"), a
  * choice among named options, or a score on an ordered rubric; each answer carries
- * calibrated probabilities. Galahad hires decision models by role ("decider").
+ * calibrated probabilities. The primary hires decision models by role ("decider").
  */
 
 const Text = z.string().min(1).max(4000);

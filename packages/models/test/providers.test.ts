@@ -50,7 +50,7 @@ describe("key headers", () => {
   test("the model gateway lends Cloudflare to tools the same way", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     const vault = new Vault(store, identity);
     vault.set("cloudflare-ai", TOKEN, { provider: "cloudflare-ai", origin: "https://gateway.ai.cloudflare.com" });
     store.emit(identity, "provider.set", { id: "cloudflare-ai", kind: "openai", baseUrl: CF, secret: "cloudflare-ai" });
@@ -115,7 +115,7 @@ describe("the models a provider is offered with", () => {
   test("whatever Z.ai serves first (zai/*) is the first of them, and the call goes to its chat completions", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     vault.set("zai", KEY, { provider: "zai", origin: originOf(preset("zai")!.baseUrl)! });
     store.emit(identity, "provider.set", { id: "zai", kind: "openai", baseUrl: preset("zai")!.baseUrl, secret: "zai" });
@@ -161,7 +161,7 @@ describe("a provider pointed elsewhere says its key was added for another addres
   const setUp = () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
     const vault = new Vault(store, identity);
     vault.set("mimo-token", KEY, { provider: "mimo-token", origin: originOf(preset("mimo-token")!.baseUrl)! });
     store.emit(identity, "provider.set", { id: "mimo-token", kind: "openai", baseUrl: preset("mimo-token")!.baseUrl, secret: "mimo-token" });
@@ -238,7 +238,7 @@ describe("a provider's key never follows a redirect", () => {
   test("through the model gateway", async () => {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
     const vault = new Vault(store, identity);
     vault.set("claude", KEY, { provider: "claude", origin: baseUrl });
     store.emit(identity, "provider.set", { id: "claude", kind: "anthropic", baseUrl, secret: "claude" });

@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage, ExecResult } from "@invincible/core";
 import type { AgentDriver, AgentEvent } from "../src/agents.ts";
-import { type QuestEvent, type QuestOptions, type QuestRole, runQuest } from "../src/quest.ts";
+import { type RunEvent, type RunOptions, type RunRole, runLoop } from "../src/run.ts";
 
 const sh = (command: string) => `Next.\n\`\`\`sh\n${command}\n\`\`\``;
 
-/** A quest whose every model call costs `per` dollars (as its caller prices them), with a script for each role. */
-function priced(engineer: string[], options: Partial<QuestOptions>, per = 0.1, complete = true, reviewer = ["PASS\nIt is."]) {
-  const queues: Record<QuestRole, string[]> = { planner: ["1. Do it.\nDone when: it is done."], engineer: [...engineer], reviewer: [...reviewer] };
+/** A run whose every model call costs `per` dollars (as its caller prices them), with a script for each role. */
+function priced(engineer: string[], options: Partial<RunOptions>, per = 0.1, complete = true, reviewer = ["PASS\nIt is."]) {
+  const queues: Record<RunRole, string[]> = { planner: ["1. Do it.\nDone when: it is done."], engineer: [...engineer], reviewer: [...reviewer] };
   let usd = 0;
-  const seen: { role: QuestRole; messages: ChatMessage[] }[] = [];
-  const events: QuestEvent[] = [];
-  const run = runQuest(
+  const seen: { role: RunRole; messages: ChatMessage[] }[] = [];
+  const events: RunEvent[] = [];
+  const run = runLoop(
     { goal: "make it so", environment: "a test sandbox", ...options },
     {
       ask: async (role, messages) => {
@@ -31,11 +31,11 @@ function priced(engineer: string[], options: Partial<QuestOptions>, per = 0.1, c
 }
 
 describe("a budget in dollars", () => {
-  test("each step says what is spent; past four fifths he is told to wrap up; spent, the work stops and what is there is judged", async () => {
+  test("each step says what is spent; past four fifths it is told to wrap up; spent, the work stops and what is there is judged", async () => {
     const q = priced(Array.from({ length: 10 }, (_, i) => sh(`echo ${i}`)), { budgetUsd: 0.6, submitAtLimit: true });
     const outcome = await q.run;
     expect(outcome.status).toBe("done");
-    expect(outcome.summary).toContain("Its budget ($0.60) was spent before he said he was done");
+    expect(outcome.summary).toContain("Its budget ($0.60) was spent before it said it was done");
     const told = q.told();
     expect(told[1]).toContain("(Spent $0.20 of $0.60.)");
     expect(told.some((m) => m.includes("of $0.60: wrap up."))).toBe(true);
@@ -45,11 +45,11 @@ describe("a budget in dollars", () => {
     ]);
   });
 
-  test("without submitAtLimit a quest whose budget is spent stops, and says it was the budget", async () => {
+  test("without submitAtLimit a run whose budget is spent stops, and says it was the budget", async () => {
     const q = priced(Array.from({ length: 10 }, (_, i) => sh(`echo ${i}`)), { budgetUsd: 0.3 });
     const outcome = await q.run;
     expect(outcome.status).toBe("stopped");
-    expect(outcome.summary).toBe("Stopped: its budget ($0.30) was spent before he finished.");
+    expect(outcome.summary).toBe("Stopped: its budget ($0.30) was spent before it finished.");
   });
 
   test("work the reviewer sent back, its budget spent by that review, isn't judged again: the reviewer's word stands", async () => {
@@ -59,7 +59,7 @@ describe("a budget in dollars", () => {
     const outcome = await q.run;
     expect(q.asked().filter((role) => role === "reviewer")).toHaveLength(1);
     expect(outcome.status).toBe("stopped");
-    expect(outcome.summary).toBe("Stopped: its budget ($0.35) was spent before he finished.");
+    expect(outcome.summary).toBe("Stopped: its budget ($0.35) was spent before it finished.");
     expect(outcome.review).toBe("The test still fails.");
   });
 
@@ -78,20 +78,20 @@ describe("a budget in dollars", () => {
 });
 
 /**
- * A coding agent at work (a stub whose events are Galahad's own), each look at it costing `perPoll` dollars of its own
+ * A coding agent at work (a stub whose events are the primary's own), each look at it costing `perPoll` dollars of its own
  * calls through the gateway, as the caller counts them; it ends of itself after `polls` looks. The planner and the
  * reviewer cost `perAsk` a call.
  */
-function agentAtWork(options: Partial<QuestOptions>, { perPoll, polls = 6, perAsk = 0, reviewer = ["PASS\nIt holds."], minutes = 60 }: { perPoll: number; polls?: number; perAsk?: number; reviewer?: string[]; minutes?: number }) {
+function agentAtWork(options: Partial<RunOptions>, { perPoll, polls = 6, perAsk = 0, reviewer = ["PASS\nIt holds."], minutes = 60 }: { perPoll: number; polls?: number; perAsk?: number; reviewer?: string[]; minutes?: number }) {
   const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const ok = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
-  const queues: Record<QuestRole, string[]> = { planner: ["1. Do it.\nDone when: it is done."], engineer: [], reviewer: [...reviewer] };
+  const queues: Record<RunRole, string[]> = { planner: ["1. Do it.\nDone when: it is done."], engineer: [], reviewer: [...reviewer] };
   let usd = 0;
   let looked = 0;
-  const events: QuestEvent[] = [];
+  const events: RunEvent[] = [];
   const prompts: string[] = [];
   let stopped = 0;
-  const run = runQuest(
+  const run = runLoop(
     { goal: "make it so", environment: "a test sandbox", agent: { driver, models: [{ provider: "p", model: "m" }], minutes, workdir: "/work" }, ...options },
     {
       ask: async (role) => {
@@ -137,7 +137,7 @@ describe("a coding agent, held to its budget", () => {
       { type: "budget", spentUsd: expect.closeTo(0.6, 5), budgetUsd: 0.5, out: true },
     ]);
     expect(outcome.status).toBe("done");
-    expect(outcome.summary).toBe("Its budget ($0.50) was spent before he said he was done. The work as it stood was put to the reviewer, who accepted it.");
+    expect(outcome.summary).toBe("Its budget ($0.50) was spent before it said it was done. The work as it stood was put to the reviewer, who accepted it.");
   });
 
   test("without submitAtLimit it stops, saying it was the budget", async () => {
@@ -145,7 +145,7 @@ describe("a coding agent, held to its budget", () => {
     const outcome = await q.run;
     expect(q.stopped()).toBe(1);
     expect(outcome.status).toBe("stopped");
-    expect(outcome.summary).toBe("Stopped: its budget ($0.50) was spent before he finished.");
+    expect(outcome.summary).toBe("Stopped: its budget ($0.50) was spent before it finished.");
   });
 
   test("work sent back isn't taken up again once the budget is spent: it ends with the reviewer's word", async () => {
@@ -173,7 +173,7 @@ describe("a coding agent out of time", () => {
     const outcome = await q.run;
     expect(q.stopped()).toBe(1);
     expect(outcome.status).toBe("done");
-    expect(outcome.summary).toBe("His time (0 minutes) was up before he said he was done. The work as it stood was put to the reviewer, who accepted it.");
+    expect(outcome.summary).toBe("Its time (0 minutes) was up before it said it was done. The work as it stood was put to the reviewer, who accepted it.");
   });
 
   test("what they don't pass ends as before: it ran out of time, and what was there was judged", async () => {
@@ -194,7 +194,7 @@ describe("a coding agent out of time", () => {
 
 /**
  * A coding agent on two models whose first run works (a command, then a summary) and ends in a failure, and whose
- * run on the next model can't start, as Percival's could not once its model access was gone (22 November 2026: its
+ * run on the next model can't start, as Ivo's could not once its model access was gone (22 November 2026: its
  * finished work was given up unjudged). `worked: false`: the first run fails before it does anything. `firstExit: 0`: it
  * ends well instead, for the reviewer to judge. `then: "hangs"`: a later run starts and does nothing, until its time
  * (`minutes`) or its budget (`budgetUsd`, spent once it starts) ends it.
@@ -202,10 +202,10 @@ describe("a coding agent out of time", () => {
 function agentThatFails({ worked = true, firstExit = 1, then = "cant-start", minutes = 60, budgetUsd, reviewer = ["PASS\nThe report is there."] }: { worked?: boolean; firstExit?: number; then?: "cant-start" | "hangs"; minutes?: number; budgetUsd?: number; reviewer?: string[] } = {}) {
   const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
   const ok = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
-  const queues: Record<QuestRole, string[]> = { planner: ["1. Write the report.\nDone when: it is written."], engineer: [], reviewer: [...reviewer] };
+  const queues: Record<RunRole, string[]> = { planner: ["1. Write the report.\nDone when: it is written."], engineer: [], reviewer: [...reviewer] };
   let launches = 0;
-  const asked: QuestRole[] = [];
-  const run = runQuest(
+  const asked: RunRole[] = [];
+  const run = runLoop(
     { goal: "profile the suite", environment: "a test sandbox", submitAtLimit: true, ...(budgetUsd !== undefined ? { budgetUsd } : {}), agent: { driver, models: [{ provider: "p", model: "first" }, { provider: "p", model: "next" }], minutes, workdir: "/work" } },
     {
       ask: async (role) => {
@@ -243,7 +243,7 @@ describe("a coding agent whose run fails on every model", () => {
     expect(q.launches()).toBe(2);
     expect(q.asked.filter((role) => role === "reviewer")).toHaveLength(1);
     expect(outcome.status).toBe("done");
-    expect(outcome.summary).toBe("Its run failed on every model before he said he was done. The work as it stood was put to the reviewer, who accepted it.");
+    expect(outcome.summary).toBe("Its run failed on every model before it said it was done. The work as it stood was put to the reviewer, who accepted it.");
   });
 
   test("what they don't pass gives up as before, saying why it failed and that what was there was judged", async () => {

@@ -14,7 +14,7 @@ const KEY = "fake_embedding_key_for_tests_0123456789";
 function setup() {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "ollama", kind: "openai", baseUrl: "http://127.0.0.1:11434/v1" });
   vault.set("remote", KEY, { provider: "remote", origin: "https://embed.example" });

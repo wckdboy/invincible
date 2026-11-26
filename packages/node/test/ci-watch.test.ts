@@ -35,7 +35,7 @@ describe("which pull requests are followed", () => {
     args: { owner: "amiriteorg", repo: "invincible", branch: "invincible/units", artifact: "art_x", title: "Units" },
     class: "outward",
     target: "POST /repos/amiriteorg/invincible/pulls (ship)",
-    by: "galahad",
+    by: "primary",
     why: null,
     node: "n_here",
     requestedAt: "x",
@@ -76,7 +76,7 @@ describe("following the checks", () => {
   function harness(shipped: ShippedPull[], back?: CiWatchOptions["back"], reviews?: CiWatchOptions["reviews"]) {
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "here" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "here" });
     let now = 10 * 60_000;
     let checks: unknown = { total_count: 0, check_runs: [] };
     const annotations: Record<number, unknown> = {};
@@ -111,13 +111,13 @@ describe("following the checks", () => {
     const asked: unknown[] = [];
     const h = harness([{ ...pull, connector: "github-amiriteorg" }], (shippedPull, failure) => {
       asked.push({ shippedPull, failure });
-      return { said: "Given back to @kay as task task_1: once its fix is verified, pushing it waits for your approval.", fixing: true };
+      return { said: "Given back to @noa as task task_1: once its fix is verified, pushing it waits for your approval.", fixing: true };
     });
     h.set({ total_count: 2, check_runs: [failed(7, "test", "a".repeat(40)), run(8, "lint", "completed", "success")] });
     h.annotate(7, [{ path: "src/importer.ts", start_line: 14, message: "Expected 3, received 2" }]);
     await h.watch.tick();
-    expect(h.notices()[0]!.body).toBe("1 of 2 checks failed: test.\nGiven back to @kay as task task_1: once its fix is verified, pushing it waits for your approval.\nsrc/importer.ts:14 Expected 3, received 2");
-    // A knight is fixing it: a note for the day's digest, not a warning that needs you (PLAN #59).
+    expect(h.notices()[0]!.body).toBe("1 of 2 checks failed: test.\nGiven back to @noa as task task_1: once its fix is verified, pushing it waits for your approval.\nsrc/importer.ts:14 Expected 3, received 2");
+    // An agent is fixing it: a note for the day's digest, not a warning that needs you (PLAN #59).
     expect(h.notices()[0]!.severity).toBe("info");
     expect(asked).toEqual([{ shippedPull: expect.objectContaining({ action: "a_ship1" }), failure: { head: "a".repeat(40), failing: ["test"], lines: ["src/importer.ts:14 Expected 3, received 2"] } }]);
     // Every read went through the connector it was shipped by.
@@ -236,7 +236,7 @@ describe("following the checks", () => {
     const logs: string[] = [];
     const identity = newNodeIdentity();
     const store = new LedgerStore(":memory:");
-    foundFleet(store, identity, { fleetName: "camelot", nodeName: "here" });
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "here" });
     let asked = 0;
     const watch = new CiWatch({
       store,
@@ -271,7 +271,7 @@ describe("following the checks", () => {
     const other: ShippedPull = { ...pull, action: "a_ship2", branch: "invincible/other", artifact: "art_y", pr: 13 };
     const h = harness([pull, other], (shippedPull, failure) => {
       asked.push({ action: shippedPull.action, base: failure.conflict! });
-      return { said: "Given back to @kay.", fixing: true };
+      return { said: "Given back to @noa.", fixing: true };
     });
     const baseA = "d".repeat(40);
     h.github.pull = { mergeable: false, mergeable_state: "dirty", base: { sha: baseA } };
@@ -299,7 +299,7 @@ describe("following the checks", () => {
     const reviewsAsked: number[] = [];
     const h = harness([pull], (_shippedPull, failure) => {
       conflicts.push(failure.conflict!);
-      return { said: "Given back to @kay.", fixing: true };
+      return { said: "Given back to @noa.", fixing: true };
     }, { wanted: () => true, asked: (_shippedPull, review) => reviewsAsked.push(review.id) });
     h.github.refuse = "pull";
     h.github.pull = { mergeable: false, mergeable_state: "dirty", base: { sha: "d".repeat(40) } };

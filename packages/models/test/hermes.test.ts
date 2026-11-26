@@ -187,7 +187,7 @@ describe("Hermes ACP driver", () => {
     expect(existsSync(join(box.home, "cancelled"))).toBe(true);
   });
 
-  test("a knight's run has no tool budget of the bridge's own: two hundred tools, and it ends as it ends (one asked for still holds, above)", async () => {
+  test("an agent's run has no tool budget of the bridge's own: two hundred tools, and it ends as it ends (one asked for still holds, above)", async () => {
     const result = await fixture().run("many");
     expect({ exit: result.exit, stderr: result.stderr }).toEqual({ exit: 0, stderr: "" });
     expect(result.events.filter((e) => e.type === "tool")).toHaveLength(200);

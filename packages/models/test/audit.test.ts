@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage, ExecResult } from "@invincible/core";
 import type { AgentDriver, AgentEvent } from "../src/agents.ts";
-import { AUDIT_EVERY, auditQuestion, type QuestEvent, type QuestOptions, type QuestRole, readAudit, runQuest } from "../src/quest.ts";
+import { AUDIT_EVERY, auditQuestion, type RunEvent, type RunOptions, type RunRole, readAudit, runLoop } from "../src/run.ts";
 
 /*
- * Work audited while it runs, in place of any limit (QuestOptions.audit): every AUDIT_EVERY, the reviewer's models, who
+ * Work audited while it runs, in place of any limit (RunOptions.audit): every AUDIT_EVERY, the reviewer's models, who
  * don't do the work, say whether it is still on its task. A steer is said to whoever does the work, and an audit never
- * ends it (your word, 19 November 2026: "dont artificially limit my knights. Just have an inline auditor, that makes sure
+ * ends it (your word, 19 November 2026: "dont artificially limit my agents. Just have an inline auditor, that makes sure
  * they stay on task"). Stand-ins play the models and the sandbox.
  */
 
@@ -14,13 +14,13 @@ const sh = (command: string) => `Next.\n\`\`\`sh\n${command}\n\`\`\``;
 const ok = (stdout = "ok\n"): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
 const commands = (n: number, from = 1) => Array.from({ length: n }, (_, i) => sh(`echo step ${from + i}`));
 
-/** The engineer's own loop, with a script for each role; `minutesPerCommand` moves the quest's clock at each command. */
-function engineer(script: { engineer: string[]; reviewer: string[] }, options: Partial<QuestOptions>, minutesPerCommand = 0) {
-  const queues: Record<QuestRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [...script.engineer], reviewer: [...script.reviewer] };
-  const seen: { role: QuestRole; messages: ChatMessage[] }[] = [];
-  const events: QuestEvent[] = [];
+/** The engineer's own loop, with a script for each role; `minutesPerCommand` moves the run's clock at each command. */
+function engineer(script: { engineer: string[]; reviewer: string[] }, options: Partial<RunOptions>, minutesPerCommand = 0) {
+  const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [...script.engineer], reviewer: [...script.reviewer] };
+  const seen: { role: RunRole; messages: ChatMessage[] }[] = [];
+  const events: RunEvent[] = [];
   let now = 1_000_000;
-  const run = runQuest(
+  const run = runLoop(
     { goal: "write the parser", environment: "a test sandbox", maxSteps: 200, ...options },
     {
       ask: async (role, messages) => {
@@ -37,11 +37,11 @@ function engineer(script: { engineer: string[]; reviewer: string[] }, options: P
       now: () => now,
     },
   );
-  const audits = () => events.filter((e): e is Extract<QuestEvent, { type: "audit" }> => e.type === "audit");
+  const audits = () => events.filter((e): e is Extract<RunEvent, { type: "audit" }> => e.type === "audit");
   const asked = () => seen.filter((s) => s.role === "reviewer").map((s) => s.messages.at(-1)!.content);
   const told = () => seen.filter((s) => s.role === "engineer").map((s) => s.messages.at(-1)!.content);
   /** How hard each call was asked to think: its last message's level. */
-  const efforts = (role: QuestRole) => seen.filter((s) => s.role === role).map((s) => s.messages.at(-1)!.effort);
+  const efforts = (role: RunRole) => seen.filter((s) => s.role === role).map((s) => s.messages.at(-1)!.effort);
   return { run, audits, asked, told, efforts };
 }
 
@@ -97,7 +97,7 @@ describe("the engineer's own loop, audited", () => {
     expect(asked).not.toContain(`echo step ${AUDIT_EVERY.steps + 1}`);
   });
 
-  test("a steer is said to him with what he is told next, and a steer after a steer is said too: no audit ends the work", async () => {
+  test("a steer is said to it with what it is told next, and a steer after a steer is said too: no audit ends the work", async () => {
     const q = engineer({ engineer: [...commands(2 * AUDIT_EVERY.steps + 5), "DONE\nThe parser is written and tested."], reviewer: ["STEER\nStop reinstalling; write the test.", "STEER\nStill reinstalling.", "PASS\nIt holds."] }, { audit: true, submitAtLimit: true });
     const outcome = await q.run;
     expect(q.audits().map((a) => [a.step, a.verdict])).toEqual([[AUDIT_EVERY.steps, "steer"], [2 * AUDIT_EVERY.steps, "steer"]]);
@@ -106,7 +106,7 @@ describe("the engineer's own loop, audited", () => {
     // The second audit is told what the first said, and sees only what was run since.
     expect(q.asked()[1]).toContain("At the last audit: STEER: Stop reinstalling; write the test.");
     expect(q.asked()[1]).not.toContain("$ echo step 20\n");
-    // He worked on to the end he chose, and his work was judged as anyone's.
+    // It worked on to the end it chose, and its work was judged as anyone's.
     expect(outcome).toMatchObject({ status: "done", steps: 2 * AUDIT_EVERY.steps + 5, summary: "The parser is written and tested." });
   });
 
@@ -119,7 +119,7 @@ describe("the engineer's own loop, audited", () => {
     expect(q.efforts("engineer")[AUDIT_EVERY.steps - 1]).toBe("medium");
   });
 
-  test("an audit that answers STOP, as audits once could, is heard as a steer: its words are said to him and the work goes on", async () => {
+  test("an audit that answers STOP, as audits once could, is heard as a steer: its words are said to it and the work goes on", async () => {
     const q = engineer({ engineer: [...commands(AUDIT_EVERY.steps + 3), "DONE\nWritten."], reviewer: ["STOP\nThe package it needs can't be installed offline.", "PASS\nIt holds."] }, { audit: true });
     const outcome = await q.run;
     expect(q.audits()).toMatchObject([{ step: AUDIT_EVERY.steps, verdict: "steer", note: "The package it needs can't be installed offline." }]);
@@ -150,10 +150,10 @@ describe("the engineer's own loop, audited", () => {
   });
 
   test("an audit is asked on the reviewer's models in their order; only the review that decides is asked apart from the work's model", async () => {
-    // On 22 November 2026 audits asked apart went to the dearest model there was: 42 % of a knight's task's money.
-    const turns: { role: QuestRole; apart?: string }[] = [];
-    const queues: Record<QuestRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [...commands(AUDIT_EVERY.steps + 2), "DONE\nWritten."], reviewer: ["ON\nOn its task.", "PASS\nIt holds."] };
-    const outcome = await runQuest({ goal: "write the parser", environment: "a test sandbox", maxSteps: 200, audit: true }, {
+    // On 22 November 2026 audits asked apart went to the dearest model there was: 42 % of an agent's task's money.
+    const turns: { role: RunRole; apart?: string }[] = [];
+    const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [...commands(AUDIT_EVERY.steps + 2), "DONE\nWritten."], reviewer: ["ON\nOn its task.", "PASS\nIt holds."] };
+    const outcome = await runLoop({ goal: "write the parser", environment: "a test sandbox", maxSteps: 200, audit: true }, {
       ask: async (role, _messages, turn) => {
         turns.push({ role, ...(turn?.apart ? { apart: turn.apart } : {}) });
         return { text: queues[role].shift()!, model: `test/${role}` };
@@ -164,7 +164,7 @@ describe("the engineer's own loop, audited", () => {
     expect(turns.filter((t) => t.role === "reviewer")).toEqual([{ role: "reviewer" }, { role: "reviewer", apart: "test/engineer" }]);
   });
 
-  test("off unless asked for: a quest is what it was, its reviewer asked only to review", async () => {
+  test("off unless asked for: a run is what it was, its reviewer asked only to review", async () => {
     const q = engineer({ engineer: [...commands(45), "DONE\nWritten."], reviewer: ["PASS\nIt holds."] }, {}, 8);
     expect((await q.run).status).toBe("done");
     expect(q.audits()).toEqual([]);
@@ -173,20 +173,20 @@ describe("the engineer's own loop, audited", () => {
 });
 
 /**
- * A coding agent at work: each look at it shows one more tool call (its session in the first), and moves the quest's
+ * A coding agent at work: each look at it shows one more tool call (its session in the first), and moves the run's
  * clock six minutes; it ends of itself at its `polls`th look. The reviewer's answers are the audits' and the review's.
  */
-function agentAtWork(reviewer: string[], options: Partial<QuestOptions> = {}, polls = 10, minutes: number | null = 600) {
+function agentAtWork(reviewer: string[], options: Partial<RunOptions> = {}, polls = 10, minutes: number | null = 600) {
   const driver: AgentDriver = { name: "stub", title: "Stub", kind: "openai", check: "true", files: () => ({}), command: () => "stub-agent", read: (line) => JSON.parse(line) as AgentEvent[] };
-  const queues: Record<QuestRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [], reviewer: [...reviewer] };
-  const events: QuestEvent[] = [];
+  const queues: Record<RunRole, string[]> = { planner: ["1. Write the parser.\nDone when: its test passes."], engineer: [], reviewer: [...reviewer] };
+  const events: RunEvent[] = [];
   const prompts: string[] = [];
   let looked = 0;
   let stopped = 0;
   let now = 1_000_000;
   /** Every command asked of the sandbox, as it was asked. */
   const ran: string[] = [];
-  const run = runQuest(
+  const run = runLoop(
     { goal: "write the parser", environment: "a test sandbox", audit: true, agent: { driver, models: [{ provider: "p", model: "m" }], ...(minutes !== null ? { minutes } : {}), workdir: "/work" }, ...options },
     {
       ask: async (role) => {
@@ -216,7 +216,7 @@ function agentAtWork(reviewer: string[], options: Partial<QuestOptions> = {}, po
       now: () => now,
     },
   );
-  const audits = () => events.filter((e): e is Extract<QuestEvent, { type: "audit" }> => e.type === "audit");
+  const audits = () => events.filter((e): e is Extract<RunEvent, { type: "audit" }> => e.type === "audit");
   return { run, audits, prompts, ran, stopped: () => stopped };
 }
 
@@ -242,7 +242,7 @@ describe("a coding agent's run, audited", () => {
 });
 
 describe("work with no count and no clock, audited instead", () => {
-  test("the engineer is told his commands have no fixed number, and that an audit looks at his work", async () => {
+  test("the engineer is told its commands have no fixed number, and that an audit looks at its work", async () => {
     const q = engineer({ engineer: [...commands(2 * AUDIT_EVERY.steps + 5), "DONE\nWritten."], reviewer: ["ON\nOn its task.", "ON\nCloser.", "PASS\nIt holds."] }, { audit: true, maxSteps: Infinity });
     expect(await q.run).toMatchObject({ status: "done", steps: 2 * AUDIT_EVERY.steps + 5 });
     expect(q.told()[0]).toContain(`Your commands have no fixed number. An independent audit looks at your work every ${AUDIT_EVERY.steps} commands or ${AUDIT_EVERY.minutes} minutes to keep it on its task: when it says what to do next, do that.`);

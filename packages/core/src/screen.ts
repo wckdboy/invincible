@@ -1,11 +1,11 @@
 /*
- * Sessions on a Mac's own screen (docs/MAC.md, M4): Galahad asks to use a Mac itself (its screen, its apps, a shell as
- * its user) for some minutes, and it is his only once you allow it, for those minutes counted from your answer, until
- * you or he ends it. An ask you don't answer in SCREEN_ANSWER_MINUTES lapses: no answer is no. Where a session stands
+ * Sessions on a Mac's own screen (docs/MAC.md, M4): the primary asks to use a Mac itself (its screen, its apps, a shell as
+ * its user) for some minutes, and it is its only once you allow it, for those minutes counted from your answer, until
+ * you or it ends it. An ask you don't answer in SCREEN_ANSWER_MINUTES lapses: no answer is no. Where a session stands
  * is worked out here, the same on every node and in every app, from what the log holds (the mind's screen sessions).
  */
 
-/** How long an ask waits for your answer: his turn has long moved on after that. */
+/** How long an ask waits for your answer: its turn has long moved on after that. */
 export const SCREEN_ANSWER_MINUTES = 15;
 
 /** A session as the log holds it (the mind's ScreenSessionRecord). */
@@ -33,7 +33,7 @@ export interface ScreenSessionView {
   state: ScreenSessionState;
   /** While it waits: until when you can answer. */
   answerBy: number;
-  /** Allowed: until when it is his (or was, once over or ended). */
+  /** Allowed: until when it is its (or was, once over or ended). */
   until: number | null;
   /** The device you answered on, where it was one. */
   decidedVia: string | null;
@@ -56,7 +56,7 @@ export function screenSessionView(s: ScreenSessionFacts, now: number, nodeName: 
   return { id: s.id, node: s.node, nodeName: nodeName(s.node), why: s.why, minutes: s.minutes, askedAt: s.askedAt, ...screenSessionState(s, now), decidedVia: s.decision?.via ?? null };
 }
 
-/** The session that lets him use `node`'s screen now, if one does (the newest, should two overlap). */
+/** The session that lets it use `node`'s screen now, if one does (the newest, should two overlap). */
 export function activeScreenSession<T extends ScreenSessionFacts>(sessions: readonly T[], node: string, now: number): T | null {
   return sessions.filter((s) => s.node === node && screenSessionState(s, now).state === "allowed").sort((x, y) => y.decision!.at - x.decision!.at)[0] ?? null;
 }

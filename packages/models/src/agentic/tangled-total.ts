@@ -8,7 +8,7 @@ import { type AgenticTask, type Built, type Check, int, js, packageJson, pickOne
  *
  * The dial: the number of faults (one per level, each in another module), and how
  * much of them the task names. At level 1 one thing is wrong and the test shows it;
- * at level 4 four are, one is named, and the rest are his to find.
+ * at level 4 four are, one is named, and the rest are its to find.
  */
 
 const WORLDS = [
@@ -176,7 +176,7 @@ const COMPLAINT: Record<Fault, (w: (typeof WORLDS)[number]) => string> = {
   order: (w) => `the ${w.group} with the largest total isn't always first`,
 };
 
-/* ---------- what the hidden tests hold him to ---------- */
+/* ---------- what the hidden tests hold it to ---------- */
 
 const FAULT_CHECK: Record<Fault, { key: string; what: string; body: string }> = {
   cents: {

@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import type { ExecResult, ScreenAction, ScreenStatus, ScreenView } from "@invincible/core";
 
 /*
- * A Mac's own screen, for Galahad (docs/MAC.md, the Mac itself): the app's own binary takes its pictures and moves its
- * pointer and keys (`Galahad --desktop`, apps/apple/Galahad/Mac/MacScreen.swift), so it is the app macOS asks you to
+ * A Mac's own screen, for the primary (docs/MAC.md, the Mac itself): the app's own binary takes its pictures and moves its
+ * pointer and keys (`The primary --desktop`, apps/apple/the primary/Mac/MacScreen.swift), so it is the app macOS asks you to
  * allow, once, in System Settings (Screen & System Audio Recording, and Accessibility). Only a node the app runs (its
  * Bun inside the app's bundle) has one; any other has none.
  */
@@ -24,7 +24,7 @@ export function screenHelper(execPath = process.execPath, platform: string = pro
   if (platform !== "darwin") return null;
   const helpers = dirname(execPath);
   if (!helpers.endsWith("/Contents/Helpers")) return null;
-  const binary = join(dirname(helpers), "MacOS", "Galahad");
+  const binary = join(dirname(helpers), "MacOS", "Invincible");
   return exists(binary) ? binary : null;
 }
 
@@ -126,18 +126,18 @@ export function screenArgs(action: ScreenAction): string[] | null {
   }
 }
 
-/** Apps that are your liege's alone: their settings, their keys and their passwords. Galahad's input never reaches them. */
+/** Apps that are the owner's alone: their settings, their keys and their passwords. The primary's input never reaches them. */
 export const OWNERS_APPS = new Set(["com.apple.systempreferences", "com.apple.keychainaccess", "com.apple.Passwords"]);
 
 /**
- * Why Galahad's own input (a click, a key, typing, the pointer, scrolling) may not reach the screen as it stands: a
+ * Why the primary's own input (a click, a key, typing, the pointer, scrolling) may not reach the screen as it stands: a
  * question of macOS's is on it (a consent, a password: yours to answer, at the Mac), or an app of yours alone is in
  * front. Null: it may. Your own taking over is never stopped by this.
  */
 export function inputRefused(action: ScreenAction, status: Pick<ScreenStatus, "asking" | "frontId" | "front">, mac: string): string | null {
   if (!["click", "move", "scroll", "type", "key"].includes(action.do)) return null;
-  if (status.asking) return `macOS is asking a question on ${mac}'s screen (${status.asking}): it is your liege's to answer, at the Mac, never yours. Look again later, or tell them it waits.`;
-  if (status.frontId && OWNERS_APPS.has(status.frontId)) return `${status.front || "That app"} is in front on ${mac}: your liege's settings, keys and passwords are theirs alone. Open another app first.`;
+  if (status.asking) return `macOS is asking a question on ${mac}'s screen (${status.asking}): it is the owner's to answer, at the Mac, never yours. Look again later, or tell them it waits.`;
+  if (status.frontId && OWNERS_APPS.has(status.frontId)) return `${status.front || "That app"} is in front on ${mac}: the owner's settings, keys and passwords are theirs alone. Open another app first.`;
   return null;
 }
 
@@ -182,7 +182,7 @@ export class MacScreen {
     throw new ScreenError(ran.code === 2 ? 424 : 502, said);
   }
 
-  /** Its size in points, what macOS lets Galahad do with it, and what is in front. */
+  /** Its size in points, what macOS lets the primary do with it, and what is in front. */
   async status(): Promise<Omit<ScreenStatus, "node">> {
     const said = JSON.parse(await this.helper(["status"])) as Partial<Omit<ScreenStatus, "node">>;
     if (typeof said.width !== "number" || typeof said.height !== "number") throw new ScreenError(502, "the screen's helper didn't say its size");

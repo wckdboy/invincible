@@ -42,7 +42,7 @@ import { toast } from "../ui/toast.ts";
 /* Every body that shares the one mind: nodes (and what each can carry), client devices, pairing, placement. */
 
 export const SCOPE_INFO: { scope: AnyScope; label: string }[] = [
-  { scope: "chat", label: "Talk to Galahad" },
+  { scope: "chat", label: "Talk to your agent" },
   { scope: "mind:read", label: "Read memory, fleet, models and activity" },
   { scope: "mind:write", label: "Remember and forget" },
   { scope: "vault:read", label: "See secret names (never values)" },
@@ -103,7 +103,7 @@ async function revoke(ctx: Ctx, d: DeviceView): Promise<void> {
             h("p", {}, "It's removed from the fleet and the vault is rotated, so it can't read anything written from now on."),
             h("p", {}, "It could read the keys in the vault until now: rotate those at their providers too."),
           ]
-        : h("p", {}, "It will no longer be able to reach Galahad. Pairing it again needs a fresh invite."),
+        : h("p", {}, "It will no longer be able to reach your agent. Pairing it again needs a fresh invite."),
     confirmLabel: "Revoke device",
     typeToConfirm: d.name,
   });
@@ -160,7 +160,7 @@ function nodeCard(ctx: Ctx, fleet: FleetView, d: DeviceView, compute: ComputeNod
       { class: "node-body" },
       h("div", { class: "chips" }, ...capChips(caps)),
       loads.length ? h("div", { class: "loads" }, ...loads) : null,
-      // What it measured, the ceiling he may not pass, and its slots in use and waiting.
+      // What it measured, the ceiling it may not pass, and its slots in use and waiting.
       compute ? capacityBlock(ctx, compute, changed) : null,
       h("div", { class: "tiny subtle row wrap" }, d.endpoint ? h("span", { class: "mono" }, d.endpoint) : null, h("span", { class: "mono" }, shortId(d.id)), joined ? h("span", {}, `joined ${relativeTime(joined)}`) : null),
     ),
@@ -515,7 +515,7 @@ function placementPlayground(ctx: Ctx, scope: Scope): HTMLElement {
   return h(
     "div",
     { class: "card pad stack loose", id: "placement" },
-    h("div", { class: "stack tight" }, h("h3", {}, "Where would this run?"), h("p", { class: "small muted" }, "Describe a piece of work; Galahad ranks your machines and says why. Nothing runs.")),
+    h("div", { class: "stack tight" }, h("h3", {}, "Where would this run?"), h("p", { class: "small muted" }, "Describe a piece of work; your agent ranks your machines and says why. Nothing runs.")),
     h("div", { class: "chips", role: "group", "aria-label": "The work needs" }, ...chips),
     memory.el,
     out,
@@ -530,7 +530,7 @@ interface ArmInfo {
 }
 
 /**
- * Agents that hold their own key to Galahad (coding agents over MCP): what each may do, and
+ * Agents that hold their own key to the primary (coding agents over MCP): what each may do, and
  * Revoke, so one can be cut off from any device. Giving one a key stays at a terminal. One on
  * another of your machines is a Q-AMP grant (an arm `qamp.<id>`): its row says whose key it is,
  * what it may call and when it ends, and Revoke ends the grant, its bridge and all.
@@ -547,7 +547,7 @@ function agentsSection(ctx: Ctx, scope: Scope): HTMLElement | null {
         "p",
         {},
         grant
-          ? "Its grant ends at once: its key to Galahad is deleted, so the agent's next call is refused, and its bridge stops. To give it again, grant it from a terminal (invincible qamp grant)."
+          ? "Its grant ends at once: its key to your agent is deleted, so the agent's next call is refused, and its bridge stops. To give it again, grant it from a terminal (invincible qamp grant)."
           : "Its key stops working at once: it can no longer read the mind, run sandboxes or use your models. To bring it back, install it again from a terminal.",
       ),
       confirmLabel: "Revoke",
@@ -557,7 +557,7 @@ function agentsSection(ctx: Ctx, scope: Scope): HTMLElement | null {
     try {
       if (grant) await ctx.api.post("/api/qamp/revoke", { id: grant.id }, scope.signal);
       else await ctx.api.post("/api/arms/revoke", { label: arm.label }, scope.signal);
-      toast(`${arm.label} can't reach Galahad any more`, { tone: "ok" });
+      toast(`${arm.label} can't reach your agent any more`, { tone: "ok" });
       void load();
     } catch (error) {
       toast("Couldn't revoke it", { tone: "error", description: errorMessage(error) });
@@ -597,7 +597,7 @@ function agentsSection(ctx: Ctx, scope: Scope): HTMLElement | null {
                 });
               }),
             )
-          : empty({ icon: "terminal", title: "No agents yet", body: "A coding agent gets Galahad's mind and sandboxes from a terminal on a node.", compact: true }),
+          : empty({ icon: "terminal", title: "No agents yet", body: "A coding agent gets your agent's memory and sandboxes from a terminal on a node.", compact: true }),
       );
     } catch (error) {
       if (!scope.disposed) replace(box, errorState("Couldn't list the agents", error, () => void load()));
@@ -609,7 +609,7 @@ function agentsSection(ctx: Ctx, scope: Scope): HTMLElement | null {
     "Agents",
     {
       note: [
-        "Coding agents with their own key to Galahad. Add one on a node: ",
+        "Coding agents with their own key to your agent. Add one on a node: ",
         h("span", { class: "mono" }, "invincible mcp install claude"),
         " (or opencode, codex, hermes); one on another machine of yours, for a while: ",
         h("span", { class: "mono" }, "invincible qamp grant"),
@@ -679,7 +679,7 @@ export const fleetView: View = (root, ctx, { scope, opts }) => {
       clientsBox,
       clients.length
         ? h("div", { class: "rows" }, ...clients.map((d) => clientRow(ctx, fleet, d)))
-        : empty({ icon: "phone", title: "No phones or browsers yet", body: "Pair one to talk to Galahad from anywhere on your tailnet.", compact: true, actions: admin ? button("Pair a phone or browser", { icon: "plus", onClick: () => openInvite(ctx, "client") }) : null }),
+        : empty({ icon: "phone", title: "No phones or browsers yet", body: "Pair one to talk to your agent from anywhere on your tailnet.", compact: true, actions: admin ? button("Pair a phone or browser", { icon: "plus", onClick: () => openInvite(ctx, "client") }) : null }),
     );
     replace(
       revokedBox,

@@ -14,7 +14,7 @@ import { toast } from "../ui/toast.ts";
  * Keys go from a password field straight into the vault on a full node, where
  * they are sealed for your full nodes only. They are never stored in this
  * browser, never logged, never shown again, and never handed to a model:
- * Galahad's arms use scoped gateway tokens instead. The UI only ever shows a
+ * Sandboxes (arms) use scoped gateway tokens instead. The UI only ever shows a
  * hint like "…3456", which the server computes.
  */
 
@@ -115,7 +115,7 @@ export function openAddKey(ctx: Ctx, options: AddKeyOptions = {}): void {
   };
   /** Another address than its own, for a provider chosen: only one you type, here, next to the key. */
   const mayGiveAnother = (): boolean => !!providerSelect.value && providerSelect.value !== "__other" && !needsAddress();
-  /** A secret of yours alone may be pinned to its API's address, so a knight can be given it to use and never see (PLAN #17). */
+  /** A secret of yours alone may be pinned to its API's address, so an agent can be given it to use and never see (PLAN #17). */
   const plain = (): boolean => providerSelect.value === "__other";
   const addressShown = (): boolean => needsAddress() || plain() || (another && mayGiveAnother());
   const showAddress = () => {
@@ -127,7 +127,7 @@ export function openAddKey(ctx: Ctx, options: AddKeyOptions = {}): void {
       needsAddress()
         ? "It has no address of its own: the key is only ever sent to this one."
         : plain()
-          ? "Optional: its API's https address, the one place it is ever sent, so a knight can be given it to use through the gateway without seeing it. Left empty, it is sent nowhere."
+          ? "Optional: its API's https address, the one place it is ever sent, so an agent can be given it to use through the gateway without seeing it. Left empty, it is sent nowhere."
           : own
           ? `Its own is ${own}. Give another only where its page shows one (another region's): the key is only ever sent to the address you give.`
           : "The key is only ever sent to the address you give.",
@@ -233,7 +233,7 @@ export function openAddKey(ctx: Ctx, options: AddKeyOptions = {}): void {
     },
     field("API key or secret", secret.wrap, { id: "key-value", hint: "Recognised from its prefix where possible. Paste it; it is never shown again." }),
     detected,
-    h("div", { class: "fields" }, field("Provider", providerSelect), field("Name", name, { hint: "How Galahad refers to it." })),
+    h("div", { class: "fields" }, field("Provider", providerSelect), field("Name", name, { hint: "How your agent refers to it." })),
     anotherRow,
     addressField,
     field("Label (optional)", label),
@@ -274,13 +274,13 @@ export function openAddKey(ctx: Ctx, options: AddKeyOptions = {}): void {
 /** Why a subscription's sign-in isn't taken as a key, and where it belongs. */
 const signInCallout = (pasted: SignInForm["signIn"]): HTMLElement => callout("warn", pasted.why, { title: `A ${pasted.tool} sign-in, not an API key` });
 
-/** An open request from Galahad for a credential, with an inline sealed field. */
+/** An open request from the primary for a credential, with an inline sealed field. */
 export function secretRequestCard(ctx: Ctx, request: SecretRequestView): HTMLElement {
   const ms = hlcMs(request.requestedAt);
   const secret = secretInput({ label: `Value for ${request.name}` });
   const seal = button("Seal", { variant: "primary", type: "submit", icon: "vault" });
   const status = h("div");
-  // A key that no longer matters (or that you won't give): out of the Inbox until he asks for it again.
+  // A key that no longer matters (or that you won't give): out of the Inbox until it asks for it again.
   const dismiss = ctx.can("vault:write")
     ? button("Dismiss", {
         size: "sm",
@@ -291,7 +291,7 @@ export function secretRequestCard(ctx: Ctx, request: SecretRequestView): HTMLEle
           void busy(event.currentTarget as HTMLButtonElement, async () => {
             try {
               await ctx.api.post("/api/secret-requests/dismiss", { name: request.name });
-              toast("Dismissed", { description: "It's back only if he asks for it again." });
+              toast("Dismissed", { description: "It's back only if it asks for it again." });
               await ctx.live.refreshInbox();
             } catch (error) {
               replace(status, callout("danger", errorMessage(error), { title: "Couldn't dismiss it" }));
@@ -312,9 +312,9 @@ export function secretRequestCard(ctx: Ctx, request: SecretRequestView): HTMLEle
         h(
           "div",
           { class: "grow stack tight" },
-          h("div", { class: "row wrap" }, h("strong", {}, "Galahad asks for "), h("span", { class: "mono strong" }, request.name), request.provider ? badge(request.provider, "neutral") : null),
+          h("div", { class: "row wrap" }, h("strong", {}, "Your agent asks for "), h("span", { class: "mono strong" }, request.name), request.provider ? badge(request.provider, "neutral") : null),
           h("p", { class: "small" }, request.purpose),
-          h("p", { class: "tiny subtle" }, ms ? `Asked ${relativeTime(ms)}. ` : "", "He'll learn that it exists, never what it is."),
+          h("p", { class: "tiny subtle" }, ms ? `Asked ${relativeTime(ms)}. ` : "", "It'll learn that it exists, never what it is."),
         ),
         dismiss,
       ),
@@ -332,7 +332,7 @@ export function secretRequestCard(ctx: Ctx, request: SecretRequestView): HTMLEle
                 void busy(seal, async () => {
                   try {
                     const extra = await sealSecret(ctx, request.name, value, request.provider);
-                    toast(`${request.name} sealed`, { tone: "ok", description: extra ?? "Galahad can use it now." });
+                    toast(`${request.name} sealed`, { tone: "ok", description: extra ?? "Your agent can use it now." });
                     await ctx.live.refreshInbox();
                   } catch (error) {
                     replace(status, callout("danger", `${errorMessage(error)}. Paste it again.`));
@@ -367,7 +367,7 @@ function explainer(unlocked: boolean | null): HTMLElement {
     h(
       "p",
       { class: "small muted" },
-      "Keys are encrypted for your full nodes and nothing else. They're never stored in this browser and never shown again. Galahad's tools and models get short-lived, scoped gateway tokens, never the key itself.",
+      "Keys are encrypted for your full nodes and nothing else. They're never stored in this browser and never shown again. Your agent's tools and models get short-lived, scoped gateway tokens, never the key itself.",
     ),
     unlocked === false ? callout("warn", "This node holds no vault grant yet, so it can't use these keys. Another full node can.", { title: "Locked on this node" }) : null,
   );
@@ -462,7 +462,7 @@ export const vaultView: View = (root, ctx, { scope, opts }) => {
       replace(explainerBox, explainer(secrets.unlocked));
       replace(
         requestsBox,
-        requests.requests.length ? section("Galahad is asking", { count: String(requests.requests.length) }, ...requests.requests.map((r) => secretRequestCard(ctx, r))) : null,
+        requests.requests.length ? section("Your agent is asking", { count: String(requests.requests.length) }, ...requests.requests.map((r) => secretRequestCard(ctx, r))) : null,
       );
       count = String(secrets.secrets.length);
       listSection.querySelector(".count-label")?.remove();
@@ -494,7 +494,7 @@ export const vaultView: View = (root, ctx, { scope, opts }) => {
         write ? button("Add key", { variant: "primary", icon: "plus", onClick: () => openAddKey(ctx) }) : null,
       ),
       write ? null : callout("quiet", "This device can see secret names, but not add or change keys."),
-      // Shown whole once the vault has answered: what he asks for and the explainer came in above the keys, and pushed them.
+      // Shown whole once the vault has answered: what it asks for and the explainer came in above the keys, and pushed them.
       pageBody(requestsBox, explainerBox, listSection),
     ),
   );

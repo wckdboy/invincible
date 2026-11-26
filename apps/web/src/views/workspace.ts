@@ -9,8 +9,8 @@ import { icon } from "../ui/icons.ts";
 import { codeBlock, renderMarkdown } from "../ui/markdown.ts";
 
 /*
- * A knight's workspace, read (POST /api/team/files, /file and /changes; the Apple apps' Workspace, the terminal's
- * `invincible roundtable files|read|changes`): its folders and files, a file as its code in colour (Markdown drawn, a
+ * An agent's workspace, read (POST /api/team/files, /file and /changes; the Apple apps' Workspace, the terminal's
+ * `invincible agents files|read|changes`): its folders and files, a file as its code in colour (Markdown drawn, a
  * picture shown), and what its latest task changed, each file's part of the diff. In a sheet that moves within itself,
  * with Back; nothing here writes.
  */
@@ -37,9 +37,9 @@ function diffParts(diff: string): Map<string, string> {
   return parts;
 }
 
-/** `task`: what that task changed, rather than the knight's latest (a task's own page opens it so). */
-export function openWorkspace(ctx: Ctx, knight: { id: string; name: string }, start: "files" | "changes" = "files", task?: string): void {
-  const sheet = openSheet({ title: `${knight.name}'s workspace`, description: task ? "Read only: its files, and what this task changed." : "Read only: its files, and what its latest task changed.", size: "wide", body: h("div") });
+/** `task`: what that task changed, rather than the agent's latest (a task's own page opens it so). */
+export function openWorkspace(ctx: Ctx, agent: { id: string; name: string }, start: "files" | "changes" = "files", task?: string): void {
+  const sheet = openSheet({ title: `${agent.name}'s workspace`, description: task ? "Read only: its files, and what this task changed." : "Read only: its files, and what its latest task changed.", size: "wide", body: h("div") });
   const stack: Page[] = [start === "files" ? { kind: "folder", path: "/work" } : { kind: "changes" }];
   const shown = segmented<"files" | "changes">(
     [
@@ -80,7 +80,7 @@ export function openWorkspace(ctx: Ctx, knight: { id: string; name: string }, st
   async function pageOf(top: Page): Promise<HTMLElement> {
     switch (top.kind) {
       case "folder": {
-        const view = await ctx.api.post<TeamFilesView>("/api/team/files", { id: knight.id, path: top.path });
+        const view = await ctx.api.post<TeamFilesView>("/api/team/files", { id: agent.id, path: top.path });
         if (!view.entries.length) return empty({ icon: "folder", title: "Nothing here yet", body: `${top.path} is empty.`, compact: true });
         return h(
           "div",
@@ -106,7 +106,7 @@ export function openWorkspace(ctx: Ctx, knight: { id: string; name: string }, st
         );
       }
       case "file": {
-        const file = await ctx.api.post<TeamFileView>("/api/team/file", { id: knight.id, path: top.path });
+        const file = await ctx.api.post<TeamFileView>("/api/team/file", { id: agent.id, path: top.path });
         const notes = [file.cut ? `Only its beginning is here: it is ${bytesLabel(file.size)}.` : null, file.redacted ? "Something that looked like a key was redacted." : null].filter(Boolean).join(" ");
         const said = notes ? h("p", { class: "tiny subtle" }, notes) : null;
         if (file.kind === "text") {
@@ -118,7 +118,7 @@ export function openWorkspace(ctx: Ctx, knight: { id: string; name: string }, st
         return empty({ icon: "file", title: file.kind === "large" ? "Too big to show here" : "Not text", body: `${bytesLabel(file.size)}${file.kind === "large" ? ": a picture past what is shown here." : " that isn't text or a picture."}`, compact: true });
       }
       case "changes": {
-        const changes = await ctx.api.post<TeamChangesView>("/api/team/changes", { id: knight.id, ...(task ? { task } : {}) });
+        const changes = await ctx.api.post<TeamChangesView>("/api/team/changes", { id: agent.id, ...(task ? { task } : {}) });
         const parts = diffParts(changes.diff);
         const from = changes.base ? `from ${changes.base.slice(0, 8)}` : "since its last commit";
         const rows = [

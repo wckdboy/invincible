@@ -61,7 +61,7 @@ export class Home {
   }
 
   readConfig(): NodeConfig {
-    if (!this.exists()) throw new Error(`no Galahad node at ${this.dir} — run \`invincible init\` or \`invincible join\``);
+    if (!this.exists()) throw new Error(`no Invincible node at ${this.dir} — run \`invincible init\` or \`invincible join\``);
     return Config.parse(JSON.parse(readFileSync(this.configPath, "utf8")));
   }
 

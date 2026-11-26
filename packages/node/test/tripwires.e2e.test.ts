@@ -3,22 +3,22 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bodyFingerprint, type Calibration, ceilingThreads, type LedgerEntry, REFERENCE_SINGLE, routes, type RouteName } from "@invincible/core";
-import type { QuestEvent } from "@invincible/models";
+import type { RunEvent } from "@invincible/models";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import type { Measure } from "../src/compute/service.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
 import { LocalClient } from "../src/loop-tasks.ts";
-import { printQuestEvent, runNodeQuest } from "../src/quest-cli.ts";
+import { printRunEvent, runOnNode } from "../src/run-cli.ts";
 import { fakeDocker } from "./fake-docker.ts";
 import { freePort } from "./ports.ts";
 
 /*
- * Your tripwires on Galahad's own quests, end to end over real HTTP on a real node (stand-ins only for Docker and the
- * models): a quest from a terminal (`invincible do`) and a loop's quest read your rules from the node before each
- * command, a refused command never reaches the sandbox, a halt ends the quest, and each trip is a line in the ledger
- * under the quest and a line of `invincible do`'s output.
+ * Your tripwires on the primary's own runs, end to end over real HTTP on a real node (stand-ins only for Docker and the
+ * models): a run from a terminal (`invincible do`) and a loop's run read your rules from the node before each
+ * command, a refused command never reaches the sandbox, a halt ends the run, and each trip is a line in the ledger
+ * under the run and a line of `invincible do`'s output.
  */
 
 const caps: Capabilities = {
@@ -65,7 +65,7 @@ const models = Bun.serve({
     if (first.startsWith("You are reviewing")) {
       role = "reviewer";
       text = "PASS\nThe file is there.";
-    } else if (first.startsWith("Quest:")) {
+    } else if (first.startsWith("Run:")) {
       role = "engineer";
       const said = turns.filter((m) => m.role === "assistant").length;
       const next = script[said];
@@ -96,7 +96,7 @@ const trips = async () => (await call<{ entries: LedgerEntry[] }>("ledger")).ent
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 60_000, docker: docker.runner, measure, slotWaitMs: 4_000 });
@@ -110,26 +110,26 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe("a quest from a terminal", () => {
+describe("a run from a terminal", () => {
   test("a refused command never reaches the sandbox; the engineer is told why; the ledger and the terminal say so", async () => {
     await call("setRule", { name: "no-locks", does: "refuse", words: ["*.lock"] });
     script = ["rm -f bun.lock", "echo hi > /work/out/hi.txt"];
     asked.length = 0;
     docker.execs.length = 0;
-    const events: QuestEvent[] = [];
-    const { outcome, quest } = await runNodeQuest(client(), { goal: "write hi to a file", network: "isolated" }, { emit: (event) => void events.push(event) });
+    const events: RunEvent[] = [];
+    const { outcome, run } = await runOnNode(client(), { goal: "write hi to a file", network: "isolated" }, { emit: (event) => void events.push(event) });
     expect(outcome.status).toBe("done");
     expect(ran().some((c) => c.includes("bun.lock"))).toBe(false);
     expect(ran()).toContain("echo hi > /work/out/hi.txt");
-    expect(asked.filter((a) => a.role === "engineer")[1]!.prompt).toStartWith('Not run: your liege\'s tripwire "no-locks" refuses this command (the word `bun.lock` matches `*.lock`).');
-    expect(await trips()).toMatchObject([{ target: "no-locks", verdict: "deny", class: "forbidden", quest, reason: "your tripwire refused the command: the word `bun.lock` matches `*.lock`", detail: "rm -f bun.lock" }]);
+    expect(asked.filter((a) => a.role === "engineer")[1]!.prompt).toStartWith('Not run: the owner\'s tripwire "no-locks" refuses this command (the word `bun.lock` matches `*.lock`).');
+    expect(await trips()).toMatchObject([{ target: "no-locks", verdict: "deny", class: "forbidden", run, reason: "your tripwire refused the command: the word `bun.lock` matches `*.lock`", detail: "rm -f bun.lock" }]);
     // What `invincible do` prints of it.
     const trip = events.find((e) => e.type === "tripped")!;
     const printed: string[] = [];
     const log = console.log;
     console.log = (...args: unknown[]) => void printed.push(args.join(" "));
     try {
-      printQuestEvent(trip);
+      printRunEvent(trip);
     } finally {
       console.log = log;
     }
@@ -138,33 +138,33 @@ describe("a quest from a terminal", () => {
     await call("removeRule", { name: "no-locks" });
   }, 20_000);
 
-  test("a halt ends the quest there, saying which rule; it is remembered so, and the ledger says it halted the work", async () => {
+  test("a halt ends the run there, saying which rule; it is remembered so, and the ledger says it halted the work", async () => {
     await call("setRule", { name: "no-env", does: "halt", words: [".env*"] });
     script = ["cat .env", "echo never"];
     docker.execs.length = 0;
-    const { outcome, quest } = await runNodeQuest(client(), { goal: "write hi to a file", network: "isolated" });
+    const { outcome, run } = await runOnNode(client(), { goal: "write hi to a file", network: "isolated" });
     expect(outcome.status).toBe("stopped");
     expect(outcome.summary).toBe('Halted by your tripwire "no-env": the word `.env` matches `.env*`.\n$ cat .env');
     expect(ran().some((c) => c.includes(".env") || c.includes("never"))).toBe(false);
-    expect((await trips())[0]).toMatchObject({ target: "no-env", quest, reason: "your tripwire halted the work: the word `.env` matches `.env*`" });
+    expect((await trips())[0]).toMatchObject({ target: "no-env", run, reason: "your tripwire halted the work: the word `.env` matches `.env*`" });
     const { memories } = await call<{ memories: { text: string }[] }>("recall", { q: "Halted" });
     expect(memories[0]!.text).toContain('Halted by your tripwire "no-env"');
     await call("removeRule", { name: "no-env" });
   }, 20_000);
 });
 
-describe("a loop's quest", () => {
-  test("is held to them too, and its trip is in the ledger under the loop's own quest", async () => {
+describe("a loop's run", () => {
+  test("is held to them too, and its trip is in the ledger under the loop's own run", async () => {
     await call("setRule", { name: "no-push", does: "refuse", words: [], contains: "git push" });
     script = ["git push origin main", "echo hi > /work/out/hi.txt"];
     docker.execs.length = 0;
-    await call("setLoop", { name: "hi", schedule: "every 30m", task: { kind: "quest", goal: "write hi to a file", network: "isolated" } });
+    await call("setLoop", { name: "hi", schedule: "every 30m", task: { kind: "run", goal: "write hi to a file", network: "isolated" } });
     await call("runLoop", { name: "hi" });
     await daemon.loops.settled("hi");
     expect(daemon.store.loopRuns("hi", 1)[0]!.body.status).toBe("ok");
     expect(ran().some((c) => c.includes("git push"))).toBe(false);
     expect((await trips())[0]).toMatchObject({ target: "no-push", reason: "your tripwire refused the command: it holds `git push`" });
-    expect((await trips())[0]!.quest).toStartWith("arm.loop.hi.q-");
+    expect((await trips())[0]!.run).toStartWith("arm.loop.hi.q-");
     await call("removeLoop", { name: "hi" });
     await call("removeRule", { name: "no-push" });
   }, 20_000);

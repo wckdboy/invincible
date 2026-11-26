@@ -11,7 +11,7 @@ import { renderMarkdown } from "../ui/markdown.ts";
 import { toast } from "../ui/toast.ts";
 
 /*
- * Projects: workspaces for your work with Galahad. Each has instructions he follows
+ * Projects: workspaces for your work with the primary. Each has instructions it follows
  * in its chats, an optional repository, its chats and the memories made in them.
  * Every node knows a project; setting one is yours (brain:write), never an agent's.
  */
@@ -20,7 +20,7 @@ import { toast } from "../ui/toast.ts";
 function editProject(ctx: Ctx, all: ProjectView[], existing?: ProjectView): Promise<string | null> {
   return new Promise((resolve) => {
     const name = h("input", { class: "input", type: "text", maxlength: 80, value: existing?.name ?? "", autocomplete: "off", placeholder: "e.g. Rocket engine" });
-    const instructions = h("textarea", { class: "input", rows: 8, maxlength: 8000, placeholder: "What Galahad should know and do in this project: goals, conventions, units, what to avoid…" }, existing?.instructions ?? "");
+    const instructions = h("textarea", { class: "input", rows: 8, maxlength: 8000, placeholder: "What your agent should know and do in this project: goals, conventions, units, what to avoid…" }, existing?.instructions ?? "");
     const repo = h("input", { class: "input mono", type: "url", maxlength: 300, value: existing?.repo ?? "", placeholder: "https://github.com/you/project (optional)", autocomplete: "off" });
     const idHint = h("span", { class: "mono" });
     const problem = h("div");
@@ -45,7 +45,7 @@ function editProject(ctx: Ctx, all: ProjectView[], existing?: ProjectView): Prom
     };
     const sheet = openSheet({
       title: existing ? `Edit ${existing.name}` : "New project",
-      description: "Galahad follows its instructions in every chat in it. Every node knows it.",
+      description: "Your agent follows its instructions in every chat in it. Every node knows it.",
       size: "wide",
       body: h(
         "form",
@@ -108,7 +108,7 @@ export const projectsView: View = (root, ctx, { scope, opts }) => {
       return empty({
         icon: "folder",
         title: "No projects yet",
-        body: "A project keeps related chats together, with instructions Galahad follows in every one of them and the memories made in them.",
+        body: "A project keeps related chats together, with instructions your agent follows in every one of them and the memories made in them.",
         actions: canEdit ? button("New project", { variant: "primary", icon: "plus", onClick: newProject }) : null,
       });
     }
@@ -142,7 +142,7 @@ export const projectsView: View = (root, ctx, { scope, opts }) => {
           memories,
           mine.length
             ? h("div", { class: "card" }, h("div", { class: "rows" }, ...mine.slice(0, 20).map((m) => h("div", { class: "item" }, h("span", { class: "avatar" }, icon("memory", { size: 14 })), h("div", { class: "grow small wrap-anywhere" }, m.text, h("div", { class: "meta" }, m.trust))))))
-            : h("p", { class: "small muted" }, "Nothing remembered in this project yet. What Galahad remembers in its chats lands here."),
+            : h("p", { class: "small muted" }, "Nothing remembered in this project yet. What your agent remembers in its chats lands here."),
         );
       })
       .catch(() => replace(memories));
@@ -181,7 +181,7 @@ export const projectsView: View = (root, ctx, { scope, opts }) => {
       section(
         "Instructions",
         {},
-        p.instructions ? h("div", { class: "card" }, h("div", { class: "card-body md" }, renderMarkdown(p.instructions))) : h("p", { class: "small muted" }, canEdit ? "None yet: Edit gives Galahad instructions for this project." : "None yet."),
+        p.instructions ? h("div", { class: "card" }, h("div", { class: "card-body md" }, renderMarkdown(p.instructions))) : h("p", { class: "small muted" }, canEdit ? "None yet: Edit gives your agent instructions for this project." : "None yet."),
       ),
       section("Chats", { count: String(mine.length) }, mine.length ? h("div", { class: "card" }, h("div", { class: "rows" }, ...mine.map(chatRow))) : h("p", { class: "small muted" }, "No chats in it yet.")),
       section("Remembered here", {}, memories),
@@ -202,7 +202,7 @@ export const projectsView: View = (root, ctx, { scope, opts }) => {
     h(
       "div",
       { class: "page" },
-      opts.project ? null : pageHead("Projects", "Workspaces for your work with Galahad: instructions he follows, an optional repository, and their own chats and memories.", canEdit ? button("New project", { variant: "primary", icon: "plus", onClick: newProject }) : null),
+      opts.project ? null : pageHead("Projects", "Workspaces for your work with your agent: instructions it follows, an optional repository, and their own chats and memories.", canEdit ? button("New project", { variant: "primary", icon: "plus", onClick: newProject }) : null),
       body,
     ),
   );

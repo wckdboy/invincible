@@ -16,9 +16,9 @@ describe("a file sent through a chat app", () => {
     const pdf = new Uint8Array([...new TextEncoder().encode("%PDF-1.7\n%"), 0xe2, 0xe3, 0xcf, 0xd3, 0x00]);
     const heic = new Uint8Array([0, 0, 0, 0x18, ...new TextEncoder().encode("ftypheic"), 0, 0, 0, 0]);
     expect([fileKind(pdf), fileKind(heic)]).toEqual([null, null]);
-    expect(refusedFile(pdf)).toBe("it isn't a picture Galahad is shown (PNG, JPEG, WebP or GIF) or text");
+    expect(refusedFile(pdf)).toBe("it isn't a picture your agent is shown (PNG, JPEG, WebP or GIF) or text");
     const bigText = new TextEncoder().encode("x".repeat(300 * 1024));
-    expect(refusedFile(bigText)).toBe("it isn't a picture Galahad is shown (PNG, JPEG, WebP or GIF) or text");
+    expect(refusedFile(bigText)).toBe("it isn't a picture your agent is shown (PNG, JPEG, WebP or GIF) or text");
     const bigPicture = new Uint8Array(6 * 1024 * 1024);
     bigPicture.set([0xff, 0xd8, 0xff]);
     expect(refusedFile(bigPicture)).toBe("it's over 5 MB");

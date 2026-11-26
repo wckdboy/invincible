@@ -11,31 +11,31 @@
  *     --moves 5     also times moving between places in the app already open, as a person does (a look at the page,
  *                   a press, the tap; each place twice, so a revisit shows), this many times over on each profile;
  *                   with --runs 0, only that
- *     --shots <dir> also screenshots, 390 and 1280 px, light and dark: the Roundtable (as a board, as a list),
- *                   Galahad's timeline (and a message of yours that
- *                   carried files, and the message box with two waiting to go), a knight's
+ *     --shots <dir> also screenshots, 390 and 1280 px, light and dark: the agents (as a board, as a list),
+ *                   the primary's timeline (and a message of yours that
+ *                   carried files, and the message box with two waiting to go), an agent's
  *                   with a task running, one whose task kept its changes, one whose task failed, a room's work, a
- *                   knight's Workspace with its desktop, a task's own thread (at work, verified, failed), a task
- *                   given to the Roundtable (where the app can), every
+ *                   agent's Workspace with its desktop, a task's own thread (at work, verified, failed), a task
+ *                   given to the agents (where the app can), every
  *                   place the app has (its lib/nav.ts), each as far down as it goes too ("-full"), the sheets and
  *                   forms its places open, and the gallery of its components (apps/web/design/gallery.ts, where the
  *                   checkout has one). The same addresses on any checkout, so an older app is shown at the same places
  *                   (a mode it doesn't have is said, and not shot).
  *     --widths 390,1280,1600  the screenshots' widths instead (under 640 is a phone held upright)
  *     --gallery <dir> only the gallery's screenshots: no node is started
- *     --shifts      also what moves on screen once it is there: each place (and Galahad's, a knight's and a room's
+ *     --shifts      also what moves on screen once it is there: each place (and the primary's, an agent's and a room's
  *                   timeline) opened as a returning visit opens it, on both profiles, watched from its first frame
  *                   until 3 s after it is usable; every layout shift is summed (the place's
  *                   cumulative layout shift), with what moved. --shift-runs n opens each that many times (default 3).
- *     --places a,b  only these places (their names as the report gives them: overview, knight, sheet-add-key…), for
+ *     --places a,b  only these places (their names as the report gives them: overview, agent, sheet-add-key…), for
  *                   --shots and --shifts
- *     --rest        only what Chat and the Roundtable cost at rest, and what they ask the node for (below): no page
+ *     --rest        only what Chat and the agents cost at rest, and what they ask the node for (below): no page
  *                   loads are measured
  *
  * It starts a throwaway node on loopback (a temp home, the file keystore, a stand-in Docker and
  * stand-in models: nothing leaves this machine, and ~/.invincible is never touched), fills it with a
- * few knights (one with a desktop in its VM), a room, tasks (running, waiting, verified with kept
- * changes, failed) and trials, a kept chat, a quest in hand and one thing that needs you, pairs a
+ * few agents (one with a desktop in its VM), a room, tasks (running, waiting, verified with kept
+ * changes, failed) and evals, a kept chat, a run in hand and one thing that needs you, pairs a
  * headless Chrome with it through the real pairing page, and then opens pages the way a browser does:
  *
  *   cold   nothing cached and no service worker: the first visit after pairing
@@ -52,7 +52,7 @@
  *   nodes    elements in the page at "usable"
  * and for the first visit: every request, with its bytes on the wire, each of the app's files as
  * the node sends it (raw, gzip, brotli), and where the main thread's time went (script, style,
- * layout, paint, parsing), from Chrome's own trace. For Chat and the Roundtable it also says what the page
+ * layout, paint, parsing), from Chrome's own trace. For Chat and the agents it also says what the page
  * costs while nothing changes, over ten seconds: the page's main thread's time a second, and the processor time a
  * second of the page's whole renderer (its main thread, compositor, raster and workers) and of every process of the
  * browser (its GPU process drawing the frames among them); and, over a minute, every request each asks the node
@@ -200,7 +200,7 @@ class Chrome {
   }
 }
 
-/** What Gawain's desktop shows: a plain stand-in page in a browser's frame (no real site, nothing fetched). */
+/** What Rio's desktop shows: a plain stand-in page in a browser's frame (no real site, nothing fetched). */
 const DESKTOP_PAGE = `<!doctype html><html><body style="margin:0;font:15px/1.5 -apple-system,system-ui,sans-serif;color:#1d1d1f;background:#fff">
 <div style="height:44px;background:#dfe1e5;display:flex;align-items:center;gap:10px;padding:0 14px"><span style="width:12px;height:12px;border-radius:50%;background:#bbb"></span><span style="width:12px;height:12px;border-radius:50%;background:#bbb"></span>
 <div style="flex:1;background:#fff;border-radius:16px;padding:5px 16px;color:#444">https://dashboard.example/exports</div></div>
@@ -213,11 +213,11 @@ const DESKTOP_PAGE = `<!doctype html><html><body style="margin:0;font:15px/1.5 -
 
 // ---------- what is measured ----------
 // (The first visit to the first one is the one whose requests and files are listed. A wide screen opens on Chat,
-// with the roster beside it; a phone on the roster itself, which is the Roundtable's address. A room is a timeline.)
+// with the roster beside it; a phone on the roster itself, which is the agents' address. A room is a timeline.)
 // (A kept chat, at its own address, is the same page on any checkout; it is added once the node holds one.)
 const PAGES: { name: string; hash: string }[] = [
   { name: "Chat", hash: "#/chat" },
-  { name: "Roundtable", hash: "#/team" },
+  { name: "Agents", hash: "#/team" },
   { name: "Room", hash: "#/team?room=forge" },
   { name: "Overview", hash: "#/overview" },
 ];
@@ -286,11 +286,11 @@ function watchPage(): void {
     // (A kept chat, once its answer is drawn.)
     if (location.hash.startsWith("#/chat")) return Boolean(main.querySelector(".chat .composer")) && (!location.hash.includes("c=") || Boolean(main.querySelector(".turn.assistant")));
     if (!location.hash.startsWith("#/team")) return Boolean(main.querySelector(".page-head h1"));
-    // (A knight's Workspace: the panel, or on an older app its tab.)
+    // (An agent's Workspace: the panel, or on an older app its tab.)
     if (location.hash.includes("tab=workspace")) return Boolean(main.querySelector(".team-panel"));
     if (location.hash.includes("room=")) return Boolean(main.querySelector(".team-message, .team-task"));
-    // (The knights' rows: in the page's own list, in the roster that was the sidebar and a phone's first screen, or, since
-    // 26 November 2026, on the Roundtable's own page, its cards or its list.)
+    // (The agents' rows: in the page's own list, in the roster that was the sidebar and a phone's first screen, or, since
+    // 26 November 2026, on the agents' own page, its cards or its list.)
     return Boolean(document.querySelector(".team-nav-row[data-key], .roster-row[data-key^='person:'], main [data-key^='person:']"));
   };
   // (For timing a move in the app already open: whether the page now on screen is there.)
@@ -461,8 +461,8 @@ try {
   mind.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
   const caps = { os: "linux", arch: "x64", hostname: "keep", cores: 16, cpu: "stand-in", memoryGb: 32, hasBattery: false, gpu: [], docker: true, vm: { kvm: true, tools: ["kata"] }, tools: ["docker"], localModels: [], tailscale: null, sandbox: { image: true, networks: true, vm: true } };
-  // Ada's task stays at its first command until the run ends, so one knight is always working; so does a task given to
-  // the Roundtable here. Gareth's gate can't run in its VM. Gawain's VM has a desktop, whose picture is drawn below.
+  // Ada's task stays at its first command until the run ends, so one agent is always working; so does a task given to
+  // the agents here. Max's gate can't run in its VM. Rio's VM has a desktop, whose picture is drawn below.
   const docker = fakeDocker();
   let adaAtWork = false;
   let desktopShot = "";
@@ -524,7 +524,7 @@ try {
   };
 
   // ---------- stand-in models, and what the pages show ----------
-  // Percival's answer never comes while the run lasts, so one knight is always thinking.
+  // Ivo's answer never comes while the run lasts, so one agent is always thinking.
   model = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -542,7 +542,7 @@ try {
           if (goal.includes("TASK_FAIL")) text = "GIVE UP\nThe gate needs a Postgres this VM does not have: `bun test db/` exits 1 before any work, with ECONNREFUSED on 127.0.0.1:5432. Nothing in the workspace can start one; a task that brings the database up first would.";
           else if (goal.includes("TASK_KEEP") && turns.some((message) => message.role === "assistant")) text = "DONE\nThe importer reads ISO 8601 dates and the old day-first form; four new tests cover both, and the gate passes.";
           else if (turns.some((message) => message.role === "assistant")) text = "DONE\nVerified.";
-          // Offered its own tools (a knight on the roster's models: quest.ts tools), it calls bash, as a real one does.
+          // Offered its own tools (an agent on the roster's models: run.ts tools), it calls bash, as a real one does.
           else if (body.tools?.length) {
             const call = { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_stand_in", function: { name: "bash", arguments: JSON.stringify({ command: `printf done > result.txt # ${write}` }) } }] } }] };
             return new Response(`data: ${JSON.stringify(call)}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -555,48 +555,48 @@ try {
   await until("the node's calibration", () => started.store.lww(`calibration:${started.identity.id}`) !== null);
   await admin("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${model.port}/v1` });
   for (const role of ["planner", "engineer", "reviewer", "swift"]) await admin("setRoster", { role, models: [`stand-in/${role}`] });
-  const knights = [
+  const agents = [
     { id: "ada", name: "Ada", role: "engineer", instructions: "Builds the sync engine and keeps its tests green." },
     { id: "lin", name: "Lin", role: "engineer", instructions: "Owns the PWA: fast, plain and legible." },
-    { id: "kay", name: "Kay", role: "planner", instructions: "Breaks large work into tasks that can be checked." },
-    { id: "bors", name: "Bors", role: "reviewer", instructions: "Reviews what the others ship, independently.", enabled: false },
-    { id: "percival", name: "Percival", role: "planner", instructions: "Researches the questions the others park." },
-    { id: "gareth", name: "Gareth", role: "engineer", instructions: "Keeps the database layer and its migrations honest." },
-    { id: "gawain", name: "Gawain", role: "engineer", instructions: "Works the web through a browser: signs in, downloads, checks pages." },
+    { id: "noa", name: "Noa", role: "planner", instructions: "Breaks large work into tasks that can be checked." },
+    { id: "eli", name: "Eli", role: "reviewer", instructions: "Reviews what the others ship, independently.", enabled: false },
+    { id: "ivo", name: "Ivo", role: "planner", instructions: "Researches the questions the others park." },
+    { id: "max", name: "Max", role: "engineer", instructions: "Keeps the database layer and its migrations honest." },
+    { id: "rio", name: "Rio", role: "engineer", instructions: "Works the web through a browser: signs in, downloads, checks pages." },
   ];
-  for (const knight of knights) await admin("saveTeammate", knight);
-  // Room for every knight's VM at once: by default the stand-in machine's ceiling (half of it) allows two sandboxes.
+  for (const agent of agents) await admin("saveAgent", agent);
+  // Room for every agent's VM at once: by default the stand-in machine's ceiling (half of it) allows two sandboxes.
   await admin("setComputeLimit", { node: started.identity.id, cores: 16, memoryGb: 32, sandboxes: 6 });
-  const idle = async () => !(await admin("team")).deliveries.some((d: { status: string; teammate: string }) => !["percival", "ada"].includes(d.teammate) && (d.status === "queued" || d.status === "running"));
+  const idle = async () => !(await admin("team")).deliveries.some((d: { status: string; agent: string }) => !["ivo", "ada"].includes(d.agent) && (d.status === "queued" || d.status === "running"));
   const ended = (id: string) => async () => !["queued", "running"].includes((await admin("team")).tasks.find((t: { id: string }) => t.id === id)?.status ?? "queued");
-  await admin("saveTeamRoom", { id: "forge", name: "Forge", members: ["ada", "lin", "kay"], turnBudget: 3 });
+  await admin("saveTeamRoom", { id: "forge", name: "Forge", members: ["ada", "lin", "noa"], turnBudget: 3 });
   await admin("postTeamMessage", { room: "forge", text: "Plan the release together: who takes the sync engine, who takes the app, and what proves each is done?" });
   await until("the room's conversation", idle);
   const first = (await admin("createTeamTask", { room: "forge", assignee: "ada", title: "Sync survives a dropped connection", goal: "TASK_SYNC: make sync resume after a dropped connection, with a test that drops it.", dependsOn: [], gates: ["test -f result.txt # gate-sync"] })).task;
   await until("Ada's task to start", () => adaAtWork);
   await admin("createTeamTask", { room: "forge", assignee: "lin", title: "The app says when sync resumed", goal: "TASK_APP: show a quiet line when sync resumes.", dependsOn: [first.id], gates: ["test -f result.txt # gate-app"] });
-  const { room: direct } = await admin("directTeammate", { id: "percival" });
+  const { room: direct } = await admin("directAgent", { id: "ivo" });
   await admin("postTeamMessage", { room: direct.id, text: "Take your time: what do other agents do about context rot?" });
-  await until("Percival to start thinking", async () => (await admin("team")).deliveries.some((d: { status: string; teammate: string }) => d.teammate === "percival" && d.status === "running"));
-  // Each knight's own conversation with you, and in it: Ada asked while she works (her task is in the Forge), Kay's task
-  // verified with its changes kept, Gareth's given up, Gawain's VM made with a desktop.
+  await until("Ivo to start thinking", async () => (await admin("team")).deliveries.some((d: { status: string; agent: string }) => d.agent === "ivo" && d.status === "running"));
+  // Each agent's own conversation with you, and in it: Ada asked while she works (her task is in the Forge), Noa's task
+  // verified with its changes kept, Max's given up, Rio's VM made with a desktop.
   const own: Record<string, string> = {};
-  for (const id of ["ada", "kay", "gareth", "gawain"]) own[id] = (await admin("directTeammate", { id })).room.id;
+  for (const id of ["ada", "noa", "max", "rio"]) own[id] = (await admin("directAgent", { id })).room.id;
   await admin("postTeamMessage", { room: own.ada, text: "How is the sync fix going? Say what the gate prints when you have it." });
-  await admin("postTeamMessage", { room: own.gawain, text: "Once your VM has its desktop, can you fetch this month's export from the dashboard?" });
-  await until("Gawain's reply", idle);
-  const kept = (await admin("createTeamTask", { room: own.kay, assignee: "kay", title: "The importer reads ISO dates", goal: "TASK_KEEP: make the importer read ISO 8601 dates as well as the day-first form, with tests.", dependsOn: [], gates: ["bun test importer # gate-keep"] })).task;
-  await until("Kay's task to end", ended(kept.id), 45_000);
-  const failing = (await admin("createTeamTask", { room: own.gareth, assignee: "gareth", title: "Migrations run on a fresh database", goal: "TASK_FAIL: make every migration run on a fresh database, with a test.", dependsOn: [], gates: ["bun test db/ # gate-fail"] })).task;
-  await until("Gareth's task to end", ended(failing.id), 45_000);
-  await admin("provisionTeammate", { id: "gawain", desktop: true });
-  // Kay's task kept what it changed: a real artifact on this node (its patch), named on the task as the runner names it
+  await admin("postTeamMessage", { room: own.rio, text: "Once your VM has its desktop, can you fetch this month's export from the dashboard?" });
+  await until("Rio's reply", idle);
+  const kept = (await admin("createTeamTask", { room: own.noa, assignee: "noa", title: "The importer reads ISO dates", goal: "TASK_KEEP: make the importer read ISO 8601 dates as well as the day-first form, with tests.", dependsOn: [], gates: ["bun test importer # gate-keep"] })).task;
+  await until("Noa's task to end", ended(kept.id), 45_000);
+  const failing = (await admin("createTeamTask", { room: own.max, assignee: "max", title: "Migrations run on a fresh database", goal: "TASK_FAIL: make every migration run on a fresh database, with a test.", dependsOn: [], gates: ["bun test db/ # gate-fail"] })).task;
+  await until("Max's task to end", ended(failing.id), 45_000);
+  await admin("provisionAgent", { id: "rio", desktop: true });
+  // Noa's task kept what it changed: a real artifact on this node (its patch), named on the task as the runner names it
   // when a repository's changes are kept. (The stand-in Docker has no repository to diff.)
   const patch = "diff --git a/src/importer.ts b/src/importer.ts\n--- a/src/importer.ts\n+++ b/src/importer.ts\n@@ -12,3 +12,6 @@\n-  const [d, m, y] = text.split(\"/\");\n+  if (/^\\d{4}-\\d{2}-\\d{2}/.test(text)) return new Date(text);\n+  const [d, m, y] = text.split(\"/\");\n";
   const artifact = await started.artifacts.save(async (_sandbox: string, _from: string, dest: string) => {
     writeFileSync(join(dest, "changes.patch"), patch);
     return { files: [{ path: "changes.patch", size: patch.length, sha256: new Bun.CryptoHasher("sha256").update(patch).digest("hex") }], bytes: patch.length, skipped: [] };
-  }, { sandbox: (await admin("team")).teammates.find((knight: { id: string }) => knight.id === "kay").workspace.id, path: `/work/out/tasks/${kept.id}`, label: `${kept.title} · kay · verified` });
+  }, { sandbox: (await admin("team")).agents.find((agent: { id: string }) => agent.id === "noa").workspace.id, path: `/work/out/tasks/${kept.id}`, label: `${kept.title} · noa · verified` });
   const { Database } = await import("bun:sqlite");
   const teamDb = new Database(join(home.dir, "team.db"));
   teamDb.query("UPDATE team_jobs SET data = json_set(data, '$.changes', json(?)) WHERE id = ?").run(JSON.stringify({ artifact: artifact.id, files: 3, base: "4f7a1c2e9b8d0a1f2e3c4b5a69788796a5b4c3d2" }), kept.id);
@@ -608,10 +608,10 @@ try {
     { problem: "heat-fin", title: "Heat lost by a straight fin", domain: "thermal" },
   ];
   for (const [n, run] of ["r-one", "r-two"].entries()) {
-    await admin("startTrialRun", { run, suite: "engineering", effort: 1 });
+    await admin("startEvalRun", { run, suite: "engineering", effort: 1 });
     for (const [i, problem] of problems.entries()) {
       const ok = i <= n + 1;
-      await admin("recordTrial", {
+      await admin("recordEval", {
         run,
         suite: "engineering",
         ...problem,
@@ -622,14 +622,14 @@ try {
           { key: "first", units: "1", expected: 0.25, got: 0.2501, tolerance: 0.00075, ok: true },
           { key: "second", units: "s", expected: 560.9, got: ok ? 560.8 : 600, tolerance: 1.68, ok },
         ],
-        quest: { status: "done", steps: 4 + i, revisions: ok ? 0 : 1 },
+        outcome: { status: "done", steps: 4 + i, revisions: ok ? 0 : 1 },
         models: ["stand-in/engineer"],
         version: "abc1234",
         seconds: 90 + 20 * i,
       });
     }
   }
-  // A kept chat (asked through the real chat route, answered by the stand-in), a quest in hand and a key he asked for.
+  // A kept chat (asked through the real chat route, answered by the stand-in), a run in hand and a key it asked for.
   const asked = await fetch(`http://127.0.0.1:${port}${routes.chat!.path}`, {
     method: "POST",
     headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" },
@@ -655,9 +655,9 @@ try {
     if (!sent.ok || !attachedChat) throw new Error(`the kept chat with files wasn't made: ${sent.status}`);
     await until("the kept chat with files to be answered", async () => (await admin("turns")).turns.length === 0);
   }
-  await admin("questProgress", { quest: "measure-1", goal: "Make sync resume after a dropped connection", state: "working", plan: "1. Reproduce the drop.\n2. Resume from the last acknowledged entry.\n3. Run the gate.", step: 3, maxSteps: 30, doing: "bun test packages/link", revisions: 0, gates: [{ command: "bun test packages/link", by: "owner", exitCode: null }] });
+  await admin("runProgress", { run: "measure-1", goal: "Make sync resume after a dropped connection", state: "working", plan: "1. Reproduce the drop.\n2. Resume from the last acknowledged entry.\n3. Run the gate.", step: 3, maxSteps: 30, doing: "bun test packages/link", revisions: 0, gates: [{ command: "bun test packages/link", by: "owner", exitCode: null }] });
   await admin("requestSecret", { name: "github-token", purpose: "To open the pull request for the sync fix." });
-  // What he knows of you (with routes any checkout has): a fact you kept, and one he noticed, waiting for you.
+  // What it knows of you (with routes any checkout has): a fact you kept, and one it noticed, waiting for you.
   await admin("remember", { text: "Short answers, the command first.", tags: ["about-you"] });
   const { token: noticer } = await admin("mintArm", { label: "measure-noticer" });
   await fetch(`http://127.0.0.1:${port}${routes.remember!.path}`, {
@@ -674,7 +674,7 @@ try {
   // is asked of it over the network until you sign in).
   if (core.MCP_LIBRARY) await admin("setConnector", { id: "linear" });
   const team = await admin("team");
-  const faces = Object.fromEntries(team.teammates.map((member: { id: string }) => [member.id, core.avatarExpression(member, team, Date.now())]));
+  const faces = Object.fromEntries(team.agents.map((member: { id: string }) => [member.id, core.avatarExpression(member, team, Date.now())]));
 
   // ---------- the app's files as the node sends them ----------
   const assets = await buildAssets();
@@ -735,7 +735,7 @@ try {
   // (A stream the page keeps open, the node's live stream among them, is quiet when nothing comes on it.)
   const quiet = (ms: number) => until("the network to go quiet", () => Date.now() - lastTraffic > ms && [...wire.values()].every((entry) => entry.done || entry.stream), 30_000);
 
-  // Gawain's desktop shows a stand-in page, drawn here once at the desktop's own size (1280×800) as the JPEG its VM sends.
+  // Rio's desktop shows a stand-in page, drawn here once at the desktop's own size (1280×800) as the JPEG its VM sends.
   await browser.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false }, page);
   await navigate(`data:text/html;charset=utf-8,${encodeURIComponent(DESKTOP_PAGE)}`);
   await sleep(400);
@@ -852,7 +852,7 @@ try {
     }
   }
 
-  // ---------- what Chat and the Roundtable cost while nothing changes ----------
+  // ---------- what Chat and the agents cost while nothing changes ----------
   // (On this machine as it is: a slowed processor drops frames, and so hides the work an animation asks for.)
   await setProfile("laptop");
   const work = async (): Promise<Record<string, number>> => Object.fromEntries((await browser.send("Performance.getMetrics", {}, page)).metrics.map((metric: { name: string; value: number }) => [metric.name, metric.value]));
@@ -905,18 +905,18 @@ try {
     return { requests: wire.size, paths: Object.fromEntries([...paths].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) };
   };
   const chatAsked = RUNS || REST ? await askedAtRest("#/chat") : null;
-  const roundtableAsked = RUNS || REST ? await askedAtRest("#/team") : null;
+  const agentsAsked = RUNS || REST ? await askedAtRest("#/team") : null;
 
   // ---------- what moves on screen once it is there ----------
-  // Each place, and Galahad's, a knight's and a room's timeline, opened as a returning visit opens it (the service worker
+  // Each place, and the primary's, an agent's and a room's timeline, opened as a returning visit opens it (the service worker
   // holds the shell), on each profile, SHIFT_RUNS times; watched from its first frame until SETTLE_MS after it is usable.
   // A place's score is the sum of every layout shift (its cumulative layout shift; nothing touches it meanwhile); what moved is said
-  // with it, the most first. Before the screenshots, which give a knight work: every checkout is seen in the same state.
+  // with it, the most first. Before the screenshots, which give an agent work: every checkout is seen in the same state.
   const SETTLE_MS = 3000;
   const shiftPlaces = [
     ...places.map((place) => ({ name: place.id, hash: `#/${place.id}` })),
-    { name: "galahad", hash: `#/chat?c=${conversation}` },
-    { name: "knight", hash: `#/team?room=${own.ada}` },
+    { name: "primary", hash: `#/chat?c=${conversation}` },
+    { name: "agent", hash: `#/team?room=${own.ada}` },
     { name: "room", hash: "#/team?room=forge" },
   ].filter((place) => wanted(place.name));
   interface Shifted {
@@ -985,20 +985,20 @@ try {
       around?: { route: string; before: unknown; after: unknown };
     }
     const views: View[] = [
-      { name: "roundtable", hash: "#/team" },
-      // The Roundtable as a list (this device's choice).
-      { name: "roundtable-list", hash: "#/team", prefs: { "invincible:roundtable-view": "list" } },
-      { name: "galahad", hash: `#/chat?c=${conversation}`, wait: ".turn.assistant" },
-      // A new chat with him: his orb, large, and what he asks you under it (where the checkout has it).
-      { name: "galahad-welcome", hash: "#/chat", steps: [press("Chat options"), press("New chat")], wait: ".chat-hero" },
+      { name: "agents", hash: "#/team" },
+      // The agents as a list (this device's choice).
+      { name: "agents-list", hash: "#/team", prefs: { "invincible:agents-view": "list" } },
+      { name: "primary", hash: `#/chat?c=${conversation}`, wait: ".turn.assistant" },
+      // A new chat with it: its orb, large, and what it asks you under it (where the checkout has it).
+      { name: "primary-welcome", hash: "#/chat", steps: [press("Chat options"), press("New chat")], wait: ".chat-hero" },
       // Files with a message: a kept one that carried a picture and a text, and the message box with two waiting to go.
-      ...(attachedChat ? [{ name: "galahad-attached", hash: `#/chat?c=${attachedChat}`, wait: ".attached-picture img[src]" }] : []),
+      ...(attachedChat ? [{ name: "primary-attached", hash: `#/chat?c=${attachedChat}`, wait: ".attached-picture img[src]" }] : []),
       { name: "chat-attaching", hash: "#/chat", steps: [ATTACHING], wait: ".composer-file.up ~ .composer-file.up" },
       { name: "ada-running-task", hash: `#/team?room=${own.ada}` },
-      { name: "kay-kept-changes", hash: `#/team?room=${own.kay}&tab=work`, wait: ".team-task" },
-      { name: "gareth-failed-task", hash: `#/team?room=${own.gareth}&tab=work`, wait: ".team-task" },
+      { name: "noa-kept-changes", hash: `#/team?room=${own.noa}&tab=work`, wait: ".team-task" },
+      { name: "max-failed-task", hash: `#/team?room=${own.max}&tab=work`, wait: ".team-task" },
       { name: "forge-work", hash: "#/team?room=forge&tab=work", wait: ".team-task" },
-      { name: "gawain-workspace-desktop", hash: `#/team?room=${own.gawain}&tab=workspace`, wait: ".team-panel .card, .desktop-shot img[data-shown]" },
+      { name: "rio-workspace-desktop", hash: `#/team?room=${own.rio}&tab=workspace`, wait: ".team-panel .card, .desktop-shot img[data-shown]" },
       // A task as a thread of its own (since 26 November 2026): at work, verified with its changes kept, and given up.
       { name: "task-running", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps" },
       { name: "task-verified", hash: `#/task/${kept.id}`, wait: ".thread-page .proof" },
@@ -1016,7 +1016,7 @@ try {
       { name: "sheet-shortcuts", hash: "#/overview", open: [key("?")] },
       { name: "sheet-chat-menu", hash: "#/chat", open: [press("Chat options")], wait: "dialog.selector-pop[open], dialog.selector-sheet[open]" },
       { name: "sheet-all-chats", hash: "#/chat", open: [press("Chat options"), press("All chats…", "All chats")] },
-      { name: "sheet-new-knight", hash: "#/team", open: [press("New knight", "Add a knight")] },
+      { name: "sheet-new-agent", hash: "#/team", open: [press("New agent", "Add an agent")] },
       { name: "sheet-new-project", hash: "#/projects", open: [press("New project")] },
       { name: "sheet-add-loop", hash: "#/loops", open: [press("Add loop", "Add a loop")] },
       { name: "sheet-add-tripwire", hash: "#/loops", open: [press("Add rule")] },
@@ -1097,14 +1097,14 @@ try {
       }
     }
     if (wanted("gallery")) shots.push(...(await shootGallery(browser, page, SHOTS, REPO)));
-    // A task given to the Roundtable, through the page's own form, where the app has one: who took it and why. Last, as it
-    // gives Gawain work; stopped again after each, so each is given to the same Roundtable.
-    giving: for (const theme of wanted("give-to-the-roundtable") ? ["light", "dark"] : []) {
+    // A task given to the agents, through the page's own form, where the app has one: who took it and why. Last, as it
+    // gives Rio work; stopped again after each, so each is given to the same Agents.
+    giving: for (const theme of wanted("give-to-the-agents") ? ["light", "dark"] : []) {
       for (const [width, height, mobile] of sizes) {
         await look(theme, width, height, mobile);
         await open("#/team", false);
         if (!(await evaluate<boolean>(`Boolean(document.querySelector("[data-give]"))`))) {
-          console.error("this app has no way to give a task to the Roundtable: no screenshot of it");
+          console.error("this app has no way to give a task to the agents: no screenshot of it");
           break giving;
         }
         await evaluate(`document.querySelector("[data-give]").click()`);
@@ -1121,7 +1121,7 @@ try {
         })()`);
         await until("who took it", () => evaluate(`Boolean(document.querySelector("dialog[open] .give-result"))`));
         await sleep(400);
-        await shoot("give-to-the-roundtable", width, theme);
+        await shoot("give-to-the-agents", width, theme);
         await evaluate(`document.querySelector("dialog[open]")?.close()`);
         for (const given of (await admin("team")).tasks.filter((task: { givenBy?: string; status: string }) => task.givenBy && (task.status === "queued" || task.status === "running"))) {
           await admin("controlTeam", { task: given.id, action: "stop" }).catch(() => {});
@@ -1184,20 +1184,20 @@ try {
 
   // ---------- the report ----------
   const restLines = () => [
-    `The Roundtable at rest (laptop, ten seconds): ${atRest!.avatars} avatars of ${atRest!.avatarElements} elements, ${atRest!.animations} animations running;`,
+    `The agents at rest (laptop, ten seconds): ${atRest!.avatars} avatars of ${atRest!.avatarElements} elements, ${atRest!.animations} animations running;`,
     `the main thread works ${atRest!.mainThread} ms a second (script ${atRest!.script}, style ${atRest!.style}, layout ${atRest!.layout}); the page's renderer ${atRest!.renderer} ms, the whole browser ${atRest!.browser} ms of processor a second.`,
     `Chat at rest: ${chatAtRest!.animations} animations running; the main thread works ${chatAtRest!.mainThread} ms a second (script ${chatAtRest!.script}, style ${chatAtRest!.style}, layout ${chatAtRest!.layout}); the page's renderer ${chatAtRest!.renderer} ms, the whole browser ${chatAtRest!.browser} ms of processor a second.`,
     ...(
       [
         ["Chat", chatAsked!],
-        ["The Roundtable", roundtableAsked!],
+        ["The agents", agentsAsked!],
       ] as const
     ).map(([name, asked]) => `${name} asks the node ${asked.requests} times a minute at rest${asked.requests ? `: ${Object.entries(asked.paths).map(([path, n]) => `${path} ${n}`).join(", ")}` : ""}.`),
   ];
   if (REST) {
     console.log(`\nThe PWA at ${revision}${dirty} (${REPO}), in ${(await browser.send("Browser.getVersion")).product}.`);
     console.log(restLines().join("\n"));
-    if (JSON_OUT) writeFileSync(JSON_OUT, `${JSON.stringify({ revision: `${revision}${dirty}`, chatAtRest, roundtableAtRest: atRest, chatAsked, roundtableAsked }, null, 2)}\n`);
+    if (JSON_OUT) writeFileSync(JSON_OUT, `${JSON.stringify({ revision: `${revision}${dirty}`, chatAtRest, agentsAtRest: atRest, chatAsked, agentsAsked }, null, 2)}\n`);
   } else if (!RUNS) console.log(`${shots.length} screenshots in ${resolve(SHOTS ?? ".")}, nothing measured${MOVES || SHIFTS ? ` but ${[MOVES ? "the moves" : "", SHIFTS ? "the shifts" : ""].filter(Boolean).join(" and ")}` : ""} (--runs 0).`);
   else {
   // (The browser fetches /sw.js itself, outside what the protocol shows of the page and the worker: it is counted here.)
@@ -1213,9 +1213,9 @@ try {
     files: [...files, { path: "all of them", raw: total("raw"), gzip: total("gzip"), brotli: total("brotli") }],
     pages: results,
     chatAtRest,
-    roundtableAtRest: atRest,
+    agentsAtRest: atRest,
     chatAsked,
-    roundtableAsked,
+    agentsAsked,
     ...(MOVES ? { moves } : {}),
     ...(SHIFTS ? { shifts: shifted } : {}),
     shots,
@@ -1229,7 +1229,7 @@ try {
     return rows.map((row) => row.map((cell, column) => (column ? cell.padStart(widths[column]!) : cell.padEnd(widths[column]!))).join("  ")).join("\n");
   };
   console.log(`\nThe PWA at ${report.revision} (${REPO}), in ${report.chrome}, ${RUNS} loads each.`);
-  console.log(`The knights' faces while it was measured: ${Object.entries(faces).map(([id, face]) => `${id} ${face}`).join(", ")}.\n`);
+  console.log(`The agents' faces while it was measured: ${Object.entries(faces).map(([id, face]) => `${id} ${face}`).join(", ")}.\n`);
   console.log("The app's files on a first visit, as the node sends them:");
   console.log(table([["file", "raw", "gzip", "brotli"], ...report.files.map((f) => [f.path, kb(f.raw), kb(f.gzip), kb(f.brotli)])]));
   console.log(`\nA first visit to ${PAGES[0]!.name}: ${report.firstVisit.requests} requests seen, and /sw.js (${firstVisit.filter((w) => w.by === "page").length} by the page, ${firstVisit.filter((w) => w.by === "service worker").length} by the service worker; ${report.firstVisit.api} of them to the API),`);

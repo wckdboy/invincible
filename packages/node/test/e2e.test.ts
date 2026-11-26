@@ -85,7 +85,7 @@ beforeAll(async () => {
       const body = (await req.json()) as { stream?: boolean; messages: { content: string }[] };
       upstreamBody = body;
       if (!body.stream) return Response.json({ choices: [{ message: { content: "pong" } }] });
-      const chunks = ["Good ", "day, ", "my liege."].map((t) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`);
+      const chunks = ["Good ", "day, ", "the owner."].map((t) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`);
       return new Response(`${chunks.join("")}data: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
     },
   });
@@ -93,7 +93,7 @@ beforeAll(async () => {
   // The laptop founds the fleet.
   const { identity, keystore } = await homeA.createIdentity("file");
   const store = new LedgerStore(homeA.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "laptop" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "laptop" });
   store.close();
   homeA.writeConfig({ v: 1, name: "laptop", fleet, port: portA, keystore, advertise: "127.0.0.1" });
   laptop = await startDaemon(homeA, {
@@ -249,11 +249,11 @@ describe("M0: one mind, two bodies", () => {
       .filter((l) => l.startsWith("data: "))
       .map((l) => JSON.parse(l.slice(6)));
     expect(events.find((e) => e.type === "fallback")?.from).toBe("nowhere/missing");
-    expect(events.filter((e) => e.type === "text").map((e) => e.text).join("")).toBe("Good day, my liege.");
+    expect(events.filter((e) => e.type === "text").map((e) => e.text).join("")).toBe("Good day, the owner.");
     expect(events.at(-1).type).toBe("done");
   });
 
-  test("a quest's call goes without recalled memories when it asks to (a trial of your own work), and with them otherwise", async () => {
+  test("a run's call goes without recalled memories when it asks to (an eval of your own work), and with them otherwise", async () => {
     const callB = admin(homeB, portB);
     await callB("remember", { text: "The widgets importer reads two-digit years as this century", tags: ["test"] });
     const ask = async (extra: object): Promise<string> => {
@@ -321,7 +321,7 @@ describe("M0: one mind, two bodies", () => {
     expect(random.status).toBe(422);
   });
 
-  test("Galahad can request a credential; filling it on another device resolves the request", async () => {
+  test("Your agent can request a credential; filling it on another device resolves the request", async () => {
     const callA = admin(homeA, portA);
     const callB = admin(homeB, portB);
     await callB("requestSecret", { name: "verda", provider: "verda", purpose: "Kimi K3.1 Pro for the engineer role" });
@@ -330,7 +330,7 @@ describe("M0: one mind, two bodies", () => {
     await until(async () => (await callB("secretRequests")).requests.length === 0);
   });
 
-  test("a key request you dismiss leaves the Inbox on every node until he asks again; an agent can't dismiss one", async () => {
+  test("a key request you dismiss leaves the Inbox on every node until it asks again; an agent can't dismiss one", async () => {
     const callA = admin(homeA, portA);
     const callB = admin(homeB, portB);
     await callB("requestSecret", { name: "orca", purpose: "a second opinion on the reviewer's answers" });
@@ -375,7 +375,7 @@ describe("M0: one mind, two bodies", () => {
     expect((await callA("providers")).signIns).toEqual(expect.arrayContaining([expect.objectContaining({ prefix: "sk-ant-oat" })]));
   });
 
-  test("a coding plan made for coding agents (OpenCode Go) answers a quest's call, as Galahad, and never his talk with you", async () => {
+  test("a coding plan made for coding agents (OpenCode Go) answers a run's call, as your agent, and never its talk with you", async () => {
     const callA = admin(homeA, portA);
     // (The plan's own preset, pointed at the stand-in provider: a key pinned to where you say it goes.)
     const planKey = "0123456789abcdef0123456789abcdef.FAKEfakeFAKEfake";
@@ -399,10 +399,10 @@ describe("M0: one mind, two bodies", () => {
       expect(talk.at(-1).error).toContain("coding plan");
       expect(upstreamAuth).toBeUndefined();
       const work = await ask({ coding: true });
-      expect(work.filter((e) => e.type === "text").map((e) => e.text).join("")).toBe("Good day, my liege.");
+      expect(work.filter((e) => e.type === "text").map((e) => e.text).join("")).toBe("Good day, the owner.");
       expect(work.find((e) => e.type === "model")).toEqual({ type: "model", ref: "opencode-go/glm-5.3" });
       expect(upstreamAuth).toBe(`Bearer ${planKey}`);
-      expect(upstreamAgent).toMatch(/^Galahad\b/);
+      expect(upstreamAgent).toMatch(/^Invincible\b/);
     } finally {
       await callA("setRoster", { role: "engineer", models: ["anthropic/claude-opus-5-5"] });
       await callA("removeProvider", { id: "opencode-go" });
@@ -431,7 +431,7 @@ describe("M0: one mind, two bodies", () => {
   });
 
   test("the Apple push key is yours alone to set, as every notification route is: another node, which holds vault:write, is refused", async () => {
-    // Found by a knight's audit of the docs (22 November 2026): this route alone checked only its scope, which a full
+    // Found by an agent's audit of the docs (22 November 2026): this route alone checked only its scope, which a full
     // node holds (an agent never may).
     const callA = admin(homeA, portA);
     const dashes = "-".repeat(5);

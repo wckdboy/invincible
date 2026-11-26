@@ -1,14 +1,14 @@
 import { type ChatMessage, redact } from "@invincible/core";
-import { clip, type GateResult, type QuestEvent, type QuestOutcome } from "./quest.ts";
+import { clip, type GateResult, type RunEvent, type RunOutcome } from "./run.ts";
 
 /*
  * Effort: more compute for a better answer. Several independent attempts at the
- * same quest run at once, each in its own sandbox and each reviewed as any quest
+ * same run run at once, each in its own sandbox and each reviewed as any run
  * is; then the independent reviewer takes the best, on the evidence alone (what
  * each ran, the exit codes, what its files print now), blind to which attempt or
  * model made it.
  *
- * The honesty rules of quests don't change: the outcome is the taken attempt's
+ * The honesty rules of runs don't change: the outcome is the taken attempt's
  * own (done only if its own review passed it), and when none passed, the outcome
  * is the best of them and never "done".
  *
@@ -19,7 +19,7 @@ import { clip, type GateResult, type QuestEvent, type QuestOutcome } from "./que
 export interface EffortAttempt<T = unknown> {
   /** 1-based. */
   index: number;
-  outcome: QuestOutcome;
+  outcome: RunOutcome;
   /** What the reviewer sees of it when attempts are compared (evidenceCollector). */
   evidence: string;
   /** What the caller needs to finish with the one taken (its sandbox, say). */
@@ -41,13 +41,13 @@ export interface EffortPick {
 
 export type EffortEvent =
   | { type: "attempt-started"; index: number; of: number }
-  | { type: "attempt-finished"; index: number; of: number; status: QuestOutcome["status"] }
+  | { type: "attempt-finished"; index: number; of: number; status: RunOutcome["status"] }
   | { type: "attempt-failed"; index: number; of: number; error: string }
   | { type: "picking"; candidates: number[] }
   | { type: "picked"; index: number; by: EffortPick["by"]; reason: string; model?: string };
 
 export interface EffortDeps<T> {
-  /** One attempt, start to finish, in its own sandbox. A rejection loses that attempt, not the quest. */
+  /** One attempt, start to finish, in its own sandbox. A rejection loses that attempt, not the run. */
   attempt(index: number, of: number, signal: AbortSignal): Promise<Omit<EffortAttempt<T>, "index">>;
   /** One complete reply from the reviewer role. */
   ask(messages: ChatMessage[]): Promise<{ text: string; model: string }>;
@@ -56,7 +56,7 @@ export interface EffortDeps<T> {
 }
 
 export interface EffortResult<T> {
-  outcome: QuestOutcome;
+  outcome: RunOutcome;
   /** The attempt whose outcome this is (null only when you stopped it before any finished). */
   taken: EffortAttempt<T> | null;
   pick: EffortPick;
@@ -71,15 +71,15 @@ const EVIDENCE_HEAD = 4_500;
 const EVIDENCE_TAIL = 1_500;
 const LABELS = "ABCDEFGH";
 
-/** The comparison: the quest and each attempt's evidence under a letter. Nothing in it says who made which. */
+/** The comparison: the run and each attempt's evidence under a letter. Nothing in it says who made which. */
 export function pickPrompt(goal: string, candidates: { label: string; evidence: string }[]): string {
-  return `You are choosing between ${candidates.length} independent attempts at the same quest. Each has already passed a review of its own. Judge only from the evidence below (what each ran, the exit codes, what its files print now); claims without evidence don't count, and nothing tells you who or what made each attempt.
+  return `You are choosing between ${candidates.length} independent attempts at the same run. Each has already passed a review of its own. Judge only from the evidence below (what each ran, the exit codes, what its files print now); claims without evidence don't count, and nothing tells you who or what made each attempt.
 
-Quest: ${goal}
+Run: ${goal}
 
 ${candidates.map((c) => `=== Attempt ${c.label} ===\n${clip(c.evidence, EVIDENCE_HEAD, EVIDENCE_TAIL)}`).join("\n\n")}
 
-Reply with PICK and one letter on the first line (for example: PICK ${candidates[0]?.label ?? "A"}): the attempt whose evidence best shows the quest done and verified. Then, in a few lines, why, and what the others lacked.`;
+Reply with PICK and one letter on the first line (for example: PICK ${candidates[0]?.label ?? "A"}): the attempt whose evidence best shows the run done and verified. Then, in a few lines, why, and what the others lacked.`;
 }
 
 /** Read the reviewer's reply: PICK and one of the letters on the first line, or null. */
@@ -92,7 +92,7 @@ export function parsePick(reply: string, labels: readonly string[]): { label: st
   return labels.includes(label) ? { label, notes: text.slice(firstLine.length).trim() } : null;
 }
 
-const STATUS_RANK: Record<QuestOutcome["status"], number> = { done: 0, unverified: 1, "gave-up": 2, stopped: 3 };
+const STATUS_RANK: Record<RunOutcome["status"], number> = { done: 0, unverified: 1, "gave-up": 2, stopped: 3 };
 
 /**
  * Which attempt is taken. One that passed its review: that one. Several: the reviewer picks, seeing only
@@ -124,7 +124,7 @@ export async function chooseAttempt<T>(goal: string, attempts: readonly EffortAt
   return { index: taken.index, by: "reviewer", reason: redact(picked.notes || `The reviewer took attempt ${taken.index}.`).slice(0, 2000), model: reply.model };
 }
 
-/** `attempts` attempts at once, then the pick. With one attempt this is just the quest. */
+/** `attempts` attempts at once, then the pick. With one attempt this is just the run. */
 export async function runEffort<T>(options: { goal: string; attempts: number }, deps: EffortDeps<T>): Promise<EffortResult<T>> {
   const of = Math.max(1, Math.floor(options.attempts));
   const signal = deps.signal ?? new AbortController().signal;
@@ -165,12 +165,12 @@ export async function runEffort<T>(options: { goal: string; attempts: number }, 
 
 /**
  * What an attempt beyond the first is told, after the usual instructions. The first attempt is the plain
- * quest (so effort 1 and the first attempt of effort 3 are the same work); the others know they aren't
+ * run (so effort 1 and the first attempt of effort 3 are the same work); the others know they aren't
  * alone, which is the only thing that sets one apart when a single model plays the engineer.
  */
 export function attemptInstructions(index: number, of: number): string {
   if (of <= 1 || index <= 1) return "";
-  return `Other engineers are attempting this same quest independently, and an independent reviewer will take the attempt whose evidence is strongest. Where there is a real choice of method, prefer a sound one that isn't the most obvious, and verify your result independently before you finish. (You are attempt ${index} of ${of}.)`;
+  return `Other engineers are attempting this same run independently, and an independent reviewer will take the attempt whose evidence is strongest. Where there is a real choice of method, prefer a sound one that isn't the most obvious, and verify your result independently before you finish. (You are attempt ${index} of ${of}.)`;
 }
 
 /** A role's models, starting at another one for each attempt (the rest stay as fallbacks, in order). */
@@ -187,14 +187,14 @@ const STEP_TAIL = 250;
 const STEPS_SHOWN = 30;
 
 /**
- * Collects an attempt's evidence as its quest runs: every command, its exit code and an excerpt of what it
+ * Collects an attempt's evidence as its run runs: every command, its exit code and an excerpt of what it
  * printed (never which model did it). `text` adds what the evidence commands print now, and the engineer's
  * summary, marked as the claim it is.
  */
-export function evidenceCollector(): { emit(event: QuestEvent): void; text(outcome: QuestOutcome, fromSandbox?: string): string } {
+export function evidenceCollector(): { emit(event: RunEvent): void; text(outcome: RunOutcome, fromSandbox?: string): string } {
   const commands = new Map<number, string>();
   const steps: { command: string; exitCode: number; excerpt: string }[] = [];
-  /** The gates' last run (a quest with gates): the comparison shows what each printed then. */
+  /** The gates' last run (a run with gates): the comparison shows what each printed then. */
   let gates: GateResult[] = [];
   return {
     emit(event) {

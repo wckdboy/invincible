@@ -2,19 +2,19 @@ import { describe, expect, test } from "bun:test";
 import { containerName, LABEL, SandboxHost, type DockerRunner, type LedgerEntryInput } from "../src/index.ts";
 
 /*
- * Watching a knight's desktop and taking it over, from outside its VM: the host does one thing there with the
+ * Watching an agent's desktop and taking it over, from outside its VM: the host does one thing there with the
  * `desktop` command (a click, some typing, a key, an address) and brings back a picture of the screen. No port is
- * opened into the VM for it. What is typed (a password, when you sign in for the knight) is never written down.
+ * opened into the VM for it. What is typed (a password, when you sign in for the agent) is never written down.
  */
 
 const ID = "0123456789";
-const QUEST = "arm.team.abcdef0123.builder";
+const RUN = "arm.team.abcdef0123.builder";
 const PICTURE = "/9j/4AAQSkZJRgABAQ"; // (the beginning of a JPEG, in base64)
 
 function desk(options: { status?: string; labels?: Record<string, string>; missing?: boolean; fail?: string } = {}) {
   const ledger: LedgerEntryInput[] = [];
   const execs: string[][] = [];
-  const labels = { [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.quest`]: QUEST, [`${LABEL}.network`]: "online", [`${LABEL}.ephemeral`]: "false", [`${LABEL}.isolation`]: "vm", ...options.labels };
+  const labels = { [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.run`]: RUN, [`${LABEL}.network`]: "online", [`${LABEL}.ephemeral`]: "false", [`${LABEL}.isolation`]: "vm", ...options.labels };
   const runner: DockerRunner = async (args) => {
     if (args[0] === "info") return { code: 0, stdout: "29.0.0", stderr: "" };
     if (args[0] === "ps") return { code: 0, stdout: ID, stderr: "" };
@@ -33,10 +33,10 @@ function desk(options: { status?: string; labels?: Record<string, string>; missi
   return { host, ledger, execs };
 }
 
-describe("a knight's desktop, from outside its VM", () => {
+describe("an agent's desktop, from outside its VM", () => {
   test("looking brings back a picture of the screen and writes nothing down", async () => {
     const d = desk();
-    const seen = await d.host.desktop(ID, QUEST, { do: "look" });
+    const seen = await d.host.desktop(ID, RUN, { do: "look" });
     expect(seen).toEqual({ shot: { mediaType: "image/jpeg", data: PICTURE }, width: 1280, height: 800 });
     expect(d.execs).toHaveLength(1);
     expect(d.execs[0]!.join(" ")).toContain("desktop shot");
@@ -46,7 +46,7 @@ describe("a knight's desktop, from outside its VM", () => {
 
   test("each thing done is one `desktop` command with its arguments as arguments, then a fresh picture, and a line in the ledger", async () => {
     const d = desk();
-    const done = async (action: Parameters<SandboxHost["desktop"]>[2]) => { d.execs.length = 0; await d.host.desktop(ID, QUEST, action); return d.execs[0]!; };
+    const done = async (action: Parameters<SandboxHost["desktop"]>[2]) => { d.execs.length = 0; await d.host.desktop(ID, RUN, action); return d.execs[0]!; };
     expect(await done({ do: "click", x: 640, y: 330 })).toEqual(["desktop", "click", "640", "330", "left"]);
     expect(await done({ do: "click", x: 5, y: 6, button: "double" })).toEqual(["desktop", "click", "5", "6", "double"]);
     expect(await done({ do: "move", x: 1, y: 2 })).toEqual(["desktop", "move", "1", "2"]);
@@ -59,13 +59,13 @@ describe("a knight's desktop, from outside its VM", () => {
       ["sandbox.desktop", "click 640 330 left"], ["sandbox.desktop", "click 5 6 double"], ["sandbox.desktop", "move 1 2"],
       ["sandbox.desktop", "scroll down 3"], ["sandbox.desktop", "key ctrl+l Return"], ["sandbox.desktop", "open https://example.com/a?b=c"],
     ]);
-    expect(d.ledger.every((e) => e.class === "modify" && e.target === containerName(ID) && e.quest === QUEST)).toBe(true);
+    expect(d.ledger.every((e) => e.class === "modify" && e.target === containerName(ID) && e.run === RUN)).toBe(true);
   });
 
   test("what is typed reaches the VM whole, as one argument, and is never written down: the ledger says only how much", async () => {
     const d = desk();
     const password = "correct horse; $(reboot) `id` 'battery' \"staple\"";
-    await d.host.desktop(ID, QUEST, { do: "type", text: password });
+    await d.host.desktop(ID, RUN, { do: "type", text: password });
     const typed = d.execs[0]!;
     // Carried as base64 to a line of Python in the VM that hands it to `desktop type` as one argument: no shell reads it.
     expect(typed.slice(0, 2)).toEqual(["python3", "-c"]);
@@ -82,21 +82,21 @@ describe("a knight's desktop, from outside its VM", () => {
       { do: "click", x: -1, y: 5 }, { do: "click", x: 1.5, y: 5 }, { do: "click", x: 5, y: 99_999 }, { do: "key", keys: ["ctrl+l; reboot"] }, { do: "key", keys: [] },
       { do: "scroll", direction: "down", times: 500 }, { do: "open", address: "javascript:alert(1)" }, { do: "open", address: "--proxy-server=evil" }, { do: "type", text: "" }, { do: "type", text: "x".repeat(5000) },
     ];
-    for (const action of bad) await expect(d.host.desktop(ID, QUEST, action)).rejects.toMatchObject({ status: 400 });
+    for (const action of bad) await expect(d.host.desktop(ID, RUN, action)).rejects.toMatchObject({ status: 400 });
     expect(d.execs).toEqual([]);
     expect(d.ledger).toEqual([]);
   });
 
-  test("only a knight's own running VM, and only one that has a desktop", async () => {
+  test("only an agent's own running VM, and only one that has a desktop", async () => {
     await expect(desk().host.desktop(ID, "arm.team.abcdef0123.other", { do: "look" })).rejects.toMatchObject({ status: 403 });
-    await expect(desk({ labels: { [`${LABEL}.ephemeral`]: "true" } }).host.desktop(ID, QUEST, { do: "look" })).rejects.toMatchObject({ status: 403 });
-    await expect(desk().host.desktop("9876543210", QUEST, { do: "look" })).rejects.toMatchObject({ status: 404 });
-    await expect(desk({ status: "exited" }).host.desktop(ID, QUEST, { do: "look" })).rejects.toMatchObject({ status: 409 });
+    await expect(desk({ labels: { [`${LABEL}.ephemeral`]: "true" } }).host.desktop(ID, RUN, { do: "look" })).rejects.toMatchObject({ status: 403 });
+    await expect(desk().host.desktop("9876543210", RUN, { do: "look" })).rejects.toMatchObject({ status: 404 });
+    await expect(desk({ status: "exited" }).host.desktop(ID, RUN, { do: "look" })).rejects.toMatchObject({ status: 409 });
     const none = desk({ missing: true });
-    await expect(none.host.desktop(ID, QUEST, { do: "look" })).rejects.toMatchObject({ status: 424, message: expect.stringContaining("has no desktop") });
+    await expect(none.host.desktop(ID, RUN, { do: "look" })).rejects.toMatchObject({ status: 424, message: expect.stringContaining("has no desktop") });
     // A desktop that will not come up says why, in its own words, and nothing is called done.
     const broken = desk({ fail: "click" });
-    await expect(broken.host.desktop(ID, QUEST, { do: "click", x: 1, y: 1 })).rejects.toMatchObject({ status: 424, message: expect.stringContaining("the browser did not start") });
+    await expect(broken.host.desktop(ID, RUN, { do: "click", x: 1, y: 1 })).rejects.toMatchObject({ status: 424, message: expect.stringContaining("the browser did not start") });
     expect(broken.ledger).toEqual([]);
   });
 });

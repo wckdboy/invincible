@@ -48,7 +48,7 @@ async function until(check: () => boolean, timeoutMs = 8000): Promise<void> {
 beforeAll(async () => {
   const { identity, keystore } = await homeA.createIdentity("file");
   const store = new LedgerStore(homeA.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   homeA.writeConfig({ v: 1, name: "ultra", fleet, port: portA, keystore, advertise: "127.0.0.1" });
   ultra = await startDaemon(homeA, { capabilities: caps("ultra"), syncIntervalMs: 100, proxyPort: freePort(), log: () => {} });
@@ -101,9 +101,9 @@ test("a model call on ultra for a model only the mini's Ollama serves is answere
   expect(JSON.stringify(asked[0]!.body.messages)).toContain("Where are you?");
 });
 
-test("what you may set a knight to work on: the roster's models, then each local one a node serves and where; never an embedder or a wildcard", async () => {
+test("what you may set an agent to work on: the roster's models, then each local one a node serves and where; never an embedder or a wildcard", async () => {
   expect((await admin(homeA, portA)("setRoster", { role: "swift", models: ["ollama/*", "deepseek/deepseek-flash"] })).status).toBe(200);
-  // (What can't do a knight's work isn't offered: the archive's embedder, the decider's decision model.)
+  // (What can't do an agent's work isn't offered: the archive's embedder, the decider's decision model.)
   expect((await admin(homeA, portA)("setRoster", { role: "embedder", models: ["ollama/qwen3-embedding:0.6b"] })).status).toBe(200);
   expect((await admin(homeA, portA)("setRoster", { role: "decider", models: ["cloudflare-ai/typesafe/jev"] })).status).toBe(200);
   const { models } = (await (await admin(homeA, portA)("teamModels")).json()) as { models: { ref: string; on: string[] }[] };

@@ -51,7 +51,7 @@ function runChaos(seed: number) {
   const random = rng(seed);
   const offsets = [0, 90_000, -120_000, 45_000, -30_000]; // within the 5-minute drift bound
   const founder = makeNode("n0", null, offsets[0]!);
-  const fleet = foundFleet(founder.store, founder.identity, { fleetName: "camelot", nodeName: "n0" });
+  const fleet = foundFleet(founder.store, founder.identity, { fleetName: "homelab", nodeName: "n0" });
   const nodes: Node[] = [founder];
   for (let i = 1; i < 5; i++) {
     const node = makeNode(`n${i}`, fleet, offsets[i]!);

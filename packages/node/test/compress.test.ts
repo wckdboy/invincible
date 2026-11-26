@@ -7,7 +7,7 @@ import { compressedJson, pickEncoding } from "../src/compress.ts";
  * cellular pays a tenth of the bytes. Small answers aren't worth it and stay as they are.
  */
 
-const big = { entries: Array.from({ length: 200 }, (_, i) => ({ id: `e${i}`, resource: "connector.site", target: "GET /status", verdict: "allow", reason: "read is within Galahad's freedom (logged)" })) };
+const big = { entries: Array.from({ length: 200 }, (_, i) => ({ id: `e${i}`, resource: "connector.site", target: "GET /status", verdict: "allow", reason: "read is within your agent's freedom (logged)" })) };
 const request = (accept: string | null) => new Request("https://node.test/api/ledger", { headers: accept ? { "accept-encoding": accept } : {} });
 
 describe("compressed answers", () => {

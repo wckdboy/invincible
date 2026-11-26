@@ -1,4 +1,4 @@
-import { type ArgValue, TEAM_GALAHAD, type TeamOutcomeStatus, type TeamTask, type TeamTaskFix, usdLabel } from "@invincible/core";
+import { type ArgValue, TEAM_PRIMARY, type TeamOutcomeStatus, type TeamTask, type TeamTaskFix, usdLabel } from "@invincible/core";
 import type { CiFailure, CiReview, ShippedPull } from "./ci-watch.ts";
 import type { OutcomeRunner } from "./outcomes.ts";
 import { sameRepository } from "./ship.ts";
@@ -6,16 +6,16 @@ import type { TeamStore } from "./team-store.ts";
 import type { TeamService } from "./team.ts";
 
 /*
- * CI and review back to the knight (PLAN #29). When a pull request of a knight's work fails its checks, or someone who
- * may push to the repository asks for changes in a review (ci-watch.ts), the knight whose work it was can be given
+ * CI and review back to the agent (PLAN #29). When a pull request of an agent's work fails its checks, or someone who
+ * may push to the repository asks for changes in a review (ci-watch.ts), the agent whose work it was can be given
  * the fix: a task on the pull request's branch (its worktree starts there), with the work's gates and budget, what
  * failed or what was asked said as data, and the independent reviewer as ever. A fix that ends verified is offered to
  * you as a push onto that branch (github.ship.update: one commit on top, from exactly where the fix began, never
  * forced); you approve it, the pull request updates, and the watcher follows it again.
  *
  * Who says it goes back: an outcome the work was a step of, within that outcome's budget (your ruling of 18 November
- * 2026: he gives an outcome's knights its tasks); anywhere else you, once (invincible roundtable ci on), since nothing
- * else gives a knight work without your word, and then within Galahad's daily giving. Either way once for each commit
+ * 2026: it gives an outcome's agents its tasks); anywhere else you, once (invincible agents ci on), since nothing
+ * else gives an agent work without your word, and then within the primary's daily giving. Either way once for each commit
  * whose checks failed and each review, at most three times for one pull request (then it's yours); the push always
  * asks. It is said in the work's trail and in the fix's, and a failure's in its notice too.
  */
@@ -34,7 +34,7 @@ export interface CiBackDeps {
 const OUTCOME_ENDED: Record<Exclude<TeamOutcomeStatus, "active">, string> = { paused: "paused", done: "done", stopped: "stopped", spent: "out of budget" };
 
 /**
- * What became of a failure: what its notice says, and whether a knight's fix is under way (then it isn't yours to look
+ * What became of a failure: what its notice says, and whether an agent's fix is under way (then it isn't yours to look
  * at yet: the notice is a note for the day's digest, not a warning that needs you; PLAN #59).
  */
 export interface GivenBack {
@@ -51,14 +51,14 @@ const given = (task: TeamTask): GivenBack =>
 
 const where = (pull: ShippedPull) => `${pull.owner}/${pull.repo}${pull.pr ? `#${pull.pr}` : ""}`;
 
-/** Whether a knight's work may go back to it now, and the budget its fix carries; or why not (null: nothing to say). */
+/** Whether an agent's work may go back to it now, and the budget its fix carries; or why not (null: nothing to say). */
 function mayGive(deps: CiBackDeps, pull: ShippedPull, work: TeamTask): { why: string | null } | { budgetUsd: number | undefined } {
   const at = `@${work.assignee}`;
-  const knight = deps.store.teammate(work.assignee);
-  if (!knight) return { why: `${at}, whose work it was, is no longer seated: it's yours.` };
-  if (!knight.repository || !sameRepository(knight.repository, pull.owner, pull.repo)) return { why: `${at} works on another repository now: it's yours.` };
+  const agent = deps.store.agent(work.assignee);
+  if (!agent) return { why: `${at}, whose work it was, is no longer seated: it's yours.` };
+  if (!agent.repository || !sameRepository(agent.repository, pull.owner, pull.repo)) return { why: `${at} works on another repository now: it's yours.` };
   // Who says it goes back: the outcome it was a step of (within what is left of its budget), or you.
-  if (!work.outcome) return deps.store.ciBack() ? { budgetUsd: work.budgetUsd } : { why: `${at} did this work. To give failing checks back to the knight whose work it was: invincible roundtable ci on` };
+  if (!work.outcome) return deps.store.ciBack() ? { budgetUsd: work.budgetUsd } : { why: `${at} did this work. To give failing checks back to the agent whose work it was: invincible agents ci on` };
   const stored = deps.store.outcome(work.outcome);
   const runner = deps.outcomes();
   if (!stored || !runner) return { why: null };
@@ -70,7 +70,7 @@ function mayGive(deps: CiBackDeps, pull: ShippedPull, work: TeamTask): { why: st
   return { budgetUsd };
 }
 
-/** The fix, given to the knight whose work it was in the work's room, and said in the work's trail. */
+/** The fix, given to the agent whose work it was in the work's room, and said in the work's trail. */
 function give(deps: CiBackDeps, pull: ShippedPull, work: TeamTask, budgetUsd: number | undefined, fix: Pick<TeamTaskFix, "head" | "review" | "conflict">, title: string, goal: string, said: string): GivenBack | null {
   const service = deps.service();
   if (!service) return null;
@@ -87,7 +87,7 @@ function give(deps: CiBackDeps, pull: ShippedPull, work: TeamTask, budgetUsd: nu
         // (A fix of work in sensitive mode is in it too, on the same models.)
         ...(work.models?.length ? { models: work.models } : {}),
       },
-      TEAM_GALAHAD,
+      TEAM_PRIMARY,
       { connector: pull.connector, owner: pull.owner, repo: pull.repo, branch: pull.branch, pr: pull.pr, ...fix },
     );
     service.noteTask(work.id, `${said}: given back to @${work.assignee} as task ${task.id}`);
@@ -97,7 +97,7 @@ function give(deps: CiBackDeps, pull: ShippedPull, work: TeamTask, budgetUsd: nu
   }
 }
 
-/** What the notice says of a failure: whether it went back to the knight whose work it was (null: no knight's work here). */
+/** What the notice says of a failure: whether it went back to the agent whose work it was (null: no agent's work here). */
 export function giveBack(deps: CiBackDeps, pull: ShippedPull, failure: CiFailure): GivenBack | null {
   const work = deps.store.taskOfWork(pull.artifact);
   if (!work) return null;
@@ -117,8 +117,8 @@ export function giveBack(deps: CiBackDeps, pull: ShippedPull, failure: CiFailure
 }
 
 /**
- * What is said of a pull request that conflicts with its base: whether it went back to the knight whose work it was
- * (null: no knight's work here), as a fix on its branch that merges the base branch in and resolves the conflicts. Once
+ * What is said of a pull request that conflicts with its base: whether it went back to the agent whose work it was
+ * (null: no agent's work here), as a fix on its branch that merges the base branch in and resolves the conflicts. Once
  * for each base commit, counted with the other fixes toward CI_FIXES for that pull request, under the same word.
  */
 function conflictBack(deps: CiBackDeps, pull: ShippedPull, conflict: { base: string }): GivenBack | null {
@@ -137,13 +137,13 @@ function conflictBack(deps: CiBackDeps, pull: ShippedPull, conflict: { base: str
   return give(deps, pull, work, may.budgetUsd, { head: conflict.base, conflict: conflict.base }, `Merge the base and resolve the conflicts on ${where(pull)}`, goal, "CI · its pull request conflicts with its base");
 }
 
-/** Whether a pull request's reviews are worth reading: a knight's work that may go back to it, with fixes still to give. */
+/** Whether a pull request's reviews are worth reading: an agent's work that may go back to it, with fixes still to give. */
 export function wantsReviews(deps: CiBackDeps, pull: ShippedPull): boolean {
   const work = deps.store.taskOfWork(pull.artifact);
   return !!work && deps.store.fixesOf(pull.owner, pull.repo, pull.branch).length < CI_FIXES && !("why" in mayGive(deps, pull, work));
 }
 
-/** A review that asks for changes on a knight's work: the knight gets them as its fix, once for each review. */
+/** A review that asks for changes on an agent's work: the agent gets them as its fix, once for each review. */
 export function reviewBack(deps: CiBackDeps, pull: ShippedPull, review: CiReview): void {
   const work = deps.store.taskOfWork(pull.artifact);
   if (!work) return;
@@ -160,7 +160,7 @@ export function reviewBack(deps: CiBackDeps, pull: ShippedPull, review: CiReview
 }
 
 export interface OfferDeps {
-  /** One call of the GitHub connector's, as the knight's own: it asks you (an approval card) unless a standing order answers, or it is Galahad's own to approve (`own`, why). */
+  /** One call of the GitHub connector's, as the agent's own: it asks you (an approval card) unless a standing order answers, or it is the primary's own to approve (`own`, why). */
   call: (input: { connector: string; tool: string; args: Record<string, ArgValue>; why: string }) => Promise<{ status: "asked" } | { status: "done"; result: { ok: boolean; body: string }; own?: string }>;
   note: (task: string, text: string) => void;
   log: (message: string) => void;
@@ -179,7 +179,7 @@ export async function offerFix(deps: OfferDeps, task: TeamTask): Promise<void> {
       why: `@${task.assignee} ${fix.conflict ? "merged the base branch in and resolved the conflicts" : "fixed the failing checks"} on ${where} (task ${task.id}), and the independent reviewer passed it: one commit on top of ${fix.branch}, where the fix began. The pull request updates and its checks run again. Its patch: ${task.changes.artifact}, changes.patch.`.slice(0, 500),
     });
     if (sent.status === "asked") deps.note(task.id, `Push · onto ${fix.branch}: it waits for your approval (Inbox)`);
-    else deps.note(task.id, `Push · onto ${fix.branch}, ${sent.own ? "approved by Galahad himself" : "under your standing order"}: ${sent.result.body}`.slice(0, 500));
+    else deps.note(task.id, `Push · onto ${fix.branch}, ${sent.own ? "approved by your agent itself" : "under your standing order"}: ${sent.result.body}`.slice(0, 500));
   } catch (error) {
     const message = (error as Error).message;
     deps.note(task.id, `Push · not offered: ${/has no tool "ship\.update"/.test(message) ? `the GitHub connector can't push fixes yet; add it again (invincible connector add ${fix.connector})` : message}`.slice(0, 500));

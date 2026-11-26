@@ -24,13 +24,13 @@ export interface FileFact {
 
 export interface RoleFact {
   role: string;
-  /** A role you made: a knight's, whose conversations and tasks are all coding work. */
+  /** A role you made: an agent's, whose conversations and tasks are all coding work. */
   custom?: boolean;
   /** Roles that answer in words are asked a word; the decider and the embedder aren't. */
   chats: boolean;
   /**
    * In the roster's order. `problem`: why this node can't use it (null: it can). `plan`: it is on a coding plan,
-   * so it does his coding and the knights' coding tools use it, and it answers nothing else. `spent`: its provider's
+   * so it does its coding and the agents' coding tools use it, and it answers nothing else. `spent`: its provider's
    * allowance is spent now (its window ends by itself, so it is passed over, never a finding).
    */
   models: { ref: string; problem: string | null; plan?: boolean; spent?: boolean }[];
@@ -62,7 +62,7 @@ export interface DoctorFacts {
     backup: { dir: string; exists: boolean; newestAt: number | null; files: number } | null;
   };
   vault: { unlocked: boolean; secrets: number; requests: string[] };
-  /** The providers this fleet has set up (a key added, or one added by hand), and those his roles' defaults name, whose key alone is enough. */
+  /** The providers this fleet has set up (a key added, or one added by hand), and those its roles' defaults name, whose key alone is enough. */
   providers?: { setUp: number; byDefault: string[] };
   /** Providers whose allowance is spent now (absent: gathered before this was known): each window, and when it resets. */
   spent?: { provider: string; until: number }[];
@@ -124,15 +124,15 @@ export interface DoctorFacts {
   /**
    * Push notifications on this node (absent: a node from before them): the devices subscribed, those whose sends keep
    * failing, and (absent: gathered before these were known) how many devices' subscriptions their push service dropped,
-   * and how many things wait for your answer (approvals, questions, keys and connectors he needs).
+   * and how many things wait for your answer (approvals, questions, keys and connectors it needs).
    */
   notify?: { devices: number; failing: { device: string; error: string }[]; keyProblem: string | null; lost?: number; asks?: number };
   /**
-   * The knights whose own setup can stop their work here (absent: a node with no Roundtable): one in sensitive mode,
+   * The agents whose own setup can stop their work here (absent: a node with no Agents): one in sensitive mode,
    * each of its models and why this node can't use it (null: it can); each key of yours it was given, and why it can't
    * go anywhere now (null: it can).
    */
-  knights?: { id: string; name: string; sensitive: { ref: string; problem: string | null }[] | null; keys: { secret: string; problem: string | null }[] }[];
+  agents?: { id: string; name: string; sensitive: { ref: string; problem: string | null }[] | null; keys: { secret: string; problem: string | null }[] }[];
 }
 
 /** A finding for the heartbeat, in words that don't change while the problem stands. */
@@ -148,10 +148,10 @@ export interface Diagnosis extends DoctorCheck {
 }
 
 const CORE_ROLES = new Set(["planner", "engineer", "reviewer"]);
-/** The roles whose own work is all coding (a quest's engineering and its review): a coding plan alone can play them. */
+/** The roles whose own work is all coding (a run's engineering and its review): a coding plan alone can play them. */
 export const CODING_ROLES = new Set(["engineer", "reviewer"]);
 /**
- * The roles a VM's own tools play, through the gateway, and never he himself (a VM's eyes): a coding plan its tools may
+ * The roles a VM's own tools play, through the gateway, and never it itself (a VM's eyes): a coding plan its tools may
  * use (one whose terms allow unattended tools) plays them alone.
  */
 export const TOOL_ROLES = new Set(["eyes"]);
@@ -256,8 +256,8 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     const off = f.mind.peers.filter((p) => p.clockOffsetMs !== null && Math.abs(p.clockOffsetMs) > CLOCK_STEP_MS);
     const known = f.mind.peers.filter((p) => p.clockOffsetMs !== null);
     if (ahead > CLOCK_GUARD_MS) {
-      add("mind", "mind.clock", "broken", `this node's clock is behind: the newest event it holds is dated ${span(ahead)} after its own time`, "Set the clock (timedatectl set-ntp true). Until it's right he sends no approval and lapses none, and other nodes refuse his requests.", {
-        finding: { severity: "alert", title: `${self}'s clock is behind`, body: "It reads earlier than the newest event it holds by more than any clock may lead another. Until it's set (timedatectl set-ntp true) he sends no approval and lapses none." },
+      add("mind", "mind.clock", "broken", `this node's clock is behind: the newest event it holds is dated ${span(ahead)} after its own time`, "Set the clock (timedatectl set-ntp true). Until it's right it sends no approval and lapses none, and other nodes refuse its requests.", {
+        finding: { severity: "alert", title: `${self}'s clock is behind`, body: "It reads earlier than the newest event it holds by more than any clock may lead another. Until it's set (timedatectl set-ntp true) it sends no approval and lapses none." },
       });
     } else if (off.length) {
       const p = off[0]!;
@@ -308,7 +308,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   if (!f.vault.unlocked) add("vault", "vault.open", "broken", `${self} can't open the vault, so it can use no key`, "It holds no grant for the current vault key. Re-grant it from another full node, or rotate the vault (invincible vault rotate).");
   else add("vault", "vault.open", "ok", `open: ${plural(f.vault.secrets, "key")} sealed in it, usable here`);
   if (f.vault.requests.length) {
-    add("vault", "vault.requests", "needs-you", `Galahad is waiting for ${plural(f.vault.requests.length, "key")}: ${f.vault.requests.slice(0, 6).join(", ")}`, "Fill them in the app's Vault, or invincible secret set <name> (a hidden prompt). He learns only that they're there.");
+    add("vault", "vault.requests", "needs-you", `Your agent is waiting for ${plural(f.vault.requests.length, "key")}: ${f.vault.requests.slice(0, 6).join(", ")}`, "Fill them in the app's Vault, or invincible secret set <name> (a hidden prompt). It learns only that they're there.");
   }
 
   /* ---------- models: each role on the roster ---------- */
@@ -317,7 +317,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   const none = f.providers?.setUp === 0;
   if (none) {
     const named = f.providers!.byDefault;
-    add("models", "models.none", "broken", "no provider is set up here yet, so no model can answer", `Add a key: invincible key add. A key for ${named.slice(0, -1).join(", ")} or ${named.at(-1)} is enough, since his roles' defaults name their models; for another provider, hire one of its models too (invincible roster set <role> <provider/model>).`);
+    add("models", "models.none", "broken", "no provider is set up here yet, so no model can answer", `Add a key: invincible key add. A key for ${named.slice(0, -1).join(", ")} or ${named.at(-1)} is enough, since its roles' defaults name their models; for another provider, hire one of its models too (invincible roster set <role> <provider/model>).`);
   }
   // A provider whose allowance is spent until it resets: its models are passed over on every role until then (a coding
   // plan's every model; any other provider's, the one model told to wait: models/windows.ts windowScope). The window
@@ -346,7 +346,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     if (!role.models.length) continue; // nobody hired for it: a choice, not a problem
     const id = `role.${role.role}`;
     const models = role.models.map((m) => (m.problem === null && refusedKey.has(m.ref.slice(0, m.ref.indexOf("/"))) ? { ...m, problem: "its provider refused its key", refused: true } : { ...m, refused: false }));
-    // A coding plan's models do his coding, and the knights' coding tools use them (models/providers.ts); they
+    // A coding plan's models do its coding, and the agents' coding tools use them (models/providers.ts); they
     // answer nothing else, and are asked no word. What is judged for everything else a role does is the rest.
     const plans = models.filter((m) => m.plan);
     const own = models.filter((m) => !m.plan);
@@ -363,20 +363,20 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
           : `Add the plan's key: invincible key add --provider ${unlent[0]!.ref.slice(0, unlent[0]!.ref.indexOf("/"))}.`,
       );
     }
-    const tools = lent.length ? `; his coding and the knights' tools use ${lent.map((m) => m.ref).join(", ")}` : "";
+    const tools = lent.length ? `; its coding and the agents' tools use ${lent.map((m) => m.ref).join(", ")}` : "";
     const usable = own.filter((m) => m.problem === null);
     const first = own.find((m) => !m.spent && !m.refused);
-    // A VM's eyes are asked by its tools, never by him: a plan they may use plays them alone (one they may not, said above).
+    // A VM's eyes are asked by its tools, never by it: a plan they may use plays them alone (one they may not, said above).
     if (!own.length && TOOL_ROLES.has(role.role)) {
       if (lent.length) add("models", id, "ok", `${role.role}: ${lent[0]!.ref} looks at the VMs' screens, asked by their tools through the gateway (a coding plan: it is asked nothing else, so not a word)`);
       continue;
     }
     // A role whose work is all coding is played by a plan alone: the engineer's and the reviewer's, and a role you made,
-    // which only knights work on (their conversations and tasks are coding work). So it is when none of its own models
+    // which only agents work on (their conversations and tasks are coding work). So it is when none of its own models
     // can be used: a refused key's or a spent one's are said above, and any other's is said here.
     if (!usable.length && lent.length && (CODING_ROLES.has(role.role) || role.custom)) {
       const lacking = own.filter((m) => m.problem !== null && !m.spent && !m.refused).map((m) => `; ${m.ref} can't be asked (${m.problem})`).join("");
-      add("models", id, "ok", `${role.role}: ${lent[0]!.ref} ${role.custom ? "does the work of the knights on it" : "does his coding"} (a coding plan: it is asked nothing else, so not a word)${lacking}`);
+      add("models", id, "ok", `${role.role}: ${lent[0]!.ref} ${role.custom ? "does the work of the agents on it" : "does its coding"} (a coding plan: it is asked nothing else, so not a word)${lacking}`);
       continue;
     }
     if (role.unset && !usable.length) {
@@ -444,7 +444,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
 
     if (a.off) add("archive", "archive.index", "needs-you", `the archive's background work is off: it keeps ${plural(a.entries, "entry", "entries")} and takes in nothing new`, "Remove INVINCIBLE_ARCHIVE=off from the node's environment and restart it.");
     else if (a.sourceErrors.length) add("archive", "archive.index", "needs-you", `the archive couldn't read ${a.sourceErrors.map((s) => `${s.name} (${redact(s.error).slice(0, 80)})`).join("; ")}`, "See invincible archive for each source; it tries again by itself.");
-    else add("archive", "archive.index", "ok", `${plural(a.entries, "entry", "entries")} in ${plural(a.chunks, "passage")}${a.backlog ? `, ${a.backlog.toLocaleString("en")} waiting for a vector (he embeds in the background)` : ""}`);
+    else add("archive", "archive.index", "ok", `${plural(a.entries, "entry", "entries")} in ${plural(a.chunks, "passage")}${a.backlog ? `, ${a.backlog.toLocaleString("en")} waiting for a vector (it embeds in the background)` : ""}`);
 
     if (a.integrity.ok === false) add("archive", "archive.integrity", "broken", `${plural(a.integrity.problems, "archived file")} damaged or missing`, "invincible archive verify names them. Restore those files from a backup of the node's home: nothing is mended by deleting.");
     else if (a.integrity.lastAt === null) add("archive", "archive.integrity", "ok", "its files haven't been re-hashed yet (it happens once a day)");
@@ -460,7 +460,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     // (A Mac with Apple's container that isn't running is told how to start it: it hosts through nothing else.)
     const container = f.sandbox.container;
     const here = container && !container.running ? `run invincible sandbox setup here: it starts Apple's container${container.version ? ` (${container.version} is installed)` : ""} and restarts the node` : "install Docker on this one and restart the node";
-    if (!hosts.length) add("sandbox", "sandbox.host", "needs-you", "no node in the fleet hosts sandboxes, so quests and trials can't run", `Enrol a machine with Docker (invincible join there), or ${here}.`);
+    if (!hosts.length) add("sandbox", "sandbox.host", "needs-you", "no node in the fleet hosts sandboxes, so runs and evals can't run", `Enrol a machine with Docker (invincible join there), or ${here}.`);
     else add("sandbox", "sandbox.host", "ok", `${self} hosts no sandboxes (no Docker here); they run on ${hosts.map((h) => h.name).join(", ")}`);
   } else {
     const mac = host.engine === "container";
@@ -468,7 +468,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     else add("sandbox", "sandbox.docker", "ok", mac ? "Apple's container answers: every sandbox here is a VM of its own" : "Docker answers");
     if (mac && host.docker && f.sandbox.container?.kernel === false) add("sandbox", "sandbox.kernel", "needs-you", "Apple's container has no kernel for its VMs yet, so none starts here", "invincible sandbox setup fetches Apple's recommended one (container checks its digest).");
     if (host.docker) {
-      if (!host.image) add("sandbox", "sandbox.image", "needs-you", "the sandbox image is missing (another tool's cleanup may have pruned it)", "invincible sandbox build. He also rebuilds it himself when a sandbox is next needed, which makes that quest wait.");
+      if (!host.image) add("sandbox", "sandbox.image", "needs-you", "the sandbox image is missing (another tool's cleanup may have pruned it)", "invincible sandbox build. It also rebuilds it itself when a sandbox is next needed, which makes that run wait.");
       else add("sandbox", "sandbox.image", "ok", "the sandbox image is built and kept in use");
       if (!host.networks) add("sandbox", "sandbox.networks", "needs-you", "a sandbox network is missing", "Restart the node: it creates them at its start (systemctl restart invincible).");
       else add("sandbox", "sandbox.networks", "ok", mac ? "both sandbox networks are there, each held up by a VM of the node's own" : "both sandbox networks are there");
@@ -502,7 +502,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     if (wall?.on && wall.release === "other") add("sandbox", "sandbox.firewall", "needs-you", "this Mac's sandbox firewall is on, with another release's rules", "invincible sandbox setup puts this release's in place (it asks for your password once).");
     else if (wall?.on) add("sandbox", "sandbox.firewall", "ok", "this Mac's sandbox firewall is on: a gateway sandbox reaches the gateway alone, an online one the internet, never this Mac or your networks; no sandbox reaches another");
     else if (wall && !wall.installed) {
-      add("sandbox", "sandbox.firewall", "needs-you", "this Mac has no sandbox firewall, so it makes no sandboxes: its knights work on your other nodes", "invincible sandbox setup, or This Mac in the app (it asks for your password once).", {
+      add("sandbox", "sandbox.firewall", "needs-you", "this Mac has no sandbox firewall, so it makes no sandboxes: its agents work on your other nodes", "invincible sandbox setup, or This Mac in the app (it asks for your password once).", {
         finding: { severity: "info", title: `${self} has no sandbox firewall`, body: "A Mac makes no sandboxes until its firewall is installed. On that Mac: invincible sandbox setup." },
       });
     } else if (wall) {
@@ -516,8 +516,8 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
 
   if (f.compute) {
     const c = f.compute;
-    if (c.lastAt === null) add("compute", "compute.calibration", c.canMeasure ? "needs-you" : "ok", c.canMeasure ? `${self} hasn't measured itself, so he counts one sandbox slot here` : `${self} doesn't measure itself here`, "invincible compute calibrate (a few seconds, at low priority).");
-    else if (c.due === "changed") add("compute", "compute.calibration", "needs-you", `its measurement is stale: this machine, its ceiling or the benchmark changed since it measured itself ${span(f.now - c.lastAt)} ago`, "invincible compute calibrate. He does it himself after the next heartbeat unless self-action is off.");
+    if (c.lastAt === null) add("compute", "compute.calibration", c.canMeasure ? "needs-you" : "ok", c.canMeasure ? `${self} hasn't measured itself, so it counts one sandbox slot here` : `${self} doesn't measure itself here`, "invincible compute calibrate (a few seconds, at low priority).");
+    else if (c.due === "changed") add("compute", "compute.calibration", "needs-you", `its measurement is stale: this machine, its ceiling or the benchmark changed since it measured itself ${span(f.now - c.lastAt)} ago`, "invincible compute calibrate. It does it itself after the next heartbeat unless self-action is off.");
     else if (f.now - c.lastAt > CALIBRATION_OLD_MS) add("compute", "compute.calibration", "needs-you", `it last measured itself ${span(f.now - c.lastAt)} ago`, "invincible compute calibrate, so placement and slots follow the machine as it is now.");
     else add("compute", "compute.calibration", "ok", `measured itself ${span(f.now - c.lastAt)} ago`);
     if (c.slots !== null) add("compute", "compute.slots", "ok", `${c.inUse} of ${plural(c.slots, "sandbox slot")} in use${c.waiting ? `, ${c.waiting} waiting for one` : ""}`);
@@ -547,7 +547,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     if (c.problem) add("connectors", id, "broken", `${c.label} doesn't validate: ${c.problem.slice(0, 200)}`, `Install it again: invincible connector add ${c.id} (or fix its manifest).`);
     else if (c.key === "missing") add("connectors", id, "needs-you", `${c.label} is waiting for its key`, `invincible secret set <name> --connector ${c.id}, or the app's Vault.`);
     else if (c.key === "wrong-origin") add("connectors", id, "needs-you", `${c.label}'s key is pinned to another address, so it's never sent`, `Set it again for this connector: invincible secret set <name> --connector ${c.id}.`);
-    else if (c.reach && !c.reach.ok) add("connectors", id, "needs-you", `${c.label} can't be reached${c.host ? ` at ${c.host}` : ""}: ${redact(c.reach.error ?? "no answer").slice(0, 120)}`, "Check the address and this node's network; his calls to it fail until it answers.", { ms: c.reach.ms });
+    else if (c.reach && !c.reach.ok) add("connectors", id, "needs-you", `${c.label} can't be reached${c.host ? ` at ${c.host}` : ""}: ${redact(c.reach.error ?? "no answer").slice(0, 120)}`, "Check the address and this node's network; its calls to it fail until it answers.", { ms: c.reach.ms });
     else if (c.reach) add("connectors", id, "ok", `${c.label} answers${c.host ? ` at ${c.host}` : ""}${c.key === "ready" ? ", and its key is in the vault" : ""}`, undefined, { ms: c.reach.ms });
     else add("connectors", id, "ok", `${c.label} is installed${c.key === "ready" ? " with its key" : ""} (not probed${f.offline ? ": offline" : ""})`);
   }
@@ -579,11 +579,11 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
       // waits for an answer only you give (unanswered, an approval lapses in a day). In your Inbox, so every app shows
       // it; never pushed (notify.ts): a notification can't say it can't reach you.
       const why = lost ? `: ${lost === 1 ? "a device's were dropped by its push service" : `${plural(lost, "device")}' were dropped by their push services`}` : `, and ${plural(asks, "thing")} ${asks === 1 ? "waits" : "wait"} for your answer`;
-      add("notify", "notify.devices", "needs-you", `no device has notifications on, so he can't reach you when the app is closed${why}`, "Turn them on from a device you carry: iPhone or iPad, More → Notifications; the web app, Settings → Notifications; Android, More → Notifications. invincible notify test sends one.", {
+      add("notify", "notify.devices", "needs-you", `no device has notifications on, so it can't reach you when the app is closed${why}`, "Turn them on from a device you carry: iPhone or iPad, More → Notifications; the web app, Settings → Notifications; Android, More → Notifications. invincible notify test sends one.", {
         as: "notify.reach",
-        finding: { severity: "warn", title: "Galahad can't reach you when the app is closed", body: "No device of yours has notifications on, so what needs you waits here until you look. iPhone or iPad: More → Notifications. Web app: Settings → Notifications. Android: More → Notifications." },
+        finding: { severity: "warn", title: "Your agent can't reach you when the app is closed", body: "No device of yours has notifications on, so what needs you waits here until you look. iPhone or iPad: More → Notifications. Web app: Settings → Notifications. Android: More → Notifications." },
       });
-    } else if (!n.devices) add("notify", "notify.devices", "ok", "no device has notifications turned on, so he can't reach you when the app is closed (Settings turns them on)");
+    } else if (!n.devices) add("notify", "notify.devices", "ok", "no device has notifications turned on, so it can't reach you when the app is closed (Settings turns them on)");
     else if (n.failing.length) {
       const names = n.failing.map((d) => d.device);
       add("notify", "notify.devices", "needs-you", `notifications aren't reaching ${n.failing.map((d) => `${d.device} (${d.error.slice(0, 80)})`).join("; ")}`, "On that device: Settings, turn notifications off and on again. invincible notify test sends one now.", {
@@ -616,17 +616,17 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     else add("service", "service.log", "ok", f.service.warnings.length ? `nothing in its log in the last hour (${plural(f.service.warnings.length, "line")} of trouble since it started)` : "nothing in its log reads like trouble");
   }
 
-  // A knight's own setup (PLAN #48, #17): in sensitive mode with no model of its own that can run here, its work can't
+  // An agent's own setup (PLAN #48, #17): in sensitive mode with no model of its own that can run here, its work can't
   // run at all (it never goes elsewhere); a key of yours given to it that can go nowhere now fails its calls.
-  for (const k of f.knights ?? []) {
+  for (const k of f.agents ?? []) {
     if (k.sensitive) {
       const usable = k.sensitive.filter((m) => m.problem === null);
-      if (usable.length) add("models", `knight.${k.id}.sensitive`, "ok", `${k.name} is in sensitive mode, on ${usable.map((m) => m.ref).join(", ")}${usable.length < k.sensitive.length ? ` (${plural(k.sensitive.length - usable.length, "model")} of its own can't be used here)` : ""}`);
-      else add("models", `knight.${k.id}.sensitive`, "broken", `${k.name} is in sensitive mode, and none of its models can be used here (${k.sensitive.map((m) => `${m.ref}: ${m.problem}`).join("; ").slice(0, 300)}): its work can't run, and never goes to another model`, `Add the key its models need (invincible key add --provider <id>), or choose models of its own that can run (invincible roundtable sensitive ${k.id} on <provider/model…>).`, { finding: { severity: "warn", title: `${k.name} can't work in sensitive mode`, body: "None of the models it is held to can be used on this node." } });
+      if (usable.length) add("models", `agent.${k.id}.sensitive`, "ok", `${k.name} is in sensitive mode, on ${usable.map((m) => m.ref).join(", ")}${usable.length < k.sensitive.length ? ` (${plural(k.sensitive.length - usable.length, "model")} of its own can't be used here)` : ""}`);
+      else add("models", `agent.${k.id}.sensitive`, "broken", `${k.name} is in sensitive mode, and none of its models can be used here (${k.sensitive.map((m) => `${m.ref}: ${m.problem}`).join("; ").slice(0, 300)}): its work can't run, and never goes to another model`, `Add the key its models need (invincible key add --provider <id>), or choose models of its own that can run (invincible agents sensitive ${k.id} on <provider/model…>).`, { finding: { severity: "warn", title: `${k.name} can't work in sensitive mode`, body: "None of the models it is held to can be used on this node." } });
     }
     for (const key of k.keys) {
-      if (key.problem) add("vault", `knight.${k.id}.key.${key.secret}`, "needs-you", `${k.name} was given the key ${key.secret}, which can go nowhere now: ${key.problem}`, `Pin it again (invincible secret set ${key.secret} --base-url https://…), or take it back (invincible roundtable keys ${k.id} rm ${key.secret}).`);
-      else add("vault", `knight.${k.id}.key.${key.secret}`, "ok", `${k.name} may use the key ${key.secret} without seeing it`);
+      if (key.problem) add("vault", `agent.${k.id}.key.${key.secret}`, "needs-you", `${k.name} was given the key ${key.secret}, which can go nowhere now: ${key.problem}`, `Pin it again (invincible secret set ${key.secret} --base-url https://…), or take it back (invincible agents keys ${k.id} rm ${key.secret}).`);
+      else add("vault", `agent.${k.id}.key.${key.secret}`, "ok", `${k.name} may use the key ${key.secret} without seeing it`);
     }
   }
 

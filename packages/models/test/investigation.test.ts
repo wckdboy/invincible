@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage, ExecResult, Preregistration } from "@invincible/core";
 import { EVIDENCE_COMMANDS, investigate, methodReview, parsePreregistration, readResults, renderPreregistration } from "../src/investigation.ts";
-import type { QuestRole } from "../src/quest.ts";
+import type { RunRole } from "../src/run.ts";
 
 /*
- * Investigations: the scientific method as a quest. What matters most is the order:
+ * Investigations: the scientific method as a run. What matters most is the order:
  * the predictions are registered before anything runs, and the reviewer judges the
  * method against that registration, from evidence read out of the sandbox.
  */
@@ -27,9 +27,9 @@ const fenced = (value: unknown) => `Here it is.\n\`\`\`json\n${JSON.stringify(va
 const sh = (command: string) => `Next.\n\`\`\`sh\n${command}\n\`\`\``;
 
 function harness(script: { planner: string[]; engineer: string[]; reviewer: string[] }) {
-  const queues: Record<QuestRole, string[]> = { planner: [...script.planner], engineer: [...script.engineer], reviewer: [...script.reviewer] };
+  const queues: Record<RunRole, string[]> = { planner: [...script.planner], engineer: [...script.engineer], reviewer: [...script.reviewer] };
   const order: string[] = [];
-  const seen: { role: QuestRole; messages: ChatMessage[] }[] = [];
+  const seen: { role: RunRole; messages: ChatMessage[] }[] = [];
   const registered: Preregistration[] = [];
   const run = investigate(
     { question: "Does the cantilever's first mode sit near 2 Hz?", environment: "the Lab", maxSteps: 10 },

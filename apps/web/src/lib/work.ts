@@ -1,18 +1,18 @@
 import type { ProjectView } from "@invincible/core";
 import { costOf, type Prices, type UsageLine } from "@invincible/core/spend";
-import type { TeamSnapshot, TeamTask, Teammate } from "@invincible/core/team";
-import { type KnightState, STATES, type StateLook } from "./knight-state.ts";
-import { type Ask, knightOfCaller } from "./roster.ts";
+import type { TeamSnapshot, TeamTask, Agent } from "@invincible/core/team";
+import { type AgentState, STATES, type StateLook } from "./agent-state.ts";
+import { type Ask, agentOfCaller } from "./roster.ts";
 import { relativeTime } from "./time.ts";
 
 /*
- * The work, told by project (your word, 25 November 2026: "way more task/coding focused … the other knights should be
+ * The work, told by project (your word, 25 November 2026: "way more task/coding focused … the other agents should be
  * more like per task/per project like t3code"): every task a thread of its own, under the project it is in, with the
- * knight on it beside it; and what is under way across all of them, what needs you first. Pure (no DOM), from what the
+ * agent on it beside it; and what is under way across all of them, what needs you first. Pure (no DOM), from what the
  * app already has: the team as one snapshot, and your projects.
  *
- * A project is a repository: the one a knight works in (its `repository`), named by a project of yours with that
- * repository where there is one, else by the repository's own last part. A task is in its knight's project; a knight
+ * A project is a repository: the one an agent works in (its `repository`), named by a project of yours with that
+ * repository where there is one, else by the repository's own last part. A task is in its agent's project; an agent
  * with no repository works on other work.
  */
 
@@ -21,10 +21,10 @@ export interface WorkTask {
   /** The conversation it was given in: where it opens. */
   room: string;
   title: string;
-  knight: { id: string; name: string; avatar: unknown };
-  /** Its ring's state (lib/knight-state.ts). */
-  state: KnightState;
-  /** Who, and how it stands, in a line: "Gareth · Gate 1/2 · bun test", "Gareth · verified · 30 min ago". */
+  agent: { id: string; name: string; avatar: unknown };
+  /** Its ring's state (lib/agent-state.ts). */
+  state: AgentState;
+  /** Who, and how it stands, in a line: "Max · Gate 1/2 · bun test", "Max · verified · 30 min ago". */
   line: string;
   at: number;
 }
@@ -35,8 +35,8 @@ export interface WorkProject {
   name: string;
   repo: string | null;
   host: string | null;
-  /** The knights that work in it, by handle. */
-  knights: string[];
+  /** The agents that work in it, by handle. */
+  agents: string[];
   tasks: WorkTask[];
   running: number;
   needs: number;
@@ -63,7 +63,7 @@ export function projectKey(repo: string): string | null {
 
 /** A task's state, as its ring shows it: at work; waiting on you (proposed, or cut short and yours to look at); queued;
  * failed; verified; stopped (paused); done without verification, at rest. */
-export function taskState(task: Pick<TeamTask, "status" | "verified">): KnightState {
+export function taskState(task: Pick<TeamTask, "status" | "verified">): AgentState {
   switch (task.status) {
     case "running": return "working";
     case "proposed": case "interrupted": return "needs";
@@ -93,11 +93,11 @@ function line(task: TeamTask, who: string, now: number): string {
   }
 }
 
-const UNDER_WAY: Partial<Record<KnightState, number>> = { needs: 0, working: 1, queued: 2 };
+const UNDER_WAY: Partial<Record<AgentState, number>> = { needs: 0, working: 1, queued: 2 };
 
-export function workOf(input: { snapshot: Pick<TeamSnapshot, "teammates" | "tasks">; projects: readonly ProjectView[]; now: number }): Work {
+export function workOf(input: { snapshot: Pick<TeamSnapshot, "agents" | "tasks">; projects: readonly ProjectView[]; now: number }): Work {
   const { snapshot, now } = input;
-  const knights = new Map(snapshot.teammates.map((knight) => [knight.id, knight]));
+  const agents = new Map(snapshot.agents.map((agent) => [agent.id, agent]));
   const named = new Map(input.projects.flatMap((project) => (project.repo && projectKey(project.repo) ? [[projectKey(project.repo)!, project] as const] : [])));
   const groups = new Map<string, WorkProject>();
   const group = (key: string, make: () => WorkProject): WorkProject => {
@@ -105,24 +105,24 @@ export function workOf(input: { snapshot: Pick<TeamSnapshot, "teammates" | "task
     if (!found) groups.set(key, (found = make()));
     return found;
   };
-  // Each knight's project, by its repository (so a project with knights but no task yet is still there).
+  // Each agent's project, by its repository (so a project with agents but no task yet is still there).
   const projectOf = (repository: string | null | undefined): WorkProject => {
     const key = repository ? projectKey(repository) : null;
-    if (!key) return group("other", () => ({ key: "other", name: "Other work", repo: null, host: null, knights: [], tasks: [], running: 0, needs: 0 }));
+    if (!key) return group("other", () => ({ key: "other", name: "Other work", repo: null, host: null, agents: [], tasks: [], running: 0, needs: 0 }));
     const yours = named.get(key);
-    return group(key, () => ({ key, name: yours?.name ?? key.split("/").at(-1)!, repo: `https://${key}`, host: key.split("/")[0]!, knights: [], tasks: [], running: 0, needs: 0 }));
+    return group(key, () => ({ key, name: yours?.name ?? key.split("/").at(-1)!, repo: `https://${key}`, host: key.split("/")[0]!, agents: [], tasks: [], running: 0, needs: 0 }));
   };
-  for (const knight of snapshot.teammates) {
-    const project = projectOf(knight.repository);
-    if (project.key !== "other") project.knights.push(knight.id);
+  for (const agent of snapshot.agents) {
+    const project = projectOf(agent.repository);
+    if (project.key !== "other") project.agents.push(agent.id);
   }
   const tasks = [...snapshot.tasks].sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1));
   const underWay: WorkTask[] = [];
   for (const task of tasks) {
-    const knight = knights.get(task.assignee);
-    const project = projectOf(knight?.repository);
+    const agent = agents.get(task.assignee);
+    const project = projectOf(agent?.repository);
     const state = taskState(task);
-    const shown: WorkTask = { id: task.id, room: task.room, title: task.title, knight: { id: task.assignee, name: knight?.name ?? task.assignee, avatar: knight?.avatar }, state, line: line(task, knight?.name ?? task.assignee, now), at: task.updatedAt };
+    const shown: WorkTask = { id: task.id, room: task.room, title: task.title, agent: { id: task.assignee, name: agent?.name ?? task.assignee, avatar: agent?.avatar }, state, line: line(task, agent?.name ?? task.assignee, now), at: task.updatedAt };
     project.tasks.push(shown);
     if (state === "working") project.running++;
     if (state === "needs") project.needs++;
@@ -137,13 +137,13 @@ export function workOf(input: { snapshot: Pick<TeamSnapshot, "teammates" | "task
 }
 
 /*
- * The work by attention (your word, 26 November 2026: "project/tasks/coding t3code style for the knights"; T3 Code's
+ * The work by attention (your word, 26 November 2026: "project/tasks/coding t3code style for the [agents]"; T3 Code's
  * sidebar, its rows in three lines, what needs you first): every task as a row of three lines (its project and how it
- * stands, its title, its knight and what it is doing or came to), in one of four sections by what it asks of you:
+ * stands, its title, its agent and what it is doing or came to), in one of four sections by what it asks of you:
  *
- *   needs    only you can move it on: a proposal to approve, work cut short to look at, its knight asking your leave
- *            while it works, work queued behind a knight you paused;
- *   active   a result new to you: it ended (failed, or done) after you last looked at its knight or its room, on any
+ *   needs    only you can move it on: a proposal to approve, work cut short to look at, its agent asking for your approval
+ *            while it works, work queued behind an agent you paused;
+ *   active   a result new to you: it ended (failed, or done) after you last looked at its agent or its room, on any
  *            device, as an email is unread (a node that keeps no such mark: for half a day after it ended);
  *   working  at work, or queued;
  *   done     settled: ended and seen, or stopped.
@@ -160,10 +160,10 @@ export interface WorkRow {
   id: string;
   room: string;
   title: string;
-  /** Its knight's repository, as the work names it: its key, its name, and the letter on its badge ("" for other work). */
+  /** Its agent's repository, as the work names it: its key, its name, and the letter on its badge ("" for other work). */
   project: { key: string; name: string; badge: string };
-  knight: { id: string; name: string; avatar: unknown };
-  state: KnightState;
+  agent: { id: string; name: string; avatar: unknown };
+  state: AgentState;
   attention: Attention;
   /** How it stands in a word or two, at the end of its first line in its state's colour: "Allow?", "Failed · gate 2",
    * "Verified", "Working · 4m", "Queued". Never colour alone: the word says it. */
@@ -171,7 +171,7 @@ export interface WorkRow {
   tone: StateLook["tone"];
   /** How long since it last moved ("12m", "3h", "2d"); null at work, whose word says how long it has been in hand. */
   age: string | null;
-  /** Its third line, after its knight's name: what it is doing, or what it came to ("bun test packages/link", "5 files
+  /** Its third line, after its agent's name: what it is doing, or what it came to ("bun test packages/link", "5 files
    * kept", "gave up"). Empty: nothing more to say. */
   detail: string;
   /** The detail is a command or a path, set in mono. */
@@ -190,9 +190,9 @@ export interface Attended {
 }
 
 export interface AttentionInput {
-  snapshot: Pick<TeamSnapshot, "teammates" | "tasks" | "seen">;
+  snapshot: Pick<TeamSnapshot, "agents" | "tasks" | "seen">;
   projects: readonly Pick<ProjectView, "name" | "repo">[];
-  /** Approvals waiting for your answer (lib/roster.ts' Ask): one a knight filed is its running task's to show. */
+  /** Approvals waiting for your answer (lib/roster.ts' Ask): one an agent filed is its running task's to show. */
   asks?: readonly Ask[];
   now: number;
 }
@@ -214,18 +214,18 @@ export function shortSpan(ms: number): string {
 /** The letter on a project's badge: its name's first letter or digit, as a capital ("" for none). */
 export const projectBadge = (name: string): string => (/[\p{L}\p{N}]/u.exec(name)?.[0] ?? "").toLocaleUpperCase();
 
-/** Each knight's project (by its repository, named by a project of yours with that repository), and other work's. */
-export function projectsOfKnights(teammates: readonly Pick<Teammate, "id" | "repository">[], projects: readonly Pick<ProjectView, "name" | "repo">[]): (knight: string) => { key: string; name: string; badge: string } {
+/** Each agent's project (by its repository, named by a project of yours with that repository), and other work's. */
+export function projectsOfAgents(agents: readonly Pick<Agent, "id" | "repository">[], projects: readonly Pick<ProjectView, "name" | "repo">[]): (agent: string) => { key: string; name: string; badge: string } {
   const named = new Map(projects.flatMap((project) => (project.repo && projectKey(project.repo) ? [[projectKey(project.repo)!, project.name] as const] : [])));
   const of = new Map(
-    teammates.map((knight) => {
-      const key = knight.repository ? projectKey(knight.repository) : null;
-      if (!key) return [knight.id, OTHER] as const;
+    agents.map((agent) => {
+      const key = agent.repository ? projectKey(agent.repository) : null;
+      if (!key) return [agent.id, OTHER] as const;
       const name = named.get(key) ?? key.split("/").at(-1)!;
-      return [knight.id, { key, name, badge: projectBadge(name) }] as const;
+      return [agent.id, { key, name, badge: projectBadge(name) }] as const;
     }),
   );
-  return (knight) => of.get(knight) ?? OTHER;
+  return (agent) => of.get(agent) ?? OTHER;
 }
 const OTHER = { key: "other", name: "Other work", badge: "" } as const;
 
@@ -255,27 +255,27 @@ export const failedGate = (progress: string): number | null => {
 
 export function attended(input: AttentionInput): Attended {
   const { snapshot, now } = input;
-  const knights = new Map(snapshot.teammates.map((knight) => [knight.id, knight]));
-  const projectOf = projectsOfKnights(snapshot.teammates, input.projects);
+  const agents = new Map(snapshot.agents.map((agent) => [agent.id, agent]));
+  const projectOf = projectsOfAgents(snapshot.agents, input.projects);
   const titles = new Map(snapshot.tasks.map((task) => [task.id, task.title]));
-  // What a knight asks your leave for, while its task runs (a knight works one thing at a time).
+  // What an agent asks your approval for, while its task runs (an agent works one thing at a time).
   const asking = new Map<string, Ask[]>();
   for (const ask of input.asks ?? []) {
-    const knight = knightOfCaller(ask.by);
-    if (knight) asking.set(knight, [...(asking.get(knight) ?? []), ask]);
+    const agent = agentOfCaller(ask.by);
+    if (agent) asking.set(agent, [...(asking.get(agent) ?? []), ask]);
   }
   const seenAt = (task: TeamTask): number | null => {
     if (!snapshot.seen) return null;
-    return Math.max(snapshot.seen[`knight:${task.assignee}`] ?? 0, snapshot.seen[`room:${task.room}`] ?? 0);
+    return Math.max(snapshot.seen[`agent:${task.assignee}`] ?? 0, snapshot.seen[`room:${task.room}`] ?? 0);
   };
   const out: Attended = { needs: [], active: [], working: [], done: [], projects: [] };
   const counts = new Map<string, { key: string; name: string; badge: string; count: number; busy: number; at: number }>();
   for (const task of snapshot.tasks) {
-    const knight = knights.get(task.assignee);
-    const name = knight?.name ?? task.assignee;
+    const agent = agents.get(task.assignee);
+    const name = agent?.name ?? task.assignee;
     const project = projectOf(task.assignee);
-    const row = rowOf(task, { name, paused: knight ? !knight.enabled : false, asks: task.status === "running" ? (asking.get(task.assignee) ?? []) : [], seen: seenAt(task), now, titles });
-    const shown: WorkRow = { id: task.id, room: task.room, title: task.title, project, knight: { id: task.assignee, name, avatar: knight?.avatar }, ...row, at: task.updatedAt };
+    const row = rowOf(task, { name, paused: agent ? !agent.enabled : false, asks: task.status === "running" ? (asking.get(task.assignee) ?? []) : [], seen: seenAt(task), now, titles });
+    const shown: WorkRow = { id: task.id, room: task.room, title: task.title, project, agent: { id: task.assignee, name, avatar: agent?.avatar }, ...row, at: task.updatedAt };
     out[row.attention].push(shown);
     const counted = counts.get(project.key) ?? { ...project, count: 0, busy: 0, at: 0 };
     counted.count++;
@@ -309,7 +309,7 @@ interface RowFacts {
   name: string;
   paused: boolean;
   asks: readonly Ask[];
-  /** When its knight's page or its room was last looked at (null: the node keeps no such mark). */
+  /** When its agent's page or its room was last looked at (null: the node keeps no such mark). */
   seen: number | null;
   now: number;
   titles: ReadonlyMap<string, string>;
@@ -319,10 +319,10 @@ type RowState = Pick<WorkRow, "state" | "attention" | "word" | "tone" | "age" | 
 
 function rowOf(task: TeamTask, f: RowFacts): RowState {
   const age = shortSpan(f.now - task.updatedAt);
-  const say = (state: KnightState, attention: Attention, word: string, detail = "", mono = false, shownAge: string | null = age): RowState => ({ state, attention, word, tone: STATES[state].tone, age: shownAge, detail, mono });
+  const say = (state: AgentState, attention: Attention, word: string, detail = "", mono = false, shownAge: string | null = age): RowState => ({ state, attention, word, tone: STATES[state].tone, age: shownAge, detail, mono });
   switch (task.status) {
     case "proposed": {
-      const by = task.proposedBy && task.proposedBy !== task.assignee ? `proposed for ${f.name}` : "proposed by its knight";
+      const by = task.proposedBy && task.proposedBy !== task.assignee ? `proposed for ${f.name}` : "proposed by its agent";
       return say("needs", "needs", "Approve?", task.proposedBy ? by : "waits for your approval");
     }
     case "interrupted":
@@ -330,12 +330,12 @@ function rowOf(task: TeamTask, f: RowFacts): RowState {
     case "running": {
       const ask = f.asks[0];
       const doing = doingNow(task.progress);
-      if (ask) return say("needs", "needs", "Allow?", ask.connector && ask.tool ? `${ask.connector}.${ask.tool}` : "asks your leave", Boolean(ask.connector), age);
+      if (ask) return say("needs", "needs", "Allow?", ask.connector && ask.tool ? `${ask.connector}.${ask.tool}` : "asks for your approval", Boolean(ask.connector), age);
       const span = shortSpan(f.now - task.createdAt);
       return say("working", "working", span === "now" ? "Working" : `Working · ${span}`, doing.text, doing.mono, null);
     }
     case "queued": {
-      if (f.paused) return say("needs", "needs", "Knight paused", `resume ${f.name} to start it`);
+      if (f.paused) return say("needs", "needs", "Agent paused", `resume ${f.name} to start it`);
       const waiting = task.dependsOn.map((id) => f.titles.get(id)).find((title) => title !== undefined);
       return say("queued", "working", "Queued", waiting ? `after “${waiting}”` : "");
     }
@@ -355,28 +355,28 @@ function rowOf(task: TeamTask, f: RowFacts): RowState {
 }
 
 /** What waits in the Inbox beyond the task rows that ask for it: its count, less the approvals a needs row stands for
- * (its knight asking your leave as its task runs). Devices asking to join, keys he asked for, notices, his own asks. */
-export function inboxBeyond(inbox: number, asks: readonly Pick<Ask, "by">[], needs: readonly Pick<WorkRow, "word" | "knight">[]): number {
-  const asking = new Set(needs.filter((row) => row.word === "Allow?").map((row) => row.knight.id));
-  return Math.max(0, inbox - asks.filter((ask) => asking.has(knightOfCaller(ask.by) ?? "")).length);
+ * (its agent asking for your approval as its task runs). Devices asking to join, keys it asked for, notices, its own asks. */
+export function inboxBeyond(inbox: number, asks: readonly Pick<Ask, "by">[], needs: readonly Pick<WorkRow, "word" | "agent">[]): number {
+  const asking = new Set(needs.filter((row) => row.word === "Allow?").map((row) => row.agent.id));
+  return Math.max(0, inbox - asks.filter((ask) => asking.has(agentOfCaller(ask.by) ?? "")).length);
 }
 
 /**
- * What opening a task marks as read, on every device (POST /api/team/seen): its knight's page, when the task has ended
- * and is the latest of that knight's results still new to you. Read marks are kept by knight and by room, as a time, so
- * this settles that knight's older results too, as opening its page does; an older result opened first marks nothing,
+ * What opening a task marks as read, on every device (POST /api/team/seen): its agent's page, when the task has ended
+ * and is the latest of that agent's results still new to you. Read marks are kept by agent and by room, as a time, so
+ * this settles that agent's older results too, as opening its page does; an older result opened first marks nothing,
  * and the newest still waits for you. Null: nothing to mark (still in hand, already read, or a node that keeps no marks).
  */
-export function seenOnOpen(id: string, snapshot: Pick<TeamSnapshot, "tasks" | "seen">): { knight: string } | null {
+export function seenOnOpen(id: string, snapshot: Pick<TeamSnapshot, "tasks" | "seen">): { agent: string } | null {
   const task = snapshot.tasks.find((one) => one.id === id);
   if (!task || !snapshot.seen || !(task.status === "done" || task.status === "failed")) return null;
-  const seenAt = (one: TeamTask) => Math.max(snapshot.seen?.[`knight:${one.assignee}`] ?? 0, snapshot.seen?.[`room:${one.room}`] ?? 0);
+  const seenAt = (one: TeamTask) => Math.max(snapshot.seen?.[`agent:${one.assignee}`] ?? 0, snapshot.seen?.[`room:${one.room}`] ?? 0);
   const unread = snapshot.tasks.filter((one) => one.assignee === task.assignee && (one.status === "done" || one.status === "failed") && one.updatedAt > seenAt(one));
   const newest = unread.reduce<TeamTask | undefined>((latest, one) => (!latest || one.updatedAt > latest.updatedAt ? one : latest), undefined);
-  return newest?.id === task.id ? { knight: task.assignee } : null;
+  return newest?.id === task.id ? { agent: task.assignee } : null;
 }
 
-/** Home's line under Galahad's name (the phone's header): how many are at work and how much needs you, else his own line. */
+/** Home's line under the primary's name (the phone's header): how many are at work and how much needs you, else its own line. */
 export function atAGlance(work: Pick<Attended, "working">, needs: number, his: string): { text: string; needs: boolean } {
   const atWork = work.working.filter((row) => row.state === "working").length;
   const parts = [atWork ? `${atWork} at work` : null, needs ? `${needs} need${needs === 1 ? "s" : ""} you` : null].filter((part): part is string => part !== null);
@@ -384,12 +384,12 @@ export function atAGlance(work: Pick<Attended, "working">, needs: number, his: s
 }
 
 /**
- * What a knight's tasks that ended since `since` cost at your prices, as their runner recorded them: its sum, and
+ * What an agent's tasks that ended since `since` cost at your prices, as their runner recorded them: its sum, and
  * whether it is the whole of it (a call that reported nothing, or a model with no price, makes it a lower bound). Null:
  * none of its tasks ended in that time with a model call counted.
  */
-export function spentSince(tasks: readonly Pick<TeamTask, "assignee" | "record">[], knight: string, since: number, prices: Prices): { usd: number; complete: boolean } | null {
-  const lines = tasks.filter((task) => task.assignee === knight && task.record && task.record.endedAt >= since).flatMap((task) => task.record!.spent as UsageLine[]);
+export function spentSince(tasks: readonly Pick<TeamTask, "assignee" | "record">[], agent: string, since: number, prices: Prices): { usd: number; complete: boolean } | null {
+  const lines = tasks.filter((task) => task.assignee === agent && task.record && task.record.endedAt >= since).flatMap((task) => task.record!.spent as UsageLine[]);
   if (!lines.some((line) => line.calls > line.unknown)) return null;
   const cost = costOf(lines, prices);
   return { usd: cost.usd, complete: cost.complete && !cost.unpriced.length };

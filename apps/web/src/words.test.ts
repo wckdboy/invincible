@@ -3,10 +3,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 /*
- * The owner's words (14 November 2026): the place is the Roundtable and its members are knights; Galahad is his
- * primary knight, and the others are not beneath him. "Don't call it Hivemind anywhere." So no file of the app says
- * either old word, in what it shows or in how it explains itself. Addresses and file names (#/team, /api/team,
- * team.ts) are the code's own and unchanged.
+ * The owner's words (14 November 2026): the others are not beneath the primary agent, and "Don't call it Hivemind
+ * anywhere." So no file of the app says it, in what it shows or in how it explains itself. Addresses and file names
+ * (#/team, /api/team, team.ts) are the code's own and unchanged.
  */
 const app = join(import.meta.dir, "..");
 const files = (dir: string): string[] =>

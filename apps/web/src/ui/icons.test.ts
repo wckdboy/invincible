@@ -17,7 +17,7 @@ function draw(name: Parameters<typeof icon>[0]): Node_ {
   finally { if (original) Object.defineProperty(globalThis, "document", original); else Reflect.deleteProperty(globalThis, "document"); }
 }
 test("the agents' icon is three of them, apart, drawn as strokes on the grid; the mark is a ring round a filled core", () => {
-  const agents = draw("roundtable").children;
+  const agents = draw("agents").children;
   expect(agents).toHaveLength(3);
   for (const one of agents) expect(one.attrs.fill).not.toBe("currentColor");
   const [ring, core] = draw("mark").children;
@@ -25,6 +25,6 @@ test("the agents' icon is three of them, apart, drawn as strokes on the grid; th
   expect(core!.attrs).toMatchObject({ fill: "currentColor", stroke: "none" });
 });
 
-test("the Roundtable is shown by its own icon wherever the app names the place", () => {
-  expect(PLACES.find((place) => place.id === "team")!.icon).toBe("roundtable");
+test("the agents are shown by their own icon wherever the app names the place", () => {
+  expect(PLACES.find((place) => place.id === "team")!.icon).toBe("agents");
 });

@@ -1,15 +1,15 @@
 /*
- * Galahad's orb, as data (your word, 23 November 2026: he is the one you talk to, "a Jarvis … like visual, the orb
+ * The primary's orb, as data (your word, 23 November 2026: it is the one you talk to, "a Jarvis … like visual, the orb
  * graphic"): a sphere of glyphs round a bright nucleus inside the rings of a heads-up display, with a ring of data
- * turning in it, in the colour of his state. On 25 November 2026 his glass sphere became glyphs, as every knight's orb
- * is (your words: "custom/procedurally generated colored particle orbs", "also update Galahad's orb", "use glyph and
+ * turning in it, in the colour of its state. On 25 November 2026 its glass sphere became glyphs, as every agent's orb
+ * is (your words: "custom/procedurally generated colored particle orbs", "also update the primary's orb", "use glyph and
  * randomness on the orbs, like Jarvis/Ultron in the movies, and my other project Phren"); the glyphs are
  * lib/orb-sphere.ts's. Pure: the parts
  * it is drawn from, in a square 200 wide centred on its middle (y down), and each state's colours. How it moves in each
  * mood (your word of 24 November 2026: "pulsing/moving when doing a task, sitting idle, waiting, done") is
- * lib/orb-motion.ts. Nothing in it comes from a name, a profile or a model but his own handle's sphere.
+ * lib/orb-motion.ts. Nothing in it comes from a name, a profile or a model but its own handle's sphere.
  *
- * Since 26 November 2026 the PWA draws his field instead (lib/field-orb.ts, ui/orb.ts: the glyphs and their bright
+ * Since 26 November 2026 the PWA draws its field instead (lib/field-orb.ts, ui/orb.ts: the glyphs and their bright
  * nucleus read "almost like nipples"), and uses only the tones here. The Apple and Android apps still draw these parts,
  * held to them by the vectors (apps/apple/scripts/vectors.ts), until they port the field (PLAN #60); then they go.
  */
@@ -20,7 +20,7 @@ export const ORB_TONES: readonly OrbTone[] = ["neutral", "accent", "warn", "ok",
 /**
  * Each state's light (lib/now.ts's tone): a calm blue at rest, a brighter blue at work, amber when something waits on
  * you, green for an answer new to you, red for a failure. The bright tints in both themes: the light theme's darker
- * ones made a bronze ball of him.
+ * ones made a bronze ball of it.
  */
 const TINTS: Record<OrbTone, string> = { neutral: "#8ab8ff", accent: "#58a6ff", warn: "#f0b549", ok: "#4cc38a", danger: "#ff6b6b" };
 
@@ -46,8 +46,8 @@ export interface OrbStop {
  * - ring: a circle's stroke, whole or only its arcs ([from, to] each).
  * - ticks: `count` short strokes across a circle, evenly round from `offset`, each `length` long and `width` wide.
  * - glyphs: `count` places round a circle `r` from the middle, about `share` of them lit with a hex digit `size` high,
- *   each changing on a slow beat of its own (lib/orb-sphere.ts' dataGlyph): his data ring.
- * - sphere: `count` glyphs on a sphere `r` from the middle, its nearest `glyph` high (lib/orb-sphere.ts), his own
+ *   each changing on a slow beat of its own (lib/orb-sphere.ts' dataGlyph): its data ring.
+ * - sphere: `count` glyphs on a sphere `r` from the middle, its nearest `glyph` high (lib/orb-sphere.ts), its own
  *   handle's sphere; some of them are `second`'s colour.
  */
 export type OrbPart =
@@ -57,7 +57,7 @@ export type OrbPart =
   | { name: string; kind: "glyphs"; r: number; count: number; size: number; share: number; ink: OrbInk }
   | { name: string; kind: "sphere"; r: number; count: number; glyph: number; second: OrbInk };
 
-/** How much of him a size can show: a badge (beside his words), a seat (at the Roundtable), or all of him (his welcome). */
+/** How much of it a size can show: a badge (beside its words), a seat (among the agents), or all of it (its welcome). */
 export type OrbLevel = "badge" | "seat" | "full";
 /** From these sizes (CSS pixels, points, dp), a seat's rings and then the full display's ticks can be told apart. */
 export const ORB_SEAT_FROM = 48;
@@ -74,7 +74,7 @@ const stop = (at: number, ink: OrbInk, opacity: number): OrbStop => ({ at, ink, 
 const halo: OrbPart = { name: "halo", kind: "disc", r: 99, cx: 0.5, cy: 0.5, spread: 0.5, stops: [stop(0, "tint", 0.55), stop(0.62, "tint", 0.2), stop(1, "tint", 0)] };
 // The light the sphere sits in, brightest at its middle: its glyphs are seen against it.
 const glow = (r: number): OrbPart => ({ name: "glow", kind: "disc", r, cx: 0.5, cy: 0.5, spread: 0.5, stops: [stop(0, "tint", 0.45), stop(0.55, "tint", 0.16), stop(1, "tint", 0)] });
-// The bright nucleus at its heart (Phren's): white at its middle, into his tint, and gone.
+// The bright nucleus at its heart (Phren's): white at its middle, into its tint, and gone.
 const nucleus = (r: number): OrbPart => ({ name: "nucleus", kind: "disc", r, cx: 0.5, cy: 0.5, spread: 0.5, stops: [stop(0, "white", 0.95), stop(0.3, "tint", 0.65), stop(1, "tint", 0)] });
 const sphere = (r: number, count: number, glyph: number): OrbPart => ({ name: "sphere", kind: "sphere", r, count, glyph, second: "white" });
 
@@ -115,8 +115,8 @@ export const orbParts = (size: number): readonly OrbPart[] => PARTS[orbLevel(siz
 export const orbTone = (tone: unknown): OrbTone => (ORB_TONES.includes(tone as OrbTone) ? (tone as OrbTone) : "neutral");
 
 /**
- * Where he stands at the Roundtable (lib/knight-state.ts' state), as his ring there would show it: blue at work, amber
- * when he needs you, red when his work failed, green for what's new to you, his calm blue otherwise.
+ * Where it stands among the agents (lib/agent-state.ts' state), as its ring there would show it: blue at work, amber
+ * when it needs you, red when its work failed, green for what's new to you, its calm blue otherwise.
  */
 const STATE_TONES: Readonly<Record<string, OrbTone>> = { working: "accent", needs: "warn", failed: "danger", verified: "ok", unread: "ok" };
 export const orbToneOfState = (state: string | undefined): OrbTone => (state && Object.hasOwn(STATE_TONES, state) ? STATE_TONES[state]! : "neutral");

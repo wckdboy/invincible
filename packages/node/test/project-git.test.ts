@@ -7,7 +7,7 @@ import { actionDone, BRANCH_SCRIPT, CLONE_SCRIPT, COMMIT_SCRIPT, GIT_SCRIPT, git
 import { LookError } from "../src/workspace-look.ts";
 
 /*
- * The Build view's git scripts, run here as they run in his computer (Python 3, the checkout and what's asked as
+ * The Build view's git scripts, run here as they run in its computer (Python 3, the checkout and what's asked as
  * arguments), on repositories made for each test, with none of this machine's own git settings: as a fresh VM has it.
  */
 const dirs: string[] = [];
@@ -70,7 +70,7 @@ describe("a project's checkout, as git has it", () => {
     expect(() => actionDone(run(BRANCH_SCRIPT, repo, "nowhere", "0"))).toThrow(LookError);
   });
 
-  test("a commit takes everything changed and new, as Galahad where no author is set; with nothing to commit it says so", () => {
+  test("a commit takes everything changed and new, as Invincible where no author is set; with nothing to commit it says so", () => {
     const repo = repository();
     writeFileSync(join(repo, "a.ts"), "export const a = 3;\n");
     writeFileSync(join(repo, "b.ts"), "export const b = 1;\n");
@@ -78,7 +78,7 @@ describe("a project's checkout, as git has it", () => {
     const view = gitView(run(GIT_SCRIPT, repo), "/work/projects/site");
     expect(view.changed).toBe(0);
     expect(view.log[0]!.subject).toBe("Three, and b");
-    expect(git(repo, "log", "-1", "--format=%an <%ae>")).toBe("Galahad <galahad@localhost>");
+    expect(git(repo, "log", "-1", "--format=%an <%ae>")).toBe("Invincible <invincible@localhost>");
     expect(git(repo, "show", "--name-only", "--format=", "HEAD").split("\n").sort()).toEqual(["a.ts", "b.ts"]);
     expect(() => actionDone(run(COMMIT_SCRIPT, repo, "Again"))).toThrow(LookError);
   });

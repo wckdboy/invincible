@@ -1,9 +1,9 @@
 import type { Ctx, Route } from "../context.ts";
 import { isWaiting } from "../live.ts";
-import { galahadState } from "../lib/knight-state.ts";
-import { galahadNow, type Now } from "../lib/now.ts";
+import { primaryState } from "../lib/agent-state.ts";
+import { primaryNow, type Now } from "../lib/now.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
-import { galahadNeeds } from "../lib/roster.ts";
+import { primaryNeeds } from "../lib/roster.ts";
 import { type Attended, inboxBeyond, type WorkRow } from "../lib/work.ts";
 import { type WorkFold, setWorkOpen, workOpen } from "../prefs.ts";
 import { button, dot, kbd, skeletonRows } from "../ui/controls.ts";
@@ -11,35 +11,35 @@ import { cx, h, isMac, keepPlace, replace, type Child } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { appMark, orb } from "../ui/orb.ts";
 import type { Signal } from "../ui/signal.ts";
-import { answerStep, chatActivity, galahadWork, nodeTurns, questsInHand, stopChat, unreadChats } from "./chat.ts";
+import { answerStep, chatActivity, primaryWork, nodeTurns, runsInHand, stopChat, unreadChats } from "./chat.ts";
 import { openPlaces } from "./places.ts";
-import { giveToRoundtable } from "./team-forms.ts";
+import { giveToAgents } from "./team-forms.ts";
 import { askProjects, rowsVersion, workNow, workRow, workSources } from "./work-rows.ts";
 
 /*
- * A wide screen's sidebar, as T3 Code's (your words, 26 November 2026: "agent first (Galahad), and project/tasks/coding
- * t3code style for the knights"): the mark, a task to give and the sidebar folded away; search; Galahad's row pinned, his
- * orb and what he is doing (it opens his own conversation); then the work in one list by attention, every task a row of
+ * A wide screen's sidebar, as T3 Code's (your words, 26 November 2026: "agent first ([the primary]), and project/tasks/coding
+ * t3code style for the [agents]"): the mark, a task to give and the sidebar folded away; search; the primary's row pinned, its
+ * orb and what it is doing (it opens its own conversation); then the work in one list by attention, every task a row of
  * three lines (views/work-rows.ts): what needs you, what is new to you, what is at work (folded), what is settled
- * (folded); and at its foot the machine it talks to, the knights, and everything else ("…"). The rail of places went with
+ * (folded); and at its foot the machine it talks to, the agents, and everything else ("…"). The rail of places went with
  * it: they are under "…" and in the command palette. It asks the node nothing of its own.
  */
 
 export interface Sidebar {
   el: HTMLElement;
-  /** Where the app is: Galahad's row or a task's is marked, and his orb is still while his conversation is open beside it. */
+  /** Where the app is: the primary's row or a task's is marked, and its orb is still while its conversation is open beside it. */
   at(where: { route: Route; task?: string | null }): void;
   dispose(): void;
 }
 
-/** What his row and line are drawn from, beyond the work's. */
-const galahadSources = (ctx: Ctx): Signal<unknown>[] => [nodeTurns, questsInHand, unreadChats, answerStep, chatActivity, ctx.live.inboxCount, ctx.live.inboxLoaded, ctx.live.actions] as Signal<unknown>[];
+/** What its row and line are drawn from, beyond the work's. */
+const primarySources = (ctx: Ctx): Signal<unknown>[] => [nodeTurns, runsInHand, unreadChats, answerStep, chatActivity, ctx.live.inboxCount, ctx.live.inboxLoaded, ctx.live.actions] as Signal<unknown>[];
 
-/** His line, as his row and Home say it: what he is doing, and what needs you that is no task's. */
-export function galahadLine(ctx: Ctx): Now {
+/** Its line, as its row and Home say it: what it is doing, and what needs you that is no task's. */
+export function primaryLine(ctx: Ctx): Now {
   const waiting = ctx.live.actions.value.filter((action) => isWaiting(action));
-  const needs = ctx.live.inboxLoaded.value ? galahadNeeds(ctx.live.inboxCount.value, waiting, ctx.live.team.value?.teammates.map((person) => person.id) ?? []) : null;
-  return galahadNow({ ...galahadWork(), needs });
+  const needs = ctx.live.inboxLoaded.value ? primaryNeeds(ctx.live.inboxCount.value, waiting, ctx.live.team.value?.agents.map((person) => person.id) ?? []) : null;
+  return primaryNow({ ...primaryWork(), needs });
 }
 
 export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
@@ -53,29 +53,29 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   const head = h(
     "div",
     { class: "side-head" },
-    h("a", { class: "side-mark", href: "#/home", title: "Home: what needs you, and the work" }, appMark(20), h("span", { class: "wordmark-text" }, "Galahad")),
-    canGive ? button("Give a task", { variant: "ghost", size: "sm", iconOnly: true, icon: "edit", title: "Give a task to the knight best suited to it, or to one by name", onClick: () => giveToRoundtable(ctx) }) : null,
+    h("a", { class: "side-mark", href: "#/home", title: "Home: what needs you, and the work" }, appMark(20), h("span", { class: "wordmark-text" }, "Invincible")),
+    canGive ? button("Give a task", { variant: "ghost", size: "sm", iconOnly: true, icon: "edit", title: "Give a task to the agent best suited to it, or to one by name", onClick: () => giveToAgents(ctx) }) : null,
     collapse,
   );
   const search = h(
     "button",
-    { class: "search-trigger side-search", type: "button", onclick: () => ctx.palette(), "aria-label": `Search, or ask Galahad (${isMac() ? "⌘" : "Ctrl"}+K)` },
+    { class: "search-trigger side-search", type: "button", onclick: () => ctx.palette(), "aria-label": `Search, or ask your agent (${isMac() ? "⌘" : "Ctrl"}+K)` },
     icon("search", { size: 14 }),
     h("span", { class: "label" }, "Search, or ask"),
     h("span", { class: "kbds" }, ...kbd(isMac() ? "⌘" : "Ctrl", "K")),
   );
 
-  // ---- Galahad, pinned: his orb in his state's colour, his name, and his line. Only the orb in focus moves (your word, 26
-  // November 2026: calm): his is still beside a pane with orbs of its own (his conversation's, Home's, the Roundtable's,
-  // a task's knight), and moves as he does beside any other page ----
-  const face = h("span", { class: "side-galahad-orb" });
-  const line = h("span", { class: "side-galahad-line ellipsis" });
-  const stop = button("Stop", { variant: "ghost", size: "sm", iconOnly: true, icon: "stop", label: "Stop Galahad answering", onClick: (event) => (event.preventDefault(), stopChat()) });
-  const galahad = h("a", { class: "side-galahad", href: "#/chat" }, face, h("span", { class: "side-galahad-text" }, h("strong", {}, "Galahad"), line), stop);
+  // ---- the primary, pinned: its orb in its state's colour, its name, and its line. Only the orb in focus moves (your word, 26
+  // November 2026: calm): its is still beside a pane with orbs of its own (its conversation's, Home's, the agents',
+  // a task's agent), and moves as it does beside any other page ----
+  const face = h("span", { class: "side-primary-orb" });
+  const line = h("span", { class: "side-primary-line ellipsis" });
+  const stop = button("Stop", { variant: "ghost", size: "sm", iconOnly: true, icon: "stop", label: "Stop your agent answering", onClick: (event) => (event.preventDefault(), stopChat()) });
+  const primary = h("a", { class: "side-primary", href: "#/chat" }, face, h("span", { class: "side-primary-text" }, h("strong", {}, "Your agent"), line), stop);
   let shownFace = "";
-  const drawGalahad = (): void => {
-    const now = galahadLine(ctx);
-    const state = galahadState(now);
+  const drawPrimary = (): void => {
+    const now = primaryLine(ctx);
+    const state = primaryState(now);
     const elsewhere = where.route === "chat" || where.route === "home" || where.route === "team" || where.route === "task";
     const look = `${now.tone}/${state}/${elsewhere}`;
     if (look !== shownFace) {
@@ -84,10 +84,10 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
     }
     if (line.textContent !== now.text) line.textContent = now.text;
     line.dataset.tone = now.tone;
-    galahad.title = `Galahad: ${now.text}`;
+    primary.title = `Your agent: ${now.text}`;
     stop.hidden = !chatActivity.value.streaming;
-    if (where.route === "chat") galahad.setAttribute("aria-current", "page");
-    else galahad.removeAttribute("aria-current");
+    if (where.route === "chat") primary.setAttribute("aria-current", "page");
+    else primary.removeAttribute("aria-current");
   };
 
   // ---- the work, by attention ----
@@ -120,7 +120,7 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   const late = setTimeout(() => render(), 1500);
 
   function render(): void {
-    drawGalahad();
+    drawPrimary();
     const now = settled() ? workNow(ctx) : null;
     const beyond = now ? inboxBeyond(ctx.live.inboxCount.value, ctx.live.actions.value.filter((action) => isWaiting(action)), now.needs) : 0;
     const version = JSON.stringify([now && [rowsVersion(now.needs), rowsVersion(now.active), rowsVersion(now.working), rowsVersion(now.done)], beyond, where, [...open], Boolean(ctx.live.teamProblem.value)]);
@@ -144,20 +144,20 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
         h(
           "div",
           { class: "side-empty" },
-          h("p", {}, "No tasks yet. Each task you or Galahad give a knight is a row here: what needs you first, then what is new, at work, and done."),
-          canGive ? button("Give a task", { size: "sm", icon: "layers", onClick: () => giveToRoundtable(ctx) }) : null,
+          h("p", {}, "No tasks yet. Each task you or your agent give an agent is a row here: what needs you first, then what is new, at work, and done."),
+          canGive ? button("Give a task", { size: "sm", icon: "layers", onClick: () => giveToAgents(ctx) }) : null,
         ),
       );
     }
     return parts;
   }
 
-  // ---- the foot: the machine it talks to, the knights, everything else ----
-  // (The knights first and the machine after them: what either says when its answer comes changes no other's place.)
+  // ---- the foot: the machine it talks to, the agents, everything else ----
+  // (The agents first and the machine after them: what either says when its answer comes changes no other's place.)
   const machine = h("a", { class: "side-pill", href: "#/fleet", hidden: !ctx.can("mind:read") });
-  const knights = h("a", { class: "side-pill", href: "#/team", hidden: !ctx.can("chat") });
+  const agents = h("a", { class: "side-pill", href: "#/team", hidden: !ctx.can("chat") });
   const more = button("Everything else", { variant: "ghost", size: "sm", iconOnly: true, icon: "settings", title: "Everything else: places, settings, this device", onClick: (event) => openPlaces(ctx, event.currentTarget as Element) });
-  const foot = h("div", { class: "side-foot" }, knights, machine, h("span", { class: "grow" }), more);
+  const foot = h("div", { class: "side-foot" }, agents, machine, h("span", { class: "grow" }), more);
   const drawFoot = (): void => {
     const fleet = ctx.live.fleet.value;
     const nodes = fleet ? fleet.devices.filter((device) => device.kind === "node" && !device.revokedAt) : [];
@@ -167,14 +167,14 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
     const tone = !fleet ? null : online === nodes.length ? "ok" : online === 0 ? "danger" : "warn";
     replace(machine, dot(tone), h("span", { class: "ellipsis tnum" }, fleet && nodes.length > 1 ? `${self} · ${online}/${nodes.length}` : self));
     machine.setAttribute("aria-label", fleet ? `${self}: ${online} of ${nodes.length} machines online` : self);
-    const count = ctx.live.team.value?.teammates.length;
+    const count = ctx.live.team.value?.agents.length;
     // (A figure space holds the count's place until the team answers.)
-    replace(knights, icon("roundtable", { size: 14 }), h("span", { class: "tnum" }, count === undefined ? "Knights \u2007" : `Knights ${count}`));
-    knights.setAttribute("aria-label", count === undefined ? "The knights" : `The knights: ${count}`);
+    replace(agents, icon("agents", { size: 14 }), h("span", { class: "tnum" }, count === undefined ? "Agents \u2007" : `Agents ${count}`));
+    agents.setAttribute("aria-label", count === undefined ? "The agents" : `The agents: ${count}`);
   };
 
-  const el = h("aside", { class: "sidebar", "aria-label": "Galahad and the work" }, head, search, galahad, work, foot);
-  const stops = [...workSources(ctx), ...galahadSources(ctx), ctx.live.teamProblem, ctx.live.inboxLoaded].map((source) => source.subscribe(render));
+  const el = h("aside", { class: "sidebar", "aria-label": "Your agent and the work" }, head, search, primary, work, foot);
+  const stops = [...workSources(ctx), ...primarySources(ctx), ctx.live.teamProblem, ctx.live.inboxLoaded].map((source) => source.subscribe(render));
   stops.push(ctx.live.fleet.subscribe(drawFoot), ctx.live.team.subscribe(drawFoot));
   // "2 min ago" moves on, and a working row's time: drawn again each minute (only what changed is).
   const minute = setInterval(render, 60_000);

@@ -15,7 +15,7 @@ import { toast } from "../ui/toast.ts";
 import { trustBadge } from "./memory.ts";
 
 /*
- * The Archive: everything Galahad made, was taught or thought of, kept for good on the
+ * The Archive: everything the primary made, was taught or thought of, kept for good on the
  * node you talk to, and searched by words and meaning together. One smart selector for
  * kind, time and trust; the search; each entry's summary, facts, lessons, files (checked
  * against their SHA-256 in the browser) and links; the index's state; and New idea.
@@ -76,7 +76,7 @@ export function openNewIdea(ctx: Ctx): void {
       },
     },
     field("Idea", title),
-    field("Details", text, { hint: "Plain text. Galahad finds it again by its words and its meaning." }),
+    field("Details", text, { hint: "Plain text. Your agent finds it again by its words and its meaning." }),
     h("div", { class: "field" }, h("label", { for: "idea-tags" }, "Tags (optional)"), tags.el),
     status,
     formActions(button("Cancel", { onClick: () => sheet.close() }), save),
@@ -126,7 +126,7 @@ function openDelete(ctx: Ctx, entry: ArchiveEntryView, done: () => void): void {
   const sheet = openSheet({ title: "Delete for good?", body: form, role: "alertdialog", initialFocus: () => reason });
 }
 
-/** One entry: what it is, what Galahad understood of it, its files and links. */
+/** One entry: what it is, what the primary understood of it, its files and links. */
 export function openEntry(ctx: Ctx, id: string): void {
   const body = h("div", { class: "stack loose" }, skeletonRows(4));
   const sheet: Sheet = openSheet({ title: "Archive entry", description: id, size: "wide", body });
@@ -227,7 +227,7 @@ export function openEntry(ctx: Ctx, id: string): void {
         h("span", { class: "small muted", title: absoluteTime(entry.createdAt) }, `made ${relativeTime(entry.createdAt)} · from ${entry.source}`),
         ...entry.tags.map((t) => h("span", { class: "tag" }, t)),
       ),
-      entry.trust === "untrusted" ? callout("warn", "Written by others (a web page, an agent's output). Galahad reads it as data, never as instructions.", { icon: "alert" }) : null,
+      entry.trust === "untrusted" ? callout("warn", "Written by others (a web page, an agent's output). Your agent reads it as data, never as instructions.", { icon: "alert" }) : null,
       u
         ? h(
             "div",
@@ -407,7 +407,7 @@ export const archiveView: View = (root, ctx, { scope, opts }) => {
           id: "trust",
           label: "Whose words",
           mode: "many",
-          options: (["owner", "agent", "untrusted"] as const).map((t) => ({ value: t, label: TRUST_LABEL[t], meta: t === "owner" ? "yours" : t === "agent" ? "Galahad's own" : "web pages, agents' output", tone: t === "untrusted" ? ("warn" as const) : t === "owner" ? ("accent" as const) : ("agent" as const), selected: filter.trust.has(t) })),
+          options: (["owner", "agent", "untrusted"] as const).map((t) => ({ value: t, label: TRUST_LABEL[t], meta: t === "owner" ? "yours" : t === "agent" ? "Your agent's own" : "web pages, agents' output", tone: t === "untrusted" ? ("warn" as const) : t === "owner" ? ("accent" as const) : ("agent" as const), selected: filter.trust.has(t) })),
         },
       ];
       if (filtering(filter)) groups.push({ id: "clear", mode: "action", options: [{ value: "clear", label: "Show everything", icon: "x" }] });
@@ -460,7 +460,7 @@ export const archiveView: View = (root, ctx, { scope, opts }) => {
           : empty({
               icon: "library",
               title: "Nothing archived yet",
-              body: "Kept work, models, what Galahad was taught, ideas, chats and lessons arrive here by themselves, and stay.",
+              body: "Kept work, models, what your agent was taught, ideas, chats and lessons arrive here by themselves, and stay.",
               actions: ctx.can("mind:write") ? button("New idea", { icon: "lightbulb", onClick: () => openNewIdea(ctx) }) : null,
             }),
       );
@@ -530,7 +530,7 @@ export const archiveView: View = (root, ctx, { scope, opts }) => {
       { class: "page" },
       pageHead(
         "Archive",
-        "Everything Galahad made, was taught or thought of, kept for good on this node and searched by words and meaning together. He searches it before new work; you see what he used with each answer.",
+        "Everything your agent made, was taught or thought of, kept for good on this node and searched by words and meaning together. It searches it before new work; you see what it used with each answer.",
         ctx.can("mind:write") ? button("New idea", { variant: "primary", icon: "lightbulb", onClick: () => openNewIdea(ctx) }) : null,
       ),
       // Shown whole once the entries and the index's state have answered: on a phone the state is under the entries,

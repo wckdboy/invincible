@@ -102,11 +102,11 @@ export function openCreateSandbox(ctx: Ctx): void {
     scale: ["15 min", "7 d"],
   });
   const image = h("input", { class: "input mono", type: "text", placeholder: "default image", autocomplete: "off", autocorrect: "off", spellcheck: "false", autocapitalize: "off" });
-  const quest = h("input", { class: "input", type: "text", placeholder: "e.g. try the new parser on untrusted samples", autocomplete: "off", maxlength: 200 });
+  const run = h("input", { class: "input", type: "text", placeholder: "e.g. try the new parser on untrusted samples", autocomplete: "off", maxlength: 200 });
   const where = h(
     "select",
     { class: "select" },
-    h("option", { value: "" }, "Let Galahad place it"),
+    h("option", { value: "" }, "Let your agent place it"),
     ...nodes.map((n) => h("option", { value: n.name }, `On ${n.name}`)),
   );
 
@@ -199,7 +199,7 @@ export function openCreateSandbox(ctx: Ctx): void {
           ...(persistent ? { persistent: true } : { ttlMinutes: TTL_STEPS[ttl.value()] ?? 60 }),
           ...(network !== "isolated" && providers.size ? { providers: [...providers] } : {}),
           ...(lab ? { lab: true } : image.value.trim() ? { image: image.value.trim() } : {}),
-          ...(quest.value.trim() ? { quest: quest.value.trim() } : {}),
+          ...(run.value.trim() ? { run: run.value.trim() } : {}),
           ...(where.value ? { on: where.value } : {}),
         };
         void busy(create, async () => {
@@ -224,10 +224,10 @@ export function openCreateSandbox(ctx: Ctx): void {
       persistent = on;
       ttl.input.disabled = on;
       sync();
-    }, { hint: "Persistent sandboxes outlive their TTL. Under the oath, destroying one asks your approval." }),
+    }, { hint: "Persistent sandboxes outlive their TTL. Under the policy, destroying one asks your approval." }),
     h("div", { class: "field" }, h("div", { class: "label" }, "Models it may use"), providersBox, providersHint),
-    h("div", { class: "fields" }, field("What is it for? (optional)", quest), field("Image (optional)", image)),
-    field("Where", where, { hint: nodes.length ? `${plural(nodes.length, "machine")} can host sandboxes right now.` : "No online machine reports Docker or a VM runtime; Galahad will try this node." }),
+    h("div", { class: "fields" }, field("What is it for? (optional)", run), field("Image (optional)", image)),
+    field("Where", where, { hint: nodes.length ? `${plural(nodes.length, "machine")} can host sandboxes right now.` : "No online machine reports Docker or a VM runtime; your agent will try this node." }),
     summary,
     status,
     formActions(button("Cancel", { onClick: () => sheet.close() }), create),
@@ -326,7 +326,7 @@ async function destroy(ctx: Ctx, sandbox: SandboxView, on: string | null): Promi
     title: `Destroy ${sandbox.name}?`,
     body: sandbox.ephemeral
       ? "It and everything inside it are deleted. It was ephemeral, so nothing else depends on it."
-      : [h("p", {}, "It's persistent: everything inside it is deleted for good."), h("p", {}, "Under the oath, Galahad may ask for your approval first.")],
+      : [h("p", {}, "It's persistent: everything inside it is deleted for good."), h("p", {}, "Under the policy, your agent may ask for your approval first.")],
     confirmLabel: "Destroy sandbox",
   });
   if (!ok) return;
@@ -336,7 +336,7 @@ async function destroy(ctx: Ctx, sandbox: SandboxView, on: string | null): Promi
     sandboxesChanged.update((n) => n + 1);
   } catch (error) {
     if (error instanceof ApiError && error.status === 409) {
-      toast("The oath asks for approval first", { tone: "warn", description: error.message, duration: 10_000 });
+      toast("The policy asks for approval first", { tone: "warn", description: error.message, duration: 10_000 });
     } else toast("Couldn't destroy it", { tone: "error", description: errorMessage(error) });
   }
 }
@@ -389,7 +389,7 @@ function sandboxCard(ctx: Ctx, sandbox: SandboxView, on: string | null): HTMLEle
           net ? badge(net.label, net.tone, net.icon) : badge(sandbox.network),
           isolationBadge(sandbox),
         ),
-        h("div", { class: "node-sub" }, sandbox.quest ? h("span", {}, sandbox.quest) : h("span", {}, "no quest"), h("span", {}, "·"), expires, ...(sandbox.ephemeral || sandbox.expiresAt ? [h("span", {}, "·"), h("span", {}, sandbox.ephemeral ? "ephemeral" : "persistent")] : [])),
+        h("div", { class: "node-sub" }, sandbox.run ? h("span", {}, sandbox.run) : h("span", {}, "no run"), h("span", {}, "·"), expires, ...(sandbox.ephemeral || sandbox.expiresAt ? [h("span", {}, "·"), h("span", {}, sandbox.ephemeral ? "ephemeral" : "persistent")] : [])),
       ),
     ),
     h(

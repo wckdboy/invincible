@@ -68,7 +68,7 @@ async function runsOf(loop: string, count: number): Promise<LoopRunView[]> {
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "wakes-node" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "wakes-node" });
   store.close();
   home.writeConfig({ v: 1, name: "wakes-node", fleet, port, keystore, advertise: "127.0.0.1" });
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 60_000, wakeWatchMs: false, ciWatchMs: false, defaultHeartbeat: false });

@@ -10,10 +10,10 @@ import { toast } from "../ui/toast.ts";
 import { deviceName } from "./activity.ts";
 
 /*
- * Tripwires and checks, on the Loops page: your rules on the commands his work runs (core's rules.ts). Before each
- * command of his quests (yours from a terminal, his loops', a trial's) and of a knight's task on his own runner, and
- * before each gate, a tripwire halts the work or refuses that command, and he is told which and why. After such a
- * command has succeeded, a check runs a command of yours, and he is told at once if it fails; a rule that tells you
+ * Tripwires and checks, on the Loops page: your rules on the commands its work runs (core's rules.ts). Before each
+ * command of its runs (yours from a terminal, its loops', an eval's) and of an agent's task on its own runner, and
+ * before each gate, a tripwire halts the work or refuses that command, and it is told which and why. After such a
+ * command has succeeded, a check runs a command of yours, and it is told at once if it fails; a rule that tells you
  * puts a notice in your Inbox once such a command has run (and a notification of its own kind). Data you write, never a
  * model's judgment; yours alone to set (fleet:admin). A coding tool's own commands inside its VM aren't seen, and the
  * section says so.
@@ -100,7 +100,7 @@ export function tripwiresSection(ctx: Ctx, scope: Scope): { el: HTMLElement; ref
     const globs = input("*.lock .env* migrations/** rm", 900);
     const contains = input("e.g. git push", 200);
     const run = input("e.g. bunx tsc --noEmit", 1000);
-    const runField = field("Check to run", run, { hint: "One line, run where his work runs after a command that matches has succeeded. If it fails, he is told at once, with what it printed." });
+    const runField = field("Check to run", run, { hint: "One line, run where its work runs after a command that matches has succeeded. If it fails, it is told at once, with what it printed." });
     let does: RuleDoes = "refuse";
     const doesControl = segmented<RuleDoes>(
       [
@@ -128,7 +128,7 @@ export function tripwiresSection(ctx: Ctx, scope: Scope): { el: HTMLElement; ref
           const made = ruleFromForm({ name: name.value, does, globs: globs.value, contains: contains.value, run: run.value });
           if ("problem" in made) return void replace(status, callout("warn", made.problem));
           const secret = [...made.rule.words, made.rule.contains ?? "", made.rule.run ?? ""].map((text) => findSecrets(text)[0]).find(Boolean);
-          if (secret) return void replace(status, callout("warn", `That looks like a ${secret.kind}: a rule's words reach the ledger and his conversation, so it wasn't set. A key belongs in the vault.`));
+          if (secret) return void replace(status, callout("warn", `That looks like a ${secret.kind}: a rule's words reach the ledger and its conversation, so it wasn't set. A key belongs in the vault.`));
           void busy(save, async () => {
             try {
               await ctx.api.post(PATH, made.rule);
@@ -152,20 +152,20 @@ export function tripwiresSection(ctx: Ctx, scope: Scope): { el: HTMLElement; ref
         { class: "stack tight" },
         h("div", { class: "label" }, "What it does"),
         doesControl.el,
-        note("Refuse: that command isn't run, he is told which rule and why, and the work goes on. Halt: the quest or task stops, saying which rule. Check after: once the command has succeeded, yours runs, and he is told if it fails. Tell me: once it has run, however it ended, a notice in your Inbox and a notification, once for each task."),
+        note("Refuse: that command isn't run, it is told which rule and why, and the work goes on. Halt: the run or task stops, saying which rule. Check after: once the command has succeeded, yours runs, and it is told if it fails. Tell me: once it has run, however it ended, a notice in your Inbox and a notification, once for each task."),
       ),
       runField,
       status,
       formActions(button("Cancel", { onClick: () => sheet.close() }), save),
     );
-    const sheet = openSheet({ title: "Add a rule", description: "A rule of yours on the commands his work runs.", body: form, initialFocus: () => name });
+    const sheet = openSheet({ title: "Add a rule", description: "A rule of yours on the commands its work runs.", body: form, initialFocus: () => name });
   }
 
   const el = section(
     "Tripwires and checks",
     {
       actions: yours ? button("Add rule", { size: "sm", icon: "plus", onClick: () => openAdd() }) : null,
-      note: `Tripwires are checked before every command of his quests and of a knight's task on his own runner, and every gate; checks run after those commands. A coding tool (OpenCode, Claude Code, Codex, Hermes) runs its own commands inside its VM, where they aren't seen.${yours ? "" : " This device can see them, not change them (no fleet:admin)."}`,
+      note: `Tripwires are checked before every command of its runs and of an agent's task on its own runner, and every gate; checks run after those commands. A coding tool (OpenCode, Claude Code, Codex, Hermes) runs its own commands inside its VM, where they aren't seen.${yours ? "" : " This device can see them, not change them (no fleet:admin)."}`,
     },
     box,
   );

@@ -3,7 +3,7 @@ import type { ChatMessage, ChatStreamEvent } from "@invincible/core";
 import { ACP_VERSION, acpAgent, promptText } from "../src/acp-agent.ts";
 
 /*
- * Galahad as an ACP agent, as a harness that runs ACP agents drives him (an editor): JSON-RPC a line
+ * The primary as an ACP agent, as a harness that runs ACP agents drives it (an editor): JSON-RPC a line
  * at a time. The node's answer is a stand-in stream.
  */
 
@@ -29,18 +29,18 @@ function client(answer: (messages: ChatMessage[], signal: AbortSignal) => AsyncI
 
 const says = (...events: ChatStreamEvent[]) => async function* () { yield* events; };
 
-describe("Galahad as an ACP agent", () => {
-  test("initialize says what he is and that he asks the client for nothing; a session opens", async () => {
+describe("Your agent as an ACP agent", () => {
+  test("initialize says what it is and that it asks the client for nothing; a session opens", async () => {
     const c = client(says());
     const init = await c.call("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: true } } });
     expect(init.result).toMatchObject({ protocolVersion: ACP_VERSION, agentCapabilities: { loadSession: false }, authMethods: [], agentInfo: { name: "invincible" } });
     const opened = await c.call("session/new", { cwd: "/tmp", mcpServers: [] });
     expect(opened.result.sessionId).toMatch(/^gal-/);
-    // What he doesn't offer is said so, and a notification of it changes nothing.
+    // What it doesn't offer is said so, and a notification of it changes nothing.
     expect((await c.call("session/load", { sessionId: "x" })).error).toMatchObject({ code: -32601 });
   });
 
-  test("a prompt is answered by Galahad on the node: his words stream as chunks, his tools as tool calls, and it ends", async () => {
+  test("a prompt is answered by your agent on the node: its words stream as chunks, its tools as tool calls, and it ends", async () => {
     const c = client(says(
       { type: "tool", id: "t1", name: "recall", title: "Recall", input: "deploy" },
       { type: "tool_result", id: "t1", name: "recall", ok: true, summary: "3 memories" },
@@ -49,13 +49,13 @@ describe("Galahad as an ACP agent", () => {
       { type: "done", ref: "p/m" },
     ));
     const { result: { sessionId } } = await c.call("session/new", { cwd: "/", mcpServers: [] });
-    const answered = await c.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "@galahad how do we deploy?" }] });
+    const answered = await c.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "@primary how do we deploy?" }] });
     expect(answered.result).toEqual({ stopReason: "end_turn" });
     const updates = c.out.filter((m) => m.method === "session/update").map((m) => m.params.update);
     expect(updates.map((u) => u.sessionUpdate)).toEqual(["tool_call", "tool_call_update", "agent_message_chunk", "agent_message_chunk"]);
     expect(updates[1]).toMatchObject({ toolCallId: "t1", status: "completed" });
     expect(updates.filter((u) => u.sessionUpdate === "agent_message_chunk").map((u) => u.content.text).join("")).toBe("It deploys with scripts/deploy.sh.");
-    expect(c.asked[0]).toEqual([{ role: "user", content: "@galahad how do we deploy?" }]);
+    expect(c.asked[0]).toEqual([{ role: "user", content: "@primary how do we deploy?" }]);
   });
 
   test("a session keeps its exchange: a follow-up is asked with what came before", async () => {
@@ -78,18 +78,18 @@ describe("Galahad as an ACP agent", () => {
     expect((await answering).result).toEqual({ stopReason: "cancelled" });
   });
 
-  test("when he can't answer, the reason is said where you asked, a line, with no key in it", async () => {
+  test("when it can't answer, the reason is said where you asked, a line, with no key in it", async () => {
     const c = client(says({ type: "error", error: `provider said 401: key ${["sk", "ant", "api03", "FAKEfakeFAKEfakeFAKEfake0123"].join("-")} refused\nstack…` }));
     const { result: { sessionId } } = await c.call("session/new", { cwd: "/", mcpServers: [] });
     expect((await c.call("session/prompt", { sessionId, prompt: [{ type: "text", text: "Hi" }] })).result).toEqual({ stopReason: "end_turn" });
     const said = c.out.filter((m) => m.method === "session/update").map((m) => m.params.update.content.text).join("");
-    expect(said).toStartWith("Galahad couldn't answer: provider said 401");
+    expect(said).toStartWith("Your agent couldn't answer: provider said 401");
     expect(said).not.toContain("sk-ant-api03");
     expect(said).not.toContain("stack");
   });
 
   test("what a prompt carries is read as words: text, a resource's text, the rest named", () => {
-    expect(promptText([{ type: "text", text: "Look at this" }, { type: "resource", resource: { uri: "chat://channel/eng", text: "a: hi\nb: ho" } }, { type: "image", data: "…" }])).toBe("Look at this\n\nchat://channel/eng:\na: hi\nb: ho\n\n(a image was attached, which Galahad can't read here)");
+    expect(promptText([{ type: "text", text: "Look at this" }, { type: "resource", resource: { uri: "chat://channel/eng", text: "a: hi\nb: ho" } }, { type: "image", data: "…" }])).toBe("Look at this\n\nchat://channel/eng:\na: hi\nb: ho\n\n(a image was attached, which your agent can't read here)");
   });
 
   test("a prompt too long to send whole keeps its beginning and its end, and a long exchange its newest messages", async () => {

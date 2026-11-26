@@ -3,13 +3,13 @@ import type { ChatMessage, ChatStreamEvent } from "@invincible/core";
 import { randomId, redact, routes } from "@invincible/core";
 
 /*
- * Galahad as an ACP agent (the Agent Client Protocol: JSON-RPC 2.0, a message a line, over stdin and stdout), for any
- * harness that runs ACP agents: editors and workbenches that run any ACP agent. Each prompt is answered by Galahad on his node, through the chat route
- * with an arm token of its own (least privilege: what he does there outward asks you on a card, as for any agent); his
- * words stream back as `agent_message_chunk`s, his tools as `tool_call`s. A session keeps its own exchange in memory
+ * The primary as an ACP agent (the Agent Client Protocol: JSON-RPC 2.0, a message a line, over stdin and stdout), for any
+ * harness that runs ACP agents: editors and workbenches that run any ACP agent. Each prompt is answered by the primary on its node, through the chat route
+ * with an arm token of its own (least privilege: what it does there outward asks you on a card, as for any agent); its
+ * words stream back as `agent_message_chunk`s, its tools as `tool_call`s. A session keeps its own exchange in memory
  * (an arm keeps no chat in your history), so a thread's follow-ups are answered in its light.
  *
- * Nothing here reads a file or runs a command for the client: Galahad advertises no client resources and asks for
+ * Nothing here reads a file or runs a command for the client: the primary advertises no client resources and asks for
  * none. stdout belongs to the protocol alone.
  */
 
@@ -23,8 +23,8 @@ const MESSAGE_CHARS = 64_000;
 /** A line longer than this is refused unread: no JSON-RPC message of this protocol is near it. */
 const LINE_LIMIT = 2_000_000;
 
-/** One answer of Galahad's to these messages, as the node streams it (the chat route, with the arm's token). */
-export type AskGalahad = (messages: ChatMessage[], signal: AbortSignal) => AsyncIterable<ChatStreamEvent>;
+/** One answer of the primary's to these messages, as the node streams it (the chat route, with the arm's token). */
+export type AskPrimary = (messages: ChatMessage[], signal: AbortSignal) => AsyncIterable<ChatStreamEvent>;
 
 interface Session {
   messages: ChatMessage[];
@@ -66,13 +66,13 @@ export function promptText(blocks: unknown): string {
       const r = b.resource as Json;
       parts.push(`${typeof r.uri === "string" ? `${r.uri}:\n` : ""}${r.text as string}`);
     } else if (b.type === "resource_link" && typeof b.uri === "string") parts.push(`(linked: ${b.uri})`);
-    else if (typeof b.type === "string") parts.push(`(a ${b.type} was attached, which Galahad can't read here)`);
+    else if (typeof b.type === "string") parts.push(`(a ${b.type} was attached, which your agent can't read here)`);
   }
   return parts.join("\n\n").trim();
 }
 
 export interface AcpAgentOptions {
-  ask: AskGalahad;
+  ask: AskPrimary;
   /** Each protocol line out (stdout). */
   write: (line: string) => void;
   /** What happened, for whoever runs it (stderr): never the conversation's words. */
@@ -97,12 +97,12 @@ export function acpAgent(o: AcpAgentOptions) {
     session.messages.push({ role: "user", content: bounded(text) });
     const running = new AbortController();
     session.running = running;
-    /** What goes into the session's exchange: his words, and why he stopped short if he did. */
+    /** What goes into the session's exchange: its words, and why it stopped short if it did. */
     let said = "";
     let stop: "end_turn" | "cancelled" = "end_turn";
-    /** Why there is no answer, said where you asked in his words (never a raw provider error: redacted, a line). */
+    /** Why there is no answer, said where you asked in its words (never a raw provider error: redacted, a line). */
     const sayWhy = (message: string) => {
-      const why = `Galahad couldn't answer: ${redact(message).split("\n", 1)[0]!.slice(0, 300)}`;
+      const why = `Your agent couldn't answer: ${redact(message).split("\n", 1)[0]!.slice(0, 300)}`;
       const chunk = said ? `\n\n${why}` : why;
       said += chunk;
       update(sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: chunk } });
@@ -151,7 +151,7 @@ export function acpAgent(o: AcpAgentOptions) {
           protocolVersion: ACP_VERSION,
           agentCapabilities: { loadSession: false, promptCapabilities: { image: false, audio: false, embeddedContext: true } },
           authMethods: [],
-          agentInfo: { name: "invincible", title: "Galahad" },
+          agentInfo: { name: "invincible", title: "Invincible" },
         });
       case "session/new": {
         const sessionId = `gal-${randomId(12)}`;
@@ -169,7 +169,7 @@ export function acpAgent(o: AcpAgentOptions) {
       case "authenticate":
         return reply(id, {});
       default:
-        if (id !== undefined) return failed(id, -32601, `Galahad doesn't offer ${method}`);
+        if (id !== undefined) return failed(id, -32601, `Invincible doesn't offer ${method}`);
     }
   }
 
@@ -181,8 +181,8 @@ export function acpAgent(o: AcpAgentOptions) {
   return { receive, close, sessions: () => sessions.size };
 }
 
-/** Galahad on his node: the chat route with an arm's token, his answer's events as they come. */
-export function askNode(base: string, token: string): AskGalahad {
+/** The primary on its node: the chat route with an arm's token, its answer's events as they come. */
+export function askNode(base: string, token: string): AskPrimary {
   return async function* (messages, signal) {
     let response: Response;
     try {
@@ -194,7 +194,7 @@ export function askNode(base: string, token: string): AskGalahad {
       });
     } catch (error) {
       if (signal.aborted) throw error;
-      throw new Error(`no Galahad node is running at ${base}; start it with \`invincible serve\``);
+      throw new Error(`no Invincible node is running at ${base}; start it with \`invincible serve\``);
     }
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };

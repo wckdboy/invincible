@@ -7,7 +7,7 @@ import { icon, type IconName } from "./icons.ts";
 /*
  * An answer's blocks drawn as what they are (core blocks.ts): a chart, figures, choices to tap, a plan's steps, a
  * page. What a model wrote goes in as text and attributes, never as markup, with one exception: a page, whose HTML is
- * parsed only inside a frame sealed off from Galahad (`framed`). A block that can't be drawn is shown as its code,
+ * parsed only inside a frame sealed off from the primary (`framed`). A block that can't be drawn is shown as its code,
  * with why.
  */
 
@@ -63,7 +63,7 @@ const PENDING: Record<string, [IconName, string]> = {
   stats: ["gauge", "Gathering figures…"],
   choices: ["chat", "Writing choices…"],
   steps: ["layers", "Planning steps…"],
-  artifact: ["file", "Making a page: it opens when he's done"],
+  artifact: ["file", "Making a page: it opens when it's done"],
 };
 
 function pending(lang: string): HTMLElement {
@@ -340,7 +340,7 @@ function statsGrid(stats: Stat[]): HTMLElement {
 }
 
 function choicesRow(choices: string[], choose: ((text: string) => void) | undefined): HTMLElement {
-  if (!choose) return h("div", { class: "viz-choices", role: "list", "aria-label": "What he offered" }, ...choices.map((c) => h("span", { class: "viz-choice static", role: "listitem" }, c)));
+  if (!choose) return h("div", { class: "viz-choices", role: "list", "aria-label": "What it offered" }, ...choices.map((c) => h("span", { class: "viz-choice static", role: "listitem" }, c)));
   const buttons = choices.map((c) =>
     h("button", {
       class: "viz-choice",
@@ -377,10 +377,10 @@ function stepsList(steps: PlanStep[]): HTMLElement {
 /* ---------- a page ---------- */
 
 /**
- * A page's HTML as its frame gets it. The frame is sandboxed (an origin of its own: nothing of Galahad's, no forms,
+ * A page's HTML as its frame gets it. The frame is sandboxed (an origin of its own: nothing of the primary's, no forms,
  * popups or navigating the app) and, until you press Run, runs no script. Our head comes first, and holds for what
  * follows: a page can add to its policy, never undo it. Nothing loads from the network (an image's address could
- * carry what he wrote out), links to other files are removed, and so is looking up a name ahead of time.
+ * carry what it wrote out), links to other files are removed, and so is looking up a name ahead of time.
  */
 export function framed(page: string, run: boolean): string {
   const policy = `default-src 'none'; img-src data: blob:; media-src data: blob:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action 'none'${run ? "; script-src 'unsafe-inline'" : ""}`;
@@ -419,7 +419,7 @@ function frameFor(page: string, run: boolean, title: string, tall = false): HTML
 const running = new Set<string>();
 
 function pageCard(page: string, asCode: () => HTMLElement): HTMLElement {
-  const title = artifactTitle(page) ?? "A page he made";
+  const title = artifactTitle(page) ?? "A page it made";
   let run = running.has(page);
   let showing: "page" | "code" = "page";
   const stage = h("div", { class: "viz-stage" });
@@ -431,7 +431,7 @@ function pageCard(page: string, asCode: () => HTMLElement): HTMLElement {
     replace(runButton, icon(run ? "stop" : "play", { size: 13 }), h("span", {}, run ? "Stop" : "Run"));
     runButton.hidden = showing === "code";
     codeButton.setAttribute("aria-pressed", String(showing === "code"));
-    note.textContent = run ? "Running its own code, sealed off from Galahad and your data. It can't fetch anything; like a link, it could still open a web address." : "Shown as it is: its scripts don't run until you press Run, and nothing loads from the network.";
+    note.textContent = run ? "Running its own code, sealed off from your agent and your data. It can't fetch anything; like a link, it could still open a web address." : "Shown as it is: its scripts don't run until you press Run, and nothing loads from the network.";
   };
   runButton.addEventListener("click", () => {
     run = !run;
@@ -448,7 +448,7 @@ function pageCard(page: string, asCode: () => HTMLElement): HTMLElement {
   return h("div", { class: "viz-page" }, h("div", { class: "viz-page-head" }, icon("file", { size: 15 }), h("strong", { class: "grow ellipsis" }, title), runButton, codeButton, open, copy), stage, note);
 }
 
-/** HTML he wrote as code: shown as code, with Preview to see it as a page (sealed off the same way). */
+/** HTML it wrote as code: shown as code, with Preview to see it as a page (sealed off the same way). */
 function previewable(block: CodeBlock, code: Code): HTMLElement {
   const holder = h("div", {});
   const asCode = code(block);
@@ -459,10 +459,10 @@ function previewable(block: CodeBlock, code: Code): HTMLElement {
   return holder;
 }
 
-/** An SVG he wrote, as the picture it is (an image runs nothing and loads nothing), with its code a tap away. */
+/** An SVG it wrote, as the picture it is (an image runs nothing and loads nothing), with its code a tap away. */
 function picture(block: CodeBlock, code: Code): HTMLElement {
   const holder = h("figure", { class: "viz-picture" });
-  const img = h("img", { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(block.v)}`, alt: "A picture he drew", decoding: "async" });
+  const img = h("img", { src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(block.v)}`, alt: "A picture it drew", decoding: "async" });
   const toggle = h("button", { class: "btn ghost sm", type: "button" }, icon("code", { size: 13 }), h("span", {}, "Code"));
   let asCode = false;
   toggle.addEventListener("click", () => {

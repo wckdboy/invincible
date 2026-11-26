@@ -1,9 +1,9 @@
 /*
- * Galahad's field: lines of force looping from pole to pole round a dark core, lit from the upper left and burning at
+ * The primary's field: lines of force looping from pole to pole round a dark core, lit from the upper left and burning at
  * the rim on the far side (your choice for the app icon, 26 November 2026: "field aurum"). Pure: points in space with
  * a colour and a size, and their place on a square picture. The icon's renderer (scripts/field-icon.ts) draws them as
  * light; the orbs draw the same points (lib/field-orb.ts says whose field, at what size and in what mood; ui/orb.ts
- * draws it), Galahad's in gold and each knight's in its own colours.
+ * draws it), the primary's in gold and each agent's in its own colours.
  *
  * A field is made in two steps, so an orb that turns does the costly part once: its model (fieldModel: each line's
  * longitude and width from its seed, each step's angle, its lean, its colours in linear light), then its points at a
@@ -29,7 +29,7 @@ export interface FieldColours {
   rim: string;
 }
 
-/** Gold and copper: the Grail's fire. */
+/** Gold and copper: the icon's fire. */
 export const AURUM: FieldColours = { key: ["#fff4d6", "#ffb12e"], rim: "#ff5a2a" };
 
 /** One point of light: where it is (the field's own units, the core at 0), its colour and its size. */

@@ -3,14 +3,14 @@ import { readFileSync } from "node:fs";
 import { CLAUDE_CODE_IMAGE, DEFAULT_IMAGE, OWN_IMAGES } from "../src/index.ts";
 
 /*
- * Claude Code for trials alone: the workshop image with Anthropic's release, pinned and checked against the checksums
- * of its signed manifest, so a run can put Claude Code and Galahad's own loop to the same tasks on the same model.
+ * Claude Code for evals alone: the workshop image with Anthropic's release, pinned and checked against the checksums
+ * of its signed manifest, so a run can put Claude Code and the primary's own loop to the same tasks on the same model.
  */
 
 const dockerfile = readFileSync(new URL("../../../sandbox/claude-code/Dockerfile", import.meta.url), "utf8");
 const arg = (name: string): string => new RegExp(`^ARG ${name}=(\\S+)$`, "m").exec(dockerfile)?.[1] ?? "";
 
-test("it is the workshop image, made where a trial needs it, and kept like the others", () => {
+test("it is the workshop image, made where an eval needs it, and kept like the others", () => {
   expect(dockerfile).toMatch(/^FROM invincible\/sandbox:1$/m);
   expect(OWN_IMAGES[CLAUDE_CODE_IMAGE]).toEqual({ context: "claude-code", keeper: "invincible-claude-code-image", base: DEFAULT_IMAGE });
 });
@@ -30,7 +30,7 @@ test("what it downloads is Anthropic's release, over https, and is checked befor
   expect(run).toContain('*) echo "no Claude Code is pinned for ${TARGETARCH}" >&2; exit 1 ;;');
 });
 
-test("it never updates itself past the pin nor reports on itself, and ends as the knights' user", () => {
+test("it never updates itself past the pin nor reports on itself, and ends as the agents' user", () => {
   expect(dockerfile).toContain("ENV DISABLE_UPDATES=1 \\\n    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n");
   expect(dockerfile.trimEnd().split("\n").filter((line) => line.startsWith("USER ")).at(-1)).toBe("USER 1000:1000");
 });

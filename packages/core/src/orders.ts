@@ -6,7 +6,7 @@ import { sha256B64u } from "./crypto.ts";
 /*
  * Standing orders: answers you give in advance. One order names one connector
  * tool, constrains its arguments and expires. When an agent's call matches an
- * active order, Galahad doesn't ask: the order is your answer, and the log records
+ * active order, the primary doesn't ask: the order is your answer, and the log records
  * which order gave it. Everything else still asks.
  *
  * Narrow by construction:
@@ -32,7 +32,7 @@ export const OrderTerms = z.strictObject({
   class: z.enum(["outward", "delete"]),
   /** Parameter → pattern. Parameters not named here may take any value. */
   args: z.record(z.string().max(40), OrderPattern),
-  /** Who may use it: arm labels or loop arms (`loop.release`), patterns allowed. Omitted: any of Galahad's agents. */
+  /** Who may use it: arm labels or loop arms (`loop.release`), patterns allowed. Omitted: any of the primary's agents. */
   callers: z.array(OrderPattern).min(1).max(16).optional(),
   /** Epoch ms. */
   until: z.number().int(),
@@ -71,7 +71,7 @@ export function orderProblems(terms: Omit<OrderTerms, "digest" | "label"> & { la
   const tool = Object.hasOwn(manifest.tools, terms.tool) ? manifest.tools[terms.tool] : undefined;
   if (!tool) return [`${manifest.id} has no tool "${terms.tool}"`];
   if (tool.class !== "outward" && tool.class !== "delete") {
-    return [`${manifest.id}.${terms.tool} is ${tool.class}: Galahad does that without asking, so it needs no order`];
+    return [`${manifest.id}.${terms.tool} is ${tool.class}: your agent does that without asking, so it needs no order`];
   }
   if (terms.class !== tool.class) problems.push(`${manifest.id}.${terms.tool} is ${tool.class}, not ${terms.class}`);
   const params: Record<string, { required?: boolean }> = tool.params ?? {};
@@ -111,7 +111,7 @@ export interface CoveredCall {
 
 /**
  * The caller name orders match against: an arm's label, `loop.<name>` for a loop
- * (whether it calls directly, recorded as `loop:<name>`, or through its quest's arm),
+ * (whether it calls directly, recorded as `loop:<name>`, or through its run's arm),
  * or `node:<name>`.
  */
 export const callerName = (by: string) => (by.startsWith("arm:") ? by.slice(4) : by.startsWith("loop:") ? `loop.${by.slice(5)}` : by);

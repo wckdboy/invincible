@@ -73,7 +73,7 @@ beforeAll(async () => {
   });
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
-  const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   store.close();
   home.writeConfig({ v: 1, name: "ultra", fleet, port, keystore, advertise: "127.0.0.1" });
   const ends = `http://127.0.0.1:${google.port}`;
@@ -87,7 +87,7 @@ beforeAll(async () => {
       origin: `http://127.0.0.1:${service.port}`,
       auth: { secret: "mailbox", scheme: "oauth", oauth: { provider: "google", scopes: ["https://mail.example.test/modify", "openid", "email"] } },
       tools: { inbox: { description: "Your inbox.", method: "GET", path: "/inbox", class: "read" } },
-      access: { only: "galahad", allowed: [] },
+      access: { only: "primary", allowed: [] },
       private: true,
     },
   });
@@ -147,7 +147,7 @@ describe("signing in to a connector as you", () => {
     expect(serviceCalls.at(-1)!.auth).toBe(`Bearer ${ACCESS}`);
     expect(called.body.result.body).not.toContain(ACCESS);
     expect(tokenAsks.slice(before).every((form) => form.get("grant_type") === "refresh_token")).toBe(true);
-    // Mail is Galahad's alone: another agent asks first.
+    // Mail is the primary's alone: another agent asks first.
     expect((await as(armToken, "callConnector", { connector: "mailbox", tool: "inbox" })).status).toBe(403);
   });
 

@@ -11,7 +11,7 @@ const entry = (over: Partial<LedgerEntry> = {}): LedgerEntry => ({
   target: "POST /posts",
   verdict: "ask",
   reason: "outward actions ask first",
-  quest: "q-release",
+  run: "q-release",
   detail: '{"channel":"general"}',
   ...over,
 });

@@ -2,7 +2,7 @@ import type { ActionView } from "@invincible/core";
 import type { Ctx } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";
-import { knightOfCaller } from "../lib/roster.ts";
+import { agentOfCaller } from "../lib/roster.ts";
 import { relativeTime } from "../lib/time.ts";
 import type { Attended, WorkRow } from "../lib/work.ts";
 import type { ActionClass } from "../types.ts";
@@ -10,7 +10,7 @@ import { button } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { cx, h, replace, type Child } from "../ui/dom.ts";
 import { icon, type IconName } from "../ui/icons.ts";
-import { knightFace } from "../ui/orb.ts";
+import { agentFace } from "../ui/orb.ts";
 import { factRow } from "./about-you.ts";
 import { CLASS_INFO } from "./activity.ts";
 import { connectorRequestCard } from "./connectors.ts";
@@ -22,15 +22,15 @@ import { secretRequestCard } from "./vault.ts";
 /*
  * What needs you, each with its answer in place (your words, 26 November 2026, after OpenMausBot's best idea: "Needs
  * you" with every card's buttons inline, never a trip to another page to answer): an approval's Allow once and Deny, a
- * proposal's Approve and Decline, work cut short's Resume, a knight you paused that work waits behind. What takes more
+ * proposal's Approve and Decline, work cut short's Resume, an agent you paused that work waits behind. What takes more
  * than a tap (comparing a device's code, typing a key, a service's question with fields) opens the Inbox's own card for
  * it in a sheet, over the page. Home draws these; the Inbox page is still where all of it is, with its history.
  */
 
-/** Who asked, as an item's first line says it: a knight by its orb and name, or him, a loop, a service. */
+/** Who asked, as an item's first line says it: an agent by its orb and name, or it, a loop, a service. */
 const who = (lead: Child, text: string): HTMLElement => h("div", { class: "need-who" }, lead, h("span", { class: "ellipsis" }, text));
 const leadIcon = (name: IconName): HTMLElement => h("span", { class: "need-icon", "aria-hidden": "true" }, icon(name, { size: 14 }));
-const face = (row: Pick<WorkRow, "knight">): HTMLElement => knightFace({ id: row.knight.id, profile: row.knight.avatar, size: 20 });
+const face = (row: Pick<WorkRow, "agent">): HTMLElement => agentFace({ id: row.agent.id, profile: row.agent.avatar, size: 20 });
 
 function item(kind: string, head: HTMLElement, what: Child, acts: Child[], extra: Child = null): HTMLElement {
   const outcome = h("div", { class: "need-outcome" });
@@ -46,7 +46,7 @@ export function askItem(ctx: Ctx, action: ActionView, row: WorkRow | null): HTML
   const info = CLASS_INFO[action.class as ActionClass];
   const destructive = action.class === "delete";
   const outward = action.class === "outward";
-  const asker = row ? `${row.knight.name} · ${row.title}` : `${askerName(ctx, action.by)} asks`;
+  const asker = row ? `${row.agent.name} · ${row.title}` : `${askerName(ctx, action.by)} asks`;
   const admin = ctx.can("fleet:admin");
   const allow = button(destructive ? "Allow delete…" : "Allow once", { variant: "primary", size: "sm" });
   const deny = button("Deny", { size: "sm" });
@@ -66,15 +66,15 @@ export function askItem(ctx: Ctx, action: ActionView, row: WorkRow | null): HTML
   return shown;
 }
 
-/** Who filed an action, as a person says it: a knight by its name, a loop of yours, or Galahad himself. */
+/** Who filed an action, as a person says it: an agent by its name, a loop of yours, or the primary itself. */
 function askerName(ctx: Ctx, by: string): string {
-  const knight = knightOfCaller(by);
-  if (knight) return ctx.live.team.value?.teammates.find((person) => person.id === knight)?.name ?? knight;
+  const agent = agentOfCaller(by);
+  if (agent) return ctx.live.team.value?.agents.find((person) => person.id === agent)?.name ?? agent;
   if (by.startsWith("loop:")) return `The loop ${by.slice(5)}`;
-  return "Galahad";
+  return "Your agent";
 }
 
-/** A task that only you can move on: its proposal, its work cut short, a knight you paused that it waits behind. */
+/** A task that only you can move on: its proposal, its work cut short, an agent you paused that it waits behind. */
 function taskItem(ctx: Ctx, row: WorkRow): HTMLElement {
   const canAct = ctx.can("fleet:admin") && ctx.can("chat");
   const open = h("a", { class: "btn ghost sm", href: hashOf("task", { task: row.id }) }, "Open");
@@ -85,16 +85,16 @@ function taskItem(ctx: Ctx, row: WorkRow): HTMLElement {
       void controlTeam(ctx, change).finally(() => (trigger.disabled = false));
     } });
   const what = h("span", {}, row.title);
-  if (row.word === "Approve?") return item("proposal", who(face(row), `${row.knight.name} proposes`), what, canAct ? [control("Approve", { task: row.id, action: "approve" }, true), control("Decline", { task: row.id, action: "stop" }), open] : [open]);
-  if (row.word === "Interrupted") return item("interrupted", who(face(row), `${row.knight.name} · interrupted`), what, canAct ? [control("Resume", { task: row.id, action: "resume" }, true), open] : [open]);
-  if (row.word === "Knight paused") return item("paused", who(face(row), `${row.knight.name} is paused`), what, canAct ? [control(`Resume ${row.knight.name}`, { teammate: row.knight.id, action: "resume" }, true), open] : [open]);
-  return item("task", who(face(row), row.knight.name), what, [open]);
+  if (row.word === "Approve?") return item("proposal", who(face(row), `${row.agent.name} proposes`), what, canAct ? [control("Approve", { task: row.id, action: "approve" }, true), control("Decline", { task: row.id, action: "stop" }), open] : [open]);
+  if (row.word === "Interrupted") return item("interrupted", who(face(row), `${row.agent.name} · interrupted`), what, canAct ? [control("Resume", { task: row.id, action: "resume" }, true), open] : [open]);
+  if (row.word === "Agent paused") return item("paused", who(face(row), `${row.agent.name} is paused`), what, canAct ? [control(`Resume ${row.agent.name}`, { agent: row.agent.id, action: "resume" }, true), open] : [open]);
+  return item("task", who(face(row), row.agent.name), what, [open]);
 }
 
 /**
- * Everything that needs you, as items with their answers in place: each task row that needs you (its knight's asks
- * under it), then what is no task's (his own asks and a loop's, devices, keys, services' questions, notices, drafts,
- * connectors, facts, his use of a Mac). The count is the same as what is shown.
+ * Everything that needs you, as items with their answers in place: each task row that needs you (its agent's asks
+ * under it), then what is no task's (its own asks and a loop's, devices, keys, services' questions, notices, drafts,
+ * connectors, facts, its use of a Mac). The count is the same as what is shown.
  */
 export function needsItems(ctx: Ctx, work: Attended): HTMLElement[] {
   const now = Date.now();
@@ -103,7 +103,7 @@ export function needsItems(ctx: Ctx, work: Attended): HTMLElement[] {
   const shownActions = new Set<string>();
   for (const row of work.needs) {
     if (row.word === "Allow?") {
-      for (const action of waiting.filter((one) => knightOfCaller(one.by) === row.knight.id)) {
+      for (const action of waiting.filter((one) => agentOfCaller(one.by) === row.agent.id)) {
         shownActions.add(action.id);
         items.push(askItem(ctx, action, row));
       }
@@ -115,13 +115,13 @@ export function needsItems(ctx: Ctx, work: Attended): HTMLElement[] {
     items.push(item("pairing", who(leadIcon(p.kind === "node" ? "server" : "phone"), p.kind === "node" ? "A machine asks to join" : "A device asks to join"), h("span", {}, p.name), admin ? [button("Compare codes…", { size: "sm", variant: "primary", onClick: inSheet(`${p.name} asks to join`, () => pairingCard(ctx, p)) })] : []));
   }
   for (const r of ctx.live.secretRequests.value) {
-    items.push(item("key", who(leadIcon("key"), "Galahad asks for a key"), [h("span", { class: "mono" }, r.name), ` · ${r.purpose}`], ctx.can("vault:write") ? [button("Add it…", { size: "sm", variant: "primary", onClick: inSheet(`A key for ${r.name}`, () => secretRequestCard(ctx, r)) })] : []));
+    items.push(item("key", who(leadIcon("key"), "Your agent asks for a key"), [h("span", { class: "mono" }, r.name), ` · ${r.purpose}`], ctx.can("vault:write") ? [button("Add it…", { size: "sm", variant: "primary", onClick: inSheet(`A key for ${r.name}`, () => secretRequestCard(ctx, r)) })] : []));
   }
   for (const q of ctx.live.questions.value.filter((one) => one.expires > now)) {
     items.push(item("question", who(leadIcon("plug"), `${q.label} asks`), h("span", {}, q.message), [button("Answer…", { size: "sm", variant: "primary", onClick: inSheet(`${q.label} asks`, () => questionCard(ctx, q)) })]));
   }
   for (const s of ctx.live.screenSessions.value.filter((one) => one.state === "waiting" || one.state === "allowed")) {
-    items.push(item("screen", who(leadIcon("monitor"), s.state === "allowed" ? `Galahad is using ${s.nodeName}` : `Galahad asks to use ${s.nodeName}`), h("span", {}, s.why), [button(s.state === "allowed" ? "See it…" : "Answer…", { size: "sm", variant: "primary", onClick: inSheet(`${s.nodeName}`, () => screenSessionCard(ctx, s)) })]));
+    items.push(item("screen", who(leadIcon("monitor"), s.state === "allowed" ? `Your agent is using ${s.nodeName}` : `Your agent asks to use ${s.nodeName}`), h("span", {}, s.why), [button(s.state === "allowed" ? "See it…" : "Answer…", { size: "sm", variant: "primary", onClick: inSheet(`${s.nodeName}`, () => screenSessionCard(ctx, s)) })]));
   }
   for (const n of ctx.live.notices.value.filter((one) => !one.dismissed)) {
     const dismiss = admin
@@ -136,9 +136,9 @@ export function needsItems(ctx: Ctx, work: Attended): HTMLElement[] {
       : null;
     items.push(item("notice", who(leadIcon(n.severity === "info" ? "bell" : "alert"), "Noticed"), h("span", {}, n.title), [dismiss, h("a", { class: "btn ghost sm", href: "#/inbox" }, "Read")]));
   }
-  for (const d of ctx.live.loopDrafts.value) items.push(item("draft", who(leadIcon("repeat"), "Galahad drafted a loop"), h("span", {}, d.label ?? d.name), [button("Review…", { size: "sm", variant: "primary", onClick: inSheet(`A loop: ${d.label ?? d.name}`, () => loopDraftCard(ctx, d)) })]));
+  for (const d of ctx.live.loopDrafts.value) items.push(item("draft", who(leadIcon("repeat"), "Your agent drafted a loop"), h("span", {}, d.label ?? d.name), [button("Review…", { size: "sm", variant: "primary", onClick: inSheet(`A loop: ${d.label ?? d.name}`, () => loopDraftCard(ctx, d)) })]));
   for (const c of ctx.live.connectorRequests.value) items.push(item("connector", who(leadIcon("plug"), `${c.by} asks for a connector`), h("span", {}, c.label ?? c.connector), [button("Review…", { size: "sm", variant: "primary", onClick: inSheet(`A connector: ${c.label ?? c.connector}`, () => connectorRequestCard(ctx, c)) })]));
-  for (const m of ctx.live.aboutYou.value) items.push(item("fact", who(leadIcon("user"), "He noticed about you"), h("span", {}, m.text.split("\n")[0] ?? ""), [button("Keep or drop…", { size: "sm", variant: "primary", onClick: inSheet("A fact about you", () => h("div", { class: "card rows" }, factRow(ctx, m, true))) })]));
+  for (const m of ctx.live.aboutYou.value) items.push(item("fact", who(leadIcon("user"), "It noticed about you"), h("span", {}, m.text.split("\n")[0] ?? ""), [button("Keep or drop…", { size: "sm", variant: "primary", onClick: inSheet("A fact about you", () => h("div", { class: "card rows" }, factRow(ctx, m, true))) })]));
   return items;
 }
 

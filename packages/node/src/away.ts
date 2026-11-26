@@ -2,16 +2,16 @@ import type { AwayLine, LoopRunView, NoticeView, TeamTask } from "@invincible/co
 
 /*
  * While you were away (PLAN #37): what happened since you last looked, in a few lines, from what the node holds and no
- * model: the knights' tasks that ended (verified, or not and why in a word), his outcomes' reports and questions, the
+ * model: the agents' tasks that ended (verified, or not and why in a word), its outcomes' reports and questions, the
  * loops that failed, and what waits for you now. Each line in its state's colour, as everywhere: done green, failed red,
  * what waits on you amber. Nothing happened: no lines, and nothing is said.
  */
 
 export interface AwayInput {
   since: number;
-  /** Every knight's tasks (they say when they last changed). */
+  /** Every agent's tasks (they say when they last changed). */
   tasks: readonly TeamTask[];
-  /** A knight's name by its handle. */
+  /** An agent's name by its handle. */
   name: (id: string) => string;
   notices: readonly NoticeView[];
   runs: readonly LoopRunView[];
@@ -34,14 +34,14 @@ export function awayLines(input: AwayInput): AwayLine[] {
   const passed = ended.filter((t) => t.status === "done" && t.verified);
   if (ended.length > AWAY_TASKS) {
     const not = ended.length - passed.length;
-    lines.push({ text: `${ended.length} knights' tasks ended: ${passed.length} verified${not ? `, ${not} didn't pass` : ""}.`, tone: not ? "danger" : "ok" });
+    lines.push({ text: `${ended.length} agents' tasks ended: ${passed.length} verified${not ? `, ${not} didn't pass` : ""}.`, tone: not ? "danger" : "ok" });
   }
   for (const t of ended.slice(0, AWAY_TASKS)) {
     const who = input.name(t.assignee);
     if (t.status === "done" && t.verified) lines.push({ text: `${who} finished ${quoted(t.title)}, verified.`, tone: "ok" });
     else lines.push({ text: `${who}'s ${quoted(t.title)} ended without passing${t.status === "stopped" || t.error === "stopped" ? " (stopped)" : ""}.`, tone: "danger" });
   }
-  // His outcomes: a question waits on you; a report is news. (Other notices are the Inbox's, and counted below.)
+  // Its outcomes: a question waits on you; a report is news. (Other notices are the Inbox's, and counted below.)
   for (const n of input.notices.filter((n) => !n.dismissed && n.at > input.since && n.source.startsWith("outcome:")).sort((a, b) => b.at - a.at)) {
     lines.push({ text: n.title, tone: n.severity === "info" ? "neutral" : "warn" });
   }

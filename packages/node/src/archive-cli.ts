@@ -22,7 +22,7 @@ const csv = (flags: Flags, key: string): string[] | undefined => {
 };
 const size = (bytes: number) => (bytes < 2 ** 20 ? `${Math.max(bytes ? 1 : 0, Math.round(bytes / 1024))} KB` : bytes < 2 ** 30 ? `${(bytes / 2 ** 20).toFixed(1)} MB` : `${(bytes / 2 ** 30).toFixed(2)} GB`);
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
-const TRUST: Record<string, string> = { owner: "yours", agent: "Galahad's", untrusted: "untrusted" };
+const TRUST: Record<string, string> = { owner: "yours", agent: "Your agent's", untrusted: "untrusted" };
 
 /** "7d", "12h", "2026-11-01": a time, in ms. */
 export function parseWhen(value: string, now = Date.now(), end = false): number {

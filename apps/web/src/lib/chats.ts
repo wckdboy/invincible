@@ -34,11 +34,11 @@ export function filterConversations(list: ConversationSummary[], query: string, 
   });
 }
 
-/** The conversation Galahad's row opens: the one last active (a pin does not make one more recent). Null: none kept yet. */
+/** The conversation the primary's row opens: the one last active (a pin does not make one more recent). Null: none kept yet. */
 export const mostRecent = (list: readonly ConversationSummary[]): ConversationSummary | null =>
   list.reduce<ConversationSummary | null>((latest, c) => (!latest || c.updatedAt > latest.updatedAt ? c : latest), null);
 
-/** What his menu offers before anything about the chat on screen: a new chat, and every kept one. */
+/** What its menu offers before anything about the chat on screen: a new chat, and every kept one. */
 export const CHATS_MENU = [
   { value: "new", label: "New chat" },
   { value: "history", label: "All chats…" },
@@ -56,7 +56,7 @@ export interface ChatAction {
  */
 export function chatActions(chat: { kept: boolean; pinned: boolean; aside: boolean; node: string }): ChatAction[] {
   return [
-    ...(chat.aside ? [{ value: "aside" as const, label: "Ask on the side…", meta: "Answered apart: what he's doing goes on" }] : []),
+    ...(chat.aside ? [{ value: "aside" as const, label: "Ask on the side…", meta: "Answered apart: what it's doing goes on" }] : []),
     ...(chat.kept
       ? [
           { value: "rename" as const, label: "Rename…" },
@@ -78,7 +78,7 @@ export interface KeptStep {
 
 /** The archived entries an answer was given, as one step: how many, and each by its id and title. */
 export function archiveStep(entries: { id: string; title: string; kind: string; trust: string }[]): { text: string; detail?: string } {
-  // His skills go with an answer as their own step (kind "skill"): notes he had at hand, not archived entries he read.
+  // Its skills go with an answer as their own step (kind "skill"): notes it had at hand, not archived entries it read.
   const skills = entries.length > 0 && entries.every((e) => e.kind === "skill");
   const text = skills ? `Had ${entries.length} skill${entries.length === 1 ? "" : "s"} at hand` : `Read ${entries.length} archived ${entries.length === 1 ? "entry" : "entries"}`;
   if (!entries.length) return { text };
@@ -100,8 +100,8 @@ export function stepsOf(answer: StoredMessage, role: string): KeptStep[] {
   if (answer.content) steps.push({ kind: "answer", text: "Answering", state: "done" });
   if (answer.status === "error") steps.push({ kind: "error", text: "Couldn't answer", ...(answer.error ? { detail: answer.error } : {}), state: "error" });
   if (answer.status === "stopped") steps.push({ kind: "stopped", text: "Stopped", state: "warn" });
-  // You sent a message while he was answering: this answer stands as far as it got, and the turn went on after it.
-  if (answer.status === "steered") steps.push({ kind: "steered", text: "Your message reached him here", state: "done" });
+  // You sent a message while it was answering: this answer stands as far as it got, and the turn went on after it.
+  if (answer.status === "steered") steps.push({ kind: "steered", text: "Your message reached it here", state: "done" });
   return steps;
 }
 

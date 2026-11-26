@@ -12,12 +12,12 @@ export { agentCleanupCommand } from "./agent-process.ts";
 
 /*
  * Coding agents in the sandbox: for long work on real codebases, a full harness
- * (OpenCode) does the engineer's part instead of the quest's one-command-at-a-time
+ * (OpenCode) does the engineer's part instead of the run's one-command-at-a-time
  * loop. It runs headless in the background inside the sandbox, so it isn't bound by
- * one command's time limit; its model calls go through Galahad's gateway on a token
- * scoped to that sandbox (it never sees a key); Galahad follows its event stream, so
+ * one command's time limit; its model calls go through Invincible's gateway on a token
+ * scoped to that sandbox (it never sees a key); the primary follows its event stream, so
  * every command and edit is visible as it happens; and the independent reviewer
- * still judges the result. Pure orchestration over `exec`, like the quest itself.
+ * still judges the result. Pure orchestration over `exec`, like the run itself.
  * (A vendor's own tool that its owner signed in there calls its vendor itself
  * instead, and the gateway is kept out of its way: vendor-cli.ts.)
  */
@@ -58,9 +58,9 @@ export interface AgentDriver {
   /** A command that exits 0 in a sandbox where it is installed and can start. */
   check: string;
   /**
-   * A vendor's own tool, which its owner signs in himself, in the sandbox, through the vendor's own flow
+   * A vendor's own tool, which its owner signs in itself, in the sandbox, through the vendor's own flow
    * (vendor-cli.ts). `check` then also prints whether it has a sign-in, and `read` reads that: signed in or
-   * not, and the tool's word for how. The sign-in itself is never Galahad's to see. `login`: the tool's own
+   * not, and the tool's word for how. The sign-in itself is never the primary's to see. `login`: the tool's own
    * command to sign in; `roster`: what kind of model it runs on through the gateway instead.
    */
   signIn?: { read(stdout: string): { signedIn: boolean; method?: string }; login: string; roster: string };
@@ -110,7 +110,7 @@ export const OPENCODE: AgentDriver = {
     for (const m of models) {
       const id = ocProvider(m);
       const entry = (providers[id] ??= {
-        name: `Galahad gateway (${m.provider})`,
+        name: `Invincible gateway (${m.provider})`,
         env: ["OPENAI_API_KEY"],
         package: "@opencode/ai/providers/openai-compatible",
         settings: { baseURL: `{env:INVINCIBLE_GATEWAY}/${m.provider}`, apiKey: "{env:OPENAI_API_KEY}" },
@@ -135,7 +135,7 @@ export const OPENCODE: AgentDriver = {
     };
   },
   command: (model, session) =>
-    `opencode run --standalone --auto --format json --title galahad --model ${quote(`${ocProvider(model)}/${model.model}`)}${session ? ` --session ${quote(session)}` : ""} "$(cat ${AGENT_DIR}/prompt.md)"`,
+    `opencode run --standalone --auto --format json --title invincible --model ${quote(`${ocProvider(model)}/${model.model}`)}${session ? ` --session ${quote(session)}` : ""} "$(cat ${AGENT_DIR}/prompt.md)"`,
   read(line) {
     let event: any;
     try {
@@ -171,7 +171,7 @@ export const OPENCODE: AgentDriver = {
 
 export const AGENTS: Record<string, AgentDriver> = { opencode: OPENCODE, hermes: HERMES, claude: CLAUDE, codex: CODEX };
 
-/** A knight's harness driver: one of AGENTS, or (harness `acp`) one for the ACP agent its command starts. */
+/** An agent's harness driver: one of AGENTS, or (harness `acp`) one for the ACP agent its command starts. */
 export function driverFor(harness: string, acp?: string | null): AgentDriver | undefined {
   if (harness === "acp") return acp ? acpDriver(acp) : undefined;
   return AGENTS[harness];
@@ -204,8 +204,8 @@ export interface AgentRun {
 }
 
 /**
- * How long a run may go unread, every look at it failing, before it is ended: Galahad has lost sight of it. On 22
- * November 2026 a knight deleted its lease, every command in its VM failed from then on, and a look that failed was
+ * How long a run may go unread, every look at it failing, before it is ended: the primary has lost sight of it. On 22
+ * November 2026 an agent deleted its lease, every command in its VM failed from then on, and a look that failed was
  * taken as no news, so its task waited on a run that had ended, with an audit paid for every quarter of an hour.
  */
 export const UNREAD_LIMIT_MS = 5 * 60_000;
@@ -299,12 +299,12 @@ export async function runAgent(
         poll = JSON.parse(looked.stdout.trim().split("\n").at(-1) ?? "");
         unreadSince = null;
       } catch (error) {
-        // A look that couldn't be read is no news, for a while; a run unread for long is one Galahad can't see.
+        // A look that couldn't be read is no news, for a while; a run unread for long is one the primary can't see.
         unreadSince ??= now();
         unreadWhy = redact((looked ? looked.stderr || looked.stdout || `exit ${looked.exitCode}` : String((error as Error)?.message ?? error)).trim().split("\n").filter(Boolean).at(-1) ?? "").slice(0, 300);
         if (now() - unreadSince > UNREAD_LIMIT_MS) {
           await stop();
-          return { ...run, status: "failed", error: `Galahad couldn't read how its run was going for ${Math.round(UNREAD_LIMIT_MS / 60_000)} minutes, so it was stopped: ${unreadWhy || "no reason given"}` };
+          return { ...run, status: "failed", error: `Invincible couldn't read how its run was going for ${Math.round(UNREAD_LIMIT_MS / 60_000)} minutes, so it was stopped: ${unreadWhy || "no reason given"}` };
         }
         poll = { alive: true, exit: null, next: offset, lines: [] };
       }
@@ -344,7 +344,7 @@ export async function runAgent(
         await stop();
         return { ...run, status: "spent", error: "its budget was spent" };
       }
-      // An audit, when one is due, may end this run (QuestOptions.audit): the caller says what comes of it.
+      // An audit, when one is due, may end this run (RunOptions.audit): the caller says what comes of it.
       if (await input.audit?.()) {
         await stop();
         return { ...run, status: "audited", error: "its audit ended this run" };
@@ -381,7 +381,7 @@ export function chooseAgentModels(engineer: readonly string[], providers: readon
     const model = ref.slice(slash + 1);
     if (!model || model === "*") continue;
     const known = providers.find((p) => p.id === provider);
-    // (A plan for interactive use only never does a knight's or a quest's unattended work.)
+    // (A plan for interactive use only never does an agent's or a run's unattended work.)
     if (planOf(provider)?.allows.tools === "interactive") continue;
     if (known?.hasKey && known.kind === kind && out.length < max) out.push({ provider, model });
   }

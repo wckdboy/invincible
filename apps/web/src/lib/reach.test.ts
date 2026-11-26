@@ -35,7 +35,7 @@ function reach({ offline = false } = {}) {
   return { handle, said, timers, later, answer, probes: () => probes };
 }
 
-describe("whether the app says it can reach Galahad", () => {
+describe("whether the app says it can reach your agent", () => {
   test("one failed request is doubted, not believed: nothing is said, and the node is asked once more a moment later", async () => {
     const r = reach();
     r.handle(false);

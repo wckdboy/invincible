@@ -25,7 +25,7 @@ const memoryChanged = signal(0);
 export function trustBadge(trust: string): HTMLElement {
   const map: Record<string, [string, Tone, IconName]> = {
     owner: ["yours", "accent", "user"],
-    agent: ["Galahad", "agent", "mark"],
+    agent: ["Your agent", "agent", "mark"],
     untrusted: ["untrusted", "warn", "alert"],
   };
   const [label, tone, iconName] = map[trust] ?? [trust, "neutral" as Tone, "info" as IconName];
@@ -67,7 +67,7 @@ export function openRemember(ctx: Ctx, initial = ""): void {
     toast("This device can't write to memory", { tone: "warn" });
     return;
   }
-  const text = h("textarea", { class: "textarea", id: "memory-text", rows: 4, placeholder: "Something Galahad should remember on every device", maxlength: 20000 });
+  const text = h("textarea", { class: "textarea", id: "memory-text", rows: 4, placeholder: "Something your agent should remember on every device", maxlength: 20000 });
   text.value = initial;
   const tags = chipInput({ id: "memory-tags", placeholder: "Add tags, then Enter", validate: (t) => (findSecrets(t).length ? "That tag looks like a secret." : null) });
   const status = h("div");
@@ -118,7 +118,7 @@ export const memoryView: View = (root, ctx, { scope, opts }) => {
   const summary = h("span", { class: "count-label tnum", role: "status" });
   let seq = 0;
 
-  // What he knows of you: his proposals (waiting for you) and what you kept (with every answer of his).
+  // What it knows of you: its proposals (waiting for you) and what you kept (with every answer of its).
   const about = h("div", { class: "card", id: "about-you", "aria-busy": "true" }, skeletonRows(2));
   async function drawAbout(): Promise<void> {
     try {
@@ -129,10 +129,10 @@ export const memoryView: View = (root, ctx, { scope, opts }) => {
         about,
         rows.length
           ? h("div", { class: "rows" }, ...rows)
-          : empty({ icon: "user", title: "Nothing about you yet", body: "Tell him a preference, a convention or what not to do: it goes with every answer of his. What he notices of you waits here for you to keep.", compact: true }),
+          : empty({ icon: "user", title: "Nothing about you yet", body: "Tell it a preference, a convention or what not to do: it goes with every answer of its. What it notices of you waits here for you to keep.", compact: true }),
       );
     } catch (error) {
-      if (!scope.disposed) replace(about, errorState("Couldn't read what he knows of you", error, () => void drawAbout()));
+      if (!scope.disposed) replace(about, errorState("Couldn't read what it knows of you", error, () => void drawAbout()));
     } finally {
       about.setAttribute("aria-busy", "false");
     }
@@ -218,7 +218,7 @@ export const memoryView: View = (root, ctx, { scope, opts }) => {
             : empty({
                 icon: "memory",
                 title: "Nothing remembered yet",
-                body: "What you or Galahad remember appears here, shared by every device.",
+                body: "What you or your agent remember appears here, shared by every device.",
                 actions: ctx.can("mind:write") ? button("Remember something", { variant: "primary", icon: "plus", onClick: () => openRemember(ctx) }) : null,
               }),
       );
@@ -253,8 +253,8 @@ export const memoryView: View = (root, ctx, { scope, opts }) => {
         h("div", { role: "search", class: "input-wrap" }, icon("search", { size: 16 }), h("label", { class: "sr-only", for: "memory-q" }, "Search memory"), query),
         ctx.can("mind:write") ? button("Remember", { variant: "primary", icon: "plus", onClick: () => openRemember(ctx) }) : null,
       ),
-      // Shown whole once both have answered: what he knows of you came in above the memories, and pushed them down.
-      pageBody(section("About you", { actions: ctx.can("mind:write") ? button("Tell him something", { size: "sm", icon: "plus", onClick: () => openAboutYou(ctx) }) : null }, about), memories),
+      // Shown whole once both have answered: what it knows of you came in above the memories, and pushed them down.
+      pageBody(section("About you", { actions: ctx.can("mind:write") ? button("Tell it something", { size: "sm", icon: "plus", onClick: () => openAboutYou(ctx) }) : null }, about), memories),
     ),
   );
   memories.querySelector(".section-head h2")?.after(summary);

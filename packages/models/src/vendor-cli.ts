@@ -6,14 +6,14 @@ import { readBridge } from "./hermes.ts";
  * The vendors' own coding tools as harnesses: Claude Code and Codex. A subscription (a Claude
  * plan, a ChatGPT plan) may be used only by its vendor's own tool, unmodified, signed in by its
  * owner through the vendor's own flow. So that is all this does: it runs the tool the owner
- * installed and signed in inside the knight's VM, headless, and reads what it prints.
+ * installed and signed in inside the agent's VM, headless, and reads what it prints.
  *
- *   - Galahad never holds a sign-in. Nothing here opens, copies, moves or sends where a tool keeps
+ *   - Invincible never holds a sign-in. Nothing here opens, copies, moves or sends where a tool keeps
  *     one. Whether the tool has one is asked of the tool (its own status command), and of the
  *     answer only "signed in or not" and one word from a fixed list leaves the VM.
- *   - Galahad never installs, updates or signs in the tool, and never says it is another tool:
+ *   - Invincible never installs, updates or signs in the tool, and never says it is another tool:
  *     the flags below are the vendor's documented ones, and no client identity is set anywhere.
- *   - Signed in, the tool talks to its vendor itself: every variable that points at Galahad's
+ *   - Signed in, the tool talks to its vendor itself: every variable that points at Invincible's
  *     gateway is taken out of its environment, so the gateway is never given that traffic.
  *   - Not signed in, it runs on a keyed roster model through the gateway, by the vendor's own
  *     documented way to another endpoint, on the VM's scoped token (never a key).
@@ -88,7 +88,7 @@ def own_path(env):
     return env
 
 def own_environment():
-    # The tool as its owner set it up in this VM, less everything that points at Galahad's gateway:
+    # The tool as its owner set it up in this VM, less everything that points at Invincible's gateway:
     # signed in for itself, it talks to its vendor itself.
     return own_path({k: v for k, v in os.environ.items() if k not in GATEWAY_VARS})
 
@@ -96,19 +96,19 @@ def gateway_lease(path):
     values = {k: os.environ.get(k, "") for k in ("INVINCIBLE_GATEWAY", "INVINCIBLE_TOKEN")}
     if path.exists():
         if path.stat().st_size > 16384:
-            raise RuntimeError("Galahad gateway environment file is too large")
+            raise RuntimeError("Invincible gateway environment file is too large")
         try:
             fresh = json.loads(path.read_text())
         except (ValueError, OSError):
-            raise RuntimeError("Galahad gateway environment file is invalid") from None
+            raise RuntimeError("Invincible gateway environment file is invalid") from None
         if not isinstance(fresh, dict) or any(not isinstance(fresh.get(k), str) or not fresh[k] for k in values):
-            raise RuntimeError("Galahad gateway environment file is incomplete")
+            raise RuntimeError("Invincible gateway environment file is incomplete")
         values.update({k: fresh[k] for k in values})
     if not all(values.values()):
-        raise RuntimeError(NAME + " needs this workspace's Galahad gateway endpoint and token")
+        raise RuntimeError(NAME + " needs this workspace's Invincible gateway endpoint and token")
     url = urlsplit(values["INVINCIBLE_GATEWAY"])
     if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password or url.query or url.fragment:
-        raise RuntimeError("Galahad gateway endpoint is invalid")
+        raise RuntimeError("Invincible gateway endpoint is invalid")
     return values["INVINCIBLE_GATEWAY"].rstrip("/"), values["INVINCIBLE_TOKEN"]
 
 def ask(env, *args):
@@ -143,7 +143,7 @@ def lines(stream):
 def run(args):
     env = own_environment() if args.own else own_path(dict(os.environ))
     if shutil.which(TOOL, path=env["PATH"]) is None:
-        raise RuntimeError(NAME + " is not installed in this VM; its owner installs it there (Galahad never does)")
+        raise RuntimeError(NAME + " is not installed in this VM; its owner installs it there (Invincible never does)")
     if args.own:
         if sign_in(env) is None:
             raise RuntimeError(NAME + " is not signed in in this VM; sign it in there (" + LOGIN + ")")
@@ -225,7 +225,7 @@ if __name__ == "__main__":
 const CLAUDE_PART = String.raw`
 TOOL, NAME, LOGIN = "claude", "Claude Code", "claude auth login"
 # How the tool says it is signed in. One of these words is all that is passed on: its status
-# command also prints whose account it is, and none of that is Galahad's to know.
+# command also prints whose account it is, and none of that is Invincible's to know.
 METHODS = ("claude.ai", "oauth_token", "api_key", "api_key_helper", "third_party")
 
 def sign_in(env):
@@ -446,10 +446,10 @@ def arguments(args, extra):
     return plain_arguments(args, extra + NOTES)
 `;
 
-/** What a tool is given for the store under a project: its arguments, and any file of Galahad's own they name. */
+/** What a tool is given for the store under a project: its arguments, and any file of the primary's own they name. */
 type Notes = (project: string) => { argv: string[]; files?: Record<string, string> };
 
-/** Claude Code: `--mcp-config <file>`, a file Galahad writes beside its bridge, holding the one stdio server. */
+/** Claude Code: `--mcp-config <file>`, a file the primary writes beside its bridge, holding the one stdio server. */
 const CLAUDE_NOTES_FILE = "/work/.agent/engram-mcp.json";
 const claudeNotes: Notes = (project) => {
   const [command, ...args] = engramArgv(project);

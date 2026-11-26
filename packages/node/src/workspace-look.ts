@@ -1,7 +1,7 @@
 import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type TeamChangesView, type TeamFileEntry, type TeamFilesView, type TeamFileView, textOf } from "@invincible/core";
 
 /*
- * Looking into a knight's workspace (its VM's /work, or Galahad's computer's) from your devices: a folder's entries, one
+ * Looking into an agent's workspace (its VM's /work, or the primary's computer's) from your devices: a folder's entries, one
  * file, and what a task changed in its repository. Read only, and yours alone (the routes are owner-only). Each look is
  * one of these fixed scripts, run in the VM with Python as the VM's own user, its only input the path or the task given
  * as arguments (never in the script's text). What comes back is bounded in the VM, checked here, and a text or a diff

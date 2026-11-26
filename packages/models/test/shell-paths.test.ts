@@ -49,7 +49,7 @@ describe("which file a command shows", () => {
 });
 
 describe("which files a command only shows (keep-reads)", () => {
-  test("a command made only of showings is a read, with the files it shows: the ways a knight reads code", () => {
+  test("a command made only of showings is a read, with the files it shows: the ways an agent reads code", () => {
     for (const [command, files] of [
       ["cat src/a.ts", ["src/a.ts"]],
       ["cd /work/tasks/t && awk 'NR>=75 && NR<=122 {printf \"%d\\t%s\\n\", NR, $0}' packages/node/test/ci-watch.test.ts && echo \"=====CI-BACK=====\" && sed -n '1,72p' packages/node/src/ci-back.ts", ["packages/node/test/ci-watch.test.ts", "packages/node/src/ci-back.ts"]],
@@ -89,9 +89,9 @@ describe("what a command may have changed, for what was read before it (keep-rea
     expect(changesOf("sed -i 's/a/b/' src/a.ts && bun x prettier --write src")).toBe("anything");
   });
 
-  test("an inline python3 script changes only the files it names, when all it does is read and write them: the way a knight edits", () => {
-    // As the first real outcome's knight edited (19 November 2026).
-    const knight = `cd /work/tasks/task-exr0arcdv_4o && python3 - <<'PY'
+  test("an inline python3 script changes only the files it names, when all it does is read and write them: the way an agent edits", () => {
+    // As the first real outcome's agent edited (19 November 2026).
+    const agent = `cd /work/tasks/task-exr0arcdv_4o && python3 - <<'PY'
 import re, pathlib
 
 def sub(path, old, new, count=1):
@@ -109,7 +109,7 @@ sub("packages/core/src/team.ts",
 }\"\"\")
 sub("packages/node/src/ci-watch.ts", 'import type { CiFailure } from "./ci-watch.ts";', 'x')
 PY`;
-    expect(changesOf(knight)).toEqual(["packages/core/src/team.ts", "packages/node/src/ci-watch.ts"]);
+    expect(changesOf(agent)).toEqual(["packages/core/src/team.ts", "packages/node/src/ci-watch.ts"]);
     expect(changesOf(`python3 -c 'import pathlib; pathlib.Path("src/a.ts").write_text("x")'`)).toEqual(["src/a.ts"]);
     // One that only reads changes nothing.
     expect(changesOf(`python3 -c 'print(open("src/a.ts").read()[:400])'`)).toBe("nothing");

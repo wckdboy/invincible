@@ -2,7 +2,7 @@ import { QAMP_TOOLS, QAMP_TTL, QampGrantInput, type QampGrantMade, type QampGran
 import type { Api } from "./loop-cli.ts";
 
 /*
- * `invincible qamp`: Galahad's tools for an agent on another of your machines, over Q-AMP (qamp-grants.ts). Thin: the node
+ * `invincible qamp`: the primary's tools for an agent on another of your machines, over Q-AMP (qamp-grants.ts). Thin: the node
  * makes, keeps and ends each grant; this shapes what you type and prints what the agent's machine runs, as
  * `invincible mcp install` prints a client's config.
  */
@@ -67,7 +67,7 @@ export async function qampCommand(api: Api, sub: string | undefined, rest: strin
     case "list": {
       const { grants } = await api.call<{ grants: QampGrantView[] }>("qampGrants");
       if (!grants.length) {
-        console.log(`No grants. An agent on another of your machines gets some of Galahad's tools with ${GRANT}`);
+        console.log(`No grants. An agent on another of your machines gets some of your agent's tools with ${GRANT}`);
         return;
       }
       for (const g of grants) {

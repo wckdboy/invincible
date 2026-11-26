@@ -9,20 +9,22 @@ import { hasUndrawn, LOOKALIKES, oneScript, readAlike, skeleton } from "../src/i
 const cp = (...points: number[]) => String.fromCodePoint(...points);
 const CYRILLIC = { a: cp(0x430), e: cp(0x435), o: cp(0x43e), c: cp(0x441), y: cp(0x443), s: cp(0x455), we: cp(0x51d), pe: cp(0x43f), ghe: cp(0x433), te: cp(0x442), em: cp(0x43c), A: cp(0x410), S: cp(0x405), Y: cp(0x4ae), T: cp(0x422), E: cp(0x415), M: cp(0x41c), de: cp(0x434) };
 const GREEK = { gamma: cp(0x3b3), omicron: cp(0x3bf), upsilon: cp(0x3c5), Upsilon: cp(0x3a5), Omicron: cp(0x39f) };
-const CHEROKEE_GALAHAD = [0x13c0, 0x13aa, 0x13de, 0x13aa, 0x13bb, 0x13aa, 0x13a0];
+const CHEROKEE_HADAL = [0x13bb, 0x13aa, 0x13a0, 0x13aa, 0x13de];
 
 describe("names that would be taken for one another", () => {
   test("the same word reads the same however it is spelled: other scripts in either case, small capitals, 1 and I for l, 0 for o, rn for m, cl for d", () => {
-    const galahad = [
-      "Galahad", "GALAHAD", "galahad",
-      `G${CYRILLIC.a}lahad`, `G${CYRILLIC.A}LAHAD`, // one Cyrillic letter, among small letters and among capitals
-      "GaIahad", "Ga1ahad", "Galahacl", // capital i, the digit one, c and l for a d
-      cp(0x262, 0x1d00, 0x29f, 0x1d00, 0x29c, 0x1d00, 0x1d05), // small capitals
-      cp(...CHEROKEE_GALAHAD), cp(...CHEROKEE_GALAHAD.map((point) => point - 0x13a0 + 0xab70)), // Cherokee letters drawn like G A L A H A D, and their small forms
-      `${cp(0xa7ac)}alahad`, `${cp(0x1e4)}alahad`, `Ga${cp(0x19a)}ahad`, `Galaha${cp(0x257)}`, // script G, G with a stroke, l with a bar, d with a hook
-      "G\u00e1lahad", `Ga${cp(0x142)}ahad`, "Gala-had", "G'alahad", `Galahad${cp(0x2bc)}`, `Galahad${cp(0x30fc)}`, // an accent, a stroke, a hyphen, apostrophes, a long-vowel mark
+    const hadal = [
+      "Hadal", "HADAL", "hadal",
+      `H${CYRILLIC.a}dal`, `H${CYRILLIC.A}DAL`, // one Cyrillic letter, among small letters and among capitals
+      "HadaI", "Hada1", "Haclal", // capital i, the digit one, c and l for a d
+      cp(0x29c, 0x1d00, 0x1d05, 0x1d00, 0x29f), // small capitals
+      cp(...CHEROKEE_HADAL), cp(...CHEROKEE_HADAL.map((point) => point - 0x13a0 + 0xab70)), // Cherokee letters drawn like H A D A L, and their small forms
+      `${cp(0x127)}adal`, `Hada${cp(0x19a)}`, `Ha${cp(0x257)}al`, // h with a stroke, l with a bar, d with a hook
+      "H\u00e1dal", `Hada${cp(0x142)}`, "Ha-dal", "H'adal", `Hadal${cp(0x2bc)}`, `Hadal${cp(0x30fc)}`, // an accent, a stroke, a hyphen, apostrophes, a long-vowel mark
     ];
-    for (const name of galahad) expect([name, readAlike(name, "galahad")]).toEqual([name, true]);
+    for (const name of hadal) expect([name, readAlike(name, "hadal")]).toEqual([name, true]);
+    // A script G and a G with a stroke are a G.
+    for (const name of [`${cp(0xa7ac)}ala`, `${cp(0x1e4)}ala`]) expect([name, readAlike(name, "gala")]).toEqual([name, true]);
     const owner = ["owner", "OWNER", "0wner", `${CYRILLIC.o}wner`, "ovvner", "\uff4f\uff57\uff4e\uff45\uff52", `OWNE${cp(0x1a6)}`, CYRILLIC.o + CYRILLIC.we + CYRILLIC.pe + CYRILLIC.e + CYRILLIC.ghe, `own${cp(0x25b)}r`];
     for (const name of owner) expect([name, readAlike(name, "owner")]).toEqual([name, true]);
     const system = ["system", "systern", "\u017fystem", CYRILLIC.S + CYRILLIC.Y + CYRILLIC.S + CYRILLIC.T + CYRILLIC.E + CYRILLIC.M, CYRILLIC.S + CYRILLIC.y + CYRILLIC.s + CYRILLIC.te + CYRILLIC.e + CYRILLIC.em];
@@ -39,7 +41,7 @@ describe("names that would be taken for one another", () => {
     for (const [a, b] of [[CYRILLIC.A + CYRILLIC.c + CYRILLIC.a, "Aca"], ["Rnona", "Mona"], ["llya", "Ilya"], ["lan", "Ian"], ["ILYA", "Ilya"], ["ADA", "Ada"], [`Ada${cp(0x2bc)}`, "Ada"], [`Ada${cp(0xa78c)}`, "Ada"], [`Ada${cp(0x640)}`, "Ada"]] as const) {
       expect([a, b, readAlike(a, b)]).toEqual([a, b, true]);
     }
-    expect(skeleton("GaIahad")).toBe(skeleton("Galahad"));
+    expect(skeleton("HadaI")).toBe(skeleton("Hadal"));
     expect(skeleton("Lan")).not.toBe(skeleton("Ian"));
   });
 
@@ -74,10 +76,10 @@ describe("one writing system", () => {
   });
 
   test("letters of two scripts in one name are not, whichever scripts they are; nor is a script nothing here can vouch for", () => {
-    const mixed = [`G${CYRILLIC.a}lahad`, `Y${CYRILLIC.o}u`, `${CYRILLIC.o}wner`, `${GREEK.Upsilon}${GREEK.Omicron}U`, "Ada\u7814", `${CYRILLIC.A}${GREEK.omicron}`, cp(0x10e7, 0x2c9f, 0xe1a), cp(0x10d7, 0xe1a)];
+    const mixed = [`H${CYRILLIC.a}dal`, `Y${CYRILLIC.o}u`, `${CYRILLIC.o}wner`, `${GREEK.Upsilon}${GREEK.Omicron}U`, "Ada\u7814", `${CYRILLIC.A}${GREEK.omicron}`, cp(0x10e7, 0x2c9f, 0xe1a), cp(0x10d7, 0xe1a)];
     for (const name of mixed) expect([name, oneScript(name)]).toEqual([name, false]);
-    // Lisu is drawn almost wholly like Latin capitals: these four spell Galahad, you, owner and system.
-    const lisu = [cp(0xa4d6, 0xa4ee, 0xa4e1, 0xa4ee, 0xa4e7, 0xa4ee, 0xa4d3), cp(0xa4ec, 0xa4f3, 0xa4f4), cp(0xa4f3, 0xa4ea, 0xa4e0, 0xa4f0, 0xa4e3), cp(0xa4e2, 0xa4ec, 0xa4e2, 0xa4d4, 0xa4f0, 0xa4df)];
+    // Lisu is drawn almost wholly like Latin capitals: these four spell Hadal, you, owner and system.
+    const lisu = [cp(0xa4e7, 0xa4ee, 0xa4d3, 0xa4ee, 0xa4e1), cp(0xa4ec, 0xa4f3, 0xa4f4), cp(0xa4f3, 0xa4ea, 0xa4e0, 0xa4f0, 0xa4e3), cp(0xa4e2, 0xa4ec, 0xa4e2, 0xa4d4, 0xa4f0, 0xa4df)];
     for (const name of [...lisu, cp(0x2c9f, 0x2c9f), cp(0x16a0, 0x16a2)]) expect([name, oneScript(name)]).toEqual([name, false]);
   });
 

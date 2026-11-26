@@ -24,7 +24,7 @@ export const KIND_INFO: Record<string, KindInfo> = {
 export const kindInfo = (kind: string): KindInfo => KIND_INFO[kind] ?? { label: kind[0]!.toUpperCase() + kind.slice(1), plural: `${kind[0]!.toUpperCase()}${kind.slice(1)}s`, icon: "file" };
 
 export type Trust = "owner" | "agent" | "untrusted";
-export const TRUST_LABEL: Record<Trust, string> = { owner: "Yours", agent: "Galahad's", untrusted: "Untrusted" };
+export const TRUST_LABEL: Record<Trust, string> = { owner: "Yours", agent: "Your agent's", untrusted: "Untrusted" };
 
 export type Span = "any" | "day" | "week" | "month" | "year";
 export const SPANS: { value: Span; label: string; ms: number }[] = [

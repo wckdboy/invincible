@@ -6,7 +6,7 @@ import { interfacesOf, MAC_FIREWALL, macFirewall, macFirewallHelper, macFirewall
  * reads whether it is on. What they do to traffic was tried on the Mac mini (docs/MAC.md); here, that they say it.
  */
 
-/** `ifconfig -a` as the Mac mini printed it (17 November 2026), trimmed: the two Galahad bridges, and two others. */
+/** `ifconfig -a` as the Mac mini printed it (17 November 2026), trimmed: the two the primary bridges, and two others. */
 const IFCONFIG = `lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
 	inet 127.0.0.1 netmask 0xff000000
 en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
@@ -96,7 +96,7 @@ describe("what ifconfig prints, read", () => {
 });
 
 describe("whether it is on", () => {
-  test("on: its helper ran a moment ago with pf on and its rules loaded, and both Galahad bridges have pf see between their VMs", async () => {
+  test("on: its helper ran a moment ago with pf on and its rules loaded, and both your agent bridges have pf see between their VMs", async () => {
     expect(await macFirewall(deps())).toEqual({ on: true });
   });
 

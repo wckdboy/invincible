@@ -160,7 +160,7 @@ export function rowsToArgs(rows: ArgRow[], cls: string): TermsRead {
   return { args, free };
 }
 
-/** "claude-code, loop:release" → the callers an order names, or none (any of Galahad's agents). */
+/** "claude-code, loop:release" → the callers an order names, or none (any of the primary's agents). */
 export function parseCallers(text: string): { callers: string[] | null } | { problem: string } {
   const names = [...new Set(text.split(/[\s,]+/).filter(Boolean))];
   if (!names.length) return { callers: null };
@@ -240,8 +240,8 @@ export function list(items: string[], last: "and" | "or" = "and"): string {
   return `${items.slice(0, -1).join(", ")} ${last} ${items.at(-1)}`;
 }
 
-/** Who may use an order, as a sentence starts: "Only claude-code", "Any of Galahad's agents". */
-export const whoWords = (callers: string[] | null): string => (callers?.length ? `Only ${list(callers, "or")}` : "Any of Galahad's agents");
+/** Who may use an order, as a sentence starts: "Only claude-code", "Any of the primary's agents". */
+export const whoWords = (callers: string[] | null): string => (callers?.length ? `Only ${list(callers, "or")}` : "Any of your agents");
 
 /**
  * The order in one plain sentence, for the preview before you sign:

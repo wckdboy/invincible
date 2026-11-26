@@ -16,7 +16,7 @@ function world() {
   const a = newNodeIdentity();
   const b = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, a, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, a, { fleetName: "homelab", nodeName: "ultra" });
   enrollDevice(store, a, { device: b.id, name: "laptop", kind: "node", box: b64u(b.boxPublic) });
   let now = T0;
   const clock = { now: () => now, set: (t: number) => void (now = t) };
@@ -361,16 +361,16 @@ describe("what wakes a loop (a webhook, new mail, a GitHub event)", () => {
 });
 
 describe("a loop whose task this version no longer has", () => {
-  /** As a fleet's mind holds it from before: his journal, removed on 14 November 2026. */
+  /** As a fleet's mind holds it from before: its journal, removed on 14 November 2026. */
   const retired = (w: ReturnType<typeof world>, name = "look-over") =>
-    w.store.emit(w.a, "loop.set", { name, schedule: "every 30m", tz: "UTC", on: w.a.id, enabled: true, task: { kind: "reflect" }, label: "His review" });
+    w.store.emit(w.a, "loop.set", { name, schedule: "every 30m", tz: "UTC", on: w.a.id, enabled: true, task: { kind: "reflect" }, label: "Its review" });
 
   test("is still listed, with its schedule, and says its task no longer exists and how to remove it", () => {
     const w = world();
     retired(w);
     w.define("beat", w.a.id);
     const [loop] = loopRecords(w.store).filter((l) => l.name === "look-over");
-    expect(loop).toMatchObject({ name: "look-over", scheduleText: "every 30m", enabled: true, task: null, label: "His review" });
+    expect(loop).toMatchObject({ name: "look-over", scheduleText: "every 30m", enabled: true, task: null, label: "Its review" });
     expect(loop!.schedule).not.toBeNull();
     expect(loop!.problem).toContain("its task no longer exists");
     expect(loop!.problem).toContain("invincible loop rm look-over");

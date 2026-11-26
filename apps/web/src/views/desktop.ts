@@ -1,4 +1,4 @@
-import type { Teammate } from "@invincible/core/team";
+import type { Agent } from "@invincible/core/team";
 import { isAbort } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import { DESKTOP_KEYS, desktopAddress, type DesktopDo, type DesktopView, saysNoDesktop, screenPoint, shotSource } from "../lib/desktop.ts";
@@ -6,9 +6,9 @@ import { button, callout, switchControl } from "../ui/controls.ts";
 import { h, replace } from "../ui/dom.ts";
 
 /*
- * A knight's desktop, watched and taken over from its Workspace (POST /api/team/desktop { id, action? }): a picture
+ * An agent's desktop, watched and taken over from its Workspace (POST /api/team/desktop { id, action? }): a picture
  * of its screen, asked for about every two seconds while it is on screen and the app is in front; and what you do
- * there. A click on the picture clicks at that place on the knight's screen; typed text is typed (and never written
+ * there. A click on the picture clicks at that place on the agent's screen; typed text is typed (and never written
  * to the ledger); keys, an address and scrolling are one press each. Each thing done brings back the screen as it
  * then is. lib/desktop.ts holds the arithmetic.
  */
@@ -24,7 +24,7 @@ export interface DesktopViewer {
 }
 
 /** `viewport`: what scrolls the panel (the picture is asked for only while it is in view). `makeAgain`: its VM made again with a desktop. */
-export function desktopViewer(ctx: Ctx, person: Pick<Teammate, "id" | "name">, viewport: Element | null, makeAgain: (() => void) | null): DesktopViewer {
+export function desktopViewer(ctx: Ctx, person: Pick<Agent, "id" | "name">, viewport: Element | null, makeAgain: (() => void) | null): DesktopViewer {
   const controller = new AbortController();
   const picture = h("img", { alt: `${person.name}'s screen`, draggable: "false" });
   const frame = h("div", { class: "desktop-shot", title: `A click here clicks at that place on ${person.name}'s screen` }, picture);
@@ -81,7 +81,7 @@ export function desktopViewer(ctx: Ctx, person: Pick<Teammate, "id" | "name">, v
     return run;
   }
 
-  // A click on the picture is a click at the same place on the knight's screen, whatever size the picture is drawn at.
+  // A click on the picture is a click at the same place on the agent's screen, whatever size the picture is drawn at.
   picture.addEventListener("click", (event: MouseEvent) => {
     if (!view) return;
     const point = screenPoint({ x: event.clientX, y: event.clientY }, picture.getBoundingClientRect(), view);

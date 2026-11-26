@@ -1,21 +1,21 @@
 import type { SandboxView } from "@invincible/core";
 import { outcomeBar, isOutcomeRoom } from "./outcome-bar.ts";
 import { findSecrets } from "@invincible/core/secret-scan";
-import type { TeamEngramStatus, TeamHarness, TeamMessage, TeamRoomView, TeamSnapshot, TeamTask, Teammate } from "@invincible/core/team";
+import type { TeamEngramStatus, TeamHarness, TeamMessage, TeamRoomView, TeamSnapshot, TeamTask, Agent } from "@invincible/core/team";
 import { TEAM_LIMITS } from "@invincible/core/team-limits";
 import { moneyPrices, type Price } from "@invincible/core/spend";
 import { avatarExpression } from "@invincible/core/avatar";
 import { isAbort, isUnavailable } from "../api.ts";
 import { errorMessage, type View } from "../context.ts";
-import { GALAHAD } from "../lib/arrange.ts";
+import { PRIMARY } from "../lib/arrange.ts";
 import { hasDesktop } from "../lib/desktop.ts";
-import { besideChip } from "../lib/knight-state.ts";
+import { besideChip } from "../lib/agent-state.ts";
 import { rosterRows } from "../lib/roster.ts";
 import { type TaskAction, taskBadge } from "../lib/task-card.ts";
-import { activeTeamWork, engramLine, HARNESS, harnessNote, knightWorksOn, taskDependencies, teamSpeaker, teammateMaker, type HarnessStatus } from "../lib/team.ts";
+import { activeTeamWork, engramLine, HARNESS, harnessNote, agentWorksOn, taskDependencies, teamSpeaker, agentMaker, type HarnessStatus } from "../lib/team.ts";
 import { giveAgain, timeline, timelineTasks } from "../lib/timeline.ts";
 import { relativeTime } from "../lib/time.ts";
-import { knightPanelShown, setKnightPanelShown } from "../prefs.ts";
+import { agentPanelShown, setAgentPanelShown } from "../prefs.ts";
 import { badge, button, callout, dot, empty, errorState, list, listRow, note, section, skeletonRows } from "../ui/controls.ts";
 import { h, keepPlace, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
@@ -24,22 +24,22 @@ import { stateChip, workerAvatar } from "../ui/avatar.ts";
 import { orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
 import { attachedView, attachTray, type Waiting } from "./attach-tray.ts";
-import { roundtableHome } from "./board.ts";
+import { agentsHome } from "./board.ts";
 import { noteSaid, seatFace, tableOf } from "./roster.ts";
 import { openConsole } from "./sandboxes.ts";
 import { desktopViewer, type DesktopViewer } from "./desktop.ts";
 import { liveTrail, type LiveTrail, taskCard } from "./task-card.ts";
-import { controlTeam, editKnight, editNotes, editRoom, exportKnight, giveTask, growVm, provisionVm, remakeVm, removeKnight, setCiBack, setEngram, shipTask } from "./team-forms.ts";
+import { controlTeam, editAgent, editNotes, editRoom, exportAgent, giveTask, growVm, provisionVm, remakeVm, removeAgent, setCiBack, setEngram, shipTask } from "./team-forms.ts";
 import { openTerminal } from "./terminal.ts";
 import { openWorkspace } from "./workspace.ts";
 
 /*
- * A knight, or a room, as one timeline: what was said and the tasks given, in the order they happened, each task a
- * card (views/task-card.ts). A knight's Workspace (its VM, its harnesses, its notes store) is a panel opened from its
- * header. On a wide screen a knight's timeline has a side panel beside it (unless you hid it on this device): the
- * knight and what it is doing, its tasks, its workspace and its working notes. Conversations and work belong to the
- * node: polling only observes them, and leaving never stops a knight. Unsaved drafts stay in memory, never storage.
- * Who there is to talk to is the roster's (views/roster.ts); with no conversation open, the Roundtable's own page is
+ * An agent, or a room, as one timeline: what was said and the tasks given, in the order they happened, each task a
+ * card (views/task-card.ts). An agent's Workspace (its VM, its harnesses, its notes store) is a panel opened from its
+ * header. On a wide screen an agent's timeline has a side panel beside it (unless you hid it on this device): the
+ * agent and what it is doing, its tasks, its workspace and its working notes. Conversations and work belong to the
+ * node: polling only observes them, and leaving never stops an agent. Unsaved drafts stay in memory, never storage.
+ * Who there is to talk to is the roster's (views/roster.ts); with no conversation open, the agents' own page is
  * the board's (views/board.ts).
  */
 const drafts = new Map<string, string>();
@@ -49,7 +49,7 @@ interface WorkspaceStatus {
   workspace: SandboxView | null;
   error?: string;
   harnesses?: HarnessStatus[];
-  /** The notes store (Engram): the node's switch, and whether this knight's VM has it. Absent on a node from before it. */
+  /** The notes store (Engram): the node's switch, and whether this agent's VM has it. Absent on a node from before it. */
   engram?: TeamEngramStatus;
 }
 
@@ -87,7 +87,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   const problem = h("div", { class: "team-send-error", role: "status" });
   const input = h("textarea", { rows: 2, maxlength: TEAM_LIMITS.message, placeholder: "Message…", "aria-label": "Message", autocomplete: "off", enterkeyhint: "send" });
   input.value = roomId ? (drafts.get(roomId) ?? "") : "";
-  // Files with your words: chosen, pasted or dropped, as in your chat with Galahad.
+  // Files with your words: chosen, pasted or dropped, as in your chat with the primary.
   const tray = attachTray(ctx, {
     files: { get: () => (roomId ? (roomFiles.get(roomId) ?? []) : []), set: (next) => void (roomId && roomFiles.set(roomId, next)) },
     enabled: () => canChat && Boolean(roomId),
@@ -115,57 +115,57 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   tray.take(input, composer);
   tray.render();
   const composerWrap = h("div", { class: "team-composer", hidden: true }, status, problem, composer);
-  // A knight's side panel, beside its timeline on a wide screen: shown unless you hid it (remembered on this device).
+  // An agent's side panel, beside its timeline on a wide screen: shown unless you hid it (remembered on this device).
   const side = h("aside", { class: "team-side", hidden: true });
-  let sideShown = knightPanelShown();
+  let sideShown = agentPanelShown();
   let sideVersion = "";
-  // An outcome's room: the bar of what Galahad owns there (outcome-bar.ts).
+  // An outcome's room: the bar of what the primary owns there (outcome-bar.ts).
   const ownBar = roomId && isOutcomeRoom(roomId) ? outcomeBar(ctx, roomId, scope.signal) : null;
-  const main = h("section", { class: "team-main", "aria-label": "The Roundtable" }, head, notice, ownBar?.el ?? null, h("div", { class: "team-body" }, h("div", { class: "team-column" }, content, composerWrap), side));
+  const main = h("section", { class: "team-main", "aria-label": "The agents" }, head, notice, ownBar?.el ?? null, h("div", { class: "team-body" }, h("div", { class: "team-column" }, content, composerWrap), side));
   replace(root, h("div", { class: "team-layout" }, main));
   replace(content, skeletonRows(4));
 
-  const nameOf = (id: string): string => (id === "galahad" ? "Galahad" : snapshot?.teammates.find((person) => person.id === id)?.name ?? snapshot?.removed?.find((person) => person.id === id)?.name ?? id);
+  const nameOf = (id: string): string => (id === "primary" ? "Your agent" : snapshot?.agents.find((person) => person.id === id)?.name ?? snapshot?.removed?.find((person) => person.id === id)?.name ?? id);
   const roomName = (id: string): string => snapshot?.rooms.find((candidate) => candidate.id === id)?.name ?? id;
-  /** "made by Galahad", for a knight he (or another knight) made; nothing for one of yours. */
-  const madeBy = (person: Teammate): string => {
-    const maker = teammateMaker(person, snapshot?.teammates ?? [], snapshot?.removed);
+  /** "made by the primary", for an agent it (or another agent) made; nothing for one of yours. */
+  const madeBy = (person: Agent): string => {
+    const maker = agentMaker(person, snapshot?.agents ?? [], snapshot?.removed);
     return maker ? `made by ${maker}` : "";
   };
-  const personOf = (id: string): Teammate | undefined => snapshot?.teammates.find((person) => person.id === id);
-  /** The knight whose own conversation this is (none: a room). */
-  const knight = (): Teammate | undefined => (room?.direct && room.members.length === 1 ? personOf(room.members[0]!) : undefined);
-  const panelOpen = (): boolean => panelAsked && Boolean(knight());
-  const avatar = (person: Teammate, live = true, size = 40): HTMLElement =>
+  const personOf = (id: string): Agent | undefined => snapshot?.agents.find((person) => person.id === id);
+  /** The agent whose own conversation this is (none: a room). */
+  const agent = (): Agent | undefined => (room?.direct && room.members.length === 1 ? personOf(room.members[0]!) : undefined);
+  const panelOpen = (): boolean => panelAsked && Boolean(agent());
+  const avatar = (person: Agent, live = true, size = 40): HTMLElement =>
     workerAvatar({ id: person.id, name: person.name, profile: person.avatar, size, still: !live, expression: live && snapshot ? avatarExpression(person, snapshot, Date.now()) : "idle" });
   const control = (change: Parameters<typeof controlTeam>[1]) => controlTeam(ctx, change);
   const showPanel = (open: boolean) => roomId && ctx.navigate("team", { room: roomId, ...(open ? { teamTab: "workspace" as const } : {}) });
   const showSide = (shown: boolean): void => {
     sideShown = shown;
-    setKnightPanelShown(shown);
+    setAgentPanelShown(shown);
     draw(true);
   };
   /** A VM made, or made again: shown at once, and asked about again. */
-  const madeVm = (person: Teammate) => (made: SandboxView | null) => {
+  const madeVm = (person: Agent) => (made: SandboxView | null) => {
     workspace = { workspace: made };
     draw(true);
     void refreshWorkspace(person.id);
   };
 
   /** The way back to the roster (a phone's; a wide screen has the roster beside it). */
-  const backLink = () => h("a", { class: "btn ghost sm icon-only pane-back", href: "#/team", "aria-label": "The Roundtable", title: "The Roundtable" }, icon("chevron-left", { size: 16 }));
+  const backLink = () => h("a", { class: "btn ghost sm icon-only pane-back", href: "#/team", "aria-label": "The agents", title: "The agents" }, icon("chevron-left", { size: 16 }));
 
   function renderHead(): void {
     if (!room || !snapshot) {
       // While a room is asked for, its header holds its place (the way back, a face's and two lines' places), so the
-      // timeline under it doesn't drop when it arrives. The Roundtable's own page has none.
+      // timeline under it doesn't drop when it arrives. The agents' own page has none.
       replace(head, ...(roomId ? [backLink(), h("span", { class: "skeleton team-head-face", "aria-hidden": "true" }), h("div", { class: "grow stack snug", "aria-hidden": "true" }, h("div", { class: "skeleton team-head-name" }), h("div", { class: "skeleton sk-line team-head-line" }))] : []));
       return;
     }
     const current = room;
-    const person = knight();
+    const person = agent();
     const active = [...current.tasks, ...current.deliveries].filter(activeTeamWork);
-    // A knight's face sits in its seat, its state in a word beside its name, as on the roster.
+    // An agent's face sits in its seat, its state in a word beside its name, as on the roster.
     const table = person ? tableOf(ctx) : null;
     const seated = person ? table!.seats.find((one) => one.id === person.id) : undefined;
     const open = panelOpen();
@@ -187,7 +187,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
           "div",
           { class: "grow" },
           h("div", { class: "team-head-title" }, h("h2", { class: "ellipsis" }, person?.name ?? current.name), person ? stateChip(seated?.state) : null),
-          h("p", { class: "meta ellipsis" }, person ? [knightWorksOn(person), madeBy(person)].filter(Boolean).join(" · ") : [...(current.direct ? [] : ["Galahad"]), ...current.members.map(nameOf)].join(" · ")),
+          h("p", { class: "meta ellipsis" }, person ? [agentWorksOn(person), madeBy(person)].filter(Boolean).join(" · ") : [...(current.direct ? [] : ["Your agent"]), ...current.members.map(nameOf)].join(" · ")),
         ),
         current.paused ? badge("Paused", "warn") : null,
         person ? sideToggle : null,
@@ -197,24 +197,24 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
         !person && canChat && active.length ? button("Stop the room's work", { variant: "ghost", size: "sm", iconOnly: true, icon: "stop", onClick: () => void control({ room: current.id, action: "stop" }) }) : null,
       ),
     );
-    composerHint.textContent = current.paused ? "Paused · messages are kept" : active.length ? (person ? "Replies when its work ends" : "A busy knight replies when free") : person || current.direct ? `Up to ${current.turnBudget} replies a chain` : "Galahad answers; name a knight with @ to ask it";
+    composerHint.textContent = current.paused ? "Paused · messages are kept" : active.length ? (person ? "Replies when its work ends" : "A busy agent replies when free") : person || current.direct ? `Up to ${current.turnBudget} replies a chain` : "Your agent answers; name an agent with @ to ask it";
     input.placeholder = `Message ${person?.name ?? current.name}…`;
     input.setAttribute("aria-label", `Message ${person?.name ?? current.name}`);
     const writing = current.deliveries.filter((delivery) => activeTeamWork(delivery));
-    replace(status, ...writing.map((delivery) => h("span", { class: "row" }, dot(delivery.status === "running" ? "accent" : "neutral", { live: delivery.status === "running" }), `${nameOf(delivery.teammate)} ${delivery.status === "running" ? "is writing" : "replies when free"}`)));
+    replace(status, ...writing.map((delivery) => h("span", { class: "row" }, dot(delivery.status === "running" ? "accent" : "neutral", { live: delivery.status === "running" }), `${nameOf(delivery.agent)} ${delivery.status === "running" ? "is writing" : "replies when free"}`)));
     syncComposer();
   }
 
   function messageEl(message: TeamMessage): HTMLElement {
-    const speaker = teamSpeaker(message, snapshot?.teammates ?? []);
+    const speaker = teamSpeaker(message, snapshot?.agents ?? []);
     const at = h("time", { datetime: new Date(message.createdAt).toISOString(), title: new Date(message.createdAt).toLocaleString() }, relativeTime(message.createdAt));
     if (message.speaker === "system") return h("div", { class: "team-system", "data-key": message.id }, icon("activity", { size: 13 }), h("span", {}, message.text), at);
     const owner = message.speaker === "owner";
     return h(
       "article",
       { class: `team-message${owner ? " owner" : ""}`, "data-key": message.id, "aria-label": `${speaker} said` },
-      // (Galahad speaking in a room is his orb, at rest, as beside his own answers.)
-      owner ? null : message.speaker === GALAHAD ? orb({ size: 40 }) : workerAvatar({ id: message.speaker, name: speaker, profile: personOf(message.speaker)?.avatar, still: true }),
+      // (The primary speaking in a room is its orb, at rest, as beside its own answers.)
+      owner ? null : message.speaker === PRIMARY ? orb({ size: 40 }) : workerAvatar({ id: message.speaker, name: speaker, profile: personOf(message.speaker)?.avatar, still: true }),
       h(
         "div",
         { class: "team-message-body" },
@@ -278,7 +278,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     }
     const next = new Map<string, { version: string; el: HTMLElement }>();
     const els = items.map((item) => {
-      const version = item.kind === "message" ? JSON.stringify([item.message.text, teamSpeaker(item.message, snapshot!.teammates), personOf(item.message.speaker)?.avatar, relativeTime(item.message.createdAt)]) : taskVersion(item.task);
+      const version = item.kind === "message" ? JSON.stringify([item.message.text, teamSpeaker(item.message, snapshot!.agents), personOf(item.message.speaker)?.avatar, relativeTime(item.message.createdAt)]) : taskVersion(item.task);
       const had = drawnItems.get(item.key);
       const el = had?.version === version ? had.el : item.kind === "message" ? messageEl(item.message) : taskEl(item.task);
       next.set(item.key, { version, el });
@@ -287,7 +287,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     drawnItems = next;
     const first = content.firstChild !== thread;
     const nearEnd = content.scrollHeight - content.scrollTop - content.clientHeight < 120;
-    const person = knight();
+    const person = agent();
     syncChildren(
       thread,
       els.length
@@ -296,7 +296,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
             empty({
               icon: "chat",
               title: person ? `Talk with ${person.name}` : `Welcome to ${current.name}`,
-              body: person ? `Give ${person.name} a job, share context, or ask a question. A task you give it is a card here, from its first line to what it kept.` : "Galahad sits here with these knights: say what you need and he answers, or brings in the knights it needs. Name a knight with @ to ask it yourself.",
+              body: person ? `Give ${person.name} a job, share context, or ask a question. A task you give it is a card here, from its first line to what it kept.` : "Your agent is in this room with these agents: say what you need and it answers, or brings in the agents it needs. Name an agent with @ to ask it yourself.",
               compact: true,
             }),
           ],
@@ -331,7 +331,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   /** A node by its name: this one, one of the fleet's, or one the app can't name. */
   const nodeName = (id: string): string => (id === ctx.whoami.node ? "this node" : (ctx.live.fleet.value?.devices.find((device) => device.id === id)?.name ?? "another node"));
 
-  /** A knight's task in its side panel: its title and where it stands; a press finds its card in the timeline. */
+  /** An agent's task in its side panel: its title and where it stands; a press finds its card in the timeline. */
   const taskRow = (task: TeamTask): HTMLElement => {
     const stands = taskBadge(task);
     return listRow({
@@ -345,10 +345,10 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     });
   };
 
-  /** The side panel beside a knight's timeline on a wide screen: the knight in its seat and what it is doing, its tasks,
+  /** The side panel beside an agent's timeline on a wide screen: the agent in its seat and what it is doing, its tasks,
    * its workspace and its working notes. Drawn from the team as the app has it: it asks the node nothing. */
   function renderSide(): void {
-    const person = knight();
+    const person = agent();
     side.hidden = !person || !sideShown;
     if (side.hidden || !person || !snapshot) return;
     const table = tableOf(ctx);
@@ -366,14 +366,14 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
           { class: "team-side-who" },
           seated ? seatFace(seated, 88) : avatar(person, true, 88),
           h("div", { class: "team-side-name" }, h("h2", { class: "ellipsis" }, person.name), stateChip(seated?.state)),
-          h("p", { class: "meta" }, [knightWorksOn(person), madeBy(person)].filter(Boolean).join(" · ")),
+          h("p", { class: "meta" }, [agentWorksOn(person), madeBy(person)].filter(Boolean).join(" · ")),
           seated ? h("p", { class: "team-side-line" }, besideChip(seated.line, seated.state)) : null,
           canEdit
             ? h(
                 "div",
                 { class: "row wrap" },
-                button("Edit", { size: "sm", icon: "edit", onClick: () => void editKnight(ctx, person) }),
-                button(person.enabled ? "Pause" : "Resume", { size: "sm", icon: person.enabled ? "pause" : "play", label: `${person.enabled ? "Pause" : "Resume"} ${person.name}`, onClick: () => void control({ teammate: person.id, action: person.enabled ? "pause" : "resume" }) }),
+                button("Edit", { size: "sm", icon: "edit", onClick: () => void editAgent(ctx, person) }),
+                button(person.enabled ? "Pause" : "Resume", { size: "sm", icon: person.enabled ? "pause" : "play", label: `${person.enabled ? "Pause" : "Resume"} ${person.name}`, onClick: () => void control({ agent: person.id, action: person.enabled ? "pause" : "resume" }) }),
               )
             : null,
         ),
@@ -398,7 +398,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   scope.add(() => viewer?.dispose());
 
   function renderPanel(): void {
-    const person = knight()!;
+    const person = agent()!;
     const known = workspace;
     const vm = known?.workspace;
     // (The switch as the team says it now; what this VM has, as it was last asked.)
@@ -432,19 +432,19 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
             { class: "grow" },
             h("strong", {}, person.name),
             h("p", { class: "small muted" }, person.instructions || "No instructions yet."),
-            h("div", { class: "meta" }, [HARNESS[person.harness], knightWorksOn(person), `${person.turnsToday}/${person.dailyTurns} turns/jobs today`, madeBy(person)].filter(Boolean).join(" · ")),
+            h("div", { class: "meta" }, [HARNESS[person.harness], agentWorksOn(person), `${person.turnsToday}/${person.dailyTurns} turns/jobs today`, madeBy(person)].filter(Boolean).join(" · ")),
             person.repository ? h("a", { class: "tiny mono", href: person.repository, target: "_blank", rel: "noopener noreferrer" }, person.repository.replace("https://github.com/", "")) : null,
           ),
-          canEdit ? button("Edit", { size: "sm", icon: "edit", onClick: () => void editKnight(ctx, person) }) : null,
+          canEdit ? button("Edit", { size: "sm", icon: "edit", onClick: () => void editAgent(ctx, person) }) : null,
         ),
         canEdit
           ? h(
               "div",
               { class: "row wrap" },
-              button(person.enabled ? "Pause knight" : "Resume knight", { size: "sm", icon: person.enabled ? "pause" : "play", onClick: () => void control({ teammate: person.id, action: person.enabled ? "pause" : "resume" }) }),
+              button(person.enabled ? "Pause agent" : "Resume agent", { size: "sm", icon: person.enabled ? "pause" : "play", onClick: () => void control({ agent: person.id, action: person.enabled ? "pause" : "resume" }) }),
               button("Working notes", { size: "sm", icon: "memory", onClick: () => editNotes(ctx, person) }),
-              button("Export", { size: "sm", icon: "download", title: `${person.name} as a file to take in on another node: its job and how it works, never its memory or a key`, onClick: () => exportKnight(person) }),
-              button("Remove knight", { size: "sm", variant: "danger", icon: "trash", onClick: () => void removeKnight(ctx, person) }),
+              button("Export", { size: "sm", icon: "download", title: `${person.name} as a file to take in on another node: its job and how it works, never its memory or a key`, onClick: () => exportAgent(person) }),
+              button("Remove agent", { size: "sm", variant: "danger", icon: "trash", onClick: () => void removeAgent(ctx, person) }),
             )
           : null,
         known?.error ? callout("warn", known.error, { title: "Workspace status unavailable", actions: button("Check again", { size: "sm", icon: "refresh", onClick: () => void refreshWorkspace(person.id) }) }) : null,
@@ -476,7 +476,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
               { class: "team-workspace-empty" },
               icon("sandbox", { size: 30 }),
               h("h3", {}, person.workspace ? "Workspace registered" : "A place to work"),
-              h("p", { class: "muted small" }, person.workspace ? `Workspace ${person.workspace.id} on ${person.workspace.node}.${!ctx.can("sandbox") ? " Its live state is shown to a device that may manage sandboxes." : known ? " Its live state couldn't be confirmed." : " Checking its live state…"}` : "Give this knight a persistent VM for code, files and tools. Its job and working notes stay with it."),
+              h("p", { class: "muted small" }, person.workspace ? `Workspace ${person.workspace.id} on ${person.workspace.node}.${!ctx.can("sandbox") ? " Its live state is shown to a device that may manage sandboxes." : known ? " Its live state couldn't be confirmed." : " Checking its live state…"}` : "Give this agent a persistent VM for code, files and tools. Its job and working notes stay with it."),
               canEdit && ctx.can("sandbox") ? button(person.workspace ? "Check / provision VM" : "Provision VM", { variant: "primary", icon: "plus", onClick: () => provisionVm(ctx, person, madeVm(person)) }) : h("p", { class: "small muted" }, "Provisioning needs fleet:admin and sandbox access on an owner device."),
             ),
       ),
@@ -509,7 +509,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
                     "div",
                     { class: "item" },
                     icon(notes.tone === "warn" ? "alert" : "memory", { size: 16 }),
-                    h("div", { class: "grow" }, h("strong", { class: "small" }, "Engram, for every knight on this node"), h("p", { class: "meta" }, notes.text)),
+                    h("div", { class: "grow" }, h("strong", { class: "small" }, "Engram, for every agent on this node"), h("p", { class: "meta" }, notes.text)),
                     badge(notes.badge, notes.tone),
                     canEdit ? button(notes.badge === "Off" ? "Turn on" : "Turn off", { size: "sm", onClick: () => void setEngram(ctx, notes.badge === "Off").then((changed) => changed && !scope.disposed && void refreshWorkspace(person.id)) }) : null,
                   ),
@@ -534,7 +534,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
                     h(
                       "div",
                       { class: "grow" },
-                      h("strong", { class: "small" }, "Failing checks and reviews back to the knight, for every knight on this node"),
+                      h("strong", { class: "small" }, "Failing checks and reviews back to the agent, for every agent on this node"),
                       h("p", { class: "meta" }, snapshot.ciBack ? "On: a fix goes back on the pull request's branch, and its push waits for you." : "Off: they are yours, except in an outcome, which gives its own back."),
                     ),
                     badge(snapshot.ciBack ? "On" : "Off", snapshot.ciBack ? "ok" : "neutral"),
@@ -548,14 +548,14 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     );
   }
 
-  /** The Roundtable's own page (no conversation open): its board, drawn by itself from then on (views/board.ts). */
+  /** The agents' own page (no conversation open): its board, drawn by itself from then on (views/board.ts). */
   let home = false;
   function renderHome(): void {
     if (home) return;
     home = true;
     replace(head);
     composerWrap.hidden = true;
-    roundtableHome(ctx, content, scope);
+    agentsHome(ctx, content, scope);
   }
 
   function syncComposer(): void {
@@ -614,7 +614,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     }
     notice.hidden = true;
     // A face that was pleased for a moment changes back by itself, and "2 min ago" moves on: both are drawn again.
-    const signature = JSON.stringify([next, room, workspace, next.teammates.map((person) => avatarExpression(person, next, Date.now())), Math.floor(Date.now() / 60_000)]);
+    const signature = JSON.stringify([next, room, workspace, next.agents.map((person) => avatarExpression(person, next, Date.now())), Math.floor(Date.now() / 60_000)]);
     if (signature === drawn && !force) return;
     drawn = signature;
     renderHead();
@@ -622,20 +622,20 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     composerWrap.hidden = !canChat || panelOpen();
     if (panelOpen()) {
       renderPanel();
-      if (!workspace) void refreshWorkspace(knight()!.id);
+      if (!workspace) void refreshWorkspace(agent()!.id);
     } else renderTimeline();
     read();
   }
 
   /** What you asked to mark read last (with what the node said had been seen then), so it's asked once. */
   let reading = "";
-  /** On screen, what ended here is read: this knight's page, or this room, is no longer new to you, on any device. */
+  /** On screen, what ended here is read: this agent's page, or this room, is no longer new to you, on any device. */
   function read(): void {
     if (!snapshot || !room || document.hidden) return;
-    const knightId = room.direct && room.members.length === 1 ? room.members[0]! : null;
-    const row = rosterRows({ snapshot, now: Date.now() }).find((r) => (knightId ? r.kind === "knight" && r.id === knightId : r.kind === "room" && r.id === room!.id));
+    const agentId = room.direct && room.members.length === 1 ? room.members[0]! : null;
+    const row = rosterRows({ snapshot, now: Date.now() }).find((r) => (agentId ? r.kind === "agent" && r.id === agentId : r.kind === "room" && r.id === room!.id));
     if (!row?.unread) return;
-    const body = knightId ? { knight: knightId } : { room: room.id };
+    const body = agentId ? { agent: agentId } : { room: room.id };
     const asked = JSON.stringify([body, snapshot.seen]);
     if (asked === reading) return;
     reading = asked;
@@ -644,7 +644,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
 
   function failed(error: unknown): void {
     if (scope.disposed || isAbort(error)) return;
-    if (!snapshot || (roomId && !room)) replace(content, isUnavailable(error) ? empty({ icon: "roundtable", title: "The Roundtable isn't available here", body: "This node doesn't seat knights yet.", actions: button("Try again", { onClick: () => void load(true) }) }) : errorState("Couldn't reach the Roundtable", error, () => void load(true)));
+    if (!snapshot || (roomId && !room)) replace(content, isUnavailable(error) ? empty({ icon: "agents", title: "The agents isn't available here", body: "This node doesn't seat agents yet.", actions: button("Try again", { onClick: () => void load(true) }) }) : errorState("Couldn't reach the agents", error, () => void load(true)));
     else {
       notice.hidden = false;
       replace(notice, h("div", { class: "banner-pill", "data-tone": "warn" }, icon("offline", { size: 16 }), h("span", { class: "banner-text" }, "Updates paused. What you see may be out of date."), button("Retry", { size: "sm", variant: "ghost", onClick: () => void load(true) })));

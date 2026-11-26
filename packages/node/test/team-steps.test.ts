@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { checkpointCommand, quote, REPO_TASK_START } from "../src/team-runtime.ts";
 
 /*
- * A knight's steps, kept as they end, and a task started from one (PLAN #15), with real git in a scratch directory:
+ * An agent's steps, kept as they end, and a task started from one (PLAN #15), with real git in a scratch directory:
  * what the VM would run, its paths under /work pointed here.
  */
 
@@ -15,8 +15,8 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), "invincible-steps-"));
   dirs.push(dir);
-  // (Git as the VM's is: its knight's name, and nothing of this machine's own configuration.)
-  const env = { PATH: process.env.PATH!, HOME: dir, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "Ada", GIT_AUTHOR_EMAIL: "ada@roundtable.invalid", GIT_COMMITTER_NAME: "Ada", GIT_COMMITTER_EMAIL: "ada@roundtable.invalid" };
+  // (Git as the VM's is: its agent's name, and nothing of this machine's own configuration.)
+  const env = { PATH: process.env.PATH!, HOME: dir, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "Ada", GIT_AUTHOR_EMAIL: "ada@agents.invalid", GIT_COMMITTER_NAME: "Ada", GIT_COMMITTER_EMAIL: "ada@agents.invalid" };
   const sh = (command: string, cwd = dir): string => {
     const ran = Bun.spawnSync(["bash", "-c", command], { cwd, env });
     if (ran.exitCode !== 0) throw new Error(`${command}: ${ran.stderr.toString()}`);
@@ -42,7 +42,7 @@ test("a step is kept as a commit under its own ref, its files as they stood (not
   // Nothing changed since: the step before's, and no new commit.
   expect(sh(here(checkpointCommand(join(dir, "t1"), "task-aaaaaaaaaaaa", 2, `${tree} ${parent}`)))).toBe("same");
   expect(Bun.spawnSync(["git", "-C", join(dir, "repo"), "rev-parse", "--verify", "--quiet", "refs/invincible/checkpoints/task-aaaaaaaaaaaa/2"]).exitCode).not.toBe(0);
-  // A commit of the knight's own is a change too: kept, its parent the new HEAD.
+  // A commit of the agent's own is a change too: kept, its parent the new HEAD.
   sh("git add a.txt && git commit -qm 'its own'", join(dir, "t1"));
   const [, , after] = sh(here(checkpointCommand(join(dir, "t1"), "task-aaaaaaaaaaaa", 3, `${tree} ${parent}`))).split(" ");
   expect(after).toBe(sh("git rev-parse HEAD", join(dir, "t1")));

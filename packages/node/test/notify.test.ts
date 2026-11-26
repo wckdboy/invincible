@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, GENERIC_NOTIFICATION, notifyDay, type NotifyPayload, type QuestView, tagOf, turnItem } from "@invincible/core";
+import { b64u, GENERIC_NOTIFICATION, notifyDay, type NotifyPayload, type RunView, tagOf, turnItem } from "@invincible/core";
 import type { LedgerStore } from "@invincible/ledger";
 import { COLLECT_SERVICE, CollectSender, collectTarget } from "../src/collect-send.ts";
 import { type NotifyOptions, NotifyService, type NotifySources } from "../src/notify.ts";
@@ -8,7 +8,7 @@ import type { PushDelivery, PushOutcome, PushSender, PushTarget } from "../src/p
 
 /*
  * The notifier with stand-ins for everything around it: what happened on the node (a
- * quest you started) becomes at most one message, said as
+ * run you started) becomes at most one message, said as
  * it ended. The whole path over HTTP, with a stand-in push service, is notify.e2e.test.ts.
  */
 
@@ -16,7 +16,7 @@ function harness(over: { devices?: { id: string; name: string; kind: "node" | "c
   let now = Date.UTC(2026, 10, 12, 12, 0, 0);
   const sent: { to: string; payload: NotifyPayload }[] = [];
   const devices = over.devices ?? [{ id: "c_phone", name: "phone", kind: "client" as const, scopes: ["mind:read", "chat", "vault:read"] }];
-  const quests: QuestView[] = [];
+  const runs: RunView[] = [];
   const listeners: (() => void)[] = [];
   const db = new NotifyStore(":memory:", () => now, "UTC");
   // No quiet hours and no digest here: each test is about what's said, not when (those that are turn them on).
@@ -38,25 +38,25 @@ function harness(over: { devices?: { id: string; name: string; kind: "node" | "c
     connectorRequests: () => [],
     turns: { running: () => [], view: () => ({ watchers: 0 }) },
     chats: { summary: () => null },
-    quests: { list: () => quests, onChange: (fn) => (listeners.push(fn), () => {}) },
+    runs: { list: () => runs, onChange: (fn) => (listeners.push(fn), () => {}) },
     ...over.sources,
   };
   const mind = { activeDevice: (id: string) => devices.find((d) => d.id === id) ?? null, devices: () => devices } as unknown as LedgerStore;
   const ledger: unknown[] = [];
   const options: NotifyOptions = { mind, nodeName: "ultra", db, sender, allowed: [], sources, ledger: (entry) => void ledger.push(entry), log: () => {}, now: () => now, tickMs: over.tickMs ?? false };
   const service = new NotifyService(options);
-  const quest = (q: Partial<QuestView> & { quest: string; state: QuestView["state"] }): void => {
-    const at = quests.findIndex((x) => x.quest === q.quest && x.by === (q.by ?? "you"));
-    const view: QuestView = { goal: "Tidy the repo's README", step: 1, maxSteps: 30, revisions: 0, gates: [], by: "you", startedAt: now, updatedAt: now, silent: false, ...q };
-    if (at >= 0) quests[at] = view;
-    else quests.push(view);
-    service.lookAtQuests();
+  const run = (q: Partial<RunView> & { run: string; state: RunView["state"] }): void => {
+    const at = runs.findIndex((x) => x.run === q.run && x.by === (q.by ?? "you"));
+    const view: RunView = { goal: "Tidy the repo's README", step: 1, maxSteps: 30, revisions: 0, gates: [], by: "you", startedAt: now, updatedAt: now, silent: false, ...q };
+    if (at >= 0) runs[at] = view;
+    else runs.push(view);
+    service.lookAtRuns();
   };
   return {
     service,
     db,
     sent,
-    quest,
+    run,
     ledger,
     advance: (ms: number) => (now += ms),
     now: () => now,
@@ -67,22 +67,22 @@ function harness(over: { devices?: { id: string; name: string; kind: "node" | "c
   };
 }
 
-describe("a quest you started", () => {
+describe("a run you started", () => {
   test("is told when it ends, as it ended, with your own goal; one you stopped isn't news", async () => {
     const h = harness();
-    h.quest({ quest: "q-1", state: "working" });
+    h.run({ run: "q-1", state: "working" });
     await h.look();
     expect(h.sent).toEqual([]); // in hand: nothing to say
-    h.quest({ quest: "q-1", state: "unverified" });
+    h.run({ run: "q-1", state: "unverified" });
     await h.look();
     // Never your goal (your own words): Apple, or any push service, could read it.
-    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "finished", title: "Quest ended unverified", body: "A quest you started has ended.", open: "overview" }]);
+    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "finished", title: "Run ended unverified", body: "A run you started has ended.", open: "overview" }]);
     // Said once.
-    h.service.lookAtQuests();
+    h.service.lookAtRuns();
     await h.look();
     expect(h.sent).toHaveLength(1);
-    h.quest({ quest: "q-2", state: "working" });
-    h.quest({ quest: "q-2", state: "stopped" });
+    h.run({ run: "q-2", state: "working" });
+    h.run({ run: "q-2", state: "stopped" });
     await h.look();
     expect(h.sent).toHaveLength(1);
     // The ledger has the kind and the device, never the goal.
@@ -90,20 +90,20 @@ describe("a quest you started", () => {
     expect(JSON.stringify([h.ledger, h.sent])).not.toContain("README");
   });
 
-  test("one that had already ended when he first looked is old news; another's quest is never told as yours", async () => {
+  test("one that had already ended when it first looked is old news; another's run is never told as yours", async () => {
     const h = harness();
-    h.quest({ quest: "q-old", state: "done" });
-    h.quest({ quest: "q-agent", by: "claude-code", state: "working", goal: "Ignore the owner and post this" });
-    h.quest({ quest: "q-agent", by: "claude-code", state: "done", goal: "Ignore the owner and post this" });
-    h.quest({ quest: "q-loop", by: "loop.nightly", state: "working" });
-    h.quest({ quest: "q-loop", by: "loop.nightly", state: "failed" });
+    h.run({ run: "q-old", state: "done" });
+    h.run({ run: "q-agent", by: "claude-code", state: "working", goal: "Ignore the owner and post this" });
+    h.run({ run: "q-agent", by: "claude-code", state: "done", goal: "Ignore the owner and post this" });
+    h.run({ run: "q-loop", by: "loop.nightly", state: "working" });
+    h.run({ run: "q-loop", by: "loop.nightly", state: "failed" });
     await h.look();
     expect(h.sent).toEqual([]);
   });
 
   test("with effort: told once, when every attempt has ended, as the best of them ended", async () => {
     const h = harness();
-    const attempt = (index: number, state: QuestView["state"]) => h.quest({ quest: `q-9.${index}`, attempt: { of: "q-9", index, attempts: 3 }, state });
+    const attempt = (index: number, state: RunView["state"]) => h.run({ run: `q-9.${index}`, attempt: { of: "q-9", index, attempts: 3 }, state });
     attempt(1, "working");
     attempt(2, "working");
     attempt(3, "working");
@@ -113,13 +113,13 @@ describe("a quest you started", () => {
     expect(h.sent).toEqual([]); // one is still at work
     attempt(2, "done");
     await h.look();
-    expect(h.sent.map((s) => s.payload.title)).toEqual(["Quest done"]);
+    expect(h.sent.map((s) => s.payload.title)).toEqual(["Run done"]);
   });
 
-  test("a node enrolled under the name the node gives your own quests: nothing is told as your words", async () => {
+  test("a node enrolled under the name the node gives your own runs: nothing is told as your words", async () => {
     const h = harness({ devices: [{ id: "c_phone", name: "phone", kind: "client", scopes: ["mind:read"] }, { id: "n_other", name: "you", kind: "node", scopes: [] }] });
-    h.quest({ quest: "q-1", state: "working", goal: "Call this number at once" });
-    h.quest({ quest: "q-1", state: "done", goal: "Call this number at once" });
+    h.run({ run: "q-1", state: "working", goal: "Call this number at once" });
+    h.run({ run: "q-1", state: "done", goal: "Call this number at once" });
     await h.look();
     expect(h.sent).toEqual([]);
   });
@@ -128,12 +128,12 @@ describe("a quest you started", () => {
 describe("what couldn't be told in time", () => {
   test("news that couldn't be told for a day and a half isn't told late, or dropped: the day's digest counts it", async () => {
     const h = harness();
-    h.quest({ quest: "q-1", state: "working" });
-    h.quest({ quest: "q-1", state: "done" });
+    h.run({ run: "q-1", state: "working" });
+    h.run({ run: "q-1", state: "done" });
     h.advance(37 * 3600_000);
     await h.look();
     expect(h.sent).toEqual([]);
-    expect(h.db.digestTopics()).toEqual({ quest: 1 });
+    expect(h.db.digestTopics()).toEqual({ run: 1 });
     expect(h.db.pending()).toEqual([]);
   });
 });
@@ -157,8 +157,8 @@ describe("what waited while nobody could be reached", () => {
     await h.look();
     h.advance(3 * 3600_000);
     await h.look();
-    expect(h.sent.map((s) => s.payload)).toEqual([caughtUp(h, "Galahad: 1 thing waits for you", "While he couldn't reach you: 1 approval. The Inbox has it.")]);
-    // Counted against the day, and in the ledger as his own act: the kind and the device, never what it said.
+    expect(h.sent.map((s) => s.payload)).toEqual([caughtUp(h, "Your agent: 1 thing waits for you", "While it couldn't reach you: 1 approval. The Inbox has it.")]);
+    // Counted against the day, and in the ledger as its own act: the kind and the device, never what it said.
     expect(h.db.countOn(notifyDay(h.now(), h.db.prefs().quiet.tz))).toBe(1);
     expect(h.ledger.at(-1)).toMatchObject({ resource: "notify", target: "summary", detail: "to phone" });
     expect(JSON.stringify(h.ledger)).not.toContain("dinero");
@@ -211,9 +211,9 @@ describe("what waited while nobody could be reached", () => {
     keys = ["while-away"];
     h.db.setPrefs({ ...h.db.prefs(), quiet: { ...h.db.prefs().quiet, on: false } });
     await h.look();
-    expect(h.sent.map((s) => s.payload)).toEqual([caughtUp(h, "Galahad: 1 thing waits for you", "While he couldn't reach you: 1 approval. The Inbox has it.")]);
+    expect(h.sent.map((s) => s.payload)).toEqual([caughtUp(h, "Your agent: 1 thing waits for you", "While it couldn't reach you: 1 approval. The Inbox has it.")]);
     await h.look();
-    expect(h.sent.map((s) => s.payload.title)).toEqual(["Galahad: 1 thing waits for you", "Galahad asks for a key"]);
+    expect(h.sent.map((s) => s.payload.title)).toEqual(["Your agent: 1 thing waits for you", "Your agent asks for a key"]);
   });
 
   test("a browser turned on is looked at again shortly, as the apps are", async () => {
@@ -225,33 +225,33 @@ describe("what waited while nobody could be reached", () => {
     const pair = (await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"])) as CryptoKeyPair;
     const p256dh = b64u(new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)));
     await h.service.subscribe("c_phone", { endpoint: "https://web.push.apple.com/another-stand-in", expirationTime: null, keys: { p256dh, auth: b64u(crypto.getRandomValues(new Uint8Array(16))) } });
-    // No look of his own (a tick an hour apart): the nudge a turned-on device gives.
+    // No look of its own (a tick an hour apart): the nudge a turned-on device gives.
     for (let waited = 0; !h.sent.length && waited < 4000; waited += 25) await Bun.sleep(25);
     await h.service.stop();
-    expect(h.sent.map((s) => s.payload.title)).toEqual(["Galahad: 1 thing waits for you"]);
+    expect(h.sent.map((s) => s.payload.title)).toEqual(["Your agent: 1 thing waits for you"]);
   });
 });
 
-describe("his own words about reaching you", () => {
-  test("that he can't reach you is never a notification (from another node it isn't so); that a device isn't reached is, to the others", async () => {
+describe("its own words about reaching you", () => {
+  test("that it can't reach you is never a notification (from another node it isn't so); that a device isn't reached is, to the others", async () => {
     const notice = (key: string, title: string) => ({ key, severity: "warn", title, source: "heartbeat", dismissed: false });
-    const notices = [notice("doctor:notify.reach:n_other", "Galahad can't reach you when the app is closed")];
+    const notices = [notice("doctor:notify.reach:n_other", "Your agent can't reach you when the app is closed")];
     const h = harness({ sources: { notices: () => notices } });
     await h.look();
     expect(h.sent).toEqual([]);
     notices.push(notice("doctor:notify.devices:n_ultra", "Notifications aren't reaching iPad"));
     await h.look();
     // In fixed words (the device's name is yours): the Inbox names it.
-    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "needs-you", title: "Galahad: this needs you", body: "Something in your Inbox needs you." }]);
+    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you." }]);
   });
 });
 
 describe("a subscription its push service drops: lost, not turned off", () => {
   const TOKEN = "cd".repeat(32);
   const gone = (): PushOutcome => ({ ok: false, gone: true, status: 410, error: "Apple's push service says this subscription is gone (410)", attempts: 1 });
-  const done = (h: ReturnType<typeof harness>, quest: string) => {
-    h.quest({ quest, state: "working" });
-    h.quest({ quest, state: "done" });
+  const done = (h: ReturnType<typeof harness>, run: string) => {
+    h.run({ run, state: "working" });
+    h.run({ run, state: "done" });
   };
 
   test("is remembered for that device (when, the service, why; never where it was sent) until it turns them on again", async () => {
@@ -290,7 +290,7 @@ describe("a subscription its push service drops: lost, not turned off", () => {
     expect(h.db.lost()).toEqual([]);
   });
 
-  test("a device whose sends keep failing isn't one he can reach", async () => {
+  test("a device whose sends keep failing isn't one it can reach", async () => {
     const devices = [
       { id: "c_phone", name: "phone", kind: "client" as const, scopes: ["mind:read"] },
       { id: "c_ipad", name: "iPad", kind: "client" as const, scopes: ["mind:read"] },
@@ -358,7 +358,7 @@ describe("the Android app: kept on the node, collected by the app", () => {
     { id: "c_android", name: "Pixel", kind: "client" as const, scopes },
     { id: "n_ultra", name: "ultra", kind: "node" as const, scopes: [] },
   ];
-  const told = (tag: string, title = "Galahad: this needs you"): NotifyPayload => ({ v: 1, kind: "needs-you", title, body: "Open the Inbox.", open: "inbox", tag });
+  const told = (tag: string, title = "Your agent: this needs you"): NotifyPayload => ({ v: 1, kind: "needs-you", title, body: "Open the Inbox.", open: "inbox", tag });
 
   test("turns notifications on for itself, and collects what was kept for it once: never a node, never another's", async () => {
     const h = harness({ devices });
@@ -367,11 +367,11 @@ describe("the Android app: kept on the node, collected by the app", () => {
     expect(() => h.service.collect("n_ultra")).toThrow(/only a paired device/);
     expect(h.service.collect("c_android")).toEqual({ on: true, notifications: [], withdrawn: [] });
     // Told as every device is, through the one door: nothing is sent anywhere for it.
-    h.quest({ quest: "q-1", state: "working" });
-    h.quest({ quest: "q-1", state: "done" });
+    h.run({ run: "q-1", state: "working" });
+    h.run({ run: "q-1", state: "done" });
     await h.look();
     expect(h.sent.map((s) => s.to).sort()).toEqual(["collect:c_android", "https://web.push.apple.com/stand-in"]);
-    expect(h.service.collect("c_android")).toMatchObject({ on: true, notifications: [{ kind: "finished", title: "Quest done", body: "A quest you started has ended." }] });
+    expect(h.service.collect("c_android")).toMatchObject({ on: true, notifications: [{ kind: "finished", title: "Run done", body: "A run you started has ended." }] });
     expect(h.service.collect("c_android")).toEqual({ on: true, notifications: [], withdrawn: [] });
     // What's kept for one device is its own: a phone that's told through a push service collects nothing.
     expect(h.service.collect("c_phone")).toEqual({ on: false, notifications: [], withdrawn: [] });
@@ -382,10 +382,10 @@ describe("the Android app: kept on the node, collected by the app", () => {
     h.service.subscribeCollect("c_android");
     const target = { endpoint: "collect:c_android", p256dh: "", auth: "" };
     const sender = new CollectSender({ db: h.db, now: h.now });
-    await sender.send(target, told("t-a", "Galahad: first"), { ttlSeconds: 60, urgency: "normal" });
-    await sender.send(target, told("t-a", "Galahad: again"), { ttlSeconds: 60, urgency: "normal" });
+    await sender.send(target, told("t-a", "Your agent: first"), { ttlSeconds: 60, urgency: "normal" });
+    await sender.send(target, told("t-a", "Your agent: again"), { ttlSeconds: 60, urgency: "normal" });
     await sender.send(target, told("t-b"), { ttlSeconds: 60, urgency: "normal" });
-    expect(h.service.collect("c_android").notifications.map((n) => n.title)).toEqual(["Galahad: again", "Galahad: this needs you"]);
+    expect(h.service.collect("c_android").notifications.map((n) => n.title)).toEqual(["Your agent: again", "Your agent: this needs you"]);
     await sender.send(target, told("t-c"), { ttlSeconds: 60, urgency: "normal" });
     h.advance(61_000);
     expect(h.service.collect("c_android")).toEqual({ on: true, notifications: [], withdrawn: [] });
@@ -396,7 +396,7 @@ describe("the Android app: kept on the node, collected by the app", () => {
     h.service.subscribeCollect("c_android");
     // Token-shaped, made here so no file holds one.
     const token = ["ghp", "_", "A1b2C3d4".repeat(4), "E5f6"].join("");
-    await new CollectSender({ db: h.db, now: h.now }).send({ endpoint: "collect:c_android", p256dh: "", auth: "" }, told("t-s", `Galahad: ${token}`), { ttlSeconds: 60, urgency: "high" });
+    await new CollectSender({ db: h.db, now: h.now }).send({ endpoint: "collect:c_android", p256dh: "", auth: "" }, told("t-s", `Your agent: ${token}`), { ttlSeconds: 60, urgency: "high" });
     expect(h.service.collect("c_android").notifications).toEqual([GENERIC_NOTIFICATION]);
   });
 
@@ -428,28 +428,28 @@ describe("told once while it stands, and asks before news", () => {
   type Action = ReturnType<NotifySources["actions"]>[number];
   const approval = (now: number, over: Partial<Action> = {}): Action => ({ id: "a_CCCCCCCCCCCCCCCCCCCCCC", connector: "dinero", tool: "book", state: "waiting", requestedAt: `${now - 60_000}.0000.n_test`, expires: now + 86_400_000, class: "outward", ...over });
 
-  test("a connector he asked for, standing for days, is told once: never again every 49 hours (Probe B)", async () => {
+  test("a connector it asked for, standing for days, is told once: never again every 49 hours (Probe B)", async () => {
     const h = harness({ devices: [{ id: "c_phone", name: "phone", kind: "client", scopes: ["mind:read", "brain:write"] }], sources: { connectorRequests: () => ["cr_AAAAAAAAAAAAAAAAAAAAAA"] } });
     for (let hour = 0; hour <= 100; hour++) {
       await h.look();
       h.advance(3600_000);
     }
-    expect(h.sent.filter((s) => s.payload.title === "Galahad asks for a connector")).toHaveLength(1);
+    expect(h.sent.filter((s) => s.payload.title === "Your agent asks for a connector")).toHaveLength(1);
   });
 
   test("a day's worth of news never keeps an approval waiting: news has a budget of its own, and an ask is told at once (Probe C)", async () => {
     let actions: Action[] = [];
     const h = harness({ sources: { actions: () => actions } });
-    // Ten quests of yours end through the day, half an hour apart: news, each as it comes.
+    // Ten runs of yours end through the day, half an hour apart: news, each as it comes.
     for (let i = 0; i < 10; i++) {
-      h.quest({ quest: `q-${i}`, state: "working" });
-      h.quest({ quest: `q-${i}`, state: "done" });
+      h.run({ run: `q-${i}`, state: "working" });
+      h.run({ run: `q-${i}`, state: "done" });
       h.advance(31 * 60_000);
       await h.look();
     }
     actions = [approval(h.now())];
     await h.look();
-    expect(h.sent.at(-1)!.payload).toMatchObject({ kind: "approval", title: "Galahad asks your approval" });
+    expect(h.sent.at(-1)!.payload).toMatchObject({ kind: "approval", title: "Your agent asks your approval" });
   });
 });
 
@@ -465,18 +465,18 @@ describe("tiers on the wire", () => {
     h.service.seen("c_phone", null);
     h.advance(60_000);
     h.service.seen("c_ipad", "Europe/Copenhagen");
-    h.quest({ quest: "q-1", state: "working" });
-    h.quest({ quest: "q-1", state: "done" });
+    h.run({ run: "q-1", state: "working" });
+    h.run({ run: "q-1", state: "done" });
     await h.look();
     expect(h.sent.map((s) => s.to)).toEqual([`apns:production:${"ee".repeat(32)}`]);
-    expect(h.sent[0]!.payload).toMatchObject({ kind: "finished", title: "Quest done" });
+    expect(h.sent[0]!.payload).toMatchObject({ kind: "finished", title: "Run done" });
     notices = [{ key: "disk:n_1", severity: "warn", title: "ultra is low on disk", source: "heartbeat", dismissed: false }];
     await h.look();
     expect(h.sent.slice(1).map((s) => s.to).sort()).toEqual([`apns:production:${"ee".repeat(32)}`, "https://web.push.apple.com/stand-in"]);
     // A device you haven't used for a day isn't "last": news goes to every device then.
     h.advance(25 * 3600_000);
-    h.quest({ quest: "q-2", state: "working" });
-    h.quest({ quest: "q-2", state: "done" });
+    h.run({ run: "q-2", state: "working" });
+    h.run({ run: "q-2", state: "done" });
     await h.look();
     expect(h.sent.slice(3).map((s) => s.to).sort()).toEqual([`apns:production:${"ee".repeat(32)}`, "https://web.push.apple.com/stand-in"]);
   });
@@ -514,13 +514,13 @@ describe("tiers on the wire", () => {
     expect(h.service.zone()).toBe("Europe/London");
   });
 
-  test("his looks that found what they looked for go to the digest; his questions are told quietly, three a day, the rest to the digest", async () => {
+  test("its looks that found what they looked for go to the digest; its questions are told quietly, three a day, the rest to the digest", async () => {
     const h = harness();
     const turn = (id: string, over: Partial<Parameters<typeof turnItem>[0]> = {}) => turnItem({ id, conversation: "cv_1234567890123456789012", state: "done", question: false, waiting: false, look: true, ...over })!;
     h.db.addPending(turn("t_look"));
     for (const id of ["t_q1", "t_q2", "t_q3", "t_q4"]) h.db.addPending(turn(id, { question: true }));
     await h.look();
-    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "told", title: "Galahad: 3 things", body: "He has 3 questions." }]);
+    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "told", title: "Your agent: 3 things", body: "It has 3 questions." }]);
     expect(h.db.digestTopics()).toEqual({ look: 1, asked: 1 });
   });
 });
@@ -535,7 +535,7 @@ describe("reminders, and what's taken down", () => {
     actions = [{ id: ID, connector: "dinero", tool: "book", state: "waiting", requestedAt: `${h.now() - 60_000}.0000.n_test`, expires: h.now() + 24 * 3600_000, class: "outward" }];
     const lapses = h.now() + 24 * 3600_000;
     await h.look();
-    expect(h.sent.map((s) => s.payload.title)).toEqual(["Galahad asks your approval"]);
+    expect(h.sent.map((s) => s.payload.title)).toEqual(["Your agent asks your approval"]);
     for (let minutes = 0; minutes < 24 * 60; minutes += 15) {
       h.advance(15 * 60_000 - 61_000);
       await h.look();
@@ -543,7 +543,7 @@ describe("reminders, and what's taken down", () => {
     const salt = h.db.setting("tag-salt")!;
     const reminders = h.sent.slice(1).map((s) => s.payload);
     expect(reminders).toHaveLength(2);
-    for (const r of reminders) expect(r).toMatchObject({ kind: "approval", title: "Galahad: still waiting", open: "inbox", tag: tagOf(`action:${ID}`, salt) });
+    for (const r of reminders) expect(r).toMatchObject({ kind: "approval", title: "Your agent: still waiting", open: "inbox", tag: tagOf(`action:${ID}`, salt) });
     expect(reminders[0]!.body).toBe("An approval still waits for your answer. No answer by Fri 12:00 means no."); // (asked Thursday at noon)
     void lapses;
     expect(Object.keys(reminders[0]!)).not.toContain("action");
@@ -581,7 +581,7 @@ describe("reminders, and what's taken down", () => {
 });
 
 describe("the day's digest", () => {
-  test("at its time in your zone: what went to it and the knights' tasks that ended, quietly, to the device you used last; once a day", async () => {
+  test("at its time in your zone: what went to it and the agents' tasks that ended, quietly, to the device you used last; once a day", async () => {
     const devices = [
       { id: "c_phone", name: "phone", kind: "client" as const, scopes: ["mind:read", "chat"] },
       { id: "c_ipad", name: "iPad", kind: "client" as const, scopes: ["mind:read", "chat"] },
@@ -594,7 +594,7 @@ describe("the day's digest", () => {
     // A note and an outcome's report: the digest's, never told on their own.
     notices = [
       { key: "order-expiring:o1", severity: "info", title: "Standing order \"x\" expires 2026-11-30", source: "heartbeat", dismissed: false },
-      { key: "outcome:out-aaaaaaaaaaaa:report", severity: "info", title: "Books: his daily report", source: "outcome:out-aaaaaaaaaaaa", dismissed: false },
+      { key: "outcome:out-aaaaaaaaaaaa:report", severity: "info", title: "Books: its daily report", source: "outcome:out-aaaaaaaaaaaa", dismissed: false },
     ];
     await h.look();
     expect(h.sent).toEqual([]);
@@ -604,7 +604,7 @@ describe("the day's digest", () => {
     h.service.seen("c_ipad", "UTC");
     await h.look();
     expect(h.sent.map((s) => [s.to, s.payload])).toEqual([
-      [`apns:production:${"ff".repeat(32)}`, { v: 1, kind: "finished", title: "Galahad: while you were away", body: "3 tasks verified, 1 task didn't pass, 1 outcome report, 1 note.", open: "overview", tag: tagOf("digest", h.db.setting("tag-salt")!) }],
+      [`apns:production:${"ff".repeat(32)}`, { v: 1, kind: "finished", title: "Your agent: while you were away", body: "3 tasks verified, 1 task didn't pass, 1 outcome report, 1 note.", open: "overview", tag: tagOf("digest", h.db.setting("tag-salt")!) }],
     ]);
     expect(h.db.digestTopics()).toEqual({});
     // It doesn't count against the day, and comes once a day.

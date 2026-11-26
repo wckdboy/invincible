@@ -1,6 +1,6 @@
 /*
  * Names that read alike. A model chooses the name of a worker it makes, and people read that name beside
- * yours, his and every other worker's: so a name must not pass for one of those by being spelled with
+ * yours, its and every other worker's: so a name must not pass for one of those by being spelled with
  * letters that are only drawn the same (a Cyrillic "а" for "a", a capital "I" for "l", small capitals).
  *
  * Two checks, both pure and small on purpose:

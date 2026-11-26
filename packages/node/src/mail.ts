@@ -3,8 +3,8 @@ import type { ConnectorResult } from "@invincible/models";
 import type { NativeTool } from "./connectors.ts";
 
 /*
- * Mail, as Galahad's own tools (natives): Gmail through Google's Gmail API, Outlook through Microsoft Graph, signed in
- * as you (brain oauth.ts) and Galahad's alone, its reads private (the catalog's gmail and outlook).
+ * Mail, as the primary's own tools (natives): Gmail through Google's Gmail API, Outlook through Microsoft Graph, signed in
+ * as you (brain oauth.ts) and the primary's alone, its reads private (the catalog's gmail and outlook).
  * A tool here may make several requests (a search then each message's headers; a reply's draft needs the message it
  * answers), so it is carried out by the node rather than as one request template, and what it answers is compact:
  * the headers that matter and the words of a message, never its raw MIME. Mail is someone else's words: it reaches

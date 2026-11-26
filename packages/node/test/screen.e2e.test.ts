@@ -85,7 +85,7 @@ beforeAll(async () => {
   for (const [h, p, name] of [[home, port, "mini"], [bareHome, barePort, "ultra"]] as const) {
     const { identity, keystore } = await h.createIdentity("file");
     const store = new LedgerStore(h.ledgerPath);
-    const fleet = foundFleet(store, identity, { fleetName: "camelot", nodeName: name });
+    const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: name });
     store.close();
     h.writeConfig({ v: 1, name, fleet, port: p, keystore, advertise: "127.0.0.1" });
   }
@@ -101,7 +101,7 @@ afterAll(async () => {
 });
 
 describe("a Mac's own screen", () => {
-  test("the node says it has one, and you see its size, what macOS allows Galahad, and what is in front", async () => {
+  test("the node says it has one, and you see its size, what macOS allows your agent, and what is in front", async () => {
     expect(daemon.store.activeDevice(daemon.identity.id)?.profile?.caps?.screen).toBe(true);
     const status = await admin<ScreenStatus>("screen", {});
     expect(status.status).toBe(200);
@@ -145,13 +145,13 @@ describe("a Mac's own screen", () => {
     const asksBare = withToken(() => bareHome.adminToken(), barePort);
     const answered = await asksBare<{ error: string }>("screen", {});
     expect(answered.status).toBe(424);
-    expect(answered.body.error).toContain("only a Mac that runs its node from the Galahad app has one");
+    expect(answered.body.error).toContain("only a Mac that runs its node from the Invincible app has one");
     expect(bare.store.activeDevice(bare.identity.id)?.profile?.caps?.screen).toBeUndefined();
   });
 });
 
 describe("sessions on a Mac's own screen", () => {
-  /** An ask, as Galahad's own (in your conversation with him) puts it in the log: only his principal reaches the route. */
+  /** An ask, as the primary's own (in your conversation with it) puts it in the log: only its principal reaches the route. */
   let n = 0;
   const asked = (minutes = 30) => {
     const id = `sc_${String(++n).padStart(22, "0")}`;
@@ -160,7 +160,7 @@ describe("sessions on a Mac's own screen", () => {
   };
   const sessionNow = async (id: string) => (await admin<{ sessions: ScreenSessionView[] }>("screenSessions")).body.sessions.find((s) => s.id === id)!;
 
-  test("an ask waits as a card; you allow it from a paired device, and it is his for its minutes from your answer", async () => {
+  test("an ask waits as a card; you allow it from a paired device, and it is its for its minutes from your answer", async () => {
     const id = asked(30);
     const reader = await pair("reader-2", ["chat", "mind:read"]);
     const listed = await reader<{ sessions: ScreenSessionView[] }>("screenSessions");
@@ -192,7 +192,7 @@ describe("sessions on a Mac's own screen", () => {
     expect((await admin("decideScreen", { id: `sc_${"x".repeat(22)}`, allow: true })).status).toBe(404);
   });
 
-  test("an agent neither asks (only Galahad himself does, in your conversation), nor answers, nor ends one", async () => {
+  test("an agent neither asks (only your agent itself does, in your conversation), nor answers, nor ends one", async () => {
     const id = asked();
     expect((await arm("askScreen", { why: "just looking", minutes: 5 })).status).toBe(403);
     expect((await arm("decideScreen", { id, allow: true })).status).toBe(403);

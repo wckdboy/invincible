@@ -7,7 +7,7 @@ import { ConnectorService } from "../src/connectors.ts";
 import { addresses, gmailNatives, gmailWords, outlookNatives, rawMessage, subjectLine, wordsOf } from "../src/mail.ts";
 
 /*
- * Mail as Galahad's own tools (mail.ts), against stand-ins for Gmail's API and Microsoft Graph: what each tool asks
+ * Mail as the primary's own tools (mail.ts), against stand-ins for Gmail's API and Microsoft Graph: what each tool asks
  * of the service, and what it answers (compact: the headers that matter and a message's words, never raw MIME).
  * Every address and message here is made up.
  */
@@ -194,9 +194,9 @@ describe("Outlook", () => {
   });
 });
 
-test("the catalog's mail is Galahad's alone and private, signs in as you, and asks before anything leaves or goes", () => {
+test("the catalog's mail is your agent's alone and private, signs in as you, and asks before anything leaves or goes", () => {
   for (const manifest of [gmail, outlook]) {
-    expect(manifest).toMatchObject({ access: { only: "galahad", allowed: [] }, private: true, auth: { scheme: "oauth" } });
+    expect(manifest).toMatchObject({ access: { only: "primary", allowed: [] }, private: true, auth: { scheme: "oauth" } });
     const cls = Object.fromEntries(Object.entries(manifest.tools).map(([name, tool]) => [name, tool.class]));
     expect(cls).toEqual({ search: "read", read: "read", draft: "create", send: "outward", archive: "modify", trash: "delete" });
   }
@@ -207,7 +207,7 @@ test("the catalog's mail is Galahad's alone and private, signs in as you, and as
 test("a native's requests go to its connector's own origin or nowhere: one sent elsewhere is refused before it leaves", async () => {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "ultra" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
   const vault = new Vault(store, identity);
   store.emit(identity, "connector.set", { id: "gmail", manifest: CATALOG.gmail!.manifest });
   const sent: string[] = [];

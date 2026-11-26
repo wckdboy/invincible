@@ -90,7 +90,7 @@ describe("secret scanning", () => {
   });
 
   // Ordinary engineering text that names a credential without holding one (it blocked every later
-  // message of a temporary chat once Galahad wrote such a line himself, since the history is resent).
+  // message of a temporary chat once the primary wrote such a line itself, since the history is resent).
   const harmless = [
     "const token = request.headers.get(\"authorization\");",
     "const token = request.headers.get(...)",

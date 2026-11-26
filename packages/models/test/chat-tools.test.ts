@@ -5,7 +5,7 @@ import { carriedFor, carryOf } from "../src/adapters.ts";
 import { chat, type ChatTools, CONTINUE, MAX_CONTINUATIONS, MAX_TOOL_ROUNDS, SAME_ANSWER_LIMIT, type ToolCall } from "../src/index.ts";
 
 /*
- * Galahad's chat with tools: the model calls tools in rounds, sees their outcomes,
+ * The primary's chat with tools: the model calls tools in rounds, sees their outcomes,
  * then answers. Both provider formats (OpenAI-compatible function calling and
  * Anthropic's tool use through the official SDK) run against stand-ins.
  */
@@ -13,7 +13,7 @@ import { chat, type ChatTools, CONTINUE, MAX_CONTINUATIONS, MAX_TOOL_ROUNDS, SAM
 function brain(models: string[], anthropic = false) {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
-  foundFleet(store, identity, { fleetName: "camelot", nodeName: "n" });
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
   const vault = new Vault(store, identity);
   store.emit(identity, "provider.set", { id: "local", kind: "openai", baseUrl: "http://127.0.0.1:9/v1" });
   if (anthropic) {
@@ -138,7 +138,7 @@ describe("chat with tools (OpenAI-compatible)", () => {
     expect(events.at(-1)).toMatchObject({ type: "error", error: expect.stringContaining(`${MAX_TOOL_ROUNDS} rounds`) });
   });
 
-  test(`the same call that said the same ${SAME_ANSWER_LIMIT} times isn't run again in that answer, and he's told why`, async () => {
+  test(`the same call that said the same ${SAME_ANSWER_LIMIT} times isn't run again in that answer, and it's told why`, async () => {
     const model = scripted([
       callTool("c1", "recall", '{"query":"ci"}'),
       callTool("c2", "recall", '{"query":"ci"}'),
@@ -261,13 +261,13 @@ describe("chat with tools (Anthropic, through the official SDK)", () => {
   });
 });
 
-/** The caller's own tools, as a quest's engineer offers them: the node never runs one. */
+/** The caller's own tools, as a run's engineer offers them: the node never runs one. */
 const SHELL = [
   { name: "read", description: "Read a file.", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
   { name: "bash", description: "Run a command.", inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } },
 ];
 
-describe("the caller's own tools (a quest's engineer)", () => {
+describe("the caller's own tools (a run's engineer)", () => {
   test("an answer that calls them ends with its calls and what to carry back; nothing runs here", async () => {
     const model = scripted([
       openai(

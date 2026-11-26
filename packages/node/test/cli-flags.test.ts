@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 /*
  * The CLI reads its options with node's parseArgs, not strictly: an option it doesn't declare is taken for a bare
- * switch, and the word after it for a positional. So `roundtable provision bob --network gateway`, `network` never
+ * switch, and the word after it for a positional. So `agents provision bob --network gateway`, `network` never
  * declared, made bob's VM online, with the internet, not the gateway-only VM asked for (found on the Mac mini, 17
  * November 2026). Every option a command reads must be declared, with its type, where the CLI parses them.
  */

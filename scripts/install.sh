@@ -11,7 +11,7 @@
 #
 #   --join <invite>     join a fleet (from `invincible invite` on one of its nodes) instead of founding one
 #   --name <name>       this node's name (default: this machine's short host name)
-#   --fleet <name>      a new fleet's name (default: camelot)
+#   --fleet <name>      a new fleet's name (default: homelab)
 #   --ref <ref>         which Invincible: a branch, a tag or a commit (default: main)
 #   --no-service        don't keep it running as a service (nor publish it: there'd be nothing to publish)
 #   --no-expose         don't publish the app on your tailnet
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 REPO=wckdboy/invincible
-REF=main NAME="" FLEET=camelot INVITE="" SERVICE=1 EXPOSE=1 PAIR=1 PLAN=0
+REF=main NAME="" FLEET=homelab INVITE="" SERVICE=1 EXPOSE=1 PAIR=1 PLAN=0
 while (($#)); do
   case $1 in
     --join) INVITE=${2:?--join needs an invite}; shift ;;

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync, statfsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type DoctorReport, freeSlots, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, redact, type Teammate } from "@invincible/core";
+import { type DoctorReport, freeSlots, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, redact, type Agent } from "@invincible/core";
 import { type ModelsContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, onPlan, parseRef, planOf, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { containerKernel, macFirewallInstalled, type SandboxHost } from "@invincible/sandbox";
@@ -199,8 +199,8 @@ export interface DoctorDeps {
   now?: () => number;
   /** Push notifications, as this node holds them (set once there are any). */
   notify?: () => DoctorFacts["notify"];
-  /** The Roundtable's knights (absent: a node with no Roundtable). */
-  knights?: () => readonly Teammate[];
+  /** The agents' agents (absent: a node with no Agents). */
+  agents?: () => readonly Agent[];
 }
 
 export interface DoctorOptions {
@@ -217,7 +217,7 @@ const CONNECTOR_PROBE_MS = 5_000;
 const EMBED_PROBE_MS = 10_000;
 /** At most this many models are asked in one check, whatever the roster holds. */
 const MAX_MODEL_PROBES = 6;
-const DOCTOR_QUEST = "galahad.doctor";
+const DOCTOR_RUN = "primary.doctor";
 /** The files the app can't open without. */
 const APP_FILES = ["/", "/app.js", "/boot.js", "/sw.js", "/pair.js", "/manifest.webmanifest"];
 const SILENT_ROLES = new Set(["decider", "embedder"]);
@@ -237,7 +237,7 @@ function modelProblem(deps: DoctorDeps, ref: string): string | null {
   // Its allowance spent until a time its provider gave: passed over until then (models/windows.ts), and said so.
   const spent = windowsOf(deps.store).spentFor(ref);
   if (spent) return windowsOf(deps.store).why(spent);
-  // (A coding plan's model is the knights' tools' to use: what is asked of it is whether a tool would get its key.)
+  // (A coding plan's model is the agents' tools' to use: what is asked of it is whether a tool would get its key.)
   const provider = resolveProvider(deps.store, deps.vault, parsed.provider, onPlan(ref) ? "tool" : "own");
   if (!provider) return `provider "${parsed.provider}" is not configured`;
   if (provider.local) {
@@ -257,7 +257,7 @@ function concrete(deps: DoctorDeps, ref: string): string | null {
   return served ? `${provider}/${served}` : null;
 }
 
-/** One word from one model, through the same door every answer of his goes through. Stopped at its first word. */
+/** One word from one model, through the same door every answer of its goes through. Stopped at its first word. */
 async function askOneWord(ctx: ModelsContext, ref: string, outer?: AbortSignal): Promise<{ ref: string; ok: boolean; ms: number; error: string | null }> {
   const stop = new AbortController();
   let timedOut = false;
@@ -315,7 +315,7 @@ async function rolesOf(deps: DoctorDeps, ask: boolean, signal?: AbortSignal): Pr
   const wanted = new Map<string, RoleFact[]>();
   for (const role of roles) {
     if (!role.chats) continue;
-    // (His own: a coding plan's model is never asked a word by him.)
+    // (Its own: a coding plan's model is never asked a word by it.)
     const first = role.models.find((m) => m.problem === null && !m.plan);
     const ref = first ? concrete(deps, first.ref) : null;
     if (!ref) continue;
@@ -341,15 +341,15 @@ async function startSandboxes(host: SandboxHost, governor: Governor, capacity: (
     let id: string | null = null;
     try {
       // (As cut off as this host cuts one off: no network, or on a Mac, which has none such, the gateway's alone.)
-      const sandbox = await host.create({ cpus: 1, memoryGb: 1, ttlMinutes: 5, persistent: false, quest: DOCTOR_QUEST, network: host.strictest, isolation: kind });
+      const sandbox = await host.create({ cpus: 1, memoryGb: 1, ttlMinutes: 5, persistent: false, run: DOCTOR_RUN, network: host.strictest, isolation: kind });
       id = sandbox.id;
       const ran = await host.exec(sandbox.id, ["true"], 30);
       out.push({ kind, ok: ran.exitCode === 0, ms: Math.round(performance.now() - started), error: ran.exitCode === 0 ? null : `its command exited ${ran.exitCode}: ${message(ran.stderr || ran.stdout)}` });
     } catch (error) {
       out.push({ kind, ok: false, ms: Math.round(performance.now() - started), error: message(error) });
     } finally {
-      // His own, ephemeral, made for this look: the oath lets him remove it.
-      if (id) await host.destroy(id, { quest: DOCTOR_QUEST }).catch(() => {});
+      // Its own, ephemeral, made for this look: the policy lets it remove it.
+      if (id) await host.destroy(id, { run: DOCTOR_RUN }).catch(() => {});
     }
   }
   return out;
@@ -563,8 +563,8 @@ export async function gatherFacts(deps: DoctorDeps, opts: DoctorOptions = {}): P
     disk: system.disk(deps.home.dir),
     service: { restarts, warnings: deps.trouble.recent() },
     ...(deps.notify ? { notify: deps.notify() } : {}),
-    // (Only knights whose own setup can stop their work: sensitive mode, keys of yours.)
-    ...(deps.knights ? { knights: deps.knights().filter((k) => k.sensitive || k.keys?.length).map((k) => ({ id: k.id, name: k.name, sensitive: k.sensitive && k.models?.length ? k.models.map((ref) => ({ ref, problem: modelProblem(deps, ref) })) : null, keys: (k.keys ?? []).map((g) => ({ secret: g.secret, problem: ungivable(deps.vault, g.secret) })) })) } : {}),
+    // (Only agents whose own setup can stop their work: sensitive mode, keys of yours.)
+    ...(deps.agents ? { agents: deps.agents().filter((k) => k.sensitive || k.keys?.length).map((k) => ({ id: k.id, name: k.name, sensitive: k.sensitive && k.models?.length ? k.models.map((ref) => ({ ref, problem: modelProblem(deps, ref) })) : null, keys: (k.keys ?? []).map((g) => ({ secret: g.secret, problem: ungivable(deps.vault, g.secret) })) })) } : {}),
   };
 }
 

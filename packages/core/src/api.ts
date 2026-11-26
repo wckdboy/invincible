@@ -9,18 +9,18 @@ import { MAX_ORDER_DAYS, OrderId, OrderPattern } from "./orders.ts";
 import { QampGrantInput, QampRevokeInput } from "./qamp.ts";
 import { RuleInput, RuleName, RuleToldInput, RuleTrippedInput } from "./rules.ts";
 import { type Scope, Scope as ScopeSchema } from "./scopes.ts";
-import { TrialRecord, TrialRunId, type TrialRunSettings } from "./trials.ts";
-import { HarnessOptions, TrialPins, VariantName } from "./trials.ts";
+import { EvalRecord, EvalRunId, type EvalRunSettings } from "./evals.ts";
+import { HarnessOptions, EvalPins, VariantName } from "./evals.ts";
 import type { Usage } from "./spend.ts";
-import { PricedModel, PriceSchema, SpendLines, type TrialSpent, UsageBudgetInput } from "./usage.ts";
+import { PricedModel, PriceSchema, SpendLines, type EvalSpent, UsageBudgetInput } from "./usage.ts";
 import { type ComputeUsage, EffortAsk, EffortLevel } from "./compute.ts";
 import { DecisionRequest } from "./decisions.ts";
 import { CancelLookInput, ConversationId, LookLaterInput, ProjectBranchInput, ProjectCommitInput, ProjectGitInput, ProjectId, ProjectInput } from "./chats.ts";
-import { TeammateId, TeammateInput, TeamBacklogInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamWorkspaceQuest, TeammateModels } from "./team.ts";
-import { QuestGates, QuestProgressInput } from "./quests.ts";
+import { AgentId, AgentInput, TeamBacklogInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamWorkspaceRun, AgentModels } from "./team.ts";
+import { RunGates, RunProgressInput } from "./runs.ts";
 import { type StopReason, TURN_ID } from "./turns.ts";
 import { type ArchiveContextEntry, ArchiveBudgetInput, ArchiveDeleteInput, ArchiveId, ArchiveReindexInput, ArchiveSearchInput, NoteIdeaInput } from "./archive.ts";
-import { QuestEvidenceInput, SkillApproveInput, SkillId, SkillLockInput, SkillRetireInput, SkillsBudgetInput, SkillWriteInput } from "./skills-input.ts";
+import { RunEvidenceInput, SkillApproveInput, SkillId, SkillLockInput, SkillRetireInput, SkillsBudgetInput, SkillWriteInput } from "./skills-input.ts";
 import { QUESTION_ID, QUESTION_LIMITS } from "./questions.ts";
 import { ApplePushInput, ApplePushKeyInput, NotifyDeviceRef, NotifyPrefsInput, PushSubscriptionInput } from "./notify-input.ts";
 
@@ -41,12 +41,12 @@ export const isReservedGatewayScope = (name: string): boolean => name === "searc
 
 /** A model provider's id: a name that isn't one of the gateway's own scopes. */
 export const ProviderId = Name.refine((name) => !isReservedGatewayScope(name), {
-  message: "search and git:… are Galahad's own gateway scopes, not model providers",
+  message: "search and git:… are your agent's own gateway scopes, not model providers",
 });
 
 const ModelRef = z.string().min(3).max(256);
 
-/** A tool the caller runs itself (a quest's engineer: its shell, its files), offered to the model by name. */
+/** A tool the caller runs itself (a run's engineer: its shell, its files), offered to the model by name. */
 export const ClientToolName = z.string().regex(/^[a-z][a-z0-9_]{0,40}$/, "a tool's name: lower case, digits and _");
 /** A call the model made to one of the caller's own tools (clientTools): its id, the tool, its input as the model gave it. */
 export const ClientCall = z.strictObject({ id: z.string().min(1).max(128), name: ClientToolName, input: z.record(z.string(), z.unknown()) });
@@ -63,7 +63,7 @@ export const ChatMessage = z
     /** Your files with it, kept on the node (uploadAttachment). An answer carries none. */
     attachments: z.array(AttachmentRef).min(1).max(ATTACHMENT_LIMITS.perMessage).optional(),
     /**
-     * How hard the model thinks from this message on: a quest's loop says it for each turn by what the turn is (brain
+     * How hard the model thinks from this message on: a run's loop says it for each turn by what the turn is (brain
      * roster.ts STEP_EFFORT), and a role you pinned (setRosterEffort) thinks at your level instead. Absent: the role's.
      */
     effort: z.enum(THINKING_EFFORTS).optional(),
@@ -114,11 +114,11 @@ const TerminalId = z.string().regex(TERMINAL_ID);
 const TerminalSize = z.strictObject({ cols: z.number().int().min(10).max(500), rows: z.number().int().min(4).max(200) });
 
 /**
- * One of several attempts at the same quest (effort): the node shows where each is, and counts
- * nothing by it. Its quest must be one an effort was granted for; otherwise it's ignored.
+ * One of several attempts at the same run (effort): the node shows where each is, and counts
+ * nothing by it. Its run must be one an effort was granted for; otherwise it's ignored.
  */
 export const AttemptTag = z.strictObject({
-  quest: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/),
+  run: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/),
   index: z.number().int().min(1).max(8),
   of: z.number().int().min(1).max(8),
 });
@@ -142,7 +142,7 @@ export const SandboxRequest = z.strictObject({
   providers: z.array(ProviderId).max(16).optional(),
   /** Persistent sandboxes are not cleaned up automatically; destroying one asks first. */
   persistent: z.boolean().default(false),
-  quest: z.string().max(64).regex(/^[A-Za-z0-9._:-]+$/).optional(),
+  run: z.string().max(64).regex(/^[A-Za-z0-9._:-]+$/).optional(),
   /** The workspace's size limit in GB (default 20). /work can't grow past it. */
   diskGb: z.number().int().min(1).max(2048).optional(),
   /**
@@ -164,17 +164,17 @@ export type SandboxRequest = z.input<typeof SandboxRequest>;
 export const LoopTask = z.discriminatedUnion("kind", [
   /**
    * Look around: fleet and body checks, notices in your inbox; optionally a checklist a model reads. After
-   * it, Galahad fixes what's on the self-action allowlist himself (self-action.ts) unless `selfAction` is false.
+   * it, the primary fixes what's on the self-action allowlist itself (self-action.ts) unless `selfAction` is false.
    */
   z.strictObject({ kind: z.literal("heartbeat"), checklist: z.string().max(4000).optional(), selfAction: z.boolean().optional() }),
-  /** A quest in a fresh sandbox: plan, work, independent review, remembered. */
+  /** A run in a fresh sandbox: plan, work, independent review, remembered. */
   z.strictObject({
-    kind: z.literal("quest"),
+    kind: z.literal("run"),
     goal: z.string().min(1).max(4000),
     network: SandboxNetwork,
     maxSteps: z.number().int().min(1).max(100).optional(),
-    /** Gates (quests.ts): each must exit 0 in the quest's sandbox before the reviewer is asked. */
-    gates: QuestGates.optional(),
+    /** Gates (runs.ts): each must exit 0 in the run's sandbox before the reviewer is asked. */
+    gates: RunGates.optional(),
   }),
   /** One connector tool; outward and delete tools file an approval request instead. */
   z.strictObject({ kind: z.literal("call"), connector: ConnectorId, tool: ToolName, args: ConnectorArgs.optional() }),
@@ -233,7 +233,7 @@ export const LoopWakes = z.array(LoopWake).max(MAX_LOOP_WAKES);
 export const WakeCooldownMs = z.number().int().min(60_000).max(24 * 3600_000);
 
 /**
- * A loop Galahad drafted because you asked for one in chat ("every weekday at 8, check my open PRs"). It is only a
+ * A loop the primary drafted because you asked for one in chat ("every weekday at 8, check my open PRs"). It is only a
  * draft: it waits in your Inbox, and becomes a loop only when you add it (setLoop with its `draft`), as you'd add one
  * yourself. Kept on the node it was drafted on, never in the mind's log; a week unanswered and it's gone.
  */
@@ -248,13 +248,13 @@ export const LoopDraftInput = z.strictObject({
   wakes: LoopWakes.optional(),
   cooldownMs: WakeCooldownMs.optional(),
   label: z.string().max(128).optional(),
-  /** What you asked for, in his words: shown with the draft. */
+  /** What you asked for, in its words: shown with the draft. */
   why: z.string().max(500).optional(),
 });
 
 /**
- * A connector an agent asked you for (Galahad, a knight, an agent over MCP): one Galahad ships that isn't installed, or
- * a service he doesn't have at all. Like a key's request it waits in your Inbox, and in the chat it was asked in, with
+ * A connector an agent asked you for (The primary, an agent, an agent over MCP): one the primary ships that isn't installed, or
+ * a service it doesn't have at all. Like a key's request it waits in your Inbox, and in the chat it was asked in, with
  * who asked and what for; it never installs anything, and it goes once that connector is installed or you dismiss it.
  * Kept on the node it was asked on, never in the mind's log; a week unanswered and it's gone.
  */
@@ -270,12 +270,12 @@ export const ConnectorRequestInput = z.strictObject({
  * it never runs, and every surface that lists it says its task no longer exists (loops.ts' loopRecords).
  */
 export const RETIRED_LOOP_TASKS: Readonly<Record<string, string>> = {
-  reflect: "his journal, removed on 14 November 2026; what he wrote is still in his memory",
+  reflect: "its journal, removed on 14 November 2026; what it wrote is still in its memory",
 };
 
-/** A place on a knight's screen, in its pixels. */
+/** A place on an agent's screen, in its pixels. */
 const ScreenPx = z.number().int().min(0).max(10_000);
-/** One thing done on a knight's desktop from outside its VM (`look`: nothing, only the picture). */
+/** One thing done on an agent's desktop from outside its VM (`look`: nothing, only the picture). */
 export const DesktopAction = z.discriminatedUnion("do", [
   z.strictObject({ do: z.literal("look") }),
   z.strictObject({ do: z.literal("click"), x: ScreenPx, y: ScreenPx, button: z.enum(["left", "right", "middle", "double"]).optional() }),
@@ -290,14 +290,14 @@ export type DesktopAction = z.infer<typeof DesktopAction>;
 /** An app on a Mac, by its name (`Safari`, `Xcode`) or bundle id (`com.apple.Safari`). */
 const AppName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$/);
 /**
- * One thing done on a Mac's own screen (docs/MAC.md, the Mac itself): a knight's desktop's actions, in its words and
+ * One thing done on a Mac's own screen (docs/MAC.md, the Mac itself): an agent's desktop's actions, in its words and
  * places (its xdotool key names, a turn of the wheel), and an app opened by its name. A place is in the screen's points.
  */
 export const ScreenAction = z.discriminatedUnion("do", [...DesktopAction.options, z.strictObject({ do: z.literal("app"), name: AppName })]);
 export type ScreenAction = z.infer<typeof ScreenAction>;
 
 /**
- * One thing Galahad does on a Mac itself, in a session you allowed: a thing done on its screen, or a shell command run
+ * One thing the primary does on a Mac itself, in a session you allowed: a thing done on its screen, or a shell command run
  * as its user in its home (`run`, held to your tripwires).
  */
 export const ScreenUseAction = z.discriminatedUnion("do", [
@@ -306,7 +306,7 @@ export const ScreenUseAction = z.discriminatedUnion("do", [
 ]);
 export type ScreenUseAction = z.infer<typeof ScreenUseAction>;
 
-/** What one thing he did on a Mac itself came to: a picture of its screen after it, or what a command printed. */
+/** What one thing it did on a Mac itself came to: a picture of its screen after it, or what a command printed. */
 export interface ScreenUse {
   node: string;
   nodeName: string;
@@ -316,14 +316,14 @@ export interface ScreenUse {
   ran?: ExecResult;
 }
 
-/** A Mac's own screen, as the node that has it says: its size in points, and whether macOS lets Galahad record it and control it. */
+/** A Mac's own screen, as the node that has it says: its size in points, and whether macOS lets the primary record it and control it. */
 export interface ScreenStatus {
   node: string;
   width: number;
   height: number;
   record: boolean;
   control: boolean;
-  /** The app in front, and its window's title where macOS lets Galahad read it. */
+  /** The app in front, and its window's title where macOS lets the primary read it. */
   front: string;
   /** The app in front's bundle id. */
   frontId?: string;
@@ -331,7 +331,7 @@ export interface ScreenStatus {
   asking?: string | null;
 }
 
-/** A picture of a screen, as a knight's desktop and a Mac's own give it: JPEG, at the screen's size. */
+/** A picture of a screen, as an agent's desktop and a Mac's own give it: JPEG, at the screen's size. */
 export interface ScreenView {
   shot: { mediaType: "image/jpeg"; data: string };
   width: number;
@@ -340,68 +340,68 @@ export interface ScreenView {
 
 export const routes = {
   team: { method: "GET", path: "/api/team", scope: "chat", input: null },
-  saveTeammate: { method: "POST", path: "/api/team/teammates", scope: "fleet:admin", input: TeammateInput },
-  /** The models you may set a knight to work on: the roster's, then each local model a node of the fleet serves, and where. */
+  saveAgent: { method: "POST", path: "/api/team/agents", scope: "fleet:admin", input: AgentInput },
+  /** The models you may set an agent to work on: the roster's, then each local model a node of the fleet serves, and where. */
   teamModels: { method: "GET", path: "/api/team/models", scope: "mind:read", input: null },
   saveTeamRoom: { method: "POST", path: "/api/team/rooms", scope: "fleet:admin", input: TeamRoomInput },
-  /** Yours alone: the knights' order, and who leads the Roundtable. */
-  directTeammate: { method: "POST", path: "/api/team/direct", scope: "fleet:admin", input: z.strictObject({ id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/) }) },
+  /** Yours alone: the agents' order, and who leads the agents. */
+  directAgent: { method: "POST", path: "/api/team/direct", scope: "fleet:admin", input: z.strictObject({ id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/) }) },
   teamRoom: { method: "POST", path: "/api/team/room", scope: "chat", input: z.strictObject({ id: z.string().min(1).max(80) }) },
   /** What a task did, as it happened: its kept lines after number `after`, a page at a time, with the task's status now. Yours to read, like a room. */
   teamTrail: { method: "POST", path: "/api/team/trail", scope: "chat", input: z.strictObject({ task: TeamTaskId, after: z.number().int().min(0).max(10_000_000).optional() }) },
   /** The steps of a task that another can be started from (PLAN #15): `{ steps: TeamCheckpoint[] }`, the first first. */
   teamSteps: { method: "POST", path: "/api/team/steps", scope: "chat", input: z.strictObject({ task: TeamTaskId }) },
-  /** How often a knight's scripts used each key of yours it was given, through the key gateway, in the last thirty days (PLAN #17). */
-  teamKeyUses: { method: "POST", path: "/api/team/key-uses", scope: "chat", input: z.strictObject({ id: TeammateId }) },
-  /** You have looked at a knight's page or a room, on whichever device: what ended there so far is no longer new (`team`'s `seen`). */
+  /** How often an agent's scripts used each key of yours it was given, through the key gateway, in the last thirty days (PLAN #17). */
+  teamKeyUses: { method: "POST", path: "/api/team/key-uses", scope: "chat", input: z.strictObject({ id: AgentId }) },
+  /** You have looked at an agent's page or a room, on whichever device: what ended there so far is no longer new (`team`'s `seen`). */
   seeTeam: { method: "POST", path: "/api/team/seen", scope: "chat", input: TeamSeenInput },
   postTeamMessage: { method: "POST", path: "/api/team/messages", scope: "fleet:admin", input: TeamPostInput },
   createTeamTask: { method: "POST", path: "/api/team/tasks", scope: "fleet:admin", input: TeamTaskInput },
-  /** Outcomes Galahad owns (PLAN #43): each with its room, budget and spend, its tasks and his plan. */
+  /** Outcomes the primary owns (PLAN #43): each with its room, budget and spend, its tasks and its plan. */
   teamOutcomes: { method: "GET", path: "/api/team/outcomes", scope: "chat", input: null },
   /**
-   * Give him an outcome to own: its room is made with the knights you named, and he gives them tasks on his own within
+   * Give it an outcome to own: its room is made with the agents you named, and it gives them tasks on its own within
    * its budget (your ruling of 18 November). Yours alone, as giving work is.
    */
   setTeamOutcome: { method: "POST", path: "/api/team/outcomes", scope: "fleet:admin", input: TeamOutcomeInput },
   controlTeamOutcome: { method: "POST", path: "/api/team/outcomes/control", scope: "fleet:admin", input: TeamOutcomeControlInput },
-  /** Galahad takes on an outcome you asked him to own, in your conversation (his team_outcome; leads the team, as giveToTeam). */
-  galahadOutcome: { method: "POST", path: "/api/team/galahad-outcome", scope: "mind:write", input: TeamOutcomeInput },
-  /** A task given to the Roundtable: the knight best suited to it takes it, and the answer says who and why (everyone considered, each with its reasons). */
+  /** The primary takes on an outcome you asked it to own, in your conversation (its team_outcome; leads the team, as giveToTeam). */
+  primaryOutcome: { method: "POST", path: "/api/team/primary-outcome", scope: "mind:write", input: TeamOutcomeInput },
+  /** A task given to the agents: the agent best suited to it takes it, and the answer says who and why (everyone considered, each with its reasons). */
   giveTeamTask: { method: "POST", path: "/api/team/give", scope: "fleet:admin", input: TeamGiveInput },
   controlTeam: { method: "POST", path: "/api/team/control", scope: "fleet:admin", input: TeamControlInput },
   /** Yours alone, and for good. A worker with a VM goes only with `destroyWorkspace`, from a device that also holds `sandbox`. */
-  removeTeammate: { method: "POST", path: "/api/team/remove", scope: "fleet:admin", input: TeamRemoveInput },
+  removeAgent: { method: "POST", path: "/api/team/remove", scope: "fleet:admin", input: TeamRemoveInput },
   teamMemory: { method: "POST", path: "/api/team/memory", scope: "fleet:admin", input: z.strictObject({ id: z.string().min(1).max(32), text: z.string().max(20000) }) },
-  /** The VMs' notes store (Engram) for this node's knights: on or off, and yours alone to say. `team` says when it is on; a knight's `teamWorkspace` says whether its VM has it. */
+  /** The VMs' notes store (Engram) for this node's agents: on or off, and yours alone to say. `team` says when it is on; an agent's `teamWorkspace` says whether its VM has it. */
   teamEngram: { method: "POST", path: "/api/team/engram", scope: "fleet:admin", input: TeamEngramInput },
-  /** Whether a pull request's failing checks go back to the knight whose work it was, outside an outcome too (PLAN #29): yours alone to say. `team` says when it is on. */
+  /** Whether a pull request's failing checks go back to the agent whose work it was, outside an outcome too (PLAN #29): yours alone to say. `team` says when it is on. */
   teamCi: { method: "POST", path: "/api/team/ci", scope: "fleet:admin", input: TeamCiInput },
-  /** Whether Galahad offers idle knights work from your backlog: one task a day at most for each, waiting for your approval. */
+  /** Whether the primary offers idle agents work from your backlog: one task a day at most for each, waiting for your approval. */
   teamBacklog: { method: "POST", path: "/api/team/backlog", scope: "fleet:admin", input: TeamBacklogInput },
-  /** A knight's verified work as a pull request, on your word (PLAN #37): filed as its knight's ship and answered by you at once, so the outbox (and the CI watcher) has it. */
+  /** An agent's verified work as a pull request, on your word (PLAN #37): filed as its agent's ship and answered by you at once, so the outbox (and the CI watcher) has it. */
   shipTeamTask: { method: "POST", path: "/api/team/ship", scope: "fleet:admin", input: TeamShipInput },
-  /* Galahad's own way to the other knights, from your conversation with him (his tools: team, team_recruit, team_message).
+  /* The primary's own way to the other agents, from your conversation with it (its tools: team, team_recruit, team_message).
    * Refused to everyone else whatever their scopes, you included: the routes above are yours. */
   teamOverview: { method: "POST", path: "/api/team/overview", scope: "mind:read", input: z.strictObject({ room: TeamRoomId.optional() }) },
-  recruitTeammate: { method: "POST", path: "/api/team/recruit", scope: "mind:write", input: TeamRecruitInput },
+  recruitAgent: { method: "POST", path: "/api/team/recruit", scope: "mind:write", input: TeamRecruitInput },
   sayToTeam: { method: "POST", path: "/api/team/say", scope: "mind:write", input: TeamSayInput },
-  /** His work for the Roundtable: the knight best suited to it takes it, as when you give one; within his allowance for the day. */
-  giveToTeam: { method: "POST", path: "/api/team/galahad-give", scope: "mind:write", input: TeamGiveInput },
+  /** Its work for the agents: the agent best suited to it takes it, as when you give one; within its allowance for the day. */
+  giveToTeam: { method: "POST", path: "/api/team/primary-give", scope: "mind:write", input: TeamGiveInput },
   teamWorkspace: { method: "POST", path: "/api/team/workspace", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32) }) },
-  /** A folder of a knight's workspace (its VM's /work; `galahad`: his computer's), read; yours alone. */
+  /** A folder of an agent's workspace (its VM's /work; `primary`: its computer's), read; yours alone. */
   teamFiles: { method: "POST", path: "/api/team/files", scope: "sandbox", input: TeamFilesInput },
-  /** One file of a knight's workspace, read: text with anything like a key redacted, a picture, or what it is. */
+  /** One file of an agent's workspace, read: text with anything like a key redacted, a picture, or what it is. */
   teamFile: { method: "POST", path: "/api/team/file", scope: "sandbox", input: TeamFileInput },
-  /** What a knight's task changed in its repository (its latest task with none named): the files and the diff. */
+  /** What an agent's task changed in its repository (its latest task with none named): the files and the diff. */
   teamChanges: { method: "POST", path: "/api/team/changes", scope: "sandbox", input: TeamChangesInput },
-  provisionTeammate: {
+  provisionAgent: {
     method: "POST", path: "/api/team/provision", scope: "fleet:admin",
     input: z.strictObject({
       id: z.string().min(1).max(32), on: NodeRef.optional(), cpus: z.number().min(0.25).max(64).default(1), memoryGb: z.number().min(0.25).max(512).default(2), diskGb: z.number().int().min(1).max(2048).default(20),
       /**
-       * What the knight's VM can reach: `online` (the internet and the model gateway: the owner's word is that
-       * knights can use the internet) or `gateway` (the model gateway and nothing else). Set when the VM is made:
+       * What the agent's VM can reach: `online` (the internet and the model gateway: the owner's word is that
+       * agents can use the internet) or `gateway` (the model gateway and nothing else). Set when the VM is made:
        * a microVM's network can't be changed afterwards.
        */
       network: z.enum(["online", "gateway"]).default("online"),
@@ -410,74 +410,74 @@ export const routes = {
     }),
   },
   /**
-   * A knight's VM made again from its image as it is now, on your word: the same VM and `/work`, a new
-   * container, so a fix to the image (or a newer tool in it) reaches a knight that was made before it. Its
-   * network may be chosen again with it. Refused while the knight is working. Yours alone, like its removal.
+   * An agent's VM made again from its image as it is now, on your word: the same VM and `/work`, a new
+   * container, so a fix to the image (or a newer tool in it) reaches an agent that was made before it. Its
+   * network may be chosen again with it. Refused while the agent is working. Yours alone, like its removal.
    */
-  remakeTeammate: {
+  remakeAgent: {
     method: "POST", path: "/api/team/remake", scope: "fleet:admin",
     input: z.strictObject({ id: z.string().min(1).max(32), network: z.enum(["online", "gateway"]).optional(), /** With a desktop from now on (true), or without one (false); absent: as it is. */ desktop: z.boolean().optional() }),
   },
-  /** The same, asked of the node that hosts the VM by the team's controller (never by a knight). */
+  /** The same, asked of the node that hosts the VM by the team's controller (never by an agent). */
   remakeTeamWorkspace: {
     method: "POST", path: "/api/team/remake-workspace", scope: "fleet:admin",
     input: z.strictObject({
-      id: SandboxId, on: NodeRef.optional(), quest: TeamWorkspaceQuest, providers: z.array(z.string().min(1).max(64)).max(16), network: z.enum(["online", "gateway"]).optional(), desktop: z.boolean().optional(),
+      id: SandboxId, on: NodeRef.optional(), run: TeamWorkspaceRun, providers: z.array(z.string().min(1).max(64)).max(16), network: z.enum(["online", "gateway"]).optional(), desktop: z.boolean().optional(),
       /** The device whose word it was, when a node passes the request on to the VM's host. */
       onBehalfOf: z.string().max(100).optional(),
     }),
   },
   /**
-   * A knight's VM made bigger while it runs, on your word: more threads, memory or disk, with nothing stopped and its
+   * An agent's VM made bigger while it runs, on your word: more threads, memory or disk, with nothing stopped and its
    * work kept (the microVM takes threads and memory as it runs; its workspace grows where it is mounted). What it adds
    * must fit this node's ceiling. Never smaller this way: a smaller size takes effect when the VM is made again.
    */
-  resizeTeammate: {
+  resizeAgent: {
     method: "POST", path: "/api/team/resize", scope: "fleet:admin",
     input: z
       .strictObject({ id: z.string().min(1).max(32), cpus: z.number().min(0.25).max(64).optional(), memoryGb: z.number().min(0.25).max(512).optional(), diskGb: z.number().int().min(1).max(4096).optional() })
       .refine((input) => input.cpus !== undefined || input.memoryGb !== undefined || input.diskGb !== undefined, "say what it should have: cpus, memoryGb or diskGb"),
   },
   /**
-   * Galahad gives a knight's VM (or his own computer, id "galahad") more while it runs, himself, when its work needs it
-   * (your ruling, 16 November 2026): only more, never past the ceiling, and the ledger says it was him and why. His alone,
-   * from your conversation with him; you give a VM more with resizeTeammate.
+   * The primary gives an agent's VM (or its own computer, id "primary") more while it runs, itself, when its work needs it
+   * (your ruling, 16 November 2026): only more, never past the ceiling, and the ledger says it was it and why. Its alone,
+   * from your conversation with it; you give a VM more with resizeAgent.
    */
-  growTeammate: {
+  growAgent: {
     method: "POST", path: "/api/team/grow", scope: "sandbox",
     input: z
       .strictObject({ id: z.string().min(1).max(32), cpus: z.number().min(0.25).max(64).optional(), memoryGb: z.number().min(0.25).max(512).optional(), diskGb: z.number().int().min(1).max(4096).optional(), why: z.string().trim().min(3).max(300) })
       .refine((input) => input.cpus !== undefined || input.memoryGb !== undefined || input.diskGb !== undefined, "say what it should have: cpus, memoryGb or diskGb"),
   },
   /**
-   * Galahad's own computer, worked on by him alone (his `computer` tool): one command in his VM, run as a knight's task
-   * runs its own, with the model gateway, and his eyes when the roster names a model for them. Everyone else is refused.
+   * The primary's own computer, worked on by it alone (its `computer` tool): one command in its VM, run as an agent's task
+   * runs its own, with the model gateway, and its eyes when the roster names a model for them. Everyone else is refused.
    */
   computerExec: { method: "POST", path: "/api/team/computer", scope: "sandbox", input: z.strictObject({ command: z.string().min(1).max(100_000), timeoutSec: z.number().int().min(1).max(900).optional() }) },
-  /** The same, asked of the node that hosts the VM by the team's controller (never by a knight). */
+  /** The same, asked of the node that hosts the VM by the team's controller (never by an agent). */
   resizeTeamWorkspace: {
     method: "POST", path: "/api/team/resize-workspace", scope: "fleet:admin",
     input: z.strictObject({
-      id: SandboxId, on: NodeRef.optional(), quest: TeamWorkspaceQuest,
+      id: SandboxId, on: NodeRef.optional(), run: TeamWorkspaceRun,
       cpus: z.number().min(0.25).max(64).optional(), memoryGb: z.number().min(0.25).max(512).optional(), diskGb: z.number().int().min(1).max(4096).optional(),
       /** The device whose word it was, when a node passes the request on to the VM's host. */
       onBehalfOf: z.string().max(100).optional(),
-      /** When Galahad grew it himself (growTeammate): why, which the ledger keeps. */
+      /** When the primary grew it itself (growAgent): why, which the ledger keeps. */
       why: z.string().trim().min(3).max(300).optional(),
     }),
   },
   /**
-   * A knight's desktop, for you to watch and to take over (to sign in for it, to get it past something): one
+   * An agent's desktop, for you to watch and to take over (to sign in for it, to get it past something): one
    * thing done there, or nothing (`look`), and a picture of the screen back. Yours alone. What you type is carried
    * to the VM and never written to the ledger.
    */
   teamDesktop: { method: "POST", path: "/api/team/desktop", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32), action: DesktopAction.default({ do: "look" }) }) },
   /** The same, asked of the node that hosts the VM by the team's controller. */
-  teamDesktopOn: { method: "POST", path: "/api/team/desktop-workspace", scope: "sandbox", input: z.strictObject({ id: SandboxId, on: NodeRef.optional(), quest: TeamWorkspaceQuest, action: DesktopAction }) },
-  /** A Mac's own screen (`on`: another node's): its size, and what macOS lets Galahad do with it. Yours alone. */
+  teamDesktopOn: { method: "POST", path: "/api/team/desktop-workspace", scope: "sandbox", input: z.strictObject({ id: SandboxId, on: NodeRef.optional(), run: TeamWorkspaceRun, action: DesktopAction }) },
+  /** A Mac's own screen (`on`: another node's): its size, and what macOS lets the primary do with it. Yours alone. */
   screen: { method: "POST", path: "/api/screen", scope: "fleet:admin", input: z.strictObject({ on: NodeRef.optional() }) },
   /**
-   * Shows macOS's own prompts on that Mac's screen, to let Galahad record it and control it (or lists the app in System
+   * Shows macOS's own prompts on that Mac's screen, to let the primary record it and control it (or lists the app in System
    * Settings for you to turn on): answered there, once, by you.
    */
   screenAllow: { method: "POST", path: "/api/screen/allow", scope: "fleet:admin", input: z.strictObject({ on: NodeRef.optional() }) },
@@ -486,22 +486,22 @@ export const routes = {
    * Yours alone; what you type is carried to it and never written to the ledger.
    */
   screenDesktop: { method: "POST", path: "/api/screen/desktop", scope: "fleet:admin", input: z.strictObject({ on: NodeRef.optional(), action: ScreenAction.default({ do: "look" }) }) },
-  /** Sessions on a Mac's own screen Galahad asked for, the newest first, each where it stands now (core's screen.ts). */
+  /** Sessions on a Mac's own screen the primary asked for, the newest first, each where it stands now (core's screen.ts). */
   screenSessions: { method: "GET", path: "/api/screen/sessions", scope: "mind:read", input: null },
   /**
-   * Galahad asks to use a Mac itself for a while (`on`: which, where the fleet has more than one): his alone, in your
-   * conversation with him. An approve card goes to your devices; nothing of that Mac is his until you allow it.
+   * The primary asks to use a Mac itself for a while (`on`: which, where the fleet has more than one): its alone, in your
+   * conversation with it. An approve card goes to your devices; nothing of that Mac is its until you allow it.
    */
   askScreen: {
     method: "POST", path: "/api/screen/ask", scope: "sandbox",
     input: z.strictObject({ on: NodeRef.optional(), why: z.string().trim().min(3).max(500), minutes: z.number().int().min(1).max(SCREEN_SESSION_MAX_MINUTES) }),
   },
-  /** Your answer to his ask, yours alone: allowed (his for its minutes, from now) or not. */
+  /** Your answer to its ask, yours alone: allowed (its for its minutes, from now) or not. */
   decideScreen: { method: "POST", path: "/api/screen/decide", scope: "fleet:admin", input: z.strictObject({ id: ScreenSessionId, allow: z.boolean() }) },
-  /** A session over before its time: ended by you, or by him once he's done. */
+  /** A session over before its time: ended by you, or by it once it's done. */
   endScreen: { method: "POST", path: "/api/screen/end", scope: "chat", input: z.strictObject({ id: ScreenSessionId }) },
   /**
-   * One thing Galahad does on a Mac itself (his alone, in a session you allowed: the Mac checks it from its own copy of
+   * One thing the primary does on a Mac itself (its alone, in a session you allowed: the Mac checks it from its own copy of
    * the log before anything is done), and a picture of its screen after it, or what a command printed.
    */
   screenUse: { method: "POST", path: "/api/screen/use", scope: "sandbox", input: z.strictObject({ on: NodeRef.optional(), action: ScreenUseAction }) },
@@ -510,20 +510,20 @@ export const routes = {
     input: z.strictObject({
       id: SandboxId,
       on: NodeRef.optional(),
-      quest: TeamWorkspaceQuest,
+      run: TeamWorkspaceRun,
       repository: z.string().regex(/^https:\/\/github\.com\/[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}\/?$/).optional(),
       /** What the task's lease covers: the providers with a key now (absent: what the VM was made with). */
       providers: z.array(z.string().min(1).max(64)).max(16).optional(),
       /** Work in sensitive mode (heldModels): the lease is good for these models alone (absent: any of its providers'). */
-      models: TeammateModels.min(1).optional(),
-      /** The keys of yours its knight may use but never see (PLAN #17), as the key gateway reads them: key:<secret>:<header>:<read|write>. */
+      models: AgentModels.min(1).optional(),
+      /** The keys of yours its agent may use but never see (PLAN #17), as the key gateway reads them: key:<secret>:<header>:<read|write>. */
       keys: z.array(z.string().regex(/^key:[A-Za-z0-9._-]{1,64}:[a-z][a-z0-9-]{0,63}:(read|write)$/)).max(16).optional(),
     }),
   },
-  /** A knight's lease kept while its task runs (its controller asks every ten minutes): `{ renewed }`. A lapsed one isn't brought back. */
+  /** An agent's lease kept while its task runs (its controller asks every ten minutes): `{ renewed }`. A lapsed one isn't brought back. */
   renewTeamWorkspace: {
     method: "POST", path: "/api/team/renew-workspace", scope: "fleet:admin",
-    input: z.strictObject({ id: SandboxId, on: NodeRef.optional(), quest: TeamWorkspaceQuest }),
+    input: z.strictObject({ id: SandboxId, on: NodeRef.optional(), run: TeamWorkspaceRun }),
   },
   whoami: { method: "GET", path: "/api/whoami", scope: null, input: null },
   /**
@@ -552,11 +552,11 @@ export const routes = {
   },
   forget: { method: "POST", path: "/api/memories/forget", scope: "mind:write", input: z.strictObject({ id: z.string() }) },
   /**
-   * What he knows of you (ABOUT_YOU_TAG): the facts you kept, which go with every answer of his, and the ones he
+   * What it knows of you (ABOUT_YOU_TAG): the facts you kept, which go with every answer of its, and the ones it
    * proposed, which wait for you. Yours to read from any device that may read the mind.
    */
   aboutYou: { method: "GET", path: "/api/about-you", scope: "mind:read", input: null },
-  /** Keep a fact he proposed (or reword one you kept): yours alone, never an agent's. It goes with his answers from then on. */
+  /** Keep a fact it proposed (or reword one you kept): yours alone, never an agent's. It goes with its answers from then on. */
   keepAboutYou: {
     method: "POST",
     path: "/api/about-you/keep",
@@ -587,7 +587,7 @@ export const routes = {
     scope: "mind:write",
     input: z.strictObject({ name: Name, provider: Name.optional(), purpose: z.string().min(1).max(500) }),
   },
-  /** A key he asked for that no longer matters (or that you won't give): out of your Inbox until he asks again. Yours: the
+  /** A key it asked for that no longer matters (or that you won't give): out of your Inbox until it asks again. Yours: the
    * scope that fills a request, which agents never hold. */
   dismissSecretRequest: { method: "POST", path: "/api/secret-requests/dismiss", scope: "vault:write", input: z.strictObject({ name: Name }) },
   rotateVault: {
@@ -623,7 +623,7 @@ export const routes = {
   },
   roster: { method: "GET", path: "/api/roster", scope: "mind:read", input: null },
   /**
-   * Check what a model can do (models/checks.ts): follow the quest loop's format, read a screen, place a click on
+   * Check what a model can do (models/checks.ts): follow the run loop's format, read a screen, place a click on
    * one. About eight calls; recorded for every node, which then chooses by it. Yours alone.
    */
   checkModel: { method: "POST", path: "/api/models/check", scope: "brain:write", input: z.strictObject({ model: ModelRef, parts: z.array(z.enum(["format", "reads", "places"])).min(1).max(3).optional() }) },
@@ -653,12 +653,12 @@ export const routes = {
       /** The model this answer is to be independent of (a review, usually): its candidates that are the same model are asked last. */
       apart: ModelRef.optional(),
       messages: z.array(ChatMessage).min(1).max(500),
-      /** Galahad's tools, within the caller's scopes (default). Quests turn them off: their roles have their own. */
+      /** The primary's tools, within the caller's scopes (default). Runs turn them off: their roles have their own. */
       tools: z.boolean().optional(),
       /**
-       * Tools the caller runs itself (a quest's engineer: its shell and its files, in its own sandbox), offered to the
+       * Tools the caller runs itself (a run's engineer: its shell and its files, in its own sandbox), offered to the
        * model. The node never runs one: an answer that calls them ends with a `calls` event, and the next request
-       * carries what they came to. Only with Galahad's own tools off, and never in a kept chat.
+       * carries what they came to. Only with the primary's own tools off, and never in a kept chat.
        */
       clientTools: z
         .array(z.strictObject({ name: ClientToolName, description: z.string().min(1).max(4000), inputSchema: z.record(z.string(), z.unknown()) }))
@@ -674,42 +674,42 @@ export const routes = {
       retry: z.boolean().optional(),
       /**
        * Offer the archive's most relevant entries as context (fenced as data). Default: on when
-       * the answer has tools, off without them; quests turn it on for the plan only.
+       * the answer has tools, off without them; runs turn it on for the plan only.
        */
       archive: z.boolean().optional(),
       /**
-       * Recall what the mind holds that bears on it (default yes). A trial of your own work's quest goes without: the
-       * mind may hold what the task it replays taught, and a trial is never handed its answer.
+       * Recall what the mind holds that bears on it (default yes). An eval of your own work's run goes without: the
+       * mind may hold what the task it replays taught, and an eval is never handed its answer.
        */
       memories: z.boolean().optional(),
       /** Start the role's models at this position: each parallel attempt takes another one first (the rest stay its fallbacks). */
       rotate: z.number().int().min(0).max(15).optional(),
-      /** This call is one attempt's (effort): the census counts it as that attempt's, not his own. */
+      /** This call is one attempt's (effort): the census counts it as that attempt's, not its own. */
       attempt: AttemptTag.optional(),
       /**
-       * This call is a quest of his own (its planner's or its engineer's): the skills that bear on its goal go
-       * with it, fenced as data, chosen once and the same for every call of that quest (skills.ts), and their
-       * use is counted against it. Only his own quests (yours from a terminal, a loop's): never an agent's.
+       * This call is a run of its own (its planner's or its engineer's): the skills that bear on its goal go
+       * with it, fenced as data, chosen once and the same for every call of that run (skills.ts), and their
+       * use is counted against it. Only its own runs (yours from a terminal, a loop's): never an agent's.
        */
-      quest: z.strictObject({ id: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/), goal: z.string().min(1).max(4000) }).optional(),
+      run: z.strictObject({ id: z.string().regex(/^[A-Za-z0-9._:-]{1,64}$/), goal: z.string().min(1).max(4000) }).optional(),
       /**
-       * This call is coding work (a quest's planner, engineer or reviewer): a coding plan's models may answer
-       * it, called as Galahad. Without it a plan's models are passed over, as for any talk with him.
+       * This call is coding work (a run's planner, engineer or reviewer): a coding plan's models may answer
+       * it, called as the primary. Without it a plan's models are passed over, as for any talk with it.
        */
       coding: z.boolean().optional(),
       /**
-       * This call spends a budget of yours (a quest given --budget-usd): only a model whose spend it can count answers
+       * This call spends a budget of yours (a run given --budget-usd): only a model whose spend it can count answers
        * it, one you've priced or one on the node's own machine. Any other is passed over, saying why.
        */
       budgeted: z.boolean().optional(),
       /**
-       * This call is a turn of a quest's work loop (a command a reply), whichever role answers it: the engineer's,
+       * This call is a turn of a run's work loop (a command a reply), whichever role answers it: the engineer's,
        * or the planner's once a gate has failed twice in a row. A model checked as not following the loop's
        * format is passed over for it, as for the engineer's own turns.
        */
       loop: z.boolean().optional(),
     })
-      .refine((c) => !c.clientTools || c.tools === false, "tools the caller runs go without Galahad's own (tools: false)")
+      .refine((c) => !c.clientTools || c.tools === false, "tools the caller runs go without your agent's own (tools: false)")
       .refine((c) => !c.clientTools || (!c.save && !c.conversation), "tools the caller runs are never in a kept chat"),
   },
   /**
@@ -735,13 +735,13 @@ export const routes = {
   /** Your chats, kept on this node (yours alone: never an agent's to read). */
   conversations: { method: "GET", path: "/api/conversations", scope: "chat", input: null },
   conversation: { method: "POST", path: "/api/conversations/get", scope: "chat", input: z.strictObject({ id: ConversationId }) },
-  /** What is under way in a chat of yours: his knights' tasks given there that haven't ended (Stop on each), his looks that wait. */
+  /** What is under way in a chat of yours: its agents' tasks given there that haven't ended (Stop on each), its looks that wait. */
   underway: { method: "POST", path: "/api/conversations/underway", scope: "chat", input: z.strictObject({ id: ConversationId }) },
-  /** A look he sets himself (his look_later, as he answers in a chat of yours): only Galahad himself, from inside the node. */
+  /** A look it sets itself (its look_later, as it answers in a chat of yours): only the primary itself, from inside the node. */
   lookLater: { method: "POST", path: "/api/looks/set", scope: "chat", input: LookLaterInput },
-  /** His looks that wait, in every chat of yours. */
+  /** Its looks that wait, in every chat of yours. */
   looks: { method: "GET", path: "/api/looks", scope: "chat", input: null },
-  /** One of his looks, called off: by you, or by him in the chat it is in. */
+  /** One of its looks, called off: by you, or by it in the chat it is in. */
   cancelLook: { method: "POST", path: "/api/looks/cancel", scope: "chat", input: CancelLookInput },
   updateConversation: {
     method: "POST",
@@ -754,7 +754,7 @@ export const routes = {
   /** You have read it, on whichever device: its answers so far are no longer new, as email's read (`unread`). */
   seeConversation: { method: "POST", path: "/api/conversations/seen", scope: "chat", input: z.strictObject({ id: ConversationId }) },
   /*
-   * Turns the node owns (turns.ts): a chat turn of yours (the chat route, with his tools) runs on the node to
+   * Turns the node owns (turns.ts): a chat turn of yours (the chat route, with its tools) runs on the node to
    * its end whether or not anyone is listening. Yours alone, like your chats: never an agent's. A temporary chat's
    * turn is watched and steered only by the device that started it.
    */
@@ -764,7 +764,7 @@ export const routes = {
   attachTurn: { method: "POST", path: "/api/turns/attach", scope: "chat", input: z.strictObject({ turn: TurnId }) },
   /** Stop a turn: the only thing that does, besides the node's own limit for one turn. */
   stopTurn: { method: "POST", path: "/api/turns/stop", scope: "chat", input: z.strictObject({ turn: TurnId }) },
-  /** Steer: your message reaches him at the next safe point, and the turn goes on with it. */
+  /** Steer: your message reaches it at the next safe point, and the turn goes on with it. */
   steerTurn: { method: "POST", path: "/api/turns/steer", scope: "chat", input: z.strictObject({ turn: TurnId, text: QueuedText }) },
   /** Queue: kept on the node behind a kept chat, sent as its next turn when the one before it ends well. */
   queueMessage: { method: "POST", path: "/api/conversations/queue", scope: "chat", input: z.strictObject({ conversation: ConversationId, text: QueuedText, role: Name.optional() }) },
@@ -777,7 +777,7 @@ export const routes = {
   resumeQueue: { method: "POST", path: "/api/conversations/queue/resume", scope: "chat", input: z.strictObject({ conversation: ConversationId }) },
   /**
    * A side question: answered (server-sent events) from what a chat holds and what its running turn has said
-   * and done so far, without his tools, and added to nothing. The working turn never sees it unless you
+   * and done so far, without its tools, and added to nothing. The working turn never sees it unless you
    * bring it back. Names a kept chat, or a running turn (a temporary chat's).
    */
   askAside: {
@@ -790,15 +790,15 @@ export const routes = {
   },
   /** Bring a side question and its answer back: the turn under way is steered with them; with none running, they join the kept chat. */
   bringBack: { method: "POST", path: "/api/turns/aside/bring", scope: "chat", input: z.strictObject({ aside: AsideId }) },
-  /** The quests in hand on this node and the ones that just ended: each one's plan, the step he's on, its gates' last results. */
-  quests: { method: "GET", path: "/api/quests", scope: "mind:read", input: null },
-  /** Whoever runs a quest says where it stands (whoever may run its sandbox may: the sandbox scope). */
-  questProgress: { method: "POST", path: "/api/quests/progress", scope: "sandbox", input: QuestProgressInput },
+  /** The runs in hand on this node and the ones that just ended: each one's plan, the step it's on, its gates' last results. */
+  runs: { method: "GET", path: "/api/runs", scope: "mind:read", input: null },
+  /** Whoever runs a run says where it stands (whoever may run its sandbox may: the sandbox scope). */
+  runProgress: { method: "POST", path: "/api/runs/progress", scope: "sandbox", input: RunProgressInput },
   projects: { method: "GET", path: "/api/projects", scope: "mind:read", input: null },
-  /** A project's instructions steer Galahad, so setting one is yours (brain:write: never an agent's). */
+  /** A project's instructions steer the primary, so setting one is yours (brain:write: never an agent's). */
   setProject: { method: "POST", path: "/api/projects", scope: "brain:write", input: ProjectInput },
   removeProject: { method: "POST", path: "/api/projects/remove", scope: "brain:write", input: z.strictObject({ id: ProjectId }) },
-  /** The Build view's git on a project's checkout on his computer (docs/BUILD.md), yours alone: how it stands. */
+  /** The Build view's git on a project's checkout on its computer (docs/BUILD.md), yours alone: how it stands. */
   projectGit: { method: "POST", path: "/api/projects/git", scope: "sandbox", input: ProjectGitInput },
   /** Switch its checkout to a branch, or start one where it stands. */
   projectBranch: { method: "POST", path: "/api/projects/branch", scope: "sandbox", input: ProjectBranchInput },
@@ -877,7 +877,7 @@ export const routes = {
       timeoutSec: z.number().int().min(1).max(3600).optional(),
       on: NodeRef.optional(),
       /** Set by a full node relaying an arm's request: the arm may only use its own sandboxes. */
-      quest: z.string().max(64).optional(),
+      run: z.string().max(64).optional(),
     }),
   },
   /**
@@ -891,15 +891,15 @@ export const routes = {
     scope: "sandbox",
     input: z.strictObject({
       id: SandboxId,
-      /** Calls since then (ms; absent: all it made, as for a fresh sandbox). A knight's VM outlives its tasks. */
+      /** Calls since then (ms; absent: all it made, as for a fresh sandbox). An agent's VM outlives its tasks. */
       since: z.number().int().min(0).optional(),
       on: NodeRef.optional(),
       /** Set by a full node relaying an arm's request: the arm may only ask of its own sandboxes. */
-      quest: z.string().max(64).optional(),
+      run: z.string().max(64).optional(),
     }),
   },
   /**
-   * Terminals in this node's sandboxes (a knight's VM, one of yours), for you alone: a login shell on a real terminal.
+   * Terminals in this node's sandboxes (an agent's VM, one of yours), for you alone: a login shell on a real terminal.
    * One stays open while it is watched and for a while after, so a phone that leaves to finish a sign-in comes back to it.
    */
   terminals: { method: "GET", path: "/api/terminals", scope: "sandbox", input: null },
@@ -923,12 +923,12 @@ export const routes = {
       on: NodeRef.optional(),
       /** Set by a full node forwarding an owner's request; honored only from full nodes. */
       onBehalfOf: z.string().max(100).optional(),
-      /** Set by a full node relaying an arm's request: cleanup of that quest's own sandboxes only. */
-      quest: z.string().max(64).optional(),
+      /** Set by a full node relaying an arm's request: cleanup of that run's own sandboxes only. */
+      run: z.string().max(64).optional(),
     }),
   },
   /**
-   * A commit of a GitHub repository put in one of your sandboxes that isn't a knight's VM (a trial of your own work's),
+   * A commit of a GitHub repository put in one of your sandboxes that isn't an agent's VM (an eval of your own work's),
    * through the node's read-only git gateway: a lease for that one repository is written inside the sandbox and
    * revoked once the fetch is over, so its token is never in a command or an answer. The commit, with up to 50
    * commits of its history and nothing after it, is checked out at `path`.
@@ -982,7 +982,7 @@ export const routes = {
    */
   loopHook: { method: "POST", path: "/api/loops/hook", scope: "brain:write", input: z.strictObject({ name: LoopName }) },
   loopDrafts: { method: "GET", path: "/api/loops/drafts", scope: "mind:read", input: null },
-  /** Telegram (PLAN #19): whether a bot of yours talks to Galahad through this node, and which account it answers. */
+  /** Telegram (PLAN #19): whether a bot of yours talks to the primary through this node, and which account it answers. */
   telegram: { method: "GET", path: "/api/telegram", scope: "mind:read", input: null },
   /**
    * Connect a bot of yours (its token from BotFather, checked with Telegram and sealed in the vault). The gateway
@@ -992,7 +992,7 @@ export const routes = {
   telegramConnect: { method: "POST", path: "/api/telegram/connect", scope: "fleet:admin", input: z.strictObject({ token: z.string().trim().min(20).max(100) }) },
   /** Stop: the bot's token goes, and the gateway's device is revoked. Its chats stay yours. */
   telegramDisconnect: { method: "POST", path: "/api/telegram/disconnect", scope: "fleet:admin", input: z.strictObject({}) },
-  /** Slack (PLAN #19): whether an app of yours talks to Galahad through this node, in which workspace, and which account it answers. */
+  /** Slack (PLAN #19): whether an app of yours talks to the primary through this node, in which workspace, and which account it answers. */
   slack: { method: "GET", path: "/api/slack", scope: "mind:read", input: null },
   /**
    * Connect an app of yours (made from SLACK_APP_MANIFEST): its app-level token (Socket Mode) and its bot token, checked
@@ -1002,7 +1002,7 @@ export const routes = {
   slackConnect: { method: "POST", path: "/api/slack/connect", scope: "fleet:admin", input: z.strictObject({ appToken: z.string().trim().min(20).max(400), botToken: z.string().trim().min(20).max(400) }) },
   /** Stop: the app's tokens go, and the gateway's device is revoked. Its chats stay yours. */
   slackDisconnect: { method: "POST", path: "/api/slack/disconnect", scope: "fleet:admin", input: z.strictObject({}) },
-  /** Galahad's draft of a loop you asked for in chat: never a loop until you add it (setLoop, brain:write). */
+  /** The primary's draft of a loop you asked for in chat: never a loop until you add it (setLoop, brain:write). */
   draftLoop: { method: "POST", path: "/api/loops/drafts", scope: "chat", input: LoopDraftInput },
   dismissLoopDraft: { method: "POST", path: "/api/loops/drafts/dismiss", scope: "brain:write", input: z.strictObject({ id: LoopDraftId }) },
   removeLoop: { method: "POST", path: "/api/loops/remove", scope: "brain:write", input: z.strictObject({ name: LoopName }) },
@@ -1025,9 +1025,9 @@ export const routes = {
    * terminal or a paired device; never an agent, never another node): a full check asks each role's model a word.
    */
   doctor: { method: "POST", path: "/api/doctor", scope: "fleet:admin", input: z.strictObject({ quick: z.boolean().optional(), offline: z.boolean().optional() }) },
-  /** Whether Galahad fixes what's on the self-action allowlist himself after each heartbeat, and what he fixed lately. */
+  /** Whether the primary fixes what's on the self-action allowlist itself after each heartbeat, and what it fixed lately. */
   selfAction: { method: "GET", path: "/api/self-action", scope: "mind:read", input: null },
-  /** The owner's switch for self-action (on by default). It steers Galahad, so it's brain:write: never an agent's. */
+  /** The owner's switch for self-action (on by default). It steers the primary, so it's brain:write: never an agent's. */
   setSelfAction: { method: "POST", path: "/api/self-action", scope: "brain:write", input: z.strictObject({ on: z.boolean() }) },
   connectors: { method: "GET", path: "/api/connectors", scope: "mind:read", input: null },
   setConnector: {
@@ -1040,7 +1040,7 @@ export const routes = {
       origin: z.string().url().max(256).optional(),
       /** A connector of your own: a full manifest. */
       manifest: z.record(z.string(), z.unknown()).optional(),
-      /** A remote MCP server: Galahad lists its tools now (again, to refresh) and keeps the classes you chose. */
+      /** A remote MCP server: the primary lists its tools now (again, to refresh) and keeps the classes you chose. */
       mcp: z
         .strictObject({
           url: z.string().url().max(512),
@@ -1086,7 +1086,7 @@ export const routes = {
   },
   /** Forget a connector's sign-in (the app you registered stays). */
   oauthSignOut: { method: "POST", path: "/api/oauth/signout", scope: "brain:write", input: z.strictObject({ connector: ConnectorId }) },
-  /** Let an agent use a connector that's Galahad's alone, or stop it again. It answers that agent's request for it. */
+  /** Let an agent use a connector that's the primary's alone, or stop it again. It answers that agent's request for it. */
   setConnectorAccess: {
     method: "POST",
     path: "/api/connectors/access",
@@ -1103,10 +1103,10 @@ export const routes = {
       args: ConnectorArgs.optional(),
       why: z.string().max(500).optional(),
       /**
-       * You, asking to be asked: file it for approval like an agent's call (on behalf of a quest
+       * You, asking to be asked: file it for approval like an agent's call (on behalf of a run
        * you started), instead of running it now. Standing orders still answer it.
        */
-      ask: z.strictObject({ quest: z.string().regex(/^q-[a-z0-9]{1,16}$/).optional() }).optional(),
+      ask: z.strictObject({ run: z.string().regex(/^q-[a-z0-9]{1,16}$/).optional() }).optional(),
     }),
   },
   /** One tool's whole definition, for a call: an MCP server's read from it now and held to its pin; a template's as installed. */
@@ -1119,7 +1119,7 @@ export const routes = {
   actions: { method: "GET", path: "/api/actions", scope: "mind:read", input: null },
   /**
    * While you were away (PLAN #37): what happened since `since` (ms), in a few lines from what the node holds, no model
-   * asked: knights' tasks that ended, his outcomes' reports and questions, loops that failed, and what waits for you now.
+   * asked: agents' tasks that ended, its outcomes' reports and questions, loops that failed, and what waits for you now.
    */
   away: { method: "POST", path: "/api/away", scope: "mind:read", input: z.strictObject({ since: z.number().int().min(0) }) },
   decideAction: {
@@ -1185,29 +1185,29 @@ export const routes = {
       predictions: z.array(PredictionOutcome).max(16).optional(),
     }),
   },
-  trials: { method: "GET", path: "/api/trials", scope: "mind:read", input: null },
+  evals: { method: "GET", path: "/api/evals", scope: "mind:read", input: null },
   /**
-   * Record a graded trial, once. brain:write (never an arm's): the Index decides what
-   * Galahad keeps, so the thing being measured can't write its own marks.
+   * Record a graded eval, once. brain:write (never an arm's): the Index decides what
+   * the primary keeps, so the thing being measured can't write its own marks.
    */
-  recordTrial: {
+  recordEval: {
     method: "POST",
-    path: "/api/trials",
+    path: "/api/evals",
     scope: "brain:write",
-    /** `spent`: what its model calls came to, by role and model (counts only), recorded beside it (`trial.spent`). */
-    input: TrialRecord.extend({ spent: SpendLines.optional() }),
+    /** `spent`: what its model calls came to, by role and model (counts only), recorded beside it (`eval.spent`). */
+    input: EvalRecord.extend({ spent: SpendLines.optional() }),
   },
   /** A run's settings (its effort, what it pinned, its variant, its budget), recorded once when it starts: the reports read them. */
-  startTrialRun: {
+  startEvalRun: {
     method: "POST",
-    path: "/api/trials/runs",
+    path: "/api/evals/runs",
     scope: "brain:write",
     input: z.strictObject({
-      run: TrialRunId,
+      run: EvalRunId,
       suite: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/),
       effort: EffortLevel,
       parallel: z.number().int().min(1).max(64).optional(),
-      pins: TrialPins.optional(),
+      pins: EvalPins.optional(),
       variant: z.strictObject({ name: VariantName, options: z.strictObject(HarnessOptions.shape) }).optional(),
       seed: z.number().int().min(0).max(0xffffffff).optional(),
       group: z.string().regex(/^g-[a-z0-9]{1,16}$/).optional(),
@@ -1227,13 +1227,13 @@ export const routes = {
   /** Your budget for this node's model calls (a line to watch, never a stop): a day's or a month's, or none. */
   setUsageBudget: { method: "POST", path: "/api/usage/budget", scope: "brain:write", input: UsageBudgetInput },
 
-  // ---- Compute: what the fleet can carry, and how he spends it (compute.ts) ----------
-  /** The census: every node's body, what it measured, its ceiling, slots in use and waiting; his plan; the day's budget. */
+  // ---- Compute: what the fleet can carry, and how it spends it (compute.ts) ----------
+  /** The census: every node's body, what it measured, its ceiling, slots in use and waiting; its plan; the day's budget. */
   compute: { method: "GET", path: "/api/compute", scope: "mind:read", input: null },
   /** A node measures itself now: a few seconds, at low priority, within its ceiling. Yours to ask (brain:write: never an agent's). */
   calibrateCompute: { method: "POST", path: "/api/compute/calibrate", scope: "brain:write", input: z.strictObject({ on: NodeRef.optional() }) },
   /**
-   * The ceiling for one node: the threads and memory he may use there, how many sandboxes and model calls at
+   * The ceiling for one node: the threads and memory it may use there, how many sandboxes and model calls at
    * once. Yours alone (fleet:admin, from a terminal or a paired device; never an agent, never a node on its own).
    */
   setComputeLimit: {
@@ -1250,7 +1250,7 @@ export const routes = {
       reset: z.boolean().optional(),
     }),
   },
-  /** The level auto may reach, and the day's budget of extra attempts. It steers how he spends: brain:write, and yours alone. */
+  /** The level auto may reach, and the day's budget of extra attempts. It steers how it spends: brain:write, and yours alone. */
   setComputePolicy: {
     method: "POST",
     path: "/api/compute/policy",
@@ -1258,14 +1258,14 @@ export const routes = {
     input: z.strictObject({ effort: EffortAsk.optional(), attemptsPerDay: z.number().int().min(0).max(500).optional() }),
   },
   /**
-   * How many attempts a quest runs at once: the node decides, from the slots free now and the day's budget
+   * How many attempts a run runs at once: the node decides, from the slots free now and the day's budget
    * (decideEffort), and records each extra attempt in the ledger. Whoever may create sandboxes may ask.
    */
   effort: {
     method: "POST",
     path: "/api/compute/effort",
     scope: "sandbox",
-    input: z.strictObject({ quest: z.string().regex(/^[A-Za-z0-9._:-]{1,48}$/), effort: EffortAsk, on: NodeRef.optional(), label: z.string().max(160).optional() }),
+    input: z.strictObject({ run: z.string().regex(/^[A-Za-z0-9._:-]{1,48}$/), effort: EffortAsk, on: NodeRef.optional(), label: z.string().max(160).optional() }),
   },
   /** Typed answers about a state from the decider role (yes/no, a choice, a score), with probabilities. */
   decide: { method: "POST", path: "/api/decide", scope: "chat", input: DecisionRequest },
@@ -1298,7 +1298,7 @@ export const routes = {
       label: z.string().min(1).max(200).optional(),
       on: z.string().min(1).max(128).optional(),
       /** Set by a full node relaying an arm's request: the arm may only keep its own sandboxes' work. */
-      quest: z.string().max(64).optional(),
+      run: z.string().max(64).optional(),
     }),
   },
   /** One file of an artifact, as bytes (text and raster images inline, the rest as a download). */
@@ -1308,7 +1308,7 @@ export const routes = {
     scope: "mind:read",
     input: z.strictObject({ id: ArtifactId, path: z.string().min(1).max(512) }),
   },
-  /** Deleting kept work is yours to decide (the oath: never delete persistent things without approval). */
+  /** Deleting kept work is yours to decide (the policy: never delete persistent things without approval). */
   removeArtifact: { method: "POST", path: "/api/artifacts/remove", scope: "fleet:admin", input: z.strictObject({ id: ArtifactId }) },
   orders: { method: "GET", path: "/api/orders", scope: "mind:read", input: null },
   /** Sign a standing order: your answer in advance. Only you (never an agent or another node). */
@@ -1329,14 +1329,14 @@ export const routes = {
     }),
   },
   revokeOrder: { method: "POST", path: "/api/orders/revoke", scope: "fleet:admin", input: z.strictObject({ id: OrderId }) },
-  /** Your rules (rules.ts): the tripwires on his work's commands, each as this node reads it. */
+  /** Your rules (rules.ts): the tripwires on its work's commands, each as this node reads it. */
   rules: { method: "GET", path: "/api/rules", scope: "mind:read", input: null },
   /** Set a rule, or replace the one by its name: yours alone, like a standing order (never an agent's, never another node's). */
   setRule: { method: "POST", path: "/api/rules", scope: "fleet:admin", input: RuleInput },
   removeRule: { method: "POST", path: "/api/rules/remove", scope: "fleet:admin", input: z.strictObject({ name: RuleName }) },
-  /** A rule stopped a quest's command: the ledger says so. Whoever runs the quest's sandbox says it, and the node checks the rule stops it. */
+  /** A rule stopped a run's command: the ledger says so. Whoever runs the run's sandbox says it, and the node checks the rule stops it. */
   ruleTripped: { method: "POST", path: "/api/rules/tripped", scope: "sandbox", input: RuleTrippedInput },
-  /** A command a rule of yours that tells matched has run (a quest's, said by its loop): the node tells you. */
+  /** A command a rule of yours that tells matched has run (a run's, said by its loop): the node tells you. */
   ruleTold: { method: "POST", path: "/api/rules/told", scope: "sandbox", input: RuleToldInput },
   arms: { method: "GET", path: "/api/arms", scope: "fleet:admin", input: null },
   mintArm: {
@@ -1363,7 +1363,7 @@ export const routes = {
     input: z.strictObject({ label: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,47}$/) }),
   },
 
-  // ---- Q-AMP grants (qamp.ts; PLAN #58): an agent on another of your machines, a few of his tools, for a while ----
+  // ---- Q-AMP grants (qamp.ts; PLAN #58): an agent on another of your machines, a few of its tools, for a while ----
   /** The grants in force on this node: each one's agent, tools, end and bridge. Yours alone, as each of these is. */
   qampGrants: { method: "GET", path: "/api/qamp/grants", scope: "fleet:admin", input: null },
   /** Grant an agent's key some of the read-only tools for a while: an arm of its own, a chain bound to its key, a bridge. */
@@ -1380,7 +1380,7 @@ export const routes = {
   archiveEntry: { method: "POST", path: "/api/archive/entry", scope: "mind:read", input: z.strictObject({ id: ArchiveId }) },
   /** One file of an entry, as bytes (checked against its SHA-256 before it's sent). */
   archiveFile: { method: "POST", path: "/api/archive/file", scope: "mind:read", input: z.strictObject({ id: ArchiveId, path: z.string().min(1).max(512) }) },
-  /** An idea, kept: yours from the app or a terminal, Galahad's from his note_idea tool. */
+  /** An idea, kept: yours from the app or a terminal, the primary's from its note_idea tool. */
   noteIdea: { method: "POST", path: "/api/archive/ideas", scope: "mind:write", input: NoteIdeaInput },
   /** Only you delete, with a reason; a tombstone stays so it's never archived again. */
   deleteArchived: { method: "POST", path: "/api/archive/delete", scope: "fleet:admin", input: ArchiveDeleteInput },
@@ -1391,21 +1391,21 @@ export const routes = {
   /** How many entries the swift role may summarise per day. */
   setArchiveBudget: { method: "POST", path: "/api/archive/budget", scope: "brain:write", input: ArchiveBudgetInput },
 
-  // ---- His skills (skills.ts): how he did a kind of work, as words he reads --------
+  // ---- Its skills (skills.ts): how it did a kind of work, as words it reads --------
   /** Every skill with its state, uses and track record, and the day's budget for distilling. Read like any memory. */
   skills: { method: "GET", path: "/api/skills", scope: "mind:read", input: null },
-  /** One skill in full: every version kept, where each came from, and the quests it was given to. */
+  /** One skill in full: every version kept, where each came from, and the runs it was given to. */
   skill: { method: "POST", path: "/api/skills/get", scope: "mind:read", input: z.strictObject({ id: SkillId }) },
   /**
    * Write a skill, or a new version of one. Who asks decides its trust, never the caller's say: yours are
-   * owner; what he writes when asked in a chat, and what another agent proposes, is untrusted and waits for you.
+   * owner; what it writes when asked in a chat, and what another agent proposes, is untrusted and waits for you.
    */
   writeSkill: { method: "POST", path: "/api/skills", scope: "mind:write", input: SkillWriteInput },
   /**
-   * A quest of his has ended: its outcome is recorded against the skills it was given, and if its review
-   * passed, one bounded call distils at most one skill from its evidence. His own quests only.
+   * A run of its has ended: its outcome is recorded against the skills it was given, and if its review
+   * passed, one bounded call distils at most one skill from its evidence. Its own runs only.
    */
-  learnSkill: { method: "POST", path: "/api/skills/learn", scope: "mind:write", input: QuestEvidenceInput },
+  learnSkill: { method: "POST", path: "/api/skills/learn", scope: "mind:write", input: RunEvidenceInput },
   /**
    * Yours alone: an Agent Skill's folder on GitHub (PLAN #34) taken in as a skill, as text: its SKILL.md alone is read,
    * nothing in the folder runs, and the skill waits for your approval (untrusted, by where it came from) like any other.
@@ -1413,22 +1413,22 @@ export const routes = {
   importSkill: { method: "POST", path: "/api/skills/take-in", scope: "fleet:admin", input: z.strictObject({ url: z.string().trim().min(10).max(500) }) },
   /** Yours alone: approve exactly the version you read (an untrusted skill is given to no model before that). */
   approveSkill: { method: "POST", path: "/api/skills/approve", scope: "fleet:admin", input: SkillApproveInput },
-  /** Yours alone: locked, he may use it but not change it. */
+  /** Yours alone: locked, it may use it but not change it. */
   lockSkill: { method: "POST", path: "/api/skills/lock", scope: "fleet:admin", input: SkillLockInput },
   /** Yours alone: retired, it's kept and never offered (nothing is deleted); put back with `retired: false`. */
   retireSkill: { method: "POST", path: "/api/skills/retire", scope: "fleet:admin", input: SkillRetireInput },
   /** Yours alone: one step back, to the version before the latest. */
   rollbackSkill: { method: "POST", path: "/api/skills/rollback", scope: "fleet:admin", input: z.strictObject({ id: SkillId }) },
-  /** The day's budget for distilling skills, in tokens (0: he distils none). */
+  /** The day's budget for distilling skills, in tokens (0: it distils none). */
   setSkillsBudget: { method: "POST", path: "/api/skills/budget", scope: "brain:write", input: SkillsBudgetInput },
-  // ---- Notifications: he comes to you, on your own paired devices (notify.ts; node-local) ----------
+  // ---- Notifications: it comes to you, on your own paired devices (notify.ts; node-local) ----------
   /*
    * Yours alone, every one of them: the node refuses agents and other nodes whatever their scopes. No route takes a
    * title or a line: what a notification says comes only from the node's own records, through its own rules.
    */
-  /** Who is notified (devices by name, never an endpoint), what he sends and when he stays silent, what was sent today, and this node's public key to subscribe to. */
+  /** Who is notified (devices by name, never an endpoint), what it sends and when it stays silent, what was sent today, and this node's public key to subscribe to. */
   notify: { method: "GET", path: "/api/notify", scope: "mind:read", input: null },
-  /** What he sends and when he stays silent: the kinds, quiet hours, the day's limit. It steers him: brain:write, never an agent's. */
+  /** What it sends and when it stays silent: the kinds, quiet hours, the day's limit. It steers it: brain:write, never an agent's. */
   setNotify: { method: "POST", path: "/api/notify", scope: "brain:write", input: NotifyPrefsInput },
   /** This device turns notifications on, for itself: its browser's push subscription, kept as that device's. Only a paired device may, and only its own. */
   pushSubscribe: { method: "POST", path: "/api/notify/subscribe", scope: "mind:read", input: PushSubscriptionInput },
@@ -1497,8 +1497,8 @@ export interface FleetView {
 
 /**
  * A memory with this tag is a durable fact about you (a preference, a convention, what not to do): yours, written
- * from your device or kept by you, goes with every answer of his; his own (an agent's) is only proposed, and waits
- * for you to keep it (your ruling, 16 November 2026), so nothing he read can plant a standing instruction.
+ * from your device or kept by you, goes with every answer of its; its own (an agent's) is only proposed, and waits
+ * for you to keep it (your ruling, 16 November 2026), so nothing it read can plant a standing instruction.
  */
 export const ABOUT_YOU_TAG = "about-you";
 
@@ -1556,7 +1556,7 @@ export interface SandboxView {
   id: string;
   name: string;
   node: string;
-  quest: string;
+  run: string;
   image: string;
   network: SandboxNetwork;
   cpus: number;
@@ -1606,7 +1606,7 @@ export interface LedgerEntry {
   target: string;
   verdict: "allow" | "ask" | "deny" | "approved";
   reason: string | null;
-  quest: string | null;
+  run: string | null;
   detail: string | null;
 }
 
@@ -1648,14 +1648,14 @@ export interface ConnectorRequestView {
   id: string;
   /** The connector asked for. */
   connector: string;
-  /** It's installed, and this asks to use it: it's Galahad's alone and the asker isn't allowed yet. */
+  /** It's installed, and this asks to use it: it's the primary's alone and the asker isn't allowed yet. */
   access: boolean;
   /** The asker's label, as a connector's access names it. */
   agent: string;
-  /** Its name, when Galahad ships it (adding it is then a tap); null for a service he doesn't have yet. */
+  /** Its name, when the primary ships it (adding it is then a tap); null for a service it doesn't have yet. */
   label: string | null;
   why: string;
-  /** Who asked: Galahad, a knight by name, or an agent's label. */
+  /** Who asked: the primary, an agent by name, or an agent's label. */
   by: string;
   at: number;
   /** Unanswered by then, and it's gone. */
@@ -1691,16 +1691,16 @@ export interface SlackView {
 }
 
 /**
- * The Slack app Galahad answers through, as Slack makes one from a manifest (api.slack.com/apps → Create New App → From
+ * The Slack app the primary answers through, as Slack makes one from a manifest (api.slack.com/apps → Create New App → From
  * a manifest): Socket Mode, so nothing of yours is opened; your direct messages with it and nothing else
- * (`message.im`), and the files you share there; buttons for an answer's choices; 👀 on your message while he works;
+ * (`message.im`), and the files you share there; buttons for an answer's choices; 👀 on your message while it works;
  * your name, to say who it answers.
  */
 export const SLACK_APP_MANIFEST = {
-  display_information: { name: "Galahad", description: "Your Galahad, in your direct messages.", background_color: "#141416" },
+  display_information: { name: "Invincible", description: "Your agent, in your direct messages.", background_color: "#141416" },
   features: {
     app_home: { home_tab_enabled: false, messages_tab_enabled: true, messages_tab_read_only_enabled: false },
-    bot_user: { display_name: "Galahad", always_online: true },
+    bot_user: { display_name: "Invincible", always_online: true },
   },
   oauth_config: { scopes: { bot: ["chat:write", "files:read", "im:history", "reactions:write", "users:read"] } },
   settings: {
@@ -1724,7 +1724,7 @@ export interface LoopDraftView {
   cooldownMs: number | null;
   label: string | null;
   why: string | null;
-  /** Who drafted it: Galahad, in a chat. */
+  /** Who drafted it: the primary, in a chat. */
   by: string;
   at: number;
   /** Unanswered by then, and it's gone. */
@@ -1753,13 +1753,13 @@ export interface FindingView {
 }
 
 export interface SelfActionView {
-  /** Every heartbeat loop lets him fix what's safe himself (none of them says `selfAction: false`). */
+  /** Every heartbeat loop lets it fix what's safe itself (none of them says `selfAction: false`). */
   on: boolean;
   /** The heartbeat loops it follows (self-action runs after each of their runs). */
   heartbeats: string[];
-  /** The allowlist: each kind, its oath class, and why it needs no asking. */
+  /** The allowlist: each kind, its policy class, and why it needs no asking. */
   allowlist: { kind: string; class: string; why: string }[];
-  /** His own fixes, newest first (ledger entries of resource "self-action"). */
+  /** Its own fixes, newest first (ledger entries of resource "self-action"). */
   recent: LedgerEntry[];
 }
 
@@ -1810,8 +1810,8 @@ export interface ConnectorView {
   needsOrigin: boolean;
   problem: string | null;
   tools: ConnectorToolView[];
-  /** Galahad's alone (and the agents you allowed, by label), when it isn't every agent's. */
-  access: { only: "galahad"; allowed: string[] } | null;
+  /** The primary's alone (and the agents you allowed, by label), when it isn't every agent's. */
+  access: { only: "primary"; allowed: string[] } | null;
   /** One that signs in as you: whose sign-in, and whose account it's signed in to (null until then). */
   /** A connector you sign in to: whose sign-in (an MCP server's own: `mcp`, no app of yours needed), and whose account, once said. */
   oauth: { provider: "google" | "microsoft" | "mcp"; account: string | null } | null;
@@ -1854,9 +1854,9 @@ export interface ActionView {
   /** The standing order that answered it, when one did. */
   order: { id: string; label: string } | null;
   receipt: string | null;
-  /** What you said with your answer; for one you edited, which it was sent as; for one Galahad approved himself, why. */
+  /** What you said with your answer; for one you edited, which it was sent as; for one the primary approved itself, why. */
   note: string | null;
-  /** Galahad approved it himself, as his to approve (oath.ts ownApproval; your word of 23 November 2026), not you. */
+  /** The primary approved it itself, as its to approve (policy.ts ownApproval; your word of 23 November 2026), not you. */
   self: boolean;
 }
 
@@ -1888,22 +1888,22 @@ export interface InvestigationView {
   concludedAt: number | null;
 }
 
-export interface TrialView extends TrialRecord {
+export interface EvalView extends EvalRecord {
   id: string;
   recordedAt: number;
   /** The node that ran it. */
   nodeName: string;
   /** What its model calls came to, by role and model (absent: recorded before calls were counted). */
-  spent?: TrialSpent;
+  spent?: EvalSpent;
 }
 
 /** The runs that recorded their settings (their effort), by run id. A run not here ran at effort 1. */
-export type TrialRunsView = Record<string, TrialRunSettings>;
+export type EvalRunsView = Record<string, EvalRunSettings>;
 
 export interface ArtifactView {
   id: string;
   label: string;
-  quest: string | null;
+  run: string | null;
   sandbox: string | null;
   /** The node holding the files. */
   node: string;
@@ -1940,7 +1940,7 @@ export type ChatStreamEvent =
   /** Kept in your history: the conversation this answer belongs to (first, when it's new). */
   | { type: "conversation"; id: string; title: string; project: string | null }
   | { type: "text"; text: string }
-  /** Galahad calls one of his tools (input: a short summary of the arguments). */
+  /** The primary calls one of its tools (input: a short summary of the arguments). */
   | { type: "tool"; id: string; name: string; title: string; input: string }
   /** How it went, in a line (never the whole result). */
   | { type: "tool_result"; id: string; name: string; ok: boolean; summary: string }
@@ -1952,7 +1952,7 @@ export type ChatStreamEvent =
    * which is said as unknown, never estimated). Counts only: nothing of the prompt or the answer.
    */
   | { type: "usage"; ref: string; usage: Usage | null }
-  /** A message of yours reached him while he worked (a steer): what follows answers it, in the same turn. */
+  /** A message of yours reached it while it worked (a steer): what follows answers it, in the same turn. */
   | { type: "steer"; text: string }
   /**
    * First in the stream of a turn the node owns: its id (to attach to, steer or stop), and `answer`, the kept
@@ -1961,7 +1961,7 @@ export type ChatStreamEvent =
   | { type: "turn"; id: string; conversation: string | null; answer: number | null; role: string; startedAt: number; deadline: number; replay: boolean }
   /** It was stopped, and by what (a turn that ran into the node's time limit ends with an error that says so). */
   | { type: "stopped"; reason: StopReason }
-  /** Messages of yours that hadn't reached him when the turn ended: queued (held) in a kept chat, handed back otherwise. */
+  /** Messages of yours that hadn't reached it when the turn ended: queued (held) in a kept chat, handed back otherwise. */
   | { type: "undelivered"; texts: string[]; queued: boolean }
   /** First in a side question's stream: its id, to bring it back by. */
   | { type: "aside"; id: string }
