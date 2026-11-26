@@ -1,6 +1,6 @@
 import { GENERIC_NOTIFICATION, isConversationId, isNotifyTaskId, isQuietKind, NOTIFY_OPENS, type NotifyOpen, type NotifyPayload, notifyUrl, readNotifyPayload } from "@invincible/core/notify-payload";
 import { afterPush, badgeCount, type BadgeState, type Badging, NO_BADGE, readBadgeMessage, readBadgeState, showBadge } from "./lib/badge.ts";
-import { showsEveryPush, showsThatVeryThing } from "./lib/showing.ts";
+import { placeOf, readShowing, SHOWING_QUESTION, SHOWING_WAIT_MS, showsEveryPush, showsThatVeryThing } from "./lib/showing.ts";
 
 /*
  * Service worker: keeps the app shell available offline, and shows what the primary
@@ -49,7 +49,7 @@ interface WindowClientLike {
   /** Its window has the focus: it's the page you're looking at. */
   focused?: boolean;
   focus?(): Promise<unknown>;
-  postMessage(message: unknown): void;
+  postMessage(message: unknown, transfer?: unknown[]): void;
 }
 
 interface ServiceWorkerScope {
@@ -183,10 +183,41 @@ async function appPages(): Promise<WindowClientLike[]> {
   });
 }
 
+/**
+ * What a page shows now, asked of it on a port of its own (its WindowClient.url is where it was opened, and doesn't
+ * follow the hash): its address, or null when it doesn't answer in time.
+ */
+function askShowing(page: WindowClientLike): Promise<string | null> {
+  return new Promise((resolve) => {
+    let channel: MessageChannel;
+    try {
+      channel = new MessageChannel();
+    } catch {
+      resolve(null);
+      return;
+    }
+    const done = (hash: string | null) => {
+      clearTimeout(timer);
+      channel.port1.close();
+      resolve(hash);
+    };
+    const timer = setTimeout(() => done(null), SHOWING_WAIT_MS);
+    channel.port1.onmessage = (event) => done(readShowing(event.data));
+    try {
+      page.postMessage(SHOWING_QUESTION, [channel.port2]);
+    } catch {
+      done(null);
+    }
+  });
+}
+
 /** Whether the page you're looking at (in front, its window focused) shows the very thing a notification opens. */
 async function lookingAt(target: OpenTarget): Promise<boolean> {
+  if (!placeOf(target)) return false;
   try {
-    return (await appPages()).some((page) => page.focused === true && page.visibilityState === "visible" && showsThatVeryThing(target, page.url));
+    const inFront = (await appPages()).filter((page) => page.focused === true && page.visibilityState === "visible");
+    const said = await Promise.all(inFront.map((page) => askShowing(page)));
+    return said.some((hash) => showsThatVeryThing(target, hash));
   } catch {
     return false;
   }

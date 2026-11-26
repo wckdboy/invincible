@@ -24,6 +24,7 @@ import { goToOf, hashOf, homeOf, keyedOf, landingOf, placesFor, routeOf, taskOf 
 import { closesKeyboard, keyboardOpen } from "./lib/viewport.ts";
 import { conversationFromHash } from "@invincible/core/notify-payload";
 import { readOpenMessage } from "./lib/push.ts";
+import { isShowingQuestion, showingAnswer } from "./lib/showing.ts";
 import { badgeMessage, type Badging, showBadge } from "./lib/badge.ts";
 import { readsFor } from "./lib/prefetch.ts";
 import { reachability } from "./lib/reach.ts";
@@ -363,6 +364,8 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       (event: MessageEvent) => {
         const open = readOpenMessage(event.data);
         if (open) ctx.navigate(open.route, open.conversation ? { conversation: open.conversation } : open.task ? { task: open.task } : {});
+        // The worker asks what this page shows, so a notification about that very thing says nothing over it (lib/showing.ts).
+        else if (isShowingQuestion(event.data)) event.ports[0]?.postMessage(showingAnswer(location.hash));
         else if ((event.data as { type?: string } | null)?.type === "invincible:push-changed") void syncPush(base.api);
       },
       { signal: lifetime.signal },

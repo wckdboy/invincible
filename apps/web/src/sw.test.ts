@@ -31,19 +31,45 @@ const listeners = new Map<string, (event: any) => void>();
 /** What the worker showed, and the pages and windows it reached, for the notification tests. */
 const shown: { title: string; options: Record<string, any> }[] = [];
 interface Page {
+  /** Where it was opened: as a browser's WindowClient.url is, it doesn't follow the hash (Chrome's doesn't). */
   url: string;
   visibilityState: string;
   focused: boolean;
+  /** What it shows now (its location.hash), which it says when the worker asks. */
+  showing: string;
+  /** Whether it answers the worker's question at all (a page that's busy, or older than the question, doesn't). */
+  answers: boolean;
+  /** How often the worker asked what it shows. */
+  asked: number;
   messages: unknown[];
   /** How often the worker brought it forward. */
   brought: number;
   focus: () => Promise<void>;
-  postMessage(message: unknown): void;
+  postMessage(message: unknown, transfer?: { postMessage(answer: unknown): void }[]): void;
 }
 let windows: Page[] = [];
 const opened: string[] = [];
-const windowAt = (url: string, visibilityState = "visible", focused = false): Page => {
-  const p: Page = { url, visibilityState, focused, messages: [], brought: 0, postMessage: (message) => void p.messages.push(message), focus: async () => void (p.brought += 1) };
+const windowAt = (url: string, visibilityState = "visible", focused = false, showing = new URL(url).hash): Page => {
+  const p: Page = {
+    url,
+    visibilityState,
+    focused,
+    showing,
+    answers: true,
+    asked: 0,
+    messages: [],
+    brought: 0,
+    // The worker's question (what it shows now) is answered on the port it came with, as the shell answers it.
+    postMessage: (message, transfer) => {
+      if ((message as { type?: string } | null)?.type === "invincible:showing?") {
+        p.asked += 1;
+        if (p.answers) transfer?.[0]?.postMessage({ type: "invincible:showing", hash: p.showing });
+        return;
+      }
+      p.messages.push(message);
+    },
+    focus: async () => void (p.brought += 1),
+  };
   return p;
 };
 /** This browser's subscription, as the worker reads it: its push service names the browser (Apple's is Safari's). */
@@ -339,6 +365,36 @@ describe("quiet while you're looking at that very thing", () => {
     await push(approval);
     expect(shown).toHaveLength(2);
     expect(shown[1]!.options).toMatchObject({ silent: true, renotify: false });
+  });
+
+  test("the page in front is asked what it shows: where it was opened says nothing of where it is now", async () => {
+    reset();
+    // Opened at Settings (its WindowClient.url says so for ever, in Chrome), and on the task's thread now: quiet.
+    windows = [windowAt(`${ORIGIN}/#/settings`, "visible", true, "#/task/task-abc123def456")];
+    await push(task);
+    expect(windows[0]!.asked).toBe(1);
+    expect(shown).toEqual([]);
+    // Opened at the task's thread, and on Home now: told.
+    windows = [windowAt(`${ORIGIN}/#/task/task-abc123def456`, "visible", true, "#/home")];
+    await push(task);
+    expect(shown).toHaveLength(1);
+    // A page that doesn't answer is taken for one that isn't looking: told, once the worker has waited a moment.
+    shown.length = 0;
+    const busy = windowAt(`${ORIGIN}/#/task/task-abc123def456`, "visible", true);
+    busy.answers = false;
+    windows = [busy];
+    const started = Date.now();
+    await push(task);
+    expect(shown).toHaveLength(1);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // Only a page in front is asked: one hidden, or not focused, is none of it.
+    const hidden = windowAt(`${ORIGIN}/#/home`, "hidden", false, "#/task/task-abc123def456");
+    const behind = windowAt(`${ORIGIN}/#/home`, "visible", false, "#/task/task-abc123def456");
+    windows = [hidden, behind];
+    shown.length = 0;
+    await push(task);
+    expect([hidden.asked, behind.asked]).toEqual([0, 0]);
+    expect(shown).toHaveLength(1);
   });
 
   test("anything else is told as ever: another task, a page in front but not focused, or one hidden", async () => {
