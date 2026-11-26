@@ -267,7 +267,8 @@
         /* Solid, as the status bar above it is: frosted, what scrolled under it showed through as a haze. */
         background: var(--bg);
       }
-      .topbar .title { font-weight: 600; font-size: var(--fs-15); letter-spacing: -0.01em; transition: opacity var(--d-2) var(--ease-out), transform var(--d-2) var(--ease-out); }
+      /* (It gives way to the bar's buttons: at a phone's 200 % it pushed search and "…" off the screen.) */
+      .topbar .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: var(--fs-15); letter-spacing: -0.01em; transition: opacity var(--d-2) var(--ease-out), transform var(--d-2) var(--ease-out); }
       .topbar .title.tucked { opacity: 0; transform: translateY(4px); }
       .topbar .brand-mini { display: flex; align-items: center; gap: var(--sp-2); }
       main.view {
@@ -365,7 +366,8 @@
       .work-badge.is-none { background: none; box-shadow: none; outline: 1px dashed var(--border-strong); outline-offset: -1px; }
       .work-project { flex: 0 1 auto; min-width: 0; }
       /* How it stands, in a word in its state's colour (the word says it: colour is never the only telling). */
-      .work-word { flex: none; display: inline-flex; align-items: center; gap: 3px; margin-left: auto; font-weight: 600; color: var(--tone, var(--text-2)); }
+      .work-word { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-weight: 600; color: var(--tone, var(--text-2)); }
+      .work-word > .dot { width: 6px; height: 6px; }
       .work-age { flex: none; min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
       /* An agent's orb where the work shows it (ui/orb.ts agentFace, still): sized here, as the face's own sheet is only
          given to the page with a seat's. */
@@ -407,6 +409,13 @@
         background: var(--surface); color: var(--text-2); font-size: var(--fs-12); font-weight: 500; text-decoration: none;
       }
       .home-chip:hover { border-color: var(--border-strong); color: var(--text); }
+      /* Very narrow (a phone at 200 %): the machine is its dot alone (its name is its label), and a choice's words go
+         before its icon, where both don't fit. */
+      @media (max-width: 359px) {
+        .home-chip { padding: 0 9px; }
+        .home-chip > .ellipsis { display: none; }
+        .segmented button > svg { display: none; }
+      }
       .home-head > .btn { flex: none; }
       /* With the sidebar beside it, the I-beam and the machine are its: Home doesn't say them twice. */
       @media (min-width: 960px) {
@@ -463,6 +472,13 @@
       .home-work-head h2 { flex: none; }
       .home-filters { display: flex; justify-content: flex-end; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
       .home-filters::-webkit-scrollbar { display: none; }
+      /* Every target a finger takes is 44 px at least: what is drawn smaller keeps its look and reaches past its edge. */
+      @media (pointer: coarse) {
+        .home-filter::after, .home-chip::after, .fold-failed::after { content: ""; position: absolute; inset: calc((100% - 44px) / 2) 0; min-height: 44px; }
+        .home-filter, .home-chip { position: relative; }
+        /* (The filters scroll sideways, which clips: their row keeps the room their targets reach into.) */
+        .home-filters { padding-block: 9px; margin-block: -9px; }
+      }
       .home-filter {
         flex: none; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px 0 8px; border: 1px solid var(--border); border-radius: var(--r-full);
         background: var(--surface); color: var(--text-2); font: inherit; font-size: var(--fs-12); font-weight: 500; white-space: nowrap;
@@ -481,7 +497,18 @@
       }
       .home-fold { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 44px; border: 0; background: none; color: var(--text-3); font: inherit; font-size: var(--fs-13); font-weight: 550; text-align: left; }
       .home-fold:active { background: var(--surface-3); }
-      .home-fold-failed { color: var(--failed); font-weight: 650; }
+      /* A failure folded into Done is said beside the fold, in red, and opens it: "Done 4 · 1 failed" (views/work-rows.ts
+         failedNote, foldLine). */
+      .fold-line { display: flex; align-items: stretch; min-width: 0; }
+      .fold-line > .home-fold { flex: none; width: auto; }
+      .fold-failed {
+        position: relative; flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 0 var(--sp-2); border-radius: var(--r-md);
+        color: var(--failed); font-size: var(--fs-13); font-weight: 650; text-decoration: none; transition: background-color var(--d-1) var(--ease-out);
+      }
+      .fold-failed::before { content: "· "; color: var(--text-3); font-weight: 500; }
+      .fold-failed:hover, .fold-failed:active { background: color-mix(in srgb, var(--failed) 9%, transparent); }
+      .home-work-rows > .fold-line { border-top: 1px solid var(--border); padding: 0 calc(var(--sp-4) + var(--safe-right)) 0 calc(var(--sp-4) + var(--safe-left)); }
+      .home-work-rows > .fold-line > .home-fold { padding: 0; }
       .home-empty, .home-note { padding: var(--sp-6) calc(var(--sp-4) + var(--safe-right)) var(--sp-6) calc(var(--sp-4) + var(--safe-left)); border-top: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-14); line-height: 1.5; }
       .home-empty p { max-width: 52ch; margin-bottom: var(--sp-3); }
       /* Its message box, docked at the foot; the list fades out under it. */
@@ -535,7 +562,7 @@
       }
       .fleet-pill:hover { border-color: var(--border-strong); color: var(--text); }
       .activity-pill { padding-right: var(--sp-1); }
-      .topbar .actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-1); }
+      .topbar .actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: var(--sp-1); }
 
       /* The banner: your agent can't be reached, or this device is offline, then for a moment that it is reached again
          (ui/banner.ts). A thin capsule hanging under the top bar over the page; its place takes no room, so nothing under
@@ -664,7 +691,8 @@
       .rows > .item .item-text > .meta { margin-top: 2px; }
       /* In a stack, a meta line takes the stack's gap. */
       .rows > .item .stack > .meta { margin-top: 0; }
-      .rows > .item .item-actions { display: flex; gap: var(--sp-1); align-items: center; flex: none; }
+      /* (Never wider than its row: at a phone's 200 % a row's controls wrap and give way, rather than run off the screen.) */
+      .rows > .item .item-actions { display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; flex: none; max-width: 100%; min-width: 0; }
       /* A folder's line in a list of files (artifacts.ts): quieter, on sunken ground. */
       .rows > .item.dir-row { align-items: center; gap: var(--sp-2); padding-top: var(--sp-2); padding-bottom: var(--sp-2); background: var(--bg-sunken); color: var(--text-3); font: var(--fs-12)/1.5 var(--font-mono); }
       /* A fact of yours (about-you.ts): its words across the row's width, whose it is and its answers under them. */
@@ -696,6 +724,10 @@
         font-size: var(--fs-13); font-weight: 550; white-space: nowrap; text-decoration: none; user-select: none;
         box-shadow: var(--shadow-1); transition: background-color var(--d-1) var(--ease-out), border-color var(--d-1) var(--ease-out), color var(--d-1) var(--ease-out), transform var(--d-1) var(--ease-out), opacity var(--d-1);
       }
+      /* A button never runs past what holds it: where it is wider (a phone at 200 %), its words end in an ellipsis rather
+         than spill over the card's edge (its full words are still its name). */
+      .btn { max-width: 100%; }
+      .btn > span:not(.spinner):not(.count) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
       .btn:hover { --btn-bg: var(--surface-2); }
       .btn:active:not(:disabled) { transform: scale(0.97); }
       .btn:disabled, .btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
@@ -735,6 +767,8 @@
         border: 1px solid color-mix(in srgb, var(--tone, var(--text-2)) 14%, transparent);
       }
       .badge svg { width: 12px; height: 12px; }
+      /* A badge's words wrap rather than run past what holds it (a phone at 200 %); on one line it is 20 px, as ever. */
+      .badge { max-width: 100%; height: auto; min-height: 20px; white-space: normal; line-height: 1.2; padding-block: 2px; }
       .badge.outline { background: transparent; border-color: var(--border-strong); color: var(--text-2); }
       [data-tone="ok"] { --tone: var(--ok); --tone-soft: var(--ok-soft); }
       [data-tone="warn"] { --tone: var(--warn); --tone-soft: var(--warn-soft); }
@@ -843,7 +877,7 @@
       .secret-field > svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-3); }
 
       .segmented {
-        position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px;
+        position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 2px;
         background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; isolation: isolate; max-width: 100%;
       }
       .segmented .thumb {
@@ -853,7 +887,7 @@
       .segmented button {
         display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: calc(var(--control-h) - 6px); padding: 0 var(--sp-3);
         border: 0; background: none; border-radius: 8px; color: var(--text-2); font-size: var(--fs-13); font-weight: 550; white-space: nowrap;
-        transition: color var(--d-1) var(--ease-out);
+        min-width: 0; overflow: hidden; text-overflow: ellipsis; transition: color var(--d-1) var(--ease-out);
       }
       .segmented button:hover { color: var(--text); }
       .segmented button:disabled { color: var(--text-3); opacity: 0.6; cursor: not-allowed; }
@@ -1314,6 +1348,8 @@
       .thread-body { position: relative; display: flex; flex: 1; min-height: 0; }
       .thread-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
       .thread-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; outline: none; }
+      /* Reached by Tab so the keys scroll it: it says so, with a ring inside its edge. */
+      .thread-scroll:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); border-radius: var(--r-md); }
       .thread-items { display: flex; flex-direction: column; gap: var(--sp-3); max-width: 760px; margin: 0 auto; padding: var(--sp-5) var(--sp-5) var(--sp-6); }
       .thread-dispatch { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-13); }
       .thread-dispatch > svg { flex: none; color: var(--text-3); }
@@ -1614,7 +1650,7 @@
       .chat-head > .btn, .chat-head > .selector-trigger { flex: none; }
       .chat-inbox { position: relative; }
       .chat-inbox .count { position: absolute; top: -4px; right: -4px; }
-      .chat-who { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 2px 8px 2px 2px; margin-left: -2px; border: 0; border-radius: var(--r-md); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+      .chat-who { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; overflow: hidden; padding: 2px 8px 2px 2px; margin-left: -2px; border: 0; border-radius: var(--r-md); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
       .chat-who:hover { background: var(--surface-2); }
       .chat-who-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
       .chat-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-weight: 650; letter-spacing: -0.01em; }
@@ -1708,6 +1744,8 @@
       .composer { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-2); transition: border-color var(--d-1) var(--ease-out), box-shadow var(--d-1) var(--ease-out); }
       .composer:focus-within { border-color: color-mix(in srgb, var(--focus) 60%, var(--border-strong)); box-shadow: var(--shadow-2), 0 0 0 3px color-mix(in srgb, var(--focus) 14%, transparent); }
       .composer textarea { display: block; width: 100%; border: 0; outline: none; background: none; resize: none; padding: 12px 14px 4px; max-height: 40vh; min-height: 48px; line-height: 1.5; font-size: var(--fs-input); }
+      /* Its placeholder on one line however narrow the box (a phone at 200 %): wrapped, it made the empty box three lines tall. */
+      .composer textarea::placeholder, .home-composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .composer .composer-bar { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 8px 8px 12px; }
       .composer .hint { font-size: var(--fs-12); color: var(--text-3); }
       .composer .send { width: 34px; height: 34px; padding: 0; border-radius: 10px; flex: none; }
@@ -1827,7 +1865,7 @@
       .notify-row.wrap { flex-wrap: wrap; }
       .notify-row > .switch { flex: 1 1 240px; min-width: 0; align-items: flex-start; }
       .notify-row > .switch .track { margin-top: 2px; }
-      .notify-hours { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+      .notify-hours { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); flex: none; max-width: 100%; }
       .notify-time { width: 9.5em; max-width: 42vw; font-variant-numeric: tabular-nums; }
       .notify-count { width: 84px; font-variant-numeric: tabular-nums; }
       .notify-row .error, .notify-row + .item .error { font-size: var(--fs-12); color: var(--danger); }

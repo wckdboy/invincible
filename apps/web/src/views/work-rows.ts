@@ -3,6 +3,7 @@ import type { Ctx } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";
 import { type Attended, attended, type WorkRow } from "../lib/work.ts";
+import { dot, type Tone } from "../ui/controls.ts";
 import { cx, h } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { agentFace } from "../ui/orb.ts";
@@ -53,7 +54,8 @@ export const projectTile = (project: WorkRow["project"]): HTMLElement => h("span
  */
 export function workRow(row: WorkRow, opts: { face?: number; current?: boolean; project?: boolean } = {}): HTMLAnchorElement {
   const verified = row.state === "verified";
-  const stands = [h("span", { class: "work-word", "data-tone": row.tone }, verified ? icon("check", { size: 12 }) : null, row.word), row.age ? h("span", { class: "work-age tnum" }, row.age) : null];
+  // How it stands: a dot of its colour and its word (verified, its check), so neither the colour nor the word is alone.
+  const stands = [h("span", { class: "work-word", "data-tone": row.tone }, verified ? icon("check", { size: 12 }) : dot(row.tone as Tone), row.word), row.age ? h("span", { class: "work-age tnum" }, row.age) : null];
   // Its project named only where the work is in more than one (lib/work.ts namesProjects): a row is then two lines, its
   // title with how it stands and its age, and its agent with what it is doing (as the iPhone's).
   const named = opts.project ?? true;
@@ -81,6 +83,19 @@ export function workRow(row: WorkRow, opts: { face?: number; current?: boolean; 
     ),
   );
 }
+
+/** Beside a folded Done, how many of it failed, in red and in words ("Done 4 · 1 failed"; lib/work.ts failedIn), and a
+ * tap away: it opens the latest that failed, so why one failed is one tap from the list even once it is settled. None
+ * failed: nothing. */
+export function failedNote(rows: readonly WorkRow[]): HTMLElement | null {
+  const failed = rows.filter((row) => row.state === "failed");
+  if (!failed.length) return null;
+  const latest = failed.reduce((a, b) => (b.at > a.at ? b : a));
+  return h("a", { class: "fold-failed tnum", href: hashOf("task", { task: latest.id }), title: `Why “${latest.title}” failed` }, `${failed.length} failed`);
+}
+
+/** A fold's line: its button (its name, its count, its chevron) and, beside it, what failed in it (failedNote). */
+export const foldLine = (fold: HTMLElement, failed: HTMLElement | null): HTMLElement => (failed ? h("div", { class: "fold-line" }, fold, failed) : fold);
 
 /** What a list of rows is drawn as, to be compared before drawing it again (a row that says the same is not redrawn). */
 export const rowsVersion = (rows: readonly WorkRow[]): string =>

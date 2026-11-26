@@ -5,7 +5,7 @@ import { noticeFrom } from "../lib/notices.ts";
 import { callerName, defaultLabel, deleteName, rowsFromCall } from "../lib/orders.ts";
 import { hlcMs, relativeTime } from "../lib/time.ts";
 import type { ActionClass } from "../types.ts";
-import { badge, busy, button, callout, card, disclosure, empty, field, formActions, linkButton, listRow, note, pageBody, pageHead, rows, section, skeletonRows, type Tone } from "../ui/controls.ts";
+import { badge, busy, button, callout, card, disclosure, empty, field, formActions, linkButton, listRow, note, onePrimary, pageBody, pageHead, rows, section, skeletonRows, type Tone } from "../ui/controls.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
 import { h, keepPlace, replace } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
@@ -547,6 +547,8 @@ export const inboxView: View = (root, ctx, { scope }) => {
   };
 
   const renderAllClear = () => {
+    // One primary on the page, whichever part was drawn again: the first decision (ui/controls.ts onePrimary).
+    onePrimary(root);
     const pending = ctx.live.pairings.value.length + ctx.live.secretRequests.value.length + waiting().length + openNotices().length + ctx.live.loopDrafts.value.length + ctx.live.aboutYou.value.length + ctx.live.connectorRequests.value.length + openScreen().length + openQuestions().length;
     // Until the first answer, a skeleton: "nothing needs you" would be a guess, and pushed away a moment later.
     const loaded = ctx.live.inboxLoaded.value;

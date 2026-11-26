@@ -178,7 +178,7 @@ export function reachNote(ctx: Ctx, scope: Scope, changed: () => void = () => {}
       const test = button("Send a test", { size: "sm", icon: "bell", onClick: () => void busy(test, sendTest) });
       replace(el, callout("ok", h("div", { class: "stack tight" }, h("div", {}, "It can reach this device when Invincible is closed. Send a test to see one arrive."), said), { title: "Notifications are on", actions: test }));
     } else if (card) {
-      const turnOn = card.action === "turn-on" ? button("Turn on notifications", { size: "sm", variant: "primary", icon: "bell", onClick: () => void busy(turnOn!, flip) }) : null;
+      const turnOn = card.action === "turn-on" ? button("Turn on notifications", { size: "sm", icon: "bell", onClick: () => void busy(turnOn!, flip) }) : null;
       const later = button("Not now", { size: "sm", variant: "ghost", onClick: () => putAway() });
       replace(el, callout("warn", h("div", { class: "stack tight" }, card.detail ? h("div", {}, card.detail) : null, said), { title: card.title, icon: "bell", actions: [turnOn, later] }));
     } else replace(el);

@@ -5,11 +5,11 @@ import { primaryState } from "../lib/agent-state.ts";
 import { primaryNow, type Now } from "../lib/now.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { primaryNeeds } from "../lib/roster.ts";
-import { atAGlance, type Attended, failedIn, inProject, namesProjects, type WorkRow } from "../lib/work.ts";
+import { atAGlance, type Attended, inProject, namesProjects, type WorkRow } from "../lib/work.ts";
 import { setWorkOpen, workOpen } from "../prefs.ts";
 import { stateChip } from "../ui/avatar.ts";
 import { arrive, button, callout, count, dot, setCount, skeletonRows } from "../ui/controls.ts";
-import { cx, h, isMac, keepPlace, replace } from "../ui/dom.ts";
+import { arrowsThrough, cx, h, isMac, keepPlace, replace } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
@@ -17,8 +17,8 @@ import { answerStep, chatActivity, chatsForPalette, nodeTurns, primaryWork, runs
 import { needsCount, needsItems, needsVersion, tickExpiries } from "./needs.ts";
 import { openPlaces } from "./places.ts";
 import { openSeat, seatFace, tableOf } from "./roster.ts";
-import { giveToAgents } from "./team-forms.ts";
-import { askProjects, projectTile, rowsVersion, workNow, workRow, workSources } from "./work-rows.ts";
+import { editAgent, giveToAgents } from "./team-forms.ts";
+import { askProjects, failedNote, foldLine, projectTile, rowsVersion, workNow, workRow, workSources } from "./work-rows.ts";
 
 /*
  * Home: the primary, first (your words, 26 November 2026: "agent first ([the primary])"; no tab bar; Home with a bar at
@@ -94,6 +94,8 @@ export const homeView: View = (root, ctx, { scope }) => {
   let needsBefore: number | null = null;
   const filters = h("div", { class: "home-filters", role: "group", "aria-label": "Show the work of" });
   const list = h("div", { class: "home-work-rows" }, skeletonRows(4, { avatar: true }));
+  // ↑ ↓ Home End through the rows, a fold's line and its failures among them.
+  arrowsThrough(list, ".work-row, .home-fold, .fold-failed");
   const work = h("section", { class: "home-work", "aria-labelledby": "home-work-head" }, h("div", { class: "home-work-head" }, h("h2", { id: "home-work-head" }, "Work"), filters), list);
   /** What needs you on Home: three decisions at most, each with its answer; the rest a tap away in the Inbox (X2). */
   const NEEDS_SHOWN = 3;
@@ -187,6 +189,8 @@ export const homeView: View = (root, ctx, { scope }) => {
 
   let named = true;
   const rowEl = (row: WorkRow): HTMLElement => workRow(row, { face: 18, project: named });
+  /** A stranger's first day: no agent yet (an agent is added before a task is given to one). */
+  const firstDay = (): boolean => ctx.live.team.value !== null && ctx.live.team.value.agents.length === 0;
   /** The page is drawn once the team and the Inbox have both answered (or a moment has passed): what needs you comes in
    * with the work, rather than above it a moment later, pushing it down. */
   const started = Date.now();
@@ -196,7 +200,7 @@ export const homeView: View = (root, ctx, { scope }) => {
     drawStrip();
     const all = settled() ? workNow(ctx) : null;
     drawHead(all, all ? needsCount(ctx, all) : 0);
-    const version = JSON.stringify([all && [rowsVersion(all.needs), rowsVersion(all.active), rowsVersion(all.working), rowsVersion(all.done), all.projects], filtered, [...open], needsVersion(ctx), Boolean(ctx.live.teamProblem.value)]);
+    const version = JSON.stringify([all && [rowsVersion(all.needs), rowsVersion(all.active), rowsVersion(all.working), rowsVersion(all.done), all.projects], filtered, [...open], needsVersion(ctx), Boolean(ctx.live.teamProblem.value), firstDay()]);
     if (version === shown) return;
     shown = version;
     // What needs you: amber, only when something waits.
@@ -225,19 +229,21 @@ export const homeView: View = (root, ctx, { scope }) => {
     const shownWork = inProject(all, filtered);
     named = namesProjects(all) && filtered === null;
     const doneOpen = open.has("done");
-    // "Done 4 · 1 failed": a failure you've seen is settled, folded with the rest, but the fold still says it.
-    const failed = failedIn(shownWork.done);
     const rows = [...shownWork.active, ...shownWork.working];
     keepPlace(list, () =>
       replace(
         list,
         ...rows.map(rowEl),
         shownWork.done.length
-          ? h(
-              "button",
-              { type: "button", class: "home-fold", "aria-expanded": String(doneOpen), onclick: () => (setWorkOpen("done", !doneOpen), (open = workOpen()), draw()) },
-              h("span", { class: "grow" }, "Done ", h("span", { class: "tnum" }, String(shownWork.done.length)), failed ? h("span", { class: "home-fold-failed tnum" }, ` · ${failed} failed`) : null),
-              icon("chevron-right", { size: 14, class: "chev" }),
+          ? // "Done 4 · 1 failed": a failure you've seen is settled, folded with the rest, but said beside the fold, a tap from why.
+            foldLine(
+              h(
+                "button",
+                { type: "button", class: "home-fold", "aria-expanded": String(doneOpen), onclick: () => (setWorkOpen("done", !doneOpen), (open = workOpen()), draw()) },
+                icon("chevron-right", { size: 14, class: "chev" }),
+                h("span", {}, "Done ", h("span", { class: "tnum" }, String(shownWork.done.length))),
+              ),
+              failedNote(shownWork.done),
             )
           : null,
         ...(doneOpen ? shownWork.done.map(rowEl) : []),
@@ -245,8 +251,8 @@ export const homeView: View = (root, ctx, { scope }) => {
           ? h(
               "div",
               { class: "home-empty" },
-              h("p", {}, filtered ? "Nothing in this project." : "Nothing under way. Ask your agent below, or give an agent a task: each is a row here, from its first step to verified."),
-              canGive && !filtered ? button("Give a task", { size: "sm", icon: "layers", onClick: () => giveToAgents(ctx) }) : null,
+              h("p", {}, filtered ? "Nothing in this project." : firstDay() ? "No agents yet. Ask your agent below, or add your first agent: a name, a lasting job and a workspace of its own. Each task you give it is then a row here, from its first step to proven." : "Nothing under way. Ask your agent below, or give an agent a task: each is a row here, from its first step to proven."),
+              canGive && !filtered ? (firstDay() ? button("Add an agent", { size: "sm", icon: "plus", onClick: () => void editAgent(ctx) }) : button("Give a task", { size: "sm", icon: "layers", onClick: () => giveToAgents(ctx) })) : null,
             )
           : null,
       ),
