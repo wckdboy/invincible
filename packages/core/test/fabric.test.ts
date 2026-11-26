@@ -19,6 +19,7 @@ import {
   readQdt,
   runGrantPolicy,
   signingPublicKey,
+  signEd25519,
   signProof,
   signQdt,
   signTransportClaim,
@@ -298,3 +299,17 @@ describe("CBOR's budget holds for indefinite-length strings too (L8)", () => {
   });
 });
 
+describe("readQdt reads what Q-AMP's SPEC 9.3 says, and nothing else (I1)", () => {
+  test("exp written as a CBOR float is refused: it is a uint", () => {
+    const good = signQdt(SEED_ONE, { aud: TWO, cmd: "/tool/x", exp: 4_000_000_000 });
+    // The same payload, by hand, with exp as a float64 (0xfb): a map of six entries.
+    const head = cborEncode(new Map<string, unknown>([["iss", good.payload.iss], ["aud", good.payload.aud], ["sub", null], ["cmd", "/tool/x"]]));
+    const float = Uint8Array.of(0xfb, ...new Uint8Array(new Float64Array([4_000_000_000]).buffer).reverse());
+    const payload = Uint8Array.from([0xa6, ...head.subarray(1), ...cborEncode("exp"), ...float, ...cborEncode("nonce"), ...cborEncode(new Uint8Array(16))]);
+    const signature = signEd25519(SEED_ONE, Uint8Array.from([...new TextEncoder().encode("qamp-delegation-v1\0"), ...payload]));
+    const token = cborEncode(new Map<string, unknown>([["p", payload], ["s", signature]]));
+    expect(() => readQdt(token)).toThrow(CborError);
+    // As a uint, the same token reads, and is signed.
+    expect(readQdt(good.encoded).signed).toBe(true);
+  });
+});

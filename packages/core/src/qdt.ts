@@ -125,7 +125,8 @@ export function readQdt(encoded: Uint8Array): QdtToken & { signed: boolean } {
   const keys = Object.keys(envelope);
   if (keys.length !== 2 || !(envelope.p instanceof Uint8Array) || !(envelope.s instanceof Uint8Array) || envelope.s.length !== 64) throw new CborError("token: a map of p and a 64-byte s");
   const p = envelope.p;
-  const raw = asMap(cborDecode(p, { rejectDuplicateKeys: true }), "payload");
+  // No floats anywhere in it: exp and nbf are uints (SPEC 9.3), and a float that reads as an integer is no uint.
+  const raw = asMap(cborDecode(p, { rejectDuplicateKeys: true, rejectFloats: true }), "payload");
   for (const key of Object.keys(raw)) if (!PAYLOAD_KEYS.has(key)) throw new CborError(`payload: unknown key ${JSON.stringify(key)}`);
   const text = (v: CborValue | undefined, what: string): string => {
     if (typeof v !== "string") throw new CborError(`payload: ${what} is text`);
