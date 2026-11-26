@@ -29,6 +29,7 @@ struct MacPlaces: View {
             CommandPalette(session: session, go: { mac.place = $0 }, give: mayGive ? { givingNext = true } : nil)
         }
         .environment(\.showInbox) { mac.place = .inbox }
+        .environment(\.openPlace) { mac.place = $0 }
         .environment(\.openSearch) { mac.searching = true }
         .task { await session.refresh() }
     }

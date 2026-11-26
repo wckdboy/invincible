@@ -9,14 +9,29 @@ struct TimelineTitle: View {
     var needs = false
     /// Centred alone in the bar; leading beside a face (the primary's orb).
     var alignment: HorizontalAlignment = .center
+    /// Where it stands, as a still dot before its line (nil, or at rest: no dot).
+    var standing: Standing? = nil
 
     var body: some View {
         VStack(alignment: alignment, spacing: Space.line) {
             Text(title).font(.headline).foregroundStyle(.primary)
-            Text(line ?? " ")
-                .font(.caption)
-                .foregroundStyle(needs ? Color.needs : .secondary)
-                .lineLimit(1)
+            HStack(spacing: 5) {
+                if let standing, standing.shown != nil {
+                    Circle().fill(Self.ink(StateLabel.tone(standing.tone))).frame(width: 6, height: 6).accessibilityHidden(true)
+                }
+                Text(line ?? " ")
+                    .font(.caption)
+                    .foregroundStyle(needs ? Color.needs : .secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private static func ink(_ tone: StateLabel.Tone) -> Color {
+        switch tone {
+        case .active: .primary
+        case .quiet: .secondary
+        case .failed: .danger
         }
     }
 }

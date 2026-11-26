@@ -102,7 +102,7 @@ struct AgentView: View {
             ToolbarItem(placement: .principal) {
                 // Not a Button: the bar sizes a button by its whole line, which then runs under the bar's own buttons; a
                 // plain title gets the room between them, and ends in an ellipsis there.
-                TimelineTitle(title: name, line: row?.line, needs: row?.needs ?? false)
+                TimelineTitle(title: name, line: row?.line, needs: row?.needs ?? false, standing: row?.standing)
                     .contentShape(.rect)
                     .onTapGesture { about = true }
                     .accessibilityElement(children: .combine)
@@ -111,29 +111,33 @@ struct AgentView: View {
                     .accessibilityHint("What \(name) is and how its day stands")
             }
             #endif
-            // Its VM, once it has one: its files and what its task changed, beside this; its screen to watch and take
-            // over, and a terminal in it.
-            if let agent, agent.workspace != nil, session.can("sandbox") {
-                ToolbarItem(placement: .barTrailing) {
-                    Button {
-                        if let workspaceColumn { workspaceColumn.wrappedValue.toggle() } else { inWorkspace = true }
-                    } label: {
-                        Label("Workspace", systemImage: workspaceColumn?.wrappedValue == true ? "folder.fill" : "folder")
-                    }
-                    .accessibilityIdentifier("workspace")
-                }
-                ToolbarItem(placement: .barTrailing) {
-                    Menu {
-                        Button { watching = true } label: { Label("Its screen", systemImage: "display") }
-                        Button { inTerminal = true } label: { Label("Its terminal", systemImage: "apple.terminal") }
-                    } label: {
-                        Label("Its VM", systemImage: "desktopcomputer")
-                    }
-                }
-            }
+            // Everything else of its in one menu (I10: one prominent thing a screen, the rest a tap further): a task to
+            // give it, its VM's files, screen and terminal once it has one, what it is.
             ToolbarItem(placement: .barTrailing) {
-                Button { giving = true } label: { Label("Give a task", systemImage: "hammer") }
-                    .disabled(room.view == nil || agent == nil)
+                Menu {
+                    Button { giving = true } label: { Label("Give \(name) a task…", systemImage: "square.stack.3d.up") }
+                        .disabled(room.view == nil || agent == nil)
+                    if let agent, agent.workspace != nil, session.can("sandbox") {
+                        Section {
+                            Button {
+                                if let workspaceColumn { workspaceColumn.wrappedValue.toggle() } else { inWorkspace = true }
+                            } label: {
+                                Label("Its files", systemImage: workspaceColumn?.wrappedValue == true ? "folder.fill" : "folder")
+                            }
+                            .accessibilityIdentifier("workspace")
+                            Button { watching = true } label: { Label("Its screen", systemImage: "display") }
+                            Button { inTerminal = true } label: { Label("Its terminal", systemImage: "apple.terminal") }
+                        }
+                    }
+                    #if os(iOS)
+                    // (Its title says the same at a tap; a Mac has its own button beside the title.)
+                    Button { about = true } label: { Label("About \(name)", systemImage: "info.circle") }
+                        .disabled(agent == nil)
+                    #endif
+                } label: {
+                    Label("More", systemImage: "ellipsis")
+                }
+                .accessibilityIdentifier("agent.more")
             }
         }
         .sheet(isPresented: $giving) {
@@ -249,9 +253,10 @@ struct TeamBubble: View {
     }
 }
 
-/// A task where it was given: what it is, where it stands, how it ended and why, what it kept, and what you can do. One
-/// an agent proposed waits for you here, with Approve and Decline. Its badge says where it stands, so nothing else does,
-/// and every line of it starts at one edge.
+/// A task where it was given, between hairlines (I10: no cards): what it is and how it stands (a dot and its word while it
+/// is in hand, its verdict as its proof allows once it ended, never "Verified"), who proposed or gave it, how it ended and
+/// why in a line, and its answers, none filled (the screen's one is its message box's send). A tap on its title opens
+/// its thread, where its proof is in full.
 struct TaskCardView: View {
     let task: TeamTask
     /// The name of the agent that proposed it, when one did.
@@ -259,22 +264,32 @@ struct TaskCardView: View {
     /// Opens its steps, to give it again from one (PLAN #15); nil: not offered here.
     var fromStep: (() -> Void)? = nil
     let act: (TaskCard.Action) -> Void
-
-    private var badge: (text: String, tone: TaskCard.Tone) { TaskCard.badge(task) }
+    @Environment(\.openPlace) private var openPlace
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                Text(task.title).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: Space.s1)
-                StateBadge(text: badge.text, tone: badge.tone.rawValue, busy: task.status == "running")
+            Divider()
+            Button { openPlace?(.task(task.id)) } label: {
+                let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s1)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Space.s2))
+                layout {
+                    Text(task.title).font(Typeset.row).foregroundStyle(.primary).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                    if !typeSize.isAccessibilitySize { Spacer(minLength: Space.s1) }
+                    standing.font(.caption)
+                    if openPlace != nil { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).accessibilityHidden(true) }
+                }
+                .frame(minHeight: Metrics.touch)
+                .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .disabled(openPlace == nil)
+            .accessibilityIdentifier("card.\(task.id)")
             if let proposed = TaskCard.proposed(task, proposer: proposer) { Text(proposed).font(.caption).foregroundStyle(.secondary) }
             if let given = TaskCard.given(task) { Text(given).font(.caption).foregroundStyle(.secondary) }
             if let sensitive = TaskCard.sensitive(task) { Text(sensitive).font(.caption).foregroundStyle(.secondary) }
             if let stepped = TaskCard.stepped(task) { Text(stepped).font(.caption).foregroundStyle(.secondary) }
             if task.status == "proposed" {
-                Text(task.goal).font(.callout).lineLimit(6).fixedSize(horizontal: false, vertical: true)
+                Text(task.goal).font(Typeset.body).lineLimit(6).fixedSize(horizontal: false, vertical: true)
                 if let gates = task.gates, !gates.isEmpty {
                     Label("Done when \(gates.joined(separator: " · ")) pass\(gates.count == 1 ? "es" : "")", systemImage: "checkmark.seal")
                         .font(.caption.monospaced())
@@ -283,15 +298,15 @@ struct TaskCardView: View {
                 }
             }
             if task.status == "running" {
-                // Two lines kept from the start, so the card doesn't grow as its latest line comes and lengthens.
+                // Two lines kept from the start, so the row doesn't grow as its latest line comes and lengthens.
                 let latest = Roster.firstLine(task.progress)
                 Text(latest.isEmpty ? " " : latest).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
             }
-            if let end = TaskCard.end(task) {
-                if let why = end.why {
-                    Text(why).font(.caption).foregroundStyle(badge.tone == .danger || badge.tone == .warn ? Color.danger : .secondary).fixedSize(horizontal: false, vertical: true)
+            if let end = TaskCard.end(task), let verdict {
+                if let why = TaskCard.because(end.why, verdict: verdict.word) {
+                    Text(why).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                if let said = end.said {
+                if let said = TaskCard.saidBesideProof(end.said) {
                     Text(said).font(.caption).foregroundStyle(.secondary).lineLimit(4)
                 }
             }
@@ -299,39 +314,57 @@ struct TaskCardView: View {
                 Label(kept, systemImage: "doc.badge.plus").font(.caption).foregroundStyle(.secondary)
             }
             if let shipped = TaskCard.shipped(task), let url = URL(string: shipped.url) {
-                Link(destination: url) { Label(shipped.text, systemImage: "arrow.up.forward.square") }.font(.caption)
+                Link(destination: url) { Label(shipped.text, systemImage: "arrow.up.forward.square") }.font(.caption.weight(.semibold))
             }
             let actions = TaskCard.actions(task)
             if !actions.isEmpty {
-                // One size for every card's buttons, big enough for a thumb.
-                HStack(spacing: Space.s2) {
-                    ForEach(actions, id: \.rawValue) { action in
-                        if action == .approve || action == .ship {
-                            Button(action == .ship ? "Ship it" : "Approve") { act(action) }
-                                .buttonStyle(.borderedProminent)
-                                .tint(.ink)
-                        } else {
-                            Button(Self.label[action] ?? action.rawValue) { act(action) }
-                                .buttonStyle(.bordered)
-                                .tint(action == .stop ? Color.danger : .ink)
-                        }
-                    }
-                    if actions.contains(.again), let fromStep {
-                        Button("From a step…") { fromStep() }
-                            .buttonStyle(.bordered)
-                            .tint(.ink)
-                    }
+                // Its answers, none of them filled, each a thumb's size.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Space.s2) { buttons(actions) }
+                    VStack(alignment: .leading, spacing: Space.s2) { buttons(actions) }
                 }
-                .controlSize(.regular)
             }
         }
-        .padding(Space.s3)
+        .padding(.bottom, Space.s2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.fill.quaternary, in: .rect(cornerRadius: Metrics.cardRadius, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 
-    private static let label: [TaskCard.Action: String] = [.decline: "Decline", .stop: "Stop", .resume: "Resume", .again: "Give again"]
+    /// Its verdict as its proof allows (from its record), once it has ended.
+    private var verdict: (word: String, verdict: Steps.Verdict)? {
+        Steps.verdict(status: task.status, verified: task.verified, error: task.error, record: task.record, facts: Steps.facts(record: task.record))
+    }
+
+    /// How it stands: a dot and its word while in hand, its verdict once ended.
+    @ViewBuilder private var standing: some View {
+        if let verdict {
+            let failed = verdict.verdict == .failed || verdict.verdict == .rejected || verdict.verdict == .gaveUp
+            HStack(spacing: 3) {
+                if verdict.verdict == .proven { Image(systemName: "checkmark").font(.caption2.weight(.bold)) }
+                Text(verdict.word).fontWeight(.semibold)
+            }
+            .foregroundStyle(failed ? AnyShapeStyle(Color.danger) : verdict.verdict == .proven ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+        } else {
+            switch task.status {
+            case "proposed": StateLabel(word: "Waits for you", tone: .active, strong: true)
+            case "running": StateLabel(word: "Working", tone: .active)
+            case "queued": StateLabel(word: "Queued", tone: .quiet)
+            case "interrupted": StateLabel(word: "Interrupted", tone: .active, strong: true)
+            default: StateLabel(word: TaskCard.badge(task).text, tone: .quiet)
+            }
+        }
+    }
+
+    @ViewBuilder private func buttons(_ actions: [TaskCard.Action]) -> some View {
+        ForEach(actions, id: \.rawValue) { action in
+            NeedButton(title: action == .ship ? "Ship it…" : action == .again ? "Give again" : Self.label[action] ?? action.rawValue.capitalized) { act(action) }
+        }
+        if actions.contains(.again), let fromStep {
+            NeedButton(title: "From a step…") { fromStep() }
+        }
+    }
+
+    private static let label: [TaskCard.Action: String] = [.approve: "Approve", .decline: "Decline", .stop: "Stop", .resume: "Resume", .again: "Give again"]
 }
 
 /// The steps of a task another can be given from (PLAN #15), asked of the node as the sheet opens: each command and
@@ -449,15 +482,24 @@ struct RoomComposer: View {
                     // One line high, the field is 44 points: Apple's least for a thing to tap.
                     .padding(.vertical, 11)
                     .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22, style: .continuous))
-                Button {
-                    Task { await room.send(with: client) }
-                } label: {
-                    Image(systemName: "arrow.up").font(.body.weight(.bold)).foregroundStyle(Prominent.label(dimmed: empty)).frame(width: 30, height: 30)
+                // Filled only while there is something to send: the one prominent thing on the screen then, and never a
+                // grey filled disc before (the same size either way, so nothing moves).
+                if empty {
+                    Button {} label: { Image(systemName: "arrow.up").font(.body.weight(.bold)).frame(width: 30, height: 30) }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .disabled(true)
+                        .accessibilityLabel("Send to \(name)")
+                } else {
+                    Button {
+                        Task { await room.send(with: client) }
+                    } label: {
+                        Image(systemName: "arrow.up").font(.body.weight(.bold)).foregroundStyle(Prominent.label()).frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .buttonBorderShape(.circle)
+                    .accessibilityLabel("Send to \(name)")
                 }
-                .buttonStyle(.glassProminent)
-                .buttonBorderShape(.circle)
-                .disabled(empty)
-                .accessibilityLabel("Send to \(name)")
             }
         }
     }
@@ -585,9 +627,9 @@ private struct AgentAbout: View {
                         .padding(.vertical, Space.s1)
                     }
                     if !agent.instructions.isEmpty {
-                        Section("Its job") { Text(agent.instructions) }
+                        Section(head: "Its job") { Text(agent.instructions) }
                     }
-                    Section("Today") {
+                    Section(head: "Today") {
                         LabeledContent("State", value: agent.enabled ? "At the table" : "Paused")
                         LabeledContent("Turns") { Text("\(agent.turnsToday) of \(agent.dailyTurns)").monospacedDigit() }
                         LabeledContent("Harness", value: AgentView.harness[agent.harness] ?? agent.harness)

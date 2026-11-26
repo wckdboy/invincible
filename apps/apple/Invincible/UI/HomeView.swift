@@ -54,10 +54,9 @@ struct HomeView: View {
     var give: (() -> Void)? = nil
     @FocusState private var composing: Bool
     @AppStorage("home.done") private var doneOpen = false
-    @State private var sheet: NeedsYou.NeedSheet?
-    @State private var confirming: ActionView?
-    @State private var busy: Set<String> = []
-    @State private var trouble: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
+    /// What its decisions' answers are doing (shared with Needs you: Decisions.swift).
+    @State private var desk = DecisionDesk()
 
     private var chat: ChatModel { session.chat }
 
@@ -82,11 +81,11 @@ struct HomeView: View {
                     .listRowSeparator(.hidden)
             }
             if let work {
-                let decisions = decisions(work)
+                let decisions = desk.decisions(session, work, go: go)
                 if !decisions.isEmpty {
                     Section {
                         ForEach(decisions.prefix(3)) { decision in
-                            DecisionRow(decision: decision, busy: busy.contains(decision.id))
+                            DecisionRow(decision: decision, busy: desk.busy.contains(decision.id))
                         }
                         if decisions.count > 3 {
                             Button { go(.inbox) } label: {
@@ -172,18 +171,7 @@ struct HomeView: View {
         #endif
         .task { await session.askProjects() }
         .refreshable { await session.refresh() }
-        .sheet(item: $sheet) { sheet in NeedSheetView(session: session, sheet: sheet) }
-        .alert("Approve and send?", isPresented: .init(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming) { action in
-            Button("Approve and send") { run("action:\(action.id)") { try await session.decide(action, approve: true) } }
-            Button("Cancel", role: .cancel) {}
-        } message: { action in
-            Text("\(session.nodeName(of: action.node)) sends it to \(action.target) once, as soon as you approve. It can't be called back, and if it fails it isn't retried.")
-        }
-        .alert("That didn't go through", isPresented: .init(get: { trouble != nil }, set: { if !$0 { trouble = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(trouble ?? "")
-        }
+        .modifier(DecisionDeskSheets(desk: desk, session: session))
     }
 
     // MARK: Its header
@@ -202,13 +190,13 @@ struct HomeView: View {
             Button { go(.primary) } label: {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(Primary.name)
-                        .font(.title2.weight(.heavy))
-                        .tracking(-0.4)
+                        .font(Typeset.title)
                         .foregroundStyle(.primary)
                     Text(line.text)
                         .font(.subheadline.weight(line.needs ? .semibold : .regular))
                         .foregroundStyle(line.needs ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                        .lineLimit(1)
+                        // (At the accessibility sizes it wraps rather than being cut.)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                         .minimumScaleFactor(0.85)
                         .monospacedDigit()
                 }
@@ -235,88 +223,6 @@ struct HomeView: View {
         guard let usage = session.usage, usage.spentUsd > 0, said.text != session.primary.line else { return said }
         let money = "\(usage.complete ? "" : "at least ")\(Spend.usd(usage.spentUsd)) \(usage.per == "day" ? "today" : "this month")"
         return ("\(said.text) · \(money)", said.needs)
-    }
-
-    // MARK: What needs you
-
-    /// Every decision that waits, as the count counts them (Session.needsYou): each approval once (an agent's under its
-    /// task's name), each task only you can move on, devices, keys, questions and asks to use a Mac.
-    private func decisions(_ work: Attended) -> [Decision] {
-        let now = Date.now.timeIntervalSince1970 * 1000
-        let admin = session.can("fleet:admin")
-        let canAct = admin && session.can("chat")
-        var shown = Set<String>()
-        var out: [Decision] = []
-        for row in work.needs {
-            if row.word == "Allow?" {
-                for action in session.waiting where Roster.agentOfCaller(action.by) == row.agent.id {
-                    shown.insert(action.id)
-                    out.append(approval(action, row: row, admin: admin))
-                }
-            } else {
-                out.append(task(row, canAct: canAct))
-            }
-        }
-        for action in session.waiting where !shown.contains(action.id) { out.append(approval(action, row: nil, admin: admin)) }
-        for pairing in session.pairings {
-            out.append(Decision(id: "pairing:\(pairing.id)", lead: .symbol(pairing.kind == "node" ? "server.rack" : "iphone"), who: pairing.kind == "node" ? "A machine asks to join" : "A device asks to join", what: pairing.name, answer: admin ? ("Compare…", { sheet = .pairing(pairing) }) : nil, rest: [], open: { sheet = .pairing(pairing) }))
-        }
-        for request in session.requests {
-            out.append(Decision(id: "key:\(request.id)", lead: .symbol("key"), who: "\(Primary.name) asks for a key", what: "\(request.name) · \(request.purpose)", answer: session.can("vault:write") ? ("Add…", { sheet = .key(request) }) : nil, rest: [], open: { sheet = .key(request) }))
-        }
-        for question in session.questions where question.expires > now {
-            out.append(Decision(id: "question:\(question.id)", lead: .symbol("powerplug"), who: "\(question.label) asks", what: question.message, answer: ("Answer…", { sheet = .question(question) }), rest: [], open: { sheet = .question(question) }))
-        }
-        for screen in session.screenSessions {
-            let using = screen.state == "allowed"
-            out.append(Decision(id: "screen:\(screen.id)", lead: .symbol("display"), who: using ? "\(Primary.name) is using \(screen.nodeName)" : "\(Primary.name) asks to use \(screen.nodeName)", what: screen.why, answer: (using ? "See it…" : "Answer…", { sheet = .screen(screen) }), rest: [], open: { sheet = .screen(screen) }))
-        }
-        return out
-    }
-
-    private func approval(_ action: ActionView, row: WorkRow?, admin: Bool) -> Decision {
-        let destructive = action.kind == "delete"
-        let asker = Approval.askedBy(action.by)
-        let lead: Decision.Lead = row.map { .agent(id: $0.agent.id, avatar: $0.agent.avatar) } ?? .symbol(Approval.symbol(action.kind))
-        let who = row.map { "\($0.agent.name) · \($0.title)" } ?? "\(asker.prefix(1).uppercased())\(asker.dropFirst()) asks"
-        let what = "\(Approval.classLine(action.kind).components(separatedBy: ":")[0]) · \(action.connector).\(action.tool) \(action.target)"
-        let id = "action:\(action.id)"
-        return Decision(
-            id: id, lead: lead, who: who, what: what,
-            // A delete is approved only in its whole card, by typing what it deletes.
-            answer: admin ? (destructive ? "Review…" : "Allow once", { if destructive { sheet = .approval(action) } else { confirming = action } }) : nil,
-            rest: admin ? [("Deny", true, { run(id) { try await session.decide(action, approve: false) } }), ("More", false, { sheet = .approval(action) })] : [],
-            open: { sheet = .approval(action) }
-        )
-    }
-
-    private func task(_ row: WorkRow, canAct: Bool) -> Decision {
-        let id = "task:\(row.id)"
-        let lead = Decision.Lead.agent(id: row.agent.id, avatar: row.agent.avatar)
-        let open = { go(.task(row.id)) }
-        switch row.word {
-        case "Approve?":
-            return Decision(id: id, lead: lead, who: "\(row.agent.name) proposes", what: row.title,
-                            answer: canAct ? ("Approve", { run(id) { try await session.control(task: row.id, "approve") } }) : nil,
-                            rest: canAct ? [("Decline", true, { run(id) { try await session.control(task: row.id, "stop") } })] : [], open: open)
-        case "Interrupted":
-            return Decision(id: id, lead: lead, who: "\(row.agent.name) · interrupted", what: row.title,
-                            answer: canAct ? ("Resume", { run(id) { try await session.control(task: row.id, "resume") } }) : nil, rest: [], open: open)
-        case "Agent paused":
-            return Decision(id: id, lead: lead, who: "\(row.agent.name) is paused", what: row.title,
-                            answer: canAct ? ("Resume", { run(id) { try await session.control(agent: row.agent.id, "resume") } }) : nil, rest: [], open: open)
-        default:
-            return Decision(id: id, lead: lead, who: row.agent.name, what: row.title, answer: nil, rest: [], open: open)
-        }
-    }
-
-    /// Something answered: its row held while the node is told, and what went wrong said.
-    private func run(_ id: String, _ work: @escaping @MainActor () async throws -> Void) {
-        busy.insert(id)
-        Task.immediate {
-            defer { busy.remove(id) }
-            do { try await work() } catch { trouble = error.localizedDescription }
-        }
     }
 
     // MARK: The work
@@ -371,17 +277,18 @@ struct HomeView: View {
 /// A section's head on Home: its name in small capitals, and how many.
 struct SectionHead: View {
     let title: String
-    let count: Int
+    /// How many (nil: a section that counts nothing, a place's own: Settings' This device).
+    var count: Int?
     var strong = false
     var failed = false
 
     var body: some View {
         HStack(spacing: Space.s2) {
             Text(title.uppercased()).tracking(0.6)
-            Text("\(count)").monospacedDigit()
+            if let count { Text("\(count)").monospacedDigit() }
             Spacer(minLength: 0)
         }
-        .font(.caption.weight(.bold))
+        .font(Typeset.section)
         .foregroundStyle(failed ? AnyShapeStyle(Color.danger) : strong ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
@@ -484,7 +391,7 @@ struct PlaceButtons: View {
         if let give { Button(action: give) { Label("Give a task…", systemImage: "square.stack.3d.up") } }
         Button { go(.primary) } label: { Label(Primary.name, systemImage: "bubble.left.and.text.bubble.right") }
         Button { go(.agents) } label: { Label("Agents", systemImage: "person.3") }
-        Button { go(.inbox) } label: { Label(session.needsYou > 0 ? "Inbox · \(session.needsYou)" : "Inbox", systemImage: "tray") }
+        Button { go(.inbox) } label: { Label(session.needsYou > 0 ? "Needs you · \(session.needsYou)" : "Needs you", systemImage: "tray") }
         Button { go(.more) } label: { Label("Settings", systemImage: "gearshape") }
     }
 }

@@ -11,11 +11,11 @@ struct JoinView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            GroupedList {
                 Section {
                     VStack(spacing: Space.s3) {
                         AppMark(size: 88)
-                        Text("Join your fleet").font(.largeTitle.bold())
+                        Text("Join your fleet").font(.largeTitle.bold()).multilineTextAlignment(.center)
                         Text("This \(ThisDevice.kind) gets its own key. It can sign, but it can never be read out, not even by this app.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -25,6 +25,7 @@ struct JoinView: View {
                     .padding(.vertical, Space.s2)
                 }
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
 
                 switch model.stage {
                 case .entering, .asking: asking
@@ -34,6 +35,8 @@ struct JoinView: View {
                 case .refusedKey: refusedKey
                 }
             }
+            .hairlinePage()
+            .screen("join.screen")
             // Asking turning into waiting for your approval is shown moving, unless the device asks for less motion.
             .animation(reduceMotion ? nil : .default, value: model.stage)
         }
@@ -55,9 +58,9 @@ struct JoinView: View {
                 model.link = strings.first ?? ""
             }
         } header: {
-            Text("Invite link")
+            SectionHead("Invite link")
         } footer: {
-            Text("From `invincible invite --client` on your node, or from Invite a device in Invincible on another of your devices.")
+            PageNote("From `invincible invite --client` on your node, or from Invite a device in Invincible on another of your devices.")
         }
         Section {
             FormField("Name", text: $model.name)
@@ -65,13 +68,13 @@ struct JoinView: View {
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("device-name")
         } header: {
-            Text("Name this device")
+            SectionHead("Name this device")
         } footer: {
-            Text("How it appears in your fleet's device list.")
+            PageNote("How it appears in your fleet's device list.")
         }
         if let problem = model.problem {
             Section {
-                Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.danger)
             }
         }
         Section {
@@ -88,7 +91,8 @@ struct JoinView: View {
             .buttonStyle(.glassProminent)
             .disabled(!model.canAsk)
             .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: Space.s4, leading: Metrics.margin, bottom: Space.s4, trailing: Metrics.margin))
             .accessibilityIdentifier("ask-to-join")
         }
     }

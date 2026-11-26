@@ -60,7 +60,7 @@ struct Drawer: View {
         HStack(spacing: Space.s3) {
             AppMark(size: 36)
             VStack(alignment: .leading, spacing: Space.line) {
-                Text(Primary.name).font(.title3.weight(.bold))
+                Text(Primary.name).font(Typeset.title)
                 Text(session.whoami?.nodeName ?? session.node.nodeName ?? "Your node").font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -76,7 +76,7 @@ struct Drawer: View {
     /// Notifications, asked for once and compactly: off, or turned off in the iPhone's Settings.
     private var notifications: some View {
         HStack(spacing: Space.s3) {
-            Image(systemName: "bell.slash").foregroundStyle(.secondary).frame(width: Metrics.iconColumn)
+            DrawerGlyph(symbol: "bell.slash", quiet: false)
             Text(push.reach == .settings ? "Notifications are off in the iPhone's Settings" : "Notifications are off").font(.subheadline).foregroundStyle(.secondary)
             Spacer(minLength: Space.s2)
             Button(push.reach == .settings ? "Open" : "Turn on") {
@@ -95,7 +95,7 @@ struct Drawer: View {
     private func row(_ title: String, symbol: String, id: String, count: Int? = nil, quietCount: Bool = false, quiet: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: Space.s3) {
-                Image(systemName: symbol).font(.body).foregroundStyle(quiet ? .tertiary : .secondary).frame(width: Metrics.iconColumn)
+                DrawerGlyph(symbol: symbol, quiet: quiet)
                 Text(title).font(quiet ? .subheadline : .body.weight(.semibold)).foregroundStyle(quiet ? .secondary : .primary).lineLimit(1)
                 Spacer(minLength: Space.s2)
                 if let count, count > 0 {
@@ -113,6 +113,26 @@ struct Drawer: View {
         struct Listed: Decodable { let conversations: [ConversationSummary] }
         let listed = try? await session.client.get("/api/conversations", as: Listed.self).conversations
         chats = (listed ?? []).sorted { $0.updatedAt > $1.updatedAt }
+    }
+}
+
+/// A place's glyph in the drawer's column: every one fitted to the same box (the people of the agents are wider than a
+/// key or a gear, and stood out of the column, I9's screenshots), so their middles and edges line up, growing with the
+/// text.
+private struct DrawerGlyph: View {
+    let symbol: String
+    let quiet: Bool
+    @ScaledMetric(relativeTo: .body) private var box: CGFloat = 22
+
+    var body: some View {
+        Image(systemName: symbol)
+            .resizable()
+            .scaledToFit()
+            .fontWeight(.regular)
+            .foregroundStyle(quiet ? .tertiary : .secondary)
+            .frame(width: box, height: box)
+            .frame(width: max(Metrics.iconColumn, box + 6))
+            .accessibilityHidden(true)
     }
 }
 

@@ -69,7 +69,7 @@ struct AgentsView: View {
             #endif
             agents
             if !rooms.isEmpty {
-                Section("Rooms") {
+                Section(head: "Rooms") {
                     ForEach(rooms) { row in
                         NavigationLink(value: Route.room(row.id)) { RoomRowView(row: row, faces: faces(of: row), selected: chosen(.room(row.id))) }
                     }
@@ -80,7 +80,9 @@ struct AgentsView: View {
         // the ink is cream, and white on it couldn't be read; there the system's grey holds the selection. (Only the
         // list's own tint: its bar's buttons and its sheets keep the ink.)
         .tint(scheme == .dark ? Color.selectionOnDark : .ink)
-        .navigationTitle("Agents")
+        .hairlinePage()
+        .screen("agents.screen")
+        .placeTitle("Agents")
         .toolbar { bar }
         .sheet(isPresented: $giving) { GiveSheet(session: session) }
         .sheet(isPresented: $seating) { AgentEditor(session: session) { open(.agent($0.id)) } }
@@ -111,7 +113,7 @@ struct AgentsView: View {
             Section {
                 ForEach(rest, id: \.self) { id in seat(id, rows) }
             } header: {
-                if !rest.isEmpty { Text("Agents") }
+                if !rest.isEmpty { SectionHead(title: "Agents", count: rest.count) }
             } footer: {
                 footer
             }
@@ -120,7 +122,7 @@ struct AgentsView: View {
             Section {
                 ForEach(matches, id: \.self) { id in seat(id, rows) }
             } header: {
-                if !matches.isEmpty { Text("Agents") }
+                if !matches.isEmpty { SectionHead(title: "Agents", count: matches.count) }
             } footer: {
                 footer
             }
@@ -129,8 +131,7 @@ struct AgentsView: View {
 
     @ToolbarContentBuilder private var bar: some ToolbarContent {
         #if os(iOS)
-        ToolbarItem(placement: .topBarLeading) { AgentsMark(size: 28) }
-            .sharedBackgroundVisibility(.hidden)
+        // (The place's title says what it is: no mark beside it says it again.)
         actions
         #else
         // (On a Mac the mark heads the sidebar, as the PWA's wide screen has it.)
@@ -166,9 +167,9 @@ struct AgentsView: View {
 
     @ViewBuilder private var footer: some View {
         if let problem = session.teamProblem {
-            Text(problem)
+            PageNote(problem)
         } else if session.team != nil, session.rows.isEmpty {
-            Text("No other agents yet. Add one with +: a name, a lasting job and a workspace of its own.")
+            PageNote("No other agents yet. Add one with +: a name, a lasting job and a workspace of its own.")
         }
     }
 
@@ -275,7 +276,7 @@ struct RosterLine<Face: View>: View {
 
     /// Its state in a word; at rest, which says none, the chip's place is kept, so a row is as tall whatever it says.
     @ViewBuilder private func chip(_ standing: Standing) -> some View {
-        if let word = standing.word {
+        if let word = standing.shown {
             StateBadge(text: word, tone: standing.tone, selected: selected)
         } else {
             StateBadge(text: "Queued", tone: "neutral").hidden().accessibilityHidden(true)
@@ -324,7 +325,7 @@ struct SeatCard<Face: View>: View {
             // A little room under every face, so its name stands clear of it.
             face.padding(.bottom, Space.s2)
             Text(name).font(.headline).lineLimit(1)
-            if let word = standing.word {
+            if let word = standing.shown {
                 StateBadge(text: word, tone: standing.tone)
             } else {
                 StateBadge(text: "Queued", tone: "neutral").hidden().accessibilityHidden(true)

@@ -37,18 +37,15 @@ struct KeysView: View {
 
     var body: some View {
         GroupedList {
+            // What a key here is, in a line under the title: no card round it.
             Section {
-                Label {
-                    Text("Keys are sealed for your full nodes: never shown again, never seen by a model. The node adds a key to a call itself, and only to the address it's pinned to.\(PhoneKeys.offered ? " A copy stays on this iPhone only when you choose to keep one." : "")")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } icon: {
-                    Image(systemName: "lock.shield").foregroundStyle(Color.ink)
-                }
+                PageNote("Sealed for your full nodes: never shown again, never seen by a model. The node adds a key to a call itself, and only to the address it's pinned to.\(PhoneKeys.offered ? " A copy stays on this iPhone only when you choose to keep one." : "")")
+                    .listRowSeparator(.hidden)
                 if !unlocked {
                     Label("This node holds no vault grant yet, so it can't use these keys. Another full node can.", systemImage: "lock.trianglebadge.exclamationmark")
                         .font(.footnote)
-                        .foregroundStyle(Color.danger)
+                        .foregroundStyle(.primary)
+                        .listRowSeparator(.hidden)
                 }
             }
             if let notice {
@@ -58,7 +55,7 @@ struct KeysView: View {
                 Section { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.danger) }
             }
             if let keys, !keys.isEmpty {
-                Section("Sealed") {
+                Section {
                     ForEach(keys) { key in
                         KeyRow(key: key, plan: plan(of: key.provider))
                             .swipeActions(edge: .trailing) {
@@ -81,6 +78,8 @@ struct KeysView: View {
                                 }
                             }
                     }
+                } header: {
+                    SectionHead(title: "Sealed", count: keys.count)
                 }
             }
             if !kept.isEmpty {
@@ -108,13 +107,13 @@ struct KeysView: View {
                         }
                     }
                 } header: {
-                    Text("On this iPhone")
+                    SectionHead("On this iPhone")
                 } footer: {
-                    Text("In this iPhone's Keychain, for this device alone, read back only with Face ID or your passcode. Swipe one to seal it on your nodes again.")
+                    PageNote("In this iPhone's Keychain, for this device alone, read back only with Face ID or your passcode. Swipe one to seal it on your nodes again.")
                 }
             }
             if let providers, !providers.providers.isEmpty {
-                Section("Providers") {
+                Section {
                     ForEach(providers.providers) { provider in
                         HStack {
                             VStack(alignment: .leading, spacing: Space.line) {
@@ -127,17 +126,21 @@ struct KeysView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            Spacer()
-                            Text(provider.hasKey ? "Key sealed" : provider.keyElsewhere != nil ? "Key for another address" : "No key yet")
+                            Spacer(minLength: Space.s2)
+                            // Where its key stands, a dot and its word: nothing here went wrong, so nothing is red.
+                            StateLabel(word: provider.hasKey ? "Key sealed" : provider.keyElsewhere != nil ? "Key for another address" : "No key yet", tone: provider.hasKey ? .quiet : .active)
                                 .font(.caption)
-                                .foregroundStyle(provider.hasKey ? Color.secondary : Color.danger)
                         }
                         .accessibilityElement(children: .combine)
                     }
+                } header: {
+                    SectionHead("Providers")
                 }
             }
         }
-        .navigationTitle("Keys")
+        .hairlinePage()
+        .screen("keys.screen")
+        .placeTitle("Keys")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { adding = true } label: { Label("Add a key", systemImage: "plus") }
@@ -148,7 +151,7 @@ struct KeysView: View {
             if keys == nil, problem == nil {
                 ProgressView()
             } else if keys?.isEmpty == true, kept.isEmpty {
-                ContentUnavailableView("No keys yet", systemImage: "key", description: Text("Add a provider's key, a coding plan's or a service's, and it's sealed for every full node. \(Primary.name) asks for one it needs in your Inbox."))
+                ContentUnavailableView("No keys yet", systemImage: "key", description: Text("Add a provider's key, a coding plan's or a service's, and it's sealed for every full node. \(Primary.name) asks for one it needs in Needs you."))
             }
         }
         .refreshable { await load() }
@@ -264,7 +267,7 @@ private struct KeyRow: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             } else {
-                Text("pinned nowhere: never used").font(.caption).foregroundStyle(Color.danger)
+                Text("pinned nowhere: never used").font(.caption.weight(.semibold)).foregroundStyle(.primary)
             }
             if let at = hlcDate(key.updatedAt) {
                 Text("Sealed \(at.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.tertiary)

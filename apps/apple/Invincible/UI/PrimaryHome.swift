@@ -34,7 +34,7 @@ struct PrimaryHero: View {
         VStack(spacing: Space.s2) {
             PrimaryOrb(size: size, tone: tone, mood: mood)
                 .padding(.bottom, Space.s2)
-            Text(title).font(.title2.bold())
+            Text(title).font(Typeset.title)
             Text(line)
                 .font(.subheadline)
                 .foregroundStyle(lineColor)
@@ -103,8 +103,9 @@ struct PrimaryAsks: View {
         let asks = asks
         if !asks.isEmpty {
             VStack(alignment: .leading, spacing: Space.s2) {
-                Text("\(Primary.name) asks you").font(.headline)
+                SectionHead("\(Primary.name) asks you")
                 ForEach(asks.prefix(Self.shown)) { ask in
+                    Divider()
                     Group {
                         switch ask {
                         case .approval(let action):
@@ -115,12 +116,11 @@ struct PrimaryAsks: View {
                             QuestionRow(session: session, question: question)
                         }
                     }
-                    .padding(Space.s3)
+                    .padding(.vertical, Space.s2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: Metrics.cardRadius, style: .continuous))
                 }
                 if asks.count > Self.shown {
-                    Button("\(asks.count - Self.shown) more in the Inbox") { showInbox?() }
+                    Button("\(asks.count - Self.shown) more in Needs you") { showInbox?() }
                         .font(.subheadline)
                         .disabled(showInbox == nil)
                 }
@@ -138,7 +138,7 @@ struct PrimaryWelcome: View {
 
     var body: some View {
         VStack(spacing: Space.s6) {
-            PrimaryHero(tone: session.primaryTone, mood: session.primaryMood, title: "At your service.", line: "Ask anything. \(Primary.name) recalls what your fleet remembers, and uses its tools. Keys belong in the vault, never here.", size: 168)
+            PrimaryHero(tone: session.primaryTone, mood: session.primaryMood, title: "At your service.", line: "Ask anything. \(Primary.name) recalls what your fleet remembers, and uses its tools. Keys belong in the vault, never here.", size: 96)
             Suggestions(fill: fill)
             PrimaryAsks(session: session)
         }

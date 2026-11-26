@@ -356,7 +356,9 @@ private struct StatView: View {
                 let note = Text(stat.note.map { " \($0)" } ?? "").foregroundStyle(.secondary)
                 Text("\(arrow)\(change)\(note)")
                     .font(.caption)
-                    .foregroundStyle(tone == .good ? Color.green : tone == .bad ? Color.danger : .secondary)
+                    // Better in the ink, worse in the ink too, by its arrow: monochrome (red is for what went wrong, and a
+                    // figure that moved the wrong way didn't go wrong).
+                    .foregroundStyle(tone == .good || tone == .bad ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     .fixedSize(horizontal: false, vertical: true)
             } else if let note = stat.note {
                 Text(note).font(.caption).foregroundStyle(.secondary)

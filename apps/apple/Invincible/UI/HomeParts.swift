@@ -66,6 +66,8 @@ struct AgentStrip: View {
 private struct AgentChip: View {
     let row: RosterRow
     let avatar: JSONValue?
+    /// As wide as its words need at the size you read at (72 points at the default), so a name isn't cut to its first letter.
+    @ScaledMetric(relativeTo: .footnote) private var width: CGFloat = 72
 
     var body: some View {
         let word = AgentStrip.word(row)
@@ -82,7 +84,7 @@ private struct AgentChip: View {
             .foregroundStyle(row.standing == .failed ? AnyShapeStyle(Color.danger) : row.needs || row.standing == .needs ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
             .lineLimit(1)
         }
-        .frame(width: 72)
+        .frame(width: width)
         .contentShape(.rect)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(row.name), \(word)")
@@ -106,19 +108,22 @@ struct Decision: Identifiable {
     let open: () -> Void
 }
 
-/// A row of "Needs you".
+/// A row of "Needs you". At the accessibility sizes its answer stands under its words, whole, rather than squeezing them.
 struct DecisionRow: View {
     let decision: Decision
     var busy = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(alignment: .center, spacing: Space.s3) {
+        let large = typeSize.isAccessibilitySize
+        let layout = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s2)) : AnyLayout(HStackLayout(alignment: .center, spacing: Space.s3))
+        layout {
             Button(action: decision.open) {
-                HStack(alignment: .center, spacing: Space.s3) {
+                HStack(alignment: large ? .top : .center, spacing: Space.s3) {
                     lead
                     VStack(alignment: .leading, spacing: Space.line) {
-                        Text(decision.who).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
-                        Text(decision.what).font(.subheadline.weight(.semibold)).lineLimit(2)
+                        Text(decision.who).font(.footnote).foregroundStyle(.secondary).lineLimit(large ? 3 : 1)
+                        Text(decision.what).font(.subheadline.weight(.semibold)).lineLimit(large ? nil : 2)
                     }
                     Spacer(minLength: 0)
                 }
@@ -134,6 +139,7 @@ struct DecisionRow: View {
                     .controlSize(.regular)
                     .tint(.primary)
                     .disabled(busy)
+                    .fixedSize()
                     .frame(minHeight: Metrics.touch)
                     .accessibilityIdentifier("decision.\(decision.id).answer")
             }

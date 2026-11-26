@@ -1,134 +1,60 @@
 import SwiftUI
 
-/// Everything that needs you, in one place (the PWA's Inbox): devices asking to join, calls the primary's policy made it ask
-/// your approval for, keys it asked for, facts it noticed about you, and what the node noticed for you. Nothing here happens
-/// without your say.
+/// What needs you, every one (the PWA's Inbox; I10: Home's own rows, in full): each decision with its one answer in
+/// place, the rest a swipe away, the whole of it a tap (its card, or its task), counted as Home counts them; then what
+/// was noticed for you, news counted nowhere, each yours to dismiss or keep. Nothing here happens without your say.
 struct InboxView: View {
     let session: Session
+    @State private var desk = DecisionDesk()
+    /// An approval its notification's Approve opened: its card, its yes given behind Face ID.
     @State private var open: ActionView?
-    /// The card was opened from its notification's Approve: its yes is given behind Face ID.
-    @State private var guarded = false
-
-    /// (Notifications are asked for once, compactly, in the drawer and in Settings: never as a card here, X2.)
-    private let reachShown = false
-    /// Why an approval declined from its row wasn't (the row has no room to say it).
-    @State private var declineTrouble: String?
+    @Environment(\.openPlace) private var openPlace
 
     var body: some View {
-        GroupedList {
-            if !session.pairings.isEmpty {
-                Section {
-                    ForEach(session.pairings) { pairing in
-                        JoinRequestRow(session: session, pairing: pairing)
+        List {
+            if let work = session.attended {
+                let decisions = desk.decisions(session, work) { openPlace?($0) }
+                if !decisions.isEmpty {
+                    Section {
+                        ForEach(decisions) { decision in DecisionRow(decision: decision, busy: desk.busy.contains(decision.id)) }
+                    } header: {
+                        SectionHead(title: "Needs you", count: session.needsYou, strong: true)
+                    } footer: {
+                        PageNote("Nothing leaves until you approve it. Unanswered, it's a no.").padding(.top, Space.s1)
                     }
-                } header: {
-                    Text("Devices asking to join")
-                } footer: {
-                    Text("Let one in only if it shows the same code.")
                 }
             }
-            if !session.questions.isEmpty {
+            let news = desk.news(session)
+            if !news.isEmpty {
                 Section {
-                    ForEach(session.questions) { question in
-                        QuestionRow(session: session, question: question)
-                    }
+                    ForEach(news) { item in DecisionRow(decision: item, busy: desk.busy.contains(item.id)) }
                 } header: {
-                    Text("Services ask you")
+                    SectionHead("Noticed")
                 } footer: {
-                    Text("An MCP server asked you something in the middle of a call of \(Primary.name)'s. Only you answer it; what you send goes to that service alone.")
-                }
-            }
-            if !session.screenSessions.isEmpty {
-                Section {
-                    ForEach(session.screenSessions) { screen in
-                        ScreenSessionRow(session: session, screen: screen)
-                    }
-                } header: {
-                    Text("Its use of a Mac itself")
-                } footer: {
-                    Text("Nothing of the Mac is \(Primary.name)'s until you let it, and only for the minutes asked. You can watch it and end it any time.")
-                }
-            }
-            if !session.waiting.isEmpty {
-                Section {
-                    ForEach(session.waiting) { action in
-                        Button {
-                            guarded = false
-                            open = action
-                        } label: { ApprovalRow(action: action) }
-                            .tint(.primary)
-                            // A no from the row; a yes is only ever given in the approval itself.
-                            .inboxSwipe("Decline", when: session.can("fleet:admin")) {
-                                Task {
-                                    do { try await session.decide(action, approve: false) } catch { declineTrouble = error.localizedDescription }
-                                }
-                            }
-                    }
-                } header: {
-                    Text("Waiting for your approval")
-                } footer: {
-                    Text("Nothing leaves until you approve it. Unanswered, it's a no.")
-                }
-            }
-            if !session.requests.isEmpty {
-                Section {
-                    ForEach(session.requests) { request in
-                        KeyRequestRow(session: session, request: request)
-                    }
-                } header: {
-                    Text("Keys \(Primary.name) asked for")
-                } footer: {
-                    Text("It'll learn that a key exists, never what it is. One you dismiss is back only if it asks again.")
-                }
-            }
-            if !session.facts.isEmpty {
-                Section {
-                    ForEach(session.facts) { fact in
-                        FactRow(session: session, fact: fact)
-                    }
-                } header: {
-                    Text("Facts it noticed about you")
-                } footer: {
-                    Text("Each goes with every answer it gives once you keep it, in your words if you like. Until then it is only a note of \(Primary.name)'s.")
-                }
-            }
-            if !session.notices.isEmpty {
-                Section {
-                    ForEach(session.notices) { notice in
-                        NoticeRow(session: session, notice: notice)
-                    }
-                } header: {
-                    Text("Noticed")
-                } footer: {
-                    Text("The heartbeat's findings, and what your rules tell you. One you dismiss stays quiet until it changes.")
+                    PageNote("What your rules and the heartbeat told you, and what \(Primary.name) noticed about you. News: counted nowhere, and one you dismiss stays quiet until it changes.").padding(.top, Space.s1)
                 }
             }
         }
+        .hairlinePage()
         .overlay {
             if !session.inboxLoaded {
                 ProgressView()
-            } else if session.inboxCount == 0 && !reachShown {
-                ContentUnavailableView("Nothing needs you", systemImage: "checkmark.circle", description: Text("Approvals, \(Primary.name)'s asks to use a Mac, keys it asks for, facts it noticed about you, what your rules tell you and devices asking to join wait here."))
+            } else if session.inboxCount == 0 {
+                ContentUnavailableView("Nothing needs you", systemImage: "checkmark.circle", description: Text("Approvals, keys \(Primary.name) asks for, devices asking to join and its asks to use a Mac wait here, each with its answer in place."))
             }
         }
-        .navigationTitle("Inbox")
+        .screen("needs.screen")
+        .placeTitle("Needs you")
         .refreshable { await session.refresh() }
-        .sheet(item: $open) { action in
-            ApprovalSheet(session: session, action: action, guarded: guarded)
-        }
-        // An approval its notification's Approve asked to see: its card, once the Inbox has it.
+        .modifier(DecisionDeskSheets(desk: desk, session: session))
+        .sheet(item: $open) { action in ApprovalSheet(session: session, action: action, guarded: true) }
+        // An approval its notification's Approve asked to see: its card, once Needs you has it, its yes behind Face ID.
         .task(id: session.approvalToOpen) {
             guard let id = session.approvalToOpen else { return }
             if !session.waiting.contains(where: { $0.id == id }) { await session.reread(["actions"], force: true) }
             session.approvalToOpen = nil
             guard let action = session.waiting.first(where: { $0.id == id }) else { return }
-            guarded = true
             open = action
-        }
-        .alert("Couldn't decline it", isPresented: Binding(get: { declineTrouble != nil }, set: { if !$0 { declineTrouble = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(declineTrouble ?? "")
         }
     }
 }
@@ -156,8 +82,9 @@ extension View {
     }
 }
 
-/// A row of the Inbox: what it is about, in the primary's red, in a column of its own, and everything else beside it, so
-/// every row's words start at one edge whatever its icon.
+/// A row of what needs you, whole (in its sheet): what it is about, in the secondary ink (red is for what went wrong, and
+/// none of these did), in a column of its own, and everything else beside it, so every row's words start at one edge
+/// whatever its icon.
 struct InboxRow<Content: View>: View {
     let symbol: String
     /// It opens: a chevron at its end, as a row that leads somewhere has.
@@ -167,7 +94,7 @@ struct InboxRow<Content: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
             Image(systemName: symbol)
-                .foregroundStyle(Color.danger)
+                .foregroundStyle(.secondary)
                 .frame(width: Metrics.iconColumn)
             VStack(alignment: .leading, spacing: Space.s3) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -280,7 +207,7 @@ struct ApprovalSheet: View {
                             Text(Approval.classLine(action.kind)).font(.subheadline).foregroundStyle(.secondary)
                         }
                     } icon: {
-                        Image(systemName: Approval.symbol(action.kind)).foregroundStyle(Color.danger)
+                        Image(systemName: Approval.symbol(action.kind)).foregroundStyle(.secondary)
                     }
                     if let why = action.why, !why.isEmpty { Text(why) }
                 }
@@ -608,7 +535,7 @@ struct QuestionRow: View {
             }
             Text("Its call waits for your answer until \(Text(Date(timeIntervalSince1970: question.expires / 1000), style: .time)). A service's own form: never a password or a key.")
                 .font(.footnote).foregroundStyle(.secondary)
-            if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
+            if let problem { Text(problem).font(.footnote).foregroundStyle(Color.danger) }
             if session.can("fleet:admin") {
                 InboxButtons {
                     Button("No") { Task { await send(false) } }.buttonStyle(.bordered)

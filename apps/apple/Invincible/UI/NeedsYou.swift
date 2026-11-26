@@ -27,6 +27,8 @@ struct NeedsYou: View {
         case pairing(PairingView)
         case question(QuestionView)
         case screen(ScreenSessionView)
+        /// What the node noticed for you: its whole words, to read and dismiss.
+        case notice(NoticeView)
 
         var id: String {
             switch self {
@@ -36,6 +38,7 @@ struct NeedsYou: View {
             case .pairing(let p): "pairing:\(p.id)"
             case .question(let q): "question:\(q.id)"
             case .screen(let s): "screen:\(s.id)"
+            case .notice(let n): "notice:\(n.id)"
             }
         }
     }
@@ -263,6 +266,7 @@ struct NeedSheetView: View {
                         case .pairing(let pairing): JoinRequestRow(session: session, pairing: pairing)
                         case .question(let question): QuestionRow(session: session, question: question)
                         case .screen(let screen): ScreenSessionRow(session: session, screen: screen)
+                        case .notice(let notice): NoticeRow(session: session, notice: notice)
                         case .approval: EmptyView()
                         }
                     }
@@ -284,6 +288,7 @@ struct NeedSheetView: View {
         case .pairing(let pairing): "\(pairing.name) asks to join"
         case .question(let question): "\(question.label) asks"
         case .screen(let screen): screen.nodeName
+        case .notice: "Noticed"
         case .approval: ""
         }
     }
@@ -296,6 +301,7 @@ struct NeedSheetView: View {
         case .pairing(let pairing): session.pairings.contains(pairing)
         case .question(let question): session.questions.contains(question)
         case .screen(let screen): session.screenSessions.contains { $0.id == screen.id }
+        case .notice(let notice): session.notices.contains(notice)
         case .approval(let action): session.waiting.contains(action)
         }
     }

@@ -217,3 +217,48 @@ enum TaskCard {
         task.changes.map { "\($0.files) file\($0.files == 1 ? "" : "s") changed" }
     }
 }
+
+extension TaskCard {
+    /// The words an agent may end on that only claim what its proof says ("Verified.", "Done."): beside the proof they
+    /// would say the verdict twice, and in the agent's voice, so a thread leaves them out.
+    private static let bareClaims: Set<String> = ["verified", "done", "proven", "passed", "pass", "complete", "completed", "finished", "ok", "success", "succeeded"]
+
+    /// What the agent said, as a thread shows it under its proof (I10: the verdict is the proof's alone): its own account
+    /// as it said it, or nothing where it said no more than a verdict.
+    static func saidBesideProof(_ said: String?) -> String? {
+        guard let trimmed = said?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        let word = trimmed.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+        return bareClaims.contains(word) ? nil : trimmed
+    }
+
+    /// Why it ended as it did, beside its verdict's word, never that word again: "It gave up." beside Gave up says nothing,
+    /// and "Not verified: its gates…" beside Not verified says only the rest.
+    static func because(_ why: String?, verdict: String) -> String? {
+        guard let why = why?.trimmingCharacters(in: .whitespacesAndNewlines), !why.isEmpty else { return nil }
+        let plain = { (text: String) in text.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces)) }
+        var said = plain(why)
+        if said.hasPrefix("it ") { said = String(said.dropFirst(3)) }
+        if said == plain(verdict) { return nil }
+        for joint in [":", " ·", " –", " —"] where why.lowercased().hasPrefix(verdict.lowercased() + joint) {
+            let rest = why.dropFirst(verdict.count + joint.count).trimmingCharacters(in: .whitespaces)
+            return rest.isEmpty ? nil : rest.prefix(1).uppercased() + rest.dropFirst()
+        }
+        return why
+    }
+
+    /// The one answer a thread offers in full (its prominent button), and the rest (its menu): a proposal approved, work
+    /// cut short resumed, verified work shipped, work that wasn't verified given again; stopping, declining and the
+    /// others a tap further. Work in hand or verified with nothing to ship has no answer in full.
+    static func answers(_ task: TeamTask) -> (prominent: Action?, rest: [Action]) {
+        switch task.status {
+        case "proposed": return (.approve, [.decline])
+        case "queued", "running": return (nil, [.stop])
+        case "done":
+            guard task.verified else { return (.again, []) }
+            return (task.changes != nil && task.fix == nil && task.shipped == nil ? .ship : nil, [.again])
+        case "failed": return (.again, [.resume])
+        case "stopped", "interrupted": return (.resume, [.again])
+        default: return (nil, actions(task))
+        }
+    }
+}

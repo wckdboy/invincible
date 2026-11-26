@@ -115,7 +115,7 @@ struct PlacesSidebar<Foot: View>: View {
                     Section {
                         if beyond > 0 {
                             HStack {
-                                Label("Inbox", systemImage: "tray")
+                                Label("Needs you", systemImage: "tray")
                                 Spacer(minLength: Space.s2)
                                 Text("\(beyond) waiting").font(.subheadline.weight(.semibold)).foregroundStyle(Color.needs).monospacedDigit()
                             }
@@ -316,7 +316,7 @@ struct SidebarSeat: View {
                 HStack(alignment: .firstTextBaseline, spacing: Space.s1) {
                     Text(name).font(.headline).lineLimit(1)
                     Spacer(minLength: 0)
-                    if let word = standing.word {
+                    if let word = standing.shown {
                         StateBadge(text: word, tone: standing.tone, selected: selected).fixedSize()
                     }
                 }

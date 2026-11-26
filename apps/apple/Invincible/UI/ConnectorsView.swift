@@ -20,7 +20,7 @@ struct ConnectorsView: View {
                 Section { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.danger) }
             }
             if !installed.isEmpty {
-                Section("Connected") {
+                Section(head: "Connected") {
                     ForEach(installed) { connector in
                         NavigationLink { ConnectorDetail(session: session, id: connector.id) { await load() } } label: { ConnectorRow(connector: connector) }
                     }
@@ -32,13 +32,15 @@ struct ConnectorsView: View {
                         NavigationLink { ConnectorDetail(session: session, id: connector.id) { await load() } } label: { ConnectorRow(connector: connector) }
                     }
                 } header: {
-                    Text("Add")
+                    SectionHead("Add")
                 } footer: {
-                    Text("Each reaches its service as you allow: reading, making and changing run freely, and anything sent out or deleted asks you first.")
+                    PageNote("Each reaches its service as you allow: reading, making and changing run freely, and anything sent out or deleted asks you first.")
                 }
             }
         }
-        .navigationTitle("Connectors")
+        .hairlinePage()
+        .screen("connectors.screen")
+        .placeTitle("Connectors")
         .overlay { if connectors == nil, problem == nil { ProgressView() } }
         .refreshable { await load() }
         .task { await load() }
@@ -75,39 +77,34 @@ private struct ConnectorRow: View {
     }
 }
 
-/// A word in a tone, as the PWA's badges are: a connector's key, a task's state. Its words are its baseline, so it sits on
-/// the line of what it is beside.
+/// A state as a still dot and its word (I10: never a pill, never a colour alone; StateLabel's look): a connector's key, a
+/// task's state, an agent's. Its words are its baseline, so it sits on the line of what it is beside. The ink at work
+/// and for what needs you (said in its weight), grey for the rest, red only for what went wrong.
 struct StateBadge: View {
     let text: String
     let tone: String
-    /// Work in hand: a live dot before the words, sending out a wave of its light (LiveDot).
+    /// Work in hand (kept for the places that pass it: every state has its dot now).
     var busy = false
     /// On the row an iPad shows selected, in the list's tint: white, as the row's words are, whatever its tone.
     var selected = false
 
     var body: some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.leading, busy ? Space.s4 : 0)
-            .overlay(alignment: .leading) {
-                if busy { LiveDot(color: color) }
-            }
-            .padding(.horizontal, Space.s2)
-            .padding(.vertical, Space.s1)
-            .background(color.opacity(selected ? 0.22 : 0.12), in: .capsule)
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 7, height: 7).accessibilityHidden(true)
+            Text(text).fontWeight(strong ? .semibold : .regular)
+        }
+        .font(.caption)
+        .foregroundStyle(color)
     }
+
+    private var strong: Bool { tone == "needs" || tone == "warn" }
 
     private var color: Color {
         if selected { return .white }
-        return switch tone {
-        case "ok": .done
-        case "warn", "needs": .needs
-        case "work": .working
-        case "failed": .failed
-        case "danger": .danger
-        case "accent": .ink
-        default: .secondary
+        return switch StateLabel.tone(tone) {
+        case .active: .primary
+        case .failed: .danger
+        case .quiet: .secondary
         }
     }
 }
@@ -159,7 +156,7 @@ struct ConnectorDetail: View {
                     sealKey(connector)
                 }
                 if connector.access != nil || connector.private {
-                    Section("Who may use it") {
+                    Section(head: "Who may use it") {
                         if let access = connector.access {
                             Label(access.allowed.isEmpty ? "\(Primary.name)'s alone" : "\(Primary.name)'s, and \(ListFormatter.localizedString(byJoining: access.allowed))'s", systemImage: "shield.lefthalf.filled")
                         }
@@ -167,13 +164,13 @@ struct ConnectorDetail: View {
                     }
                 }
                 if !connector.tools.isEmpty {
-                    Section("What it can do") {
+                    Section(head: "What it can do") {
                         ForEach(connector.tools) { tool in
                             VStack(alignment: .leading, spacing: Space.line) {
                                 HStack {
                                     Text(tool.name).font(.callout.monospaced())
                                     Spacer()
-                                    Text(Connectors.classLine(tool)).font(.caption).foregroundStyle(tool.asks ? Color.orange : .secondary)
+                                    Text(Connectors.classLine(tool)).font(.caption).foregroundStyle(tool.asks ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                                 }
                                 if !tool.description.isEmpty { Text(tool.description).font(.caption).foregroundStyle(.secondary).lineLimit(3) }
                             }
@@ -181,7 +178,8 @@ struct ConnectorDetail: View {
                     }
                 }
                 if connector.installed, session.can("brain:write") {
-                    Section { Button("Remove \(connector.label)", role: .destructive) { removing = true } }
+                    // In the ink: red is for what went wrong; the question that follows has the system's red.
+                    Section { Button("Remove \(connector.label)…") { removing = true }.foregroundStyle(.primary) }
                 }
                 if let problem {
                     Section { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.danger) }

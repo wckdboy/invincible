@@ -120,6 +120,7 @@ struct PhoneRoot: View {
         }
         .environment(\.showInbox) { go(.inbox) }
         .environment(\.showPrimary) { go(.primary) }
+        .environment(\.openPlace) { go($0) }
         .task(id: PushCenter.shared.opened) { await follow() }
         .onChange(of: path, initial: true) { PushCenter.shared.showing = Self.showing(path, chat: session.chat.conversation) }
         .onChange(of: session.chat.conversation) { PushCenter.shared.showing = Self.showing(path, chat: session.chat.conversation) }
@@ -235,6 +236,7 @@ struct SplitPlaces: View {
             CommandPalette(session: session, go: { place = $0 }, give: mayGive ? { givingNext = true } : nil)
         }
         .environment(\.showInbox) { place = .inbox }
+        .environment(\.openPlace) { place = $0 }
         .environment(\.openSearch) { searching = true }
         .focusedSceneValue(\.placeActions, PlaceActions(go: { place = $0 }, newChat: newChat, give: mayGive ? { giving = true } : nil, search: { searching = true }))
         .task(id: PushCenter.shared.opened) { await follow() }
@@ -336,8 +338,8 @@ struct PadCommands: Commands {
             place("Home", .home, "0")
             place(Primary.name, .primary, "1")
             place("Agents", .agents, "2")
-            place("Inbox", .inbox, "3")
-            place("More", .more, "4")
+            place("Needs You", .inbox, "3")
+            place("Settings", .more, "4")
         }
     }
 

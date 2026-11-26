@@ -88,6 +88,8 @@ struct TaskView: View {
     /// On a wide screen its details are a column beside it; on an iPhone, a sheet.
     var wide = false
     @State private var thread: TaskThread?
+    /// What its answers do, from its bar's menu and from the thread.
+    @State private var answers = TaskAnswers()
     @State private var detailsSheet = false
     @AppStorage("task.details") private var detailsShown = true
     @FocusState private var composing: Bool
@@ -95,7 +97,7 @@ struct TaskView: View {
     var body: some View {
         Group {
             if let task = session.task(id), let thread {
-                TaskThreadView(session: session, task: task, thread: thread, composing: $composing)
+                TaskThreadView(session: session, task: task, thread: thread, answers: answers, composing: $composing)
                     .modifier(DetailsPlace(wide: wide, shown: $detailsShown, sheet: $detailsSheet) {
                         TaskDetails(session: session, task: task, thread: thread)
                     })
@@ -130,19 +132,11 @@ struct TaskView: View {
         }
     }
 
+    /// Its bar: its details, and the rest of its answers in a menu (the one in full is the thread's). Its title is the
+    /// page's own, in full: the bar says none of it again.
     @ToolbarContentBuilder private func toolbar(_ task: TeamTask) -> some ToolbarContent {
-        let agent = session.drawn(task.assignee)
-        let name = agent?.name ?? task.assignee
-        let project = session.attended?.byAttention.first { $0.id == task.id }?.project ?? Work.other
         #if os(iOS)
-        ToolbarItem(placement: .principal) {
-            VStack(spacing: 0) {
-                Text(task.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                // (A project's name where there is one; never "Other work".)
-                Text(project.key == Work.other.key ? name : "\(project.name) · \(name)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            .accessibilityElement(children: .combine)
-        }
+        ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) }
         #endif
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
@@ -151,8 +145,19 @@ struct TaskView: View {
                 Label(wide && detailsShown ? "Hide the details" : "Show the details", systemImage: "sidebar.trailing")
             }
             .help("The task's details: its VM, changes, gates, reviewer and cost")
-            // The agent's orb: moving while it works (the orb in focus), still otherwise.
-            AgentFace(id: task.assignee, profile: agent?.avatar, size: 28, mood: task.status == "running" ? .working : nil, label: task.status == "running" ? "\(name), working" : name, key: "task:\(task.assignee)")
+            .accessibilityIdentifier("task.details")
+            let rest = session.can("fleet:admin") && session.can("chat") ? TaskCard.answers(task).rest : []
+            if !rest.isEmpty {
+                Menu {
+                    ForEach(rest, id: \.self) { action in
+                        Button { answers.run(action, task, session: session) } label: { Label(TaskAnswers.title(action), systemImage: TaskAnswers.symbol(action)) }
+                            .disabled(answers.busy)
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis")
+                }
+                .accessibilityIdentifier("task.more")
+            }
         }
     }
 
@@ -206,18 +211,67 @@ private struct DetailsPlace<Details: View>: ViewModifier {
     }
 }
 
-/// The thread itself, its live line and its message box.
+/// What a thread's answers do, shared by its bar's menu and the thread itself: the task being given again or shipped
+/// (each asks first), whether the node is being told, and what went wrong.
+@MainActor @Observable final class TaskAnswers {
+    var againing: TeamTask?
+    var shipping: TeamTask?
+    var busy = false
+    var trouble: String?
+
+    func run(_ action: TaskCard.Action, _ task: TeamTask, session: Session) {
+        switch action {
+        case .approve: control("approve", task, session)
+        case .decline, .stop: control("stop", task, session)
+        case .resume: control("resume", task, session)
+        case .again: againing = task
+        case .ship: shipping = task
+        }
+    }
+
+    private func control(_ action: String, _ task: TeamTask, _ session: Session) {
+        busy = true
+        Task.immediate {
+            defer { self.busy = false }
+            do { try await session.control(task: task.id, action) } catch { self.trouble = error.localizedDescription }
+        }
+    }
+
+    static func title(_ action: TaskCard.Action) -> String {
+        switch action {
+        case .approve: "Approve"
+        case .decline: "Decline"
+        case .stop: "Stop it"
+        case .resume: "Resume"
+        case .again: "Give again…"
+        case .ship: "Ship it…"
+        }
+    }
+
+    static func symbol(_ action: TaskCard.Action) -> String {
+        switch action {
+        case .approve: "checkmark"
+        case .decline: "xmark"
+        case .stop: "stop"
+        case .resume: "play"
+        case .again: "arrow.clockwise"
+        case .ship: "arrow.up.right.square"
+        }
+    }
+}
+
+/// The thread itself, as a page reads (I10: every screen to Home's bar): its title and who has it, how it stands in a
+/// dot and a word; the brief; the work, folded; then what proves it, apart from the agent's words, which follow it,
+/// labelled as its own; its conversation after. Hairlines between, no cards; one answer in full, the rest in its bar's
+/// menu; its live line and message box at its foot.
 private struct TaskThreadView: View {
     let session: Session
     let task: TeamTask
     @Bindable var thread: TaskThread
+    @Bindable var answers: TaskAnswers
     var composing: FocusState<Bool>.Binding
     @State private var workedOpen = false
-    @State private var shipping: TeamTask?
-    /// The task Give again is about to give once more, once you say so.
-    @State private var againing: TeamTask?
-    @State private var trouble: String?
-    @State private var busy = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var canAct: Bool { session.can("fleet:admin") && session.can("chat") }
     private var agent: Agent? { session.drawn(task.assignee) }
@@ -230,7 +284,7 @@ private struct TaskThreadView: View {
         ScrollView {
             items(groups, running: running)
                 .padding(.horizontal, Metrics.margin)
-                .padding(.vertical, Space.s4)
+                .padding(.bottom, Space.s6)
                 .readingWidth()
         }
         // From the top; while it works, the latest step kept in view as steps come.
@@ -238,83 +292,144 @@ private struct TaskThreadView: View {
         .defaultScrollAnchor(running ? .bottom : .top, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
         .safeAreaBar(edge: .bottom) { foot(entries, running: running) }
-        .modifier(ShipPrompt(task: $shipping, room: thread.room, client: session.client))
-        .modifier(AgainPrompt(task: $againing, room: thread.room, client: session.client))
+        .modifier(ShipPrompt(task: $answers.shipping, room: thread.room, client: session.client))
+        .modifier(AgainPrompt(task: $answers.againing, room: thread.room, client: session.client))
         // Ship it, from its notification: Face ID first (the owner's, as an approval's yes is), then its pull request.
         .task(id: session.shipToOpen) {
             guard session.shipToOpen == task.id else { return }
             session.shipToOpen = nil
-            guard TaskCard.actions(task).contains(.ship) else { trouble = "There's nothing of it to ship now: it was shipped already, or kept nothing."; return }
-            if let why = await DeviceOwner.confirm("Ship “\(task.title)” as a pull request") { trouble = why } else { shipping = task }
+            guard TaskCard.actions(task).contains(.ship) else { answers.trouble = "There's nothing of it to ship now: it was shipped already, or kept nothing."; return }
+            if let why = await DeviceOwner.confirm("Ship “\(task.title)” as a pull request") { answers.trouble = why } else { answers.shipping = task }
         }
-        .alert("That didn't go through", isPresented: .init(get: { trouble != nil }, set: { if !$0 { trouble = nil } })) {
+        .alert("That didn't go through", isPresented: .init(get: { answers.trouble != nil }, set: { if !$0 { answers.trouble = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(trouble ?? "")
+            Text(answers.trouble ?? "")
         }
     }
 
-    /// The thread's items, in the order they happened.
+    /// The thread's parts, in the order they happened, a hairline between each.
     private func items(_ groups: [Steps.Group], running: Bool) -> some View {
-            VStack(alignment: .leading, spacing: Space.s3) {
-                dispatch
-                Text(task.goal)
-                    .font(.callout)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, Space.s4)
-                    .padding(.vertical, Space.s3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.fill.quinary, in: .rect(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.separator, lineWidth: 1))
-                    .accessibilityLabel("The brief: \(task.goal)")
-                facts
-                if thread.read {
-                    work(groups, running: running)
-                } else {
-                    ProgressView().frame(maxWidth: .infinity).padding(.vertical, Space.s4)
-                }
-                // An outward step asks here, in place.
-                if running {
-                    ForEach(session.waiting.filter { Roster.agentOfCaller($0.by) == task.assignee }) { action in
-                        AskCard(session: session, action: action)
-                            .background(.background.secondary, in: .rect(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.needs.opacity(0.34), lineWidth: 1))
-                    }
-                }
-                callouts
-                if let said = TaskCard.end(task)?.said {
-                    VStack(alignment: .leading, spacing: Space.s2) {
-                        HStack(spacing: 6) {
-                            AgentFace(id: task.assignee, profile: agent?.avatar, size: 16)
-                            Text(name).fontWeight(.semibold)
-                            Text("said").foregroundStyle(.secondary)
-                        }
-                        .font(.footnote)
-                        MarkdownView(said).font(.callout)
-                    }
-                    .padding(.top, Space.s1)
-                }
-                if thread.read, task.status == "done" || task.status == "failed" {
-                    ProofCard(session: session, task: task, thread: thread, agent: agent, name: name, canAct: canAct, shipping: $shipping, againing: $againing)
-                }
-                ForEach(thread.conversation(of: task)) { message in
-                    ThreadMessage(message: message, speaker: Timeline.speaker(message, agents: session.team?.agents ?? []))
+        VStack(alignment: .leading, spacing: 0) {
+            header(running: running)
+            Divider()
+            brief
+            Divider()
+            if thread.read {
+                work(groups, running: running)
+            } else {
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, Space.s4)
+            }
+            // An outward step asks here, in place: its answer the one in full while it works.
+            if running {
+                ForEach(session.waiting.filter { Roster.agentOfCaller($0.by) == task.assignee }) { action in
+                    Divider()
+                    AskCard(session: session, action: action).padding(.horizontal, -Space.s4)
                 }
             }
+            callout
+            if thread.read, task.status == "done" || task.status == "failed" {
+                Divider()
+                ProofSection(session: session, task: task, thread: thread, agent: agent, name: name, canAct: canAct, answers: answers)
+            }
+            // The agent's own words, after the proof and labelled as its own: never its bare claim of a verdict.
+            if let said = TaskCard.saidBesideProof(TaskCard.end(task)?.said) {
+                Divider()
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    SectionHead("\(name) said")
+                    MarkdownView(said).font(Typeset.body)
+                }
+                .padding(.vertical, Space.s4)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("task.said")
+            }
+            let messages = thread.conversation(of: task)
+            if !messages.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: Space.s3) {
+                    ForEach(messages) { message in
+                        ThreadMessage(message: message, speaker: Timeline.speaker(message, agents: session.team?.agents ?? []))
+                    }
+                }
+                .padding(.vertical, Space.s4)
+            }
+        }
+    }
+
+    /// Its title in full (the bar says none of it), and who has it and how it stands: a dot and its word while it is in
+    /// hand, when it ended once it has (its verdict is its proof's, below).
+    private func header(running: Bool) -> some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            Text(task.title)
+                .font(Typeset.title)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("task.title")
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s1)) : AnyLayout(HStackLayout(spacing: Space.s2))
+            layout {
+                HStack(spacing: 6) {
+                    // Its agent's orb: moving while it works (the orb in focus), still otherwise.
+                    AgentFace(id: task.assignee, profile: agent?.avatar, size: 20, mood: running ? .working : nil, key: "task:\(task.assignee)")
+                    Text(name).fontWeight(.semibold).foregroundStyle(.primary)
+                }
+                standing(running: running)
+                if let project = project { Text(project).lineLimit(typeSize.isAccessibilitySize ? nil : 1) }
+            }
+            .font(Typeset.detail)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.top, Space.s2)
+        .padding(.bottom, Space.s4)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Its project's name, where it has one (never "Other work").
+    private var project: String? {
+        let project = session.attended?.byAttention.first { $0.id == task.id }?.project
+        return project.flatMap { $0.key == Work.other.key ? nil : $0.name }
+    }
+
+    @ViewBuilder private func standing(running: Bool) -> some View {
+        switch task.status {
+        case "running":
+            let since = Work.shortSpan(Date.now.timeIntervalSince1970 * 1000 - (task.createdAt ?? task.updatedAt))
+            StateLabel(word: since == "now" ? "Just started" : "Working · \(since)", tone: .active)
+        case "queued": StateLabel(word: "Queued", tone: .quiet)
+        case "proposed": StateLabel(word: "Waits for your approval", tone: .active, strong: true)
+        case "interrupted": StateLabel(word: "Interrupted", tone: .active, strong: true)
+        case "stopped": StateLabel(word: "Stopped", tone: .quiet)
+        default: Text("Ended \(Work.relativeTime(task.record?.endedAt ?? task.updatedAt))").monospacedDigit()
+        }
+    }
+
+    /// What it was asked, who gave it and how; what waits on it.
+    private var brief: some View {
+        VStack(alignment: .leading, spacing: Space.s2) {
+            SectionHead("The brief")
+            Text(task.goal)
+                .font(Typeset.body)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("The brief: \(task.goal)")
+            dispatch
+            facts
+        }
+        .padding(.vertical, Space.s4)
     }
 
     /// Its foot: the live line while it works, and its message box.
     private func foot(_ entries: [TrailEntry], running: Bool) -> some View {
-            let stopping: (() -> Void)? = canAct ? { control("stop") } : nil
-            return VStack(spacing: 0) {
-                if running, let live = Steps.live(entries) { LiveLine(live: live, stop: stopping) }
-                if canAct {
-                    if let hint = hint {
-                        Text(hint).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, Metrics.margin + Space.s4).padding(.top, Space.s1)
-                    }
-                    RoomComposer(room: thread.room, name: name, client: session.client, composing: composing, prompt: "Tell \(name)…")
+        let stopping: (() -> Void)? = canAct ? { answers.run(.stop, task, session: session) } : nil
+        return VStack(spacing: 0) {
+            if running, let live = Steps.live(entries) { LiveLine(live: live, stop: stopping) }
+            if canAct {
+                if let hint = hint {
+                    Text(hint).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, Metrics.margin + Space.s4).padding(.top, Space.s1)
                 }
+                RoomComposer(room: thread.room, name: name, client: session.client, composing: composing, prompt: "Tell \(name)…")
             }
+        }
     }
 
     /// What its message box says under it: when the agent reads what you tell it.
@@ -339,19 +454,10 @@ private struct TaskThreadView: View {
             default: return "Given to \(name) by name."
             }
         }()
-        return HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-            Group {
-                if task.givenBy == "primary" || task.proposedBy == "primary" {
-                    PrimaryOrb(size: 18)
-                } else {
-                    Image(systemName: task.proposedBy != nil ? "lightbulb" : "square.stack.3d.up").foregroundStyle(.secondary)
-                }
-            }
-            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-            Text("\(words) \(Text(Work.relativeTime(task.createdAt ?? task.updatedAt)).foregroundStyle(.tertiary))")
-        }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
+        return Text("\(words) \(Text(Work.relativeTime(task.createdAt ?? task.updatedAt)).foregroundStyle(.tertiary))")
+            .font(Typeset.detail)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder private var facts: some View {
@@ -363,17 +469,15 @@ private struct TaskThreadView: View {
         }
     }
 
-    /// The work: while it runs, the steps as they come under who does it; once it ended, folded ("Ada worked for 6m 12s ›").
+    /// The work: while it runs, the steps as they come; once it ended, folded ("Ada worked for 6m 12s ›").
     @ViewBuilder private func work(_ groups: [Steps.Group], running: Bool) -> some View {
         if !groups.isEmpty {
             if running {
-                let started = Work.shortSpan(Date.now.timeIntervalSince1970 * 1000 - (task.createdAt ?? task.updatedAt))
                 VStack(alignment: .leading, spacing: Space.s1) {
-                    Text("\(Text(name).fontWeight(.semibold).foregroundStyle(.primary)) · \(started == "now" ? "just started" : "working for \(started)")")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    SectionHead("The work")
                     StepList(groups: groups)
                 }
+                .padding(.vertical, Space.s4)
             } else {
                 let summary = Steps.summary(thread.entries, record: task.record.map { ($0.startedAt, $0.endedAt) })
                 let words = Steps.summaryWords(summary)
@@ -386,82 +490,51 @@ private struct TaskThreadView: View {
                             // (Under half a second, no time: never "worked for 0s".)
                             Text("\(name) \(summary.ms >= 500 ? "worked for \(Steps.workedFor(summary.ms))" : "worked")\(Text(words.isEmpty ? "" : " · \(words)").foregroundStyle(.tertiary))")
                                 .monospacedDigit()
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .font(.footnote)
+                        .font(Typeset.detail)
                         .foregroundStyle(.secondary)
                         .frame(minHeight: Metrics.touch)
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .accessibilityValue(workedOpen ? "Shown" : "Folded")
-                    if workedOpen { StepList(groups: groups) }
+                    if workedOpen { StepList(groups: groups).padding(.bottom, Space.s2) }
                 }
+                .padding(.vertical, Space.s1)
             }
         } else if running {
-            Text("\(Text(name).fontWeight(.semibold).foregroundStyle(.primary)) is starting on it").font(.footnote).foregroundStyle(.secondary)
+            Text("\(Text(name).fontWeight(.semibold).foregroundStyle(.primary)) is starting on it").font(Typeset.detail).foregroundStyle(.secondary).padding(.vertical, Space.s4)
         } else if task.status == "queued" {
             let waitsFor = task.dependsOn.compactMap { dep in session.team?.tasks.first { $0.id == dep } }.filter { !($0.status == "done" && $0.verified) }
             Text(waitsFor.isEmpty ? "Queued: \(name) starts on it next." : "Queued: it starts once \(waitsFor.map { "“\($0.title)”" }.joined(separator: " and ")) \(waitsFor.count == 1 ? "is" : "are") done and verified.")
-                .font(.footnote)
+                .font(Typeset.detail)
                 .foregroundStyle(.secondary)
+                .padding(.vertical, Space.s4)
+        } else {
+            Text("No steps were kept.").font(Typeset.detail).foregroundStyle(.tertiary).padding(.vertical, Space.s4)
         }
     }
 
-    /// What only you can do with it now: a proposal's Approve and Decline, work cut short's Resume, a stopped task's Resume
-    /// and Give again, a queued one's Stop.
-    @ViewBuilder private var callouts: some View {
-        if canAct {
-            switch task.status {
-            case "proposed":
-                Callout(tone: .ink, text: "\(task.proposedBy.flatMap { session.drawn($0)?.name } ?? name) proposes this. Nothing runs until you approve it.") {
-                    NeedButton(title: "Approve", prominent: true, busy: busy) { control("approve") }
-                    NeedButton(title: "Decline", busy: busy) { control("stop") }
-                }
-            case "interrupted":
-                Callout(tone: .needs, text: "The node was cut off while this ran. Look at what it did, then resume it, or give it again.") {
-                    NeedButton(title: "Resume", prominent: true, busy: busy) { control("resume") }
-                }
-            case "stopped":
-                Callout(tone: .secondary, text: "Stopped before it was done.") {
-                    NeedButton(title: "Resume", busy: busy) { control("resume") }
-                    NeedButton(title: "Give again…", busy: busy) { againing = task }
-                }
-            case "queued":
-                NeedButton(title: "Stop it", busy: busy) { control("stop") }
-            default:
-                EmptyView()
+    /// What only you can do with it now, before it ends (a proposal, work cut short or stopped): said, and its one answer
+    /// in full; the rest of its answers are in the bar's menu.
+    @ViewBuilder private var callout: some View {
+        let answer = TaskCard.answers(task).prominent
+        let words: String? = switch task.status {
+        case "proposed": "\(task.proposedBy.flatMap { session.drawn($0)?.name } ?? name) proposes this. Nothing runs until you approve it."
+        case "interrupted": "The node was cut off while this ran. Look at what it did, then resume it, or give it again."
+        case "stopped": "Stopped before it was done."
+        default: nil
+        }
+        if canAct, let words, let answer {
+            Divider()
+            VStack(alignment: .leading, spacing: Space.s3) {
+                Text(words).font(Typeset.body).fixedSize(horizontal: false, vertical: true)
+                NeedButton(title: TaskAnswers.title(answer), prominent: true, busy: answers.busy) { answers.run(answer, task, session: session) }
+                    .accessibilityIdentifier("task.answer")
             }
+            .padding(.vertical, Space.s4)
         }
-    }
-
-    private func control(_ action: String) {
-        busy = true
-        Task.immediate {
-            defer { busy = false }
-            do { try await session.control(task: task.id, action) } catch { trouble = error.localizedDescription }
-        }
-    }
-
-}
-
-/// A line of what only you can do with a task, and its buttons.
-private struct Callout<Actions: View>: View {
-    let tone: Color
-    let text: String
-    @ViewBuilder let actions: Actions
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
-            Text(text).font(.subheadline)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: Space.s2) { actions }
-                VStack(alignment: .leading, spacing: Space.s2) { actions }
-            }
-        }
-        .padding(Space.s4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: .rect(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(tone.opacity(0.34), lineWidth: 1))
     }
 }
 
@@ -616,17 +689,17 @@ private struct ThreadMessage: View {
     }
 }
 
-/// What proves it, apart from what the agent says: the Verified card, or why it isn't verified. Its own ground and edge in
-/// its verdict's colour.
-private struct ProofCard: View {
+/// What proves it, apart from what the agent says: its verdict as its proof allows, what that rests on, each gate and how
+/// it stood before the work, the reviewer, what it kept and cost, and its one answer in full. A section of the thread
+/// with hairlines, no card: red only where it failed.
+private struct ProofSection: View {
     let session: Session
     let task: TeamTask
     let thread: TaskThread
     let agent: Agent?
     let name: String
     let canAct: Bool
-    @Binding var shipping: TeamTask?
-    @Binding var againing: TeamTask?
+    @Bindable var answers: TaskAnswers
     @State private var reviewing = false
 
     var body: some View {
@@ -636,29 +709,31 @@ private struct ProofCard: View {
         let said = Steps.verdict(status: task.status, verified: task.verified, error: task.error, record: task.record, facts: thread.read ? Steps.facts(proof) : Steps.facts(record: task.record))
         let kind = said?.verdict
         let failed = kind == .failed || kind == .rejected || kind == .gaveUp
-        let ink: Color = failed ? .danger : kind == .proven ? .primary : .secondary
-        let end = TaskCard.end(task)
+        let word = said?.word ?? (verified ? "Reviewed" : "Not verified")
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            SectionHead("Proof").padding(.top, Space.s4).padding(.bottom, Space.s3)
+            HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
                 Image(systemName: kind == .proven ? "checkmark" : failed ? "xmark" : "minus")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(failed ? AnyShapeStyle(Color.white) : AnyShapeStyle(.background))
                     .frame(width: 22, height: 22)
-                    .background(ink, in: .circle)
+                    .background(failed ? Color.danger : kind == .proven ? Color.primary : Color.secondary, in: .circle)
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-                Text("\(Text(said?.word ?? (verified ? "Reviewed" : "Not verified")).fontWeight(.bold).foregroundStyle(failed ? AnyShapeStyle(Color.danger) : AnyShapeStyle(.primary))) · \(Self.why(kind, end: end))")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Space.line) {
+                    Text(word).font(Typeset.row).foregroundStyle(failed ? AnyShapeStyle(Color.danger) : AnyShapeStyle(.primary))
+                    if let why = Self.why(kind, end: TaskCard.end(task), word: word) {
+                        Text(why).font(Typeset.detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, Space.s3)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("task.verdict")
             ForEach(caveats(proof, verified: verified), id: \.self) { line in
                 Divider()
-                Label(line, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.vertical, Space.s2)
+                Label(line, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary).padding(.vertical, Space.s2)
             }
             if !proof.gates.isEmpty {
                 Divider()
@@ -676,10 +751,9 @@ private struct ProofCard: View {
                 } icon: {
                     Image(systemName: "person.badge.shield.checkmark").foregroundStyle(.tertiary)
                 }
-                .font(.footnote)
+                .font(Typeset.detail)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
+                .padding(.vertical, Space.s2)
             }
             Divider()
             HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
@@ -689,33 +763,31 @@ private struct ProofCard: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            .font(.footnote)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            let actions = canAct ? TaskCard.actions(task) : []
-            if !actions.isEmpty || task.shipped != nil || (verified && canAct) {
-                Divider()
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Space.s2) { buttons(actions, verified: verified) }
-                    VStack(alignment: .leading, spacing: Space.s2) { buttons(actions, verified: verified) }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+            .font(Typeset.detail)
+            .frame(minHeight: Metrics.touch)
+            if canAct, let answer = TaskCard.answers(task).prominent {
+                NeedButton(title: TaskAnswers.title(answer), prominent: true, busy: answers.busy) { answers.run(answer, task, session: session) }
+                    .padding(.top, Space.s2)
+                    .padding(.bottom, Space.s4)
+                    .accessibilityIdentifier("task.answer")
+            }
+            if let shipped = TaskCard.shipped(task), let url = URL(string: shipped.url) {
+                Link(destination: url) { Label(shipped.text, systemImage: "arrow.up.right.square") }
+                    .font(Typeset.detail.weight(.semibold))
+                    .frame(minHeight: Metrics.touch)
             }
         }
-        .background(.background.secondary)
-        .clipShape(.rect(cornerRadius: 14, style: .continuous))
         .sheet(isPresented: $reviewing) { WorkspaceView(session: session, id: task.assignee, name: name, startOn: .changes) }
     }
 
-    /// What the verdict rests on, after its word.
-    private static func why(_ kind: Steps.Verdict?, end: (why: String?, said: String?)?) -> String {
+    /// What the verdict rests on, under its word, never that word again (TaskCard.because).
+    private static func why(_ kind: Steps.Verdict?, end: (why: String?, said: String?)?, word: String) -> String? {
         switch kind {
-        case .proven: "a gate that failed before the work passes now, and a reviewer that didn't write it passed it"
-        case .reviewed: "the reviewer passed it; no gate shows the work was done"
-        case .failed, .rejected, .gaveUp, .unverified: end?.why ?? "its gates or the review did not pass"
-        case .stopped: "it stopped where it was"
-        case nil: "it hasn't ended"
+        case .proven: "A gate that failed before the work passes now, and a reviewer that didn't write it passed it."
+        case .reviewed: "The reviewer passed it; no gate shows the work was done."
+        case .failed, .rejected, .gaveUp, .unverified: TaskCard.because(end?.why ?? "Its gates or the review did not pass.", verdict: word)
+        case .stopped: TaskCard.because("It stopped where it was.", verdict: word)
+        case nil: "It hasn't ended."
         }
     }
 
@@ -737,38 +809,18 @@ private struct ProofCard: View {
                     Button {
                         reviewing = true
                     } label: {
-                        Text("\(files) file\(files == 1 ? "" : "s") · Review \(Image(systemName: "chevron.right"))")
+                        Text("\(files) file\(files == 1 ? "" : "s") · Review \(Image(systemName: "chevron.right"))").fontWeight(.semibold)
                     }
                     .buttonStyle(.borderless)
+                    .frame(minHeight: Metrics.touch)
                 } else {
                     Text("\(files) file\(files == 1 ? "" : "s") kept")
                 }
-                if let added, let removed {
-                    Text("\(Text("+\(added)").foregroundStyle(Color.done)) \(Text("−\(removed)").foregroundStyle(Color.failed))").monospacedDigit()
-                }
+                // A diff's sums by their signs, in the page's greys (no green, no red: nothing here went wrong).
+                if let added, let removed { Text("+\(added) −\(removed)").monospacedDigit().foregroundStyle(.secondary) }
             }
         } else {
             Text("No changes kept").foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder private func buttons(_ actions: [TaskCard.Action], verified: Bool) -> some View {
-        ForEach(actions, id: \.self) { action in
-            switch action {
-            case .ship: NeedButton(title: "Ship it…", prominent: true) { shipping = task }
-            case .again: NeedButton(title: "Give again…", prominent: !verified) { againing = task }
-            case .resume: NeedButton(title: "Resume") { Task { try? await session.control(task: task.id, "resume") } }
-            default: EmptyView()
-            }
-        }
-        // Verified work with nothing to ship can still be given again, revised.
-        if verified, canAct, !actions.contains(.again) {
-            NeedButton(title: "Give again…") { againing = task }
-        }
-        if let shipped = TaskCard.shipped(task), let url = URL(string: shipped.url) {
-            Link(destination: url) { Label(shipped.text, systemImage: "arrow.up.right.square") }
-                .font(.subheadline)
-                .frame(minHeight: Metrics.touch)
         }
     }
 }
@@ -800,8 +852,11 @@ private struct GateLine: View {
     /// In the proof card (how it exited, in how long, what it printed, and how it stood before the work, on a line of its
     /// own so none of it is cut), or in the details (its time alone).
     var ended = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        // At the accessibility sizes each part is a line of its own, and none is cut.
+        let large = typeSize.isAccessibilitySize
         VStack(alignment: .leading, spacing: Space.line) {
             HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
                 Image(systemName: symbol)
@@ -809,23 +864,27 @@ private struct GateLine: View {
                     .foregroundStyle(tint)
                     .frame(width: 16)
                     .accessibilityLabel(gate.state.rawValue)
-                Text(gate.command).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle).foregroundStyle(.primary)
+                Text(gate.command).font(.caption.monospaced()).lineLimit(large ? 4 : 1).truncationMode(.middle).foregroundStyle(.primary)
                 Spacer(minLength: Space.s2)
-                if !ended || gate.state == .running || gate.state == .waiting {
+                if !large, !ended || gate.state == .running || gate.state == .waiting {
                     Text(said).font(.caption).monospacedDigit().lineLimit(1).fixedSize().foregroundStyle(.tertiary)
                 }
             }
+            if large, !ended || gate.state == .running || gate.state == .waiting {
+                Text(said).font(.caption).monospacedDigit().foregroundStyle(.tertiary).padding(.leading, 16 + Space.s2)
+            }
             if ended, gate.state == .passed || gate.state == .failed {
-                HStack(alignment: .firstTextBaseline, spacing: Space.s1) {
+                let layout = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.line)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Space.s1))
+                layout {
                     // Its exit and time are never cut; what it printed is, at the end.
                     Text([gate.exit.map { "exit \($0)" }, gate.ms.map(Self.took)].compactMap(\.self).joined(separator: " · "))
-                        .fixedSize()
+                        .fixedSize(horizontal: !large, vertical: false)
                         .foregroundStyle(gate.state == .failed ? AnyShapeStyle(Color.danger) : AnyShapeStyle(.secondary))
                     if let before = beforeWords {
-                        Text("· \(before)").fixedSize().foregroundStyle(gate.before != 0 && gate.exit == 0 ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                        Text("\(large ? "" : "· ")\(before)").fixedSize(horizontal: !large, vertical: false).foregroundStyle(gate.before != 0 && gate.exit == 0 ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                     }
                     if !gate.said.isEmpty {
-                        Text("· \(gate.said)").lineLimit(1).truncationMode(.tail).foregroundStyle(.tertiary)
+                        Text("\(large ? "" : "· ")\(gate.said)").lineLimit(large ? 3 : 1).truncationMode(.tail).foregroundStyle(.tertiary)
                     }
                 }
                 .font(.caption)
@@ -833,7 +892,6 @@ private struct GateLine: View {
                 .padding(.leading, 16 + Space.s2)
             }
         }
-        .padding(.horizontal, ended ? 14 : 0)
         .padding(.vertical, ended ? Space.s1 : 0)
         .frame(minHeight: 28)
         .accessibilityElement(children: .combine)
@@ -942,7 +1000,7 @@ struct TaskDetails: View {
                         Button {
                             reviewing = true
                         } label: {
-                            Text("\(Text("+\(added)").foregroundStyle(Color.done)) \(Text("−\(removed)").foregroundStyle(Color.failed)) \(Image(systemName: "chevron.right"))").monospacedDigit()
+                            Text("+\(added) −\(removed) \(Image(systemName: "chevron.right"))").monospacedDigit().foregroundStyle(.secondary)
                         }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Review its changes: \(added) lines added, \(removed) removed")

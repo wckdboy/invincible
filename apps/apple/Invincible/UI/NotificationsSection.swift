@@ -31,9 +31,9 @@ struct NotificationsSection: View {
                 Label(problem, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Color.danger)
             }
         } header: {
-            Text("Notifications")
+            SectionHead("Notifications")
         } footer: {
-            Text("\(Primary.name) comes to you here when something needs you: an approval, a key it asked for, a question, at once and with a sound; work that ended while you were away, quietly. A notification says fixed words only, never a key, your own words or a model's: the app shows those once you open it.")
+            PageNote("\(Primary.name) comes to you here when something needs you: an approval, a key it asked for, a question, at once and with a sound; work that ended while you were away, quietly. A notification says fixed words only, never a key, your own words or a model's: the app shows those once you open it.")
         }
         .task { await load() }
     }

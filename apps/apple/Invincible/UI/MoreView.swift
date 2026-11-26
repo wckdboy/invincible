@@ -18,50 +18,72 @@ struct MoreView<Leading: View>: View {
     var body: some View {
         GroupedList {
             leading
-            Section("This device") {
+            Section {
                 LabeledContent("Name", value: session.node.name)
                 LabeledContent("Device") { Text(String(session.key.device.dropFirst(2).prefix(8))).font(.body.monospaced()) }
                 LabeledContent("Key", value: session.key.storage == .secureEnclave ? "In the Secure Enclave" : "In the Keychain")
                 if let scopes = session.whoami?.scopes {
                     LabeledContent("May") { Text(scopes.joined(separator: ", ")).font(.footnote.monospaced()).multilineTextAlignment(.trailing) }
                 }
+            } header: {
+                SectionHead("This device")
             }
             #if os(iOS)
             if session.can("mind:read") {
                 NotificationsSection(session: session)
             }
             #endif
-            if places, session.can("vault:read") {
+            if places, session.can("vault:read") || session.can("mind:read") {
                 Section {
-                    NavigationLink { KeysView(session: session) } label: {
-                        Label("Keys", systemImage: "key")
+                    if session.can("vault:read") {
+                        NavigationLink { KeysView(session: session) } label: { Label("Keys", systemImage: "key") }
+                            .accessibilityIdentifier("settings.keys")
                     }
+                    if session.can("mind:read") {
+                        NavigationLink { ConnectorsView(session: session) } label: { Label("Connectors", systemImage: "point.3.connected.trianglepath.dotted") }
+                            .accessibilityIdentifier("settings.connectors")
+                    }
+                } header: {
+                    SectionHead("Keys and services")
                 } footer: {
-                    Text("Sealed for your full nodes, each pinned to the one address it may go to; no model ever sees one.")
+                    PageNote("Keys are sealed for your full nodes, each pinned to the one address it may go to; no model ever sees one. A service's call that sends something out or deletes something asks you first.")
                 }
             }
-            if places, session.can("mind:read") {
-                Section {
-                    NavigationLink { ConnectorsView(session: session) } label: {
-                        Label("Connectors", systemImage: "point.3.connected.trianglepath.dotted")
-                    }
-                } footer: {
-                    Text("Your services: what's sent out or deleted asks you first.")
-                }
-            }
-            Section("Its node") {
+            Section {
                 LabeledContent("Node", value: session.whoami?.nodeName ?? session.node.nodeName ?? "—")
                 LabeledContent("Fleet", value: session.whoami?.fleetName ?? session.node.fleetName ?? "—")
                 LabeledContent("Address") { Text(session.node.origin.absoluteString).font(.footnote.monospaced()) }
+            } header: {
+                SectionHead("Its node")
+            }
+            if places {
+                Section {
+                    NavigationLink { AboutView(session: session) } label: {
+                        // The app's mark on nothing (AppMark: no tile on a light page), as the PWA's About row has it.
+                        HStack(spacing: Space.s3) {
+                            AppMark(size: 32)
+                            VStack(alignment: .leading, spacing: Space.line) {
+                                Text("About Invincible").font(Typeset.row)
+                                Text("Version \(Self.version)").font(Typeset.detail).foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(minHeight: Metrics.touch)
+                    }
+                    .accessibilityIdentifier("settings.about")
+                }
             }
             Section {
-                Button("Forget this device", role: .destructive) { forgetting = true }
+                // In the ink: red is for what went wrong. What can't be undone is asked again, in the system's red there.
+                Button("Forget this device…") { forgetting = true }
+                    .foregroundStyle(.primary)
+                    .frame(minHeight: Metrics.touch)
             } footer: {
-                Text("Deletes this device's key, which can't be recovered: pairing again makes a new device. Revoke the old one on your node too.")
+                PageNote("Deletes this device's key, which can't be recovered: pairing again makes a new device. Revoke the old one on your node too.")
             }
             if let problem {
                 Section { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.danger) }
             }
+            #if os(macOS)
             Section {
                 // The app's mark on nothing (AppMark: no tile on a light page), as the PWA's About row has it.
                 HStack(spacing: Space.s3) {
@@ -73,9 +95,11 @@ struct MoreView<Leading: View>: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+            #endif
         }
+        .hairlinePage()
         .screen("settings.screen")
-        .navigationTitle(places ? "More" : "This \(ThisDevice.kind)")
+        .placeTitle(places ? "Settings" : "This \(ThisDevice.kind)")
         .confirmationDialog("Forget this device?", isPresented: $forgetting, titleVisibility: .visible) {
             Button("Forget this device", role: .destructive) {
                 do {

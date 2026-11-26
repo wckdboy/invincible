@@ -24,7 +24,7 @@ struct ChatsView: View {
                     Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.danger)
                 }
                 ForEach(groups, id: \.label) { group in
-                    Section(group.label) {
+                    Section(head: group.label) {
                         ForEach(group.items) { chat in
                             Button {
                                 open(chat.id)
@@ -58,7 +58,9 @@ struct ChatsView: View {
                     }
                 }
             }
-            .navigationTitle("Chats")
+            .hairlinePage()
+            .screen("chats.screen")
+            .navigationTitle("All chats")
             .inlineTitle()
             .searchable(text: $query, placement: .alwaysShown, prompt: "Chats")
             .toolbar {
@@ -122,8 +124,9 @@ struct ChatsView: View {
     }
 }
 
-/// A chat in the list: its title (a green dot before it while an answer in it is new to you), where it stands (amber
-/// when it needs you, red when it failed), and when it was last active.
+/// A chat in the list: its title (a dot in the ink before it while an answer in it is new to you, as an unread email
+/// has), where it stands in a dot and its word (the ink when it needs you, red when it failed), and when it was last
+/// active.
 struct ChatRow: View {
     let chat: ConversationSummary
     /// The heading it's under, which says how its time reads.
@@ -139,18 +142,15 @@ struct ChatRow: View {
             VStack(alignment: .leading, spacing: Space.line) {
                 HStack(spacing: Space.s2) {
                     // An answer in it you haven't read: a green dot, as an unread email has, until you open it.
-                    if unread { Circle().fill(Color.done).frame(width: 8, height: 8).accessibilityLabel("New answer") }
+                    if unread { Circle().fill(Color.ink).frame(width: 8, height: 8).accessibilityLabel("New answer") }
                     if chat.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
                     Text(chat.title).font(.body.weight(current || unread ? .semibold : .regular)).lineLimit(1)
                 }
                 if !words.isEmpty {
-                    HStack(spacing: Space.s2) {
-                        // The words say it; the dot is for the eye, so the row stays a button to VoiceOver.
-                        if chat.state == "working" { LiveDot(color: .working) }
-                        Text(words).lineLimit(2)
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(chat.state == "waiting" ? Color.needs : chat.state == "failed" ? Color.failed : .secondary)
+                    // The words say it; the dot is for the eye, so the row stays a button to VoiceOver.
+                    StateLabel(word: words, tone: chat.state == "working" || chat.state == "waiting" ? .active : chat.state == "failed" ? .failed : .quiet, strong: chat.state == "waiting")
+                        .lineLimit(2)
+                        .font(.subheadline)
                 }
             }
             Spacer(minLength: Space.s2)
