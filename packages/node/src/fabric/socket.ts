@@ -22,6 +22,24 @@ const QUEUE_BYTES = 16 << 20;
 
 export type Chunk = { text: string } | { bytes: Uint8Array } | { value: unknown };
 
+/**
+ * `work`, or what `late` gives if `work` takes longer than `ms`. The timer is cleared whichever comes first, so nothing is
+ * left pending after the answer (an uncancellable sleep raced against it would hold a forwarded call's 75 minutes).
+ */
+export async function within<T, U>(work: Promise<T>, ms: number, late: () => U | Promise<U>): Promise<T | U> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<U>((resolve, reject) => {
+    timer = setTimeout(() => {
+      Promise.resolve().then(late).then(resolve, reject);
+    }, ms);
+  });
+  try {
+    return await Promise.race([work, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export type SidecarErrorKind = "remote" | "cancelled" | "deadline" | "unavailable" | "invalid" | "internal" | "closed";
 
 /** A call that ended without a result, or a request the sidecar refused. `code` is the peer's Q-AMP error code (SPEC 5.5). */
@@ -332,11 +350,10 @@ export class SidecarClient {
         error: (_s, error) => client.closed(new SidecarError("closed", `the sidecar's socket failed: ${error.message}`)),
       },
     });
-    const timeout = Bun.sleep(opts.timeoutMs ?? 5_000).then(() => {
-      throw new SidecarError("unavailable", "the sidecar said no hello");
-    });
     try {
-      await Promise.race([hello, timeout]);
+      await within(hello, opts.timeoutMs ?? 5_000, () => {
+        throw new SidecarError("unavailable", "the sidecar said no hello");
+      });
     } catch (error) {
       client.close();
       throw error;

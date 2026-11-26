@@ -2,7 +2,7 @@ import { FABRIC, type GEvent, type NodeIdentity, OWNER_SCOPES, type PeerPath, ty
 import type { Device, LedgerStore } from "@invincible/ledger";
 import { answerPush, answerSync, type SyncTransport } from "@invincible/link";
 import type { Sidecar } from "./sidecar.ts";
-import { type CallOptions, type Chunk, type Invocation, SidecarError, type SidecarClient, type ToolSpec } from "./socket.ts";
+import { type CallOptions, type Chunk, type Invocation, SidecarError, type SidecarClient, type ToolSpec, within } from "./socket.ts";
 
 /*
  * The node's fabric (docs/ARCHITECTURE.md §3): its peers over Q-AMP, through its sidecar.
@@ -275,7 +275,7 @@ export class Fabric implements SyncTransport {
         })()
       : null;
     try {
-      const value = await Promise.race([call.result, Bun.sleep(timeout + 2_000).then(() => Promise.reject(new SidecarError("deadline", `no answer in ${timeout} ms`)))]);
+      const value = await within(call.result, timeout + 2_000, () => Promise.reject(new SidecarError("deadline", `no answer in ${timeout} ms`)));
       await reading;
       this.backoff.delete(peer.id);
       this.paths.set(peer.id, { path: "qamp", why: null, at: this.now() });

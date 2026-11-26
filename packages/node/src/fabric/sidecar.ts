@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync, writeSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import { b64u, didKeyOfEd25519, fromB64u, signingPublicKey } from "@invincible/core";
-import { SidecarClient } from "./socket.ts";
+import { SidecarClient, within } from "./socket.ts";
 
 /*
  * The node's sidecar (docs/ARCHITECTURE.md §3): Q-AMP's own binary, `qamp sidecar`, beside the daemon, spoken to over a
@@ -232,7 +232,7 @@ export class Sidecar {
     this.proc = proc;
     if (proc.pid) writeFileSync(join(socketDir, "qamp.pid"), `${proc.pid}\n`, { mode: 0o600 });
     void proc.exited.then((how) => this.exited(proc, how));
-    const said = await Promise.race([proc.ready, Bun.sleep(this.opts.startMs ?? 20_000).then(() => "timeout" as const)]);
+    const said = await within(proc.ready, this.opts.startMs ?? 20_000, () => "timeout" as const);
     if (said === "timeout" || said === null || !(said.startsWith("qamp://") || said.startsWith("did:key:"))) {
       this.proc = null;
       proc.kill("SIGKILL");
@@ -352,10 +352,10 @@ export class Sidecar {
     this.why = "stopped";
     if (proc) {
       proc.kill("SIGTERM");
-      const how = await Promise.race([proc.exited, Bun.sleep(this.opts.stopGraceMs ?? 15_000).then(() => "killed" as const)]);
+      const how = await within(proc.exited, this.opts.stopGraceMs ?? 15_000, () => "killed" as const);
       if (how === "killed") {
         proc.kill("SIGKILL");
-        await Promise.race([proc.exited, Bun.sleep(2_000)]);
+        await within(proc.exited, 2_000, () => null);
       }
       rmSync(join(this.socketPath, "..", "qamp.pid"), { force: true });
     }
