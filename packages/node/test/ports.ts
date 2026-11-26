@@ -21,3 +21,19 @@ export function freePort(): number {
   }
   throw new Error(`no port free for a test between ${TEST_PORTS.first} and ${TEST_PORTS.last}`);
 }
+
+/** A UDP port of the same range that is free now (a sidecar's, in a test). */
+export async function freeUdpPort(): Promise<number> {
+  for (let tried = 0; tried <= TEST_PORTS.last - TEST_PORTS.first; tried++) {
+    const port = next;
+    next = next === TEST_PORTS.last ? TEST_PORTS.first : next + 1;
+    try {
+      const socket = await Bun.udpSocket({ hostname: "127.0.0.1", port });
+      socket.close();
+      return port;
+    } catch {
+      // Taken: the next one.
+    }
+  }
+  throw new Error(`no UDP port free for a test between ${TEST_PORTS.first} and ${TEST_PORTS.last}`);
+}

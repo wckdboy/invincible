@@ -199,6 +199,8 @@ export interface DoctorDeps {
   now?: () => number;
   /** Push notifications, as this node holds them (set once there are any). */
   notify?: () => DoctorFacts["notify"];
+  /** Its sidecar, as the fabric holds it (absent: no fabric). */
+  fabric?: () => DoctorFacts["fabric"];
   /** The agents' agents (absent: a node with no Agents). */
   agents?: () => readonly Agent[];
 }
@@ -470,6 +472,7 @@ export async function gatherFacts(deps: DoctorDeps, opts: DoctorOptions = {}): P
           lastSeen: status?.lastSeen ?? null,
           error: status?.error ? redact(status.error).slice(0, 200) : null,
           clockOffsetMs: status?.online ? await system.peerClock(d.profile!.endpoint!) : null,
+          ...(status?.path ? { path: status.path, fallback: status.fallback ? redact(status.fallback).slice(0, 200) : null } : {}),
         };
       }),
     ),
@@ -529,6 +532,7 @@ export async function gatherFacts(deps: DoctorDeps, opts: DoctorOptions = {}): P
     },
     mind: { events: store.eventCount(), integrity, head: store.head(self), forks: store.forks().map((id) => ({ id, name: store.device(id)?.name ?? id.slice(0, 12) })), newestEventAt: newest || null, timeSynced, peers, backup },
     vault: { unlocked: deps.vault.unlocked(), secrets: deps.vault.list().length, requests: deps.vault.requests().map((r) => r.name) },
+    ...(deps.fabric ? { fabric: deps.fabric() } : {}),
     providers: { setUp: providerRecords(store).length, byDefault: [...new Set(ROLES.planner!.defaults.map((ref) => ref.slice(0, ref.indexOf("/"))))] },
     spent: windowsOf(store).list().map((w) => ({ provider: w.provider, until: w.until })),
     // A provider whose key a call got refused, unless the key was set again since (its secret's last set is newer than

@@ -85,7 +85,9 @@ export function capChips(caps: Caps | null): HTMLElement[] {
 function statusLine(fleet: FleetView, d: DeviceView): HTMLElement {
   if (d.id === fleet.self) return h("span", { class: "row tight" }, dot("ok", { live: true }), "online · serving you");
   const peer = peerOf(fleet, d.id);
-  if (peer?.online) return h("span", { class: "row tight tnum" }, dot("ok", { live: true }), `online${peer.rttMs !== null ? ` · ${peer.rttMs} ms` : ""}`);
+  // Its path, in words: Q-AMP through the sidecars, or HTTPS with signed requests (why, on hover) where Q-AMP can't be had.
+  const path = peer?.path === "qamp" ? " · Q-AMP" : peer?.path === "https" ? " · HTTPS" : "";
+  if (peer?.online) return h("span", { class: "row tight tnum", title: peer.path === "https" ? (peer.fallback ?? "") : "" }, dot("ok", { live: true }), `online${peer.rttMs !== null ? ` · ${peer.rttMs} ms` : ""}${path}`);
   return h(
     "span",
     { class: "row tight", title: peer?.error ?? "" },

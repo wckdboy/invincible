@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, decodeHlc, moneyPrices, type NodeIdentity, pricesOf, screenSessionView } from "@invincible/core";
+import { canonical, decodeHlc, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, screenSessionView } from "@invincible/core";
 import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, windowsOf } from "@invincible/models";
 // The apps' own words for a task's verdict, cost and what can be done with it (the CLI reads them too).
 import { costWords, factsOfRecord, verdictOf } from "../../../apps/web/src/lib/steps.ts";
@@ -20,7 +20,9 @@ import { Governor } from "./compute/governor.ts";
 import { modelSpeed, sandboxStart } from "./compute/measure.ts";
 import { ComputeService, liveHost, type Measure } from "./compute/service.ts";
 import { ArmTokens, PRIMARY_ARM } from "./arms.ts";
-import { QampGrants, type QampRunner, qampRunner } from "./qamp-grants.ts";
+import { QampGrants, type QampRunner, qampRunner, unspecified } from "./qamp-grants.ts";
+import { Fabric, fabricRequest, type FabricPrincipal } from "./fabric/service.ts";
+import { Sidecar, type SpawnSidecar } from "./fabric/sidecar.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, skillsAdapter, evalsAdapter } from "./archive/adapters.ts";
 import { LocalDiskBackend } from "./archive/blobs.ts";
@@ -71,6 +73,8 @@ export interface Daemon {
   identity: NodeIdentity;
   store: LedgerStore;
   sync: SyncEngine;
+  /** Its peers over Q-AMP, through its sidecar (fabric/service.ts). */
+  fabric: Fabric;
   loops: LoopRunner;
   connectors: ConnectorService;
   artifacts: ArtifactStore;
@@ -157,7 +161,13 @@ export interface DaemonOptions {
   push?: { allow?: string[]; tickMs?: number | false; now?: () => number; sleep?: (ms: number) => Promise<void>; apple?: { development?: string; production?: string } };
   /** How Q-AMP's binary is run for grants (tests: a stand-in). Default: <home>/bin/qamp, or INVINCIBLE_QAMP_BIN. */
   qamp?: QampRunner;
-  /** The UDP ports grants' bridges listen on (tests: others; default 7410–7419), and how often expiry is looked for. */
+  /**
+   * The node's sidecar (fabric/sidecar.ts). Default: <home>/bin/qamp (or INVINCIBLE_QAMP_BIN) on the advertised address,
+   * UDP 7410 (INVINCIBLE_QAMP_PORT). Tests: another binary, port or socket, or a stand-in spawner; false: none (every
+   * link over HTTPS).
+   */
+  sidecar?: { binary?: string | null; port?: number; socket?: string; spawn?: SpawnSidecar } | false;
+  /** The UDP ports grants' bridges listen on (tests: others; default 7411–7419), and how often expiry is looked for. */
   qampPorts?: { first: number; last: number };
   qampSweepMs?: number;
 }
@@ -275,7 +285,56 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const advertise = env.INVINCIBLE_ADVERTISE ?? config.advertise ?? caps.tailscale?.ip ?? "127.0.0.1";
   const endpoint = `http://${advertise}:${port}`;
 
-  const sync = new SyncEngine(store, identity, { intervalMs: opts.syncIntervalMs, log });
+  // The fabric (docs/ARCHITECTURE.md §3): its peers over Q-AMP, through its sidecar, which holds no secret but the node's
+  // transport key; HTTPS with signed requests to any peer it can't be had for, as before it.
+  const qampBin = env.INVINCIBLE_QAMP_BIN ?? join(home.dir, "bin", "qamp");
+  // (With test capabilities, none unless the test asks for one: no test binds a real port by accident.)
+  const sidecarOpts = opts.sidecar === false || (opts.sidecar === undefined && opts.capabilities) ? null : (opts.sidecar ?? {});
+  const qampPort = sidecarOpts?.port ?? env.INVINCIBLE_QAMP_PORT ?? QAMP_SIDECAR_PORT;
+  /** What the profile last said of its endpoint: kept while the sidecar is down, so its profile doesn't flap. */
+  let qampEndpoint: QampEndpoint | null = null;
+  let routes: ((req: Request, listener: "fabric") => Promise<Response>) | null = null;
+  const sidecar = new Sidecar({
+    home: home.dir,
+    binary: () => (sidecarOpts === null ? null : sidecarOpts.binary !== undefined ? sidecarOpts.binary : qampBin),
+    // Its advertised address alone, never every interface: with no other to give it, it only dials out.
+    listen: () => (unspecified(advertise) ? null : `${advertise.includes(":") ? `[${advertise}]` : advertise}:${qampPort}`),
+    name: config.name,
+    log,
+    ...(sidecarOpts?.socket ?? env.INVINCIBLE_QAMP_SOCKET ? { socket: sidecarOpts?.socket ?? env.INVINCIBLE_QAMP_SOCKET } : {}),
+    ...(sidecarOpts?.spawn ? { spawn: sidecarOpts.spawn } : {}),
+    up: async (client) => {
+      await fabric.serve(client);
+      // Its endpoint in its profile, once it listens (and again only if it moved).
+      const now = fabric.endpoint();
+      if (now && (now.address !== qampEndpoint?.address || now.did !== qampEndpoint?.did)) {
+        qampEndpoint = now;
+        if (profiled) publishProfile(store, identity, endpoint, withQamp(caps));
+      }
+    },
+  });
+  const fabric = new Fabric({
+    store,
+    identity,
+    sidecar,
+    log,
+    presence: async () => ({ ...(await presence()), compute: compute.usage() }),
+    // A route a node forwarded over Q-AMP: the same door as over HTTPS, for the principal its key proved.
+    route: async (path, body, principal: FabricPrincipal, signal) => {
+      if (!routes) return { status: 503, body: { error: "this node is starting" } };
+      const res = await routes(fabricRequest(path, body, principal, signal), "fabric");
+      const text = await res.text();
+      try {
+        return { status: res.status, body: text.trim() ? JSON.parse(text) : null };
+      } catch {
+        return { status: res.status, body: { error: text.slice(0, 500) } };
+      }
+    },
+  });
+  /** Its capabilities as its profile says them: with its Q-AMP endpoint, once its sidecar has said one. */
+  const withQamp = (c: Capabilities): Capabilities => (qampEndpoint ? { ...c, qamp: qampEndpoint } : c);
+  let profiled = false;
+  const sync = new SyncEngine(store, identity, { intervalMs: opts.syncIntervalMs, log, transport: fabric });
   const stopPush = store.onEmit((event) => sync.push([event]));
   const pairing = new PairingHost(store, identity, endpoint);
 
@@ -319,7 +378,6 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
 
   // Grants to agents on your other machines, over Q-AMP (qamp-grants.ts): each its arm, its chain and its bridge, which
   // serves `invincible mcp --arm qamp.<id> --tools …` on this node's own address. Its binary is the node's own copy.
-  const qampBin = env.INVINCIBLE_QAMP_BIN ?? join(home.dir, "bin", "qamp");
   const cliPath = resolve(dirname(fileURLToPath(import.meta.url)), "cli.ts");
   const qamp = new QampGrants({
     db: local,
@@ -644,6 +702,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     notify: () => notify.doctorFacts(),
     agents: () => team.store.agents(),
+    fabric: () => ({ state: sidecar.state, why: sidecar.why, did: sidecar.did, address: sidecar.address, version: sidecar.version }),
   };
   // The heartbeat takes from a quick look what it doesn't check itself (a clock out of step, the app not published, …).
   taskDeps.doctor = () => heartbeatFromDoctor(doctorDeps);
@@ -657,6 +716,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     vault,
     pairing,
     sync,
+    fabric,
     tokens,
     arms,
     qamp,
@@ -698,6 +758,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     ...(opts.oauthEndpoints ? { oauthEndpoints: opts.oauthEndpoints } : {}),
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
+
+  routes = app;
 
   // Loopback: the CLI and the local model gateway (local processes only).
   // Proxied: what `tailscale serve` forwards to (the HTTPS PWA) — remote traffic, so no
@@ -753,8 +815,11 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     }, 60_000);
   }
 
+  // Its sidecar's first start (up, or why not: it tries again by itself), so its profile names its endpoint from the first.
+  await sidecar.start();
   // Advertise the endpoint only once we are actually listening on it.
-  publishProfile(store, identity, endpoint, caps);
+  publishProfile(store, identity, endpoint, withQamp(caps));
+  profiled = true;
   sync.start();
   // Grants still in force get their bridges back (each one's MCP server calls this node's API, now listening); those whose
   // time ran out while it was down end now.
@@ -818,7 +883,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const refresh = opts.capabilities
     ? null
     : setInterval(() => {
-        void refreshCapabilities(async () => withScreen(withAwake(await probeCapabilities())), (fresh) => publishProfile(store, identity, endpoint, fresh), log).then((fresh) => {
+        void refreshCapabilities(async () => withScreen(withAwake(await probeCapabilities())), (fresh) => publishProfile(store, identity, endpoint, withQamp(fresh)), log).then((fresh) => {
           if (fresh) caps = fresh;
           // A GPU, a local runtime, more memory, a new ceiling: it measures itself again.
           upkeep();
@@ -834,6 +899,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     identity,
     store,
     sync,
+    fabric,
     loops,
     connectors,
     artifacts,
@@ -854,6 +920,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       shutdown.abort();
       // Grants' bridges stop (each drains its calls); the grants stay, and their bridges start again with the node.
       const qampStopped = qamp.stop();
+      // Its sidecar drains (GOAWAY: its peers take their calls elsewhere) while this node still answers what is under way.
+      const sidecarStopped = sidecar.stop();
       // Every terminal's shell is ended, and whoever watched one is told (their streams end with it).
       terminals?.closeAll();
       const teamEnded = Promise.all([team.service?.stop(), team.outcomes?.stop(), team.backlog?.stop()]);
@@ -888,6 +956,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       await turns.close();
       await teamEnded;
       await qampStopped;
+      await sidecarStopped;
+      fabric.close();
       await Promise.all(servers.map((s) => s.stop(true)));
       notifyDb.close();
       chats.close();

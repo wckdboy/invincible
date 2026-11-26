@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { preset } from "@invincible/models";
-import type { Presence } from "@invincible/core";
+import type { Presence, QampEndpoint } from "@invincible/core";
 import { type ContainerHostCaps, probeContainer, probeSandbox } from "@invincible/sandbox";
 
 /*
@@ -33,6 +33,11 @@ export interface Capabilities {
   awake?: boolean;
   /** This Mac's own screen can be the primary's (mac-screen.ts: its node runs from the app). Whether macOS allows it now is asked of it. */
   screen?: true;
+  /**
+   * Its Q-AMP endpoint (docs/ARCHITECTURE.md §3): its sidecar's transport key and where it listens, as its own signed
+   * profile says them, so a call that key's handshake proves is this node's. Absent: no sidecar has come up here.
+   */
+  qamp?: QampEndpoint;
 }
 
 const TOOLS = [

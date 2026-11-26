@@ -182,6 +182,7 @@ import { githubRepo, shipBranch } from "./run-cli.ts";
 import type { Terminals } from "./terminals.ts";
 import { LiveChanges, LedgerCounts, timedStamp } from "./live.ts";
 import { QampGrantError, QampGrants } from "./qamp-grants.ts";
+import { type Fabric, fabricPrincipalOf } from "./fabric/service.ts";
 
 /**
  * loopback  127.0.0.1:<port>         local processes only: CLI (admin token), model gateway
@@ -189,7 +190,8 @@ import { QampGrantError, QampGrants } from "./qamp-grants.ts";
  * tailnet   <tailnet ip>:<port>      node-to-node link
  * sandbox   <gateway bridge>:7402    reachable only from sandboxes: the model gateway and nothing else
  */
-export type Listener = "loopback" | "proxied" | "tailnet" | "sandbox";
+/** fabric: a route another node forwarded over Q-AMP, its principal the node its key proved (fabric/service.ts). */
+export type Listener = "loopback" | "proxied" | "tailnet" | "sandbox" | "fabric";
 
 export interface AppContext {
   identity: NodeIdentity;
@@ -201,6 +203,8 @@ export interface AppContext {
   vault: Vault;
   pairing: PairingHost;
   sync: SyncEngine;
+  /** Its peers over Q-AMP, through its sidecar (fabric/service.ts): forwarded work goes there first, HTTPS where it can't. */
+  fabric?: Fabric;
   tokens: GatewayTokens;
   arms: ArmTokens;
   /** Grants to agents on your other machines, over Q-AMP (qamp-grants.ts): each an arm, a chain and a bridge. */
@@ -393,6 +397,11 @@ export function createApp(ctx: AppContext) {
   const adminBytes = utf8(ctx.adminToken);
 
   function authenticate(req: Request, body: Uint8Array, pathAndQuery: string, listener: Listener): Principal | null {
+    // A route a node forwarded over Q-AMP: the node its key proved, if it is still an active one (never cached).
+    if (listener === "fabric") {
+      const by = fabricPrincipalOf(req);
+      return by && ctx.store.activeDevice(by.device)?.kind === "node" ? { device: by.device, kind: "node", scopes: by.scopes } : null;
+    }
     const armToken = req.headers.get("authorization")?.match(/^Bearer\s+(arm_\S+)$/)?.[1];
     if (armToken) {
       // Arm tokens are local credentials too: never valid over the tailnet or through tailscale serve.
@@ -454,10 +463,28 @@ export function createApp(ctx: AppContext) {
     return resolveNode(best.device);
   }
 
-  /** Send a request to another node, signed as this one; its errors come back as ours. */
+  /**
+   * Send a request to another node: over Q-AMP, its one connection to that node through the sidecars, where it can be had,
+   * else over HTTPS, signed as this one; its errors come back as ours either way.
+   */
   async function forward<T>(target: Device, path: string, body: Record<string, unknown>): Promise<T> {
     if (!target.profile?.endpoint) throw new HttpError(424, `${target.name} has no reachable endpoint`);
     let result: T;
+    const viaQamp = ctx.fabric
+      ? await ctx.fabric.forward(target, path, body, 75 * 60_000).catch((error: Error) => {
+          throw new HttpError(502, `${target.name}: ${String(error.message ?? error).slice(0, 300)}`);
+        })
+      : null;
+    if (viaQamp) {
+      if (viaQamp.status >= 400) {
+        const said = viaQamp.body as { error?: unknown } | null;
+        throw new HttpError(viaQamp.status, `${target.name}: ${typeof said?.error === "string" ? said.error : JSON.stringify(said).slice(0, 300)}`);
+      }
+      result = viaQamp.body as T;
+      const failed = streamedError(result);
+      if (failed) throw new HttpError(failed.status, `${target.name}: ${failed.error}`);
+      return result;
+    }
     try {
       result = await signedPost<T>(ctx.identity, target.profile.endpoint, path, body, { timeoutMs: 75 * 60_000 });
     } catch (error) {
@@ -4318,6 +4345,9 @@ export function createApp(ctx: AppContext) {
       if (!path.startsWith("/gw/")) throw new HttpError(404, "not found");
       return handleGateway(req, { store: ctx.store, vault: ctx.vault, tokens: ctx.tokens, onUsage: toolCalled });
     }
+
+    // Over Q-AMP a node reaches this node's API routes, and nothing else (fabric/service.ts).
+    if (listener === "fabric" && !path.startsWith("/api/")) throw new HttpError(404, "not found");
 
     if (req.method === "GET" && ctx.assets.has(path)) return ctx.assets.serve(path, req);
     // Google's return from its consent page: bound to the sign-in a device of yours started, by its state.

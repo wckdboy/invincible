@@ -1,4 +1,4 @@
-import { compareEvents, type GEvent, type NodeIdentity, type PeerStatus, type SyncPage, type SyncRequest } from "@invincible/core";
+import { compareEvents, type GEvent, type NodeIdentity, type PeerPath, type PeerStatus, type SyncPage, type SyncRequest } from "@invincible/core";
 import { type Device, type LedgerStore, PullState } from "@invincible/ledger";
 import { type FetchLike, signedPost } from "./client.ts";
 
@@ -72,10 +72,23 @@ export function answerPush(store: LedgerStore, events: unknown[]): { added: numb
   return { added: taken.length ? store.ingest(taken).added : 0, deferred };
 }
 
+/**
+ * Another way to a peer than HTTPS: Q-AMP, through the node's sidecar (the node's fabric/service.ts). Null or false: it
+ * can't be had for that peer now, and the request goes over HTTPS with a signed request, as before it.
+ */
+export interface SyncTransport {
+  sync(peer: Device, request: SyncRequest): Promise<SyncPage | null>;
+  push(peer: Device, events: GEvent[]): Promise<boolean>;
+  /** Why a peer is on HTTPS, when it is. */
+  pathOf?(peer: string): { path: PeerPath; why: string | null } | null;
+}
+
 export interface SyncOptions {
   intervalMs?: number;
   fetch?: FetchLike;
   log?: (message: string) => void;
+  /** Q-AMP, tried first for every peer; HTTPS when it can't be had (absent: HTTPS alone). */
+  transport?: SyncTransport;
 }
 
 export class SyncEngine {
@@ -112,15 +125,16 @@ export class SyncEngine {
     let pull = this.pulls.get(peer.id);
     if (!pull) this.pulls.set(peer.id, (pull = new PullState(this.store)));
     pull.begin();
+    let path: PeerPath = "https";
     try {
       for (let page = 0; page < MAX_PAGES; page++) {
-        const result = await signedPost<SyncPage>(
-          this.identity,
-          peer.profile!.endpoint!,
-          "/link/sync",
-          pull.request(this.comparesSets.has(peer.id)),
-          { fetch: this.opts.fetch, timeoutMs: 8000 },
-        );
+        const request = pull.request(this.comparesSets.has(peer.id));
+        // Q-AMP first; a peer it can't be had for (or that failed over it) is asked over HTTPS, signed, as before.
+        const viaQamp = this.opts.transport ? await this.opts.transport.sync(peer, request).catch(() => null) : null;
+        path = viaQamp ? "qamp" : "https";
+        const result =
+          viaQamp ??
+          (await signedPost<SyncPage>(this.identity, peer.profile!.endpoint!, "/link/sync", request, { fetch: this.opts.fetch, timeoutMs: 8000 }));
         presence = result.presence ?? presence;
         if (result.sets === true) this.comparesSets.add(peer.id);
         const taken = pull.receive(result);
@@ -134,6 +148,7 @@ export class SyncEngine {
         rttMs: Math.round(performance.now() - started),
         error: null,
         presence,
+        ...this.pathOf(peer.id, path),
       });
     } catch (error) {
       // It may be an older node again: start without set hashes next time, and learn anew.
@@ -145,9 +160,16 @@ export class SyncEngine {
         lastSeen: previous?.lastSeen ?? null,
         rttMs: null,
         error: String((error as Error).message ?? error).slice(0, 200),
+        ...this.pathOf(peer.id, path),
       });
     }
     return added;
+  }
+
+  /** The path a peer's sync went on, and why not Q-AMP when it wasn't. */
+  private pathOf(peer: string, path: PeerPath): Pick<PeerStatus, "path" | "fallback"> {
+    if (!this.opts.transport) return { path };
+    return { path, fallback: path === "qamp" ? null : (this.opts.transport.pathOf?.(peer)?.why ?? null) };
   }
 
   /** One round of pulls from every peer, in parallel. */
@@ -156,12 +178,18 @@ export class SyncEngine {
     return results.reduce((a, b) => a + b, 0);
   }
 
-  /** Best-effort immediate fan-out of freshly written events. */
+  /** Best-effort immediate fan-out of freshly written events: over Q-AMP where it can be had, HTTPS otherwise. */
   push(events: GEvent[]): void {
     for (const peer of this.peers()) {
       if (this.statuses.get(peer.id)?.online === false) continue;
-      signedPost(this.identity, peer.profile!.endpoint!, "/link/push", { events }, { fetch: this.opts.fetch, timeoutMs: 5000 }).catch(
-        () => {},
+      const https = () => signedPost(this.identity, peer.profile!.endpoint!, "/link/push", { events }, { fetch: this.opts.fetch, timeoutMs: 5000 }).catch(() => {});
+      if (!this.opts.transport) {
+        void https();
+        continue;
+      }
+      this.opts.transport.push(peer, events).then(
+        (sent) => (sent ? undefined : https()),
+        () => https(),
       );
     }
   }

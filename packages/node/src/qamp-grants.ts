@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { QAMP_ARM_PREFIX, QAMP_PORTS, QAMP_TOOLS, QampDid, type QampGrantMade, type QampGrantView, type QampTool, qampArm, type Scope } from "@invincible/core";
+import { QAMP_ARM_PREFIX, QAMP_BRIDGE_PORTS, QAMP_TOOLS, QampDid, type QampGrantMade, type QampGrantView, type QampTool, qampArm, type Scope } from "@invincible/core";
 import type { LedgerEntryInput } from "@invincible/sandbox";
 import { ARM_FORBIDDEN_SCOPES, type ArmTokens } from "./arms.ts";
 import type { Home } from "./home.ts";
@@ -254,7 +254,7 @@ export class QampGrants {
 
   constructor(private readonly opts: QampGrantsOptions) {
     this.now = opts.now ?? Date.now;
-    this.ports = opts.ports ?? QAMP_PORTS;
+    this.ports = opts.ports ?? QAMP_BRIDGE_PORTS;
     this.portFree = opts.portFree ?? udpFree;
     opts.db.exec(`CREATE TABLE IF NOT EXISTS qamp_grants (
       id TEXT PRIMARY KEY, agent TEXT NOT NULL, tools TEXT NOT NULL, scopes TEXT NOT NULL, port INTEGER NOT NULL UNIQUE,

@@ -49,6 +49,10 @@ const Env = z.object({
     .string()
     .refine((p) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p), "an absolute path")
     .optional(),
+  /** The UDP port its sidecar listens on, on its advertised address (default 7410: docs/ARCHITECTURE.md §9). */
+  INVINCIBLE_QAMP_PORT: z.coerce.number().int().min(1).max(65_535).optional(),
+  /** Its sidecar's socket, where <home>/run/qamp.sock is too long a path for a Unix socket: an absolute path. */
+  INVINCIBLE_QAMP_SOCKET: z.string().startsWith("/").max(103).optional(),
   /** Chat turns this node runs at once (default 4), and how long one may run, in minutes (default 30). */
   INVINCIBLE_TURNS_MAX: z.coerce.number().int().min(1).max(64).optional(),
   INVINCIBLE_TURN_MINUTES: z.coerce.number().min(1).max(720).optional(),

@@ -57,11 +57,23 @@ export interface DoctorFacts {
     newestEventAt: number | null;
     /** Whether the system says its clock is synchronised (null: it can't be asked here). */
     timeSynced: boolean | null;
-    peers: { name: string; alwaysOn: boolean; online: boolean; lastSeen: number | null; error: string | null; /** Its clock minus this node's, in ms (null: not known). */ clockOffsetMs: number | null }[];
+    peers: {
+      name: string;
+      alwaysOn: boolean;
+      online: boolean;
+      lastSeen: number | null;
+      error: string | null;
+      /** Its clock minus this node's, in ms (null: not known). */ clockOffsetMs: number | null;
+      /** The path its sync is on, and why HTTPS when it is (absent: gathered before the fabric). */
+      path?: "qamp" | "https";
+      fallback?: string | null;
+    }[];
     /** Where backups of the mind are looked for, and the newest file there (null: not looked for here). */
     backup: { dir: string; exists: boolean; newestAt: number | null; files: number } | null;
   };
   vault: { unlocked: boolean; secrets: number; requests: string[] };
+  /** Its sidecar (docs/ARCHITECTURE.md §3): whether it is up, under which key, where, and why not (absent: no fabric here). */
+  fabric?: { state: "off" | "starting" | "up" | "down"; why: string | null; did: string | null; address: string | null; version: string | null };
   /** The providers this fleet has set up (a key added, or one added by hand), and those its roles' defaults name, whose key alone is enough. */
   providers?: { setUp: number; byDefault: string[] };
   /** Providers whose allowance is spent now (absent: gathered before this was known): each window, and when it resets. */
@@ -236,6 +248,15 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     add("node", "node.home", "needs-you", what, "chmod 700 the node's home and chmod 600 admin.token: whoever reads that token is you at a terminal.");
   } else add("node", "node.home", "ok", "its home and admin token are its own user's alone");
 
+  if (f.fabric) {
+    const q = f.fabric;
+    const where = q.address ? `on ${q.address.split("@")[1]}` : "dialling out only";
+    if (q.state === "up") add("node", "node.qamp", "ok", `its sidecar is up as ${q.did?.slice(0, 22)}… ${where} (qamp ${q.version ?? "?"}): its links to other nodes go over Q-AMP`);
+    else if (q.state === "off") add("node", "node.qamp", "ok", /isn't installed/.test(q.why ?? "") ? "Q-AMP isn't installed here, so every link to another node goes over HTTPS with signed requests" : "this node runs no sidecar, so every link to another node goes over HTTPS with signed requests");
+    else
+      add("node", "node.qamp", "needs-you", `its sidecar is ${q.state === "starting" ? "starting" : "down"}${q.why ? `: ${q.why}` : ""}; its links to other nodes go over HTTPS meanwhile`, "It is started again by itself (its log says each try: qamp: …). If it keeps stopping, check its binary (<home>/bin/qamp, scripts/qamp-pin.sh) and that its UDP port (7410) is free on the node's address.");
+  }
+
   /* ---------- the mind ---------- */
 
   if (f.mind.integrity === null) add("mind", "mind.integrity", "skipped", "the database's integrity wasn't scanned (a full check does)");
@@ -283,7 +304,7 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   if (!f.mind.peers.length) add("mind", "mind.sync", "ok", "the only node in its fleet, so there's nothing to sync with (a second node would also be a living copy of the mind)");
   for (const peer of f.mind.peers) {
     const id = `mind.sync.${peer.name}`;
-    if (peer.online) add("mind", id, "ok", `in sync with ${peer.name}`);
+    if (peer.online) add("mind", id, "ok", `in sync with ${peer.name}${peer.path === "qamp" ? " over Q-AMP" : peer.path === "https" ? ` over HTTPS${peer.fallback ? ` (${redact(peer.fallback).slice(0, 160)})` : ""}` : ""}`);
     else if (peer.error && /\b40[13]\b/.test(peer.error)) add("mind", id, "needs-you", `${peer.name} refuses this node's requests (${redact(peer.error).slice(0, 120)})`, "A clock out of step, or one of them was revoked: check both clocks, then invincible status on each.");
     else if (!peer.alwaysOn) add("mind", id, "ok", `${peer.name} is asleep or away (a personal machine: it syncs when it's back)`);
     else if (f.now - (peer.lastSeen ?? f.self.startedAt) < OFFLINE_AFTER_MS) add("mind", id, "ok", `${peer.name} hasn't answered in the last minutes`);
