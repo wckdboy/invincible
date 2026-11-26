@@ -368,9 +368,14 @@ export function proofRefusal(attestation: unknown, expect: ProofExpectation): st
   if (expect.gates.some((gate, i) => statement.gates[i] !== gate)) return "its gates aren't the ones asked for";
   if (expect.task && statement.task !== expect.task) return "it names another task than the one it was taken as";
   if (expect.run && statement.run !== expect.run) return "it names another run's key than the one it was taken with";
-  // Verified, only as its own facts say: done, its end done, every gate passing after, no review asking for more.
+  // Verified, only as its own facts say: done, its end done, every gate it names passing after (one exit of 0 each),
+  // no review asking for more; and only as the task and run this node was told it was taken as (its `accepted`).
   const facts = statement.proof;
-  if (statement.verified && (statement.status !== "done" || statement.ended !== "done" || (facts !== null && (facts.after.some((exit) => exit !== 0) || facts.review === "revise")))) return "it says verified, but its own facts don't";
+  if (statement.verified) {
+    const gated = statement.gates.length === 0 ? facts === null || facts.after.every((exit) => exit === 0) : facts !== null && facts.after.length === statement.gates.length && facts.after.every((exit) => exit === 0);
+    if (statement.status !== "done" || statement.ended !== "done" || !gated || facts?.review === "revise") return "it says verified, but its own facts don't";
+    if (!expect.task || !expect.run) return "it says verified, but this node was never told the task and run it was taken as";
+  }
   if (expect.said) {
     const { output, error } = expect.said;
     if (typeof output !== "string" || (error !== null && typeof error !== "string") || saidDigest(output, error) !== statement.said) return "what it said beside its proof isn't what it signed";

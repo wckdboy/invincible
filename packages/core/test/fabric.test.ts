@@ -244,7 +244,7 @@ describe("the proof a node signs for work it ran for another", () => {
     expect(proofRefusal(signProof(runner, { ...statement, goal: goalDigest("Something else") }), expect_)).toBe("it is over another goal");
     expect(proofRefusal(signProof(runner, { ...statement, gates: ["true"] }), expect_)).toBe("its gates aren't the ones asked for");
     // The planner's own proposals may follow yours; yours never go missing.
-    expect(proofRefusal(signProof(runner, { ...statement, gates: ["bun test", "bun run lint"] }), expect_)).toBeNull();
+    expect(proofRefusal(signProof(runner, { ...statement, gates: ["bun test", "bun run lint"], proof: { ...statement.proof!, before: [1, 1], after: [0, 0] } }), expect_)).toBeNull();
     expect(proofRefusal(signProof(runner, { ...statement, gates: [] }), expect_)).toBe("its gates aren't the ones asked for");
   });
 
@@ -262,6 +262,17 @@ describe("the proof a node signs for work it ran for another", () => {
     expect(proofRefusal(signProof(runner, { ...statement, status: "failed" }), expect_)).toBe("it says verified, but its own facts don't");
     // Not verified: its facts may say anything.
     expect(proofRefusal(signProof(runner, { ...statement, verified: false, ended: "unverified", proof: { ...statement.proof!, after: [1] } }), expect_)).toBeNull();
+  });
+
+  test("verified only with every gate it names passing after, and only as the task and run this node was told (I-d)", () => {
+    // Two gates named, and an exit after for one of them, or for neither, or no facts at all: not verified.
+    const two = { ...statement, gates: ["bun test", "bun run lint"] };
+    for (const after of [[0], []]) expect(proofRefusal(signProof(runner, { ...two, proof: { ...statement.proof!, before: [1, 1], after } }), expect_)).toBe("it says verified, but its own facts don't");
+    expect(proofRefusal(signProof(runner, { ...statement, proof: null }), expect_)).toBe("it says verified, but its own facts don't");
+    // No gate asked: its review decides, with its facts or none.
+    expect(proofRefusal(signProof(runner, { ...statement, gates: [], proof: null }), { ...expect_, gates: [] })).toBeNull();
+    // This node never told which task and run took it (no accepted came): a proof that says verified isn't held to them.
+    for (const told of [{ task: null, run: null }, { run: null }]) expect(proofRefusal(signProof(runner, statement), { ...expect_, ...told })).toBe("it says verified, but this node was never told the task and run it was taken as");
   });
 
   test("what it says beside its proof, its output and its error, is what it signed (I2): changed, refused", () => {
