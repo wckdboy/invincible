@@ -11,8 +11,9 @@ import { workNow, workSources } from "./work-rows.ts";
 
 /*
  * Everything else, as the iPhone's drawer (your words, 26 November 2026: on a phone no tab bar; Home with a bar at its
- * foot and a drawer): a new chat and your latest chats, so a past one is two taps from Home; then what needs you and the
- * agents, each with its count, your chats, the keys, the connectors and Settings; then More, every other place. On a
+ * foot and a drawer): a new chat; what needs you and the agents, each with its count, all your chats, the keys, the
+ * connectors, Settings and More, every other place; then your latest chats, so a past one is two taps from Home (last,
+ * where their coming a moment later moves nothing). On a
  * phone, and wherever no sidebar shows, it is a drawer from the left edge (Home's I-beam opens it, or a swipe from the
  * edge, or "…"); on a wide screen it is the sidebar, kept open beside the page (views/sidebar.ts). More (#/more) is
  * the whole index as a page, with a line saying what is in each place.
@@ -108,18 +109,21 @@ export function placesNav(ctx: Ctx, picked: () => void = () => {}): PlacesNav {
   const el = h(
     "nav",
     { class: "places-nav", "aria-label": "Everything else" },
-    canChat ? h("div", { class: "places-group" }, row({ lead: "edit", text: "New chat", run: () => (startNewChat(), ctx.navigate("chat")) }), chats) : null,
     h(
       "div",
       { class: "places-group" },
+      canChat ? row({ lead: "edit", text: "New chat", run: () => (startNewChat(), ctx.navigate("chat")) }) : null,
       placeOf("inbox", needs),
       placeOf("team", agents),
       canChat ? row({ lead: "clock", text: "All chats", run: () => ctx.navigate("chat", { intent: "history" }) }) : null,
       placeOf("vault"),
       placeOf("connectors"),
       placeOf("settings"),
+      more,
     ),
-    more ? h("div", { class: "places-group" }, more) : null,
+    // Your latest chats last: they come a moment after the list is drawn, and under it their coming moves nothing (the
+    // scorecard's layout shift: above the places, they pushed every row down on every page of a wide screen).
+    canChat ? h("div", { class: "places-group places-latest" }, chats) : null,
   );
   arrowsThrough(el, ".place");
   for (const source of [...workSources(ctx), ctx.live.inboxLoaded, ctx.live.inboxCount, ctx.live.pairings, ctx.live.secretRequests, ctx.live.questions, ctx.live.screenSessions, ctx.live.notices, ctx.live.loopDrafts, ctx.live.connectorRequests, ctx.live.aboutYou] as { subscribe(listener: () => void): () => void }[]) stops.push(source.subscribe(drawCounts));

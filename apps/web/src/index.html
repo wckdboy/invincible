@@ -325,7 +325,7 @@
       .places-nav { display: flex; flex-direction: column; }
       .places-group { display: flex; flex-direction: column; padding: var(--sp-1) 0; }
       .places-group + .places-group { border-top: 1px solid var(--border); }
-      .places-chats:empty { display: none; }
+      .places-chats:empty, .places-latest:has(> .places-chats:empty) { display: none; }
       .place {
         display: flex; align-items: center; gap: 14px; width: 100%; min-width: 0; min-height: 44px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-md);
         background: none; color: var(--text); font: inherit; font-size: var(--fs-16); font-weight: 650; letter-spacing: -0.01em; text-align: left; text-decoration: none;
