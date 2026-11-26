@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTrailEntry } from "@invincible/core/team";
-import { commandKind, costWords, factsOfProof, factsOfRecord, gateRows, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
+import { commandKind, costWords, factsOfProof, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, readTrailLine, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
 
 /* A task's trail as the node writes it (team-runtime.ts progress()), its lines in the order they happened. */
 const T0 = 1_764_000_000_000;
@@ -209,5 +209,63 @@ describe("the verdict, in words that follow the proof", () => {
     const fromTrail = factsOfProof(proofOf({ gates: ["bun test"], status: "done" }, entries));
     expect(fromTrail.gates.map((g) => [g.exit, g.before])).toEqual([[0, 1]]);
     expect(verdictOf(done(), fromTrail)).toEqual({ word: "Proven", verdict: "proven" });
+  });
+});
+
+describe("a steer, as its trail says it", () => {
+  // As the runner writes them (team-runtime.ts progress() and its Judged line), each where the work took it.
+  const STEERED = trail(
+    "Running · bun test packages/link",
+    "Exit 1 · 2 fail",
+    "Steered · You: Use the new schema.",
+    "Steered · Your agent: Keep the old reader.\nIt still has users.",
+    "Running · bun test packages/link",
+    "Exit 0 · 14 pass",
+    "Submitted for review · on the new schema",
+    "Gate 1/1 · exit 0 · bun test packages/link\n14 pass",
+    "Judged · against its goal and 2 steers, in order",
+    "Review · pass\nBoth taken up.",
+  );
+
+  test("read by its mark: whose words they were and what they said; any other speaker is a note, as before", () => {
+    expect(readTrailLine("Steered · You: Use the new schema.")).toEqual({ kind: "steer", by: "owner", text: "Use the new schema." });
+    expect(readTrailLine("Steered · Your agent: Keep the old reader.\nIt still has users.")).toEqual({ kind: "steer", by: "primary", text: "Keep the old reader.\nIt still has users." });
+    expect(readTrailLine("Judged · against its goal and 2 steers, in order")).toEqual({ kind: "judged", steers: 2 });
+    expect(readTrailLine("Judged · against its goal and 1 steer, in order")).toEqual({ kind: "judged", steers: 1 });
+    expect(readTrailLine("Steered · Somebody: x")).toEqual({ kind: "note", text: "Steered · Somebody: x", tone: "neutral" });
+  });
+
+  test("each steer stands alone among the steps, where it was taken, in whose words; the judged line is the proof's, not a step", () => {
+    const groups = stepGroups(STEERED);
+    expect(groups.map((g) => [g.kind, g.text])).toEqual([
+      ["run", "Ran bun test packages/link · failed"],
+      ["steer", "You: Use the new schema."],
+      ["steer", "Your agent: Keep the old reader."],
+      ["run", "Ran bun test packages/link"],
+      ["submitted", "Submitted it for its gates and review"],
+      ["gate", "Gate 1 of 1 · passed"],
+      ["review", "The reviewer passed it"],
+    ]);
+    // Its words whole, a click away.
+    expect(groups[2]!.items).toEqual([{ text: "Keep the old reader.\nIt still has users.", exit: null }]);
+    expect(groups[1]).toMatchObject({ from: 3, to: 3, tone: "neutral" });
+  });
+
+  test("the steers on a trail, in order, and how many the latest review judged the work against", () => {
+    expect(steersOf(STEERED)).toEqual([
+      { by: "owner", text: "Use the new schema.", n: 3, at: STEERED[2]!.at },
+      { by: "primary", text: "Keep the old reader.\nIt still has users.", n: 4, at: STEERED[3]!.at },
+    ]);
+    expect(judgedWith(STEERED)).toBe(2);
+    // A steer taken after the latest review is not one it judged with; no review, nothing judged.
+    expect(judgedWith([...STEERED, { n: 11, at: T0, text: "Steered · You: And name it v2." }])).toBe(2);
+    expect(judgedWith(STEERED.slice(0, 8))).toBeNull();
+    expect(judgedWith(trail("Review · pass"))).toBe(0);
+    expect(steersOf(trail("Running · ls", "Exit 0 · ok"))).toEqual([]);
+  });
+
+  test("the live line, when a steer was the last thing on its trail: it is taking up whose words", () => {
+    expect(liveStep(trail("Running · ls", "Exit 0 · ok", "Steered · You: Use the new schema."))).toMatchObject({ text: "Taking up your words", command: false });
+    expect(liveStep(trail("Steered · Your agent: Keep the old reader."))).toMatchObject({ text: "Taking up your agent's words", command: false });
   });
 });

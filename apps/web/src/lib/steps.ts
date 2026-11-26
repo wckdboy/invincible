@@ -10,7 +10,7 @@ import type { TeamTask, TeamTrailEntry } from "@invincible/core/team";
  * and Android apps port this.
  */
 
-export type StepKind = "plan" | "read" | "edit" | "run" | "submitted" | "gate" | "review" | "note";
+export type StepKind = "plan" | "read" | "edit" | "run" | "submitted" | "gate" | "review" | "note" | "steer";
 export type StepTone = "neutral" | "ok" | "failed" | "warn";
 
 /** One line of the work, folded: a step of its own (its plan, a gate, the review, a note), or a run of steps alike. */
@@ -70,6 +70,10 @@ type Line =
   | { kind: "submitted"; summary: string }
   | { kind: "review"; verdict: "pass" | "revise"; notes: string }
   | { kind: "thought" }
+  /** Your words to it, or your agent's, where its run took them ("Steered · You: …"). */
+  | { kind: "steer"; by: "owner" | "primary"; text: string }
+  /** What the review after it judged the work against: its goal and this many steers ("Judged · …"). */
+  | { kind: "judged"; steers: number }
   | { kind: "note"; text: string; tone: StepTone };
 
 const NOTE_TONE: Readonly<Record<string, StepTone>> = {
@@ -102,6 +106,13 @@ function read(text: string): Line {
     return listed.length ? { kind: "gates", commands: listed } : { kind: "gated" };
   }
   if (mark === "Review" && (said === "pass" || said === "revise")) return { kind: "review", verdict: said, notes: body.trim() };
+  // (Whose words a steer was is the runner's to say: "You" or "Your agent", and nothing else.)
+  if (mark === "Steered") {
+    const by = said.startsWith("You: ") ? "owner" : said.startsWith("Your agent: ") ? "primary" : null;
+    if (by) return { kind: "steer", by, text: [said.slice(by === "owner" ? 5 : 12), body].filter(Boolean).join("\n") };
+  }
+  const judged = mark === "Judged" ? /^against its goal and (\d+) steers?, in order$/.exec(said) : null;
+  if (judged) return { kind: "judged", steers: Number(judged[1]) };
   return { kind: "note", text: head, tone: NOTE_TONE[mark] ?? "neutral" };
 }
 
@@ -198,7 +209,7 @@ export function stepGroups(entries: readonly TeamTrailEntry[]): StepGroup[] {
   };
   for (const entry of entries) {
     const line = read(entry.text);
-    if (line.kind === "thought" || line.kind === "gates" || line.kind === "gated" || line.kind === "baseline") continue;
+    if (line.kind === "thought" || line.kind === "gates" || line.kind === "gated" || line.kind === "baseline" || line.kind === "judged") continue;
     if (line.kind === "exit") {
       const last = open?.raw.at(-1);
       if (last && last.exit === null) {
@@ -224,9 +235,41 @@ export function stepGroups(entries: readonly TeamTrailEntry[]): StepGroup[] {
     else if (line.kind === "gate") one("gate", `Gate ${line.index} of ${line.of} · ${line.exit === 0 ? "passed" : `failed, exit ${line.exit}`}`, line.exit === 0 ? "ok" : "failed", [{ text: line.command, exit: line.exit }]);
     else if (line.kind === "review") one("review", line.verdict === "pass" ? "The reviewer passed it" : "The reviewer sent it back", line.verdict === "pass" ? "ok" : "warn", line.notes ? [{ text: firstLine(line.notes), exit: null }] : []);
     else if (line.kind === "note") one("note", line.text, line.tone);
+    else if (line.kind === "steer") one("steer", `${line.by === "owner" ? "You" : "Your agent"}: ${firstLine(line.text)}`, "neutral", [{ text: line.text, exit: null }]);
   }
   close();
   return groups;
+}
+
+/** A steer on a task's trail: whose words, what they said, and the line it was taken at. */
+export interface TrailSteer {
+  by: "owner" | "primary";
+  text: string;
+  n: number;
+  at: number;
+}
+
+/** The steers on a task's trail, in the order its run took them. */
+export function steersOf(entries: readonly TeamTrailEntry[]): TrailSteer[] {
+  const out: TrailSteer[] = [];
+  for (const entry of entries) {
+    const line = read(entry.text);
+    if (line.kind === "steer") out.push({ by: line.by, text: line.text, n: entry.n, at: entry.at });
+  }
+  return out;
+}
+
+/**
+ * How many steers the latest review judged the work against: those taken before it (the reviewer is told every one, in
+ * order). Null: no review yet.
+ */
+export function judgedWith(entries: readonly TeamTrailEntry[]): number | null {
+  let last = -1;
+  entries.forEach((entry, i) => {
+    if (read(entry.text).kind === "review") last = i;
+  });
+  if (last < 0) return null;
+  return entries.slice(0, last).filter((entry) => read(entry.text).kind === "steer").length;
 }
 
 /** What the work came to in figures, for its folded line ("Worked for 6m 12s · ran 14 commands · edited 5 files"). */
@@ -336,6 +379,7 @@ export function liveStep(entries: readonly TeamTrailEntry[]): { text: string; co
   if (line.kind === "review") return { text: line.verdict === "pass" ? "Keeping its changes" : "Back to the work", command: false, since: last.at };
   if (line.kind === "exit") return { text: "Reading what it printed", command: false, since: last.at };
   if (line.kind === "thought") return { text: "Thinking", command: false, since: last.at };
+  if (line.kind === "steer") return { text: line.by === "owner" ? "Taking up your words" : "Taking up your agent's words", command: false, since: last.at };
   return { text: "Working", command: false, since: last.at };
 }
 
