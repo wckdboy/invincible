@@ -1,0 +1,11 @@
+{
+  "about": "The iPhone app's performance budgets, held by PerfTests.swift on a simulator against a dev node with a busy fleet (scripts/dev-node.ts --heavy --auto-approve). A number over its budget fails the test. Set from docs/X2's speed targets on 26 November 2026; change one only on purpose, in its own reviewed change, saying why.",
+  "launchToUsableMs": 400,
+  "requestsAtRestPerMinute": 2,
+  "eventToScreenP95Ms": 1000,
+  "deadLinkNoticedMs": 5000,
+  "deadLinkBackMs": 2000,
+  "cpuAtRestPercent": 1,
+  "memoryAtRestMB": 150,
+  "scrollLateMsPerSecond": 5
+}

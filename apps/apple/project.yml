@@ -84,6 +84,21 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot.tests
+  # The app as you use it, against a dev node (scripts/dev-node.ts --heavy --auto-approve, its front's address in
+  # INVINCIBLE_DEV_NODE): how fast it opens and answers, what it asks the node at rest, how soon it notices a dead link,
+  # how it scrolls, and how many taps each place is from Home. Without a dev node each test says it was skipped.
+  InvincibleUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: InvincibleUITests
+    dependencies:
+      - target: Invincible
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot.uitests
+        TEST_TARGET_NAME: Invincible
   # The Mac's: a native app (not Mac Catalyst), the client and the node's manager, signed with a Developer ID for a release
   # (outside the App Store). It is called Invincible as the iPhone's is, and its module is too, so the tests import it as
   # they import the iPhone's. A build here is signed to run on this Mac only and carries no node: scripts/mac-node-bundle.sh
@@ -156,9 +171,11 @@ schemes:
       targets:
         Invincible: all
         InvincibleTests: [test]
+        InvincibleUITests: [test]
     test:
       targets:
         - InvincibleTests
+        - InvincibleUITests
   InvincibleMac:
     build:
       targets:

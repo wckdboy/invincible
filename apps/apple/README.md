@@ -84,6 +84,40 @@ there; Operator's VM has a desktop (its screen shows a browser's blank tab until
 
 The node lets one app in: give each app a node of its own.
 
+With `--heavy` it holds what a busy fleet does, to use the app hard: ten agents, a hundred more tasks (proven, reviewed
+but not proven, failed, queued), long chats with the primary and more approvals waiting. With `--auto-approve` the first
+device that asks is let in without a code (the UI tests pair that way). The app comes in through a front of the dev
+node's own, which counts every request the app sends and, under `/__dev/`, answers the UI tests: the invite, the
+requests since a moment, a dead link on demand (nothing goes through either way, as a half-open connection), and a poke
+(a device asking to join, at once).
+
+## Measured: the performance suite
+
+`InvincibleUITests` uses the app as you would against a dev node with a busy fleet, and holds each number to its budget
+in `InvincibleUITests/Budgets.json` (a number over its budget fails the test):
+
+| | Budget |
+|---|---|
+| From the process starting to Home's first frame with what it shows (median of five) | 400 ms |
+| What it asks the node in a minute at rest | 2 requests |
+| From something needing you on the node to Home counting it (95th percentile) | 1 s |
+| A dead link (the node gone silent) noticed / back once it can be reached | 5 s / 2 s |
+| CPU at rest on Home / memory | 1 % / 150 MB |
+| Frames that came late scrolling Home's long list | 5 ms a second |
+
+On a simulator Apple's launch metric reports nothing and its scroll metric only a duration, so the app measures those
+itself, and only when the suite launches it to be measured (`-InvincibleMeasure YES`; `App/PerfProbe.swift`). Run it as
+CI does:
+
+```sh
+bun apps/apple/scripts/dev-node.ts --dir /tmp/invincible-dev --heavy --auto-approve &   # writes /tmp/invincible-dev/front.txt
+TEST_RUNNER_INVINCIBLE_DEV_NODE=$(cat /tmp/invincible-dev/front.txt) xcodebuild -project Invincible.xcodeproj \
+  -scheme Invincible -destination 'platform=iOS Simulator,id=<a simulator of its own>' -derivedDataPath build \
+  test -only-testing:InvincibleUITests
+```
+
+Without a dev node each UI test says it was skipped, unverified.
+
 ## The iPad and the Mac
 
 The places in a sidebar (`Invincible/UI/Places.swift`, shared by both), the place chosen beside it, and a task's details

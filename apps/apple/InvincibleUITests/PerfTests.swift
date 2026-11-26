@@ -1,0 +1,204 @@
+import XCTest
+
+/*
+ * The app as you use it, measured against a dev node with a busy fleet (scripts/dev-node.ts --heavy --auto-approve) and
+ * held to Budgets.json:
+ *  - launch: from the process starting to Home's first frame with what it shows (the app's own probe, PerfProbe.swift:
+ *    Apple's launch metric reports nothing on a simulator), the median of five;
+ *  - at rest on Home: what it asks the node in a minute, and its CPU and memory while nothing changes;
+ *  - live: from something needing you on the node to Home's header counting it;
+ *  - a dead link: how soon the app says it's reconnecting once the node goes silent (as a half-open connection does),
+ *    and how soon it's back once the node can be reached again;
+ *  - scrolling Home's long list: the frames that came late, in ms a second (Apple's hitch time ratio).
+ * Each prints a PERF line and attaches its numbers, so a run's log and its result bundle say what was measured.
+ */
+final class PerfTests: XCTestCase {
+    struct Budgets: Decodable {
+        let launchToUsableMs: Double
+        let requestsAtRestPerMinute: Double
+        let eventToScreenP95Ms: Double
+        let deadLinkNoticedMs: Double
+        let deadLinkBackMs: Double
+        let cpuAtRestPercent: Double
+        let memoryAtRestMB: Double
+        let scrollLateMsPerSecond: Double
+    }
+
+    private var budgets: Budgets {
+        get throws {
+            let url = try XCTUnwrap(Bundle(for: PerfTests.self).url(forResource: "Budgets", withExtension: "json"), "Budgets.json isn't in the suite's bundle")
+            return try JSONDecoder().decode(Budgets.self, from: Data(contentsOf: url))
+        }
+    }
+
+    /// What was measured, said in the log and kept with the result.
+    private func report(_ name: String, _ values: [String: Double]) {
+        let line = values.keys.sorted().map { "\($0)=\(values[$0].map { String(format: "%.1f", $0) } ?? "-")" }.joined(separator: " ")
+        print("PERF \(name) \(line)")
+        let attachment = XCTAttachment(string: line)
+        attachment.name = "perf.\(name)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testLaunchToUsable() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        try app.openHome(node)
+        app.launchArguments = ["-InvincibleMeasure", "YES"]
+        var took: [Double] = []
+        for _ in 0..<5 {
+            app.terminate()
+            settle(1)
+            app.launch()
+            let probe = app.probe
+            XCTAssertTrue(probe.waitForExistence(timeout: 20), "The probe never came: the app wasn't launched to be measured")
+            let deadline = Date().addingTimeInterval(20)
+            var launch: Double?
+            while launch == nil, Date() < deadline {
+                launch = app.reading("launch")
+                if launch == nil { settle(0.1) }
+            }
+            took.append(try XCTUnwrap(launch, "Home never showed what it holds"))
+        }
+        report("launch-to-usable", ["p50": percentile(took, 0.5), "max": took.max() ?? .nan])
+        print("PERF launch-to-usable each: \(took.map { Int($0) })")
+        XCTAssertLessThanOrEqual(percentile(took, 0.5), try budgets.launchToUsableMs, "Launch to usable took \(took.map { Int($0) }) ms")
+    }
+
+    @MainActor
+    func testRequestsAtRest() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        try app.openHome(node)
+        // Whatever opening asked for has been answered.
+        settle(10)
+        let since = try node.now()
+        settle(60)
+        let asked = try node.requests(since: since).requests
+        let byPath = Dictionary(grouping: asked, by: { $0.path.components(separatedBy: "?")[0] }).map { "\($0.value.count) \($0.key)" }.sorted()
+        report("requests-at-rest", ["perMinute": Double(asked.count)])
+        print("PERF requests-at-rest by route: \(byPath.joined(separator: ", "))")
+        XCTAssertLessThanOrEqual(Double(asked.count), try budgets.requestsAtRestPerMinute, "At rest the app asked the node \(asked.count) times in a minute: \(byPath)")
+    }
+
+    @MainActor
+    func testAtRest() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        app.launchArguments = ["-InvincibleMeasure", "YES"]
+        app.terminate()
+        try app.openHome(node)
+        settle(10)
+        // Reading the probe costs the app something itself (XCUITest takes a picture of its whole accessibility tree to
+        // find it): what one reading costs, from two back to back, is taken off what the rest between two cost.
+        let a = try XCTUnwrap(app.reading("cpu"))
+        let b = try XCTUnwrap(app.reading("cpu"))
+        let perReading = max(0, b - a)
+        let cpu0 = try XCTUnwrap(app.reading("cpu"))
+        let start = Date()
+        settle(20)
+        let cpu1 = try XCTUnwrap(app.reading("cpu"))
+        let seconds = Date().timeIntervalSince(start)
+        let percent = max(0, cpu1 - cpu0 - perReading) / (seconds * 1000) * 100
+        let memory = try XCTUnwrap(app.reading("mem"))
+        report("at-rest", ["cpuPercent": percent, "memoryMB": memory, "readingCostMs": perReading])
+        XCTAssertLessThanOrEqual(percent, try budgets.cpuAtRestPercent, "At rest on Home the app used \(String(format: "%.1f", percent)) % of a core")
+        XCTAssertLessThanOrEqual(memory, try budgets.memoryAtRestMB, "At rest on Home the app held \(Int(memory)) MB")
+    }
+
+    @MainActor
+    func testEventToScreen() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        try app.openHome(node)
+        settle(5)
+        var took: [Double] = []
+        for _ in 0..<10 {
+            let before = try XCTUnwrap(app.needsCount, "Home says no count")
+            _ = try node.poke()
+            let start = Date()
+            while (app.needsCount ?? before) <= before, Date().timeIntervalSince(start) < 20 { settle(0.02) }
+            took.append(Date().timeIntervalSince(start) * 1000)
+            settle(1)
+        }
+        report("event-to-screen", ["p50": percentile(took, 0.5), "p95": percentile(took, 0.95), "max": took.max() ?? .nan])
+        print("PERF event-to-screen each: \(took.map { Int($0) })")
+        XCTAssertLessThanOrEqual(percentile(took, 0.95), try budgets.eventToScreenP95Ms, "Something needing you took \(took.map { Int($0) }) ms to show")
+    }
+
+    @MainActor
+    func testDeadLink() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        app.launchArguments = ["-InvincibleMeasure", "YES"]
+        app.terminate()
+        try app.openHome(node)
+        settle(5)
+        defer { try? node.blackhole(false) }
+        XCTAssertFalse(app.linkDown.exists, "The app said the link was down before it was")
+        let dead = try node.blackhole(true)
+        let deadHere = Date()
+        while !app.linkDown.exists, Date().timeIntervalSince(deadHere) < 150 { settle(0.05) }
+        // As the test saw it on screen (its own looks at the screen take a while), and as the app said it (its probe:
+        // the moment it took the link for lost, by the same clock as the dev node's).
+        let shown = Date().timeIntervalSince(deadHere) * 1000
+        let noticed = (app.reading("lostAt") ?? .nan) - dead
+        let alive = try node.blackhole(false)
+        let aliveHere = Date()
+        while app.linkDown.exists, Date().timeIntervalSince(aliveHere) < 60 { settle(0.05) }
+        let shownBack = Date().timeIntervalSince(aliveHere) * 1000
+        let back = (app.reading("backAt") ?? .nan) - alive
+        report("dead-link", ["noticedMs": noticed, "shownMs": shown, "backMs": back, "shownBackMs": shownBack])
+        XCTAssertLessThanOrEqual(noticed, try budgets.deadLinkNoticedMs, "A dead link took \(Int(noticed)) ms to notice (\(Int(shown)) ms to be seen on screen)")
+        XCTAssertLessThanOrEqual(back, try budgets.deadLinkBackMs, "Back took \(Int(back)) ms once the node could be reached")
+    }
+
+    @MainActor
+    func testScrollHome() throws {
+        let node = try DevNode.named()
+        let app = XCUIApplication()
+        app.launchArguments = ["-InvincibleMeasure", "YES", "-InvincibleMeasureFrames", "YES"]
+        app.terminate()
+        try app.openHome(node)
+        settle(5)
+        let list = app.scrollViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        let late0 = try XCTUnwrap(app.reading("lateMs"))
+        let start = Date()
+        for _ in 0..<3 {
+            list.swipeUp(velocity: .fast)
+            list.swipeUp(velocity: .fast)
+            list.swipeDown(velocity: .fast)
+            list.swipeDown(velocity: .fast)
+        }
+        let seconds = Date().timeIntervalSince(start)
+        let late1 = try XCTUnwrap(app.reading("lateMs"))
+        let ratio = (late1 - late0) / seconds
+        report("scroll-home", ["lateMsPerSecond": ratio, "seconds": seconds])
+        XCTAssertLessThanOrEqual(ratio, try budgets.scrollLateMsPerSecond, "Scrolling Home, frames came \(String(format: "%.1f", ratio)) ms a second late")
+    }
+}
+
+@MainActor
+extension XCUIApplication {
+    /// The app's own probe (PerfProbe.swift), there when it was launched to be measured.
+    var probe: XCUIElement { descendants(matching: .any)["perf.probe"] }
+
+    /// One of the probe's readings, as it stands this moment (nil: not measured yet).
+    func reading(_ name: String) -> Double? {
+        guard probe.exists, let value = probe.value as? String else { return nil }
+        for part in value.split(separator: ";") {
+            let pair = part.split(separator: "=", maxSplits: 1)
+            if pair.count == 2, pair[0] == name { return Double(pair[1]) }
+        }
+        return nil
+    }
+}
+
+/// Lets the app and the clock run for a while (the test's own run loop: taps and queries still go through).
+@MainActor
+func settle(_ seconds: TimeInterval) {
+    RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+}

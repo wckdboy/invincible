@@ -58,7 +58,13 @@ struct HomeView: View {
             // Back here, the next message starts a conversation of its own (the one you left stays among its chats).
             composing = false
             if !chat.answering { chat.startNew() }
+            #if os(iOS)
+            if work != nil { PerfProbe.shared.usable() }
+            #endif
         }
+        #if os(iOS)
+        .onChange(of: work != nil) { if work != nil { PerfProbe.shared.usable() } }
+        #endif
         .task { await session.askProjects() }
         .refreshable { await session.refresh() }
     }
@@ -94,6 +100,7 @@ struct HomeView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(Primary.name): \(glance.0)")
             .accessibilityHint("Opens its own conversation")
+            .accessibilityIdentifier("home.glance")
             Spacer(minLength: Space.s2)
             MachineChip(session: session) { go(.more) }
             if let everything {

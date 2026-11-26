@@ -21,6 +21,8 @@ struct RootView: View {
         .tint(.ink)
         .background(WindowTint())
         .background(ClosesKeyboard())
+        // What the performance suite reads, when it launched the app to measure it (nothing otherwise).
+        .overlay(alignment: .topLeading) { PerfProbeMark() }
         .task { app.start() }
     }
 }
