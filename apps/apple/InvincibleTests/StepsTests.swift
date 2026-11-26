@@ -164,4 +164,11 @@ struct StepsTests {
         #expect(Spend.usd(0.0042) == "$0.0042")
         #expect(Spend.usd(0) == "$0")
     }
+
+    @Test func theVerdictFollowsTheProofAsThePWAsDoes() {
+        for one in Vectors.shared.verdicts {
+            let said = Steps.verdict(status: one.task.status, verified: one.task.verified, error: one.task.error, record: one.task.record, facts: Steps.facts(record: one.task.record))
+            #expect(said.map { Vectors.VerdictCase.Said(word: $0.word, verdict: $0.verdict.rawValue) } == one.verdict, "\(one.task.status) \(String(describing: one.task.record?.proof))")
+        }
+    }
 }

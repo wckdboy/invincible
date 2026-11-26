@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTrailEntry } from "@invincible/core/team";
-import { commandKind, costWords, gateRows, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, summaryWords, workedFor, workSummary } from "./steps.ts";
+import { commandKind, costWords, factsOfProof, factsOfRecord, gateRows, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, summaryWords, verdictOf, workedFor, workSummary } from "./steps.ts";
 
 /* A task's trail as the node writes it (team-runtime.ts progress()), its lines in the order they happened. */
 const T0 = 1_764_000_000_000;
@@ -167,5 +167,47 @@ describe("a task's proof and its cost, in one place", () => {
     expect(costWords({ record: { ...record, spent: [line("a/m", 2, 2, 0, 0)] } }, prices)).toBe("spend unknown · 6m 12s");
     expect(costWords({ budgetUsd: 0.5 }, prices)).toBe("budget $0.50");
     expect(costWords({}, prices)).toBe("");
+  });
+});
+
+describe("the verdict, in words that follow the proof", () => {
+  const record = (proof?: { before: number[]; after: number[]; review: "pass" | "revise" | null; sameModel: boolean }, ended: "done" | "unverified" | "gave-up" | "stopped" = "done") => ({ startedAt: 0, endedAt: 1, ended, commands: 1, revisions: 0, spent: [], ...(proof ? { proof } : {}) });
+  const done = (proof?: Parameters<typeof record>[0]) => ({ status: "done" as const, verified: true, error: null, record: record(proof) });
+
+  test("proven: a gate that failed before the work passes after it, and another model's reviewer passed it", () => {
+    const task = done({ before: [1, 0], after: [0, 0], review: "pass", sameModel: false });
+    expect(verdictOf(task, factsOfRecord(task.record))).toEqual({ word: "Proven", verdict: "proven" });
+  });
+
+  test("never proven when every gate passed before the work, when there were none, or when the work's own model reviewed it", () => {
+    for (const proof of [{ before: [0], after: [0], review: "pass", sameModel: false }, { before: [], after: [], review: "pass", sameModel: false }, { before: [1], after: [0], review: "pass", sameModel: true }] as const) {
+      const task = done({ ...proof, before: [...proof.before], after: [...proof.after] });
+      expect(verdictOf(task, factsOfRecord(task.record))).toEqual({ word: "Reviewed, not proven", verdict: "reviewed" });
+    }
+    // Nothing says what its gates showed (a record from before they were kept): reviewed, and no more.
+    expect(verdictOf(done(), factsOfRecord(done().record))).toEqual({ word: "Reviewed", verdict: "reviewed" });
+  });
+
+  test("failed at a gate names the first that failed at the end; sent back, gave up, stopped say so", () => {
+    const failed = { status: "failed" as const, verified: false, error: "unverified", record: record({ before: [1, 1], after: [0, 1], review: null, sameModel: false }, "unverified") };
+    expect(verdictOf(failed, factsOfRecord(failed.record))).toEqual({ word: "Failed · gate 2", verdict: "failed" });
+    const sent = { status: "failed" as const, verified: false, error: "unverified", record: record({ before: [1], after: [0], review: "revise", sameModel: false }, "unverified") };
+    expect(verdictOf(sent, factsOfRecord(sent.record))).toEqual({ word: "Sent back", verdict: "rejected" });
+    const gave = { status: "failed" as const, verified: false, error: "gave-up", record: record({ before: [1], after: [], review: null, sameModel: false }, "gave-up") };
+    expect(verdictOf(gave, factsOfRecord(gave.record))).toEqual({ word: "Gave up", verdict: "gave-up" });
+    expect(verdictOf({ status: "stopped", verified: false, error: "stopped", record: undefined }, null)).toEqual({ word: "Stopped", verdict: "stopped" });
+    expect(verdictOf({ status: "running", verified: false, error: null, record: undefined }, null)).toBeNull();
+  });
+
+  test("the trail's proof and the record's give the same facts", () => {
+    const entries: TeamTrailEntry[] = [
+      { n: 1, at: 1, text: "Gates before the work · 1. exit 1 · bun test" },
+      { n: 2, at: 2, text: "Submitted for review · now" },
+      { n: 3, at: 3, text: "Gate 1/1 · exit 0 · bun test\n1 pass" },
+      { n: 4, at: 4, text: "Review · pass\nFine." },
+    ];
+    const fromTrail = factsOfProof(proofOf({ gates: ["bun test"], status: "done" }, entries));
+    expect(fromTrail.gates.map((g) => [g.exit, g.before])).toEqual([[0, 1]]);
+    expect(verdictOf(done(), fromTrail)).toEqual({ word: "Proven", verdict: "proven" });
   });
 });

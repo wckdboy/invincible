@@ -528,6 +528,44 @@ struct Vectors: Decodable {
     }
     /// Code, coloured by what each part is (the PWA's lib/highlight.ts).
     let highlights: [HighlightCase]
+    /// The mark, the I-beam (scripts/mark.ts): MarkTests.swift.
+    let mark: Mark
+    /// The live stream's timing (core's live.ts, the PWA's lib/live-link.ts): LiveLinkTests.swift.
+    let live: Live
+    /// The verdict in words that follow the proof (the PWA's lib/steps.ts verdictOf): StepsTests.swift.
+    let verdicts: [VerdictCase]
+
+    struct VerdictCase: Decodable {
+        struct Task: Decodable {
+            let status: String
+            let verified: Bool
+            let error: String?
+            let record: TeamTask.Record?
+        }
+        struct Said: Decodable, Equatable {
+            let word: String
+            let verdict: String
+        }
+        let task: Task
+        let verdict: Said?
+    }
+
+    struct Mark: Decodable {
+        let rects: [[Double]]
+        let polygon: String
+        let box: Double
+    }
+
+    struct Live: Decodable {
+        let beatMs: Double
+        let silentMs: Double
+        let helloWaitMs: Double
+        let retryFirstMs: Double
+        let retryMaxMs: Double
+        let steadyMs: Double
+        let gapMs: Double
+        let topics: [String]
+    }
 
     static let shared: Vectors = {
         guard let url = Bundle(for: BundleToken.self).url(forResource: "core-vectors", withExtension: "json") else {

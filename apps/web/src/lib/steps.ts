@@ -364,9 +364,59 @@ export function proofOf(task: Pick<TeamTask, "gates" | "status">, entries: reado
 }
 
 /**
+ * The facts a verdict is read from: each gate's exit at the end and before the work, the reviewer's last verdict, and
+ * whether that review was by the model that did the work. From a task's trail (factsOfProof) or from its record, which
+ * the runner gives them since 26 November 2026 (factsOfRecord), so a list can say a task is proven without its trail.
+ */
+export interface ProofFacts {
+  gates: readonly { exit: number | null; before: number | null }[];
+  review: "pass" | "revise" | null;
+  sameModel: boolean;
+}
+
+/** The facts its trail gives (proofOf). */
+export const factsOfProof = (proof: Pick<Proof, "gates" | "review" | "sameModel">): ProofFacts => ({ gates: proof.gates, review: proof.review?.verdict ?? null, sameModel: proof.sameModel });
+
+/** The facts its record keeps (null: a record from before they were kept, or none yet). */
+export function factsOfRecord(record: TeamTask["record"]): ProofFacts | null {
+  const proof = record?.proof;
+  if (!proof) return null;
+  return { gates: proof.after.map((exit, i) => ({ exit, before: proof.before[i] ?? null })), review: proof.review, sameModel: proof.sameModel };
+}
+
+export type Verdict = "proven" | "reviewed" | "failed" | "rejected" | "gave-up" | "stopped" | "unverified";
+
+/**
+ * A task's verdict, in words that follow its proof (the owner's word, 26 November 2026: never "Verified" above a warning
+ * that its gates proved nothing), once it has ended (null while it is in hand); read from the same facts as the CLI's
+ * verdict (inv proof):
+ *  - Proven: verified, a gate that failed before the work passes after it, and a reviewer that didn't do the work passed it;
+ *  - Reviewed, not proven: verified, but no gate shows the work was done (each passed before it, or there were none), or
+ *    the review was by the model that did the work; "Reviewed" alone when nothing says what its gates showed;
+ *  - Failed · gate 2: a gate failed at the end, the first that did, counted from 1;
+ *  - Sent back: every gate passed, and the reviewer sent it back until its revisions ran out;
+ *  - Gave up, Stopped, Failed, Not verified: how its run ended otherwise.
+ */
+export function verdictOf(task: Pick<TeamTask, "status" | "verified" | "record" | "error">, facts: ProofFacts | null): { word: string; verdict: Verdict } | null {
+  if (task.status !== "done" && task.status !== "failed" && task.status !== "stopped") return null;
+  const how = task.record?.ended ?? (task.error ?? "").trim().split("\n")[0]?.trim() ?? "";
+  if (task.status === "stopped" || how === "stopped") return { word: "Stopped", verdict: "stopped" };
+  if (task.status === "done" && task.verified) {
+    if (!facts) return { word: "Reviewed", verdict: "reviewed" };
+    const shows = facts.gates.some((gate) => gate.exit === 0 && gate.before !== null && gate.before !== 0);
+    return shows && facts.review === "pass" && !facts.sameModel ? { word: "Proven", verdict: "proven" } : { word: "Reviewed, not proven", verdict: "reviewed" };
+  }
+  const failing = facts ? facts.gates.findIndex((gate) => gate.exit !== null && gate.exit !== 0) : -1;
+  if (failing >= 0) return { word: `Failed · gate ${failing + 1}`, verdict: "failed" };
+  if (facts?.review === "revise") return { word: "Sent back", verdict: "rejected" };
+  if (how === "gave-up") return { word: "Gave up", verdict: "gave-up" };
+  return task.status === "failed" ? { word: "Failed", verdict: "failed" } : { word: "Not verified", verdict: "unverified" };
+}
+
+/**
  * What a task cost, in a line: its money at your prices (a lower bound with "at least" when a call went uncounted, "no
  * price" when a model that answered has none) against its budget, and how long it ran, as the runner recorded it.
- * Before it has ended, its budget alone (the runner records its spend at the end).
+ * Before it has ended, its budget alone (the runner records its spend at the end). A run of under half a second says no time.
  */
 export function costWords(task: Pick<TeamTask, "record" | "budgetUsd">, prices: Prices): string {
   const budget = task.budgetUsd !== undefined ? usdLabel(task.budgetUsd) : null;
@@ -375,5 +425,7 @@ export function costWords(task: Pick<TeamTask, "record" | "budgetUsd">, prices: 
   const cost = costOf(task.record.spent as readonly UsageLine[], prices);
   const money = !total.calls ? null : total.unknown === total.calls ? "spend unknown" : cost.unpriced.length ? "no price" : `${cost.complete ? "" : "at least "}${usdLabel(cost.usd)}`;
   const spent = money ? (budget ? `${money} of ${budget}` : money) : budget ? `budget ${budget}` : !total.calls ? "no model calls" : null;
-  return [spent, workedFor(task.record.endedAt - task.record.startedAt)].filter(Boolean).join(" · ");
+  // (A run of under half a second says no time: never "0s", which reads as broken.)
+  const ran = task.record.endedAt - task.record.startedAt;
+  return [spent, ran >= 500 ? workedFor(ran) : null].filter(Boolean).join(" · ");
 }

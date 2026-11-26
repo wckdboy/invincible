@@ -116,6 +116,17 @@ struct TeamTask: Decodable, Sendable {
         var commands: Int? = nil
         var revisions: Int? = nil
         let spent: [UsageLine]
+        /// What proves it, as the runner saw it (core's TeamTaskProof; absent from a record made before it was kept).
+        var proof: Proof? = nil
+
+        struct Proof: Decodable, Equatable, Sendable {
+            /// Each gate's exit before any work, and in the last round.
+            let before: [Int]
+            let after: [Int]
+            /// The reviewer's last verdict (pass · revise), and whether it was by the model that did the work.
+            let review: String?
+            let sameModel: Bool
+        }
     }
     let id: String
     let room: String

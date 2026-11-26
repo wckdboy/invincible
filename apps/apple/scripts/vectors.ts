@@ -39,7 +39,9 @@ import { budgetFrom } from "../../web/src/lib/give.ts";
 import { applyEvent, beginTurn, endTurn, failTurn, keptDiffers, shownAgain, turnOf } from "../../web/src/lib/turns.ts";
 import { chatStateWords } from "../../../packages/core/src/turns.ts";
 import { atAGlance, attended, byAttention, doingNow, failedGate, inboxBeyond, inProject, NEW_FOR_MS, projectBadge, projectKey, seenOnOpen, shortSpan, spentSince, type Attended } from "../../web/src/lib/work.ts";
-import { commandKind, costWords, gateRows, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, summaryWords, workedFor, workSummary } from "../../web/src/lib/steps.ts";
+import { commandKind, costWords, factsOfRecord, gateRows, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, summaryWords, verdictOf, workedFor, workSummary } from "../../web/src/lib/steps.ts";
+import { MARK_BOX, MARK_POLYGON, MARK_RECTS } from "../../../scripts/mark.ts";
+import { GAP_MS, HELLO_WAIT_MS, RETRY_FIRST_MS, RETRY_MAX_MS, SILENT_MS, STEADY_MS } from "../../web/src/lib/live-link.ts";
 
 // The chats list groups at midnight: UTC here, and in the Swift tests, whatever this machine's own zone is.
 process.env.TZ = "UTC";
@@ -1247,6 +1249,33 @@ const steps = {
 };
 
 // ---- the file ----------------------------------------------------------------------------------------------------------
+// ---- the verdict, in words that follow the proof (the PWA's lib/steps.ts verdictOf), from a task's record ------------
+const proofRecord = (ended: "done" | "unverified" | "gave-up" | "stopped", proof?: { before: number[]; after: number[]; review: "pass" | "revise" | null; sameModel: boolean }) => ({ startedAt: 0, endedAt: 1000, ended, commands: 2, revisions: 0, spent: [], ...(proof ? { proof } : {}) });
+const verdictCases = [
+  { status: "done", verified: true, error: null, record: proofRecord("done", { before: [1, 0], after: [0, 0], review: "pass", sameModel: false }) },
+  { status: "done", verified: true, error: null, record: proofRecord("done", { before: [0], after: [0], review: "pass", sameModel: false }) },
+  { status: "done", verified: true, error: null, record: proofRecord("done", { before: [], after: [], review: "pass", sameModel: false }) },
+  { status: "done", verified: true, error: null, record: proofRecord("done", { before: [1], after: [0], review: "pass", sameModel: true }) },
+  { status: "done", verified: true, error: null, record: proofRecord("done") },
+  { status: "done", verified: true, error: null },
+  { status: "failed", verified: false, error: "unverified", record: proofRecord("unverified", { before: [1, 1], after: [0, 1], review: null, sameModel: false }) },
+  { status: "failed", verified: false, error: "unverified", record: proofRecord("unverified", { before: [1], after: [0], review: "revise", sameModel: false }) },
+  { status: "failed", verified: false, error: "gave-up", record: proofRecord("gave-up", { before: [1], after: [], review: null, sameModel: false }) },
+  { status: "failed", verified: false, error: "Model unavailable" },
+  { status: "done", verified: false, error: null, record: proofRecord("unverified") },
+  { status: "stopped", verified: false, error: "stopped" },
+  { status: "failed", verified: false, error: "stopped\nBy you.", record: proofRecord("stopped") },
+  { status: "running", verified: false, error: null },
+  { status: "queued", verified: false, error: null },
+] as const;
+const verdicts = verdictCases.map((task) => ({ task, verdict: verdictOf(task as never, factsOfRecord((task as { record?: never }).record)) }));
+
+// ---- the mark: the I-beam (scripts/mark.ts), which the app draws as a shape of its own (AppMark) --------------------
+const mark = { rects: MARK_RECTS, polygon: MARK_POLYGON, box: MARK_BOX };
+
+// ---- the live stream's timing (core's live.ts, the web app's lib/live-link.ts), which the app's LiveLink keeps -------
+const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELLO_WAIT_MS, retryFirstMs: RETRY_FIRST_MS, retryMaxMs: RETRY_MAX_MS, steadyMs: STEADY_MS, gapMs: GAP_MS, topics: core.LIVE_TOPICS };
+
 const vectors = {
   about: "Made by apps/apple/scripts/vectors.ts from packages/core (and the PWA's roster). Every key here is a fake made for these tests.",
   auth: { domain: "invincible-req/v1", headers: core.AUTH, maxSkewMs: core.MAX_REQUEST_SKEW_MS },
@@ -1277,6 +1306,9 @@ const vectors = {
   notifyQuiet,
   work,
   steps,
+  mark,
+  live,
+  verdicts,
 };
 const text = `${JSON.stringify(vectors, null, 2)}\n`;
 if (Bun.argv.includes("--check")) {

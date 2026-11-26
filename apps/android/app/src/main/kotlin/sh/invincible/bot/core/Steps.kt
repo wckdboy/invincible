@@ -403,7 +403,9 @@ object Steps {
             else -> "${if (cost.complete) "" else "at least "}${Usage.usd(cost.usd)}"
         }
         val spent = if (money != null) (if (budget != null) "$money of $budget" else money) else if (budget != null) "budget $budget" else if (total.calls == 0.0) "no model calls" else null
-        return listOfNotNull(spent, workedFor(record.endedAt - record.startedAt).ifEmpty { null }).joinToString(" · ")
+        // (A run of under half a second says no time: never "0s".)
+        val ran = record.endedAt - record.startedAt
+        return listOfNotNull(spent, if (ran >= 500) workedFor(ran).ifEmpty { null } else null).joinToString(" · ")
     }
 
     // ---- a trail read page by page (the PWA's lib/trail.ts) ------------------------------------------------------------

@@ -413,6 +413,52 @@ enum Steps {
         return Proof(gates: rows, passed: passed, review: review, reviewer: reviewer, sameModel: sameModelReview(entries), provesNothing: !rows.isEmpty && rows.allSatisfy { $0.before == 0 })
     }
 
+    /// The facts a verdict is read from (the PWA's ProofFacts): each gate's exit at the end and before the work, the
+    /// reviewer's last verdict, and whether that review was by the model that did the work.
+    struct Facts: Equatable, Sendable {
+        struct Gate: Equatable, Sendable {
+            let exit: Int?
+            let before: Int?
+        }
+        let gates: [Gate]
+        let review: String?
+        let sameModel: Bool
+    }
+
+    /// The facts its trail gives (the PWA's factsOfProof).
+    static func facts(_ proof: Proof) -> Facts {
+        Facts(gates: proof.gates.map { Facts.Gate(exit: $0.exit, before: $0.before) }, review: proof.review?.verdict, sameModel: proof.sameModel)
+    }
+
+    /// The facts its record keeps (the PWA's factsOfRecord); nil from a record made before they were kept.
+    static func facts(record: TeamTask.Record?) -> Facts? {
+        guard let proof = record?.proof else { return nil }
+        return Facts(gates: proof.after.enumerated().map { Facts.Gate(exit: $0.element, before: $0.offset < proof.before.count ? proof.before[$0.offset] : nil) }, review: proof.review, sameModel: proof.sameModel)
+    }
+
+    enum Verdict: String, Sendable {
+        case proven, reviewed, failed, rejected, gaveUp = "gave-up", stopped, unverified
+    }
+
+    /// A task's verdict in words that follow its proof, once it has ended (the PWA's verdictOf; the owner's word, 26
+    /// November 2026: never "Verified" above a warning that its gates proved nothing): Proven, Reviewed, not proven
+    /// (Reviewed where nothing says what its gates showed), Failed · gate 2, Sent back, Gave up, Stopped, Failed, Not
+    /// verified. Nil while it is in hand.
+    static func verdict(status: String, verified: Bool, error: String?, record: TeamTask.Record?, facts: Facts?) -> (word: String, verdict: Verdict)? {
+        guard ["done", "failed", "stopped"].contains(status) else { return nil }
+        let how = record?.ended ?? (error ?? "").trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n")[0].trimmingCharacters(in: .whitespaces)
+        if status == "stopped" || how == "stopped" { return ("Stopped", .stopped) }
+        if status == "done", verified {
+            guard let facts else { return ("Reviewed", .reviewed) }
+            let shows = facts.gates.contains { $0.exit == 0 && $0.before != nil && $0.before != 0 }
+            return shows && facts.review == "pass" && !facts.sameModel ? ("Proven", .proven) : ("Reviewed, not proven", .reviewed)
+        }
+        if let failing = facts?.gates.firstIndex(where: { $0.exit != nil && $0.exit != 0 }) { return ("Failed · gate \(failing + 1)", .failed) }
+        if facts?.review == "revise" { return ("Sent back", .rejected) }
+        if how == "gave-up" { return ("Gave up", .gaveUp) }
+        return status == "failed" ? ("Failed", .failed) : ("Not verified", .unverified)
+    }
+
     /// What a task cost, in a line: its money at your prices (a lower bound with "at least" when a call went uncounted, "no
     /// price" when a model that answered has none) against its budget, and how long it ran, as the runner recorded it.
     /// Before it has ended, its budget alone (the runner records its spend at the end).
@@ -423,6 +469,8 @@ enum Steps {
         let cost = Spend.cost(record.spent, prices)
         let money: String? = total.calls == 0 ? nil : total.unknown == total.calls ? "spend unknown" : !cost.unpriced.isEmpty ? "no price" : "\(cost.complete ? "" : "at least ")\(Spend.usd(cost.usd))"
         let spent: String? = money.map { money in budget.map { "\(money) of \($0)" } ?? money } ?? (budget.map { "budget \($0)" } ?? (total.calls == 0 ? "no model calls" : nil))
-        return [spent, workedFor(record.endedAt - record.startedAt)].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: " · ")
+        // (A run of under half a second says no time: never "0s".)
+        let ran = record.endedAt - record.startedAt
+        return [spent, ran >= 500 ? workedFor(ran) : nil].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }

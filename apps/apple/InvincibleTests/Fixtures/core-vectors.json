@@ -30999,5 +30999,362 @@
         "words": "no model calls · 2h 06m"
       }
     ]
-  }
+  },
+  "mark": {
+    "rects": [
+      [
+        22,
+        14,
+        78,
+        30
+      ],
+      [
+        41,
+        30,
+        59,
+        70
+      ],
+      [
+        22,
+        70,
+        78,
+        86
+      ]
+    ],
+    "polygon": "22,14 78,14 78,30 59,30 59,70 78,70 78,86 22,86 22,70 41,70 41,30 22,30",
+    "box": 0.7
+  },
+  "live": {
+    "beatMs": 1500,
+    "silentMs": 4500,
+    "helloWaitMs": 3000,
+    "retryFirstMs": 1000,
+    "retryMaxMs": 30000,
+    "steadyMs": 30000,
+    "gapMs": 500,
+    "topics": [
+      "fleet",
+      "pairings",
+      "secretRequests",
+      "loopDrafts",
+      "connectorRequests",
+      "aboutYou",
+      "actions",
+      "screenSessions",
+      "questions",
+      "notices",
+      "runs",
+      "team",
+      "turns"
+    ]
+  },
+  "verdicts": [
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1,
+              0
+            ],
+            "after": [
+              0,
+              0
+            ],
+            "review": "pass",
+            "sameModel": false
+          }
+        }
+      },
+      "verdict": {
+        "word": "Proven",
+        "verdict": "proven"
+      }
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              0
+            ],
+            "after": [
+              0
+            ],
+            "review": "pass",
+            "sameModel": false
+          }
+        }
+      },
+      "verdict": {
+        "word": "Reviewed, not proven",
+        "verdict": "reviewed"
+      }
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [],
+            "after": [],
+            "review": "pass",
+            "sameModel": false
+          }
+        }
+      },
+      "verdict": {
+        "word": "Reviewed, not proven",
+        "verdict": "reviewed"
+      }
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1
+            ],
+            "after": [
+              0
+            ],
+            "review": "pass",
+            "sameModel": true
+          }
+        }
+      },
+      "verdict": {
+        "word": "Reviewed, not proven",
+        "verdict": "reviewed"
+      }
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "done",
+          "commands": 2,
+          "revisions": 0,
+          "spent": []
+        }
+      },
+      "verdict": {
+        "word": "Reviewed",
+        "verdict": "reviewed"
+      }
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": true,
+        "error": null
+      },
+      "verdict": {
+        "word": "Reviewed",
+        "verdict": "reviewed"
+      }
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "unverified",
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "unverified",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1,
+              1
+            ],
+            "after": [
+              0,
+              1
+            ],
+            "review": null,
+            "sameModel": false
+          }
+        }
+      },
+      "verdict": {
+        "word": "Failed · gate 2",
+        "verdict": "failed"
+      }
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "unverified",
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "unverified",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1
+            ],
+            "after": [
+              0
+            ],
+            "review": "revise",
+            "sameModel": false
+          }
+        }
+      },
+      "verdict": {
+        "word": "Sent back",
+        "verdict": "rejected"
+      }
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "gave-up",
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "gave-up",
+          "commands": 2,
+          "revisions": 0,
+          "spent": [],
+          "proof": {
+            "before": [
+              1
+            ],
+            "after": [],
+            "review": null,
+            "sameModel": false
+          }
+        }
+      },
+      "verdict": {
+        "word": "Gave up",
+        "verdict": "gave-up"
+      }
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "Model unavailable"
+      },
+      "verdict": {
+        "word": "Failed",
+        "verdict": "failed"
+      }
+    },
+    {
+      "task": {
+        "status": "done",
+        "verified": false,
+        "error": null,
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "unverified",
+          "commands": 2,
+          "revisions": 0,
+          "spent": []
+        }
+      },
+      "verdict": {
+        "word": "Not verified",
+        "verdict": "unverified"
+      }
+    },
+    {
+      "task": {
+        "status": "stopped",
+        "verified": false,
+        "error": "stopped"
+      },
+      "verdict": {
+        "word": "Stopped",
+        "verdict": "stopped"
+      }
+    },
+    {
+      "task": {
+        "status": "failed",
+        "verified": false,
+        "error": "stopped\nBy you.",
+        "record": {
+          "startedAt": 0,
+          "endedAt": 1000,
+          "ended": "stopped",
+          "commands": 2,
+          "revisions": 0,
+          "spent": []
+        }
+      },
+      "verdict": {
+        "word": "Stopped",
+        "verdict": "stopped"
+      }
+    },
+    {
+      "task": {
+        "status": "running",
+        "verified": false,
+        "error": null
+      },
+      "verdict": null
+    },
+    {
+      "task": {
+        "status": "queued",
+        "verified": false,
+        "error": null
+      },
+      "verdict": null
+    }
+  ]
 }
