@@ -23,6 +23,8 @@ function handoffs(db: Database, stopWaitMs: number) {
   const fabric = {
     unusable: () => null,
     peerEndpoint: () => ({ did: "did:key:z6Mkbeta", address: "qamp://did:key:z6Mkbeta@127.0.0.1:1" }),
+    // (The link call as its node signs it: what it carries is the stand-in call's to ignore.)
+    seal: async (path: string, body: unknown) => ({ path, body: JSON.stringify(body), auth: {} }),
     sidecar: { client: { call: () => silentCall() }, did: "did:key:z6Mkalpha" },
   } as unknown as Fabric;
   const store = { activeDevice: () => beta, device: () => beta } as unknown as LedgerStore;

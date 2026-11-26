@@ -8,12 +8,16 @@ import {
   HandArgs,
   HandChunk,
   HandInputChunk,
+  LINK_PATHS,
+  LinkCall,
   newNodeIdentity,
   ProofAttestation,
   type ProofStatement,
   proofRefusal,
   qdtChainText,
+  qampEndpointOf,
   qdtChainTokens,
+  readHandoffTerms,
   readQdt,
   runGrantPolicy,
   signingPublicKey,
@@ -21,14 +25,16 @@ import {
   signQdt,
 } from "../../packages/core/src/index.ts";
 import { handleFabricTool } from "../../packages/node/src/fabric/handoff.ts";
-import { FrameReader } from "../../packages/node/src/fabric/socket.ts";
+import { Fabric } from "../../packages/node/src/fabric/service.ts";
+import { FrameReader, type Invocation } from "../../packages/node/src/fabric/socket.ts";
+import { transportKeyOf } from "../../packages/node/src/home.ts";
 import { rng } from "../lib.ts";
 
 /*
  * Fuzzing the fabric's decoders: whatever bytes or values arrive, each says why it refuses, in its own kind of error,
  * and nothing that was changed passes for what it wasn't. Seeded (the same seed, the same inputs) and time-bounded:
  *
- *   bun bench/fabric/fuzz.ts [--seconds 60] [--seed 20261126] [--only cbor,frames,qdt,messages,gateway]
+ *   bun bench/fabric/fuzz.ts [--seconds 60] [--seed 20261126] [--only cbor,frames,qdt,messages,gateway,link]
  *
  *  - cbor: CBOR decoding (Q-AMP's budget): only CborError; what decodes, re-encoded, decodes to itself.
  *  - frames: the sidecar socket's framing, fed in pieces of any size: only its SidecarError; never a message past its
@@ -38,12 +44,14 @@ import { rng } from "../lib.ts";
  *  - messages: the hand-off's messages and the proof, as JSON-shaped values: their schemas never throw; a changed proof
  *    never checks.
  *  - gateway: a VM's tool requests: any path and body, never a 5xx and never a throw.
+ *  - link: the door's signed link calls (LinkCall), a profile's endpoint and its proof, a grant's terms: any value never
+ *    throws, and a signed call changed in any way, or sent again, is refused; only the one sent as signed is taken.
  */
 
 const { values } = parseArgs({ options: { seconds: { type: "string" }, seed: { type: "string" }, only: { type: "string" } } });
 const SECONDS = Number(values.seconds ?? 60);
 const SEED = Number(values.seed ?? 20_261_126);
-const only = new Set((values.only ?? "cbor,frames,qdt,messages,gateway").split(","));
+const only = new Set((values.only ?? "cbor,frames,qdt,messages,gateway,link").split(","));
 
 type Random = () => number;
 const below = (r: Random, n: number) => Math.floor(r() * n);
@@ -232,6 +240,57 @@ const campaigns: Campaign[] = [];
       const body = below(r, 2) ? JSON.stringify(randomValue(r)) : new TextDecoder().decode(randomBytes(r, 80));
       const res = await handleFabricTool(new Request(`http://10.89.0.1:7402${path}`, { method: below(r, 6) ? "POST" : "PUT", body, headers: below(r, 4) ? { authorization: "Bearer gw_ok" } : {} }), ctx);
       if (res.status >= 500) throw new Error(`a ${res.status} for ${path}`);
+    },
+  });
+}
+
+// ---- link ----
+{
+  const node = newNodeIdentity();
+  const key = transportKeyOf(new Uint8Array(32).fill(9), node.id);
+  const peer = { id: node.id, name: "peer", kind: "node", role: "full", box: null, scopes: [], enrolledBy: node.id, enrolledHlc: "0", revokedHlc: null, profile: { endpoint: "http://127.0.0.1:1", caps: { qamp: { did: key.did, address: `qamp://${key.did}@127.0.0.1:7410`, pop: key.pop } } } };
+  const store = { onApplied: () => () => {}, devices: () => [peer], activeDevice: (id: string) => (id === node.id ? peer : null), profilesOf: () => [] };
+  const answered = { events: [], more: false };
+  // The door is another node's; the calls are the peer's own, sealed as its node seals them.
+  const fabric = new Fabric({ store: store as never, identity: newNodeIdentity(), sidecar: { client: null } as never, log: () => {}, presence: async () => ({}) as never });
+  const sealer = new Fabric({ store: store as never, identity: node, sidecar: { client: null } as never, log: () => {}, presence: async () => ({}) as never });
+  // Sync's answer is stood in for: what is checked here is the door, before anything is read.
+  (fabric as unknown as { deps: { store: unknown } }).deps.store = { ...store, eventsSince: () => answered };
+  const knock = (args: unknown): Promise<"taken" | "refused" | "other"> =>
+    new Promise((resolve) => {
+      const timer = setTimeout(() => resolve("other"), 1_000);
+      const said = (verdict: "taken" | "refused" | "other") => {
+        clearTimeout(timer);
+        resolve(verdict);
+      };
+      const inv = { task: 1, tool: "invincible/link/sync", args, caller: key.did, authorization: { kind: "public" }, chain: [], meta: null, deadlineMs: null, input: false, signal: new AbortController().signal, inputs: { [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) }, emit() {}, progress() {}, complete: () => said("taken"), fail: (code: number) => said(code === 3 ? "refused" : "other") } as unknown as Invocation;
+      fabric.door(inv);
+    });
+  const fields = ["path", "body", "auth.device", "auth.ts", "auth.nonce", "auth.sig"] as const;
+  campaigns.push({
+    name: "link",
+    async one(r) {
+      const value = randomValue(r);
+      LinkCall.safeParse(value);
+      readHandoffTerms(value);
+      qampEndpointOf({ qamp: value }, node.id);
+      qampEndpointOf({ qamp: { ...key, address: `qamp://${key.did}@127.0.0.1:7410`, pop: typeof value === "string" ? value : key.pop.slice(0, below(r, 86)) } }, node.id);
+      const sealed = await sealer.seal(LINK_PATHS.sync, { have: {} });
+      // Changed in one field, by a character or a value of its own: refused, never taken.
+      const field = fields[below(r, fields.length)]!;
+      const changed = structuredClone(sealed) as unknown as Record<string, Record<string, unknown> | unknown>;
+      const [top, sub] = field.split(".") as [string, string | undefined];
+      const holder = (sub ? changed[top] : changed) as Record<string, unknown>;
+      const name = sub ?? top;
+      const was = String(holder[name]);
+      holder[name] = below(r, 3) === 0 ? randomValue(r) : `${was.slice(0, below(r, was.length))}${String.fromCharCode(33 + below(r, 90))}${was.slice(below(r, was.length) + 1)}`;
+      const sameAsSigned = JSON.stringify(changed) === JSON.stringify(sealed);
+      const verdict = await knock(changed);
+      if (!sameAsSigned && verdict === "taken") throw new Error(`a changed link call was taken (${field}: ${JSON.stringify(holder[name]).slice(0, 80)})`);
+      if (sameAsSigned) return;
+      // The call as signed, once: taken; again: refused.
+      if ((await knock(sealed)) !== "taken") throw new Error("the call as it was signed was refused");
+      if ((await knock(sealed)) !== "refused") throw new Error("a signed call sent twice was taken the second time");
     },
   });
 }

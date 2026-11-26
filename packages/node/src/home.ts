@@ -1,7 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { b64u, exportIdentity, fromB64u, importIdentity, newNodeIdentity, newPushKeyPair, type NodeIdentity, type PushKeyPair, pushPublicKey, randomId } from "@invincible/core";
+import { b64u, didKeyOfEd25519, exportIdentity, fromB64u, importIdentity, newNodeIdentity, newPushKeyPair, type NodeIdentity, type PushKeyPair, pushPublicKey, randomId, signingPublicKey, signTransportClaim } from "@invincible/core";
 import { z } from "zod";
 import { loadEnv } from "./env.ts";
 
@@ -13,6 +14,7 @@ import { loadEnv } from "./env.ts";
  *   admin.token   local CLI credential (0600)
  *   keys.json     device private keys, only when the OS keychain is unavailable (0600)
  *   push-key.json this node's notification key (VAPID), only when the OS keychain is unavailable (0600)
+ *   transport-key.json  its Q-AMP transport key (the fabric), only when the OS keychain is unavailable (0600)
  *   push.db       who gets notifications and what was sent (node-local, 0600; see notify-store.ts)
  */
 
@@ -35,6 +37,28 @@ const Config = z.strictObject({
 export type NodeConfig = z.infer<typeof Config>;
 
 const KEYCHAIN_SERVICE = "dev.invincible.node";
+/** How Q-AMP reads an Ed25519 key: `qamp-sk1.` and base64url of its 32-byte seed. */
+const QAMP_KEY_PREFIX = "qamp-sk1.";
+
+/** The OS keychain, as Bun gives it (tests: a stand-in, so no test touches the real one). */
+export interface Secrets {
+  get(options: { service: string; name: string }): Promise<string | null>;
+  set(options: { service: string; name: string; value: string }): Promise<void>;
+  delete(options: { service: string; name: string }): Promise<boolean>;
+}
+
+/**
+ * The node's transport key (fabric/sidecar.ts): Ed25519, its sidecar's alone, never the device key. It carries calls and
+ * nothing more: each link call is signed by the device key too. Kept where the device keys are, for this node's id: a
+ * home enrolled again as another node gets a key of its own.
+ */
+export interface TransportKey {
+  did: string;
+  /** As Q-AMP reads a key (`qamp-sk1.…`), for the sidecar's stdin and nothing else. */
+  text: string;
+  /** Its signature that it is this node's (core's signTransportClaim), for its profile. */
+  pop: string;
+}
 
 export class Home {
   readonly configPath: string;
@@ -43,8 +67,14 @@ export class Home {
   readonly adminTokenPath: string;
   readonly keyFilePath: string;
   readonly pushKeyPath: string;
+  /** The transport key, only when the OS keychain is unavailable (0600); before the keystore, it was <home>/qamp/node.qamp-key. */
+  readonly transportKeyPath: string;
 
-  constructor(readonly dir: string) {
+  constructor(
+    readonly dir: string,
+    private readonly secrets: Secrets = Bun.secrets,
+  ) {
+    this.transportKeyPath = join(dir, "transport-key.json");
     this.pushKeyPath = join(dir, "push-key.json");
     this.configPath = join(dir, "config.json");
     this.ledgerPath = join(dir, "ledger.db");
@@ -136,6 +166,40 @@ export class Home {
     return pair;
   }
 
+  // ---- this node's transport key (Q-AMP; fabric/sidecar.ts) -----------------
+
+  /**
+   * The node's transport key for `node` (its device id): made the first time its sidecar starts, kept where its device
+   * keys are (the OS keychain, or a 0600 file in its home), and made anew when the one kept is another node's (a home
+   * enrolled again). A key from before the keystore (<home>/qamp/node.qamp-key) is replaced and removed: nothing ran on it.
+   */
+  async transportKey(keystore: "os" | "file", node: string): Promise<TransportKey> {
+    const kept = await this.keptTransport(keystore);
+    if (kept && kept.node === node) return transportKeyOf(fromB64u(kept.seed), node);
+    return this.rotateTransportKey(keystore, node);
+  }
+
+  /** A new transport key for `node`, in place of the one kept (its sidecar is started again on it, and its profile names it). */
+  async rotateTransportKey(keystore: "os" | "file", node: string): Promise<TransportKey> {
+    this.ensureDir();
+    const seed = randomBytes(32);
+    const serialized = JSON.stringify({ v: 1, node, seed: b64u(seed) });
+    if (keystore === "os") await this.secrets.set({ service: KEYCHAIN_SERVICE, name: `${this.dir}#qamp`, value: serialized });
+    else writeSecretFile(this.transportKeyPath, serialized);
+    rmSync(join(this.dir, "qamp", "node.qamp-key"), { force: true });
+    const key = transportKeyOf(seed, node);
+    seed.fill(0);
+    return key;
+  }
+
+  private async keptTransport(keystore: "os" | "file"): Promise<{ node: string; seed: string } | null> {
+    const text = keystore === "os" ? await this.secrets.get({ service: KEYCHAIN_SERVICE, name: `${this.dir}#qamp` }) : existsSync(this.transportKeyPath) ? readFileSync(this.transportKeyPath, "utf8") : null;
+    if (!text) return null;
+    const stored = JSON.parse(text) as { v?: number; node?: unknown; seed?: unknown };
+    if (stored.v !== 1 || typeof stored.node !== "string" || typeof stored.seed !== "string") throw new Error("this node's transport key isn't in a form this version reads");
+    return { node: stored.node, seed: stored.seed };
+  }
+
   // ---- arm tokens (MCP) ----------------------------------------------------
 
   armTokenPath(label: string): string {
@@ -163,6 +227,12 @@ export class Home {
     writeSecretFile(this.adminTokenPath, token);
     return token;
   }
+}
+
+/** A transport key from its seed: its DID, its text for the sidecar, and its proof that it is `node`'s. */
+export function transportKeyOf(seed: Uint8Array, node: string): TransportKey {
+  if (seed.length !== 32) throw new Error("this node's transport key isn't an Ed25519 key's seed");
+  return { did: didKeyOfEd25519(signingPublicKey(seed)), text: `${QAMP_KEY_PREFIX}${b64u(seed)}\n`, pop: signTransportClaim(seed, node) };
 }
 
 function writeSecretFile(path: string, content: string): void {

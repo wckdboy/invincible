@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { b64u, fromB64u } from "./bytes.ts";
 import { canonical } from "./canonical.ts";
-import { sha256B64u } from "./crypto.ts";
+import { sha256B64u, signEd25519, verifyEd25519 } from "./crypto.ts";
 import { domain, isNodeId, type NodeIdentity, verifyDeviceSignature } from "./identity.ts";
-import { QAMP_TOOLS, QampDid } from "./qamp.ts";
+import { ed25519OfDidKey, QAMP_TOOLS, QampDid } from "./qamp.ts";
 import { MAX_PROPOSED_GATES, MAX_RUN_GATES } from "./runs.ts";
 import { AgentId, TeamTaskProof } from "./team.ts";
 import { TEAM_LIMITS } from "./team-limits.ts";
@@ -20,14 +20,21 @@ export const PEER_PATHS = ["qamp", "https"] as const;
 export type PeerPath = (typeof PEER_PATHS)[number];
 
 /**
- * A node's Q-AMP endpoint, as its own signed profile says it (node.profile's `caps.qamp`): its sidecar's transport key
- * and where that key listens. Its device key vouches for the transport key: a call that the key's handshake proves is
- * that node's.
+ * A node's Q-AMP endpoint, as its own signed profile says it (node.profile's `caps.qamp`): its sidecar's transport key,
+ * where that key listens, and the key's own signature over the node's id (`pop`: it holds the key it names, so no node
+ * can claim another's). The transport key carries calls and nothing more: each link call is signed by the node's device
+ * key as its HTTPS request would be (LinkCall).
  */
 export const QampEndpoint = z
-  .strictObject({ did: QampDid, address: z.string().min(1).max(300) })
+  .strictObject({ did: QampDid, address: z.string().min(1).max(300), pop: z.string().regex(/^[A-Za-z0-9_-]{86}$/) })
   .refine((e) => qampAddressDid(e.address) === e.did, "the address names its own key: qamp://<did>@<host>:<port>");
 export type QampEndpoint = z.infer<typeof QampEndpoint>;
+
+/** What a node's transport key signs to say it is that node's (`caps.qamp.pop`): the node's id, under a label of its own. */
+export const transportClaimInput = (node: string): Uint8Array<ArrayBuffer> => domain("invincible-qamp-key/v1", node);
+
+/** The proof that the transport key with this seed is `node`'s, for its profile. */
+export const signTransportClaim = (seed: Uint8Array, node: string): string => b64u(signEd25519(seed, transportClaimInput(node)));
 
 /** The key a `qamp://<did>@<host>:<port>` address names, or null when it isn't one. */
 export function qampAddressDid(address: string): string | null {
@@ -36,11 +43,22 @@ export function qampAddressDid(address: string): string | null {
   return m[1]!;
 }
 
-/** A peer's endpoint from its profile's capabilities, when it has one that reads as one. */
-export function qampEndpointOf(caps: unknown): QampEndpoint | null {
+/**
+ * A node's endpoint from its profile's capabilities, when it has one that reads as one and its transport key signed
+ * for that node; null otherwise (a claim on a key the node doesn't hold is no endpoint, and takes nobody's calls).
+ */
+export function qampEndpointOf(caps: unknown, node: string): QampEndpoint | null {
   const raw = caps && typeof caps === "object" ? (caps as { qamp?: unknown }).qamp : undefined;
   const parsed = QampEndpoint.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) return null;
+  const key = ed25519OfDidKey(parsed.data.did);
+  let pop: Uint8Array;
+  try {
+    pop = fromB64u(parsed.data.pop);
+  } catch {
+    return null;
+  }
+  return key && pop.length === 64 && verifyEd25519(pop, transportClaimInput(node), key) ? parsed.data : null;
 }
 
 /**
@@ -70,11 +88,31 @@ export const RUN_GRANT_TTL = 300;
 /** A grant to a run's key holds it to its own task: every call's `task` must be the hand-off's (Q-AMP SPEC 9.7). */
 export const runGrantPolicy = (handoff: string): [string, string, string][] => [["==", ".task", handoff]];
 
-/** A request forwarded to the node that holds the sandbox (`forward` in the server): one route, as a node signed it over HTTPS. */
-export const LinkForwardInput = z.strictObject({
-  path: z.string().regex(/^\/api\/[a-z0-9/-]{1,200}$/),
-  body: z.record(z.string(), z.unknown()),
+/**
+ * A link call, as one node sends it to another over Q-AMP (sync, push, a forwarded route, a hand-off): its path, its
+ * body as the JSON text that was signed, and the signature of the sending node's device key over them, made and checked
+ * exactly as its HTTPS request's would be (request-auth.ts: the time, a fresh nonce, the body's digest), with the method
+ * QAMP, so a request signed for either path never passes on the other. The transport key's handshake says which
+ * connection; this says which node, so a transport key alone carries nothing.
+ */
+export const LINK_METHOD = "QAMP";
+/** The path each link tool's call is signed for (a forwarded route's is that route's own, `/api/…`). */
+export const LINK_PATHS = { sync: "/link/sync", push: "/link/push", hand: "/fabric/hand" } as const;
+/** A forwarded route's path, as `forward` in the server sends it. */
+export const LinkForwardPath = z.string().regex(/^\/api\/[a-z0-9/-]{1,200}$/);
+/** The most a link call's body may be: what one Q-AMP frame holds, with room for the rest. */
+export const LINK_BODY_MAX = 15 * 1024 * 1024;
+export const LinkCall = z.strictObject({
+  path: z.string().regex(/^\/[a-z0-9/-]{1,200}$/),
+  body: z.string().max(LINK_BODY_MAX),
+  auth: z.strictObject({
+    device: z.string().regex(/^n_[A-Za-z0-9_-]{43,87}$/),
+    ts: z.string().regex(/^\d{1,16}$/),
+    nonce: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
+    sig: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/),
+  }),
 });
+export type LinkCall = z.infer<typeof LinkCall>;
 
 /** A hand-off's id, made by the node that hands the task on. */
 export const HandId = z.string().regex(/^h_[A-Za-z0-9_-]{22}$/);

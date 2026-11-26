@@ -13,13 +13,20 @@ answered and its fixes reviewed again.
 
 - **What it is.** Q-AMP's own binary, `qamp sidecar`, beside the daemon. The daemon holds the vault, so no QUIC stack is
   loaded into it; the sidecar holds no secret but the node's **transport key**.
-- **The transport key.** Ed25519, made once by the node (`<home>/qamp/node.qamp-key`, 0600, Q-AMP's `qamp-sk1.` form).
-  It is never the device key, which signs the ledger and stays in the daemon.
+- **The transport key.** Ed25519, never the device key, which signs the ledger and stays in the daemon. It carries
+  calls and nothing more: every link call and hand-off is signed by the device key too (below), so the transport key
+  alone, read from a backup or a file, carries nothing.
+  - **Kept where the device keys are:** the OS keychain (`dev.invincible.node`, `<home>#qamp`), or a 0600
+    `<home>/transport-key.json` where there is none. It is made for the node's id, so a home enrolled again as another
+    node gets a key of its own.
+  - **It reaches the sidecar on its stdin** (`--key /dev/stdin`, read once to its end), never as a file.
+  - **`invincible fabric rotate`** (the `rotateTransportKey` route) makes a new one: the profile stops naming the old
+    one at once, the sidecar starts again on the new one, and the peers refuse the old one from then on.
 - **Where it listens.** UDP 7410 (`INVINCIBLE_QAMP_PORT`) on the node's advertised address alone. An address that is
   every interface's makes it dial out only.
 - **Its socket.** `<home>/run/qamp.sock` (`INVINCIBLE_QAMP_SOCKET` when that path is too long). It is 0600 in a 0700
   directory, same-user only (Q-AMP's checks), with its state file (grants, revocations) beside it.
-- **How it is started.** `qamp sidecar --key … --socket … --name <node> --max-ttl 86400 --allow-cmd /tool/invincible
+- **How it is started.** `qamp sidecar --key /dev/stdin --socket … --name <node> --max-ttl 86400 --allow-cmd /tool/invincible
   --listen <address>:7410`. The binary is `<home>/bin/qamp` (`INVINCIBLE_QAMP_BIN`).
   - It is asked first whether it has a sidecar (0.1.0 has none), and again only when the file changes.
   - The node watches it, and starts it again when it stops: 1 s, then longer each time, to a minute, and at once after
@@ -30,8 +37,9 @@ answered and its fixes reviewed again.
     and its profile names no endpoint from then on. The grants' bridges run the same binary either way.
   - `INVINCIBLE_QAMP=off`: no sidecar at all, whatever the setting says.
 - **Its endpoint in the node's profile.** Once the sidecar has said where it listens, the node's signed profile
-  (`node.profile`, `caps.qamp`) names its transport key and address. It is kept while the sidecar is down, so the
-  profile doesn't flap.
+  (`node.profile`, `caps.qamp`) names its transport key, its address, and the key's own signature over the node's id
+  (`pop`: Ed25519 over `invincible-qamp-key/v1\n<node id>`). A claim without that signature is no endpoint, so no node
+  can claim another's key. It is kept while the sidecar is down, so the profile doesn't flap.
 - **The Doctor** says it in one line (`node.qamp`):
   - up, with its key, address and version;
   - off (switched off, not installed, or told so), which is no fault;
@@ -50,9 +58,15 @@ answered and its fixes reviewed again.
 
 - **Still over HTTP, not moved yet:** a kept file's bytes (`fileFrom`, streamed), local model calls between nodes
   (`localModelCall`, streamed tokens), pairing, and every client's API.
-- **The door.** The sidecar proves the caller's key in the handshake. The node takes it for the active node whose signed
-  profile names it, read afresh on every call; a key nobody names, a revoked node's, or a key two profiles name is
-  refused. A forwarded route runs through the same door as over HTTPS (the `fabric` listener), for that node's principal.
+- **The door.** The sidecar proves the caller's transport key in the handshake. The node takes it for the active node
+  whose signed profile names it with that key's proof, read afresh on every call. A key nobody names, a key two
+  profiles name, or a key a revoked node ever held is refused, whoever names it after.
+- **Each call is its node's own word.** Every sync, push, forwarded route and hand-off is a `LinkCall`: its path, its
+  body as the JSON text that was signed, and the sending node's device signature over them, made and checked exactly as
+  its HTTPS request's (the same time window, nonce cache and body digest), with the method `QAMP`, so a signature made
+  for either path never passes on the other. It must be the transport key's own node's, active, fresh and for the
+  tool's path. A forwarded route then runs through the same door as over HTTPS (the `fabric` listener), for that
+  node's principal.
 - **When Q-AMP is tried again after it wasn't had.** It waits by why:
   - refused (`UNAUTHORIZED`: the peer doesn't know this node's key yet; its next pull of this node's profile cures it), 2 s;
   - busy or draining, 5 s;

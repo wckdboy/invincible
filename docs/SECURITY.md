@@ -434,15 +434,27 @@ Phase 2 ([FABRIC.md](FABRIC.md); the design, [ARCHITECTURE](ARCHITECTURE.md) §3
 over Q-AMP through a sidecar of its own, and a task can be handed to another node's agents. New doors: a UDP port on the
 tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path in each VM.
 
-- **Who is calling.** The sidecar proves the caller's key in the TLS handshake (raw public keys, X25519MLKEM768). The
-  node takes that key for the active node whose own signed profile (`node.profile`'s `caps.qamp`) names it, and for
-  nothing else. Who is active is read afresh on every call, never cached.
-  - A key no node names, or a revoked node's, is refused (`UNAUTHORIZED`) before the node reads anything. A key two
-    nodes' profiles both name is neither's, so a node can't take another's calls by naming its key.
-  - The link's tools (sync, push, forward) and the hand-off are public at Q-AMP's door and decided by the node's; a
-    forwarded route runs through the same door as over HTTPS (the `fabric` listener) for that node's principal.
+- **Who is calling.** The sidecar proves the caller's transport key in the TLS handshake (raw public keys,
+  X25519MLKEM768). The node takes that key for the active node whose own signed profile (`node.profile`'s `caps.qamp`)
+  names it with the key's own signature over the node's id, and for nothing else. Who is active is read afresh on
+  every call, never cached.
+  - A key no node names, a key two nodes' profiles both name, or a key a revoked node ever held (in any profile it
+    signed) is refused (`UNAUTHORIZED`) before the node reads anything. A claim on a key a node doesn't hold is no
+    claim (the review's L6), so no node can take, or block, another's calls by naming its key.
   - Tests: `fabric.e2e.test.ts` (a stranger's key refused at the door; a revoked node refused on its very next call),
-    `fabric-service.test.ts` (a key claimed twice, a key nobody names, a revoked node's).
+    `fabric-service.test.ts` and `fabric-link-auth.test.ts` (a claim without the key's proof, a key two hold, a key
+    nobody names, a revoked node's, and one it held before).
+- **The transport key carries calls, not authority** (the review's M1). Every sync, push, forwarded route and hand-off
+  carries its node's device signature, made and checked exactly as an HTTPS request's (`verifyRequestSignature`: the
+  node's own, active, within 60 s, its nonce never seen before, over the path and the body as signed), with the method
+  `QAMP`, so neither kind of signature passes for the other.
+  - So the transport key alone, read from a backup or a file, syncs, pushes, forwards and hands over nothing.
+  - The key is kept where the device keys are: the OS keychain, or a 0600 file where there is none. It reaches the
+    sidecar on its stdin, never a file, and is made for the node's id, so a home enrolled again gets a key of its own.
+  - `invincible fabric rotate` replaces it; the peers refuse the old one from then on.
+  - Tests: `fabric-link-auth.test.ts` (unsigned, another device's, another tool's path, too old, changed after it was
+    signed, sent twice: each refused; a hand-off held to the same), `fabric-sidecar.test.ts` (the keystore, the key
+    on stdin of a real process), `fabric.e2e.test.ts` (the same against a real sidecar).
 - **What a node that turned on another can do: only what its grants say.** A full node is owner-equivalent by design
   (it holds the vault), over HTTPS and over Q-AMP alike; what the fabric adds is held to grants.
   - A run elsewhere reaches its giver's tools only under the giver's grant to the run's own key: the read-only tools its
@@ -492,9 +504,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
 - **Grants never outlive their task.** Renewed at half their life while the hand-off lives, revoked when it ends; a giver
   that dies renews nothing, so its grants end within 300 s. Test: `fabric-handoff.e2e.test.ts` (4 s grants, past their
   first token's end and after the task).
-- **The sidecar and its socket.** The sidecar holds no secret but the node's transport key (Ed25519, 0600 in
-  `<home>/qamp`, never the device key, which stays in the daemon). Its socket is 0600 in a 0700 directory, same-user
-  only (Q-AMP's own checks), and whoever can connect has the node's transport authority; the node starts it with
+- **The sidecar and its socket.** The sidecar holds no secret but the node's transport key (Ed25519, given on its stdin,
+  never the device key, which stays in the daemon). Its socket is 0600 in a 0700 directory, same-user only (Q-AMP's own
+  checks), and whoever can connect has the node's transport (its connections and its grants' minting, not its link
+  calls, which need the device key); the node starts it with
   `--allow-cmd /tool/invincible` and `--max-ttl 86400`, so nothing minted through it reaches past Invincible's tools
   or a day. It listens on the node's advertised address alone: every way of writing every interface makes it dial out
   only. Tests: `fabric-sidecar.test.ts`.

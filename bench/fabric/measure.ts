@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { b64u, bodyFingerprint, ceilingThreads, clientIdentity, FABRIC, type HandedView, KERNEL, newClientSecret, REFERENCE_SINGLE, routes, type RouteName, signRequest, type TeamSnapshot, utf8 } from "../../packages/core/src/index.ts";
+import { b64u, bodyFingerprint, ceilingThreads, clientIdentity, FABRIC, type HandedView, KERNEL, LINK_PATHS, newClientSecret, REFERENCE_SINGLE, routes, type RouteName, signRequest, type TeamSnapshot, utf8 } from "../../packages/core/src/index.ts";
 import { requestPairing, signedPost, type SyncPage, waitForApproval } from "../../packages/link/src/index.ts";
 import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../../packages/ledger/src/index.ts";
 import type { Capabilities } from "../../packages/node/src/capabilities.ts";
@@ -179,7 +179,7 @@ try {
       // A sidecar of beta's transport key, started for this sample. Its first call ever (to gamma) pays the process's own
       // first use (its crypto library, its runtime) as a long-running sidecar never does again; its first call to alpha
       // after that is what a node pays for a fresh connection to a peer: a Retry, the 1-RTT handshake, the call.
-      const fresh = new Sidecar({ home: keyHome, binary: () => QAMP, listen: () => null, name: "bench", log: () => {}, socket: join(root, `f${i % 2}.sock`) });
+      const fresh = new Sidecar({ home: keyHome, key: () => new Home(keyHome).transportKey("file", b.identity.id), binary: () => QAMP, listen: () => null, name: "bench", log: () => {}, socket: join(root, `f${i % 2}.sock`) });
       // (A sample that fails is counted and said, never dropped in silence; its sidecar is stopped whatever happened.)
       let stage = "start";
       const s0 = performance.now();
@@ -187,12 +187,15 @@ try {
         await fresh.start();
         if (fresh.state !== "up") throw new Error(`a fresh sidecar didn't start: ${fresh.why}`);
         stage = "its first call (gamma)";
+        // Each call signed by beta's device key, as its sync's are, before the clock starts.
+        const toGamma = await b.fabric.seal(LINK_PATHS.sync, { have });
         const c0 = performance.now();
-        await fresh.client!.call(gammaAddress, FABRIC.sync, { have }).result;
+        await fresh.client!.call(gammaAddress, FABRIC.sync, toGamma).result;
         cold.push(performance.now() - c0);
         stage = "its call to alpha";
+        const toAlpha = await b.fabric.seal(LINK_PATHS.sync, { have });
         const t0 = performance.now();
-        await fresh.client!.call(a.fabric.sidecar.address!, FABRIC.sync, { have }).result;
+        await fresh.client!.call(a.fabric.sidecar.address!, FABRIC.sync, toAlpha).result;
         qamp.push(performance.now() - t0);
       } catch (error) {
         failures.push(`sample ${i}, ${stage}, after ${Math.round(performance.now() - s0)} ms: ${(error as Error).message}`);

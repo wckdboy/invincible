@@ -21,6 +21,7 @@ import {
   signingPublicKey,
   signProof,
   signQdt,
+  signTransportClaim,
 } from "../src/index.ts";
 import rust from "./fixtures/qdt-rust.json";
 
@@ -172,16 +173,30 @@ describe("delegation tokens, as Q-AMP's SPEC 9.3 writes them", () => {
 });
 
 describe("a node's Q-AMP endpoint, as its profile says it", () => {
-  test("its key and an address that names the same key", () => {
+  const NODE = "n_" + "A".repeat(43);
+  const OTHER = "n_" + "B".repeat(43);
+  const pop = signTransportClaim(SEED_ONE, NODE);
+
+  test("its key, an address that names the same key, and the key's own signature that it is this node's", () => {
     const did = ONE;
     expect(qampAddressDid(`qamp://${did}@192.0.2.10:7410`)).toBe(did);
     expect(qampAddressDid(`qamp://${did}@[fd7a:115c::1]:7410`)).toBe(did);
-    expect(qampEndpointOf({ cores: 4, qamp: { did, address: `qamp://${did}@127.0.0.1:7410` } })).toEqual({ did, address: `qamp://${did}@127.0.0.1:7410` });
+    expect(qampEndpointOf({ cores: 4, qamp: { did, address: `qamp://${did}@127.0.0.1:7410`, pop } }, NODE)).toEqual({ did, address: `qamp://${did}@127.0.0.1:7410`, pop });
+  });
+
+  test("a claim on a key it doesn't hold is no endpoint: no signature, another node's, or another key's", () => {
+    const address = `qamp://${ONE}@127.0.0.1:7410`;
+    expect(qampEndpointOf({ qamp: { did: ONE, address } }, NODE)).toBeNull();
+    // The same proof, claimed by another node: it names the node it was made for.
+    expect(qampEndpointOf({ qamp: { did: ONE, address, pop } }, OTHER)).toBeNull();
+    // Signed by another key than the one it names.
+    expect(qampEndpointOf({ qamp: { did: ONE, address, pop: signTransportClaim(SEED_TWO, NODE) } }, NODE)).toBeNull();
+    expect(qampEndpointOf({ qamp: { did: ONE, address, pop: "A".repeat(86) } }, NODE)).toBeNull();
   });
 
   test("an address naming another key, no port, or no endpoint at all reads as none", () => {
-    for (const caps of [{ qamp: { did: ONE, address: `qamp://${TWO}@127.0.0.1:7410` } }, { qamp: { did: ONE, address: `qamp://${ONE}@127.0.0.1` } }, { qamp: { did: ONE, address: `qamp://${ONE}@127.0.0.1:70000` } }, { qamp: "x" }, {}, null]) {
-      expect(qampEndpointOf(caps)).toBeNull();
+    for (const caps of [{ qamp: { did: ONE, address: `qamp://${TWO}@127.0.0.1:7410`, pop } }, { qamp: { did: ONE, address: `qamp://${ONE}@127.0.0.1`, pop } }, { qamp: { did: ONE, address: `qamp://${ONE}@127.0.0.1:70000`, pop } }, { qamp: "x" }, {}, null]) {
+      expect(qampEndpointOf(caps, NODE)).toBeNull();
     }
   });
 });

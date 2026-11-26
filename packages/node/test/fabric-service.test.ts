@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { didKeyOfEd25519, newNodeIdentity, signingPublicKey } from "@invincible/core";
+import { newNodeIdentity } from "@invincible/core";
 import type { Device, LedgerStore } from "@invincible/ledger";
 import { Fabric } from "../src/fabric/service.ts";
 import type { Sidecar } from "../src/fabric/sidecar.ts";
 import { type Call, SidecarError } from "../src/fabric/socket.ts";
+import { transportKeyOf } from "../src/home.ts";
 
 /*
  * The fabric's calling side, with a stand-in sidecar: which path a peer is on after each kind of failure, and when Q-AMP
  * is tried again. (The real sidecars are in fabric.e2e.test.ts.)
  */
 
-/** The stand-in peer's transport key: a test seed's (03…03), made here. */
-const PEER_DID = didKeyOfEd25519(signingPublicKey(new Uint8Array(32).fill(3)));
+/** The stand-in peer's transport key: a test seed's (03…03), made here, with its proof that it is the peer's. */
+const PEER_KEY = transportKeyOf(new Uint8Array(32).fill(3), "n_peer");
+const PEER_DID = PEER_KEY.did;
 const peer: Device = {
   id: "n_peer",
   name: "beta",
@@ -22,7 +24,7 @@ const peer: Device = {
   enrolledBy: "n_a",
   enrolledHlc: "0",
   revokedHlc: null,
-  profile: { endpoint: "http://127.0.0.1:1", caps: { qamp: { did: PEER_DID, address: `qamp://${PEER_DID}@127.0.0.1:7410` } } },
+  profile: { endpoint: "http://127.0.0.1:1", caps: { qamp: { did: PEER_DID, address: `qamp://${PEER_DID}@127.0.0.1:7410`, pop: PEER_KEY.pop } } },
 };
 
 /** A fabric whose sidecar answers every call with what `answer` says. */
@@ -89,27 +91,46 @@ describe("when Q-AMP is tried again", () => {
 });
 
 describe("who a transport key is", () => {
-  const did = (seed: number) => didKeyOfEd25519(signingPublicKey(new Uint8Array(32).fill(seed)));
-  const node = (id: string, key: string, revoked = false): Device => ({ ...peer, id, name: id, revokedHlc: revoked ? "1" : null, profile: { endpoint: "http://127.0.0.1:1", caps: { qamp: { did: key, address: `qamp://${key}@127.0.0.1:7410` } } } });
-  const fabricOf = (devices: Device[]) => {
+  const seedOf = (n: number) => new Uint8Array(32).fill(n);
+  const did = (n: number) => transportKeyOf(seedOf(n), "n_any").did;
+  /** A node whose profile names key `n`, with that key's proof made for `claimedFor` (its own id, unless it lies). */
+  const node = (id: string, n: number, opts: { revoked?: boolean; claimedFor?: string } = {}): Device => {
+    const key = transportKeyOf(seedOf(n), opts.claimedFor ?? id);
+    return { ...peer, id, name: id, revokedHlc: opts.revoked ? "1" : null, profile: { endpoint: "http://127.0.0.1:1", caps: { qamp: { did: key.did, address: `qamp://${key.did}@127.0.0.1:7410`, pop: key.pop } } } };
+  };
+  const fabricOf = (devices: Device[], earlier: Record<string, unknown[]> = {}) => {
     const sidecar = { client: null, did: "did:key:z6Mkself", address: null, state: "off", why: null } as unknown as Sidecar;
-    const store = { onApplied: () => () => {}, devices: () => devices.filter((d) => !d.revokedHlc), activeDevice: (id: string) => devices.find((d) => d.id === id && !d.revokedHlc) ?? null } as unknown as LedgerStore;
+    const store = {
+      onApplied: () => () => {},
+      devices: (withRevoked = false) => devices.filter((d) => withRevoked || !d.revokedHlc),
+      activeDevice: (id: string) => devices.find((d) => d.id === id && !d.revokedHlc) ?? null,
+      // Every profile it ever signed: the ones given here, then its latest.
+      profilesOf: (id: string) => [...(earlier[id] ?? []), devices.find((d) => d.id === id)?.profile?.caps],
+    } as unknown as LedgerStore;
     return new Fabric({ store, identity: newNodeIdentity(), sidecar, log: () => {}, presence: async () => ({}) as never });
   };
 
-  test("the active node whose signed profile names it", () => {
-    expect(fabricOf([node("n_b", did(4)), node("n_c", did(5))]).nodeOfKey(did(5))?.id).toBe("n_c");
+  test("the active node whose signed profile names it, with that key's own proof for it", () => {
+    expect(fabricOf([node("n_b", 4), node("n_c", 5)]).nodeOfKey(did(5))?.id).toBe("n_c");
   });
 
-  test("a key two nodes claim is neither's: a node can't take another's calls by naming its key", () => {
-    const f = fabricOf([node("n_b", did(4)), node("n_liar", did(4)), node("n_c", did(5))]);
+  test("a claim on a key it doesn't hold is no claim (L6): the key stays its own node's", () => {
+    // n_liar copies n_b's key and its proof: the proof names n_b.
+    const f = fabricOf([node("n_b", 4), node("n_liar", 4, { claimedFor: "n_b" })]);
+    expect(f.nodeOfKey(did(4))?.id).toBe("n_b");
+  });
+
+  test("a key two nodes both hold is neither's", () => {
+    const f = fabricOf([node("n_b", 4), node("n_twin", 4), node("n_c", 5)]);
     expect(f.nodeOfKey(did(4))).toBeNull();
     expect(f.nodeOfKey(did(5))?.id).toBe("n_c");
   });
 
-  test("a key no node names, or a revoked node's, is nobody", () => {
-    const f = fabricOf([node("n_b", did(4)), node("n_gone", did(6), true)]);
-    expect(f.nodeOfKey(did(7))).toBeNull();
-    expect(f.nodeOfKey(did(6))).toBeNull();
+  test("a key no node names, or a revoked node's, is nobody; a key a revoked node ever held is nobody's, whoever names it after", () => {
+    expect(fabricOf([node("n_b", 4), node("n_gone", 6, { revoked: true })]).nodeOfKey(did(7))).toBeNull();
+    expect(fabricOf([node("n_b", 4), node("n_gone", 6, { revoked: true })]).nodeOfKey(did(6))).toBeNull();
+    // n_gone held key 8 once (an earlier profile), then moved to 6, and was revoked; n_b names 8 now, with a proof for itself.
+    const f = fabricOf([node("n_b", 8), node("n_gone", 6, { revoked: true })], { n_gone: [node("n_gone", 8).profile!.caps] });
+    expect(f.nodeOfKey(did(8))).toBeNull();
   });
 });

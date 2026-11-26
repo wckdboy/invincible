@@ -221,6 +221,8 @@ export interface AppContext {
   handoffs?: Handoffs;
   /** The node's own switch for its fabric (daemon.ts): set and applied now (`on`), or only read. */
   fabricSetting?(on?: boolean): Promise<FabricSettingView>;
+  /** A new transport key for its sidecar (daemon.ts): its peers refuse the old one from then on. */
+  rotateTransport?(): Promise<FabricSettingView>;
   tokens: GatewayTokens;
   arms: ArmTokens;
   /** Grants to agents on your other machines, over Q-AMP (qamp-grants.ts): each an arm, a chain and a bridge. */
@@ -4513,6 +4515,11 @@ export function createApp(ctx: AppContext) {
       ownerOnly(p);
       if (!ctx.fabricSetting) throw new HttpError(424, "this node has no fabric");
       return ctx.fabricSetting(input.on);
+    },
+    rotateTransportKey: (_input, p) => {
+      ownerOnly(p);
+      if (!ctx.rotateTransport) throw new HttpError(424, "this node has no fabric");
+      return ctx.rotateTransport();
     },
     handTask: (input, p) => {
       ownerOnly(p);

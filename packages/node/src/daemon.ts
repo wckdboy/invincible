@@ -96,6 +96,8 @@ export interface Daemon {
   doctor(opts?: DoctorOptions): Promise<DoctorRun>;
   /** Its own switch for the fabric (`invincible fabric on|off`): set and applied now (`on`), or only read (none). */
   fabricSetting(on?: boolean): Promise<FabricSettingView>;
+  /** A new transport key for its sidecar (`invincible fabric rotate`): the old one is refused by its peers from then on. */
+  rotateTransport(): Promise<FabricSettingView>;
   /** Notifications to your paired devices (notify.ts). */
   notify: NotifyService;
   stop(): Promise<void>;
@@ -313,6 +315,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   let routes: ((req: Request, listener: "fabric") => Promise<Response>) | null = null;
   const sidecar = new Sidecar({
     home: home.dir,
+    // Where its device keys are kept, for this node's id: read at each start, so a rotated key is the one it runs.
+    key: () => home.transportKey(config.keystore, identity.id),
     binary: () => (sidecarOpts === null ? null : sidecarOpts.binary !== undefined ? sidecarOpts.binary : qampBin),
     off: () => (fabricOn ? null : FABRIC_OFF),
     // Its advertised address alone, never every interface: with no other to give it, it only dials out.
@@ -376,6 +380,28 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
         }
       }
       return fabricView();
+    });
+    switching = next.catch(() => {});
+    return next;
+  };
+  /**
+   * A new transport key in place of the one kept: its profile stops naming the old one at once, its sidecar starts
+   * again on the new one (when the fabric is on), and its profile names that once it listens. From then on its peers
+   * refuse the old key, as no profile of an active node names it.
+   */
+  const rotateTransport = (): Promise<FabricSettingView> => {
+    const next = switching.then(async () => {
+      const made = await home.rotateTransportKey(config.keystore, identity.id);
+      log(`fabric: its transport key was rotated: now ${made.did.slice(0, 22)}…`);
+      if (qampEndpoint) {
+        qampEndpoint = null;
+        if (profiled) publishProfile(store, identity, endpoint, withQamp(caps));
+      }
+      if (fabricOn) {
+        await sidecar.stop("its transport key was rotated");
+        await sidecar.start();
+      }
+      return { ...fabricView(), did: made.did };
     });
     switching = next.catch(() => {});
     return next;
@@ -782,6 +808,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     fabric,
     handoffs,
     fabricSetting,
+    rotateTransport,
     tokens,
     arms,
     qamp,
@@ -976,6 +1003,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     chats,
     doctor: (options) => runDoctor(doctorDeps, options),
     fabricSetting,
+    rotateTransport,
     notify,
     /**
      * In order: take nothing new (stop listening; requests under way go on), start nothing

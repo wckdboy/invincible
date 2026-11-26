@@ -39,15 +39,16 @@ describe("the fabric's waits end with what they waited for", () => {
   test("a call over Q-AMP that has its answer leaves no timer behind (a forwarded route's waits 75 minutes)", async () => {
     const ms = await lifetime(`
       import { Fabric } from ${JSON.stringify(join(SRC, "service.ts"))};
-      import { didKeyOfEd25519, signingPublicKey } from ${JSON.stringify(join(import.meta.dir, "..", "..", "core", "src", "index.ts"))};
-      const did = didKeyOfEd25519(signingPublicKey(new Uint8Array(32).fill(3)));
+      import { transportKeyOf } from ${JSON.stringify(join(SRC, "..", "home.ts"))};
+      import { newNodeIdentity } from ${JSON.stringify(join(import.meta.dir, "..", "..", "core", "src", "index.ts"))};
+      const key = transportKeyOf(new Uint8Array(32).fill(3), "n_peer");
       const peer = { id: "n_peer", name: "beta", kind: "node", role: "full", box: null, scopes: [], enrolledBy: "n_a", enrolledHlc: "0", revokedHlc: null,
-        profile: { endpoint: "http://192.0.2.10:1", caps: { qamp: { did, address: "qamp://" + did + "@192.0.2.10:7410" } } } };
+        profile: { endpoint: "http://192.0.2.10:1", caps: { qamp: { did: key.did, address: "qamp://" + key.did + "@192.0.2.10:7410", pop: key.pop } } } };
       const empty = { [Symbol.asyncIterator]: () => ({ next: async () => ({ value: undefined, done: true }) }) };
       const client = { open: true, call: () => ({ id: 1, chunks: empty, result: Promise.resolve({ status: 200, body: {} }), send() {}, end() {}, cancel() {} }) };
       const sidecar = { client, did: "did:key:z6Mkself", address: null, state: "up", why: null };
       const store = { onApplied: () => () => {}, devices: () => [peer], activeDevice: () => peer };
-      const fabric = new Fabric({ store, identity: { id: "n_self" }, sidecar, log: () => {}, presence: async () => ({}) });
+      const fabric = new Fabric({ store, identity: newNodeIdentity(), sidecar, log: () => {}, presence: async () => ({}) });
       const answer = await fabric.forward(peer, "/api/sandboxes", {}, 75 * 60_000);
       if (answer?.status !== 200) throw new Error("no answer");
       fabric.close();
@@ -59,11 +60,12 @@ describe("the fabric's waits end with what they waited for", () => {
   test("a sidecar's start that failed leaves no timer behind (it waits 20 s for an address)", async () => {
     const ms = await lifetime(`
       import { Sidecar } from ${JSON.stringify(join(SRC, "sidecar.ts"))};
+      import { transportKeyOf } from ${JSON.stringify(join(SRC, "..", "home.ts"))};
       import { mkdtempSync } from "node:fs";
       import { tmpdir } from "node:os";
       import { join } from "node:path";
       const home = mkdtempSync(join(tmpdir(), "q5t-home-"));
-      const sidecar = new Sidecar({ home, binary: () => process.execPath, listen: () => null, name: "n", log: () => {},
+      const sidecar = new Sidecar({ home, key: async () => transportKeyOf(new Uint8Array(32).fill(4), "n_test"), binary: () => process.execPath, listen: () => null, name: "n", log: () => {},
         probe: () => ({ sidecar: true, version: "0.2.0" }),
         spawn: () => ({ ready: Promise.resolve(null), exited: Promise.resolve(1), kill() {} }) });
       await sidecar.start();

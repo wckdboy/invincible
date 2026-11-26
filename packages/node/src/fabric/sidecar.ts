@@ -1,21 +1,19 @@
-import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync, writeSync, closeSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { b64u, didKeyOfEd25519, fromB64u, signingPublicKey } from "@invincible/core";
 import { SidecarClient, within } from "./socket.ts";
 
 /*
  * The node's sidecar (docs/ARCHITECTURE.md §3): Q-AMP's own binary, `qamp sidecar`, beside the daemon, spoken to over a
  * socket in the node's home. The daemon holds the vault, so no QUIC stack is loaded into it; the sidecar holds no secret
- * but the node's transport key, an Ed25519 key of its own (never the node's device key, which signs its ledger).
+ * but the node's transport key, an Ed25519 key of its own (never the node's device key, which signs its ledger). That
+ * key carries calls and nothing more (each link call is signed by the device key too), lives where the node's device
+ * keys do (home.ts transportKey: the OS keychain, or a 0600 file), and reaches the sidecar on its stdin, never a file.
  *
- * The node makes that key once, starts the sidecar, watches it, and starts it again when it stops (at once after one
- * that ran a while, longer each time after one that keeps stopping). While it is down, or the binary isn't installed,
- * every link goes over HTTPS with signed requests, as before it, and the node says so.
+ * The node starts the sidecar, watches it, and starts it again when it stops (at once after one that ran a while,
+ * longer each time after one that keeps stopping). While it is down, or the binary isn't installed, every link goes
+ * over HTTPS with signed requests, as before it, and the node says so.
  */
 
-/** The transport key's file, as `qamp keygen` writes one: `qamp-sk1.` and base64url of its 32-byte seed. */
-const KEY_PREFIX = "qamp-sk1.";
 /** A Unix socket's path is short (104 bytes on macOS, 108 on Linux, with its NUL). */
 const SOCKET_PATH_MAX = 103;
 const MAX_BACKOFF_MS = 60_000;
@@ -32,11 +30,15 @@ export interface SidecarProcess {
   pid?: number;
 }
 
-export type SpawnSidecar = (binary: string, args: string[], env: Record<string, string>, line: (text: string) => void) => SidecarProcess;
+/** `key`: the transport key as Q-AMP reads one (`qamp-sk1.…`), for the process's stdin (`--key /dev/stdin`). */
+export type SpawnSidecar = (binary: string, args: string[], env: Record<string, string>, line: (text: string) => void, key: string) => SidecarProcess;
 
-/** How the sidecar's process is started: Bun.spawn, its stdout's first line its address, stderr's lines to `line`. */
-export const spawnSidecar: SpawnSidecar = (binary, args, env, line) => {
-  const proc = Bun.spawn([binary, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env });
+/**
+ * How the sidecar's process is started: Bun.spawn with its key on stdin (read once, to its end, and closed), its
+ * stdout's first line its address, stderr's lines to `line`.
+ */
+export const spawnSidecar: SpawnSidecar = (binary, args, env, line, key) => {
+  const proc = Bun.spawn([binary, ...args], { stdin: new Blob([key]), stdout: "pipe", stderr: "pipe", env });
   const lines = async (stream: ReadableStream<Uint8Array>, each: (text: string) => void) => {
     const decoder = new TextDecoder();
     let held = "";
@@ -69,9 +71,20 @@ export function probeSidecar(binary: string): { sidecar: boolean; version: strin
   return { sidecar: help.exitCode === 0, version: said };
 }
 
+/** The node's transport key as the sidecar is given it (home.ts transportKey): its text, its DID, and its proof for the node. */
+export interface SidecarKey {
+  /** As Q-AMP reads a key: `qamp-sk1.` and its seed; for the sidecar's stdin alone. */
+  text: string;
+  did: string;
+  /** Its signature that it is this node's key (core's signTransportClaim), for the profile's `caps.qamp.pop`. */
+  pop: string;
+}
+
 export interface SidecarOptions {
-  /** The node's home: the key goes to <home>/qamp/node.qamp-key, the socket to <home>/run/qamp.sock. */
+  /** The node's home: the socket goes to <home>/run/qamp.sock. */
   home: string;
+  /** The node's transport key, read from its keystore at each start (it may have been rotated). */
+  key: () => Promise<SidecarKey>;
   /**
    * The `qamp` binary, looked for at each start: a path that isn't there yet is looked for again (installing it needs no
    * restart); null, the node runs no sidecar at all (tests, or a node told so), and nothing is tried again.
@@ -114,36 +127,6 @@ export function sidecarListen(advertise: string, port: number, unspecified: (add
   return `${bare.includes(":") ? `[${bare}]` : bare}:${port}`;
 }
 
-/** The node's transport key: made once, 0600, in its home. Returns its DID; its secret is never kept in memory. */
-export function transportKey(home: string): { path: string; did: string; made: boolean } {
-  const dir = join(home, "qamp");
-  const path = join(dir, "node.qamp-key");
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  let made = false;
-  if (!existsSync(path)) {
-    const seed = randomBytes(32);
-    // Made exclusively, so two starts can never write two keys; 0600 from its first byte.
-    const fd = openSync(path, "wx", 0o600);
-    try {
-      writeSync(fd, `${KEY_PREFIX}${b64u(seed)}\n`);
-    } finally {
-      closeSync(fd);
-    }
-    seed.fill(0);
-    made = true;
-  }
-  const stat = lstatSync(path);
-  if (!stat.isFile()) throw new Error(`${path} isn't a file`);
-  if ((stat.mode & 0o077) !== 0) chmodSync(path, 0o600);
-  const text = readFileSync(path, "utf8").trim();
-  if (!text.startsWith(KEY_PREFIX)) throw new Error(`${path} isn't a Q-AMP key (qamp-sk1.…): a P-256 one, or another file`);
-  const seed = fromB64u(text.slice(KEY_PREFIX.length));
-  if (seed.length !== 32) throw new Error(`${path} isn't an Ed25519 key's seed`);
-  const did = didKeyOfEd25519(signingPublicKey(seed));
-  seed.fill(0);
-  return { path, did, made };
-}
-
 export class Sidecar {
   private readonly now: () => number;
   private proc: SidecarProcess | null = null;
@@ -158,8 +141,9 @@ export class Sidecar {
   state: SidecarState = "off";
   why: string | null = "not started";
   client: SidecarClient | null = null;
-  /** Its transport key's DID (known from its key, sidecar up or not), and its address once it said one. */
+  /** Its transport key's DID (known from its key, sidecar up or not), its proof for the node, and its address once it said one. */
   did: string | null = null;
+  pop: string | null = null;
   address: string | null = null;
   version: string | null = null;
 
@@ -203,13 +187,15 @@ export class Sidecar {
     if (this.probed?.key !== made) this.probed = { key: made, ...(this.opts.probe ?? probeSidecar)(binary) };
     if (!this.probed.sidecar) return this.off(`the qamp here (${this.probed.version ?? binary}) has no sidecar: Q-AMP's release with one goes to <home>/bin/qamp (scripts/qamp-pin.sh; deploy.sh --qamp <file>)`);
     if (this.socketPath.length > SOCKET_PATH_MAX) return this.off(`the sidecar's socket path is too long for a Unix socket (${this.socketPath.length} bytes): set INVINCIBLE_QAMP_SOCKET to a shorter one`);
-    let key: { path: string; did: string };
+    let key: SidecarKey;
     try {
-      key = transportKey(this.opts.home);
+      key = await this.opts.key();
       this.did = key.did;
+      this.pop = key.pop;
     } catch (error) {
       return this.off(`its transport key can't be read: ${(error as Error).message}`);
     }
+    if (this.stopping) return;
     const socketDir = join(this.socketPath, "..");
     try {
       mkdirSync(socketDir, { recursive: true, mode: 0o700 });
@@ -222,18 +208,25 @@ export class Sidecar {
     this.why = null;
     this.tail = [];
     const listen = this.opts.listen();
-    const args = ["sidecar", "--key", key.path, "--socket", this.socketPath, "--name", this.opts.name, "--max-ttl", String(this.opts.maxTtlSecs ?? 86_400), "--allow-cmd", "/tool/invincible"];
+    // Its key on its stdin, read once to its end: never a file the sidecar, or anything else, could read again.
+    const args = ["sidecar", "--key", "/dev/stdin", "--socket", this.socketPath, "--name", this.opts.name, "--max-ttl", String(this.opts.maxTtlSecs ?? 86_400), "--allow-cmd", "/tool/invincible"];
     if (listen) args.push("--listen", listen);
     // What it needs, and nothing else of the daemon's environment (the vault's key among them).
     const env: Record<string, string> = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? this.opts.home };
     if (process.env.RUST_LOG) env.RUST_LOG = process.env.RUST_LOG;
     let proc: SidecarProcess;
     try {
-      proc = (this.opts.spawn ?? spawnSidecar)(binary, args, env, (text) => {
-        const said = text.trim();
-        if (!said) return;
-        this.tail = [...this.tail.slice(-4), said.slice(0, 300)];
-      });
+      proc = (this.opts.spawn ?? spawnSidecar)(
+        binary,
+        args,
+        env,
+        (text) => {
+          const said = text.trim();
+          if (!said) return;
+          this.tail = [...this.tail.slice(-4), said.slice(0, 300)];
+        },
+        key.text,
+      );
     } catch (error) {
       return this.failed(`it didn't start: ${(error as Error).message}`);
     }

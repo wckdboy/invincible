@@ -12,6 +12,7 @@ import {
   HandChunk,
   type HandedView,
   HandInputChunk,
+  LINK_PATHS,
   handoffUnder,
   type HandTaskInput,
   type NodeIdentity,
@@ -269,7 +270,8 @@ export class Handoffs implements FabricTools {
       .query("INSERT INTO fabric_handed (id, node, node_name, title, goal, gates, tools, nonce, phase, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'handing', 'handing', ?)")
       .run(id, node.id, node.name, title, input.goal, JSON.stringify(gates), JSON.stringify(tools), nonce, this.now());
     const args: HandArgs = { handoff: id, nonce, goal: input.goal, title, gates, tools, ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}), ...(input.agent ? { agent: input.agent } : {}) };
-    const call = client.call(endpoint.address, FABRIC.hand, args, { input: true });
+    // Signed by this node's device key, as its HTTPS request would be: its transport key alone hands nothing over.
+    const call = client.call(endpoint.address, FABRIC.hand, await this.deps.fabric.seal(LINK_PATHS.hand, args), { input: true });
     this.calls.set(id, { call, renew: null });
     void this.follow(id, node, call);
     return this.view(this.row(id)!);

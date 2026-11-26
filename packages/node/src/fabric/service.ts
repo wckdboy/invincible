@@ -1,4 +1,27 @@
-import { FABRIC, type GEvent, type NodeIdentity, OWNER_SCOPES, type PeerPath, type Presence, PushRequest, type QampEndpoint, qampEndpointOf, type Scope, type SyncPage, SyncRequest, LinkForwardInput } from "@invincible/core";
+import {
+  AUTH,
+  type DeviceId,
+  FABRIC,
+  type GEvent,
+  LINK_METHOD,
+  LINK_PATHS,
+  LinkCall,
+  LinkForwardPath,
+  NonceCache,
+  type NodeIdentity,
+  OWNER_SCOPES,
+  type PeerPath,
+  type Presence,
+  PushRequest,
+  type QampEndpoint,
+  qampEndpointOf,
+  type Scope,
+  signRequest,
+  type SyncPage,
+  SyncRequest,
+  utf8,
+  verifyRequestSignature,
+} from "@invincible/core";
 import type { Device, LedgerStore } from "@invincible/ledger";
 import { answerPush, answerSync, type SyncTransport } from "@invincible/link";
 import type { Sidecar } from "./sidecar.ts";
@@ -80,11 +103,23 @@ const NOT_HERE = new Map<number, number>([
   [1, 60_000],
 ]);
 
+/** The link tools whose every call is signed by its node's device key (LinkCall), and the path each one is signed for. */
+const SIGNED = new Map<string, (path: string) => boolean>([
+  [FABRIC.sync, (path) => path === LINK_PATHS.sync],
+  [FABRIC.push, (path) => path === LINK_PATHS.push],
+  [FABRIC.forward, (path) => LinkForwardPath.safeParse(path).success],
+  [FABRIC.hand, (path) => path === LINK_PATHS.hand],
+]);
+
 export class Fabric implements SyncTransport {
   private readonly now: () => number;
   private readonly paths = new Map<string, PathState>();
   private readonly backoff = new Map<string, { until: number; ms: number }>();
   private callers: Map<string, string | null> | null = null;
+  /** Peers' endpoints as their profiles prove them (their transport keys' own signatures), until a profile changes. */
+  private readonly endpoints = new Map<string, QampEndpoint | null>();
+  /** Link calls' nonces, for their signatures' window: a call sent twice is refused the second time. */
+  private readonly nonces = new NonceCache();
   private readonly running = new Map<string, Set<Invocation>>();
   private tools: FabricTools | null = null;
   private readonly unsubscribe: () => void;
@@ -93,7 +128,10 @@ export class Fabric implements SyncTransport {
     this.now = deps.now ?? Date.now;
     // A node revoked, or a profile changed: who each key is is read again; a revoked node's calls end at once.
     this.unsubscribe = deps.store.onApplied((events, rebuilt) => {
-      if (rebuilt || events.some((e) => e.kind === "node.profile" || e.kind.startsWith("device."))) this.callers = null;
+      if (rebuilt || events.some((e) => e.kind === "node.profile" || e.kind.startsWith("device."))) {
+        this.callers = null;
+        this.endpoints.clear();
+      }
       for (const event of events) {
         if (event.kind !== "device.revoked") continue;
         const body = event.body as { device?: unknown };
@@ -115,31 +153,77 @@ export class Fabric implements SyncTransport {
     return this.deps.sidecar;
   }
 
-  /** This node's own endpoint, for its profile: once its sidecar has said where it listens. */
+  /** This node's own endpoint, for its profile: once its sidecar has said where it listens, with its key's proof that it is this node's. */
   endpoint(): QampEndpoint | null {
-    const { did, address } = this.deps.sidecar;
-    return did && address ? { did, address } : null;
+    const { did, address, pop } = this.deps.sidecar;
+    return did && address && pop ? { did, address, pop } : null;
   }
 
   // ---- who is calling ----
 
-  /** The active node a transport key belongs to, by the profiles nodes signed; none when no node, or more than one, says it. */
+  /**
+   * The active node a transport key belongs to, by the profiles nodes signed; none when no node, or more than one, says
+   * it. A profile's claim counts only with the key's own signature for that node (`pop`), and a key a revoked node ever
+   * held is nobody's from then on, whoever names it after.
+   */
   nodeOfKey(did: string): Device | null {
     if (!this.callers) {
       const map = new Map<string, string | null>();
-      for (const d of this.deps.store.devices()) {
+      const burned = new Set<string>();
+      for (const d of this.deps.store.devices(true)) {
         if (d.kind !== "node" || d.id === this.deps.identity.id) continue;
-        const endpoint = qampEndpointOf(d.profile?.caps);
+        if (d.revokedHlc) {
+          for (const caps of this.deps.store.profilesOf(d.id)) {
+            const held = qampEndpointOf(caps, d.id);
+            if (held) burned.add(held.did);
+          }
+          continue;
+        }
+        const endpoint = qampEndpointOf(d.profile?.caps, d.id);
         if (!endpoint) continue;
-        // Two nodes naming one key: neither is taken for it.
+        // Two nodes naming one key (both holding it): neither is taken for it.
         map.set(endpoint.did, map.has(endpoint.did) ? null : d.id);
       }
+      for (const did of burned) map.set(did, null);
       this.callers = map;
     }
     const id = this.callers.get(did);
     // Never cached: a node revoked a moment ago is refused now.
     const device = id ? this.deps.store.activeDevice(id) : null;
     return device && device.kind === "node" ? device : null;
+  }
+
+  /**
+   * A link call for `path`, signed by this node's device key as its HTTPS request would be (LinkCall): what each of the
+   * link's calls and each hand-off carries, so that a transport key alone carries nothing.
+   */
+  async seal(path: string, body: unknown): Promise<LinkCall> {
+    const text = JSON.stringify(body);
+    const headers = await signRequest(this.deps.identity.id as DeviceId, (message) => this.deps.identity.sign(message), LINK_METHOD, path, utf8(text), this.now());
+    return { path, body: text, auth: { device: headers[AUTH.device]!, ts: headers[AUTH.ts]!, nonce: headers[AUTH.nonce]!, sig: headers[AUTH.sig]! } };
+  }
+
+  /**
+   * A link call's own signature, checked exactly as an HTTPS request's is (request-auth.ts): by the node the transport
+   * key belongs to, active, within the time window, its nonce not seen before, for the path its tool signs. Its body,
+   * or why it is refused.
+   */
+  private opened(inv: Invocation, caller: Device, signedFor: (path: string) => boolean): { path: string; body: unknown } | { refused: string } {
+    const call = LinkCall.safeParse(inv.args);
+    if (!call.success) return { refused: "a link call is signed by its node's device key, as its HTTPS request would be" };
+    const { path, body, auth } = call.data;
+    if (!signedFor(path)) return { refused: `that call isn't signed for ${inv.tool}` };
+    const headers = new Headers({ [AUTH.device]: auth.device, [AUTH.ts]: auth.ts, [AUTH.nonce]: auth.nonce, [AUTH.sig]: auth.sig });
+    const proof = verifyRequestSignature(headers, LINK_METHOD, path, utf8(body), this.now());
+    if (!proof) return { refused: "its signature doesn't verify, or it is outside its time window" };
+    if (proof.device !== caller.id) return { refused: "it is signed by another device than the node whose transport key called" };
+    if (!this.deps.store.activeDevice(proof.device)) return { refused: "it is signed by a node that isn't active" };
+    if (!this.nonces.claim(proof.device, proof.nonce, this.now())) return { refused: "it was sent before: its nonce is spent" };
+    try {
+      return { path, body: JSON.parse(body) as unknown };
+    } catch {
+      return { refused: "its body isn't JSON" };
+    }
   }
 
   private principalOf(device: Device): FabricPrincipal {
@@ -155,11 +239,22 @@ export class Fabric implements SyncTransport {
       { name: FABRIC.forward, description: "One of this node's routes, forwarded by an enrolled node (a sandbox here)" },
     ];
     // Public at Q-AMP's door (any authenticated key may call them), and the node's own decides: an enrolled node, or nothing.
-    await client.serve([...link, ...extra.tools], [...link.map((t) => t.name), ...extra.public], (inv) => this.invoked(inv));
+    await client.serve([...link, ...extra.tools], [...link.map((t) => t.name), ...extra.public], (inv) => this.door(inv));
   }
 
-  private invoked(inv: Invocation): void {
+  /**
+   * The node's door, for an invocation its sidecar delivered (the caller's transport key proved by the handshake): the
+   * active node that key belongs to, and for each link call and hand-off, that node's own signature over it.
+   */
+  door(inv: Invocation): void {
     const caller = this.nodeOfKey(inv.caller);
+    const signedFor = SIGNED.get(inv.tool);
+    if (signedFor) {
+      if (!caller) return inv.fail(3, "this node takes link calls from the active nodes of its fleet alone, by the key each one's signed profile names");
+      const opened = this.opened(inv, caller, signedFor);
+      if ("refused" in opened) return inv.fail(3, `refused: ${opened.refused}`);
+      inv.args = inv.tool === FABRIC.forward ? { path: opened.path, body: opened.body } : opened.body;
+    }
     if (this.tools?.owns(inv.tool)) {
       this.track(caller, inv);
       this.tools.invoked(inv, caller);
@@ -178,8 +273,9 @@ export class Fabric implements SyncTransport {
           return answerPush(this.deps.store, PushRequest.parse(inv.args).events);
         case FABRIC.forward: {
           if (!this.deps.route) throw Object.assign(new Error("this node forwards no routes"), { code: 1 });
-          const { path, body } = LinkForwardInput.parse(inv.args);
-          return this.deps.route(path, body, this.principalOf(caller), inv.signal);
+          const { path, body } = inv.args as { path: string; body: unknown };
+          if (!body || typeof body !== "object" || Array.isArray(body)) throw Object.assign(new Error("a forwarded route's body is a JSON object"), { code: 2 });
+          return this.deps.route(path, body as Record<string, unknown>, this.principalOf(caller), inv.signal);
         }
         default:
           throw Object.assign(new Error(`no tool ${inv.tool}`), { code: 1 });
@@ -225,9 +321,15 @@ export class Fabric implements SyncTransport {
 
   // ---- calling peers ----
 
-  /** A peer's endpoint, by its signed profile. */
+  /** A peer's endpoint, by its signed profile, when its transport key signed for it (checked once per profile). */
   peerEndpoint(peer: Device): QampEndpoint | null {
-    return qampEndpointOf(peer.profile?.caps);
+    const claim = (peer.profile?.caps as { qamp?: { pop?: unknown } } | undefined)?.qamp?.pop;
+    const key = `${peer.id} ${typeof claim === "string" ? claim : ""}`;
+    if (!this.endpoints.has(key)) {
+      if (this.endpoints.size > 256) this.endpoints.clear();
+      this.endpoints.set(key, qampEndpointOf(peer.profile?.caps, peer.id));
+    }
+    return this.endpoints.get(key) ?? null;
   }
 
   /** The path a peer was last reached on, and why not Q-AMP (null: not reached yet). */
@@ -297,18 +399,18 @@ export class Fabric implements SyncTransport {
   // ---- the link, as the sync engine asks for it ----
 
   async sync(peer: Device, request: SyncRequest): Promise<SyncPage | null> {
-    const answer = await this.call(peer, FABRIC.sync, request, { timeoutMs: 8_000 });
+    const answer = await this.call(peer, FABRIC.sync, await this.seal(LINK_PATHS.sync, request), { timeoutMs: 8_000 });
     return "value" in answer ? (answer.value as SyncPage) : null;
   }
 
   async push(peer: Device, events: GEvent[]): Promise<boolean> {
-    const answer = await this.call(peer, FABRIC.push, { events }, { timeoutMs: 5_000 });
+    const answer = await this.call(peer, FABRIC.push, await this.seal(LINK_PATHS.push, { events }), { timeoutMs: 5_000 });
     return "value" in answer;
   }
 
   /** A route forwarded to a peer over Q-AMP: its status and JSON answer, or null when it must go over HTTPS. */
   async forward(peer: Device, path: string, body: Record<string, unknown>, timeoutMs: number): Promise<{ status: number; body: unknown } | null> {
-    const answer = await this.call(peer, FABRIC.forward, { path, body }, { timeoutMs });
+    const answer = await this.call(peer, FABRIC.forward, await this.seal(path, body), { timeoutMs });
     if (!("value" in answer)) return null;
     const value = answer.value as { status?: unknown; body?: unknown };
     return { status: typeof value?.status === "number" ? value.status : 502, body: value?.body ?? null };

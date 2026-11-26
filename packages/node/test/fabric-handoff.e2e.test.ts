@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { bodyFingerprint, ceilingThreads, FABRIC, type HandedView, KERNEL, newNodeIdentity, REFERENCE_SINGLE, runGrantPolicy, signQdt, type TeamSnapshot } from "@invincible/core";
 import { Sidecar } from "../src/fabric/sidecar.ts";
 import { SidecarError } from "../src/fabric/socket.ts";
+import { transportKeyOf } from "../src/home.ts";
 import { fakeDocker } from "./fake-docker.ts";
 import { HAVE_QAMP, type Pair, QAMP, sandboxCaps, startPair, until } from "./fabric-pair.ts";
 
@@ -201,7 +203,7 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
     const other = await refusal(pair.b.fabric.sidecar.client!.call(alpha, `${FABRIC.agent}/fleet`, { task: "h_BBBBBBBBBBBBBBBBBBBBBB", input: {} }, { proofs: [...run.chain, link("fleet")] }).result);
     expect(other?.code).toBe(3);
     // Stolen, and presented by another key: the chain ends at beta's key, so it binds to nobody else's connection.
-    const thief = new Sidecar({ home: join(pair.root, "thief"), binary: () => QAMP, listen: () => null, name: "thief", log: () => {} });
+    const thief = new Sidecar({ home: join(pair.root, "thief"), key: async () => transportKeyOf(randomBytes(32), "n_thief"), binary: () => QAMP, listen: () => null, name: "thief", log: () => {} });
     await thief.start();
     try {
       const stolen = await refusal(thief.client!.call(alpha, `${FABRIC.agent}/fleet`, { task: view.id, input: {} }, { proofs: [...run.chain, link("fleet")] }).result);

@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { FABRIC, type FleetView, qampEndpointOf } from "@invincible/core";
+import { FABRIC, type FleetView, LINK_PATHS, qampEndpointOf } from "@invincible/core";
 import { revokeDevice } from "@invincible/ledger";
 import type { Daemon } from "../src/daemon.ts";
 import { Sidecar } from "../src/fabric/sidecar.ts";
 import { SidecarError } from "../src/fabric/socket.ts";
+import { transportKeyOf } from "../src/home.ts";
 import { fakeDocker } from "./fake-docker.ts";
 import { fakeCaps, HAVE_QAMP, type Pair, QAMP, startPair, until } from "./fabric-pair.ts";
 
@@ -50,8 +52,8 @@ describe.skipIf(!HAVE_QAMP)(`the fabric between two nodes on one machine${HAVE_Q
     expect(a.fabric.sidecar.did).toMatch(/^did:key:z6Mk/);
     expect(a.fabric.sidecar.did).not.toBe(b.fabric.sidecar.did);
     expect(a.fabric.sidecar.address).toMatch(new RegExp(`^qamp://${a.fabric.sidecar.did}@127\\.0\\.0\\.1:\\d+$`));
-    await until(() => qampEndpointOf(a.store.device(b.identity.id)?.profile?.caps)?.did === b.fabric.sidecar.did, 15_000, "B's endpoint on A");
-    await until(() => qampEndpointOf(b.store.device(a.identity.id)?.profile?.caps)?.did === a.fabric.sidecar.did, 15_000, "A's endpoint on B");
+    await until(() => qampEndpointOf(a.store.device(b.identity.id)?.profile?.caps, b.identity.id)?.did === b.fabric.sidecar.did, 15_000, "B's endpoint on A");
+    await until(() => qampEndpointOf(b.store.device(a.identity.id)?.profile?.caps, a.identity.id)?.did === a.fabric.sidecar.did, 15_000, "A's endpoint on B");
   });
 
   test("their sync goes over Q-AMP, and a memory written on either reaches the other", async () => {
@@ -75,7 +77,7 @@ describe.skipIf(!HAVE_QAMP)(`the fabric between two nodes on one machine${HAVE_Q
 
   test("a key no node of the fleet names is refused at the door, before anything is read", async () => {
     const strangerHome = join(pair.root, "s");
-    stranger = new Sidecar({ home: strangerHome, binary: () => QAMP, listen: () => null, name: "stranger", log: () => {} });
+    stranger = new Sidecar({ home: strangerHome, key: async () => transportKeyOf(randomBytes(32), "n_stranger"), binary: () => QAMP, listen: () => null, name: "stranger", log: () => {} });
     await stranger.start();
     expect(stranger.state).toBe("up");
     const call = stranger.client!.call(a.fabric.sidecar.address!, FABRIC.sync, { have: {} });
@@ -97,14 +99,28 @@ describe.skipIf(!HAVE_QAMP)(`the fabric between two nodes on one machine${HAVE_Q
     await until(() => peerOf(a, b)?.path === "qamp", 30_000, "A on Q-AMP to B again");
   });
 
+  test("its transport key alone carries nothing: a call its device key didn't sign is refused, and a signed one sent twice is refused the second time", async () => {
+    const address = a.fabric.sidecar.address!;
+    // B's own sidecar, B's own transport key, but no signature of B's device key: refused at A's door.
+    const unsigned = await b.fabric.sidecar.client!.call(address, FABRIC.sync, { have: {} }).result.catch((e) => e as SidecarError);
+    expect(unsigned).toBeInstanceOf(SidecarError);
+    expect((unsigned as SidecarError).code).toBe(3);
+    expect((unsigned as SidecarError).message).toMatch(/signed by its node's device key/);
+    const sealed = await b.fabric.seal(LINK_PATHS.sync, { have: {} });
+    expect(await b.fabric.sidecar.client!.call(address, FABRIC.sync, sealed).result).toMatchObject({ more: expect.any(Boolean) });
+    const again = await b.fabric.sidecar.client!.call(address, FABRIC.sync, sealed).result.catch((e) => e as SidecarError);
+    expect((again as SidecarError).message).toMatch(/its nonce is spent/);
+  });
+
   test("a node revoked is refused from its very next call over Q-AMP", async () => {
     // B calls A directly through its sidecar, as its sync does: taken now.
     const address = a.fabric.sidecar.address!;
-    const before = await b.fabric.sidecar.client!.call(address, FABRIC.sync, { have: {} }).result;
+    const before = await b.fabric.sidecar.client!.call(address, FABRIC.sync, await b.fabric.seal(LINK_PATHS.sync, { have: {} })).result;
     expect(before).toMatchObject({ more: expect.any(Boolean) });
+    const next = await b.fabric.seal(LINK_PATHS.sync, { have: {} });
     const revokedAt = performance.now();
     revokeDevice(a.store, a.identity, b.identity.id, "test: revoked");
-    const after = await b.fabric.sidecar.client!.call(address, FABRIC.sync, { have: {} }).result.catch((e) => e as SidecarError);
+    const after = await b.fabric.sidecar.client!.call(address, FABRIC.sync, next).result.catch((e) => e as SidecarError);
     const ms = performance.now() - revokedAt;
     expect(after).toBeInstanceOf(SidecarError);
     expect((after as SidecarError).code).toBe(3);

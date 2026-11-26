@@ -56,7 +56,7 @@ function verdictExit(view: HandedView): void {
   if (!verdict?.proven) process.exitCode = 1;
 }
 
-export const FABRIC_USAGE = `usage: invincible fabric on|off|status
+export const FABRIC_USAGE = `usage: invincible fabric on|off|status|rotate
        invincible fabric grant <from> <to> --budget <usd a day> [--agents <id>,…] [--tools ${FABRIC_RUN_TOOLS.join(",")}]
        invincible fabric grants | invincible fabric revoke <from> <to>`;
 
@@ -109,6 +109,12 @@ function fabricLine(view: FabricSettingView): string {
  */
 export async function fabricCommand(api: Api, sub: string | undefined, config: FabricConfig, rest: string[] = [], flags: Flags = {}): Promise<void> {
   if (sub === "grant" || sub === "grants" || sub === "revoke") return grantCommand(api, sub, rest, flags);
+  if (sub === "rotate") {
+    const view = await api.call<FabricSettingView>("rotateTransportKey", {});
+    console.log(`A new transport key: ${view.did ?? "?"}. Its peers refuse the old one from now on.`);
+    console.log(fabricLine(view));
+    return;
+  }
   if (sub !== undefined && sub !== "on" && sub !== "off" && sub !== "status") throw new Error(FABRIC_USAGE);
   const on = sub === "on" ? true : sub === "off" ? false : undefined;
   let view: FabricSettingView;

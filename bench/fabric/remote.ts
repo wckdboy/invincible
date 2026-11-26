@@ -1,13 +1,14 @@
+import { randomBytes } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { bodyFingerprint, ceilingThreads, clientIdentity, FABRIC, type HandedView, KERNEL, newClientSecret, REFERENCE_SINGLE, routes, type RouteName, signRequest, utf8 } from "../../packages/core/src/index.ts";
+import { bodyFingerprint, ceilingThreads, clientIdentity, FABRIC, type HandedView, KERNEL, LINK_PATHS, newClientSecret, REFERENCE_SINGLE, routes, type RouteName, signRequest, utf8 } from "../../packages/core/src/index.ts";
 import { requestPairing, signedPost, type SyncPage, waitForApproval } from "../../packages/link/src/index.ts";
 import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../../packages/ledger/src/index.ts";
 import type { Capabilities } from "../../packages/node/src/capabilities.ts";
 import { type Daemon, type DaemonOptions, startDaemon } from "../../packages/node/src/daemon.ts";
 import { Sidecar } from "../../packages/node/src/fabric/sidecar.ts";
-import { Home } from "../../packages/node/src/home.ts";
+import { Home, transportKeyOf } from "../../packages/node/src/home.ts";
 import { fakeDocker } from "../../packages/node/test/fake-docker.ts";
 
 /*
@@ -264,19 +265,22 @@ try {
   }
   record("first answer, fresh connection · HTTP, signed request", freshHttp);
   // A sidecar of this node's key, warmed on a throwaway one of its own on loopback, then its first call to the server.
-  const warmer = new Sidecar({ home: join(ROOT, "warmer"), binary: () => QAMP, listen: () => `127.0.0.1:${QPORT + 10}`, name: "warmer", log: () => {}, socket: join(ROOT, "w.sock") });
+  const warmer = new Sidecar({ home: join(ROOT, "warmer"), key: async () => transportKeyOf(randomBytes(32), "n_warmer"), binary: () => QAMP, listen: () => `127.0.0.1:${QPORT + 10}`, name: "warmer", log: () => {}, socket: join(ROOT, "w.sock") });
   await warmer.start();
   const freshQamp: number[] = [];
   const coldQamp: number[] = [];
   for (let i = 0; i < N; i++) {
-    const fresh = new Sidecar({ home: join(ROOT, "node"), binary: () => QAMP, listen: () => null, name: "fresh", log: () => {}, socket: join(ROOT, `f${i % 2}.sock`) });
+    // This node's own transport key, from its keystore; each call signed by its device key, before the clock starts.
+    const fresh = new Sidecar({ home: join(ROOT, "node"), key: () => home.transportKey("file", me.identity.id), binary: () => QAMP, listen: () => null, name: "fresh", log: () => {}, socket: join(ROOT, `f${i % 2}.sock`) });
     await fresh.start();
     if (fresh.state !== "up") throw new Error(`a fresh sidecar didn't start: ${fresh.why}`);
+    const toWarmer = await me.fabric.seal(LINK_PATHS.sync, { have });
     const c0 = performance.now();
-    await fresh.client!.call(warmer.address!, FABRIC.sync, { have }).result.catch(() => null);
+    await fresh.client!.call(warmer.address!, FABRIC.sync, toWarmer).result.catch(() => null);
     coldQamp.push(performance.now() - c0);
+    const toServer = await me.fabric.seal(LINK_PATHS.sync, { have });
     const t0 = performance.now();
-    await fresh.client!.call(serverAddress, FABRIC.sync, { have }).result;
+    await fresh.client!.call(serverAddress, FABRIC.sync, toServer).result;
     freshQamp.push(performance.now() - t0);
     await fresh.stop();
   }

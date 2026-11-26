@@ -1422,6 +1422,17 @@ export class LedgerStore {
     return rows.map(toDevice).filter((d) => includeRevoked || !d.revokedHlc);
   }
 
+  /**
+   * The capabilities of every profile a device ever signed, oldest first, not only its latest: the fabric refuses any
+   * transport key a revoked node ever held, whoever names it after (core's qampEndpointOf says which it held).
+   */
+  profilesOf(device: string): unknown[] {
+    return this.db
+      .query<{ raw: string }, [string]>("SELECT raw FROM events WHERE kind = 'node.profile' AND device = ? ORDER BY hlc, id")
+      .all(device)
+      .map((row) => (JSON.parse(row.raw) as { body?: { caps?: unknown } }).body?.caps ?? null);
+  }
+
   lww<T = Json>(key: string): LwwEntry<T> | null {
     const row = this.db.query<LwwRow, [string]>("SELECT * FROM v_lww WHERE k = ?").get(key);
     return row ? toLww<T>(row) : null;

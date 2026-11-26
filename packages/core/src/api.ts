@@ -1467,6 +1467,8 @@ export const routes = {
   // ---- The fabric (fabric.ts; docs/ARCHITECTURE.md §3): a task handed to another node's agents, over Q-AMP ----
   /** The node's own switch for its fabric, off by default: set it (`on`) or read it (none). Yours alone. */
   fabricSetting: { method: "POST", path: "/api/fabric/setting", scope: "fleet:admin", input: FabricSettingInput },
+  /** A new transport key for the node's sidecar, in place of the one it kept: its peers refuse the old one from then on. Yours alone. */
+  rotateTransportKey: { method: "POST", path: "/api/fabric/rotate", scope: "fleet:admin", input: z.strictObject({}) },
   /** Your grants for hand-offs in force, by pair: which node may hand tasks to which node's agents at once, within what. */
   handoffGrants: { method: "GET", path: "/api/fabric/grants", scope: "fleet:admin", input: null },
   /** Grant one node hand-offs to another's agents, given once for the pair (the next one replaces it). Yours alone. */
