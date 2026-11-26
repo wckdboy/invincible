@@ -16,9 +16,17 @@ I-beam, or a swipe from the left edge) holds a new chat and your latest five, wh
 connectors and Settings, so every place is two taps from Home. A task opens as a thread of its own (`UI/TaskView.swift`:
 the brief, the work folded, the proof card apart from the agent's words, its details in a sheet). A notification, or an
 `invincible://` link (`task/<id>`, `agent/<handle>`, `approval/<id>`, `chat/<id>`), opens its place over Home; one about
-what the screen shows is told only in the list, and a task's Ship it asks Face ID first. An iPad's and a Mac's window are
-three panes: the mark and the INVINCIBLE wordmark at the head of a sidebar of the work by attention (`UI/Places.swift`),
-the place chosen, and a task's details beside it; ⌘K searches or asks. A tap anywhere but a field closes the keyboard
+what the screen shows is told only in the list, and a task's Ship it asks Face ID first. Every screen beyond Home is
+held to Home's bar (I10): its title in SF Pro Display bold on one type scale (`UI/Page.swift`, `Typeset`), sections
+named in small capitals over rows split by hairlines (no cards), a state as a still dot with its word, the verdict said
+once (the agent's bare "Verified." is never shown beside its proof), one answer in full a screen and the rest in its
+menu or a swipe, and Dynamic Type to the largest accessibility size without clipping. Needs you is Home's decisions in
+full, with what was noticed below them, counted nowhere. While the primary answers, its chat's message box stays open:
+Steer and Queue beside Stop (Return does the one Settings → Chat chose), what you queued above the box with Send now,
+Edit and Remove, a held queue saying why with Resume, and a side question asked apart from its menu or with `/btw …`
+(`UI/ChatQueue.swift`, the web's words through the vectors' `composer`). An iPad's and a Mac's window are three panes:
+the mark and the INVINCIBLE wordmark at the head of a sidebar of the work by attention (`UI/Places.swift`), the place
+chosen, and a task's details beside it; ⌘K searches or asks. A tap anywhere but a field closes the keyboard
 (`KeyboardCloser`).
 
 The app keeps up with its node over its live stream (`Node/LiveLink.swift`, the web app's lib/live-link.ts ported and
@@ -63,8 +71,8 @@ The apps of the system Invincible succeeds stay installed until the cutover, so 
 
 | | Invincible |
 |---|---|
-| Bundle IDs | `sh.invincible.bot` (iPhone and iPad; App Store Connect's "Invincible Bot"), `sh.invincible.bot.mac` (Developer ID, outside the App Store), the tests' `….tests` |
-| Push topic | `sh.invincible.bot` (core's `ApplePushKeyInput`), the payload's own part under `invincible` |
+| Bundle IDs | `sh.invincible.bot` (iPhone and iPad; App Store Connect's "Invincible Bot"), its widgets' `sh.invincible.bot.widgets` (the Live Activity), `sh.invincible.bot.mac` (Developer ID, outside the App Store), the tests' `….tests` |
+| Push topic | `sh.invincible.bot` (core's `ApplePushKeyInput`), the payload's own part under `invincible`; a Live Activity's `sh.invincible.bot.push-type.liveactivity` |
 | Keychain | the device key's tag `sh.invincible.bot.device-key`, the phone's copies of keys under the service `sh.invincible.bot.keys`, a Mac's wrapped key labelled "Invincible: …" |
 | Defaults | `sh.invincible.bot.paired-node`, `sh.invincible.bot.mac.place`, `sh.invincible.bot.mac.first-run`, `invincible.awaySeen` (each app's own suite, by its bundle ID) |
 | Links | the `invincible:` scheme (`invincible://pair#pair=…`) |
@@ -102,8 +110,9 @@ With `--heavy` it holds what a busy fleet does, to use the app hard: ten agents,
 but not proven, failed, queued), long chats with the primary and more approvals waiting. With `--auto-approve` the first
 device that asks is let in without a code (the UI tests pair that way). The app comes in through a front of the dev
 node's own, which counts every request the app sends and, under `/__dev/`, answers the UI tests: the invite, the
-requests since a moment, a dead link on demand (nothing goes through either way, as a half-open connection), and a poke
-(a device asking to join, at once).
+requests since a moment, a dead link on demand (nothing goes through either way, as a half-open connection), a poke
+(a device asking to join, at once), the fixture's tasks by what they show, and a demo task stepped through for the Live
+Activity's pictures (held at its start and at its review until asked on).
 
 ## Measured: the performance suite
 
@@ -113,7 +122,7 @@ recorded in every run as an expected failure until it is):
 
 | | Limit | X2's target | Measured, 26 Nov (before → after) |
 |---|---|---|---|
-| From the app's first line to Home's first frame with what it shows (median of five; the whole launch is reported beside it) | 1.5 s | 0.4 s | the whole: 3.3–3.7 s → 2.0 s launched plainly; the app's part 0.42–0.45 s plainly, 0.83–1.0 s under XCUITest |
+| From the app's first line to Home's first frame with what it shows (median of five; the whole launch is reported beside it) | 1.5 s | 0.4 s | the whole: 3.3–3.7 s → 2.0 s launched plainly; the app's part 0.42–0.45 s plainly, 0.83–1.0 s under XCUITest (I9); from its first line as it is now counted, 0.27 s plainly on a quiet Mac and 0.52 s under XCUITest, main and I10 alike (I10) |
 | What it asks the node in a minute at rest | 2 | 2 | 144 → 0 |
 | From something needing you on the node to Home counting it (95th percentile) | 1 s | 1 s | 4.0–4.3 s → 0.18 s |
 | A dead link (the node gone silent) noticed / back once it can be reached | 5 s / 2 s | 5 s / 2 s | 63 s / 5.3–6.8 s → 4.0–4.5 s / 0.8 s |
@@ -123,10 +132,15 @@ recorded in every run as an expected failure until it is):
 
 On a simulator Apple's launch metric reports nothing and its scroll metric only a duration, so the app measures those
 itself, and only when the suite launches it to be measured (`-InvincibleMeasure YES`; `App/PerfProbe.swift`). Launch is
-held from the app's own first line: before it, a simulator spends 1.5–1.6 s starting the process (more under XCUITest,
-whose libraries go into the app, and on a simulator a device panel's tooling puts its own into), which says nothing of a
-device. X2's 400 ms from launch to usable on a device is not met yet: the app's own part measured 0.42–0.45 s. Run it as
-CI does:
+held from the app's own first line, its `init`, before it reads its key and its kept agents (until I10 those reads were
+counted as the platform's): before it, a simulator spends 1.1–1.6 s starting the process (more under XCUITest, whose
+libraries go into the app, and on a simulator a device panel's tooling puts its own into), which says nothing of a
+device. Launched plainly by the simulator (`scripts/launch-plain.sh <simulator> [launches]`, which prints each launch's
+marks), the app's own part is 265–282 ms on the Mac mini's iOS 27.2 simulator while the Mac is quiet (I10: its key +3
+ms, its kept agents +11, its root view +87, Home's first body +115, Home on screen +177, usable +272), within X2's 400
+ms. While other work holds the Mac's cores every part of it takes about twice as long, the keychain read included, so a
+launch is only ever said beside the Mac's load. Under XCUITest it is 0.52 s, so the suite still records the target as
+missed. Run it as CI does:
 
 ```sh
 bun apps/apple/scripts/dev-node.ts --dir /tmp/invincible-dev --heavy --auto-approve &   # writes /tmp/invincible-dev/front.txt
@@ -136,6 +150,39 @@ TEST_RUNNER_INVINCIBLE_DEV_NODE=$(cat /tmp/invincible-dev/front.txt) xcodebuild 
 ```
 
 Without a dev node each UI test says it was skipped, unverified.
+
+## A task's proof on the Lock Screen
+
+A Live Activity and the Dynamic Island (I10; core's `live-activity.ts`): the app starts one when you give a task from the
+phone or open one in hand (`App/LiveActivities.swift`), and it shows the agent's orb in its colour, the task's title (given
+on the phone: it never goes to Apple), each gate's state, the reviewer when it answers, then the verdict, kept a quarter of
+an hour once the task ends. While the app is in front it updates the activity itself from the task's trail
+(`TaskActivityState.of`, held to the web lib's `activityOf` by the vectors' `liveActivities`); otherwise the node does,
+through Apple's push service: the app hands it the activity's own push token (`POST /api/notify/activity`, `mind:read`, a
+paired device's own), and the node sends a `liveactivity` push whenever the team moves and the state changed
+(`packages/node/src/apns-send.ts`, `notify.ts`). What it sends is read strictly before it goes: fixed words and counts,
+never a title, a goal or an agent's words. A node without the route refuses the token, and the activity is still kept up
+from the phone while the app is open; an app without it never asks. The widgets are their own target
+(`InvincibleWidgets`, bundle `sh.invincible.bot.widgets`), with the state's type shared from `Core/TaskActivity.swift`.
+
+## Every screen, pictured
+
+`ShotsTests` pictures every iPhone screen against a dev node, in light and dark, at the default text size and at the
+largest accessibility size, each an attachment of the run's result bundle (`shot-<n>-<screen>-<look>`); and a task's Live
+Activity as it goes, at work and under review in the Dynamic Island (compact and opened) and on the Lock Screen, then
+proven, and in a run of its own a gate that failed (`live-<state>-<where>`; an activity that has ended leaves the island).
+It runs only when asked, each test alone on a simulator of its own: a fresh one opens on Join, pictured before it pairs,
+and a task at work opened in one test starts an activity that would stand in front of the one another pictures. Set the
+simulator's appearance first and ask for that one's looks (`TEST_RUNNER_INVINCIBLE_SHOTS=light` or `dark`): XCUITest's
+own setting doesn't reach an iOS 27 simulator, whose "dark" pictures came out light.
+
+```sh
+xcrun simctl ui <a simulator of its own> appearance dark
+TEST_RUNNER_INVINCIBLE_SHOTS=dark TEST_RUNNER_INVINCIBLE_DEV_NODE=$(cat /tmp/invincible-dev/front.txt) xcodebuild \
+  -project Invincible.xcodeproj -scheme Invincible -destination 'platform=iOS Simulator,id=<a simulator of its own>' \
+  -derivedDataPath build -resultBundlePath shots.xcresult test -only-testing:InvincibleUITests/ShotsTests/testEveryScreen
+xcrun xcresulttool export attachments --path shots.xcresult --output-path shots
+```
 
 ## The iPad and the Mac
 
