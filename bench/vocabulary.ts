@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
  *
  * Not looked at: that one section of docs/ARCHITECTURE.md, the licence and the notice, and the importer (which reads
  * the old system's home, in its words) under IMPORTER, with its tests under IMPORTER_TESTS. A file that isn't text
- * (it holds a NUL) is skipped too.
+ * (it holds a NUL) is skipped too. So is another library's own name that holds a word, whole and as it spells it
+ * (THEIRS).
  *
  * The words are written here backwards, so this file says none of them itself.
  */
@@ -27,6 +28,13 @@ export const NAMES: readonly string[] = [
   "ettenyl", "sedemalap", "eronillep", "rehtu", "eumin", "anagrom", "rotce", "srob", "yak", "karomal",
 ].map(backwards);
 
+/**
+ * Other libraries' own names that hold one of the words, allowed whole and exactly as those libraries spell them, and
+ * nothing that merely contains them (26 November 2026, a narrow exception for the owner to review): FEniCSx's UFL names
+ * a weak form's unknown function so, and the Lab's check calls it. The carry renamed it, and the Lab's check failed.
+ */
+export const THEIRS: readonly string[] = ["noitcnuFlairT", "snoitcnuFlairT"].map(backwards);
+const THEIR_NAMES = new Set(THEIRS);
 const STEM_PART = new RegExp(`^(${STEMS.join("|")})(s|es|ed|ing)?$`);
 const NAME_PART = new Set(NAMES);
 /** The theme's one word written as two, with a space, a hyphen or an underscore between them. */
@@ -53,6 +61,8 @@ export interface Finding {
 function parts(line: string): { part: string; at: number }[] {
   const out: { part: string; at: number }[] = [];
   for (const run of line.matchAll(/[A-Za-z]+/g)) {
+    // (Another library's own name, whole and as it spells it, is that library's word: THEIRS.)
+    if (THEIR_NAMES.has(run[0])) continue;
     for (const piece of run[0].matchAll(/[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+/g)) out.push({ part: piece[0], at: run.index! + piece.index! });
   }
   return out;

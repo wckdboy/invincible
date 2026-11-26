@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findOldWords, IMPORTER, IMPORTER_TESTS, NAMES, STEMS, trackedFiles, wordsIn } from "./vocabulary.ts";
+import { findOldWords, IMPORTER, IMPORTER_TESTS, NAMES, STEMS, THEIRS, trackedFiles, wordsIn } from "./vocabulary.ts";
 
 /*
  * The vocabulary check (vocabulary.ts) catches every word of the old theme however it is written, lets ordinary
@@ -45,6 +45,15 @@ describe("every word of the theme is caught", () => {
     }
     // (A part is a word of its own only where case or a separator says so: "oathbound" is one word, never two.)
     expect(wordsIn("sir, yes sir")).toEqual([]);
+  });
+
+  test("another library's own name that holds one is that library's word, whole and as it spells it; nothing around it is", () => {
+    // (UFL's, which the Lab's check calls: renamed in the carry, the Lab's check failed.)
+    expect(THEIRS.length).toBe(2);
+    for (const theirs of THEIRS) {
+      expect([theirs, wordsIn(`u, v = ufl.${theirs}(V), ufl.TestFunction(V)`)]).toEqual([theirs, []]);
+      for (const around of [`my${theirs}`, `${theirs}Store`]) expect([around, wordsIn(around).length]).toEqual([around, 1]);
+    }
   });
 });
 

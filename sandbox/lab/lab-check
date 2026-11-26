@@ -102,7 +102,7 @@ def _():
     V = fem.functionspace(domain, ("Lagrange", 2))
     facets = mesh.locate_entities_boundary(domain, 1, lambda x: np.full(x.shape[1], True))
     bc = fem.dirichletbc(0.0, fem.locate_dofs_topological(V, 1, facets), V)
-    u, v = ufl.EvalFunction(V), ufl.TestFunction(V)
+    u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
     a = ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
     L = fem.Constant(domain, 1.0) * v * ufl.dx
     uh = LinearProblem(a, L, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"}).solve()

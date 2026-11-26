@@ -55,7 +55,7 @@ def solve(n):
 
     # Stream function: ∫∇ψ·∇φ = ∫(u ∂φ/∂y − v ∂φ/∂x), ψ = 0 on the boundary.
     S = fem.functionspace(msh, ("Lagrange", 3))
-    psi, phi = ufl.EvalFunction(S), ufl.TestFunction(S)
+    psi, phi = ufl.TrialFunction(S), ufl.TestFunction(S)
     msh.topology.create_connectivity(1, 2)
     bdofs = fem.locate_dofs_topological(S, 1, mesh.exterior_facet_indices(msh.topology))
     a = ufl.inner(ufl.grad(psi), ufl.grad(phi)) * ufl.dx
