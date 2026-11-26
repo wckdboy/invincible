@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
                 app.front.value = true
                 try {
                     launch { app.inFront() }
-                    app.poll()
+                    app.live()
                 } finally {
                     app.front.value = false
                 }

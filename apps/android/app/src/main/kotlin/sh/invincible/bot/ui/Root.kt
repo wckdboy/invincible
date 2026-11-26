@@ -162,6 +162,8 @@ fun Root(app: AppModel) {
         if (wide && folded) {
             IconButton(onClick = { folded = false }, modifier = Modifier.align(Alignment.BottomStart).semantics { contentDescription = "Show the sidebar" }) { Icon(PanelIcon, null) }
         }
+        // While the node can't be reached: said over the page, with Retry (its live stream told it within seconds).
+        ReachBanner(app, Modifier.align(Alignment.TopCenter))
     }
     if (places) PlacesSheet(app, nav, give = { giving = true }, close = { places = false })
     if (giving) GiveDialog(app) { giving = false }

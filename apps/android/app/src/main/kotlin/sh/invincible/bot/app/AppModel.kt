@@ -3,17 +3,30 @@ package sh.invincible.bot.app
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.ConnectivityManager
+import android.net.Network
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import sh.invincible.bot.core.After
 import sh.invincible.bot.core.Ask
+import sh.invincible.bot.core.Followers
+import sh.invincible.bot.core.LinkHandlers
+import sh.invincible.bot.core.Live
+import sh.invincible.bot.core.LiveLink
+import sh.invincible.bot.core.NetworkWatch
+import sh.invincible.bot.core.liveOpen
 import sh.invincible.bot.core.DeviceKey
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeClient
@@ -140,8 +153,10 @@ data class FleetLook(val nodes: Int, val online: Int) {
 
 /**
  * The app's state, one for the process (a rotation or a new window keeps it): the pairing, the device key, and what the
- * node last said. While the app is on screen it asks the node every five seconds and after every answer of yours, as
- * the Apple app does; off screen it asks nothing (Android would stop it anyway, and the battery is yours).
+ * node last said. While the app is on screen it keeps the node's live stream open (core's live.ts; LiveLink), which says
+ * what changed, and reads again only that, and what you answer at once after; off screen it asks nothing (Android would
+ * stop it anyway, and the battery is yours). While the stream is down it asks on a timer, as it did before there was one,
+ * and says it can't reach the node.
  */
 class AppModel(context: Context) {
     private val appContext = context.applicationContext
@@ -173,10 +188,15 @@ class AppModel(context: Context) {
     private val _prices = MutableStateFlow<Map<String, Price>?>(null)
     val prices: StateFlow<Map<String, Price>?> = _prices.asStateFlow()
 
-    /** How the fleet stands (GET /api/fleet), asked every minute or so while the app is on screen. */
+    /** How the fleet stands (GET /api/fleet): read when the live stream says it changed (every minute while it is down). */
     private val _fleet = MutableStateFlow<FleetLook?>(null)
     val fleet: StateFlow<FleetLook?> = _fleet.asStateFlow()
-    private var fleetAt = 0L
+    /** The primary's name has been asked for this session (whoami). */
+    private var primaryAsked = false
+
+    /** Whether the node is reached (its live stream up): null until it is first known, false while it can't be. */
+    private val _online = MutableStateFlow<Boolean?>(null)
+    val online: StateFlow<Boolean?> = _online.asStateFlow()
 
     /** The last thing that went wrong asking the node (null: the last ask was answered). */
     private val _problem = MutableStateFlow<NodeError?>(null)
@@ -312,7 +332,7 @@ class AppModel(context: Context) {
         projectsAsked = false
         _prices.value = null
         _fleet.value = null
-        fleetAt = 0
+        primaryAsked = false
         chat.reset()
     }
 
@@ -376,52 +396,183 @@ class AppModel(context: Context) {
         if (Notices.on(appContext)) runCatching { Notices.collect(appContext, c, show = false) }
     }
 
-    /** Asks every five seconds while [active] runs (the activity's STARTED state). */
-    suspend fun poll() {
-        while (true) {
-            refresh()
-            delay(5_000)
+    // ---- the live stream, and what it says to read ----
+
+    /** The routes the screens show: each with the live topics that say it changed, and how often it is asked while the
+     * stream is down (as every route was, every five seconds, before there was a stream). */
+    private data class Route(val path: String, val topics: List<String>, val everyMs: Long, val gapMs: Long = Live.GAP_MS)
+
+    private val routes = listOf(
+        // (The largest answer: no oftener than a second, however busy the agents are.)
+        Route(TEAM, listOf("team"), 5_000, gapMs = 1_000),
+        Route("/api/actions", listOf("actions"), 5_000),
+        Route("/api/questions", listOf("questions"), 5_000),
+        Route("/api/secret-requests", listOf("secretRequests"), 5_000),
+        Route("/api/pairings", listOf("pairings"), 5_000),
+        Route("/api/turns", listOf("turns"), 5_000),
+        Route("/api/about-you", listOf("aboutYou"), 5_000),
+        Route("/api/notices", listOf("notices"), 5_000),
+        Route("/api/screen/sessions", listOf("screenSessions"), 5_000),
+        // (Spend moves as turns, runs and the agents' work do: no topic of its own. Read now and then while they move.)
+        Route("/api/usage/meter", listOf("turns", "runs", "team"), 60_000, gapMs = 30_000),
+        Route("/api/fleet", listOf("fleet"), 60_000),
+    )
+
+    /** What each route last answered: the pieces the Inbox and the table are made of. One that fails keeps what it had. */
+    private val answers = HashMap<String, Json>()
+
+    private val main = Handler(Looper.getMainLooper())
+    private val afterMain: After = { ms, run ->
+        val step = Runnable(run)
+        main.postDelayed(step, ms)
+        ({ main.removeCallbacks(step) })
+    }
+    private val clock: () -> Long = { SystemClock.elapsedRealtime() }
+    private val followers = Followers(afterMain, clock).also { f ->
+        for (route in routes) f.follow(route.topics, route.everyMs, route.gapMs) { _, done ->
+            scope.launch {
+                try {
+                    read(route.path)
+                } finally {
+                    done()
+                }
+            }
         }
     }
 
-    /** One look at everything the screens show, the asks in parallel; one that fails leaves what it had. */
+    /** The stream to the node this phone is paired with (null: none yet). */
+    private fun linkFor(c: NodeClient): LiveLink = LiveLink(
+        open = liveOpen(scope, Dispatchers.IO, post = { run -> main.post { run() } }) { opened, alive, event ->
+            c.stream("/api/live", opened, alive, event)
+        },
+        // (No stream on an older node, a device that may not read it, a revoked one: tried again only when told.)
+        refused = { it is NodeError && it.status in listOf(401, 403, 404) },
+        after = afterMain,
+        now = clock,
+    ).also { link ->
+        link.attach(object : LinkHandlers {
+            override fun up(topics: List<String>, at: Long) {
+                _online.value = true
+                // (The node's beat, as its hello said: the chat's watch is held to it too.)
+                chat.beat = link.beat
+                followers.up(at)
+            }
+
+            override fun changed(topics: List<String>) = followers.changed(topics)
+
+            override fun down() {
+                _online.value = false
+                followers.down()
+            }
+
+            override fun lost() {
+                _online.value = false
+                // (Every stream of this node went the same way: the chat being watched is found again too.)
+                chat.linkLost()
+            }
+        })
+    }
+
+    /**
+     * While the app is on screen (the activity's STARTED state): the node's live stream open, and what it says changed
+     * read again; the network watched, so a link back is used at once. Off screen, nothing.
+     */
+    suspend fun live() {
+        _paired.collectLatest { node ->
+            if (node == null) return@collectLatest
+            // (Paired a moment ago, its client may be made after its pairing was told: made here then.)
+            val c = client ?: run {
+                connect()
+                client
+            } ?: return@collectLatest
+            val link = linkFor(c)
+            val network = appContext.getSystemService(ConnectivityManager::class.java)
+            // The network under the app: a change can leave the stream open dead without a word (Wi-Fi to cellular, lost,
+            // back), so a fresh one is opened at once, never left to time out. (Told on the main thread, as the link is.)
+            val seen = NetworkWatch<Network>()
+            val watch = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(n: Network) {
+                    if (seen.available(n)) moved(link) else link.retry()
+                }
+
+                override fun onLost(n: Network) {
+                    if (seen.lost(n)) moved(link)
+                }
+            }
+            runCatching { network?.registerDefaultNetworkCallback(watch, main) }
+            linkNow = link
+            link.start()
+            try {
+                awaitCancellation()
+            } finally {
+                link.stop()
+                if (linkNow === link) linkNow = null
+                followers.off()
+                runCatching { network?.unregisterNetworkCallback(watch) }
+                _online.value = null
+            }
+        }
+    }
+
+    private fun moved(link: LiveLink) {
+        link.renew()
+        chat.linkLost()
+    }
+
+    /** The stream open now (null: the app off screen, or not paired). */
+    private var linkNow: LiveLink? = null
+
+    /** A fresh stream opened now, whatever stands: refused, waiting to try again, or hanging on a dead link (the banner's Retry). */
+    fun reconnect() {
+        main.post { linkNow?.renew() }
+    }
+
+    /** One route read again, and what it changes drawn. */
+    private suspend fun read(path: String) {
+        val c = client ?: return
+        val got = attempt { c.get(path) }
+        got.onSuccess { answers[path] = it }
+        if (path == TEAM) _problem.value = got.exceptionOrNull() as? NodeError
+        rebuild()
+        if (path == "/api/turns") chat.follow(_table.value.chats)
+        lookAround(c)
+    }
+
+    /** Everything the screens show, read at once (after an answer of yours), the asks in parallel. */
     suspend fun refresh() {
         val c = client ?: return
         coroutineScope {
-            val team = async { attempt { c.get("/api/team") } }
-            val actions = async { attempt { c.get("/api/actions") } }
-            val questions = async { attempt { c.get("/api/questions") } }
-            val keys = async { attempt { c.get("/api/secret-requests") } }
-            val pairings = async { attempt { c.get("/api/pairings") } }
-            val turns = async { attempt { c.get("/api/turns") } }
-            val about = async { attempt { c.get("/api/about-you") } }
-            val notices = async { attempt { c.get("/api/notices") } }
-            val screens = async { attempt { c.get("/api/screen/sessions") } }
-            val usage = async { attempt { c.get("/api/usage/meter") } }
-            val got = listOf(team, actions, questions, keys, pairings, turns, about, notices, screens, usage).map { it.await() }
-            val failure = got.firstNotNullOfOrNull { it.exceptionOrNull() as? NodeError }
-            _problem.value = if (got[0].isSuccess) null else failure
-
-            val inbox = Inbox(
-                actions = got[1].getOrNull()?.let { j -> j["actions"].list.filter { it["state"].string == "waiting" } } ?: _inbox.value.actions,
-                questions = got[2].getOrNull()?.let { it["questions"].list } ?: _inbox.value.questions,
-                keys = got[3].getOrNull()?.let { it["requests"].list } ?: _inbox.value.keys,
-                pairings = got[4].getOrNull()?.let { it["pairings"].list } ?: _inbox.value.pairings,
-                facts = got[6].getOrNull()?.let { it["proposed"].list } ?: _inbox.value.facts,
-                notices = got[7].getOrNull()?.let { Inbox.open(it["notices"].list) } ?: _inbox.value.notices,
-                screens = got[8].getOrNull()?.let { Inbox.live(it["sessions"].list) } ?: _inbox.value.screens,
-            )
-            _inbox.value = inbox
-            got[9].getOrNull()?.let(UsageMeter::of)?.let { _usage.value = it }
-            val turnsJson = got[5].getOrNull()
-            val asks = inbox.actions.map { Ask(it["by"].string ?: "", it["connector"].string, it["tool"].string) }
-            val teamJson = got[0].getOrNull()
-            _table.value = _table.value.after(teamJson?.let(Snapshot::of), turnsJson, asks, inbox.count, System.currentTimeMillis(), teamJson?.let(TeamTask::all))
-            // (What the node said of the team just now is kept for the next time the app opens: KeptTable.)
-            got[0].getOrNull()?.let { team -> keep(team, turnsJson, asks, inbox.count) }
+            val got = routes.filter { it.path != "/api/fleet" }.map { route -> route.path to async { attempt { c.get(route.path) } } }.map { (path, asked) -> path to asked.await() }
+            for ((path, result) in got) result.onSuccess { answers[path] = it }
+            val team = got.first { it.first == TEAM }.second
+            _problem.value = if (team.isSuccess) null else got.firstNotNullOfOrNull { it.second.exceptionOrNull() as? NodeError }
         }
+        rebuild()
         chat.follow(_table.value.chats)
         lookAround(c)
+    }
+
+    /** The Inbox and the table, from what each route last answered. */
+    private fun rebuild() {
+        val inbox = Inbox(
+            actions = answers["/api/actions"]?.let { j -> j["actions"].list.filter { it["state"].string == "waiting" } } ?: _inbox.value.actions,
+            questions = answers["/api/questions"]?.let { it["questions"].list } ?: _inbox.value.questions,
+            keys = answers["/api/secret-requests"]?.let { it["requests"].list } ?: _inbox.value.keys,
+            pairings = answers["/api/pairings"]?.let { it["pairings"].list } ?: _inbox.value.pairings,
+            facts = answers["/api/about-you"]?.let { it["proposed"].list } ?: _inbox.value.facts,
+            notices = answers["/api/notices"]?.let { Inbox.open(it["notices"].list) } ?: _inbox.value.notices,
+            screens = answers["/api/screen/sessions"]?.let { Inbox.live(it["sessions"].list) } ?: _inbox.value.screens,
+        )
+        if (inbox != _inbox.value) _inbox.value = inbox
+        answers["/api/usage/meter"]?.let(UsageMeter::of)?.let { if (it != _usage.value) _usage.value = it }
+        answers["/api/fleet"]?.let(FleetLook::of)?.let { if (it != _fleet.value) _fleet.value = it }
+        val turnsJson = answers["/api/turns"]
+        val asks = inbox.actions.map { Ask(it["by"].string ?: "", it["connector"].string, it["tool"].string) }
+        val teamJson = answers[TEAM]
+        val table = _table.value.after(teamJson?.let(Snapshot::of), turnsJson, asks, inbox.count, System.currentTimeMillis(), teamJson?.let(TeamTask::all))
+        if (table != _table.value) _table.value = table
+        // (What the node said of the team just now is kept for the next time the app opens: KeptTable.)
+        teamJson?.let { team -> keep(team, turnsJson, asks, inbox.count) }
     }
 
     /** What the work's names, a task's cost and the machine chip read, asked beside the rest and far less often. */
@@ -433,12 +584,11 @@ class AppModel(context: Context) {
             }.onFailure { projectsAsked = false }
         }
         if (_prices.value == null) attempt { c.get("/api/prices") }.onSuccess { _prices.value = Spend.pricesOf(it) }
-        val now = System.currentTimeMillis()
-        if (now - fleetAt > 60_000) {
-            fleetAt = now
-            attempt { c.get("/api/fleet") }.onSuccess { _fleet.value = FleetLook.of(it) }
-            // What the primary is called, where the node names it (core's Primary).
-            attempt { c.get("/api/whoami") }.onSuccess { Primary.named(it["primaryName"].string) }
+        // What the primary is called, where the node names it (core's Primary): once a session (the fleet's chip follows
+        // the stream's `fleet`).
+        if (!primaryAsked) {
+            primaryAsked = true
+            attempt { c.get("/api/whoami") }.onSuccess { Primary.named(it["primaryName"].string) }.onFailure { primaryAsked = false }
         }
     }
 
@@ -538,6 +688,9 @@ class AppModel(context: Context) {
 
         /** A number of anything, as a badge says it. */
         fun badge(n: Int): String = if (n > 99) "99+" else n.toString()
+
+        /** The agents' route: what the app reads first, and whose failure is the one said. */
+        private const val TEAM = "/api/team"
 
     }
 }

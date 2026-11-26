@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import sh.invincible.bot.core.Json
+import sh.invincible.bot.core.Live
 import sh.invincible.bot.core.LookNote
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.long
@@ -58,7 +59,12 @@ class ChatModel(private val app: AppModel) {
     val chats: StateFlow<List<Json>> = _chats.asStateFlow()
 
     private var watch: Job? = null
+    /** How the stream watched now is taken for dead at once (null: none is watched). */
+    private var quiet: (() -> Unit)? = null
     private var turn: String? = null
+
+    /** The node's beat, as its live stream's hello said (an older node's until one has): a turn's stream beats with it. */
+    var beat: Long = Live.OLDER_BEAT_MS
     private var seenChats: String? = null
 
     fun reset() {
@@ -73,7 +79,13 @@ class ChatModel(private val app: AppModel) {
     private fun leave() {
         watch?.cancel()
         watch = null
+        quiet = null
         _live.value = false
+    }
+
+    /** The node's live stream went silent, or the network changed under it: the turn's stream went the same way. */
+    fun linkLost() {
+        quiet?.invoke()
     }
 
     suspend fun loadChats() {
@@ -143,7 +155,7 @@ class ChatModel(private val app: AppModel) {
             "conversation" to id,
             "messages" to listOf(mapOf("role" to "user", "content" to words, "attachments" to attachments.ifEmpty { null })),
         )
-        stream { c.events("/api/chat", body) }
+        stream { alive -> c.events("/api/chat", body, alive) }
     }
 
     private fun attachTo(turnId: String) {
@@ -152,16 +164,23 @@ class ChatModel(private val app: AppModel) {
         val shown = _bubbles.value
         val last = shown.lastOrNull()
         _bubbles.value = if (last != null && !last.mine) shown.dropLast(1) + last.copy(text = "", status = "streaming", steps = emptyList()) else shown + Bubble("assistant", "", "streaming")
-        stream { c.events("/api/turns/attach", Json.obj("turn" to turnId)) }
+        stream { alive -> c.events("/api/turns/attach", Json.obj("turn" to turnId), alive) }
     }
 
-    private fun stream(events: () -> kotlinx.coroutines.flow.Flow<Json>) {
+    /**
+     * Watches a turn's stream. It beats as the node's live stream does: silent for three of the node's beats (`beat`), or
+     * when the live stream is lost or the network changes under it, it is gone (a half-open link, a node gone from the
+     * network), and the turn is attached to again, which replays it from its start; with no turn to attach to yet, it says so.
+     */
+    private fun stream(events: (alive: () -> Unit) -> kotlinx.coroutines.flow.Flow<Json>) {
         leave()
         _live.value = true
         _problem.value = null
-        watch = app.launch {
+        val heard = java.util.concurrent.atomic.AtomicLong(android.os.SystemClock.elapsedRealtime())
+        lateinit var collecting: Job
+        collecting = app.launch {
             try {
-                events().collect { e -> take(e) }
+                events { heard.set(android.os.SystemClock.elapsedRealtime()) }.collect { e -> take(e) }
                 finish("done")
             } catch (e: NodeError) {
                 finish("failed", e.message)
@@ -170,8 +189,34 @@ class ChatModel(private val app: AppModel) {
             } catch (e: Exception) {
                 finish("failed", e.message)
             } finally {
-                _live.value = false
-                turn = null
+                // (Only while it is still the one watched: one taken for dead is replaced before it finishes.)
+                if (watch === collecting) {
+                    _live.value = false
+                    turn = null
+                }
+            }
+        }
+        watch = collecting
+        val dead = {
+            if (collecting.isActive && watch === collecting) {
+                val again = turn
+                collecting.cancel()
+                quiet = null
+                if (again != null) attachTo(again) else {
+                    watch = null
+                    _live.value = false
+                    finish("failed", "Its answer stopped coming: the link to the node went quiet. Open the chat again to read it.")
+                }
+            }
+        }
+        quiet = dead
+        app.launch {
+            while (collecting.isActive && watch === collecting) {
+                kotlinx.coroutines.delay(Live.BEAT_MS)
+                if (android.os.SystemClock.elapsedRealtime() - heard.get() > 3 * beat) {
+                    dead()
+                    break
+                }
             }
         }
     }
