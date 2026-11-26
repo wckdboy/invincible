@@ -84,8 +84,9 @@ answered and its fixes reviewed again.
 ## Agents across nodes: the hand-off
 
 `invincible hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools fleet,compute,place,ledger] [--budget 2]
-[--follow]`, and `invincible handed [<id> [--follow] | stop <id>]` (its exit code is the verdict: 0 means proven).
-The routes are `handTask`, `handedTasks`, `handedTask` and `stopHanded`, with `handoffGrants`, `grantHandoffs` and
+[--follow]`, and `invincible handed [<id> [--follow] | stop <id> | revoke <id>]` (its exit code is the verdict: 0
+means proven; `revoke` cuts its run off from this node's tools, the task going on there without them).
+The routes are `handTask`, `handedTasks`, `handedTask`, `stopHanded` and `revokeHandedRun`, with `handoffGrants`, `grantHandoffs` and
 `revokeHandoffs` for your grants (and `fabricSetting`, the switch). One Q-AMP call between the two nodes'
 transport keys carries all of it:
 

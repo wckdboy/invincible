@@ -16,7 +16,7 @@ const dim = (s: string) => (tty ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (tty ? `\x1b[1m${s}\x1b[0m` : s);
 
 export const HAND_USAGE = `usage: invincible hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools ${FABRIC_RUN_TOOLS.join(",")}] [--budget <usd>] [--title "…"] [--follow]
-       invincible handed [<id> [--follow] | stop <id>]`;
+       invincible handed [<id> [--follow] | stop <id> | revoke <id>]`;
 
 /** A handed task's verdict, in the apps' words, from what the node that ran it signed (null: not ended yet). */
 export function handedVerdict(view: HandedView): { word: string; proven: boolean } | null {
@@ -161,6 +161,12 @@ export async function handCommand(api: Api, command: "hand" | "handed", rest: st
     const { handed } = await api.call<{ handed: HandedView[] }>("handedTasks");
     if (!handed.length) console.log(`No task handed to another node yet. ${HAND_USAGE.split("\n")[0]!.replace("usage: ", "")}`);
     for (const view of handed) console.log(summary(view));
+    return;
+  }
+  if (first === "revoke") {
+    if (!second) throw new Error("usage: invincible handed revoke <id>");
+    const view = await api.call<HandedView>("revokeHandedRun", { id: second });
+    console.log(`Cut ${view.id}'s run on ${plainLine(view.node.name)} off from this node's tools: its next call is refused, and the task goes on there without them.`);
     return;
   }
   if (first === "stop") {

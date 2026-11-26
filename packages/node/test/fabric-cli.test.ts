@@ -210,3 +210,20 @@ describe("what `invincible handed` prints of another node's words (L5)", () => {
     expect(printed).toContain("all gates passed");
   });
 });
+
+describe("invincible handed revoke: a run's key cut off alone (I3)", () => {
+  test("it asks the node to revoke that run's grant, and says the task goes on there", async () => {
+    const sent: [string, unknown][] = [];
+    const api = { call: async (name: string, input: unknown) => (sent.push([name, input]), base) };
+    const out: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => void out.push(args.join(" ")));
+    try {
+      await handCommand(api as never, "handed", ["revoke", base.id], {});
+    } finally {
+      log.mockRestore();
+    }
+    expect(sent).toEqual([["revokeHandedRun", { id: base.id }]]);
+    expect(out.join("\n")).toContain("its next call is refused, and the task goes on there without them");
+    await expect(handCommand(api as never, "handed", ["revoke"], {})).rejects.toThrow("usage: invincible handed revoke <id>");
+  });
+});

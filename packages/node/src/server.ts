@@ -4544,6 +4544,13 @@ export function createApp(ctx: AppContext) {
       ownerOnly(p);
       return handErrors(() => ctx.handoffs!.stop(input.id));
     },
+    revokeHandedRun: (input, p) => {
+      ownerOnly(p);
+      return handErrors(async () => {
+        await ctx.handoffs!.revokeRun(input.id);
+        return ctx.handoffs!.get(input.id, -1);
+      });
+    },
     qampGrant: (input, p) => {
       ownerOfQamp(p);
       return qampErrors(() => ctx.qamp.grant(input, p));

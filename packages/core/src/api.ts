@@ -1483,6 +1483,8 @@ export const routes = {
   handedTask: { method: "POST", path: "/api/fabric/handed/one", scope: "chat", input: z.strictObject({ id: HandId, after: z.number().int().min(0).max(10_000_000).optional() }) },
   /** Stop a task handed on: the node it runs on stops the work and says how it ended. Yours alone. */
   stopHanded: { method: "POST", path: "/api/fabric/handed/stop", scope: "fleet:admin", input: z.strictObject({ id: HandId }) },
+  /** Cut a handed task's run off from this node's tools (its grant revoked: its next call refused); the task goes on there. Yours alone. */
+  revokeHandedRun: { method: "POST", path: "/api/fabric/handed/revoke", scope: "fleet:admin", input: z.strictObject({ id: HandId }) },
 
   // ---- The archive (node-local: what this node keeps, for good) -----------------
   /** Entries, chunks embedded, the backlog, the embedder, the last integrity check, disk used. */

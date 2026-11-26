@@ -122,6 +122,8 @@ export class Fabric implements SyncTransport {
   /** Link calls' nonces, for their signatures' window: a call sent twice is refused the second time. */
   private readonly nonces = new NonceCache();
   private readonly running = new Map<string, Set<Invocation>>();
+  /** Each tracked call's own signal's controller, so a revocation stops its work. */
+  private readonly cuts = new WeakMap<Invocation, AbortController>();
   private tools: FabricTools | null = null;
   private readonly unsubscribe: () => void;
 
@@ -308,13 +310,24 @@ export class Fabric implements SyncTransport {
       held.delete(inv);
       fail(code, message, retryable, data);
     };
+    // Its work's own signal: the call's, and cut off with its node if that node is revoked here (cutOff).
+    const cut = new AbortController();
+    const call = inv.signal;
+    if (call.aborted) cut.abort(call.reason);
+    else call.addEventListener("abort", () => cut.abort(call.reason), { once: true });
+    inv.signal = cut.signal;
+    this.cuts.set(inv, cut);
     inv.signal.addEventListener("abort", () => held.delete(inv), { once: true });
   }
 
   private cutOff(device: string): void {
     const calls = this.running.get(device);
     this.running.delete(device);
-    for (const inv of calls ?? []) inv.fail(3, "this node was revoked");
+    for (const inv of calls ?? []) {
+      inv.fail(3, "this node was revoked");
+      // Its work stops too (a forwarded command, a run's call), not only its answer.
+      this.cuts.get(inv)?.abort(new Error("the node that called was revoked"));
+    }
     this.tools?.revoked(device);
     this.paths.delete(device);
     this.deps.log(`fabric: ${device.slice(0, 12)} was revoked: its calls here ended, and it is refused from the next one`);

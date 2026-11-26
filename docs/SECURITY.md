@@ -500,9 +500,13 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   so a runner can't swap them (the review's I2). Tests: `fabric.test.ts` (each of those), `fabric-handoff.e2e.test.ts`
   (a runner signing with another key, end to end).
 - **Revocation.** A node revoked is refused from its very next call wherever the revocation has reached (a push: on
-  loopback about 25 ms over Q-AMP, 32 ms over HTTPS), and its calls under way at that node end. A run's key is cut off
-  by revoking its grant at the giver's sidecar: its next call is refused (about 10 ms on loopback, most of it the
-  sidecar's durable write). Tests: `fabric.e2e.test.ts`, `fabric-handoff.e2e.test.ts`.
+  loopback about 25 ms over Q-AMP, 32 ms over HTTP). Its calls under way at that node end, and their work stops with
+  them, not only their answers (a forwarded command's own signal aborts; the review's I3). A revocation that lands
+  while a task is being given there stops that task. A run's key is cut off alone, its task going on without the
+  giver's tools, by `invincible handed revoke <id>` (the `revokeHandedRun` route): its grant is revoked at the giver's
+  sidecar and its next call refused (about 10 ms on loopback, most of it the sidecar's durable write). Tests:
+  `fabric-service.test.ts`, `fabric-hand-grant.test.ts`, `fabric-cli.test.ts`, `fabric.e2e.test.ts`,
+  `fabric-handoff.e2e.test.ts`.
 - **Grants never outlive their task** (the review's L1). Minted once, when the task is taken (a second `accepted` is
   ignored); renewed at half their life while the run lives there; revoked the moment the runner says the task ended,
   even with the call still open; never renewed past the call's deadline (24 h). An end the call's result didn't bring

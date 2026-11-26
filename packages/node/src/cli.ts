@@ -426,8 +426,9 @@ Agents (MCP, ACP)
                                   a task for another node's agents, over Q-AMP: it runs there, its trail comes back as it
                                   goes, and its proof (signed by that node's own key) is checked here; --tools: what its
                                   run may call back here, under a grant to its own key that ends with the task
-  handed [<id> [--follow] | stop <id>]
-                                  the tasks handed on, one with its trail, or stop one there; the exit code is the verdict
+  handed [<id> [--follow] | stop <id> | revoke <id>]
+                                  the tasks handed on, one with its trail, or stop one there; the exit code is the verdict;
+                                  revoke cuts its run off from this node's tools, the task going on there without them
 
 Maintenance
   awake on|off|status             a Mac set to stay on (a Mac mini serving the fleet) is kept from sleeping while its

@@ -156,3 +156,40 @@ describe("plain HTTP to a peer that speaks Q-AMP (L7)", () => {
     expect(fabricOf("off").httpRefused(withEndpoint("http://192.0.2.10:7400"))).toBeNull();
   });
 });
+
+describe("a node revoked here (I3)", () => {
+  test("its forwarded work under way is cut off: the route's own signal aborts, so the work stops, not only its answer", async () => {
+    const alpha = newNodeIdentity();
+    const key = transportKeyOf(new Uint8Array(32).fill(4), alpha.id);
+    const device: Device = { ...peer, id: alpha.id, name: "alpha", profile: { endpoint: "http://127.0.0.1:1", caps: { qamp: { did: key.did, address: `qamp://${key.did}@127.0.0.1:7410`, pop: key.pop } } } };
+    let revoked = false;
+    const listeners: ((events: { kind: string; body: unknown }[], rebuilt: boolean) => void)[] = [];
+    const store = {
+      onApplied: (listener: (typeof listeners)[number]) => (listeners.push(listener), () => {}),
+      devices: (withRevoked = false) => (withRevoked || !revoked ? [device] : []),
+      activeDevice: (id: string) => (id === alpha.id && !revoked ? device : null),
+      profilesOf: () => [],
+    } as unknown as LedgerStore;
+    const sidecar = { client: null, did: "did:key:z6Mkself", address: null, state: "up", why: null } as unknown as Sidecar;
+    let routeSignal: AbortSignal | null = null;
+    const fabric = new Fabric({
+      store,
+      identity: newNodeIdentity(),
+      sidecar,
+      log: () => {},
+      presence: async () => ({}) as never,
+      // A long command in a sandbox: it waits on its signal, as the server's route does.
+      route: (_path, _body, _principal, signal) => ((routeSignal = signal), new Promise(() => {})),
+    });
+    const sealer = new Fabric({ store, identity: alpha, sidecar, log: () => {}, presence: async () => ({}) as never });
+    let failed: { code: number; message: string } | null = null;
+    const inv = { task: 1, tool: "invincible/link/forward", args: await sealer.seal("/api/sandboxes/exec", { id: "0a1b2c3d4e", cmd: ["sleep", "4500"] }), caller: key.did, authorization: { kind: "public" }, chain: [], meta: null, deadlineMs: null, input: false, signal: new AbortController().signal, inputs: { [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) }, emit() {}, progress() {}, complete() {}, fail: (code: number, message: string) => void (failed = { code, message }) };
+    fabric.door(inv as never);
+    for (let i = 0; i < 50 && !routeSignal; i++) await Bun.sleep(10);
+    expect(routeSignal).not.toBeNull();
+    revoked = true;
+    for (const listener of listeners) listener([{ kind: "device.revoked", body: { device: alpha.id } }], false);
+    expect(failed as { code: number; message: string } | null).toEqual({ code: 3, message: "this node was revoked" });
+    expect((routeSignal as AbortSignal | null)?.aborted).toBe(true);
+  });
+});
