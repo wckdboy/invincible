@@ -189,7 +189,8 @@ async function showPush(event: PushEventLike): Promise<void> {
     // Android's status bar draws a badge from its alpha alone: the field in white on nothing, not the tile (a white
     // square). No picture (`image`): its words are the message, and a picture would only decorate it.
     badge: "/icon-mono-96.png",
-    data: { open: shown.open, ...(shown.conversation ? { conversation: shown.conversation } : {}) },
+    // Where a tap opens: the place, and the chat or the task it names (a task's own thread, never the one that needs you most).
+    data: { open: shown.open, ...(shown.conversation ? { conversation: shown.conversation } : {}), ...(shown.task ? { task: shown.task } : {}) },
   });
   await countOnIcon(shown);
 }

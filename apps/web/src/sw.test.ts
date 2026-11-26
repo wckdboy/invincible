@@ -228,6 +228,23 @@ describe("a tap opens the app at the right place", () => {
     }
   });
 
+  test("a task's notification opens that very task, in the window that's open or in one of its own", async () => {
+    const task = { v: 1, kind: "finished", title: "Your agent's task: Proven", body: "Proven · $0.31. Its changes are ready to ship.", open: "task", task: "task-abc123def456", ship: true, tag: "t-task0123456789abcdefgh" };
+    windows = [];
+    shown.length = 0;
+    opened.length = 0;
+    await push(task);
+    // What the notification remembers names the task: a tap never opens the one that needs you most instead.
+    expect(shown[0]!.options.data).toEqual({ open: "task", task: "task-abc123def456" });
+    await tap();
+    expect(opened).toEqual(["/#/task/task-abc123def456"]);
+    opened.length = 0;
+    windows = [windowAt(`${ORIGIN}/#/home`, "visible")];
+    await tap();
+    expect(windows[0]!.messages).toEqual([{ type: "invincible:open", open: "task", conversation: null, task: "task-abc123def456" }]);
+    expect(opened).toEqual([]);
+  });
+
   test("a page that can't be brought forward, or another site's, isn't relied on: the place opens in a window of its own", async () => {
     shown.length = 0;
     opened.length = 0;
