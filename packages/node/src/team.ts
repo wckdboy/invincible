@@ -225,11 +225,17 @@ export class TeamService {
   }
   /**
    * One task ended now, in these words, by no word of yours: another node's hand-off that nobody follows any more, or
-   * one your grant for it was revoked under (fabric/handoff.ts). Running, queued or waiting for you; ended ones stay.
+   * one your grant for it was revoked under (fabric/handoff.ts). Running, queued, waiting for you, or cut off by a crash;
+   * ended ones stay.
    */
   stopTask(task: string, why: string): void {
     this.accepting();
     const found = this.store.task(task);
+    if (found?.status === "interrupted") {
+      this.store.endInterrupted(task, why);
+      this.changed();
+      return;
+    }
     if (!found || (found.status !== "running" && found.status !== "queued" && found.status !== "proposed")) return;
     this.cancel({ task }, "stopped", why);
     this.store.finish(task, "stopped", why);

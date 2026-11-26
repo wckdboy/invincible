@@ -733,9 +733,17 @@ export class TeamStore {
     const given = this.db.query<{ usd: number | null }, [string, number]>("SELECT SUM(json_extract(data, '$.budgetUsd')) AS usd FROM team_jobs WHERE kind = 'task' AND json_extract(data, '$.givenBy') = ? AND json_extract(data, '$.proposedBy') IS NULL AND created_at > ?").get(by, since)!.usd ?? 0;
     return { atOnce, given };
   }
-  /** The tasks other nodes handed here that haven't ended (waiting for you, queued or running), by id. */
+  /** The tasks other nodes handed here that haven't ended (waiting for you, queued, running, or cut off by a crash), by id. */
   handedOpen(): string[] {
-    return this.db.query<{ id: string }, []>("SELECT id FROM team_jobs WHERE kind = 'task' AND status IN ('proposed','queued','running') AND json_extract(data, '$.givenBy') LIKE 'node:%' ORDER BY seq").all().map((r) => r.id);
+    return this.db.query<{ id: string }, []>("SELECT id FROM team_jobs WHERE kind = 'task' AND status IN ('proposed','queued','running','interrupted') AND json_extract(data, '$.givenBy') LIKE 'node:%' ORDER BY seq").all().map((r) => r.id);
+  }
+  /** Interrupted work nobody should take up again (another node's hand-off whose call ended with it): stopped, in these words. */
+  endInterrupted(key: string, error: string): void {
+    const row = this.jobRow(key);
+    if (row?.status !== "interrupted") return;
+    const data = JSON.parse(row.data);
+    delete data.restart;
+    this.db.query("UPDATE team_jobs SET status='stopped',error=?,data=?,updated_at=? WHERE id=?").run(teamOutput(error, 2000), JSON.stringify(data), this.now(), key);
   }
   /** A task's work, shipped as a pull request on your word (PLAN #37): said on it from then on. */
   markShipped(key: string, shipped: TeamTaskShipped): void {
@@ -1045,6 +1053,12 @@ export class TeamStore {
       const row = this.jobRow(key);
       if (!row || row.status !== "running") return;
       const data = JSON.parse(row.data);
+      // Another node's hand-off (fabric/handoff.ts): its call ends with this restart, and nobody would follow it after,
+      // so it ends here rather than run again by itself.
+      if (row.kind === "task" && typeof data.givenBy === "string" && data.givenBy.startsWith("node:")) {
+        this.finish(key, "stopped", "Invincible restarted during this work, which was handed over by another node: its call ended with the restart, and nobody follows it now, so it ends here rather than run again unseen.");
+        return;
+      }
       const again = data.restart?.resumed === true;
       // A reply is begun again from its start: one that had already done something (acted) would do it twice.
       const acted = row.kind === "delivery" && data.acted === true;
