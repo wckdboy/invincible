@@ -2393,7 +2393,7 @@ export function createApp(ctx: AppContext) {
     });
     team.outcomes = outcomes;
     // What it starts on its own yes (TeamService.approveOwn) must fit what is left of your budget, when you set one.
-    ctx.team.service = new TeamService({ store: ctx.team.store, ...runtime, answer: answerInRoom, timeoutMs: 15 * 60_000, taskTimeoutMs: null, restartWaitMs: (TEAM_COMMAND_SECONDS + 60) * 1000, budgetLeft: () => ctx.usage.meter(ctx.nodeName, moneyOf(ctx.store)).leftUsd, onRecruit, onTaskEnded: (task) => {
+    ctx.team.service = new TeamService({ store: ctx.team.store, ...runtime, onChange: () => ctx.handoffs?.poke(), answer: answerInRoom, timeoutMs: 15 * 60_000, taskTimeoutMs: null, restartWaitMs: (TEAM_COMMAND_SECONDS + 60) * 1000, budgetLeft: () => ctx.usage.meter(ctx.nodeName, moneyOf(ctx.store)).leftUsd, onRecruit, onTaskEnded: (task) => {
       if (task.outcome) outcomes.nudge();
       // A fix to a pull request that ended verified is offered to you as a push onto its branch, as its agent's (ci-back.ts).
       if (task.fix) void offerFix({ call: (input) => ctx.connectors.call(input, { kind: "agent", by: agentLabel(task.assignee) }), note: (id, text) => team.service?.noteTask(id, text), log: ctx.log }, task);

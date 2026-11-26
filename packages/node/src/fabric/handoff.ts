@@ -137,6 +137,8 @@ export class Handoffs implements FabricTools {
   private readonly stopTimers = new Set<ReturnType<typeof setTimeout>>();
   /** The node is stopping: nothing more is written or followed (its database closes after this). */
   private closed = false;
+  /** Followers waiting for the agents here to change something (poke), each at most a while. */
+  private readonly wakers = new Set<() => void>();
 
   constructor(private readonly deps: HandoffsDeps) {
     this.now = deps.now ?? Date.now;
@@ -356,12 +358,31 @@ export class Handoffs implements FabricTools {
     return this.view(this.row(id)!);
   }
 
+  /** The agents here changed something (a trail's line, a task's state): whoever follows a run here looks now. */
+  poke(): void {
+    for (const wake of [...this.wakers]) wake();
+  }
+
+  /** Until the agents here change something, or `ms` at most. */
+  private nap(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        this.wakers.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, ms);
+      this.wakers.add(wake);
+    });
+  }
+
   /**
    * As the node stops, before its database closes: nothing more is written or followed here, and no timer of a hand-off
    * outlives the node (the calls end with its sidecar, and each runner stops its work when its call ends).
    */
   close(): void {
     this.closed = true;
+    this.poke();
     for (const timer of this.stopTimers) clearTimeout(timer);
     this.stopTimers.clear();
     for (const held of this.calls.values()) if (held.renew) clearInterval(held.renew);
@@ -493,7 +514,8 @@ export class Handoffs implements FabricTools {
           inv.emit({ value: { kind: "state", status } });
         }
         if ((ENDED.has(task.status) && !page.more) || inv.signal.aborted) break;
-        await Bun.sleep(page.more ? 0 : 100);
+        // Woken by the agents' own change (each line of its trail is one); a while at most, whatever happens.
+        if (!page.more) await this.nap(250);
       }
       if (inv.signal.aborted) return;
       const task = this.team.task(run.task)!;
