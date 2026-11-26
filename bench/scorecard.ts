@@ -96,6 +96,8 @@ export interface Row {
   /** How big a change would have to be to count (speed: the noise band; quality: its resolution, as a fraction). */
   noise: number | null;
   verdict: Verdict;
+  /** A speed metric of a strict suite: slower beyond noise is a regression, not only past 2×. */
+  strict?: true;
 }
 
 export interface Comparison {
@@ -122,6 +124,10 @@ export interface CompareOptions {
   full: boolean;
   /** CI's gate: speed is reported and never fails. */
   qualityOnly: boolean;
+  /** The suite's speed is held to its baseline (Suite.strict): slower beyond a band at least this wide fails. */
+  strict?: { noiseFloor: number };
+  /** Its timings are compared as measured (Suite.asMeasured): never scaled by the machines' calibrations. */
+  asMeasured?: boolean;
 }
 
 /**
@@ -154,18 +160,18 @@ export function compare(run: Scorecard, baseline: Scorecard | null, options: Com
       rows.push({ metric, baseline: was, change: changeOf(metric.value, was.value), noise: was.value === 0 ? null : resolution / Math.abs(was.value), verdict });
       continue;
     }
-    const now = scaled(metric, run);
-    const then = scaled(was, baseline!);
+    const now = options.asMeasured ? metric.value : scaled(metric, run);
+    const then = options.asMeasured ? was.value : scaled(was, baseline!);
     const change = changeOf(now, then);
     // How many times worse: a time that grew, or a rate that shrank, by the same factor.
     const worse = now > 0 && then > 0 ? (metric.better === "lower" ? now / then : then / now) : null;
     const spreads = (metric.value ? (metric.spread ?? 0) / metric.value : 0) + (was.value ? (was.spread ?? 0) / was.value : 0);
-    const noise = Math.max(SPEED_NOISE_FLOOR, SPEED_SPREAD_FACTOR * spreads);
+    const noise = Math.max(options.strict?.noiseFloor ?? SPEED_NOISE_FLOOR, SPEED_SPREAD_FACTOR * spreads);
     let verdict: Verdict = "same";
     if (worse === null) verdict = now === then ? "same" : "new";
-    else if (worse > 1 + noise) verdict = worse > SPEED_FAIL_FACTOR && !options.qualityOnly ? "regressed" : "slower";
+    else if (worse > 1 + noise) verdict = (options.strict || worse > SPEED_FAIL_FACTOR) && !options.qualityOnly ? "regressed" : "slower";
     else if (worse < 1 / (1 + noise)) verdict = "better";
-    rows.push({ metric, baseline: was, change, noise, verdict });
+    rows.push({ metric, baseline: was, change, noise, verdict, ...(options.strict ? { strict: true as const } : {}) });
   }
   if (judge) {
     const reported = new Set(run.metrics.map((m) => m.id));
@@ -208,7 +214,7 @@ export function verdictWords(row: Row): string {
     case "slower":
       return "slower";
     case "regressed":
-      return m.kind === "speed" ? `REGRESSED (over ${SPEED_FAIL_FACTOR}× slower)` : "REGRESSED";
+      return m.kind === "speed" ? (row.strict ? `REGRESSED (slower than its baseline, beyond ±${Math.round((row.noise ?? 0) * 100)} %)` : `REGRESSED (over ${SPEED_FAIL_FACTOR}× slower)`) : "REGRESSED";
     case "new":
       return "new";
     case "gone":

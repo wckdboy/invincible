@@ -1,0 +1,9 @@
+<!doctype html><meta charset=utf-8><title>anim</title>
+<style>html,body{margin:0;overflow:hidden;background:#111}</style>
+<canvas id=c></canvas><script>
+const c=document.getElementById('c'),x=c.getContext('2d');c.width=innerWidth;c.height=innerHeight;
+const P=[...Array(400)].map(()=>({x:Math.random()*c.width,y:Math.random()*c.height,vx:Math.random()*4-2,vy:Math.random()*4-2,r:4+Math.random()*16,h:Math.random()*360}));
+let f=0,t0=performance.now();
+function tick(){x.fillStyle='rgba(17,17,17,.3)';x.fillRect(0,0,c.width,c.height);for(const p of P){p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>c.width)p.vx*=-1;if(p.y<0||p.y>c.height)p.vy*=-1;x.beginPath();x.fillStyle='hsl('+p.h+',80%,60%)';x.arc(p.x,p.y,p.r,0,7);x.fill()}
+f++;const t=performance.now();if(t-t0>1000){document.title='anim '+Math.round(f*1000/(t-t0))+' fps';f=0;t0=t}requestAnimationFrame(tick)}tick();
+</script>

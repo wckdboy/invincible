@@ -1,0 +1,11 @@
+<!doctype html><meta charset=utf-8><title>Sign up</title>
+<style>body{font:16px sans-serif;margin:32px} label{display:block;margin:12px 0 4px} input,select,textarea{font:16px sans-serif;width:360px;padding:6px} button{margin-top:16px;font:16px sans-serif;padding:8px 20px}</style>
+<h1>Sign up</h1>
+<form method=post action="/submit">
+<label for=name>Full name</label><input id=name name=name autocomplete=off>
+<label for=email>Email</label><input id=email name=email type=email autocomplete=off>
+<label for=plan>Plan</label><select id=plan name=plan><option>Free</option><option>Team</option><option>Enterprise</option></select>
+<label><input id=terms name=terms type=checkbox style="width:auto"> I accept the terms</label>
+<label for=note>Note</label><textarea id=note name=note rows=3></textarea>
+<button id=send type=submit>Send</button>
+</form>

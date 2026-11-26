@@ -1,0 +1,6 @@
+<!doctype html><meta charset=utf-8><title>color 0</title>
+<style>html,body{margin:0;height:100%;background:#fff;cursor:default}</style>
+<body><script>
+let on=false,n=0;const flip=e=>{on=!on;n++;document.body.style.background=on?'#000':'#fff';document.title='color '+n+' '+e.type+' '+(e.clientX??'')+','+(e.clientY??'')+' '+(e.key??'')};
+addEventListener('mousedown',flip);addEventListener('keydown',flip);
+</script>

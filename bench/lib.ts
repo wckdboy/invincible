@@ -169,6 +169,21 @@ export interface Suite {
   about: string;
   /** The metrics a reader should see first, in order. */
   headline: readonly string[];
+  /**
+   * Why it can't run on this machine (what it needs isn't here), or null when it can. A suite that can't is skipped:
+   * the report says so and why, and it is unverified, never a pass.
+   */
+  cannot?(): Promise<string | null> | string | null;
+  /**
+   * Its speed held to its baseline: slower beyond the noise band fails the run (not only past 2×), and the band is
+   * never narrower than `noiseFloor` (a fraction). For a suite whose every number is a target of the owner's.
+   */
+  strict?: { noiseFloor: number };
+  /**
+   * Its timings are of other processes (a VM, a browser in it, Docker), not of this one's own arithmetic: recorded as
+   * measured, never brought to the machine's pace, and compared as measured, never scaled by a calibration.
+   */
+  asMeasured?: true;
   run(ctx: SuiteContext): Promise<void> | void;
 }
 
@@ -187,7 +202,7 @@ interface Timed {
  * Collects one suite's metrics. With a `pace`, timings are brought to the suite's own calibration when it
  * `finish`es (see Pace); without one (tests of a suite's logic) they are recorded as measured.
  */
-export function collector(seed: number, full: boolean, log: (line: string) => void, pace?: Pace): { ctx: SuiteContext; metrics: ScoreMetric[]; finish(): number | null } {
+export function collector(seed: number, full: boolean, log: (line: string) => void, pace?: Pace, asMeasured = false): { ctx: SuiteContext; metrics: ScoreMetric[]; finish(): number | null } {
   const metrics: ScoreMetric[] = [];
   const timed: Timed[] = [];
   const seen = new Set<string>();
@@ -209,7 +224,8 @@ export function collector(seed: number, full: boolean, log: (line: string) => vo
     if (!pace) return null;
     for (let i = 0; i < 3; i++) pace.window(80);
     const calibration = pace.calibration();
-    for (const t of timed) {
+    // (A suite timed as measured keeps every sample as it was: its calibration only says what machine ran it.)
+    for (const t of asMeasured ? [] : timed) {
       const m = t.metric;
       if (t.paced) {
         const s = summarise(t.paced.map((x) => x / calibration));

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { REFERENCE_SINGLE } from "../packages/core/src/compute.ts";
 import { collector, Pace, rng, sig, subSeed, summarise } from "./lib.ts";
-import { compare, formatScorecard, nextBaseline, renderSuite, Scorecard, type ScoreMetric, SPEED_FAIL_FACTOR, SPEED_NOISE_FLOOR } from "./scorecard.ts";
+import { compare, formatScorecard, nextBaseline, renderSuite, Scorecard, type ScoreMetric, SPEED_FAIL_FACTOR, SPEED_NOISE_FLOOR, verdictWords } from "./scorecard.ts";
 
 /*
  * How a run is read against its baseline: the rules that decide what "better",
@@ -11,7 +11,7 @@ import { compare, formatScorecard, nextBaseline, renderSuite, Scorecard, type Sc
 const quality = (id: string, value: number, better: "higher" | "lower" = "lower", spread?: number): ScoreMetric => ({ id, value, unit: "", kind: "quality", better, ...(spread !== undefined ? { spread } : {}) });
 const speed = (id: string, value: number, spread = 0, better: "higher" | "lower" = "lower"): ScoreMetric => ({ id, value, unit: better === "lower" ? "ms" : "/s", kind: "speed", better, spread, n: 9 });
 const card = (metrics: ScoreMetric[], over: Partial<Scorecard> = {}): Scorecard => ({ suite: "demo", commit: "abc1234", at: 1, seed: 7, machine: { name: "test", calibration: REFERENCE_SINGLE, cores: 8 }, metrics, ...over });
-const verdicts = (run: Scorecard, baseline: Scorecard | null, options = { full: false, qualityOnly: false }) => Object.fromEntries(compare(run, baseline, options).rows.map((r) => [r.metric.id, r.verdict]));
+const verdicts = (run: Scorecard, baseline: Scorecard | null, options: Parameters<typeof compare>[2] = { full: false, qualityOnly: false }) => Object.fromEntries(compare(run, baseline, options).rows.map((r) => [r.metric.id, r.verdict]));
 const DEFAULT = { full: false, qualityOnly: false };
 
 describe("quality: exact, and a change for the worse fails", () => {
@@ -113,6 +113,40 @@ describe("speed: scaled by the machine, judged beyond noise, failed only far out
   });
 });
 
+describe("a strict suite (the desktop's): a number worse than its baseline fails the run", () => {
+  const STRICT = { full: false, qualityOnly: false, strict: { noiseFloor: 0.2 } };
+
+  test("slower beyond its band fails, not only past 2×; inside it is the same; faster is said", () => {
+    const baseline = card([speed("click", 100), speed("rate", 1000, 0, "higher")]);
+    const slower = compare(card([speed("click", 125), speed("rate", 800, 0, "higher")]), baseline, STRICT);
+    expect(slower.rows.map((r) => r.verdict)).toEqual(["regressed", "regressed"]);
+    expect(slower.failed).toBe(true);
+    expect(verdictWords(slower.rows[0]!)).toBe("REGRESSED (slower than its baseline, beyond ±20 %)");
+    // The same numbers in an ordinary suite are only slower, and don't fail.
+    expect(compare(card([speed("click", 125)]), card([speed("click", 100)]), DEFAULT).failed).toBe(false);
+    const click = card([speed("click", 100)]);
+    expect(verdicts(card([speed("click", 119)]), click, STRICT)).toEqual({ click: "same" });
+    expect(verdicts(card([speed("click", 80)]), click, STRICT)).toEqual({ click: "better" });
+  });
+
+  test("its band is never narrower than its samples' own spread", () => {
+    expect(verdicts(card([speed("click", 125, 10)]), card([speed("click", 100, 10)]), STRICT)).toEqual({ click: "same" });
+  });
+
+  test("timed as measured, it is compared as measured: a slower machine's calibration excuses nothing", () => {
+    const baseline = card([speed("click", 100)]);
+    const slowMachine = card([speed("click", 130)], { machine: { name: "slow", calibration: REFERENCE_SINGLE / 2, cores: 4 } });
+    expect(verdicts(slowMachine, baseline, { ...STRICT, asMeasured: true })).toEqual({ click: "regressed" });
+    expect(verdicts(slowMachine, baseline, STRICT)).toEqual({ click: "better" });
+  });
+
+  test("under --ci its speed is reported and never fails, as every suite's", () => {
+    const gate = compare(card([speed("click", 150)]), card([speed("click", 100)]), { ...STRICT, qualityOnly: true });
+    expect(gate.rows[0]!.verdict).toBe("slower");
+    expect(gate.failed).toBe(false);
+  });
+});
+
 describe("baselines and files", () => {
   test("a default run's baseline keeps the full-only numbers the old one held; a full run's replaces them", () => {
     const old = card([quality("a", 1), quality("full.b", 2), quality("dropped", 3)]);
@@ -195,6 +229,16 @@ describe("the machine's pace through a suite", () => {
     expect(by["in-the-burst"]!.spread).toBeGreaterThan(0);
     expect(by["in-the-quiet"]!.spread).toBe(0);
     expect(by.exact!.spread).toBeUndefined();
+  });
+
+  test("a suite timed as measured (another process's work: a VM, a browser) keeps its samples as they were, burst or not", () => {
+    const pace = new Scripted([
+      { at: 0, score: 60_000 }, { at: 500, score: 60_000 }, { at: 1_100, score: 30_000 }, { at: 1_500, score: 30_000 }, { at: 1_900, score: 30_000 }, { at: 2_100, score: 60_000 }, { at: 3_000, score: 60_000 },
+    ]);
+    const { ctx, metrics, finish } = collector(1, false, () => {}, pace, true);
+    ctx.speed("in-the-burst", [200, 200, 200], "ms", "lower", [1_050, 1_950]);
+    expect(finish()).toBe(60_000);
+    expect(metrics[0]!.value).toBe(200);
   });
 
   test("timing a function: its samples as measured are returned, the metric is their median at the suite's pace, in milliseconds an item", () => {

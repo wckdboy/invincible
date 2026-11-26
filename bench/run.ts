@@ -21,6 +21,8 @@ const SUITES: Record<string, () => Promise<{ suite: Suite }>> = {
   context: () => import("./suites/context.ts"),
   notify: () => import("./suites/notify.ts"),
   web: () => import("./suites/web.ts"),
+  // Needs Docker with Kata microVMs (a sandbox host): skipped, and said to be, anywhere else.
+  desktop: () => import("./suites/desktop.ts"),
 };
 
 const USAGE = `bun run bench [suite…] [--full] [--json] [--all] [--ci] [--seed n] [--update-baseline]
@@ -35,6 +37,9 @@ const USAGE = `bun run bench [suite…] [--full] [--json] [--all] [--ci] [--seed
   --list             the suites, a line each`;
 
 function revision(root: string): string {
+  // A copy with no history of its own (one sent to a sandbox host to run a suite there) says which commit it is.
+  const said = process.env.INVINCIBLE_BENCH_COMMIT?.trim();
+  if (said && /^[0-9a-f]{7,40}(\+dirty)?$/.test(said)) return said;
   try {
     const git = Bun.spawnSync(["git", "describe", "--always", "--dirty=+dirty", "--abbrev=12"], { cwd: root, stderr: "ignore" });
     const rev = git.stdout.toString().trim();
@@ -54,8 +59,10 @@ interface Result {
   comparison: Comparison | null;
   error: string | null;
   tookMs: number | null;
-  /** Whether it ran now (always, since every suite runs here; kept in the JSON for whatever reads it). */
+  /** Whether it ran now (false: it was skipped). */
   ran: boolean;
+  /** Why it was skipped: what it needs isn't on this machine (Suite.cannot). Unverified, never a pass. */
+  skipped: string | null;
   baselineWritten: boolean;
 }
 
@@ -108,16 +115,23 @@ async function main(): Promise<number> {
 
   const results: Result[] = [];
   for (const name of toRun) {
-    const result: Result = { suite: name, scorecard: null, comparison: null, error: null, tookMs: null, ran: true, baselineWritten: false };
+    const result: Result = { suite: name, scorecard: null, comparison: null, error: null, tookMs: null, ran: true, skipped: null, baselineWritten: false };
     results.push(result);
     process.stderr.write(`${name}…\n`);
     let suite: Suite | null = null;
     const t0 = performance.now();
     try {
       suite = (await SUITES[name]!()).suite;
+      const cannot = (await suite.cannot?.()) ?? null;
+      if (cannot) {
+        result.ran = false;
+        result.skipped = cannot;
+        say(`${name}: SKIPPED, so unverified: ${cannot}\n`);
+        continue;
+      }
       // The machine's pace is sampled beside every timing, and whenever the suite awaits (see Pace).
       const pace = new Pace();
-      const { ctx, metrics, finish } = collector(seed, full, progress, pace);
+      const { ctx, metrics, finish } = collector(seed, full, progress, pace, suite.asMeasured === true);
       const sampler = setInterval(() => pace.pulse(), 200);
       try {
         await suite.run(ctx);
@@ -130,7 +144,7 @@ async function main(): Promise<number> {
       writeScorecard(OUT_DIR, card);
       result.scorecard = card;
       const baseline = readScorecard(BASELINE_DIR, name);
-      result.comparison = compare(card, baseline, options);
+      result.comparison = compare(card, baseline, { ...options, ...(suite.strict ? { strict: suite.strict } : {}), ...(suite.asMeasured ? { asMeasured: true } : {}) });
       if (values["update-baseline"]) {
         writeScorecard(BASELINE_DIR, nextBaseline(card, baseline, full));
         result.baselineWritten = true;
@@ -149,6 +163,7 @@ async function main(): Promise<number> {
   const rows = results.flatMap((r) => (r.comparison?.rows ?? []).map((row) => ({ suite: r.suite, row })));
   const of = (...verdicts: string[]) => rows.filter(({ row }) => verdicts.includes(row.verdict));
   const broke = results.filter((r) => r.error);
+  const skipped = results.filter((r) => r.skipped);
   const unbaselined = results.filter((r) => r.comparison?.note && !r.baselineWritten);
   const regressed = of("regressed");
   const gone = of("gone").filter(({ row }) => row.metric.kind === "quality" || !values.ci);
@@ -165,14 +180,16 @@ async function main(): Promise<number> {
   if (regressed.length) say(`  REGRESSED${over}: ${list(regressed)}.`);
   if (gone.length) say(`  GONE${over}: ${list(gone)}.`);
   if (broke.length) say(`  BROKE: ${broke.map((r) => r.suite).join(", ")}.`);
+  if (skipped.length) say(`  SKIPPED, so unverified: ${skipped.map((r) => `${r.suite} (${r.skipped})`).join("; ")}.`);
   if (unbaselined.length) say(`  Not judged (${values.ci ? "fails under --ci" : "no baseline, or another seed"}): ${unbaselined.map((r) => r.suite).join(", ")}.`);
   const recorded = results.filter((r) => r.baselineWritten);
   if (recorded.length) say(`  Baseline recorded for: ${recorded.map((r) => r.suite).join(", ")}.`);
-  say(failed ? "FAILED." : recorded.length || unbaselined.length || better.length || slower.length ? "OK." : "Nothing moved.");
+  const passed = failed ? "FAILED." : recorded.length || unbaselined.length || better.length || slower.length ? "OK." : "Nothing moved.";
+  say(skipped.length && !failed ? `${passed.slice(0, -1)} in what ran; ${skipped.length} suite${skipped.length > 1 ? "s" : ""} skipped, unverified.` : passed);
 
   if (values.json) {
     process.stdout.write(
-      `${JSON.stringify({ commit, seed, full, at: Date.now(), failed, suites: results.map((r) => ({ suite: r.suite, ran: r.ran, tookMs: r.tookMs === null ? null : Math.round(r.tookMs), error: r.error, scorecard: r.scorecard, note: r.comparison?.note ?? null, verdicts: (r.comparison?.rows ?? []).map((row) => ({ id: row.metric.id, verdict: row.verdict, change: row.change, baseline: row.baseline?.value ?? null })) })) }, null, 2)}\n`,
+      `${JSON.stringify({ commit, seed, full, at: Date.now(), failed, suites: results.map((r) => ({ suite: r.suite, ran: r.ran, skipped: r.skipped, tookMs: r.tookMs === null ? null : Math.round(r.tookMs), error: r.error, scorecard: r.scorecard, note: r.comparison?.note ?? null, verdicts: (r.comparison?.rows ?? []).map((row) => ({ id: row.metric.id, verdict: row.verdict, change: row.change, baseline: row.baseline?.value ?? null })) })) }, null, 2)}\n`,
     );
   }
   return failed ? 1 : 0;
