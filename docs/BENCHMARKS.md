@@ -75,7 +75,8 @@ everything but the model.
   INVINCIBLE_BENCH_SCRATCH=c1 INVINCIBLE_BENCH_COMMIT=$(git rev-parse --short HEAD) bun run bench desktop
   ```
 
-- **What it measures** (C0's study, 26 November 2026, whose numbers are its first baseline):
+- **What it measures** (C0's study, 26 November 2026, whose numbers were its first baseline; recorded again after
+  C1's steps 4 to 6, from 416b774, C0's kept in this file's history):
   - boot to usable: a fresh VM, the desktop started, a page painted and read, a picture taken;
   - inside the VM: an action to its pixels changing (timed by an MIT-SHM probe), the dead time after a click, a
     screenshot;
@@ -87,6 +88,8 @@ everything but the model.
     let settle by pictures compared), each to its gate;
   - what breaks (the F tests): typing with nothing focused, a JavaScript alert, the tab in front, the picture after a
     click that navigates, double clicks, a killed browser, the last tab closed;
+  - the accessibility tree: the form's controls where `desktop find` puts them against the DOM's, a lookup's time, and
+    a typical front page's and the browser's own settings' trees in tokens (characters / 4);
   - what each state costs the host (CPU and memory of the VM's QEMU, virtiofsd and shim): a VM without the desktop
     image, one whose desktop isn't started, idle, busy, watched;
   - what watching moves while the screen is still.
