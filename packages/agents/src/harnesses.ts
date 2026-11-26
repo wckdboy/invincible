@@ -235,10 +235,10 @@ export interface AgentRunDeps {
 
 export interface AgentRun {
   /**
-   * `spent`: its budget was spent, and it was stopped as at its deadline. `audited`: its audit ended this run
-   * (`input.audit`). `steered`: a steer of yours, or your agent's, ended it between its tool calls (`input.steer`).
+   * `spent`: its budget was spent, and it was stopped as at its deadline. `steered`: a steer (yours, your agent's or its
+   * audit's) ended it between its tool calls (`input.steer`).
    */
-  status: "finished" | "failed" | "timeout" | "stopped" | "spent" | "audited" | "steered";
+  status: "finished" | "failed" | "timeout" | "stopped" | "spent" | "steered";
   /** The agent's last words: its own account of what it did. */
   summary: string;
   /** Tool calls it made. */
@@ -412,7 +412,7 @@ const tellCommand = (line: object, wait?: { run: string; seconds: number }): str
  */
 export async function runAgent(
   driver: AgentDriver,
-  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<boolean>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<string | null>; cutOff?: boolean },
+  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<void>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<string | null>; cutOff?: boolean },
   deps: AgentRunDeps,
 ): Promise<AgentRun> {
   const now = deps.now ?? Date.now;
@@ -614,11 +614,8 @@ export async function runAgent(
             await stop();
             return ended({ ...run, status: "spent", error: "its budget was spent" });
           }
-          // An audit, when one is due, may end this run (RunOptions.audit): the caller says what comes of it.
-          if (await input.audit?.()) {
-            await stop();
-            return ended({ ...run, status: "audited", error: "its audit ended this run" });
-          }
+          // An audit, when one is due (RunOptions.audit): what it says to do is a steer, given as yours are, above.
+          await input.audit?.();
         }
       } finally {
         end();
@@ -660,15 +657,13 @@ export async function runAgent(
         await stop();
         return ended({ ...run, status: "spent", error: "its budget was spent" });
       }
-      // A steer ends this run only between its tool calls, so its own session can be told: the caller says what comes of it.
+      // An audit, when one is due (RunOptions.audit): what it says to do is a steer, given as yours are, below.
+      await input.audit?.();
+      // A steer (yours, your agent's or its audit's) ends this run only between its tool calls, so its own session can be
+      // told: the caller says what comes of it.
       if (between() && (await input.steer?.())) {
         await stop();
         return ended({ ...run, status: "steered", error: "it was steered" });
-      }
-      // An audit, when one is due, may end this run (RunOptions.audit): the caller says what comes of it.
-      if (await input.audit?.()) {
-        await stop();
-        return ended({ ...run, status: "audited", error: "its audit ended this run" });
       }
       if (now() > input.deadline) {
         await stop();

@@ -163,7 +163,9 @@ The run loop is carried and renamed (§10), the most proven part of it:
     ends, in the same turn, and one after its turn starts another. Claude Code takes words that come while it answers
     once that answer ends; Codex 0.172.0 takes them at once. Words it never took are said in its next run.
   - Any other harness's run is ended between its tool calls (a call it is in finishes first, for up to 15 minutes; its
-    stream says when one begins, but OpenCode's only when one ends) and its own session is told, as the audit's steer is.
+    stream says when one begins, but OpenCode's only when one ends) and its own session is told.
+  - An audit's steer is a steer as these are: one rule for every steer. It reaches a coding harness's run at the same
+    safe points, told on a live one's input or ending another's between its calls, and never cuts a call it is in.
   - The trail says it where it was taken ("You: …", "Your agent: …"), and every audit is told it.
   - The reviewer judges the work against its goal and every steer, in order, and the trail says so before its verdict.
     A steer changes what is wanted; it is never a way around the gates or the review. One that comes while the work is

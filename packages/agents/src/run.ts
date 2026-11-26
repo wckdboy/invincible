@@ -1550,44 +1550,45 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     let warned = false;
     audits.at = clock();
     audits.step = steps;
-    /** Where the trail stood at the last audit; the steer that ended a run, until it is said; its session as it began. */
+    /** Where the trail stood at the last audit; its session as it began. */
     let auditedAt = 0;
-    let audited: { verdict: AuditVerdict; note: string } | null = null;
     let live: string | null = null;
     /**
-     * At each look at the agent: the work is still going (deps.alive), and an audit when one is due (o.audit). Whether
-     * that ends this run: a steer does when its session can be told (it is taken up there); one without a session works
-     * on, its steer said.
+     * What its audits said to do that its run hasn't been given yet. An audit's steer is a steer as yours is (one rule
+     * for every steer): it reaches the run at the same safe points, and never cuts a call the run is in.
      */
-    const auditNow = async (): Promise<boolean> => {
+    let auditSays: string[] = [];
+    /** At each look at the agent: the work is still going (deps.alive), and an audit when one is due (o.audit), whose steer waits to be given. */
+    const auditNow = async (): Promise<void> => {
       await deps.alive?.();
-      if (!auditDue()) return false;
+      if (!auditDue()) return;
       const found = await audit(trail.slice(auditedAt), false, trail);
       auditedAt = trail.length;
-      if (!(found.verdict === "steer" && (live ?? session))) return false;
-      audited = found;
-      return true;
+      if (found.verdict === "steer") auditSays.push(steered(found.note));
     };
     /** Steers taken at a look (RunDeps.steers), said to its own session once its run has ended there. */
     let heard: RunSteer[] = [];
+    /** Yours, and its audits', as its next message would carry them. */
+    const toldAs = (steers: readonly RunSteer[], audits: readonly string[]): string => [...(steers.length ? [steersSaid(steers, o.unreviewed)] : []), ...audits].join("\n\n");
     /**
-     * At each look at the agent between its tool calls (runAgent waits out a call it is in): steers waiting end this run,
-     * so its own session can be told them, as an audit's steer is. With no session to tell yet they wait where they are.
+     * At each look at the agent between its tool calls (runAgent waits out a call it is in): steers waiting, yours or its
+     * audits', end this run, so its own session can be told them. With no session to tell yet they wait where they are.
      */
     const steerNow = async (): Promise<boolean> => {
       if (!(live ?? session)) return false;
       const got = await takeSteers(steps);
       heard = [...heard, ...got];
-      return got.length > 0;
+      return got.length > 0 || auditSays.length > 0;
     };
     /**
-     * At each tick of a run that can be told as it works (a live driver, followed): the steers waiting now, taken (said on
-     * its trail, kept for its reviewer) and put as its next message would put them. Its own session isn't needed: they
-     * follow its message on its input. What it never takes comes back as `untold`, for its next run to say.
+     * At each tick of a run that can be told as it works (a live driver, followed): the steers waiting now, yours (taken:
+     * said on its trail, kept for its reviewer) and its audits', put as its next message would put them. Its own session
+     * isn't needed: they follow its message on its input. What it never takes comes back as `untold`, for its next run.
      */
     const steersLive = async (): Promise<string | null> => {
       const got = await takeSteers(steps);
-      return got.length ? steersSaid(got, o.unreviewed) : null;
+      const said = toldAs(got, auditSays.splice(0));
+      return said || null;
     };
     /** The steers the next run's message carries: said again if that run fails on its model before it could take them up. */
     let carried = "";
@@ -1597,8 +1598,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     /** When the windows its tool refused in this run reset (the latest), and the latest spent run's rest. */
     let refusedUntil = 0;
     let rest: { until: number; why: string } | null = null;
-    /** What a coding agent is told of steers in its session, and what to do once they are done. */
-    const steerPrompt = (steers: readonly RunSteer[]): string => `${steersSaid(steers, o.unreviewed)} Then end with a short summary and the evidence.`;
+    /** What a coding agent is told of steers in its session (yours, then its audits'), and what to do once they are done. */
+    const steerPrompt = (steers: readonly RunSteer[], audits: readonly string[] = []): string => `${toldAs(steers, audits)} Then end with a short summary and the evidence.`;
     /**
      * Its budget, at each look at the agent: its own calls through the gateway count as it makes them (deps.spentUsd).
      * Past four fifths it is said once; spent, it is said and the agent is stopped. It can't be told to wrap up mid-run.
@@ -1652,7 +1653,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       worked = agentModelName(model);
       const run = await runAgent(
         agent.driver,
-        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers ? { steer: steerNow, steers: steersLive } : {}), ...(cutOff ? { cutOff: true } : {}) },
+        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers || o.audit ? { steer: steerNow, steers: steersLive } : {}), ...(cutOff ? { cutOff: true } : {}) },
         {
           exec: deps.harness?.exec ?? deps.exec,
           ...((deps.harness ? deps.harness.follow : deps.follow) ? { follow: (deps.harness ? deps.harness.follow : deps.follow)! } : {}),
@@ -1695,17 +1696,10 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       const unheard = run.untold?.length ? run.untold.join("\n\n") : "";
       const withUnheard = (text: string) => (unheard ? `${unheard}\n\n${text}` : text);
       if (unheard) carried = [carried, unheard].filter(Boolean).join("\n\n");
-      // Ended by a steer of yours, or your agent's, between its tool calls: taken up in its own session.
+      // Ended by a steer between its tool calls (yours, your agent's or its audit's): taken up in its own session.
       if (run.status === "steered") {
-        prompt = carried = withUnheard(steerPrompt(heard));
+        prompt = carried = withUnheard(steerPrompt(heard, auditSays.splice(0)));
         heard = [];
-        continue;
-      }
-      // Ended by its audit's steer: taken up in its own session.
-      if (run.status === "audited" && audited) {
-        const found: { verdict: AuditVerdict; note: string } = audited;
-        audited = null;
-        prompt = withUnheard(`${steered(found.note)} Then end with a short summary and the evidence.`);
         continue;
       }
       // Spent: what it left is judged as it stands (submitAtLimit), as when the engineer's budget runs out. (Only what
@@ -1748,8 +1742,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       // Words that waited as it ended of itself, or that it never took as it worked, are said in its own session before it
       // is judged.
       const waiting = session ? await takeSteers(steps) : [];
-      if (waiting.length || (unheard && session)) {
-        prompt = carried = waiting.length ? withUnheard(steerPrompt(waiting)) : `${unheard} Then end with a short summary and the evidence.`;
+      const audits = session ? auditSays.splice(0) : [];
+      if (waiting.length || audits.length || (unheard && session)) {
+        prompt = carried = waiting.length || audits.length ? withUnheard(steerPrompt(waiting, audits)) : `${unheard} Then end with a short summary and the evidence.`;
         continue;
       }
       // The reviewer sees the latest commands; every one of them is in the ledger.

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { ExecResult } from "@invincible/core";
 import { FOLLOW, followArgv, FOLLOW_TICK_MS, OPENCODE, OWN_SIGN_IN, runAgent, STOP_GRACE_SECONDS, type AgentDriver, type AgentRun, type FollowedRun } from "../src/harnesses.ts";
-import { type RunEvent, type RunSteer, runLoop, spentReset, steersSaid } from "../src/run.ts";
+import { AUDIT_EVERY, type RunEvent, type RunSteer, runLoop, spentReset, steersSaid } from "../src/run.ts";
+import type { AgentEvent } from "../src/harnesses.ts";
 import { harnessReadiness } from "../src/team-runtime.ts";
 import { CLAUDE, CODEX } from "../src/vendor-cli.ts";
 
@@ -419,6 +420,83 @@ describe("steering a coding agent's task", () => {
     expect(second).toBe(`${steersSaid([STEERED])} Then end with a short summary and the evidence.`);
     // Said once on the trail, where it was taken: not again for its second telling.
     expect(run.events.filter((event) => event.type === "steered")).toHaveLength(1);
+  });
+});
+
+/*
+ * An audit's steer is a steer as yours is (one rule for every steer): it never cuts a call its run is in. Told on a live
+ * run's input, which takes it once its call has ended; a run that can't be told is ended between its calls, and its own
+ * session is told in the run that follows.
+ */
+describe("an audit's steer, as every steer is", () => {
+  const PLAN = "1. Write the parser.\nDone when: its test passes.";
+  const AUDIT = "STEER\nWrite the parser's test first.";
+  const SAID = "An independent audit of the work so far says: Write the parser's test first.";
+  /** A run loop on a coding agent, audited: its first audit steers, then its work passes review. */
+  const audited = (driver: AgentDriver, box: ReturnType<typeof vm>) => {
+    const events: RunEvent[] = [];
+    const answers = [AUDIT, "PASS\nIt parses."];
+    // (Its clock moves on by each wait, a real millisecond at a time: a pause of the test's is seconds of the run's, never
+    // the quarter of an hour after which a call it is in no longer holds a steer back.)
+    let t = 1_000_000;
+    const done = runLoop(
+      { goal: "Write the parser", environment: "a stand-in VM", plan: PLAN, audit: true, agent: { driver, models: [OWN_SIGN_IN], workdir: "/work/repo" } },
+      {
+        ask: async (role) => ({ text: role === "reviewer" ? (answers.shift() ?? "ON\nOn its task.") : PLAN, model: `stand-in/${role}` }),
+        exec: box.exec,
+        follow: box.follow,
+        emit: (event) => events.push(event),
+        now: () => t,
+        sleep: async (ms: number) => {
+          t += ms;
+          await Bun.sleep(1);
+        },
+      },
+    );
+    return { done, events };
+  };
+  /** Enough calls, each ended, that an audit is due; then one it is in. */
+  const busy = (lines: (at: number, event: object) => string, from: number) => [...Array.from({ length: AUDIT_EVERY.steps + 1 }, (_, n) => lines(from + 10 * (n + 1), { type: "tool", tool: "shell", input: `step ${n}`, output: "ok", ok: true, id: `done_${n}` })), lines(from + 10 * (AUDIT_EVERY.steps + 2), { type: "call", id: "call_open" })];
+  const stopped = (box: ReturnType<typeof vm>) => box.commands.some((command) => command.includes("\ncleanup(")) || box.told.some((told) => told.stop === true);
+  const launches = (box: ReturnType<typeof vm>) => box.commands.filter((command) => command.startsWith("mkdir -p /work/.agent"));
+
+  for (const driver of [CLAUDE, CODEX]) {
+    test(`${driver.title}: told on its input, never stopped; it takes the words once its call has ended`, async () => {
+      const box = vm();
+      const run = audited(driver, box);
+      await box.until(() => box.follows.length === 1);
+      box.current().push(E(10, { type: "session", id: "ses_live" }), ...busy(E, 10));
+      await box.until(() => box.told.length === 1);
+      const [said] = box.told as { say?: string; id?: string; stop?: boolean }[];
+      expect(said!.stop).toBeUndefined();
+      expect(said!.say).toBe(`${SAID}\nTake that up from where you are.`);
+      expect(stopped(box)).toBe(false);
+      box.current().push(E(1000, { type: "tool", tool: "shell", input: "pytest", output: "ok", ok: true, id: "call_open" }), E(1010, { type: "steer", id: said!.id, state: "taken" }), E(1020, { type: "text", text: "The test is written first now." }), S(false, 0, 1020));
+      expect((await run.done).status).toBe("done");
+      expect(launches(box)).toHaveLength(1);
+      expect(run.events.filter((event) => event.type === "audit").map((event) => (event as { verdict: string }).verdict)).toEqual(["steer"]);
+    });
+  }
+
+  test("a run that can't be told: its call ends first, then the run, and its own session is told in the run that follows", async () => {
+    const stub: AgentDriver = { name: "stub", title: "Stub", kind: "openai", capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false }, check: "true", files: () => ({}), command: (_m, session) => `stub-agent${session ? ` --session ${session}` : ""}`, read: (line) => [JSON.parse(line) as AgentEvent] };
+    const box = vm();
+    const run = audited(stub, box);
+    await box.until(() => box.follows.length === 1);
+    box.current().push(E(10, { type: "session", id: "ses_stub" }), ...busy(E, 10));
+    await box.until(() => run.events.some((event) => event.type === "audit"));
+    // Its audit has steered, and the call it is in goes on: nothing is stopped while it does.
+    await Bun.sleep(50);
+    expect(stopped(box)).toBe(false);
+    expect(launches(box)).toHaveLength(1);
+    box.current().push(E(1000, { type: "tool", tool: "shell", input: "pytest", output: "ok", ok: true, id: "call_open" }));
+    await box.until(() => box.follows.length === 2);
+    expect(stopped(box)).toBe(true);
+    const second = Buffer.from(launches(box)[1]!.match(/printf %s '([A-Za-z0-9+/=]+)'/)![1]!, "base64").toString("utf8");
+    expect(second).toContain(SAID);
+    expect(launches(box)[1]).toContain("stub-agent --session ses_stub");
+    box.current().push(E(1100, { type: "text", text: "The test is written first now." }), S(false, 0, 1100));
+    expect((await run.done).status).toBe("done");
   });
 });
 
