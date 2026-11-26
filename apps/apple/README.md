@@ -6,13 +6,25 @@ does and signs every request the way `packages/core` verifies it. The Mac's app 
 (docs/ARCHITECTURE.md §10), and are Invincible's own: every word of the old theme is gone, and the vocabulary check
 reads these sources too.
 
-On an iPhone it opens on the primary, the one agent you talk to, with no tab bar: Home (`Invincible/UI/HomeView.swift`)
-is its orb, its name and how things stand, what needs you with each answer in place, the work by attention in three-line
-rows, and its message box docked. A task opens as a thread of its own (`UI/TaskView.swift`: the brief, the work folded,
-the Verified card apart from the agent's words, its details in a sheet); the primary's conversation, the agents, the
-Inbox and Settings are pushed over Home, with "…" for everything else. An iPad's and a Mac's window are three panes: the
-mark and the INVINCIBLE wordmark at the head of a sidebar of the work by attention (`UI/Places.swift`), the place chosen,
-and a task's details beside it; ⌘K searches or asks. A tap anywhere but a field closes the keyboard (`KeyboardCloser`).
+On an iPhone it opens on Home, with no tab bar (the owner's ruling; X2's "Home, a bar and a drawer"): the I-beam (a tap
+opens the drawer), the primary's name and one line of how things stand (a tap opens its conversation); the agents in a
+strip, their orbs the only colour on the page, each a tap from its page; what needs you, decisions only, three at most,
+each with its one answer in place and the rest a swipe away; the work by proof (Working, Proven, Failed, the rest of
+what's done folded), a lazy list however many tasks there are; and at its foot the bar: search and ask, the primary's
+message box, a task to give (`Invincible/UI/HomeView.swift`, `HomeParts.swift`). The drawer (`UI/Drawer.swift`: the
+I-beam, or a swipe from the left edge) holds a new chat and your latest five, what needs you, the agents, all chats, keys,
+connectors and Settings, so every place is two taps from Home. A task opens as a thread of its own (`UI/TaskView.swift`:
+the brief, the work folded, the proof card apart from the agent's words, its details in a sheet). A notification, or an
+`invincible://` link (`task/<id>`, `agent/<handle>`, `approval/<id>`, `chat/<id>`), opens its place over Home; one about
+what the screen shows is told only in the list, and a task's Ship it asks Face ID first. An iPad's and a Mac's window are
+three panes: the mark and the INVINCIBLE wordmark at the head of a sidebar of the work by attention (`UI/Places.swift`),
+the place chosen, and a task's details beside it; ⌘K searches or asks. A tap anywhere but a field closes the keyboard
+(`KeyboardCloser`).
+
+The app keeps up with its node over its live stream (`Node/LiveLink.swift`, the web app's lib/live-link.ts ported and
+held to its cases): nothing is asked while nothing changes, a change is read within a moment of the node saying so, a
+link silent for three of the node's beats is taken for dead and opened again, and a change of network opens a fresh one
+at once (`Node/PathWatch.swift`). Home says "Reconnecting" in one line while it is down.
 
 **The primary's name** is the node's to say: "Invincible" until you name it (`Core/Primary.swift`, from `GET
 /api/whoami`'s `primaryName` when a node sends one). Its handle on the wire is `primary`. Where a line is the web app's
@@ -20,13 +32,15 @@ own (a room's speaker, "Given to the agents by your agent", a coding plan's line
 by the parity vectors. The app's words about itself (macOS's permissions, a device's name, notifications) say
 "Invincible", whatever the primary is called.
 
-**The look** is the redesign's, kept: every orb is a field, lines of force round a dark core (`Core/Field.swift`,
-`Core/FieldOrb.swift`, drawn by `UI/FieldOrbView.swift`), the web app's `lib/field.ts` and `lib/field-orb.ts`, held to
-them by the vectors' `field` section. The primary's is in gold, a beam of light through it along its axis
-(`PrimaryOrb`), its embers drifting while it works; each agent's is in the colour you chose for it or one of the 24 its
-handle picks (`Core/AgentOrb.swift`, core's `avatar.ts`). On a light page a field is ink on paper. Where orbs are many
-they are still; the one you are looking at moves only while something is going on, and none moves where the device asks
-for reduced motion.
+**The look** is monochrome (the owner's word, 26 November 2026): black, white and greys, bold type, the system's own
+surfaces; colour is kept for the agents, so they are told apart at a glance, and red for what went wrong, nothing else.
+The primary is shown by the I-beam in one ink (`UI/Mark.swift`, a shape held to `scripts/mark.ts` by `MarkTests`), never
+an orb and never moving. Each agent's orb is a field, lines of force round a dark core (`Core/Field.swift`,
+`Core/FieldOrb.swift`, drawn by `UI/FieldOrbView.swift`), in the colour you chose for it or one of the 24 its handle picks
+(`Core/AgentOrb.swift`, core's `avatar.ts`), held to the web app's `lib/field.ts` and `lib/field-orb.ts` by the vectors'
+`field` section. Where orbs are many they are still; the one you are looking at moves only while its agent works, and none
+moves where the device asks for reduced motion. A state is a still dot beside its word; a task's verdict says what its
+proof allows (Proven, Reviewed, not proven, Failed · gate 2), never "Verified" above a warning that its gates proved nothing.
 
 Needs Xcode 27 (Swift 6, the iOS 27 and macOS 27 SDKs) and [XcodeGen](https://github.com/yonaskolb/XcodeGen). It runs on
 iOS 26 and later, and on macOS 27.
@@ -167,9 +181,9 @@ bun apps/apple/scripts/vectors.ts --check   # exits 1 if the file isn't what thi
 
 ## The brand
 
-`bun apps/apple/scripts/brand.ts` writes the app's colours (the ink: the black tile on light, the cream on dark; what
-is written on it; the red of what went wrong) and its icon, the I-beam, from `scripts/mark.ts`, the mark of
-the web app's and Android's icons: iOS's tile edge to edge (iOS rounds it), its dark form the mark alone on nothing
-(iOS backs it itself), its tinted form that mark in grey, and the Mac's tile at each size. The app's mark inside the app
-(Settings' About, joining, a Mac's first run, the sidebar's head) is the field alone (`AppMark`), beside the INVINCIBLE
-wordmark (`Wordmark`) where a sidebar begins.
+`bun apps/apple/scripts/brand.ts` writes the app's colours (the ink: black on light, white on dark; what is written on
+it; the red of what went wrong) and its icon, the I-beam, from `scripts/mark.ts`, the mark of the web app's and Android's
+icons: iOS's tile edge to edge (iOS rounds it), its dark form the mark alone on nothing (iOS backs it itself), its tinted
+form that mark in grey, and the Mac's tile at each size. The app's mark inside the app (Settings' About, joining, a Mac's
+first run, Home's header, the drawer's head, the sidebar's head) is the I-beam alone in the page's ink (`AppMark`), beside
+the INVINCIBLE wordmark (`Wordmark`) where a sidebar begins.

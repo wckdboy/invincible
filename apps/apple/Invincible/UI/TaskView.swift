@@ -118,6 +118,7 @@ struct TaskView: View {
                 ContentUnavailableView("This task isn't here", systemImage: "square.stack.3d.up.slash", description: Text("It may have been given on another node, or its agent was removed. Home has the work, by what needs you."))
             }
         }
+        .screen("task.screen")
         .navigationTitle(session.task(id)?.title ?? "Task")
         .inlineTitle()
         .hidingTabBar()
@@ -238,6 +239,13 @@ private struct TaskThreadView: View {
         .safeAreaBar(edge: .bottom) { foot(entries, running: running) }
         .modifier(ShipPrompt(task: $shipping, room: thread.room, client: session.client))
         .modifier(AgainPrompt(task: $againing, room: thread.room, client: session.client))
+        // Ship it, from its notification: Face ID first (the owner's, as an approval's yes is), then its pull request.
+        .task(id: session.shipToOpen) {
+            guard session.shipToOpen == task.id else { return }
+            session.shipToOpen = nil
+            guard TaskCard.actions(task).contains(.ship) else { trouble = "There's nothing of it to ship now: it was shipped already, or kept nothing."; return }
+            if let why = await DeviceOwner.confirm("Ship “\(task.title)” as a pull request") { trouble = why } else { shipping = task }
+        }
         .alert("That didn't go through", isPresented: .init(get: { trouble != nil }, set: { if !$0 { trouble = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {

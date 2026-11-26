@@ -75,6 +75,7 @@ struct ChatView: View {
                 Composer(chat: chat, client: session.client, composing: $composing)
             }
         }
+        .screen("chat.screen")
         .navigationTitle(build?.project ?? Primary.name)
         .inlineTitle()
         // A conversation has the screen to itself, as in Messages.

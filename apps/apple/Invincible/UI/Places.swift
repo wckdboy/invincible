@@ -14,6 +14,8 @@ import SwiftUI
 /// team, an agent's or a room's page, the Inbox, Settings (More), and on a Mac, This Mac (its node).
 enum Place: Hashable, Codable {
     case home, primary, agents, inbox, more, thisMac
+    /// Every one of the primary's chats, your keys, your connectors: the drawer's (an iPhone's), each a place of its own.
+    case chats, keys, connectors
     case agent(String)
     case room(String)
     case task(String)
@@ -243,7 +245,7 @@ struct PlacesSidebar<Foot: View>: View {
         case .primary: session.chat.conversation.map(PlaceWindow.chat)
         case .agent(let id): .agent(id)
         case .room(let id): .room(id)
-        case .home, .agents, .inbox, .more, .thisMac, .task: nil
+        case .home, .agents, .inbox, .more, .thisMac, .task, .chats, .keys, .connectors: nil
         }
     }
 }

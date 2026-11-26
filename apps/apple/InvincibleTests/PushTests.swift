@@ -89,4 +89,43 @@ struct PushTests {
         #expect(Push.lostLine(at: 1_795_003_200_000, service: "Apple") == "They were on until 18 Nov: Apple's push service stopped taking them.")
         #expect(Push.lostLine(at: 1_795_003_200_000, service: "a push service you allowed") == "They were on until 18 Nov: the push service you allowed stopped taking them.")
     }
+
+    @Test func aTaskNotificationOpensItsTaskAndOneItCantNameOpensTheAgents() {
+        let task: [AnyHashable: Any] = ["invincible": ["v": 1, "kind": "finished", "open": "task", "task": "task-abcdefghijkl", "tag": "t"]]
+        #expect(Push.destination(task) == .task("task-abcdefghijkl"))
+        let bad: [AnyHashable: Any] = ["invincible": ["v": 1, "kind": "finished", "open": "task", "task": "../../x", "tag": "t"]]
+        #expect(Push.destination(bad) == .overview)
+        #expect(Push.kind(task) == "finished")
+    }
+
+    @Test func shipItShipsOnlyTheTaskItNamesAndOnlyWhereTheNodeSaidItCan() {
+        #expect(Push.shipTask(["invincible": ["v": 1, "open": "task", "task": "task-abcdefghijkl", "ship": true]]) == "task-abcdefghijkl")
+        #expect(Push.shipTask(["invincible": ["v": 1, "open": "task", "task": "task-abcdefghijkl"]]) == nil)
+        #expect(Push.shipTask(["invincible": ["v": 1, "open": "chat", "task": "task-abcdefghijkl", "ship": true]]) == nil)
+        #expect(Push.shipTask(["invincible": ["v": 2, "open": "task", "task": "task-abcdefghijkl", "ship": true]]) == nil)
+    }
+
+    @Test func invincibleLinksOpenATaskAnAgentAnApprovalOrAChatAndNothingElse() throws {
+        let link = { (text: String) in Push.link(try #require(URL(string: text))) }
+        #expect(try link("invincible://task/task-abcdefghijkl") == .task("task-abcdefghijkl"))
+        #expect(try link("invincible://agent/writer") == .agent("writer"))
+        #expect(try link("invincible://approval/a_1234567890123456789012") == .approval("a_1234567890123456789012"))
+        #expect(try link("invincible://chat/cv_1234567890123456789012") == .chat("cv_1234567890123456789012"))
+        for bad in ["invincible://task/../etc", "invincible://agent/Writer", "invincible://settings/x", "https://task/task-abcdefghijkl", "invincible://task/task-abcdefghijkl/more", "invincible://pair#pair=gi1.x"] {
+            #expect(try link(bad) == nil, "\(bad)")
+        }
+    }
+
+    @Test func whatTheScreenShowsIsToldOnlyInTheListAndNewsNeverSounds() {
+        let quiet = Push.presentation(.task("task-abcdefghijkl"), kind: "finished", showing: .task("task-abcdefghijkl"))
+        #expect(quiet.banner == false && quiet.sound == false)
+        #expect(Push.presentation(.ship("task-abcdefghijkl"), kind: "finished", showing: .task("task-abcdefghijkl")).banner == false)
+        #expect(Push.presentation(.chat("cv_1234567890123456789012"), kind: "question", showing: .chat("cv_1234567890123456789012")).banner == false)
+        #expect(Push.presentation(.approval("a_1234567890123456789012"), kind: "approval", showing: .inbox).banner == false)
+        // Something else on screen: a banner; a sound only for what is told now, never for news.
+        let other = Push.presentation(.task("task-abcdefghijkl"), kind: "finished", showing: .task("task-bbbbbbbbbbbb"))
+        #expect(other.banner && !other.sound)
+        let ask = Push.presentation(.approval("a_1234567890123456789012"), kind: "approval", showing: nil)
+        #expect(ask.banner && ask.sound)
+    }
 }

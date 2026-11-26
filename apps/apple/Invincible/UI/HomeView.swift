@@ -1,59 +1,156 @@
 import SwiftUI
 
 /*
- * Home: the primary, first (the PWA's views/home.ts; your words, 26 November 2026: "agent first (the primary)"; on an iPhone no
- * tab bar, "a '…' sheet for everything else"). Its orb, the one that moves on the screen, its name and a line of how things
- * stand, the machine it runs on, and "…". Then what needs you, each with its answer in place (NeedsYou.swift); then the
- * work in one list by attention (what is new to you, then what is at work, quieter; what is settled folds), each task a
- * row of three lines that opens its thread, with a filter for each project; and its message box docked at the foot, where
- * whatever you ask it starts a conversation with it. An iPhone opens here; a wide window has it beside the same work in
- * its sidebar.
+ * Home (X2's Home, 26 November 2026: what needs you and what is proven, on one screen; the owner's ruling of no tab bar
+ * and Home the primary kept). Its header is the I-beam (a tap opens the drawer on an iPhone), the primary's name, and one
+ * line of how things stand (a tap opens its conversation). Then the agents in a strip, their orbs the only colour on the
+ * page; what needs you, decisions only, three at most, each with its one answer in place (the rest a swipe away, all of
+ * it a tap on the row); and the work by proof: Working, Proven, Failed, and the rest of what is done, folded. At its foot
+ * the bar: search and ask, the primary's message box, a task to give. The node is named only when something is wrong.
+ * A lazy list: a hundred tasks cost what is on screen.
  */
 
-/// Where Home's parts lead: a place (its conversation, a task's thread, the Inbox, Settings…), and everything else.
+/// Home's work, by proof: in hand, proven, failed, and the rest of what ended.
+struct ByProof: Equatable {
+    var working: [WorkRow] = []
+    var proven: [WorkRow] = []
+    var failed: [WorkRow] = []
+    var done: [WorkRow] = []
+
+    /// Every task but those that need you (they are decisions), each in its group, the latest first; at work before queued.
+    init(_ work: Attended) {
+        for row in work.active + work.working + work.done {
+            if row.state == .working || row.state == .queued || (row.verdict == nil && row.attention == .working) {
+                working.append(row)
+                continue
+            }
+            switch row.verdict?.kind {
+            case .proven: proven.append(row)
+            case .failed, .rejected, .gaveUp: failed.append(row)
+            default: done.append(row)
+            }
+        }
+        let newest = { (a: WorkRow, b: WorkRow) -> Bool in a.at != b.at ? a.at > b.at : a.id < b.id }
+        working.sort { a, b in (a.state == .working) != (b.state == .working) ? a.state == .working : newest(a, b) }
+        proven.sort(by: newest)
+        failed.sort(by: newest)
+        done.sort(by: newest)
+    }
+
+    init() {}
+
+    var isEmpty: Bool { working.isEmpty && proven.isEmpty && failed.isEmpty && done.isEmpty }
+}
+
 struct HomeView: View {
     let session: Session
-    /// Goes to a place: its conversation, a task's thread, the Inbox.
+    /// Goes to a place: its conversation, a task's thread, an agent, the Inbox.
     let go: (Place) -> Void
-    /// Everything else ("…"): the places sheet on an iPhone. Nil on a wide window, whose "…" is a menu of the places.
-    var everything: (() -> Void)? = nil
+    /// The drawer (an iPhone's): from the I-beam, and from the left edge. Nil on a wide window, which has its sidebar.
+    var drawer: (() -> Void)? = nil
+    /// Search, or ask (the bar's ⌕, an iPad's ⌘K).
+    var search: (() -> Void)? = nil
     /// Gives a task to the agents (nil: this device may not).
     var give: (() -> Void)? = nil
     @FocusState private var composing: Bool
-    @State private var filtered: String?
     @AppStorage("home.done") private var doneOpen = false
+    @State private var sheet: NeedsYou.NeedSheet?
+    @State private var confirming: ActionView?
+    @State private var busy: Set<String> = []
+    @State private var trouble: String?
 
     private var chat: ChatModel { session.chat }
 
     var body: some View {
         let work = session.attended
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.s6) {
-                if session.reconnecting {
-                    ReconnectingLine(session: session)
-                } else if let trouble = session.trouble {
-                    TroubleRow(trouble: trouble).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if let since = session.keptSince { KeptLine(since: since) }
-                #if os(iOS)
-                ReachCard(session: session)
-                #endif
-                if let work { NeedsYou(session: session, work: work) { go(.task($0)) } }
-                workSection(work)
+        List {
+            if session.reconnecting {
+                ReconnectingLine(session: session).listRowSeparator(.hidden)
+            } else if let trouble = session.trouble {
+                TroubleRow(trouble: trouble).font(.callout).listRowSeparator(.hidden)
             }
-            .padding(.horizontal, Metrics.margin)
-            .padding(.top, Space.s2)
-            .padding(.bottom, Space.s6)
-            .readingWidth()
+            if let since = session.keptSince { KeptLine(since: since).listRowSeparator(.hidden) }
+            if !session.rows.isEmpty {
+                AgentStrip(session: session, rows: session.rows) { go(.agent($0)) }
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+            }
+            if let work {
+                let decisions = decisions(work)
+                if !decisions.isEmpty {
+                    Section {
+                        ForEach(decisions.prefix(3)) { decision in
+                            DecisionRow(decision: decision, busy: busy.contains(decision.id))
+                        }
+                        if decisions.count > 3 {
+                            Button { go(.inbox) } label: {
+                                HStack {
+                                    Text("\(decisions.count - 3) more").fontWeight(.semibold)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                                }
+                                .font(.subheadline)
+                                .frame(minHeight: Metrics.touch)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("needs.more")
+                        }
+                    } header: {
+                        SectionHead(title: "Needs you", count: session.needsYou, strong: true)
+                    }
+                }
+                let groups = ByProof(work)
+                if !groups.working.isEmpty { Section { rows(groups.working) } header: { SectionHead(title: "Working", count: groups.working.count) } }
+                if !groups.proven.isEmpty { Section { rows(groups.proven) } header: { SectionHead(title: "Proven", count: groups.proven.count) } }
+                if !groups.failed.isEmpty { Section { rows(groups.failed) } header: { SectionHead(title: "Failed", count: groups.failed.count, failed: true) } }
+                if !groups.done.isEmpty {
+                    Section {
+                        FoldHead(title: "Done", count: groups.done.count, open: $doneOpen).listRowSeparator(.hidden)
+                        if doneOpen { rows(groups.done) }
+                    }
+                }
+                if groups.isEmpty && decisions.isEmpty { empty }
+            } else if let problem = session.teamProblem {
+                VStack(alignment: .leading, spacing: Space.s2) {
+                    Text("The work can't be read just now.").font(.subheadline)
+                    Text(problem).font(.footnote).foregroundStyle(.secondary)
+                    Button("Try again") { Task { await session.refresh() } }.buttonStyle(.borderless).frame(minHeight: Metrics.touch)
+                }
+                .listRowSeparator(.hidden)
+            } else {
+                // Until the agents have answered: the rows' places held, quietly.
+                ForEach(0..<3, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: 6) {
+                        RoundedRectangle(cornerRadius: 4).fill(.fill.tertiary).frame(width: 120, height: 10)
+                        RoundedRectangle(cornerRadius: 4).fill(.fill.tertiary).frame(height: 12)
+                        RoundedRectangle(cornerRadius: 4).fill(.fill.tertiary).frame(width: 180, height: 10)
+                    }
+                    .padding(.vertical, Space.s2)
+                    .listRowSeparator(.hidden)
+                }
+                .accessibilityElement()
+                .accessibilityLabel("Reading the work")
+            }
         }
+        .listStyle(.plain)
         .scrollDismissesKeyboard(.interactively)
-        // What scrolls goes under its header and its message box, which keep the system's own edge.
         .scrollEdgeEffectStyle(.hard, for: .top)
         .scrollEdgeEffectStyle(.hard, for: .bottom)
         .safeAreaBar(edge: .top) { header(work) }
-        .safeAreaBar(edge: .bottom) { dock }
+        .safeAreaBar(edge: .bottom) { bar }
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
+        // From the left edge, the drawer (an iPhone's Home: elsewhere that edge goes back).
+        .overlay(alignment: .leading) {
+            if let drawer {
+                Color.clear
+                    .frame(width: 18)
+                    .contentShape(.rect)
+                    .gesture(DragGesture(minimumDistance: 8).onEnded { if $0.translation.width > 36 { drawer() } })
+                    .accessibilityHidden(true)
+            }
+        }
         #endif
         .navigationTitle(Primary.name)
         .onAppear {
@@ -69,189 +166,183 @@ struct HomeView: View {
         #endif
         .task { await session.askProjects() }
         .refreshable { await session.refresh() }
+        .sheet(item: $sheet) { sheet in NeedSheetView(session: session, sheet: sheet) }
+        .alert("Approve and send?", isPresented: .init(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming) { action in
+            Button("Approve and send") { run("action:\(action.id)") { try await session.decide(action, approve: true) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { action in
+            Text("\(session.nodeName(of: action.node)) sends it to \(action.target) once, as soon as you approve. It can't be called back, and if it fails it isn't retried.")
+        }
+        .alert("That didn't go through", isPresented: .init(get: { trouble != nil }, set: { if !$0 { trouble = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(trouble ?? "")
+        }
     }
 
     // MARK: Its header
 
     private func header(_ work: Attended?) -> some View {
-        let glance = work.map { Work.atAGlance($0, needs: session.needsCount($0), its: session.primary.line) } ?? (session.primary.line, false)
+        let line = glance(work)
         return HStack(spacing: Space.s3) {
+            if let drawer {
+                Button(action: drawer) { AppMark(size: 34).frame(width: Metrics.touch, height: Metrics.touch).contentShape(.rect) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Everything: the drawer")
+                    .accessibilityIdentifier("home.drawer")
+            } else {
+                AppMark(size: 34)
+            }
             Button { go(.primary) } label: {
-                HStack(spacing: Space.s3) {
-                    // The one orb that moves here: its (the agents' in their rows are still).
-                    PrimaryOrb(size: 48, tone: session.primaryTone, mood: session.primaryMood, key: "primary:home")
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(Primary.name)
-                            .font(.title2.weight(.bold))
-                            .tracking(-0.4)
-                            .foregroundStyle(.primary)
-                        // One line, whole where it can be: beside the machine chip on a phone it shrinks a little
-                        // ("1 at work · 5 need you", as it read then, was cut to "5 nee…" on a 402-point iPhone) before
-                        // it is cut.
-                        Text(glance.0)
-                            .font(.subheadline)
-                            .foregroundStyle(glance.1 ? Color.needs : lineColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .monospacedDigit()
-                    }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(Primary.name)
+                        .font(.title2.weight(.heavy))
+                        .tracking(-0.4)
+                        .foregroundStyle(.primary)
+                    Text(line.text)
+                        .font(.subheadline.weight(line.needs ? .semibold : .regular))
+                        .foregroundStyle(line.needs ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .monospacedDigit()
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(Primary.name): \(glance.0)")
+            .accessibilityLabel("\(Primary.name): \(line.text)")
             .accessibilityHint("Opens its own conversation")
             .accessibilityIdentifier("home.glance")
-            Spacer(minLength: Space.s2)
-            MachineChip(session: session) { go(.more) }
-            if let everything {
-                Button(action: everything) {
-                    Image(systemName: "ellipsis").font(.body.weight(.semibold)).frame(width: 30, height: 30)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .accessibilityLabel("Everything else")
-                .accessibilityIdentifier("everything")
-            } else {
-                PlacesMenu(session: session, go: go, give: give)
-            }
+            if drawer == nil { PlacesMenu(session: session, go: go, give: give) }
         }
         .padding(.horizontal, Metrics.margin)
         .padding(.vertical, Space.s2)
         .readingWidth()
     }
 
-    /// Its line's colour: where it stands, as everywhere.
-    private var lineColor: Color {
-        switch session.primaryTone {
-        case .warn: .needs
-        case .accent: .working
-        case .ok: .done
-        case .danger: .failed
-        case .neutral: .secondary
+    /// The header's line: what needs you, what is at work, and what the node's model calls cost today (its own line
+    /// when nothing does).
+    private func glance(_ work: Attended?) -> (text: String, needs: Bool) {
+        guard let work else { return (session.primary.line, false) }
+        let said = Work.atAGlance(work, needs: session.needsYou, its: session.primary.line)
+        guard let usage = session.usage, usage.spentUsd > 0, said.text != session.primary.line else { return said }
+        let money = "\(usage.complete ? "" : "at least ")\(Spend.usd(usage.spentUsd)) \(usage.per == "day" ? "today" : "this month")"
+        return ("\(said.text) · \(money)", said.needs)
+    }
+
+    // MARK: What needs you
+
+    /// Every decision that waits, as the count counts them (Session.needsYou): each approval once (an agent's under its
+    /// task's name), each task only you can move on, devices, keys, questions and asks to use a Mac.
+    private func decisions(_ work: Attended) -> [Decision] {
+        let now = Date.now.timeIntervalSince1970 * 1000
+        let admin = session.can("fleet:admin")
+        let canAct = admin && session.can("chat")
+        var shown = Set<String>()
+        var out: [Decision] = []
+        for row in work.needs {
+            if row.word == "Allow?" {
+                for action in session.waiting where Roster.agentOfCaller(action.by) == row.agent.id {
+                    shown.insert(action.id)
+                    out.append(approval(action, row: row, admin: admin))
+                }
+            } else {
+                out.append(task(row, canAct: canAct))
+            }
+        }
+        for action in session.waiting where !shown.contains(action.id) { out.append(approval(action, row: nil, admin: admin)) }
+        for pairing in session.pairings {
+            out.append(Decision(id: "pairing:\(pairing.id)", lead: .symbol(pairing.kind == "node" ? "server.rack" : "iphone"), who: pairing.kind == "node" ? "A machine asks to join" : "A device asks to join", what: pairing.name, answer: admin ? ("Compare…", { sheet = .pairing(pairing) }) : nil, rest: [], open: { sheet = .pairing(pairing) }))
+        }
+        for request in session.requests {
+            out.append(Decision(id: "key:\(request.id)", lead: .symbol("key"), who: "\(Primary.name) asks for a key", what: "\(request.name) · \(request.purpose)", answer: session.can("vault:write") ? ("Add…", { sheet = .key(request) }) : nil, rest: [], open: { sheet = .key(request) }))
+        }
+        for question in session.questions where question.expires > now {
+            out.append(Decision(id: "question:\(question.id)", lead: .symbol("powerplug"), who: "\(question.label) asks", what: question.message, answer: ("Answer…", { sheet = .question(question) }), rest: [], open: { sheet = .question(question) }))
+        }
+        for screen in session.screenSessions {
+            let using = screen.state == "allowed"
+            out.append(Decision(id: "screen:\(screen.id)", lead: .symbol("display"), who: using ? "\(Primary.name) is using \(screen.nodeName)" : "\(Primary.name) asks to use \(screen.nodeName)", what: screen.why, answer: (using ? "See it…" : "Answer…", { sheet = .screen(screen) }), rest: [], open: { sheet = .screen(screen) }))
+        }
+        return out
+    }
+
+    private func approval(_ action: ActionView, row: WorkRow?, admin: Bool) -> Decision {
+        let destructive = action.kind == "delete"
+        let asker = Approval.askedBy(action.by)
+        let lead: Decision.Lead = row.map { .agent(id: $0.agent.id, avatar: $0.agent.avatar) } ?? .symbol(Approval.symbol(action.kind))
+        let who = row.map { "\($0.agent.name) · \($0.title)" } ?? "\(asker.prefix(1).uppercased())\(asker.dropFirst()) asks"
+        let what = "\(Approval.classLine(action.kind).components(separatedBy: ":")[0]) · \(action.connector).\(action.tool) \(action.target)"
+        let id = "action:\(action.id)"
+        return Decision(
+            id: id, lead: lead, who: who, what: what,
+            // A delete is approved only in its whole card, by typing what it deletes.
+            answer: admin ? (destructive ? "Review…" : "Allow once", { if destructive { sheet = .approval(action) } else { confirming = action } }) : nil,
+            rest: admin ? [("Deny", true, { run(id) { try await session.decide(action, approve: false) } }), ("More", false, { sheet = .approval(action) })] : [],
+            open: { sheet = .approval(action) }
+        )
+    }
+
+    private func task(_ row: WorkRow, canAct: Bool) -> Decision {
+        let id = "task:\(row.id)"
+        let lead = Decision.Lead.agent(id: row.agent.id, avatar: row.agent.avatar)
+        let open = { go(.task(row.id)) }
+        switch row.word {
+        case "Approve?":
+            return Decision(id: id, lead: lead, who: "\(row.agent.name) proposes", what: row.title,
+                            answer: canAct ? ("Approve", { run(id) { try await session.control(task: row.id, "approve") } }) : nil,
+                            rest: canAct ? [("Decline", true, { run(id) { try await session.control(task: row.id, "stop") } })] : [], open: open)
+        case "Interrupted":
+            return Decision(id: id, lead: lead, who: "\(row.agent.name) · interrupted", what: row.title,
+                            answer: canAct ? ("Resume", { run(id) { try await session.control(task: row.id, "resume") } }) : nil, rest: [], open: open)
+        case "Agent paused":
+            return Decision(id: id, lead: lead, who: "\(row.agent.name) is paused", what: row.title,
+                            answer: canAct ? ("Resume", { run(id) { try await session.control(agent: row.agent.id, "resume") } }) : nil, rest: [], open: open)
+        default:
+            return Decision(id: id, lead: lead, who: row.agent.name, what: row.title, answer: nil, rest: [], open: open)
+        }
+    }
+
+    /// Something answered: its row held while the node is told, and what went wrong said.
+    private func run(_ id: String, _ work: @escaping @MainActor () async throws -> Void) {
+        busy.insert(id)
+        Task.immediate {
+            defer { busy.remove(id) }
+            do { try await work() } catch { trouble = error.localizedDescription }
         }
     }
 
     // MARK: The work
 
-    @ViewBuilder private func workSection(_ work: Attended?) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
-                Text("Work").font(.headline).accessibilityAddTraits(.isHeader)
-                Spacer(minLength: Space.s2)
-                if let give {
-                    Button(action: give) { Label("New task", systemImage: "plus") }
-                        .font(.subheadline.weight(.semibold))
-                        .buttonStyle(.borderless)
-                        .frame(minHeight: Metrics.touch)
-                        .help("Give a task to the agent best suited to it, or to one by name")
-                }
-            }
-            if let work {
-                let projects = work.projects
-                if projects.count > 1 { filters(projects) }
-                let shown = work.only(filtered.flatMap { key in projects.contains { $0.key == key } ? key : nil })
-                let rows = shown.active + shown.working
-                ForEach(rows) { row in rowButton(row) }
-                if !shown.done.isEmpty {
-                    if !rows.isEmpty { Divider() }
-                    FoldHead(title: "Done", count: shown.done.count, open: $doneOpen)
-                    if doneOpen { ForEach(shown.done) { row in rowButton(row) } }
-                }
-                if rows.isEmpty && shown.done.isEmpty && shown.needs.isEmpty {
-                    empty(filtered: filtered != nil)
-                }
-            } else if let problem = session.teamProblem {
-                VStack(alignment: .leading, spacing: Space.s2) {
-                    Text("The work can't be read just now.").font(.subheadline)
-                    Text(problem).font(.footnote).foregroundStyle(.secondary)
-                    Button("Try again") { Task { await session.refresh() } }.buttonStyle(.borderless).frame(minHeight: Metrics.touch)
-                }
-                .padding(.vertical, Space.s3)
-            } else {
-                // Until the agents have answered: the rows' places held, quietly.
-                VStack(alignment: .leading, spacing: Space.s4) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        VStack(alignment: .leading, spacing: 6) {
-                            RoundedRectangle(cornerRadius: 4).fill(.fill.tertiary).frame(width: 120, height: 10)
-                            RoundedRectangle(cornerRadius: 4).fill(.fill.tertiary).frame(height: 12)
-                            RoundedRectangle(cornerRadius: 4).fill(.fill.tertiary).frame(width: 180, height: 10)
-                        }
-                    }
-                }
-                .padding(.vertical, Space.s3)
-                .accessibilityElement()
-                .accessibilityLabel("Reading the work")
-            }
+    private func rows(_ rows: [WorkRow]) -> some View {
+        ForEach(rows) { row in
+            Button { go(.task(row.id)) } label: { WorkRowView(row: row, face: 18, quietWhenWorking: false) }
+                .buttonStyle(RowPress())
+                .accessibilityIdentifier("row.\(row.id)")
         }
     }
 
-    private func rowButton(_ row: WorkRow) -> some View {
-        Button { go(.task(row.id)) } label: { WorkRowView(row: row, face: 18) }
-            .buttonStyle(RowPress())
-            .overlay(alignment: .bottom) { Divider().opacity(0.6) }
-    }
-
-    /// A filter for each project with work, when there is more than one.
-    private func filters(_ projects: [Attended.Project]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                chip(nil, "All", badge: nil)
-                ForEach(projects, id: \.key) { project in
-                    chip(project.key, project.name, badge: WorkProject(key: project.key, name: project.name, badge: project.badge))
-                }
-            }
-            .padding(.vertical, Space.s2)
-        }
-        .scrollClipDisabled()
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Show the work of")
-    }
-
-    private func chip(_ key: String?, _ label: String, badge: WorkProject?) -> some View {
-        let on = filtered == key
-        return Button {
-            withAnimation(.snappy) { filtered = key }
-        } label: {
-            HStack(spacing: 6) {
-                if let badge { ProjectBadge(project: badge) }
-                Text(label).lineLimit(1)
-            }
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(on ? Color.onAccent : .primary)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 34)
-            .background(on ? AnyShapeStyle(Color.ink) : AnyShapeStyle(.fill.quaternary), in: .capsule)
-            .overlay(Capsule().strokeBorder(.separator, lineWidth: on ? 0 : 1))
-            .contentShape(.capsule)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
-    }
-
-    private func empty(filtered: Bool) -> some View {
+    private var empty: some View {
         VStack(alignment: .leading, spacing: Space.s3) {
-            Text(filtered ? "Nothing in this project." : "Nothing under way. Ask \(Primary.name) below, or give an agent a task: each is a row here, from its first step to verified.")
+            Text("Nothing under way. Ask \(Primary.name) below, or give an agent a task: each is a row here, from its first step to its proof.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            if let give, !filtered {
-                NeedButton(title: "Give a task", prominent: true, action: give)
-            }
         }
         .padding(.vertical, Space.s3)
+        .listRowSeparator(.hidden)
     }
 
-    // MARK: Its message box
+    // MARK: Its bar
 
-    @ViewBuilder private var dock: some View {
+    @ViewBuilder private var bar: some View {
         if !session.can("chat") {
             EmptyView()
         } else if chat.answering {
-            // While it answers in the chat you left, the box is that chat's: a press shows it.
+            // While it answers in the chat you left, the bar is that chat's: a press shows it.
             Button { go(.primary) } label: {
                 HStack(spacing: Space.s2) {
-                    LiveDot(color: .working)
+                    LiveDot(color: .ink)
                     Text(chat.title.map { "Answering in “\($0)”" } ?? "Answering").lineLimit(1)
                     Spacer(minLength: Space.s2)
                     Text("Show").fontWeight(.semibold)
@@ -266,8 +357,28 @@ struct HomeView: View {
             .readingWidth()
             .accessibilityIdentifier("answering")
         } else {
-            Composer(chat: chat, client: session.client, composing: $composing, sent: { go(.primary) }, prompt: "Ask \(Primary.name)…")
+            HomeBar(chat: chat, client: session.client, composing: $composing, search: search, give: give, sent: { go(.primary) })
         }
+    }
+}
+
+/// A section's head on Home: its name in small capitals, and how many.
+struct SectionHead: View {
+    let title: String
+    let count: Int
+    var strong = false
+    var failed = false
+
+    var body: some View {
+        HStack(spacing: Space.s2) {
+            Text(title.uppercased()).tracking(0.6)
+            Text("\(count)").monospacedDigit()
+            Spacer(minLength: 0)
+        }
+        .font(.caption.weight(.bold))
+        .foregroundStyle(failed ? AnyShapeStyle(Color.danger) : strong ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

@@ -179,7 +179,11 @@ The models layer, carried (§10):
 ## 8. Clients
 
 - **One interface, every device.**
-  - Phones: no tab bar. Home is your agent: what needs you, with its answer in place, then the work by attention.
+  - Phones: no tab bar. Home is your agent: the agents in a strip, what needs you (decisions only, each with its one
+    answer in place), then the work by proof; a bar at its foot to search, ask and give; a drawer for every other place,
+    two taps from Home; notifications and `invincible://` links that land on the exact task, agent, approval or chat.
+  - Every client keeps up over the node's live stream (core's live.ts): nothing asked while nothing changes, a dead link
+    told within three of the node's beats (4.5 s).
   - Wide screens: three panes. Your agent pinned atop the work, a task's thread, and its details: the VM, the
     changes, the proof, the cost.
   - It was designed and measured in the last redesign before the carry (§10), and carried over without the old theme.

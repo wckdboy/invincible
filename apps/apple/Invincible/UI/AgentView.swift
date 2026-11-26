@@ -84,6 +84,7 @@ struct AgentView: View {
                 RoomComposer(room: room, name: name, client: session.client, composing: $composing, seats: [Mentions.Seat(id: id, name: name), Mentions.Seat(id: "primary", name: Primary.name)])
             }
         }
+        .screen("agent.screen")
         .navigationTitle(name)
         .inlineTitle()
         .hidingTabBar()

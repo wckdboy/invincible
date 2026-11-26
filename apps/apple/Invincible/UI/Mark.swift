@@ -31,6 +31,11 @@ struct IBeam: Shape {
     }
 }
 
+extension View {
+    /// A screen named for the UI tests (InvincibleUITests' taps): a container by that name, its contents as they were.
+    func screen(_ id: String) -> some View { accessibilityElement(children: .contain).accessibilityIdentifier(id) }
+}
+
 /// The app's mark where a page shows it (joining, Settings' About, a Mac's first run, the sidebar's head): the I-beam in
 /// the page's ink, on nothing, so it sits on a light page as on a dark one. Decorative: what it is in is named.
 struct AppMark: View {

@@ -80,15 +80,20 @@ struct WorkRowView: View {
     var current = false
     /// In a sidebar: closer together, as T3's are.
     var dense = false
+    /// Working rows quieter than the rest (a list of every kind); Home's sections say what each is, and keep them whole.
+    var quietWhenWorking = true
     @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
-        let quiet = row.attention == .working && !current
+        let quiet = quietWhenWorking && row.attention == .working && !current
         let selected = prominence == .increased
         VStack(alignment: .leading, spacing: dense ? 2 : 3) {
             HStack(spacing: 6) {
-                ProjectBadge(project: row.project)
-                Text(row.project.name).lineLimit(1)
+                // A project's name where there is one; nothing where there is none (X2: no "Other work" on every row).
+                if row.project.key != "other" {
+                    ProjectBadge(project: row.project)
+                    Text(row.project.name).lineLimit(1)
+                }
                 Spacer(minLength: Space.s2)
                 StateWord(row: row).layoutPriority(1)
                 if let age = row.age {

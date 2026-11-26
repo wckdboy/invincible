@@ -44,6 +44,9 @@ struct MacPlaces: View {
         case .inbox: InboxView(session: session)
         case .more: MoreView(app: mac.app, session: session)
         case .thisMac: GroupedList { ThisMacSections(mac: mac) }.navigationTitle("This Mac")
+        case .chats: AllChats(session: session) { mac.place = .primary }
+        case .keys: KeysView(session: session)
+        case .connectors: ConnectorsView(session: session)
         }
     }
 

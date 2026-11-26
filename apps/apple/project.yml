@@ -57,8 +57,14 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         # Take Photo, in a message's attach menu: asked the first time you choose it, never before.
         NSCameraUsageDescription: Invincible uses the camera only when you take a photo to send with a message.
-        # An approval opened from its notification's Approve is given behind Face ID (the owner's word, 25 November 2026).
-        NSFaceIDUsageDescription: Invincible asks for Face ID before a yes you give to an approval opened from its notification.
+        # An approval opened from its notification's Approve is given behind Face ID (the owner's word, 25 November 2026),
+        # and so is a task's work shipped from its notification's Ship it.
+        NSFaceIDUsageDescription: Invincible asks for Face ID before a yes you give from a notification, to an approval or to shipping a task's work.
+        # invincible: links open a task, an agent, an approval or a chat over Home (invincible://task/<id>, /agent/<handle>,
+        # /approval/<id>, /chat/<id>).
+        CFBundleURLTypes:
+          - CFBundleURLName: sh.invincible.bot.links
+            CFBundleURLSchemes: [invincible]
     # Notifications from your node, through Apple's push service (written by XcodeGen like Info.plist), to the topic
     # sh.invincible.bot (core's ApplePushKeyInput). Xcode builds answer to Apple's development service; an archive for
     # TestFlight is signed for its production one.

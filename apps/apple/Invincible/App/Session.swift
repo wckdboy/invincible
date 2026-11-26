@@ -25,6 +25,8 @@ import Observation
     private(set) var screenSessions: [ScreenSessionView] = []
     /// An approval its notification's Approve asked to see (its id): the Inbox opens its card, the yes behind Face ID.
     var approvalToOpen: String?
+    /// A task its notification's Ship it asked to ship (its id): its thread asks Face ID, then for the pull request.
+    var shipToOpen: String?
     /// MCP servers' questions to you, mid-call: each holds its call until you answer, say no, or its time runs out.
     private(set) var questions: [QuestionView] = []
     private(set) var turns: [TurnView] = []

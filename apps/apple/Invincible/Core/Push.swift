@@ -31,6 +31,63 @@ enum Push {
         /// An approval's card, in full, from its notification's Approve: a yes is given only with the request in front of
         /// you, and behind Face ID (your word, 25 November 2026).
         case approval(String)
+        /// An agent's task, by its id: a notification about it, or a link.
+        case task(String)
+        /// An agent's page: a link.
+        case agent(String)
+        /// A task's work, shipped from its notification's Ship it: the task, its ship asked for behind Face ID.
+        case ship(String)
+    }
+
+    private static let taskId = #"^task-[a-z0-9_-]{12}$"#
+    private static let agentId = #"^[a-z][a-z0-9-]{0,31}$"#
+    private static let actionId = #"^a_[A-Za-z0-9_-]{22}$"#
+    private static let chatId = #"^cv_[A-Za-z0-9_-]{22}$"#
+    private static func valid(_ id: String, _ pattern: String) -> Bool { id.range(of: pattern, options: .regularExpression) != nil }
+
+    /// An `invincible:` link (`invincible://task/<id>`, `/agent/<handle>`, `/approval/<id>`, `/chat/<id>`), as the app
+    /// opens it, over Home; anything else is nothing (an invite link is the Join screen's).
+    static func link(_ url: URL) -> Destination? {
+        guard url.scheme == "invincible", let host = url.host(), url.pathComponents.count == 2 else { return nil }
+        let id = url.pathComponents[1]
+        switch host {
+        case "task": return valid(id, taskId) ? .task(id) : nil
+        case "agent": return valid(id, agentId) ? .agent(id) : nil
+        case "approval": return valid(id, actionId) ? .approval(id) : nil
+        case "chat": return valid(id, chatId) ? .chat(id) : nil
+        default: return nil
+        }
+    }
+
+    /// A notification's kind, as the node wrote it (ours: `invincible.kind`).
+    static func kind(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard let ours = userInfo["invincible"] as? [String: Any], (ours["v"] as? Int) == 1 else { return nil }
+        return ours["kind"] as? String
+    }
+
+    /// How a notification is shown while the app is open (X2: never a banner or a sound about what is on screen): only in
+    /// the list when the screen shows that very thing; otherwise a banner, with a sound unless it is news (core's quiet
+    /// kinds: finished, told, limit), which the node already sends without one.
+    static func presentation(_ destination: Destination, kind: String?, showing: Destination?) -> (banner: Bool, sound: Bool) {
+        if let showing, same(destination, showing) { return (false, false) }
+        return (true, !["finished", "told", "limit"].contains(kind ?? ""))
+    }
+
+    private static func same(_ a: Destination, _ b: Destination) -> Bool {
+        switch (a, b) {
+        case (.task(let x), .task(let y)), (.ship(let x), .task(let y)): x == y
+        case (.chat(let x?), .chat(let y?)): x == y
+        case (.agent(let x), .agent(let y)): x == y
+        case (.inbox, .inbox), (.approval, .inbox): true
+        default: false
+        }
+    }
+
+    /// The task a notification's Ship it ships (its own id), or nil: read strictly, as the node writes it.
+    static func shipTask(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard let ours = userInfo["invincible"] as? [String: Any], (ours["v"] as? Int) == 1, ours["open"] as? String == "task",
+              ours["ship"] as? Bool == true, let id = ours["task"] as? String, valid(id, taskId) else { return nil }
+        return id
     }
 
     /// iOS's leave to show notifications, as core's notifyReach takes it.
@@ -83,6 +140,9 @@ enum Push {
         static let declineOnly = "approval-decline"
         static let approve = "approve"
         static let decline = "decline"
+        /// A task's work that can be shipped (the node's APPLE_CATEGORY.ship), and its Ship it.
+        static let ship = "ship"
+        static let shipIt = "ship-it"
     }
 
     /// The action an approval's notification is about (the outbox's own id), or nil: read strictly, as the node writes it.
@@ -101,6 +161,8 @@ enum Push {
             return .chat(id.flatMap { $0.range(of: #"^cv_[A-Za-z0-9_-]{22}$"#, options: .regularExpression) != nil ? $0 : nil })
         case "overview": return .overview
         case "settings": return .settings
+        // A task's own thread (one this device can't name opens the agents, where every task is).
+        case "task": return (ours["task"] as? String).flatMap { valid($0, taskId) ? .task($0) : nil } ?? .overview
         default: return .inbox
         }
     }

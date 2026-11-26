@@ -172,3 +172,22 @@ struct ChatRow: View {
         }
     }
 }
+
+/// Every one of the primary's chats as a place of its own (the drawer's "All chats", a sidebar's): one chosen opens in its
+/// conversation, as a new one does.
+struct AllChats: View {
+    let session: Session
+    let opened: () -> Void
+
+    var body: some View {
+        ChatsView(session: session) { id in
+            Task {
+                await session.chat.open(id, with: session.client)
+                opened()
+            }
+        } startNew: {
+            session.chat.startNew()
+            opened()
+        }
+    }
+}

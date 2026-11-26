@@ -74,6 +74,7 @@ struct MoreView<Leading: View>: View {
                 .accessibilityElement(children: .combine)
             }
         }
+        .screen("settings.screen")
         .navigationTitle(places ? "More" : "This \(ThisDevice.kind)")
         .confirmationDialog("Forget this device?", isPresented: $forgetting, titleVisibility: .visible) {
             Button("Forget this device", role: .destructive) {

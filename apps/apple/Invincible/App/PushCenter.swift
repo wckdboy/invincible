@@ -21,8 +21,11 @@ import UserNotifications
         #endif
     }
     private(set) var token: String?
-    /// Where a tapped notification asked to go, until MainView has gone there.
+    /// Where a tapped notification or a link asked to go, until MainView has gone there.
     var opened: Push.Destination?
+    /// What the screen shows now (a task, a chat, an agent, the Inbox): a notification about that very thing is told only
+    /// in the list while the app is open, never as a banner or a sound.
+    var showing: Push.Destination?
     /// What the card on the primary's home and the Inbox says: nothing, Turn on, or Open Settings (Push.reach, at the last look).
     private(set) var reach: Push.Reach = .none
     /// When and through which service this device's were lost (not turned off by you), for the card's words.
@@ -134,9 +137,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // without the request); Decline is answered where it's told, behind the iPhone's own unlock.
         let approve = UNNotificationAction(identifier: Push.Button.approve, title: "Approve…", options: [.authenticationRequired, .foreground])
         let decline = UNNotificationAction(identifier: Push.Button.decline, title: "Decline", options: [.authenticationRequired, .destructive])
+        // A task's work that can be shipped: Ship it opens the app at the task, and asks Face ID before the pull request
+        // (X2: behind Face ID as Approve is).
+        let ship = UNNotificationAction(identifier: Push.Button.shipIt, title: "Ship it…", options: [.authenticationRequired, .foreground])
         UNUserNotificationCenter.current().setNotificationCategories([
             UNNotificationCategory(identifier: Push.Button.approval, actions: [approve, decline], intentIdentifiers: []),
             UNNotificationCategory(identifier: Push.Button.declineOnly, actions: [decline], intentIdentifiers: []),
+            UNNotificationCategory(identifier: Push.Button.ship, actions: [ship], intentIdentifiers: []),
         ])
         return true
     }
@@ -149,9 +156,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         PushCenter.shared.failed(error)
     }
 
-    /// While the app is open a notification still shows: it is often about something other than what is on screen.
+    /// While the app is open a notification still shows, as it is often about something other than what is on screen; one
+    /// about what the screen shows now is told only in the list (Push.presentation), and news never sounds.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        let userInfo = notification.request.content.userInfo
+        let destination = Push.destination(userInfo)
+        let kind = Push.kind(userInfo)
+        let showing = await MainActor.run { PushCenter.shared.showing }
+        let told = Push.presentation(destination, kind: kind, showing: showing)
+        var options: UNNotificationPresentationOptions = [.list]
+        if told.banner { options.insert(.banner) }
+        if told.sound { options.insert(.sound) }
+        return options
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
@@ -163,6 +179,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
         if response.actionIdentifier == Push.Button.decline, let action = Push.action(userInfo) {
             await Self.decline(action)
+            return
+        }
+        // Ship it: the app, at the task, its ship asked for behind Face ID there.
+        if response.actionIdentifier == Push.Button.shipIt, let task = Push.shipTask(userInfo) {
+            await MainActor.run { PushCenter.shared.opened = .ship(task) }
             return
         }
         let destination = Push.destination(userInfo)

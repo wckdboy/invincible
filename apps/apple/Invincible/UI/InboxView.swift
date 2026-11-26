@@ -9,27 +9,13 @@ struct InboxView: View {
     /// The card was opened from its notification's Approve: its yes is given behind Face ID.
     @State private var guarded = false
 
-    /// When you put the card that says it can't reach this device away (Not now, for a week).
-    @AppStorage("reach-put-away") private var reachPutAway: Double = 0
-
-    /// Whether the card that says it can't reach this device is at the top (iPhone and iPad only).
-    private var reachShown: Bool {
-        #if os(iOS)
-        (PushCenter.shared.reach == .turnOn || PushCenter.shared.reach == .settings) && Date.now.timeIntervalSince1970 - reachPutAway >= 7 * 24 * 3600
-        #else
-        false
-        #endif
-    }
+    /// (Notifications are asked for once, compactly, in the drawer and in Settings: never as a card here, X2.)
+    private let reachShown = false
     /// Why an approval declined from its row wasn't (the row has no room to say it).
     @State private var declineTrouble: String?
 
     var body: some View {
         GroupedList {
-            #if os(iOS)
-            if reachShown {
-                Section { ReachCard(session: session).listRowInsets(EdgeInsets()) }
-            }
-            #endif
             if !session.pairings.isEmpty {
                 Section {
                     ForEach(session.pairings) { pairing in
@@ -338,6 +324,7 @@ struct ApprovalSheet: View {
                     Section { Text("This device can't answer approvals (it has no fleet:admin scope).").foregroundStyle(.secondary) }
                 }
             }
+            .screen("approval.card")
             .navigationTitle(destructive ? "Delete?" : "Send?")
             .inlineTitle()
             .toolbar {
