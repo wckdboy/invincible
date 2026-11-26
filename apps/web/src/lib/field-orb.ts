@@ -1,9 +1,9 @@
 import { blendHex, agentColors } from "@invincible/core/avatar";
-import { AURUM, FIELD_RIM, project, type FieldColours } from "./field.ts";
+import { AURUM, FIELD_RIM, linear, project, type FieldColours, type Rgb } from "./field.ts";
 import { ORB_LONGEST_STEP, orbRand, orbSeed, type OrbMood } from "./orb-motion.ts";
 
 /*
- * The orbs as fields (26 November 2026): the primary's field (lib/field.ts) is every orb, its in gold with its beam of light
+ * The orbs as fields (26 November 2026): The primary's field (lib/field.ts) is every orb, its in gold with its beam of light
  * through it, each agent's in its own colours. The owner's words: the glyph spheres "still look a little strange/not
  * cool enough, and almost like nipples", and "i dont want them to be too visually distractin"; then, of the heads-up ring
  * it had worn round its field, "remove the old mark around [the primary]. make the primary agent distinct in some other cool
@@ -11,7 +11,7 @@ import { ORB_LONGEST_STEP, orbRand, orbSeed, type OrbMood } from "./orb-motion.t
  * lattice on a sphere reads as a disco ball), and no ring round it, its or an agent's; it is still where it is one of
  * many, and moves slowly where it is the one you are looking at. Pure: whose field an orb is, how it is drawn at a size,
  * its beam, how it moves in each mood, its embers and its ink on a light page. The PWA draws it (ui/orb.ts); the Apple
- * and Android apps will draw the same, held to these numbers by the vectors (apps/apple/scripts/vectors.ts).
+ * and Android apps draw the same, held to these numbers by the vectors (apps/apple/scripts/vectors.ts).
  */
 
 /** Whose field an orb is: its seed (its lines' longitudes and widths), its lean (lib/field.ts' tilt), how many lines,
@@ -73,11 +73,13 @@ export function fieldLook(identity: FieldIdentity, size: number, primary: boolea
  * of its middle (so the core, r < 0.32, stays dark), `width` of the orb's width across at its root (never under a pixel),
  * narrowing to nothing at its tip, its light fading as it goes (beamAt). On a dark page its light is added as the
  * field's is, with a close glow `glow.width` times as wide and `glow.alpha` as strong (no fog); on a light page it is ink,
- * `ink.width` times as wide and `ink.alpha` times as strong as its light (ink on white reads thinner than light on black).
- * Its outline is taken at `steps` steps along it. The field turns about it; it shines as the field does, never past its
+ * `ink.width` times as wide and `ink.alpha` times as strong as its light (ink on white reads thinner than light on black),
+ * its root never under `ink.least` CSS pixels each side (so at 34 px it holds as a blade, not a needle), its ink fading
+ * slower than its light does (beamAt's light to the power `ink.fade`), over a close tint of its ink (`ink.glow`). Its
+ * outline is taken at `steps` steps along it. The field turns about it; it shines as the field does, never past its
  * light at rest (breathing while something waits, dimmer while queued or paused, its tip red-brown when its work failed).
  */
-export const PRIMARY_BEAM = { from: 0.36, to: 1.72, width: 1 / 40, steps: 16, glow: { width: 3.2, alpha: 0.2 }, ink: { width: 1.3, alpha: 1.2 } } as const;
+export const PRIMARY_BEAM = { from: 0.36, to: 1.72, width: 1 / 40, steps: 16, glow: { width: 3.2, alpha: 0.2 }, ink: { width: 1.6, alpha: 1.5, least: 0.85, fade: 0.6, glow: { width: 3.2, alpha: 0.24 } } } as const;
 
 /** A direction in the field's own space turned as its lean turns its points (lib/field.ts' fieldAt: Rx·Ry·Rz). */
 function leaned([x0, y0, z0]: [number, number, number], [ax, ay, az]: [number, number, number]): [number, number, number] {
@@ -131,16 +133,18 @@ export interface FieldMotion {
   rim: number;
 }
 
-/** The primary's moods: at rest it turns slowly; at work a little quicker, embers drifting off its rim; waiting on you it
- * breathes; queued and paused it dims and slows (paused stops); done, it settles; failed, its rim dims to red-brown. */
+/** the primary's moods: only while something is going on does it move (your word, 26 November 2026: "nothing animating at
+ * rest"): at work it turns, embers drifting off its rim; waiting on you it breathes, turning slowly. At rest (idle), done
+ * (it settles), queued, paused and failed it comes to rest, still, in its mood's light: dimmer while queued or paused, its
+ * rim red-brown when its work failed. (Until 26 November 2026 it turned at rest too, a turn a minute.) */
 export const FIELD_MOTION: Readonly<Record<OrbMood, FieldMotion>> = {
-  idle: { turn: 0.1, glow: 1, breath: null, embers: false, rim: 0 },
+  idle: { turn: 0, glow: 1, breath: null, embers: false, rim: 0 },
   working: { turn: 0.2, glow: 1.08, breath: null, embers: true, rim: 0 },
   waiting: { turn: 0.08, glow: 1, breath: { period: 5.2, depth: 0.2 }, embers: false, rim: 0 },
-  queued: { turn: 0.06, glow: 0.85, breath: null, embers: false, rim: 0 },
+  queued: { turn: 0, glow: 0.85, breath: null, embers: false, rim: 0 },
   paused: { turn: 0, glow: 0.7, breath: null, embers: false, rim: 0 },
-  done: { turn: 0.035, glow: 1, breath: null, embers: false, rim: 0 },
-  failed: { turn: 0.03, glow: 0.88, breath: null, embers: false, rim: 1 },
+  done: { turn: 0, glow: 1, breath: null, embers: false, rim: 0 },
+  failed: { turn: 0, glow: 0.88, breath: null, embers: false, rim: 1 },
 };
 
 /** An agent's: it moves only while it works (your word, 26 November 2026: still in rows, moving only in its own
@@ -206,10 +210,11 @@ export function fieldSettled(clock: FieldClock, motion: FieldMotion): boolean {
 }
 
 /** How many frames a second a field needs now: as few as look smooth (each frame costs a battery). While it eases to a
- * mood or its embers drift, 30; breathing, 20; only turning, 15; and none once it has come to rest. */
+ * mood, 30; while its embers drift (slowly: a frame moves one a third of a pixel at 168 px) or it breathes, 20; only
+ * turning, 15; and none once it has come to rest. */
 export function fieldFps(clock: FieldClock, motion: FieldMotion): number {
-  if (!fieldSettled(clock, motion) || clock.embers > 0.01) return 30;
-  if (clock.depth > 0.002) return 20;
+  if (!fieldSettled(clock, motion)) return 30;
+  if (clock.embers > 0.01 || clock.depth > 0.002) return 20;
   return clock.speed > 0.0005 ? 15 : 0;
 }
 
@@ -231,11 +236,13 @@ export interface FieldFrame {
 }
 
 /**
- * Its embers: how many; each lives 2.8 to 4.4 seconds (then another sets out); where they set out (a share of the way
- * from the middle to the edge of the orb's square) and how far each drifts; how much they rise as they go; how far
- * round from the rim's burning side they may set out (degrees either way); and their radius. Always inside its square.
+ * Its embers, refined (26 November 2026: few, small and slow, so they say it works without pulling the eye): how many;
+ * each lives 3.6 to 5.6 seconds (then another sets out); where they set out (a share of the way from the middle to the
+ * edge of the orb's square) and how far each drifts; how much they rise as they go; how far round from the rim's burning
+ * side they may set out (degrees either way); their radius; and how long each takes to come into sight (a share of its
+ * life). Always inside its square. Drawn soft (a light that falls away from its middle), never a hard dot.
  */
-export const FIELD_EMBERS = { count: 7, life: [2.8, 4.4], from: [0.56, 0.64], drift: [0.1, 0.2], rise: 0.06, spread: 70, size: [0.016, 0.028] } as const;
+export const FIELD_EMBERS = { count: 5, life: [3.6, 5.6], from: [0.58, 0.64], drift: [0.08, 0.15], rise: 0.05, spread: 60, size: [0.012, 0.022], fadeIn: 0.25 } as const;
 /** Where the rim burns, in degrees clockwise from the top (lib/field.ts' rim light, seen from the front: lower right). */
 export const RIM_ANGLE = (Math.atan2(FIELD_RIM[0], FIELD_RIM[1]) * 180) / Math.PI;
 
@@ -265,7 +272,7 @@ function embersAt(seed: number, t: number, share: number): FieldEmber[] {
     const lot = (seed + Math.imul(round, 0x9e3779b1)) >>> 0;
     const angle = ((RIM_ANGLE + E.spread * (2 * orbRand(lot, i, 72) - 1)) * Math.PI) / 180;
     const reach = E.from[0] + (E.from[1] - E.from[0]) * orbRand(lot, i, 73) + (E.drift[0] + (E.drift[1] - E.drift[0]) * orbRand(lot, i, 74)) * u;
-    const fadeIn = Math.min(1, u / 0.15);
+    const fadeIn = Math.min(1, u / E.fadeIn);
     embers.push({
       x: reach * Math.sin(angle),
       y: -reach * Math.cos(angle) - E.rise * u,
@@ -311,32 +318,140 @@ export function fieldTone(r: number, g: number, b: number, exposure = FIELD_EXPO
  *   weight.
  * - glow: under each line on a dark page, its light again as `width` times as wide and `alpha` as strong: close, so no
  *   fog (your word, 26 November 2026: "less fog, so it reads clearer").
- * - ink: a line's width on a light page, as a share of its width on a dark one.
+ * - ink: a line's width on a light page, as a share of its width on a dark one at its largest, the same at every size (a
+ *   look's weight, its boldness where small, is for light, which spreads): wider, as ink on paper has no glow to carry it
+ *   (until 26 November 2026, 0.85 of the dark page's at each size: the agents read as thin scribbles there).
+ * - inkLeast: no line on a light page is narrower than this (CSS pixels), so a 14 px face keeps its lines. (No glow under
+ *   them there: a tint of 6 % showed next to nothing and cost a second pass of every stroke, each frame.)
  * - light: how much of its points' light a line shows on a dark page (a line is lit along its length where the icon's
  *   points are dots); less again where it is smaller than `full`, where its lines lie closer and their light adds up.
  */
-export const FIELD_STROKE = { least: 0.42, more: 0.5, glow: { width: 3.2, alpha: 0.12 }, ink: 0.85, light: 0.22, full: 96 } as const;
+export const FIELD_STROKE = { least: 0.42, more: 0.5, glow: { width: 3.2, alpha: 0.12 }, ink: 1.35, inkLeast: 0.55, light: 0.22, full: 96 } as const;
 /** How much of its points' light a field `size` wide shows on a dark page. */
 export const strokeLight = (size: number): number => FIELD_STROKE.light * Math.min(1, size / FIELD_STROKE.full);
 
-/** A field's inks on a light page, as sRGB (0 to 255 each): where its key light falls, its key's deep colour darkened
- * (it would be white on white otherwise), and where its rim burns, its rim's, darkened less. */
+/**
+ * A field's ink on a light page (26 November 2026: it read as "flat line art" there, the agents' above all, which the icon
+ * rounds had turned down): each colour as a saturated ink rather than darkened towards black (which made gold brown and
+ * every tint muddy):
+ * - key, rim: how far its key's ink and its rim's stand from the page (#fafafa) where fully lit, as a contrast ratio
+ *   (3:1 is a graphic's floor; the key, nearer you, stronger);
+ * - chroma: how much more saturated each ink is than its colour, as far as sRGB allows at its lightness;
+ * - sheen: where the key light strikes hardest (past `from` of its light), its ink goes up to `most` of the way to its lit
+ *   colour as an ink `contrast` to 1 from the page: the light page's white-hot, so it reads as lit, not drawn;
+ * - floor, curve: how opaque a line is by its light, from `floor` where the lights leave it to whole where it is fully
+ *   lit, along `curve` (under 1, it gains sooner): the far lines faint but there, so the field keeps its volume.
+ */
+export const FIELD_INK = { key: 3.4, rim: 3.1, sheen: { contrast: 2.2, from: 0.55, most: 0.7 }, chroma: 1.2, floor: 0.22, curve: 0.9 } as const;
+
+/** A field's inks on a light page, as sRGB (0 to 255 each): where its key light falls, its key's deep colour as ink, and
+ * where its rim burns, its rim's (FIELD_INK). */
 export interface FieldInks {
   key: [number, number, number];
   rim: [number, number, number];
+  /** Where the key light strikes hardest, its lit colour as a lighter ink: the sheen that says it is lit. */
+  sheen: [number, number, number];
 }
 export function fieldInks(colours: FieldColours): FieldInks {
-  const rgb = (hex: string): [number, number, number] => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
-  return { key: rgb(blendHex(colours.key[1], "#000000", 0.38)), rim: rgb(blendHex(colours.rim, "#000000", 0.22)) };
+  // (Worked out once for each field's colours: a frame on a light page reads them, and an ink takes a few hundred steps.)
+  const key = `${colours.key[0]}|${colours.key[1]}|${colours.rim}`;
+  let inks = inked.get(key);
+  if (!inks) {
+    inks = { key: inkOf(colours.key[1], FIELD_INK.key), rim: inkOf(colours.rim, FIELD_INK.rim), sheen: inkOf(colours.key[0], FIELD_INK.sheen.contrast) };
+    if (inked.size >= 64) inked.delete(inked.keys().next().value!);
+    inked.set(key, inks);
+  }
+  return inks;
+}
+const inked = new Map<string, FieldInks>();
+
+/** A colour as an ink on the light page: its hue kept, its chroma FIELD_INK.chroma times its own (as far as sRGB goes),
+ * and as light as it can be while it stands `contrast` to 1 from the page (or as it is, where it is darker already). */
+export function inkOf(hex: string, contrast: number): [number, number, number] {
+  const [L, a, b] = oklab(linear(hex));
+  const C = Math.hypot(a, b) * FIELD_INK.chroma, h = Math.atan2(b, a);
+  const ch = Math.cos(h), sh = Math.sin(h);
+  // The most chroma up to C that sRGB holds at a lightness (bisected: 16 steps, under a ten-thousandth of the range,
+  // finer than a byte of sRGB can tell).
+  const held = (l: number): [number, number, number] => {
+    let lo = 0, hi = C;
+    if (inGamut(fromOklab(l, C * ch, C * sh))) lo = C;
+    else for (let i = 0; i < 16; i++) {
+      const mid = (lo + hi) / 2;
+      if (inGamut(fromOklab(l, mid * ch, mid * sh))) lo = mid;
+      else hi = mid;
+    }
+    return fromOklab(l, lo * ch, lo * sh);
+  };
+  const most = (PAGE_LUMINANCE + 0.05) / contrast - 0.05;
+  let shown = held(L);
+  if (relativeLuminance(shown) > most) {
+    // As light as it may be: the lightness that stands `contrast` from the page (bisected, 16 steps).
+    let lo = 0, hi = L;
+    for (let i = 0; i < 16; i++) {
+      const mid = (lo + hi) / 2;
+      if (relativeLuminance(held(mid)) > most) hi = mid;
+      else lo = mid;
+    }
+    shown = held(lo);
+  }
+  return [srgb8(shown[0]), srgb8(shown[1]), srgb8(shown[2])];
 }
 
 /** A point's ink on a light page, from the key's light on it and the rim's (lib/field.ts' shadeLit): between its two
- * inks by their shares, and as opaque as it is lit, faint where it is dark (so the field keeps its depth on paper). */
+ * inks by their shares, and as opaque as it is lit (FIELD_INK's floor and curve), so the field keeps its depth on paper
+ * and its far lines don't vanish. */
 export function fieldInk(inks: FieldInks, lit: number, rim: number): { rgb: [number, number, number]; alpha: number } {
   const total = lit + rim;
   const share = total > 0 ? rim / total : 0;
-  const mix = (at: 0 | 1 | 2) => inks.key[at] + (inks.rim[at] - inks.key[at]) * share;
-  return { rgb: [mix(0), mix(1), mix(2)], alpha: Math.min(1, 0.1 + 0.95 * Math.max(lit, rim)) };
+  // Where the key strikes hardest (past `sheen.from` of its light), its sheen: up to `sheen.most` of the way to it.
+  const S = FIELD_INK.sheen;
+  const sheen = S.most * Math.max(0, Math.min(1, (lit - S.from) / (1 - S.from))) * (1 - share);
+  const mix = (at: 0 | 1 | 2) => {
+    const ink = inks.key[at] + (inks.rim[at] - inks.key[at]) * share;
+    return ink + (inks.sheen[at] - ink) * sheen;
+  };
+  const light = Math.min(1, Math.max(0, lit, rim));
+  return { rgb: [mix(0), mix(1), mix(2)], alpha: FIELD_INK.floor + (1 - FIELD_INK.floor) * Math.pow(light, FIELD_INK.curve) };
+}
+
+/** fieldInk for each point of each frame on a light page, making nothing: its colour into `out` (0 to 255 a channel) and
+ * its opacity as `out[3]`, read from FIELD_INK's curve taken in 1024 steps (within a thousandth of fieldInk's; a stroke is
+ * drawn in sixteen steps of it anyway). */
+export function fieldInkInto(inks: FieldInks, lit: number, rim: number, out: Float64Array | number[]): void {
+  const total = lit + rim;
+  const share = total > 0 ? rim / total : 0;
+  const S = FIELD_INK.sheen;
+  const sheen = S.most * Math.max(0, Math.min(1, (lit - S.from) / (1 - S.from))) * (1 - share);
+  for (let c = 0; c < 3; c++) {
+    const ink = inks.key[c]! + (inks.rim[c]! - inks.key[c]!) * share;
+    out[c] = ink + (inks.sheen[c]! - ink) * sheen;
+  }
+  out[3] = INK_ALPHA[Math.round(Math.min(1, Math.max(0, lit, rim)) * 1023)]!;
+}
+const INK_ALPHA = Float64Array.from({ length: 1024 }, (_, i) => FIELD_INK.floor + (1 - FIELD_INK.floor) * Math.pow(i / 1023, FIELD_INK.curve));
+
+// (Colour in OKLab, Björn Ottosson's: a lightness and two axes of hue, so an ink keeps its hue as it darkens.)
+/** The light page's own luminance (#fafafa, --bg). */
+const PAGE_LUMINANCE = Math.pow((250 / 255 + 0.055) / 1.055, 2.4);
+function oklab([r, g, b]: Rgb): [number, number, number] {
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+function fromOklab(L: number, a: number, b: number): Rgb {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s];
+}
+const inGamut = (rgb: Rgb): boolean => rgb.every((c) => c >= -1e-9 && c <= 1 + 1e-9);
+const relativeLuminance = ([r, g, b]: Rgb): number => 0.2126 * Math.max(0, r) + 0.7152 * Math.max(0, g) + 0.0722 * Math.max(0, b);
+/** Linear light to an sRGB byte. */
+function srgb8(v: number): number {
+  const c = Math.max(0, Math.min(1, v));
+  return Math.round(255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055));
 }
 
 function fract(x: number): number {

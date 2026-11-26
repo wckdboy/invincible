@@ -121,3 +121,10 @@ export function projectIdFrom(name: string, taken: string[] = []): string {
   if (!taken.includes(base)) return base;
   for (let n = 2; ; n++) if (!taken.includes(`${base}-${n}`)) return `${base}-${n}`;
 }
+
+/** Whether a kept chat's title is only its first message's first words, as the node titles a new chat (core's titleFrom:
+ * its first line, at most 60 characters), so the thread says it right under it: then it isn't said above it again. */
+export function titleRepeats(title: string, first: string): boolean {
+  const line = first.replace(/\s+/g, " ").trim();
+  return line !== "" && title === (line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line);
+}

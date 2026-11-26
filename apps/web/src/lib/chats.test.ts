@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ConversationSummary, StoredMessage } from "@invincible/core";
-import { chatActions, CHATS_MENU, filterConversations, groupConversations, mostRecent, projectIdFrom, stepsOf } from "./chats.ts";
+import { titleFrom } from "../../../../packages/core/src/chats.ts";
+import { chatActions, CHATS_MENU, filterConversations, groupConversations, mostRecent, projectIdFrom, stepsOf, titleRepeats } from "./chats.ts";
 
 const now = new Date(2026, 10, 10, 15, 0).getTime();
 const HOUR = 3_600_000;
@@ -123,5 +124,16 @@ describe("a chat's one menu", () => {
   });
   test("a device that may not chat is offered no side question", () => {
     expect(values({ kept: true, pinned: false, aside: false, node: "keep" })).toEqual(["rename", "pin", "delete"]);
+  });
+});
+
+describe("a chat's title, said once", () => {
+  test("a title that is only its first message's first words (as the node made it) repeats it; one you gave it doesn't", () => {
+    for (const first of ["What is left before the release, in order?", "  two\n lines  of it ", "x".repeat(140), "Is this how the icon should look on a phone? It is 192 pixels square and rounded"]) {
+      expect(titleRepeats(titleFrom(first), first)).toBe(true);
+    }
+    expect(titleRepeats("Release plan", "What is left before the release, in order?")).toBe(false);
+    // An empty first message (files alone) gives "New chat", which says nothing it repeats.
+    expect([titleFrom(""), titleRepeats(titleFrom(""), "")]).toEqual(["New chat", false]);
   });
 });

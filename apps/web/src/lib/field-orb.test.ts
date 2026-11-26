@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { AGENT_TINTS, agentColors } from "@invincible/core/avatar";
+import { blendHex, AGENT_TINTS, agentColors } from "@invincible/core/avatar";
 import { AURUM, fieldPoints, project } from "./field.ts";
 import {
-  FIELD_EASE, FIELD_EMBERS, FIELD_MOTION, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldSettled, fieldStep, fieldStill, fieldTone,
+  FIELD_EASE, FIELD_EMBERS, FIELD_INK, FIELD_MOTION, FIELD_STROKE, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInkInto, fieldInks, fieldLook, fieldMotion, fieldSettled, fieldStep, fieldStill, fieldTone,
   PRIMARY_FIELD, PRIMARY_BEAM, agentField, beamAt, beamLine, RIM_ANGLE, RIM_DIM, type FieldClock, type FieldMotion,
 } from "./field-orb.ts";
 import { ORB_LONGEST_STEP, ORB_MOODS } from "./orb-motion.ts";
@@ -132,7 +132,7 @@ describe("how a field is drawn at a size", () => {
 });
 
 describe("how it moves", () => {
-  test("slowly: a turn takes half a minute or more, a breath five seconds, and only work sends off embers", () => {
+  test("slowly, and only while something is going on: a turn takes half a minute or more, a breath five seconds, only work sends off embers", () => {
     expect(Object.keys(FIELD_MOTION).sort()).toEqual([...ORB_MOODS].sort());
     for (const [mood, motion] of Object.entries(FIELD_MOTION)) {
       expect(motion.turn).toBeLessThanOrEqual((2 * Math.PI) / 30);
@@ -140,12 +140,13 @@ describe("how it moves", () => {
       if (motion.breath) expect([motion.breath.period >= 4, motion.breath.depth <= 0.25]).toEqual([true, true]);
       expect(motion.embers).toBe(mood === "working");
     }
-    // At work, a little quicker than at rest; done, it settles; paused, it stops; failed, its rim dims.
-    expect(FIELD_MOTION.working.turn).toBeGreaterThan(FIELD_MOTION.idle.turn);
-    expect(FIELD_MOTION.done.turn).toBeLessThan(FIELD_MOTION.idle.turn);
-    expect(FIELD_MOTION.paused.turn).toBe(0);
-    expect(FIELD_MOTION.failed.rim).toBe(1);
+    // Only while something is going on (your word, 26 November 2026: "nothing animating at rest"): at work it turns,
+    // waiting on you it breathes; at rest, done (it settles), queued, paused and failed it is still, in its mood's light.
+    expect(FIELD_MOTION.working.turn).toBeGreaterThan(0);
     expect(FIELD_MOTION.waiting.breath).not.toBeNull();
+    for (const mood of ["idle", "done", "queued", "paused", "failed"] as const) expect([mood, FIELD_MOTION[mood].turn, FIELD_MOTION[mood].breath]).toEqual([mood, 0, null]);
+    expect(FIELD_MOTION.paused.glow).toBeLessThan(FIELD_MOTION.queued.glow);
+    expect(FIELD_MOTION.failed.rim).toBe(1);
   });
 
   test("an agent moves only while it works, and never sends off embers", () => {
@@ -181,15 +182,22 @@ describe("how it moves", () => {
     expect(back.turn).toBeCloseTo(FIELD_MOTION.working.turn * ORB_LONGEST_STEP, 12);
   });
 
-  test("as few frames as look smooth: none once an agent has come to rest", () => {
+  test("as few frames as look smooth: none once it has come to rest, its or an agent's", () => {
     const resting = fieldMotion("idle", true);
     let clock = run(fieldClock(FIELD_MOTION.working), resting, 0.2);
     expect(fieldFps(clock, resting)).toBe(30);
     clock = run(clock, resting, 8);
     expect(fieldFps(clock, resting)).toBe(0);
-    expect(fieldFps(fieldClock(FIELD_MOTION.idle), FIELD_MOTION.idle)).toBe(15);
+    // Its, at rest: none; done after work, it eases to a stop (30 while it eases) and then none.
+    expect(fieldFps(fieldClock(FIELD_MOTION.idle), FIELD_MOTION.idle)).toBe(0);
+    let done = run(fieldClock(FIELD_MOTION.working), FIELD_MOTION.done, 0.2);
+    expect(fieldFps(done, FIELD_MOTION.done)).toBe(30);
+    done = run(done, FIELD_MOTION.done, 8);
+    expect([fieldFps(done, FIELD_MOTION.done), done.speed]).toEqual([0, expect.any(Number)]);
+    expect(done.speed).toBeLessThan(0.0005);
+    // Breathing, or its embers drifting (slowly), 20; only easing to a mood takes 30.
     expect(fieldFps(fieldClock(FIELD_MOTION.waiting), FIELD_MOTION.waiting)).toBe(20);
-    expect(fieldFps(fieldClock(FIELD_MOTION.working), FIELD_MOTION.working)).toBe(30);
+    expect(fieldFps(fieldClock(FIELD_MOTION.working), FIELD_MOTION.working)).toBe(20);
   });
 
   test("waiting on you, a slow breath of brightness; still, none", () => {
@@ -198,6 +206,22 @@ describe("how it moves", () => {
     expect(Math.min(...glows)).toBeCloseTo(0.8, 6);
     expect(fieldStill(FIELD_MOTION.waiting)).toEqual({ turn: 0, glow: 1, rim: 0, embers: [] });
     expect(fieldStill(FIELD_MOTION.failed)).toEqual({ turn: 0, glow: FIELD_MOTION.failed.glow, rim: 1, embers: [] });
+  });
+
+  test("its embers are few, small and slow (26 November 2026: refined, never busy), and none pops into sight", () => {
+    expect(FIELD_EMBERS.count).toBeLessThanOrEqual(5);
+    expect(FIELD_EMBERS.life[0]).toBeGreaterThanOrEqual(3.5);
+    expect(FIELD_EMBERS.size[1]).toBeLessThanOrEqual(0.022);
+    // Slow: at most a fifth of the orb's half-width a life, so at 168 px under 5 px a second (they went at 8).
+    expect(FIELD_EMBERS.drift[1] + FIELD_EMBERS.rise).toBeLessThanOrEqual(0.2);
+    expect(((FIELD_EMBERS.drift[1] + FIELD_EMBERS.rise) * 84) / FIELD_EMBERS.life[0]).toBeLessThan(5);
+    // Each comes into sight over a quarter of its life, and is never brighter than three fifths of its light.
+    expect(FIELD_EMBERS.fadeIn).toBeGreaterThanOrEqual(0.2);
+    const working = fieldClock(FIELD_MOTION.working);
+    let brightest = 0;
+    for (let t = 0; t < 60; t += 0.05) for (const e of fieldFrame(working, t, { seed: 3, embers: true }).embers) brightest = Math.max(brightest, e.alpha);
+    expect(brightest).toBeGreaterThan(0.4);
+    expect(brightest).toBeLessThan(0.6);
   });
 
   test("its embers drift off the burning rim, inside its square, fading in and out; the same for the same moment", () => {
@@ -245,17 +269,55 @@ describe("its colours", () => {
     expect(r > g && g > b).toBe(true);
   });
 
-  test("on a light page, ink: darker than its light, readable on the page, as opaque as it is lit", () => {
-    for (const handle of HANDLES.slice(0, 40)) {
-      const inks = fieldInks(agentField(handle).colours);
+  test("on a light page, ink: saturated (not darkened towards black), readable on the page, lit where the light strikes, as opaque as it is lit", () => {
+    const contrast = (rgb: [number, number, number]) => (luminance([250, 250, 250]) + 0.05) / (luminance(rgb) + 0.05);
+    /** How colourful (its channels' spread, 0 to 255). */
+    const colourful = (rgb: readonly number[]) => Math.max(...rgb) - Math.min(...rgb);
+    for (const handle of HANDLES) {
+      const colours = agentField(handle).colours;
+      const inks = fieldInks(colours);
       // At least 3 to 1 against the light page's ground (#fafafa) where it is fully lit, as a graphic needs.
-      for (const ink of [inks.key, inks.rim]) expect((luminance([250, 250, 250]) + 0.05) / (luminance(ink) + 0.05)).toBeGreaterThan(3);
+      for (const ink of [inks.key, inks.rim]) expect(contrast(ink)).toBeGreaterThan(3);
+      // More colourful than the colour darkened towards black (until 26 November 2026's ink, which read as muddy line
+      // art), its hue its own.
+      expect(colourful(inks.key)).toBeGreaterThan(colourful(hexRgb(blendHex(colours.key[1], "#000000", 0.38))));
+      expect(colourful(inks.rim)).toBeGreaterThan(colourful(hexRgb(blendHex(colours.rim, "#000000", 0.22))));
+      // Its sheen (where the key strikes hardest) lighter than its key ink: it reads as lit, not drawn.
+      expect(luminance(inks.sheen)).toBeGreaterThan(luminance(inks.key));
     }
     const inks = fieldInks(AURUM);
     expect(luminance(inks.key)).toBeLessThan(luminance(hexRgb(AURUM.key[1])));
-    expect(fieldInk(inks, 1, 0).rgb).toEqual(inks.key);
+    // Worked out once for the same colours: a frame reads them, it doesn't work them out again.
+    expect(fieldInks(AURUM)).toBe(inks);
+    // Gold stays gold: its red the most, its blue the least (darkened, it had gone brown).
+    expect(inks.key[0] > inks.key[1] && inks.key[1] > inks.key[2]).toBe(true);
+    // Its key where the key's light is moderate, its rim where the rim burns; toward its sheen where the key strikes hardest.
+    expect(fieldInk(inks, FIELD_INK.sheen.from, 0).rgb).toEqual(inks.key);
     expect(fieldInk(inks, 0, 1).rgb).toEqual(inks.rim);
+    expect(luminance(fieldInk(inks, 1, 0).rgb as [number, number, number])).toBeGreaterThan(luminance(inks.key));
     expect(fieldInk(inks, 0.9, 0).alpha).toBeGreaterThan(fieldInk(inks, 0.2, 0).alpha);
-    expect(fieldInk(inks, 0, 0)).toEqual({ rgb: inks.key, alpha: 0.1 });
+    // The far lines faint but there (a floor, so it keeps its volume), and whole where it is fully lit.
+    expect(fieldInk(inks, 0, 0)).toEqual({ rgb: inks.key, alpha: FIELD_INK.floor });
+    expect(FIELD_INK.floor).toBeGreaterThan(0.15);
+    expect(fieldInk(inks, 1, 0).alpha).toBe(1);
+    // As a frame draws it (making nothing): the same colour, its opacity within a thousandth.
+    const out = new Float64Array(4);
+    for (const [lit, rim] of [[0, 0], [0.2, 0.05], [0.5, 0.5], [0.8, 0], [1, 0], [0, 1], [0.37, 0.61]] as [number, number][]) {
+      fieldInkInto(inks, lit, rim, out);
+      const exact = fieldInk(inks, lit, rim);
+      for (const c of [0, 1, 2]) expect(out[c]).toBeCloseTo(exact.rgb[c]!, 9);
+      expect(Math.abs(out[3]! - exact.alpha)).toBeLessThan(0.001);
+    }
+  });
+
+  test("on a light page, its lines hold at the smallest size and its beam holds as a blade", () => {
+    // No line narrower than FIELD_STROKE.inkLeast, wider than on a dark page (ink has no glow to carry it).
+    expect(FIELD_STROKE.inkLeast).toBeGreaterThanOrEqual(0.5);
+    expect(FIELD_STROKE.ink).toBeGreaterThanOrEqual(1);
+    // At 34 px its beam's root is at least 2.5 px across on paper (a pixel and a half wider than on a dark page's 1).
+    const at34 = 2 * Math.max(PRIMARY_BEAM.ink.least, (34 * PRIMARY_BEAM.width) / 2) * PRIMARY_BEAM.ink.width;
+    expect(at34).toBeGreaterThan(2.5);
+    // A close tint under its beam: as close as the dark page's glow, never fog.
+    expect(PRIMARY_BEAM.ink.glow.width).toBeLessThanOrEqual(PRIMARY_BEAM.glow.width);
   });
 });

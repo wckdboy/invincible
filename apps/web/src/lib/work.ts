@@ -295,6 +295,14 @@ export function attended(input: AttentionInput): Attended {
   return out;
 }
 
+/** Whether the rows name their project: only where the work is in more than one (with one, or none, "Other work" and its
+ * dashed badge on every row said nothing; a row's first line is then how it stands, and its age). */
+export const namesProjects = (work: Pick<Attended, "projects">): boolean => work.projects.length > 1;
+
+/** How many of these rows (a folded Done) failed: a failure you have seen is settled, folded with verified work, but the
+ * fold still says it ("Done 4 · 1 failed"), so it never hides. */
+export const failedIn = (rows: readonly Pick<WorkRow, "state">[]): number => rows.filter((row) => row.state === "failed").length;
+
 /** The rows of one project alone (a filter), its sections as they were; every project's with none. */
 export function inProject(work: Attended, key: string | null): Attended {
   if (key === null) return work;
@@ -376,11 +384,12 @@ export function seenOnOpen(id: string, snapshot: Pick<TeamSnapshot, "tasks" | "s
   return newest?.id === task.id ? { agent: task.assignee } : null;
 }
 
-/** Home's line under the primary's name (the phone's header): how many are at work and how much needs you, else its own line. */
-export function atAGlance(work: Pick<Attended, "working">, needs: number, his: string): { text: string; needs: boolean } {
+/** Home's line under the primary's name (the phone's header): how much needs you, first (the line is amber then, and its first
+ * words agree with its colour), and how many are at work; else its own line. */
+export function atAGlance(work: Pick<Attended, "working">, needs: number, its: string): { text: string; needs: boolean } {
   const atWork = work.working.filter((row) => row.state === "working").length;
-  const parts = [atWork ? `${atWork} at work` : null, needs ? `${needs} need${needs === 1 ? "s" : ""} you` : null].filter((part): part is string => part !== null);
-  return parts.length ? { text: parts.join(" · "), needs: needs > 0 } : { text: his, needs: false };
+  const parts = [needs ? `${needs} need${needs === 1 ? "s" : ""} you` : null, atWork ? `${atWork} at work` : null].filter((part): part is string => part !== null);
+  return parts.length ? { text: parts.join(" · "), needs: needs > 0 } : { text: its, needs: false };
 }
 
 /**

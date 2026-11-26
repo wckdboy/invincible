@@ -305,7 +305,8 @@ export function gateRows(gates: readonly string[], entries: readonly TeamTrailEn
 
 /** The first line of what a command printed that says something (not its exit, not "stderr:"). */
 function firstSaid(output: string): string {
-  return output.split("\n").map((line) => line.trim()).find((line) => line && line !== "stderr:" && line !== "(no output)" && !/^exit -?\d+$/.test(line))?.slice(0, 200) ?? "";
+  // (Not the runner's own line: "exit 0" or "exit 0 · 12 ms", which the gate's row says already.)
+  return output.split("\n").map((line) => line.trim()).find((line) => line && line !== "stderr:" && line !== "(no output)" && !/^exit -?\d+( · \d+ ms\b.*)?$/.test(line))?.slice(0, 200) ?? "";
 }
 
 /** The reviewer's latest verdict, as the runner wrote it (null: no review yet). */

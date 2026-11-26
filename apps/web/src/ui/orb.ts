@@ -1,6 +1,6 @@
 import { fieldAt, fieldBuffer, fieldLight, fieldModel, type FieldBuffer, type FieldModel } from "../lib/field.ts";
 import {
-  FIELD_STROKE, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldStep, fieldStill, fieldTone, PRIMARY_FIELD, PRIMARY_BEAM, agentField, beamAt, beamLine, strokeLight,
+  FIELD_STROKE, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInkInto, fieldInks, fieldLook, fieldMotion, fieldStep, fieldStill, fieldTone, PRIMARY_FIELD, PRIMARY_BEAM, agentField, beamAt, beamLine, strokeLight,
   type FieldClock, type FieldFrame, type FieldIdentity, type FieldInks, type FieldLook, type FieldMotion,
 } from "../lib/field-orb.ts";
 import type { FieldColours } from "../lib/field.ts";
@@ -223,6 +223,7 @@ const DISTANCE = 8.3;
 /** What a frame draws, kept from one to the next: each point's place on the canvas and the stroke it belongs to. */
 let placed = { x: new Float32Array(0), y: new Float32Array(0), stroke: new Int32Array(0) };
 const toned: [number, number, number] = [0, 0, 0];
+const inked = new Float64Array(4);
 
 /**
  * A frame of a field on `g`, a square `px` device pixels wide (`size` CSS pixels at `dpr`): its lines turned as the frame
@@ -251,11 +252,12 @@ function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: n
     placed.y[i] = half - (buffer.y[i]! * f) / depth;
     let r: number, gg: number, b: number, level: number;
     if (inks) {
-      const ink = fieldInk(inks, buffer.lit[i]!, buffer.rim[i]!);
-      r = ink.rgb[0] / 255;
-      gg = ink.rgb[1] / 255;
-      b = ink.rgb[2] / 255;
-      level = Math.min(1, ink.alpha * glow);
+      // (Into one array kept from frame to frame: a frame makes nothing for each of its thousands of points.)
+      fieldInkInto(inks, buffer.lit[i]!, buffer.rim[i]!, inked);
+      r = inked[0]! / 255;
+      gg = inked[1]! / 255;
+      b = inked[2]! / 255;
+      level = Math.min(1, inked[3]! * glow);
     } else {
       fieldTone(buffer.r[i]! * glow * light, buffer.g[i]! * glow * light, buffer.b[i]! * glow * light, undefined, toned);
       // Its colour at full brightness, and how bright: so a stroke of one colour can be drawn at a step of brightness.
@@ -290,6 +292,8 @@ function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: n
   g.lineCap = "round";
   g.lineJoin = "round";
   g.globalCompositeOperation = onPaper ? "source-over" : "lighter";
+  const halo = FIELD_STROKE.glow;
+  // (On a light page the lines are ink, with no glow under them: one pass.)
   for (const pass of onPaper ? (["line"] as const) : (["glow", "line"] as const)) {
     // Its beam, under its lines (on a light page they cross over it; on a dark one light adds alike either way).
     if (pass === "line" && spec.beam) beam(g, px, dpr, size, look.zoom, colours, glow, inks);
@@ -297,26 +301,27 @@ function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: n
       const level = (kind & 0xf) / (LEVELS - 1);
       const hue = kind >> 4;
       const channel = (shift: number) => Math.round((((hue >> shift) & 0xf) / (HUES - 1)) * 255);
-      const width = (FIELD_STROKE.least + FIELD_STROKE.more * level) * weight * (onPaper ? FIELD_STROKE.ink : 1);
-      g.lineWidth = pass === "glow" ? width * FIELD_STROKE.glow.width : width;
-      g.strokeStyle = `rgba(${channel(8)},${channel(4)},${channel(0)},${Math.round((pass === "glow" ? level * FIELD_STROKE.glow.alpha : level) * 1000) / 1000})`;
+      // (On a light page, one ink at every size: the small sizes' boldness is for light, which spreads.)
+      const width = onPaper ? Math.max(FIELD_STROKE.inkLeast, (FIELD_STROKE.least + FIELD_STROKE.more * level) * FIELD_STROKE.ink) * dpr : (FIELD_STROKE.least + FIELD_STROKE.more * level) * weight;
+      g.lineWidth = pass === "glow" ? width * halo.width : width;
+      g.strokeStyle = `rgba(${channel(8)},${channel(4)},${channel(0)},${Math.round((pass === "glow" ? level * halo.alpha : level) * 1000) / 1000})`;
       strokeOf(g, held.path);
     }
   }
   if (frame.embers.length) {
-    const [er, eg, eb] = onPaper ? fieldInks(colours).rim : emberLight(colours);
+    const [er, eg, eb] = (onPaper ? fieldInks(colours).rim : emberLight(colours)).map(Math.round) as [number, number, number];
+    const rgba = (alpha: number) => `rgba(${er},${eg},${eb},${Math.round(Math.max(0, Math.min(1, alpha)) * 1000) / 1000})`;
     for (const e of frame.embers) {
       if (e.alpha < 0.01) continue;
-      const r = Math.max(0.6 * dpr, e.r * half);
-      if (!onPaper) {
-        g.fillStyle = `rgba(${Math.round(er)},${Math.round(eg)},${Math.round(eb)},${Math.round(e.alpha * FIELD_STROKE.glow.alpha * 2 * 1000) / 1000})`;
-        g.beginPath();
-        g.arc(half + e.x * half, half + e.y * half, r * 2.4, 0, 2 * Math.PI);
-        g.fill();
-      }
-      g.fillStyle = `rgba(${Math.round(er)},${Math.round(eg)},${Math.round(eb)},${Math.round(Math.min(1, e.alpha) * 1000) / 1000})`;
+      // Soft: its light (or its ink) falls away from its middle to nothing at three times its radius, never a hard dot.
+      const r = Math.max(0.6 * dpr, e.r * half), x = half + e.x * half, y = half + e.y * half;
+      const soft = g.createRadialGradient(x, y, 0, x, y, r * 3);
+      soft.addColorStop(0, rgba(e.alpha));
+      soft.addColorStop(0.33, rgba(e.alpha * 0.55));
+      soft.addColorStop(1, rgba(0));
+      g.fillStyle = soft;
       g.beginPath();
-      g.arc(half + e.x * half, half + e.y * half, r, 0, 2 * Math.PI);
+      g.arc(x, y, r * 3, 0, 2 * Math.PI);
       g.fill();
     }
   }
@@ -333,27 +338,33 @@ function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: n
 function beam(g: CanvasRenderingContext2D, px: number, dpr: number, size: number, zoom: number, colours: FieldColours, glow: number, inks: FieldInks | null): void {
   const L = PRIMARY_BEAM;
   const half = px / 2;
-  // Half its width at its root, in device pixels: never under half a pixel (a pixel across).
-  const root = Math.max(0.5, (size * L.width) / 2) * dpr;
+  // Half its width at its root, in device pixels: never under half a pixel (a pixel across); on a light page, never under
+  // its ink's least, so it holds as a blade where it is small.
+  const root = Math.max(inks ? L.ink.least : 0.5, (size * L.width) / 2) * dpr;
   const strength = Math.min(1, Math.max(0, glow));
   const hex = (value: string): [number, number, number] => [1, 3, 5].map((at) => parseInt(value.slice(at, at + 2), 16)) as [number, number, number];
   const mix = (a: readonly number[], b: readonly number[], t: number) => a.map((v, c) => Math.round(v + (b[c]! - v) * t));
   const lit = hex(colours.key[0]), gold = hex(colours.key[1]), rim = hex(colours.rim);
-  const colourAt = (hue: number) => (inks ? mix(inks.key, inks.rim, hue) : hue <= 0.5 ? mix(lit, gold, hue * 2) : mix(gold, rim, (hue - 0.5) * 2));
+  // From its lit gold through its gold to its rim's copper; on a light page, its inks the same way: its sheen, its key, its rim.
+  const [first, middle, last] = inks ? [inks.sheen, inks.key, inks.rim] : [lit, gold, rim];
+  const colourAt = (hue: number) => (hue <= 0.5 ? mix(first, middle, hue * 2) : mix(middle, last, (hue - 0.5) * 2));
   const STOPS = 8;
   for (const blade of beamLine(PRIMARY_FIELD, zoom)) {
     const x0 = half + blade.root[0] * half, y0 = half + blade.root[1] * half;
     const x1 = half + blade.tip[0] * half, y1 = half + blade.tip[1] * half;
     const length = Math.hypot(x1 - x0, y1 - y0) || 1;
     const nx = -(y1 - y0) / length, ny = (x1 - x0) / length;
-    for (const pass of inks ? (["line"] as const) : (["glow", "line"] as const)) {
-      const spread = pass === "glow" ? L.glow.width : inks ? L.ink.width : 1;
-      const strong = strength * (pass === "glow" ? L.glow.alpha : inks ? L.ink.alpha : 1);
+    for (const pass of ["glow", "line"] as const) {
+      const shape = inks ? (pass === "glow" ? L.ink.glow : L.ink) : pass === "glow" ? L.glow : { width: 1, alpha: 1 };
+      const spread = shape.width;
+      const strong = strength * shape.alpha;
       const fill = g.createLinearGradient(x0, y0, x1, y1);
       for (let i = 0; i <= STOPS; i++) {
         const at = beamAt(i / STOPS);
         const [r, gg, b] = colourAt(at.hue);
-        fill.addColorStop(i / STOPS, `rgba(${r},${gg},${b},${Math.round(Math.min(1, at.light * strong) * 1000) / 1000})`);
+        // (Ink fades slower than light: on a light page the blade holds further out towards its tip.)
+        const light = inks ? Math.pow(at.light, L.ink.fade) : at.light;
+        fill.addColorStop(i / STOPS, `rgba(${r},${gg},${b},${Math.round(Math.min(1, light * strong) * 1000) / 1000})`);
       }
       g.fillStyle = fill;
       g.beginPath();

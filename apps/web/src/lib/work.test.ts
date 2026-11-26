@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamSnapshot, TeamTask, Agent } from "@invincible/core/team";
-import { atAGlance, attended, byAttention, doingNow, failedGate, inboxBeyond, inProject, NEW_FOR_MS, projectBadge, projectKey, seenOnOpen, shortSpan, spentSince, taskState, workOf } from "./work.ts";
+import { atAGlance, attended, byAttention, doingNow, failedGate, failedIn, inboxBeyond, inProject, namesProjects, NEW_FOR_MS, projectBadge, projectKey, seenOnOpen, shortSpan, spentSince, taskState, workOf } from "./work.ts";
 
 const NOW = 1_764_000_000_000;
 const ago = (minutes: number) => NOW - minutes * 60_000;
@@ -127,6 +127,24 @@ describe("the work by attention", () => {
     expect([fresh.active.map((row) => row.id), fresh.done.map((row) => row.id)]).toEqual([[verified.id], [old.id]]);
   });
 
+  test("a failure you have seen is settled, folded with what was verified, but counted on its own so it never hides", () => {
+    const failed = task("ada", "failed", 30, { error: "gave-up" });
+    const verified = task("ada", "done", 10, { verified: true });
+    const work = attended({ snapshot: snapshot([ada], [failed, verified], { "agent:ada": ago(1) }), projects: [], now: NOW });
+    expect(work.done.map((row) => row.id)).toEqual([verified.id, failed.id]);
+    expect(failedIn(work.done)).toBe(1);
+    expect(failedIn(work.done.filter((row) => row.id !== failed.id))).toBe(0);
+  });
+
+  test("rows name their project only where the work is in more than one: in one, or none, \"Other work\" says nothing", () => {
+    const none = attended({ snapshot: snapshot([agent("eli", null)], [task("eli", "running", 1)], {}), projects: [], now: NOW });
+    expect([none.projects.map((project) => project.name), namesProjects(none)]).toEqual([["Other work"], false]);
+    const one = attended({ snapshot: snapshot([ada], [task("ada", "running", 1), task("ada", "queued", 1)], {}), projects: [], now: NOW });
+    expect([one.projects.length, namesProjects(one)]).toEqual([1, false]);
+    const two = attended({ snapshot: snapshot([ada, agent("eli", null)], [task("ada", "running", 1), task("eli", "queued", 1)], {}), projects: [], now: NOW });
+    expect([two.projects.map((project) => project.name), namesProjects(two)]).toEqual([["invincible", "Other work"], true]);
+  });
+
   test("at work and queued are under way, at work first; a stop of yours is settled at once", () => {
     const tasks = [task("ada", "queued", 1), task("ada", "running", 3, { progress: "Gate 1/2 · exit 0 · bun test" }), task("ada", "stopped", 2), task("ada", "queued", 0, { dependsOn: [] })];
     tasks[0]!.dependsOn = [tasks[1]!.id];
@@ -204,10 +222,10 @@ describe("the work by attention", () => {
     expect([seenOnOpen(running.id, theirs), seenOnOpen("task-nope00000000", theirs), seenOnOpen(newer.id, snapshot([ada], [newer]))]).toEqual([null, null, null]);
   });
 
-  test("Home's line: how many are at work and what needs you, else its own", () => {
+  test("Home's line: what needs you first (its colour and its first words agree), then how many are at work, else its own", () => {
     const work = attended({ snapshot: snapshot([ada], [task("ada", "running", 1), task("ada", "running", 2), task("ada", "queued", 3)], {}), projects: [], now: NOW });
-    expect(atAGlance(work, 2, "Idle")).toEqual({ text: "2 at work · 2 need you", needs: true });
-    expect(atAGlance(work, 1, "Idle")).toEqual({ text: "2 at work · 1 needs you", needs: true });
+    expect(atAGlance(work, 2, "Idle")).toEqual({ text: "2 need you · 2 at work", needs: true });
+    expect(atAGlance(work, 1, "Idle")).toEqual({ text: "1 needs you · 2 at work", needs: true });
     expect(atAGlance(work, 0, "Idle")).toEqual({ text: "2 at work", needs: false });
     expect(atAGlance({ working: [] }, 0, "Idle · nothing needs you")).toEqual({ text: "Idle · nothing needs you", needs: false });
   });

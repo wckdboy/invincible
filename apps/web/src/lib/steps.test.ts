@@ -90,7 +90,7 @@ describe("what proves it, apart from what the agent says", () => {
       "Running · bun test packages/link",
       "Submitted for review · second try",
       "Gate 1/3 · exit 0 · bun test packages/link\nexit 0\n14 pass",
-      "Gate 2/3 · exit 0 · bun run typecheck\n(no output)",
+      "Gate 2/3 · exit 0 · bun run typecheck\nexit 0 · 412 ms\n(no output)",
     );
     // At work: the round's first gate without a result is running, the rest wait. The planner's own gate is listed too.
     expect(gateRows(GATES, entries, true)).toEqual([
