@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Notifications (asked for only from More → Notifications), and collecting them again after a restart. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Android 14 and later ask it of a job that waits for a network. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- The UnifiedPush distributors on this phone (ntfy and the like), for instant notifications. -->
+    <queries>
+        <intent>
+            <action android:name="org.unifiedpush.android.distributor.REGISTER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Invincible"
+        android:networkSecurityConfig="@xml/network_security"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Invincible">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- An invite: invincible://pair#pair=… or invincible:<invite link>, as the Apple app takes them. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="invincible" />
+            </intent-filter>
+            <!-- Something shared from another app: a new chat with it in the message box, unsent (the web app's share target). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+        <!-- Collects what the node kept for this phone, on Android's schedule (app/Notices.kt). -->
+        <service
+            android:name=".app.CollectJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <!-- What a UnifiedPush distributor says (app/UnifiedPush.kt). Exported with no permission, as the spec has none:
+             distributors are other apps. The gate is the registration's random token, and a message that isn't encrypted
+             to this phone's own key doesn't decrypt. -->
+        <receiver
+            android:name=".app.PushReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+            </intent-filter>
+        </receiver>
+        <!-- Approve or Decline from an approval's notification, behind the phone's unlock. -->
+        <receiver
+            android:name=".app.NoticeAnswer"
+            android:exported="false" />
+    </application>
+</manifest>

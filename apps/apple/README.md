@@ -1,0 +1,140 @@
+# Invincible for iPhone, iPad and Mac
+
+A SwiftUI client for an Invincible node: Apple's own components, with Invincible's look. It pairs the way the web app
+does and signs every request the way `packages/core` verifies it. The Mac's app is the same sources built for macOS
+(`InvincibleMac`). They came from the system Invincible succeeds as it was redesigned on 26 November 2026
+(docs/ARCHITECTURE.md §10), and are Invincible's own: every word of the old theme is gone, and the vocabulary check
+reads these sources too.
+
+On an iPhone it opens on the primary, the one agent you talk to, with no tab bar: Home (`Invincible/UI/HomeView.swift`)
+is its orb, its name and how things stand, what needs you with each answer in place, the work by attention in three-line
+rows, and its message box docked. A task opens as a thread of its own (`UI/TaskView.swift`: the brief, the work folded,
+the Verified card apart from the agent's words, its details in a sheet); the primary's conversation, the agents, the
+Inbox and Settings are pushed over Home, with "…" for everything else. An iPad's and a Mac's window are three panes: the
+mark and the INVINCIBLE wordmark at the head of a sidebar of the work by attention (`UI/Places.swift`), the place chosen,
+and a task's details beside it; ⌘K searches or asks. A tap anywhere but a field closes the keyboard (`KeyboardCloser`).
+
+**The primary's name** is the node's to say: "Invincible" until you name it (`Core/Primary.swift`, from `GET
+/api/whoami`'s `primaryName` when a node sends one). Its handle on the wire is `primary`. Where a line is the web app's
+own (a room's speaker, "Given to the agents by your agent", a coding plan's line), it says what the web says, held to it
+by the parity vectors. The app's words about itself (macOS's permissions, a device's name, notifications) say
+"Invincible", whatever the primary is called.
+
+**The look** is the redesign's, kept: every orb is a field, lines of force round a dark core (`Core/Field.swift`,
+`Core/FieldOrb.swift`, drawn by `UI/FieldOrbView.swift`), the web app's `lib/field.ts` and `lib/field-orb.ts`, held to
+them by the vectors' `field` section. The primary's is in gold, a beam of light through it along its axis
+(`PrimaryOrb`), its embers drifting while it works; each agent's is in the colour you chose for it or one of the 24 its
+handle picks (`Core/AgentOrb.swift`, core's `avatar.ts`). On a light page a field is ink on paper. Where orbs are many
+they are still; the one you are looking at moves only while something is going on, and none moves where the device asks
+for reduced motion.
+
+Needs Xcode 27 (Swift 6, the iOS 27 and macOS 27 SDKs) and [XcodeGen](https://github.com/yonaskolb/XcodeGen). It runs on
+iOS 26 and later, and on macOS 27.
+
+```sh
+cd apps/apple
+xcodegen generate                      # writes Invincible.xcodeproj and each app's Info.plist from project.yml (none is committed)
+xcodebuild -project Invincible.xcodeproj -scheme Invincible \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath build test -skip-testing:InvincibleTests/MacShotsTests
+xcodebuild -project Invincible.xcodeproj -scheme InvincibleMac -destination 'platform=macOS' -derivedDataPath build build
+```
+
+CI runs the first on a simulator made for the run and deleted after, then builds the Mac app without launching it, and
+unregisters every app it built from Launch Services (`.github/workflows/ci.yml`, the `apple` job). Don't launch a Mac
+build on a Mac whose own device key it would load.
+
+## Beside the app it succeeds
+
+The apps of the system Invincible succeeds stay installed until the cutover, so nothing of these may be theirs:
+
+| | Invincible |
+|---|---|
+| Bundle IDs | `sh.invincible.bot` (iPhone and iPad; App Store Connect's "Invincible Bot"), `sh.invincible.bot.mac` (Developer ID, outside the App Store), the tests' `….tests` |
+| Push topic | `sh.invincible.bot` (core's `ApplePushKeyInput`), the payload's own part under `invincible` |
+| Keychain | the device key's tag `sh.invincible.bot.device-key`, the phone's copies of keys under the service `sh.invincible.bot.keys`, a Mac's wrapped key labelled "Invincible: …" |
+| Defaults | `sh.invincible.bot.paired-node`, `sh.invincible.bot.mac.place`, `sh.invincible.bot.mac.first-run`, `invincible.awaySeen` (each app's own suite, by its bundle ID) |
+| Links | the `invincible:` scheme (`invincible://pair#pair=…`) |
+| Notifications | the categories `approval` and `approval-decline`, the node's `APPLE_CATEGORY` (each app registers its own) |
+| The Mac | its node's launchd label `sh.invincible.node`, its home `~/.invincible`, its updates from `https://invincible.sh/mac/appcast.xml` |
+| App Groups | none |
+
+## Running it against a throwaway node
+
+`scripts/dev-node.ts` starts this repository's node the way `apps/web/measure/first-load.ts` does: a temp home, the file
+keystore, a stand-in Docker and stand-in models, on loopback only (never `~/.invincible`). It adds agents named by their
+jobs in every state the app shows (Builder at work, Researcher thinking, Writer verified, Coder failed, Reviewer paused,
+Operator with a desktop, which proposes a task for your approval), has an agent ask your approval for an outward call,
+the primary ask for a key and a rule of yours tell you of a command it ran, and prints a client invite. The simulator
+reaches it on 127.0.0.1.
+
+```sh
+bun apps/apple/scripts/dev-node.ts --dir /tmp/invincible-dev    # from the repository's root; prints the invite link
+```
+
+Paste the link into the app and press Ask to join (on a Mac, opening an `invincible:` link that carries it fills it in
+too). The node prints the code the request shows; compare it with the app's, then approve as the node's owner would:
+`echo 482913 > /tmp/invincible-dev/approve` (the code, its digits only).
+
+Ask the primary anything with "show" in it, and the stand-in answers with everything an answer can hold: headings, a
+list, a quote, a table, code, a chart, figures, a plan's steps, a page and choices to tap. A message with "Take your
+time" is never answered, so a turn stays running to leave and come back to. Writer and Coder share a room and answer you
+there; Operator's VM has a desktop (its screen shows a browser's blank tab until you open an address, then a page:
+`scripts/fixtures/screen-*.jpg`) and a stand-in terminal in the node, never one on this machine. Ask an agent to
+"propose" something and its stand-in proposes a task, so its card comes up to approve.
+
+The node lets one app in: give each app a node of its own.
+
+## The iPad and the Mac
+
+The places in a sidebar (`Invincible/UI/Places.swift`, shared by both), the place chosen beside it, and a task's details
+in a third pane. Each window keeps its own place across launches; an agent, a room or one of the primary's chats opens in
+a window of its own; ⌘N a new chat, ⌥⌘N a new window (iPad), ⌘K a task for the agents, ⌘1 to ⌘4 the places, ⌘, Settings
+(Mac), and the agents in the Mac's menu bar. What only one platform has is marked `#if os(iOS)` or `#if os(macOS)`; the
+Mac's own views are in `Invincible/Mac` (left out of the iOS target).
+
+A Mac's key is made in the Secure Enclave and kept, wrapped by it, in the login keychain (`Core/DeviceKey.swift`). The
+app is also the node: its first run makes a Mac with no `~/.invincible` a node (start a fleet, join yours, or just the
+app), and its binary is the node's launcher. An everyday build carries no node, and says so;
+`scripts/mac-node-bundle.sh` puts it into a built app and signs it (with the Developer ID for a release).
+`scripts/mac-release.sh` makes a release: built, its node bundled, notarized and stapled, the zip signed with the
+owner's Sparkle key (the login keychain's account `invincible`), and `apps/site/public/mac/appcast.xml` written for it.
+**Updates stay off until the owner makes Invincible's Sparkle key** (Sparkle's `generate_keys --account invincible`) and
+puts its public half in `project.yml`'s `INVINCIBLE_SPARKLE_PUBLIC_KEY`, which is empty until then.
+
+`MacShotsTests` pictures the Mac app against a dev node; it launches the Mac app, so it runs only on a Mac set aside for
+it, never in CI or on a laptop whose own key the app would load.
+
+## TestFlight
+
+`scripts/testflight.sh` archives the app for devices, signs it for your team (Xcode's automatic signing makes the
+distribution certificate and profile with the key, the first time) and uploads it to App Store Connect, where TestFlight
+offers it to your testers once Apple has processed it. It needs an App Store Connect API team key with the Admin role
+(its `.p8` file, key ID and issuer ID; the script keeps nothing of it), your team id (given when you run it, never
+committed), and the app in App Store Connect: "Invincible Bot", bundle ID `sh.invincible.bot`.
+
+```sh
+TEAM_ID=… ASC_KEY_ID=… ASC_ISSUER_ID=… ASC_KEY_PATH=/path/to/AuthKey.p8 apps/apple/scripts/testflight.sh
+```
+
+Each upload is a new build, numbered by the time (UTC, `yyyymmddHHMM`). `Invincible/PrivacyInfo.xcprivacy` says what the
+App Store asks: the app tracks no one and collects nothing, and the one "required reason" API it uses is UserDefaults.
+
+## What the tests are held to
+
+The Swift tests (on iOS and, the same ones, on macOS) read `InvincibleTests/Fixtures/core-vectors.json`: vectors made by
+this repository's own `packages/core` and `apps/web/src/lib`, each checked against them before it is written. The
+Android app's tests read the same file. After a change to either, write them again; CI checks them:
+
+```sh
+bun apps/apple/scripts/vectors.ts           # from the repository's root
+bun apps/apple/scripts/vectors.ts --check   # exits 1 if the file isn't what this repository's code makes now
+```
+
+## The brand
+
+`bun apps/apple/scripts/brand.ts` writes the app's colours (the ink: the black tile on light, the cream on dark; what
+is written on it; the red of what went wrong) and its icon, Field · Aurum, from `scripts/field-icon.ts`, the renderer of
+the web app's and Android's icons: iOS's tile edge to edge (iOS rounds it), its dark form the field alone on nothing
+(iOS backs it itself), its tinted form that field in grey, and the Mac's tile at each size. The app's mark inside the app
+(Settings' About, joining, a Mac's first run, the sidebar's head) is the field alone (`AppMark`), beside the INVINCIBLE
+wordmark (`Wordmark`) where a sidebar begins.

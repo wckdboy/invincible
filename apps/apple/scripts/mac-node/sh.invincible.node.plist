@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The node's launchd agent, inside the Mac app (Contents/Library/LaunchAgents), registered by the app with
+  SMAppService.agent(plistName:) under the label install.sh uses. launchd runs the app's own binary with
+  serve-node, which becomes the bundled Bun running the bundled node; launchd keeps it alive (docs/MAC.md).
+-->
+<plist version="1.0"><dict>
+  <key>Label</key><string>sh.invincible.node</string>
+  <key>BundleProgram</key><string>Contents/MacOS/Invincible</string>
+  <key>ProgramArguments</key><array><string>Invincible</string><string>--serve-node</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict></plist>

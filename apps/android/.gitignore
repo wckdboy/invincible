@@ -1,0 +1,9 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+# A signing key and its passwords never enter the repository (scripts/release.sh reads them from outside it).
+*.jks
+*.keystore
+*.p12
+.signing/

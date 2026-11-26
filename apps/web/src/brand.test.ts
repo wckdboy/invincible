@@ -54,6 +54,20 @@ describe("the app icon: your agent's field in gold, rendered as light", () => {
     }
   });
 
+  test("the Apple app's: iOS's tile, its dark form the field alone (iOS backs it), its tinted form in grey; the Mac's at each size", () => {
+    const set = "apps/apple/Invincible/Assets.xcassets/AppIcon.appiconset";
+    expect(header(`${set}/AppIcon.png`)).toEqual({ width: 1024, height: 1024, type: 2 });
+    expect(header(`${set}/AppIcon-dark.png`)).toEqual({ width: 1024, height: 1024, type: 6 });
+    expect(header(`${set}/AppIcon-tinted.png`)).toEqual({ width: 1024, height: 1024, type: 6 });
+    const contents = JSON.parse(readFileSync(join(ROOT, set, "Contents.json"), "utf8")) as { images: { filename: string; appearances?: { value: string }[] }[] };
+    expect(contents.images.map((i) => [i.filename, i.appearances?.[0]?.value ?? "any"])).toEqual([["AppIcon.png", "any"], ["AppIcon-dark.png", "dark"], ["AppIcon-tinted.png", "tinted"]]);
+    for (const px of [16, 32, 64, 128, 256, 512, 1024]) expect(header(`apps/apple/Invincible/Mac/MacAssets.xcassets/MacIcon.appiconset/icon_${px}.png`)).toMatchObject({ width: px, height: px });
+    // The dark form is the field on nothing: its corners are transparent (no more than 1 of 255 there), where the tile's are its night. (At 256 px, as
+    // at the 1024 the app takes; at 64 its bloom reaches the corners.)
+    const dark = rgba(renderField(256, { tile: null }), { opaque: false });
+    for (const at of [0, 255, 256 * 255, 256 * 256 - 1]) expect(dark[at * 4 + 3]).toBeLessThanOrEqual(1);
+  });
+
   test("the pages and the manifest name only icons that are there, and the favicon is the field", () => {
     const manifest = JSON.parse(readFileSync(join(ROOT, "apps/web/src/manifest.webmanifest"), "utf8")) as { icons: { src: string; type: string }[] };
     for (const icon of manifest.icons) {

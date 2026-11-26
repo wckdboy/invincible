@@ -1,0 +1,169 @@
+# Invincible's native Apple apps: a SwiftUI client for an Invincible node, for iPhone and iPad, and for the Mac, both from
+# the same sources (what is one platform's alone is marked `#if os(iOS)` or `#if os(macOS)` in them).
+# XcodeGen writes Invincible.xcodeproj and each app's Info.plist from this file; none of them is committed (README.md).
+#
+# Everything that names the app is Invincible's own (bundle IDs, the URL scheme, the keychain's services and tags, the
+# defaults' keys, the notifications' categories, the update feed), so it installs and runs beside the app of the system it
+# succeeds, which stays on the owner's devices until the cutover (docs/ARCHITECTURE.md §10).
+name: Invincible
+options:
+  bundleIdPrefix: sh.invincible
+  deploymentTarget:
+    iOS: "26.0"
+    macOS: "27.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+# Sparkle 2, for the Mac app's updates, at an exact release: 2.10.1, of 25 October 2026. Its framework is a binary Swift
+# Package Manager checks against the checksum in that release's Package.swift.
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+targets:
+  # The iPhone's and the iPad's: "Invincible Bot" in App Store Connect, bundle ID sh.invincible.bot (push notifications on).
+  Invincible:
+    type: application
+    platform: iOS
+    sources:
+      # (The agents are orbs, drawn in code: no drawings of them are bundled.)
+      - path: Invincible
+        excludes: ["Mac/**"]
+    info:
+      path: Invincible/Info.plist
+      properties:
+        CFBundleDisplayName: Invincible
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # A node on this machine or the local network answers over plain HTTP; everywhere else ATS holds.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        ITSAppUsesNonExemptEncryption: false
+        # Take Photo, in a message's attach menu: asked the first time you choose it, never before.
+        NSCameraUsageDescription: Invincible uses the camera only when you take a photo to send with a message.
+        # An approval opened from its notification's Approve is given behind Face ID (the owner's word, 25 November 2026).
+        NSFaceIDUsageDescription: Invincible asks for Face ID before a yes you give to an approval opened from its notification.
+    # Notifications from your node, through Apple's push service (written by XcodeGen like Info.plist), to the topic
+    # sh.invincible.bot (core's ApplePushKeyInput). Xcode builds answer to Apple's development service; an archive for
+    # TestFlight is signed for its production one.
+    entitlements:
+      path: Invincible/Invincible.entitlements
+      properties:
+        aps-environment: development
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+  InvincibleTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: InvincibleTests
+    dependencies:
+      - target: Invincible
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot.tests
+  # The Mac's: a native app (not Mac Catalyst), the client and the node's manager, signed with a Developer ID for a release
+  # (outside the App Store). It is called Invincible as the iPhone's is, and its module is too, so the tests import it as
+  # they import the iPhone's. A build here is signed to run on this Mac only and carries no node: scripts/mac-node-bundle.sh
+  # puts the node in a built app and signs it.
+  InvincibleMac:
+    type: application
+    platform: macOS
+    dependencies:
+      - package: Sparkle
+    sources:
+      # The iPhone's Info.plist and entitlements are XcodeGen's, written there for the iOS target.
+      - path: Invincible
+        excludes: ["Info.plist", "Invincible.entitlements"]
+    info:
+      path: InvincibleMac/Info.plist
+      properties:
+        CFBundleDisplayName: Invincible
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.developer-tools
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        # An `invincible:` link carrying an invite opens the app at joining, with the invite filled in.
+        CFBundleURLTypes:
+          - CFBundleURLName: sh.invincible.bot.invite
+            CFBundleURLSchemes: [invincible]
+        # Updates (Sparkle): Invincible's own signed feed, and the public key each update is checked against. The key is
+        # the owner's to make (Sparkle's generate_keys, its private half in their login keychain as the account
+        # `invincible`); while it is empty, as it is until they make it, the updater stays off. scripts/mac-release.sh
+        # makes a release and its feed.
+        SUFeedURL: https://invincible.sh/mac/appcast.xml
+        SUPublicEDKey: $(INVINCIBLE_SPARKLE_PUBLIC_KEY)
+        # Checked once a day without asking first: a node's Mac is meant to keep up by itself.
+        SUEnableAutomaticChecks: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot.mac
+        PRODUCT_NAME: Invincible
+        # Sparkle's public EdDSA key (base64), once the owner has made Invincible's: its private half never in here.
+        INVINCIBLE_SPARKLE_PUBLIC_KEY: ""
+        PRODUCT_MODULE_NAME: Invincible
+        ASSETCATALOG_COMPILER_APPICON_NAME: MacIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_PREVIEWS: YES
+      # A release lets no debugger in (Xcode adds get-task-allow even to a Release build signed to run locally), which
+      # notarization requires: mac-node-bundle.sh refuses a Developer ID signing of a build that does.
+      configs:
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+  InvincibleMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: InvincibleTests
+    dependencies:
+      - target: InvincibleMac
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot.mac.tests
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Invincible.app/Contents/MacOS/Invincible
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  Invincible:
+    build:
+      targets:
+        Invincible: all
+        InvincibleTests: [test]
+    test:
+      targets:
+        - InvincibleTests
+  InvincibleMac:
+    build:
+      targets:
+        InvincibleMac: all
+        InvincibleMacTests: [test]
+    test:
+      targets:
+        - InvincibleMacTests

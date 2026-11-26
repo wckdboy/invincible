@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Bun inside the Mac app, under the hardened runtime: its JIT, and nothing else (the spike, docs/MAC.md). -->
+<plist version="1.0"><dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+</dict></plist>

@@ -1,0 +1,79 @@
+#!/usr/bin/env bun
+/*
+ * Writes the Apple app's brand assets, so they can't drift from the web app's:
+ *   - the app icon, Field · Aurum (the owner's choice, 26 November 2026): the primary's field in gold, rendered as light
+ *     by scripts/field-icon.ts, the renderer of the web app's and the Android app's icons. iOS's "any" form is the tile,
+ *     1024 px edge to edge and opaque (iOS rounds the corners itself); its dark form is the field alone on nothing, which
+ *     iOS backs itself; its tinted form is that field in grey, for the system to colour. The Mac's is the tile at each
+ *     size a Mac draws an icon at (macOS clips it to its own shape);
+ *   - the app's colours: the ink (the black tile on light, the cream on dark), what is written on it, and the red of what
+ *     went wrong.
+ *
+ *   bun apps/apple/scripts/brand.ts      (pure TypeScript: no browser, no ImageMagick)
+ */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { downscale, greyscale, png, renderField, rgba } from "../../../scripts/field-icon.ts";
+
+/** The apps' inks, as the Android app's Theme.kt has them too: the black tile, the cream on dark, and the red of what went
+ * wrong (its deeper form on light, its brighter one on dark). */
+export const INK = { tile: "#0a0a0b", cream: "#f8ebdc", danger: "#c4141b", dangerOnDark: "#ee2c36" } as const;
+
+const ASSETS = join(import.meta.dir, "../Invincible/Assets.xcassets");
+const MAC_ICON = join(import.meta.dir, "../Invincible/Mac/MacAssets.xcassets/MacIcon.appiconset");
+/** A Mac icon's sizes, in points and scales. */
+const MAC_SIZES = [[16, 1], [16, 2], [32, 1], [32, 2], [128, 1], [128, 2], [256, 1], [256, 2], [512, 1], [512, 2]] as const;
+const write = (path: string, text: string) => {
+  mkdirSync(join(ASSETS, path, ".."), { recursive: true });
+  writeFileSync(join(ASSETS, path), text);
+  console.log(`wrote ${path}`);
+};
+const contents = (value: object) => `${JSON.stringify({ ...value, info: { author: "xcode", version: 1 } }, null, 2)}\n`;
+
+if (import.meta.main) {
+  // ---- colours -----------------------------------------------------------------------------------------------------
+  const rgb = (hex: string) => ({ red: `0x${hex.slice(1, 3)}`, green: `0x${hex.slice(3, 5)}`, blue: `0x${hex.slice(5, 7)}`, alpha: "1.000" });
+  const colour = (name: string, light: string, dark: string) =>
+    write(
+      `${name}.colorset/Contents.json`,
+      contents({
+        colors: [
+          { color: { "color-space": "srgb", components: rgb(light) }, idiom: "universal" },
+          { appearances: [{ appearance: "luminosity", value: "dark" }], color: { "color-space": "srgb", components: rgb(dark) }, idiom: "universal" },
+        ],
+      }),
+    );
+  // The ink: the black tile on light, the cream on dark; and what is written on it.
+  colour("AccentColor", INK.tile, INK.cream);
+  colour("OnAccent", INK.cream, INK.tile);
+  // The red of what went wrong.
+  colour("Danger", INK.danger, INK.dangerOnDark);
+  colour("Tile", INK.tile, INK.tile);
+  colour("Cream", INK.cream, INK.cream);
+
+  // ---- the app icon --------------------------------------------------------------------------------------------------
+  const icon = rgba(renderField(1024));
+  const bare = rgba(renderField(1024, { tile: null }), { opaque: false });
+  mkdirSync(join(ASSETS, "AppIcon.appiconset"), { recursive: true });
+  writeFileSync(join(ASSETS, "AppIcon.appiconset/AppIcon.png"), png(icon, 1024));
+  writeFileSync(join(ASSETS, "AppIcon.appiconset/AppIcon-dark.png"), png(bare, 1024));
+  writeFileSync(join(ASSETS, "AppIcon.appiconset/AppIcon-tinted.png"), png(greyscale(bare), 1024));
+  console.log("rendered AppIcon.appiconset (any, dark, tinted)");
+  write(
+    "AppIcon.appiconset/Contents.json",
+    contents({
+      images: [
+        { filename: "AppIcon.png", idiom: "universal", platform: "ios", size: "1024x1024" },
+        { appearances: [{ appearance: "luminosity", value: "dark" }], filename: "AppIcon-dark.png", idiom: "universal", platform: "ios", size: "1024x1024" },
+        { appearances: [{ appearance: "luminosity", value: "tinted" }], filename: "AppIcon-tinted.png", idiom: "universal", platform: "ios", size: "1024x1024" },
+      ],
+    }),
+  );
+  mkdirSync(MAC_ICON, { recursive: true });
+  for (const px of new Set(MAC_SIZES.map(([points, scale]) => points * scale))) writeFileSync(join(MAC_ICON, `icon_${px}.png`), png(px === 1024 ? icon : downscale(icon, 1024, px), px));
+  writeFileSync(
+    join(MAC_ICON, "Contents.json"),
+    contents({ images: MAC_SIZES.map(([points, scale]) => ({ filename: `icon_${points * scale}.png`, idiom: "mac", scale: `${scale}x`, size: `${points}x${points}` })) }),
+  );
+  console.log("rendered the Mac's MacIcon.appiconset");
+}

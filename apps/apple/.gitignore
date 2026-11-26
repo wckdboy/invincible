@@ -1,0 +1,7 @@
+# Written by XcodeGen from project.yml.
+Invincible.xcodeproj/
+Invincible/Info.plist
+Invincible/Invincible.entitlements
+InvincibleMac/
+# xcodebuild -derivedDataPath build
+build/

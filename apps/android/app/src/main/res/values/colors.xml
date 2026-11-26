@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- What shows before the first frame: the app's own ground (Theme.kt's paper), so nothing changes when it's drawn. -->
+    <color name="window">#FFFFFF</color>
+</resources>
