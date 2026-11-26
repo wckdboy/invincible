@@ -41,8 +41,11 @@ function tasks(ctx: SuiteContext, runs: TaskRun[], n: number, span: [number, num
       if (acted.length) ctx.speed(`desktop.task.${task}.${policy}.ms`, acted, "ms", "lower", span, `${task}, ${policy}: from its first command to its last action's return (no model)`);
       if (passed) {
         const ok = these.filter((r) => r.pass);
-        ctx.quality(`desktop.task.${task}.${policy}.commands`, Math.max(...ok.map((r) => r.commands)), "commands", "lower", { note: `${task}, ${policy}: commands a passing run took (each one an agent turn with a model)` });
-        ctx.quality(`desktop.task.${task}.${policy}.looks`, Math.max(...ok.map((r) => r.looks)), "looks", "lower", { note: `${task}, ${policy}: where it would have asked its eyes (each one a model's call)` });
+        // (Through the loop, its commands and looks would be the stand-in's own reads of the truth: its calls and actions say it.)
+        if (policy !== "toolset") {
+          ctx.quality(`desktop.task.${task}.${policy}.commands`, Math.max(...ok.map((r) => r.commands)), "commands", "lower", { note: `${task}, ${policy}: commands a passing run took (each one an agent turn with a model)` });
+          ctx.quality(`desktop.task.${task}.${policy}.looks`, Math.max(...ok.map((r) => r.looks)), "looks", "lower", { note: `${task}, ${policy}: where it would have asked its eyes (each one a model's call)` });
+        }
         // Through the loop: a model call a turn, each turn several actions (C1 step 7: one model call per verified action at most).
         const looped = ok.filter((r) => r.loop);
         if (looped.length) {
