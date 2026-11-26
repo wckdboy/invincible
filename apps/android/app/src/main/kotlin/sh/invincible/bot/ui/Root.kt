@@ -81,8 +81,9 @@ fun Root(app: AppModel) {
     val motion = MaterialTheme.motionScheme
     val brand = LocalBrand.current
 
-    // A tapped notification, or one of its buttons: the page it was about, opened straight from Home. The very task (its
-    // ship asked, from Ship it…), a chat by its conversation, the Inbox (an approval's card first, from Approve…).
+    // A tapped notification, one of its buttons, or an `invincible:` link: the page it was about, opened straight from Home.
+    // The very task (its ship asked, from Ship it…), an agent, a chat by its conversation, the Inbox (an approval's card
+    // first, from Approve… or a link to it).
     val opening by app.opening.collectAsState()
     LaunchedEffect(opening) {
         val o = opening ?: return@LaunchedEffect
@@ -91,6 +92,8 @@ fun Root(app: AppModel) {
                 o.conversation?.let(app.chat::open)
                 nav.open("chat")
             }
+            // (An agent's page, from an `invincible://agent/<handle>` link.)
+            o.address.startsWith("agent:") -> nav.open(o.address)
             o.address.startsWith("task:") -> {
                 if (o.ship) app.shipAsked.value = o.address.removePrefix("task:")
                 nav.open(o.address)

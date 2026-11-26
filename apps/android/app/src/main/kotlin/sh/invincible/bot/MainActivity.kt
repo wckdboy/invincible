@@ -24,6 +24,7 @@ import sh.invincible.bot.core.Share
 import sh.invincible.bot.ui.InvincibleTheme
 import sh.invincible.bot.ui.JoinScreen
 import sh.invincible.bot.ui.Root
+import sh.invincible.bot.core.Links
 
 class MainActivity : ComponentActivity() {
     private val app by lazy { AppModel.of(this) }
@@ -61,13 +62,18 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * A tapped notification opens where it says; an `invincible:` link carrying an invite, opened or shared on this phone,
-     * fills in the join; anything else shared from another app goes to a new chat's message box, unsent.
+     * A tapped notification opens where it says; an `invincible:` link to a place (a task, an agent, an approval, a chat)
+     * opens that very place and only navigates; one carrying an invite, opened or shared on this phone, fills in the join;
+     * anything else shared from another app goes to a new chat's message box, unsent.
      */
     private fun take(intent: Intent?) {
         intent ?: return
         Notices.opening(intent)?.let {
             app.opening.value = it
+            return
+        }
+        intent.dataString?.let(Links::of)?.let { place ->
+            app.opening.value = AppModel.Opening(place.address, conversation = place.conversation, approval = place.approval)
             return
         }
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
