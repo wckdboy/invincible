@@ -16,10 +16,8 @@
     "html_handling": "auto-trailing-slash",
     "run_worker_first": ["/", "/install"]
   },
-  "routes": [
-    { "pattern": "invincible.sh", "custom_domain": true },
-    { "pattern": "www.invincible.sh", "custom_domain": true }
-  ],
+  // invincible.sh alone: www.invincible.sh belongs to the account's www-redirect Worker, which sends it on to here (301).
+  "routes": [{ "pattern": "invincible.sh", "custom_domain": true }],
   "workers_dev": false,
   "preview_urls": false
 }

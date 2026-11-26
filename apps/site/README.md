@@ -63,6 +63,8 @@ forge's secret sweep, in CI.
 
 Nothing deploys from a checkout. CI's `deploy-site` job does, on GitHub alone, on a push to main, after every job that
 runs there has passed, and only with the `CLOUDFLARE_API_TOKEN` secret set (scoped to this Worker; its account in
-`CLOUDFLARE_ACCOUNT_ID` beside it). Without the token it says so and does nothing. `wrangler.jsonc` names the routes,
-`invincible.sh` and `www.invincible.sh`: the site served there today is another project's, and this one replaces it on
-the owner's word, which is setting that secret.
+`CLOUDFLARE_ACCOUNT_ID` beside it). Without the token it says so and does nothing. Until that secret is set, a release
+of the site is deployed by hand from a clean checkout of main (`bun run deploy` here, with the owner's `wrangler` login),
+as it first was on 26 November 2026, on the owner's word ("Also update the webpage invincible.sh", then "Yes deploy").
+The Worker is `invincible-site`, on `invincible.sh` alone: `www.invincible.sh` belongs to the account's www-redirect
+Worker, which sends it on here (301). Cloudflare keeps each version, so `wrangler rollback` puts the last one back.
