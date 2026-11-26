@@ -347,6 +347,9 @@ import Observation
     private func readTeam() async {
         switch await attempt({ [client] in try await client.read("/api/team", as: TeamSnapshot.self) }) {
         case .success(let team):
+            #if os(iOS)
+            PerfProbe.shared.mark("team read")
+            #endif
             (self.team, teamProblem, kept) = (team.value, nil, nil)
             // What the node said of the agents, as it came: kept for the next time the app opens.
             keep(team.bytes)

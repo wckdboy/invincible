@@ -52,6 +52,7 @@ struct MainView: View {
     @Environment(\.horizontalSizeClass) private var width
 
     var body: some View {
+        let _ = PerfProbe.shared.mark("main body")
         Group {
             if width == .compact {
                 PhoneRoot(app: app, session: session)

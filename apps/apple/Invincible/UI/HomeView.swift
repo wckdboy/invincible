@@ -163,6 +163,7 @@ struct HomeView: View {
             composing = false
             if !chat.answering { chat.startNew() }
             #if os(iOS)
+            PerfProbe.shared.mark("home appear")
             if work != nil { PerfProbe.shared.usable() }
             #endif
         }

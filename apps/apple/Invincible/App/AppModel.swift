@@ -51,14 +51,19 @@ struct PairedNode: Codable, Equatable, Sendable {
         // (Each window starts it: the first that finds this device paired is the one.)
         if case .paired = phase { return }
         do {
-            guard let key = try DeviceKey.load(), let node = PairedNode.load(), node.device == key.device else {
+            let key = try DeviceKey.load()
+            Self.mark("key read")
+            guard let key, let node = PairedNode.load(), node.device == key.device else {
                 // (A team kept for a pairing that's gone goes with it.)
                 KeptTable.Store.here?.forget()
                 phase = .unpaired
                 return
             }
-            let kept = KeptTable.Store.here
-            phase = .paired(Session(key: key, node: node, kept: kept?.load(for: node), keeping: kept))
+            let store = KeptTable.Store.here
+            let kept = store?.load(for: node)
+            Self.mark("kept read")
+            phase = .paired(Session(key: key, node: node, kept: kept, keeping: store))
+            Self.mark("session made")
         } catch {
             phase = .broken(error.localizedDescription)
         }
@@ -75,11 +80,19 @@ struct PairedNode: Codable, Equatable, Sendable {
     /// (Session.live), and nothing asked while nothing changes. Returns when this one leaves the front (its task is
     /// cancelled); the stream closes with the last.
     func keepFresh(_ session: Session) async {
+        Self.mark("live start")
         inFront += 1
         if inFront == 1 { session.live(true) }
         while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
         inFront -= 1
         if inFront == 0 { session.live(false) }
+    }
+
+    /// A moment of the launch, for the performance suite (an iPhone's and an iPad's; nothing unless it is measuring).
+    private static func mark(_ what: StaticString) {
+        #if os(iOS)
+        PerfProbe.shared.mark(what)
+        #endif
     }
 
     /// Deletes this device's key. It can't be recovered: pairing again makes a new device, and the old one stays in

@@ -8,15 +8,18 @@ struct InvincibleApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     /// Whether this device is paired, and with what: one for every window (an iPad has several). Read before the first
     /// frame, so it is Home from what was kept.
-    @State private var app = AppModel(startNow: true)
+    @State private var app: AppModel
     /// The main window's group, which New Window opens another of.
     static let main = "main"
 
     init() {
+        // The app's first line, before anything of its own runs (measured by the performance suite only when it asks: it
+        // starts its clock here). Until 26 November 2026 the app's state was read in a property's initial value, which
+        // runs before this, so its keychain and its kept agents were counted as the platform's.
+        PerfProbe.shared.mark("app init")
+        _app = State(initialValue: AppModel(startNow: true))
         // A count of what needs you is in the primary's red, as everything that needs you is.
         UITabBarItem.appearance().badgeColor = UIColor(named: "Danger")
-        // (Measured by the performance suite only when it asks: it starts its clock here.)
-        PerfProbe.shared.mark("app init")
     }
 
     var body: some Scene {
