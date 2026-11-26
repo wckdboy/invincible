@@ -29,6 +29,11 @@ val CloseIcon: ImageVector = icon("Close") {
     line { moveTo(6.5f, 6.5f); lineTo(17.5f, 17.5f); moveTo(17.5f, 6.5f); lineTo(6.5f, 17.5f) }
 }
 
+/** Search: a lens and its handle. */
+val SearchIcon: ImageVector = icon("Search") {
+    line { moveTo(4.5f, 10.5f); arcToRelative(6f, 6f, 0f, true, true, 12f, 0f); arcToRelative(6f, 6f, 0f, true, true, -12f, 0f); close(); moveTo(15f, 15f); lineTo(19.5f, 19.5f) }
+}
+
 /** A file carried by a message: a paperclip, three loops, at a slant. */
 val AttachIcon: ImageVector = icon("Attach") {
     group(rotate = 40f, pivotX = 12f, pivotY = 12f) {

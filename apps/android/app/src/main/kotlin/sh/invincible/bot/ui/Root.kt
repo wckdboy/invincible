@@ -53,13 +53,15 @@ import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.Work
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.string
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 /**
- * The app once it's paired (your words, 26 November 2026: "agent first (the primary)", T3 Code's panes on a wide screen): no
- * tab bar, and Home is the primary. On a phone one page at a time, opened from Home and back to it; on a tablet or an open
- * foldable, the work's sidebar beside the page, as T3 Code's. Every page the app had is still here: Home holds what needs
- * you and the work, "…" everything else (the agents, the Inbox, its chats, keys, connectors, settings), and a tapped
- * notification opens where it always did. Back, and Esc on a keyboard, return the way you came.
+ * The app once it's paired (your words, 26 November 2026: "agent first (the primary)", T3 Code's panes on a wide screen; the
+ * iPhone's I9: Home, a bar and a drawer): no tab bar, and Home is the primary. On a phone one page at a time, opened from
+ * Home and back to it, and the drawer (ModalNavigationDrawer) for every other place, from the I-beam or a swipe from Home's
+ * left edge; Back closes it. From 600 dp wide (a tablet, a foldable open), the work's sidebar beside the page instead, as
+ * T3 Code's. A tapped notification opens where it always did. Back, and Esc on a keyboard, return the way you came.
  */
 @Composable
 fun Root(app: AppModel) {
@@ -72,6 +74,8 @@ fun Root(app: AppModel) {
     // A tablet, or a foldable open (the window's width, as Android's own size classes read it).
     val width: Dp = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() }
     val wide = width >= Space.wide
+    val drawer = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
     val roomy = width >= Space.roomy
     val sidebar = wide && !folded
     val motion = MaterialTheme.motionScheme
@@ -111,9 +115,11 @@ fun Root(app: AppModel) {
     }
 
     BackHandler(enabled = nav.depth > 1) { nav.back() }
+    // (Declared after Back's own, so while the drawer is open, Back closes it first.)
+    BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
     val work = if (wide) rememberWork(app) else null
 
-    Box(
+    val content: @Composable () -> Unit = { Box(
         Modifier
             .fillMaxSize()
             .background(brand.paper)
@@ -155,7 +161,7 @@ fun Root(app: AppModel) {
                 // A tap that nothing on the page takes puts the keyboard away, as Back does (your word, 23 November 2026:
                 // it can always be closed, so you never get stuck under it).
                 Column(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focus.clearFocus() }) }) {
-                    Page(app, nav, address, wide, roomy, places = { places = true }, give = { giving = true })
+                    Page(app, nav, address, wide, roomy, drawer = if (sidebar || wide) null else ({ scope.launch { drawer.open() } }), places = { places = true }, give = { giving = true })
                 }
             }
         }
@@ -164,7 +170,23 @@ fun Root(app: AppModel) {
         }
         // While the node can't be reached: said over the page, with Retry (its live stream told it within seconds).
         ReachBanner(app, Modifier.align(Alignment.TopCenter))
-    }
+    } }
+    if (wide) content() else androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = drawer,
+        // (From Home's left edge only: elsewhere that edge goes back.)
+        gesturesEnabled = drawer.isOpen || nav.top == Nav.HOME,
+        drawerContent = {
+            androidx.compose.material3.ModalDrawerSheet(drawerContainerColor = brand.paper, windowInsets = WindowInsets.safeDrawing) {
+                Drawer(
+                    app,
+                    go = { address -> scope.launch { drawer.close() }; nav.open(address) },
+                    chat = { id -> scope.launch { drawer.close() }; if (id == null) app.chat.fresh() else app.chat.open(id); nav.open("chat") },
+                    close = { scope.launch { drawer.close() } },
+                )
+            }
+        },
+        content = content,
+    )
     if (places) PlacesSheet(app, nav, give = { giving = true }, close = { places = false })
     if (giving) GiveDialog(app) { giving = false }
 }
@@ -173,7 +195,7 @@ private val DIGITS = listOf(Key.One, Key.Two, Key.Three, Key.Four, Key.Five, Key
 
 /** The page at an address. */
 @Composable
-private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy: Boolean, places: () -> Unit, give: () -> Unit) {
+private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy: Boolean, drawer: (() -> Unit)?, places: () -> Unit, give: () -> Unit) {
     val back = { nav.back(); Unit }
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
@@ -186,6 +208,7 @@ private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy:
         "room" -> RoomScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })
         "agents" -> AgentsScreen(app, back = back, openChat = { app.chat.fresh(); nav.go("chat") }, openAgent = { nav.go(Nav.agent(it)) }, openRoom = { nav.go(Nav.room(it)) })
         "inbox" -> InboxScreen(app, watch = { nav.go("mac:$it") }, back = back)
+        "search" -> SearchScreen(app, nav, back = back)
         "settings" -> SettingsScreen(app, openKeys = { nav.go("keys") }, openConnectors = { nav.go("connectors") }, back = back)
         "keys" -> KeysScreen(app, back)
         "connectors" -> ConnectorsScreen(app, back)
@@ -196,6 +219,6 @@ private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy:
             val agent = rest.substringAfter(':', "")
             TerminalScreen(app, sandbox, table.snapshot?.agents?.firstOrNull { it.id == agent }?.name ?: "Its VM", back)
         }
-        else -> HomeScreen(app, nav, places = places, give = give)
+        else -> HomeScreen(app, nav, drawer = drawer, search = { nav.go("search") }, places = places, give = give)
     }
 }

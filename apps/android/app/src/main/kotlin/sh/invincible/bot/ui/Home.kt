@@ -65,6 +65,8 @@ import sh.invincible.bot.core.Work
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.string
 import sh.invincible.bot.core.Primary
+import sh.invincible.bot.core.AgentMark
+import androidx.compose.foundation.layout.width
 
 /*
  * Home: the primary, first (your words, 26 November 2026: "agent first (the primary)"; on a phone no tab bar, "a '…' sheet for
@@ -83,10 +85,11 @@ private var filtered by mutableStateOf<String?>(null)
 internal var doneOpen by mutableStateOf(false)
 
 @Composable
-fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
+fun HomeScreen(app: AppModel, nav: Nav, drawer: (() -> Unit)?, search: () -> Unit, places: () -> Unit, give: () -> Unit) {
     val table by app.table.collectAsState()
     val live by app.chat.live.collectAsState()
     val problem by app.problem.collectAsState()
+    val usage by app.usage.collectAsState()
     val work = rememberWork(app)
     val brand = LocalBrand.current
     // Its line from the agents this phone kept (KeptTable), until the node answers: after a moment, a still line says
@@ -106,9 +109,12 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
     }
     // (The one count of what needs you, as every place says it: AppModel.needsYou.)
     val needs by app.needsYou.collectAsState()
-    val glance = work?.let { Work.atAGlance(it.working, needs, table.primary.line) } ?: Work.Glance(table.primary.line, false)
+    val said = work?.let { Work.atAGlance(it.working, needs, table.primary.line) } ?: Work.Glance(table.primary.line, false)
+    // What the node's model calls cost today, after what needs you and what is at work (the iPhone's line).
+    val spent = usage?.takeIf { it.spentUsd > 0 && said.text != table.primary.line }?.let { "${if (it.complete) "" else "at least "}${sh.invincible.bot.core.Usage.usd(it.spentUsd)} ${if (it.per == "day") "today" else "this month"}" }
+    val glance = if (spent != null) Work.Glance("${said.text} · $spent", said.needs) else said
     Column(Modifier.fillMaxSize().imePadding()) {
-        HomeHead(app, glance, open = { app.chat.fresh(); nav.go("chat") }, settings = { nav.go("settings") }, places = places)
+        HomeHead(glance, drawer = drawer, open = { app.chat.fresh(); nav.go("chat") }, places = places)
         val shown = work?.let { Work.inProject(it, filtered?.takeIf { key -> it.projects.any { p -> p.key == key } }) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s6)) {
             problem?.let { p -> item(key = "problem") { Refused(app, p) } }
@@ -118,7 +124,10 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
                     Text("As your node last said it, $ago. Asking it again.", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1))
                 }
             }
-            item(key = "reach") { ReachCard(app) }
+            // (On a phone, notifications are asked for in the drawer, once, never as a card here; a wide screen has no drawer.)
+            if (drawer == null) item(key = "reach") { ReachCard(app) }
+            // The agents, each a tap from here: their marks the only colour on the page.
+            item(key = "agents") { AgentStrip(app) { nav.go(Nav.agent(it)) } }
             if (work == null) {
                 item(key = "wait") {
                     Text(if (problem != null) "The work can't be read just now." else "Asking your node…", style = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin))
@@ -126,52 +135,49 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
                 return@LazyColumn
             }
             item(key = "needs") { NeedsYou(app, work, openTask = { nav.go(Nav.task(it)) }, openAll = { nav.go("inbox") }, watch = { nav.go("mac:$it") }) }
-            item(key = "work-head") {
-                Column(verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-                    Text("Work", style = Type.title, modifier = Modifier.padding(start = Space.margin, end = Space.margin, top = Space.s4).semantics { heading() })
-                    ProjectFilters(work.projects, filtered) { filtered = it }
-                }
-            }
-            val rows = shown!!.active + shown.working
-            items(rows, key = { "r:${it.id}" }) { row ->
-                Column {
-                    Hairline(inset = Space.margin)
-                    WorkRow(row, onOpen = { nav.go(Nav.task(row.id)) })
-                }
-            }
-            if (shown.done.isNotEmpty()) {
-                item(key = "done-head") {
-                    Column {
-                        Hairline(inset = Space.margin)
-                        FoldHead("Done", shown.done.size, doneOpen, onToggle = { doneOpen = !doneOpen })
-                    }
-                }
-                if (doneOpen) items(shown.done, key = { "d:${it.id}" }) { row ->
+            if (work.projects.size > 1) item(key = "filters") { ProjectFilters(work.projects, filtered) { filtered = it } }
+            // The work by proof: in hand first (a running task one tap from here), then proven, then failed; the rest folds.
+            val groups = Work.ByProof(shown!!)
+            fun section(key: String, title: String, rows: List<Work.Row>, failed: Boolean = false) {
+                if (rows.isEmpty()) return
+                item(key = "$key-head") { SectionHead(title, rows.size, tone = if (failed) brand.danger else null) }
+                items(rows, key = { "$key:${it.id}" }) { row ->
                     Column {
                         Hairline(inset = Space.margin)
                         WorkRow(row, onOpen = { nav.go(Nav.task(row.id)) })
                     }
                 }
             }
-            if (rows.isEmpty() && shown.done.isEmpty() && shown.needs.isEmpty()) {
-                item(key = "empty") {
-                    Column(Modifier.fillMaxWidth().padding(Space.margin), verticalArrangement = Arrangement.spacedBy(Space.s3)) {
-                        Text(
-                            if (filtered != null) "Nothing in this project." else "Nothing under way. Ask ${Primary.name} below, or give an agent a task: each is a row here, from its first step to verified.",
-                            style = Type.body,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (filtered == null && table.asOf == null) OutlinedButton(onClick = give, border = BorderStroke(1.dp, brand.line), modifier = Modifier.heightIn(min = Space.touch)) {
-                            Icon(LayersIcon, null, Modifier.size(18.dp))
-                            Spacer(Modifier.size(Space.s2))
-                            Text("Give a task")
-                        }
+            section("working", "Working", groups.working)
+            section("proven", "Proven", groups.proven)
+            section("failed", "Failed", groups.failed, failed = true)
+            if (groups.done.isNotEmpty()) {
+                item(key = "done-head") {
+                    Column {
+                        Hairline(inset = Space.margin)
+                        FoldHead("Done", groups.done.size, doneOpen, onToggle = { doneOpen = !doneOpen })
                     }
+                }
+                if (doneOpen) items(groups.done, key = { "d:${it.id}" }) { row ->
+                    Column {
+                        Hairline(inset = Space.margin)
+                        WorkRow(row, onOpen = { nav.go(Nav.task(row.id)) })
+                    }
+                }
+            }
+            if (groups.empty && shown.needs.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        if (filtered != null) "Nothing in this project." else "Nothing under way. Ask ${Primary.name} below, or give an agent a task: each is a row here, from its first step to its proof.",
+                        style = Type.body,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(Space.margin),
+                    )
                 }
             }
         }
         if (live) {
-            // While it answers in the chat you left, the box is that chat's: a press shows it.
+            // While it answers in the chat you left, the bar is that chat's: a press shows it.
             val title by app.chat.title.collectAsState()
             Row(
                 Modifier.fillMaxWidth().clickable { nav.go("chat") }.semantics(mergeDescendants = true) { role = Role.Button }.heightIn(min = 56.dp).padding(horizontal = Space.margin, vertical = Space.s3),
@@ -183,28 +189,32 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
                 Text("Show", style = Type.word, color = brand.ink)
             }
         } else {
-            // (A task is given once the node has answered: never from the agents this phone kept.)
-            Dock(app, give = give, canGive = table.asOf == null, sent = { nav.go("chat") })
+            // The bar: search and ask, the message box, a task to give. (A task is given once the node has answered: never
+            // from the agents this phone kept.)
+            HomeBar(app, search = search, give = give, canGive = table.asOf == null, sent = { nav.go("chat") })
         }
     }
 }
 
 /**
- * Its header: the I-beam (the primary, in ink), its name and the line at a glance (in full ink and weight when something
- * needs you), the machine it runs on (its dot says how the fleet stands), and "…" for everything else. Its mark and name
- * open its own conversation.
+ * Its header: the I-beam (the primary, in ink: on a phone, a tap opens the drawer), its name and the line at a glance (in
+ * full ink and weight when something needs you), a tap on which opens its own conversation. On a wide screen, which has its
+ * sidebar and no drawer, "…" for everything else. The machine is named in the drawer, and only when something is off.
  */
 @Composable
-private fun HomeHead(app: AppModel, glance: Work.Glance, open: () -> Unit, settings: () -> Unit, places: () -> Unit) {
+private fun HomeHead(glance: Work.Glance, drawer: (() -> Unit)?, open: () -> Unit, places: () -> Unit) {
     val brand = LocalBrand.current
-    val paired by app.paired.collectAsState()
-    val fleet by app.fleet.collectAsState()
     Row(
-        Modifier.fillMaxWidth().padding(start = Space.s3, end = Space.s1, top = Space.s2, bottom = Space.s2),
+        Modifier.fillMaxWidth().padding(start = Space.s1, end = Space.s1, top = Space.s2, bottom = Space.s2),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.s2),
+        horizontalArrangement = Arrangement.spacedBy(Space.s1),
     ) {
-        Row(
+        if (drawer != null) {
+            IconButton(onClick = drawer, modifier = Modifier.size(Space.touch).semantics { contentDescription = "Everything: the drawer" }) { PrimaryMark(36.dp) }
+        } else {
+            Box(Modifier.size(Space.touch), contentAlignment = Alignment.Center) { PrimaryMark(36.dp) }
+        }
+        Column(
             Modifier
                 .weight(1f)
                 .clip(MaterialTheme.shapes.medium)
@@ -213,60 +223,84 @@ private fun HomeHead(app: AppModel, glance: Work.Glance, open: () -> Unit, setti
                     role = Role.Button
                     contentDescription = "${Primary.name}: ${glance.text}. Ask it"
                 }
-                .padding(Space.s1),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Space.s3),
+                .padding(horizontal = Space.s2, vertical = Space.s1),
         ) {
-            PrimaryMark(40.dp)
-            Column(Modifier.weight(1f)) {
-                Text(Primary.name, style = Type.display, maxLines = 1)
-                Text(
-                    glance.text,
-                    style = Type.meta.copy(fontSize = Type.body.fontSize),
-                    color = if (glance.needs) brand.needs else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = if (glance.needs) androidx.compose.ui.text.font.FontWeight.SemiBold else null,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                )
-            }
+            Text(Primary.name, style = Type.display, maxLines = 1)
+            Text(
+                glance.text,
+                style = Type.meta.copy(fontSize = Type.body.fontSize),
+                color = if (glance.needs) brand.needs else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (glance.needs) androidx.compose.ui.text.font.FontWeight.SemiBold else null,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
         }
-        // The machine it runs on, by its name; its dot says how the fleet stands once it answers.
-        val self = paired?.nodeName ?: paired?.fleetName ?: "This node"
-        val tone = fleet?.let { if (it.online == it.nodes) brand.done else if (it.online == 0) brand.failed else brand.needs }
-        Row(
-            Modifier
-                .clip(CircleShape)
-                .border(BorderStroke(1.dp, brand.line), CircleShape)
-                .clickable(onClick = settings)
-                .clearAndSetSemantics {
-                    role = Role.Button
-                    contentDescription = fleet?.let { "$self: ${it.online} of ${it.nodes} machines online" } ?: self
-                }
-                .heightIn(min = 32.dp)
-                .padding(horizontal = Space.s3, vertical = Space.s1),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            // (A dot only where something is off, and its words beside it: never the colour alone.)
-            val off = fleet?.let { if (it.online == 0) "offline" else if (it.online < it.nodes) "${it.online} of ${it.nodes} online" else null }
-            if (off != null) Dot(tone ?: MaterialTheme.colorScheme.onSurfaceVariant, size = 7)
-            Text(listOfNotNull(self, off).joinToString(" · "), style = Type.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
-        }
-        IconButton(onClick = places, modifier = Modifier.semantics { contentDescription = "Everything else" }) { Icon(MoreIcon, null) }
+        if (drawer == null) IconButton(onClick = places, modifier = Modifier.semantics { contentDescription = "Everything else" }) { Icon(MoreIcon, null) }
     }
 }
 
 /**
- * Its message box, docked at the foot (as the web's): "+" gives a task, and what you write starts a conversation with it
- * (the one you had open stays among your chats). [sent]: it went, and its answer is coming in that conversation.
+ * The agents in a strip, each its mark (still, its state in its shape), its name and its state in a word (red only where
+ * it failed): a tap opens its page. The primary is the I-beam above, never here.
  */
 @Composable
-private fun Dock(app: AppModel, give: () -> Unit, canGive: Boolean, sent: () -> Unit) {
+private fun AgentStrip(app: AppModel, open: (String) -> Unit) {
+    val table by app.table.collectAsState()
+    val brand = LocalBrand.current
+    val agents = table.rows.filter { it.kind == "agent" }
+    if (agents.isEmpty()) return
+    androidx.compose.foundation.lazy.LazyRow(
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Space.s2),
+        modifier = Modifier.fillMaxWidth().padding(vertical = Space.s1),
+    ) {
+        items(agents, key = { it.id }) { row ->
+            val word = row.state?.words
+            Column(
+                Modifier
+                    .width(84.dp)
+                    .clip(MaterialTheme.shapes.medium)
+                    .clickable { open(row.id) }
+                    .clearAndSetSemantics {
+                        role = Role.Button
+                        contentDescription = listOfNotNull(row.name, word).joinToString(", ")
+                    }
+                    .padding(vertical = Space.s2),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                AgentMarkView(row.id, row.avatar, 44.dp, state = AgentMark.state(row.state))
+                Spacer(Modifier.size(Space.s1))
+                Text(row.name, style = Type.rowTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    word ?: " ",
+                    style = Type.meta,
+                    color = when (row.state) { AgentState.FAILED -> brand.danger; AgentState.NEEDS, AgentState.WORKING -> brand.ink; else -> brand.quiet },
+                    fontWeight = if (row.state == AgentState.NEEDS) androidx.compose.ui.text.font.FontWeight.SemiBold else null,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The bar at Home's foot (the iPhone's): search and ask, the primary's message box, where what you write starts a
+ * conversation with it (the one you had open stays among your chats), and a task to give. [sent]: it went, and its answer
+ * is coming in that conversation.
+ */
+@Composable
+private fun HomeBar(app: AppModel, search: () -> Unit, give: () -> Unit, canGive: Boolean, sent: () -> Unit) {
+    val brand = LocalBrand.current
     MessageDock(
         placeholder = "Ask ${Primary.name}…",
         key = "home",
-        lead = { IconButton(onClick = give, enabled = canGive, modifier = Modifier.semantics { contentDescription = "Give a task" }) { Icon(PlusIcon, null) } },
+        before = {
+            IconButton(onClick = search, modifier = Modifier.size(Space.touch).clip(CircleShape).border(BorderStroke(1.dp, brand.line), CircleShape).semantics { contentDescription = "Search, or ask" }) { Icon(SearchIcon, null) }
+        },
+        after = {
+            IconButton(onClick = give, enabled = canGive, modifier = Modifier.size(Space.touch).clip(CircleShape).border(BorderStroke(1.dp, brand.line), CircleShape).semantics { contentDescription = "Give a task" }) { Icon(PlusIcon, null) }
+        },
     ) { words ->
         app.chat.fresh()
         app.chat.send(words)

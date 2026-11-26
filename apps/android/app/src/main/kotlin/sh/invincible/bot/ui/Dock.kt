@@ -52,6 +52,8 @@ fun MessageDock(
     enabled: Boolean = true,
     hint: String? = null,
     lead: (@Composable () -> Unit)? = null,
+    before: (@Composable () -> Unit)? = null,
+    after: (@Composable () -> Unit)? = null,
     send: (String) -> Boolean,
 ) {
     val brand = LocalBrand.current
@@ -62,8 +64,10 @@ fun MessageDock(
         if (words.isNotEmpty() && enabled && send(words)) text = ""
     }
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = Space.s3, vertical = Space.s2)) {
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+        before?.invoke()
         Row(
-            Modifier.fillMaxWidth().clip(shape).border(BorderStroke(1.dp, brand.line), shape).background(brand.raised).padding(Space.s1),
+            Modifier.weight(1f).clip(shape).border(BorderStroke(1.dp, brand.line), shape).background(brand.raised).padding(Space.s1),
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(Space.s1),
         ) {
@@ -94,6 +98,8 @@ fun MessageDock(
                     },
             )
             FilledIconButton(onClick = ::deliver, enabled = enabled && text.isNotBlank()) { Icon(SendIcon, contentDescription = "Send") }
+        }
+        after?.invoke()
         }
         hint?.let { Text(it, style = Type.small, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = Space.s4, top = Space.s1)) }
     }

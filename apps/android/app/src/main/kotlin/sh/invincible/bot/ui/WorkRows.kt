@@ -53,6 +53,7 @@ import sh.invincible.bot.core.AgentState
 import sh.invincible.bot.core.Steps
 import sh.invincible.bot.core.Work
 import sh.invincible.bot.core.AgentMark
+import androidx.compose.ui.unit.sp
 
 /*
  * The work's rows, as every list of them draws them (a tablet's sidebar, a phone's Home): a task in three lines, as T3
@@ -190,17 +191,22 @@ fun Hairline(modifier: Modifier = Modifier, inset: Dp = 0.dp) {
     androidx.compose.material3.HorizontalDivider(modifier.padding(start = inset), thickness = Dp.Hairline, color = LocalBrand.current.line)
 }
 
-/** A section's head in a list of the work: its words, in its tone (amber for what needs you), and how many. */
+/** A section's head in a list (the iPhone's): its name in small capitals, tracked, and how many; in its tone (the ink for
+ * what needs you, red for what failed), else grey. */
 @Composable
 fun SectionHead(text: String, count: Int? = null, tone: Color? = null, modifier: Modifier = Modifier) {
     val color = tone ?: MaterialTheme.colorScheme.onSurfaceVariant
+    val style = Type.section.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, letterSpacing = 0.9.sp, fontFeatureSettings = "tnum")
     Row(
-        modifier.fillMaxWidth().padding(horizontal = Space.margin).padding(top = Space.s4, bottom = Space.s1).semantics(mergeDescendants = true) { heading() },
+        modifier.fillMaxWidth().padding(horizontal = Space.margin).padding(top = Space.s4, bottom = Space.s1).clearAndSetSemantics {
+            heading()
+            contentDescription = listOfNotNull(text, count?.toString()).joinToString(", ")
+        },
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(Space.s2),
     ) {
-        Text(text, style = Type.section, color = color)
-        count?.let { Text("· $it", style = Type.section.copy(fontFeatureSettings = "tnum"), color = color) }
+        Text(text.uppercase(), style = style, color = color)
+        count?.let { Text("$it", style = style, color = color) }
     }
 }
 

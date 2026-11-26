@@ -414,6 +414,38 @@ object Work {
     /** What waits in the Inbox beyond the task rows that ask for it: its count, less the approvals a needs row stands for
      * (its agent asking for your approval as its task runs). */
     /**
+     * Home's work by proof (the iPhone's ByProof): in hand, proven, failed, and the rest of what ended, each the latest
+     * first (at work before queued); what needs you is left out, as Home shows those as decisions above.
+     */
+    class ByProof(work: Attended) {
+        val working = ArrayList<Row>()
+        val proven = ArrayList<Row>()
+        val failed = ArrayList<Row>()
+        val done = ArrayList<Row>()
+
+        init {
+            for (row in work.active + work.working + work.done) {
+                if (row.state == AgentState.WORKING || row.state == AgentState.QUEUED || (row.verdict == null && row.attention == Attention.WORKING)) {
+                    working += row
+                    continue
+                }
+                when (row.verdict?.verdict) {
+                    Steps.Verdict.PROVEN -> proven += row
+                    Steps.Verdict.FAILED, Steps.Verdict.REJECTED, Steps.Verdict.GAVE_UP -> failed += row
+                    else -> done += row
+                }
+            }
+            val newest = compareByDescending<Row> { it.at }.thenBy { it.id }
+            working.sortWith(compareBy<Row> { it.state != AgentState.WORKING }.then(newest))
+            proven.sortWith(newest)
+            failed.sortWith(newest)
+            done.sortWith(newest)
+        }
+
+        val empty: Boolean get() = working.isEmpty() && proven.isEmpty() && failed.isEmpty() && done.isEmpty()
+    }
+
+    /**
      * What needs you, decisions only, counted one way for every place that says how many (Home's line and its Needs you,
      * the Inbox's badge, the primary's line among the agents, the sidebar, the kept agents): every approval waiting once,
      * each task only you can move on (an agent asking for your approval is that approval's), devices asking to join, keys

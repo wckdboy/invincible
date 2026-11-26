@@ -89,7 +89,7 @@ object Space {
     val sidebar = 280.dp
     val details = 320.dp
     /** Wide enough for the sidebar beside a pane; and for a task's details card beside its thread too. */
-    val wide = 720.dp
+    val wide = 600.dp
     val roomy = 1100.dp
 }
 
