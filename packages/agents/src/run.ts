@@ -40,6 +40,11 @@ export interface RunDeps {
   stopAgent?(): Promise<void>;
   /** A coding agent's run followed as it goes, where its VM's host can keep a command open (harnesses.ts AgentRunDeps.follow). */
   follow?: AgentRunDeps["follow"];
+  /**
+   * Where a coding agent's tool runs when that isn't the workspace's own VM: a seat's VM that shares its /work (I15 step
+   * 9). Its run's own commands, its follow and its stop go there; everything else of the work stays in the workspace's.
+   */
+  harness?: { exec(command: string, timeoutSec: number): Promise<ExecResult>; follow?: AgentRunDeps["follow"]; stopAgent?(): Promise<void> };
   /** Persist the harness session as soon as it is created; used when resuming a task. */
   agentSession?(id: string): Promise<void>;
   /** Progress, for whoever is watching. */
@@ -1649,9 +1654,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         agent.driver,
         { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers ? { steer: steerNow, steers: steersLive } : {}), ...(cutOff ? { cutOff: true } : {}) },
         {
-          exec: deps.exec,
-          ...(deps.follow ? { follow: deps.follow } : {}),
-          stopAgent: deps.stopAgent,
+          exec: deps.harness?.exec ?? deps.exec,
+          ...((deps.harness ? deps.harness.follow : deps.follow) ? { follow: (deps.harness ? deps.harness.follow : deps.follow)! } : {}),
+          stopAgent: deps.harness ? deps.harness.stopAgent : deps.stopAgent,
           session: async (id) => {
             live = id;
             await deps.agentSession?.(id);

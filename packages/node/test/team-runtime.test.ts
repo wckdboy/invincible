@@ -7,7 +7,8 @@ import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { acpDriver, AGENTS, OWN_SIGN_IN, type RunEvent } from "@invincible/agents";
 import { harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
-import type { TeamRunContext } from "@invincible/agents";
+import type { SeatAnswer, SeatRun, TeamRunContext } from "@invincible/agents";
+import type { TaskAccount } from "@invincible/core";
 
 const stores: LedgerStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
@@ -853,6 +854,179 @@ test("a roster model this VM's gateway token doesn't cover is not run on, and th
   });
   await expect(f.runtime.executeTask(agent, task, f.context)).rejects.toThrow("OpenCode can't work in this VM yet: Put a keyed OpenAI-compatible model on the engineer's roster. orcarouter/gpt-6.1-sol is on the roster, but this VM's gateway token doesn't cover its provider: it covers the providers with a key when its task began");
   expect(commands.some((c) => c.includes("setsid"))).toBe(false);
+});
+
+/* Runs on a seat of yours (I15 step 9): the node chooses a seat (seat-runs.ts), and its coding tool runs in that seat's VM,
+ * which shares the agent's /work. Its gates, its evidence and its session's record stay in the agent's own VM. */
+const SEAT = `st_${"s".repeat(22)}`;
+const RESET = Date.UTC(2026, 10, 27, 14, 0);
+type Told = { exitCode?: number; stdout: string };
+/** An agent on a vendor's tool with seats of yours: its own VM and a seat's VM answer the status question as told, and a run there ends at once, saying a window of its plan. */
+function seatTask(harness: "claude" | "codex", options: { own: Told; seat?: Told; roster?: { provider: string; model: string }[]; answers?: SeatAnswer[]; account?: TaskAccount | null; agent?: Partial<Agent>; task?: Partial<TeamTask>; fails?: (command: string) => boolean }) {
+  const inAgent: string[] = [], inSeat: string[] = [], said: string[] = [], kept: TaskAccount[] = [], released: string[] = [], stopped: string[] = [];
+  const asks: { from: TaskAccount | null; wait: boolean }[] = [];
+  const windows: string[] = [], seatWindows: string[] = [];
+  const agent = { ...member, harness, ...options.agent };
+  const kind = harness === "claude" ? "claude-subscription" : "chatgpt-codex";
+  const play = (command: string, told: Told) => {
+    if (command.includes("--status")) return result({ stdout: told.stdout, exitCode: told.exitCode ?? 0 });
+    if (command.includes('"next": nxt')) return result({ stdout: JSON.stringify({ alive: false, exit: 0, next: 42, lines: [JSON.stringify({ type: "session", id: "00000000-0000-4000-8000-000000000001" }), JSON.stringify({ type: "window", name: "five_hour", status: "allowed", usedPercent: 12, resetsAt: RESET }), JSON.stringify({ type: "text", text: "Built and checked." })] }) });
+    if (command.includes("command -v desktop")) return result({ stdout: options.agent?.name === "Desk" ? "/usr/local/bin/desktop" : "" });
+    return result({ stdout: command.includes("cat ") ? "" : "0" });
+  };
+  const run = (): SeatRun => ({
+    seat: { id: SEAT, kind, label: "Work Max" },
+    exec: async (command) => (inSeat.push(command), play(command, options.seat ?? { stdout: status({ installed: true, signedIn: true, method: "claude.ai" }) })),
+    stop: async () => void stopped.push("seat"),
+    release: async (signedOut) => void released.push(signedOut ? "signed out" : "let go"),
+  });
+  const answers = options.answers ?? [{ run: run() }];
+  const f = fixture([say("1. Build and verify."), say("PASS\nThe gate passed.")], {
+    agent: () => agent,
+    models: () => options.roster ?? [],
+    exec: async (_m, command) => {
+      inAgent.push(command);
+      if (options.fails?.(command)) throw new Error("its VM went away");
+      return play(command, options.own);
+    },
+    stopWorker: async () => void stopped.push("own"),
+    seat: async (_m, asked, opts) => {
+      expect(asked).toBe(harness);
+      asks.push(opts);
+      const next = answers.shift() ?? { none: true };
+      return "run" in next && next.run === undefined ? { run: run() } : next;
+    },
+    window: (_m, _h, window) => void windows.push(`${window.name} ${window.usedPercent}`),
+    seatWindow: (seat, window) => void seatWindows.push(`${seat.id} ${window.name} ${window.usedPercent}`),
+  });
+  const context: TeamRunContext = { ...f.context, emit: (line) => void said.push(line), account: options.account ?? null, onAccount: (account) => void kept.push(account) };
+  const launch = (where: string[]) => where.find((c) => c.includes("setsid"));
+  return { go: () => f.runtime.executeTask(agent, { ...task, ...options.task }, context), inAgent, inSeat, said, kept, released, stopped, asks, windows, seatWindows, launch, run };
+}
+const signedOut = status({ installed: true, signedIn: false });
+const signedIn = (method = "claude.ai") => status({ installed: true, signedIn: true, method });
+
+test("a run on a seat of yours: its tool's check, launch and follow are in the seat's VM, its gates and session's record in the agent's; the seat is let go as it ends, and its account kept", async () => {
+  for (const harness of ["claude", "codex"] as const) {
+    const t = seatTask(harness, { own: { stdout: signedOut }, roster: [opus] });
+    expect((await t.go()).verified).toBe(true);
+    expect(t.asks).toEqual([{ from: null, wait: false }]);
+    expect(t.inSeat.filter((c) => c.includes("--status"))).toHaveLength(1);
+    expect(t.launch(t.inSeat)).toContain("--own");
+    expect(t.launch(t.inAgent)).toBeUndefined();
+    expect(t.inSeat.some((c) => c.includes('"next": nxt'))).toBe(true);
+    // The runner runs the gates, in the agent's own VM, on the same /work; its session's record is kept per account.
+    expect(t.inAgent.some((c) => c.includes("bun test required-check"))).toBe(true);
+    expect(t.inSeat.some((c) => c.includes("bun test required-check"))).toBe(false);
+    expect(t.inAgent.some((c) => c.includes(`/work/.agent/sessions/task-abcdefghijkl.${harness}.${SEAT}`) && c.includes("00000000-0000-4000-8000-000000000001"))).toBe(true);
+    // Every command in the seat's VM is the task's, in its workspace, with its gateway lease read from the shared /work.
+    expect(t.inSeat.every((c) => plain(c).includes("cd '/work/tasks/task-abcdefghijkl'") && c.includes("/work/.invincible-gateway.json"))).toBe(true);
+    expect(t.released).toEqual(["let go"]);
+    expect(t.kept).toEqual([{ seat: SEAT, kind: harness === "claude" ? "claude-subscription" : "chatgpt-codex" }]);
+    expect(t.said).toContain(`Seat · ${harness === "claude" ? "Claude Code" : "Codex"} runs on your seat Work Max`);
+    // A window of its plan is the seat's to keep, never the agent VM's own sign-in's.
+    expect(t.seatWindows).toEqual([`${SEAT} five_hour 12`]);
+    expect(t.windows).toEqual([]);
+  }
+});
+
+test("a seat whose tool isn't signed in there is let go, said and marked; the work goes on in its own VM, as before seats", async () => {
+  const t = seatTask("claude", { own: { stdout: signedIn() }, seat: { stdout: signedOut }, roster: [opus] });
+  expect((await t.go()).verified).toBe(true);
+  expect(t.released).toEqual(["signed out"]);
+  expect(t.said).toContain("Seat · Work Max: Claude Code isn't signed in there, so this task goes on without it");
+  expect(t.launch(t.inSeat)).toBeUndefined();
+  expect(t.launch(t.inAgent)).toContain("--own");
+  // Its work began on its own VM's sign-in: that is the account it goes on on.
+  expect(t.kept).toEqual([{ seat: null, kind: "claude-subscription" }]);
+  expect(t.windows).toEqual(["five_hour 12"]);
+  expect(t.seatWindows).toEqual([]);
+  // One that can't say at all is let go too, and not marked signed out.
+  const silent = seatTask("claude", { own: { stdout: signedOut }, seat: { exitCode: 127, stdout: "" }, roster: [opus] });
+  expect((await silent.go()).verified).toBe(true);
+  expect(silent.released).toEqual(["let go"]);
+  expect(silent.said).toContain("Seat · Work Max: Claude Code couldn't say there whether it is signed in, so this task goes on without it");
+});
+
+test("no seat free: it runs in its own VM as before; with no other way to go on it waits for a seat, or rests until one opens, or says what to do", async () => {
+  const before = seatTask("claude", { own: { stdout: signedIn() }, roster: [opus], answers: [{ none: true }] });
+  expect((await before.go()).verified).toBe(true);
+  expect(before.asks).toEqual([{ from: null, wait: false }]);
+  expect(before.launch(before.inAgent)).toContain("--own");
+  // Nothing else to run on: it waits for a seat, and runs on the one it is given.
+  const waits = seatTask("claude", { own: { stdout: signedOut }, answers: [{ none: true }, { run: undefined as never }] });
+  expect((await waits.go()).verified).toBe(true);
+  expect(waits.asks).toEqual([{ from: null, wait: false }, { from: null, wait: true }]);
+  expect(waits.said[0]).toBe("Waiting · for a seat of yours that runs Claude Code: Sign Claude Code in in this agent's VM (claude auth login), or put an Anthropic-API model on the engineer's roster");
+  expect(waits.launch(waits.inSeat)).toContain("--own");
+  // A tool missing from its own VM doesn't end it either, with a seat to run on.
+  const missing = seatTask("codex", { own: { exitCode: 127, stdout: "" }, answers: [{ none: true }, { run: undefined as never }], seat: { stdout: signedIn("chatgpt") } });
+  expect((await missing.go()).verified).toBe(true);
+  // Every seat that could take it spent: it rests until the soonest opens, and nothing is started.
+  const rests = seatTask("claude", { own: { stdout: signedOut }, answers: [{ none: true }, { rest: { until: RESET, why: "Every seat of yours that could take it is spent (Work Max)" } }] });
+  const rested = await rests.go();
+  expect(rested.verified).toBe(false);
+  expect(rested.rest).toEqual({ until: RESET, why: "Every seat of yours that could take it is spent (Work Max)" });
+  expect(rests.launch(rests.inAgent) ?? rests.launch(rests.inSeat)).toBeUndefined();
+  // No seat at all: what to do, as before seats.
+  const none = seatTask("claude", { own: { stdout: signedOut }, answers: [{ none: true }, { none: true }] });
+  await expect(none.go()).rejects.toThrow("Claude Code can't work in this VM yet: Sign Claude Code in in this agent's VM (claude auth login), or put an Anthropic-API model on the engineer's roster");
+  const broken = seatTask("claude", { own: { exitCode: 127, stdout: "" }, answers: [{ none: true }, { none: true }] });
+  await expect(broken.go()).rejects.toThrow("claude is not ready in this VM:");
+});
+
+test("work that began on a seat goes on on no other account of its vendor's: not its own VM's sign-in; its seat busy and nothing else to run on, it waits for it", async () => {
+  const account: TaskAccount = { seat: SEAT, kind: "claude-subscription" };
+  const roster = seatTask("claude", { own: { stdout: signedIn() }, roster: [opus], account, answers: [{ none: true }] });
+  expect((await roster.go()).verified).toBe(true);
+  expect(roster.asks).toEqual([{ from: account, wait: false }]);
+  expect(roster.launch(roster.inAgent)).toContain("claude-code.py --provider");
+  expect(roster.launch(roster.inAgent)).not.toContain("--own");
+  expect(roster.kept).toEqual([]);
+  const waits = seatTask("claude", { own: { stdout: signedIn() }, account, answers: [{ none: true }, { run: undefined as never }] });
+  expect((await waits.go()).verified).toBe(true);
+  expect(waits.asks).toEqual([{ from: account, wait: false }, { from: account, wait: true }]);
+  expect(waits.said[0]).toStartWith("Waiting · for a seat of yours that runs Claude Code: its work began on a seat of yours, which can't take it now, and it goes on on no other account of its vendor's");
+  expect(waits.launch(waits.inSeat)).toContain("--own");
+  // (Back on its own seat: the account is the same, so nothing new is kept.)
+  expect(waits.kept).toEqual([]);
+  // Another vendor's seat is no account of this one's: a Codex task whose Claude work was elsewhere isn't held by it.
+  const other = seatTask("codex", { own: { stdout: signedIn("chatgpt") }, account, answers: [{ none: true }] });
+  expect((await other.go()).verified).toBe(true);
+  expect(other.launch(other.inAgent)).toContain("--own");
+  expect(harnessReadiness(AGENTS.claude!, { exitCode: 0, stdout: signedIn() }, [opus], [], "engineer", false, null, true)).toEqual({ ready: true, models: [opus], on: "anthropic/claude-opus-5-5 through the gateway: its work began on a seat of yours, and this VM's own sign-in is another account" });
+});
+
+test("work in sensitive mode never takes a seat; an agent with a desktop does, its tool told its commands are beside it, not of a desktop out of their reach; a harness no seat runs is never asked about one", async () => {
+  const held = seatTask("claude", { own: { stdout: signedOut }, roster: [opus], task: { models: ["local/fake"] } });
+  expect((await held.go()).verified).toBe(true);
+  expect(held.asks).toEqual([]);
+  /** What its tool was told, as its launch wrote it to its prompt. */
+  const told = (launch: string | undefined) => Buffer.from(/printf %s '([A-Za-z0-9+/=]+)' \| base64 -d/.exec(plain(launch ?? ""))?.[1] ?? "", "base64").toString("utf8");
+  const desk = seatTask("claude", { own: { stdout: signedIn() }, roster: [opus], agent: { name: "Desk" } });
+  expect((await desk.go()).verified).toBe(true);
+  expect(desk.asks).toEqual([{ from: null, wait: false }]);
+  expect(told(desk.launch(desk.inSeat))).toContain("Your commands run in a VM made for your plan, beside your own VM and sharing its /work: your own VM's desktop is out of their reach.");
+  expect(told(desk.launch(desk.inSeat))).not.toContain("This VM has a desktop");
+  // In its own VM, as before: told of its desktop.
+  const own = seatTask("claude", { own: { stdout: signedIn() }, roster: [opus], agent: { name: "Desk" }, answers: [{ none: true }] });
+  expect((await own.go()).verified).toBe(true);
+  expect(told(own.launch(own.inAgent))).toContain("This VM has a desktop");
+  const commands: string[] = [];
+  const agent = { ...member, harness: "opencode" as const };
+  let asked = 0;
+  const f = fixture([], { agent: () => agent, models: () => [], exec: async (_m, command) => { commands.push(command); return result({ stdout: "2.2.6" }); }, seat: async () => (asked++, { none: true }) });
+  await expect(f.runtime.executeTask(agent, task, f.context)).rejects.toThrow("OpenCode can't work in this VM yet");
+  expect(asked).toBe(0);
+});
+
+test("a seat is let go when the task ends before its run begins", async () => {
+  // (Its session's record can't be read in its own VM, after the seat was given: the task ends, and the seat goes back.)
+  const t = seatTask("claude", { own: { stdout: signedOut }, roster: [opus], fails: (command) => plain(command).includes("cat '/work/.agent/sessions/") });
+  await expect(t.go()).rejects.toThrow("its VM went away");
+  expect(t.asks).toEqual([{ from: null, wait: false }]);
+  expect(t.released).toEqual(["let go"]);
+  expect(t.launch(t.inSeat)).toBeUndefined();
 });
 
 /* The VM's notes store (Engram, packages/agents/src/engram.ts): one switch for a node's agents, off unless its

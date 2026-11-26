@@ -43,6 +43,8 @@ export const SEAT_LIMITS = {
   attemptMinutes: 10,
   /** Windows kept for one seat (five hours, a week, a model's week, a month…). */
   windows: 8,
+  /** How long a window its tool refused without saying when it resets counts as spent: the shortest plan window, five hours. */
+  restMinutes: 300,
 } as const;
 
 /**
@@ -310,6 +312,85 @@ export function seatRuns(seat: { kind: SeatKind; runs: number }): number {
   const limit = seat.kind === "chatgpt-codex" ? 1 : SUBSCRIPTION_KINDS.includes(seat.kind) ? SHARED_RUNS_PROVEN : SEAT_LIMITS.runs;
   return Math.max(1, Math.min(seat.runs, limit));
 }
+
+/** The harness a seat's own plan runs: its vendor's tool. (A keyed seat runs any harness that speaks its API, through the gateway.) */
+export const SEAT_HARNESS: Readonly<Partial<Record<SeatKind, string>>> = { "claude-subscription": "claude", "chatgpt-codex": "codex" };
+
+/** When a window ends: its reset, or with none said, SEAT_LIMITS.restMinutes after it was said (the shortest plan window). */
+const windowEnds = (window: SeatFacts["windows"][number]): number => window.resetsAt ?? window.at + SEAT_LIMITS.restMinutes * 60_000;
+
+/**
+ * How much of a seat's plan is used now: its most used window that is still open (one past its end is fresh again, and
+ * one its tool refused is used whole), and when that one resets; of the equally used, the soonest to reset.
+ */
+export function seatHeadroom(seat: Pick<SeatView, "windows">, now: number): { used: number; resetsAt: number | null } {
+  let used = 0;
+  let resetsAt: number | null = null;
+  for (const window of seat.windows) {
+    if (windowEnds(window) <= now) continue;
+    const share = window.status === "rejected" ? 100 : (window.usedPercent ?? 0);
+    if (share > used || (share === used && window.resetsAt !== null && (resetsAt === null || window.resetsAt < resetsAt))) {
+      used = share;
+      resetsAt = window.resetsAt;
+    }
+  }
+  return { used, resetsAt };
+}
+
+/**
+ * The seat a run of `harness` takes now (I15 step 9: Invincible chooses, and nothing asks the owner), or null when none
+ * can. Of the seats whose own plan runs that harness, ready (not signed out, signing in or resting), with a run to spare
+ * (`busy` below its runs), with some of their plan left, and that the work may go on on (mayCarryOn from the seat it ran
+ * on, if it ran on one: never a second subscription seat of that vendor's): the most headroom first (the share its most
+ * used open window has used), then, of the equally used, the soonest reset (what would expire unused goes first), then
+ * its id. `pinned`: that seat or none (a project's pin keeps its work off another account). The same seats at the same
+ * time always give the same choice, whatever their order.
+ */
+export function chooseSeat(
+  harness: string,
+  seats: readonly SeatView[],
+  busy: (seat: string) => number,
+  now: number,
+  opts: { pinned?: string | null; from?: Pick<SeatView, "id" | "kind" | "provider"> | null } = {},
+): SeatView | null {
+  const able = seats.filter((seat) => SEAT_HARNESS[seat.kind] === harness && seat.state.is === "ready" && busy(seat.id) < seat.runs && seatHeadroom(seat, now).used < 100 && (!opts.from || mayCarryOn(opts.from, seat)));
+  if (opts.pinned) return able.find((seat) => seat.id === opts.pinned) ?? null;
+  const later = (at: number | null) => (at === null ? Number.MAX_SAFE_INTEGER : at);
+  const ranked = able
+    .map((seat) => ({ seat, room: seatHeadroom(seat, now) }))
+    .sort((a, b) => a.room.used - b.room.used || later(a.room.resetsAt) - later(b.room.resetsAt) || (a.seat.id < b.seat.id ? -1 : a.seat.id > b.seat.id ? 1 : 0));
+  return ranked[0]?.seat ?? null;
+}
+
+/**
+ * When a seat whose plan is spent now is open again: every window of its that is used whole has ended, and its rest is
+ * over. Null: it isn't spent now.
+ */
+export function seatOpensAt(seat: Pick<SeatView, "windows" | "state">, now: number): number | null {
+  let at: number | null = seat.state.is === "resting" && seat.state.until > now ? seat.state.until : null;
+  for (const window of seat.windows) {
+    const ends = windowEnds(window);
+    if (ends <= now || (window.status !== "rejected" && (window.usedPercent ?? 0) < 100)) continue;
+    at = Math.max(at ?? 0, ends);
+  }
+  return at;
+}
+
+/** The seat kind whose plan a harness's own sign-in is (an agent's VM signed in by hand is one account of its vendor's). */
+export function seatKindOf(harness: string): SeatKind | null {
+  for (const kind of SEAT_KINDS) if (SEAT_HARNESS[kind] === harness) return kind;
+  return null;
+}
+
+/**
+ * The account a task's work ran on (I15 step 9), kept with the task so that work taken up again goes on on it alone (the
+ * rule): a seat of yours, or (`seat` null) its tool's own sign-in in its agent's VM, an account of `kind`'s vendor.
+ */
+export const TaskAccount = z.strictObject({ seat: SeatId.nullable(), kind: SeatKind });
+export type TaskAccount = z.infer<typeof TaskAccount>;
+
+/** A task's account as the seat it would go on from (chooseSeat's `from`): its own VM's sign-in is an account no seat is. */
+export const accountSeat = (account: TaskAccount): { id: string; kind: SeatKind; provider: null } => ({ id: account.seat ?? "own", kind: account.kind, provider: null });
 
 /**
  * The rule (D1 and D2, the owner's "never switch"): may work that runs on `from` go on on `to`? Never on a second

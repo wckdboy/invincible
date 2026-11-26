@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  accountSeat,
+  chooseSeat,
   mayCarryOn,
+  seatKindOf,
+  seatOpensAt,
+  TaskAccount,
+  SEAT_HARNESS,
+  seatHeadroom,
+  type SeatView,
   SEAT_KINDS,
   SEAT_LIMITS,
   SeatAddInput,
@@ -173,5 +181,118 @@ describe("a sign-in's card", () => {
     expect(signInUrlOk("chatgpt-codex", "https://claude.ai/oauth/authorize")).toBe(false);
     expect(signInUrlOk("claude-subscription", "https://auth.openai.com/codex/device")).toBe(false);
     expect(signInUrlOk("api", "https://claude.ai/oauth/authorize")).toBe(false);
+  });
+});
+
+/*
+ * The scheduler's choice (I15 step 9: Invincible chooses, the owner never routes): a seat whose own plan runs the
+ * harness, ready, with a run to spare and some of its plan left, by headroom then the soonest reset; never a second
+ * subscription seat of the vendor's for work that ran on one (D1, D2); a pin is that seat or none; the same seats at the
+ * same time always the same choice.
+ */
+describe("which seat a run takes", () => {
+  const NOW = Date.UTC(2026, 10, 27, 9, 0);
+  const HOUR = 3_600_000;
+  const seat = (id: string, over: Partial<SeatView> = {}): SeatView => ({ id: `st_${id.padEnd(22, "0")}`, kind: "claude-subscription", vendor: "anthropic", label: id, node: "n_node", provider: null, runs: 1, plan: "max", method: "claude.ai", state: { is: "ready", renewBy: null }, windows: [], ...over });
+  const used = (share: number, resetsIn: number, status: "allowed" | "warning" | "rejected" = "allowed") => ({ window: "five_hour", status, usedPercent: share, resetsAt: NOW + resetsIn, at: NOW - HOUR });
+  const idle = () => 0;
+
+  test("the most headroom, then the soonest reset; its harness's seats alone; the same whatever their order", () => {
+    const a = seat("a", { windows: [used(60, 2 * HOUR)] });
+    const b = seat("b", { windows: [used(20, 4 * HOUR)] });
+    const c = seat("c", { windows: [used(20, 1 * HOUR)] });
+    const codex = seat("x", { kind: "chatgpt-codex", vendor: "openai", windows: [] });
+    expect(chooseSeat("claude", [a, b, c, codex], idle, NOW)?.label).toBe("c");
+    expect(chooseSeat("claude", [codex, c, b, a], idle, NOW)?.label).toBe("c");
+    expect(chooseSeat("codex", [a, b, c, codex], idle, NOW)?.label).toBe("x");
+    expect(chooseSeat("opencode", [a, b, c, codex], idle, NOW)).toBeNull();
+    expect(SEAT_HARNESS).toEqual({ "claude-subscription": "claude", "chatgpt-codex": "codex" });
+  });
+
+  test("a window past its reset is fresh again, one its tool refused is used whole, and a seat with none left, resting, signed out or at its runs is passed over", () => {
+    expect(seatHeadroom({ windows: [used(90, -1)] }, NOW)).toEqual({ used: 0, resetsAt: null });
+    expect(seatHeadroom({ windows: [used(10, HOUR, "rejected"), used(40, 2 * HOUR)] }, NOW)).toEqual({ used: 100, resetsAt: NOW + HOUR });
+    const spent = seat("spent", { windows: [used(100, HOUR)] });
+    const resting = seat("resting", { state: { is: "resting", until: NOW + HOUR, window: "five_hour" } });
+    const out = seat("out", { state: { is: "signed-out", why: "expired" } });
+    const busy = seat("busy");
+    const free = seat("free", { windows: [used(95, HOUR)] });
+    expect(chooseSeat("claude", [spent, resting, out, busy, free], (id) => (id === busy.id ? 1 : 0), NOW)?.label).toBe("free");
+    expect(chooseSeat("claude", [spent, resting, out, busy], (id) => (id === busy.id ? 1 : 0), NOW)).toBeNull();
+  });
+
+  test("work that ran on a seat goes on on it, never on a second subscription seat of the vendor's (D1, D2); a pin is that seat or none", () => {
+    const mine = seat("mine", { windows: [used(70, HOUR)] });
+    const other = seat("other", { windows: [used(5, HOUR)] });
+    expect(chooseSeat("claude", [mine, other], idle, NOW)?.label).toBe("other");
+    expect(chooseSeat("claude", [mine, other], idle, NOW, { from: mine })?.label).toBe("mine");
+    // Its seat spent, it isn't carried on another of the vendor's: there is none to take it.
+    expect(chooseSeat("claude", [{ ...mine, state: { is: "resting", until: NOW + HOUR, window: "five_hour" } }, other], idle, NOW, { from: mine })).toBeNull();
+    expect(chooseSeat("claude", [mine, other], idle, NOW, { pinned: mine.id })?.label).toBe("mine");
+    expect(chooseSeat("claude", [mine, other], (id) => (id === mine.id ? 1 : 0), NOW, { pinned: mine.id })).toBeNull();
+  });
+
+  test("a window its tool refused without saying when it resets is spent for five hours from when it was said, then fresh; an own VM's sign-in is an account no seat of its vendor's carries on", () => {
+    const refused = { window: "five_hour", status: "rejected" as const, usedPercent: null, resetsAt: null, at: NOW - HOUR };
+    expect(seatHeadroom({ windows: [refused] }, NOW)).toEqual({ used: 100, resetsAt: null });
+    expect(seatHeadroom({ windows: [refused] }, NOW - HOUR + SEAT_LIMITS.restMinutes * 60_000)).toEqual({ used: 0, resetsAt: null });
+    expect(chooseSeat("claude", [seat("r", { windows: [refused] })], idle, NOW)).toBeNull();
+    expect(chooseSeat("claude", [seat("r", { windows: [refused] })], idle, NOW + 4 * HOUR)?.label).toBe("r");
+    // Work that began on its agent's own VM's sign-in: no seat of that vendor's takes it on (it is another account).
+    const own = accountSeat({ seat: null, kind: "claude-subscription" });
+    expect(chooseSeat("claude", [seat("a")], idle, NOW, { from: own })).toBeNull();
+    expect(chooseSeat("codex", [seat("x", { kind: "chatgpt-codex", vendor: "openai" })], idle, NOW, { from: own })?.label).toBe("x");
+    expect(accountSeat({ seat: seat("a").id, kind: "claude-subscription" }).id).toBe(seat("a").id);
+    expect([seatKindOf("claude"), seatKindOf("codex"), seatKindOf("opencode")]).toEqual(["claude-subscription", "chatgpt-codex", null]);
+    expect(TaskAccount.safeParse({ seat: null, kind: "chatgpt-codex" }).success).toBe(true);
+    expect(TaskAccount.safeParse({ seat: "st_x", kind: "chatgpt-codex" }).success).toBe(false);
+    expect(TaskAccount.safeParse({ seat: null, kind: "chatgpt-codex", url: "https://example.test" }).success).toBe(false);
+  });
+
+  test("a spent seat is open again once every window of its used whole has ended and its rest is over; one not spent says so", () => {
+    const week = { window: "seven_day", status: "rejected" as const, usedPercent: 100, resetsAt: NOW + 30 * HOUR, at: NOW - HOUR };
+    expect(seatOpensAt({ windows: [used(40, HOUR)], state: { is: "ready", renewBy: null } }, NOW)).toBeNull();
+    expect(seatOpensAt({ windows: [used(100, 2 * HOUR), week], state: { is: "ready", renewBy: null } }, NOW)).toBe(NOW + 30 * HOUR);
+    expect(seatOpensAt({ windows: [used(100, 2 * HOUR)], state: { is: "resting", until: NOW + 3 * HOUR, window: "five_hour" } }, NOW)).toBe(NOW + 3 * HOUR);
+    expect(seatOpensAt({ windows: [{ window: "five_hour", status: "rejected", usedPercent: null, resetsAt: null, at: NOW - HOUR }], state: { is: "ready", renewBy: null } }, NOW)).toBe(NOW - HOUR + SEAT_LIMITS.restMinutes * 60_000);
+    // A window whose reset wasn't said is taken as said for five hours, whatever it says.
+    expect(seatHeadroom({ windows: [{ window: "five_hour", status: "allowed", usedPercent: 80, resetsAt: null, at: NOW - 6 * HOUR }] }, NOW)).toEqual({ used: 0, resetsAt: null });
+  });
+
+  test("properties: any able seat means one is chosen; it is able and none able has more headroom; order never matters; the same seats give the same choice", () => {
+    let state = 0x5eed;
+    const random = () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = <T,>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
+    for (let round = 0; round < 400; round++) {
+      const seats: SeatView[] = Array.from({ length: 1 + Math.floor(random() * 6) }, (_, n) => {
+        const kind = pick(["claude-subscription", "chatgpt-codex", "plan"] as const);
+        const states: SeatView["state"][] = [{ is: "ready", renewBy: null }, { is: "ready", renewBy: null }, { is: "resting", until: NOW + HOUR, window: null }, { is: "signed-out", why: "never" }];
+        return seat(`s${n}`, { kind, vendor: kind === "chatgpt-codex" ? "openai" : "anthropic", runs: 1 + Math.floor(random() * 3), state: pick(states), windows: Array.from({ length: Math.floor(random() * 3) }, () => used(Math.floor(random() * 101), Math.floor((random() * 10 - 2) * HOUR), random() < 0.1 ? "rejected" : "allowed")) });
+      });
+      const load = new Map(seats.map((s) => [s.id, Math.floor(random() * 3)]));
+      const busy = (id: string) => load.get(id) ?? 0;
+      const harness = pick(["claude", "codex"]);
+      const from = random() < 0.3 ? pick(seats) : null;
+      const able = seats.filter((s) => SEAT_HARNESS[s.kind] === harness && s.state.is === "ready" && busy(s.id) < s.runs && seatHeadroom(s, NOW).used < 100 && (!from || mayCarryOn(from, s)));
+      const chosen = chooseSeat(harness, seats, busy, NOW, { from });
+      expect(chosen === null).toBe(able.length === 0);
+      if (!chosen) continue;
+      expect(able).toContain(chosen);
+      const room = (s: SeatView) => seatHeadroom(s, NOW);
+      for (const other of able) {
+        const better = room(other).used < room(chosen).used || (room(other).used === room(chosen).used && (room(other).resetsAt ?? Infinity) < (room(chosen).resetsAt ?? Infinity));
+        expect(better).toBe(false);
+      }
+      // Never a second subscription seat of the vendor's for work that ran on one.
+      if (from && from.id !== chosen.id) expect(mayCarryOn(from, chosen)).toBe(true);
+      expect(chooseSeat(harness, [...seats].reverse(), busy, NOW, { from })?.id).toBe(chosen.id);
+      expect(chooseSeat(harness, seats, busy, NOW, { from })?.id).toBe(chosen.id);
+    }
   });
 });

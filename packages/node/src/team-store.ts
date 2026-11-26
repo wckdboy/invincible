@@ -10,6 +10,7 @@ import {
   TeamOutcomeInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, type TeamSteer, heldModels, SENSITIVE_WORK,
 } from "../../core/src/team.ts";
 import { type InterventionKind, type NorthStar, northStar } from "../../core/src/interventions.ts";
+import { TaskAccount } from "../../core/src/seats.ts";
 
 /** An outcome as the store keeps it (outcomes.ts adds what it has cost, at your prices, for its view). */
 export interface StoredOutcome {
@@ -1014,6 +1015,21 @@ export class TeamStore {
       this.db.query("UPDATE team_jobs SET status='interrupted',data=?,error=?,updated_at=? WHERE id=?").run(JSON.stringify(data), error, this.now(), key);
       if (again || acted) this.pauseRoom(row.room, true);
     })();
+  }
+  /** The account a task's work began on (I15 step 9: a seat of yours, or its tool's own sign-in in its agent's VM), or null. */
+  account(key: string): TaskAccount | null {
+    const row = this.jobRow(key);
+    if (!row || row.kind !== "task") return null;
+    const kept = TaskAccount.safeParse(JSON.parse(row.data).account);
+    return kept.success ? kept.data : null;
+  }
+  /** Its work began on this account (TeamRunContext.onAccount): kept with the task, so work taken up again goes on on it alone. */
+  keepAccount(key: string, account: TaskAccount): void {
+    const row = this.jobRow(key);
+    if (!row || row.kind !== "task" || row.status !== "running") return;
+    const data = JSON.parse(row.data);
+    data.account = TaskAccount.parse(account);
+    this.db.query("UPDATE team_jobs SET data=? WHERE id=?").run(JSON.stringify(data), key);
   }
   /** Running work did something that changes something (TeamRunContext.acting): said once, in its own row. */
   acted(key: string): void {

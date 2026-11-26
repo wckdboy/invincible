@@ -9,6 +9,7 @@ import { TeamStore, TeamError, teamInput, teamOutput, teamText, type TeamAnswer,
 
 export { TeamError } from "./team-store.ts";
 import type { TeamRunContext } from "@invincible/agents";
+import type { TaskAccount } from "../../core/src/seats.ts";
 
 
 export interface TeamServiceOptions {
@@ -498,6 +499,7 @@ export class TeamService {
       recruit: (worker) => { budget(); const made = this.store.recruit(worker, job.agent, job.room); this.recruited(made); return made; },
       emit: (progress) => { current(); this.store.progress(job.id, progress); this.changed(); },
       // A task's run takes what was said to it at its safe points: each once, at the step it reached (a reply takes none).
+      // And it goes on on the account its work began on, alone among that vendor's (the rule): kept with the task.
       ...(job.kind === "task"
         ? {
             steers: (step: number) => {
@@ -505,6 +507,8 @@ export class TeamService {
               if (taken.length) this.changed();
               return taken.map(({ by, text }) => ({ by, text }));
             },
+            account: this.store.account(job.id),
+            onAccount: (account: TaskAccount) => this.store.keepAccount(job.id, account),
           }
         : {}),
     };

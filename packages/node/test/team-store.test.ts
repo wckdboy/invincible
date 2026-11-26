@@ -1246,3 +1246,36 @@ describe("work that rests for its plan's window", () => {
     expect(store.task(early.id)!.status).toBe("done");
   });
 });
+
+describe("the account a task's work began on (I15 step 9)", () => {
+  const SEAT = `st_${"s".repeat(22)}`;
+  test("kept with the task while it runs, through a rest, a restart and your resume; a task's alone, and only one that is one", () => {
+    let clock = Date.UTC(2026, 10, 27, 9, 0);
+    const store = make(":memory:", () => clock);
+    setup(store);
+    const task = store.createTask({ room: "workshop", assignee: "ada", title: "Parser", goal: "Write the parser" });
+    expect(store.account(task.id)).toBeNull();
+    // (Not while it waits its turn: only a run's work begins on an account.)
+    store.keepAccount(task.id, { seat: SEAT, kind: "claude-subscription" });
+    expect(store.account(task.id)).toBeNull();
+    expect(store.claim(task.id)).toBe(true);
+    store.keepAccount(task.id, { seat: SEAT, kind: "claude-subscription" });
+    expect(store.account(task.id)).toEqual({ seat: SEAT, kind: "claude-subscription" });
+    store.rest(task.id, clock + 3_600_000, "Every seat of yours that could take it is spent (Work Max)");
+    clock += 3_600_000;
+    expect(store.resumeRestarted()).toBe(1);
+    expect(store.claim(task.id)).toBe(true);
+    expect(store.account(task.id)).toEqual({ seat: SEAT, kind: "claude-subscription" });
+    store.interruptForRestart(task.id, clock + 60_000, 5);
+    clock += 60_000;
+    expect(store.resumeRestarted()).toBe(1);
+    expect(store.claim(task.id)).toBe(true);
+    store.finish(task.id, "failed", "Not verified.", { verified: false, output: "" });
+    store.resume({ task: task.id });
+    expect(store.account(task.id)).toEqual({ seat: SEAT, kind: "claude-subscription" });
+    // Anything that isn't an account is never kept, and one written by hand that isn't is read as none.
+    expect(store.claim(task.id)).toBe(true);
+    expect(() => store.keepAccount(task.id, { seat: "st_x", kind: "claude-subscription" })).toThrow();
+    expect(store.account(task.id)).toEqual({ seat: SEAT, kind: "claude-subscription" });
+  });
+});

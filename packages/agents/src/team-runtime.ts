@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
@@ -34,7 +34,29 @@ export interface TeamRunContext {
    * `step` (the commands it had run), each once, in order (RunDeps.steers). Absent: nothing reaches it.
    */
   steers?(step: number): readonly RunSteer[];
+  /** The account this task's work began on (TeamStore keeps it): work taken up again goes on on it alone (the rule). */
+  account?: TaskAccount | null;
+  /** Told when its work begins on an account it wasn't on before: kept with the task. */
+  onAccount?(account: TaskAccount): void;
 }
+
+/**
+ * A coding agent's run on a seat of yours (I15 step 9): a VM made for that seat on its node, from the pinned tools'
+ * image, with the seat's home and the agent's own /work. Its tool's commands, its follow and its stop go there; the
+ * work's files are that same /work, and its gates, its evidence and its review stay in the agent's own VM.
+ */
+export interface SeatRun {
+  seat: { id: string; kind: SeatKind; label: string };
+  exec(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
+  follow?(offset: number, signal: AbortSignal): Promise<FollowedRun>;
+  /** Its tool's run stopped there (the same fixed cleanup as in the agent's own VM). */
+  stop(): Promise<void>;
+  /** The seat let go as its run ends: its VM gone, and the seat free for the next run. `signedOut`: its tool said it isn't signed in there. */
+  release(signedOut?: boolean): Promise<void>;
+}
+
+/** What asking for a seat comes to: one to run on, none (the run is in the agent's own VM), or a rest until the soonest reset of the seats that could take it. */
+export type SeatAnswer = { run: SeatRun } | { none: true } | { rest: { until: number; why: string } };
 
 export interface TeamRuntimeDeps {
   brain(agent: Agent): ModelsContext;
@@ -89,6 +111,14 @@ export interface TeamRuntimeDeps {
   ownSpent?(agent: Agent, harness: string): { until: number } | null;
   /** Told of each window of its plan that a coding agent's tool says as it runs (RunEvent window). */
   window?(agent: Agent, harness: string, window: Extract<RunEvent, { type: "window" }>): void;
+  /**
+   * A seat for a run of a vendor's tool, chosen by the node (core's chooseSeat: nothing asks you). `from`: the account
+   * the task's work began on, which it goes on on alone among its vendor's. `wait`: the run has no other way to go on, so
+   * it waits for a seat that is busy, or rests until one that is spent resets. Absent: no seats, as before them.
+   */
+  seat?(agent: Agent, harness: string, opts: { from: TaskAccount | null; wait: boolean }, signal: AbortSignal): Promise<SeatAnswer>;
+  /** Told of each window of a seat's plan that its tool says as a run on it goes: the seat's to keep (seat.window; spent, seat.rested). */
+  seatWindow?(seat: SeatRun["seat"], window: Extract<RunEvent, { type: "window" }>): void;
   /** The node's switch for the VMs' notes store (Engram): on, a task is given the store when its VM has the pinned binary. Absent: off. */
   engram?(): boolean;
   memories(query: string): string;
@@ -335,22 +365,25 @@ export interface HarnessReadiness {
  * one in: with nothing to run on, the reason says what the owner can do. `outside`: roster models it could speak
  * to, on providers this VM's token doesn't cover (a task's token covers the providers with a key when it began).
  */
-export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "exitCode" | "stdout">, roster: readonly AgentModel[], outside: readonly AgentModel[] = [], role = "engineer", held = false, ownSpent: { until: number } | null = null): HarnessReadiness {
+export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "exitCode" | "stdout">, roster: readonly AgentModel[], outside: readonly AgentModel[] = [], role = "engineer", held = false, ownSpent: { until: number } | null = null, bound = false): HarnessReadiness {
   const on = role === "engineer" ? "the engineer's roster" : `the ${role} role`;
   if (probe.exitCode !== 0) return { ready: false, models: [], reason: `Install ${driver.title} in this agent's VM (Your agent never installs or signs in a harness)` };
   const gateway = roster[0] ? `${agentModelName(roster[0])} through the gateway` : null;
   // (What the VM printed is data: the driver reads one flag and one known word from it.)
   const told = driver.signIn?.read(probe.stdout);
   // (Work in sensitive mode runs on its own models alone, through the gateway: never the tool's own sign-in.)
+  // Work that began on a seat of yours (`bound`) goes on on no other account of its vendor's: not this VM's own sign-in.
+  if (told?.signedIn && !held && bound && gateway) return { ready: true, models: [...roster], on: `${gateway}: its work began on a seat of yours, and this VM's own sign-in is another account` };
   // Its own sign-in spent (a window it refused, until its reset): the roster's models first, and it last, so a task
   // doesn't begin by asking a spent plan (it isn't moved to another account of the vendor's: there is none to move to).
-  if (told?.signedIn && !held && ownSpent && gateway) return { ready: true, models: [...roster, OWN_SIGN_IN], on: `${gateway}: its own sign-in in this VM${told.method ? ` (${told.method})` : ""} is spent until ${new Date(ownSpent.until).toISOString().slice(11, 16)} UTC, and goes last` };
-  if (told?.signedIn && !held) return { ready: true, models: [OWN_SIGN_IN, ...roster], on: `its own sign-in in this VM${told.method ? ` (${told.method})` : ""}${gateway ? `, then ${gateway}` : ""}` };
+  if (told?.signedIn && !held && !bound && ownSpent && gateway) return { ready: true, models: [...roster, OWN_SIGN_IN], on: `${gateway}: its own sign-in in this VM${told.method ? ` (${told.method})` : ""} is spent until ${new Date(ownSpent.until).toISOString().slice(11, 16)} UTC, and goes last` };
+  if (told?.signedIn && !held && !bound) return { ready: true, models: [OWN_SIGN_IN, ...roster], on: `its own sign-in in this VM${told.method ? ` (${told.method})` : ""}${gateway ? `, then ${gateway}` : ""}` };
   // An ACP agent you named runs as you set it up in its VM: the role's model through the gateway is offered to it.
   if (driver.ownSetup && !held) return { ready: true, models: gateway ? [...roster] : [OWN_SIGN_IN], on: gateway ? `its own setup in this VM, with ${gateway} for an agent that reads OPENAI_BASE_URL` : "its own setup in this VM" };
   if (gateway) return { ready: true, models: [...roster], on: gateway };
   if (held) return { ready: false, models: [], reason: `This work is in sensitive mode, and none of its models speaks ${driver.title}'s API (${driver.kind === "anthropic" ? "Anthropic's" : "OpenAI's"}): give it one that does, or your agent's own harness` };
   const uncovered = outside[0] ? `. ${agentModelName(outside[0])} is on the roster, but this VM's gateway token doesn't cover its provider: it covers the providers with a key when its task began` : "";
+  if (bound && driver.signIn) return { ready: false, models: [], reason: `its work began on a seat of yours, which can't take it now, and it goes on on no other account of its vendor's: sign that seat in again, or put ${driver.signIn.roster} on ${on}${uncovered}` };
   if (driver.signIn) return { ready: false, models: [], reason: `Sign ${driver.title} in in this agent's VM (${driver.signIn.login}), or put ${driver.signIn.roster} on ${on}${uncovered}` };
   return { ready: false, models: [], reason: `Put a keyed ${driver.kind === "anthropic" ? "Anthropic-API" : "OpenAI-compatible"} model on ${on}${uncovered}` };
 }
@@ -657,39 +690,17 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           deps.checkpoint?.(task, { step, commit: steps.commit, command, at: Date.now() });
         });
       };
+      /** A command of the task's, in its workspace: in the agent's own VM (`exec`), or in the VM of the seat its coding tool runs on (`execOn`). */
+      const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`);
       const exec = async (command: string, timeout = 120) => {
         await keeping;
         // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms.
         const direct = deps.execArgv ? desktopArgv(command, sees) : null;
         if (direct) return deps.execArgv!(agent, ["desktop", ...direct], Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
-        return deps.exec(agent, withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
+        return deps.exec(agent, inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
       };
-      let coding;
-      if (agent.harness !== "native") {
-        // (An ACP agent calls whatever you set it up to: sensitive mode can't hold its calls to the models it names.)
-        if (held && agent.harness === "acp") throw new Error(`${agent.name} works in an ACP agent of your own, which calls the models you set it up with: work in sensitive mode runs on your agent's own harness, OpenCode, Hermes, Claude Code or Codex, whose calls go through its VM's gateway`);
-        const driver = driverFor(agent.harness, agent.acp);
-        if (!driver) throw new Error(agent.harness === "acp" ? "Name the command that starts its ACP agent in its VM (invincible agents add <id> --harness acp --acp \"goose acp\")" : `No ${agent.harness} driver is available`);
-        const probe = await exec(driver.check, 30);
-        // (A check that failed says why in its own words. A vendor's tool whose bridge answered is spoken for below: there, or not.)
-        const answered = Boolean(driver.signIn) && /"type":\s*"status"/.test(probe.stdout);
-        if (probe.exitCode !== 0 && !answered) throw new Error(`${agent.harness} is not ready in this VM: ${redact(probe.stderr || probe.stdout).slice(0, 400)}`);
-        // Which credential this task runs on is decided here, as it starts: the tool's own sign-in in this VM
-        // when it says it has one, then the roster's models through the gateway.
-        // A task with a budget gives its coding tool only models whose spend the budget can count, as its own calls are (countable).
-        // (In sensitive mode, its models are the ones it is held to.)
-        const worker = held ? { ...agent, models: [...held] } : agent;
-        const roster = deps.models(worker);
-        const offered = task.budgetUsd !== undefined && deps.countable ? roster.filter((m) => m.own || deps.countable!(`${m.provider}/${m.model}`)) : roster;
-        const ready = harnessReadiness(driver, probe, offered, deps.modelsOutside?.(worker), workRole(agent.role), held !== null, deps.ownSpent?.(agent, driver.name) ?? null);
-        // (A tool signed in on its own in this VM still runs on that, as ever: only the gateway's models are held to it.)
-        if (!ready.ready && roster.length && !offered.length) throw new Error(`${driver.title} has no model its budget can count: you've set no price for ${roster.map(agentModelName).join(", ")} (invincible price set <provider/model> <$ per million in> <$ per million out>), and a task with a budget never runs on what it would count as nothing`);
-        if (!ready.ready) throw new Error(`${driver.title} can't work in this VM yet: ${ready.reason}`);
-        const saved = (await exec(`cat ${quote(sessionFile)} 2>/dev/null || true`, 10)).stdout.trim();
-        coding = { driver, models: ready.models, workdir: root, ...(/^[A-Za-z0-9_.:-]{1,160}$/.test(saved) ? { session: saved } : {}) };
-      }
-      // (A coding tool's run isn't stepped through by the primary: its steps aren't kept.)
-      steps.on = Boolean(agent.repository) && !coding;
+      const execOn = (seat: SeatRun) => (command: string, timeout = 120) => seat.exec(inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
+      const harnessOn = (seat: SeatRun) => ({ exec: execOn(seat), ...(seat.follow ? { follow: (offset: number) => seat.follow!(offset, ctx.signal) } : {}), stopAgent: () => seat.stop() });
       const inherited = data("Verified predecessor results (file paths belong to their original VM)", deps.dependencies(task));
       // Fenced once for the task: every turn of its planner and engineer is then sent the same beginning, which a
       // provider reads from its cache (a new fence on each call made each turn's beginning a new one).
@@ -703,6 +714,93 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Started from a step of another task (PLAN #15): it is told where its files stand.
       const started = task.from ? `Your workspace starts as task ${task.from.task} left it after its step ${task.from.step} (${JSON.stringify(task.from.command.slice(0, 200))}): what that task did after it was set aside, and is not in your files.` : null;
       const instructions = [`You are ${agent.name} (${agent.id}), one of the owner's agents, with a job of your own; the primary leads the work. Say plainly what you did, what you checked and what you could not do. This VM and coding harness are tools for your assigned work. Keep your contributions attributable to your own name.`, brief(agent) ?? agent.instructions, started, inherited, data("Your working notes", agent.memory), deps.memories(task.goal)].filter(Boolean).join("\n\n");
+      let coding;
+      /** Where its coding tool's session is kept: one per account (a seat's sessions are in that seat's home). */
+      let sessionAt = sessionFile;
+      /** The seat of yours its coding tool runs on, when it runs on one (I15 step 9): let go as its run loop ends, or as the task ends before one begins. */
+      let onSeat: SeatRun | null = null;
+      const letGo = async () => {
+        const seat = onSeat;
+        onSeat = null;
+        if (seat) await seat.release().catch(() => {});
+      };
+      if (agent.harness !== "native") {
+        try {
+          // (An ACP agent calls whatever you set it up to: sensitive mode can't hold its calls to the models it names.)
+          if (held && agent.harness === "acp") throw new Error(`${agent.name} works in an ACP agent of your own, which calls the models you set it up with: work in sensitive mode runs on your agent's own harness, OpenCode, Hermes, Claude Code or Codex, whose calls go through its VM's gateway`);
+          const driver = driverFor(agent.harness, agent.acp);
+          if (!driver) throw new Error(agent.harness === "acp" ? "Name the command that starts its ACP agent in its VM (invincible agents add <id> --harness acp --acp \"goose acp\")" : `No ${agent.harness} driver is available`);
+          // Its vendor's seats are weighed first (the node chooses: nothing asks you), but not for work in sensitive mode (a
+          // seat's own sign-in is never one of its models). (A run on a seat has no desktop: its agent's is in its own VM.)
+          const kind = seatKindOf(driver.name);
+          const seated = Boolean(deps.seat) && kind !== null && !held;
+          const account = ctx.account ?? null;
+          // Work that began on a seat of yours goes on on no other account of its vendor's: not its own VM's sign-in (the rule).
+          const bound = Boolean(kind && account?.seat && seatVendor({ kind: account.kind }) === seatVendor({ kind }));
+          /** A seat's tool asked whether it is signed in there: one that isn't, or can't say, is let go and said, and the work goes on without it. */
+          const signedIn = async (seat: SeatRun): Promise<ExecResult | null> => {
+            const probe = await execOn(seat)(driver.check, 30).catch(() => null);
+            const told = probe && /"type":\s*"status"/.test(probe.stdout) ? driver.signIn?.read(probe.stdout) : undefined;
+            if (probe && told?.signedIn) return probe;
+            ctx.emit(`Seat · ${seat.seat.label}: ${driver.title} ${told ? "isn't signed in there" : "couldn't say there whether it is signed in"}, so this task goes on without it`);
+            await seat.release(told !== undefined && !told.signedIn).catch(() => {});
+            return null;
+          };
+          const take = async (wait: boolean): Promise<{ seat: SeatRun; probe: ExecResult } | { rest: { until: number; why: string } } | null> => {
+            const answer = await deps.seat!(agent, driver.name, { from: account, wait }, ctx.signal);
+            if ("rest" in answer) return answer;
+            if (!("run" in answer)) return null;
+            const probe = await signedIn(answer.run);
+            return probe ? { seat: answer.run, probe } : null;
+          };
+          const first = seated ? await take(false) : null;
+          if (first && "seat" in first) onSeat = first.seat;
+          let probe = first && "seat" in first ? first.probe : await exec(driver.check, 30);
+          // (A check that failed says why in its own words. A vendor's tool whose bridge answered is spoken for below: there, or not.)
+          const broken = (said: ExecResult) => said.exitCode !== 0 && !(Boolean(driver.signIn) && /"type":\s*"status"/.test(said.stdout));
+          const notReady = (said: ExecResult) => new Error(`${agent.harness} is not ready in this VM: ${redact(said.stderr || said.stdout).slice(0, 400)}`);
+          // (With seats to wait for, a tool missing from its own VM isn't the end of it: see below.)
+          if (broken(probe) && !seated) throw notReady(probe);
+          // Which credential this task runs on is decided here, as it starts: on a seat, its sign-in there; otherwise the
+          // tool's own sign-in in this VM when it says it has one; then the roster's models through the gateway.
+          // A task with a budget gives its coding tool only models whose spend the budget can count, as its own calls are (countable).
+          // (In sensitive mode, its models are the ones it is held to.)
+          const worker = held ? { ...agent, models: [...held] } : agent;
+          const roster = deps.models(worker);
+          const offered = task.budgetUsd !== undefined && deps.countable ? roster.filter((m) => m.own || deps.countable!(`${m.provider}/${m.model}`)) : roster;
+          // (On a seat its plan isn't spent: the seat wasn't chosen if it were.)
+          const readiness = (said: ExecResult, seat: boolean) => harnessReadiness(driver, said, offered, deps.modelsOutside?.(worker), workRole(agent.role), held !== null, seat ? null : (deps.ownSpent?.(agent, driver.name) ?? null), !seat && bound);
+          let ready = readiness(probe, onSeat !== null);
+          // (A tool signed in on its own in this VM still runs on that, as ever: only the gateway's models are held to it.)
+          if (!ready.ready && roster.length && !offered.length) throw new Error(`${driver.title} has no model its budget can count: you've set no price for ${roster.map(agentModelName).join(", ")} (invincible price set <provider/model> <$ per million in> <$ per million out>), and a task with a budget never runs on what it would count as nothing`);
+          if (!ready.ready && seated) {
+            // No other way for it to go on: it waits for a seat of its vendor's that is busy, or rests until one that is spent resets.
+            ctx.emit(`Waiting · for a seat of yours that runs ${driver.title}: ${ready.reason}`);
+            const later = await take(true);
+            if (later && "rest" in later) return { verified: false, output: later.rest.why, error: later.rest.why, record: { startedAt, endedAt: Date.now(), ended: "stopped", commands: 0, revisions: 0, spent: [] }, rest: later.rest };
+            if (later) {
+              onSeat = later.seat;
+              probe = later.probe;
+              ready = readiness(probe, true);
+              // (It may have waited longer than its lease lasts: renewed as its run begins.)
+              leaseKept = 0;
+            }
+          }
+          if (!ready.ready) throw broken(probe) && !onSeat ? notReady(probe) : new Error(`${driver.title} can't work in this VM yet: ${ready.reason}`);
+          if (onSeat) sessionAt = `${sessionFile}.${onSeat.seat.id}`;
+          const saved = (await exec(`cat ${quote(sessionAt)} 2>/dev/null || true`, 10)).stdout.trim();
+          coding = { driver, models: ready.models, workdir: root, ...(/^[A-Za-z0-9_.:-]{1,160}$/.test(saved) ? { session: saved } : {}) };
+          // The account its work begins on, kept with the task: taken up again, it goes on on that one alone.
+          const began: TaskAccount | null = onSeat ? { seat: onSeat.seat.id, kind: onSeat.seat.kind } : kind && ready.models[0] === OWN_SIGN_IN ? { seat: null, kind } : null;
+          if (began && (began.seat !== account?.seat || began.kind !== account?.kind)) ctx.onAccount?.(began);
+          if (onSeat) ctx.emit(`Seat · ${driver.title} runs on your seat ${onSeat.seat.label}`);
+        } catch (error) {
+          await letGo();
+          throw error;
+        }
+      }
+      // (A coding tool's run isn't stepped through by the primary: its steps aren't kept.)
+      steps.on = Boolean(agent.repository) && !coding;
       // The model that did the work last: in sensitive mode the review goes to another of its models first, where it has another.
       let worked = coding?.models[0] && !coding.models[0].own ? `${coding.models[0].provider}/${coding.models[0].model}` : undefined;
       // A review answered by the same model as the work is said once, whatever it is answered by on later submissions.
@@ -713,7 +811,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const proof: { before: number[]; after: number[]; review: "pass" | "revise" | null } = { before: [], after: [], review: null };
       // Its own tools where they were measured: on the roster's engineer models, in the primary's own loop (toolsLoop).
       const tools = Boolean(deps.toolsLoop) && !coding && !held && !agent.models?.length;
-      const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. /work/.invincible-gateway.json is your model access, written by your agent for this task: never move, change or delete it.${screen}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? ["git status --short", `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`] : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "" } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}) }, {
+      // On a seat its tool's commands run in the seat's VM: told so, and not told of a desktop out of their reach.
+      const where = onSeat ? ` Your commands run in a VM made for your plan, beside your own VM and sharing its /work${desktop ? ": your own VM's desktop is out of their reach" : ""}.` : screen;
+      const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. /work/.invincible-gateway.json is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? ["git status --short", `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`] : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "" } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}) }, {
         // (keepReads: an agent sees whole what it reads, and it stays in view while it is current. The first real outcome's
         // agents, shown 8,000 characters of each, read one file in 26 then 34 commands, and three tasks ended with nothing
         // written: run.ts keepReads. Each command has TEAM_COMMAND_SECONDS: at 120 s, the repository's own tests were cut off.)
@@ -744,7 +844,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         emit: (event) => {
           // A window its coding agent's tool said: the node's to remember (a spent own sign-in goes last until its reset).
           if (event.type === "window") {
-            deps.window?.(agent, agent.harness, event);
+            // (A window of a seat's plan is the seat's to keep: seat.window, and when it is spent seat.rested.)
+            const seat = onSeat;
+            if (seat && event.own) deps.seatWindow?.(seat.seat, event);
+            else deps.window?.(agent, agent.harness, event);
             return;
           }
           trail.on(event);
@@ -788,14 +891,16 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         stopAgent: () => deps.stopWorker(agent),
         // Its coding agent's run followed as it goes, where its VM's node can keep a command open: else looked at.
         ...(deps.follow ? { follow: (offset: number) => deps.follow!(agent, offset, ctx.signal) } : {}),
+        // On a seat: its coding tool's own commands, its follow and its stop are in the seat's VM; everything else stays here.
+        ...(onSeat ? { harness: harnessOn(onSeat) } : {}),
         // What you and your agent said to it as it ran, taken at its safe points.
         ...(ctx.steers ? { steers: (step: number) => ctx.steers!(step) } : {}),
         agentSession: async (id) => {
           if (!/^[A-Za-z0-9_.:-]{1,160}$/.test(id)) throw new Error("Invalid harness session identifier");
-          const saved = await exec(`mkdir -p /work/.agent/sessions && printf %s ${quote(id)} > ${quote(`${sessionFile}.new`)} && mv ${quote(`${sessionFile}.new`)} ${quote(sessionFile)}`, 10);
+          const saved = await exec(`mkdir -p /work/.agent/sessions && printf %s ${quote(id)} > ${quote(`${sessionAt}.new`)} && mv ${quote(`${sessionAt}.new`)} ${quote(sessionAt)}`, 10);
           if (saved.exitCode !== 0) throw new Error("Could not retain the harness session");
         },
-      });
+      }).finally(letGo);
       // (A reply with no command to run spent a turn and ran nothing: it is not one of the commands.)
       // (Its coding tool's calls are in what it spent, under the role "tool".)
       const proven = proof.before.length || proof.after.length || proof.review ? { proof: { before: proof.before, after: proof.after, review: proof.review, sameModel: proof.review !== null && saidSameReview } } : {};

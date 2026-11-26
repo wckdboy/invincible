@@ -11,6 +11,8 @@ interface Container {
   name: string;
   image: string;
   labels: Record<string, string>;
+  /** Its mounts as it was run (`--mount type=…,src=…,dst=…`), as `docker inspect` says them. */
+  mounts: { Type: string; Name?: string; Source?: string; Destination: string }[];
   status: string;
   /** What Docker holds it to (--cpus and --memory as it was run, or as `docker update` changed them). */
   held: { NanoCpus: number; Memory: number };
@@ -75,9 +77,15 @@ export function fakeDocker(): FakeDocker {
             const [key, ...value] = rest[i + 1]!.split("=");
             labels[key!] = value.join("=");
           }
+          const mounts: Container["mounts"] = [];
+          for (let i = 0; i < rest.length; i++) {
+            if (rest[i] !== "--mount") continue;
+            const parts = Object.fromEntries(rest[i + 1]!.split(",").map((kv) => kv.split("=") as [string, string]));
+            mounts.push({ Type: parts.type!, ...(parts.type === "volume" ? { Name: parts.src } : { Source: parts.src }), Destination: parts.dst! });
+          }
           // The image comes before the command (`sleep infinity`).
           const image = rest[rest.length - 3]!;
-          containers.set(name, { name, image, labels, status: "running", held: heldOf(rest) });
+          containers.set(name, { name, image, labels, mounts, status: "running", held: heldOf(rest) });
           peak = Math.max(peak, fake.running());
           return ok(name);
         }
@@ -91,6 +99,11 @@ export function fakeDocker(): FakeDocker {
           return ok(matching.map((c) => c.name).join("\n"));
         }
         case "inspect": {
+          // (Its mounts alone, as the host asks where an agent's /work is.)
+          if (rest[0] === "--format" && rest[1] === "{{json .Mounts}}") {
+            const container = containers.get(rest[2]!);
+            return container ? ok(JSON.stringify(container.mounts)) : no();
+          }
           const found = rest.map((name) => containers.get(name)).filter((c): c is Container => !!c);
           if (!found.length) return no();
           return ok(JSON.stringify(found.map((c) => ({ Config: { Labels: c.labels, Image: c.image }, State: { Status: c.status }, HostConfig: c.held }))));

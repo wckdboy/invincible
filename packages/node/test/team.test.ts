@@ -848,3 +848,31 @@ describe("work whose plan is spent (I15 step 8)", () => {
     expect(store.task(other.id)!.status).toBe("done");
   });
 });
+
+describe("the account a task's work began on (I15 step 9)", () => {
+  test("its run is told the account its work began on, and what it begins on is kept: taken up again, it is told that one", async () => {
+    const SEAT = `st_${"s".repeat(22)}`;
+    const told: unknown[] = [];
+    let runs = 0;
+    const { store, service } = setup({
+      executeTask: async (_agent, _task, context) => {
+        told.push(context.account ?? null);
+        if (runs++ === 0) {
+          context.onAccount?.({ seat: SEAT, kind: "claude-subscription" });
+          return { verified: false, output: "Half done.", error: "gave-up", rest: { until: Date.now() - 1, why: "Every seat of yours that could take it is spent (Work Max)" } };
+        }
+        return { verified: true, output: "Verified" };
+      },
+      tickMs: 10,
+    });
+    const task = service.createTask({ room: "workshop", assignee: "ada", title: "Parser", goal: "Write the parser" });
+    service.start();
+    await service.settled();
+    expect(store.task(task.id)!.status).toBe("interrupted");
+    // (Its rest is over at once: the controller's next look takes it up again by itself.)
+    for (let n = 0; n < 200 && store.task(task.id)!.status !== "done"; n++) await Bun.sleep(10);
+    await service.settled();
+    expect(store.task(task.id)!.status).toBe("done");
+    expect(told).toEqual([null, { seat: SEAT, kind: "claude-subscription" }]);
+  });
+});

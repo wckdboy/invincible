@@ -156,6 +156,7 @@ import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfAc
 import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.ts";
 import { addSeat, removeSeat, SeatError, seatViews, setSeatPolicy } from "./seats.ts";
 import { SeatSignIns } from "./seat-sign-in.ts";
+import { SeatRuns } from "./seat-runs.ts";
 import { QuestionError, type Questions } from "./questions.ts";
 
 /** An agent's uses of each key it was given are counted over this many days (teamKeyUses). */
@@ -1068,6 +1069,8 @@ export function createApp(ctx: AppContext) {
   const scanOptions = { isPublic: (token: string) => ctx.store.event(token) !== null };
   /** Seats' sign-ins on this node, each in a VM of the seat's own on this node's sandbox host (seat-sign-in.ts). */
   const seatSignIns = new SeatSignIns({ store: ctx.store, vault: ctx.vault, node: ctx.identity, host: () => ctx.sandbox ?? null });
+  /** Coding agents' runs on this node's seats (seat-runs.ts): the node chooses, and nothing asks you. */
+  const seatRuns = new SeatRuns({ store: ctx.store, node: ctx.identity, host: () => ctx.sandbox ?? null, log: ctx.log });
   /** A seat's refusal, in its words and with its status. */
   async function seatErrorsAsync<T>(work: () => Promise<T>): Promise<T> {
     try {
@@ -2444,6 +2447,14 @@ export function createApp(ctx: AppContext) {
       window: (member, harness, window) => {
         if (window.own && window.status === "rejected" && window.resetsAt) signInWindowsOf(ctx.store).hold(`${member.id}/${harness}`, window.resetsAt, `${harness}'s own sign-in in ${member.name}'s VM: its ${window.name} window is spent`);
       },
+      // A seat of yours for a coding agent's run (seat-runs.ts): one of this node's, for an agent whose VM is here (the
+      // seat's VM shares its /work). Its windows are the seat's to keep.
+      seat: async (member, harness, opts, signal) => {
+        const bound = teamMember(member.id).workspace;
+        if (!bound || bound.node !== ctx.identity.id || !ctx.sandbox) return { none: true };
+        return seatRuns.take({ agent: member.id, vm: bound.id, harness, from: opts.from, wait: opts.wait }, signal);
+      },
+      seatWindow: (seat, window) => seatRuns.window(seat.id, window),
       // An agent on the roster's engineer models works with its own tools, as was measured (team-runtime toolsLoop).
       toolsLoop: true,
       files: (refs) => filesFor(refs, ctx.uploads),
@@ -2545,6 +2556,8 @@ export function createApp(ctx: AppContext) {
       // A fix to a pull request that ended verified is offered to you as a push onto its branch, as its agent's (ci-back.ts).
       if (task.fix) void offerFix({ call: (input) => ctx.connectors.call(input, { kind: "agent", by: agentLabel(task.assignee) }), note: (id, text) => team.service?.noteTask(id, text), log: ctx.log }, task);
     } });
+    // (Seats' VMs an earlier process of this node left are removed first: the work they ran ended with it.)
+    void seatRuns.sweep();
     ctx.team.service.start();
     // A task another node handed over (fabric/handoff.ts): given to the agents here as you would give it, followed, stopped.
     ctx.handoffs?.attachTeam({

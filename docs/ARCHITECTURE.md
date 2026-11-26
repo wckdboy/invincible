@@ -203,7 +203,7 @@ The run loop is carried and renamed (§10), the most proven part of it:
     Claude's usage credits and ChatGPT's credit use are never turned on: they are money, and yours to decide.
   - Measured with the real tools against a loopback model that refused the first model as each vendor does (10 runs
     each): working again on the next model 0.61 s after the refusal (p50; 1.68 s p95) for Claude Code, 1.03 s (1.54 s)
-    for Codex. A seat's own windows wait for runs on seats (the scheduler, next).
+    for Codex. A run on a seat says its windows to the seat (below).
   - A node that stops on purpose (a deploy, an update) stops its tasks' runs by each tool's own interrupt, and takes the
     tasks up again by itself once it is back, each tool in its own session. Following a run that outlived its node, its
     run loop's own state (its plan, its gates' first run, the steers it had taken) kept beside it, is not built yet.
@@ -236,6 +236,32 @@ The run loop is carried and renamed (§10), the most proven part of it:
     on the vendor's own hosts (`signInUrlOk`). Ten minutes, then it lapses. Then the tool's own status says how it
     stands; another account than the seat's is refused and signed out again by the tool's own command. A Mistral plan
     is a key seat (Vibe's sign-in ends in an API key), and Sign in with ChatGPT is the node's own (to come);
+  - which seat a run takes is Invincible's to choose, and nothing asks you (`chooseSeat`, `seat-runs.ts`): of its node's
+    seats whose plan runs the agent's tool (Claude Code on a Claude plan, Codex on a ChatGPT plan), signed in, not
+    resting, with a run to spare and some of their plan left, the one with the most headroom (the share its most used
+    open window has used), then the soonest reset. A task's first run takes a free seat; with none free it runs in its
+    agent's own VM as before seats; with no other way to go on it waits for a busy seat (it has it the moment that one
+    is let go) or rests until a spent one opens. Work in sensitive mode never takes one;
+  - a run on a seat is in a VM made for it from the pinned tools' image, with the seat's home and the agent's own
+    `/work`, as big as the agent's VM. The tool's check, launch, follow and stop are there; the work's gates, its
+    evidence and its review stay in the agent's own VM, on the same files. It has no desktop: the agent's stays in its
+    own VM, and its tool is told its commands are out of its reach. The seat is let go as the run ends (its VM
+    removed); one whose tool says it isn't signed in there is let go, marked signed out, and the work goes on without
+    it. A node removes every seat's VM an earlier process of it left before its first run takes a seat;
+  - the account a task's work began on (its seat, or its own VM's sign-in) is kept with the task: taken up again (a rest,
+    a restart, your resume), it goes on on that account alone among its vendor's, and not on its own VM's sign-in of
+    that vendor's either. Its tool's session is kept per account (a seat's sessions are in that seat's home);
+  - what a run on a seat says of its plan's windows is the seat's (`seat.window`, when its state, its reset or its share
+    by five points or more is new); a window used whole rests the seat until it resets (`seat.rested`; with no reset
+    said, five hours), and one said open again before then ends the rest (`seat.back`);
+  - measured (`bun run bench seats`: a seeded week in virtual time, the real choice, three seats): 13 tasks proven a day
+    when the week asks about what the seats hold, 22.6 with a backlog of three times that; each week's window 62.7 %
+    and 88.7 % used by its reset; 26 and 61 runs cut off by a spent window; 0.42 and 0 seat-minutes idle while work
+    waited (what is left is the controller's 15-second look for resting work). Choosing the seat whose remaining share
+    expires soonest instead used 66.7 % of each week's window, with 31 runs cut off rather than 26 and the same tasks
+    proven; the first seat free, 58.3 %. A run waiting for a busy seat has it 0.19 ms after it is let go;
+  - seats live on a node: a run takes one of its node's, for an agent whose VM is on that node. A project's pin of a
+    seat (`chooseSeat`'s `pinned`) has no setting yet;
   - routes: `GET /api/seats` (`mind:read`); `POST /api/seats`, `/api/seats/remove`, `/api/seats/policy`,
     `/api/seats/sign-in`, `/api/seats/sign-in/answer` and `/api/seats/sign-in/cancel` (`fleet:admin`, yours alone).
 - **Sandboxes:**
