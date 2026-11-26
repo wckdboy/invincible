@@ -332,7 +332,8 @@
         -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: background-color var(--d-1) var(--ease-out);
       }
       .place > svg { flex: none; color: var(--text-2); }
-      .place:hover, .place:active, .place[aria-current="page"] { background: var(--surface-3); }
+      .place:active, .place[aria-current="page"] { background: var(--surface-3); }
+      @media (hover: hover) { .place:hover { background: var(--surface-3); } }
       /* Your latest chats: quieter than the places, as the iPhone's. */
       .place.quiet { font-weight: 450; color: var(--text-2); }
       .place.quiet > svg { color: var(--text-3); }
@@ -397,7 +398,8 @@
       .home-orb { flex: none; display: grid; place-items: center; width: 48px; height: 48px; }
       /* The I-beam: your agent, and the drawer's button (a finger's 48 px). */
       .home-drawer { padding: 0; border: 0; border-radius: var(--r-lg); background: none; color: inherit; cursor: pointer; -webkit-touch-callout: none; transition: background-color var(--d-1) var(--ease-out); }
-      .home-drawer:hover, .home-drawer:active { background: var(--surface-3); }
+      .home-drawer:active { background: var(--surface-3); }
+      @media (hover: hover) { .home-drawer:hover { background: var(--surface-3); } }
       .home-name { flex: 1; min-width: 0; color: inherit; text-decoration: none; }
       .home-head h1 { font-size: var(--fs-20); letter-spacing: -0.02em; line-height: 1.15; }
       .home-line { margin-top: 2px; font-size: var(--fs-13); color: var(--text-3); }
@@ -429,7 +431,8 @@
         flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 92px; min-height: 44px; padding: var(--sp-2) 4px; border-radius: var(--r-lg);
         color: var(--text); text-decoration: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: background-color var(--d-1) var(--ease-out);
       }
-      .home-strip-agent:hover, .home-strip-agent:active { background: var(--surface-3); }
+      .home-strip-agent:active { background: var(--surface-3); }
+      @media (hover: hover) { .home-strip-agent:hover { background: var(--surface-3); } }
       .home-strip-agent > .seat { margin-bottom: 4px; }
       .home-strip-name { max-width: 100%; font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.01em; }
       .home-strip-agent > .state-chip { padding: 0; border: 0; background: none; box-shadow: none; font-size: var(--fs-13); font-weight: 600; }
@@ -506,7 +509,8 @@
         color: var(--failed); font-size: var(--fs-13); font-weight: 650; text-decoration: none; transition: background-color var(--d-1) var(--ease-out);
       }
       .fold-failed::before { content: "· "; color: var(--text-3); font-weight: 500; }
-      .fold-failed:hover, .fold-failed:active { background: color-mix(in srgb, var(--failed) 9%, transparent); }
+      .fold-failed:active { background: color-mix(in srgb, var(--failed) 9%, transparent); }
+      @media (hover: hover) { .fold-failed:hover { background: color-mix(in srgb, var(--failed) 9%, transparent); } }
       .home-work-rows > .fold-line { border-top: 1px solid var(--border); padding: 0 calc(var(--sp-4) + var(--safe-right)) 0 calc(var(--sp-4) + var(--safe-left)); }
       .home-work-rows > .fold-line > .home-fold { padding: 0; }
       .home-empty, .home-note { padding: var(--sp-6) calc(var(--sp-4) + var(--safe-right)) var(--sp-6) calc(var(--sp-4) + var(--safe-left)); border-top: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-14); line-height: 1.5; }
@@ -1557,9 +1561,10 @@
       .team-member-choice { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); }
       .team-member-choice .meta { display: block; }
       /* A task is a card in the timeline: where it stands; while it runs, its latest lines; once it has ended, how. */
-      .team-task { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--card-pad); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-1); }
+      /* A task's card in a timeline: filled one step off the page, as every card is, never outlined. */
+      .team-task { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--card-pad); border: 1px solid transparent; border-radius: var(--r-xl); background: var(--surface-2); }
       /* A task opened from Work, marked a moment where it is (views/team.ts): a ring of its own, fading. */
-      .team-task.is-focus { box-shadow: var(--shadow-1), 0 0 0 2px var(--work); transition: box-shadow 1.2s ease-out; }
+      .team-task.is-focus { box-shadow: 0 0 0 2px var(--work); transition: box-shadow 1.2s ease-out; }
       /* An approval its address named (#/inbox?a=…): ringed a moment as it comes into view. */
       .card.is-picked { box-shadow: 0 0 0 2px var(--focus); transition: box-shadow 1.2s ease-out; }
       .task-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
