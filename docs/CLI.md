@@ -8,6 +8,9 @@ This page is the contract: the commands, their output and their exit codes are p
 written here. Anything not written here (the text for people, its spacing, its colours) may change.
 
 `invincible`, the node's own command line, is a separate program and keeps its own commands, output and exit codes.
+The installers put both in place: `curl -fsSL https://invincible.sh | bash` writes `inv` beside `invincible` in your
+`~/.local/bin`, and a server's deploy (`scripts/deploy.sh`) writes `/usr/local/bin/inv`, run as the node's service user.
+From a checkout, `bun run inv`.
 
 ## Reaching a node
 
@@ -241,5 +244,3 @@ The first slice talks HTTPS with signed requests, as the browser does. Later:
 - **Keys in the board:** ↵ open, space peek, `a` allow, `d` deny, `g` give, and `inv watch`'s approvals inline.
 - **The rest of §5 of the study:** `inv logs`, `inv agents`, `inv projects`, `inv nodes`, `inv doctor`, and `--schema`
   for answers in a shape you give.
-- **The installer's `inv`:** it still links `inv` to `invincible`. Until it installs this client, run it as
-  `bun run inv` or `bun packages/node/src/inv/main.ts`.
