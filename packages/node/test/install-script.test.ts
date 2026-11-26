@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -41,7 +41,8 @@ test("on a machine new to it, it says it would fetch this commit, install its ow
   // Never over a Bun of yours.
   expect(said).not.toContain(`${home}/.bun`);
   expect(said).toContain(`would: write ${home}/.local/bin/invincible`);
-  expect(said).toContain(`would: link ${home}/.local/bin/inv to it`);
+  // `inv` is the command line client (docs/CLI.md), a command of its own: never another name for `invincible`.
+  expect(said).toContain(`would: write ${home}/.local/bin/inv: the command line client (packages/node/src/inv/main.ts)`);
   expect(said).toContain("would: invincible init --name laptop --fleet homelab");
   expect(readdirSync(home)).toEqual([]);
 });
@@ -82,6 +83,17 @@ test("run by a shell that isn't bash (`curl … | sh` on Debian is dash), it say
     expect([shell, run.exitCode]).toEqual([shell, 1]);
     expect(run.stderr.toString()).toContain("curl -fsSL https://invincible.sh | bash");
     expect(readdirSync(home)).toEqual([]);
+  }
+});
+
+test("both installers make `inv` the command line client, run as the node's own command is, never a link to it", () => {
+  // Until 26 November 2026 each linked inv to invincible, so `inv ask "…"`, as invincible.sh shows it, ran the node's
+  // command instead of the client.
+  expect(existsSync(join(root, "packages/node/src/inv/main.ts"))).toBe(true);
+  for (const installer of ["scripts/install.sh", "scripts/remote-setup.sh"]) {
+    const text = readFileSync(join(root, installer), "utf8");
+    expect(text).not.toMatch(/ln -sfn invincible \S*\binv\b/);
+    expect(text).toContain("packages/node/src/inv/main.ts");
   }
 });
 

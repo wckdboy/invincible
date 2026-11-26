@@ -124,16 +124,19 @@ if [[ ! -f $RELEASE/.installed ]]; then
 fi
 act ln -sfn "$RELEASE" "$DIR/current"
 
-# ─── The invincible command ─────────────────────────────────────────────────────────────────────────────────────────
+# ─── The invincible and inv commands ───────────────────────────────────────────────────────────────────────────────
+# `invincible` is the node's own command; `inv` is the command line client (docs/CLI.md), of this node or of the one it
+# is paired with. (Until 26 November 2026 inv was a link to invincible: an update replaces that link with its own.)
+INV_ENTRY=packages/node/src/inv/main.ts
 if ((PLAN)); then
   printf '  would: write %s\n' "$BIN/invincible"
-  printf '  would: link %s to it\n' "$BIN/inv"
+  printf '  would: write %s: the command line client (%s)\n' "$BIN/inv" "$INV_ENTRY"
 else
   mkdir -p "$BIN"
   printf '#!/bin/sh\n# Invincible (scripts/install.sh): the node in %s.\nexec "%s" "%s/current/packages/node/src/cli.ts" "$@"\n' "$DIR" "$BUN" "$DIR" > "$BIN/invincible.new"
   chmod 0755 "$BIN/invincible.new" && mv -f "$BIN/invincible.new" "$BIN/invincible"
-  # `inv`: the same command, shorter.
-  ln -sfn invincible "$BIN/inv"
+  printf '#!/bin/sh\n# inv (scripts/install.sh): the command line client of Invincible in %s.\nexec "%s" "%s/current/%s" "$@"\n' "$DIR" "$BUN" "$DIR" "$INV_ENTRY" > "$BIN/inv.new"
+  chmod 0755 "$BIN/inv.new" && mv -f "$BIN/inv.new" "$BIN/inv"
 fi
 invincible() { "$BIN/invincible" "$@"; }
 case ":$PATH:" in *":$BIN:"*) ;; *) say "add $BIN to your PATH to type invincible anywhere: export PATH=\"$BIN:\$PATH\"" ;; esac

@@ -108,8 +108,19 @@ if [ "\$(id -u)" = 0 ]; then exec runuser -u $SVC -- \$CMD "\$@"; fi
 exec sudo -u $SVC \$CMD "\$@"
 WRAPPER
   chmod 0755 /usr/local/bin/invincible
-  # `inv`: the same command, shorter.
-  ln -sfn invincible /usr/local/bin/inv
+  # `inv`: the command line client (docs/CLI.md), run as the invincible service user as `invincible` is, so it talks to
+  # this node through its home. (Until 26 November 2026 it was a link to invincible: rm first, so cat never writes
+  # through that link into invincible's wrapper.)
+  rm -f /usr/local/bin/inv
+  cat >/usr/local/bin/inv <<WRAPPER
+#!/bin/sh
+# Run inv, Invincible's command line client, as the invincible service user.
+CMD="env -i HOME=$SVC_HOME PATH=$SYSTEM_PATH INVINCIBLE_KEYSTORE=file TERM=\${TERM:-dumb} $BUN $APP/packages/node/src/inv/main.ts"
+if [ "\$(id -un)" = "$SVC" ]; then exec \$CMD "\$@"; fi
+if [ "\$(id -u)" = 0 ]; then exec runuser -u $SVC -- \$CMD "\$@"; fi
+exec sudo -u $SVC \$CMD "\$@"
+WRAPPER
+  chmod 0755 /usr/local/bin/inv
   if [[ $OPEN_FIREWALL == 1 ]] && command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
     ufw allow in on tailscale0 to any port "$PORT" proto tcp comment "Invincible link over Tailscale" >/dev/null &&
       echo "→ ufw: allowed $PORT/tcp on tailscale0 only" || echo "ufw rule not added" >&2

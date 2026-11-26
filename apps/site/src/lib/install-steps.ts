@@ -19,7 +19,8 @@ const LINES: Record<string, (installer: Installer, bun: string) => string> = {
   "The release": (i) => `That commit's source, in \`${at(i, "INVINCIBLE_INSTALL_DIR")}/releases\`. The one before it stays, to go back to.`,
   "Bun, Invincible's own: pinned, checksum-verified, never over a Bun of yours": (i, bun) =>
     `Bun ${bun}, checked against its SHA-256, in Invincible's own folder; then its dependencies, from the lockfile. A Bun of yours is left alone.`,
-  "The invincible command": (i) => `\`invincible\`, and \`inv\` for short, in \`${at(i, "INVINCIBLE_BIN_DIR")}\`.`,
+  "The invincible and inv commands": (i) =>
+    `\`invincible\`, the node's own command, and \`inv\`, the command line client, in \`${at(i, "INVINCIBLE_BIN_DIR")}\`.`,
   "This node: founded, or joined to your fleet (once; an update keeps it)": (i) =>
     `\`invincible init\` makes this machine your fleet's first node, its home in \`${at(i, "INVINCIBLE_HOME")}\`; with \`--join\` and an invite it joins your fleet instead. A machine that is a node already is kept as it is.`,
   "Kept running": () => "A service of yours keeps the node running, and serving the web app: launchd on a Mac, systemd on Linux.",
