@@ -383,12 +383,13 @@ export class Fabric implements SyncTransport {
 
   /**
    * Why this peer may not be reached over plain HTTP now: it speaks Q-AMP (its profile names an endpoint its key signed
-   * for), this node runs its sidecar (its fabric is on), and the peer's HTTP endpoint is off the tailnet, so a link's
-   * requests and answers would travel in clear. Null: HTTP, signed, as before (the tailnet, this machine, a peer without
-   * Q-AMP, or a node whose fabric is off).
+   * for), this node's fabric is on (its setting, whatever its sidecar's state: one that can't start for a fault here is
+   * refused too, and its Doctor says so), and the peer's HTTP endpoint is off the tailnet, so a link's requests and
+   * answers would travel in clear. Null: HTTP, signed, as before (the tailnet, this machine, a peer without Q-AMP, or a
+   * node whose fabric is switched off).
    */
   httpRefused(peer: Device): string | null {
-    if (this.deps.sidecar.state === "off" || !this.peerEndpoint(peer)) return null;
+    if (!this.deps.sidecar.switchedOn || !this.peerEndpoint(peer)) return null;
     let host: string;
     try {
       host = new URL(peer.profile?.endpoint ?? "").hostname;

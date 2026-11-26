@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { newNodeIdentity } from "@invincible/core";
 import type { Device, LedgerStore } from "@invincible/ledger";
 import { Fabric } from "../src/fabric/service.ts";
-import type { Sidecar } from "../src/fabric/sidecar.ts";
+import { FABRIC_OFF, Sidecar } from "../src/fabric/sidecar.ts";
 import { type Call, SidecarError } from "../src/fabric/socket.ts";
 import { transportKeyOf } from "../src/home.ts";
 
@@ -137,8 +141,8 @@ describe("who a transport key is", () => {
 
 describe("plain HTTP to a peer that speaks Q-AMP (L7)", () => {
   const withEndpoint = (endpoint: string, qamp = true): Device => ({ ...peer, profile: { endpoint, caps: qamp ? peer.profile!.caps : {} } });
-  const fabricOf = (state: "up" | "down" | "off") => {
-    const sidecar = { client: null, did: "did:key:z6Mkself", address: null, state, why: null } as unknown as Sidecar;
+  const fabricOf = (state: "up" | "down" | "off", switchedOn = state !== "off") => {
+    const sidecar = { client: null, did: "did:key:z6Mkself", address: null, state, why: null, switchedOn } as unknown as Sidecar;
     const store = { onApplied: () => () => {}, devices: () => [], activeDevice: () => null } as unknown as LedgerStore;
     return new Fabric({ store, identity: newNodeIdentity(), sidecar, log: () => {}, presence: async () => ({}) as never });
   };
@@ -154,6 +158,25 @@ describe("plain HTTP to a peer that speaks Q-AMP (L7)", () => {
     expect(fabricOf("up").httpRefused(withEndpoint("http://127.0.0.1:7400"))).toBeNull();
     expect(fabricOf("up").httpRefused(withEndpoint("http://192.0.2.10:7400", false))).toBeNull();
     expect(fabricOf("off").httpRefused(withEndpoint("http://192.0.2.10:7400"))).toBeNull();
+  });
+
+  test("switched on, its sidecar off for a fault of this node's own (here no binary): refused all the same; switched off: HTTP (I-b)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "q5r-"));
+    const self = newNodeIdentity();
+    const store = { onApplied: () => () => {}, devices: () => [], activeDevice: () => null } as unknown as LedgerStore;
+    const sidecarOf = (off: string | null) => new Sidecar({ home: join(dir, String(off !== null)), key: async () => transportKeyOf(randomBytes(32), self.id), binary: () => join(dir, "bin", "qamp"), off: () => off, listen: () => null, name: "self", log: () => {} });
+    for (const [off, refused] of [[null, true], [FABRIC_OFF, false]] as const) {
+      const sidecar = sidecarOf(off);
+      await sidecar.start();
+      expect(sidecar.state).toBe("off");
+      const fabric = new Fabric({ store, identity: self, sidecar, log: () => {}, presence: async () => ({}) as never });
+      const why = fabric.httpRefused(withEndpoint("http://192.0.2.10:7400"));
+      if (refused) expect(why).toContain("off the tailnet: its requests and answers would travel in clear, so it waits for Q-AMP");
+      else expect(why).toBeNull();
+      fabric.close();
+      await sidecar.stop();
+    }
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

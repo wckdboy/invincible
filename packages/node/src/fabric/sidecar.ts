@@ -151,6 +151,14 @@ export class Sidecar {
     this.now = opts.now ?? Date.now;
   }
 
+  /**
+   * Whether this node's own setting runs a sidecar (its fabric is on), whatever state it is in: one that can't start for
+   * a fault here (no binary, a key it can't read, a socket directory that isn't private) is still switched on.
+   */
+  get switchedOn(): boolean {
+    return this.opts.binary() !== null && (this.opts.off?.() ?? null) === null;
+  }
+
   /** Its process's id while it runs (the doctor says it; tests stop it to see the node start it again). */
   get pid(): number | null {
     return this.proc?.pid ?? null;

@@ -75,7 +75,8 @@ export interface DoctorFacts {
   };
   vault: { unlocked: boolean; secrets: number; requests: string[] };
   /** Its sidecar (docs/ARCHITECTURE.md §3): whether it is up, under which key, where, and why not (absent: no fabric here). */
-  fabric?: { state: "off" | "starting" | "up" | "down"; why: string | null; did: string | null; address: string | null; version: string | null };
+  /** `on`: this node's own setting runs a sidecar (its fabric is on), whatever state the sidecar is in. */
+  fabric?: { state: "off" | "starting" | "up" | "down"; on: boolean; why: string | null; did: string | null; address: string | null; version: string | null };
   /** The providers this fleet has set up (a key added, or one added by hand), and those its roles' defaults name, whose key alone is enough. */
   providers?: { setUp: number; byDefault: string[] };
   /** Providers whose allowance is spent now (absent: gathered before this was known): each window, and when it resets. */
@@ -253,12 +254,16 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   if (f.fabric) {
     const q = f.fabric;
     const where = q.address ? `on ${q.address.split("@")[1]}` : "dialling out only";
+    // (While its fabric is on, a link to a node off the tailnet never goes over plain HTTP: it waits for Q-AMP.)
+    const meanwhile = "links to nodes on the tailnet go over HTTP with signed requests meanwhile, and those off it wait for Q-AMP";
+    const binary = "Put the pinned release in place: deploy.sh --qamp <its binary for this machine> (scripts/qamp-pin.sh checks its SHA-256). The node starts its sidecar by itself once it is there.";
+    const knowingly = "Or switch the fabric off (invincible fabric off): every link then goes over HTTP, knowingly.";
     if (q.state === "up") add("node", "node.qamp", "ok", `its sidecar is up as ${q.did?.slice(0, 22)}… ${where} (qamp ${q.version ?? "?"}): its links to other nodes go over Q-AMP`);
-    else if (q.state === "off" && /has no sidecar/.test(q.why ?? "")) add("node", "node.qamp", "needs-you", `${q.why}; every link to another node goes over HTTP with signed requests meanwhile`, "Put the pinned release in place: deploy.sh --qamp <its binary for this machine> (scripts/qamp-pin.sh checks its SHA-256). The node starts its sidecar by itself once it is there.");
-    else if (q.state === "off" && /^the fabric is off/.test(q.why ?? "")) add("node", "node.qamp", "ok", "the fabric is off on this node, so every link to another node goes over HTTP with signed requests (invincible fabric on switches it on)");
-    else if (q.state === "off") add("node", "node.qamp", "ok", /isn't installed/.test(q.why ?? "") ? "Q-AMP isn't installed here, so every link to another node goes over HTTP with signed requests" : "this node runs no sidecar, so every link to another node goes over HTTP with signed requests");
+    else if (q.state === "off" && !q.on)
+      add("node", "node.qamp", "ok", /^the fabric is off/.test(q.why ?? "") ? "the fabric is off on this node, so every link to another node goes over HTTP with signed requests (invincible fabric on switches it on)" : "this node runs no sidecar, so every link to another node goes over HTTP with signed requests");
+    else if (q.state === "off") add("node", "node.qamp", "needs-you", `its fabric is on, but its sidecar can't start: ${q.why ?? "it is off"}; ${meanwhile}`, /has no sidecar|isn't installed/.test(q.why ?? "") ? `${binary} ${knowingly}` : `Put right what it says, and the node starts its sidecar again when it next starts. ${knowingly}`);
     else
-      add("node", "node.qamp", "needs-you", `its sidecar is ${q.state === "starting" ? "starting" : "down"}${q.why ? `: ${q.why}` : ""}; its links to other nodes go over HTTP meanwhile`, "It is started again by itself (its log says each try: qamp: …). If it keeps stopping, check its binary (<home>/bin/qamp, scripts/qamp-pin.sh) and that its UDP port (7410) is free on the node's address.");
+      add("node", "node.qamp", "needs-you", `its sidecar is ${q.state === "starting" ? "starting" : "down"}${q.why ? `: ${q.why}` : ""}; ${meanwhile}`, "It is started again by itself (its log says each try: qamp: …). If it keeps stopping, check its binary (<home>/bin/qamp, scripts/qamp-pin.sh) and that its UDP port (7410) is free on the node's address.");
   }
 
   /* ---------- the mind ---------- */

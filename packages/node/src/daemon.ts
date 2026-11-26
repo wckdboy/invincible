@@ -791,7 +791,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
     notify: () => notify.doctorFacts(),
     agents: () => team.store.agents(),
-    fabric: () => ({ state: sidecar.state, why: sidecar.why, did: sidecar.did, address: sidecar.address, version: sidecar.version }),
+    fabric: () => ({ state: sidecar.state, on: sidecar.switchedOn, why: sidecar.why, did: sidecar.did, address: sidecar.address, version: sidecar.version }),
   };
   // The heartbeat takes from a quick look what it doesn't check itself (a clock out of step, the app not published, …).
   taskDeps.doctor = () => heartbeatFromDoctor(doctorDeps);

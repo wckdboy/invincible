@@ -96,7 +96,7 @@ describe("a peer's words in this node's own reports", () => {
   test("invincible doctor prints every line plain, whatever a peer put in it", () => {
     const facts = healthy();
     const did = didKeyOfEd25519(signingPublicKey(new Uint8Array(32).fill(9)));
-    facts.fabric = { state: "up", why: null, did, address: `qamp://${did}@192.0.2.10:7410`, version: "0.2.0" };
+    facts.fabric = { state: "up", on: true, why: null, did, address: `qamp://${did}@192.0.2.10:7410`, version: "0.2.0" };
     facts.mind.peers[0] = { ...facts.mind.peers[0]!, name: `rack${ESC}[2K`, online: true, path: "https", fallback: hostile, qamp: true };
     const lines = doctorLines(reportOf("self", facts, diagnose(facts), 10)).join("\n");
     expect(lines).toContain("in sync with rack over Q-AMP");

@@ -657,7 +657,7 @@ describe("an agent's own setup", () => {
 describe("the fabric, as the doctor says it (docs/ARCHITECTURE.md §3)", () => {
   // (A transport key's DID: the spec's test seed 01…01's, made here.)
   const did = didKeyOfEd25519(signingPublicKey(new Uint8Array(32).fill(1)));
-  const sidecar = (over: Partial<NonNullable<DoctorFacts["fabric"]>>): NonNullable<DoctorFacts["fabric"]> => ({ state: "up", why: null, did, address: `qamp://${did}@192.0.2.10:7410`, version: "0.2.0", ...over });
+  const sidecar = (over: Partial<NonNullable<DoctorFacts["fabric"]>>): NonNullable<DoctorFacts["fabric"]> => ({ state: "up", on: true, why: null, did, address: `qamp://${did}@192.0.2.10:7410`, version: "0.2.0", ...over });
 
   test("a sidecar that is up says its key, where it listens and its version: the links go over Q-AMP", () => {
     const up = healthy();
@@ -667,28 +667,41 @@ describe("the fabric, as the doctor says it (docs/ARCHITECTURE.md §3)", () => {
     expect(line.line).toBe(`its sidecar is up as ${did.slice(0, 22)}… on 192.0.2.10:7410 (qamp 0.2.0): its links to other nodes go over Q-AMP`);
   });
 
-  test("no binary is no fault: every link goes over HTTP with signed requests, and it says so", () => {
+  test("switched off, or running none as it was told, is no fault: every link goes over HTTP with signed requests, and it says so", () => {
     const off = healthy();
-    off.fabric = sidecar({ state: "off", why: "Q-AMP isn't installed on this node: its pinned binary goes to <home>/bin/qamp", address: null, version: null });
-    expect(byId(diagnose(off), "node.qamp")).toMatchObject({ state: "ok", line: "Q-AMP isn't installed here, so every link to another node goes over HTTP with signed requests" });
-    // Nor is a node that runs none, as it was told.
+    off.fabric = sidecar({ state: "off", on: false, why: "the fabric is off on this node (invincible fabric on switches it on)", address: null, version: null });
+    expect(byId(diagnose(off), "node.qamp")).toMatchObject({ state: "ok", line: "the fabric is off on this node, so every link to another node goes over HTTP with signed requests (invincible fabric on switches it on)" });
     const none = healthy();
-    none.fabric = sidecar({ state: "off", why: "this node runs no sidecar", address: null, version: null });
+    none.fabric = sidecar({ state: "off", on: false, why: "this node runs no sidecar", address: null, version: null });
     expect(byId(diagnose(none), "node.qamp")).toMatchObject({ state: "ok", line: "this node runs no sidecar, so every link to another node goes over HTTP with signed requests" });
+  });
+
+  test("switched on, a sidecar that can't start for a fault here is yours to know: links off the tailnet wait meanwhile (I-b)", () => {
+    for (const why of [
+      "Q-AMP isn't installed on this node: its pinned binary goes to <home>/bin/qamp",
+      "its transport key can't be read: EACCES",
+      "its socket's directory /tmp/x isn't this node's alone: INVINCIBLE_QAMP_SOCKET needs a directory of its own, mode 0700 (this one is 1777)",
+      "the sidecar's socket path is too long for a Unix socket (120 bytes): set INVINCIBLE_QAMP_SOCKET to a shorter one",
+    ]) {
+      const line = fault((f) => (f.fabric = sidecar({ state: "off", on: true, why, address: null, version: null })), "node.qamp");
+      expect(line.state).toBe("needs-you");
+      expect(line.line).toBe(`its fabric is on, but its sidecar can't start: ${why}; links to nodes on the tailnet go over HTTP with signed requests meanwhile, and those off it wait for Q-AMP`);
+      expect(line.fix).toContain("invincible fabric off");
+    }
   });
 
   test("a binary from before the sidecar (0.1.0) is yours to replace: the line says so, and how", () => {
     const old = fault((f) => (f.fabric = sidecar({ state: "off", why: "the qamp here (0.1.0) has no sidecar: Q-AMP's release with one goes to <home>/bin/qamp (scripts/qamp-pin.sh; deploy.sh --qamp <file>)", address: null, version: null })), "node.qamp");
     expect(old.state).toBe("needs-you");
-    expect(old.line).toStartWith("the qamp here (0.1.0) has no sidecar");
-    expect(old.line).toEndWith("every link to another node goes over HTTP with signed requests meanwhile");
+    expect(old.line).toStartWith("its fabric is on, but its sidecar can't start: the qamp here (0.1.0) has no sidecar");
+    expect(old.line).toEndWith("links to nodes on the tailnet go over HTTP with signed requests meanwhile, and those off it wait for Q-AMP");
     expect(old.fix).toContain("deploy.sh --qamp");
   });
 
-  test("a sidecar that is down is yours to know: why, that HTTP carries the links meanwhile, and what to check", () => {
+  test("a sidecar that is down is yours to know: why, that HTTP carries the tailnet's links meanwhile, and what to check", () => {
     const down = fault((f) => (f.fabric = sidecar({ state: "down", why: "it stopped (9)" })), "node.qamp");
     expect(down.state).toBe("needs-you");
-    expect(down.line).toBe("its sidecar is down: it stopped (9); its links to other nodes go over HTTP meanwhile");
+    expect(down.line).toBe("its sidecar is down: it stopped (9); links to nodes on the tailnet go over HTTP with signed requests meanwhile, and those off it wait for Q-AMP");
     expect(down.fix).toContain("7410");
   });
 
@@ -711,7 +724,7 @@ describe("the fabric, as the doctor says it (docs/ARCHITECTURE.md §3)", () => {
     expect(line.finding).toMatchObject({ severity: "warn", title: `${left.mind.peers[0]!.name}'s link left Q-AMP for HTTP` });
     // With this node's fabric off, HTTP is its own choice: no fault.
     const off = healthy();
-    off.fabric = sidecar({ state: "off", why: "the fabric is off on this node (invincible fabric on switches it on)", address: null, version: null });
+    off.fabric = sidecar({ state: "off", on: false, why: "the fabric is off on this node (invincible fabric on switches it on)", address: null, version: null });
     off.mind.peers[0] = { ...left.mind.peers[0]! };
     expect(byId(diagnose(off), `mind.sync.${off.mind.peers[0]!.name}`).state).toBe("ok");
   });
