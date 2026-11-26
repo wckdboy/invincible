@@ -21,13 +21,14 @@ test("a gateway token's file is read as its KEY=value lines; each route goes whe
   expect(routeOf({ ANTHROPIC_BASE_URL: "http://192.0.2.10:7811/gw/anthropic" }, "anthropic")).toBeNull();
 });
 
-test("the node's meter is read for the token's label alone, its colours aside; one it says nothing of is null", () => {
+test("the node's meter is read for the token's label alone (as its by-who lines name a token, with no arm: before it), its colours aside; one it says nothing of is null", () => {
   const usage = [
     "Model calls on node since 2026-11-26 (UTC) · tokens as the providers reported them",
     "",
     "By who asked",
     "  arm:team.0123456789.curator                      59 calls     2.29M in     57.6k out  $0",
-    "  \x1b[1marm:c1-bench\x1b[0m                                    12 calls      211k in      4.1k out  $1,204.37",
+    "  \x1b[1mc1-bench\x1b[0m                                         12 calls      211k in      4.1k out  $1,204.37",
+    "  arm:c1-bench-old                                  3 calls       10k in       1k out  $9.99",
     "  you                                              39 calls      621k in     32.3k out  $0.34",
   ].join("\n");
   expect(meterDollars(usage, "c1-bench")).toBe(1204.37);

@@ -57,10 +57,11 @@ export function routeOf(values: Record<string, string>, route: string): { base: 
   return null;
 }
 
-/** What the node's meter (`invincible usage`) says a token's label has spent, in dollars; null when it says nothing of it. */
+/** What the node's meter (`invincible usage`, its by-who lines) says a token's label has spent, in dollars; null when it says nothing of it. */
 export function meterDollars(text: string, label: string): number | null {
   // (Its lines are coloured on a terminal: the colour codes aren't the words.)
-  const line = text.replace(/\x1b\[[0-9;]*m/g, "").split("\n").find((l) => l.trim().startsWith(`arm:${label} `));
+  // (A gateway token's line is its label, as an agent's arm's is arm:<its label>.)
+  const line = text.replace(/\x1b\[[0-9;]*m/g, "").split("\n").find((l) => l.trim().split(/\s+/)[0] === label);
   const said = line ? /\$([0-9][0-9,]*(?:\.[0-9]+)?)\s*$/.exec(line.trim()) : null;
   return said ? Number(said[1]!.replaceAll(",", "")) : null;
 }
