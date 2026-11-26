@@ -358,6 +358,38 @@ Its first phase (`packages/node/src/qamp-grants.ts`; how it works: [ARCHITECTURE
   - **A cancel stops the route's request.** A route that finishes its work after its caller leaves still finishes it.
   - **Not yet run on a server.** The Linux binary, the firewall rule and a Tailscale ACL haven't been exercised on one: everything above ran on a Mac, on loopback.
 
+## The one-time import (tested)
+
+`invincible import` ([ARCHITECTURE.md §10](ARCHITECTURE.md)) brings the owner's world across from the system Invincible
+succeeds (`packages/node/src/import/`), tested in `packages/node/test/import/` against a home that system's own code made.
+
+- **Its home is only read.** Each of its databases is opened so that SQLite writes nothing beside it:
+  - a write-ahead one whose log holds pages, with its index read only (`readonly_shm`);
+  - one whose log is empty, as an immutable file;
+  - a rollback one, under SQLite's shared lock;
+  - a log without its index is refused, never indexed.
+
+  A plain read-only open would not do: a reader sets its read marks in a write-ahead database's index. A test hashes
+  every file of the home before and after, a run beside a writer in a process of its own included.
+- **Its secrets are opened in memory and sealed anew.** Its vault key is opened with its node's key file (a server's
+  file keystore; a home whose keys are in the OS keychain brings no secret). Each value is sealed in this node's vault
+  under the address it was pinned to. None is ever printed, logged or put in an error: a secret is said by its name, and
+  one that won't open is skipped by name.
+- **No identity, device or fleet comes.** Every event it writes is this node's own, signed by it. The old node's key
+  opens its vault and does nothing else, and the old chat apps' device keys stay behind with their bots.
+- **Trust comes as it was.**
+  - A memory keeps its trust (yours, an agent's, a page's) and where it came from, never the device it came through.
+  - An agent's job written by the primary or another agent stays theirs, fenced as before, never the owner's by coming
+    across.
+  - A chat that read the bank stays behind, since the guard that kept it to the devices allowed to read the bank did not
+    come either.
+  - Text is scanned for keys as everything entering memory is, and what looks like one is skipped.
+- **It writes only with this node stopped.** A second writer signing as this node, with a clock of its own, could fork
+  its chain. A dry run writes nothing anywhere and may run beside it.
+- **Residual risk:** the sign-ins that come across (mail, an MCP server's) are used by both nodes until the old one
+  stops. A service that rotates its sign-ins and refuses an old one can end one node's sign-in, which is then signed in
+  again there.
+
 ## Known limitations
 
 **The model gateway forwards any path.** A gateway token reaches every method and path under its provider's base URL with the real key: not only model calls but, for an OpenAI-style key, files, batches, fine-tuning, assistants and deletes, and whatever an admin-capable key allows. It is bounded by the token (its providers, expiry, request cap, revocation), and the key itself never leaves the node. A path allowlist was weighed in November 2026 and not added: Invincible's own model calls never use the gateway (they go to providers directly), its clients are other tools (OpenCode in sandboxes, any code in a sandbox, whatever runs under `invincible run`) whose endpoints are theirs and change with their versions, and a path missed would break a tool. A list of model-call paths per provider kind, which you could extend per provider, is the likely next step.

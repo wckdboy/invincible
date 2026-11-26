@@ -70,8 +70,9 @@ Q-AMP between the nodes and the agents.
 
 ## Phase 4: the cutover 🔜
 
-- The one-time import ([ARCHITECTURE §10](ARCHITECTURE.md)) on the owner's server (Ultra), with the old system still
+- 🔨 The one-time import ([ARCHITECTURE §10](ARCHITECTURE.md)) on the owner's server (Ultra), with the old system still
   running beside it. Its memory, vault, projects, providers, connectors and chosen chats are checked on the other side.
+  The importer is built, and tested against a home the old system's own code made; its run on Ultra is next.
 - The owner's devices pair with Invincible, and the old system stops. Its website points to invincible.sh.
 
 **Exit:** the owner uses Invincible for a day without opening the old system.

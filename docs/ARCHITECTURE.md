@@ -230,6 +230,27 @@ its own.
 | **Left behind** | Personas (looks, temperaments, faces, seats, arranging), squires, the bookkeeping, bank, Buzz and MCP-index features, and every word of the theme. Anything else returns only when a task needs it. |
 | **Imported once** | `invincible import galahad` reads a Galahad home: your memory and what it learned about you, the vault's secrets (resealed), your projects, providers and keys, connectors, and the chats if you want them. Knights become agent profiles. |
 
+**The import, as built** (`packages/node/src/import/`, its tests in `packages/node/test/import/`):
+`invincible import galahad <its home> [--dry-run] [--chats all|none|<id>,<id>]`.
+- It reads the home as Galahad keeps it (its config, its node's key file, `mind.db`, `team.db`, `chats.db`, its uploads)
+  without writing a byte there, and writes here as this node: new events on its ledger, and its agents' and chats'
+  stores.
+- What comes:
+  - providers (the coding plans among them), the roster, how hard each role thinks, and prices;
+  - the vault's keys, opened with its node's key file and sealed anew here, never shown;
+  - memory, with its trust and where it came from (what it learned about you, kept and proposed);
+  - projects;
+  - connectors: one Invincible ships as it ships it, with your address, key and access; one of yours as you made it;
+    the knights' labels mapped to the agents' here;
+  - each knight as an agent's profile, its job still in whose words it was;
+  - chats only as `--chats` says.
+- What stays behind: its identity, devices and fleet; its chat apps' bots and device keys; its Apple push key; its loops
+  (with their webhook keys), rules, skills and standing orders; the knights' looks, temperaments, seating, rooms, tasks
+  and VMs; and a chat that read the bank.
+- What this node already holds by a name (or removed) is never written over or brought back, so a second run brings
+  nothing.
+- A run writes with this node stopped; a dry run writes nothing anywhere and may run beside it.
+
 **Beside it until the cutover:** Galahad keeps running on the owner's machines. Its home (`~/.galahad`), its service,
 its ports (7777–7779, and 7781–7789/udp for Q-AMP) and its bridges are left alone; Invincible's own are in §9.
 
