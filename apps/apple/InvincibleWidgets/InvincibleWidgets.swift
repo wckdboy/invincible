@@ -26,7 +26,8 @@ struct TaskActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     AgentDisc(colour: context.attributes.colour, size: 40).padding(.leading, 4)
                 }
-                DynamicIslandExpandedRegion(.trailing) {
+                // (First call on the width: the title beside it takes whatever is left, and broke "Review" in two.)
+                DynamicIslandExpandedRegion(.trailing, priority: 1) {
                     StandingWord(state: context.state).font(.subheadline.weight(.semibold)).padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
@@ -89,7 +90,10 @@ struct StandingWord: View {
     let state: TaskActivityState
 
     var body: some View {
-        Text(state.short).foregroundStyle(state.failed ? AnyShapeStyle(Danger.red) : AnyShapeStyle(.primary))
+        Text(state.short)
+            .foregroundStyle(state.failed ? AnyShapeStyle(Danger.red) : AnyShapeStyle(.primary))
+            .lineLimit(1)
+            .fixedSize()
     }
 }
 
