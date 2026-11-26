@@ -191,8 +191,8 @@ export class NotifyService {
   private readonly turns = new Map<string, { watchers: number }>();
   /** Runs of yours seen in hand, by the run they belong to. */
   private readonly runs = new Set<string>();
-  /** Agents' tasks seen in hand here, and the team's version when they were last looked at. */
-  private readonly tasksInHand = new Set<string>();
+  /** The agents' tasks that had ended at the last look (null: it hasn't looked yet), and the team's version then. */
+  private tasksEnded: Set<string> | null = null;
   private tasksSeen: string | null = null;
   private keyProblem: string | null = null;
   private tagSalt: string | null = null;
@@ -281,8 +281,10 @@ export class NotifyService {
   }
 
   /**
-   * An agent's task that was in hand here and has ended: told by its verdict and cost, opening the task (taskItem). Read
-   * only when the team changed; one never seen in hand here is old news.
+   * An agent's task that has ended since the last look: told by its verdict and cost, opening the task (taskItem). Read
+   * only when the team changed. Whether it was seen in hand doesn't matter: a task can be given and end between two looks
+   * (one whose gate can't run fails at once). What had ended before the first look is old news; one given again is
+   * news again when it ends.
    */
   lookAtTasks(): void {
     const tasks = this.o.sources.tasks;
@@ -290,17 +292,17 @@ export class NotifyService {
     const version = tasks.version();
     if (version === this.tasksSeen) return;
     this.tasksSeen = version;
+    const ended = new Set<string>();
     for (const task of tasks.list()) {
-      if (task.status === "running" || task.status === "queued") {
-        this.tasksInHand.add(task.id);
-        continue;
-      }
-      if (!this.tasksInHand.delete(task.id)) continue;
+      if (task.status !== "done" && task.status !== "failed" && task.status !== "stopped") continue;
+      ended.add(task.id);
+      if (this.tasksEnded === null || this.tasksEnded.has(task.id)) continue;
       const item = taskItem(task);
       if (!item) continue;
       this.o.db.addPending(item);
       this.nudge();
     }
+    this.tasksEnded = ended;
   }
 
   /** A run you run (from a terminal) that was in hand and has ended. With effort: once every attempt has. */

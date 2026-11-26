@@ -89,12 +89,38 @@ describe("an agent's task", () => {
     h.service.lookAtTasks();
     await h.look();
     expect(h.sent).toHaveLength(1);
-    // One never seen in hand here is old news.
-    tasks.push({ id: "task-bbbbbbbbbbbb", status: "failed", word: "Failed", cost: "", ship: false });
-    version = 4;
+  });
+
+  test("one given and ended between two looks is told all the same; what had ended before it first looked is old news", async () => {
+    let version = 1;
+    // (26 November 2026: the dev node's tasks end 75 ms after they're given, and one whose gate can't run fails as fast:
+    // a look once a second never saw them in hand, and they were never told.)
+    let tasks = [{ id: "task-oldoldoldold", status: "done", word: "Proven", cost: "$0.20", ship: true }];
+    const h = harness({ sources: { tasks: { version: () => String(version), list: () => tasks } } });
     h.service.lookAtTasks();
     await h.look();
+    expect(h.sent).toEqual([]); // ended before it first looked: old news
+    tasks = [...tasks, { id: "task-fastfastfast", status: "failed", word: "Failed · gate 1", cost: "$0.01", ship: false }];
+    version = 2;
+    h.service.lookAtTasks();
+    await h.look();
+    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "finished", title: "Your agent's task: Failed · gate 1", open: "task", task: "task-fastfastfast" }]);
+    // Once: the team changing again says nothing more of it.
+    version = 3;
+    h.service.lookAtTasks();
+    h.advance(31 * 60_000);
+    await h.look();
     expect(h.sent).toHaveLength(1);
+    // Another, seen in hand first, is told as ever; one you stopped isn't news, however fast.
+    tasks = [...tasks, { id: "task-slowslowslow", status: "running", word: "", cost: "", ship: false }, { id: "task-stopstopstop", status: "stopped", word: "", cost: "", ship: false }];
+    version = 4;
+    h.service.lookAtTasks();
+    tasks = tasks.map((t) => (t.id === "task-slowslowslow" ? { ...t, status: "done", word: "Proven", cost: "$0.04", ship: true } : t));
+    version = 5;
+    h.service.lookAtTasks();
+    h.advance(31 * 60_000);
+    await h.look();
+    expect(h.sent.map((s) => s.payload.title)).toEqual(["Your agent's task: Failed · gate 1", "Your agent's task: Proven"]);
   });
 });
 
