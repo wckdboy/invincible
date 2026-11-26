@@ -93,6 +93,18 @@ export function agentFace(options: AgentFaceOptions): HTMLElement {
   return h("span", { class: "agent-orb", style: `--orb-size:${size}px`, "data-tint": identity.colours.key[1], ...named }, canvas);
 }
 
+/**
+ * A frame of a field on any 2D context, drawn as every orb here is (drawField): a square `size` CSS pixels wide at `dpr`
+ * device pixels to one; whose field (`identity`), with its beam or not, and the primary's look at that size or an
+ * agent's (`primary`); in `frame` (lib/field-orb.ts' fieldStill, fieldFrame); as light on a dark page or ink on a light
+ * one (`paper`). invincible.sh (apps/site) draws its still orbs with it when it is built, onto a context that writes SVG,
+ * so the site's orbs are the app's own.
+ */
+export function paintField(g: CanvasRenderingContext2D, size: number, dpr: number, field: { identity: FieldIdentity; beam: boolean; primary: boolean }, frame: FieldFrame, paper: boolean): void {
+  const spec: Spec = { identity: field.identity, beam: field.beam, agent: !field.primary, mood: undefined, key: "" };
+  drawField(g, Math.round(size * dpr), dpr, size, spec, fieldLook(field.identity, size, field.primary), frame, paper);
+}
+
 // ---- an orb on its canvas ---------------------------------------------------------------------------------------------
 
 /** What is drawn: whose field, with its beam or not, an agent's (which moves only while it works) or its (with embers),
