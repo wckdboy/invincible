@@ -8,21 +8,21 @@ interventions per completed task).
 
 ## Phase 0: the foundation 🔨
 
-The repository, the rules, and Galahad's proven engine carried in, renamed and green.
+The repository, the rules, and the proven engine carried in ([ARCHITECTURE §10](ARCHITECTURE.md)), renamed and green.
 
 - 🔨 These documents, AGENTS.md, the mandate.
 - 🔜 The engine carried and reshaped (core, ledger, link, models, agents, sandbox, node). The node runs:
   `invincible start` on a fresh home, a client pairs, the primary answers, a task runs in a sandbox and is verified.
 - 🔜 The vocabulary check in CI: no word of the old theme.
 - 🔜 sovware.io holds the main copy: a protected main that takes only pull requests whose checks all passed, as
-  Galahad's does.
+  the system it succeeds has.
 - 🔨 **Q-AMP, built in parallel from today** in its own repository: the sidecar socket API, P-256 identities with
   signing by callback, then the bindings. Phases 2 and 5 stand on these.
 
 **Exit:**
-- `bun run check` is green, with the suites carried from Galahad passing in their new places;
+- `bun run check` is green, with the carried suites passing in their new places;
 - the vocabulary check is clean;
-- the scorecard's carried suites hold their Galahad baselines.
+- the scorecard's carried suites hold the baselines they came with.
 
 ## Phase 1: the primary and its agents 🔜
 
@@ -39,7 +39,7 @@ What the owner uses every day, built on the carried engine around the new model.
 **Exit:**
 - a task given in plain words, in a repository the agent has never seen, ends verified and shipped as a pull request,
   with no intervention, on a real node;
-- the agentic suite holds Galahad's baseline or beats it;
+- the agentic suite holds the baseline it came with, or beats it;
 - the web app passes the owner's bar: the screenshot review beside the benchmarks, no layout shift, nothing moving at
   rest.
 
@@ -51,12 +51,12 @@ Q-AMP between the nodes and the agents.
 - Node ↔ node over Q-AMP: sync, pushes and forwarded work, with HTTPS as the fallback.
 - Runs on other nodes, and agents outside the fleet, using the primary's tools with their own keys and chains.
 
-**Exit:** the first answer on a fresh connection, and sync's lag, are measured before and after (Galahad measured 96 vs
-504 ms first answer for a grant). Revocation cuts a key off within one round trip. The fuzz targets run clean.
+**Exit:** the first answer on a fresh connection, and sync's lag, are measured before and after (the carried grants measured 96 vs
+504 ms first answer). Revocation cuts a key off within one round trip. The fuzz targets run clean.
 
 ## Phase 3: the apps 🔜
 
-- iPhone, iPad and Mac, and Android, on the new interface, with Galahad's plumbing (device keys, pairing, push) and the
+- iPhone, iPad and Mac, and Android, on the new interface, with the carried plumbing (device keys, pairing, push) and the
   pure logic ported, held to the vectors.
 - New identities in the stores: `industries.invincible.app`. Its App Store Connect record waits on the owner.
 
@@ -68,11 +68,11 @@ Q-AMP between the nodes and the agents.
 
 ## Phase 4: the cutover 🔜
 
-- `invincible import galahad` on the owner's server (Ultra), with Galahad still running beside it. Its memory, vault,
-  projects, providers, connectors and chosen chats are checked on the other side.
-- The owner's devices pair with Invincible, and Galahad stops. galahad.sh points to invincible.sh.
+- The one-time import ([ARCHITECTURE §10](ARCHITECTURE.md)) on the owner's server (Ultra), with the old system still
+  running beside it. Its memory, vault, projects, providers, connectors and chosen chats are checked on the other side.
+- The owner's devices pair with Invincible, and the old system stops. Its website points to invincible.sh.
 
-**Exit:** the owner uses Invincible for a day without opening Galahad.
+**Exit:** the owner uses Invincible for a day without opening the old system.
 
 ## Phase 5: Q-AMP everywhere 🔜
 

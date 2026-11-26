@@ -12,8 +12,9 @@
     "inv": "bun packages/node/src/cli.ts",
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json && bun test",
-    "bench": "bun bench/run.ts"
+    "check": "tsc -p tsconfig.json && bun bench/vocabulary.ts && bun test",
+    "bench": "bun bench/run.ts",
+    "vocabulary": "bun bench/vocabulary.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",

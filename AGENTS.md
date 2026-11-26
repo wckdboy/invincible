@@ -13,7 +13,8 @@ interventions per completed task.
 
 ```sh
 bun install
-bun run check                          # tsc + the whole suite: green before you say "done"
+bun run check                          # tsc, the vocabulary check, the whole suite: green before you say "done"
+bun run vocabulary                     # no word of the old theme in any tracked file (bench/vocabulary.ts)
 INVINCIBLE_KEYSTORE=file bun test      # tests never touch the OS keychain
 bun test packages/ledger               # one package
 bun invincible help                    # the CLI
@@ -39,7 +40,7 @@ bun run bench                          # the scorecard against its baselines
 - **Nothing destructive:**
   - no `rm -rf` outside temp dirs, no killing by pattern, no force-push;
   - tests use temp homes, never `~/.invincible`;
-  - Galahad keeps running on the owner's machines until the cutover, so leave `~/.galahad`, its ports and its
-    service alone.
+  - the system Invincible succeeds keeps running on the owner's machines until the cutover, so leave its home, its
+    ports and its service alone ([docs/ARCHITECTURE.md §10](docs/ARCHITECTURE.md) names them).
 - **Landing.** The main copy is `sovware.io/wckdboy/invincible`. Its main takes only pull requests whose checks all
   passed, fast-forward only. Nobody pushes main.

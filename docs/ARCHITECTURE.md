@@ -38,7 +38,7 @@ clients … super modern, sleek, and future focused."*
 | **Approval** | What the primary or an agent wants to do that only you may allow: money, legal, destructive, outward. |
 | **Proof** | Each gate's command, exit and time, and the reviewer's verdict, as the runner recorded them. |
 
-No word of the old theme appears anywhere: code, routes, events, copy or docs. CI fails on one ([§10](#10-from-galahad)).
+No word of the old theme appears anywhere: code, routes, events, copy or docs. CI fails on one (§10).
 
 ## 1. The big picture
 
@@ -66,7 +66,7 @@ No word of the old theme appears anywhere: code, routes, events, copy or docs. C
   ledger.
 - **Capabilities are delegations, narrowed at every hop.** You → a node: enrolled. The primary → a run: this
   project's tools, the key gateway for these providers, this budget, these hours. A run → a sub-agent: less again. The
-  HTTP routes' scopes (one per route, from Galahad) become the caveats of these chains, so a route and a Q-AMP tool
+  HTTP routes' scopes (one per route, carried) become the caveats of these chains, so a route and a Q-AMP tool
   check the same thing.
 - **The door decides.** The node checks every call: the signature or the chain, the time, the nonce, the scope. Q-AMP
   carries a call and proves who sent it; it never decides alone.
@@ -88,14 +88,14 @@ out QAMP"). What runs over it, in order:
 | Link | Over | Since |
 |---|---|---|
 | Node ↔ node: ledger sync, pushes, forwarded work (a sandbox on another node) | Q-AMP, one connection per peer; HTTPS with signed requests as the fallback | Phase 2 |
-| An agent outside the fleet using the primary's tools | Q-AMP grants (Galahad's Phase 1, carried) | Phase 2 |
+| An agent outside the fleet using the primary's tools | Q-AMP grants (carried, §10) | Phase 2 |
 | A run on another node calling the primary's tools; one agent handing work to another | Q-AMP, the run's own key and chain | Phase 2 |
 | Native clients (iPhone, iPad, Mac, Android) ↔ their node | Q-AMP through Swift and Kotlin bindings, signing with the device's hardware key | Phase 5 |
 | The browser ↔ its node | WebTransport (HTTP/3), the same frames; HTTPS with signed requests until then | Phase 5 |
 | Devices away from your network (a phone on mobile data) | relays and NAT traversal in Q-AMP; a tailnet until then | Phase 5 |
 
 **How a node uses Q-AMP:** a sidecar, the `qamp` binary, beside the Bun process, spoken to over a local socket. The
-daemon holds the vault, so no native QUIC stack is loaded into it (the reasoning is in Galahad's Q-AMP design, 25
+daemon holds the vault, so no native QUIC stack is loaded into it (the reasoning is in the carried Q-AMP design, 25
 November 2026). The sidecar holds no secret but the node's transport key.
 
 **What Q-AMP gains for this, in its own repository, spec first:**
@@ -110,7 +110,7 @@ Each comes with its tests, a fuzz target where it parses input, and before-and-a
 
 ## 4. The ledger
 
-Galahad's Mind, carried whole in kind:
+The ledger is carried whole in kind (§10):
 - an append-only log of signed events, one hash chain per device;
 - ordered by a hybrid logical clock;
 - views rebuilt from the log.
@@ -119,8 +119,7 @@ Galahad's Mind, carried whole in kind:
 event kind must be deterministic under replay, and an unknown kind is kept and ignored, never fatal.
 
 Its event kinds are Invincible's own (`chat.*`, `task.*`, `run.*`, `project.*`, `agent.*`, `grant.*`, `approval.*`,
-`fleet.*`), so there is nothing to read from Galahad's log. A one-time importer reads Galahad's home instead
-([§10](#10-from-galahad)).
+`fleet.*`), so there is nothing to read from the old log. A one-time importer reads the old home instead (§10).
 
 ## 5. The primary
 
@@ -145,7 +144,7 @@ Its event kinds are Invincible's own (`chat.*`, `task.*`, `run.*`, `project.*`, 
 
 ## 6. Agents, tasks and runs
 
-Galahad's run loop is carried and renamed, the most proven part of it:
+The run loop is carried and renamed (§10), the most proven part of it:
 - **The loop:** restate the task as acceptance criteria, plan, work, verify, report.
 - **Gates:** the gates run before any work, so a gate that already passes proves nothing and is said to. Test files a
   gate names are locked.
@@ -168,7 +167,7 @@ Galahad's run loop is carried and renamed, the most proven part of it:
 
 ## 7. Models
 
-Galahad's brain, carried:
+The models layer, carried (§10):
 - providers, with coding plans held to each vendor's terms;
 - a roster of models by role, with fallback;
 - the gateway that meters every call at your prices;
@@ -181,7 +180,7 @@ Galahad's brain, carried:
   - Phones: no tab bar. Home is your agent: what needs you, with its answer in place, then the work by attention.
   - Wide screens: three panes. Your agent pinned atop the work, a task's thread, and its details: the VM, the
     changes, the proof, the cost.
-  - It was designed and measured in Galahad's last redesign, and carried over without the knights.
+  - It was designed and measured in the last redesign before the carry (§10), and carried over without the old theme.
 - **Its bar** is the owner's: hyper modern and super usable, measured.
   - One focal point per screen.
   - Layered hairline surfaces in each platform's own materials.
@@ -212,7 +211,7 @@ Galahad's brain, carried:
 | `apps/web`, `apps/apple`, `apps/android`, `apps/site` | The clients and invincible.sh |
 | `bench/` | The scorecard: every suite against its recorded baseline |
 
-**Coexisting with Galahad on one host** until the cutover:
+**Coexisting with the system it succeeds on one host** (§10) until the cutover:
 - the home is `~/.invincible` and the service user is `invincible`;
 - ports: 7400 (node), 7401 (behind `tailscale serve`), 7402 (the sandboxes' bridge, `inv0`), 7410–7419/udp (Q-AMP).
 
@@ -227,5 +226,8 @@ its own.
 | **Reshaped** | Knights become agents (profiles: role, harness, models), each task a thread of its own. The Roundtable becomes the work, by attention. Quests become runs, trials become evals, and the oath gate becomes approvals. Galahad becomes the primary, named by you. |
 | **Left behind** | Personas (looks, temperaments, faces, seats, arranging), squires, the bookkeeping, bank, Buzz and MCP-index features, and every word of the theme. Anything else returns only when a task needs it. |
 | **Imported once** | `invincible import galahad` reads a Galahad home: your memory and what it learned about you, the vault's secrets (resealed), your projects, providers and keys, connectors, and the chats if you want them. Knights become agent profiles. |
+
+**Beside it until the cutover:** Galahad keeps running on the owner's machines. Its home (`~/.galahad`), its service,
+its ports (7777–7779, and 7781–7789/udp for Q-AMP) and its bridges are left alone; Invincible's own are in §9.
 
 **Enforced:** `bench/vocabulary.ts` fails CI on any word of the old theme outside this section and the importer.

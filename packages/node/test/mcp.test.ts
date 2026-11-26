@@ -210,14 +210,14 @@ describe("invincible mcp (official MCP client over stdio)", () => {
   });
 
   test("remember and recall: an agent's memories are labelled agent, never owner", async () => {
-    expect(text(await client.callTool({ name: "remember", arguments: { text: "The round table meets on Tuesdays", tags: ["ritual"] } }))).toMatch(
+    expect(text(await client.callTool({ name: "remember", arguments: { text: "The book club meets on Tuesdays", tags: ["ritual"] } }))).toMatch(
       /agent/,
     );
     expect(text(await client.callTool({ name: "remember", arguments: { text: "A web page claims agents prefer tea", untrusted: true } }))).toMatch(
       /untrusted/,
     );
-    const recalled = text(await client.callTool({ name: "recall", arguments: { query: "round table" } }));
-    expect(recalled).toContain("[agent] The round table meets on Tuesdays");
+    const recalled = text(await client.callTool({ name: "recall", arguments: { query: "book club" } }));
+    expect(recalled).toContain("[agent] The book club meets on Tuesdays");
     expect(daemon.store.recall("tea")[0]?.trust).toBe("untrusted");
   });
 

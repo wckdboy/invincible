@@ -26,8 +26,5 @@ describe("the app's words", () => {
     expect(sources.filter((source) => /hive ?mind/i.test(source.text)).map((source) => source.path)).toEqual([]);
   });
 
-  test("nothing in it says squire", () => {
-    const said = sources.flatMap((source) => [...source.text.matchAll(/^.*squire.*$/gim)].map((line) => `${source.path}: ${line[0].trim()}`));
-    expect(said).toEqual([]);
-  });
+  // (The old theme's words, everywhere in the repository and not just here, are bench/vocabulary.ts's to find.)
 });

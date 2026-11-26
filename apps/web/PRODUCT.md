@@ -8,11 +8,11 @@ web
 
 ## Users
 
-Today: one owner, running a personal fleet on machines they own (their your agent and their agents), mostly from an iPhone with the app installed to the home screen, checking in between other things. Soon: other people running their own your agent (it is open source, Apache-2.0), each pairing their own phone to their own your agent; the app has to make sense on a stranger's first day too (pairing, an empty Agents, a first task).
+Today: one owner, running a personal fleet on machines they own (their primary agent and its agents), mostly from an iPhone with the app installed to the home screen, checking in between other things. Soon: other people running their own Invincible (it is open source, Apache-2.0), each pairing their own phone to their own your agent; the app has to make sense on a stranger's first day too (pairing, an empty Agents, a first task).
 
 ## Product Purpose
 
-Your agent is a lean, highly capable agent for tasks, above all for coding and for managing large projects. It creates and orchestrates persistent agents: named workers with lasting jobs, each working in a VM of its own on the owner's machines. The phone app is how the owner works with them. Its four jobs, all confirmed as the ones that matter:
+Invincible is a lean, highly capable agent for tasks, above all for coding and for managing large projects. Its primary agent creates and orchestrates persistent agents: named workers with lasting jobs, each working in a VM of its own on the owner's machines. The phone app is how the owner works with them. Its four jobs, all confirmed as the ones that matter:
 
 - see who is doing what: which agents are working, on what, and what is done;
 - talk to your agent: ask, discuss, give it work, follow its answer as it comes;
@@ -23,7 +23,7 @@ Success is the mandate's north star (`docs/MANDATE.md`): human interventions per
 
 ## Positioning
 
-Your agent's own: one mind across the owner's devices; persistent agents, each in its own VM, some with a desktop of their own; work that counts as done only when its gates pass and an independent reviewer agrees; an approvals (creating is free, deleting and outward-facing actions ask first); keys sealed in a vault and never shown back. Self-hosted and open source.
+Invincible's own: one mind across the owner's devices; persistent agents, each in its own VM, some with a desktop of their own; work that counts as done only when its gates pass and an independent reviewer agrees; an approvals (creating is free, deleting and outward-facing actions ask first); keys sealed in a vault and never shown back. Self-hosted and open source.
 
 ## Operating Context
 
@@ -40,16 +40,15 @@ The phone in one hand, often in short glances; work runs for minutes to hours un
 - The Inbox: approvals and secret requests, and everything else that waits; what needs the owner shows on Home with its answers in place too.
 - An agent's Workspace: its desktop (watch, take over) and a terminal into its VM.
 - Beast mode: your agent engages it when a task demands it, raising its compute and model access and acting more without asking. Not built yet; its autonomy limits are an open decision for the owner.
-- Agents are orbs of glyphs (`lib/orb-sphere.ts`, `ui/orb.ts` `agentFace`): a colour you chose (`{ v: 2, color }`) or one of core's 24 `AGENT_TINTS` its handle picks, its sphere, glyphs and arcs its handle's. What an agent is doing comes from the node (`avatarExpression`, its state) and shows in how its orb moves and its seat's ring.
+- Agents are fields (`lib/field.ts`, `lib/field-orb.ts`, `ui/orb.ts` `agentFace`): lines of force in colours of an agent's own, a colour you chose (`{ v: 2, color }`) or one of core's 24 `AGENT_TINTS` its handle picks; the primary's is the gold field with its beam. What an agent is doing comes from the node (`avatarExpression`, its state) and shows in how its field moves.
 - Technical: vanilla TypeScript with an `h()` DOM helper, no framework; served by the node with a strict CSP (self-hosted assets and fonts, no third-party requests); every request signed; offline-capable service worker; first load measured by `apps/web/measure/first-load.ts`.
 - Terminology: your agent, agents, the agents, rooms, tasks, the Inbox, beast mode.
 
 ## Brand Commitments
 
-- The name your agent, and the Arthurian vocabulary above.
-- Your agent's colours are oxblood, navy and off-white, used as accents only (binding). Oxblood marks what waits on the owner.
-- The agents are orbs of glyphs, each its own colour, moving slowly and calmly; your agent's orb is its state's colour inside the rings of a heads-up display, with a ring of data (the owner's words, 25 November 2026: "custom/procedurally generated colored particle orbs", "glyph and randomness … like Jarvis/Ultron … and my other project Phren", "slow and calming movement"; this replaces the drawings of 14–15 November).
-- Your agent's helm, with the oxblood Templar cross, stays its emblem in the app and the website's crest (binding). The app's icon and favicon are your agent's field in gold: lines of force round a dark core, white-hot where the light strikes and burning copper at the far rim (the owner's choice, 26 November 2026, replacing the agents of 15 November).
+- The name Invincible, set as the INVINCIBLE wordmark in letterspaced capitals at the head of the sidebar. The primary agent is the owner's to name, and "Invincible" until they do. No word of the old theme anywhere (`docs/ARCHITECTURE.md` §10, enforced by `bench/vocabulary.ts`).
+- The look is the redesign's, carried by the owner's word (26 November 2026): the primary is a field orb in gold (AURUM), marked apart by a beam of light along the field's axis (light on dark, gold ink on light pages, dimming with its mood, a red-brown tip on failure); each agent is a field in colours of its own; embers drift about them. They move slowly and calmly, and only as their state asks; reduced motion stills them all, and colour is never the only sign of a state.
+- The app's icon and favicon are Field · Aurum: the gold field, lines of force round a dark core, white-hot where the light strikes and burning copper at the far rim, with a transparent dark variant for iOS. In the page the app's mark is drawn without its tile.
 - The look around them takes after Vercel/shadcn (Geist, neutral greys, 1 px borders), Benji Taylor's trays and live pills, and T3 Code's composer (the owner's references).
 
 ## Evidence on Hand

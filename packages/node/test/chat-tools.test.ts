@@ -110,16 +110,16 @@ afterAll(async () => {
 
 describe("Your agent's chat has its tools", () => {
   test("from a terminal: the same tools agents get, and the steps stream back", async () => {
-    script = [callTool("recall", { query: "round table" }), say("Nothing about it yet.")];
-    const events = await ask(home.adminToken(), "What do you remember about the round table?");
+    script = [callTool("recall", { query: "book club" }), say("Nothing about it yet.")];
+    const events = await ask(home.adminToken(), "What do you remember about the book club?");
     // (All of them but a Mac itself: no node of this fleet lends it its screen; and a look later, which comes back only
     // in a kept chat, and this one is kept nowhere.)
     expect(offered().sort()).toEqual(TOOLS.map((t) => t.name).filter((name) => name !== "mac" && name !== "look_later").sort());
     // Yours is a turn the node owns: the stream says which first (to attach to, steer or stop).
     expect(events.map((e) => e.type)).toEqual(["turn", "model", "tool", "tool_result", "text", "done"]);
     expect(events[0]).toMatchObject({ type: "turn", conversation: null, answer: null, replay: false });
-    expect(events[2]).toMatchObject({ type: "tool", name: "recall", title: "Recall from the shared mind", input: '{"query":"round table"}' });
-    expect(bodies[1].messages.at(-1)).toEqual({ role: "tool", tool_call_id: "call_recall", content: 'Nothing remembered about "round table".' });
+    expect(events[2]).toMatchObject({ type: "tool", name: "recall", title: "Recall from the shared mind", input: '{"query":"book club"}' });
+    expect(bodies[1].messages.at(-1)).toEqual({ role: "tool", tool_call_id: "call_recall", content: 'Nothing remembered about "book club".' });
   });
 
   test("within the caller's scopes: an agent without the sandbox scope gets no sandbox tools, and gets them once granted", async () => {

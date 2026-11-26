@@ -11,8 +11,9 @@ fabric with no passwords.
 curl -fsSL https://invincible.sh | sh
 ```
 
-**Status:** being built, 26 November 2026. Invincible succeeds Galahad. It carries over the parts of Galahad that were
-already proven: the signed requests, the vault, sandboxed VMs, model providers, and the gates-and-reviewer verifier.
+**Status:** being built, 26 November 2026. Invincible succeeds the owner's earlier agent system
+([docs/ARCHITECTURE.md §10](docs/ARCHITECTURE.md)), and carries over its parts that were already proven: the signed
+requests, the vault, sandboxed VMs, model providers, and the gates-and-reviewer verifier.
 Everything is designed around the primary agent. [docs/PLAN.md](docs/PLAN.md) says what exists and what comes next.
 
 - [The mandate](docs/MANDATE.md): what "best" means, in four numbers.

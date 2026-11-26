@@ -108,5 +108,6 @@ This file is a mandate, not a description. Concretely:
 - Say "unverified" rather than implying success.
 - Ask once, precisely, when a decision is genuinely the owner's — not repeatedly, and not never.
 
-This mandate came with Invincible from Galahad, where it was written on 14 November 2026. It holds unchanged: the
+This mandate came with Invincible from the system it succeeds ([ARCHITECTURE §10](ARCHITECTURE.md)), where it was
+written on 14 November 2026. It holds unchanged: the
 primary agent and the agents it runs are held to the same four numbers. [AGENTS.md](../AGENTS.md) holds the working rules.
