@@ -1,5 +1,5 @@
 import { CLOCK, isConversationId, NOTIFY_OPENS, NOTIFY_PER_DAY, type NotifyLostView, type NotifyOpen, type NotifyPrefs, type NotifyView } from "@invincible/core/notify";
-import { isNotifyTaskId } from "@invincible/core/notify-payload";
+import { isNotifyActionId, isNotifyTaskId } from "@invincible/core/notify-payload";
 
 /*
  * Notifications on this device, as the page reasons about them (pure: the browser's
@@ -115,12 +115,13 @@ export function pushSync(s: { subscribed: boolean; lost: boolean; browser: boole
  * What the service worker tells an open page when a notification is tapped: one of the app's places, and a
  * kept chat for the chat page. Read strictly: anything else is no message of ours.
  */
-export function readOpenMessage(data: unknown): { route: NotifyOpen; conversation?: string; task?: string } | null {
-  const d = (data && typeof data === "object" ? data : {}) as { type?: unknown; open?: unknown; conversation?: unknown; task?: unknown };
+export function readOpenMessage(data: unknown): { route: NotifyOpen; conversation?: string; task?: string; action?: string } | null {
+  const d = (data && typeof data === "object" ? data : {}) as { type?: unknown; open?: unknown; conversation?: unknown; task?: unknown; action?: unknown };
   if (d.type !== "invincible:open" || typeof d.open !== "string" || !(NOTIFY_OPENS as readonly string[]).includes(d.open)) return null;
   const conversation = d.open === "chat" && typeof d.conversation === "string" && isConversationId(d.conversation) ? d.conversation : undefined;
   const task = d.open === "task" && typeof d.task === "string" && isNotifyTaskId(d.task) ? d.task : undefined;
-  return { route: d.open as NotifyOpen, ...(conversation ? { conversation } : {}), ...(task ? { task } : {}) };
+  const action = d.open === "inbox" && typeof d.action === "string" && isNotifyActionId(d.action) ? d.action : undefined;
+  return { route: d.open as NotifyOpen, ...(conversation ? { conversation } : {}), ...(task ? { task } : {}), ...(action ? { action } : {}) };
 }
 
 /** A VAPID key (base64url) as the bytes `pushManager.subscribe` takes. */

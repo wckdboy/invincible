@@ -4,6 +4,7 @@ import {
   alertReserve,
   catchUpMessage,
   connectorItem,
+  approvalFromHash,
   conversationFromHash,
   digestDue,
   digestMessage,
@@ -656,6 +657,11 @@ describe("the payload", () => {
 
   test("where it opens is always inside the app, at one of five places", () => {
     expect(notifyUrl({ open: "inbox" })).toBe("/#/inbox");
+    // An approval's own: its card first in the Inbox (the web's address for it, as a task's thread is #/task/<id>).
+    expect(notifyUrl({ open: "inbox", action: "a_0123456789abcdefghijkl" })).toBe("/#/inbox?a=a_0123456789abcdefghijkl");
+    expect(notifyUrl({ open: "inbox", action: "../evil" })).toBe("/#/inbox");
+    expect(approvalFromHash("#/inbox?a=a_0123456789abcdefghijkl")).toBe("a_0123456789abcdefghijkl");
+    for (const hash of ["#/inbox", "#/inbox?a=<script>", "#/chat?a=a_0123456789abcdefghijkl", "#/inbox?a=a_0123456789abcdefghijkl&x=1"]) expect(approvalFromHash(hash)).toBeNull();
     expect(notifyUrl({ open: "chat", conversation: "cv_1234567890123456789012" })).toBe("/#/chat?c=cv_1234567890123456789012");
     expect(conversationFromHash("#/chat?c=cv_1234567890123456789012")).toBe("cv_1234567890123456789012");
     expect(conversationFromHash("#/chat")).toBeNull();

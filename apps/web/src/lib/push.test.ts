@@ -55,6 +55,10 @@ describe("a tapped notification, as the service worker tells an open page", () =
     expect(readOpenMessage({ type: "invincible:open", open: "task", task: "task-abcdefghijkl" })).toEqual({ route: "task", task: "task-abcdefghijkl" });
     expect(readOpenMessage({ type: "invincible:open", open: "task", task: "<script>" })).toEqual({ route: "task" });
     expect(readOpenMessage({ type: "invincible:open", open: "inbox", task: "task-abcdefghijkl" })).toEqual({ route: "inbox" });
+    // An approval's own card, first in the Inbox; nothing else is ever taken for one.
+    expect(readOpenMessage({ type: "invincible:open", open: "inbox", conversation: null, action: "a_0123456789abcdefghijkl" })).toEqual({ route: "inbox", action: "a_0123456789abcdefghijkl" });
+    expect(readOpenMessage({ type: "invincible:open", open: "inbox", action: "a_../../x" })).toEqual({ route: "inbox" });
+    expect(readOpenMessage({ type: "invincible:open", open: "chat", action: "a_0123456789abcdefghijkl" })).toEqual({ route: "chat" });
     // A chat only goes with the chat page, and only when it reads as one.
     expect(readOpenMessage({ type: "invincible:open", open: "overview", conversation: chat })).toEqual({ route: "overview" });
     expect(readOpenMessage({ type: "invincible:open", open: "chat", conversation: "<script>" })).toEqual({ route: "chat" });

@@ -23,7 +23,7 @@ import { filterConversations } from "./lib/chats.ts";
 import { goToOf, hashOf, homeOf, keyedOf, landingOf, placesFor, routeOf, taskOf } from "./lib/nav.ts";
 import { closesKeyboard, keyboardOpen } from "./lib/viewport.ts";
 import { fromEdge, type Point, swiped } from "./lib/swipe.ts";
-import { conversationFromHash } from "@invincible/core/notify-payload";
+import { approvalFromHash, conversationFromHash } from "@invincible/core/notify-payload";
 import { readOpenMessage } from "./lib/push.ts";
 import { isShowingQuestion, showingAnswer } from "./lib/showing.ts";
 import { badgeMessage, type Badging, showBadge } from "./lib/badge.ts";
@@ -35,6 +35,8 @@ import { connectorsView } from "./views/connectors.ts";
 import { findingsView } from "./views/findings.ts";
 import { fleetView, openInvite } from "./views/fleet.ts";
 import { inboxView } from "./views/inbox.ts";
+import { needsCount } from "./views/needs.ts";
+import { workNow, workSources } from "./views/work-rows.ts";
 import { loopsView, openLoopSheet } from "./views/loops.ts";
 import { memoryView, openRemember } from "./views/memory.ts";
 import { skillsView } from "./views/skills.ts";
@@ -296,23 +298,33 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   document.addEventListener("pointerdown", ahead, { capture: true, passive: true, signal: lifetime.signal });
 
   // ---------- live chrome ----------
-  // What waits in the Inbox is counted in the page's title (the sidebar, Home and "…" count it where they show it).
-  live.inboxCount.watch((n) => {
-    document.title = document.title.replace(/^\(\d+\+?\) /, "");
-    if (n) document.title = `(${n}) ${document.title}`;
-  });
-  // The number on the app's icon: what waits in the Inbox, once it has been read (lib/badge.ts). The service worker
-  // is told it too, and counts on from there the pushes that come while the app is closed.
+  // One count of what needs you, everywhere (the iPhone's): the page's title and the app's icon say the count Home's
+  // header, its Needs you and the drawer say (views/needs.ts needsCount: each thing waiting, and each task that needs
+  // you), never the Inbox's alone beside it.
+  const needsNow = (): number => {
+    const work = hasWork ? workNow(ctx) : null;
+    return work ? needsCount(ctx, work) : live.inboxCount.value;
+  };
+  let titleLabel = "Invincible";
+  const retitle = (): void => {
+    const n = needsNow();
+    const title = `${n ? `(${n}) ` : ""}${titleLabel} · Invincible`;
+    if (document.title !== title) document.title = title;
+  };
+  // The number on the app's icon, once the Inbox has been read (lib/badge.ts). The service worker is told it too, and
+  // counts on from there the pushes that come while the app is closed.
+  let iconSaid = -1;
   const toIcon = () => {
     if (!live.inboxLoaded.value) return;
-    const n = live.inboxCount.value;
+    const n = needsNow();
+    if (n === iconSaid) return;
+    iconSaid = n;
     void showBadge(navigator as Badging, n);
     if (isSecureContext && "serviceWorker" in navigator) {
       navigator.serviceWorker.ready.then((registration) => registration.active?.postMessage(badgeMessage(n))).catch(() => {});
     }
   };
-  live.inboxCount.subscribe(toIcon);
-  live.inboxLoaded.watch(toIcon);
+  for (const source of [...workSources(ctx), live.inboxCount, live.inboxLoaded] as { subscribe(listener: () => void): () => void }[]) lifetime.signal.addEventListener("abort", source.subscribe(() => (retitle(), toIcon())));
   live.fleet.watch((fleet) => {
     if (!fleet) {
       // As wide as it will be, the counts' places held by figure spaces (a tabular digit's width), so the pill doesn't
@@ -353,7 +365,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   function render(): void {
     const route = routeFromHash() ?? home();
     const spec = visible.find((r) => r.id === route)!;
-    const opts = pending?.route === route ? pending.opts : route === "team" ? teamLocation(location.hash) : route === "task" ? { task: taskOf(location.hash) ?? undefined } : {};
+    const opts = pending?.route === route ? pending.opts : route === "team" ? teamLocation(location.hash) : route === "task" ? { task: taskOf(location.hash) ?? undefined } : route === "inbox" ? { approval: approvalFromHash(location.hash) ?? undefined } : {};
     pending = null;
     viewScope?.dispose();
     viewScope = new Scope();
@@ -366,8 +378,8 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     sidebar?.at({ route, task: route === "task" ? (opts.task ?? null) : null });
     watch();
     topTitle.textContent = spec.label;
-    const n = live.inboxCount.value;
-    document.title = `${n ? `(${n}) ` : ""}${spec.label} · Invincible`;
+    titleLabel = spec.label;
+    retitle();
     replace(main);
     VIEWS[route](main, ctx, { scope: viewScope, opts });
     // The top bar names the page only once the page's own heading has scrolled away.
@@ -400,7 +412,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       "message",
       (event: MessageEvent) => {
         const open = readOpenMessage(event.data);
-        if (open) ctx.navigate(open.route, open.conversation ? { conversation: open.conversation } : open.task ? { task: open.task } : {});
+        if (open) ctx.navigate(open.route, open.conversation ? { conversation: open.conversation } : open.task ? { task: open.task } : open.action ? { approval: open.action } : {});
         // The worker asks what this page shows, so a notification about that very thing says nothing over it (lib/showing.ts).
         else if (isShowingQuestion(event.data)) event.ports[0]?.postMessage(showingAnswer(location.hash));
         else if ((event.data as { type?: string } | null)?.type === "invincible:push-changed") void syncPush(base.api);

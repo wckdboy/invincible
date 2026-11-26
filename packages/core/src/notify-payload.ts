@@ -24,6 +24,8 @@ const TAG = /^[A-Za-z0-9._:-]{1,64}$/;
 export const isConversationId = (id: string): boolean => CONVERSATION.test(id);
 export const isNotifyTaskId = (id: string): boolean => TASK.test(id);
 export const isNotifyTag = (tag: string): boolean => TAG.test(tag);
+/** An approval's own action id, as a payload or an address may carry it. */
+export const isNotifyActionId = (id: string): boolean => ACTION.test(id);
 
 export interface NotifyPayload {
   v: 1;
@@ -101,9 +103,20 @@ export function readNotifyPayload(raw: unknown): NotifyPayload | null {
   };
 }
 
-/** The address a notification opens, within the app's own origin (a task's own thread: the web app's #/task/<id>). */
-export const notifyUrl = (payload: Pick<NotifyPayload, "open" | "conversation" | "task">): string =>
-  payload.open === "task" && payload.task ? `/#/task/${payload.task}` : `/#/${payload.open}${payload.conversation ? `?c=${payload.conversation}` : ""}`;
+/** The address a notification opens, within the app's own origin (a task's own thread: the web app's #/task/<id>; an
+ * approval's own card, first in the Inbox: #/inbox?a=<its action>). */
+export const notifyUrl = (payload: Pick<NotifyPayload, "open" | "conversation" | "task" | "action">): string =>
+  payload.open === "task" && payload.task
+    ? `/#/task/${payload.task}`
+    : payload.open === "inbox" && payload.action && ACTION.test(payload.action)
+      ? `/#/inbox?a=${payload.action}`
+      : `/#/${payload.open}${payload.conversation ? `?c=${payload.conversation}` : ""}`;
+
+/** An approval named in the app's address ("#/inbox?a=a_…"), or null. */
+export function approvalFromHash(hash: string): string | null {
+  const id = /^#\/inbox\?a=([A-Za-z0-9_-]+)$/.exec(hash)?.[1] ?? null;
+  return id && ACTION.test(id) ? id : null;
+}
 
 /** A kept chat named in the app's address by a notification ("#/chat?c=cv_…"), or null. */
 export function conversationFromHash(hash: string): string | null {

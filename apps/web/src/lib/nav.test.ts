@@ -90,6 +90,15 @@ describe("the app's places", () => {
 
   // Your words, 26 November 2026: "agent first ([the primary])"; on a phone, no tab bar: Home is the primary. And I11: at
   // desktop width the drawer's places are a sidebar that stays open, with Home beside it.
+  test("an approval has an address of its own, kept when the app opens at it: its card first in the Inbox", () => {
+    const id = "a_0123456789abcdefghijkl";
+    expect(hashOf("inbox", { approval: id })).toBe(`#/inbox?a=${id}`);
+    expect(hashOf("inbox", { approval: "<script>" })).toBe("#/inbox");
+    expect(landingOf("inbox", `#/inbox?a=${id}`)).toBe(`#/inbox?a=${id}`);
+    expect(landingOf("inbox", "#/inbox?a=nope")).toBe("#/inbox");
+    expect(routeOf(`#/inbox?a=${id}`, PLACES as never)).toBe("inbox");
+  });
+
   test("a phone and a wide screen both open on Home; a device that may not chat opens on its Inbox", () => {
     expect(homeOf(device(...OWNER), { narrow: true })).toBe("home");
     expect(homeOf(device(...OWNER), { narrow: false })).toBe("home");

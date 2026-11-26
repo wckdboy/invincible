@@ -24,6 +24,8 @@ export interface NavigateOptions {
   /** A persistent team room or direct conversation, and its selected view. */
   room?: string;
   teamTab?: TeamTab;
+  /** An approval to bring first in the Inbox (its card), as a notification or a link names it. */
+  approval?: string;
   /** A task to show in that room's timeline (from Work): it is brought into view and marked a moment. */
   task?: string;
 }

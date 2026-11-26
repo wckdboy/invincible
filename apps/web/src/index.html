@@ -1563,6 +1563,8 @@
       .team-task { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--card-pad); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-1); }
       /* A task opened from Work, marked a moment where it is (views/team.ts): a ring of its own, fading. */
       .team-task.is-focus { box-shadow: var(--shadow-1), 0 0 0 2px var(--work); transition: box-shadow 1.2s ease-out; }
+      /* An approval its address named (#/inbox?a=…): ringed a moment as it comes into view. */
+      .card.is-picked { box-shadow: 0 0 0 2px var(--focus); transition: box-shadow 1.2s ease-out; }
       .task-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
       .task-head strong { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
       .task-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-12); }

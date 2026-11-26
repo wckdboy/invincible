@@ -1,4 +1,4 @@
-import { GENERIC_NOTIFICATION, isConversationId, isNotifyTaskId, isQuietKind, NOTIFY_OPENS, type NotifyOpen, type NotifyPayload, notifyUrl, readNotifyPayload } from "@invincible/core/notify-payload";
+import { GENERIC_NOTIFICATION, isConversationId, isNotifyActionId, isNotifyTaskId, isQuietKind, NOTIFY_OPENS, type NotifyOpen, type NotifyPayload, notifyUrl, readNotifyPayload } from "@invincible/core/notify-payload";
 import { afterPush, badgeCount, type BadgeState, type Badging, NO_BADGE, readBadgeMessage, readBadgeState, showBadge } from "./lib/badge.ts";
 import { placeOf, readShowing, SHOWING_QUESTION, SHOWING_WAIT_MS, showsEveryPush, showsThatVeryThing } from "./lib/showing.ts";
 
@@ -162,14 +162,17 @@ interface OpenTarget {
   conversation?: string;
   /** An agent's task (with open "task"): its own thread. */
   task?: string;
+  /** An approval's own action (with open "inbox"): its card, first in the Inbox. */
+  action?: string;
 }
 
 function readTarget(data: unknown): OpenTarget {
-  const d = (data && typeof data === "object" ? data : {}) as { open?: unknown; conversation?: unknown; task?: unknown };
+  const d = (data && typeof data === "object" ? data : {}) as { open?: unknown; conversation?: unknown; task?: unknown; action?: unknown };
   const open = typeof d.open === "string" && (NOTIFY_OPENS as readonly string[]).includes(d.open) ? (d.open as NotifyOpen) : "inbox";
   const conversation = open === "chat" && typeof d.conversation === "string" && isConversationId(d.conversation) ? d.conversation : undefined;
   const task = open === "task" && typeof d.task === "string" && isNotifyTaskId(d.task) ? d.task : undefined;
-  return { open, ...(conversation ? { conversation } : {}), ...(task ? { task } : {}) };
+  const action = open === "inbox" && typeof d.action === "string" && isNotifyActionId(d.action) ? d.action : undefined;
+  return { open, ...(conversation ? { conversation } : {}), ...(task ? { task } : {}), ...(action ? { action } : {}) };
 }
 
 /** The app's own pages, open in this browser (another site's are none of its business). */
@@ -305,7 +308,7 @@ async function openFromNotification(data: unknown): Promise<void> {
   // The page you're looking at, else any that's open.
   const page = pages.find((p) => p.visibilityState === "visible") ?? pages[0];
   if (page) {
-    page.postMessage({ type: "invincible:open", open: target.open, conversation: target.conversation ?? null, ...(target.task ? { task: target.task } : {}) });
+    page.postMessage({ type: "invincible:open", open: target.open, conversation: target.conversation ?? null, ...(target.task ? { task: target.task } : {}), ...(target.action ? { action: target.action } : {}) });
     try {
       await page.focus?.();
       return;

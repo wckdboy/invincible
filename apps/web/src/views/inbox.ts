@@ -1,4 +1,5 @@
 import type { ActionView, LoopDraftView, LoopView, NoticeView, QuestionField, QuestionView, ScreenSessionView } from "@invincible/core";
+import { isNotifyActionId } from "@invincible/core/notify-payload";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
 import { noticeFrom } from "../lib/notices.ts";
@@ -7,7 +8,7 @@ import { hlcMs, relativeTime } from "../lib/time.ts";
 import type { ActionClass } from "../types.ts";
 import { badge, busy, button, callout, card, disclosure, empty, field, formActions, linkButton, listRow, note, onePrimary, pageBody, pageHead, rows, section, skeletonRows, type Tone } from "../ui/controls.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
-import { h, keepPlace, replace } from "../ui/dom.ts";
+import { h, keepPlace, prefersReducedMotion, replace } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { toast } from "../ui/toast.ts";
 import { factRow } from "./about-you.ts";
@@ -417,7 +418,12 @@ function decidedRow(ctx: Ctx, action: ActionView): HTMLElement {
   });
 }
 
-export const inboxView: View = (root, ctx, { scope }) => {
+export const inboxView: View = (root, ctx, { scope, opts }) => {
+  // An approval named in the address (#/inbox?a=…, a notification's or a link's): its card first, brought into view
+  // once and marked a moment; one no longer waiting says so.
+  const picked = opts.approval && isNotifyActionId(opts.approval) ? opts.approval : null;
+  const pickedNote = h("div");
+  let brought = false;
   const pairingsBox = h("div", { class: "stack" });
   const requestsBox = h("div", { class: "stack" });
   const draftsBox = h("div", { class: "stack" });
@@ -470,8 +476,11 @@ export const inboxView: View = (root, ctx, { scope }) => {
     const signature = JSON.stringify(list);
     if (signature !== shownWaiting) {
       shownWaiting = signature;
-      replace(actionsBox, ...list.map((a) => actionCard(ctx, a)));
+      const first = picked ? [...list.filter((a) => a.id === picked), ...list.filter((a) => a.id !== picked)] : list;
+      replace(actionsBox, ...first.map((a) => Object.assign(actionCard(ctx, a), { id: `action-${a.id}` })));
     }
+    replace(pickedNote, picked && ctx.live.inboxLoaded.value && !list.some((a) => a.id === picked) ? callout("quiet", "That approval isn't waiting any more: it was answered, or it expired (no answer in 24 hours means no). What was decided is under Recent decisions.") : null);
+    if (picked && !brought) bring(picked);
     actionsSection.hidden = !list.length;
     const decided = ctx.live.actions.value.filter((a) => !isWaiting(a)).slice(0, 6);
     keepPlace(historyRows, () => replace(historyRows, ...decided.map((a) => decidedRow(ctx, a))));
@@ -546,6 +555,19 @@ export const inboxView: View = (root, ctx, { scope }) => {
     renderAllClear();
   };
 
+  /** The picked approval's card, into view once the page shows it (it waits to be shown whole), and marked a moment. */
+  const bring = (id: string, tries = 30): void => {
+    const card = document.getElementById(`action-${id}`);
+    if (!card) return;
+    if (!card.getClientRects().length) {
+      if (tries > 0) scope.timeout(() => bring(id, tries - 1), 100);
+      return;
+    }
+    brought = true;
+    card.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    card.classList.add("is-picked");
+    scope.timeout(() => card.classList.remove("is-picked"), 2400);
+  };
   const renderAllClear = () => {
     // One primary on the page, whichever part was drawn again: the first decision (ui/controls.ts onePrimary).
     onePrimary(root);
@@ -606,7 +628,7 @@ export const inboxView: View = (root, ctx, { scope }) => {
       { class: "page narrow" },
       pageHead("Inbox", "Everything that needs you. Nothing here happens without your say."),
       // Shown whole once the Inbox has been read: what waits comes in at once, not section by section.
-      pageBody(reach.el, allClear, pairingsSection, screenSection, questionsSection, actionsSection, requestsSection, connectorsSection, draftsSection, aboutYouSection, noticesSection, read ? history : null),
+      pageBody(pickedNote, reach.el, allClear, pairingsSection, screenSection, questionsSection, actionsSection, requestsSection, connectorsSection, draftsSection, aboutYouSection, noticesSection, read ? history : null),
     ),
   );
 

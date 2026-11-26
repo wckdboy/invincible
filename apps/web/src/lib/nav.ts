@@ -1,3 +1,4 @@
+import { approvalFromHash, isNotifyActionId } from "@invincible/core/notify-payload";
 import type { AnyScope } from "../types.ts";
 import type { IconName } from "../ui/icons.ts";
 import { teamHash, teamLocation, type TeamLocation } from "./team.ts";
@@ -96,10 +97,11 @@ export function taskOf(hash: string): string | null {
 }
 
 /** Where a place is, with what it opens: a room (and its tab, and a task to bring into view) among the agents; a task's
- * own thread; any other place by its name. */
-export function hashOf(route: Route, opts: TeamLocation = {}): string {
+ * own thread; an approval's card, first in the Inbox; any other place by its name. */
+export function hashOf(route: Route, opts: TeamLocation & { approval?: string } = {}): string {
   if (route === "team") return teamHash(opts);
   if (route === "task") return opts.task && TASK_ID.test(opts.task) ? `#/task/${opts.task}` : "#/task";
+  if (route === "inbox") return opts.approval && isNotifyActionId(opts.approval) ? `#/inbox?a=${opts.approval}` : "#/inbox";
   return `#/${route}`;
 }
 
@@ -108,6 +110,7 @@ export function hashOf(route: Route, opts: TeamLocation = {}): string {
 export function landingOf(route: Route, hash: string): string {
   if (route === "team") return teamHash(teamLocation(hash));
   if (route === "task") return hashOf("task", { task: taskOf(hash) ?? undefined });
+  if (route === "inbox") return hashOf("inbox", { approval: approvalFromHash(hash) ?? undefined });
   return `#/${route}`;
 }
 

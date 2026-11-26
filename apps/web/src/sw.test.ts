@@ -278,6 +278,22 @@ describe("a tap opens the app at the right place", () => {
     expect(opened).toEqual([]);
   });
 
+  test("an approval's notification opens that very approval: its card first in the Inbox, in the window that's open or one of its own", async () => {
+    const approval = { v: 1, kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in the Inbox.", open: "inbox", tag: "t-approval0123456789abcd", action: "a_0123456789abcdefghijkl", approvable: true };
+    windows = [];
+    shown.length = 0;
+    opened.length = 0;
+    await push(approval);
+    expect(shown[0]!.options.data).toEqual({ open: "inbox", action: "a_0123456789abcdefghijkl" });
+    await tap();
+    expect(opened).toEqual(["/#/inbox?a=a_0123456789abcdefghijkl"]);
+    opened.length = 0;
+    windows = [windowAt(`${ORIGIN}/#/home`, "visible")];
+    await tap();
+    expect(windows[0]!.messages).toEqual([{ type: "invincible:open", open: "inbox", conversation: null, action: "a_0123456789abcdefghijkl" }]);
+    expect(opened).toEqual([]);
+  });
+
   test("a page that can't be brought forward, or another site's, isn't relied on: the place opens in a window of its own", async () => {
     shown.length = 0;
     opened.length = 0;
