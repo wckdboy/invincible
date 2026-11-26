@@ -538,7 +538,10 @@ try {
       if (goal.includes("TASK_")) {
         text = "1. Make the change.\n2. Run the required gate.\nDone when: the gate and independent review pass.";
         const write = goal.includes("TASK_KEEP") ? "write-keep" : goal.includes("TASK_GIVE") ? "write-give" : "write-sync";
-        if (body.model === "engineer") {
+        // A turn of an agent's work is offered the work's own tools, whatever role's models answer it: Noa's (a planner's)
+        // is worked as an engineer's is, so her task ends verified, as the place that shows it says.
+        const working = body.model === "engineer" || (body.tools ?? []).some((tool) => (tool as { function?: { name?: string } }).function?.name === "bash");
+        if (working) {
           if (goal.includes("TASK_FAIL")) text = "GIVE UP\nThe gate needs a Postgres this VM does not have: `bun test db/` exits 1 before any work, with ECONNREFUSED on 127.0.0.1:5432. Nothing in the workspace can start one; a task that brings the database up first would.";
           else if (goal.includes("TASK_KEEP") && turns.some((message) => message.role === "assistant")) text = "DONE\nThe importer reads ISO 8601 dates and the old day-first form; four new tests cover both, and the gate passes.";
           else if (turns.some((message) => message.role === "assistant")) text = "DONE\nVerified.";
