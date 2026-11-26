@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { HandedView } from "@invincible/core";
-import { handCommand, handedVerdict } from "../src/fabric-cli.ts";
+import { fabricCommand, handCommand, handedVerdict } from "../src/fabric-cli.ts";
 
 /*
  * `invincible hand` and `invincible handed`, against a stand-in node: what you type becomes the hand-off's input, its
@@ -90,5 +90,48 @@ describe("the commands", () => {
       out.mockRestore();
     }
     expect(process.exitCode).toBe(1);
+  });
+});
+
+describe("invincible fabric: the node's own switch", () => {
+  const printed = async (work: () => Promise<void>): Promise<string> => {
+    const out: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => void out.push(args.join(" ")));
+    try {
+      await work();
+    } finally {
+      log.mockRestore();
+    }
+    return out.join("\n");
+  };
+  const kept = () => {
+    let fabric: boolean | undefined;
+    return { readConfig: () => ({ ...(fabric === undefined ? {} : { fabric }) }), writeConfig: (c: { fabric: boolean }) => void (fabric = c.fabric), get: () => fabric };
+  };
+
+  test("a running node applies it at once, and says its sidecar's state", async () => {
+    const sent: unknown[] = [];
+    const api = { call: async (_name: string, input: unknown) => (sent.push(input), { on: true, state: "up", why: null, did: "did:key:z6MkFAKEFAKEFAKEFAKEFAKEFAKE", address: "qamp://did:key:z6MkFAKE@192.0.2.10:7410" }) };
+    const config = kept();
+    const text = await printed(() => fabricCommand(api as never, "on", config));
+    expect(sent).toEqual([{ on: true }]);
+    expect(text).toContain("fabric: on · its sidecar is up as did:key:z6MkFAKEFAKEFA… on 192.0.2.10:7410");
+    // The node wrote its own config: nothing here did.
+    expect(config.get()).toBeUndefined();
+  });
+
+  test("a node that isn't running keeps it in its config for its next start; status reads it", async () => {
+    const api = { call: async () => Promise.reject(new Error("no daemon on http://127.0.0.1:7400 — start it with `invincible serve`")) };
+    const config = kept();
+    expect(await printed(() => fabricCommand(api as never, "on", config))).toBe("fabric: on · the node isn't running: it applies this when it next starts");
+    expect(config.get()).toBe(true);
+    expect(await printed(() => fabricCommand(api as never, "status", config))).toBe("fabric: on · the node isn't running");
+  });
+
+  test("anything else is its usage, and a node's refusal is said as it is (nothing is written behind its back)", async () => {
+    const config = kept();
+    await expect(fabricCommand({ call: async () => ({}) } as never, "maybe", config)).rejects.toThrow("usage: invincible fabric on|off|status");
+    await expect(fabricCommand({ call: async () => Promise.reject(new Error("chats are yours alone")) } as never, "on", config)).rejects.toThrow("chats are yours alone");
+    expect(config.get()).toBeUndefined();
   });
 });

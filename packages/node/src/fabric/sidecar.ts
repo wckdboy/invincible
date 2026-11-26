@@ -20,6 +20,9 @@ const KEY_PREFIX = "qamp-sk1.";
 const SOCKET_PATH_MAX = 103;
 const MAX_BACKOFF_MS = 60_000;
 
+/** Why a node runs no sidecar while its own setting is off (home.ts NodeConfig.fabric), its default. */
+export const FABRIC_OFF = "the fabric is off on this node (invincible fabric on switches it on)";
+
 /** The sidecar process as the supervisor sees it (tests: a stand-in). */
 export interface SidecarProcess {
   /** Its first line on stdout: its address (qamp://…) when it listens, else its DID; null if it ended first. */
@@ -74,6 +77,8 @@ export interface SidecarOptions {
    * restart); null, the node runs no sidecar at all (tests, or a node told so), and nothing is tried again.
    */
   binary: () => string | null;
+  /** Why the node runs no sidecar now, though it has one to run (its own setting: the fabric is off); null: it runs one. */
+  off?: () => string | null;
   /** host:port to listen on (this node's tailnet address, never every interface); null: it only dials out. */
   listen: () => string | null;
   /** The name its MANIFEST gives (the node's). */
@@ -183,11 +188,14 @@ export class Sidecar {
     if (this.retry) clearTimeout(this.retry);
     this.retry = null;
     const binary = this.opts.binary();
-    if (binary === null) {
+    // Neither is tried again by itself: the node starts it when its setting changes.
+    const off = binary === null ? "this node runs no sidecar" : (this.opts.off?.() ?? null);
+    if (off) {
       this.state = "off";
-      this.why = "this node runs no sidecar";
+      this.why = off;
       return;
     }
+    if (binary === null) return;
     if (!existsSync(binary)) return this.off("Q-AMP isn't installed on this node: its pinned binary goes to <home>/bin/qamp (scripts/qamp-pin.sh; deploy.sh --qamp <file>)");
     // A binary from before the sidecar (0.1.0) runs grants' bridges and no sidecar: asked once, again when it changes.
     const stat = statSync(binary);
@@ -338,8 +346,8 @@ export class Sidecar {
     this.retry.unref?.();
   }
 
-  /** Stops it: SIGTERM (it drains its calls, up to 10 s), then SIGKILL if it won't. */
-  async stop(): Promise<void> {
+  /** Stops it: SIGTERM (it drains its calls, up to 10 s), then SIGKILL if it won't. `why`: what it says of itself after. */
+  async stop(why = "stopped"): Promise<void> {
     this.stopping = true;
     if (this.retry) clearTimeout(this.retry);
     this.retry = null;
@@ -349,7 +357,7 @@ export class Sidecar {
     const proc = this.proc;
     this.proc = null;
     this.state = "off";
-    this.why = "stopped";
+    this.why = why;
     if (proc) {
       proc.kill("SIGTERM");
       const how = await within(proc.exited, this.opts.stopGraceMs ?? 15_000, () => "killed" as const);

@@ -89,7 +89,7 @@ export async function startPair(opts: { a?: Partial<DaemonOptions>; b?: Partial<
   const store = new LedgerStore(homeA.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "pair", nodeName: "alpha" });
   store.close();
-  homeA.writeConfig({ v: 1, name: "alpha", fleet, port: portA, keystore, advertise: "127.0.0.1" });
+  homeA.writeConfig({ v: 1, name: "alpha", fleet, port: portA, keystore, advertise: "127.0.0.1", fabric: true });
   const a = await startDaemon(homeA, { capabilities: fakeCaps("alpha"), syncIntervalMs: 200, proxyPort: freePort(), log: logOf("alpha"), sidecar: { binary: QAMP, port: await freeUdpPort() }, defaultHeartbeat: false, archiveIntervalMs: false, ...opts.a });
   const callA = admin(homeA, portA);
 
@@ -103,7 +103,7 @@ export async function startPair(opts: { a?: Partial<DaemonOptions>; b?: Partial<
   storeB.expectFleet(approved.fleet);
   storeB.ingest((await signedPost<SyncPage>(joining.identity, a.endpoint, "/link/sync", { have: {} })).events);
   storeB.close();
-  homeB.writeConfig({ v: 1, name: "beta", fleet: approved.fleet, port: portB, keystore: joining.keystore, advertise: "127.0.0.1" });
+  homeB.writeConfig({ v: 1, name: "beta", fleet: approved.fleet, port: portB, keystore: joining.keystore, advertise: "127.0.0.1", fabric: true });
   const b = await startDaemon(homeB, { capabilities: fakeCaps("beta"), syncIntervalMs: 200, proxyPort: freePort(), log: logOf("beta"), sidecar: { binary: QAMP, port: await freeUdpPort() }, defaultHeartbeat: false, archiveIntervalMs: false, ...opts.b });
   const callB = admin(homeB, portB);
   // Each knows the other's transport key from the other's signed profile, and their link is on Q-AMP.

@@ -1,6 +1,7 @@
 import {
   ABOUT_YOU_TAG,
   ZONE_HEADER,
+  type FabricSettingView,
   LOOK_LIMITS,
   type LookHeld,
   type UnderwayTask,
@@ -215,6 +216,8 @@ export interface AppContext {
   fabric?: Fabric;
   /** Tasks handed to other nodes' agents, and handed here (fabric/handoff.ts). */
   handoffs?: Handoffs;
+  /** The node's own switch for its fabric (daemon.ts): set and applied now (`on`), or only read. */
+  fabricSetting?(on?: boolean): Promise<FabricSettingView>;
   tokens: GatewayTokens;
   arms: ArmTokens;
   /** Grants to agents on your other machines, over Q-AMP (qamp-grants.ts): each an arm, a chain and a bridge. */
@@ -4471,6 +4474,11 @@ export function createApp(ctx: AppContext) {
     qampGrants: (_input, p) => {
       ownerOfQamp(p);
       return { grants: ctx.qamp.list() };
+    },
+    fabricSetting: (input, p) => {
+      ownerOnly(p);
+      if (!ctx.fabricSetting) throw new HttpError(424, "this node has no fabric");
+      return ctx.fabricSetting(input.on);
     },
     handTask: (input, p) => {
       ownerOnly(p);

@@ -26,6 +26,11 @@ const Config = z.strictObject({
   advertise: z.string().nullable(),
   /** On a Mac: keep it from sleeping while the node runs (`invincible awake on`; keep-awake.ts). Absent: off. */
   keepAwake: z.boolean().optional(),
+  /**
+   * Its agents across nodes over Q-AMP, through its sidecar (`invincible fabric on`; docs/FABRIC.md). Absent: off, whatever
+   * binary it has: a `qamp` with a sidecar in its place switches nothing on by being there (the grants' bridges run it either way).
+   */
+  fabric: z.boolean().optional(),
 });
 export type NodeConfig = z.infer<typeof Config>;
 

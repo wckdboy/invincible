@@ -22,7 +22,7 @@ import { keyAddCommand, keyElsewhereLine } from "./key-cli.ts";
 import { skillsCommand } from "./skills-cli.ts";
 import { ruleCommand } from "./rule-cli.ts";
 import { qampCommand } from "./qamp-cli.ts";
-import { handCommand } from "./fabric-cli.ts";
+import { fabricCommand, handCommand } from "./fabric-cli.ts";
 import { computeCommand, parseEffort } from "./compute-cli.ts";
 import { checkGates, githubConnector, githubRepo, investigateFromCli, runFromCli, shipBranch } from "./run-cli.ts";
 import { askCommand, runsCommand, queueCommand, queueLines, turnLine, turnsCommand } from "./turn-cli.ts";
@@ -414,6 +414,8 @@ Agents (MCP, ACP)
                                   alone, through a bridge on this node's tailnet address. Prints what its machine runs
   qamp grants | qamp revoke <id>|--all
                                   the grants in force; end one, or every one, now (each also ends by itself)
+  fabric on|off|status            agents across this fleet's nodes over Q-AMP, through this node's sidecar: off by
+                                  default, whatever binary it has; on starts its sidecar now, off stops it (docs/FABRIC.md)
   hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools fleet,compute,place,ledger] [--budget 2] [--follow]
                                   a task for another node's agents, over Q-AMP: it runs there, its trail comes back as it
                                   goes, and its proof (signed by that node's own key) is checked here; --tools: what its
@@ -2087,6 +2089,9 @@ Evidence: invincible artifact ${i!.artifact}`));
     case "hand":
     case "handed":
       await handCommand(new Admin(home), command, [sub, ...rest].filter((x): x is string => typeof x === "string"), flags);
+      return;
+    case "fabric":
+      await fabricCommand(new Admin(home), sub, { readConfig: () => home.readConfig(), writeConfig: (change) => home.writeConfig({ ...home.readConfig(), ...change }) });
       return;
     case "archive":
       await archiveCommand(new Admin(home), sub, rest, flags, { confirm, readStdin: () => Bun.stdin.text() });

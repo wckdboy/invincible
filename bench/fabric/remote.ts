@@ -109,7 +109,7 @@ if (role === "serve") {
   const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "q5-bench", nodeName: "server" });
   store.close();
-  home.writeConfig({ v: 1, name: "server", fleet, port: PORT, keystore, advertise: ADVERTISE });
+  home.writeConfig({ v: 1, name: "server", fleet, port: PORT, keystore, advertise: ADVERTISE, fabric: true });
   node = await startDaemon(home, base("server"));
   const call = admin(home, PORT);
   // Stand-in models for its agent's work: the engineer writes a file, the reviewer passes it.
@@ -205,7 +205,7 @@ try {
   const serverEndpoint = join_.invite.e;
   store.ingest((await signedPost<SyncPage>(joining.identity, serverEndpoint, "/link/sync", { have: {} })).events);
   store.close();
-  home.writeConfig({ v: 1, name: "client", fleet: approved.fleet, port: PORT, keystore: joining.keystore, advertise: ADVERTISE });
+  home.writeConfig({ v: 1, name: "client", fleet: approved.fleet, port: PORT, keystore: joining.keystore, advertise: ADVERTISE, fabric: true });
   node = await startDaemon(home, base("client"));
   const me = node;
   const call = admin(home, PORT);

@@ -49,7 +49,10 @@ const Env = z.object({
     .string()
     .refine((p) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p), "an absolute path")
     .optional(),
-  /** off: this node runs no Q-AMP sidecar, and every link to another node goes over HTTPS with signed requests (docs/FABRIC.md). */
+  /**
+   * off: this node runs no Q-AMP sidecar, whatever its own setting says (`invincible fabric`, off by default), and every
+   * link to another node goes over HTTPS with signed requests (docs/FABRIC.md). on: as its setting says.
+   */
   INVINCIBLE_QAMP: z.enum(["on", "off"]).optional(),
   /** The UDP port its sidecar listens on, on its advertised address (default 7410: docs/ARCHITECTURE.md §9). */
   INVINCIBLE_QAMP_PORT: z.coerce.number().int().min(1).max(65_535).optional(),

@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, decodeHlc, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, screenSessionView } from "@invincible/core";
+import { canonical, decodeHlc, type FabricSettingView, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, screenSessionView } from "@invincible/core";
 import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, signInWindowsOf, windowsOf } from "@invincible/models";
 // The apps' own words for a task's verdict, cost and what can be done with it (the CLI reads them too).
 import { activityOf } from "../../../apps/web/src/lib/live-activity.ts";
@@ -23,7 +23,7 @@ import { ComputeService, liveHost, type Measure } from "./compute/service.ts";
 import { ArmTokens, PRIMARY_ARM } from "./arms.ts";
 import { QampGrants, type QampRunner, qampRunner, unspecified } from "./qamp-grants.ts";
 import { Fabric, fabricRequest, type FabricPrincipal } from "./fabric/service.ts";
-import { Sidecar, sidecarListen, type SpawnSidecar } from "./fabric/sidecar.ts";
+import { FABRIC_OFF, Sidecar, sidecarListen, type SpawnSidecar } from "./fabric/sidecar.ts";
 import { Handoffs } from "./fabric/handoff.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, skillsAdapter, evalsAdapter } from "./archive/adapters.ts";
@@ -94,6 +94,8 @@ export interface Daemon {
   chats: ChatStore;
   /** The doctor: one look at this node's whole installation (doctor.ts). */
   doctor(opts?: DoctorOptions): Promise<DoctorRun>;
+  /** Its own switch for the fabric (`invincible fabric on|off`): set and applied now (`on`), or only read (none). */
+  fabricSetting(on?: boolean): Promise<FabricSettingView>;
   /** Notifications to your paired devices (notify.ts). */
   notify: NotifyService;
   stop(): Promise<void>;
@@ -301,8 +303,10 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   // transport key; HTTPS with signed requests to any peer it can't be had for, as before it.
   const qampBin = env.INVINCIBLE_QAMP_BIN ?? join(home.dir, "bin", "qamp");
   // (With test capabilities, none unless the test asks for one: no test binds a real port by accident. INVINCIBLE_QAMP=off:
-  // none at all, every link over HTTPS, the way back if Q-AMP misbehaves.)
+  // none at all, every link over HTTPS, the way back if Q-AMP misbehaves, whatever the node's setting says.)
   const sidecarOpts = opts.sidecar === false || env.INVINCIBLE_QAMP === "off" || (opts.sidecar === undefined && opts.capabilities) ? null : (opts.sidecar ?? {});
+  // Its own setting, off by default: the binary alone switches nothing on (the grants' bridges run it either way).
+  let fabricOn = config.fabric === true;
   const qampPort = sidecarOpts?.port ?? env.INVINCIBLE_QAMP_PORT ?? QAMP_SIDECAR_PORT;
   /** What the profile last said of its endpoint: kept while the sidecar is down, so its profile doesn't flap. */
   let qampEndpoint: QampEndpoint | null = null;
@@ -310,6 +314,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const sidecar = new Sidecar({
     home: home.dir,
     binary: () => (sidecarOpts === null ? null : sidecarOpts.binary !== undefined ? sidecarOpts.binary : qampBin),
+    off: () => (fabricOn ? null : FABRIC_OFF),
     // Its advertised address alone, never every interface: with no other to give it, it only dials out.
     listen: () => sidecarListen(advertise, qampPort, unspecified),
     name: config.name,
@@ -350,6 +355,31 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   /** Its capabilities as its profile says them: with its Q-AMP endpoint, once its sidecar has said one. */
   const withQamp = (c: Capabilities): Capabilities => (qampEndpoint ? { ...c, qamp: qampEndpoint } : c);
   let profiled = false;
+  /**
+   * Its own switch, kept in its config: on starts its sidecar now (its profile names its endpoint once it listens); off
+   * stops it, and its profile names none from then on, so its peers reach it over HTTPS alone.
+   */
+  let switching: Promise<unknown> = Promise.resolve();
+  const fabricView = (): FabricSettingView => ({ on: fabricOn, state: sidecar.state, why: sidecar.why, did: sidecar.did, address: sidecar.address });
+  const fabricSetting = (on?: boolean): Promise<FabricSettingView> => {
+    const next = switching.then(async () => {
+      if (on === undefined || on === fabricOn) return fabricView();
+      home.writeConfig({ ...home.readConfig(), fabric: on });
+      fabricOn = on;
+      log(`fabric: switched ${on ? "on" : "off"} on this node`);
+      if (on) await sidecar.start();
+      else {
+        await sidecar.stop(FABRIC_OFF);
+        if (qampEndpoint) {
+          qampEndpoint = null;
+          if (profiled) publishProfile(store, identity, endpoint, withQamp(caps));
+        }
+      }
+      return fabricView();
+    });
+    switching = next.catch(() => {});
+    return next;
+  };
   const sync = new SyncEngine(store, identity, { intervalMs: opts.syncIntervalMs, log, transport: fabric });
   const stopPush = store.onEmit((event) => sync.push([event]));
   const pairing = new PairingHost(store, identity, endpoint);
@@ -751,6 +781,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     sync,
     fabric,
     handoffs,
+    fabricSetting,
     tokens,
     arms,
     qamp,
@@ -944,6 +975,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     looks,
     chats,
     doctor: (options) => runDoctor(doctorDeps, options),
+    fabricSetting,
     notify,
     /**
      * In order: take nothing new (stop listening; requests under way go on), start nothing

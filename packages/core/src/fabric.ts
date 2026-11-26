@@ -211,6 +211,19 @@ export function proofRefusal(attestation: unknown, expect: ProofExpectation): st
   return null;
 }
 
+/**
+ * The node's own switch for its fabric (`invincible fabric on|off`, the fabricSetting route), off by default: what it is
+ * set to, and its sidecar's state and why, as they are once the switch has been applied.
+ */
+export const FabricSettingInput = z.strictObject({ on: z.boolean().optional() });
+export interface FabricSettingView {
+  on: boolean;
+  state: "off" | "starting" | "up" | "down";
+  why: string | null;
+  did: string | null;
+  address: string | null;
+}
+
 /** A task this node handed to another, as it shows it. */
 export interface HandedView {
   id: string;

@@ -113,7 +113,7 @@ async function node(name: string, founder: Node | null, extra: Partial<DaemonOpt
     const store = new LedgerStore(home.ledgerPath);
     const fleet = foundFleet(store, identity, { fleetName: "bench", nodeName: name });
     store.close();
-    home.writeConfig({ v: 1, name, fleet, port, keystore, advertise: "127.0.0.1" });
+    home.writeConfig({ v: 1, name, fleet, port, keystore, advertise: "127.0.0.1", fabric: true });
   } else {
     const invite = await founder.call<{ invite: string }>("createInvite", { kind: "node" });
     const joining = await home.createIdentity("file");
@@ -126,7 +126,7 @@ async function node(name: string, founder: Node | null, extra: Partial<DaemonOpt
     store.expectFleet(approved.fleet);
     store.ingest((await signedPost<SyncPage>(joining.identity, founder.d.endpoint, "/link/sync", { have: {} })).events);
     store.close();
-    home.writeConfig({ v: 1, name, fleet: approved.fleet, port, keystore: joining.keystore, advertise: "127.0.0.1" });
+    home.writeConfig({ v: 1, name, fleet: approved.fleet, port, keystore: joining.keystore, advertise: "127.0.0.1", fabric: true });
   }
   const d = await startDaemon(home, base);
   nodes.push(d);

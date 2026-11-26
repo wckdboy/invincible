@@ -7,7 +7,7 @@ import { ActionId, ArtifactId, ConnectorId, LoopName, LoopStatus, NoticeKey, Not
 import { Conclusion, InvestigationId, InvestigationStatus, PredictionOutcome, Preregistration } from "./investigations.ts";
 import { MAX_ORDER_DAYS, OrderId, OrderPattern } from "./orders.ts";
 import { QampGrantInput, QampRevokeInput } from "./qamp.ts";
-import { HandId, HandTaskInput } from "./fabric.ts";
+import { FabricSettingInput, HandId, HandTaskInput } from "./fabric.ts";
 import { RuleInput, RuleName, RuleToldInput, RuleTrippedInput } from "./rules.ts";
 import { SeatAddInput, SeatIdInput, SeatPolicyInput, SeatServesInput, SeatSignInAnswerInput, SeatSignInCancelInput } from "./seats.ts";
 import { type Scope, Scope as ScopeSchema } from "./scopes.ts";
@@ -1465,6 +1465,8 @@ export const routes = {
   qampRevoke: { method: "POST", path: "/api/qamp/revoke", scope: "fleet:admin", input: QampRevokeInput },
 
   // ---- The fabric (fabric.ts; docs/ARCHITECTURE.md §3): a task handed to another node's agents, over Q-AMP ----
+  /** The node's own switch for its fabric, off by default: set it (`on`) or read it (none). Yours alone. */
+  fabricSetting: { method: "POST", path: "/api/fabric/setting", scope: "fleet:admin", input: FabricSettingInput },
   /** Hand a task to another node's agents: it runs there, its trail streams back, and its proof is checked here. Yours alone. */
   handTask: { method: "POST", path: "/api/fabric/hand", scope: "fleet:admin", input: HandTaskInput },
   /** The tasks this node handed on, the latest first, without their trails. */

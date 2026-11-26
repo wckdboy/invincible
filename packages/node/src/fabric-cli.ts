@@ -1,4 +1,4 @@
-import { FABRIC_RUN_TOOLS, type HandedView, HandTaskInput } from "@invincible/core";
+import { FABRIC_RUN_TOOLS, type FabricSettingView, type HandedView, HandTaskInput } from "@invincible/core";
 // The apps' own words for a verdict (the CLI reads them as the apps do).
 import { type ProofFacts, verdictOf } from "../../../apps/web/src/lib/steps.ts";
 import type { Api } from "./loop-cli.ts";
@@ -53,6 +53,41 @@ function verdictExit(view: HandedView): void {
   const verdict = handedVerdict(view);
   console.log(`\n${bold(verdict?.word ?? view.status)}${view.proof.state === "checked" ? dim(` · its proof checked: signed by ${view.node.name}'s own key, for this hand-off`) : ""}`);
   if (!verdict?.proven) process.exitCode = 1;
+}
+
+export const FABRIC_USAGE = "usage: invincible fabric on|off|status";
+
+/** Where the setting is kept: the node's config (home.ts), written here only when the node isn't running. */
+export interface FabricConfig {
+  readConfig(): { fabric?: boolean };
+  writeConfig(change: { fabric: boolean }): void;
+}
+
+function fabricLine(view: FabricSettingView): string {
+  const sidecar = view.state === "up" ? `its sidecar is up as ${view.did?.slice(0, 22)}…${view.address ? ` on ${view.address.split("@")[1]}` : " (dials out only)"}` : `its sidecar is ${view.state}${view.why ? `: ${view.why}` : ""}`;
+  return `fabric: ${view.on ? "on" : "off"} · ${sidecar}`;
+}
+
+/**
+ * `invincible fabric on|off|status`: the node's own switch for its fabric, off by default (home.ts NodeConfig.fabric). A
+ * running node applies it at once (on: its sidecar starts; off: it stops, and its profile names no endpoint); one that
+ * isn't running keeps it in its config for its next start.
+ */
+export async function fabricCommand(api: Api, sub: string | undefined, config: FabricConfig): Promise<void> {
+  if (sub !== undefined && sub !== "on" && sub !== "off" && sub !== "status") throw new Error(FABRIC_USAGE);
+  const on = sub === "on" ? true : sub === "off" ? false : undefined;
+  let view: FabricSettingView;
+  try {
+    view = await api.call<FabricSettingView>("fabricSetting", on === undefined ? {} : { on });
+  } catch (error) {
+    if (!/^no daemon on/.test((error as Error).message)) throw error;
+    if (on !== undefined) config.writeConfig({ fabric: on });
+    console.log(`fabric: ${(on ?? config.readConfig().fabric === true) ? "on" : "off"} · the node isn't running${on === undefined ? "" : ": it applies this when it next starts"}`);
+    return;
+  }
+  console.log(fabricLine(view));
+  if (on === true && view.state !== "up") console.log(dim("It goes on trying by itself; invincible doctor says why, and docs/FABRIC.md what to check."));
+  if (on === false) console.log(dim("Every link to another node goes over HTTPS with signed requests, as before the fabric."));
 }
 
 export async function handCommand(api: Api, command: "hand" | "handed", rest: string[], flags: Flags): Promise<void> {

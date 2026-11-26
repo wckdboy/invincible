@@ -4,9 +4,10 @@ Phase 2 of [PLAN.md](PLAN.md), as built (26 November 2026). [ARCHITECTURE](ARCHI
 [SECURITY](SECURITY.md) says what it defends against and how each claim is tested. This page says what runs where, the
 protocol for proof across nodes, the numbers, and how to switch it on.
 
-**State:** on main, dormant. Today's pin is Q-AMP 0.1.0, which has no sidecar, so every node stays on HTTPS with signed
-requests and its Doctor says why. It switches on when the pin moves to a Q-AMP release with the sidecar, which waits for
-the independent security review of the fabric and its fixes.
+**State:** on main, dormant. It is off on every node until that node's own setting says so (`invincible fabric on`), and
+today's pin is Q-AMP 0.1.0, which has no sidecar, so every node stays on HTTPS with signed requests and its Doctor says
+why. The pin moves to a Q-AMP release with the sidecar only after the independent security review of the fabric is
+answered and its fixes reviewed again.
 
 ## The sidecar under every node
 
@@ -23,13 +24,17 @@ the independent security review of the fabric and its fixes.
   - It is asked first whether it has a sidecar (0.1.0 has none), and again only when the file changes.
   - The node watches it, and starts it again when it stops: 1 s, then longer each time, to a minute, and at once after
     one that ran a while. It stops a sidecar a dead node left running, by its pid.
-  - `INVINCIBLE_QAMP=off`: no sidecar at all.
+  - **Only when the node's own setting says so:** `invincible fabric on|off|status` (the `fabricSetting` route; `fabric`
+    in its `config.json`), off by default. A binary with a sidecar switches nothing on by being there: no sidecar is
+    started and no transport key made. A running node applies the setting at once: on starts its sidecar; off stops it,
+    and its profile names no endpoint from then on. The grants' bridges run the same binary either way.
+  - `INVINCIBLE_QAMP=off`: no sidecar at all, whatever the setting says.
 - **Its endpoint in the node's profile.** Once the sidecar has said where it listens, the node's signed profile
   (`node.profile`, `caps.qamp`) names its transport key and address. It is kept while the sidecar is down, so the
   profile doesn't flap.
 - **The Doctor** says it in one line (`node.qamp`):
   - up, with its key, address and version;
-  - off (not installed, or told so), which is no fault;
+  - off (switched off, not installed, or told so), which is no fault;
   - a 0.1.0 binary, which needs you;
   - down, and why.
 
@@ -60,7 +65,7 @@ the independent security review of the fabric and its fixes.
 
 `invincible hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools fleet,compute,place,ledger] [--budget 2]
 [--follow]`, and `invincible handed [<id> [--follow] | stop <id>]` (its exit code is the verdict: 0 means proven).
-The routes are `handTask`, `handedTasks`, `handedTask` and `stopHanded`. One Q-AMP call between the two nodes'
+The routes are `handTask`, `handedTasks`, `handedTask` and `stopHanded` (and `fabricSetting`, the switch). One Q-AMP call between the two nodes'
 transport keys carries all of it:
 
 1. **The giver opens the call** with the task: `{handoff, nonce, goal, title, gates, budgetUsd?, agent?, tools}`. The
@@ -203,23 +208,27 @@ answered and a Q-AMP release with the sidecar is pinned.
    - **With a deploy:** `scripts/deploy.sh <host> --qamp <the release's binary for that machine>`. The node is restarted
      as every deploy restarts it.
    - **Without one:** on the host, as the node's user, `source scripts/qamp-pin.sh && install_qamp <the binary>
-     ~/.invincible/bin`. The node needs no restart: its supervisor looks for the binary again within a minute, asks it
-     whether it has a sidecar, and starts it.
-3. **The port.** On a Linux node with UFW, `deploy.sh --open-qamp` (UDP 7410–7419, `tailscale0` alone), or the one rule
+     ~/.invincible/bin`. The node needs no restart.
+
+   The binary alone switches nothing on.
+3. **Switch it on, on each node:** `invincible fabric on`. A running node starts its sidecar at once (and asks the binary
+   whether it has one); a stopped one does when it starts.
+4. **The port.** On a Linux node with UFW, `deploy.sh --open-qamp` (UDP 7410–7419, `tailscale0` alone), or the one rule
    `ufw allow in on tailscale0 to any port 7410 proto udp`. A Mac with its application firewall off needs nothing; with
    it on, allow the qamp binary.
-4. **Check, on each node:**
+5. **Check, on each node:**
    - `invincible doctor`: `node.qamp` says its sidecar is up on `192.0.2.10:7410` with its version, and
      `mind.sync.<peer>` says "over Q-AMP";
    - `invincible status`: the peer reads `online <n>ms q-amp`;
    - the fleet's page in the app says "· Q-AMP".
-5. **Measure the pair** (read-only, or with a test agent and task of your own):
+6. **Measure the pair** (read-only, or with a test agent and task of your own):
    - `invincible status` on each, for the link's round trip;
    - `invincible hand <the other node> "Write hello.txt" --gate "test -f hello.txt" --agent <a test agent there>
      --follow`, then `invincible handed <id>`: its first output and end are `firstOutputAt` and `endedAt` against
      `createdAt` in `handedTask`.
-6. **Back to HTTPS alone**, if Q-AMP misbehaves: `INVINCIBLE_QAMP=off` in the node's service environment and a restart,
-   or close UDP 7410. Each peer falls back within one failed call and tries Q-AMP again later, so nothing waits on it.
+7. **Back to HTTPS alone**, if Q-AMP misbehaves: `invincible fabric off` (at once, no restart), `INVINCIBLE_QAMP=off` in
+   the node's service environment and a restart, or close UDP 7410. Each peer falls back within one failed call and
+   tries Q-AMP again later, so nothing waits on it.
 
 ## What isn't verified yet
 
