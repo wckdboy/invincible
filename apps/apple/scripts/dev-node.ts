@@ -14,12 +14,24 @@
  * sets itself a look a minute ahead: both are under way above that chat's message box, and the look comes back as its own.
  *
  * Pairing waits for you as a node does: the app's request is printed with its code, and approved only once you write
- * that code into <dir>/approve (`echo 482913 > <dir>/approve`), having compared it with the app's.
+ * that code into <dir>/approve (`echo 482913 > <dir>/approve`), having compared it with the app's. With --auto-approve
+ * the first device that asks is let in without a code (the app's UI tests pair that way: a throwaway node on loopback).
  *
- *   bun apps/apple/scripts/dev-node.ts [--dir <dir>]    (SIGINT or SIGTERM stops it and deletes its home)
+ * With --heavy it holds what a busy fleet does, to use the app hard: ten agents, a hundred more tasks (proven, reviewed
+ * but not proven, failed, queued), long chats with the primary, and more approvals waiting.
  *
- * <dir> (default: a new temp directory, printed) receives invite.txt, and pairing.txt while a request waits. The node's
- * home is made inside it too, so a run that is killed outright leaves its home there, not in the system's temp folder.
+ * The app comes in through a front of the dev node's own (never a node's): every /api request it sends is counted, and
+ * under /__dev/ it answers the UI tests (apps/apple/InvincibleUITests):
+ *   GET  /__dev/invite             the invite link
+ *   GET  /__dev/requests?since=ms  the app's requests since then: { now, requests: [{ at, method, path, status, ms }] }
+ *   POST /__dev/blackhole?on=1|0   a dead link while on: nothing goes through either way, as a half-open connection
+ *   POST /__dev/poke               something that needs you, at once (a device asking to join): { label, at }
+ *
+ *   bun apps/apple/scripts/dev-node.ts [--dir <dir>] [--heavy] [--auto-approve]   (SIGINT or SIGTERM stops it, deleting its home)
+ *
+ * <dir> (default: a new temp directory, printed) receives invite.txt, front.txt (the front's address), and pairing.txt
+ * while a request waits. The node's home is made inside it too, so a run that is killed outright leaves its home there,
+ * not in the system's temp folder.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,6 +48,8 @@ const flag = (name: string): string | undefined => {
   const at = process.argv.indexOf(`--${name}`);
   return at < 0 ? undefined : process.argv[at + 1];
 };
+const heavy = process.argv.includes("--heavy");
+const autoApprove = process.argv.includes("--auto-approve");
 // The node's key goes to a file in the temp home, never to the OS keychain.
 process.env.INVINCIBLE_KEYSTORE = "file";
 const chosen = flag("dir");
@@ -69,7 +83,8 @@ const mind = new LedgerStore(home.ledgerPath);
 const fleet = foundFleet(mind, identity, { fleetName: "homelab", nodeName: "keep" });
 mind.close();
 home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
-const caps = { os: "linux", arch: "x64", hostname: "keep", cores: 16, cpu: "stand-in", memoryGb: 32, hasBattery: false, gpu: [], docker: true, vm: { kvm: true, tools: ["kata"] }, tools: ["docker"], localModels: [], tailscale: null, sandbox: { image: true, networks: true, vm: true } };
+// (A busy fleet keeps ten agents' VMs: each holds its share of the memory while it is kept.)
+const caps = { os: "linux", arch: "x64", hostname: "keep", cores: heavy ? 64 : 16, cpu: "stand-in", memoryGb: heavy ? 192 : 32, hasBattery: false, gpu: [], docker: true, vm: { kvm: true, tools: ["kata"] }, tools: ["docker"], localModels: [], tailscale: null, sandbox: { image: true, networks: true, vm: true } };
 // Builder's task stays at its first command, so one agent is always at work; Researcher's answer never comes, so one is always
 // thinking. Coder's gate can't run in its VM.
 const docker = fakeDocker();
@@ -112,8 +127,15 @@ docker.onExec = async (_container: string, command: string[]) => {
     await hold;
   }
   if (text.includes("gate-fail")) return { code: 1, stdout: "", stderr: "error: connect ECONNREFUSED 127.0.0.1:5432" };
+  // A task whose gate fails until its work is done (--heavy's proven ones): before the work it shows what is missing.
+  const wrote = /write-prove-([a-z0-9]+)/.exec(text)?.[1];
+  if (wrote) proven.add(wrote);
+  const proves = /gate-prove-([a-z0-9]+)/.exec(text)?.[1];
+  if (proves) return proven.has(proves) ? { code: 0, stdout: "4 pass, 0 fail" } : { code: 1, stdout: "", stderr: "1 fail: expected the change, and it isn't there yet" };
   return { code: 0, stdout: text.includes("gate-") ? "required gate passed" : "command completed" };
 };
+/** The proven tasks whose work has been done (their gates pass from then on). */
+const proven = new Set<string>();
 
 // ---------- stand-in models ----------
 const PRIMARY = "Good evening. This is a stand-in model on a throwaway node, so the words are canned, but they stream to you as a real model's would: a word at a time, into this bubble, until the answer is done.";
@@ -162,6 +184,17 @@ const SHOWN = [
   JSON.stringify(["Ship it", "Hold until Monday"]),
   "```",
 ].join("\n");
+/** What a long chat of --heavy's is answered with, each time: a few paragraphs, as a real answer runs. */
+const SEEDED = [
+  "Here is where that stands. The sync engine now resumes after a dropped connection, and the test that drops it passes on every node.",
+  "",
+  "Two things are left: the importer's day-first dates, which Writer has in hand, and the migration that needs a fresh database, which Coder is checking.",
+  "",
+  "- The release notes are drafted from the merged pull requests.",
+  "- Nothing has been sent outward without your approval.",
+  "",
+  "I'll say when the last gate passes.",
+].join("\n");
 /** A stand-in engineer's call to its bash tool, streamed as an OpenAI-compatible tool call. */
 const bashCall = (command: string): Response =>
   new Response(`data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_stand_in", function: { name: "bash", arguments: JSON.stringify({ command }) } }] } }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -205,7 +238,8 @@ const model = Bun.serve({
     const goal = JSON.stringify(turns[0] ?? "");
     if (goal.includes("TASK_")) {
       let text = "1. Make the change.\n2. Run the required gate.\nDone when: the gate and independent review pass.";
-      const write = goal.includes("TASK_KEEP") ? "write-keep" : "write-sync";
+      const proves = /TASK_PROVE_([a-z0-9]+)/.exec(goal)?.[1];
+      const write = proves ? `write-prove-${proves}` : goal.includes("TASK_KEEP") ? "write-keep" : "write-sync";
       // Whoever works it: an engineer, or an agent offered its tools on its own role's models (Writer works on the planner's).
       if (body.model === "engineer" || (body.model !== "reviewer" && !!body.tools?.length)) {
         if (goal.includes("TASK_FAIL")) text = "GIVE UP\nThe gate needs a Postgres this VM does not have: `bun test db/` exits 1 before any work, with ECONNREFUSED on 127.0.0.1:5432.";
@@ -233,6 +267,8 @@ const model = Bun.serve({
     // message box, with its Stop. Asked to look again, it sets itself a look a minute ahead: there too, with its Cancel.
     // Each done, it says what its tools said; and a look of its that comes is answered with what it found.
     const offered = new Set((body.tools ?? []).map((t) => (t as { function?: { name?: string } }).function?.name));
+    // A long chat of --heavy's, written at once.
+    if (asked.includes("SEED")) return stream(SEEDED, 0);
     if (asked.includes("A look you set yourself")) return stream("I looked again, as I said I would: the importer check is still at its first command. Nothing needs you yet.", 30);
     const plan: [string, unknown][] = [];
     if (/\b(hand|give)\b/i.test(asked) && offered.has("team_give")) plan.push(["team_give", { title: "Check the importer's dates", goal: "TASK_HOLD: check that the importer reads ISO 8601 dates, with a test.", gates: ["bun test importer # gate-hold"] }]);
@@ -359,7 +395,7 @@ const agents = [
 ];
 for (const agent of agents) await admin("saveAgent", agent);
 await admin("provisionAgent", { id: "operator", desktop: true });
-await admin("setComputeLimit", { node: started.identity.id, cores: 16, memoryGb: 32, sandboxes: 6 });
+await admin("setComputeLimit", { node: started.identity.id, cores: caps.cores, memoryGb: caps.memoryGb, sandboxes: heavy ? 12 : 6 });
 const ended = (id: string) => async () => !["queued", "running"].includes((await admin("team")).tasks.find((t: { id: string }) => t.id === id)?.status ?? "queued");
 const own: Record<string, string> = {};
 for (const id of ["builder", "writer", "researcher", "coder"]) own[id] = (await admin("directAgent", { id })).room.id;
@@ -399,13 +435,155 @@ await admin("requestSecret", { name: "github-token", purpose: "To open the pull 
 await admin("setRule", { name: "pushes", does: "tell", words: ["git"], contains: "push" });
 await admin("ruleTold", { run: "q-release", rule: "pushes", command: "git push origin release/0.4", exitCode: 0 });
 
+// ---------- --heavy: a busy fleet ----------
+/** A message to the primary, its answer streamed to its end: the kept chat it is in. */
+const chatOnce = async (input: Record<string, unknown>): Promise<string | null> => {
+  const response = await fetch(`http://127.0.0.1:${port}${routes.chat!.path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify(input) });
+  if (!response.ok) throw new Error(`chat: ${response.status} ${await response.text()}`);
+  let kept: string | null = null;
+  for (const line of (await response.text()).split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const event = JSON.parse(line.slice(5)) as { type?: string; id?: string; conversation?: string };
+    if (event.type === "conversation" && event.id) kept = event.id;
+    if (event.type === "turn" && event.conversation) kept = event.conversation;
+  }
+  return kept;
+};
+if (heavy) {
+  const started = Date.now();
+  const more = [
+    { id: "designer", name: "Designer", role: "planner", instructions: "Keeps the apps' screens consistent, and measures them." },
+    { id: "tester", name: "Tester", role: "engineer", instructions: "Writes the failing test first, then hands it over." },
+    { id: "ops", name: "Ops", role: "engineer", instructions: "Keeps the nodes up, their backups taken and their disks clear." },
+    { id: "docs", name: "Docs", role: "planner", instructions: "Writes what each change means for whoever reads the docs next." },
+  ];
+  for (const agent of more) await admin("saveAgent", agent);
+  for (const { id } of more) own[id] = (await admin("directAgent", { id })).room.id;
+  // A hundred more tasks: proven (a gate failed before the work and passes after), reviewed but not proven (each gate
+  // passed before), failed, and queued behind Builder's, which never ends.
+  const subjects = ["the importer", "sync", "the ledger", "pairing", "the vault", "the fleet view", "backups", "the gateway", "notifications", "the CLI"];
+  const plan: { agent: string; kind: "prove" | "keep" | "fail" | "queue" }[] = [
+    ...Array.from({ length: 30 }, (_, i) => ({ agent: ["writer", "designer", "tester", "ops", "docs"][i % 5]!, kind: "prove" as const })),
+    ...Array.from({ length: 35 }, (_, i) => ({ agent: ["writer", "designer", "tester", "ops", "docs"][i % 5]!, kind: "keep" as const })),
+    ...Array.from({ length: 25 }, (_, i) => ({ agent: ["coder", "tester"][i % 2]!, kind: "fail" as const })),
+    ...Array.from({ length: 10 }, () => ({ agent: "builder", kind: "queue" as const })),
+  ];
+  const given: string[] = [];
+  for (const [i, { agent, kind }] of plan.entries()) {
+    const subject = subjects[i % subjects.length]!;
+    const key = `h${i}`;
+    const goal = kind === "prove" ? `TASK_PROVE_${key}: make ${subject} handle the case its test names, with that test.` : kind === "keep" ? `TASK_KEEP: tidy ${subject}, keeping its tests green.` : kind === "fail" ? `TASK_FAIL: make ${subject} run on a fresh database, with a test.` : `TASK_SYNC: make ${subject} resume after a dropped connection.`;
+    const gates = kind === "prove" ? [`bun test ${subject.replace(/^the /, "").replace(/ /g, "-")} # gate-prove-${key}`] : kind === "keep" ? [`bun test # gate-keep`] : kind === "fail" ? ["bun test db/ # gate-fail"] : ["test -f result.txt # gate-sync"];
+    const title = `${["Fix", "Check", "Speed up", "Harden", "Document"][i % 5]} ${subject} (${i + 1})`;
+    given.push((await admin("createTeamTask", { room: own[agent], assignee: agent, title, goal, dependsOn: [], gates })).task.id);
+  }
+  await until("the heavy fixture's tasks to end", async () => {
+    const tasks = (await admin("team")).tasks as { id: string; assignee: string; status: string }[];
+    return given.every((id) => { const t = tasks.find((task) => task.id === id); return !t || t.assignee === "builder" || !["queued", "running"].includes(t.status); });
+  }, 600_000);
+  // Long chats with the primary: three of twenty-five exchanges each, and one that shows what an answer can hold.
+  for (const topic of ["the 0.4 release", "the sync engine", "the nodes' disks"]) {
+    let conversation: string | null = null;
+    for (let n = 1; n <= 25; n++) {
+      const message = { role: "user", content: `SEED ${n}: where are we with ${topic}? (${n} of 25)` };
+      conversation = await chatOnce(conversation ? { conversation, messages: [message] } : { save: true, messages: [message] });
+    }
+  }
+  await chatOnce({ save: true, messages: [{ role: "user", content: "Show me what the release looks like." }] });
+  // More approvals waiting: the release bot's posts, each held for you.
+  for (const text of ["Sync survives a dropped connection: thanks to everyone who tested it.", "The importer now reads ISO 8601 dates.", "Backups are taken daily on every node.", "0.4 is out: here is what changed."]) {
+    await call(bot, "callConnector", { connector: "forge", tool: "post", args: { text }, why: "Tell people what shipped." });
+  }
+  await admin("requestSecret", { name: "npm-token", purpose: "To publish the CLI's package." });
+  say(`heavy: ${more.length + agents.length} agents, ${given.length} more tasks, 4 long chats, 5 approvals (${Math.round((Date.now() - started) / 1000)} s)`);
+}
+
+// ---------- the app's way in: a front that counts, and can go silent ----------
+/** Every request the app sent through the front (its /api ones; the dev node's own go straight to the node). */
+const requests: { at: number; method: string; path: string; status: number; ms: number }[] = [];
+/** A dead link while on: nothing goes through either way, as a half-open connection carries nothing. */
+let blackhole = false;
+let unblocked: (() => void)[] = [];
+const through = (): Promise<void> => (blackhole ? new Promise((go) => unblocked.push(go)) : Promise.resolve());
+const nodeOrigin = `http://127.0.0.1:${proxyPort}`;
+let pokes = 0;
+const { p256 } = (await import(Bun.resolveSync("@noble/curves/nist.js", join(import.meta.dir, "../../../packages/core/src")))) as typeof import("../../../packages/core/node_modules/@noble/curves/nist.js");
+/** A device asks to join, by the name given: something that needs you, as soon as the node takes it. */
+const askToJoin = async (name: string): Promise<number> => {
+  const asking = core.decodeInvite((await admin("createInvite", { kind: "client" })).invite);
+  const fields: core.PairRequestFields = { invite: asking.i, device: core.clientIdFromKey(p256.getPublicKey(p256.utils.randomSecretKey(), false)), name, kind: "client" };
+  const response = await fetch(`${nodeOrigin}/link/pair/request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, proof: core.pairProof(core.fromB64u(asking.s), fields) }) });
+  await response.text();
+  return response.status;
+};
+let invite: { url: string; invite: string };
+const front = Bun.serve({
+  port: 0,
+  hostname: "127.0.0.1",
+  idleTimeout: 255,
+  fetch: async (req) => {
+    const url = new URL(req.url);
+    if (url.pathname.startsWith("/__dev/")) {
+      const control = url.pathname.slice("/__dev/".length);
+      if (control === "invite") return new Response(invite.url);
+      if (control === "requests") {
+        const since = Number(url.searchParams.get("since") ?? 0);
+        return Response.json({ now: Date.now(), requests: requests.filter((r) => r.at >= since) });
+      }
+      if (control === "blackhole" && req.method === "POST") {
+        blackhole = url.searchParams.get("on") === "1";
+        if (!blackhole) for (const go of unblocked.splice(0)) go();
+        say(`the link is ${blackhole ? "dead (a black hole)" : "back"}`);
+        return Response.json({ blackhole, at: Date.now() });
+      }
+      if (control === "poke" && req.method === "POST") {
+        const label = `Poke ${++pokes} iPad`;
+        const status = await askToJoin(label);
+        return Response.json({ label, at: Date.now(), status });
+      }
+      return new Response("not found", { status: 404 });
+    }
+    await through();
+    const entry = { at: Date.now(), method: req.method, path: url.pathname + url.search, status: 0, ms: 0 };
+    if (url.pathname.startsWith("/api/")) requests.push(entry);
+    const headers = new Headers(req.headers);
+    headers.delete("host");
+    const upstream = await fetch(nodeOrigin + url.pathname + url.search, {
+      method: req.method,
+      headers,
+      body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer(),
+      signal: req.signal,
+      redirect: "manual",
+      // As it came: compressed bodies pass through compressed.
+      decompress: false,
+    } as RequestInit);
+    entry.status = upstream.status;
+    const passed = upstream.body?.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        async transform(chunk, out) {
+          await through();
+          out.enqueue(chunk);
+        },
+        flush() {
+          entry.ms = Date.now() - entry.at;
+        },
+      }),
+    );
+    return new Response(passed ?? null, { status: upstream.status, headers: upstream.headers });
+  },
+});
+servers.push(front);
+
 // ---------- pairing ----------
-const origin = `http://127.0.0.1:${proxyPort}`;
-const invite = await admin("createInvite", { kind: "client", origin, scopes: core.CLIENT_DEFAULT_SCOPES });
+const origin = `http://127.0.0.1:${front.port}`;
+invite = await admin("createInvite", { kind: "client", origin, scopes: core.CLIENT_DEFAULT_SCOPES });
+/** The app's own invite, by its id: the request made with it is the app's. */
+const appInvite = core.decodeInvite(invite.invite).i;
 writeFileSync(join(dir, "invite.txt"), `${invite.url}\n`);
+writeFileSync(join(dir, "front.txt"), `${origin}\n`);
 say(`node keep (fleet homelab) at ${origin}`);
 say(`invite: ${invite.url}`);
-say(`(also in ${join(dir, "invite.txt")}; approve a request with: echo <code> > ${join(dir, "approve")})`);
+say(`(also in ${join(dir, "invite.txt")}; approve a request with: echo <code> > ${join(dir, "approve")}${autoApprove ? ", or it is let in by itself (--auto-approve)" : ""})`);
 
 // A second device asks too once the app is in, so the app's Inbox has a device to answer: a fake key, a code of its own.
 let appPaired = false;
@@ -420,21 +598,19 @@ for (;;) {
       if (!appPaired) writeFileSync(join(dir, "pairing.txt"), `${pending.sas}\n`);
     }
   }
-  if (!appPaired && existsSync(approveFile)) {
-    const code = readFileSync(approveFile, "utf8").replace(/\D/g, "");
-    unlinkSync(approveFile);
-    const match = pairings.find((pending) => pending.sas.replace(/\s/g, "") === code);
+  const asked = existsSync(approveFile);
+  if (!appPaired && (asked || (autoApprove && pairings.some((pending) => pending.invite === appInvite)))) {
+    const code = asked ? readFileSync(approveFile, "utf8").replace(/\D/g, "") : null;
+    if (asked) unlinkSync(approveFile);
+    // (Let in by itself: the request made with the app's invite, whatever its code.)
+    const match = code === null ? pairings.find((pending) => pending.invite === appInvite) : pairings.find((pending) => pending.sas.replace(/\s/g, "") === code);
     if (!match) say(`no request shows ${code}: nothing approved`);
     else {
       await admin("approvePairing", { invite: match.invite, device: match.device });
       appPaired = true;
       rmSync(join(dir, "pairing.txt"), { force: true });
-      say(`approved "${match.name}" (${match.device.slice(0, 10)}…)`);
-      const second = core.decodeInvite((await admin("createInvite", { kind: "client" })).invite);
-      const { p256 } = (await import(Bun.resolveSync("@noble/curves/nist.js", join(import.meta.dir, "../../../packages/core/src")))) as typeof import("../../../packages/core/node_modules/@noble/curves/nist.js");
-      const fields: core.PairRequestFields = { invite: second.i, device: core.clientIdFromKey(p256.getPublicKey(p256.utils.randomSecretKey(), false)), name: "Invincible app on iPad", kind: "client" };
-      const response = await fetch(`${origin}/link/pair/request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...fields, proof: core.pairProof(core.fromB64u(second.s), fields) }) });
-      say(`a second device asks to join: ${response.status} ${await response.text()}`);
+      say(`approved "${match.name}" (${match.device.slice(0, 10)}…)${code === null ? " by itself (--auto-approve)" : ""}`);
+      say(`a second device asks to join: ${await askToJoin("Invincible app on iPad")}`);
     }
   }
   await sleep(500);
