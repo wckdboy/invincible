@@ -96,6 +96,7 @@ export function openAIResponsesConversation(input: CompletionInput): Conversatio
     async *turn(tools, signal) {
       finalPending = false;
       spent = undefined;
+      const functions = tools.filter((t) => !t.native);
       const post = (reasons: boolean): Promise<Response> =>
         (input.fetch ?? fetch)(`${input.provider.baseUrl}/responses`, {
           method: "POST",
@@ -107,7 +108,8 @@ export function openAIResponsesConversation(input: CompletionInput): Conversatio
             stream: true,
             store: false,
             ...(reasons ? { include: ["reasoning.encrypted_content"], reasoning: { effort: effort() } } : {}),
-            ...(tools.length ? { tools: tools.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.inputSchema, strict: false })) } : {}),
+            // (A provider's own tool, Claude's computer toolset, is no function: it isn't offered here.)
+            ...(functions.length ? { tools: functions.map((t) => ({ type: "function", name: t.name, description: t.description, parameters: t.inputSchema, strict: false })) } : {}),
           }),
           redirect: "manual",
           signal: signal ?? input.signal,

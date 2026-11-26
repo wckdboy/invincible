@@ -67,6 +67,35 @@ export interface ToolSpec {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /**
+   * The provider's own tool in its place (Claude's computer toolset): offered as the provider's to a model that takes
+   * it (nativeComputer), and to no other. Its calls come back named by the toolset's members (screenshot, left_click …).
+   */
+  native?: "computer";
+}
+
+/**
+ * The desktop of an agent's VM, as Claude's own computer toolset (computer_toolset_20260801): its screen, clicks, keys
+ * and typing, in the pixels of the screenshots it is shown. A model that doesn't take it is offered nothing for it, and
+ * works the desktop by its command.
+ */
+export const COMPUTER: ToolSpec = {
+  name: "computer",
+  description: "The desktop of your VM, through your provider's own computer use tools.",
+  inputSchema: { type: "object" },
+  native: "computer",
+};
+
+/**
+ * The Claude models documented as taking the computer toolset (Anthropic's computer use page and its model migration
+ * guide, November 2026): Opus 5 and Fable 5.1 take it beside the earlier tool, and the rest take only it. A model the
+ * documentation doesn't name gets no toolset (an endpoint refuses a tool type its model doesn't take), whatever its family.
+ */
+const TAKES_COMPUTER_TOOLSET = /^claude-(opus-5|opus-5-5|sonnet-5-5|haiku-5-5|fable-5-1|fable-5-2|mythos-5-2)(-\d{8})?$/;
+
+/** Whether a model takes Claude's computer toolset (COMPUTER): Claude's own, on an endpoint that speaks Anthropic's API. */
+export function nativeComputer(kind: string, model: string): boolean {
+  return kind === "anthropic" && TAKES_COMPUTER_TOOLSET.test(model);
 }
 
 /** A call the model made. The input is the model's, unchecked: validate it before running anything. */
@@ -101,6 +130,8 @@ interface Carried {
   model: string;
   reasoning?: string;
   blocks?: unknown[];
+  /** The calls (by id) that were the computer toolset's: they go back as its, and so do their results. */
+  computer?: string[];
 }
 
 export function carryOf(provider: string, model: string, kept: Omit<Carried, "v" | "provider" | "model">): string | undefined {
@@ -231,23 +262,33 @@ export function anthropicConversation(input: CompletionInput): Conversation {
   // refuses a tool turn without the thinking it began with). One without them (another model's, or none) goes as words,
   // and so do its results: a call and what it came to, said.
   const inWords = new Set<string>();
+  // A call of the computer toolset's goes back as its, and so does what it came to: the API refuses either without.
+  const toolset = new Set<string>();
+  const asToolset = (id: string) => (toolset.has(id) ? { toolset_name: "computer" } : {});
   const toolTurn = (m: ModelMessage): Anthropic.Beta.BetaContentBlockParam[] | string => {
     const carried = carriedFor(m.carry, input.provider.id, input.model);
     if (!carried?.blocks?.length) {
       for (const c of m.calls!) inWords.add(c.id);
       return [m.content, ...m.calls!.map(callInWords)].filter(Boolean).join("\n");
     }
+    for (const id of carried.computer ?? []) toolset.add(id);
     return [
       ...(carried.blocks as Anthropic.Beta.BetaContentBlockParam[]),
       ...words(m.content),
-      ...m.calls!.map((c) => ({ type: "tool_use" as const, id: c.id, name: c.name, input: c.input })),
+      ...m.calls!.map((c) => ({ type: "tool_use" as const, id: c.id, name: c.name, input: c.input, ...asToolset(c.id) })),
     ];
   };
   // A result's pictures (a desktop's screen) go in its own tool_result, beside its words; one said in words, after them.
   const resultsTurn = (m: ModelMessage): Anthropic.Beta.BetaContentBlockParam[] => [
     ...(m.results ?? [])
       .filter((r) => !inWords.has(r.id))
-      .map((r) => ({ type: "tool_result" as const, tool_use_id: r.id, content: r.images?.length ? [...words(r.content), ...r.images.map(picture)] : r.content, ...(r.error ? { is_error: true } : {}) })),
+      .map((r) => ({
+        type: "tool_result" as const,
+        tool_use_id: r.id,
+        content: r.images?.length ? [...words(r.content), ...r.images.map(picture)] : r.content,
+        ...(r.error ? { is_error: true } : {}),
+        ...asToolset(r.id),
+      })),
     ...words((m.results ?? []).filter((r) => inWords.has(r.id)).map(resultInWords).join("\n")),
     ...(m.results ?? []).filter((r) => inWords.has(r.id)).flatMap((r) => (r.images ?? []).map(picture)),
     ...(m.images ?? []).map(picture),
@@ -276,13 +317,20 @@ export function anthropicConversation(input: CompletionInput): Conversation {
   let spent: Usage | null | undefined;
   /** The thinking blocks of the last turn that ended in calls, signatures and all (see Conversation.carry). */
   let thought: unknown[] = [];
+  /** Which of that turn's calls were the computer toolset's. */
+  let members: string[] = [];
+  // The computer toolset, for a model that takes it, in the place of the spec that stands for it; for any other, nothing.
+  const computer = nativeComputer(input.provider.kind, input.model);
+  const offer = (t: ToolSpec): Anthropic.Beta.BetaToolUnion[] =>
+    t.native ? (computer ? [{ type: "computer_toolset_20260801" }] : []) : [{ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema }];
   return {
     spent: () => spent,
-    carry: () => carryOf(input.provider.id, input.model, { blocks: thought }),
+    carry: () => carryOf(input.provider.id, input.model, { blocks: thought, ...(members.length ? { computer: members } : {}) }),
     async *turn(tools, signal) {
       finalPending = false;
       spent = undefined;
       if (!input.provider.apiKey) throw new Error(`${input.provider.id} has no API key`);
+      const offered = tools.flatMap(offer);
       // pause_turn only comes from server-side tools; resume it a few times, never forever.
       for (let pauses = 0; ; pauses++) {
         const stream = client.beta.messages.stream(
@@ -294,7 +342,7 @@ export function anthropicConversation(input: CompletionInput): Conversation {
             messages,
             thinking: { type: "adaptive" },
             output_config: { effort },
-            ...(tools.length ? { tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema })) } : {}),
+            ...(offered.length ? { tools: offered } : {}),
             ...(betas.length ? { betas } : {}),
             ...(serverFallback ? { fallbacks: "default" as const } : {}),
           },
@@ -324,6 +372,7 @@ export function anthropicConversation(input: CompletionInput): Conversation {
         // The whole turn goes back as it came, thinking blocks and signatures included.
         messages.push({ role: "assistant", content: final.content as Anthropic.Beta.BetaContentBlockParam[] });
         thought = final.content.filter((b) => b.type === "thinking" || b.type === "redacted_thinking");
+        members = calls.filter((b) => b.toolset_name === "computer").map((b) => b.id);
         return { calls: calls.map((b) => ({ id: b.id, name: b.name, input: b.input })), truncated: false };
       }
     },
@@ -453,6 +502,7 @@ export function openAIConversation(input: CompletionInput): Conversation {
     async *turn(tools, signal) {
       finalPending = false;
       spent = undefined;
+      const functions = tools.filter((t) => !t.native);
       const post = (askUsage: boolean, askEffort: boolean): Promise<Response> =>
         (input.fetch ?? fetch)(`${input.provider.baseUrl}/chat/completions`, {
           method: "POST",
@@ -466,7 +516,8 @@ export function openAIConversation(input: CompletionInput): Conversation {
             // How hard it thinks, where the provider takes a level (DeepSeek's `reasoning_effort`).
             ...(askEffort && effortField && effortLevel ? { [effortField]: effortLevel } : {}),
             messages,
-            ...(tools.length ? { tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } })) } : {}),
+            // (A provider's own tool, Claude's computer toolset, is no function: it isn't offered here.)
+            ...(functions.length ? { tools: functions.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } })) } : {}),
           }),
           redirect: "manual",
           signal: signal ?? input.signal,

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { carryOf, chat, conversationFor, RefusalError, type ResolvedProvider, speaksResponses } from "../src/index.ts";
+import { carryOf, chat, COMPUTER, conversationFor, RefusalError, type ResolvedProvider, speaksResponses } from "../src/index.ts";
 
 /*
  * OpenAI's own models through its Responses API: GPT-6.2 Astra calls no tool through Chat Completions (OpenAI's own
@@ -80,6 +80,16 @@ describe("OpenAI's own API, through Responses", () => {
     expect(asked[1]!.body.input).toEqual([{ role: "user", content: "What is your policy?" }, REASONING, CALL, { type: "function_call_output", call_id: "call_1", output: "I keep the policy of courtesy." }]);
     // And goes on with the answer that called, to this model alone.
     expect(JSON.parse(c.carry!()!)).toMatchObject({ provider: "openai", model: "gpt-6.2-astra", blocks: [REASONING, CALL] });
+  });
+
+  test("Claude's computer toolset is no function of OpenAI's: offered beside the caller's tools, it is left out", async () => {
+    const { asked, fetch } = standIn(stream(completed()), stream(completed()));
+    const recall = { name: "recall", description: "Search what you keep.", inputSchema: { type: "object" } };
+    await drain(conversationFor({ provider: OPENAI, model: "gpt-6.2-astra", system: "s", messages: [{ role: "user", content: "Send the form." }], effort: "medium", fetch }).turn([recall, COMPUTER]));
+    expect(asked[0]!.body.tools).toEqual([{ type: "function", name: "recall", description: "Search what you keep.", parameters: { type: "object" }, strict: false }]);
+    // Offered alone, it leaves no tools at all (an empty list is a request the API refuses).
+    await drain(conversationFor({ provider: OPENAI, model: "gpt-6.2-astra", system: "s", messages: [{ role: "user", content: "Send the form." }], effort: "medium", fetch }).turn([COMPUTER]));
+    expect(asked[1]!.body.tools).toBeUndefined();
   });
 
   test("a tool turn kept in the chat's history goes back with its reasoning to the model it came from, and without to another", async () => {
