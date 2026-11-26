@@ -517,7 +517,14 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   only. Tests: `fabric-sidecar.test.ts`.
 - **Bounded input.** The node's side of the socket bounds a message's length before it buffers it (65 MiB, as the
   sidecar), decodes CBOR under Q-AMP's decode budget, checks every hand-off message with its schema, keeps a hand-off's
-  trail to 2,000 lines of 4,000 characters, and takes a VM's tool input up to 1 MiB. Tests: `fabric-socket.test.ts`,
+  trail to 2,000 lines of 4,000 characters, and takes a VM's tool input up to 1 MiB.
+  - **What a call holds** (the review's L2): each chunk counts at its message's encoded length, structured ones too, so
+    past 1 MiB unread the sidecar is asked to hold the rest; a call that takes no chunks (sync, push, a forwarded
+    route) drops them as they come; past 32 MiB unread, whatever it asked, the call is cancelled (a task's input, its
+    task failed).
+  - **Over HTTP** (the fallback, and every link before the fabric): a peer's answer is read up to 64 MiB (the largest
+    sync page and route answer), refused past it whether it says its length or not. Tests: `fabric-socket.test.ts`,
+    `packages/link/test/client.test.ts`. Tests: `fabric-socket.test.ts`,
   `fabric-gateway.test.ts`, the seeded fuzzing in `fabric.test.ts`, and `bench/fabric/fuzz.ts` (FABRIC.md).
 - **Falling back.** Where Q-AMP can't be had (no sidecar there or here, a peer from before the fabric, a failure), each
   link goes over HTTP with signed requests on the tailnet, as before, and says so; nothing is weakened. What it loses

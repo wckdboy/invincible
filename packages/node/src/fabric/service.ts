@@ -370,7 +370,8 @@ export class Fabric implements SyncTransport {
     const client = this.deps.sidecar.client!;
     const endpoint = this.peerEndpoint(peer)!;
     const timeout = opts.timeoutMs ?? 15_000;
-    const call = client.call(endpoint.address, tool, args, { ...opts, deadlineMs: opts.deadlineMs ?? timeout });
+    // A call nobody reads chunks of (sync, push, a forwarded route) holds none: they are dropped as they come.
+    const call = client.call(endpoint.address, tool, args, { ...opts, deadlineMs: opts.deadlineMs ?? timeout, discard: !opts.chunks });
     const reading = opts.chunks
       ? (async () => {
           for await (const chunk of call.chunks) opts.chunks!(chunk);

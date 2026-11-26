@@ -17,6 +17,13 @@ export const SIDECAR_API = 1;
 export const MAX_MESSAGE_BYTES = 65 * 1024 * 1024;
 /** What this host holds of one call's chunks or one task's input before it asks the sidecar to hold the rest. */
 const HOLD_BYTES = 1 << 20;
+/**
+ * The most it holds of them unread, whatever it asked: past it, the peer sent past the pause it was asked for (room for
+ * two of Q-AMP's largest frames beyond the budget), and the call is cancelled, or the task failed.
+ */
+const HOLD_MAX = 32 << 20;
+/** Each message's encoded length, as the frame reader read it: what a chunk is counted at. */
+const frameBytes = new WeakMap<object, number>();
 /** What it holds of its own output for a task the sidecar asked it to pause, before it gives that task up. */
 const QUEUE_BYTES = 16 << 20;
 
@@ -117,6 +124,8 @@ export interface CallOptions {
   meta?: Record<string, unknown>;
   /** Keep the call's input open for `send` and `end`. */
   input?: boolean;
+  /** It takes its result alone (sync, push, a forwarded route): the chunks it is sent are dropped as they come. */
+  discard?: boolean;
   signal?: AbortSignal;
 }
 
@@ -162,23 +171,26 @@ export interface PeerInfo {
 
 export type Msg = Record<string, unknown> & { t: string };
 
-/** A FIFO of chunks a reader takes from as they come; `bytes` is what it holds and the reader hasn't taken. */
+/**
+ * A FIFO of chunks a reader takes from as they come; `bytes` is what it holds and the reader hasn't taken, each chunk
+ * counted at its message's encoded length (structured ones too: never a guess).
+ */
 class Stream {
-  private readonly items: Chunk[] = [];
+  private readonly items: { chunk: Chunk; size: number }[] = [];
   private readonly waiters: ((r: IteratorResult<Chunk>) => void)[] = [];
   private ended: Error | true | null = null;
   bytes = 0;
   constructor(private readonly taken: (bytes: number) => void = () => {}) {}
 
-  push(chunk: Chunk): void {
+  push(chunk: Chunk, size = chunkBytes(chunk)): void {
     if (this.ended) return;
     const waiter = this.waiters.shift();
     if (waiter) {
       waiter({ value: chunk, done: false });
       return;
     }
-    this.items.push(chunk);
-    this.bytes += chunkBytes(chunk);
+    this.items.push({ chunk, size });
+    this.bytes += size;
   }
 
   end(error?: Error): void {
@@ -192,10 +204,9 @@ class Stream {
       next: () => {
         const item = this.items.shift();
         if (item) {
-          const size = chunkBytes(item);
-          this.bytes -= size;
-          this.taken(size);
-          return Promise.resolve({ value: item, done: false });
+          this.bytes -= item.size;
+          this.taken(item.size);
+          return Promise.resolve({ value: item.chunk, done: false });
         }
         if (this.ended) return Promise.resolve({ value: undefined, done: true });
         return new Promise((resolve) => this.waiters.push(resolve));
@@ -259,6 +270,7 @@ export class FrameReader {
         throw new SidecarError("internal", `the sidecar sent what isn't a message: ${(error as Error).message}`);
       }
       if (!decoded || typeof decoded !== "object" || Array.isArray(decoded) || decoded instanceof Uint8Array || typeof (decoded as Msg).t !== "string") throw new SidecarError("internal", "the sidecar sent what isn't a message: not a map with a type");
+      frameBytes.set(decoded, 4 + length);
       out.push(decoded as Msg);
     }
     return out;
@@ -301,6 +313,8 @@ interface CallState {
   outbox: Msg[];
   /** This host asked the sidecar to hold the call's chunks. */
   paused: boolean;
+  /** It takes its result alone: its chunks are dropped as they come. */
+  discard: boolean;
   done: boolean;
 }
 
@@ -461,8 +475,17 @@ export class SidecarClient {
       case "chunk": {
         const call = id !== null ? this.calls.get(id) : undefined;
         const chunk = chunkOf(m);
-        if (!call || !chunk) return;
-        call.stream.push(chunk);
+        if (!call || !chunk || call.discard) return;
+        call.stream.push(chunk, frameBytes.get(m) ?? chunkBytes(chunk));
+        if (call.stream.bytes > HOLD_MAX) {
+          // Past its pause and more: the call ends here, and the sidecar is told to end it there.
+          this.calls.delete(id!);
+          call.done = true;
+          this.trySend({ t: "cancel", id: id! });
+          call.reject(new SidecarError("internal", `its peer sent past what this node holds for a call (${HOLD_MAX} bytes unread), though asked to hold`));
+          call.stream.end();
+          return;
+        }
         if (!call.paused && call.stream.bytes > HOLD_BYTES) {
           call.paused = true;
           this.trySend({ t: "pause", id: id! });
@@ -498,7 +521,11 @@ export class SidecarClient {
         const t = task !== null ? this.tasks.get(task) : undefined;
         const chunk = chunkOf(m);
         if (!t || !chunk) return;
-        t.input.push(chunk);
+        t.input.push(chunk, frameBytes.get(m) ?? chunkBytes(chunk));
+        if (t.input.bytes > HOLD_MAX) {
+          t.inv.fail(9, `its caller sent past what this node holds of a task's input (${HOLD_MAX} bytes unread), though asked to hold`);
+          return;
+        }
         if (!t.paused && t.input.bytes > HOLD_BYTES) {
           t.paused = true;
           this.trySend({ t: "pause", task: task! });
@@ -615,6 +642,7 @@ export class SidecarClient {
       inputHeld: false,
       outbox: [],
       paused: false,
+      discard: opts.discard === true,
       done: false,
     };
     const message: Msg = { t: "call", id, peer, tool, args: args ?? null };

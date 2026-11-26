@@ -37,7 +37,38 @@ export async function signedFetch(
   });
 }
 
-/** POST JSON to a peer, signed by this node's device key. */
+/**
+ * The most of a peer's answer a node reads: room for the largest sync page (500 events of 64 KiB each) and a forwarded
+ * route's answer, never a node's memory to fill.
+ */
+export const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
+
+/** An answer's text, read as it comes up to `max` bytes: past them (said or found), refused. */
+async function boundedText(response: Response, max: number): Promise<string> {
+  const said = response.headers.get("content-length");
+  const tooLong = () => new Error(`its answer is past the ${max} bytes this node reads`);
+  if (said && /^\d{1,16}$/.test(said) && Number(said) > max) {
+    await response.body?.cancel().catch(() => {});
+    throw tooLong();
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      throw tooLong();
+    }
+    parts.push(value);
+  }
+  return Buffer.concat(parts).toString("utf8");
+}
+
+/** POST JSON to a peer, signed by this node's device key; its answer read up to MAX_ANSWER_BYTES. */
 export async function signedPost<T>(
   identity: NodeIdentity,
   endpoint: string,
@@ -46,8 +77,8 @@ export async function signedPost<T>(
   opts: { fetch?: FetchLike; timeoutMs?: number } = {},
 ): Promise<T> {
   const response = await signedFetch(identity, endpoint, path, payload, opts);
-  if (!response.ok) throw new Error(`${path} → ${response.status} ${await response.text().catch(() => "")}`.trim());
-  return (await response.json()) as T;
+  if (!response.ok) throw new Error(`${path} → ${response.status} ${await boundedText(response, 64 * 1024).catch(() => "")}`.trim());
+  return JSON.parse(await boundedText(response, MAX_ANSWER_BYTES)) as T;
 }
 
 export type { SyncPage } from "@invincible/core";

@@ -256,6 +256,47 @@ describe("the sidecar's socket, as the node speaks it", () => {
     client.close();
   });
 
+  test("structured chunks count at their size: past the budget, the host asks the sidecar to hold them too (L2)", async () => {
+    const f = fake();
+    const client = await SidecarClient.connect(f.path);
+    const call = client.call("qamp://p", "big/tool", null);
+    const big = "x".repeat(256 * 1024);
+    // The same bytes as the text chunks above, sent as structured values: before the fix each counted 64 bytes.
+    for (let i = 0; i < 6; i++) f.send({ t: "chunk", id: call.id, value: { line: big } });
+    expect(await f.next((m) => m.t === "pause")).toEqual({ t: "pause", id: call.id });
+    call.cancel();
+    client.close();
+  });
+
+  test("a call that takes no chunks holds none: what its peer streams to it is dropped as it comes (L2)", async () => {
+    const f = fake();
+    const client = await SidecarClient.connect(f.path);
+    const call = client.call("qamp://p", "invincible/link/sync", null, { discard: true });
+    const big = "x".repeat(256 * 1024);
+    for (let i = 0; i < 16; i++) f.send({ t: "chunk", id: call.id, value: { line: big } });
+    f.send({ t: "result", id: call.id, result: { events: [], more: false } });
+    expect(await call.result).toEqual({ events: [], more: false });
+    const read: unknown[] = [];
+    for await (const chunk of call.chunks) read.push(chunk);
+    expect(read).toEqual([]);
+    expect(f.got.some((m) => m.t === "pause")).toBe(false);
+    client.close();
+  });
+
+  test("a peer that sends past what a call may hold, whatever it was asked, has that call cancelled (L2)", async () => {
+    // A stand-in that ignores the pause it is asked for.
+    const f = fake();
+    const client = await SidecarClient.connect(f.path);
+    const call = client.call("qamp://p", "big/tool", null);
+    const big = "x".repeat(1024 * 1024);
+    for (let i = 0; i < 40; i++) f.send({ t: "chunk", id: call.id, value: { line: big } });
+    const error = await call.result.catch((e) => e as SidecarError);
+    expect(error).toBeInstanceOf(SidecarError);
+    expect((error as SidecarError).message).toContain("sent past what this node holds for a call");
+    expect(await f.next((m) => m.t === "cancel")).toEqual({ t: "cancel", id: call.id });
+    client.close();
+  });
+
   test("a socket that closes ends its calls as unavailable and aborts its tasks", async () => {
     let inv!: Invocation;
     const f = fake();
