@@ -58,6 +58,7 @@ export interface Review {
 }
 
 /** A trail line read: its mark and what follows it. */
+export type TrailLine = Line;
 type Line =
   | { kind: "plan"; text: string }
   | { kind: "command"; command: string }
@@ -76,7 +77,7 @@ const NOTE_TONE: Readonly<Record<string, StepTone>> = {
   "Tests changed": "warn", Contract: "neutral", Steps: "neutral", Lease: "warn", "No command to run": "neutral", Review: "warn",
 };
 
-/** A line of the trail, read by its mark. */
+/** A line of the trail, read by its mark (the command line's stream says each as it comes: readTrailLine). */
 function read(text: string): Line {
   const [head = "", ...rest] = text.split("\n");
   const body = rest.join("\n");
@@ -103,6 +104,8 @@ function read(text: string): Line {
   if (mark === "Review" && (said === "pass" || said === "revise")) return { kind: "review", verdict: said, notes: body.trim() };
   return { kind: "note", text: head, tone: NOTE_TONE[mark] ?? "neutral" };
 }
+
+export { read as readTrailLine };
 
 /** A shell word at the start of `text` ('quoted', as the tools quote a path, or bare), and what follows it. */
 function word(text: string): { word: string; rest: string } | null {

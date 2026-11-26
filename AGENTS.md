@@ -18,6 +18,7 @@ bun run vocabulary                     # no word of the old theme in any tracked
 INVINCIBLE_KEYSTORE=file bun test      # tests never touch the OS keychain
 bun test packages/ledger               # one package
 bun invincible help                    # the CLI
+bun run inv help                       # inv, a client of a node (docs/CLI.md): its exit code is the verdict
 bun run bench                          # the scorecard against its baselines
 bun apps/apple/scripts/vectors.ts --check   # the parity vectors the Apple and Android apps test against
 ```

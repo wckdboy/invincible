@@ -69,7 +69,8 @@ Every command that prints a list or a result takes `--json`.
 - `--json`: prints one object: at once, `{"task", "agent", "room", "why"}`; with `--wait`, the proof.
 - `--no-ask`: if the task comes to need you (an approval, a proposal, work cut short), `inv` stops it and exits 20, so
   nothing waits forever for a person. It implies `--wait`.
-- `--timeout <duration>` (`90s`, `20m`, `2h`): with `--wait`, leaves when it runs out and exits 21. The task goes on.
+- `--timeout <duration>` (`90s`, `20m`, `2h`): leaves when it runs out and exits 21, and the task goes on. It implies
+  `--wait`.
 - `--title "…"`: the task's title (its goal's start, otherwise).
 
 **`--for-task`, as the node keeps it today:** besides allowing this call, `inv` signs a standing order for it. The order
@@ -138,15 +139,16 @@ A promise: a code keeps its meaning, and a new one is added only with a new mean
 | 2 | **Bad usage:** an unknown command or flag, or a missing or malformed argument. |
 | 10 | **A gate failed:** the task ended with a gate that didn't pass. |
 | 11 | **The reviewer rejected it:** every gate passed, and the reviewer sent it back until its revisions ran out. |
-| 12 | **Finished without proof:** the reviewer passed it, but no gate shows the work: it had no gate, or only gates that already passed before the work. |
+| 12 | **Finished without proof:** the reviewer passed it, but no gate shows the work (it had no gate, or only gates that already passed before the work), or the only review was by the model that did the work. |
 | 13 | **Stopped:** by you, by its budget, or by a rule of yours. For `inv "…"`, you stopped the answer with Ctrl-C. |
 | 20 | **Needs you:** with `--no-ask`, it came to need you, and `inv` stopped it. For `inv proof`, it waits on you now. |
 | 21 | **Still running:** `--timeout` ran out, or you left with Ctrl-C, and the task goes on. For `inv proof`, it has no verdict yet. |
 | 30 | **Refused:** the pairing was refused, or this device's key is no longer enrolled (revoked), or it lacks the scope the command needs. |
 | 31 | **The node is unreachable:** nothing answered at its address, or what answered wasn't the node (a proxy whose node is down). |
 
-`inv watch`, `inv proof` and `inv give --wait` exit with the task's verdict. Every other command exits 0 when it did
-what it says, or with 1, 2, 30 or 31.
+`inv watch`, `inv proof`, `inv give --wait` and `inv again --wait` exit with the task's verdict. Every other command
+exits 0 when it did what it says, or with 1, 2, 30 or 31. Ctrl-C pressed twice leaves at once, whatever is under way,
+with 1.
 
 ## The proof
 
@@ -178,7 +180,8 @@ what it says, or with 1, 2, 30 or 31.
 ```
 
 - **`state`** is one of `verified` (0), `failed` (10), `rejected` (11), `unproven` (12), `stopped` (13), `needs-you`
-  (20), `working` or `queued` (21), and `error` (1). `exit` is its code.
+  (20), `working` or `queued` (21), and `error` (1). `exit` is its code, and always the code `inv` exits with: when it
+  leaves before the task ends, `exit` is 21 (or 20 for `--no-ask`), whatever the state.
 - **`word`** is the apps' word for the task, as its row says it.
 - **`gates`** are as the latest round left them, from the runner's own lines on the task's trail, never the agent's
   account.
@@ -201,7 +204,7 @@ know. Fields and types may be added; none changes its meaning.
 
 | `type` | Carries |
 |---|---|
-| `task.started` | `title`, `agent`, `room`, `node`, `project`, `budgetUsd`, `gates` (commands), `why` (why that agent) |
+| `task.started` | `title`, `agent`, `room`, `node`, `project`, `budgetUsd`, `gates` (commands), `why` (why that agent took it, when `inv` gave it). The first event. |
 | `task.state` | `state` (queued, running, needs-you, …), `word` (the apps' word) |
 | `step.started` | `n` (its line on the trail), `kind` (plan, read, edit, run, submitted, note), `text` |
 | `step.completed` | `n`, `kind`, `text`, `exit` (a command's exit, or null) |

@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "invincible": "bun packages/node/src/cli.ts",
-    "inv": "bun packages/node/src/cli.ts",
+    "inv": "bun packages/node/src/inv/main.ts",
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json && bun bench/vocabulary.ts && bun test",

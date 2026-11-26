@@ -198,7 +198,8 @@ The models layer, carried (§10):
   - iPhone, iPad and Mac in SwiftUI (`apps/apple`: `sh.invincible.bot`, App Store Connect's "Invincible Bot", and
     the Mac's `sh.invincible.bot.mac`, signed with a Developer ID outside the App Store);
   - Android in Kotlin and Compose (`apps/android`: `sh.invincible.bot`);
-  - the CLI, `invincible` (or `inv`).
+  - the command line: `invincible` on a node's own machine, and `inv`, a client of a node from anywhere, paired and
+    signing with its own key as the apps do ([CLI.md](CLI.md): its commands, and its exit codes as the verdict).
 - **Parity:** the pure logic is written once, in TypeScript. The native apps port it, held to vectors the TypeScript
   writes (`apps/apple/scripts/vectors.ts`, from `packages/core` and `apps/web/src/lib`; CI checks them).
 - **The primary's name** is the node's to say: "Invincible" until you name it. The apps take it from `whoami`'s
@@ -217,7 +218,7 @@ The models layer, carried (§10):
 | `packages/models` | Providers, plans, the roster, fallback, the gateway, prices and usage; the primary's chat and its prompt, connectors and their sign-ins, decisions, embeddings, and the evals' suites |
 | `packages/agents` | The run loop: harnesses, gates, the reviewer, rules, audits, checkpoints, shipping, the team runtime, investigations |
 | `packages/sandbox` | VM drivers and their firewall |
-| `packages/node` | The daemon, the server, the CLI, the primary, approvals, notifications, projects, placement |
+| `packages/node` | The daemon, the server, the CLI (`invincible`, and `inv` in `src/inv/`: a client of a node, [CLI.md](CLI.md)), the primary, approvals, notifications, projects, placement |
 | `apps/web` | The web client (the PWA the node serves) |
 | `apps/apple` | The iPhone, iPad and Mac apps (SwiftUI), the parity vectors' script and fixture, the dev node they run against, their brand assets and release scripts |
 | `apps/android` | The Android app (Kotlin and Compose), held to the same vectors; `apps/site` (invincible.sh) comes back later |

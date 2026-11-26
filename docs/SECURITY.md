@@ -149,6 +149,35 @@ It reaches you by Web Push, to your own paired devices only. No messaging gatewa
 - **It ends when what it was opened under is gone.** Revoked, a device's stream ends at once (`bye: revoked`) and opening it again is refused; its scopes changed, it ends (`bye: rescoped`), and opened again it tells of what the device may read now; the node stopping ends every stream (`bye: stopping`) (all tested on the node that revoked). A revocation that arrives from another node takes the same path, the mind telling of the events it took (`MindStore.onApplied`, `packages/ledger/test/applied.test.ts`); that is not tested end to end.
 - **Bounded.** At most eight open from one device: a ninth closes its oldest (tested). One that falls a megabyte behind is let go (not tested). What changed is worked out only while someone listens.
 
+## `inv`, the command line as a client (tested)
+
+- **A paired device like any other.** `inv pair` makes a P-256 key and pairs it as a phone pairs ([CLI.md](CLI.md)). The
+  invite's secret is never sent. Both sides derive the code you compare. Only an approval the invite's secret
+  authenticates is taken, and a refused pairing leaves no key behind (`packages/node/test/inv/inv.e2e.test.ts`). From
+  then on, every request is signed, and the node checks it as it checks any client's: the signature, the time, the
+  nonce, the enrolment and the route's one scope. Revoked, it is refused (exit 30, tested).
+- **Its key is software, not hardware.** It is kept in the macOS login keychain (service `dev.invincible.cli`), or in a
+  0600 file elsewhere, never in the pairing file beside it (tested). The apps keep theirs in the Secure Enclave or
+  StrongBox. So anything that runs as you can use this key: from the keychain, past its own prompt, or from the file.
+  Revoke it from the node (`invincible revoke <device>`) if the machine is lost. A key in the Secure Enclave, signing by
+  callback through Q-AMP, comes later.
+- **Unpaired, only on a node's own machine.** `inv` then reads that node's admin token from its home, and the node
+  takes it on loopback alone, as it takes `invincible`'s. Nothing is made: a home with no token is a node that never ran.
+- **What it prints can't steer the terminal.** Every name, title, command and line a model or another device wrote goes
+  through core's plain text. An approval waiting for you is shown exactly: each character that can't be seen (a
+  bidirectional override, a zero-width character, a control, an unusual space) is shown as `⟨U+202E⟩` and counted
+  (`visibleText`, `packages/core/test/plain.test.ts`, and end to end in `inv.e2e.test.ts`).
+- **`--for-task` never widens an answer.** It signs a standing order for the asking agent alone and that exact call,
+  for a day, the shortest the node keeps. It refuses an ask that isn't an agent's, and a call an order can't pin
+  exactly (an argument holding `*`, which an order reads as any text, or one that isn't text, a number or a yes or no)
+  (`packages/node/test/inv/asks.test.ts`). **Residual risk:** the order outlives the task by up to a day, for that
+  agent's same exact call.
+- **`--no-ask` answers no for you.** A task that comes to need you is stopped, and its agent's waiting approvals are
+  declined, saying why (tested).
+- **Residual risk:** `inv` speaks plain HTTP to the node's address, as nodes speak to each other: Tailscale encrypts the
+  wire, and the signatures prove who sent each request and keep it from being replayed. On a network that isn't
+  encrypted, what the requests and answers hold could be read in passing. Q-AMP is the next transport.
+
 ## The doctor (tested)
 
 - **Read-only by construction.** `invincible doctor` writes to no file and no database, and installs, builds and mends nothing. It never opens a key file (it reads its mode), and never prints a secret: a provider's error is redacted before it becomes a line (tested with a key echoed in a 401). When the sandbox image is missing it says so and starts nothing, since creating a sandbox would rebuild it (`packages/node/test/doctor.e2e.test.ts`).
