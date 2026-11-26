@@ -102,9 +102,10 @@ extension FieldOrb.Motion {
 }
 
 /// A still orb: its picture, drawn once for each field, look, light, page and screen, and shared by every row that shows
-/// it. Compared by what it is drawn from, so a row drawn again draws nothing. One not drawn yet is drawn away from the
-/// main thread, a quiet disc of its size standing in meanwhile, so a screen of orbs (Home's first frame) is never held up
-/// by drawing them, and nothing moves when each comes.
+/// it. Compared by what it is drawn from, so a row drawn again draws nothing. One that stands alone (64 points and more: a
+/// welcome, a header) is drawn at once; the many small ones of a list or a strip not drawn yet are drawn away from the
+/// main thread, a soft disc of their own colour standing in meanwhile, so a screen of them (Home's first frame, a list
+/// scrolled) is never held up by drawing them, and nothing moves when each comes.
 private struct StillField: View, Equatable {
     let identity: FieldIdentity
     let beam: Bool
@@ -121,14 +122,14 @@ private struct StillField: View, Equatable {
 
     var body: some View {
         let key = FieldStills.key(identity: identity, beam: beam, agent: agent, size: size, frame: frame, paper: paper, scale: scale)
-        if let image = FieldStills.shared.kept(key) ?? drawn {
+        if let image = FieldStills.shared.kept(key) ?? drawn ?? (size >= 64 ? FieldStills.shared.image(identity: identity, beam: beam, agent: agent, size: size, frame: frame, paper: paper, scale: scale) : nil) {
             Image(decorative: image, scale: scale)
                 .resizable()
                 .interpolation(.high)
                 .frame(width: size, height: size)
         } else {
             Circle()
-                .fill(.fill.quaternary)
+                .fill(Color(hex: identity.colours.key.last ?? "#808080").opacity(paper ? 0.22 : 0.4))
                 .frame(width: size * 0.62, height: size * 0.62)
                 .frame(width: size, height: size)
                 .task(id: key) {
