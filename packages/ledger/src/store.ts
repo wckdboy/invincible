@@ -18,6 +18,9 @@ import {
   parseEvent,
   type Prov,
   type Scope,
+  type SeatFacts,
+  type SeatSignInBody,
+  type SeatWindowBody,
   SetHash,
   sha256B64u,
   signEvent,
@@ -68,8 +71,10 @@ CREATE TABLE IF NOT EXISTS pending (id TEXT PRIMARY KEY, device TEXT NOT NULL, h
  *    screen-decision:<id>, screen-ended:<id>), applied the same way by a replica that held them before it knew them.
  * 6: key requests you dismissed (secret.request.dismissed; clears v_lww's secret-request:<name>), applied the same
  *    way by a replica that held them before it knew them.
+ * 7: seats (seat.added and the rest; in v_lww as seat:<id>, seat-policy:<id>, seat-signin:<id>, seat-account:<id>,
+ *    seat-window:<id>:<window>, seat-rest:<id>), applied the same way by a replica that held them before it knew them.
  */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const MAX_PENDING = 2000;
 
@@ -293,6 +298,9 @@ export class LedgerStore {
         this.replay();
       } else if (from < 6 && this.db.query("SELECT 1 FROM events WHERE kind = 'secret.request.dismissed' LIMIT 1").get()) {
         // Key requests dismissed on a newer node while this replica didn't know the kind: applied now, as a rebuild would.
+        this.replay();
+      } else if (from < 7 && this.db.query("SELECT 1 FROM events WHERE kind LIKE 'seat.%' LIMIT 1").get()) {
+        // Seats a newer node wrote while this replica didn't know them: applied now, as a rebuild would.
         this.replay();
       }
       if (from < SCHEMA_VERSION) this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -1157,6 +1165,54 @@ export class LedgerStore {
         this.putLww(`rule:${body.name}`, event, { name: body.name, rule: body.rule as Json, ...(event.prov.via ? { via: event.prov.via } : {}) });
         return null;
       }
+      // Seats (core's seats.ts): yours alone to add, set and remove, on a full node. How one stands is said by the node
+      // that holds its home and by no other. The last writer wins; the account its first sign-in was to is kept, and a
+      // later sign-in to another account is refused on every replica.
+      case "seat.added": {
+        if (!isFullNode(signer)) return "only full nodes may record seats";
+        if (event.prov?.trust !== "owner") return "a seat is yours alone to add";
+        const body = bodyOf(event, "seat.added");
+        if (this.lww(`seat:${body.id}`)) return "seat already added";
+        if (this.deviceAt(body.node, event.hlc)?.kind !== "node") return "a seat's home is on an active node";
+        this.putLww(`seat:${body.id}`, event, body as Json);
+        return null;
+      }
+      case "seat.policy":
+      case "seat.removed": {
+        if (!isFullNode(signer)) return "only full nodes may record seats";
+        if (event.prov?.trust !== "owner") return "a seat is yours alone to set";
+        const id = event.kind === "seat.removed" ? bodyOf(event, "seat.removed").id : bodyOf(event, "seat.policy").id;
+        if (!this.lww(`seat:${id}`)?.value) return "no such seat";
+        if (event.kind === "seat.removed") this.putLww(`seat:${id}`, event, null);
+        else this.putLww(`seat-policy:${id}`, event, bodyOf(event, "seat.policy").runs);
+        return null;
+      }
+      case "seat.signin":
+      case "seat.window":
+      case "seat.rested":
+      case "seat.back": {
+        const body = bodyOf(event, event.kind);
+        const seat = this.lww<{ node: string }>(`seat:${body.id}`)?.value;
+        if (!seat) return "no such seat";
+        if (event.device !== seat.node) return "only the node that holds a seat's home says how it stands";
+        if (event.kind === "seat.signin") {
+          const sign = bodyOf(event, "seat.signin");
+          if (sign.phase === "ended" && sign.outcome === "ready" && sign.fingerprint) {
+            const account = this.lww<string>(`seat-account:${sign.id}`)?.value;
+            if (account && account !== sign.fingerprint) return "signed in to another account than the seat's";
+            if (!account) this.putLww(`seat-account:${sign.id}`, event, sign.fingerprint);
+          }
+          this.putLww(`seat-signin:${sign.id}`, event, sign as Json);
+        } else if (event.kind === "seat.window") {
+          const window = bodyOf(event, "seat.window");
+          this.putLww(`seat-window:${window.id}:${window.window}`, event, window as Json);
+        } else if (event.kind === "seat.rested") {
+          this.putLww(`seat-rest:${body.id}`, event, bodyOf(event, "seat.rested") as Json);
+        } else {
+          this.putLww(`seat-rest:${body.id}`, event, null);
+        }
+        return null;
+      }
       case "skill.written": {
         if (!isFullNode(signer)) return "only full nodes write skills";
         const body = bodyOf(event, "skill.written");
@@ -1365,6 +1421,46 @@ export class LedgerStore {
   /** Your rules in force, by name, each as it was written (open in the log: core's readRule reads it). */
   rules(): RuleRecord[] {
     return this.lwwPrefix<{ name: string; rule: Json; via?: string }>("rule:").map((entry) => ({ name: entry.value!.name, rule: entry.value!.rule, hlc: entry.hlc, via: entry.value!.via ?? null }));
+  }
+
+  // ---- seats --------------------------------------------------------------------
+
+  /** Every seat you have added and not removed, the oldest first, as the log holds it (core's seatState says where each stands). */
+  seats(): SeatFacts[] {
+    const windows = new Map<string, SeatFacts["windows"]>();
+    for (const entry of this.lwwPrefix<SeatWindowBody>("seat-window:")) {
+      const window = entry.value!;
+      const list = windows.get(window.id) ?? [];
+      list.push({ window: window.window, status: window.status, usedPercent: window.usedPercent ?? null, resetsAt: window.resetsAt ?? null, at: decodeHlc(entry.hlc).ms });
+      windows.set(window.id, list);
+    }
+    return this.lwwPrefix<{ id: string; kind: SeatFacts["kind"]; label: string; node: string; provider?: string; runs: number }>("seat:")
+      .map((entry): SeatFacts => {
+        const added = entry.value!;
+        const sign = this.lww<SeatSignInBody>(`seat-signin:${added.id}`);
+        const rest = this.lww<{ until: number; window?: string }>(`seat-rest:${added.id}`);
+        const signedAt = sign ? decodeHlc(sign.hlc).ms : 0;
+        const said = sign?.value ?? null;
+        return {
+          id: added.id,
+          kind: added.kind,
+          label: added.label,
+          node: added.node,
+          provider: added.provider ?? null,
+          runs: this.lww<number>(`seat-policy:${added.id}`)?.value ?? added.runs,
+          addedAt: decodeHlc(entry.hlc).ms,
+          signIn: !said
+            ? null
+            : said.phase === "started"
+              ? { phase: "started", attempt: said.attempt, at: signedAt }
+              : { phase: "ended", attempt: said.attempt ?? null, outcome: said.outcome, method: said.method ?? null, plan: said.plan ?? null, renewBy: said.renewBy ?? null, at: signedAt },
+          account: this.lww<string>(`seat-account:${added.id}`)?.value ?? null,
+          // (The newest few: a seat's node names its windows, and a list of them stays short.)
+          windows: (windows.get(added.id) ?? []).sort((a, b) => b.at - a.at || a.window.localeCompare(b.window)).slice(0, 8),
+          rest: rest?.value ? { until: rest.value.until, window: rest.value.window ?? null, at: decodeHlc(rest.hlc).ms } : null,
+        };
+      })
+      .sort((a, b) => a.addedAt - b.addedAt || a.id.localeCompare(b.id));
   }
 
   // ---- screen sessions ---------------------------------------------------------

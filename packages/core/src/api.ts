@@ -9,6 +9,7 @@ import { MAX_ORDER_DAYS, OrderId, OrderPattern } from "./orders.ts";
 import { QampGrantInput, QampRevokeInput } from "./qamp.ts";
 import { HandId, HandTaskInput } from "./fabric.ts";
 import { RuleInput, RuleName, RuleToldInput, RuleTrippedInput } from "./rules.ts";
+import { SeatAddInput, SeatIdInput, SeatPolicyInput } from "./seats.ts";
 import { type Scope, Scope as ScopeSchema } from "./scopes.ts";
 import { EvalRecord, EvalRunId, type EvalRunSettings } from "./evals.ts";
 import { HarnessOptions, EvalPins, VariantName } from "./evals.ts";
@@ -1349,6 +1350,18 @@ export const routes = {
   ruleTripped: { method: "POST", path: "/api/rules/tripped", scope: "sandbox", input: RuleTrippedInput },
   /** A command a rule of yours that tells matched has run (a run's, said by its loop): the node tells you. */
   ruleTold: { method: "POST", path: "/api/rules/told", scope: "sandbox", input: RuleToldInput },
+  /*
+   * Seats (seats.ts): accounts you hold with a vendor, that any agent may use, their homes on this node. Every change is
+   * yours alone. Nothing a seat route answers or takes carries a token: a seat's account is signed in on its vendor's page.
+   */
+  /** Every seat, and where each stands. */
+  seats: { method: "GET", path: "/api/seats", scope: "mind:read", input: null },
+  /** Add a seat, its home on this node. Answers `{ seat }`. */
+  addSeat: { method: "POST", path: "/api/seats", scope: "fleet:admin", input: SeatAddInput },
+  /** Remove a seat, and the email its sign-in started with. */
+  removeSeat: { method: "POST", path: "/api/seats/remove", scope: "fleet:admin", input: SeatIdInput },
+  /** How many runs at once a seat takes, at most (never more than has been shown safe). Answers `{ seat }`. */
+  setSeatPolicy: { method: "POST", path: "/api/seats/policy", scope: "fleet:admin", input: SeatPolicyInput },
   arms: { method: "GET", path: "/api/arms", scope: "fleet:admin", input: null },
   mintArm: {
     method: "POST",

@@ -153,6 +153,7 @@ import { handleSandboxSearch, SearchError, searchWeb } from "./search.ts";
 import { type Caller, ConnectorCallError, type ConnectorService } from "./connectors.ts";
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
 import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.ts";
+import { addSeat, removeSeat, SeatError, seatViews, setSeatPolicy } from "./seats.ts";
 import { QuestionError, type Questions } from "./questions.ts";
 
 /** An agent's uses of each key it was given are counted over this many days (teamKeyUses). */
@@ -1012,6 +1013,16 @@ export function createApp(ctx: AppContext) {
    * quotes them from the ledger), so they pass.
    */
   const scanOptions = { isPublic: (token: string) => ctx.store.event(token) !== null };
+  /** A seat's refusal, in its words and with its status. */
+  function seatErrors<T>(work: () => T): T {
+    try {
+      return work();
+    } catch (error) {
+      if (error instanceof SeatError) throw new HttpError(error.status, error.message);
+      throw error;
+    }
+  }
+
   function guardAgainstSecrets(...texts: string[]): void {
     for (const text of texts) {
       const finding = findSecrets(text, scanOptions)[0];
@@ -4160,6 +4171,22 @@ export function createApp(ctx: AppContext) {
       if (!trip) throw new HttpError(400, `"${input.rule}" doesn't stop that command`);
       ledgerTrip(runRef(p, input.run), trip, input.command, input.gate === true);
       return { ok: true };
+    },
+    // Seats (seats.ts): yours alone to add, set and remove, from a terminal or a device of yours; their homes on this node.
+    seats: () => ({ seats: seatViews(ctx.store) }),
+    addSeat: (input, p) => {
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can add a seat");
+      // (Its name reaches the log, and its email the vault: neither may be a key.)
+      guardAgainstSecrets(input.label, input.email ?? "");
+      return seatErrors(() => ({ seat: addSeat(ctx.store, ctx.vault, ctx.identity, input, p.kind === "client" ? p.device : null) }));
+    },
+    removeSeat: (input, p) => {
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can remove a seat");
+      return seatErrors(() => (removeSeat(ctx.store, ctx.vault, ctx.identity, input.id, p.kind === "client" ? p.device : null), { removed: input.id }));
+    },
+    setSeatPolicy: (input, p) => {
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can set a seat");
+      return seatErrors(() => ({ seat: setSeatPolicy(ctx.store, ctx.identity, input.id, input.runs, p.kind === "client" ? p.device : null) }));
     },
     arms: () => ({ arms: ctx.arms.list() }),
     mintArm: (input) => {

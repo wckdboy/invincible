@@ -172,6 +172,22 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - the native tools loop (the default, measured level with OpenCode);
   - Claude Code, Codex and OpenCode through the key gateway (a run uses your keys without seeing them);
   - any ACP agent.
+- **Seats:** an account you hold with a vendor, added once, that any agent may use (`packages/core/src/seats.ts`):
+  - the kinds: a Claude plan, a ChatGPT plan (through Codex, or Sign in with ChatGPT), a Mistral plan, a coding plan's
+    key, an API key;
+  - a subscription seat's sign-in lives in its own home on its node, made there by the vendor's own tool in the vendor's
+    own flow. The node never reads its files: only the tool's own status command, and five things of what it says;
+  - in the ledger (`seat.added`, `seat.policy`, `seat.removed` on your word alone; `seat.signin`, `seat.window`,
+    `seat.rested`, `seat.back` from the seat's own node alone). None of them carries a sign-in's address, its code or a
+    token. A seat's email is sealed in the vault, and the account its first sign-in was to is kept: a sign-in to
+    another is refused on every replica;
+  - the rule, your word (26 November 2026, "All, never switch"): every account works side by side, and work running on
+    one never moves to a second subscription seat of the same vendor. A spent seat's work waits for its reset, goes to
+    another vendor's tool, or uses that plan's own sanctioned capacity. No setting switches accounts (`mayCarryOn`);
+  - runs at once on one subscription seat: one until shared runs are shown safe, then three, your word given
+    (`SHARED_RUNS_PROVEN`); Codex's homes stay one at a time;
+  - routes: `GET /api/seats` (`mind:read`); `POST /api/seats`, `/api/seats/remove` and `/api/seats/policy`
+    (`fleet:admin`, yours alone).
 - **Sandboxes:**
   - Kata microVMs on Linux and Apple containers on macOS;
   - one per run;

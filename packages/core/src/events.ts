@@ -11,6 +11,7 @@ import { RuleName } from "./rules.ts";
 import { Scope } from "./scopes.ts";
 import { SkillId, SkillVersionId } from "./skills-input.ts";
 import { EvalId, EvalRecord, EvalRunId } from "./evals.ts";
+import { SEAT_LIMITS, SeatId, SeatKind, SeatSignInBody, SeatWindowBody, SeatWindowName } from "./seats.ts";
 
 /** How hard a model thinks for an answer (Anthropic's `effort`; other providers' models choose for themselves). */
 export const THINKING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -329,6 +330,31 @@ export const Bodies = {
   /** A rule, set or replaced. Open in the log: a newer node's rule never makes this one refuse the event (core's readRule reads it). */
   "rule.set": z.strictObject({ name: RuleName, rule: Open }),
   "rule.removed": z.strictObject({ name: RuleName }),
+
+  /*
+   * Seats (seats.ts): accounts you hold with a vendor, that any agent may use. Added, set and removed by you alone; how
+   * each stands (its sign-in, its windows, a rest until a reset) is said by the node that holds its home, and by no other.
+   * None carries a sign-in's address, its code or a token, and a seat's email is in the vault. The last writer wins.
+   * (Checked here only by length and alphabet, as every body is: the routes refuse anything shaped like a token, and a
+   * newer scanner must never make a replica refuse an event an older one took.)
+   */
+  "seat.added": z.strictObject({
+    id: SeatId,
+    kind: SeatKind,
+    label: z.string().min(1).max(SEAT_LIMITS.label),
+    node: DeviceRef,
+    provider: Name.optional(),
+    runs: z.number().int().min(1).max(SEAT_LIMITS.runs),
+  }),
+  "seat.policy": z.strictObject({ id: SeatId, runs: z.number().int().min(1).max(SEAT_LIMITS.runs) }),
+  "seat.removed": z.strictObject({ id: SeatId }),
+  /** A sign-in begun, or ended (by a sign-in, or as its node found it when it asked the tool). */
+  "seat.signin": SeatSignInBody,
+  /** A window, as the seat's tool reported it: said when its state or its reset changes, never at every call. */
+  "seat.window": SeatWindowBody,
+  /** Its window is spent: it rests until that resets. Back: it is in use again. */
+  "seat.rested": z.strictObject({ id: SeatId, until: z.number().int().min(0), window: SeatWindowName.optional() }),
+  "seat.back": z.strictObject({ id: SeatId }),
 } as const;
 
 export type EventKind = keyof typeof Bodies;
