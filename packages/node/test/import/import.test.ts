@@ -444,6 +444,34 @@ describe("what can't come is said by name, and the rest comes", () => {
   }, 30_000);
 });
 
+describe("its node's rollback journals are never locked", () => {
+  // A reader's shared lock on a rollback journal fails a writer without a busy timeout at once, as Galahad's stores of
+  // knights and chats are: so what they hold is read from a copy taken when it held still, in memory.
+  test("its knights' and chats' databases are read from a copy, its mind beside its log", async () => {
+    const old = oldHome(join(root, "galahad"));
+    for (const name of ["team.db", "chats.db"]) {
+      const db = openReadOnly(join(old, name));
+      expect([name, db.filename]).toEqual([name, ":memory:"]);
+      db.close();
+    }
+    const mind = openReadOnly(join(old, "mind.db"));
+    expect(mind.filename).not.toBe(":memory:");
+    mind.close();
+  });
+
+  test("a write under way is waited for; one whose journal stays is said, and nothing is read", async () => {
+    const { old, home } = await setup();
+    const journal = join(old, "team.db-journal");
+    writeFileSync(journal, "a write under way");
+    // The writer ends its write in a while, from a process of its own as a node's is (this one waits, unable to).
+    const done = Bun.spawn(["bun", "-e", `await Bun.sleep(300); require("node:fs").rmSync(${JSON.stringify(journal)});`]);
+    expect((await runImport(old, home, { dryRun: true })).code).toBe(0);
+    await done.exited;
+    writeFileSync(journal, "a write a stopped node left");
+    await expect(runImport(old, home, { dryRun: true })).rejects.toThrow("team.db can't be read: a write's journal stays beside it");
+  }, 30_000);
+});
+
 describe("what it refuses", () => {
   test("writing while this node runs (a dry run beside it is fine), and nothing is written", async () => {
     const { old, home } = await setup();

@@ -363,11 +363,14 @@ Its first phase (`packages/node/src/qamp-grants.ts`; how it works: [ARCHITECTURE
 `invincible import` ([ARCHITECTURE.md §10](ARCHITECTURE.md)) brings the owner's world across from the system Invincible
 succeeds (`packages/node/src/import/`), tested in `packages/node/test/import/` against a home that system's own code made.
 
-- **Its home is only read.** Each of its databases is opened so that SQLite writes nothing beside it:
-  - a write-ahead one whose log holds pages, with its index read only (`readonly_shm`);
-  - one whose log is empty, as an immutable file;
-  - a rollback one, under SQLite's shared lock;
-  - a log without its index is refused, never indexed.
+- **Its home is only read, and its node never waits on it.** Each of its databases is opened so that SQLite writes
+  nothing beside it and takes no lock its node's writers could fail on:
+  - a write-ahead one, beside its log and index, with the index read only (`readonly_shm`): a reader of a write-ahead
+    log never stands in a writer's way;
+  - one with no log to read, as an immutable file;
+  - a log with pages and no index is refused, never indexed;
+  - a rollback one is never locked (a shared lock would fail a writer without a busy timeout, as the agents' and chats'
+    stores are): it is copied when it holds still and checks whole, and the copy is read in memory.
 
   A plain read-only open would not do: a reader sets its read marks in a write-ahead database's index. A test hashes
   every file of the home before and after, a run beside a writer in a process of its own included.
