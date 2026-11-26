@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { OUT_DIR } from "../scorecard.ts";
 import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
 
 /*
@@ -218,6 +221,14 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     why = String((error as Error).message ?? error);
   }
   const actedMs = acted ? acted - t0 : null;
+  // A run that failed leaves the screen as it was, to look at (bench/out/desktop/, never committed).
+  if (!pass) {
+    const shot = await vm.raw(["sh", "-c", "f=/tmp/failed.png; desktop shot $f >/dev/null && base64 -w0 $f"]);
+    if (shot.code === 0 && shot.stdout) {
+      mkdirSync(join(OUT_DIR, "desktop"), { recursive: true });
+      writeFileSync(join(OUT_DIR, "desktop", `failed-${task}-${policy}-${run}.png`), Buffer.from(shot.stdout.trim(), "base64"));
+    }
+  }
   await tidy(vm, task);
   return { task, policy, run, pass, why, actedMs, commands, looks };
 }

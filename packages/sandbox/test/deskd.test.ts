@@ -123,13 +123,13 @@ describe("deskd's held session (the node's): toolset actions in, answers out", (
     expect(click).toMatchObject({ id: 1, ok: true, action: "left_click", did: "clicked at 640,450", changed: true, focus: { before: { app: "Chromium" }, after: { app: "Chromium" } } });
     expect(click.changed_ms).toBeLessThan(20);
     expect(click.text).toMatch(/^clicked at 640,450 · the screen changed \(\d+ ms\) · focus: Chromium "about:blank - Chromium"$/);
-    expect(typed).toMatchObject({ id: 2, ok: true, did: "typed 3 characters" });
+    // (A text field of the page has the focus: the text goes in by the browser's own insertText. Below, the other ways.)
+    expect(typed).toMatchObject({ id: 2, ok: true, did: "typed 3 characters into the page" });
     expect(key).toMatchObject({ id: 3, ok: true, did: "pressed ctrl+l" });
     const t = r.trace();
     expect(calls(t, "motion")).toEqual([{ call: "motion", x: 640, y: 450 }]);
     expect(calls(t, "button")).toEqual([{ call: "button", button: 1, down: true }, { call: "button", button: 1, down: false }]);
-    // Each letter by its own key, shift where the keyboard needs it: nothing remapped (C0: remapping lowercased Æ).
-    expect(keys(t)).toEqual(["+Shift_L", "+h", "-h", "-Shift_L", "+i", "-i", "+Shift_L", "+1", "-1", "-Shift_L", "+Control_L", "+l", "-l", "-Control_L"]);
+    expect(keys(t)).toEqual(["+Control_L", "+l", "-l", "-Control_L"]);
   });
 
   test("an action that changes nothing on the screen says so, having waited no longer than its grace", async () => {
@@ -251,13 +251,6 @@ describe("the desktop command: deskd's thin client", () => {
     const shot = desktop(r, ["shot", "mine.png"], {}, here);
     expect(shot).toMatchObject({ code: 0, out: `${join(here, "mine.png")}\n` });
     expect(decodePng(readFileSync(join(here, "mine.png"))).at(50, 60)).toEqual([255, 0, 0]);
-  });
-
-  test("text that isn't on the keyboard still goes as the shell command sent it (until step 4 sends it exactly)", async () => {
-    if (!needs()) return;
-    const r = await deskd();
-    expect(desktop(r, ["type", "Søren Ærø"])).toMatchObject({ code: 0, out: expect.stringMatching(/^typed 9 characters/) });
-    expect(calls(r.trace(), "xdotool")).toEqual([{ call: "xdotool", argv: ["type", "--delay", "12", "--", "Søren Ærø"] }]);
   });
 
   test("look puts the question and a fresh picture to the eyes named for this VM, with its token from the environment, never an argument", async () => {
@@ -473,5 +466,49 @@ print(json.dumps(b.front()[0]))`)).toBe("T2");
     // (A screen that never stops: the open waits its settle out, a second at most.)
     expect(opened.ms).toBeGreaterThan(900);
     expect(opened.ms).toBeLessThan(3000);
+  });
+});
+
+describe("text that arrives exactly (step 4): typed by what has the focus, never by remapping keys", () => {
+  const TEST_STRING = "Søren Ærø – blåbærgrød 25 °C ✓ € ü 日本語 🙂";
+
+  test("into a text field of the browser's page it goes by the browser's own insertText, whole, and what landed is checked", async () => {
+    const r = await deskd({ DESKD_FOCUS: "field" });
+    const [typed] = await session(r, [{ id: 1, name: "type", input: { text: TEST_STRING } }]);
+    expect(typed).toMatchObject({ ok: true, did: "typed 40 characters into the page" });
+    const t = r.trace();
+    expect(calls(t, "cdp").filter((c) => c.method === "Input.insertText")).toEqual([{ call: "cdp", method: "Input.insertText", params: { text: TEST_STRING } }]);
+    expect(calls(t, "key")).toEqual([]);
+    expect(calls(t, "xdotool")).toEqual([]);
+  });
+
+  test("with nothing that takes text focused (C0's F1: the page, its body), it is an error, not exit 0, and nothing is typed", async () => {
+    if (!built) return;
+    const r = await deskd({ DESKD_FOCUS: "body" });
+    const blind = desktop(r, ["type", "typed-blind"]);
+    expect(blind.code).toBe(1);
+    expect(blind.err).toContain("nothing that takes text has the keyboard's focus");
+    const none = await deskd({ DESKD_FOCUS: "none" });
+    expect(desktop(none, ["type", "x"]).code).toBe(1);
+    for (const run of [r, none]) expect(run.trace().filter((t) => ["key", "xdotool", "own"].includes(String(t.call)) || (t.call === "cdp" && t.method === "Input.insertText"))).toEqual([]);
+  });
+
+  test("into a terminal, text the keyboard has no keys for is pasted from a selection deskd holds, with shift+Insert; into another app, with ctrl+v", async () => {
+    const term = await deskd({ DESKD_FOCUS: "xterm" });
+    await session(term, [{ id: 1, name: "type", input: { text: TEST_STRING } }]);
+    expect(calls(term.trace(), "own")).toEqual([{ call: "own", text: TEST_STRING }]);
+    expect(keys(term.trace())).toEqual(["+Shift_L", "+Insert", "-Insert", "-Shift_L"]);
+    const editor = await deskd({ DESKD_FOCUS: "mousepad" });
+    await session(editor, [{ id: 1, name: "type", input: { text: TEST_STRING } }]);
+    expect(calls(editor.trace(), "own")).toEqual([{ call: "own", text: TEST_STRING }]);
+    expect(keys(editor.trace())).toEqual(["+Control_L", "+v", "-v", "-Control_L"]);
+    for (const run of [term, editor]) expect(calls(run.trace(), "xdotool")).toEqual([]);
+  });
+
+  test("short text the keyboard has keys for still goes key by key, shift where it needs it, into whatever takes text", async () => {
+    const r = await deskd({ DESKD_FOCUS: "xterm" });
+    await session(r, [{ id: 1, name: "type", input: { text: "Ls -a" } }]);
+    expect(keys(r.trace())).toEqual(["+Shift_L", "+l", "-l", "-Shift_L", "+s", "-s", "+space", "-space", "+-", "--", "+a", "-a"]);
+    expect(calls(r.trace(), "own")).toEqual([]);
   });
 });

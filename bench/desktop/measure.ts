@@ -196,6 +196,29 @@ export interface Typing {
   got: string[];
 }
 
+/** The id of the window whose name matches, once it has the keyboard's focus (by the oracle), or after a click on it. */
+async function focusWindow(vm: BenchVm, name: string): Promise<boolean> {
+  for (let i = 0; i < 40; i++) {
+    const w = json(await vm.raw(["python3", `${IN_VM}/oracle.py`, "window", name]));
+    if (typeof w.x === "number") {
+      if (!new RegExp(name).test(String(json(await vm.raw(["python3", `${IN_VM}/oracle.py`, "focus"])).name ?? ""))) await vm.raw(["desktop", "click", String(w.x), String(w.y)]);
+      for (let j = 0; j < 20; j++) {
+        if (new RegExp(name).test(String(json(await vm.raw(["python3", `${IN_VM}/oracle.py`, "focus"])).name ?? ""))) return true;
+        await Bun.sleep(100);
+      }
+    }
+    await Bun.sleep(150);
+  }
+  return false;
+}
+
+/** An app of the bench's, started in the VM apart from the command, its process id kept to end it by. */
+const startApp = (vm: BenchVm, argv: string) => vm.raw(["sh", "-c", `DISPLAY=:1 setsid ${argv} >/dev/null 2>&1 & echo $! > ${IN_VM}/out/app.pid`]);
+const endApp = async (vm: BenchVm) => {
+  await vm.raw(["sh", "-c", `p=$(cat ${IN_VM}/out/app.pid 2>/dev/null) && kill -TERM "$p" 2>/dev/null; rm -f ${IN_VM}/out/app.pid; true`]);
+  await Bun.sleep(300);
+};
+
 export async function typing(vm: BenchVm, n: number): Promise<Typing> {
   const got: string[] = [];
   const ms: number[] = [];
@@ -214,11 +237,49 @@ export async function typing(vm: BenchVm, n: number): Promise<Typing> {
   }
   const has = async (app: string) => (await vm.raw(["sh", "-c", `command -v ${app}`])).code === 0;
   const absent = (app: string) => ({ exact: 0, of: 0, note: `no ${app} in the image` });
-  return {
-    exact: { chromium: { exact, of: n }, xterm: (await has("xterm")) ? absent("way to read back what xterm took yet") : absent("xterm"), mousepad: (await has("mousepad")) ? absent("way to read back what mousepad took yet") : absent("mousepad") },
-    ms: { samples: ms, span: [t0, performance.now()] },
+  // A terminal: what is typed into a line that cat writes to a file, read back.
+  const xterm = async () => {
+    let right = 0;
+    for (let i = 0; i < n; i++) {
+      const file = `${IN_VM}/out/xterm-${i}.txt`;
+      await startApp(vm, `xterm -geometry 100x20+100+100 -e sh -c 'cat > ${file}'`);
+      if (await focusWindow(vm, "^xterm$")) {
+        await vm.raw(["desktop", "type", TEST_STRING], { env: { LC_ALL: "C.UTF-8" } });
+        await vm.raw(["desktop", "key", "Return"]);
+        await Bun.sleep(400);
+        if ((await vm.raw(["cat", file])).stdout === `${TEST_STRING}\n`) right++;
+      }
+      await endApp(vm);
+    }
+    return { exact: right, of: n };
+  };
+  // An editor: what is typed into a new file of its own, saved where it was named, read back.
+  const mousepad = async () => {
+    let right = 0;
+    for (let i = 0; i < n; i++) {
+      const file = `${IN_VM}/out/mousepad-${i}.txt`;
+      await startApp(vm, `mousepad ${file}`);
+      if (await focusWindow(vm, "Mousepad$")) {
+        await vm.raw(["desktop", "type", TEST_STRING], { env: { LC_ALL: "C.UTF-8" } });
+        await vm.raw(["desktop", "key", "ctrl+s"]);
+        for (let j = 0; j < 20 && (await vm.raw(["cat", file])).code !== 0; j++) await Bun.sleep(150);
+        if ((await vm.raw(["cat", file])).stdout.replace(/\n$/, "") === TEST_STRING) right++;
+        await vm.raw(["desktop", "key", "ctrl+q"]);
+        await Bun.sleep(300);
+      }
+      await endApp(vm);
+    }
+    return { exact: right, of: n };
+  };
+  const answer = {
+    exact: { chromium: { exact, of: n }, xterm: (await has("xterm")) ? await xterm() : absent("xterm"), mousepad: (await has("mousepad")) ? await mousepad() : absent("mousepad") },
+    ms: { samples: ms, span: [t0, performance.now()] as [number, number] },
     got,
   };
+  // The desktop as the next measure finds it: the browser with the focus, the pointer over its page.
+  await vm.raw(["desktop", "click", "900", "15"]);
+  await vm.raw(["desktop", "move", "640", "450"]);
+  return answer;
 }
 
 /* ---------- §3 what breaks: the F tests ---------- */

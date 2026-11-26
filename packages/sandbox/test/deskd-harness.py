@@ -6,6 +6,9 @@ file, a JSON line a call, and the tests read it. Nothing here is deskd's own log
   INVINCIBLE_DESKTOP_RUN=<dir> DESKD_TRACE=<file> python3 deskd-harness.py      serves on <dir>/deskd.sock
   DESKD_QUIET=1             the screen never changes after an input (an action that shows nothing)
   DESKD_BUSY=1              the screen never stops changing (a page that animates)
+  DESKD_FOCUS=…             what has the keyboard's focus: field (a text field of the browser's page, the default),
+                            body (the page, with nothing in it that takes text), bar (the browser's own bar), xterm,
+                            mousepad, none
 """
 import importlib.util, json, os, sys, threading, time
 
@@ -17,6 +20,7 @@ spec.loader.exec_module(deskd)
 
 TRACE = os.environ["DESKD_TRACE"]
 QUIET = os.environ.get("DESKD_QUIET") == "1"
+FOCUS = os.environ.get("DESKD_FOCUS", "field")
 BUSY = os.environ.get("DESKD_BUSY") == "1"
 lock = threading.Lock()
 
@@ -29,7 +33,7 @@ def trace(**what):
 # A US keyboard's map, as X gives it: keysym -> (keycode, level).
 NAMES = {"Return": 0xFF0D, "Tab": 0xFF09, "Escape": 0xFF1B, "BackSpace": 0xFF08, "Delete": 0xFFFF, "Left": 0xFF51, "Up": 0xFF52, "Right": 0xFF53,
          "Down": 0xFF54, "Home": 0xFF50, "End": 0xFF57, "Page_Up": 0xFF55, "Page_Down": 0xFF56, "space": 0x20, "Control_L": 0xFFE3, "Shift_L": 0xFFE1,
-         "Alt_L": 0xFFE9, "Super_L": 0xFFEB, "F5": 0xFFC2}
+         "Alt_L": 0xFFE9, "Super_L": 0xFFEB, "F5": 0xFFC2, "Insert": 0xFF63}
 KEYS = {}
 code = 10
 for lower, upper in zip("abcdefghijklmnopqrstuvwxyz1234567890-=[];',./\\`", "ABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+{}:\"<>?|~"):
@@ -39,7 +43,7 @@ for lower, upper in zip("abcdefghijklmnopqrstuvwxyz1234567890-=[];',./\\`", "ABC
 for name, sym in NAMES.items():
     KEYS[sym] = (code, 0)
     code += 1
-CODE_NAMES = {c: (chr(s) if s < 0x100 and chr(s).isprintable() and level == 0 else next((n for n, v in NAMES.items() if v == s), None)) for s, (c, level) in KEYS.items() if level == 0}
+CODE_NAMES = {c: next((n for n, v in NAMES.items() if v == s), None) or (chr(s) if s < 0x100 else None) for s, (c, level) in KEYS.items() if level == 0}
 
 
 class Screen:
@@ -73,6 +77,10 @@ class Screen:
             self.appeared, self.gone = [], []
         return a, g
 
+    def own(self, text):
+        # (A selection held for a paste: the stand-in app that pastes it is the trace's reader.)
+        trace(call="own", text=text)
+
 
 class FakeDisplay:
     w, h = deskd.W, deskd.H
@@ -80,10 +88,11 @@ class FakeDisplay:
     def __init__(self, screen):
         self.screen = screen
         self.at = (0, 0)
-        self.focused = "0x400001"
         self.windows = {"0x400001": {"id": "0x400001", "title": "about:blank - Chromium", "app": "Chromium", "dialog": False, "box": [0, 0, 1280, 800]},
+                        "0x500001": {"id": "0x500001", "title": "xterm", "app": "XTerm", "dialog": False, "box": [20, 600, 300, 150]},
                         "0x600001": {"id": "0x600001", "title": "Untitled 1 - Mousepad", "app": "Mousepad", "dialog": False, "box": [800, 300, 400, 300]}}
-        self.stacking = ["0x400001", "0x600001"]  # bottom to top
+        self.focused = {"xterm": "0x500001", "mousepad": "0x600001", "none": "0x0"}.get(FOCUS, "0x400001")
+        self.stacking = ["0x400001", "0x500001", "0x600001"]  # bottom to top
 
     def client_at(self, x, y):
         """The topmost window whose box holds the point, as the window manager stacks them."""
@@ -176,8 +185,14 @@ class FakeBrowser:
     def front(self):
         return ("page-1", {"session": "s1", "url": "about:blank"})
 
+    typed = ""
+
     def evaluate(self, expression, bound=deskd.CDP_BOUND):
         trace(call="evaluate", expression=expression[:60])
+        if expression == deskd.FOCUS_PROBE:
+            return {"field": [True, True, "INPUT"], "body": [True, False, "BODY"]}.get(FOCUS, [False, False, None])
+        if expression == deskd.FIELD_VALUE:
+            return FakeBrowser.typed
         if expression == "document.readyState":
             return "complete"
         if "' · '" in expression:
@@ -186,6 +201,8 @@ class FakeBrowser:
 
     def call(self, method, params=None, session=None, bound=deskd.CDP_BOUND):
         trace(call="cdp", method=method, params=params)
+        if method == "Input.insertText":
+            FakeBrowser.typed += params["text"]
         return {}
 
 

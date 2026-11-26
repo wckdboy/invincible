@@ -44,6 +44,13 @@ SETTLE_CAP = 3.0  # and is never waited for longer than this
 GRACE = 0.060  # an action's answer waits this long at most for the screen to show it
 CDP_BOUND = 2.0  # every call to the browser answers within this, or says it didn't
 NAVIGATION_CAP = 10.0  # a navigation an action started is waited for this long at most
+SHORT = 40  # text the keyboard has every key for, at most this long, goes key by key; anything else is inserted or pasted
+# What the browser's page says has its focus: whether the page has it, whether what has it takes text, and its tag.
+FOCUS_PROBE = ("(() => { const e = document.activeElement; const t = e ? e.tagName : null; const text = !!e && !e.disabled && !e.readOnly && "
+               "(e.isContentEditable || t === 'TEXTAREA' || (t === 'INPUT' && /^(text|search|email|url|tel|password|number)$/i.test(e.type || 'text'))); "
+               "return [document.hasFocus(), text, t]; })()")
+# What the field with the focus holds, once text has gone in: what landed.
+FIELD_VALUE = "(() => { const e = document.activeElement; return e ? (e.isContentEditable ? e.textContent : (e.value || '')) : ''; })()"
 EYES_FRAMING = ("This is a screenshot of a desktop, 1280 pixels wide and 800 high: x runs right from 0 and y runs down from 0. "
                 "Answer from what is on it and nothing else. When asked where something is, give the pixel coordinates of its "
                 "centre as x,y; if it is not on the screen, say so.")
@@ -96,6 +103,16 @@ class XPropertyEvent(ctypes.Structure):
 class XClientMessageEvent(ctypes.Structure):
     _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int), ("display", ctypes.c_void_p), ("window", ctypes.c_ulong),
                 ("message_type", ctypes.c_ulong), ("format", ctypes.c_int), ("l", ctypes.c_long * 5)]
+
+
+class XSelectionRequestEvent(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int), ("display", ctypes.c_void_p), ("owner", ctypes.c_ulong),
+                ("requestor", ctypes.c_ulong), ("selection", ctypes.c_ulong), ("target", ctypes.c_ulong), ("property", ctypes.c_ulong), ("time", ctypes.c_ulong)]
+
+
+class XSelectionEvent(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int), ("display", ctypes.c_void_p), ("requestor", ctypes.c_ulong),
+                ("selection", ctypes.c_ulong), ("target", ctypes.c_ulong), ("property", ctypes.c_ulong), ("time", ctypes.c_ulong)]
 
 
 class XWindowAttributes(ctypes.Structure):
@@ -152,6 +169,9 @@ def libs():
     _proto(x, "XDisplayKeycodes", I, P, ctypes.POINTER(I), ctypes.POINTER(I))
     _proto(x, "XGetKeyboardMapping", ctypes.POINTER(UL), P, ctypes.c_ubyte, I, ctypes.POINTER(I))
     _proto(x, "XStringToKeysym", UL, ctypes.c_char_p)
+    _proto(x, "XCreateSimpleWindow", UL, P, UL, I, I, U, U, U, UL, UL)
+    _proto(x, "XSetSelectionOwner", I, P, UL, UL, UL)
+    _proto(x, "XChangeProperty", I, P, UL, UL, UL, I, I, P, I)
     _proto(x, "XSendEvent", I, P, UL, I, L, P)
     handler = ctypes.CFUNCTYPE(I, P, P)
     _proto(x, "XSetErrorHandler", P, handler)
@@ -185,7 +205,7 @@ KEY_ALIASES = {"enter": "Return", "return": "Return", "esc": "Escape", "escape":
                "end": "End", "insert": "Insert", "ins": "Insert", "menu": "Menu", "print": "Print"}
 WM_NAMES = ("_NET_WM_NAME", "UTF8_STRING", "WM_NAME", "STRING", "WM_CLASS", "_NET_ACTIVE_WINDOW", "WINDOW", "_NET_CLIENT_LIST",
             "_NET_WM_WINDOW_TYPE", "ATOM", "_NET_WM_WINDOW_TYPE_DIALOG", "WM_TRANSIENT_FOR", "_NET_WM_PID", "CARDINAL",
-            "_NET_CLIENT_LIST_STACKING")
+            "_NET_CLIENT_LIST_STACKING", "PRIMARY", "CLIPBOARD", "TARGETS", "TEXT", "text/plain;charset=utf-8", "text/plain", "DESKD_SELECTION")
 
 
 class Display:
@@ -370,6 +390,9 @@ class Watch(threading.Thread):
         self.known = {}
         self.appeared = []  # (when, window) since the last answer took them
         self.gone = []
+        # A window of its own, never shown, to hold a selection for a paste (own): the text pasted, as UTF-8.
+        self.win = self.d.x.XCreateSimpleWindow(self.d.dpy, self.d.root, 0, 0, 1, 1, 0, 0, 0)
+        self.clip = None
         self.started = False
         self._list()
         self.started = True
@@ -408,7 +431,43 @@ class Watch(threading.Thread):
                     pe = ctypes.cast(ctypes.byref(ev), ctypes.POINTER(XPropertyEvent)).contents
                     if pe.atom == self.d.atoms["_NET_CLIENT_LIST"]:
                         self._list()
+                elif ev.type == 30:  # SelectionRequest: an app pasting what it holds
+                    self._answer(ev)
+                elif ev.type == 29:  # SelectionClear: another app holds it now
+                    with self.lock:
+                        self.clip = None
             select.select([fd], [], [], 1.0)
+
+    def own(self, text):
+        """Hold `text` as the PRIMARY selection and the clipboard, for a paste to take (shift+Insert, ctrl+v)."""
+        with self.lock:
+            self.clip = text.encode("utf-8")
+        for name in ("PRIMARY", "CLIPBOARD"):
+            self.d.x.XSetSelectionOwner(self.d.dpy, self.d.atoms[name], self.win, 0)
+        # (A round trip: the server has it before the paste's keys come, on the other connection.)
+        self.d.sync()
+
+    def _answer(self, ev):
+        a, x, dpy = self.d.atoms, self.d.x, self.d.dpy
+        req = ctypes.cast(ctypes.byref(ev), ctypes.POINTER(XSelectionRequestEvent)).contents
+        prop = req.property or req.target
+        with self.lock:
+            data = self.clip
+        if data is not None and req.target == a["TARGETS"]:
+            targets = (ctypes.c_ulong * 6)(a["TARGETS"], a["UTF8_STRING"], a["STRING"], a["TEXT"], a["text/plain;charset=utf-8"], a["text/plain"])
+            x.XChangeProperty(dpy, req.requestor, prop, a["ATOM"], 32, 0, ctypes.cast(targets, ctypes.c_void_p), 6)
+        elif data is not None and req.target in (a["UTF8_STRING"], a["TEXT"], a["text/plain;charset=utf-8"]):
+            x.XChangeProperty(dpy, req.requestor, prop, a["UTF8_STRING"], 8, 0, ctypes.cast(ctypes.c_char_p(data), ctypes.c_void_p), len(data))
+        elif data is not None and req.target in (a["STRING"], a["text/plain"]):
+            latin = data.decode("utf-8").encode("latin-1", "replace")
+            x.XChangeProperty(dpy, req.requestor, prop, a["STRING"], 8, 0, ctypes.cast(ctypes.c_char_p(latin), ctypes.c_void_p), len(latin))
+        else:
+            prop = 0  # refused: nothing held, or a form it isn't given in
+        reply = XEvent()
+        n = ctypes.cast(ctypes.byref(reply), ctypes.POINTER(XSelectionEvent)).contents
+        n.type, n.display, n.requestor, n.selection, n.target, n.property, n.time = 31, dpy, req.requestor, req.selection, req.target, prop, req.time
+        x.XSendEvent(dpy, req.requestor, 0, 0, ctypes.byref(reply))
+        x.XFlush(dpy)
 
     def since(self, t):
         """Whether the screen was drawn on after `t`, and how soon after it."""
@@ -1021,8 +1080,29 @@ class Desk:
             return "pressed %s%s" % (combo, " %d times" % repeat if repeat > 1 else "")
         return do
 
+    def text_target(self):
+        """What has the keyboard's focus, as typing needs it: "page" (a field of the browser's page in front that takes
+        text), "bar" (the browser's own bar: the page doesn't have the focus), "terminal", "app" (another app's window), or
+        None: nothing that takes text (no window; the page with nothing in it that takes text)."""
+        active = self.d.active()
+        if not active:
+            return None
+        app = self.d.window(active)["app"].lower()
+        if app == "chromium":
+            try:
+                state = self.browser.evaluate(FOCUS_PROBE, bound=0.5)
+            except Failed:
+                return "bar"
+            if not state or not state[0]:
+                return "bar"
+            return "page" if state[1] else None
+        return "terminal" if app in ("xterm", "uxterm") else "app"
+
     def typing(self, text):
-        """Text typed key by key where the keyboard has every letter of it; otherwise as the shell command did (xdotool)."""
+        """Text that arrives exactly, by what has the focus (C0: xdotool's remapped keys lowercased Æ and lost letters):
+        into the browser's page by its own insertText, what landed checked; short text the keyboard has every key for,
+        key by key; anything else pasted from a selection deskd holds (shift+Insert in a terminal, ctrl+v elsewhere).
+        Never a key remapped. With nothing that takes text focused, an error, and nothing typed."""
         keymap = self.d.keymap()
         plan = []
         for ch in text:
@@ -1032,11 +1112,21 @@ class Desk:
                 break
             plan.append(keymap[sym])
         shift = keymap.get(self.d.keysym("Shift_L"), (0, 0))[0]
+        n = len(text)
+        plural = "" if n == 1 else "s"
 
         def do():
-            if plan is None:
-                subprocess.run(["xdotool", "type", "--delay", "12", "--", text], env=dict(os.environ, DISPLAY=DISPLAY), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
-            else:
+            target = self.text_target()
+            if target is None:
+                raise Failed("nothing that takes text has the keyboard's focus: click where the text should go, then type")
+            if target == "page":
+                _, page = self.browser.front()
+                self.browser.call("Input.insertText", {"text": text}, page["session"])
+                landed = self.browser.evaluate(FIELD_VALUE, bound=1) or ""
+                if text not in landed:
+                    raise Failed("the text didn't land as typed: the field holds %s" % json.dumps(landed[-80:], ensure_ascii=False))
+                return "typed %d character%s into the page" % (n, plural)
+            if plan is not None and n <= SHORT:
                 for code, level in plan:
                     if level:
                         self.d.key(shift, True)
@@ -1044,7 +1134,13 @@ class Desk:
                     self.d.key(code, False)
                     if level:
                         self.d.key(shift, False)
-            return "typed %d character%s" % (len(text), "" if len(text) == 1 else "s")
+                return "typed %d character%s" % (n, plural)
+            self._watch.own(text)
+            for code in self._keys("shift+Insert" if target == "terminal" else "ctrl+v"):
+                self.d.key(code, True)
+            for code in reversed(self._keys("shift+Insert" if target == "terminal" else "ctrl+v")):
+                self.d.key(code, False)
+            return "pasted %d character%s" % (n, plural)
         return do
 
     def scroll(self, direction, amount, x=None, y=None, mods=""):
@@ -1168,7 +1264,9 @@ desktop look [--eyes p/m] "<question>"   ask a model that can see what is on the
 desktop click <x> <y> [left|right|middle|double|triple]
 desktop move <x> <y>               desktop drag <x0> <y0> <x1> <y1>
 desktop scroll <up|down|left|right> [times] [x y]
-desktop type <text>                type text where the keyboard's focus is
+desktop type <text>                type text where the keyboard's focus is, exactly: into the browser's page by
+                                   its own input (and checked), elsewhere pasted or key by key; an error when
+                                   nothing that takes text has the focus (click there first)
 desktop key <key>... [--repeat n]  press keys, e.g. Return, Tab, Escape, ctrl+l, ctrl+a, alt+Left
 desktop settle                     wait until the screen is still (150 ms with nothing drawn, 3 s at most)
 desktop windows                    the windows on the screen, and which has the keyboard's focus
