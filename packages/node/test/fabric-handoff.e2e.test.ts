@@ -71,6 +71,8 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
 
   beforeAll(async () => {
     pair = await startPair({
+      // Alpha's grants to runs last 4 s here (300 s otherwise), so every run below lives across their renewals.
+      a: { fabricGrantTtlSecs: 4 },
       b: {
         capabilities: sandboxCaps("beta"),
         docker: docker.runner,
@@ -167,6 +169,31 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
     hold = null;
     await ended(view.id);
     // Its task over, nothing of it answers: no run here, and alpha's grant for it is gone with it.
+    expect((await pair.b.handoffs.callGiver(vm, "fleet", {}, new AbortController().signal)).status).toBe(404);
+  });
+
+  test("a run's grant renews itself while its task lives, and never outlives it", async () => {
+    let release!: () => void;
+    const done = new Promise<void>((resolve) => (release = resolve));
+    hold = { tag: "renew", entered: false, release, done };
+    const view = await pair.callA<HandedView>("handTask", { node: "beta", goal: "TASK_RENEW: look at the fleet, for a while", gates: ["test -f result-renew.txt # gate-renew"], agent: "ada", tools: ["fleet"] });
+    await until(() => hold!.entered, 30_000, "the run under way on beta");
+    await until(() => pair.b.handoffs.running().some((r) => r.handoff === view.id && r.chained), 10_000, "the run's chain on beta");
+    const first = pair.b.handoffs.chainOf(view.id)!;
+    const vm = (await pair.callB<TeamSnapshot>("team")).agents.find((m) => m.id === "ada")!.workspace!.id;
+    // Past the first token's 4 s: the run's calls still go through, under a chain alpha renewed and sent in.
+    await Bun.sleep(6_000);
+    expect(pair.b.handoffs.chainOf(view.id)).not.toBe(first);
+    expect((await pair.b.handoffs.callGiver(vm, "fleet", {}, new AbortController().signal)).status).toBe(200);
+    release();
+    hold = null;
+    await ended(view.id);
+    // Ended with the task: revoked at alpha's sidecar (its renewals with it), and nothing of the run answers on beta.
+    const grants = (await pair.a.fabric.sidecar.client!.grants()) as { aud: string; revoked: boolean }[];
+    const run = (await handed(view.id)).task;
+    expect(run).not.toBeNull();
+    expect(grants.filter((g) => g.revoked).length).toBeGreaterThan(0);
+    expect(grants.some((g) => !g.revoked && g.aud.startsWith("did:key:"))).toBe(false);
     expect((await pair.b.handoffs.callGiver(vm, "fleet", {}, new AbortController().signal)).status).toBe(404);
   });
 

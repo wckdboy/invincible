@@ -69,6 +69,8 @@ export interface HandoffsDeps {
   fabric: Fabric;
   log(message: string): void;
   now?(): number;
+  /** How long a run's grant lasts before it is renewed at half of it, in seconds (tests: a few; RUN_GRANT_TTL). */
+  grantTtlSecs?: number;
 }
 
 const ENDED = new Set(["done", "failed", "stopped", "interrupted"]);
@@ -78,6 +80,8 @@ const TRAIL_KEEP = 2_000;
 const STOP_WAIT_MS = 15_000;
 /** How long a run's link (the run's key to its node's) lasts at most; it is signed again as the grant renews. */
 const LINK_TTL = RUN_GRANT_TTL;
+/** A link is signed again this long before it would end (or its grant's token would). */
+const LINK_EARLY_SECS = 30;
 
 interface Row {
   id: string;
@@ -272,7 +276,8 @@ export class Handoffs implements FabricTools {
     const tools = JSON.parse(row.tools) as FabricRunTool[];
     const client = this.deps.fabric.sidecar.client;
     if (!tools.length || !row.run || !client) return;
-    const minted = await client.mint({ aud: row.run, cmds: [RUN_GRANT_COMMAND], sub: this.deps.fabric.sidecar.did ?? undefined, pol: runGrantPolicy(id), ttlSecs: RUN_GRANT_TTL, renewable: true });
+    const ttl = this.deps.grantTtlSecs ?? RUN_GRANT_TTL;
+    const minted = await client.mint({ aud: row.run, cmds: [RUN_GRANT_COMMAND], sub: this.deps.fabric.sidecar.did ?? undefined, pol: runGrantPolicy(id), ttlSecs: ttl, renewable: true });
     const chain = minted.tokens[0]!.chain;
     this.set(id, { grant_id: minted.grant, tokens: JSON.stringify(minted.tokens.map((t) => t.tokenId)) });
     call.send({ value: { kind: "chain", chain } });
@@ -284,7 +289,7 @@ export class Handoffs implements FabricTools {
         const sidecar = this.deps.fabric.sidecar.client;
         if (!live || live.phase === "ended" || !live.grant_id || !sidecar) return;
         try {
-          const renewed = await sidecar.renew(live.grant_id, RUN_GRANT_TTL);
+          const renewed = await sidecar.renew(live.grant_id, ttl);
           const ids = [...(JSON.parse(live.tokens) as string[]), ...renewed.tokens.map((t) => t.tokenId)].slice(-8);
           this.set(id, { tokens: JSON.stringify(ids) });
           call.send({ value: { kind: "chain", chain: renewed.tokens[0]!.chain } });
@@ -292,7 +297,7 @@ export class Handoffs implements FabricTools {
           this.deps.log(`fabric: ${id}'s grant wasn't renewed: ${(error as Error).message}`);
         }
       })();
-    }, (RUN_GRANT_TTL * 1000) / 2);
+    }, (ttl * 1000) / 2);
     held.renew.unref?.();
   }
 
@@ -510,7 +515,8 @@ export class Handoffs implements FabricTools {
     if (!giver || !endpoint || !client || !self) return { status: 503, body: { error: "the node that gave this task can't be reached over Q-AMP now" } };
     const root = readQdt(run.chain[0]!).payload;
     const nowSecs = Math.floor(this.now() / 1000);
-    if (!run.link || run.link.exp - nowSecs < 30) {
+    // Signed again when it would end soon (a renewal of the giver's grant has cleared it already: chain, above).
+    if (!run.link || run.link.exp - nowSecs < LINK_EARLY_SECS) {
       // The run's key passes the grant on to its own node's transport key: no more than it was given, never past it.
       const exp = Math.min(root.exp, nowSecs + LINK_TTL);
       const link = signQdt(run.seed, { aud: self, sub: root.sub, cmd: `/tool/${FABRIC.agent}/${tool}`, exp, pol: runGrantPolicy(run.handoff) });

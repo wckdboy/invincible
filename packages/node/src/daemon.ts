@@ -170,6 +170,8 @@ export interface DaemonOptions {
    * link over HTTPS).
    */
   sidecar?: { binary?: string | null; port?: number; socket?: string; spawn?: SpawnSidecar } | false;
+  /** How long a run's grant lasts before it is renewed at half of it (tests: a few seconds; default 300). */
+  fabricGrantTtlSecs?: number;
   /** The UDP ports grants' bridges listen on (tests: others; default 7411–7419), and how often expiry is looked for. */
   qampPorts?: { first: number; last: number };
   qampSweepMs?: number;
@@ -335,7 +337,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     },
   });
   // Tasks handed to other nodes' agents and handed here, each over one Q-AMP call, its proof signed by the node that ran it.
-  const handoffs = new Handoffs({ db: local, store, identity, fabric, log });
+  const handoffs = new Handoffs({ db: local, store, identity, fabric, log, ...(opts.fabricGrantTtlSecs ? { grantTtlSecs: opts.fabricGrantTtlSecs } : {}) });
   fabric.attach(handoffs);
   /** Its capabilities as its profile says them: with its Q-AMP endpoint, once its sidecar has said one. */
   const withQamp = (c: Capabilities): Capabilities => (qampEndpoint ? { ...c, qamp: qampEndpoint } : c);
