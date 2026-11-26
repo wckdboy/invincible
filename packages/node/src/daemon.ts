@@ -689,7 +689,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
           const prices = moneyPrices(pricesOf(store), PLAN_PROVIDERS);
           return team.store.tasks().map((t) => {
             const ended = t.status === "done" || t.status === "failed";
-            return { id: t.id, status: t.status, word: ended ? (verdictOf(t, factsOfRecord(t.record))?.word ?? "ended") : "", cost: ended ? costWords(t, prices) : "", ship: ended && taskActions(t).includes("ship") };
+            return { id: t.id, status: t.status, word: ended ? (verdictOf(t, factsOfRecord(t.record))?.word ?? "ended") : "", cost: ended ? costWords(t, prices) : "", ship: ended && taskActions(t).includes("ship"), ...(t.record ? { endedAt: t.record.endedAt } : {}) };
           });
         },
       },

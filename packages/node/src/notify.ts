@@ -98,9 +98,9 @@ export interface NotifySources {
   turns: { running(): LiveTurn[]; view(turn: LiveTurn, watchable: boolean): { watchers: number } };
   chats: { summary(id: string): KeptSummary | null };
   runs: { list(): RunView[]; onChange(fn: () => void): () => void };
-  /** The agents' tasks, each with its verdict and cost in words once it has ended (taskItem's), read only when the team
-   * has changed since (`version`). */
-  tasks?: { version(): string; list(): { id: string; status: string; word: string; cost: string; ship: boolean }[] };
+  /** The agents' tasks, each with its verdict and cost in words once it has ended (taskItem's), and when its last run
+   * ended (its record's `endedAt`), read only when the team has changed since (`version`). */
+  tasks?: { version(): string; list(): { id: string; status: string; word: string; cost: string; ship: boolean; endedAt?: number }[] };
   /** How a task stands on its Live Activity now (the web lib's activityOf, from its record and its trail); null: there is
    * no such task. Read only when the team has changed. */
   activity?(task: string): ActivityState | null;
@@ -199,8 +199,9 @@ export class NotifyService {
   private readonly turns = new Map<string, { watchers: number }>();
   /** Runs of yours seen in hand, by the run they belong to. */
   private readonly runs = new Set<string>();
-  /** The agents' tasks that had ended at the last look (null: it hasn't looked yet), and the team's version then. */
-  private tasksEnded: Set<string> | null = null;
+  /** The agents' tasks that had ended at the last look, by when their last run ended (null: it hasn't looked yet), and
+   * the team's version then. */
+  private tasksEnded: Map<string, number> | null = null;
   private tasksSeen: string | null = null;
   /** The team's version when the Live Activities were last told (null: tell them at the next look), and a look under way. */
   private activitiesSeen: string | null = null;
@@ -295,8 +296,9 @@ export class NotifyService {
   /**
    * An agent's task that has ended since the last look: told by its verdict and cost, opening the task (taskItem). Read
    * only when the team changed. Whether it was seen in hand doesn't matter: a task can be given and end between two looks
-   * (one whose gate can't run fails at once). What had ended before the first look is old news; one given again is
-   * news again when it ends.
+   * (one whose gate can't run fails at once). What had ended before the first look is old news. One resumed is news
+   * again when it ends, however soon (in hand at a look between, or its last run ending at another moment): what was
+   * told of its earlier end doesn't hold it back, and its notification replaces that one where it still shows (one tag).
    */
   lookAtTasks(): void {
     const tasks = this.o.sources.tasks;
@@ -304,13 +306,15 @@ export class NotifyService {
     const version = tasks.version();
     if (version === this.tasksSeen) return;
     this.tasksSeen = version;
-    const ended = new Set<string>();
+    const ended = new Map<string, number>();
     for (const task of tasks.list()) {
       if (task.status !== "done" && task.status !== "failed" && task.status !== "stopped") continue;
-      ended.add(task.id);
-      if (this.tasksEnded === null || this.tasksEnded.has(task.id)) continue;
+      const at = task.endedAt ?? -1;
+      ended.set(task.id, at);
+      if (this.tasksEnded === null || this.tasksEnded.get(task.id) === at) continue;
       const item = taskItem(task);
       if (!item) continue;
+      this.o.db.forget(item.key);
       this.o.db.addPending(item);
       this.nudge();
     }

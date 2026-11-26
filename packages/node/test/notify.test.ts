@@ -215,6 +215,37 @@ describe("a task's Live Activity, kept up from here while the app isn't in front
   });
 });
 
+describe("an agent's task, resumed", () => {
+  test("ends again and is told again, replacing what was told of it: whoever resumes work wants to hear how it ends", async () => {
+    // (26 November 2026: its key was told for two days, so a task resumed within them ended in silence.)
+    type T = { id: string; status: string; word: string; cost: string; ship: boolean; endedAt?: number };
+    let version = 1;
+    let tasks: T[] = [{ id: "task-againagainag", status: "running", word: "", cost: "", ship: false }];
+    const h = harness({ sources: { tasks: { version: () => String(version), list: () => tasks } } });
+    const look = async (next: T[]) => {
+      tasks = next;
+      version += 1;
+      h.service.lookAtTasks();
+      h.advance(31 * 60_000);
+      await h.look();
+    };
+    h.service.lookAtTasks();
+    await look([{ id: "task-againagainag", status: "failed", word: "Failed · gate 1", cost: "$0.02", ship: false, endedAt: 1_000 }]);
+    // Resumed: in hand again, then ended.
+    await look([{ id: "task-againagainag", status: "running", word: "", cost: "", ship: false, endedAt: 1_000 }]);
+    await look([{ id: "task-againagainag", status: "done", word: "Proven", cost: "$0.05", ship: true, endedAt: 2_000 }]);
+    expect(h.sent.map((s) => s.payload.title)).toEqual(["Your agent's task: Failed · gate 1", "Your agent's task: Proven"]);
+    // The newer end replaces the older one where it is still shown: one notification for one task.
+    expect(h.sent[1]!.payload.tag).toBe(h.sent[0]!.payload.tag);
+    // Resumed and ended again between two looks (it can take less than a second): told all the same.
+    await look([{ id: "task-againagainag", status: "failed", word: "Failed · gate 2", cost: "$0.06", ship: false, endedAt: 3_000 }]);
+    expect(h.sent.map((s) => s.payload.title).at(-1)).toBe("Your agent's task: Failed · gate 2");
+    // The team changing for another reason (shipped, renamed) says nothing more of it.
+    await look([{ id: "task-againagainag", status: "failed", word: "Failed · gate 2", cost: "$0.06", ship: false, endedAt: 3_000 }]);
+    expect(h.sent).toHaveLength(3);
+  });
+});
+
 describe("a run you started", () => {
   test("is told when it ends, as it ended, with your own goal; one you stopped isn't news", async () => {
     const h = harness();
