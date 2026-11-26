@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type ActionClass, type Decision, decide, type ExecResult, isReservedGatewayScope, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead } from "@invincible/core";
+import { type ActionClass, type Decision, decide, type ExecResult, isReservedGatewayScope, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead } from "@invincible/core";
 import {
   CONTAINER_MAJOR,
   containerBuildArgs,
@@ -41,6 +41,7 @@ import {
   execArgs,
   gatewayEnv,
   DESKTOP_IMAGE,
+  HARNESS_IMAGE,
   LAB_IMAGE,
   LABEL,
   NETWORKS,
@@ -49,6 +50,7 @@ import {
   runArgs,
   type SandboxSpec,
   SEARCH_SCOPE,
+  seatVolumeName,
   TERMINAL_HANG_UP,
   terminalArgs,
   volumeName,
@@ -207,6 +209,28 @@ export interface CreateInput {
   search?: boolean;
 }
 
+/**
+ * How a sandbox is made, beyond what it is: `signal`, its asker went away while it waited for room (a governed host's);
+ * `seat` and `shares`, a seat's VM (createSeatVm's alone: never a route's).
+ */
+export interface CreateOptions {
+  signal?: AbortSignal;
+  seat?: SeatVmInput["seat"];
+  shares?: NonNullable<SandboxSpec["shares"]>;
+}
+
+/** A VM for a seat (createSeatVm): which seat, how many VMs its home may be in at once, and an agent's VM whose /work it shares. */
+export interface SeatVmInput {
+  seat: { id: string; kind: SeatKind; runs: number };
+  /** For a run on the seat: the agent's own VM, on this host, whose /work this one uses. None: a VM of its own (a sign-in). */
+  shares?: string;
+  network: "online" | "gateway";
+  cpus: number;
+  memoryGb: number;
+  ttlMinutes: number;
+  run: string;
+}
+
 /** One thing done on an agent's desktop from outside its VM (`look`: nothing, only the picture). */
 export type DesktopAction =
   | { do: "look" }
@@ -319,6 +343,8 @@ export class SandboxHost {
   private readonly tokenStore: SandboxTokenStore;
   /** Workspaces made for a sandbox that hasn't started yet (so a cleanup never takes them). */
   private readonly creating = new Set<string>();
+  /** A seat whose VM is being made: the next ask for that seat waits for it, so two never pass the count at once. */
+  private readonly seating = new Map<string, Promise<unknown>>();
   private readonly building = new Map<string, Promise<{ ok: boolean; output: string }>>();
   /** On a Mac: the networks being held up, once at a time (what it does to their helpers must never overlap). */
   private keeping: Promise<void> | null = null;
@@ -575,7 +601,7 @@ export class SandboxHost {
     return !!this.opts.workspaces && (await this.opts.workspaces.available());
   }
 
-  async create(input: CreateInput): Promise<SandboxView> {
+  async create(input: CreateInput, seated: CreateOptions = {}): Promise<SandboxView> {
     const providers = sandboxScopes(input);
     // Never weaker than asked: what a Mac can't give (no network at all, an image not built for it) isn't made here.
     const cannot = this.refusal(input);
@@ -640,11 +666,15 @@ export class SandboxHost {
       isolation,
       ...(this.opts.resolvConf ? { resolvConf: this.opts.resolvConf } : {}),
       ...(tokenHash ? { tokenHash } : {}),
+      ...(seated.seat ? { seat: { id: seated.seat.id, kind: seated.seat.kind } } : {}),
+      ...(seated.shares ? { shares: seated.shares } : {}),
     };
 
     this.creating.add(id);
     try {
-      if (limited) {
+      if (seated.shares) {
+        // Its /work is an agent's own, which it never makes, sizes or removes.
+      } else if (limited) {
         try {
           spec.workspace = await this.opts.workspaces!.create(id, diskGb, { retain: input.persistent && run.startsWith("arm.team.") });
           spec.diskGb = diskGb;
@@ -672,7 +702,7 @@ export class SandboxHost {
       if (ran.code !== 0) {
         await this.docker(this.removeArgs(containerName(id)));
         if (spec.workspace) await this.opts.workspaces!.remove(id).catch(() => {});
-        else await this.docker(["volume", "rm", "-f", volumeName(id)]);
+        else if (!seated.shares) await this.docker(["volume", "rm", "-f", volumeName(id)]);
         if (tokenHash) this.opts.tokens.revoke(tokenHash);
         throw new SandboxError(`could not start sandbox: ${redact(ran.stderr.trim()).slice(0, 500)}`, 500);
       }
@@ -687,7 +717,7 @@ export class SandboxHost {
       target: containerName(id),
       verdict: "allow",
       run,
-      detail: `${isolation === "vm" ? "microVM" : "container"} · ${input.network} · ${input.cpus} cpu · ${input.memoryGb} GB · ${spec.workspace ? `${diskGb} GB disk` : "unlimited disk"} · ${image}${models.length ? ` · models: ${models.join(", ")}` : ""}${providers.includes(SEARCH_SCOPE) ? " · web search" : ""}`,
+      detail: `${isolation === "vm" ? "microVM" : "container"} · ${input.network} · ${input.cpus} cpu · ${input.memoryGb} GB · ${seated.shares ? `the /work of ${containerName(seated.shares.sandbox)}` : spec.workspace ? `${diskGb} GB disk` : "unlimited disk"} · ${image}${seated.seat ? ` · seat ${seated.seat.id}'s home` : ""}${models.length ? ` · models: ${models.join(", ")}` : ""}${providers.includes(SEARCH_SCOPE) ? " · web search" : ""}`,
     });
     return (await this.get(id))!;
   }
@@ -1191,6 +1221,85 @@ export class SandboxHost {
    * Destroy through approvals. `approvedBy` is set when the owner asked for it
    * directly (their request *is* the approval); autonomous callers pass a run.
    */
+  /**
+   * A VM for a seat (core's seats.ts), from the pinned tools' image: the seat's home mounted (made the first time and given
+   * to the VMs' user), for its sign-in or for a run on it, and then sharing an agent's own /work. A seat's home is in no
+   * more VMs at once than it takes (`runs`: D4); one more is refused, never made. On a Linux host with Docker alone: a
+   * Mac's volumes are disk images only one VM may mount.
+   */
+  async createSeatVm(input: SeatVmInput): Promise<SandboxView> {
+    if (this.apple) throw new SandboxError("a seat's VM is made on a Linux host with Docker", 424);
+    const before = this.seating.get(input.seat.id);
+    const work = (async () => {
+      await before?.catch(() => {});
+      const using = await this.seatVms(input.seat.id);
+      if (using === null) throw new SandboxError("docker couldn't say which VMs have this seat's home, so none was made", 503);
+      if (using.length >= input.seat.runs) throw new SandboxError(`this seat's home is in use (${using.length} VM${using.length === 1 ? "" : "s"}, and it takes ${input.seat.runs} at once): it waits`, 409);
+      await this.seatHome(input.seat.id);
+      const shares = input.shares ? await this.sharedWork(input.shares) : undefined;
+      return this.create(
+        { network: input.network, image: HARNESS_IMAGE, cpus: input.cpus, memoryGb: input.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run },
+        { seat: input.seat, ...(shares ? { shares } : {}) },
+      );
+    })();
+    this.seating.set(input.seat.id, work);
+    try {
+      return await work;
+    } finally {
+      if (this.seating.get(input.seat.id) === work) this.seating.delete(input.seat.id);
+    }
+  }
+
+  /** The VMs on this host that have a seat's home, in any state (a stopped one still holds it): null when docker can't say. */
+  async seatVms(seat: string): Promise<string[] | null> {
+    const listed = await this.docker(["ps", "-aq", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.seat=${seat}`]);
+    return listed.code === 0 ? listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : null;
+  }
+
+  /** A seat's home: made the first time, and given to the VMs' user (uid 1000), with nothing else of the host in reach. */
+  private async seatHome(seat: string): Promise<void> {
+    const name = seatVolumeName(seat);
+    if ((await this.docker(["volume", "inspect", name])).code === 0) return;
+    const made = await this.docker(["volume", "create", "--label", `${LABEL}=1`, "--label", `${LABEL}.seat=${seat}`, "--label", `${LABEL}.node=${this.opts.node}`, name]);
+    if (made.code !== 0) throw new SandboxError(`could not make this seat's home: ${redact(made.stderr.trim()).slice(0, 300)}`, 500);
+    // (A new volume is root's: a one-off container, with no network and only the capabilities to hand it over, makes it the VMs' user's alone.)
+    const given = await this.docker(["run", "--rm", "--network", "none", "--user", "0:0", "--cap-drop", "ALL", "--cap-add", "CHOWN", "--cap-add", "FOWNER", "--security-opt", "no-new-privileges:true", "--mount", `type=volume,src=${name},dst=/home-of-seat`, DEFAULT_IMAGE, "sh", "-c", "chown 1000:1000 /home-of-seat && chmod 0700 /home-of-seat"], 120_000);
+    if (given.code !== 0) {
+      await this.docker(["volume", "rm", name]);
+      throw new SandboxError(`could not give this seat's home to the VMs' user: ${redact(given.stderr.trim()).slice(0, 300)}`, 500);
+    }
+  }
+
+  /** Where an agent's VM on this host has its /work, as its container says: never worked out from its id. */
+  private async sharedWork(id: string): Promise<NonNullable<SandboxSpec["shares"]>> {
+    const sandbox = await this.get(id);
+    if (!sandbox || sandbox.ephemeral) throw new SandboxError("a run on a seat shares an agent's own VM on this host, and that one is not here", 404);
+    const mounts = await this.docker(["inspect", "--format", "{{json .Mounts}}", containerName(id)]);
+    let found: { Type?: string; Source?: string; Name?: string; Destination?: string }[] = [];
+    try {
+      found = mounts.code === 0 ? (JSON.parse(mounts.stdout) as typeof found) : [];
+    } catch {
+      // (Not JSON: the same as not told.)
+    }
+    const work = found.find((m) => m.Destination === "/work");
+    if (work?.Type === "volume" && work.Name === volumeName(id)) return { sandbox: id, volume: work.Name };
+    if (work?.Type === "bind" && work.Source?.startsWith("/")) return { sandbox: id, workspace: work.Source };
+    throw new SandboxError("could not tell where that agent's /work is; nothing was made", 424);
+  }
+
+  /** Remove a seat's home, and the sign-in its tool keeps there: never while a VM has it. */
+  async removeSeatHome(seat: string): Promise<void> {
+    if (this.apple) return;
+    const using = await this.seatVms(seat);
+    if (using === null) throw new SandboxError("docker couldn't say which VMs have this seat's home, so it was kept", 503);
+    if (using.length) throw new SandboxError("a VM has this seat's home: its run ends first", 409);
+    const name = seatVolumeName(seat);
+    if ((await this.docker(["volume", "inspect", name])).code !== 0) return;
+    const removed = await this.docker(["volume", "rm", name]);
+    if (removed.code !== 0) throw new SandboxError(`could not remove this seat's home: ${redact(removed.stderr.trim()).slice(0, 300)}`, 500);
+    this.opts.ledger({ class: "delete", resource: "docker.volume", target: name, verdict: "allow", detail: "a seat you removed: its home, and the sign-in its tool kept there" });
+  }
+
   async destroy(id: string, opts: { approvedBy?: string; run?: string } = {}): Promise<Decision> {
     const sandbox = await this.get(id);
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);

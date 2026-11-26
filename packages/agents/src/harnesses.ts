@@ -66,7 +66,14 @@ export interface AgentDriver {
    * not, and the tool's word for how. The sign-in itself is never the primary's to see. `login`: the tool's own
    * command to sign in; `roster`: what kind of model it runs on through the gateway instead.
    */
-  signIn?: { read(stdout: string): { signedIn: boolean; method?: string }; login: string; roster: string };
+  signIn?: {
+    /** What its `--status` said: signed in or not and how, and for a seat (seatCheck) its tier, its account's fingerprint and when it ends. */
+    read(stdout: string): { signedIn: boolean; method?: string; plan?: string; fingerprint?: string; renewBy?: number };
+    login: string;
+    roster: string;
+    /** Its status for a seat: the check with the salt its account's fingerprint is made with (core's seats.ts). */
+    seatCheck(salt: string): string;
+  };
   /**
    * It runs as you set it up in the sandbox (an ACP agent you named: acp.ts), its own sign-in or configuration, with the
    * role's model offered through the gateway for it to use: with none to offer, it runs on its setup alone.

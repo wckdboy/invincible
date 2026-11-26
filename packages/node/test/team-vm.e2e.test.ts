@@ -323,7 +323,7 @@ test("harness readiness says what each would run on: a vendor's tool on its own 
     // Each was asked once, in this agent's own VM, by its bridge's own status question.
     const asked = events.slice(before).filter((event) => event.text.includes("--status"));
     expect(asked.map((event) => event.target)).toEqual([vm, vm]);
-    expect(asked.every((event) => event.text.includes("def status():") && event.text.trimEnd().endsWith("--status"))).toBe(true);
+    expect(asked.every((event) => event.text.includes("def status(args):") && event.text.trimEnd().endsWith("--status"))).toBe(true);
     // Not signed in, and no Anthropic-API model on the engineer's roster: what a person can do about it.
     toolStatus.set("claude", { code: 0, stdout: told({ installed: true, signedIn: false }) });
     expect((await readiness()).claude).toEqual({ id: "claude", ready: false, reason: "Sign Claude Code in in this agent's VM (claude auth login), or put an Anthropic-API model on the engineer's roster" });

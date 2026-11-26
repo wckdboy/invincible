@@ -1,6 +1,8 @@
-import { type NodeIdentity, type Prov, randomId, type SeatAddInput, type SeatView, seatView } from "@invincible/core";
+import { HOMED_KINDS, type NodeIdentity, type Prov, randomId, type SeatAddInput, type SeatFacts, seatRuns, type SeatView, seatView } from "@invincible/core";
+import type { AgentDriver } from "@invincible/agents";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { keyUsable, providerRecords } from "@invincible/models";
+import type { SandboxHost } from "@invincible/sandbox";
 
 /*
  * Seats on this node (core's seats.ts): what the seats routes do with the mind. A seat is added, set and removed on your
@@ -57,9 +59,21 @@ export function addSeat(store: LedgerStore, vault: Vault, node: NodeIdentity, in
   return seatOf(store, id, now);
 }
 
-/** Remove a seat, and its email with it. */
-export function removeSeat(store: LedgerStore, vault: Vault, node: NodeIdentity, id: string, via: string | null): void {
-  if (!store.seats().some((seat) => seat.id === id)) throw new SeatError("no such seat", 404);
+/**
+ * Remove a seat, its email with it, and its home on this node with the sign-in its tool kept there (never while a VM has
+ * it: its run ends first). Its home goes first, so a seat is never gone from the log with a sign-in left behind.
+ */
+export async function removeSeat(store: LedgerStore, vault: Vault, node: NodeIdentity, id: string, via: string | null, host: Pick<SandboxHost, "removeSeatHome"> | null): Promise<void> {
+  const seat = store.seats().find((s) => s.id === id);
+  if (!seat) throw new SeatError("no such seat", 404);
+  if (HOMED_KINDS.includes(seat.kind) && seat.node === node.id && host) {
+    try {
+      await host.removeSeatHome(id);
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      throw new SeatError((error as Error).message, status === 409 ? 409 : 503);
+    }
+  }
   store.emit(node, "seat.removed", { id }, yourWord(via));
   if (vault.has(seatEmailName(id))) vault.delete(seatEmailName(id));
 }
@@ -69,4 +83,58 @@ export function setSeatPolicy(store: LedgerStore, node: NodeIdentity, id: string
   seatOf(store, id, now);
   store.emit(node, "seat.policy", { id, runs }, yourWord(via));
   return seatOf(store, id, now);
+}
+
+/** The vault's name for the fleet's salt for seats' fingerprints: one salt, so one account is one fingerprint whatever its seat. */
+export const SEATS_SALT = "seats-salt";
+
+/** The salt seats' fingerprints are made with, made the first time it's needed and sealed in the vault. */
+export function seatSalt(vault: Vault): string {
+  if (vault.has(SEATS_SALT)) return vault.reveal(SEATS_SALT);
+  const salt = randomId(24);
+  vault.set(SEATS_SALT, salt, { label: "The salt seats' account fingerprints are made with" });
+  return salt;
+}
+
+/** What a seat's tool said of its sign-in, as its driver read it: whether, how, its tier, its account's fingerprint, when it ends. */
+export type SeatStatus = ReturnType<NonNullable<AgentDriver["signIn"]>["read"]>;
+
+/**
+ * A seat's status, asked of its own tool in a VM made for it from the pinned image, its home mounted (and made, the
+ * first time), the VM gone once it has answered. Refused like any seat's VM while its home is in use: it waits.
+ */
+export async function askSeat(host: Pick<SandboxHost, "createSeatVm" | "exec" | "destroy">, seat: SeatFacts, driver: AgentDriver, salt: string): Promise<SeatStatus> {
+  if (!driver.signIn) throw new SeatError(`${driver.title} has no sign-in to ask about`, 400);
+  const run = `seat.${seat.id}`;
+  const vm = await host.createSeatVm({ seat: { id: seat.id, kind: seat.kind, runs: seatRuns(seat) }, network: "online", cpus: 1, memoryGb: 1, ttlMinutes: 15, run });
+  try {
+    const asked = await host.exec(vm.id, ["bash", "-lc", driver.signIn.seatCheck(salt)], 60);
+    return driver.signIn.read(asked.stdout);
+  } finally {
+    await host.destroy(vm.id, { run });
+  }
+}
+
+/**
+ * What the log is told of what a seat's tool said, by the node that holds its home: only a change (a sign-in, a sign-out,
+ * a new tier or end), and never a sign-in to an account other than its own or another seat's. `attempt`: a sign-in's.
+ * Answers how its sign-in stands now.
+ */
+export function recordSeatStatus(store: LedgerStore, node: NodeIdentity, seat: SeatFacts, told: SeatStatus, attempt?: string): "ready" | "signed-out" | "wrong-account" {
+  const said = (body: Record<string, unknown>) => store.emit(node, "seat.signin", { id: seat.id, ...(attempt ? { attempt } : {}), phase: "ended", ...body } as never);
+  const before = seat.signIn?.phase === "ended" ? seat.signIn : null;
+  if (!told.signedIn) {
+    if (attempt || before?.outcome === "ready") said({ outcome: "signed-out" });
+    return "signed-out";
+  }
+  const theirs = told.fingerprint ? store.seats().find((other) => other.id !== seat.id && other.account === told.fingerprint) : undefined;
+  if ((seat.account && told.fingerprint !== seat.account) || theirs) {
+    said({ outcome: "wrong-account" });
+    return "wrong-account";
+  }
+  const same = before?.outcome === "ready" && before.method === (told.method ?? null) && before.plan === (told.plan ?? null) && before.renewBy === (told.renewBy ?? null) && (!told.fingerprint || seat.account === told.fingerprint);
+  if (!same || attempt) {
+    said({ outcome: "ready", ...(told.method ? { method: told.method } : {}), ...(told.plan ? { plan: told.plan } : {}), ...(told.fingerprint ? { fingerprint: told.fingerprint } : {}), ...(told.renewBy ? { renewBy: told.renewBy } : {}) });
+  }
+  return "ready";
 }

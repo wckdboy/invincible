@@ -1,3 +1,4 @@
+import { SeatFingerprint, SeatPlan, SIGN_IN_METHODS, tokenShaped } from "@invincible/core";
 import type { AgentDriver, AgentEvent, AgentModel } from "./harnesses.ts";
 import { ENGRAM_ENV, engramArgv } from "./engram.ts";
 import { readBridge } from "./hermes.ts";
@@ -5,14 +6,18 @@ import { readBridge } from "./hermes.ts";
 /*
  * The vendors' own coding tools as harnesses: Claude Code and Codex. A subscription (a Claude
  * plan, a ChatGPT plan) may be used only by its vendor's own tool, unmodified, signed in by its
- * owner through the vendor's own flow. So that is all this does: it runs the tool the owner
- * installed and signed in inside the agent's VM, headless, and reads what it prints.
+ * owner through the vendor's own flow. So that is all this does: it runs the tool (pinned and
+ * checked in the VM's image, sandbox/harnesses, or one the owner installed in the VM), signed in
+ * by its owner, headless, and reads what it prints.
  *
  *   - Invincible never holds a sign-in. Nothing here opens, copies, moves or sends where a tool keeps
  *     one. Whether the tool has one is asked of the tool (its own status command), and of the
- *     answer only "signed in or not" and one word from a fixed list leaves the VM.
- *   - Invincible never installs, updates or signs in the tool, and never says it is another tool:
- *     the flags below are the vendor's documented ones, and no client identity is set anywhere.
+ *     answer only "signed in or not" and one word from a fixed list leaves the VM; for a seat (core's
+ *     seats.ts), three things more: its tier, its account as a salted hash made in the VM, and when
+ *     its sign-in ends.
+ *   - Invincible never updates or signs in the tool, and never says it is another tool: the flags
+ *     below are the vendor's documented ones, and no client identity is set anywhere but its own
+ *     name to Codex's app server. A seat's sign-in is the owner's, on the vendor's own page.
  *   - Signed in, the tool talks to its vendor itself: every variable that points at Invincible's
  *     gateway is taken out of its environment, so the gateway is never given that traffic.
  *   - Not signed in, it runs on a keyed roster model through the gateway, by the vendor's own
@@ -23,7 +28,7 @@ import { readBridge } from "./hermes.ts";
  */
 
 /** Shared by both bridges: bounded events, the two environments, the gateway lease, the run itself. */
-const SHARED = String.raw`import argparse, json, os, re, shutil, subprocess, sys, time
+const SHARED = String.raw`import argparse, base64, hashlib, hmac, json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -117,15 +122,42 @@ def ask(env, *args):
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
 
-def status():
-    # Installed, and signed in or not. Asked of the tool as itself: a gateway token is never its sign-in.
+def moment(value):
+    # When, as a tool says it (an ISO date, or seconds or ms since the epoch): ms since the epoch, else None.
+    try:
+        if type(value) in (int, float) and value > 0:
+            return int(value if value > 100000000000 else value * 1000)
+        if isinstance(value, str) and value:
+            from datetime import datetime, timezone
+            when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return int((when if when.tzinfo else when.replace(tzinfo=timezone.utc)).timestamp() * 1000)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return None
+
+def fingerprint(salt, ident):
+    # Which account, as a salted hash made here: the account's own id never leaves this VM.
+    return base64.urlsafe_b64encode(hmac.new(salt, ident.encode("utf-8"), hashlib.sha256).digest()[:16]).decode().rstrip("=")
+
+def status(args):
+    # Installed, and signed in or not. Asked of the tool as itself: a gateway token is never its sign-in. For a seat
+    # (--salt), three things more: the plan's tier, the account as a salted hash, and when the sign-in ends. Nothing
+    # else the tool says of its account (whose it is, its email, its organization) is passed on.
     env = own_environment()
     version = ask(env, "--version") if shutil.which(TOOL, path=env["PATH"]) else None
     installed = version is not None and version.returncode == 0
-    method = sign_in(env) if installed else None
-    told = {"type": "status", "installed": installed, "signedIn": method is not None}
-    if method:
-        told["method"] = method
+    held = account(env, bool(args.salt)) if installed else None
+    told = {"type": "status", "installed": installed, "signedIn": held is not None}
+    if held:
+        told["method"] = held["method"]
+        if args.salt:
+            salt = base64.urlsafe_b64decode(args.salt + "=" * (-len(args.salt) % 4))
+            if held.get("plan"):
+                told["plan"] = held["plan"]
+            if held.get("id"):
+                told["fingerprint"] = fingerprint(salt, held["id"])
+            if held.get("renewBy"):
+                told["renewBy"] = held["renewBy"]
     print(json.dumps(told), flush=True)
     return 0 if installed else 1
 
@@ -196,10 +228,14 @@ def main():
     parser.add_argument("--prompt", default="/work/.agent/prompt.md")
     parser.add_argument("--gateway-env", default="/work/.invincible-gateway.json")
     parser.add_argument("--status", action="store_true")
+    # For a seat's status: the salt its account's fingerprint is made with (url-safe base64).
+    parser.add_argument("--salt", default="")
     args = parser.parse_args()
     try:
         if args.status:
-            return status()
+            if args.salt and not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", args.salt):
+                raise RuntimeError("A seat's salt is url-safe base64")
+            return status(args)
         # A session, a provider and a model are passed to the tool as arguments: none may read as a flag.
         if args.session is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}", args.session):
             raise RuntimeError("The saved " + NAME + " session is not one of its own")
@@ -228,7 +264,9 @@ TOOL, NAME, LOGIN = "claude", "Claude Code", "claude auth login"
 # command also prints whose account it is, and none of that is Invincible's to know.
 METHODS = ("claude.ai", "oauth_token", "api_key", "api_key_helper", "third_party")
 
-def sign_in(env):
+def account(env, seat):
+    # Its status command prints JSON: signed in or not and how, and for a claude.ai sign-in its plan, its organization
+    # and when the sign-in ends (loginExpiresAt, as 2.1.325 says it). The organization is the account's id here.
     state = ask(env, "auth", "status")
     if state is None or state.returncode != 0:
         return None
@@ -238,7 +276,19 @@ def sign_in(env):
         return None
     if not isinstance(told, dict) or told.get("loggedIn") is False or told.get("authMethod") == "none":
         return None
-    return told["authMethod"] if told.get("authMethod") in METHODS else "signed in"
+    held = {"method": told["authMethod"] if told.get("authMethod") in METHODS else "signed in"}
+    if isinstance(told.get("subscriptionType"), str):
+        held["plan"] = told["subscriptionType"].lower()
+    if isinstance(told.get("orgId"), str) and told["orgId"]:
+        held["id"] = "claude.ai:" + told["orgId"]
+    when = moment(told.get("loginExpiresAt"))
+    if when:
+        held["renewBy"] = when
+    return held
+
+def sign_in(env):
+    held = account(env, False)
+    return held["method"] if held else None
 
 def through_gateway(env, base, token, model):
     # The tool's own documented way to a gateway: its endpoint, and a bearer for it.
@@ -336,13 +386,58 @@ class Reader:
 const CODEX_PART = String.raw`
 TOOL, NAME, LOGIN = "codex", "Codex", "codex login --device-auth"
 
-def sign_in(env):
+# Where it keeps its sign-in in a VM, as OpenAI's CI page asks: a file in its home (a VM has no keyring).
+STORE = ["-c", 'cli_auth_credentials_store="file"']
+
+def app_server(env, requests):
+    # Its own app server, on stdio, for the account it holds (account/read): asked and closed. Its answers by id.
+    try:
+        child = subprocess.Popen([TOOL, "app-server", *STORE], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace")
+    except OSError:
+        return {}
+    answers = {}
+    try:
+        lines = [{"id": 0, "method": "initialize", "params": {"clientInfo": {"name": "invincible", "title": "Invincible", "version": "1"}, "capabilities": None}}, {"method": "initialized"}]
+        lines += [dict(item, id=i + 1) for i, item in enumerate(requests)]
+        child.stdin.write("".join(json.dumps(line) + "\n" for line in lines))
+        child.stdin.flush()
+        until = time.monotonic() + 12
+        while time.monotonic() < until and len(answers) < len(requests):
+            raw = child.stdout.readline(LINE_LIMIT + 1)
+            if not raw:
+                break
+            try:
+                said = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(said, dict) and type(said.get("id")) is int and said["id"] > 0 and isinstance(said.get("result"), dict):
+                answers[said["id"]] = said["result"]
+    except (OSError, ValueError):
+        pass
+    finally:
+        child.kill()
+        child.wait()
+    return answers
+
+def account(env, seat):
     state = ask(env, "login", "status")
     if state is None or state.returncode != 0:
         return None
     said = state.stdout + state.stderr
     # With an API key this command prints part of the key. One of these words is all that is passed on.
-    return "chatgpt" if "ChatGPT" in said else "api-key" if "API key" in said else "signed in"
+    held = {"method": "chatgpt" if "ChatGPT" in said else "api-key" if "API key" in said else "signed in"}
+    if seat and held["method"] == "chatgpt":
+        read = app_server(env, [{"method": "account/read", "params": {}}]).get(1, {})
+        plan = (read.get("account") or {}).get("planType") if isinstance(read.get("account"), dict) else None
+        if isinstance(plan, str):
+            held["plan"] = plan.lower()
+        if isinstance(read.get("userId"), str) and read["userId"]:
+            held["id"] = "chatgpt:" + read["userId"]
+    return held
+
+def sign_in(env):
+    held = account(env, False)
+    return held["method"] if held else None
 
 def through_gateway(env, base, token, model):
     # The tool's own documented way to another endpoint: a model_providers entry on the Responses
@@ -476,17 +571,26 @@ const codexNotes: Notes = (project) => {
 
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-/** The words a tool has for how it is signed in. Nothing else a VM says of a sign-in is passed on. */
-const SIGN_IN_WORDS = ["claude.ai", "oauth_token", "api_key", "api_key_helper", "third_party", "chatgpt", "api-key", "signed in"];
+/** The words a tool has for how it is signed in (core's SIGN_IN_METHODS). Nothing else a VM says of a sign-in is passed on. */
+const SIGN_IN_WORDS: readonly string[] = SIGN_IN_METHODS;
 
-/** What a bridge's `--status` printed. A VM's output is data: one flag and one known word are read from it. */
-function readStatus(stdout: string): { signedIn: boolean; method?: string } {
+/**
+ * What a bridge's `--status` printed. A VM's output is data: one flag and one known word are read from it, and for a seat
+ * three things more, each only in its own shape (a tier's one word, a fingerprint, a time): anything else is dropped.
+ */
+function readStatus(stdout: string): { signedIn: boolean; method?: string; plan?: string; fingerprint?: string; renewBy?: number } {
   for (const line of stdout.trim().split("\n").reverse()) {
     let told: any;
     try { told = JSON.parse(line); } catch { continue; }
     if (!told || typeof told !== "object" || told.type !== "status") continue;
     if (told.signedIn !== true) break;
-    return { signedIn: true, ...(SIGN_IN_WORDS.includes(told.method) ? { method: told.method as string } : {}) };
+    return {
+      signedIn: true,
+      ...(SIGN_IN_WORDS.includes(told.method) ? { method: told.method as string } : {}),
+      ...(SeatPlan.safeParse(told.plan).success && !tokenShaped(told.plan) ? { plan: told.plan as string } : {}),
+      ...(SeatFingerprint.safeParse(told.fingerprint).success ? { fingerprint: told.fingerprint as string } : {}),
+      ...(Number.isSafeInteger(told.renewBy) && told.renewBy > 0 ? { renewBy: told.renewBy as number } : {}),
+    };
   }
   return { signedIn: false };
 }
@@ -507,13 +611,13 @@ function read(line: string): AgentEvent[] {
   });
 }
 
-const driver = (name: string, title: string, kind: AgentDriver["kind"], script: string, part: string, notes: Notes, signIn: Omit<NonNullable<AgentDriver["signIn"]>, "read">): AgentDriver => ({
+const driver = (name: string, title: string, kind: AgentDriver["kind"], script: string, part: string, notes: Notes, signIn: Omit<NonNullable<AgentDriver["signIn"]>, "read" | "seatCheck">): AgentDriver => ({
   name,
   title,
   kind,
   // (Passed whole: readiness is asked before any run has written the bridge into the sandbox.)
   check: `python3 -c ${quote(`${SHARED}${part}${MAIN}`)} --status`,
-  signIn: { ...signIn, read: readStatus },
+  signIn: { ...signIn, read: readStatus, seatCheck: (salt) => `python3 -c ${quote(`${SHARED}${part}${MAIN}`)} --status --salt ${quote(salt)}` },
   files: (_models, engram) => {
     if (!engram) return { [script]: `${SHARED}${part}${MAIN}` };
     const given = notes(engram);

@@ -77,7 +77,7 @@ if args[:2] == ["auth", "status"]:
     record({"asked": "status", "env": dict(os.environ)})
     if signed:
         # As the real command prints it: who is signed in, to what. None of this may leave the VM.
-        print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "agent@example.invalid", "orgId": "org-FAKE-0000", "orgName": "Fake Org Ltd", "subscriptionType": "max"}, indent=2))
+        print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "agent@example.invalid", "orgId": "org-FAKE-0000", "orgName": "Fake Org Ltd", "subscriptionType": "max", "loginExpiresAt": "2026-12-24T10:00:00.000Z"}, indent=2))
         sys.exit(0)
     print(json.dumps({"loggedIn": False, "authMethod": "none", "apiProvider": "firstParty"}, indent=2))
     sys.exit(1)
@@ -155,6 +155,18 @@ if args[:2] == ["login", "status"]:
         sys.exit(0)
     print("Not logged in", file=sys.stderr)
     sys.exit(1)
+if args[:1] == ["app-server"]:
+    # Its app server on stdio, as 0.169.0 answers these (its generated protocol types): the account it holds.
+    record({"asked": "app-server", "argv": args})
+    for raw in sys.stdin:
+        said = json.loads(raw)
+        record({"asked": said.get("method")})
+        if said.get("method") == "initialize":
+            out({"id": said["id"], "result": {"userAgent": "invincible/0.169.0", "codexHome": str(here), "platformFamily": "unix", "platformOs": "linux"}})
+        elif said.get("method") == "account/read":
+            held = {"type": "chatgpt", "email": "agent@example.invalid", "planType": "plus", "workspaceName": "Fake Workspace"}
+            out({"id": said["id"], "result": {"account": held if signed else None, "userId": "user-FAKE0000" if signed else None, "requiresOpenaiAuth": not signed}})
+    sys.exit(0)
 if args[0] != "exec":
     sys.exit(2)
 prompt = sys.stdin.read()
@@ -777,9 +789,96 @@ describe("a sign-in and the roster together", () => {
   });
 });
 
+/*
+ * A seat's status (I15; core's seats.ts): asked with the salt its account's fingerprint is made with, the bridge says
+ * three things more than whether the tool is signed in and how: the plan's tier, the account as a salted hash made in the
+ * VM, and when the sign-in ends. Nothing else the tool says of its account leaves the VM, and what the VM says is data.
+ */
+describe("a seat's status", () => {
+  // (Fake: a salt for tests alone.)
+  const SALT = "RkFLRS1zZWF0LXNhbHQtMDAwMA";
+  /**
+   * HMAC-SHA-256 as RFC 2104 makes it, from plain SHA-256, to check the VM's own: Bun's keyed hasher fails with an
+   * OpenSSL error another test's elliptic-curve check can leave queued in the process (POINT_IS_NOT_ON_CURVE), so a run
+   * of the whole suite failed where this file alone passed.
+   */
+  const fingerprintOf = (salt: string, id: string) => {
+    const sha = (data: Uint8Array) => new Uint8Array(new Bun.CryptoHasher("sha256").update(data).digest());
+    const key = new Uint8Array(64);
+    key.set(Buffer.from(salt, "base64url"));
+    const pad = (byte: number) => key.map((k) => k ^ byte);
+    const inner = sha(Buffer.concat([pad(0x36), Buffer.from(id, "utf8")]));
+    return Buffer.from(sha(Buffer.concat([pad(0x5c), inner]))).subarray(0, 16).toString("base64url");
+  };
+  const told = (run: { lines: string[] }) => JSON.parse(run.lines.at(-1)!);
+
+  test("Claude Code: its tier, its organization as a salted hash, when its sign-in ends; never whose it is", async () => {
+    const box = vm("claude");
+    const run = await box.run(["--status", "--salt", SALT]);
+    expect(run.exit).toBe(0);
+    const expected = { type: "status", installed: true, signedIn: true, method: "claude.ai", plan: "max", fingerprint: fingerprintOf(SALT, "claude.ai:org-FAKE-0000"), renewBy: Date.parse("2026-12-24T10:00:00.000Z") };
+    expect(told(run)).toEqual(expected);
+    for (const kept of ["agent@example.invalid", "org-FAKE-0000", "Fake Org"]) expect(run.stdout).not.toContain(kept);
+    const { type: _type, installed: _installed, ...read } = expected;
+    expect(CLAUDE.signIn!.read(run.stdout)).toEqual(read);
+    // The same account is the same fingerprint with the same salt, and another with another.
+    expect(told(await box.run(["--status", "--salt", SALT])).fingerprint).toBe(expected.fingerprint);
+    expect(told(await box.run(["--status", "--salt", "QW5vdGhlci1zZWF0LXNhbHQtMQ"])).fingerprint).not.toBe(expected.fingerprint);
+  });
+
+  test("Codex: its tier and its user from its own app server, where it is only asked for the account it holds", async () => {
+    const box = vm("codex");
+    const run = await box.run(["--status", "--salt", SALT]);
+    expect(told(run)).toEqual({ type: "status", installed: true, signedIn: true, method: "chatgpt", plan: "plus", fingerprint: fingerprintOf(SALT, "chatgpt:user-FAKE0000") });
+    for (const kept of ["agent@example.invalid", "user-FAKE0000", "Fake Workspace"]) expect(run.stdout).not.toContain(kept);
+    const server = box.trace().filter((item) => item.asked === "app-server");
+    expect(server.map((item) => item.argv)).toEqual([["app-server", "-c", 'cli_auth_credentials_store="file"']]);
+    expect(box.trace().filter((item) => typeof item.asked === "string" && item.asked.includes("/") || item.asked === "initialize" || item.asked === "initialized").map((item) => item.asked)).toEqual(["initialize", "initialized", "account/read"]);
+  });
+
+  test("asked without a salt (an agent's readiness), it says only whether and how, and Codex's app server isn't started", async () => {
+    for (const tool of ["claude", "codex"] as const) {
+      const box = vm(tool);
+      const run = await box.run(["--status"]);
+      expect(Object.keys(told(run)).sort()).toEqual(["installed", "method", "signedIn", "type"]);
+      expect(box.trace().some((item) => item.asked === "app-server")).toBe(false);
+    }
+    // Not signed in: nothing more, whatever the salt.
+    const out = await vm("claude", { signedIn: false }).run(["--status", "--salt", SALT]);
+    expect(told(out)).toEqual({ type: "status", installed: true, signedIn: false });
+  });
+
+  test("what a VM says is data: a tier that isn't one plain word, a fingerprint of another shape, a time that isn't one, anything else, are dropped", () => {
+    for (const driver of [CLAUDE, CODEX]) {
+      const line = (more: Record<string, unknown>) => JSON.stringify({ type: "status", signedIn: true, method: "claude.ai", ...more });
+      expect(driver.signIn!.read(line({ plan: "max plan", fingerprint: "short", renewBy: "soon", email: "agent@example.invalid", orgId: "org-FAKE" }))).toEqual({ signedIn: true, method: "claude.ai" });
+      expect(driver.signIn!.read(line({ plan: "sk-ant-oat01-fake-not-a-token-0000" }))).toEqual({ signedIn: true, method: "claude.ai" });
+      expect(driver.signIn!.read(line({ renewBy: 1.5 }))).toEqual({ signedIn: true, method: "claude.ai" });
+      expect(driver.signIn!.read(line({ plan: "pro", fingerprint: "A".repeat(22), renewBy: 1_800_000_000_000 }))).toEqual({ signedIn: true, method: "claude.ai", plan: "pro", fingerprint: "A".repeat(22), renewBy: 1_800_000_000_000 });
+    }
+  });
+
+  test("a salt that isn't one is refused before the tool is asked anything", async () => {
+    const box = vm("claude");
+    const run = await box.run(["--status", "--salt", "not a salt; $(id)"]);
+    expect(run.exit).toBe(1);
+    expect(box.trace()).toEqual([]);
+    expect(Bun.spawnSync(["bash", "-n", "-c", CLAUDE.signIn!.seatCheck("x'; $(danger)")]).exitCode).toBe(0);
+  });
+});
+
 describe("a subscription's sign-in never reaches your agent", () => {
-  test("no shipped source names where either tool keeps its sign-in: nothing reads, copies or moves one", () => {
-    const kept = [".credentials.json", "CLAUDE_CODE_OAUTH", "auth.json", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "CODEX_HOME", "CLAUDE_CONFIG_DIR"];
+  test("no shipped source names where either tool keeps its sign-in, but to tell a seat's tool its own home: nothing reads, copies or moves one", () => {
+    // Each tool's sign-in, and the variables that carry one: named nowhere.
+    const kept = [".credentials.json", "CLAUDE_CODE_OAUTH", "auth.json", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY"];
+    // Where each tool keeps its home: named in one place only, to tell a seat's tool the seat's own home (I15 step 3),
+    // as a path under it and nothing else, so no source finds or reads what a tool keeps there.
+    const homes = ["CODEX_HOME", "CLAUDE_CONFIG_DIR"];
+    const POINTED = "packages/sandbox/src/spec.ts";
+    const pointsAtSeatHome = (text: string, name: string) => {
+      const lines = text.split("\n").filter((line) => line.includes(name));
+      return lines.length === 1 && new RegExp(`^  if \\(kind === "[a-z-]+"\\) return \\{ ${name}: \`\\$\\{home\\}/[a-z]+\` \\};$`).test(lines[0]!);
+    };
     const root = new URL("../../../", import.meta.url).pathname;
     const sources: string[] = [];
     const walk = (dir: string) => {
@@ -792,8 +891,16 @@ describe("a subscription's sign-in never reaches your agent", () => {
     };
     for (const dir of ["packages", "apps/web/src", "sandbox", "integrations"]) walk(join(root, dir));
     expect(sources.length).toBeGreaterThan(100);
-    const found = sources.flatMap((path) => { const text = readFileSync(path, "utf8"); return kept.filter((name) => text.includes(name)).map((name) => `${path.slice(root.length)}: ${name}`); });
+    const found = sources.flatMap((path) => {
+      const text = readFileSync(path, "utf8");
+      const rel = path.slice(root.length);
+      const named = [...kept, ...homes].filter((name) => text.includes(name) && !(rel === POINTED && homes.includes(name) && pointsAtSeatHome(text, name)));
+      return named.map((name) => `${rel}: ${name}`);
+    });
     expect(found).toEqual([]);
+    // And the one place does say each, so this test holds what it says it holds.
+    const pointed = readFileSync(join(root, POINTED), "utf8");
+    for (const name of homes) expect([name, pointsAtSeatHome(pointed, name)]).toEqual([name, true]);
     // Nor do the bridges speak to anyone themselves, or say who the tool is: they start it and read it.
     for (const bridge of [CLAUDE_BRIDGE, CODEX_BRIDGE]) expect(bridge).not.toMatch(/user.agent|urllib\.request|http\.client|\bsocket\b|\bcurl\b|\bwget\b/i);
   });

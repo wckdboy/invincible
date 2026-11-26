@@ -1,4 +1,4 @@
-import type { SandboxNetwork } from "@invincible/core";
+import type { SandboxNetwork, SeatKind } from "@invincible/core";
 
 /*
  * A sandbox is where an agent works: an unprivileged, resource-capped container
@@ -53,6 +53,13 @@ export interface SandboxSpec {
    * VM gets this resolv.conf: the host's upstream resolvers, read-only.
    */
   resolvConf?: string;
+  /** A VM made for a seat (a run on it, or its sign-in): the seat's home mounted, and its tool told where (seatEnv). */
+  seat?: { id: string; kind: SeatKind };
+  /**
+   * A VM made for an agent's run: that agent's own /work (its volume, or its workspace's path on this host), never one of
+   * its own. Removing this VM leaves it as it was: it has no disk of its own to remove.
+   */
+  shares?: { sandbox: string; volume: string } | { sandbox: string; workspace: string };
 }
 
 /** A stopped container that keeps the sandbox image in use, so image pruning (Coolify's nightly cleanup) leaves it alone. */
@@ -94,6 +101,25 @@ export const FIRST_IMAGES: readonly string[] = [DEFAULT_IMAGE, LAB_IMAGE, DESKTO
 export const containerName = (id: string) => `invincible-sbx-${id}`;
 export const volumeName = (id: string) => `invincible-sbx-${id}-work`;
 
+/**
+ * A seat's home (core's seats.ts): a volume of its own, where the vendor's tool keeps that seat's sign-in. Mounted at
+ * /seats/<id> in a VM made for a run on that seat or for its sign-in, and in no other VM at once (the host leases it).
+ */
+export const seatVolumeName = (seat: string) => `invincible-seat-${seat}`;
+export const seatHome = (seat: string) => `/seats/${seat}`;
+
+/**
+ * Where a seat's tool keeps its sign-in, inside the seat's home, told to the tool by the variable its vendor documents
+ * for keeping accounts apart (Anthropic's Authentication page, OpenAI's Codex configuration). This is the one place that
+ * names them: nothing of Invincible's reads, copies or moves what a tool keeps there.
+ */
+export function seatEnv(seat: string, kind: SeatKind): Record<string, string> {
+  const home = seatHome(seat);
+  if (kind === "claude-subscription") return { CLAUDE_CONFIG_DIR: `${home}/claude` };
+  if (kind === "chatgpt-codex") return { CODEX_HOME: `${home}/codex` };
+  return {};
+}
+
 export function labels(spec: SandboxSpec): Record<string, string> {
   return {
     [LABEL]: "1",
@@ -109,6 +135,8 @@ export function labels(spec: SandboxSpec): Record<string, string> {
     [`${LABEL}.memory`]: String(spec.memoryGb),
     [`${LABEL}.disk`]: spec.workspace && spec.diskGb ? String(spec.diskGb) : "none",
     [`${LABEL}.isolation`]: spec.isolation,
+    ...(spec.seat ? { [`${LABEL}.seat`]: spec.seat.id } : {}),
+    ...(spec.shares ? { [`${LABEL}.shares`]: spec.shares.sandbox } : {}),
     // The gateway token's hash is deliberately NOT a label: images can carry labels of
     // their own, so anything security-relevant lives in node-local state instead.
   };
@@ -137,7 +165,14 @@ export function runArgs(spec: SandboxSpec): string[] {
     "--tmpfs",
     "/tmp:rw,nosuid,nodev,size=2g,mode=1777",
     "--mount",
-    spec.workspace ? `type=bind,src=${spec.workspace},dst=/work` : `type=volume,src=${volumeName(spec.id)},dst=/work`,
+    spec.shares
+      ? "workspace" in spec.shares
+        ? `type=bind,src=${spec.shares.workspace},dst=/work`
+        : `type=volume,src=${spec.shares.volume},dst=/work`
+      : spec.workspace
+        ? `type=bind,src=${spec.workspace},dst=/work`
+        : `type=volume,src=${volumeName(spec.id)},dst=/work`,
+    ...(spec.seat ? ["--mount", `type=volume,src=${seatVolumeName(spec.seat.id)},dst=${seatHome(spec.seat.id)}`] : []),
     "--workdir",
     "/work",
     "--env",
@@ -166,7 +201,7 @@ export function runArgs(spec: SandboxSpec): string[] {
       : []),
   ];
   for (const [key, value] of Object.entries(labels(spec))) args.push("--label", `${key}=${value}`);
-  for (const [key, value] of Object.entries(spec.env)) args.push("--env", `${key}=${value}`);
+  for (const [key, value] of Object.entries({ ...spec.env, ...(spec.seat ? seatEnv(spec.seat.id, spec.seat.kind) : {}) })) args.push("--env", `${key}=${value}`);
   args.push(spec.image, "sleep", "infinity");
   return args;
 }

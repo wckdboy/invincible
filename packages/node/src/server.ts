@@ -4180,9 +4180,16 @@ export function createApp(ctx: AppContext) {
       guardAgainstSecrets(input.label, input.email ?? "");
       return seatErrors(() => ({ seat: addSeat(ctx.store, ctx.vault, ctx.identity, input, p.kind === "client" ? p.device : null) }));
     },
-    removeSeat: (input, p) => {
+    removeSeat: async (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can remove a seat");
-      return seatErrors(() => (removeSeat(ctx.store, ctx.vault, ctx.identity, input.id, p.kind === "client" ? p.device : null), { removed: input.id }));
+      // (Its home goes with it, and the sign-in its tool kept there: never while a VM has it.)
+      try {
+        await removeSeat(ctx.store, ctx.vault, ctx.identity, input.id, p.kind === "client" ? p.device : null, ctx.sandbox ?? null);
+      } catch (error) {
+        if (error instanceof SeatError) throw new HttpError(error.status, error.message);
+        throw error;
+      }
+      return { removed: input.id };
     },
     setSeatPolicy: (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can set a seat");

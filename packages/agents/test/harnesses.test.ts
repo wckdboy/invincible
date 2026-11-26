@@ -108,12 +108,16 @@ describe("a driver and the notes store", () => {
   // came to be Invincible, and the old theme's word for an agent became agent: word for word against the text before,
   // nothing else differs. And again that day, when the Claude Code, Codex and ACP bridges (Hermes' among them) came to
   // say each tool call as it begins and to name it at its end, so a steer waits for a call an agent is in: each one's
-  // text with exactly those lines taken out hashes to its pin from before (OpenCode's is as it was).
+  // text with exactly those lines taken out hashes to its pin from before (OpenCode's is as it was). Claude Code's and
+  // Codex's again that day, when a seat's status came to say three things more (I15: its tier, its account as a salted
+  // hash made in the VM, when its sign-in ends), each tool's sign-in read by one account() its sign_in() now asks, and
+  // Codex's from its own app server for a seat: their texts at the commit before (278581a) hash to 019a8c1a… and ef08b762…,
+  // so nothing else changed; what a run runs and writes is as it was (vendor-cli.test.ts).
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "91daad81e7e298606abf3e1974f9b26adfa3cb50841073baed40aa037e32c5ec",
-    claude: "019a8c1ae8c4a33f00a9e0a17e23d22749e357b20f37b61e3c5e4f6672524958",
-    codex: "ef08b762ee2cf0ba57b4462478de4f7de832c34288a248c4f7b5bab3d9f77283",
+    claude: "8da77ff7029145e563fbc75fb81639b8dd240facffc824a84f6c8a38dad8eaca",
+    codex: "9859b6405a70b1ddb1c9948c1911fba7ac3743e43c67d250a5783f71e7af9e7f",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

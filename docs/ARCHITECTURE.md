@@ -186,6 +186,15 @@ The run loop is carried and renamed (§10), the most proven part of it:
     another vendor's tool, or uses that plan's own sanctioned capacity. No setting switches accounts (`mayCarryOn`);
   - runs at once on one subscription seat: one until shared runs are shown safe, then three, your word given
     (`SHARED_RUNS_PROVEN`); Codex's homes stay one at a time;
+  - a seat's home is a volume of its own (`invincible-seat-<id>`), mounted at `/seats/<id>` only in a VM made for that
+    seat from the pinned tools' image (`createSeatVm`): for its sign-in, its status, or a run on it, which shares the
+    agent's own `/work`. Its tool is told the home by the variable its vendor documents (`seatEnv`). The host refuses a
+    VM more than the seat takes at once, counted from its own containers' labels, so a restart forgets nothing. Only the
+    node's own team service makes one, never the sandbox route, and only on a Linux host with Docker (a Mac's volumes are
+    disk images only one VM may mount). Removing a seat removes its home, never while a VM has it;
+  - its status is asked of its own tool in such a VM (`askSeat`), with the fleet's salt from the vault; the log is told
+    only what changes (`recordSeatStatus`), and a sign-in to another account than the seat's, or to another seat's, is
+    refused;
   - routes: `GET /api/seats` (`mind:read`); `POST /api/seats`, `/api/seats/remove` and `/api/seats/policy`
     (`fleet:admin`, yours alone).
 - **Sandboxes:**

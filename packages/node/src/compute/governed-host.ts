@@ -1,5 +1,5 @@
 import { clampNeed, type Decision, type ExecResult, type NodeCapacity, type SandboxView } from "@invincible/core";
-import { type CreateInput, type DesktopAction, type DesktopView, SandboxError, SandboxHost, type SandboxHostOptions } from "@invincible/sandbox";
+import { type CreateInput, type CreateOptions, type DesktopAction, type DesktopView, SandboxError, SandboxHost, type SandboxHostOptions } from "@invincible/sandbox";
 import { CapacityError, type Governor } from "./governor.ts";
 
 /*
@@ -24,8 +24,8 @@ export class GovernedSandboxHost extends SandboxHost {
     super(options);
   }
 
-  /** `wait.signal`: the caller went away while it queued, so it leaves the queue (a sandbox being created is finished). */
-  override async create(input: CreateInput, wait: { signal?: AbortSignal } = {}): Promise<SandboxView> {
+  /** `wait.signal`: the caller went away while it queued, so it leaves the queue (a sandbox being created is finished). A seat's VM takes a slot as any does. */
+  override async create(input: CreateInput, wait: CreateOptions = {}): Promise<SandboxView> {
     // What this host won't make (on a Mac: no network at all, an image not built for it) never waits for a slot first.
     const cannot = this.refusal(input);
     if (cannot) throw new SandboxError(cannot, 424);
@@ -50,7 +50,7 @@ export class GovernedSandboxHost extends SandboxHost {
       throw error;
     }
     try {
-      const view = await super.create({ ...input, cpus, memoryGb });
+      const view = await super.create({ ...input, cpus, memoryGb }, wait);
       this.governed.governor.bind(ticket, view.id);
       return view;
     } catch (error) {

@@ -158,6 +158,8 @@ export const DOCKER_ON_A_MAC: Readonly<Record<string, { container: string | null
 export function containerRunArgs(spec: SandboxSpec): string[] {
   const cannot = containerCannot({ network: spec.network });
   if (cannot) throw new Error(cannot);
+  // A Mac's workspace is an ext4 image of its own, which two VMs must never mount at once; a seat's home, the same.
+  if (spec.seat || spec.shares) throw new Error("a seat's VM, and one that shares an agent's workspace, are made on a Linux host with Docker");
   const args = [
     "run",
     "--detach",
