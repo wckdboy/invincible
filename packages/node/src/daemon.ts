@@ -300,8 +300,9 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   // The fabric (docs/ARCHITECTURE.md §3): its peers over Q-AMP, through its sidecar, which holds no secret but the node's
   // transport key; HTTPS with signed requests to any peer it can't be had for, as before it.
   const qampBin = env.INVINCIBLE_QAMP_BIN ?? join(home.dir, "bin", "qamp");
-  // (With test capabilities, none unless the test asks for one: no test binds a real port by accident.)
-  const sidecarOpts = opts.sidecar === false || (opts.sidecar === undefined && opts.capabilities) ? null : (opts.sidecar ?? {});
+  // (With test capabilities, none unless the test asks for one: no test binds a real port by accident. INVINCIBLE_QAMP=off:
+  // none at all, every link over HTTPS, the way back if Q-AMP misbehaves.)
+  const sidecarOpts = opts.sidecar === false || env.INVINCIBLE_QAMP === "off" || (opts.sidecar === undefined && opts.capabilities) ? null : (opts.sidecar ?? {});
   const qampPort = sidecarOpts?.port ?? env.INVINCIBLE_QAMP_PORT ?? QAMP_SIDECAR_PORT;
   /** What the profile last said of its endpoint: kept while the sidecar is down, so its profile doesn't flap. */
   let qampEndpoint: QampEndpoint | null = null;
