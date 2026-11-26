@@ -51,3 +51,8 @@
 # The fabric's QDT test (packages/core/test/fabric.test.ts): the did:key of Q-AMP SPEC A.2's Ed25519 test seed 01..01,
 # a PUBLIC key, checked as a known answer against the spec. Reviewed 26 November 2026; named by its commit as main has it (the branch was rebased).
 e36a2fa7ed695592c667e3de8a2319f7f2ae6586:packages/core/test/fabric.test.ts:generic-api-key:125
+
+# Seats refuse anything token-shaped (core seats.ts, tokenShaped): their test holds a signed three-part token whose
+# header and payload both decode to {"FAKE":"not-a-token"}, said to be fake beside it. Shaped as one, so the refusal is
+# of the shape.
+3fac6e3c8cdb39bff659bbfd7f8e28232fdae955:packages/core/test/seats.test.ts:jwt:30
