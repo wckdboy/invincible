@@ -1,0 +1,213 @@
+# CI for Invincible. Its main copy is on sovware.io (Forgejo, sign-in only, no sign-ups), whose Actions run this file
+# on the owner's runners for every push and pull request there, and its main takes only pull requests whose checks all
+# passed (AGENTS.md). Should a public mirror ever run it too, the steps that need sovware.io's runners or secrets say
+# so (`github.server_url`), and no job asks for a runner of the owner's by name: a pull request from a fork runs its
+# own copy of a workflow, and a stranger's code must never reach the owner's machines.
+#
+#  typecheck   ┐
+#  test        │ every push and PR
+#  vocabulary  │ no word of the old theme in any tracked file (bench/vocabulary.ts, docs/ARCHITECTURE.md §10)
+#  bench       │ the scorecard's quality gates (bun run bench --ci)
+#  secrets     │ gitleaks over what the push (or the pull request) adds
+#  sweep       ┘ the owner's private details, by the forge's secret list, in what it adds (sovware.io alone)
+#  sandbox     real-Docker sandbox tests; opt-in via the repo variable SANDBOX_TESTS=true (a runner with Docker and
+#              no KVM skips the microVM cases)
+#
+# The apps' jobs (the parity vectors, Android's tests, the iPhone's tests and the Mac build) and the website's come
+# back with apps/apple, apps/android and apps/site.
+#
+# Hardening: read-only token, actions pinned to commit SHAs, no pull_request_target,
+# credentials not persisted in the checkout, superseded runs cancelled.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun test
+        if: github.server_url == 'https://github.com'
+        env:
+          INVINCIBLE_KEYSTORE: file
+      # sovware.io's runner runs a job's steps as root in its container, and Invincible never runs as root: its installer
+      # refuses to, and its terminals' tests act as a person's shell does. There the tests run as a user of their own.
+      - name: bun test (as a user of its own, not root)
+        if: github.server_url != 'https://github.com'
+        run: |
+          install -m 755 "$(command -v bun)" /usr/local/bin/bun
+          id ci >/dev/null 2>&1 || useradd --create-home --uid 1001 ci
+          chown -R ci "$GITHUB_WORKSPACE"
+          su ci -c "cd '$GITHUB_WORKSPACE' && INVINCIBLE_KEYSTORE=file bun test"
+
+  # The vocabulary check: no word of the old theme in any tracked file but docs/ARCHITECTURE.md §10, the licence, the
+  # notice and the importer (bench/vocabulary.ts). It needs no install: it reads the checkout with git.
+  vocabulary:
+    name: Vocabulary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun run vocabulary
+
+  # The scorecard: every suite's deterministic quality metrics against the recorded baselines (bench/baseline/).
+  # A metric that got worse, one the baseline had that's gone, a suite that broke or has no baseline: red.
+  # Timings are printed and never fail here: a runner isn't the machine the baseline was taken on.
+  bench:
+    name: Scorecard (quality gates)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run bench --ci
+        if: github.server_url == 'https://github.com'
+        env:
+          INVINCIBLE_KEYSTORE: file
+      # Its web suite measures the app in Chrome. GitHub's runners have one; sovware.io's runner image doesn't, so it
+      # fetches one there, and runs the scorecard as a user of its own (Chrome, as Invincible, won't run as root), with
+      # Chrome's sandbox off, which a container can't make: it loads nothing but this checkout's own app.
+      - name: Chrome (sovware.io's runner has none)
+        id: chrome
+        if: github.server_url != 'https://github.com'
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        with:
+          chrome-version: stable
+          install-dependencies: true
+          no-sudo: true
+      - name: bun run bench --ci (as a user of its own, not root)
+        if: github.server_url != 'https://github.com'
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          install -m 755 "$(command -v bun)" /usr/local/bin/bun
+          id ci >/dev/null 2>&1 || useradd --create-home --uid 1001 ci
+          chown -R ci "$GITHUB_WORKSPACE"
+          su ci -c "cd '$GITHUB_WORKSPACE' && INVINCIBLE_KEYSTORE=file INVINCIBLE_CHROME_NO_SANDBOX=1 CHROME='$CHROME_PATH' bun run bench --ci"
+
+  # Secrets: gitleaks 8.30.1 (its checked release) over the commits this push or pull request adds. (The tests carry
+  # fakes made for them: each is said to be one, in .gitleaksignore or in the test.)
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: gitleaks over what this adds
+        env:
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          tar=gitleaks_8.30.1_linux_x64.tar.gz
+          curl -fsSLo "$RUNNER_TEMP/$tar" "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/$tar"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/$tar" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tar" -C "$RUNNER_TEMP" gitleaks
+          from="${BASE:-$BEFORE}"
+          # A new branch (no commit before it) is scanned from where it left main.
+          if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then from=$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse HEAD~1); fi
+          echo "scanning $from..HEAD ($(git rev-list --count "$from..HEAD") commits)"
+          "$RUNNER_TEMP/gitleaks" git --log-opts="$from..HEAD" --no-banner --redact
+
+  # What a push or a pull request adds, swept for the owner's private details (logins, home paths, tailnet addresses,
+  # device names, account ids) before it can reach main. Its list is sovware.io's secret PRIVATE_SWEEP (an extended
+  # regular expression), so it never enters the repository; a match is told by file and line alone, never by what
+  # matched. On sovware.io alone: a mirror would only ever receive what passed it.
+  sweep:
+    name: Private sweep
+    if: github.server_url != 'https://github.com'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: What this adds, swept for private details
+        env:
+          PRIVATE: ${{ secrets.PRIVATE_SWEEP }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          [ -n "$PRIVATE" ] || { echo "::error::sovware.io holds no PRIVATE_SWEEP secret: nothing can be swept, so nothing passes"; exit 1; }
+          from="${BASE:-$BEFORE}"
+          if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then from=$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse HEAD~1); fi
+          echo "sweeping what $from..HEAD adds ($(git rev-list --count "$from..HEAD") commits)"
+          # Every added line as "file:line<TAB>text"; the text is matched, and only "file:line" is ever printed.
+          git diff --unified=0 --no-color "$from" HEAD | awk '
+            /^\+\+\+ / { file = substr($0, 7); next }
+            /^@@ / { split($3, a, ","); line = substr(a[1], 2) + 0; next }
+            /^\+/ { printf "%s:%d\t%s\n", file, line, substr($0, 2); line++ }' > "$RUNNER_TEMP/added.txt"
+          hits=$(cut -f2- "$RUNNER_TEMP/added.txt" | grep -n -E -e "$PRIVATE" | cut -d: -f1 || true)
+          if [ -n "$hits" ]; then
+            for n in $hits; do echo "::error::a private detail is added at $(sed -n "${n}p" "$RUNNER_TEMP/added.txt" | cut -f1)"; done
+            exit 1
+          fi
+          echo "nothing private added ($(wc -l < "$RUNNER_TEMP/added.txt") lines looked at)"
+
+  sandbox:
+    name: Sandbox (real Docker)
+    needs: [typecheck, test]
+    if: vars.SANDBOX_TESTS == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: docker build -q -t invincible/sandbox:1 sandbox/
+      - run: bun test packages/sandbox
+        env:
+          INVINCIBLE_DOCKER_TESTS: "1"
