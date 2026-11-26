@@ -211,7 +211,11 @@ export class Sidecar {
     try {
       const made = !existsSync(socketDir);
       if (made) mkdirSync(socketDir, { recursive: true, mode: 0o700 });
-      if (made || socketDir === join(this.opts.home, "run")) chmodSync(socketDir, 0o700);
+      // (Looked at before anything is changed: only a real directory of this user's is made private, never what a
+      // symbolic link points to.)
+      const found = lstatSync(socketDir);
+      const real = found.isDirectory() && (process.getuid === undefined || found.uid === process.getuid());
+      if (real && (made || socketDir === join(this.opts.home, "run"))) chmodSync(socketDir, 0o700);
       const dir = lstatSync(socketDir);
       const mine = dir.isDirectory() && (process.getuid === undefined || dir.uid === process.getuid()) && (dir.mode & 0o077) === 0;
       if (!mine) return this.off(`its socket's directory ${socketDir} isn't this node's alone: INVINCIBLE_QAMP_SOCKET needs a directory of its own, mode 0700 (this one is ${(dir.mode & 0o7777).toString(8)})`);

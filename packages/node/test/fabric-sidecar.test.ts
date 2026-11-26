@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { didKeyOfEd25519, fromB64u, qampEndpointOf, signingPublicKey } from "@invincible/core";
@@ -208,6 +208,28 @@ describe("the sidecar's socket directory (L4)", () => {
     expect(statSync(shared).mode & 0o7777).toBe(0o1777);
     expect(spawned).toBe(0);
     expect(why).toMatch(/^its socket's directory .* isn't this node's alone: INVINCIBLE_QAMP_SOCKET needs a directory of its own, mode 0700 \(this one is 1777\)$/);
+  });
+
+  test("the home's own, a symbolic link to a shared directory, is refused, and what it points to is left as it was (I-a)", async () => {
+    const dir = temp();
+    const shared = join(dir, "shared");
+    mkdirSync(shared);
+    chmodSync(shared, 0o1777);
+    const home = join(dir, "h");
+    mkdirSync(home);
+    symlinkSync(shared, join(home, "run"));
+    const binary = join(dir, "qamp");
+    writeFileSync(binary, "#!/bin/sh\nexit 0\n");
+    chmodSync(binary, 0o755);
+    let spawned = 0;
+    const sidecar = new Sidecar({ home, key: someKey, binary: () => binary, listen: () => null, name: "n", log: () => {}, spawn: () => (spawned++, { ready: Promise.resolve(null), exited: Promise.resolve(1), kill() {} }), probe: () => ({ sidecar: true, version: "0.2.0" }) });
+    await sidecar.start();
+    const why = sidecar.why;
+    await sidecar.stop();
+    expect(statSync(shared).mode & 0o7777).toBe(0o1777);
+    expect(lstatSync(join(home, "run")).isSymbolicLink()).toBe(true);
+    expect(spawned).toBe(0);
+    expect(why).toMatch(/^its socket's directory .* isn't this node's alone/);
   });
 
   test("one it makes for itself (missing), or the home's own, is made 0700; an existing private one of this user's is used", async () => {
