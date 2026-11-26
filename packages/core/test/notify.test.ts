@@ -48,7 +48,7 @@ import {
   tierOf,
   turnItem,
 } from "../src/notify.ts";
-import { NotifyPrefsInput, PushSubscriptionInput } from "../src/notify-input.ts";
+import { ApplePushKeyInput, NotifyPrefsInput, PushSubscriptionInput } from "../src/notify-input.ts";
 
 /*
  * Notifications, as rules: what it may say, when it speaks and when it stays silent,
@@ -766,4 +766,13 @@ describe("settings and what a device hands over", () => {
       expect(PushSubscriptionInput.safeParse(bad).success).toBe(false);
     }
   });
+});
+
+// The iPhone app is "Invincible Bot" in App Store Connect, bundle ID sh.invincible.bot (apps/apple/project.yml): an Apple
+// push key notifies that app unless it names another, and never the system Invincible succeeds, whose app stays installed
+// beside it until the cutover.
+test("an Apple push key notifies the iPhone app, sh.invincible.bot, unless it names another", () => {
+  const key = { key: `${"-".repeat(5)}BEGIN PRIVATE KEY${"-".repeat(5)}FAKEFORTESTS${"-".repeat(5)}END PRIVATE KEY${"-".repeat(5)}`, keyId: "KEY0000001", teamId: "TEAM000001" };
+  expect(ApplePushKeyInput.parse(key).topic).toBe("sh.invincible.bot");
+  expect(ApplePushKeyInput.parse({ ...key, topic: "org.example.app" }).topic).toBe("org.example.app");
 });

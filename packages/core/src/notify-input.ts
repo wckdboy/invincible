@@ -45,7 +45,7 @@ export const ApplePushKeyInput = z.strictObject({
   key: z.string().max(4096).regex(/-{5}BEGIN PRIVATE KEY-{5}[A-Za-z0-9+/=\s]+-{5}END PRIVATE KEY-{5}/, "the .p8 file's whole text, as Apple gave it"),
   keyId: z.string().regex(/^[A-Z0-9]{10}$/, "the key's ID: ten capital letters and digits"),
   teamId: z.string().regex(/^[A-Z0-9]{10}$/, "your Team ID: ten capital letters and digits"),
-  topic: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.-]{0,154}$/, "the app's bundle id").default("industries.invincible.app"),
+  topic: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.-]{0,154}$/, "the app's bundle id").default("sh.invincible.bot"),
 });
 export type ApplePushKeyInput = z.infer<typeof ApplePushKeyInput>;
 
