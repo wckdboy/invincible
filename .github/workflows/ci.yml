@@ -235,16 +235,24 @@ jobs:
           runtime=$(xcrun simctl list runtimes iOS -j | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin)["runtimes"] if x.get("isAvailable")]; print(max(r, key=lambda x: [int(n) for n in x["version"].split(".")])["identifier"])')
           udid=$(xcrun simctl create "Invincible CI ${GITHUB_RUN_NUMBER:-0}" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$runtime")
           dev="$RUNNER_TEMP/dev-node"
+          # -quiet names a failing test and nothing of why: its messages are read from the result bundle (a budget's say
+          # what it measured), and the step still fails as the tests did.
+          results="$RUNNER_TEMP/iphone-tests-${GITHUB_RUN_ID:-0}.xcresult"
+          rm -rf "$results"
           mkdir -p "$dev"
           bun scripts/dev-node.ts --dir "$dev" --heavy --auto-approve > "$dev/log" 2>&1 &
           devnode=$!
-          trap 'kill -INT "$devnode" 2>/dev/null || true; xcrun simctl delete "$udid"' EXIT
+          trap 'kill -INT "$devnode" 2>/dev/null || true; xcrun simctl delete "$udid"; rm -rf "$results"' EXIT
           xcrun simctl bootstatus "$udid" -b > /dev/null
           for _ in $(seq 1 300); do [ -s "$dev/front.txt" ] && break; kill -0 "$devnode" 2>/dev/null || break; sleep 1; done
           [ -s "$dev/front.txt" ] || { echo "::error::the dev node never came up"; cat "$dev/log"; exit 1; }
           TEST_RUNNER_INVINCIBLE_DEV_NODE=$(cat "$dev/front.txt") xcodebuild -project Invincible.xcodeproj -scheme Invincible \
             -destination "platform=iOS Simulator,id=$udid" -derivedDataPath build -packageAuthorizationProvider netrc \
-            test -skip-testing:InvincibleTests/MacShotsTests -quiet
+            -resultBundlePath "$results" test -skip-testing:InvincibleTests/MacShotsTests -quiet || {
+              status=$?
+              bun scripts/test-failures.ts "$results" || true
+              exit "$status"
+            }
       - name: Mac build (never launched)
         working-directory: apps/apple
         run: |
