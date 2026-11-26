@@ -65,6 +65,13 @@ export const LAB_IMAGE = "invincible/lab:1";
 export const DESKTOP_IMAGE = "invincible/desktop:1";
 /** Claude Code in the workshop image, for evals alone (sandbox/claude-code): tagged by its pinned release. */
 export const CLAUDE_CODE_IMAGE = "invincible/claude-code:2.1.319";
+/**
+ * The vendors' own coding tools in the workshop image, pinned (sandbox/harnesses): where every run of Claude Code or Codex
+ * is made, on a seat or through the gateway. Tagged by the releases it pins, so a new pin is a new image.
+ */
+export const HARNESS_IMAGE = "invincible/harnesses:claude-2.1.326.codex-0.172.0";
+/** The pins it holds, as the tools say their versions (`--version`): what readiness names. */
+export const HARNESS_PINS = { claude: "2.1.326", codex: "0.172.0" } as const;
 
 /**
  * The primary's own images: where each is built from (under the sandbox directory) and the keeper that holds it. `base`:
@@ -75,6 +82,7 @@ export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: stri
   [LAB_IMAGE]: { context: "lab", keeper: "invincible-lab-image" },
   [DESKTOP_IMAGE]: { context: "desktop", keeper: "invincible-desktop-image", base: DEFAULT_IMAGE },
   [CLAUDE_CODE_IMAGE]: { context: "claude-code", keeper: "invincible-claude-code-image", base: DEFAULT_IMAGE },
+  [HARNESS_IMAGE]: { context: "harnesses", keeper: "invincible-harnesses-image", base: DEFAULT_IMAGE },
 };
 
 /**
