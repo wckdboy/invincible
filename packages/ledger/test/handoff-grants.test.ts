@@ -65,8 +65,14 @@ const grant = (store: LedgerStore, signer: NodeIdentity, from: string, to: strin
   store.emit(signer, "handoff.granted", { from, to, terms: t }, prov);
 const revoke = (store: LedgerStore, signer: NodeIdentity, from: string, to: string, prov: Prov = YOURS): GEvent => store.emit(signer, "handoff.revoked", { from, to }, prov);
 
-/** The grants as a reader sees them. */
-const seen = (store: LedgerStore) => store.handoffGrants().map((g) => ({ from: g.from, to: g.to, terms: g.terms, via: g.via }));
+/** Grants by pair, in the code units' order: the same order whatever the ids are (a locale's order isn't). */
+const byPair = (x: { from: string; to: string }, y: { from: string; to: string }) => {
+  const [p, q] = [`${x.from}:${x.to}`, `${y.from}:${y.to}`];
+  return p < q ? -1 : p > q ? 1 : 0;
+};
+
+/** The grants as a reader sees them, by pair. */
+const seen = (store: LedgerStore) => store.handoffGrants().map((g) => ({ from: g.from, to: g.to, terms: g.terms, via: g.via })).sort(byPair);
 
 /** An event signed by an enrolled node but never checked by a store's emit: what a misbehaving (or newer) node could send. */
 function forged(store: LedgerStore, signer: NodeIdentity, kind: string, body: unknown, p?: Prov): GEvent {
@@ -83,7 +89,7 @@ describe("your grants for hand-offs, in the mind", () => {
       [
         { from: a.id, to: b.id, terms: terms(), via: null },
         { from: b.id, to: a.id, terms: terms(2), via: "c_phone000000000000000000000000000000000000000" },
-      ].sort((x, y) => `${x.from}:${x.to}`.localeCompare(`${y.from}:${y.to}`)),
+      ].sort(byPair),
     );
     expect(storeB.handoffGrant(a.id, b.id)?.terms).toEqual(terms());
     // Replaced: the pair's grant is the newer one; revoked: none.
