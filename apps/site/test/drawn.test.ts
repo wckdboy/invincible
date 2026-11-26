@@ -2,15 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { inflateSync } from "node:zlib";
-import { agentOrbSvg } from "../src/lib/field-svg.ts";
+import { markGeometry } from "../../../packages/core/src/agent-mark.ts";
+import { handleSeed } from "../../../packages/core/src/avatar.ts";
+import { markParts } from "../../web/src/ui/mark.ts";
+import { agentMarkSvg } from "../src/lib/mark-svg.ts";
 import { FAVICON_SVG, icon64, ogImage, touchIcon } from "../src/lib/icons.ts";
 import { MARK_POLYGON } from "../../../scripts/mark.ts";
 import { MARK, markCorners } from "../src/lib/mark.ts";
-import { AGENTS, agentOrb, orbFiles } from "../src/lib/orbs.ts";
+import { AGENTS, agentOrb, MARKS, orbFiles } from "../src/lib/orbs.ts";
 
 /*
- * What invincible.sh draws when it is built: the agents' orbs (the app's own drawing, written as SVG), and the mark and
- * the icons made from it. Each is the same every build.
+ * What invincible.sh draws when it is built: the agents' marks (the app's own drawing of the Grille, written as SVG),
+ * and the I-beam and the icons made from it. Each is the same every build.
  */
 
 const SITE = resolve(import.meta.dir, "..");
@@ -28,25 +31,26 @@ function readPng(bytes: Uint8Array): { width: number; height: number; type: numb
   return { width: view.getUint32(16), height: view.getUint32(20), type: bytes[25]!, raw: new Uint8Array(inflateSync(Buffer.concat(chunks))) };
 }
 
-describe("the agents' orbs: the app's own fields, as SVG", () => {
-  test("each job's, the same every time, drawn for a dark page and a light one", () => {
+describe("the agents' marks: the app's own Grille, as SVG", () => {
+  test("each job's, the same every time, drawn for a dark page and a light one: its slats, core's geometry", () => {
     for (const job of AGENTS) {
-      const a = agentOrbSvg(job, 72), b = agentOrbSvg(job, 72);
+      const a = agentMarkSvg(job, MARKS[job], 72), b = agentMarkSvg(job, MARKS[job], 72);
       expect(a).toEqual(b);
       expect(a.dark).not.toBe(a.light);
+      const parts = markParts(markGeometry({ mark: MARKS[job], seed: handleSeed(job), state: "idle", size: 72, t: null, since: null }));
       for (const svg of [a.dark, a.light]) {
-        expect(svg).toStartWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" width="72" height="72">');
-        expect(svg).not.toMatch(/NaN|Infinity|undefined|<script|<foreignObject|href=|url\(http/);
-        expect((svg.match(/<path /g) ?? []).length).toBeGreaterThan(10);
+        expect(svg).toStartWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="72" height="72">');
+        expect(svg).not.toMatch(/NaN|Infinity|undefined|<script|<foreignObject|<style|href=|url\(/);
+        // One path a slat: three or four, each the app's band of the disc, turned to its angle.
+        expect((svg.match(/<path /g) ?? []).length).toBe(parts.length);
+        for (const part of parts) expect(svg).toContain(`<g transform="${part.turned}"><path d="${part.d}" transform="${part.slid}"`);
       }
-      // As light, every stroke added to the others (as the app's canvas adds them); as ink, laid over.
-      expect(a.dark).toContain("<style>path,circle{mix-blend-mode:plus-lighter}</style>");
-      expect(a.light).not.toContain("<style>");
     }
   });
 
-  test("each in its own colours: two agents' fields are not the same drawing", () => {
-    const drawings = AGENTS.map((job) => agentOrbSvg(job, 72).light);
+  test("each in its own colour, as a node gives them: no two jobs' marks are the same drawing", () => {
+    expect(new Set(AGENTS.map((job) => MARKS[job].color)).size).toBe(AGENTS.length);
+    const drawings = AGENTS.map((job) => agentMarkSvg(job, MARKS[job], 72).light);
     expect(new Set(drawings).size).toBe(AGENTS.length);
   });
 
@@ -55,7 +59,8 @@ describe("the agents' orbs: the app's own fields, as SVG", () => {
     expect(files).toHaveLength(AGENTS.length * 2);
     for (const { href, svg } of files) {
       expect(href).toMatch(/^\/orbs\/[a-z]+-72-(light|ink)-[0-9a-f]{10}\.svg$/);
-      expect(svg).toBe(href.includes("-light-") ? agentOrbSvg(href.split("/")[2]!.split("-")[0]!, 72).dark : agentOrbSvg(href.split("/")[2]!.split("-")[0]!, 72).light);
+      const job = href.split("/")[2]!.split("-")[0]! as (typeof AGENTS)[number];
+      expect(svg).toBe(href.includes("-light-") ? agentMarkSvg(job, MARKS[job], 72).dark : agentMarkSvg(job, MARKS[job], 72).light);
     }
     expect(agentOrb("coder", 72)).toBe(agentOrb("coder", 72));
   });

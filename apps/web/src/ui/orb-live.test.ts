@@ -3,9 +3,9 @@ import { seat, workerAvatar } from "./avatar.ts";
 import { appMark, agentFace, orb } from "./orb.ts";
 
 /*
- * The orbs on a canvas (26 November 2026: the primary's field, and each agent's), drawn on one that records what is drawn
- * on it, without a browser: light added to light on a dark page, ink on a light one; still where they are many, where
- * motion is reduced, and once an agent has come to rest; moving slowly where they are looked at.
+ * Your agent's I-beam and each agent's mark (the Grille, O2: ui/mark.ts) on a page that records what is made, without a
+ * browser: no canvas anywhere; still where they are many, where motion is reduced, and at rest; moving slowly where one is
+ * looked at and its state moves it; asking for nothing once still.
  */
 
 /** A 2D context that keeps the name of every call made on it, and every blend it is set to. (A gradient it makes, linear
@@ -42,6 +42,8 @@ class Node_ {
     made.push(this);
   }
   setAttribute(key: string, value: string) { this.attrs[key] = value; }
+  getAttribute(key: string) { return this.attrs[key] ?? null; }
+  removeAttribute(key: string) { delete this.attrs[key]; }
   appendChild(child: Node_) { this.children.push(child); return child; }
   addEventListener() {}
   getContext(kind: string) { return this.tag === "canvas" && kind === "2d" ? context(this.calls, this.blends) : null; }
@@ -117,9 +119,6 @@ afterEach(() => {
   saved.clear();
 });
 
-const canvasOf = (node: Node_) => node.children.find((child) => child.tag === "canvas");
-const canvasIn = (node: Node_): Node_ | undefined => (node.tag === "canvas" ? node : node.children.map(canvasIn).find(Boolean));
-const count = (calls: string[], name: string) => calls.filter((call) => call === name).length;
 
 describe("your agent's mark", () => {
   test("the I-beam, still, wherever it is: no canvas, no frame asked for, whatever it is doing", () => {
@@ -131,34 +130,21 @@ describe("your agent's mark", () => {
   });
 });
 
-describe("an agent's field", () => {
-  test("in a mood, a canvas its own size, sharp on the screen: its field added as light, and no beam", () => {
+const pathsIn = (node: Node_): Node_[] => (node.tag === "path" ? [node] : node.children.flatMap(pathsIn));
+const slidesOf = (node: Node_) => pathsIn(node).map((path) => path.attrs.transform);
+
+describe("an agent's mark", () => {
+  test("its Grille at its own size, named: no canvas, a disc cut into three or four slats; in a state that moves, a frame at a time", () => {
     const drawn = agentFace({ id: "ada", size: 168, mood: "working", label: "Ada · Working", key: "test:sharp" }) as unknown as Node_;
-    expect([drawn.attrs.class, drawn.attrs.role, drawn.attrs["aria-label"]]).toEqual(["agent-orb", "img", "Ada · Working"]);
-    const canvas = canvasOf(drawn)!;
-    // Nothing reaches past it: its canvas is its own square, at twice the pixels on this screen.
-    expect([canvas.className, canvas.style.width, canvas.width, canvas.attrs["aria-hidden"]]).toEqual(["agent-orb-canvas", "168px", 336, "true"]);
-    // Drawn at once, so it never shows empty: its lines as strokes (a few dozen, gathered by colour), added as light.
-    expect(canvas.blends).toContain("lighter");
-    expect(count(canvas.calls, "stroke")).toBeGreaterThan(10);
-    expect(count(canvas.calls, "stroke")).toBeLessThan(400);
-    expect(count(canvas.calls, "createLinearGradient")).toBe(0);
-    // Then a frame at a time.
+    expect([drawn.attrs.class, drawn.attrs.role, drawn.attrs["aria-label"], drawn.attrs["data-state"]]).toEqual(["agent-orb agent-mark", "img", "Ada · Working", "working"]);
+    expect(drawn.attrs.style).toStartWith("--orb-size:168px;");
+    expect(made.some((node) => node.tag === "canvas")).toBe(false);
+    expect(pathsIn(drawn).length).toBeWithin(3, 5);
     expect(frames.length).toBeGreaterThan(0);
   });
 
-  test("on a light page, ink: nothing is added as light", () => {
-    root.dataset.theme = "light";
-    const canvas = canvasOf(agentFace({ id: "ada", size: 50, mood: "working", key: "test:paper" }) as unknown as Node_)!;
-    expect(canvas.blends).not.toContain("lighter");
-    expect(count(canvas.calls, "stroke")).toBeGreaterThan(5);
-  });
-
   test("at rest (idle), done, queued, paused or failed, still: drawn once, asking for no frame (nothing animates at rest)", () => {
-    for (const mood of ["idle", "done", "queued", "paused", "failed"] as const) {
-      const canvas = canvasOf(agentFace({ id: "ada", size: 48, mood, key: `test:rest-${mood}` }) as unknown as Node_)!;
-      expect([mood, count(canvas.calls, "drawImage")]).toEqual([mood, 1]);
-    }
+    for (const mood of ["idle", "done", "queued", "paused", "failed"] as const) agentFace({ id: "ada", size: 48, mood, key: `test:rest-${mood}` });
     const before = asked;
     run(1000);
     run(2000);
@@ -166,90 +152,75 @@ describe("an agent's field", () => {
     expect(frames).toEqual([]);
   });
 
-  test("at work, then at rest: it settles, and asks for no more frames once still", () => {
-    const working = canvasOf(agentFace({ id: "ada", size: 48, mood: "working", key: "test:settles" }) as unknown as Node_)!;
+  test("at work, then at rest: it stops, and asks for no more frames", () => {
+    const working = agentFace({ id: "ada", size: 48, mood: "working", key: "test:settles" }) as unknown as Node_;
     run(1000);
     expect(frames.length + timers.length).toBeGreaterThan(0);
     working.isConnected = false;
-    const resting = canvasOf(agentFace({ id: "ada", size: 48, mood: "idle", key: "test:settles" }) as unknown as Node_)!;
-    for (let ms = 1000; ms < 12_000; ms += 50) run(ms);
-    const drawn = resting.calls.length;
-    for (let ms = 12_000; ms < 14_000; ms += 50) run(ms);
-    expect(resting.calls.length).toBe(drawn);
+    const resting = agentFace({ id: "ada", size: 48, mood: "idle", key: "test:settles" }) as unknown as Node_;
+    const still = slidesOf(resting);
+    for (let ms = 1000; ms < 4000; ms += 50) run(ms);
+    expect(slidesOf(resting)).toEqual(still);
     expect([frames, timers]).toEqual([[], []]);
   });
 
   test("still where motion is reduced: drawn once, and nothing more", () => {
     root.dataset.motion = "reduce";
-    const canvas = canvasOf(agentFace({ id: "ada", size: 168, mood: "working", key: "test:still" }) as unknown as Node_)!;
-    const before = canvas.calls.length;
-    expect(before).toBeGreaterThan(0);
+    const drawn = agentFace({ id: "ada", size: 168, mood: "working", key: "test:still" }) as unknown as Node_;
+    const still = slidesOf(drawn);
     run(1000);
     run(2000);
-    expect(canvas.calls.length).toBe(before);
+    expect(slidesOf(drawn)).toEqual(still);
     expect(frames).toEqual([]);
   });
 
-  test("without a mood (a row, the history), still: drawn once; the same face again is stamped from one picture", () => {
-    const [a, b] = [agentFace({ id: "ada", size: 28 }), agentFace({ id: "ada", size: 28 })].map((node) => canvasOf(node as unknown as Node_)!) as [Node_, Node_];
-    // Each stamped from one picture, drawn once in its own canvas.
-    expect([count(a.calls, "drawImage"), count(b.calls, "drawImage"), count(a.calls, "stroke"), count(b.calls, "stroke")]).toEqual([1, 1, 0, 0]);
-    expect(made.filter((node) => node.tag === "canvas" && count(node.calls, "stroke") > 0)).toHaveLength(1);
+  test("without a mood (a row, the history), still: drawn once, whatever its state", () => {
+    agentFace({ id: "ada", size: 28 });
+    agentFace({ id: "ada", size: 28, state: "working" });
     run(1000);
     run(2000);
     expect(frames).toEqual([]);
-  });
-
-  test("with no canvas to draw on, its box alone", () => {
-    stub("window", undefined);
-    expect((agentFace({ id: "ada", size: 28, mood: "working" }) as unknown as Node_).children).toEqual([]);
   });
 
   test("on screen it moves a frame at a time at its pace, and once off the page it is forgotten", () => {
-    const canvas = canvasOf(agentFace({ id: "ada", size: 36, mood: "working", key: "test:frames" }) as unknown as Node_)!;
-    const first = canvas.calls.length;
+    const drawn = agentFace({ id: "ada", size: 36, mood: "working", key: "test:frames" }) as unknown as Node_;
+    const first = slidesOf(drawn);
     run(5000);
-    expect(canvas.calls.length).toBeGreaterThan(first);
-    // (A frame sooner than its next is due draws nothing: at work an agent's only turns, drawn at 15 a second.)
-    const drawn = canvas.calls.length;
+    expect(slidesOf(drawn)).not.toEqual(first);
+    // (A frame sooner than its next is due draws nothing: its slats slide at 15 frames a second.)
+    const drawnThen = slidesOf(drawn);
     run(5040);
-    expect(canvas.calls.length).toBe(drawn);
+    expect(slidesOf(drawn)).toEqual(drawnThen);
     run(5070);
-    expect(canvas.calls.length).toBeGreaterThan(drawn);
-    canvas.isConnected = false;
-    const gone = canvas.calls.length;
+    expect(slidesOf(drawn)).not.toEqual(drawnThen);
+    drawn.isConnected = false;
+    const gone = slidesOf(drawn);
     run(6000);
     run(6100);
-    expect(canvas.calls.length).toBe(gone);
+    expect(slidesOf(drawn)).toEqual(gone);
   });
 
   test("one made before it is put on the page is looked for ten times a second, not at every frame, and forgotten after five", () => {
-    const canvas = canvasOf(agentFace({ id: "ada", size: 36, mood: "working", key: "test:unplaced" }) as unknown as Node_)!;
-    canvas.isConnected = false;
+    const drawn = agentFace({ id: "ada", size: 36, mood: "working", key: "test:unplaced" }) as unknown as Node_;
+    drawn.isConnected = false;
     const before = asked;
     for (let ms = 1000; ms < 2000; ms += 1000 / 60) run(ms);
     expect(asked - before).toBeWithin(8, 13);
-    canvas.isConnected = true;
-    const drawn = canvas.calls.length;
+    drawn.isConnected = true;
+    const then = slidesOf(drawn);
     for (let ms = 2000; ms < 3000; ms += 1000 / 60) run(ms);
-    expect(canvas.calls.length).toBeGreaterThan(drawn);
-    const other = canvasOf(agentFace({ id: "ada", size: 36, mood: "working", key: "test:never" }) as unknown as Node_)!;
+    expect(slidesOf(drawn)).not.toEqual(then);
+    const other = agentFace({ id: "ada", size: 36, mood: "working", key: "test:never" }) as unknown as Node_;
     other.isConnected = false;
-    canvas.isConnected = false;
+    drawn.isConnected = false;
     for (let ms = 3000; ms < 9000; ms += 1000 / 60) run(ms);
     expect([frames, timers]).toEqual([[], []]);
   });
 
-  test("a change of theme draws every face on the page again, in the new one", () => {
-    const canvas = canvasOf(agentFace({ id: "ada", size: 34, key: "test:theme" }) as unknown as Node_)!;
-    expect(themeWatcher).not.toBeNull();
-    const drawn = canvas.calls.length;
-    root.dataset.theme = "light";
-    themeWatcher!();
-    expect(canvas.calls.length).toBeGreaterThan(drawn);
-    // (Stamped from the light page's picture: drawn anew, with no light added in it.)
-    const pictures = made.filter((node) => node.tag === "canvas" && count(node.calls, "stroke") > 0);
-    expect(pictures.at(-1)!.blends).not.toContain("lighter");
+  test("a change of theme draws nothing again: its colours are the page's own pair, light and dark (light-dark())", () => {
+    const drawn = agentFace({ id: "ada", size: 34, key: "test:theme" }) as unknown as Node_;
+    expect(drawn.attrs.style).toMatch(/--mark-body:light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\)/);
+    expect(themeWatcher).toBeNull();
   });
 });
 
@@ -265,17 +236,20 @@ describe("the app's mark", () => {
 });
 
 describe("an agent's face", () => {
-  test("never with a beam: its alone", () => {
-    agentFace({ id: "max", size: 50, mood: "working", key: "test:no-beam" });
-    agentFace({ id: "ada", size: 34 });
-    for (const node of made.filter((one) => one.tag === "canvas")) expect(count(node.calls, "createLinearGradient")).toBe(0);
+  test("its mark alone: slats and nothing else, never a beam, never a canvas", () => {
+    const working = agentFace({ id: "max", size: 50, mood: "working", key: "test:no-beam" }) as unknown as Node_;
+    const still = agentFace({ id: "ada", size: 34 }) as unknown as Node_;
+    for (const face of [working, still]) {
+      const svgs = face.children;
+      expect(svgs.map((child) => [child.tag, child.attrs.class])).toEqual([["svg", "agent-mark-svg"]]);
+      expect(made.filter((node) => node.tag !== "span" && node.tag !== "svg" && node.tag !== "g" && node.tag !== "path")).toEqual([]);
+    }
   });
 
-  test("still unless it works: at rest, in a row or in the history, drawn once and never asking for a frame", () => {
-    for (const face of [agentFace({ id: "max", size: 34, mood: "idle", key: "test:idle" }), agentFace({ id: "max", size: 34 }), workerAvatar({ id: "max", name: "Max", still: true })]) {
-      const canvas = canvasIn(face as unknown as Node_)!;
-      expect([canvas.className, count(canvas.calls, "drawImage")]).toEqual(["agent-orb-canvas", 1]);
-    }
+  test("still unless its state moves it where it is looked at: at rest, in a row or in the history, never asking for a frame", () => {
+    agentFace({ id: "max", size: 34, mood: "idle", key: "test:idle" });
+    agentFace({ id: "max", size: 34 });
+    workerAvatar({ id: "max", name: "Max", still: true });
     const before = asked;
     run(1000);
     run(2000);
@@ -283,29 +257,31 @@ describe("an agent's face", () => {
     expect(frames).toEqual([]);
   });
 
-  test("at work it turns; given rest again, it comes to rest and asks for no more frames", () => {
+  test("at work its slats slide; given rest again, it is still and asks for no more frames", () => {
     const working = agentFace({ id: "max", size: 34, mood: "working", key: "test:rest" }) as unknown as Node_;
-    expect(working.children[0]!.className).toBe("agent-orb-canvas");
     expect(frames.length).toBeGreaterThan(0);
+    const first = slidesOf(working);
     for (let ms = 1000; ms < 2000; ms += 1000 / 60) run(ms);
-    // Its work ends: drawn again at rest, on the same course, it slows to a stop, then nothing more.
-    working.children[0]!.isConnected = false;
-    const resting = canvasOf(agentFace({ id: "max", size: 34, mood: "idle", key: "test:rest" }) as unknown as Node_)!;
-    for (let ms = 2000; ms < 12_000; ms += 1000 / 60) run(ms);
-    const settled = resting.calls.length;
-    for (let ms = 12_000; ms < 13_000; ms += 1000 / 60) run(ms);
-    expect(resting.calls.length).toBe(settled);
+    expect(slidesOf(working)).not.toEqual(first);
+    working.isConnected = false;
+    agentFace({ id: "max", size: 34, mood: "idle", key: "test:rest" });
+    for (let ms = 2000; ms < 4000; ms += 1000 / 60) run(ms);
     expect(frames).toEqual([]);
   });
 });
 
 describe("an agent's seat", () => {
-  test("its face, still, with no ring and no lights round it; its state on the seat and in its name", () => {
+  test("its mark, still, with no ring round it; its state on the seat, in its mark's shape and in its name", () => {
     const live = seat({ id: "max", name: "Max", state: "working", expression: "working", size: 40 }) as unknown as Node_;
     expect(live.children.map((child) => child.attrs.class ?? child.className)).toEqual(["worker-avatar"]);
     expect(live.attrs["data-state"]).toBe("working");
     const face = live.children[0]!.children[0]!;
-    expect([face.attrs.class, face.attrs["aria-label"]]).toEqual(["agent-orb", "Max · Working"]);
+    expect([face.attrs.class, face.attrs["aria-label"], face.attrs["data-state"]]).toEqual(["agent-orb agent-mark", "Max · Working", "working"]);
+    // Failed: its bottom slat red and loose, still; asks you: its top slat in ink.
+    const failed = seat({ id: "max", name: "Max", state: "failed", size: 40 }) as unknown as Node_;
+    expect(pathsIn(failed).map((path) => path.attrs.class).at(-1)).toBe("key");
+    const asks = seat({ id: "max", name: "Max", state: "needs", size: 40 }) as unknown as Node_;
+    expect(pathsIn(asks).map((path) => path.attrs.class)[0]).toBe("key");
     run(1000);
     expect(frames).toEqual([]);
   });

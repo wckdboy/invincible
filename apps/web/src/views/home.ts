@@ -73,15 +73,17 @@ export const homeView: View = (root, ctx, { scope }) => {
     strip.hidden = !ordered.length;
     replace(
       strip,
-      ...ordered.map((seated) =>
-        h(
+      ...ordered.map((seated) => {
+        // (What needs you first: its mark and its word say the same.)
+        const shown = { ...seated, state: seated.needs ? ("needs" as const) : seated.state };
+        return h(
           "a",
           { class: "home-strip-agent", href: seated.href, onclick: openSeat(ctx, seated), title: `${seated.name}: ${seated.line}` },
-          seatFace(seated, 40),
+          seatFace(shown, 40),
           h("span", { class: "home-strip-name ellipsis" }, seated.name),
-          stateChip(seated.needs ? "needs" : seated.state) ?? h("span", { class: "home-strip-rest", "aria-hidden": "true" }, " "),
-        ),
-      ),
+          stateChip(shown.state) ?? h("span", { class: "home-strip-rest", "aria-hidden": "true" }, " "),
+        );
+      }),
     );
   };
 

@@ -24,6 +24,7 @@ import { openSheet } from "../ui/dialog.ts";
 import { cx, h, keepPlace, replace, type Child } from "../ui/dom.ts";
 import { icon, type IconName } from "../ui/icons.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
+import { markStateOfAgent } from "../ui/mark.ts";
 import { agentFace, orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
 import { askItem } from "./needs.ts";
@@ -301,13 +302,14 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
 
   function drawHead(n: Now, force = false): void {
     const working = n.task.status === "running";
-    const version = JSON.stringify([n.task.title, n.project, n.name, n.agent?.avatar, working, shownDetails, wide.matches]);
+    const state = taskState(n.task);
+    const version = JSON.stringify([n.task.title, n.project, n.name, n.agent?.avatar, working, state, shownDetails, wide.matches]);
     if (version === headVersion && !force) return;
     headVersion = version;
     const direct = directRoom(n.snapshot, n.task.assignee);
-    const state = taskState(n.task);
-    // The agent's orb: moving while it works (the orb in focus), still otherwise.
-    const face = h("span", { class: "thread-head-face" }, agentFace({ id: n.task.assignee, profile: n.agent?.avatar, size: 28, mood: working ? orbMoodOfState("working") : undefined, label: `${n.name}${working ? ", working" : ""}`, key: `task:${n.task.assignee}` }));
+    // The agent's mark, the one in focus: its slats slide while it works; as its task ends it settles (done) or its bottom
+    // slat drops (failed), once, then it is still.
+    const face = h("span", { class: "thread-head-face" }, agentFace({ id: n.task.assignee, profile: n.agent?.avatar, size: 28, mood: orbMoodOfState("working"), state: markStateOfAgent(state), label: `${n.name}${working ? ", working" : ""}`, key: `task:${n.task.assignee}` }));
     keepPlace(head, () =>
       replace(
         head,

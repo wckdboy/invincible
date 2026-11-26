@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { agentColors } from "@invincible/core/avatar";
+import { MARK_PALETTE, markOf } from "@invincible/core/agent-mark";
 import { appMark, agentFace, orb, type OrbTone } from "./orb.ts";
 
 /** Captures the renderer's real createElement and createElementNS calls, without an HTML parser or a browser (and with
@@ -60,12 +60,13 @@ describe("the app's mark", () => {
   });
 });
 
-describe("an agent's face, where there is no canvas", () => {
-  test("its colour, its size and its name, and nothing drawn", () => {
+describe("an agent's face", () => {
+  test("its mark, the Grille: its colour, its size and its name, drawn as SVG on any page", () => {
     const face = draw(() => agentFace({ id: "ada", size: 34, label: "Ada · Working" }) as unknown as Node_);
-    expect([face.attrs.class, face.attrs.style, face.attrs["data-tint"], face.attrs.role, face.attrs["aria-label"]]).toEqual(["agent-orb", "--orb-size:34px", agentColors("ada").tint, "img", "Ada · Working"]);
-    expect(face.children).toEqual([]);
+    expect([face.attrs.class, face.attrs.role, face.attrs["aria-label"]]).toEqual(["agent-orb agent-mark", "img", "Ada · Working"]);
+    expect(face.attrs.style).toStartWith(`--orb-size:34px;--mark-body:light-dark(${MARK_PALETTE[markOf("ada").color]!.light}, `);
+    expect(face.children.map((child) => [child.tag, child.attrs.viewBox])).toEqual([["svg", "0 0 100 100"]]);
     const decorative = draw(() => agentFace({ id: "ada", size: 900 }) as unknown as Node_);
-    expect([decorative.attrs["aria-hidden"], decorative.attrs.style]).toEqual(["true", "--orb-size:256px"]);
+    expect([decorative.attrs["aria-hidden"], decorative.attrs.style!.split(";")[0]]).toEqual(["true", "--orb-size:256px"]);
   });
 });
