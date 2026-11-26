@@ -266,7 +266,8 @@ Work
                                   engineer says DONE, and every one must exit 0 before the reviewer is asked
                                   (a failing gate sends the work back; one that never passes: never done).
                                   The planner may add gates of its own, marked as its proposal; yours stay
-                                  exactly as given (--no-planner-gates: yours only)
+                                  exactly as given (--no-planner-gates: yours only). Work that gives up
+                                  with the planner's in force has them withdrawn, once, and goes on
   do --harness opencode "<goal>" [--minutes 60] [--repo https://…] [--net gateway|online]
                                   the same, with a full coding agent doing the work for up to --minutes
                                   (models through the gateway; --repo clones first and keeps a patch:

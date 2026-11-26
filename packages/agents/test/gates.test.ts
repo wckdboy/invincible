@@ -356,6 +356,58 @@ describe("gates the planner proposes", () => {
     expect(outcome.status).toBe("done");
     expect(h.commands).toEqual([]);
   });
+
+  test("giving up with the planner's gates in force withdraws them, and the work goes on under yours: a plan's slip doesn't end it", async () => {
+    // 26 November 2026, on a real node: the planner proposed a `wc -c` of 10 and a `cmp` with "invincible" and a newline
+    // (11 bytes). The engineer rightly said no file passes both, and the run ended there, though your own gate could pass.
+    const tenBytes = `test "$(wc -c < proof.txt)" = "10"`;
+    const exact = `cmp proof.txt <(printf 'invincible\\n')`;
+    const yours = "grep -qx invincible proof.txt";
+    const h = harness(
+      {
+        planner: [`1. Write proof.txt.\nDone when: proof.txt holds the one line invincible.\nGate: ${tenBytes}\nGate: ${exact}`],
+        engineer: ["GIVE UP\nGate 2 wants 10 bytes and gate 3 wants invincible and a newline, 11: no file passes both.", sh("printf 'invincible\\n' > proof.txt"), "DONE\nWrote proof.txt."],
+        exec: (command) => (command === tenBytes ? { exitCode: 1, stdout: "" } : {}),
+      },
+      { gates: [yours], proposeGates: true },
+    );
+    const outcome = await h.run;
+    expect(outcome.status).toBe("done");
+    // Yours ran; the planner's never did. Giving up was a turn, not a command.
+    expect(h.commands).toEqual(["printf 'invincible\\n' > proof.txt", yours]);
+    expect(outcome.steps).toBe(1);
+    expect(outcome.gates!.map((g) => [g.command, g.by])).toEqual([[yours, "owner"]]);
+    // The gates are said again, yours alone, with why.
+    const said = h.events.filter((e): e is Extract<RunEvent, { type: "gates" }> => e.type === "gates");
+    expect(said.map((e) => e.gates.map((g) => g.by))).toEqual([["owner", "planner", "planner"], ["owner"]]);
+    expect(said[1]!.why).toMatch(/the planner's .*withdrawn/i);
+    // And the engineer is told so, with the gates that still hold, then goes on.
+    const told = h.seen.filter((s) => s.role === "engineer")[1]!.messages.at(-1)!.content;
+    expect(told).toMatch(/withdrawn/);
+    expect(told).toContain(`$ ${yours} (set by the owner)`);
+    expect(told).not.toContain(tenBytes);
+  });
+
+  test("the same when the engineer works with its own tools (the default loop)", async () => {
+    const h = harness({ planner: ["1. Do it.\nDone when: done.\nGate: test -f never.txt"], engineer: ["GIVE UP\nGate 2 can't pass.", "DONE\nDone."] }, { gates: ["test -f a.txt"], proposeGates: true, tools: true });
+    const outcome = await h.run;
+    expect(outcome.status).toBe("done");
+    expect(h.commands).toEqual(["test -f a.txt"]);
+    expect(h.events.filter((e) => e.type === "gates")).toHaveLength(2);
+  });
+
+  test("once, and only the planner's: giving up again, or with none of its gates in force, ends the run as giving up does", async () => {
+    const again = harness({ planner: ["1. Do it.\nDone when: done.\nGate: test -f never.txt"], engineer: ["GIVE UP\nGate 2 can't pass.", "GIVE UP\nStill can't."] }, { gates: ["test -f a.txt"], proposeGates: true });
+    const twice = await again.run;
+    expect(twice.status).toBe("gave-up");
+    expect(twice.summary).toBe("Still can't.");
+    expect(again.commands).toEqual([]);
+    const none = harness({ planner: ["1. Do it.\nDone when: done."], engineer: ["GIVE UP\nCan't."] }, { gates: ["test -f a.txt"], proposeGates: true });
+    const once = await none.run;
+    expect(once.status).toBe("gave-up");
+    expect(once.summary).toBe("Can't.");
+    expect(none.events.filter((e) => e.type === "gates")).toHaveLength(1);
+  });
 });
 
 describe("gates with a coding agent", () => {

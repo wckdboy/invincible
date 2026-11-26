@@ -347,7 +347,7 @@ export function progress(event: RunEvent): string {
     case "format": return `No command to run · ${event.problem}\n${event.reply}`;
     // A gate that passes before any work shows nothing about it (PLAN #7): said, and when every gate does, that the reviewer's word is all there is.
     case "baseline": return `Gates before the work · ${event.results.map((g, i) => `${i + 1}. exit ${g.exitCode} · ${g.command}${g.exitCode === 0 ? " · passes already, so it shows nothing about this work" : ""}`).join("\n")}${event.results.length && event.results.every((g) => g.exitCode === 0) ? "\nNone of its gates can show this task was done: each passes before any work, so the reviewer decides alone." : ""}`;
-    case "gates": return `Gates · ${event.gates.map((g, i) => `${i + 1}. ${g.command}`).join("\n")}`;
+    case "gates": return `Gates · ${[...(event.why ? [event.why] : []), ...event.gates.map((g, i) => `${i + 1}. ${g.command}`)].join("\n")}`;
     case "gated": {
       const failed = event.results.filter((g) => g.exitCode !== 0).length;
       return `Gates · ${failed ? `${failed} of ${event.results.length} failed: back to the work` : `all ${event.results.length} passed`}`;

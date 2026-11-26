@@ -1231,6 +1231,10 @@ test("a tripwire is said in words on a task's timeline: which rule, what it did,
 test("the gates are said in words on a task's timeline: which they are, then how they went", () => {
   const gate = (command: string) => ({ command, by: "owner" as const });
   expect(progress({ type: "gates", gates: [gate("bun test"), gate("test -s out.csv")] })).toBe("Gates · 1. bun test\n2. test -s out.csv");
+  // Said again when they change (the planner's withdrawn): why, then the gates that still hold, listed as before.
+  expect(progress({ type: "gates", gates: [gate("bun test")], why: "the planner's gate is withdrawn: the work gave up with it in force, and goes on under yours" })).toBe(
+    "Gates · the planner's gate is withdrawn: the work gave up with it in force, and goes on under yours\n1. bun test",
+  );
   const run = (exitCode: number) => ({ ...gate("bun test"), exitCode, durationMs: 9, excerpt: "" });
   expect(progress({ type: "gated", round: 1, passed: true, results: [run(0), run(0)] })).toBe("Gates · all 2 passed");
   expect(progress({ type: "gated", round: 2, passed: false, results: [run(1), run(0)] })).toBe("Gates · 1 of 2 failed: back to the work");

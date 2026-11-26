@@ -373,7 +373,7 @@ export function printRunEvent(event: RunEvent): void {
       console.log(`\n${bold("◇ Submitted")}\n${indent(firstLines(event.summary, 6))}`);
       return;
     case "gates":
-      console.log(`${bold("◇ Gates")} ${dim("· each must exit 0 before the reviewer is asked")}\n${event.gates.map((g, i) => `  ${i + 1}. $ ${firstLines(g.command, 2)} ${dim(`(${gateBy(g.by)})`)}`).join("\n")}\n`);
+      console.log(`${bold("◇ Gates")} ${dim(`· ${event.why ?? "each must exit 0 before the reviewer is asked"}`)}\n${event.gates.map((g, i) => `  ${i + 1}. $ ${firstLines(g.command, 2)} ${dim(`(${gateBy(g.by)})`)}`).join("\n")}\n`);
       return;
     case "gate": {
       const [, ...output] = event.output.split("\n");

@@ -271,8 +271,11 @@ export const commandsRun = (outcome: Pick<RunOutcome, "steps" | "malformed" | "t
 
 export type RunEvent =
   | { type: "plan"; text: string; model: string }
-  /** The run's gates, once the plan is known: yours first, then the planner's proposals. */
-  | { type: "gates"; gates: Gate[] }
+  /**
+   * The run's gates, once the plan is known: yours first, then the planner's proposals. Said again, with `why`, when
+   * they change: the planner's withdrawn, when the work gave up with them in force.
+   */
+  | { type: "gates"; gates: Gate[]; why?: string }
   /** One gate ran (`round`: which submission this is, from 1). */
   | { type: "gate"; index: number; of: number; round: number; command: string; by: GateBy; exitCode: number; durationMs: number; output: string }
   /** The gates as they ran before any work (gatesFirst): never a submission's round. */
@@ -579,6 +582,14 @@ const gatesBriefing = (gates: readonly Gate[], before?: readonly GateResult[], l
   gates.length
     ? `\n\nGates: when you say you are done, ${gates.length === 1 ? "this command is" : "these commands are"} run in your workspace, and each must exit 0 before your work ${unreviewed ? "is done" : "goes to the reviewer"}. You can't change them; make the work pass them.\n${gates.map((g, i) => `${i + 1}. $ ${g.command} (${gateBy(g.by)})`).join("\n")}${before?.length ? gatesBefore(before) : ""}${locked.length ? `\nThe test files they run are the contract: ${locked.join(", ")}. Change the work, never these: a submission that changed one goes back before any gate runs. New tests the run asks for go in a new file beside them (say which, and run it): these stay as they are.` : ""}`
     : "";
+
+/** What the engineer is told when the planner's gates are withdrawn (it gave up with them in force): what still holds. */
+const withdrawnNote = (withdrawn: number, gates: readonly Gate[], unreviewed = false): string =>
+  `The planner's ${withdrawn === 1 ? "gate is" : `${withdrawn} gates are`} withdrawn: you gave up with ${withdrawn === 1 ? "it" : "them"} in force, and ${withdrawn === 1 ? "it was" : "they were"} only its proposal. ${
+    gates.length
+      ? `${gates.length === 1 ? "This gate still holds" : "These gates still hold"}, and each must exit 0 before your work ${unreviewed ? "is done" : "goes to the reviewer"}:\n${gates.map((g, i) => `${i + 1}. $ ${g.command} (${gateBy(g.by)})`).join("\n")}`
+      : `No gate holds now: ${unreviewed ? "your word that it is done ends the run" : "the independent reviewer judges the work"}.`
+  }\nGo on with the run. If the run itself can't be done, reply GIVE UP and say why.`;
 
 /** The test files a gate names, read as they are: one line per file there (`<sha256>  <path>`), nothing for one that isn't. */
 const digestCommand = (paths: readonly string[]): string => `for f in ${paths.map((p) => `'${p.replaceAll("'", "'\\''")}'`).join(" ")}; do [ -f "$f" ] && sha256sum -- "$f"; done 2>/dev/null; true`;
@@ -1179,6 +1190,21 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     const done = { ...outcome, steps, revisions, plan, ...(last ? { gates: last } : {}), ...(before ? { gatesBefore: before } : {}), ...(malformed ? { malformed } : {}), ...(tripped ? { tripped } : {}), timing: { ...timing } };
     emit({ type: "finished", outcome: done });
     return done;
+  };
+  /**
+   * The planner's gates withdrawn, when the work gave up with them in force: they are its proposal, and a plan can slip
+   * (26 November 2026, on a real node: a `wc -c` of 10 beside a `cmp` with an 11-byte line, which no file passes at
+   * once). Yours stay, and so do the test files they name; what only the planner's named is unlocked. How many went.
+   */
+  const withdrawPlanners = (): number => {
+    const withdrawn = gates.filter((g) => g.by === "planner").length;
+    gates = gates.filter((g) => g.by !== "planner");
+    if (before) before = before.filter((g) => g.by !== "planner");
+    const named = new Set(gates.flatMap((g) => testFilesOf(g.command)));
+    for (const path of [...locked.keys()]) if (!named.has(path)) locked.delete(path);
+    const goesOn = gates.length ? "under yours" : o.unreviewed ? "with no gate" : "with the reviewer alone to judge it";
+    emit({ type: "gates", gates, why: `the planner's ${withdrawn === 1 ? "gate is" : "gates are"} withdrawn: the work gave up with ${withdrawn === 1 ? "it" : "them"} in force, and goes on ${goesOn}` });
+    return withdrawn;
   };
 
   /** Your rules as they stand now; if they can't be read, nothing more runs. */
@@ -1838,6 +1864,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       if (action.kind === "give-up") {
         // (Like DONE, a turn and not a command: it isn't counted as one.)
         steps -= 1;
+        // With the planner's gates in force, giving up may be giving up on them: they are withdrawn, once, and it goes on.
+        if (gates.some((g) => g.by === "planner")) {
+          const withdrawn = withdrawPlanners();
+          messages.push({ role: "user", content: `${withdrawnNote(withdrawn, gates, o.unreviewed)}${cut}${await afterStep()}`, effort: STEP_EFFORT.hard });
+          continue;
+        }
         return finish({ status: "gave-up", summary: action.reason });
       }
       if (action.kind === "commands") {

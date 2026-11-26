@@ -147,7 +147,9 @@ Its event kinds are Invincible's own (`chat.*`, `task.*`, `run.*`, `project.*`, 
 The run loop is carried and renamed (§10), the most proven part of it:
 - **The loop:** restate the task as acceptance criteria, plan, work, verify, report.
 - **Gates:** the gates run before any work, so a gate that already passes proves nothing and is said to. Test files a
-  gate names are locked.
+  gate names are locked. Yours run exactly as given. The planner may propose up to three of its own, and they are only
+  its proposal: work that gives up with them in force has them withdrawn, once, and goes on under yours (26 November
+  2026: two it proposed asked for a 10-byte file and an 11-byte one, and the task ended though yours could pass).
 - **The reviewer:** independent. A review by the model that did the work is marked as one.
 - **Tripwires, checks and tells:** rules of yours at fixed points of the work.
 - **Audited, never capped:** no command count and no time limit. An independent audit steers the run, and only your
