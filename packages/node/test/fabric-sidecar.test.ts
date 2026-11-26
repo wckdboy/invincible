@@ -3,7 +3,8 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { didKeyOfEd25519, fromB64u, signingPublicKey } from "@invincible/core";
-import { probeSidecar, Sidecar, type SidecarProcess, transportKey } from "../src/fabric/sidecar.ts";
+import { probeSidecar, Sidecar, sidecarListen, type SidecarProcess, transportKey } from "../src/fabric/sidecar.ts";
+import { unspecified } from "../src/qamp-grants.ts";
 
 /*
  * The node's sidecar supervisor without a real sidecar (the real one is in fabric.e2e.test.ts): its transport key, a
@@ -108,5 +109,18 @@ describe("a sidecar that won't start", () => {
     await sidecar.start();
     expect(sidecar.why).toMatch(/too long for a Unix socket/);
     await sidecar.stop();
+  });
+});
+
+describe("where the sidecar listens", () => {
+  test("on the node's own address and port, an IPv6 one in brackets", () => {
+    expect(sidecarListen("192.0.2.10", 7410, unspecified)).toBe("192.0.2.10:7410");
+    expect(sidecarListen("fd7a:115c:a1e0::1", 7410, unspecified)).toBe("[fd7a:115c:a1e0::1]:7410");
+    expect(sidecarListen("[fd7a:115c:a1e0::1]", 7410, unspecified)).toBe("[fd7a:115c:a1e0::1]:7410");
+    expect(sidecarListen("127.0.0.1", 47410, unspecified)).toBe("127.0.0.1:47410");
+  });
+
+  test("never every interface, however it is written: then it only dials out", () => {
+    for (const any of ["0.0.0.0", "0", "::", "[::]", "::0", "0:0::0", "::ffff:0.0.0.0", ""]) expect([any, sidecarListen(any, 7410, unspecified)]).toEqual([any, null]);
   });
 });

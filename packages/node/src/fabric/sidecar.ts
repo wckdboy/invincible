@@ -98,6 +98,17 @@ export interface SidecarOptions {
 
 export type SidecarState = "off" | "starting" | "up" | "down";
 
+/**
+ * Where the sidecar listens: the node's advertised address alone, never every interface. An address that is every
+ * interface's (0.0.0.0, ::, and every other way of writing them) gives null: it only dials out (its peers' calls still
+ * reach it over the connections it opens).
+ */
+export function sidecarListen(advertise: string, port: number, unspecified: (address: string) => boolean): string | null {
+  if (unspecified(advertise)) return null;
+  const bare = advertise.replace(/^\[(.*)\]$/, "$1");
+  return `${bare.includes(":") ? `[${bare}]` : bare}:${port}`;
+}
+
 /** The node's transport key: made once, 0600, in its home. Returns its DID; its secret is never kept in memory. */
 export function transportKey(home: string): { path: string; did: string; made: boolean } {
   const dir = join(home, "qamp");

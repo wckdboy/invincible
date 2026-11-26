@@ -22,7 +22,7 @@ import { ComputeService, liveHost, type Measure } from "./compute/service.ts";
 import { ArmTokens, PRIMARY_ARM } from "./arms.ts";
 import { QampGrants, type QampRunner, qampRunner, unspecified } from "./qamp-grants.ts";
 import { Fabric, fabricRequest, type FabricPrincipal } from "./fabric/service.ts";
-import { Sidecar, type SpawnSidecar } from "./fabric/sidecar.ts";
+import { Sidecar, sidecarListen, type SpawnSidecar } from "./fabric/sidecar.ts";
 import { Handoffs } from "./fabric/handoff.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { artifactsAdapter, chatsAdapter, investigationsAdapter, memoriesAdapter, skillsAdapter, evalsAdapter } from "./archive/adapters.ts";
@@ -303,7 +303,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     home: home.dir,
     binary: () => (sidecarOpts === null ? null : sidecarOpts.binary !== undefined ? sidecarOpts.binary : qampBin),
     // Its advertised address alone, never every interface: with no other to give it, it only dials out.
-    listen: () => (unspecified(advertise) ? null : `${advertise.includes(":") ? `[${advertise}]` : advertise}:${qampPort}`),
+    listen: () => sidecarListen(advertise, qampPort, unspecified),
     name: config.name,
     log,
     ...(sidecarOpts?.socket ?? env.INVINCIBLE_QAMP_SOCKET ? { socket: sidecarOpts?.socket ?? env.INVINCIBLE_QAMP_SOCKET } : {}),

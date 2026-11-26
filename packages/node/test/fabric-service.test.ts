@@ -87,3 +87,29 @@ describe("when Q-AMP is tried again", () => {
     expect(fabric.unusable(peer)).toBeNull();
   });
 });
+
+describe("who a transport key is", () => {
+  const did = (seed: number) => didKeyOfEd25519(signingPublicKey(new Uint8Array(32).fill(seed)));
+  const node = (id: string, key: string, revoked = false): Device => ({ ...peer, id, name: id, revokedHlc: revoked ? "1" : null, profile: { endpoint: "http://127.0.0.1:1", caps: { qamp: { did: key, address: `qamp://${key}@127.0.0.1:7410` } } } });
+  const fabricOf = (devices: Device[]) => {
+    const sidecar = { client: null, did: "did:key:z6Mkself", address: null, state: "off", why: null } as unknown as Sidecar;
+    const store = { onApplied: () => () => {}, devices: () => devices.filter((d) => !d.revokedHlc), activeDevice: (id: string) => devices.find((d) => d.id === id && !d.revokedHlc) ?? null } as unknown as LedgerStore;
+    return new Fabric({ store, identity: newNodeIdentity(), sidecar, log: () => {}, presence: async () => ({}) as never });
+  };
+
+  test("the active node whose signed profile names it", () => {
+    expect(fabricOf([node("n_b", did(4)), node("n_c", did(5))]).nodeOfKey(did(5))?.id).toBe("n_c");
+  });
+
+  test("a key two nodes claim is neither's: a node can't take another's calls by naming its key", () => {
+    const f = fabricOf([node("n_b", did(4)), node("n_liar", did(4)), node("n_c", did(5))]);
+    expect(f.nodeOfKey(did(4))).toBeNull();
+    expect(f.nodeOfKey(did(5))?.id).toBe("n_c");
+  });
+
+  test("a key no node names, or a revoked node's, is nobody", () => {
+    const f = fabricOf([node("n_b", did(4)), node("n_gone", did(6), true)]);
+    expect(f.nodeOfKey(did(7))).toBeNull();
+    expect(f.nodeOfKey(did(6))).toBeNull();
+  });
+});

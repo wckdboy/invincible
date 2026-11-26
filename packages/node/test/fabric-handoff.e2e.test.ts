@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { bodyFingerprint, ceilingThreads, type HandedView, KERNEL, newNodeIdentity, REFERENCE_SINGLE, type TeamSnapshot } from "@invincible/core";
+import { join } from "node:path";
+import { bodyFingerprint, ceilingThreads, FABRIC, type HandedView, KERNEL, newNodeIdentity, REFERENCE_SINGLE, runGrantPolicy, signQdt, type TeamSnapshot } from "@invincible/core";
+import { Sidecar } from "../src/fabric/sidecar.ts";
+import { SidecarError } from "../src/fabric/socket.ts";
 import { fakeDocker } from "./fake-docker.ts";
-import { HAVE_QAMP, type Pair, sandboxCaps, startPair, until } from "./fabric-pair.ts";
+import { HAVE_QAMP, type Pair, QAMP, sandboxCaps, startPair, until } from "./fabric-pair.ts";
 
 /*
  * Agents working together across nodes (docs/ARCHITECTURE.md §3), end to end on one machine: two nodes with real Q-AMP
@@ -170,6 +173,50 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
     await ended(view.id);
     // Its task over, nothing of it answers: no run here, and alpha's grant for it is gone with it.
     expect((await pair.b.handoffs.callGiver(vm, "fleet", {}, new AbortController().signal)).status).toBe(404);
+  });
+
+  test("a runner that turned on its giver gets only what the grant says; a stolen chain, and the chain for another task, are refused", async () => {
+    let release!: () => void;
+    const done = new Promise<void>((resolve) => (release = resolve));
+    hold = { tag: "rogue", entered: false, release, done };
+    const view = await pair.callA<HandedView>("handTask", { node: "beta", goal: "TASK_ROGUE: look at the fleet", gates: ["test -f result-rogue.txt # gate-rogue"], agent: "ada", tools: ["fleet"] });
+    await until(() => hold!.entered, 30_000, "the run under way on beta");
+    await until(() => pair.b.handoffs.running().some((r) => r.handoff === view.id && r.chained), 10_000, "the run's chain on beta");
+    // What beta holds for the run, as a node that turned on alpha would use it: the grant's tokens and the run's own key.
+    const run = (pair.b.handoffs as unknown as { runs: Map<string, { chain: Uint8Array[]; seed: Uint8Array }> }).runs.get(view.id)!;
+    const alpha = pair.a.fabric.sidecar.address!;
+    const betaKey = pair.b.fabric.sidecar.did!;
+    const exp = Math.floor(Date.now() / 1000) + 60;
+    const link = (tool: string, task = view.id) => signQdt(run.seed, { aud: betaKey, sub: pair.a.fabric.sidecar.did, cmd: `/tool/${FABRIC.agent}/${tool}`, exp, pol: runGrantPolicy(task) }).encoded;
+    const refusal = async (call: Promise<unknown>) => {
+      const error = await call.then(() => null, (e) => e as SidecarError);
+      return error ? { code: error.code, message: error.message } : null;
+    };
+    // The grant's command covers every agent tool; alpha's door holds the run to the one its task was given.
+    const compute = await refusal(pair.b.fabric.sidecar.client!.call(alpha, `${FABRIC.agent}/compute`, { task: view.id, input: {} }, { proofs: [...run.chain, link("compute")] }).result);
+    expect(compute).toEqual({ code: 3, message: expect.stringContaining("compute isn't one of the tools this task was given") });
+    // The chain for this task, with another task's id: its policy holds it to this one, at alpha's sidecar.
+    const other = await refusal(pair.b.fabric.sidecar.client!.call(alpha, `${FABRIC.agent}/fleet`, { task: "h_BBBBBBBBBBBBBBBBBBBBBB", input: {} }, { proofs: [...run.chain, link("fleet")] }).result);
+    expect(other?.code).toBe(3);
+    // Stolen, and presented by another key: the chain ends at beta's key, so it binds to nobody else's connection.
+    const thief = new Sidecar({ home: join(pair.root, "thief"), binary: () => QAMP, listen: () => null, name: "thief", log: () => {} });
+    await thief.start();
+    try {
+      const stolen = await refusal(thief.client!.call(alpha, `${FABRIC.agent}/fleet`, { task: view.id, input: {} }, { proofs: [...run.chain, link("fleet")] }).result);
+      expect(stolen?.code).toBe(3);
+      // Even re-signed by the run's key to the thief's own: its door asks for the node the task was handed to.
+      const resigned = signQdt(run.seed, { aud: thief.did!, sub: pair.a.fabric.sidecar.did, cmd: `/tool/${FABRIC.agent}/fleet`, exp, pol: runGrantPolicy(view.id) }).encoded;
+      const passedOn = await refusal(thief.client!.call(alpha, `${FABRIC.agent}/fleet`, { task: view.id, input: {} }, { proofs: [...run.chain, resigned] }).result);
+      expect(passedOn).toEqual({ code: 3, message: expect.stringContaining("only the node this task was handed to") });
+    } finally {
+      await thief.stop();
+    }
+    // And the run itself, through its node, still gets what it was given.
+    const vm = (await pair.callB<TeamSnapshot>("team")).agents.find((m) => m.id === "ada")!.workspace!.id;
+    expect((await pair.b.handoffs.callGiver(vm, "fleet", {}, new AbortController().signal)).status).toBe(200);
+    release();
+    hold = null;
+    await ended(view.id);
   });
 
   test("a run's grant renews itself while its task lives, and never outlives it", async () => {
