@@ -615,6 +615,14 @@ struct Vectors: Decodable {
         let steadyMs: Double
         let gapMs: Double
         let topics: [String]
+        /// Which a device keeps and opens the stream again from (core's LIVE_CURSOR), and the path it sends for each.
+        let cursors: [Cursor]
+
+        struct Cursor: Decodable {
+            let cursor: String
+            let kept: Bool
+            let path: String
+        }
     }
 
     static let shared: Vectors = {

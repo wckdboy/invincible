@@ -11,20 +11,31 @@ import Foundation
  * says nothing at all for three of the node's beats is taken for dead and opened again; the node says its beat in its
  * hello (an older node, which doesn't, beats every 15 s). `renew` opens a fresh one at once, whatever stands: the network
  * changed under it, so the one open may be dead without a word (Wi-Fi to cellular), and a link that comes back within
- * HELLO_WAIT is never said to have gone.
+ * HELLO_WAIT is never said to have gone. Each is opened from where the last left off: the last cursor its node gave (a
+ * hello's or a change's `at`), and that hello says what changed since (core's live.ts). It is trusted only from a stream
+ * opened from a cursor whose hello tells of the same topics as the stream before it; otherwise the device's scopes
+ * changed, and it is read as a fresh hello.
  *
- * Followers are what the app reads, each for its topics. When the stream comes up, each whose last read began before the
- * stream said hello runs once (what it shows may be from before the node was telling of changes); one read since can't
- * have missed anything. Then each runs only when one of its topics changes. While the stream is down (no hello within
+ * Followers are what the app reads, each for its topics. When a fresh stream comes up, each whose last read began before
+ * the stream said hello runs once (what it shows may be from before the node was telling of changes); one read since
+ * can't have missed anything. When a resumed one comes up, only those whose topics changed since run, with any that never
+ * read and any owed a run: one whose run failed, one the app's going to the background called off, or one told of a
+ * change meanwhile. Then each runs only when one of its topics changes. While the stream is down (no hello within
  * HELLO_WAIT, or it can't be opened) each runs at once and then every so often, at its own interval. A follower runs one
- * at a time: what comes meanwhile is merged into one more run after it, and runs come no closer together than its gap.
+ * at a time: what comes meanwhile is merged into one more run after it, and runs come no closer together than its gap. A
+ * run that failed (it threw) is owed, never tried again by itself: it is run with the follower's next, and when the
+ * stream is up again. One that was under way when the stream came up again (a read hung on a network that went) and
+ * then failed runs once more at once, as nothing else would read it.
  */
 
 /// What the live stream says (core's LiveEvent): the topics it tells of, then what changed, and why it ended.
 enum LiveEvent: Equatable, Sendable {
-    /// The topics this stream tells of (read each now), and how often the node beats on it (ms; nil from an older node).
-    case hello(topics: [String], beat: Double?)
-    case changed([String])
+    /// The topics this stream tells of (read each now), how often the node beats on it (ms; nil from an older node), where
+    /// things stand (`at`: the cursor to open it again from; nil from an older node), and, opened from a cursor, which of
+    /// its topics changed since (`changed`; nil: read everything).
+    case hello(topics: [String], beat: Double?, at: String? = nil, changed: [String]? = nil)
+    /// These changed, and where things stand after them (nil from an older node).
+    case changed([String], at: String? = nil)
     case bye(String)
 
     init?(json: String) {
@@ -33,11 +44,13 @@ enum LiveEvent: Equatable, Sendable {
             let topics: [String]?
             let beat: Double?
             let reason: String?
+            let at: String?
+            let changed: [String]?
         }
         guard let frame = try? JSONDecoder().decode(Frame.self, from: Data(json.utf8)) else { return nil }
         switch frame.type {
-        case "hello": self = .hello(topics: frame.topics ?? [], beat: frame.beat.flatMap { $0 >= 250 && $0 <= 60_000 ? $0 : nil })
-        case "changed": self = .changed(frame.topics ?? [])
+        case "hello": self = .hello(topics: frame.topics ?? [], beat: frame.beat.flatMap { $0 >= 250 && $0 <= 60_000 ? $0 : nil }, at: frame.at, changed: frame.changed)
+        case "changed": self = .changed(frame.topics ?? [], at: frame.at)
         case "bye": self = .bye(frame.reason ?? "")
         default: return nil
         }
@@ -74,10 +87,18 @@ final class LiveLink {
     /// A stream that was open at least this long is opened again at once when it ends (the node restarting).
     nonisolated static let steady: Double = 30_000
 
+    /// What a cursor of the stream is (core's LIVE_CURSOR): short, and only characters a URL carries as they are.
+    nonisolated static func isCursor(_ text: String) -> Bool {
+        (1...64).contains(text.utf8.count) && text.utf8.allSatisfy { byte in
+            (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte) || (0x30...0x39).contains(byte) || byte == 0x5F || byte == 0x2E || byte == 0x2D
+        }
+    }
+
     /// Who hears where the stream stands.
     struct Handlers {
-        /// It is open since `at` (when it said hello), telling of these topics: read now what was read before then.
-        var up: @MainActor (_ topics: [String], _ at: Double) -> Void
+        /// It is open since `at` (when it said hello), telling of these topics: read now what was read before then; or,
+        /// resumed (`changed`), only what changed since the last stream left off (and what was never read, or is owed).
+        var up: @MainActor (_ topics: [String], _ at: Double, _ changed: [String]?) -> Void
         var changed: @MainActor (_ topics: [String]) -> Void
         /// It isn't open, and hasn't been for a while (or can't be): read what is shown on a timer until it is.
         var down: @MainActor () -> Void
@@ -85,8 +106,9 @@ final class LiveLink {
         var lost: @MainActor () -> Void = {}
     }
 
-    /// Opens the stream: its events as they come; `alive` is called on everything that arrives, its beats too.
-    private let open: @MainActor (_ alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error>
+    /// Opens the stream (from `since`, the last cursor its node gave, when there is one): its events as they come;
+    /// `alive` is called on everything that arrives, its beats too.
+    private let open: @MainActor (_ since: String?, _ alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error>
     /// A failure that is the node's refusal: not tried again on a timer.
     private let refused: (any Error) -> Bool
     private let clock: LiveClock
@@ -101,6 +123,8 @@ final class LiveLink {
     /// When the open stream said hello, and what it tells of.
     private var upAt: Double = 0
     private var topics: [String] = []
+    /// The last cursor the node gave (a hello's or a change's): the next stream is opened from it.
+    private(set) var cursor: String?
     /// The node's beat, as its last hello said: three of them silent and a stream is gone.
     private(set) var beat = LiveLink.olderBeat
     /// Down has been said since it was last up.
@@ -112,7 +136,7 @@ final class LiveLink {
     /// The stream that went silent, closed for it (its end says it was lost).
     private var quiet: Int?
 
-    init(open: @escaping @MainActor (_ alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error>, refused: @escaping (any Error) -> Bool, clock: LiveClock = .real) {
+    init(open: @escaping @MainActor (_ since: String?, _ alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error>, refused: @escaping (any Error) -> Bool, clock: LiveClock = .real) {
         self.open = open
         self.refused = refused
         self.clock = clock
@@ -168,7 +192,8 @@ final class LiveLink {
     /// Who is told from now on; told at once where it stands, if it is up or down.
     func attach(_ next: Handlers) {
         handlers = next
-        if up { next.up(topics, upAt) } else if saidDown { next.down() }
+        // (Read as a fresh hello: what changed before it was told to whoever was attached then.)
+        if up { next.up(topics, upAt, nil) } else if saidDown { next.down() }
     }
 
     private func off(_ cancel: (@MainActor () -> Void)?) -> (@MainActor () -> Void)? {
@@ -176,14 +201,14 @@ final class LiveLink {
         return nil
     }
 
-    private func goUp(_ told: [String], beat: Double?) {
+    private func goUp(_ told: [String], beat: Double?, changed: [String]?) {
         up = true
         upAt = clock.now()
         saidDown = false
         downing = off(downing)
         topics = told
         self.beat = beat ?? Self.olderBeat
-        handlers?.up(told, upAt)
+        handlers?.up(told, upAt, changed)
     }
 
     private func goDown() {
@@ -213,9 +238,10 @@ final class LiveLink {
         opened += 1
         let stream = opened
         current = stream
+        let since = cursor
         watch(stream)
         waitForHello()
-        let events = open { [weak self] in
+        let events = open(since) { [weak self] in
             guard let self, self.current == stream else { return }
             self.watch(stream)
         }
@@ -226,13 +252,20 @@ final class LiveLink {
                 for try await event in events {
                     guard let self, self.current == stream else { return }
                     switch event {
-                    case .hello(let topics, let beat):
+                    case .hello(let topics, let beat, let at, let changed):
                         helloAt = self.clock.now()
-                        self.goUp(topics, beat: beat)
+                        // What changed since, trusted from a stream opened from a cursor that tells of what the last told of.
+                        let same = topics.count == self.topics.count && topics.allSatisfy { self.topics.contains($0) }
+                        let resumed = since != nil && same ? changed.map { $0.filter { topics.contains($0) } } : nil
+                        self.cursor = at.flatMap { Self.isCursor($0) ? $0 : nil }
+                        self.goUp(topics, beat: beat, changed: resumed)
                         // (The node's beat, now known: three of them silent and it is gone.)
                         self.watch(stream)
-                    case .changed(let topics):
-                        if self.up { self.handlers?.changed(topics) }
+                    case .changed(let topics, let at):
+                        if self.up {
+                            if let at, Self.isCursor(at) { self.cursor = at }
+                            self.handlers?.changed(topics)
+                        }
                     case .bye:
                         break
                     }
@@ -272,9 +305,10 @@ final class LiveLink {
 
 /// `run`, one at a time: what is asked for meanwhile is merged into one more run after it, never closer than `gap` to the
 /// last (`last`: when it last ran before this, if it did). `changed` names the topics that changed, or is nil: everything.
+/// A run that failed (it threw), or one called off before it ran (`shelve`), is owed: run with the next, never by itself.
 @MainActor
 final class Paced {
-    private let run: @MainActor ([String]?) async -> Void
+    private let run: @MainActor ([String]?) async throws -> Void
     private let gap: Double
     private let clock: LiveClock
     private var last: Double
@@ -282,23 +316,45 @@ final class Paced {
     /// nil: nothing wanted; `everything`: all of it; otherwise these topics.
     private var wanted: Set<String>?
     private var everything = false
+    /// What it owes, as `wanted` says what it is asked for.
+    private var owed: Set<String>?
+    private var owesEverything = false
     private var waiting: (@MainActor () -> Void)?
 
-    init(gap: Double, clock: LiveClock, last: Double = -.infinity, run: @escaping @MainActor ([String]?) async -> Void) {
+    init(gap: Double, clock: LiveClock, last: Double = -.infinity, run: @escaping @MainActor ([String]?) async throws -> Void) {
         self.run = run
         self.gap = gap
         self.clock = clock
         self.last = last
     }
 
+    /// A run is owed: one failed, or was called off.
+    var isOwed: Bool { owesEverything || owed != nil }
+
     func want(_ topics: [String]?) {
         if topics == nil || everything { everything = true; wanted = [] } else { wanted = (wanted ?? []).union(topics ?? []) }
         go()
     }
 
+    /// These are owed a run, with the next.
+    func owe(_ topics: [String]?) {
+        if topics == nil || owesEverything { owesEverything = true; owed = [] } else { owed = (owed ?? []).union(topics ?? []) }
+    }
+
+    /// Nothing more runs until asked again; what was asked for and hadn't run is owed (the app went to the background).
+    func shelve() {
+        if everything { owe(nil) } else if let wanted { owe(Array(wanted)) }
+        wanted = nil
+        everything = false
+        waiting?()
+        waiting = nil
+    }
+
     func cancel() {
         wanted = nil
         everything = false
+        owed = nil
+        owesEverything = false
         waiting?()
         waiting = nil
     }
@@ -313,14 +369,21 @@ final class Paced {
             }
             return
         }
-        let changed: [String]? = everything ? nil : wanted.map { $0.sorted() }
+        let changed: [String]? = everything || owesEverything ? nil : (wanted ?? []).union(owed ?? []).sorted()
         wanted = nil
         everything = false
+        owed = nil
+        owesEverything = false
         running = true
         last = clock.now()
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.run(changed)
+            do {
+                try await self.run(changed)
+            } catch {
+                // Owed, with the next; never tried again by itself (a node refusing it would be asked again and again).
+                self.owe(changed)
+            }
             self.running = false
             self.go()
         }
@@ -358,6 +421,8 @@ final class Followers {
     private let clock: LiveClock
     private var all: [ObjectIdentifier: Follower] = [:]
     private var mode = Mode.off
+    /// How many times the stream has come up.
+    private var ups = 0
 
     init(clock: LiveClock = .real) {
         self.clock = clock
@@ -365,13 +430,20 @@ final class Followers {
 
     /// `run` when one of these topics changes while the stream is up (and once when it comes up, if what it shows was read
     /// before); at once and then every `every` ms while it is down (nil: once, and it keeps its own time from there); never
-    /// while the app is in the background. Returns how to stop following.
-    func follow(_ topics: [String], every: Double?, gap: Double = Followers.gap, first: FirstRead = .owner, run: @escaping @MainActor ([String]?) async -> Void) -> @MainActor () -> Void {
+    /// while the app is in the background. A run that throws is owed (Paced). Returns how to stop following.
+    func follow(_ topics: [String], every: Double?, gap: Double = Followers.gap, first: FirstRead = .owner, run: @escaping @MainActor ([String]?) async throws -> Void) -> @MainActor () -> Void {
         let read = first == .owner ? clock.now() : -.infinity
         let follower = Follower(topics: Set(topics), every: every, since: read)
-        follower.pace = Paced(gap: gap, clock: clock, last: read) { [weak follower, clock] changed in
+        follower.pace = Paced(gap: gap, clock: clock, last: read) { [weak self, weak follower, clock] changed in
             follower?.since = clock.now()
-            await run(changed)
+            let ups = self?.ups
+            do {
+                try await run(changed)
+            } catch {
+                // Up again while it read, so nothing else will read it: it reads once more (once: a second failure is owed).
+                if let self, self.mode == .up, self.ups != ups { follower?.pace.want(changed) }
+                throw error
+            }
         }
         let key = ObjectIdentifier(follower)
         all[key] = follower
@@ -384,21 +456,31 @@ final class Followers {
         }
     }
 
-    /// The stream is up, since `at`: each that last read before then runs once now; then each runs when its topics change.
-    func up(at: Double) {
+    /// The stream is up, since `at`. Fresh (`changed` nil): each that last read before then runs once now. Resumed: only
+    /// those of whose topics something changed since, those that never read, and those owed a run. Then each runs when its
+    /// topics change.
+    func up(at: Double, changed: [String]? = nil) {
         mode = .up
+        ups += 1
         for follower in all.values {
             follower.timer?()
             follower.timer = nil
-            if follower.since < at { follower.pace.want(nil) }
+            guard let changed else {
+                if follower.since < at { follower.pace.want(nil) } else if follower.pace.isOwed { follower.pace.want([]) }
+                continue
+            }
+            let mine = changed.filter { follower.topics.contains($0) }
+            if follower.since == -.infinity { follower.pace.want(nil) } else if !mine.isEmpty || follower.pace.isOwed { follower.pace.want(mine) }
         }
     }
 
+    /// These changed: each that follows one of them runs (while the app is in the background, it is owed a run instead).
     func changed(_ topics: [String]) {
-        guard mode == .up else { return }
+        guard mode != .down else { return }
         for follower in all.values {
             let mine = topics.filter { follower.topics.contains($0) }
-            if !mine.isEmpty { follower.pace.want(mine) }
+            guard !mine.isEmpty else { continue }
+            if mode == .up { follower.pace.want(mine) } else { follower.pace.owe(mine) }
         }
     }
 
@@ -411,13 +493,13 @@ final class Followers {
         }
     }
 
-    /// Nothing runs: the app is in the background.
+    /// Nothing runs: the app is in the background. What was asked for and hadn't run is owed.
     func off() {
         mode = .off
         for follower in all.values {
             follower.timer?()
             follower.timer = nil
-            follower.pace.cancel()
+            follower.pace.shelve()
         }
     }
 

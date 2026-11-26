@@ -6,8 +6,9 @@ import Testing
  * The node's live stream as the app keeps it (Node/LiveLink.swift), held to the web app's lib/live-link.test.ts case by
  * case: open while the app is in front, opened again when it ends (at once after a long one, backing off after failures,
  * never on a timer once the node refused it), taken for dead when it says nothing for three of the node's beats, opened
- * afresh at once when the network changes; and what the app reads, run once when it comes up, then only for what
- * changed, polled only while it is down.
+ * afresh at once when the network changes, each opened from where the last left off; and what the app reads, run once
+ * when it comes up (resumed: only what changed since, never read, or owed), then only for what changed, polled only
+ * while it is down.
  */
 
 /// A clock in hand: `advance` runs what comes due, in order.
@@ -66,10 +67,13 @@ final class HeldStreams {
     final class Opened: @unchecked Sendable {
         let continuation: AsyncThrowingStream<LiveEvent, any Error>.Continuation
         let alive: @MainActor @Sendable () -> Void
+        /// The cursor it was opened from (nil: afresh).
+        let since: String?
         /// The link closed it (it went quiet, it was stopped or renewed).
         var aborted = false
-        init(_ continuation: AsyncThrowingStream<LiveEvent, any Error>.Continuation, alive: @escaping @MainActor @Sendable () -> Void) {
+        init(_ continuation: AsyncThrowingStream<LiveEvent, any Error>.Continuation, since: String?, alive: @escaping @MainActor @Sendable () -> Void) {
             self.continuation = continuation
+            self.since = since
             self.alive = alive
         }
         @MainActor func push(_ event: LiveEvent) { alive(); continuation.yield(event) }
@@ -81,9 +85,9 @@ final class HeldStreams {
     var opened: [Opened] = []
     var refuseWith: (any Error)?
 
-    func open(alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error> {
+    func open(since: String?, alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error> {
         let (stream, continuation) = AsyncThrowingStream<LiveEvent, any Error>.makeStream()
-        let one = Opened(continuation, alive: alive)
+        let one = Opened(continuation, since: since, alive: alive)
         continuation.onTermination = { end in if case .cancelled = end { one.aborted = true } }
         if let refuseWith { continuation.finish(throwing: refuseWith) }
         opened.append(one)
@@ -102,9 +106,9 @@ private func link() -> (clock: HeldClock, streams: HeldStreams, told: () -> [Str
     let streams = HeldStreams()
     final class Told: @unchecked Sendable { var lines: [String] = [] }
     let told = Told()
-    let link = LiveLink(open: { alive in streams.open(alive: alive) }, refused: { $0 is Refused }, clock: clock.clock)
+    let link = LiveLink(open: { since, alive in streams.open(since: since, alive: alive) }, refused: { $0 is Refused }, clock: clock.clock)
     link.attach(.init(
-        up: { topics, _ in told.lines.append("up \(topics.joined(separator: ","))") },
+        up: { topics, _, changed in told.lines.append("up \(topics.joined(separator: ","))" + (changed.map { " changed:\($0.joined(separator: ","))" } ?? "")) },
         changed: { topics in told.lines.append("changed \(topics.joined(separator: ","))") },
         down: { told.lines.append("down") }
     ))
@@ -113,6 +117,9 @@ private func link() -> (clock: HeldClock, streams: HeldStreams, told: () -> [Str
 
 private func hello(_ topics: String..., beat: Double? = 1_500) -> LiveEvent { .hello(topics: topics, beat: beat) }
 private func changed(_ topics: String...) -> LiveEvent { .changed(topics) }
+/// A node's of today: where things stand with each, and with a hello opened from a cursor, what changed since.
+private func helloAt(_ at: String, _ topics: [String], changed: [String]? = nil) -> LiveEvent { .hello(topics: topics, beat: 1_500, at: at, changed: changed) }
+private func changedAt(_ at: String, _ topics: String...) -> LiveEvent { .changed(topics, at: at) }
 
 @MainActor
 @Suite struct LiveLinkTests {
@@ -258,7 +265,7 @@ private func changed(_ topics: String...) -> LiveEvent { .changed(topics) }
         await clock.flush()
         final class Late: @unchecked Sendable { var lines: [String] = [] }
         let late = Late()
-        link.attach(.init(up: { topics, _ in late.lines.append("up \(topics.joined(separator: ","))") }, changed: { _ in }, down: { late.lines.append("down") }))
+        link.attach(.init(up: { topics, _, _ in late.lines.append("up \(topics.joined(separator: ","))") }, changed: { _ in }, down: { late.lines.append("down") }))
         #expect(late.lines == ["up pairings"])
     }
 
@@ -281,6 +288,99 @@ private func changed(_ topics: String...) -> LiveEvent { .changed(topics) }
         #expect(told() == ["up fleet", "up fleet", "down"])
     }
 
+    @Test func itIsOpenedAgainFromTheLastCursorItsNodeGaveAHellosOrAChangesThatHelloSaysOnlyWhatChangedSince() async {
+        let (clock, streams, told, link) = link()
+        link.start()
+        #expect(streams.last.since == nil)
+        streams.last.push(helloAt("b00t.4", ["actions", "notices"]))
+        streams.last.push(changedAt("b00t.5", "actions"))
+        await clock.flush()
+        streams.last.end()
+        await clock.advance(LiveLink.retryFirst)
+        #expect(streams.last.since == "b00t.5")
+        streams.last.push(helloAt("b00t.7", ["actions", "notices"], changed: ["notices"]))
+        await clock.flush()
+        // Nothing changed since: nothing to read but the stream.
+        streams.last.end()
+        await clock.advance(2 * LiveLink.retryFirst)
+        #expect(streams.last.since == "b00t.7")
+        streams.last.push(helloAt("b00t.7", ["actions", "notices"], changed: []))
+        await clock.flush()
+        #expect(told() == ["up actions,notices", "changed actions", "up actions,notices changed:notices", "up actions,notices changed:"])
+    }
+
+    @Test func inTheBackgroundAndInFrontAgainItOpensFromWhereItLeftOffRenewedToo() async {
+        let (clock, streams, _, link) = link()
+        link.start()
+        streams.last.push(helloAt("b00t.3", ["fleet"]))
+        await clock.flush()
+        link.stop()
+        link.start()
+        #expect(streams.last.since == "b00t.3")
+        streams.last.push(helloAt("b00t.3", ["fleet"], changed: []))
+        await clock.flush()
+        // The network changed: a fresh one at once, from where it left off; and one silent too long, from there again.
+        link.renew()
+        #expect(streams.last.since == "b00t.3")
+        await clock.advance(link.silent)
+        await clock.advance(LiveLink.retryFirst)
+        #expect(streams.opened.count == 4)
+        #expect(streams.last.since == "b00t.3")
+    }
+
+    @Test func withNoCursorFromItsNodeOrOneThatIsntOneItOpensAfreshAndAStreamOpenedAfreshIsReadAsFresh() async {
+        let (clock, streams, told, link) = link()
+        link.start()
+        streams.last.push(hello("fleet"))
+        await clock.flush()
+        // Each ends soon after it opened, and is opened again after its wait (a second, then twice as long each time).
+        var wait = LiveLink.retryFirst
+        func again() async {
+            streams.last.end()
+            await clock.advance(wait)
+            wait = min(wait * 2, LiveLink.retryMax)
+        }
+        await again()
+        #expect(streams.last.since == nil)
+        for notOne in ["a b", "", "b00t.1?x=1", String(repeating: "x", count: 65)] {
+            streams.last.push(helloAt(notOne, ["fleet"]))
+            await clock.flush()
+            await again()
+            #expect(streams.last.since == nil, "\(notOne)")
+        }
+        // (What a hello says changed means nothing from a stream not opened from a cursor.)
+        streams.last.push(helloAt("b00t.2", ["fleet"], changed: []))
+        await clock.flush()
+        #expect(told().last == "up fleet")
+    }
+
+    @Test func aHelloThatTellsOfOtherTopicsThanTheStreamBeforeItIsReadAsAFreshOne() async {
+        let (clock, streams, told, link) = link()
+        link.start()
+        streams.last.push(helloAt("b00t.1", ["actions", "secretRequests"]))
+        await clock.flush()
+        streams.last.end()
+        await clock.advance(LiveLink.retryFirst)
+        #expect(streams.last.since == "b00t.1")
+        streams.last.push(helloAt("b00t.2", ["actions"], changed: []))
+        // And what one says changed is held to what it tells of.
+        streams.last.end()
+        await clock.advance(2 * LiveLink.retryFirst)
+        streams.last.push(helloAt("b00t.3", ["actions"], changed: ["actions", "pairings"]))
+        await clock.flush()
+        #expect(told() == ["up actions,secretRequests", "up actions", "up actions changed:actions"])
+    }
+
+    @Test func aCursorIsKeptAndSentOnlyWhenItIsOneAsCoreSays() {
+        let cursors = Vectors.shared.live.cursors
+        #expect(!cursors.isEmpty)
+        for one in cursors {
+            #expect(LiveLink.isCursor(one.cursor) == one.kept, "\(one.cursor)")
+            #expect(NodeClient.livePath(since: one.cursor) == one.path, "\(one.cursor)")
+        }
+        #expect(NodeClient.livePath(since: nil) == "/api/live")
+    }
+
     @Test func itsTimingIsTheWebApps() {
         let live = Vectors.shared.live
         #expect(LiveLink.helloWait == live.helloWaitMs)
@@ -299,6 +399,10 @@ private func changed(_ topics: String...) -> LiveEvent { .changed(topics) }
         // A beat no node would say is no beat.
         #expect(LiveEvent(json: #"{"type":"hello","topics":[],"beat":5}"#) == .hello(topics: [], beat: nil))
         #expect(LiveEvent(json: #"{"type":"changed","topics":["turns"]}"#) == .changed(["turns"]))
+        // Where things stand, and opened from a cursor, what changed since (a node of today's).
+        #expect(LiveEvent(json: #"{"type":"hello","topics":["team","turns"],"beat":1500,"at":"b00t.4","changed":["turns"]}"#) == .hello(topics: ["team", "turns"], beat: 1_500, at: "b00t.4", changed: ["turns"]))
+        #expect(LiveEvent(json: #"{"type":"hello","topics":["team"],"beat":1500,"at":"b00t.4"}"#) == .hello(topics: ["team"], beat: 1_500, at: "b00t.4", changed: nil))
+        #expect(LiveEvent(json: #"{"type":"changed","topics":["turns"],"at":"b00t.5"}"#) == .changed(["turns"], at: "b00t.5"))
         #expect(LiveEvent(json: #"{"type":"bye","reason":"revoked"}"#) == .bye("revoked"))
         #expect(LiveEvent(json: #"{"type":"later"}"#) == nil)
     }
@@ -397,6 +501,119 @@ private func changed(_ topics: String...) -> LiveEvent { .changed(topics) }
         followers.down()
         await clock.advance(60_000)
         #expect(runs.lines == ["underway"])
+    }
+
+    @Test func resumedOnlyWhatChangedSinceRunsWithWhatNeverReadAndWhatNothingChangedOfRunsNotAtAll() async {
+        let (clock, followers, runs, follow) = followers()
+        _ = follow("inbox", ["actions", "notices"], 15_000, .owner, Followers.gap)
+        _ = follow("fleet", ["fleet"], 15_000, .owner, Followers.gap)
+        _ = follow("team", ["team"], 2_000, .later, Followers.gap)
+        await clock.advance(1_000)
+        followers.up(at: clock.now, changed: ["notices", "pairings"])
+        await clock.advance(Followers.gap)
+        #expect(runs.lines.sorted() == ["inbox notices", "team"])
+        runs.lines.removeAll()
+        followers.up(at: clock.now, changed: [])
+        await clock.advance(60_000)
+        #expect(runs.lines.isEmpty)
+    }
+
+    @Test func whatGoingToTheBackgroundCalledOffIsOwedAndRunsOnceTheStreamIsUpAgainResumedOrNot() async {
+        let (clock, followers, runs, follow) = followers()
+        _ = follow("inbox", ["actions"], 15_000, .owner, 2_000)
+        _ = follow("fleet", ["fleet"], 15_000, .owner, 2_000)
+        followers.up(at: clock.now)
+        await clock.advance(100)
+        // Told of a change it waits its gap to read, and the app gone to the background before it did.
+        followers.changed(["actions"])
+        followers.off()
+        await clock.advance(10_000)
+        #expect(runs.lines.isEmpty)
+        followers.up(at: clock.now, changed: [])
+        await clock.advance(Followers.gap)
+        #expect(runs.lines == ["inbox actions"])
+    }
+
+    @Test func toldOfAChangeWhileInTheBackgroundItIsOwedAndRunsOnceTheStreamIsUpAgain() async {
+        let (clock, followers, runs, follow) = followers()
+        _ = follow("notices", ["notices"], 15_000, .owner, Followers.gap)
+        followers.off()
+        followers.changed(["notices"])
+        await clock.advance(60_000)
+        #expect(runs.lines.isEmpty)
+        followers.up(at: clock.now, changed: [])
+        await clock.advance(Followers.gap)
+        #expect(runs.lines == ["notices notices"])
+    }
+
+    @Test func aRunThatFailedIsOwedNeverTriedAgainByItselfRunAgainOnceTheStreamIsUpAgainWithWhatChangesMeanwhile() async {
+        let clock = HeldClock()
+        let followers = Followers(clock: clock.clock)
+        final class Held: @unchecked Sendable {
+            var runs: [[String]?] = []
+            var failing = true
+        }
+        struct Away: Error {}
+        let held = Held()
+        _ = followers.follow(["actions", "notices"], every: 15_000, gap: Followers.gap, first: .owner) { changed in
+            held.runs.append(changed)
+            if held.failing { throw Away() }
+        }
+        followers.up(at: clock.now)
+        await clock.advance(Followers.gap)
+        followers.changed(["actions"])
+        await clock.advance(60_000)
+        #expect(held.runs == [["actions"]])
+        held.failing = false
+        followers.up(at: clock.now, changed: [])
+        await clock.advance(Followers.gap)
+        #expect(held.runs == [["actions"], ["actions"]])
+        // Paid: nothing owed now.
+        followers.up(at: clock.now, changed: [])
+        await clock.advance(60_000)
+        #expect(held.runs.count == 2)
+        // Owed and told of another change: both in the one run.
+        held.failing = true
+        followers.changed(["actions"])
+        await clock.advance(Followers.gap)
+        held.failing = false
+        followers.changed(["notices"])
+        await clock.advance(Followers.gap)
+        #expect(held.runs.last == ["actions", "notices"])
+    }
+
+    @Test func aRunUnderWayWhenTheStreamComesUpAgainThatThenFailsRunsOnceMoreAtOnce() async {
+        let clock = HeldClock()
+        let followers = Followers(clock: clock.clock)
+        final class Held: @unchecked Sendable {
+            var runs: [[String]?] = []
+            var finish: CheckedContinuation<Bool, Never>?
+        }
+        struct NetworkWent: Error {}
+        let held = Held()
+        _ = followers.follow(["actions"], every: 15_000, gap: Followers.gap, first: .owner) { changed in
+            held.runs.append(changed)
+            let answered = await withCheckedContinuation { held.finish = $0 }
+            if !answered { throw NetworkWent() }
+        }
+        followers.up(at: clock.now)
+        await clock.advance(Followers.gap)
+        followers.changed(["actions"])
+        await clock.flush()
+        // Its read hangs on the network that went; the stream renewed meanwhile says nothing changed since (it told this).
+        await clock.advance(1_000)
+        followers.up(at: clock.now, changed: [])
+        await clock.flush()
+        #expect(held.runs == [["actions"]])
+        held.finish?.resume(returning: false)
+        held.finish = nil
+        await clock.advance(Followers.gap)
+        #expect(held.runs == [["actions"], ["actions"]])
+        // Once: one that fails again is owed, as any is.
+        held.finish?.resume(returning: false)
+        held.finish = nil
+        await clock.advance(60_000)
+        #expect(held.runs.count == 2)
     }
 
     @Test func offNothingRunsWhateverChangesAndOneThatStoppedFollowingIsNeverRun() async {

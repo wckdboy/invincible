@@ -196,13 +196,14 @@ import Observation
     @ObservationIgnored private(set) lazy var link: LiveLink = {
         let client = self.client
         let link = LiveLink(
-            open: { alive in client.live(alive: { Task { @MainActor in alive() } }) },
+            // (Opened again from where the last left off: only what changed since is read.)
+            open: { since, alive in client.live(since: since, alive: { Task { @MainActor in alive() } }) },
             // An older node without the stream (404), a device that may not read it (403), one revoked (401, which the
             // reads then say): read on a timer instead, and opened again only when asked.
             refused: { ($0 as? NodeError).map { [401, 403, 404].contains($0.status) } ?? false }
         )
         link.attach(.init(
-            up: { [weak self] _, at in
+            up: { [weak self] _, at, changed in
                 guard let self else { return }
                 // (Set only when they change: what shows them is drawn again only then.)
                 if !self.linkUp { self.linkUp = true }
@@ -212,7 +213,7 @@ import Observation
                 #endif
                 // The node's beat, as its hello said: the chat's watch is held to it too.
                 self.chat.beat = self.link.beat
-                self.followers.up(at: at)
+                self.followers.up(at: at, changed: changed)
             },
             changed: { [weak self] topics in self?.followers.changed(topics) },
             down: { [weak self] in
@@ -285,19 +286,34 @@ import Observation
         chat.linkLost()
     }
 
-    /// Everything this app reads, each by the topics that move it (once: they last as long as the session).
+    /// Everything this app reads, each by the topics that move it (once: they last as long as the session). A read that
+    /// got no answer is owed (Followers): read again with its next, and when the stream is up again.
     private func follow() {
         guard !following else { return }
         following = true
         let every = Self.fallbackMs
-        _ = followers.follow(["fleet"], every: every, first: .later) { [weak self] _ in await self?.readMe() }
+        _ = followers.follow(["fleet"], every: every, first: .later) { [weak self] _ in let read = await self?.readMe(); try Self.answered(read) }
         // (The largest answer: no oftener than a second, however busy the agents are.)
-        _ = followers.follow(["team"], every: every, gap: 1_000, first: .later) { [weak self] _ in await self?.readTeam() }
-        _ = followers.follow(Self.inboxTopics, every: every, first: .later) { [weak self] changed in await self?.readInbox(changed) }
-        _ = followers.follow(["turns"], every: every, first: .later) { [weak self] _ in await self?.readTurns() }
-        _ = followers.follow(["runs"], every: every, first: .later) { [weak self] _ in await self?.readRuns() }
+        _ = followers.follow(["team"], every: every, gap: 1_000, first: .later) { [weak self] _ in let read = await self?.readTeam(); try Self.answered(read) }
+        _ = followers.follow(Self.inboxTopics, every: every, first: .later) { [weak self] changed in let read = await self?.readInbox(changed); try Self.answered(read) }
+        _ = followers.follow(["turns"], every: every, first: .later) { [weak self] _ in let read = await self?.readTurns(); try Self.answered(read) }
+        _ = followers.follow(["runs"], every: every, first: .later) { [weak self] _ in let read = await self?.readRuns(); try Self.answered(read) }
         // The meter moves with model calls, which turns and tasks make: read now and then while they do.
-        _ = followers.follow(["turns", "runs", "team"], every: 60_000, gap: 30_000, first: .later) { [weak self] _ in await self?.readUsage() }
+        _ = followers.follow(["turns", "runs", "team"], every: 60_000, gap: 30_000, first: .later) { [weak self] _ in let read = await self?.readUsage(); try Self.answered(read) }
+    }
+
+    /// A read that got no answer (nothing answered, the node failed it): its follower owes it (Followers).
+    private struct Unanswered: Error {}
+    private static func answered(_ read: Bool?) throws {
+        if read == false { throw Unanswered() }
+    }
+
+    /// Whether a failure is an answer all the same: one the node refused or doesn't have (a 4xx), which asking again
+    /// would only have refused again (the web app's live.ts asks again on the same terms).
+    private static func settled(_ error: any Error) -> Bool {
+        if error is CancellationError { return true }
+        guard let error = error as? NodeError else { return false }
+        return (400..<500).contains(error.status)
     }
 
     /// What a view shows, read again as these topics change (at once and every `every` ms while the stream is down; nil:
@@ -325,26 +341,30 @@ import Observation
 
     /// Everything, now (pulled to refresh, or Try again): each part read as the stream would have it read.
     func refresh() async {
-        async let me: Void = readMe()
-        async let team: Void = readTeam()
-        async let inbox: Void = readInbox(nil)
-        async let turns: Void = readTurns()
-        async let runs: Void = readRuns()
-        async let usage: Void = readUsage()
+        async let me = readMe()
+        async let team = readTeam()
+        async let inbox = readInbox(nil)
+        async let turns = readTurns()
+        async let runs = readRuns()
+        async let usage = readUsage()
         _ = await (me, team, inbox, turns, runs, usage)
     }
 
-    private func readMe() async {
+    /// Whoami, read: whether it was answered (false: owed, Followers).
+    @discardableResult private func readMe() async -> Bool {
         switch await attempt({ [client] in try await client.get("/api/whoami", as: WhoAmI.self) }) {
         case .success(let me):
             (whoami, trouble) = (me, nil)
             Primary.named(me.primaryName)
-        case .failure(let error as NodeError): trouble = error
-        case .failure: break
+            return true
+        case .failure(let error as NodeError):
+            trouble = error
+            return Self.settled(error)
+        case .failure(let error): return Self.settled(error)
         }
     }
 
-    private func readTeam() async {
+    @discardableResult private func readTeam() async -> Bool {
         switch await attempt({ [client] in try await client.read("/api/team", as: TeamSnapshot.self) }) {
         case .success(let team):
             #if os(iOS)
@@ -354,43 +374,59 @@ import Observation
             // What the node said of the agents, as it came: kept for the next time the app opens.
             keep(team.bytes)
             trouble = trouble?.unreachable == true ? nil : trouble
-        case .failure(let error as NodeError) where [404, 424, 501].contains(error.status): teamProblem = "This node has no other agents yet."
-        case .failure(let error as NodeError) where error.unreachable: trouble = error
-        case .failure(let error): teamProblem = error.localizedDescription
+            return true
+        case .failure(let error as NodeError) where [404, 424, 501].contains(error.status):
+            teamProblem = "This node has no other agents yet."
+            return true
+        case .failure(let error as NodeError) where error.unreachable:
+            trouble = error
+            return false
+        case .failure(let error):
+            teamProblem = error.localizedDescription
+            return Self.settled(error)
         }
     }
 
-    /// The Inbox's parts these topics name (nil: every one).
-    private func readInbox(_ changed: [String]?) async {
+    /// The Inbox's parts these topics name (nil: every one): whether each was answered.
+    @discardableResult private func readInbox(_ changed: [String]?) async -> Bool {
         let client = self.client
         // Each part read at once, side by side (each one's answer waits on the network, not on the others).
         let reading = Set(changed ?? Self.inboxTopics).map { part in Task { await self.readInboxPart(part, client) } }
-        for part in reading { await part.value }
+        var answered = true
+        for part in reading {
+            let read = await part.value
+            if !read { answered = false }
+        }
+        return answered
     }
 
-    private func readInboxPart(_ part: String, _ client: NodeClient) async {
+    private func readInboxPart(_ part: String, _ client: NodeClient) async -> Bool {
+        /// Read, and what it said put where the app shows it: whether it was answered.
+        func read<T: Sendable>(_ work: @Sendable () async throws -> T, _ put: (T) -> Void) async -> Bool {
+            switch await attempt(work) {
+            case .success(let value):
+                put(value)
+                return true
+            case .failure(let error): return Self.settled(error)
+            }
+        }
         switch part {
         case "actions":
-            if case .success(let list) = await attempt({ try await client.get("/api/actions", as: Listed.self).actions ?? [] }) {
+            return await read({ try await client.get("/api/actions", as: Listed.self).actions ?? [] }) { list in
                 actions = list
                 inboxRead(part)
             }
         case "secretRequests":
-            if case .success(let list) = await attempt({ try await client.get("/api/secret-requests", as: Listed.self).requests ?? [] }) {
+            return await read({ try await client.get("/api/secret-requests", as: Listed.self).requests ?? [] }) { list in
                 requests = list
                 inboxRead(part)
             }
-        case "pairings":
-            if case .success(let list) = await attempt({ try await client.get("/api/pairings", as: Listed.self).pairings ?? [] }) { pairings = list }
-        case "aboutYou":
-            if case .success(let about) = await attempt({ try await client.get("/api/about-you", as: AboutYou.self) }) { facts = about.proposed }
-        case "notices":
-            if case .success(let list) = await attempt({ try await client.get("/api/notices", as: Listed.self).notices ?? [] }) { notices = Notices.open(list) }
-        case "screenSessions":
-            if case .success(let list) = await attempt({ try await client.get("/api/screen/sessions", as: Listed.self).sessions ?? [] }) { screenSessions = list.filter { $0.state == "waiting" || $0.state == "allowed" } }
-        case "questions":
-            if case .success(let list) = await attempt({ try await client.get("/api/questions", as: Listed.self).questions ?? [] }) { questions = list }
-        default: break
+        case "pairings": return await read({ try await client.get("/api/pairings", as: Listed.self).pairings ?? [] }) { pairings = $0 }
+        case "aboutYou": return await read({ try await client.get("/api/about-you", as: AboutYou.self) }) { facts = $0.proposed }
+        case "notices": return await read({ try await client.get("/api/notices", as: Listed.self).notices ?? [] }) { notices = Notices.open($0) }
+        case "screenSessions": return await read({ try await client.get("/api/screen/sessions", as: Listed.self).sessions ?? [] }) { list in screenSessions = list.filter { $0.state == "waiting" || $0.state == "allowed" } }
+        case "questions": return await read({ try await client.get("/api/questions", as: Listed.self).questions ?? [] }) { questions = $0 }
+        default: return true
         }
     }
 
@@ -400,21 +436,36 @@ import Observation
         keep(nil)
     }
 
-    private func readTurns() async {
-        guard case .success(let listed) = await attempt({ [client] in try await client.get("/api/turns", as: Listed.self) }) else { return }
+    @discardableResult private func readTurns() async -> Bool {
+        let listed: Listed
+        switch await attempt({ [client] in try await client.get("/api/turns", as: Listed.self) }) {
+        case .success(let said): listed = said
+        case .failure(let error): return Self.settled(error)
+        }
         turns = listed.turns ?? []
         unreadChats = listed.unread ?? []
         keep(nil)
         // The chat on screen, as the node holds it, when anything kept changed on another device.
         await chat.noticed(chats: listed.chats, turns: turns, with: client)
+        return true
     }
 
-    private func readRuns() async {
-        if case .success(let list) = await attempt({ [client] in try await client.get("/api/runs", as: Listed.self).runs ?? [] }) { runs = list }
+    @discardableResult private func readRuns() async -> Bool {
+        switch await attempt({ [client] in try await client.get("/api/runs", as: Listed.self).runs ?? [] }) {
+        case .success(let list):
+            runs = list
+            return true
+        case .failure(let error): return Self.settled(error)
+        }
     }
 
-    private func readUsage() async {
-        if case .success(let meter) = await attempt({ [client] in try await client.get("/api/usage/meter", as: UsageMeter.self) }) { usage = meter }
+    @discardableResult private func readUsage() async -> Bool {
+        switch await attempt({ [client] in try await client.get("/api/usage/meter", as: UsageMeter.self) }) {
+        case .success(let meter):
+            usage = meter
+            return true
+        case .failure(let error): return Self.settled(error)
+        }
     }
 
     /// The agents as the node just said them, kept for the next launch with what waits and runs as they stand (nil: kept

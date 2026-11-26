@@ -36,7 +36,9 @@ chosen, and a task's details beside it; ⌘K searches or asks. A tap anywhere bu
 The app keeps up with its node over its live stream (`Node/LiveLink.swift`, the web app's lib/live-link.ts ported and
 held to its cases): nothing is asked while nothing changes, a change is read within a moment of the node saying so, a
 link silent for three of the node's beats is taken for dead and opened again, and a change of network opens a fresh one
-at once (`Node/PathWatch.swift`). Home says "Reconnecting" in one line while it is down.
+at once (`Node/PathWatch.swift`). Each is opened from where the last left off, so a renewal reads only what changed
+meanwhile, and a read that got no answer is owed until it does: a stall costs the stream's one request
+(`PerfTests.testRequestsThroughAStall`). Home says "Reconnecting" in one line while it is down.
 
 **The primary's name** is the node's to say: "Invincible" until you name it (`Core/Primary.swift`, from `GET
 /api/whoami`'s `primaryName` when a node sends one). Its handle on the wire is `primary`. Where a line is the web app's

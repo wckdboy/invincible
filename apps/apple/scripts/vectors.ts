@@ -1365,7 +1365,14 @@ const verdicts = verdictCases.map((task) => ({ task, verdict: verdictOf(task as 
 const mark = { rects: MARK_RECTS, polygon: MARK_POLYGON, box: MARK_BOX };
 
 // ---- the live stream's timing (core's live.ts, the web app's lib/live-link.ts), which the app's LiveLink keeps -------
-const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELLO_WAIT_MS, retryFirstMs: RETRY_FIRST_MS, retryMaxMs: RETRY_MAX_MS, steadyMs: STEADY_MS, gapMs: GAP_MS, topics: core.LIVE_TOPICS };
+// And its cursors: which a device keeps and opens the stream again from (core's LIVE_CURSOR, the node's LiveCursor), and
+// the path it signs and sends for each (livePath).
+const liveCursors = ["b00t.0", "AbC-_9.123456789012345", "x".repeat(64), "x".repeat(65), "", "a b", "b00t.1?x=1", "b00t.1&since=2", "b00t/1", "%2e", "a+b", "é.1", "b00t.1\n"].map((cursor) => {
+  const kept = core.LIVE_CURSOR.test(cursor);
+  if (kept !== core.LiveCursor.safeParse(cursor).success) fail(`the node and a device disagree on whether ${JSON.stringify(cursor)} is a cursor`);
+  return { cursor, kept, path: core.livePath(cursor) };
+});
+const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELLO_WAIT_MS, retryFirstMs: RETRY_FIRST_MS, retryMaxMs: RETRY_MAX_MS, steadyMs: STEADY_MS, gapMs: GAP_MS, topics: core.LIVE_TOPICS, cursors: liveCursors };
 
 // ---- a task on its Live Activity: its state, from the task and its trail, and its words (lib/live-activity.ts) ----------
 const activityTrail = (...texts: string[]) => texts.map((text, i) => ({ n: i + 1, at: NOW - 600_000 + i * 10_000, text }));

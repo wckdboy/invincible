@@ -34,6 +34,17 @@ struct NodeClientTests {
         #expect(request.cachePolicy == .reloadIgnoringLocalAndRemoteCacheData)
     }
 
+    @Test func theLiveStreamOpenedAgainFromACursorIsSignedOverItsPathAndQueryAsSent() throws {
+        let path = NodeClient.livePath(since: "b00t-_.42")
+        #expect(path == "/api/live?since=b00t-_.42")
+        let request = try client(origin: "http://127.0.0.1:7778").request("GET", path, body: nil)
+        #expect(request.url?.absoluteString == "http://127.0.0.1:7778/api/live?since=b00t-_.42")
+        #expect(try verifies(request, method: "GET", path: path, body: Data()))
+        #expect(try !verifies(request, method: "GET", path: "/api/live", body: Data()))
+        // One that isn't a cursor is never sent: the stream is opened afresh.
+        #expect(NodeClient.livePath(since: "b00t 42") == "/api/live")
+    }
+
     @Test func aPostIsSignedOverExactlyTheBytesItSends() throws {
         let body = Data(#"{"role":"planner","messages":[{"role":"user","content":"Hvad så? 🛡️"}]}"#.utf8)
         let request = try client(origin: "https://keep.example.test/").request("POST", "/api/chat", body: body)

@@ -32235,6 +32235,73 @@
       "runs",
       "team",
       "turns"
+    ],
+    "cursors": [
+      {
+        "cursor": "b00t.0",
+        "kept": true,
+        "path": "/api/live?since=b00t.0"
+      },
+      {
+        "cursor": "AbC-_9.123456789012345",
+        "kept": true,
+        "path": "/api/live?since=AbC-_9.123456789012345"
+      },
+      {
+        "cursor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "kept": true,
+        "path": "/api/live?since=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "cursor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "a b",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "b00t.1?x=1",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "b00t.1&since=2",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "b00t/1",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "%2e",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "a+b",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "é.1",
+        "kept": false,
+        "path": "/api/live"
+      },
+      {
+        "cursor": "b00t.1\n",
+        "kept": false,
+        "path": "/api/live"
+      }
     ]
   },
   "verdicts": [

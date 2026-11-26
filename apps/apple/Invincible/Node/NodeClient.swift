@@ -71,10 +71,18 @@ struct NodeClient: Sendable {
         payloads(path, body, alive: alive, as: ChatEvent.init(json:))
     }
 
-    /// The node's live stream (core's live.ts, GET /api/live): what changed, as it changes. `alive` is told of every line
-    /// that arrives, its beats too (LiveLink takes a stream silent for three of them for dead).
-    func live(alive: @escaping @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error> {
-        stream(Result { try self.request("GET", "/api/live", body: nil, timeout: 120) }, alive: alive, as: LiveEvent.init(json:))
+    /// The node's live stream (core's live.ts, GET /api/live): what changed, as it changes, opened again from `since` (the
+    /// last cursor the node gave) when there is one. `alive` is told of every line that arrives, its beats too (LiveLink
+    /// takes a stream silent for three of them for dead).
+    func live(since: String? = nil, alive: @escaping @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error> {
+        stream(Result { try self.request("GET", Self.livePath(since: since), body: nil, timeout: 120) }, alive: alive, as: LiveEvent.init(json:))
+    }
+
+    /// The stream's path, opened again from `since` when it is a cursor (core's livePath): signed over exactly this, path
+    /// and query, and sent as it is (a cursor holds nothing a URL escapes).
+    static func livePath(since: String?) -> String {
+        guard let since, LiveLink.isCursor(since) else { return "/api/live" }
+        return "/api/live?since=\(since)"
     }
 
     /// A POST answered with server-sent events, each read as `read` reads it (one it can't read is passed over).
