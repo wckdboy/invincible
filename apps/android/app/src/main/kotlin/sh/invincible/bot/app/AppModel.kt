@@ -367,7 +367,13 @@ class AppModel(context: Context) {
             }
             Reach.Step.NONE -> _reach.value = null
         }
-        if (Notices.on(appContext) && Notices.instant(appContext) == null) runCatching { Notices.collect(appContext, c, show = false) }
+        // Told through a distributor whose server refuses them (it can't reach this phone): said in Settings, and they're
+        // collected meanwhile (the node keeps what was refused). In front, what was kept is taken and dropped: the app shows it.
+        if (Notices.instant(appContext) != null) {
+            val mine = view["devices"].list.firstOrNull { it["device"].string == _paired.value?.device }
+            Notices.trouble(appContext, mine?.get("lastError")?.string?.let { "$it. Collected meanwhile, as often as Android lets this phone ask." })
+        }
+        if (Notices.on(appContext)) runCatching { Notices.collect(appContext, c, show = false) }
     }
 
     /** Asks every five seconds while [active] runs (the activity's STARTED state). */

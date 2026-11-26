@@ -66,6 +66,16 @@ export interface PushDelivery {
   urgency: "low" | "normal" | "high";
 }
 
+/**
+ * A push service's refusal, in words that are safe to show and log (never its endpoint). ntfy's server answers 507 to a
+ * UnifiedPush topic that no phone's ntfy is connected to (Android may not let it connect from the background), so that
+ * says what to do.
+ */
+export const refusal = (service: string, status: number): string =>
+  service === "ntfy (UnifiedPush)" && status === 507
+    ? "ntfy (UnifiedPush)'s server holds no connection from the phone's ntfy (507): open ntfy on the phone, and let it run in the background"
+    : `${service}'s push service answered ${status}`;
+
 export class PushSender {
   private readonly tokens = new Map<string, { token: string; expires: number }>();
   private readonly fetchImpl: typeof fetch;
@@ -138,7 +148,7 @@ export class PushSender {
         const status = response.status;
         if (status >= 200 && status < 300) return { ok: true, gone: false, status, error: null, attempts };
         if (status === 404 || status === 410) return { ok: false, gone: true, status, error: `${service.service}'s push service says this subscription is gone (${status})`, attempts };
-        last = { ok: false, gone: false, status, error: `${service.service}'s push service answered ${status}`, attempts };
+        last = { ok: false, gone: false, status, error: refusal(service.service, status), attempts };
         // Anything but "busy" and "failing" is an answer: trying again wouldn't change it.
         if (status !== 429 && status < 500) return last;
         const after = Number(response.headers.get("retry-after"));

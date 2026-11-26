@@ -460,8 +460,35 @@ describe("the Android app: kept on the node, collected by the app", () => {
     expect(h.sent.map((s) => s.to).sort()).toEqual(["collect:c_android", "https://web.push.apple.com/stand-in"]);
     expect(h.service.collect("c_android")).toMatchObject({ on: true, notifications: [{ kind: "finished", title: "Run done", body: "A run you started has ended." }] });
     expect(h.service.collect("c_android")).toEqual({ on: true, notifications: [], withdrawn: [] });
-    // What's kept for one device is its own: a phone that's told through a push service collects nothing.
-    expect(h.service.collect("c_phone")).toEqual({ on: false, notifications: [], withdrawn: [] });
+    // What's kept for one device is its own: a phone that's told through a push service collects nothing (its
+    // notifications are on, through that service).
+    expect(h.service.collect("c_phone")).toEqual({ on: true, notifications: [], withdrawn: [] });
+  });
+
+  test("what its push service refused is kept for it to collect: nothing is lost while its distributor can't be reached", async () => {
+    // (26 November 2026, on an emulator: Android wouldn't let ntfy start its connection from the background, ntfy's server
+    // answered 507 to everything, and the phone, told "On, and instant", got nothing at all.)
+    let refusing = true;
+    const h = harness({ devices, answer: (t) => (t.endpoint.startsWith("https://ntfy.sh/") && refusing ? { ok: false, gone: false, status: 507, error: "ntfy (UnifiedPush)'s push service answered 507", attempts: 3 } : undefined) });
+    // The app collects first, always; then its distributor's address is handed over (instant).
+    h.service.subscribeCollect("c_android");
+    h.db.put("c_android", { endpoint: "https://ntfy.sh/upAbCdEfGhIj?up=1", p256dh: "p", auth: "a", service: "ntfy (UnifiedPush)" });
+    await h.service.test("c_android");
+    expect(h.sent.map((s) => s.to)).toEqual(["https://ntfy.sh/upAbCdEfGhIj?up=1"]);
+    // Its notifications are on (through ntfy), and what ntfy's server refused is handed over when it collects, once.
+    expect(h.service.collect("c_android")).toMatchObject({ on: true, notifications: [{ kind: "test", title: "Invincible" }] });
+    expect(h.service.collect("c_android").notifications).toEqual([]);
+    // Once its distributor is back, what goes through isn't kept as well: nothing comes twice.
+    refusing = false;
+    h.advance(6_000);
+    await h.service.test("c_android");
+    expect(h.service.collect("c_android").notifications).toEqual([]);
+  });
+
+  test("a device whose app doesn't collect keeps nothing: a browser's or an iPhone's refused push is told and gone", async () => {
+    const h = harness({ devices, answer: () => ({ ok: false, gone: false, status: 500, error: "Apple's push service answered 500", attempts: 3 }) });
+    await h.service.test("c_phone");
+    expect(h.service.collect("c_phone")).toEqual({ on: true, notifications: [], withdrawn: [] });
   });
 
   test("a newer one about the same thing replaces one not yet collected; one kept past its time is dropped untold", async () => {

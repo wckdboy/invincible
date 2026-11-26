@@ -47,7 +47,7 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
 import type { KeptSummary } from "./chats.ts";
 import type { LostRow, NotifyStore, Subscription, ToldRow } from "./notify-store.ts";
 import { appleEndpoint, type ApplePushEnvironment, appleTarget } from "./apns-send.ts";
-import { COLLECT_SERVICE, collectEndpoint } from "./collect-send.ts";
+import { COLLECT_SERVICE, collectEndpoint, collectTarget, keepToCollect } from "./collect-send.ts";
 import type { PushDelivery, PushOutcome, PushTarget } from "./push-send.ts";
 import type { LiveTurn } from "./turns.ts";
 
@@ -651,8 +651,13 @@ export class NotifyService {
         this.o.log(`notifications: ${to.name}'s iPhone answers on Apple's ${moved.environment} service; kept there`);
       }
       this.o.db.mark(to.sub.device, { ok: true });
+    } else {
+      this.o.db.mark(to.sub.device, { ok: false, error: outcome.error ?? "the send failed" });
+      // A phone whose app collects (Android) takes what its push service refused when it next collects, on its own
+      // schedule or as the app opens: nothing is lost while its distributor can't be reached (ntfy's server answering 507
+      // while Android won't let ntfy connect).
+      if (!collectTarget(to.sub.endpoint) && this.o.db.collects(to.sub.device)) keepToCollect(this.o.db, to.sub.device, payload, delivery, this.now());
     }
-    else this.o.db.mark(to.sub.device, { ok: false, error: outcome.error ?? "the send failed" });
     return outcome.ok;
   }
 
@@ -743,20 +748,24 @@ export class NotifyService {
     if (!paired || paired.kind !== "client") throw new NotifyError(403, "only a paired device turns notifications on, for itself");
     const back = this.comesBack();
     const kept = this.o.db.put(device, { endpoint: collectEndpoint(device), p256dh: "", auth: "", service: COLLECT_SERVICE });
+    this.o.db.setCollects(device);
     if (back) this.o.db.catchUp(device);
     this.nudge();
     return this.deviceView(kept, paired.name);
   }
 
   /**
-   * What the node kept for a device that collects its notifications, handed over once and forgotten. `on` false: its
-   * notifications are off (turned off here or elsewhere, or never on), and nothing is kept for it. `withdrawn`, whatever
-   * else: the tags of notifications whose matter was answered, dismissed, cleared or lapsed, to take down where it shows them.
+   * What the node kept for a device that collects its notifications, handed over once and forgotten: all of them while it
+   * collects, and what its push service refused while it is told through one (UnifiedPush). `on` false: its notifications
+   * are off (turned off here or elsewhere, or never on), and nothing is kept for it. `withdrawn`, whatever else: the tags
+   * of notifications whose matter was answered, dismissed, cleared or lapsed, to take down where it shows them. A device
+   * that asks is one whose app collects: from then on, what its push service refuses is kept for it.
    */
   collect(device: string): { on: boolean; notifications: NotifyPayload[]; withdrawn: string[] } {
     const paired = this.o.mind.activeDevice(device);
     if (!paired || paired.kind !== "client") throw new NotifyError(403, "only a paired device collects its notifications, its own");
-    const on = this.o.db.subscription(device)?.endpoint === collectEndpoint(device);
+    const on = this.o.db.subscription(device) !== null;
+    if (on) this.o.db.setCollects(device);
     return { on, notifications: on ? this.o.db.collect(device) : [], withdrawn: this.o.db.withdrawn() };
   }
 

@@ -131,7 +131,8 @@ export class NotifyStore {
       CREATE TABLE IF NOT EXISTS presence (device TEXT PRIMARY KEY, at INTEGER NOT NULL, zone TEXT);
       CREATE TABLE IF NOT EXISTS asks (key TEXT PRIMARY KEY, told_at INTEGER NOT NULL, expires INTEGER, reminded INTEGER NOT NULL DEFAULT 0, reminded_at INTEGER);
       CREATE TABLE IF NOT EXISTS digest (key TEXT PRIMARY KEY, topic TEXT NOT NULL, at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS withdrawn (tag TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS withdrawn (tag TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS collectors (device TEXT PRIMARY KEY, at INTEGER NOT NULL);`);
   }
 
   close(): void {
@@ -185,9 +186,19 @@ export class NotifyStore {
    * it was lost (turned off, or revoked, it isn't lost). Whether it had a subscription. */
   remove(device: string): boolean {
     this.db.query("DELETE FROM collect WHERE device = ?").run(device);
+    this.db.query("DELETE FROM collectors WHERE device = ?").run(device);
     this.forgetLost(device);
     this.caughtUp(device);
     return this.db.query("DELETE FROM subscriptions WHERE device = ?").run(device).changes > 0;
+  }
+
+  /** This device's app collects its notifications (the Android app): what its push service refuses is kept for it. */
+  setCollects(device: string): void {
+    this.db.query("INSERT INTO collectors (device, at) VALUES (?, ?) ON CONFLICT (device) DO UPDATE SET at = excluded.at").run(device, this.now());
+  }
+
+  collects(device: string): boolean {
+    return this.db.query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM collectors WHERE device = ?").get(device)!.n > 0;
   }
 
   /* ---------- where you are, and which device you used last ---------- */

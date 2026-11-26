@@ -95,7 +95,7 @@ object UnifiedPush {
 }
 
 /**
- * What a distributor says: an endpoint (subscribed on the node; collecting stops), a registration that failed or ended
+ * What a distributor says: an endpoint (subscribed on the node; collecting goes on as a backstop), a registration that failed or ended
  * (back to collecting), and messages (read, shown, acknowledged). A broadcast without this registration's token is
  * ignored: the token is the spec's gate, and a message that isn't for this phone's key doesn't decrypt anyway.
  */
@@ -115,8 +115,9 @@ class PushReceiver : BroadcastReceiver() {
                             Json.obj("endpoint" to endpoint, "keys" to Json.obj("p256dh" to Base64Url.encode(registration.keys.publicPoint), "auth" to Base64Url.encode(registration.keys.auth))),
                         )
                         UnifiedPush.keep(context, endpoint)
-                        // The node now sends to the endpoint: nothing is kept to collect.
-                        Notices.stop(context)
+                        // The node sends to the endpoint now. Collecting goes on beside it, seldom, as a backstop: what the
+                        // distributor's server refuses (Android may not let it connect from the background, and ntfy's then
+                        // answers 507) is kept on the node for this phone, and collected.
                     } catch (e: NodeError) {
                         // The node refused the push server (a self-hosted one it doesn't know): the phone goes on collecting.
                         Notices.trouble(context, e.message ?: "Your node refused that push server.")

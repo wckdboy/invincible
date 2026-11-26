@@ -36,7 +36,9 @@ import sh.invincible.bot.core.Primary
  * Notifications with no push service (no Google, nobody in between): the node keeps what it would tell this phone, by
  * its own rules (the kinds you chose, quiet hours, the day's limit), and the phone collects it over its own signed
  * connection (core's `notifyCollect`): every fifteen minutes or so on Android's own schedule, which waits longer while
- * the phone sleeps, and each time the app comes to the front. Or at once, through UnifiedPush (UnifiedPush.kt). Each is
+ * the phone sleeps, and each time the app comes to the front. Or at once, through UnifiedPush (UnifiedPush.kt), with
+ * collecting kept on beside it as a backstop: what the distributor's server refuses is kept on the node and collected
+ * (26 November 2026: Android wouldn't let ntfy connect from the background, and everything was lost). Each is
  * read strictly (core/NotifyPayload.kt) and shown as the node told it: a title, one line, where it opens (the very task
  * among them); what needs you on the Needs you channel, news (a quiet kind) on News, and so is one about what the app
  * shows that moment (as the iPhone's goes only to the list). An approval told alone carries Approve…, which opens that
