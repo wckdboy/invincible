@@ -262,7 +262,9 @@ const model = Bun.serve({
       // Whoever works it: an engineer, or an agent offered its tools on its own role's models (Writer works on the planner's).
       if (body.model === "engineer" || (body.model !== "reviewer" && !!body.tools?.length)) {
         if (goal.includes("TASK_FAIL")) text = "GIVE UP\nThe gate needs a Postgres this VM does not have: `bun test db/` exits 1 before any work, with ECONNREFUSED on 127.0.0.1:5432.";
-        else if (turns.some((message) => message.role === "assistant")) text = "DONE\nVerified.";
+        // Done once its work has run: a task that proves itself, once its write did (a steer that came before the write
+        // started leaves it unrun, and the work is asked again), any other once it has answered at all.
+        else if (proves ? proven.has(proves) : turns.some((message) => message.role === "assistant")) text = "DONE\nVerified.";
         // Offered its own tools (an agent on the roster's models: run.ts tools), it calls bash, as a real one does.
         else if (body.tools?.length) return bashCall(`printf done > result.txt # ${write}`);
         else text = `\`\`\`sh\nprintf done > result.txt # ${write}\n\`\`\``;
