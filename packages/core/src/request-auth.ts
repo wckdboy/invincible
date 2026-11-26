@@ -79,6 +79,8 @@ export function verifyRequestSignature(
   } catch {
     return null;
   }
+  // Only as its bytes encode: the last character's unused bits set would be the same signature written another way.
+  if (b64u(signature) !== sig) return null;
   if (!verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body))) return null;
   return { device, nonce, ts: time };
 }

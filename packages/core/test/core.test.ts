@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AUTH,
   aeadOpen,
   aeadSeal,
   b64u,
@@ -153,6 +154,22 @@ describe("request signing", () => {
     const proof = verifyRequestSignature(headers, "POST", "/link/sync", body, 10_000)!;
     expect(nonces.claim(proof.device, proof.nonce, 10_000)).toBe(true);
     expect(nonces.claim(proof.device, proof.nonce, 10_001)).toBe(false);
+  });
+
+  test("a signature counts only as its bytes encode: one written another way (its last character's unused bits set) is refused", async () => {
+    // An Ed25519 signature is 64 bytes, 86 base64url characters, of which the last carries 2 bits and 4 unused: changed
+    // only in those, it decodes to the same bytes, so the same request would have had more than one form (the fabric's
+    // fuzzing found one taken as "changed").
+    const node = newNodeIdentity();
+    const body = utf8('{"have":{}}');
+    const signed = await signRequest(node.id, node.sign, "POST", "/link/sync", body, 10_000);
+    const sig = signed[AUTH.sig]!;
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const last = alphabet.indexOf(sig.at(-1)!);
+    const otherwise = `${sig.slice(0, -1)}${alphabet[last ^ 1]}`;
+    expect(fromB64u(otherwise)).toEqual(fromB64u(sig));
+    expect(verifyRequestSignature(new Headers({ ...signed, [AUTH.sig]: otherwise }), "POST", "/link/sync", body, 10_000)).toBeNull();
+    expect(verifyRequestSignature(new Headers(signed), "POST", "/link/sync", body, 10_000)?.device).toBe(node.id);
   });
 
   test("browser WebCrypto P-256 signatures verify (the PWA path)", async () => {
