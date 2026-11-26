@@ -63,6 +63,21 @@ test("every firewall rule the setup adds has a comment ufw accepts: no apostroph
   for (const comment of comments) expect(comment).not.toContain("'");
 });
 
+// The setup runs under `set -euo pipefail`: a piped command substitution whose first command fails (a Lab check that
+// found 21 of 22, a microVM that wouldn't boot, a tailnet status that wouldn't answer) ended the whole deploy, silently,
+// before the line that was there to report it (on the first deploy of 26 November 2026). Each one that only reports
+// must tolerate failure.
+test("no piped command substitution in the setup can end the deploy: each that only reports tolerates failure", () => {
+  // A command continued over lines (a trailing backslash) is read as the one line it is.
+  const lines = readFileSync(script, "utf8").replace(/\\\n\s*/g, " ").split("\n");
+  const piped = lines.map((line, i) => ({ line, n: i + 1 })).filter(({ line }) => /=\$\((?:[^()]|\([^()]*\))*\|(?:[^()]|\([^()]*\))*\)/.test(line));
+  expect(piped.length).toBeGreaterThanOrEqual(4);
+  // What a substitution is allowed to fail on: those that make a value the deploy can't go on without.
+  const mustSucceed = [/SEARX_SECRET=/];
+  const fragile = piped.filter(({ line }) => !line.includes("|| true)") && !mustSucceed.some((re) => re.test(line)));
+  expect(fragile.map(({ n, line }) => `${n}: ${line.trim().slice(0, 80)}`)).toEqual([]);
+});
+
 test("a release whose tests fail on the host never becomes app: the node's code on disk stays the release it runs", () => {
   const deploy = server("refused", "fail");
   expect(deploy.code).toBe(1);

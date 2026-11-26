@@ -251,7 +251,7 @@ UNIT
       echo "→ building the Lab image (the first build takes 10 minutes or more)"
       if runuser -u "$SVC" -- env -i HOME="$SVC_HOME" PATH="$SYSTEM_PATH" docker build -q -t invincible/lab:1 "$APP/sandbox/lab" >/dev/null; then
         LAB=$(docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 --mount type=volume,dst=/work \
-          --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --network none invincible/lab:1 lab-check 2>/dev/null | tail -1)
+          --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --network none invincible/lab:1 lab-check 2>/dev/null | tail -1 || true)
         echo "→ Lab image ready: ${LAB:-lab-check gave no report}"
       else
         echo "Lab image build failed; sandboxes still work, without the Lab" >&2
@@ -259,13 +259,13 @@ UNIT
       # The agents' desktop (a display, a window manager, a browser): made from the image above, a minute or two the first time.
       if runuser -u "$SVC" -- env -i HOME="$SVC_HOME" PATH="$SYSTEM_PATH" docker build -q -t invincible/desktop:1 "$APP/sandbox/desktop" >/dev/null; then
         DESK=$(docker run --rm --read-only --tmpfs /tmp:rw,nosuid,nodev,size=1g,mode=1777 --mount type=volume,dst=/work \
-          --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --network none invincible/desktop:1 desktop start 2>&1 | tail -1)
+          --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges:true --network none invincible/desktop:1 desktop start 2>&1 | tail -1 || true)
         echo "→ desktop image ready: ${DESK:-desktop start gave no report}"
       else
         echo "desktop image build failed; sandboxes still work, without a desktop" >&2
       fi
       if [[ -e /usr/local/bin/containerd-shim-kata-v2 ]]; then
-        GUEST=$(docker run --rm --runtime io.containerd.kata.v2 --network none --user 1000:1000 invincible/sandbox:1 uname -r 2>&1 | tail -1)
+        GUEST=$(docker run --rm --runtime io.containerd.kata.v2 --network none --user 1000:1000 invincible/sandbox:1 uname -r 2>&1 | tail -1 || true)
         [[ -n $GUEST && $GUEST != "$(uname -r)" ]] && echo "→ microVM check: a sandbox booted its own kernel ($GUEST)" || echo "microVM check failed: $GUEST" >&2
       fi
     else
@@ -418,7 +418,7 @@ UNIT
     # tailnet; never let that hang a deploy. Show its link instead.
     # Serve targets the dedicated "proxied" listener (port + 1), never the local-only port.
     SERVE_OUT=$(timeout 20 tailscale serve --bg --https="$EXPOSE" "http://127.0.0.1:$((PORT + 1))" 2>&1) && SERVE_OK=1 || SERVE_OK=0
-    DNS=$(tailscale status --self --json 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*/\1/p' | head -1)
+    DNS=$(tailscale status --self --json 2>/dev/null | sed -n 's/.*"DNSName": *"\([^"]*\)\.".*/\1/p' | head -1 || true)
     if [[ $SERVE_OK == 1 ]]; then
       echo "→ PWA: https://$DNS:$EXPOSE/  (tailnet only)"
     else
