@@ -1,15 +1,13 @@
 /*
  * Invincible's mark: the I-beam, one solid shape, the steel section and the letter I, in one ink (white on black, black
- * on white). The owner's, 26 November 2026. This is its one place on the site: Mark.astro draws it, and the icons (the
- * favicon, the touch icon, a link's preview) are made from it when the site is built (icons.ts). When the mark comes to
- * scripts/brand.ts, this reads it from there, and nothing else on the site changes.
+ * on white). The owner's, 26 November 2026. Its shape has one place in the repository, scripts/mark.ts (the app icons
+ * are drawn from it too); this is where the site takes it: Mark.astro draws it, and the icons (the favicon, the touch
+ * icon, a link's preview) are made from it when the site is built (icons.ts).
  */
+import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 
 /** The mark in its square: a polygon in a `box`-wide viewBox. */
-export const MARK = {
-  box: 100,
-  points: "22,14 78,14 78,30 59,30 59,70 78,70 78,86 22,86 22,70 41,70 41,30 22,30",
-} as const;
+export const MARK = { box: 100, points: MARK_POLYGON } as const;
 
 /** The polygon's corners, in the viewBox's units. */
 export const markCorners = (): [number, number][] => MARK.points.split(" ").map((pair) => pair.split(",").map(Number) as [number, number]);

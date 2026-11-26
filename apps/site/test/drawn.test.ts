@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { inflateSync } from "node:zlib";
 import { agentOrbSvg } from "../src/lib/field-svg.ts";
 import { FAVICON_SVG, icon64, ogImage, touchIcon } from "../src/lib/icons.ts";
+import { MARK_POLYGON } from "../../../scripts/mark.ts";
 import { MARK, markCorners } from "../src/lib/mark.ts";
 import { AGENTS, agentOrb, orbFiles } from "../src/lib/orbs.ts";
 
@@ -71,11 +72,12 @@ describe("the mark and the icons made from it", () => {
     }
   });
 
-  test("the mark is in one place on the site, src/lib/mark.ts: nothing else spells out its shape", () => {
+  test("the mark's shape is the repository's (scripts/mark.ts, the app icons' too): nothing on the site spells it out", () => {
+    expect(MARK.points).toBe(MARK_POLYGON);
     const corner = MARK.points.split(" ").slice(0, 3).join(" ");
     const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? walk(join(dir, name)) : [join(dir, name)]));
     const spelled = [...walk(join(SITE, "src")), ...walk(join(SITE, "public")), ...walk(join(SITE, "scripts"))].filter((path) => readFileSync(path, "utf8").includes(corner));
-    expect(spelled.map((path) => relative(SITE, path))).toEqual(["src/lib/mark.ts"]);
+    expect(spelled.map((path) => relative(SITE, path))).toEqual([]);
   });
 
   test("a tab's icon: the mark in white on a black tile", () => {
