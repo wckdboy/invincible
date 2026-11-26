@@ -1473,6 +1473,13 @@ export interface PeerStatus {
   error: string | null;
   /** Live load reported by the peer on its last sync (not stored in the log). */
   presence?: Presence | null;
+  /**
+   * The path its last sync went on: Q-AMP through the sidecars, or HTTPS with signed requests (the fallback); absent from
+   * a node from before the fabric (docs/ARCHITECTURE.md §3).
+   */
+  path?: "qamp" | "https";
+  /** Why it is on HTTPS when it is (no sidecar here or there, Q-AMP failed and when it is tried again); null on Q-AMP. */
+  fallback?: string | null;
 }
 
 export interface Presence {

@@ -19,8 +19,14 @@ export const QAMP_TOOLS_ALLOWED = "fleet, compute, place and ledger are the tool
 /** How long a grant lasts, in seconds: an hour unless you say otherwise, a day at most. Longer is refused, never cut short. */
 export const QAMP_TTL = { min: 60, default: 3600, max: 86_400 } as const;
 
-/** The UDP ports a node's bridges listen on, one a grant: what the tailnet firewall rule opens (deploy.sh --open-qamp). */
+/** The UDP ports a node's Q-AMP listens on: what the tailnet firewall rule opens (deploy.sh --open-qamp). */
 export const QAMP_PORTS = { first: 7410, last: 7419 } as const;
+
+/** The node's sidecar, its one connection per peer (docs/ARCHITECTURE.md §3), takes the first of them. */
+export const QAMP_SIDECAR_PORT = QAMP_PORTS.first;
+
+/** Grants' bridges take the rest, one a grant. */
+export const QAMP_BRIDGE_PORTS = { first: QAMP_PORTS.first + 1, last: QAMP_PORTS.last } as const;
 
 /** What an agent's grant is named by: its arm is `qamp.<id>`. */
 export const QampGrantId = z.string().regex(/^[0-9a-f]{10}$/, "a grant's id: 10 hex digits (invincible qamp grants lists them)");
