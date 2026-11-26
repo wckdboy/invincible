@@ -14,7 +14,7 @@ import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWa
 import { sensitiveLine, steppedLine, taskActions, taskEnd } from "../lib/task-card.ts";
 import { teamSpeaker } from "../lib/team.ts";
 import { giveAgain } from "../lib/timeline.ts";
-import { relativeTime } from "../lib/time.ts";
+import { duration, relativeTime } from "../lib/time.ts";
 import { emptyTrail, takeTrail, type Trail, trailNext, type TrailPage } from "../lib/trail.ts";
 import { byAttention, projectsOfAgents, seenOnOpen, shortSpan, taskState } from "../lib/work.ts";
 import { chatEnter, setTaskDetailsShown, taskDetailsShown } from "../prefs.ts";
@@ -68,6 +68,8 @@ function dispatchWords(task: TeamTask, agent: string, proposer: string | null): 
 }
 
 const GATE_ICON: Record<GateRow["state"], IconName> = { passed: "check", failed: "x", running: "play", waiting: "clock" };
+/** How long a gate ran, as long as it took ("4 ms", "2.3 s"): never "0:00" (null: unknown, or under a millisecond). */
+const gateTime = (ms: number | null): string | null => (ms !== null && ms >= 1 ? duration(ms) : null);
 const clock = (ms: number): string => {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -387,8 +389,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
                 "li",
                 { class: "proof-gate", "data-state": gate.state },
                 h("span", { class: "proof-gate-mark", "aria-label": gate.state }, icon(GATE_ICON[gate.state], { size: 12 })),
-                h("code", { class: "ellipsis" }, gate.command),
-                h("span", { class: "proof-gate-said tnum" }, gate.exit !== null ? [`exit ${gate.exit}`, gate.ms !== null ? clock(gate.ms) : null, gate.said || null].filter(Boolean).join(" · ") : "not run"),
+                // The command whole and what it said under it, never cut (the iPhone's): a gate is the proof.
+                h("span", { class: "proof-gate-text" }, h("code", {}, gate.command), h("span", { class: "proof-gate-said tnum" }, gate.exit !== null ? [`exit ${gate.exit}`, gateTime(gate.ms), gate.said || null].filter(Boolean).join(" · ") : "not run")),
               ),
             ),
           )
@@ -585,7 +587,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
             { class: "td-gate", "data-state": gate.state },
             h("span", { class: "td-icon", "aria-label": gate.state }, icon(GATE_ICON[gate.state], { size: 12 })),
             h("code", { class: "ellipsis" }, gate.command),
-            h("span", { class: "td-end tnum" }, gate.state === "running" ? "running" : gate.state === "waiting" ? (task.status === "running" ? "next" : "not run") : gate.ms !== null ? clock(gate.ms) : `exit ${gate.exit}`),
+            h("span", { class: "td-end tnum" }, gate.state === "running" ? "running" : gate.state === "waiting" ? (task.status === "running" ? "next" : "not run") : (gateTime(gate.ms) ?? `exit ${gate.exit}`)),
           ),
         ),
         !proof.gates.length ? h("p", { class: "td-note" }, "No commands were given to prove it: the independent reviewer decides alone.") : null,

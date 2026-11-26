@@ -606,8 +606,10 @@
       .section > .section-head + .note { margin-top: calc(var(--sp-1) - var(--section-gap)); }
       h3 { font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; }
 
+      /* A card: filled one step off the page, never outlined (the owner's look, 26 November 2026: hairlines instead of
+         outline cards); what's in it is split by hairlines. (Its border stays, clear, for a tone to colour.) */
       .card {
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-1), var(--ring-inset);
+        background: var(--surface-2); border: 1px solid transparent; border-radius: var(--r-xl); box-shadow: none;
         min-width: 0;
       }
       /* What's in a padded card is a stack at the section's gap, unless it says otherwise (a row, a tighter stack). */
@@ -620,7 +622,7 @@
       .card-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--row-pad) var(--card-pad); border-bottom: 1px solid var(--border); min-height: 48px; }
       .card-head h3 { font-size: var(--fs-14); }
       .card-body { padding: var(--card-pad); }
-      .card-foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--row-pad) var(--card-pad); border-top: 1px solid var(--border); background: var(--bg-sunken); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+      .card-foot { display: flex; align-items: center; gap: var(--sp-2); padding: var(--row-pad) var(--card-pad); border-top: 1px solid var(--border); border-radius: 0 0 var(--r-xl) var(--r-xl); }
       .grid { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
       .grid.wide { grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); }
       .grid.stats { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
@@ -710,6 +712,8 @@
       .btn.ghost { --btn-bg: transparent; --btn-border: transparent; box-shadow: none; color: var(--text-2); }
       .btn.ghost:hover { --btn-bg: var(--surface-3); color: var(--text); }
       .btn.sm { height: var(--control-h-sm); padding: 0 10px; font-size: var(--fs-12); border-radius: var(--r-sm); gap: 5px; }
+      /* (44 px to press under a finger, as the usability pass asks, a small button's look kept.) */
+      @media (pointer: coarse) { .btn.sm::after { content: ""; position: absolute; inset: calc((var(--control-h-sm) - 44px) / 2); } }
       .btn.lg { height: 42px; padding: 0 var(--sp-5); font-size: var(--fs-14); border-radius: 10px; }
       .btn.icon-only { width: var(--control-h); padding: 0; }
       .btn.sm.icon-only { width: var(--control-h-sm); }
@@ -1341,28 +1345,31 @@
       .thread-said-by > strong { color: var(--text); font-weight: 600; }
       .thread-said > .md { font-size: var(--fs-14); line-height: 1.6; }
       /* What proves it, apart from the agent's words: its own ground and edge in its verdict's colour. */
-      .proof { --verdict: var(--ok); display: flex; flex-direction: column; margin-top: var(--sp-1); border-radius: 14px; background: var(--surface); overflow: hidden; box-shadow: var(--shadow-1), inset 0 0 0 1px color-mix(in srgb, var(--verdict) 42%, var(--border)); }
+      .proof { --verdict: var(--ok); display: flex; flex-direction: column; margin-top: var(--sp-1); border-radius: var(--r-xl); background: var(--surface-2); overflow: hidden; }
       .proof[data-verdict="failed"] { --verdict: var(--failed); }
-      .proof > * + * { border-top: 1px solid color-mix(in srgb, var(--verdict) 16%, var(--border)); }
-      .proof-seal { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: color-mix(in srgb, var(--verdict) 9%, var(--surface)); }
-      .proof-seal strong { color: var(--verdict); font-weight: 650; }
-      .proof-by { color: var(--text-2); font-size: var(--fs-13); }
-      .proof-mark { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--verdict); color: var(--surface); }
+      .proof > * + * { border-top: 1px solid var(--border); }
+      .proof-seal { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; line-height: 1.4; }
+      .proof-seal strong { color: var(--verdict); font-size: var(--fs-16); font-weight: 750; letter-spacing: -0.01em; }
+      .proof-by { color: var(--text-2); font-size: var(--fs-15); }
+      .proof-mark { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-top: -1px; border-radius: 50%; background: var(--verdict); color: var(--bg); }
       .proof-caveat { display: flex; align-items: flex-start; gap: var(--sp-2); padding: 8px 14px; color: var(--warn); font-size: var(--fs-12); line-height: 1.45; }
       .proof-caveat > svg { flex: none; margin-top: 1px; }
       .proof-gates { display: flex; flex-direction: column; margin: 0; padding: 4px 0; list-style: none; }
-      .proof-gate { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); min-height: 28px; padding: 0 14px; font-size: var(--fs-12); }
-      .proof-gate code { font-family: var(--font-mono); font-size: 11.5px; color: var(--text); }
-      .proof-gate-mark { display: grid; place-items: center; color: var(--text-3); }
+      .proof-gate { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: var(--sp-2); padding: 6px 16px; font-size: var(--fs-12); }
+      .proof-gate-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .proof-gate code { font-family: var(--font-mono); font-size: var(--fs-13); color: var(--text); overflow-wrap: anywhere; }
+      .proof-gate-mark { display: grid; place-items: center; margin-top: 2px; color: var(--text-3); }
       .proof-gate[data-state="passed"] .proof-gate-mark { color: var(--ok); }
       .proof-gate[data-state="failed"] .proof-gate-mark, .proof-gate[data-state="failed"] .proof-gate-said { color: var(--failed); }
-      .proof-gate-said { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+      .proof-gate-said { color: var(--text-3); overflow-wrap: anywhere; }
       .proof-review { display: flex; align-items: flex-start; gap: var(--sp-2); padding: 9px 14px; font-size: var(--fs-13); color: var(--text-2); line-height: 1.45; }
       .proof-review > svg { flex: none; margin-top: 2px; color: var(--text-3); }
       .proof-review strong { color: var(--text); font-weight: 600; }
       .proof-facts { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; padding: 9px 14px; font-size: var(--fs-13); }
       .proof-changes { display: inline-flex; align-items: center; gap: 4px; }
-      .proof-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: 10px 14px 12px; }
+      .proof-acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: 12px 16px 14px; }
+      .proof-acts > .btn { border-radius: var(--r-full); padding-inline: 16px; font-weight: 650; }
+      .proof-acts > .btn:not(.primary) { --btn-bg: var(--surface); }
       .link-button { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; cursor: pointer; }
       .link-button:hover { text-decoration-color: currentColor; }
       .thread-message { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-14); }

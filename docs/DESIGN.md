@@ -82,8 +82,8 @@ All colour tokens use `light-dark()`, so one list serves both themes. The theme 
 |---|---|---|---|
 | `--bg` | `#fafafa` | `#08080a` | Canvas |
 | `--sidebar` | `#f5f5f6` | `#0b0b0d` | Sidebar (falls to `--bg-sunken`) |
-| `--surface` | `#ffffff` | `#111113` | Cards, dialogs |
-| `--surface-2` | `#f4f4f5` | `#17171a` | Inputs, chips, user bubbles |
+| `--surface` | `#ffffff` | `#111113` | Dialogs, fields, a control's fill |
+| `--surface-2` | `#f4f4f5` | `#17171a` | Cards (filled one step off the page, never outlined), chips, user bubbles |
 | `--surface-3` | `#ebebed` | `#1f1f23` | Hover, active |
 | `--bg-sunken` | `#f3f3f4` | `#050506` | Code, card footers, copy fields |
 | `--alert-bg` | `#ffffff` | `#101012` | An alert's surface (a toast, the banner): precise, over whatever is under it |
@@ -140,9 +140,9 @@ Monochrome (the owner's word, 26 November 2026, as the iPhone's Brand.swift has 
 |---|---|
 | Space | 4 · 8 · 12 · 16 · 20 · 24 · 32 · 40 · 48 · 64 (`--sp-1`…`--sp-16`) |
 | Rhythm | What each kind of box takes from the scale, as tokens, so every page is spaced alike: `--page-gap` 24 (a page's head and its sections; a column of sections, `.stack.loose`) · `--section-gap` 12 (a section's head and what is in it) · `--card-pad` 16 (a card's content, and its head, rows and foot: their leading edges line up, card to card) · `--row-pad` 12 (above and below a row's text) · `--form-gap` 16 (a form's fields, and anything stacked in a sheet) · `--field-gap` 8 (a field's label, control and hint). The lines of one item (a title and the line under it) are 2 px apart; nothing else is off the scale. |
-| Radii | 6 (small controls) · 8 (controls) · 12 (cards) · 16 (dialogs, composer) · 999 (pills) |
-| Elevation | `--shadow-1` hairline lift for cards and controls · `--shadow-2` popovers, composer, toasts · `--shadow-3` dialogs and the palette. Dark mode leans on borders, with deeper shadows only for overlays. |
-| Controls | 34 px (28 small) with a fine pointer; 44 px (36 small) with a coarse one |
+| Radii | 6 (small controls) · 8 (controls) · 12 (rows) · 16 (cards, dialogs, composer) · 999 (pills, a card's answers) |
+| Elevation | `--shadow-1` hairline lift for controls (a card is flat: filled, never outlined, hairlines inside) · `--shadow-2` popovers, composer, toasts · `--shadow-3` dialogs and the palette. Dark mode leans on borders, with deeper shadows only for overlays. |
+| Controls | 34 px (28 small) with a fine pointer; 44 px (36 small, pressed at 44: its `::after` reaches) with a coarse one |
 | Shell | top bar 52 px (a place's page) · sidebar 268 px, the drawer's places kept open (folded away: none, a button at the top brings it back) · drawer 360 px at most · a task's details card 340 px · content max 1120 px (760 for reading pages, Home and a thread) |
 
 ## Motion
@@ -213,7 +213,7 @@ The components are one library, `ui/controls.ts` (each documented where it is de
 | Component | Where | Notes |
 |---|---|---|
 | Page head, page body, section, note | `pageHead()`, `pageBody()`, `section()`, `note()` | Every page opens with its head: the title, a line saying what it's for, its actions (its one primary action among them), under the line on a phone. A page whose parts load separately puts them in a page body that appears whole. A section has a small heading, an optional count, links or actions at its end, and a note under the heading. |
-| Card, list, list row | `card()`, `list()`, `listRow()`, `rows()`, `meta()`, `kv()` | A card has an optional head (icon, title, actions) and foot, padded or flush, toned (accent, warn, danger) or flat. Every list is list rows: a lead (an icon on a tile, toned when it means something, or a face), a title, a line under it, a meta line (tabular figures), something under that (`body`), a trail (actions, a badge, a control); a link or a button; a setting's row wraps its control under the words on a narrow screen. A list with nothing in it shows its empty state in the same card. A row's layout (`.item`) works as a card's head too (a loop, a request). |
+| Card, list, list row | `card()`, `list()`, `listRow()`, `rows()`, `meta()`, `kv()` | A card is filled one step off the page (`--surface-2`), never outlined; hairlines split what is in it (the owner's look, 26 November 2026). It has an optional head (icon, title, actions) and foot, padded or flush, toned (accent, warn, danger) or flat. Every list is list rows: a lead (an icon on a tile, toned when it means something, or a face), a title, a line under it, a meta line (tabular figures), something under that (`body`), a trail (actions, a badge, a control); a link or a button; a setting's row wraps its control under the words on a narrow screen. A list with nothing in it shows its empty state in the same card. A row's layout (`.item`) works as a card's head too (a loop, a request). |
 | Disclosure | `disclosure()` | A card that opens on request: one line with a chevron; `flush` for a list in it. |
 | Form actions, link button, spinner | `formActions()`, `linkButton()`, `spinner()` | A form ends with its actions, the primary one last; in a sheet on a phone they are thumb-sized and full width, as a sheet's foot's are. A link that looks like a button goes somewhere (a section's "View all"). Spinners are 16, 12 (`sm`) or 10 px (`xs`). |
 | Button | `ui/controls.ts` `button()` | `primary` (one per view), default, `ghost`, `danger` (text), `danger-solid` (only inside a confirmation). `busy()` swaps the icon for a spinner and disables it while work runs. |
