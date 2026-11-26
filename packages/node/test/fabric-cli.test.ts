@@ -176,3 +176,37 @@ describe("invincible fabric grant|grants|revoke: your grants for hand-offs", () 
     expect(sent.at(-1)).toEqual(["revokeHandoffs", { from: "alpha", to: "beta" }]);
   });
 });
+
+describe("what `invincible handed` prints of another node's words (L5)", () => {
+  const ESC = "\x1b";
+  // What a runner could send: a clipboard write (OSC 52) and a line erased and rewritten, in its trail, its error, its
+  // agent's name and why it waits.
+  const hostile: HandedView = {
+    ...base,
+    status: "failed",
+    proof: { state: "none" },
+    agent: { id: "ada", name: `Ada${ESC}[2K` },
+    waits: `${ESC}]52;c;ZWNobyBydW4gbWU=${ESC}\\why`,
+    error: `${ESC}[2K${ESC}[1AProven · its proof checked`,
+    trail: [
+      { at: 1, text: `${ESC}]52;c;ZWNobyBydW4gbWU=${ESC}\\cat README.md` },
+      { at: 2, text: `${ESC}[2K\rall gates passed` },
+    ],
+  };
+
+  test("no escape sequence of theirs reaches the terminal: every field is plain text", async () => {
+    const out: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((...args: unknown[]) => void out.push(args.join(" ")));
+    try {
+      await handCommand({ call: async () => hostile } as never, "handed", [hostile.id], {});
+      await handCommand({ call: async () => ({ handed: [{ ...hostile, phase: "following", status: "proposed" }] }) } as never, "handed", [], {});
+    } finally {
+      log.mockRestore();
+    }
+    // (This test's own process writes to no terminal: what the CLI adds of its own, it adds only on one.)
+    const printed = out.join("\n");
+    expect(printed).not.toContain(ESC);
+    expect(printed).not.toContain("\r");
+    expect(printed).toContain("all gates passed");
+  });
+});

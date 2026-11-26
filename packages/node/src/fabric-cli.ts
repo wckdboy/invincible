@@ -21,28 +21,34 @@ export const HAND_USAGE = `usage: invincible hand <node> "<goal>" [--gate "<comm
 /** A handed task's verdict, in the apps' words, from what the node that ran it signed (null: not ended yet). */
 export function handedVerdict(view: HandedView): { word: string; proven: boolean } | null {
   if (view.phase !== "ended") return null;
-  if (view.proof.state === "refused") return { word: `Not proven: its proof didn't check (${view.proof.why})`, proven: false };
-  if (view.proof.state === "none") return { word: view.status === "stopped" ? "Stopped" : `Failed${view.error ? `: ${view.error}` : ""}`, proven: false };
+  if (view.proof.state === "refused") return { word: `Not proven: its proof didn't check (${plainLine(view.proof.why)})`, proven: false };
+  if (view.proof.state === "none") return { word: view.status === "stopped" ? "Stopped" : `Failed${view.error ? `: ${plainLine(view.error)}` : ""}`, proven: false };
   const facts: ProofFacts | null = view.proof.proof
     ? { gates: view.proof.proof.after.map((exit, i) => ({ exit, before: view.proof.state === "checked" ? (view.proof.proof!.before[i] ?? null) : null })), review: view.proof.proof.review, sameModel: view.proof.proof.sameModel }
     : null;
   const status = view.status === "done" || view.status === "failed" || view.status === "stopped" ? view.status : "failed";
   const verdict = verdictOf({ status, verified: view.proof.verified, record: view.proof.ended ? ({ ended: view.proof.ended } as never) : undefined, error: view.error }, facts);
-  return verdict ? { word: verdict.word, proven: verdict.verdict === "proven" } : null;
+  return verdict ? { word: plainLine(verdict.word), proven: verdict.verdict === "proven" } : null;
 }
 
 function summary(view: HandedView): string {
   const verdict = handedVerdict(view);
-  const where = `${view.node.name}${view.agent ? ` · ${view.agent.name}` : ""}`;
-  const state = verdict ? verdict.word : view.phase === "handing" ? "handing it over" : view.status === "proposed" ? `waits for your approval there${view.waits ? ` (${view.waits})` : ""}` : `${view.status} there`;
-  return `${bold(view.id)}  ${view.title.slice(0, 80)}\n  ${dim(`${where} · ${state}${view.task ? ` · its task there ${view.task}` : ""}`)}`;
+  // Every field another node said is plain text here: no escape of theirs reaches your terminal.
+  const where = `${plainLine(view.node.name)}${view.agent ? ` · ${plainLine(view.agent.name)}` : ""}`;
+  const state = verdict ? verdict.word : view.phase === "handing" ? "handing it over" : view.status === "proposed" ? `waits for your approval there${view.waits ? ` (${plainLine(view.waits)})` : ""}` : `${plainLine(view.status)} there`;
+  return `${bold(view.id)}  ${plainLine(view.title).slice(0, 80)}\n  ${dim(`${where} · ${state}${view.task ? ` · its task there ${plainLine(view.task)}` : ""}`)}`;
+}
+
+/** A line of a trail another node's agent wrote, as plain text, its first line alone. */
+function trailLine(line: { at: number; text: string }): string {
+  return `  ${dim(new Date(line.at).toLocaleTimeString())}  ${plainLine(line.text.split("\n")[0]!).slice(0, 200)}`;
 }
 
 async function follow(api: Api, id: string, from = 0): Promise<HandedView> {
   let after = from;
   for (;;) {
     const view = await api.call<HandedView>("handedTask", { id, after });
-    for (const line of view.trail) console.log(`  ${dim(new Date(line.at).toLocaleTimeString())}  ${line.text.split("\n")[0]!.slice(0, 200)}`);
+    for (const line of view.trail) console.log(trailLine(line));
     after += view.trail.length;
     if (view.phase === "ended") return view;
     await Bun.sleep(300);
@@ -52,7 +58,7 @@ async function follow(api: Api, id: string, from = 0): Promise<HandedView> {
 /** Ends with the verdict: printed, and as the exit code (0: proven). */
 function verdictExit(view: HandedView): void {
   const verdict = handedVerdict(view);
-  console.log(`\n${bold(verdict?.word ?? view.status)}${view.proof.state === "checked" ? dim(` · its proof checked: signed by ${view.node.name}'s own key, for this hand-off`) : ""}`);
+  console.log(`\n${bold(verdict?.word ?? plainLine(view.status))}${view.proof.state === "checked" ? dim(` · its proof checked: signed by ${plainLine(view.node.name)}'s own key, for this hand-off`) : ""}`);
   if (!verdict?.proven) process.exitCode = 1;
 }
 
@@ -143,7 +149,7 @@ export async function handCommand(api: Api, command: "hand" | "handed", rest: st
     const checked = HandTaskInput.safeParse({ node, goal: goal.join(" "), ...(gates.length ? { gates } : {}), ...(agents[0] ? { agent: agents[0] } : {}), ...(tools ? { tools } : {}), ...(budget !== undefined ? { budgetUsd: budget } : {}), ...(typeof flags.title === "string" ? { title: flags.title } : {}) });
     if (!checked.success) throw new Error(checked.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; "));
     const view = await api.call<HandedView>("handTask", checked.data);
-    console.log(`Handed to ${view.node.name} over Q-AMP: ${bold(view.id)}${view.tools.length ? ` · its run may use ${view.tools.join(", ")} here` : ""}`);
+    console.log(`Handed to ${plainLine(view.node.name)} over Q-AMP: ${bold(view.id)}${view.tools.length ? ` · its run may use ${view.tools.join(", ")} here` : ""}`);
     if (!flags.follow) {
       console.log(dim(`invincible handed ${view.id} --follow follows it; invincible handed stop ${view.id} stops it there.`));
       return;
@@ -160,13 +166,13 @@ export async function handCommand(api: Api, command: "hand" | "handed", rest: st
   if (first === "stop") {
     if (!second) throw new Error("usage: invincible handed stop <id>");
     const view = await api.call<HandedView>("stopHanded", { id: second });
-    console.log(`Asked ${view.node.name} to stop ${view.id}: it stops the work there and says how it ended.`);
+    console.log(`Asked ${plainLine(view.node.name)} to stop ${view.id}: it stops the work there and says how it ended.`);
     return verdictExit(await follow(api, view.id, 10_000_000));
   }
   const view = flags.follow ? await follow(api, first) : await api.call<HandedView>("handedTask", { id: first });
   if (!flags.follow) {
     console.log(summary(view));
-    for (const line of view.trail.slice(-20)) console.log(`  ${dim(new Date(line.at).toLocaleTimeString())}  ${line.text.split("\n")[0]!.slice(0, 200)}`);
+    for (const line of view.trail.slice(-20)) console.log(trailLine(line));
   }
   if (view.phase === "ended") verdictExit(view);
 }

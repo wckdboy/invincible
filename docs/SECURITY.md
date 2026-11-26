@@ -517,6 +517,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   only. Its socket's directory is the node's own (`<home>/run`, or one it makes, made 0700); a directory it didn't make
   must be this user's with mode 0700 already, so a socket put in a shared one (`/tmp`, `/run`) is refused, never made
   private by changing it (the review's L4). Tests: `fabric-sidecar.test.ts`.
+- **Another node's words are plain text in your terminal** (the review's L5). What `invincible hand` and `invincible
+  handed` print of a hand-off (its trail, its agent's name, its error, why it waits, the refusal's why) goes through
+  core's `plainLine`, as the team CLI and `inv` do, so no escape sequence a runner or its agent wrote (a clipboard
+  write, a line rewritten to fake "all gates passed") reaches it. Test: `fabric-cli.test.ts`.
 - **A failure ends one hand-off, never the node** (the review's L3). The runner's loop, a run's call back to its giver
   and the giver's follower each catch what goes wrong in them: that hand-off fails (`INTERNAL`, with why), its task
   stops there, and the node goes on. `invincible serve` also says, and survives, any failure nothing waited for. Test:
