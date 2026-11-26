@@ -207,7 +207,14 @@ export const TeamGiveInput = z.strictObject({
   gates: z.array(z.string().trim().min(1).max(1000)).max(16).optional(),
   /** Money its model calls may spend, in US dollars at your prices: told what is spent at each step, it stops when spent. */
   budgetUsd: z.number().positive().max(100).optional(),
-  needs: z.strictObject({ desktop: z.boolean().optional(), repository: z.string().trim().min(1).max(300).optional() }).optional(),
+  needs: z
+    .strictObject({
+      desktop: z.boolean().optional(),
+      repository: z.string().trim().min(1).max(300).optional(),
+      /** The node the work runs on, by its name or its id (a start of it will do): only an agent whose VM is there takes it. */
+      node: z.string().min(1).max(100).regex(/^[A-Za-z0-9._:-]+$/).optional(),
+    })
+    .optional(),
 });
 export type TeamGiveInput = z.infer<typeof TeamGiveInput>;
 

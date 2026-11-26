@@ -2190,11 +2190,14 @@ export function createApp(ctx: AppContext) {
         return {
           id: m.id, name: m.name, instructions: m.instructions, role: m.role, enabled: m.enabled, dailyTurns: m.dailyTurns, turnsToday: m.turnsToday, repository: m.repository,
           vm: m.workspace ? { image: vm?.image ?? "", status: vm?.status ?? "unknown" } : null,
+          node: m.workspace?.node ?? null,
           tasks: state.tasks.filter((t) => t.assignee === m.id).map((t) => ({ status: t.status, verified: t.verified })),
         };
       }),
     );
-    const { choice, considered } = chooseAgent(input.goal, input.needs ?? {}, facts);
+    // (A node named for the work, by its name or id, is held to as that node's id: an unknown one is refused, never ignored.)
+    const { node: on, ...needs } = input.needs ?? {};
+    const { choice, considered } = chooseAgent(input.goal, { ...needs, ...(on ? { node: resolveNode(on).id } : {}) }, facts);
     if (!choice) throw new HttpError(409, `No agent can take this task now${considered.length ? `: ${considered.map((c) => `${c.name}: ${c.why.join("; ")}`).join(" · ")}` : ": there are no agents"}`);
     const room = teamOf().direct(choice.id);
     const task = teamOf().createTask({ room: room.id, assignee: choice.id, title: input.title ?? input.goal.slice(0, 200), goal: input.goal, gates: input.gates ?? [], ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}) }, by);

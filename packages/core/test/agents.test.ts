@@ -35,6 +35,20 @@ describe("who takes a task", () => {
     expect(considered.every((c) => !c.eligible)).toBe(true);
   });
 
+  test("a task held to a node goes to an agent whose VM is on it: one elsewhere, or with no VM yet, can't take it", () => {
+    const on = "n_" + "u".repeat(43);
+    const { choice, considered } = chooseAgent("Run the long suite.", { node: on }, [
+      agent("rio", { node: "n_" + "m".repeat(43) }),
+      agent("ivo", { vm: null, node: null }),
+      agent("una", { node: on }),
+    ]);
+    expect(choice?.id).toBe("una");
+    const why = Object.fromEntries(considered.filter((c) => !c.eligible).map((c) => [c.id, c.why.join("; ")]));
+    expect(why).toEqual({ rio: "its VM is on another node", ivo: "its VM isn't made yet, so it isn't on that node" });
+    // Without a node named, where a VM is changes nothing.
+    expect(chooseAgent("Run the long suite.", {}, [agent("rio", { node: "n_" + "m".repeat(43) })]).choice?.id).toBe("rio");
+  });
+
   test("the same repository is the same however it is written", () => {
     const { choice } = chooseAgent("Fix the importer.", { repository: "https://github.com/You/App.git/" }, [agent("ivo", { repository: "https://github.com/you/app" })]);
     expect(choice?.id).toBe("ivo");

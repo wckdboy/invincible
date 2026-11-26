@@ -6,10 +6,10 @@ import { redact } from "./secret-scan.ts";
  * its host says now) and this says who takes the task, and why, in words the owner reads.
  *
  * What can't be bent is a requirement: a paused agent, one whose turns for the day are spent, one without a
- * desktop when the task needs a screen, one on another repository. Of those that can take it, an agent is weighed
- * by what is known of it: whether it is free now, how much of its work has been verified, and whether its job
- * speaks of the task's work. Ties go to the one that has done less today, then by name, so the same facts always
- * give the same agent.
+ * desktop when the task needs a screen, one on another repository, one whose VM isn't on the node the task names.
+ * Of those that can take it, an agent is weighed by what is known of it: whether it is free now, how much of its
+ * work has been verified, and whether its job speaks of the task's work. Ties go to the one that has done less
+ * today, then by name, so the same facts always give the same agent.
  */
 
 export interface AgentFacts {
@@ -24,6 +24,8 @@ export interface AgentFacts {
   repository: string | null;
   /** Its VM as its host says now; null: none made yet (one is made when a task starts). */
   vm: { image: string; status: string } | null;
+  /** The node its VM is on (that node's device id); null: no VM yet. Absent: not said, by a caller that never needs a node. */
+  node?: string | null;
   /** Its tasks, each as it stands. */
   tasks: { status: string; verified: boolean }[];
 }
@@ -34,6 +36,8 @@ export interface TaskNeeds {
   desktop?: boolean;
   /** The repository it must work on. */
   repository?: string;
+  /** The node the work must run on (its device id): an agent whose VM is on that node. */
+  node?: string;
 }
 
 export interface AgentChoice {
@@ -105,6 +109,10 @@ export function chooseAgent(goal: string, needs: TaskNeeds, agents: readonly Age
     if (repository) {
       if (!k.repository) barred.push("it has no repository");
       else if (repositoryKey(k.repository) !== repository) barred.push(`it works on ${repositoryKey(k.repository)}`);
+    }
+    if (needs.node) {
+      if (!k.node) barred.push("its VM isn't made yet, so it isn't on that node");
+      else if (k.node !== needs.node) barred.push("its VM is on another node");
     }
     if (barred.length) return { id: k.id, name: k.name, eligible: false, score: 0, why: barred, turnsToday: k.turnsToday };
 
