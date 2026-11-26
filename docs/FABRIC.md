@@ -230,6 +230,9 @@ answered and a Q-AMP release with the sidecar is pinned.
   here, and sends each renewal in on the hand-off's call.
 - **One connect timeout** in 391 fresh-connection samples on loopback: the first sample of one run, not reproduced in
   the 390 that followed, cause not established.
+- **A handed run reaches its giver's tools only when its agent's VM is on the node that runs it.** A VM that placement
+  put on another node (the giver itself, say) calls that node's gateway, which holds no run of this one: it answers 404.
+  Found by `bench/fabric/remote.ts`, where both test nodes hosted VMs.
 - **Not moved to Q-AMP:** kept files' bytes and local model calls between nodes.
 - **Not driven:** the hand-off from the web app or the native apps (the CLI and the API only); a VM's real harness
   calling its giver's tools (the gateway path is tested with a stand-in, `callGiver` end to end); Linux with real

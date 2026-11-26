@@ -65,9 +65,26 @@ const stats = (samples: number[]) => {
 };
 
 const home = new Home(join(ROOT, "node"));
+// The serving node's VM, through a stand-in Docker: a command tagged write-hold… waits until it is told to go on (a run
+// under way, to stop or to revoke), every other command answers at once.
+const docker = fakeDocker();
+let release: () => void = () => {};
+let held = new Promise<void>((resolve) => (release = resolve));
+const written = new Set<string>();
+docker.onExec = async (_container, command) => {
+  const text = command.join("\n");
+  const gate = /gate-([a-z0-9]+)/.exec(text)?.[1];
+  if (gate) return written.has(gate) ? { code: 0, stdout: "there" } : { code: 1, stdout: "", stderr: "missing" };
+  const write = /write-([a-z0-9]+)/.exec(text)?.[1];
+  if (write?.startsWith("hold")) await held;
+  if (write) written.add(write);
+  return { code: 0, stdout: "ok" };
+};
+// The serving node alone hosts VMs: its agent's VM is then its own, as a handed run's must be for it to reach its giver's
+// tools (a VM on another node calls that node's gateway, which holds no run of this one: docs/FABRIC.md).
 const base = (name: string): DaemonOptions => ({
-  capabilities: caps(name, { docker: true, tools: ["git", "docker"], vm: { kvm: true, tools: ["kata"] }, sandbox: { image: true, networks: true, vm: true } }),
-  docker: fakeDocker().runner,
+  capabilities: name === "server" ? caps(name, { docker: true, tools: ["git", "docker"], vm: { kvm: true, tools: ["kata"] }, sandbox: { image: true, networks: true, vm: true } }) : caps(name),
+  docker: docker.runner,
   measure,
   // Pulls every 2 s: a push takes only what extends a device's chain as the receiver holds it, so the two converge fast
   // and every push after that is taken as it comes (what is measured; a pull would come seconds later).
@@ -133,6 +150,19 @@ if (role === "serve") {
         if (text.startsWith("q5echo? ")) say(`q5echo! ${text.slice(8)}`);
         else if (text === "q5ctl sidecar off") void node!.fabric.sidecar.stop().then(() => say("q5ctl sidecar is off"));
         else if (text === "q5ctl sidecar on") void node!.fabric.sidecar.start().then(() => say(`q5ctl sidecar is ${node!.fabric.sidecar.state}`));
+        else if (text === "q5ctl release") {
+          release();
+          held = new Promise<void>((resolve) => (release = resolve));
+        } else if (text.startsWith("q5ctl callgiver ")) {
+          // The run of that hand-off calls a tool of its giver's, as its VM would through this node's gateway.
+          const handoff = text.slice("q5ctl callgiver ".length);
+          void (async () => {
+            const team = await call<{ agents: { id: string; workspace: { id: string } | null }[] }>("team");
+            const vm = team.agents.find((a) => a.id === "ada")?.workspace?.id ?? "";
+            const answer = await node!.handoffs.callGiver(vm, "fleet", {}, new AbortController().signal);
+            say(`q5echo! callgiver ${handoff} ${answer.status}`);
+          })();
+        }
       } else if (e.kind === "device.revoked") {
         const device = (e.body as { device?: string }).device ?? "";
         if (!node!.store.activeDevice(device)) say(`q5echo! revoked ${device}`);
@@ -301,6 +331,49 @@ try {
   }
   record("a handed task's first output back here · Q-AMP", first);
   record("a handed task, given to its end here (stand-in models) · Q-AMP", whole);
+
+  // A stop's round trip, and a run's key revoked until its next call is refused: on runs held under way on the server.
+  const callGiver = async (handoff: string): Promise<string> => {
+    let resolve!: (status: string) => void;
+    const back = new Promise<string>((r) => (resolve = r));
+    const off = me.store.onApplied((events) => {
+      for (const e of events) {
+        const text = e.kind === "memory.added" ? ((e.body as { text?: string }).text ?? "") : "";
+        if (text.startsWith(`q5echo! callgiver ${handoff} `)) resolve(text.slice(`q5echo! callgiver ${handoff} `.length));
+      }
+    });
+    me.store.remember(me.identity, `q5ctl callgiver ${handoff}`);
+    try {
+      return await Promise.race([back, Bun.sleep(30_000).then(() => "no answer")]);
+    } finally {
+      off();
+    }
+  };
+  const stops: number[] = [];
+  const revokes: number[] = [];
+  for (let i = 0; i < Math.min(N, 10); i++) {
+    const view = await call<HandedView>("handTask", { node: "server", goal: `TASK_HOLD${i}: write it, slowly`, gates: [`test -f r-hold${i}.txt # gate-hold${i}`], agent: "ada", tools: ["fleet"] });
+    await until(async () => (await call<HandedView>("handedTask", { id: view.id, after: 0 })).trail.some((t) => t.text.includes(`write-hold${i}`)), 60_000, "the held command under way").catch(async (error) => {
+      const seen = await call<HandedView>("handedTask", { id: view.id, after: 0 });
+      throw new Error(`${(error as Error).message}: ${seen.phase} ${seen.status} · ${seen.trail.map((t) => t.text.split("\n")[0]).join(" | ").slice(0, 800)}`);
+    });
+    const taken = await callGiver(view.id);
+    if (taken !== "200") throw new Error(`the run's call to this node wasn't taken: ${taken}`);
+    // Revoked here: from then until the server says the run's next call was refused (one call there and its word back).
+    const r0 = performance.now();
+    await me.handoffs.revokeRun(view.id);
+    const refused = await callGiver(view.id);
+    revokes.push(performance.now() - r0);
+    if (refused !== "403") throw new Error(`a revoked run's call was answered ${refused}`);
+    const s0 = performance.now();
+    await call("stopHanded", { id: view.id });
+    await until(async () => (await call<HandedView>("handedTask", { id: view.id, after: 0 })).phase === "ended", 60_000, "stopped");
+    stops.push(performance.now() - s0);
+    // Its held command let go there, so its agent is free for the next one.
+    me.store.remember(me.identity, "q5ctl release");
+  }
+  record("a stop's round trip (this node's stop, the work stopped there and said) · Q-AMP", stops);
+  record("a run's key revoked here, until the server says its next call was refused · Q-AMP", revokes);
 
   // 4. A forwarded command in the server's sandbox (as a run's commands go when its VM is elsewhere): Q-AMP, then HTTP.
   const { sandbox } = await call<{ sandbox: { id: string } }>("createSandbox", { on: "server", image: "invincible/sandbox:1" });
