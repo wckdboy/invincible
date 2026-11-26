@@ -52,6 +52,7 @@ import { Home } from "../../../packages/node/src/home.ts";
 import { CHANGES_SCRIPT, LIST_SCRIPT, READ_SCRIPT } from "../../../packages/node/src/workspace-look.ts";
 import { fakeDocker } from "../../../packages/node/test/fake-docker.ts";
 import { freePort } from "../../../packages/node/test/ports.ts";
+import { keptAlive } from "./kept-alive.ts";
 
 const flag = (name: string): string | undefined => {
   const at = process.argv.indexOf(`--${name}`);
@@ -247,7 +248,10 @@ const model = Bun.serve({
   port: 0,
   hostname: "127.0.0.1",
   idleTimeout: 255,
-  fetch: async (request) => {
+  // Every answer kept alive while it waits (kept-alive.ts): one held on purpose (an agent thinking, a stepped demo's
+  // step) sends its headers at once and a comment every 30 s, so the node's fetch never ends it, and the fleet stays as
+  // it is for as long as a suite runs.
+  fetch: (request) => keptAlive(async () => {
     const body = (await request.json()) as { model: string; tools?: unknown[]; messages: { role: string; content: unknown }[] };
     const turns = body.messages.filter((message) => message.role !== "system");
     if (JSON.stringify(turns).includes("Take your time")) await hold;
@@ -303,7 +307,7 @@ const model = Bun.serve({
     }
     if (Array.isArray(body.tools) && body.tools.length) return stream(/\bshow\b/i.test(asked) ? SHOWN : PRIMARY, /\bshow\b/i.test(asked) ? 15 : 70);
     return stream("Understood. I will take the part that is mine and say when it is done.", 0);
-  },
+  }),
 });
 servers.push(model);
 // Where the agent's outward call would go, were it approved.
