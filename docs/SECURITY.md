@@ -528,6 +528,8 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
 - **Bounded input.** The node's side of the socket bounds a message's length before it buffers it (65 MiB, as the
   sidecar), decodes CBOR under Q-AMP's decode budget, checks every hand-off message with its schema, keeps a hand-off's
   trail to 2,000 lines of 4,000 characters, and takes a VM's tool input up to 1 MiB.
+  - **CBOR's budget counts every chunk** of an indefinite-length string as an item, so a few MiB of empty chunks are
+    refused before anything is built (the review's L8; `fabric.test.ts`).
   - **What a call holds** (the review's L2): each chunk counts at its message's encoded length, structured ones too, so
     past 1 MiB unread the sidecar is asked to hold the rest; a call that takes no chunks (sync, push, a forwarded
     route) drops them as they come; past 32 MiB unread, whatever it asked, the call is cancelled (a task's input, its

@@ -279,3 +279,22 @@ describe("your grant for hand-offs: what a node takes at once, and what waits fo
     expect(handoffUnder(readHandoffTerms({ tools: [], budgetUsdPerDay: 5 })!, { agent: null, tools: ["fleet"], budgetUsd: 1 }, 0)).toEqual({ beyond: "your grant gives its runs none of its tools, not fleet" });
   });
 });
+
+describe("CBOR's budget holds for indefinite-length strings too (L8)", () => {
+  test("a few MiB of empty chunks are refused by the item budget, before anything is built", () => {
+    const n = 4 * 1024 * 1024;
+    const bytes = new Uint8Array(n + 2);
+    bytes[0] = 0x5f; // an indefinite-length byte string
+    bytes.fill(0x40, 1, n + 1); // each chunk an empty definite one
+    bytes[n + 1] = 0xff;
+    const started = performance.now();
+    expect(() => cborDecode(bytes)).toThrow(CborError);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  test("a few chunks, within the budget, still read whole", () => {
+    expect(cborDecode(Uint8Array.of(0x5f, 0x42, 1, 2, 0x41, 3, 0xff))).toEqual(Uint8Array.of(1, 2, 3));
+    expect(cborDecode(Uint8Array.of(0x7f, 0x62, 0x68, 0x69, 0x61, 0x21, 0xff))).toBe("hi!");
+  });
+});
+

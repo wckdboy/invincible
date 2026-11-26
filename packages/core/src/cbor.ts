@@ -211,6 +211,8 @@ function walk(r: Reader, budget: CborBudget, state: { items: number; floats: boo
         const c = r.u8();
         if (c === 0xff) return;
         if (c >> 5 !== major || (c & 0x1f) === 31) throw new CborError("malformed indefinite-length string");
+        // Each chunk is an item of the budget: the build makes a view of each before it joins them.
+        if (++state.items > budget.maxItems) throw new CborError("too many items");
         // count() moves past the length first: read it before adding.
         const n = r.count(c & 0x1f, 1);
         r.at += n;
