@@ -341,7 +341,7 @@ enum Steps {
 
     /// A span of work as its folded line says it: "42s", "6m 12s", "1h 04m".
     static func workedFor(_ ms: Double) -> String {
-        let seconds = max(0, Int(FieldOrb.jsRound(ms / 1000)))
+        let seconds = max(0, Int((ms / 1000).jsRounded))
         if seconds < 60 { return "\(seconds)s" }
         let minutes = seconds / 60
         if minutes < 60 { return "\(minutes)m \(pad(seconds % 60))s" }

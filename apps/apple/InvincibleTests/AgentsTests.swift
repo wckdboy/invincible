@@ -108,19 +108,19 @@ struct AgentsTests {
         #expect(Set(json.keys) == ["id", "name", "instructions", "repository", "harness", "role", "enabled", "dailyTurns"])
     }
 
-    @Test func itsOrbsColourIsSentAsCoreSavesItAndNullGivesItsHandlesBack() throws {
-        // (The PWA's avatarEditor: { v: 2, color } when you chose, null to reset, nothing when untouched.)
-        var input = AgentInput(id: "ada", name: "Ada", instructions: "", repository: nil, harness: "native", role: "engineer", enabled: true, dailyTurns: 40, avatar: .chosen("#3abeff"))
+    @Test func itsMarksColourIsSentAsCoreTakesItAndNullAsksItsNodeAgain() throws {
+        // (The PWA's avatarEditor: { v: 2, color } when you chose, null to ask its node again, nothing when untouched. A node
+        // before the marks keeps it as it is; one with them snaps it to the eight and keeps the agent's form.)
+        var input = AgentInput(id: "ada", name: "Ada", instructions: "", repository: nil, harness: "native", role: "engineer", enabled: true, dailyTurns: 40, avatar: .chosen("#0084ba"))
         let chosen = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(input)) as? [String: Any])
         let profile = try #require(chosen["avatar"] as? [String: Any])
         #expect(Set(profile.keys) == ["v", "color"])
         #expect(profile["v"] as? Int == 2)
-        #expect(profile["color"] as? String == "#3abeff")
-        // What was sent is what core takes as a chosen colour, and the colour the orb then has.
+        #expect(profile["color"] as? String == "#0084ba")
+        // What was sent is what core takes as a chosen colour, and the mark it reads from it: Sky, in its handle's form.
         let sent = try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: profile))
-        #expect(AgentOrb.chosenColor(sent) == "#3abeff")
-        let colors = AgentOrb.colors(id: "ada", profile: sent)
-        #expect([colors.tint, colors.light, colors.deep] == ["#3abeff", "#93dbff", "#1c5b7a"] && colors.chosen)
+        #expect(AgentMark.chosenColor(sent) == "#0084ba")
+        #expect(AgentMark.of(id: "ada", profile: sent) == AgentMark(color: 4, form: AgentMark.seeded("ada").form))
         input.avatar = .handle
         let reset = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(input)) as? [String: Any])
         #expect(reset.keys.contains("avatar"))

@@ -55,8 +55,9 @@ struct Agent: Decodable, Sendable, Identifiable {
     let dailyTurns: Int
     let turnsToday: Int
     let repository: String?
-    /// Its saved avatar: the colour you chose for its orb (core's OrbProfile, read by AgentOrb.chosenColor), or a look
-    /// from before the orbs, which colours nothing. Checked field by field before it colours anything.
+    /// Its saved avatar: its mark as its node gave it (`{v: 3, color, form}`, read by AgentMark.of), a colour chosen for its
+    /// orb before the marks (`{v: 2, color}`, snapped to the eight), or a look from before the orbs, which colours nothing.
+    /// Checked field by field before it colours anything.
     let avatar: JSONValue?
     /// Who made it: `owner` (also what its absence means), `primary`, or the agent that did.
     let createdBy: String?

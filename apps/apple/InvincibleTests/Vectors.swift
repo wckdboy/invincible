@@ -157,7 +157,7 @@ struct Vectors: Decodable {
         let shots: [Shot]
     }
 
-    /// An agent's face (core's taskStep, and the mood its orb takes from what it is doing: lib/orb-motion.ts').
+    /// An agent's face (core's taskStep, and the mood it takes from what it is doing: lib/orb-motion.ts').
     struct Faces: Decodable {
         struct Step: Decodable { let line: String; let step: String }
         struct Mood: Decodable { let expression: String; let mood: String }
@@ -165,160 +165,16 @@ struct Vectors: Decodable {
         let moods: [Mood]
     }
 
-    /// The primary's orb (the PWA's lib/orb.ts): each state's colours, the parts of each level, and the level of each size.
+    /// How a face stands (the PWA's lib/orb.ts and lib/orb-motion.ts, whose orbs went with O2): the tone and the mood of
+    /// each state the node names.
     struct OrbCases: Decodable {
-        struct Palette: Decodable { let tint: String; let light: String; let deep: String }
-        struct Stop: Decodable { let at: Double; let ink: String; let opacity: Double }
-        /// A part as lib/orb.ts writes it: its kind, and that kind's fields.
-        struct Part: Decodable {
-            let name: String
-            let kind: String
-            let r: Double?
-            let cx: Double?
-            let cy: Double?
-            let spread: Double?
-            let stops: [Stop]?
-            let width: Double?
-            let ink: String?
-            let opacity: Double?
-            let arcs: [[Double]]?
-            let count: Int?
-            let offset: Double?
-            let length: Double?
-            let size: Double?
-            let share: Double?
-            let glyph: Double?
-            let second: String?
-        }
-        struct Size: Decodable { let size: Double; let level: String }
         struct State: Decodable { let state: String; let tone: String }
-        /// How it moves (the PWA's lib/orb-motion.ts): each mood's motion, each state's mood, its times, its stages, how
-        /// a frame moves its parts, when it bursts, its seeds and random numbers, and its clock and frames at given moments.
         struct Motion: Decodable {
-            struct Mood: Decodable {
-                struct Turn: Decodable { let ring: Double; let ticks: Double; let segments: Double }
-                struct Comet: Decodable { let speed: Double; let tail: Double }
-                struct Motes: Decodable { let count: Int; let speed: Double; let sway: Double; let flow: String }
-                let breath: Double
-                let swell: Double
-                let turn: Turn
-                let comet: Comet?
-                let ripple: Double?
-                let motes: Motes
-                let aura: Double
-            }
             struct State: Decodable { let state: String; let mood: String }
-            struct Stage: Decodable {
-                struct Track: Decodable { let r: Double; let width: Double }
-                let reach: Double
-                let band: [Double]
-                let mote: Double
-                let share: Double
-                let waves: [Double]
-                let wave: Double
-                let comet: Track?
-            }
-            struct Moves: Decodable { let ring: [String]; let ticks: [String]; let segments: [String]; let swell: [String]; let glow: [String]; let lightsBefore: String }
-            struct Burst: Decodable { let from: String?; let to: String; let bursts: Bool }
-            struct Seed: Decodable { let name: String; let seed: UInt32 }
-            struct Rand: Decodable { let seed: UInt32; let i: Int; let k: Int; let value: Double }
-            struct Clock: Decodable {
-                let ring: Double
-                let ticks: Double
-                let segments: Double
-                let head: Double
-                let ringSpeed: Double
-                let ticksSpeed: Double
-                let segmentsSpeed: Double
-                let headSpeed: Double
-                let tail: Double
-                let breath: Double
-                let swell: Double
-                let light: Double
-                let aura: Double
-            }
-            struct ClockCase: Decodable { let mood: String; let seed: UInt32; let clock: Clock }
-            struct Step: Decodable { let mood: String; let dt: Double; let clock: Clock }
-            struct Mote: Decodable { let angle: Double; let u: Double; let size: Double; let alpha: Double }
-            struct Light: Decodable { let head: Double; let tail: Double; let alpha: Double }
-            struct Frame: Decodable {
-                let scale: Double
-                let glow: Double
-                let aura: Double
-                let ring: Double
-                let ticks: Double
-                let segments: Double
-                let comet: Light?
-                let ripples: [Double]
-                let motes: [Mote]
-                let leaving: [Mote]
-                let sparks: [Mote]
-            }
-            struct FrameCase: Decodable { let mood: String; let seed: UInt32; let t: Double; let since: Double?; let from: String?; let burst: Bool; let clock: Clock; let frame: Frame }
-            let moods: [String: Mood]
             let states: [State]
-            let arrive: Double
-            let burst: Double
-            let burstMotes: Int
-            let ease: Double
-            let longestStep: Double
-            let stages: [String: Stage]
-            let moves: Moves
-            let bursts: [Burst]
-            let seeds: [Seed]
-            let rands: [Rand]
-            let clocks: [ClockCase]
-            let start: Clock
-            let steps: [Step]
-            let frames: [FrameCase]
         }
-        /// The spheres of glyphs (the PWA's lib/orb-sphere.ts): each handle's sphere, its points, its glyphs as they
-        /// change, what is seen of them in given frames, the shades, an agent's arcs and the primary's data ring.
-        struct Spheres: Decodable {
-            struct Look: Decodable { let count: Int; let glyph: Double; let r: Double; let nucleus: Double }
-            struct Sphere: Decodable { let seed: UInt32; let tilt: Double; let spin: Double; let phase: Double; let share: Double }
-            struct Handle: Decodable { let handle: String; let sphere: Sphere }
-            struct Point: Decodable { let x: Double; let y: Double; let z: Double; let second: Bool; let size: Double }
-            struct Points: Decodable { let handle: String; let count: Int; let points: [Point] }
-            struct Glyph: Decodable { let char: String; let data: Bool; let fade: Double }
-            struct GlyphCase: Decodable { let seed: UInt32; let i: Int; let level: Int; let t: Double; let flash: Double; let glyph: Glyph }
-            struct Shown: Decodable { let x: Double; let y: Double; let near: Double; let size: Double; let alpha: Double; let shade: Int; let second: Bool; let char: String; let data: Bool }
-            struct Frame: Decodable {
-                let handle: String
-                let count: Int
-                let angle: Double
-                let scale: Double
-                let radius: Double
-                let glyph: Double
-                let t: Double
-                let mood: String
-                let paper: Bool
-                let shown: [Shown]
-            }
-            struct Shades: Decodable { let ink: String; let light: String; let deep: String; let shades: [String]; let paper: [String] }
-            struct Arc: Decodable { let r: Double; let width: Double; let from: Double; let length: Double; let speed: Double }
-            struct Arcs: Decodable { let handle: String; let level: String; let arcs: [Arc] }
-            struct Place: Decodable { let char: String; let alpha: Double }
-            struct Ring: Decodable { let seed: UInt32; let t: Double; let share: Double; let places: [Place?] }
-            let agent: [String: Look]
-            let turn: Double
-            let ladder: [[String]]
-            let data: String
-            let flash: [String: Double]
-            let spheres: [Handle]
-            let points: [Points]
-            let glyphs: [GlyphCase]
-            let frames: [Frame]
-            let shades: [Shades]
-            let arcs: [Arcs]
-            let ring: [Ring]
-        }
-        let palettes: [String: Palette]
-        let levels: [String: [Part]]
-        let sizes: [Size]
         let states: [State]
         let motion: Motion
-        let sphere: Spheres
     }
 
     /// An agent's mark, the Grille (core's agent-mark.ts): its palette, its pale and grey forms, its forms and times, each
@@ -557,8 +413,6 @@ struct Vectors: Decodable {
     let orb: OrbCases
     /// An agent's mark, the Grille (core's agent-mark.ts): AgentMarkTests.swift.
     let marks: Marks
-    /// The orbs as fields (the PWA's lib/field.ts and lib/field-orb.ts): FieldTests.swift.
-    let field: FieldCases
     /// The work by attention (the PWA's lib/work.ts): WorkTests.swift.
     let work: WorkCases
     /// A task's work folded, its gates, review, live line, proof and cost (the PWA's lib/steps.ts): StepsTests.swift.

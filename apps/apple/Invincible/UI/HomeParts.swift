@@ -72,7 +72,7 @@ private struct AgentChip: View {
     var body: some View {
         let word = AgentStrip.word(row)
         VStack(spacing: Space.s1) {
-            AgentFace(id: row.id, profile: avatar, size: 44)
+            AgentFace(id: row.id, profile: avatar, size: 44, mood: Orb.Mood(row.standing), still: true)
             Text(row.name)
                 .font(.footnote.weight(.semibold))
                 .lineLimit(1)

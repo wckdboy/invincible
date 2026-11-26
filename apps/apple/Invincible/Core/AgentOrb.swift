@@ -3,8 +3,8 @@ import Foundation
 /*
  * An agent as an orb (core's avatar.ts, held to it by the vectors; your word, 25 November 2026: "drop the agent avatars,
  * and just use custom/procedurally generated colored particle orbs"): a sphere of glyphs in a colour of its own, the one
- * you chose for it or one of 24 its handle picks, the same on every device, moving as its work goes. Its colours are
- * here; its sphere is OrbSphere.swift's, and AgentFace draws it. What an agent is doing (core's taskStep and
+ * you chose for it or one of 24 its handle picks, the same on every device. Its colours are here, read now by the Live
+ * Activity alone (an agent's face is its mark: AgentMark.swift). What an agent is doing (core's taskStep and
  * avatarExpression) is here too: its orb's mood comes from it (Orb.Mood(expression:)). A look from the drawings (a saved
  * profile of v 1) colours nothing any more.
  */
@@ -68,9 +68,9 @@ enum AgentOrb {
     }
 
     /// An agent's orb's colours (core's agentColors): the colour you chose for it, else the tint its handle picks (its
-    /// FNV-1a seed, core's handleSeed, which is Orb.seed), and the second colour its seed picks a few tints on.
+    /// FNV-1a seed, core's handleSeed, which is AgentMark.seed), and the second colour its seed picks a few tints on.
     static func colors(id: String, profile: JSONValue?) -> Colors {
-        let seed = Orb.seed(id)
+        let seed = AgentMark.seed(id)
         let chosen = chosenColor(profile)
         let at = chosen.map(nearestTint) ?? Int(seed % UInt32(tints.count))
         let tint = chosen ?? tints[at]

@@ -30,7 +30,7 @@ struct AgentOrbTests {
 
     @Test func aHandlesSeedIsFNV1aOverItsUTF16AsCoresIs() {
         #expect(!orbs.seeds.isEmpty)
-        for item in orbs.seeds { #expect(Orb.seed(item.id) == item.seed, "\(item.id)") }
+        for item in orbs.seeds { #expect(AgentMark.seed(item.id) == item.seed, "\(item.id)") }
     }
 
     @Test func coloursBlendInWholeChannelsAndFindTheirNearestTintAsCoresDo() {

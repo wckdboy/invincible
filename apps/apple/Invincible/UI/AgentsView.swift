@@ -361,13 +361,14 @@ private struct CardGrid<Content: View>: View {
     }
 }
 
-/// A face among the agents (the PWA's seat; 26 November 2026): its orb, still, as every orb in a row is ("i dont want them
-/// to be too visually distractin"), in the room its ring took, so a row keeps its height. Where it stands is said beside it,
-/// in a chip's words and colour, never by a ring round its face.
+/// A face among the agents (the PWA's seat; 26 November 2026): its mark, still, as every mark in a row is ("i dont want
+/// them to be too visually distractin"), in the room its ring took, so a row keeps its height. Where it stands is in its
+/// mark's shape (the top slat in ink when it needs you, the bottom one red and loose when it failed, pale while queued,
+/// grey while paused) and said beside it in a chip's words, never by a ring round its face.
 struct SeatFace: View {
     /// An agent's handle, or `primary`.
     let id: String
-    /// Its saved avatar: the colour you chose for its orb, if you did.
+    /// Its saved avatar: its mark.
     var profile: JSONValue? = nil
     let size: CGFloat
     let standing: Standing
@@ -377,10 +378,10 @@ struct SeatFace: View {
         let ring = size >= Metrics.cardFace ? Metrics.cardRing : Metrics.rowRing
         Group {
             if id == "primary" {
-                // The primary itself is its orb, its beam through it.
+                // The primary itself is the I-beam.
                 PrimaryOrb(size: size + 2 * ring, tone: Orb.Tone(standing))
             } else {
-                AgentFace(id: id, profile: profile, size: size)
+                AgentFace(id: id, profile: profile, size: size, mood: Orb.Mood(standing), still: true)
                     .padding(ring)
             }
         }

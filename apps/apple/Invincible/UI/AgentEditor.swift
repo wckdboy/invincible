@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// An agent, new or changed (the PWA's agent form): its orb's colour, its name and handle, its job, its repository, the
+/// An agent, new or changed (the PWA's agent form): its mark's colour, its name and handle, its job, its repository, the
 /// harness and model role it works with, and its day's allowance. The node checks it all again when it is saved.
 struct AgentEditor: View {
     let session: Session
@@ -12,7 +12,8 @@ struct AgentEditor: View {
     @State private var handle: String
     /// A handle you typed yourself stops following the name.
     @State private var handleTyped: Bool
-    /// The colour you chose for its orb (one of the 24, or one it was given elsewhere); nil: the one its handle gives it.
+    /// The colour you chose here for its mark (one of the eight, as its light form); nil: what it has, or (touched) its
+    /// node's choice again.
     @State private var chosenColor: String?
     /// Whether its colour was chosen here: untouched, what is saved stays as it is (the PWA's avatarEditor).
     @State private var colorTouched = false
@@ -43,7 +44,6 @@ struct AgentEditor: View {
         _name = State(initialValue: existing?.name ?? "")
         _handle = State(initialValue: existing?.id ?? "")
         _handleTyped = State(initialValue: existing != nil)
-        _chosenColor = State(initialValue: AgentOrb.chosenColor(existing?.avatar))
         _instructions = State(initialValue: existing?.instructions ?? "")
         _repository = State(initialValue: existing?.repository ?? "")
         _harness = State(initialValue: existing?.harness ?? "native")
@@ -57,6 +57,27 @@ struct AgentEditor: View {
     }
 
     private var taken: [String] { (session.team?.agents.map(\.id) ?? []) + (session.team?.removed?.map(\.id) ?? []) }
+
+    /// Its mark as it will be once saved, as its node gives one (AgentMark.assign: after the marks the others wear, which
+    /// is all that counts): untouched, the one it has (a new agent, the one its node will give it); a colour you chose,
+    /// that colour in its own form; its node's choice again, the one its node gives it now.
+    private var mark: AgentMark {
+        let id = handle.isEmpty ? "agent" : handle
+        let others = (session.team?.agents ?? []).filter { $0.id != id }.map { AgentMark.of(id: $0.id, profile: $0.avatar) }
+        if let existing {
+            let now = AgentMark.of(id: existing.id, profile: existing.avatar)
+            if !colorTouched { return now }
+            if let chosenColor { return AgentMark(color: AgentMark.snap(chosenColor), form: now.form) }
+        }
+        return AgentMark.assign(id, after: others, chosen: colorTouched ? chosenColor : nil)
+    }
+
+    /// What its mark's colour is, in words.
+    private var colorNote: String {
+        if colorTouched, chosenColor != nil { return "The colour you chose. Its form stays its own." }
+        if existing != nil, !colorTouched { return "The colour its node gave it. Choose another and its form stays its own." }
+        return "Its node gives it a colour no other agent has, while one is free, and a form of its own."
+    }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     /// What stops it being saved, in words; nil: nothing.
@@ -79,7 +100,7 @@ struct AgentEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    OrbColorPicker(handle: handle, chosen: chosenColor) { color in
+                    MarkColorPicker(handle: handle, mark: mark, note: colorNote) { color in
                         chosenColor = color
                         colorTouched = true
                     }
@@ -258,7 +279,7 @@ struct AgentEditor: View {
         var input = AgentInput(
             id: handle, name: trimmedName, instructions: instructions, repository: address.isEmpty ? nil : address,
             harness: harness, role: role, enabled: enabled, dailyTurns: dailyTurns,
-            // Its colour, when you chose here: the one you chose, or its handle's again. Untouched, it is left as it is.
+            // Its colour, when you chose here: the one you chose, or its node's choice again. Untouched, it is left as it is.
             avatar: colorTouched ? (chosenColor.map(AgentInput.OrbColor.chosen) ?? .handle) : nil
         )
         // Its own models, to a node that knows them: none is its role's again.
@@ -284,54 +305,47 @@ struct AgentEditor: View {
     }
 }
 
-/// An agent's colour as you choose it (the PWA's avatarEditor): its orb as it will be, the 24 colours to choose from, each
-/// named, the one you chose ringed in the ink, and the one its handle gives it.
-struct OrbColorPicker: View {
-    /// Its handle: its orb's own sphere, and the colour it gives it until you choose one.
+/// An agent's colour as you choose it (the PWA's avatarEditor): its mark as it will be, the palette's eight colours to
+/// choose from, each named, the one it will wear ringed in the ink, and its node's choice.
+struct MarkColorPicker: View {
+    /// Its handle: its mark's seed.
     let handle: String
-    /// The colour you chose (one of the 24, or one it was given elsewhere); nil: its handle's.
-    let chosen: String?
-    /// A colour chosen, or (nil) its handle's again.
+    /// Its mark as it will be once saved.
+    let mark: AgentMark
+    /// What its colour is, in words.
+    let note: String
+    /// A colour chosen (one of the eight, as its light form), or (nil) its node's choice again.
     let choose: (String?) -> Void
-
-    private var id: String { handle.isEmpty ? "agent" : handle }
-
-    /// What its orb's colour is, in words.
-    private var note: String {
-        guard chosen == nil else { return "The colour you chose." }
-        let tint = AgentOrb.colors(id: id, profile: nil).tint
-        return "Its handle gives it \(AgentOrb.tints.firstIndex(of: tint).map { AgentOrb.tintNames[$0] } ?? "this colour"): change its handle and its colour comes with it, until you choose one."
-    }
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(spacing: Space.s3) {
             HStack(spacing: Space.s4) {
-                // Its orb as it will be: the colour you chose (as its saved avatar would say it), or its handle's.
-                WorkerFace(id: id, profile: chosen.map { .object(["v": .number(2), "color": .string($0)]) }, size: 96, expression: "idle")
+                AgentMarkView(mark: mark, seed: AgentMark.seed(handle.isEmpty ? "agent" : handle), size: 96)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Space.s2) {
                     Text(note).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button("Its handle's colour") { choose(nil) }
+                    Button("Its node's choice") { choose(nil) }
                         .buttonStyle(.borderless)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: Metrics.touch), spacing: Space.s1)], spacing: Space.s1) {
-                ForEach(AgentOrb.tints.indices, id: \.self) { n in
-                    let tint = AgentOrb.tints[n]
-                    Button { choose(tint) } label: {
+                ForEach(AgentMark.palette.indices, id: \.self) { n in
+                    let hue = AgentMark.palette[n]
+                    Button { choose(hue.forms.light) } label: {
                         Circle()
-                            .fill(Color(hex: tint))
-                            .overlay(Circle().strokeBorder(.black.opacity(0.14), lineWidth: 1))
+                            .fill(Color(hex: hue.forms.on(scheme == .dark ? .dark : .light)))
                             .frame(width: 30, height: 30)
                             .padding(Space.s1)
-                            .overlay(Circle().strokeBorder(chosen == tint ? Color.ink : .clear, lineWidth: 2))
+                            .overlay(Circle().strokeBorder(mark.color == n ? Color.ink : .clear, lineWidth: 2))
                             .frame(width: Metrics.touch, height: Metrics.touch)
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(AgentOrb.tintNames[n])
-                    .accessibilityAddTraits(chosen == tint ? .isSelected : [])
-                    .help(AgentOrb.tintNames[n])
+                    .accessibilityLabel(hue.name)
+                    .accessibilityAddTraits(mark.color == n ? .isSelected : [])
+                    .help(hue.name)
                 }
             }
         }

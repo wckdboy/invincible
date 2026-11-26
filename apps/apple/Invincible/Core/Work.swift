@@ -140,10 +140,10 @@ enum Work {
         let delta = now - ms, future = delta < 0, gone = abs(delta)
         func wrap(_ s: String) -> String { future ? "in \(s)" : "\(s) ago" }
         if gone < 45_000 { return future ? "in a moment" : "just now" }
-        if gone < hour { return wrap("\(max(1, Int(FieldOrb.jsRound(gone / minute)))) min") }
-        if gone < day { return wrap("\(Int(FieldOrb.jsRound(gone / hour))) h") }
+        if gone < hour { return wrap("\(max(1, Int((gone / minute).jsRounded))) min") }
+        if gone < day { return wrap("\(Int((gone / hour).jsRounded)) h") }
         let date = Date(timeIntervalSince1970: ms / 1000), today = Date(timeIntervalSince1970: now / 1000)
-        if future { return gone < 7 * day ? "in \(Int(FieldOrb.jsRound(gone / day))) d" : shortDate(date, today, calendar, locale) }
+        if future { return gone < 7 * day ? "in \(Int((gone / day).jsRounded)) d" : shortDate(date, today, calendar, locale) }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: today), calendar.isDate(date, inSameDayAs: yesterday) { return "yesterday" }
         if gone < 6 * day { return date.formatted(Date.FormatStyle(locale: locale, calendar: calendar).weekday(.abbreviated)) }
         return shortDate(date, today, calendar, locale)

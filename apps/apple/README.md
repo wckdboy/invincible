@@ -8,7 +8,7 @@ reads these sources too.
 
 On an iPhone it opens on Home, with no tab bar (the owner's ruling; X2's "Home, a bar and a drawer"): the I-beam (a tap
 opens the drawer), the primary's name and one line of how things stand (a tap opens its conversation); the agents in a
-strip, their orbs the only colour on the page, each a tap from its page; what needs you, decisions only, three at most,
+strip, their marks the only colour on the page, each a tap from its page; what needs you, decisions only, three at most,
 each with its one answer in place and the rest a swipe away; the work by proof (Working, Proven, Failed, the rest of
 what's done folded), a lazy list however many tasks there are; and at its foot the bar: search and ask, the primary's
 message box, a task to give (`Invincible/UI/HomeView.swift`, `HomeParts.swift`). The drawer (`UI/Drawer.swift`: the
@@ -49,11 +49,13 @@ by the parity vectors. The app's words about itself (macOS's permissions, a devi
 **The look** is monochrome (the owner's word, 26 November 2026): black, white and greys, bold type, the system's own
 surfaces; colour is kept for the agents, so they are told apart at a glance, and red for what went wrong, nothing else.
 The primary is shown by the I-beam in one ink (`UI/Mark.swift`, a shape held to `scripts/mark.ts` by `MarkTests`), never
-an orb and never moving. Each agent's orb is a field, lines of force round a dark core (`Core/Field.swift`,
-`Core/FieldOrb.swift`, drawn by `UI/FieldOrbView.swift`), in the colour you chose for it or one of the 24 its handle picks
-(`Core/AgentOrb.swift`, core's `avatar.ts`), held to the web app's `lib/field.ts` and `lib/field-orb.ts` by the vectors'
-`field` section. Where orbs are many they are still; the one you are looking at moves only while its agent works, and none
-moves where the device asks for reduced motion. A state is a still dot beside its word; a task's verdict says what its
+a mark and never moving. Each agent is its mark, the Grille (O2, 26 November 2026): a disc in its own colour, one of
+eight, cut into slats by two or three slots at its own angle (`Core/AgentMark.swift`, drawn by `UI/AgentMarkView.swift`),
+as its node gave it, or, from a node before the marks, the colour chosen for its orb snapped to the eight; held to core's
+`agent-mark.ts` by the vectors' `marks` to the last bit (its sines and cosines too, from arithmetic alone). Its state is in
+its shape: its top slat in ink when it asks you, its bottom one red and knocked loose when its work failed, pale while
+queued, grey while paused. Rows are still; the one you are looking at moves only while its agent works or asks you, and
+once as it arrives at done or failed; none moves where the device asks for reduced motion, and nothing is drawn at rest. A state is a still dot beside its word; a task's verdict says what its
 proof allows (Proven, Reviewed, not proven, Failed · gate 2), never "Verified" above a warning that its gates proved nothing.
 
 Needs Xcode 27 (Swift 6, the iOS 27 and macOS 27 SDKs) and [XcodeGen](https://github.com/yonaskolb/XcodeGen). It runs on

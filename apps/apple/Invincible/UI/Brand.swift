@@ -75,15 +75,14 @@ extension Color {
     static let onAccent = Color(.onAccent)
 }
 
-/// A face as it stands alone, beside its words, in a header or a pick list (the PWA's workerAvatar; your word, 25 November
-/// 2026: "drop the agent avatars, and just use custom/procedurally generated colored particle orbs"): an agent's orb
-/// (AgentFace), or the primary's own (`primary`), moving as what it is doing does (`expression`, as AgentOrb.expression
-/// says it), on its own course (`face:<handle>`, its `primary:face`). Without an expression it is still: a speaker in a
-/// conversation's history keeps no state of its own. Decorative beside its name; named (`label`) where it stands alone.
+/// A face as it stands alone, beside its words, in a header or a pick list (the PWA's workerAvatar): an agent's mark
+/// (AgentFace), or the primary's I-beam (`primary`), moving as what it is doing does (`expression`, as AgentOrb.expression
+/// says it). Without an expression it is still: a speaker in a conversation's history keeps no state of its own.
+/// Decorative beside its name; named (`label`) where it stands alone.
 struct WorkerFace: View {
     /// An agent's handle, or `primary` for Invincible itself (a handle no agent can have).
     let id: String
-    /// Its saved avatar: a colour you chose for it (core's OrbProfile); anything else is its handle's colour.
+    /// Its saved avatar: its mark (AgentMark.of).
     var profile: JSONValue? = nil
     var size: CGFloat = 40
     /// What it is doing (AgentOrb.expression); nil: still.

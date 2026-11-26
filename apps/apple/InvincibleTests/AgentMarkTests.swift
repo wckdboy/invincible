@@ -6,7 +6,8 @@ import Testing
 
 /// An agent's mark, the Grille (O2, 26 November 2026), as core makes it (`agent-mark.ts`, through the vectors' `marks`):
 /// its palette and its pale and grey forms, its forms and times, each expression's state, the marks a node gives, the snap
-/// of a colour you pick, a saved mark read strictly, its sines and cosines and its slats at given moments to the last bit.
+/// of a colour you pick, a saved mark read strictly, its sines and cosines and its slats at given moments to the last bit;
+/// and the mark as it is drawn, its state in its shape.
 struct AgentMarkTests {
     let marks = Vectors.shared.marks
 
@@ -37,6 +38,8 @@ struct AgentMarkTests {
         #expect(marks.stateOf.count == 11)
         for item in marks.stateOf {
             #expect(MarkState(expression: item.expression).rawValue == item.state, "\(item.expression)")
+            // A face given its mood shows the same: waiting on you is its `needs`.
+            #expect(MarkState(Orb.Mood(expression: item.expression)).rawValue == item.state, "\(item.expression)")
         }
         #expect(MarkState(expression: "dancing") == .idle && MarkState(expression: nil) == .idle)
     }
@@ -148,5 +151,128 @@ struct AgentMarkTests {
         // Still, what asks you holds its top slat out, and what failed its bottom one loose.
         #expect(still(.needs).slats.first?.slide == 5 && still(.needs).slats.first?.key == true)
         #expect(still(.failed).slats.last?.drop == 8 && still(.failed).slats.last?.turn == 10)
+    }
+}
+
+/// The mark as it is drawn (AgentMarkView): its slats in its colour with the slots between them clear, nothing outside its
+/// disc, and its state in its shape: the top slat in the ink when it asks you, the bottom one red and knocked loose below
+/// the disc when it failed, pale while queued, grey while paused.
+@MainActor struct AgentMarkDrawingTests {
+    /// Builder's mark in the vectors: Amber, two slots at -27 degrees.
+    let mark = AgentMark(color: 0, form: 1)
+
+    @Test func itsSlatsAreItsColourAndItsSlotsAreClear() throws {
+        for theme in [AgentMark.Theme.light, .dark] {
+            let picture = try #require(Self.pixels(mark, .idle, theme))
+            let geometry = AgentMark.geometry(mark, seed: 0, state: .idle, size: 100, t: nil, since: nil)
+            // The middle of each slat is its colour; the middle of each slot is clear.
+            for slat in geometry.slats {
+                #expect(Self.near(Self.at(picture, Self.point(geometry, slide: slat.slide, across: (slat.from + slat.to) / 2)), AgentMark.palette[0].forms.on(theme)), "\(theme) slat \(slat.from)")
+            }
+            for (upper, lower) in zip(geometry.slats, geometry.slats.dropFirst()) {
+                #expect(Self.at(picture, Self.point(geometry, slide: 0, across: (upper.to + lower.from) / 2)).alpha < 8, "\(theme) slot \(upper.to)")
+            }
+            // Nothing outside its disc (its radius 44 of the box's 100, and a pixel's softening).
+            #expect(Self.outside(picture, beyond: 45.5) == 0, "\(theme)")
+        }
+    }
+
+    @Test func itsStateIsInItsShape() throws {
+        // Asks you: its top slat in the ink, held out along its slot.
+        for theme in [AgentMark.Theme.light, .dark] {
+            let picture = try #require(Self.pixels(mark, .needs, theme))
+            let geometry = AgentMark.geometry(mark, seed: 0, state: .needs, size: 100, t: nil, since: nil)
+            let top = try #require(geometry.slats.first)
+            #expect(Self.near(Self.at(picture, Self.point(geometry, slide: top.slide, across: (top.from + top.to) / 2)), AgentMark.ink.on(theme)), "\(theme)")
+        }
+        // Failed: its bottom slat red, and knocked loose below the disc; nothing of it there while it is well.
+        let failed = try #require(Self.pixels(mark, .failed, .light))
+        let idle = try #require(Self.pixels(mark, .idle, .light))
+        #expect(Self.below(failed, AgentMark.red.light) > 20)
+        #expect(Self.below(idle, AgentMark.red.light) == 0)
+        // Queued is pale, paused grey: the middle slat in each.
+        let geometry = AgentMark.geometry(mark, seed: 0, state: .idle, size: 100, t: nil, since: nil)
+        let middle = Self.point(geometry, slide: 0, across: 0)
+        #expect(Self.near(Self.at(try #require(Self.pixels(mark, .queued, .light)), middle), AgentMark.queued[0].light))
+        #expect(Self.near(Self.at(try #require(Self.pixels(mark, .paused, .dark)), middle), AgentMark.paused.dark))
+    }
+
+    @Test func anAgentsFaceIsItsMark() throws {
+        // AgentFace draws the mark its avatar says: the same pixels as the mark itself.
+        let profile = JSONValue.object(["v": .number(3), "color": .string("#c88200"), "form": .number(1)])
+        let face = try #require(Self.render(AgentFace(id: "builder", profile: profile, size: 100).environment(\.colorScheme, .light)))
+        let drawn = try #require(Self.pixels(mark, .idle, .light))
+        #expect(face == drawn)
+    }
+
+    // MARK: Pixels
+
+    struct Pixel { let r: Int; let g: Int; let b: Int; let alpha: Int }
+    /// A picture 100 points square at twice its size, and its width in pixels.
+    struct Picture: Equatable { let bytes: [UInt8]; let width: Int }
+
+    static func pixels(_ mark: AgentMark, _ state: MarkState, _ theme: AgentMark.Theme) -> Picture? {
+        render(AgentMarkView(mark: mark, seed: 0, state: state, size: 100).environment(\.colorScheme, theme == .dark ? .dark : .light))
+    }
+
+    /// A view's pixels as SwiftUI draws it alone, 100 points square at twice its size: RGBA, eight bits each.
+    static func render(_ view: some View) -> Picture? {
+        let renderer = ImageRenderer(content: view.frame(width: 100, height: 100))
+        renderer.scale = 2
+        guard let image = renderer.cgImage, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        let (width, height) = (image.width, image.height)
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return drawn ? Picture(bytes: bytes, width: width) : nil
+    }
+
+    /// A point of the 100-unit box: `across` its slots (down, before turning) and `slide` along them, turned to its angle.
+    static func point(_ geometry: AgentMark.Geometry, slide: Double, across: Double) -> CGPoint {
+        let turned = geometry.angle * Double.pi / 180
+        return CGPoint(x: 50 + slide * cos(turned) - across * sin(turned), y: 50 + slide * sin(turned) + across * cos(turned))
+    }
+
+    /// The pixel at a point of the box (un-premultiplied).
+    static func at(_ picture: Picture, _ point: CGPoint) -> Pixel {
+        let scale = Double(picture.width) / 100
+        let (x, y) = (Int(point.x * scale), Int(point.y * scale))
+        let i = (y * picture.width + x) * 4
+        let alpha = Int(picture.bytes[i + 3])
+        let plain = { (c: UInt8) in alpha == 0 ? 0 : min(255, Int(c) * 255 / alpha) }
+        return Pixel(r: plain(picture.bytes[i]), g: plain(picture.bytes[i + 1]), b: plain(picture.bytes[i + 2]), alpha: alpha)
+    }
+
+    /// Whether a pixel is a colour ("#rrggbb"), solid, within a few levels.
+    static func near(_ pixel: Pixel, _ hex: String) -> Bool {
+        let value = Int(hex.dropFirst(), radix: 16) ?? -1
+        let (r, g, b) = ((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff)
+        return pixel.alpha > 250 && abs(pixel.r - r) <= 3 && abs(pixel.g - g) <= 3 && abs(pixel.b - b) <= 3
+    }
+
+    /// How many pixels more than faintly there lie further than `beyond` units from the box's middle.
+    static func outside(_ picture: Picture, beyond: Double) -> Int {
+        let scale = Double(picture.width) / 100
+        var count = 0
+        for y in 0..<picture.width {
+            for x in 0..<picture.width where picture.bytes[(y * picture.width + x) * 4 + 3] > 16 {
+                let (dx, dy) = ((Double(x) + 0.5) / scale - 50, (Double(y) + 0.5) / scale - 50)
+                if (dx * dx + dy * dy).squareRoot() > beyond { count += 1 }
+            }
+        }
+        return count
+    }
+
+    /// How many pixels of a colour lie below the disc (more than 45 units under the box's middle).
+    static func below(_ picture: Picture, _ hex: String) -> Int {
+        let scale = Double(picture.width) / 100
+        var count = 0
+        for y in Int(95 * scale)..<picture.width {
+            for x in 0..<picture.width where near(at(picture, CGPoint(x: (Double(x) + 0.5) / scale, y: (Double(y) + 0.5) / scale)), hex) { count += 1 }
+        }
+        return count
     }
 }

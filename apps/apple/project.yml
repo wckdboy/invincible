@@ -32,7 +32,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      # (The agents are orbs, drawn in code: no drawings of them are bundled.)
+      # (The agents are marks, drawn in code: no drawings of them are bundled.)
       - path: Invincible
         excludes: ["Mac/**"]
     info:

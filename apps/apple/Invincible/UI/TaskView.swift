@@ -405,8 +405,9 @@ private struct TaskThreadView: View {
             let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s1)) : AnyLayout(HStackLayout(spacing: Space.s2))
             layout {
                 HStack(spacing: 6) {
-                    // Its agent's orb: moving while it works (the orb in focus), still otherwise.
-                    AgentFace(id: task.assignee, profile: agent?.avatar, size: 20, mood: running ? .working : nil, key: "task:\(task.assignee)")
+                    // Its agent's mark, the one in focus, in how the task stands: its slats slide while it works; as the task
+                    // ends it settles (done) or its bottom slat drops (failed), once, then it is still.
+                    AgentFace(id: task.assignee, profile: agent?.avatar, size: 20, mood: Orb.Mood(task: task.status, verified: task.verified), key: "task:\(task.assignee)")
                     Text(name).fontWeight(.semibold).foregroundStyle(.primary)
                 }
                 standing(running: running)

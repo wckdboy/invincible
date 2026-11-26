@@ -28,12 +28,13 @@ struct AgentInput: Encodable, Sendable, Equatable {
     var sendKeys = false
     var enabled: Bool
     var dailyTurns: Int
-    /// Its orb's colour, as you chose it in its form (the PWA's avatarEditor): one of yours, or back to the one its handle
-    /// gives it; nil, untouched: left as it is, and not sent (a new agent takes its handle's).
+    /// Its mark's colour, as you chose it in its form (the PWA's avatarEditor): one of the eight, or its node's choice
+    /// again; nil, untouched: left as it is, and not sent (a new agent takes the one its node gives it).
     var avatar: OrbColor? = nil
 
-    /// A colour you chose for an agent's orb, sent as core's OrbProfile (`{ v: 2, color }`); or its handle's again, sent as
-    /// null, which the node keeps as no colour chosen.
+    /// A colour you chose for an agent's mark, sent as core's OrbProfile (`{ v: 2, color }`: a node with marks snaps it to
+    /// the eight and keeps the agent's form, one from before them keeps it as it is); or its node's choice again, sent as
+    /// null.
     enum OrbColor: Equatable, Sendable {
         case chosen(String)
         case handle
