@@ -165,6 +165,8 @@ export class Handoffs implements FabricTools {
   private readonly calls = new Map<string, { call: Call; renew: ReturnType<typeof setInterval> | null }>();
   /** Here, as the runner: the runs under way, by hand-off and by task. */
   private readonly runs = new Map<string, Running>();
+  /** Here, as the runner: each giving node's hand-offs waiting to be given, one at a time, and the last of them. */
+  private readonly giving = new Map<string, { waiting: number; last: Promise<unknown> }>();
   /** Stops waiting for the runner's answer, cleared when the node stops. */
   private readonly stopTimers = new Set<ReturnType<typeof setTimeout>>();
   /** The node is stopping: nothing more is written or followed (its database closes after this). */
@@ -564,22 +566,41 @@ export class Handoffs implements FabricTools {
     if (!this.team) return inv.fail(1, "this node has no agents to give it to");
     const self = this.deps.identity.id;
     const by = handedBy(caller.id);
-    const counts = this.team.handed(by, this.now() - HANDOFF_DAY_MS);
-    if (counts.atOnce >= HANDED_AT_ONCE) return inv.fail(6, `${caller.name} has ${HANDED_AT_ONCE} tasks handed here at once already, waiting for you, queued or running: let some end first`, true);
-    // Your grant for this pair, as the ledger holds it now: within it, taken at once; beyond it, written down for you.
-    const terms = readHandoffTerms(this.deps.store.handoffGrant(caller.id, self)?.terms ?? null);
-    const under = handoffUnder(terms, { agent: args.agent ?? null, tools: args.tools, ...(args.budgetUsd !== undefined ? { budgetUsd: args.budgetUsd } : {}) }, counts.given);
-    const how: HandHow = "budgetUsd" in under ? { by, budgetUsd: under.budgetUsd, ...(terms?.agents ? { agents: terms.agents } : {}) } : { by, propose: under.beyond };
+    const team = this.team;
+    const busy = () => inv.fail(6, `${caller.name} has ${HANDED_AT_ONCE} tasks handed here at once already, waiting for you, queued or running: let some end first`, true);
+    // One at a time for each giving node: what it has open and what your grant has given it today are read, it is given
+    // to an agent, and its task is written, before that node's next hand-off is looked at. (The give awaits, and every
+    // call of a burst would otherwise read "nothing open, nothing given".) Those waiting their turn count as open from
+    // the moment they arrive, so a burst past the limit is refused at once rather than kept waiting.
+    const line = this.giving.get(by) ?? { waiting: 0, last: Promise.resolve() };
+    if (team.handed(by, this.now() - HANDOFF_DAY_MS).atOnce + line.waiting >= HANDED_AT_ONCE) return busy();
+    line.waiting++;
+    this.giving.set(by, line);
+    const turn = line.last.then(async () => {
+      if (inv.signal.aborted) throw new Error("its call ended before its turn came");
+      const counts = team.handed(by, this.now() - HANDOFF_DAY_MS);
+      if (counts.atOnce >= HANDED_AT_ONCE) return null;
+      // Your grant for this pair, as the ledger holds it now: within it, taken at once; beyond it, written down for you.
+      const terms = readHandoffTerms(this.deps.store.handoffGrant(caller.id, self)?.terms ?? null);
+      const under = handoffUnder(terms, { agent: args.agent ?? null, tools: args.tools, ...(args.budgetUsd !== undefined ? { budgetUsd: args.budgetUsd } : {}) }, counts.given);
+      const how: HandHow = "budgetUsd" in under ? { by, budgetUsd: under.budgetUsd, ...(terms?.agents ? { agents: terms.agents } : {}) } : { by, propose: under.beyond };
+      return { how, given: await team.give(args, inv.signal, how) };
+    });
+    line.last = turn.catch(() => {});
+    let taken: { how: HandHow; given: { task: TeamTask; agent: { id: string; name: string } } } | null;
+    try {
+      taken = await turn;
+    } catch (error) {
+      return inv.fail(8, `it couldn't be given to an agent here: ${String((error as Error).message ?? error).slice(0, 400)}`);
+    } finally {
+      // (Its task is written by now, or it was never given: the agents' own count holds it from here, or nothing does.)
+      if (--line.waiting === 0 && this.giving.get(by) === line) this.giving.delete(by);
+    }
+    if (!taken) return busy();
+    const { how, given } = taken;
     // The run's own key: made here for this run alone, held in memory, destroyed when it ends.
     const seed = new Uint8Array(randomBytes(32));
     const did = didKeyOfEd25519(signingPublicKey(seed));
-    let given: { task: TeamTask; agent: { id: string; name: string } };
-    try {
-      given = await this.team.give(args, inv.signal, how);
-    } catch (error) {
-      seed.fill(0);
-      return inv.fail(8, `it couldn't be given to an agent here: ${String((error as Error).message ?? error).slice(0, 400)}`);
-    }
     // A revocation that landed while it was being given (the node, or your grant it was taken under): it ends now.
     const still = this.deps.store.activeDevice(caller.id);
     const lost = !still || still.role !== "full" ? "the node that handed it over was revoked" : "budgetUsd" in how && !this.deps.store.handoffGrant(caller.id, self) ? "your grant for it was revoked as it was given" : null;
@@ -619,8 +640,11 @@ export class Handoffs implements FabricTools {
     })().catch(() => {
       // Its input ended with its call: what the run does then is the call's end, below.
     });
-    // A call that ended (the giver cancelled, went away, or its link did): the work stops here too.
-    inv.signal.addEventListener("abort", () => this.team?.stop(run.task, "The node that handed it over stopped following it: its call ended."), { once: true });
+    // A call that ended (the giver cancelled, went away, or its link did): the work stops here too, also when it ended
+    // as its task was being given.
+    const unfollowed = () => this.team?.stop(run.task, "The node that handed it over stopped following it: its call ended.");
+    if (inv.signal.aborted) unfollowed();
+    else inv.signal.addEventListener("abort", unfollowed, { once: true });
     let after = 0;
     let status = "";
     try {
