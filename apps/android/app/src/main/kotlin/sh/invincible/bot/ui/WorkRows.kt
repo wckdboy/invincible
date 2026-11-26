@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.AgentState
+import sh.invincible.bot.core.Steps
 import sh.invincible.bot.core.Work
 
 /*
@@ -88,7 +89,7 @@ fun rememberWork(app: AppModel): Work.Attended? {
 
 /** A row's words, for a screen reader: what it is, where, how it stands and who is on it. */
 fun rowLabel(row: Work.Row): String =
-    listOfNotNull(row.title, row.project.name, row.word, "${row.agentName}${if (row.detail.isNotEmpty()) ": ${row.detail}" else ""}", row.age?.let { "$it ago" }).joinToString(", ")
+    listOfNotNull(row.title, row.project.name, row.verdict?.word ?: row.word, "${row.agentName}${if (row.detail.isNotEmpty()) ": ${row.detail}" else ""}", row.age?.let { "$it ago" }).joinToString(", ")
 
 /** A project's badge: its letter on a small tile (other work's is an empty, dashed one). */
 @Composable
@@ -121,14 +122,23 @@ fun ProjectBadge(project: Work.Project, size: Dp = 16.dp) {
     }
 }
 
-/** How a row stands in a word, in its state's colour (and verified work with its check): never colour alone. */
+/**
+ * How a row stands in a word: its word, or once it has ended its verdict as its proof allows (Proven with a tick in the
+ * ink, Reviewed, not proven in grey, Failed · gate 2 in red), never colour alone.
+ */
 @Composable
 fun StateWord(row: Work.Row) {
     val brand = LocalBrand.current
-    val color = brand.of(row.tone) ?: MaterialTheme.colorScheme.onSurfaceVariant
+    val verdict = row.verdict
+    val color = when {
+        verdict == null -> brand.of(row.tone) ?: MaterialTheme.colorScheme.onSurfaceVariant
+        verdict.verdict == Steps.Verdict.PROVEN -> brand.ink
+        verdict.verdict.wrong -> brand.danger
+        else -> brand.quiet
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        if (row.state == AgentState.VERIFIED) Icon(CheckIcon, null, Modifier.size(14.dp), tint = color)
-        Text(row.word, style = Type.word, color = color, maxLines = 1)
+        if (verdict?.verdict == Steps.Verdict.PROVEN) Icon(CheckIcon, null, Modifier.size(14.dp), tint = color)
+        Text(verdict?.word ?: row.word, style = Type.word, color = color, maxLines = 1)
     }
 }
 
@@ -167,7 +177,8 @@ fun WorkRow(row: Work.Row, onOpen: () -> Unit, face: Dp = 18.dp, current: Boolea
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             AgentOrb(row.agent, row.avatar, face)
             Text(row.agentName, style = Type.meta, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (calm) 0.72f else 0.86f), maxLines = 1)
-            if (row.detail.isNotEmpty()) Text(row.detail, style = if (row.mono) Type.mono else Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            // (Not what its word says already: "Gave up", then "gave up".)
+            if (row.detail.isNotEmpty() && !row.detail.equals(row.verdict?.word ?: row.word, ignoreCase = true)) Text(row.detail, style = if (row.mono) Type.mono else Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         }
     }
 }

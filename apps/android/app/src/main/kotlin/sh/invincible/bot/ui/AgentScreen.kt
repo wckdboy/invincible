@@ -43,6 +43,8 @@ import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.AgentState
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Roster
+import sh.invincible.bot.core.Steps
+import sh.invincible.bot.core.TeamTask
 import sh.invincible.bot.core.bool
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.int
@@ -275,8 +277,10 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
         "done" -> if (verified) AgentState.VERIFIED else null
         else -> null
     }
-    val word = when (status) {
-        "done" -> if (verified) "Verified" else "Done"
+    // Once it has ended, its verdict as its proof allows (never "Verified" where its gates proved nothing).
+    val said = remember(t) { TeamTask.of(t).let { Steps.verdict(it.status, it.verified, it.error, it.record, Steps.facts(it.record)) } }
+    val word = said?.word ?: when (status) {
+        "done" -> "Done"
         "proposed" -> "Proposed"
         "stopped" -> "Stopped"
         "interrupted" -> "Interrupted"
@@ -285,7 +289,14 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
     Panel {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
             Text("Task", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = state?.tone?.let(LocalBrand.current::of) ?: MaterialTheme.colorScheme.onSurfaceVariant) }
+            val brand = LocalBrand.current
+            val ink = when {
+                said == null -> state?.tone?.let(brand::of) ?: MaterialTheme.colorScheme.onSurfaceVariant
+                said.verdict == Steps.Verdict.PROVEN -> brand.ink
+                said.verdict.wrong -> brand.danger
+                else -> brand.quiet
+            }
+            word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
         }
         Text(t["title"].string ?: "", style = MaterialTheme.typography.titleMediumEmphasized)
         // Work that ended short says why (a run's word for it in words: "gave-up" is "gave up"); work under way, its latest step.

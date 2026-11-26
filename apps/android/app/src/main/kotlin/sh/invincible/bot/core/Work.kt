@@ -53,8 +53,13 @@ data class TeamTask(
     /** Each time you stepped in on it, by how. */
     val interventions: Map<String, Int> = emptyMap(),
 ) {
-    /** What its run came to, once it ended in the agent's hands: when it began and ended, how, and its model calls. */
-    data class Record(val startedAt: Long, val endedAt: Long, val ended: String, val spent: List<UsageLine>)
+    /** What its run came to, once it ended in the agent's hands: when it began and ended, how, its model calls, and what
+     * proves it (null: a record from before the runner kept that). */
+    data class Record(val startedAt: Long, val endedAt: Long, val ended: String, val spent: List<UsageLine>, val proof: Proof? = null) {
+        /** Each gate's exit before the work and after it (null: not run), the reviewer's verdict ("pass", "revise"; null:
+         * none), and whether the reviewer was the model that did the work. */
+        data class Proof(val before: List<Int?>, val after: List<Int?>, val review: String?, val sameModel: Boolean)
+    }
 
     /** What it changed in its repository, where that was kept: how many files, and from which commit. */
     data class Changes(val files: Int, val base: String?)
@@ -89,7 +94,12 @@ data class TeamTask(
                 updatedAt = updatedAt,
                 budgetUsd = j["budgetUsd"].double,
                 record = (j["record"] as? Json.Obj)?.let { r ->
-                    Record(r["startedAt"].long ?: 0, r["endedAt"].long ?: 0, r["ended"].string ?: "", r["spent"].list.map(UsageLine::of))
+                    Record(
+                        r["startedAt"].long ?: 0, r["endedAt"].long ?: 0, r["ended"].string ?: "", r["spent"].list.map(UsageLine::of),
+                        (r["proof"] as? Json.Obj)?.let { p ->
+                            Record.Proof(p["before"].list.map { it.int }, p["after"].list.map { it.int }, p["review"].string, p["sameModel"].bool ?: false)
+                        },
+                    )
                 },
                 changes = (j["changes"] as? Json.Obj)?.let { c -> c["files"].int?.let { Changes(it, c["base"].string) } },
                 givenBy = j["givenBy"].string,
@@ -143,6 +153,9 @@ object Work {
         val detail: String,
         val mono: Boolean,
         val at: Long,
+        /** Once it has ended, its verdict in words that follow its proof (Steps.verdict, from its record): what its row
+         * says in place of [word], so a row never says "Verified" where its gates proved nothing. Null while in hand. */
+        val verdict: Steps.Said? = null,
     )
 
     /** The work in its four sections, each the latest first (at work before queued), and the projects with tasks, for the
@@ -311,7 +324,10 @@ object Work {
             val name = agent?.name ?: task.assignee
             val project = projectOf(task.assignee)
             val row = rowOf(task, name, agent?.enabled == false, if (task.status == "running") asking[task.assignee] ?: emptyList() else emptyList(), seenAt(task), now, titles)
-                .copy(id = task.id, room = task.room, title = task.title, project = project, agent = task.assignee, agentName = name, avatar = agent?.avatar, at = task.updatedAt)
+                .copy(
+                    id = task.id, room = task.room, title = task.title, project = project, agent = task.assignee, agentName = name, avatar = agent?.avatar, at = task.updatedAt,
+                    verdict = Steps.verdict(task.status, task.verified, task.error, task.record, Steps.facts(task.record)),
+                )
             when (row.attention) {
                 Attention.NEEDS -> needs += row
                 Attention.ACTIVE -> active += row

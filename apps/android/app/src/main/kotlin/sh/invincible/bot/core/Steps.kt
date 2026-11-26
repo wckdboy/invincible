@@ -372,6 +372,53 @@ object Steps {
      * (passed, sent back, reading, waits, none), and the two ways a pass can say less than it seems. */
     data class Proof(val gates: List<GateRow>, val passed: Int, val review: Review?, val reviewer: String, val sameModel: Boolean, val provesNothing: Boolean)
 
+    /** What proves a task, as facts (the PWA's ProofFacts): each gate's exit and its exit before the work, the reviewer's
+     * verdict, and whether the reviewer was the model that did the work. */
+    data class Facts(val gates: List<Gate>, val review: String?, val sameModel: Boolean) {
+        data class Gate(val exit: Int?, val before: Int?)
+    }
+
+    /** The facts its trail gives (the PWA's factsOfProof). */
+    fun facts(proof: Proof): Facts = Facts(proof.gates.map { Facts.Gate(it.exit, it.before) }, proof.review?.verdict, proof.sameModel)
+
+    /** The facts its record keeps (the PWA's factsOfRecord); null from a record made before they were kept, or none yet. */
+    fun facts(record: TeamTask.Record?): Facts? {
+        val proof = record?.proof ?: return null
+        return Facts(proof.after.mapIndexed { i, exit -> Facts.Gate(exit, proof.before.getOrNull(i)) }, proof.review, proof.sameModel)
+    }
+
+    enum class Verdict(val wire: String) {
+        PROVEN("proven"), REVIEWED("reviewed"), FAILED("failed"), REJECTED("rejected"), GAVE_UP("gave-up"), STOPPED("stopped"), UNVERIFIED("unverified");
+
+        /** Whether it says the work went wrong (red, with its word). */
+        val wrong: Boolean get() = this == FAILED || this == REJECTED || this == GAVE_UP
+    }
+
+    /** A verdict, and its word. */
+    data class Said(val word: String, val verdict: Verdict)
+
+    /**
+     * A task's verdict in words that follow its proof, once it has ended (the PWA's verdictOf; the owner's word, 26 November
+     * 2026: never "Verified" above a warning that its gates proved nothing): Proven, Reviewed, not proven (Reviewed where
+     * nothing says what its gates showed), Failed · gate 2, Sent back, Gave up, Stopped, Failed, Not verified. Null while
+     * it is in hand.
+     */
+    fun verdict(status: String, verified: Boolean, error: String?, record: TeamTask.Record?, facts: Facts?): Said? {
+        if (status != "done" && status != "failed" && status != "stopped") return null
+        val how = record?.ended ?: (error ?: "").trim().split("\n")[0].trim()
+        if (status == "stopped" || how == "stopped") return Said("Stopped", Verdict.STOPPED)
+        if (status == "done" && verified) {
+            if (facts == null) return Said("Reviewed", Verdict.REVIEWED)
+            val shows = facts.gates.any { it.exit == 0 && it.before != null && it.before != 0 }
+            return if (shows && facts.review == "pass" && !facts.sameModel) Said("Proven", Verdict.PROVEN) else Said("Reviewed, not proven", Verdict.REVIEWED)
+        }
+        val failing = facts?.gates?.indexOfFirst { it.exit != null && it.exit != 0 } ?: -1
+        if (failing >= 0) return Said("Failed · gate ${failing + 1}", Verdict.FAILED)
+        if (facts?.review == "revise") return Said("Sent back", Verdict.REJECTED)
+        if (how == "gave-up") return Said("Gave up", Verdict.GAVE_UP)
+        return if (status == "failed") Said("Failed", Verdict.FAILED) else Said("Not verified", Verdict.UNVERIFIED)
+    }
+
     fun proofOf(status: String, gates: List<String>, entries: List<TrailEntry>): Proof {
         val running = status == "running"
         val rows = gateRows(gates, entries, running)
@@ -462,6 +509,59 @@ object TaskWords {
         if (task.status == "done" && task.verified) return End(null, said)
         val error = task.error?.let(JsText::trim)
         return End((if (!error.isNullOrEmpty()) RUN_ENDS[error] ?: error else null) ?: UNSAID[task.status], said)
+    }
+
+    /** The words an agent may end on that only claim what its proof says ("Verified.", "Done."). */
+    private val BARE_CLAIMS = setOf("verified", "done", "proven", "passed", "pass", "complete", "completed", "finished", "ok", "success", "succeeded")
+
+    /**
+     * What the agent said, as a thread shows it beside its proof: its own account as it said it, or nothing where it said
+     * no more than a verdict, which would say the verdict twice, and in the agent's voice (the iPhone's saidBesideProof).
+     */
+    fun saidBesideProof(said: String?): String? {
+        val trimmed = said?.trim().orEmpty()
+        if (trimmed.isEmpty()) return null
+        val word = trimmed.lowercase().trim { it.isWhitespace() || it.category.code.startsWith("P") }
+        return if (word in BARE_CLAIMS) null else trimmed
+    }
+
+    /** How long a gate took, to the precision it needs: "340 ms", "4.2 s", "2m 05s". Never "0:00". */
+    fun took(ms: Long): String = when {
+        ms < 1_000 -> "$ms ms"
+        ms < 60_000 -> String.format(java.util.Locale.ROOT, "%.1f s", ms / 1_000.0)
+        else -> Steps.workedFor(ms)
+    }
+
+    /** How a gate stood before the work: failed then and passes now (it shows the work was done), or passed then too. */
+    fun before(before: Int?, exit: Int?): String? = when {
+        before == null -> null
+        before == 0 -> "passed before the work too"
+        exit == 0 -> "failed before the work"
+        else -> "failed before the work too"
+    }
+
+    /** The folded work's head: "Ada worked for 6m 12s", or under half a second no time at all ("Ada worked"), never "0s". */
+    fun worked(name: String, ms: Long): String = if (ms >= 500) "$name worked for ${Steps.workedFor(ms)}" else "$name worked"
+
+    /**
+     * What a verdict rests on, as a line under its word, never that word again: "It gave up." under "Gave up" says nothing
+     * more; "Not verified: its gates or the independent review did not pass." under "Not verified" says the rest. Null:
+     * nothing more to say. (The iPhone's TaskCard.because.)
+     */
+    fun because(why: String?, verdict: String): String? {
+        val said = why?.trim().orEmpty()
+        if (said.isEmpty()) return null
+        fun plain(text: String) = text.lowercase().trim { it.isWhitespace() || it.category.code.startsWith("P") }
+        var bare = plain(said)
+        if (bare.startsWith("it ")) bare = bare.drop(3)
+        if (bare == plain(verdict)) return null
+        for (joint in listOf(":", " ·", " –", " —")) {
+            if (said.lowercase().startsWith(verdict.lowercase() + joint)) {
+                val rest = said.drop(verdict.length + joint.length).trim()
+                return if (rest.isEmpty()) null else rest.replaceFirstChar { it.uppercase() }
+            }
+        }
+        return said
     }
 
     /** What can be done with a task: a proposal approved or declined, work in hand stopped, work that ended unverified

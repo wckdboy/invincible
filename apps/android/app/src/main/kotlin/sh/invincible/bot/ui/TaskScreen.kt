@@ -217,9 +217,10 @@ fun TaskScreen(app: AppModel, id: String, nav: Nav, wide: Boolean, roomy: Boolea
                         }
                     }
                     item(key = "asks") { InPlace(app, task, name, give = { giving = true }) }
-                    TaskWords.end(task)?.said?.let { said -> item(key = "said") { Said(task, name, agent?.avatar, said) } }
+                    // (An agent's bare "Verified." would say the verdict twice beside its proof, in its own voice: left out.)
+                    TaskWords.saidBesideProof(TaskWords.end(task)?.said)?.let { said -> item(key = "said") { Said(task, name, agent?.avatar, said) } }
                     if (task.status == "done" || task.status == "failed") item(key = "proof") {
-                        ProofCard(app, task, name, proof, changes, prices, ship = { shipping = true }, again = { giving = true })
+                        ProofCard(app, task, name, proof, read = trail.entries.isNotEmpty(), changes, prices, ship = { shipping = true }, again = { giving = true })
                     }
                     items(conversation(room, task), key = { "m:${it["id"].string ?: it["createdAt"].long}" }) { m -> Message(m, snapshot.agents) }
                     item(key = "end") { Spacer(Modifier.size(Space.s2)) }
@@ -403,7 +404,7 @@ private fun WorkDone(task: TeamTask, name: String, entries: List<TrailEntry>, re
                     Icon(ChevronIcon, null, Modifier.size(16.dp).rotate(if (open) 90f else 0f), tint = quiet)
                     Text(
                         buildAnnotatedString {
-                            append("$name worked for ${Steps.workedFor(summary.ms)}")
+                            append(TaskWords.worked(name, summary.ms))
                             if (words.isNotEmpty()) withStyle(SpanStyle(color = quiet)) { append(" · $words") }
                         },
                         style = Type.body,
@@ -518,18 +519,31 @@ private fun Said(task: TeamTask, name: String, avatar: Json?, said: String) {
 }
 
 /**
- * What proves it, apart from what the agent says and in its own colour: the Verified card, or why it isn't verified. Its
- * seal, the ways a pass can say less than it seems, each gate's command and how it ended, the reviewer that didn't write
- * it, what it changed, its cost, and what can be done with it (Ship it, Give again, Resume, its pull request).
+ * What proves it, apart from what the agent says: its verdict as its proof allows (Proven, Reviewed, not proven, Failed ·
+ * gate 2…, never "Verified" above a warning that its gates proved nothing) and what that rests on, the ways a pass can say
+ * less than it seems, each gate's command and how it ended, the reviewer that didn't write it, what it changed, its cost,
+ * and what can be done with it (Ship it, Give again, Resume, its pull request). Filled one step off the page, no outline:
+ * red only where it failed. [read]: its trail is read, so its verdict is from the trail, else from its record.
  */
 @Composable
-private fun ProofCard(app: AppModel, task: TeamTask, name: String, proof: Steps.Proof, changes: Json?, prices: Map<String, sh.invincible.bot.core.Price>?, ship: () -> Unit, again: () -> Unit) {
+private fun ProofCard(app: AppModel, task: TeamTask, name: String, proof: Steps.Proof, read: Boolean, changes: Json?, prices: Map<String, sh.invincible.bot.core.Price>?, ship: () -> Unit, again: () -> Unit) {
     val brand = LocalBrand.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val verified = task.status == "done" && task.verified
-    val tone = if (verified) brand.done else brand.failed
     val end = TaskWords.end(task)
+    val said = Steps.verdict(task.status, task.verified, task.error, task.record, if (read) Steps.facts(proof) else Steps.facts(task.record))
+    val kind = said?.verdict
+    val failed = kind?.wrong == true
+    val word = said?.word ?: if (verified) "Reviewed" else "Not verified"
+    val why = when (kind) {
+        Steps.Verdict.PROVEN -> "A gate that failed before the work passes now, and a reviewer that didn't write it passed it."
+        Steps.Verdict.REVIEWED -> "The reviewer passed it; no gate shows the work was done."
+        Steps.Verdict.STOPPED -> TaskWords.because("It stopped where it was.", word)
+        null -> null
+        else -> TaskWords.because(end?.why ?: "Its gates or the review did not pass.", word)
+    }
+    val tone = if (failed) brand.danger else if (kind == Steps.Verdict.PROVEN) brand.ink else brand.quiet
     val actions = TaskWords.actions(task)
     val files = task.changes?.files ?: changes?.get("files")?.list?.size ?: 0
     val added = changes?.get("files")?.list?.sumOf { it["added"].int ?: 0 }
@@ -544,26 +558,22 @@ private fun ProofCard(app: AppModel, task: TeamTask, name: String, proof: Steps.
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .border(BorderStroke(1.dp, tone.copy(alpha = 0.5f)), shape)
-            .background(tone.copy(alpha = 0.06f))
+            .background(brand.raised)
             .padding(Space.s4)
-            .semantics { contentDescription = if (verified) "Verified: by its gates and a reviewer that didn't write it" else "Not verified: ${end?.why ?: ""}" },
+            .semantics { contentDescription = listOfNotNull(word, why).joinToString(". ") },
         verticalArrangement = Arrangement.spacedBy(Space.s3),
     ) {
         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
             Box(Modifier.size(22.dp).clip(CircleShape).background(tone), contentAlignment = Alignment.Center) {
-                Icon(if (verified) CheckIcon else CrossIcon, null, Modifier.size(14.dp), tint = brand.paper)
+                Icon(if (kind == Steps.Verdict.PROVEN) CheckIcon else if (failed) CrossIcon else DashIcon, null, Modifier.size(14.dp), tint = if (failed) Color.White else brand.paper)
             }
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = tone)) { append(if (verified) "Verified" else "Not verified") }
-                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(if (verified) " · by its gates and a reviewer that didn't write it" else " · ${end?.why ?: "its gates or the review did not pass"}") }
-                },
-                style = Type.body,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(word, style = Type.rowTitle.copy(fontWeight = FontWeight.SemiBold), color = if (failed) brand.danger else brand.ink)
+                why?.let { Text(it, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
         }
         for (c in caveats) Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-            Icon(AlertIcon, null, Modifier.size(15.dp).padding(top = 2.dp), tint = brand.needs)
+            Icon(InfoIcon, null, Modifier.size(15.dp).padding(top = 2.dp), tint = brand.quiet)
             Text(c, style = Type.meta)
         }
         if (proof.gates.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(Space.s2)) { for (gate in proof.gates) GateLine(gate, stacked = true) }
@@ -616,7 +626,7 @@ private fun ProofCard(app: AppModel, task: TeamTask, name: String, proof: Steps.
     }
 }
 
-/** A clock for how long a gate took: "0:42", "12:05". */
+/** A step's clock while it runs: "0:42", "12:05". */
 private fun clock(ms: Long): String {
     val seconds = maxOf(0L, ms / 1000)
     return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
@@ -636,7 +646,8 @@ private fun GateLine(gate: Steps.GateRow, stacked: Boolean = false, end: String?
         Steps.GateState.RUNNING -> PlayIcon to brand.working
         Steps.GateState.WAITING -> ClockIcon to MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val how = end ?: if (gate.exit != null) listOfNotNull("exit ${gate.exit}", gate.ms?.let(::clock), gate.said.takeIf { it.isNotEmpty() }).joinToString(" · ") else "not run"
+    // Its exit and time whole (never "0:00"), how it stood before the work, then its first words.
+    val how = end ?: if (gate.exit != null) listOfNotNull("exit ${gate.exit}", gate.ms?.let(TaskWords::took), TaskWords.before(gate.before, gate.exit), gate.said.takeIf { it.isNotEmpty() }).joinToString(" · ") else "not run"
     if (stacked) {
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s2), modifier = Modifier.semantics(mergeDescendants = true) { stateDescription = gate.state.wire }) {
             Icon(icon, null, Modifier.padding(top = 2.dp).size(14.dp), tint = tone)
@@ -785,7 +796,7 @@ private fun Details(app: AppModel, task: TeamTask, name: String, proof: Steps.Pr
             val end = when (gate.state) {
                 Steps.GateState.RUNNING -> "running"
                 Steps.GateState.WAITING -> if (task.status == "running") "next" else "not run"
-                else -> gate.ms?.let(::clock) ?: "exit ${gate.exit}"
+                else -> gate.ms?.let(TaskWords::took) ?: "exit ${gate.exit}"
             }
             Box(Modifier.padding(horizontal = Space.s4, vertical = 4.dp)) { GateLine(gate, end = end) }
         }
