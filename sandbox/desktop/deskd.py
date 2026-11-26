@@ -1237,7 +1237,9 @@ class Pieces:
     def _start(self):
         os.makedirs(self.profile, exist_ok=True)
         if not _own("Xvfb") or not self.display_up():
-            self._spawn(["Xvfb", DISPLAY, "-screen", "0", "%dx%dx24" % (W, H), "-nolisten", "tcp"], "display.log")
+            # (-noreset: the display never resets when its last client leaves, as it would after the check below, and
+            # a connection made during the reset found no display.)
+            self._spawn(["Xvfb", DISPLAY, "-screen", "0", "%dx%dx24" % (W, H), "-nolisten", "tcp", "-noreset"], "display.log")
             self.until(self.display_up, "the display", "display.log")
         if not _own("openbox"):
             self._spawn(["openbox"], "windows.log", keep="windows")

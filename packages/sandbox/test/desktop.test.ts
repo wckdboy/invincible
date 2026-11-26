@@ -66,7 +66,9 @@ print(json.dumps(started))`;
     const started = JSON.parse(ran.stdout.toString()) as string[][];
     // Once: a second start finds them running.
     expect(started.map((argv) => argv[0])).toEqual(["Xvfb", "openbox", "dbus-daemon", "/usr/libexec/at-spi-bus-launcher", "chromium"]);
-    expect(started[0]).toEqual(["Xvfb", ":1", "-screen", "0", "1280x800x24", "-nolisten", "tcp"]);
+    // (Never reset when its last client leaves: deskd's own "is it up?" was one, and a start that came during the reset
+    // found no display, one boot in about 35 on Ultra.)
+    expect(started[0]).toEqual(["Xvfb", ":1", "-screen", "0", "1280x800x24", "-nolisten", "tcp", "-noreset"]);
     // The session bus on its own default (a socket in the VM, no address of ours to listen on): the accessibility
     // bus is AT-SPI's launcher's, on the same.
     expect(started[2]).toEqual(["dbus-daemon", "--session", "--fork", "--print-address=1", "--print-pid=1"]);
