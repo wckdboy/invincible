@@ -390,11 +390,11 @@ Your rules on the commands its work runs ([ARCHITECTURE](ARCHITECTURE.md) §6). 
 Its first phase (`packages/node/src/qamp-grants.ts`; how it works: [ARCHITECTURE](ARCHITECTURE.md) §3). This is a new door: a UDP port on the tailnet, through which an agent on a machine that runs no node calls a few of Invincible's tools.
 
 - **What it admits.** Each grant you make runs one bridge (`qamp serve --mcp-stdio`, Q-AMP 0.1.0, pinned by SHA-256 in `scripts/qamp-pin.sh`).
-  - It listens on the node's tailnet address and one port of 7781–7789, never `0.0.0.0`.
+  - It listens on the node's tailnet address and one port of 7411–7419 (7410 is the node's sidecar's), never `0.0.0.0`.
   - It lets one key finish the handshake: the agent's own Ed25519 key, by its `did:key`. A stranger's key fails the TLS handshake.
   - A call needs a delegation chain from the node's bridge key, bound to the agent's key and ending with the grant. An expired chain, one from another key, one for another command, or none at all is refused (`UNAUTHORIZED`).
   - It serves the granted tools alone. Any other is `UNKNOWN_TOOL`.
-  - Nothing listens until you grant something, and the firewall rule (`deploy.sh --open-qamp`) admits UDP 7781–7789 on `tailscale0` alone.
+  - Nothing listens until you grant something, and the firewall rule (`deploy.sh --open-qamp`) admits UDP 7410–7419 on `tailscale0` alone.
 - **What a grant may hold, by your word (25 November 2026).** The read-only tools `fleet`, `compute`, `place` and `ledger`, for a minute to a day (an hour unless you say).
   - Any other tool is refused by name: none of your memories, nothing that writes.
   - A longer lifetime is refused, never cut short.
@@ -427,6 +427,76 @@ Its first phase (`packages/node/src/qamp-grants.ts`; how it works: [ARCHITECTURE
   - **Q-AMP 0.1 has one implementation.** Its fuzzing and review figures are its own.
   - **A cancel stops the route's request.** A route that finishes its work after its caller leaves still finishes it.
   - **Not yet run on a server.** The Linux binary, the firewall rule and a Tailscale ACL haven't been exercised on one: everything above ran on a Mac, on loopback.
+
+## The fabric: nodes, their runs and their proof over Q-AMP (tested)
+
+Phase 2 ([FABRIC.md](FABRIC.md); the design, [ARCHITECTURE](ARCHITECTURE.md) §3): each node's links to the others go
+over Q-AMP through a sidecar of its own, and a task can be handed to another node's agents. New doors: a UDP port on the
+tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path in each VM.
+
+- **Who is calling.** The sidecar proves the caller's key in the TLS handshake (raw public keys, X25519MLKEM768). The
+  node takes that key for the active node whose own signed profile (`node.profile`'s `caps.qamp`) names it, and for
+  nothing else. Who is active is read afresh on every call, never cached.
+  - A key no node names, or a revoked node's, is refused (`UNAUTHORIZED`) before the node reads anything. A key two
+    nodes' profiles both name is neither's, so a node can't take another's calls by naming its key.
+  - The link's tools (sync, push, forward) and the hand-off are public at Q-AMP's door and decided by the node's; a
+    forwarded route runs through the same door as over HTTPS (the `fabric` listener) for that node's principal.
+  - Tests: `fabric.e2e.test.ts` (a stranger's key refused at the door; a revoked node refused on its very next call),
+    `fabric-service.test.ts` (a key claimed twice, a key nobody names, a revoked node's).
+- **What a node that turned on another can do: only what its grants say.** A full node is owner-equivalent by design
+  (it holds the vault), over HTTPS and over Q-AMP alike; what the fabric adds is held to grants.
+  - A run elsewhere reaches its giver's tools only under the giver's grant to the run's own key: the read-only tools its
+    task was given (`fleet`, `compute`, `place`, `ledger`, your word for agents outside the fleet), for that task alone
+    (its policy), while it lives (300 s at a time, renewed, revoked when it ends). The grant's command covers every
+    agent tool, and the giver's door holds the run to its task's tools, its own grant's tokens, its run's key and the
+    node it was handed to.
+  - Tests: `fabric-handoff.e2e.test.ts` (with the run's real chain and key, a tool its task wasn't given is refused at
+    the giver's door, and the chain for another task at its sidecar; once the task ends nothing answers).
+- **A stolen chain.** A run's chain ends at the transport key of the node its task was handed to, so presented on any
+  other connection it binds to nobody (Q-AMP SPEC 9.4 step 8): refused at the giver's sidecar. Re-signed by the run's
+  own key to another key, it is refused at the giver's door (only the node the task was handed to). The chain and the
+  run's key stay in the runner's daemon; the VM calls through its node's gateway with its own token and never sees
+  either. Test: `fabric-handoff.e2e.test.ts` (a thief's sidecar refused, both ways).
+- **Replay.** Q-AMP sends nothing in 0-RTT (SPEC 2.3), and every call rides an authenticated connection, so a captured
+  packet replays nothing. A proof replayed for another hand-off names another hand-off and nonce. The HTTPS fallback
+  keeps its signed requests, their time window and nonce cache. Tests: `fabric.test.ts` (a proof of another hand-off,
+  another nonce), and the existing request-signing tests.
+- **A node that lies about proof.** The node that ran the work signs what it came to (each gate's exit before and
+  after, the reviewer's verdict, how it ended) with its own device key, for the hand-off and its nonce, over the goal
+  and the gates asked for; the node that handed it on checks the signature, and only then reads the facts for
+  "Proven", and keeps it. A node that didn't run the work can't make it look proven: another key's signature, the
+  runner's proof of another hand-off, of another goal or other gates, a changed exit, or a revoked node's proof are
+  each refused, and the hand-off says "Not proven: its proof didn't check". Tests: `fabric.test.ts` (each of those),
+  `fabric-handoff.e2e.test.ts` (a runner signing with another key, end to end).
+- **Revocation.** A node revoked is refused from its very next call wherever the revocation has reached (a push: on
+  loopback about 25 ms over Q-AMP, 32 ms over HTTPS), and its calls under way at that node end. A run's key is cut off
+  by revoking its grant at the giver's sidecar: its next call is refused (about 10 ms on loopback, most of it the
+  sidecar's durable write). Tests: `fabric.e2e.test.ts`, `fabric-handoff.e2e.test.ts`.
+- **Grants never outlive their task.** Renewed at half their life while the hand-off lives, revoked when it ends; a giver
+  that dies renews nothing, so its grants end within 300 s. Test: `fabric-handoff.e2e.test.ts` (4 s grants, past their
+  first token's end and after the task).
+- **The sidecar and its socket.** The sidecar holds no secret but the node's transport key (Ed25519, 0600 in
+  `<home>/qamp`, never the device key, which stays in the daemon). Its socket is 0600 in a 0700 directory, same-user
+  only (Q-AMP's own checks), and whoever can connect has the node's transport authority; the node starts it with
+  `--allow-cmd /tool/invincible` and `--max-ttl 86400`, so nothing minted through it reaches past Invincible's tools
+  or a day. It listens on the node's advertised address alone: every way of writing every interface makes it dial out
+  only. Tests: `fabric-sidecar.test.ts`.
+- **Bounded input.** The node's side of the socket bounds a message's length before it buffers it (65 MiB, as the
+  sidecar), decodes CBOR under Q-AMP's decode budget, checks every hand-off message with its schema, keeps a hand-off's
+  trail to 2,000 lines of 4,000 characters, and takes a VM's tool input up to 1 MiB. Tests: `fabric-socket.test.ts`,
+  `fabric-gateway.test.ts`, the seeded fuzzing in `fabric.test.ts`, and `bench/fabric/fuzz.ts` (FABRIC.md).
+- **Falling back.** Where Q-AMP can't be had (no sidecar there or here, a peer from before the fabric, a failure), each
+  link goes over HTTP with signed requests on the tailnet, as before, and says so; nothing is weakened. What it loses
+  is Q-AMP's post-quantum key exchange inside the tunnel (WireGuard's own is classical), its streams and its stop.
+- **Residual risk.**
+  - **A runner can lie with its own key.** The proof says which node vouches for the work; it can't show that node ran
+    its gates truthfully. A false proof is signed evidence against that node, and kept.
+  - **A full node is still owner-equivalent.** The fabric narrows what runs elsewhere may do, not what a full node may.
+  - **The hand-off has no HTTPS form**, so a task for another node's agents waits on Q-AMP between them.
+  - **A sidecar holding the transport key replays its own chains.** A compromised sidecar holds the node's transport
+    key and sees each call's chain, so it can use a run's grant within its task, its tools and its 300 s, as the node
+    could. Revocation ends it.
+  - **Q-AMP's relays and NAT traversal aren't used**: nodes reach each other on the tailnet, directly.
 
 ## The one-time import (tested)
 

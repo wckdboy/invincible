@@ -128,9 +128,9 @@ WRAPPER
     ufw allow in on inv0 to any port 7402 proto tcp comment "Invincible sandboxes to model gateway only" >/dev/null &&
       echo "→ ufw: sandboxes may reach 7402/tcp on inv0 only" || echo "ufw sandbox rule not added" >&2
   fi
-  # Q-AMP grants (docs/SECURITY.md): each grant's bridge listens on one UDP port of 7410-7419, on the node's tailnet
-  # address alone, and lets one agent's key in. Opted into on its own (deploy.sh --open-qamp); nothing listens there until
-  # you grant an agent something, and a grant ends by itself within a day.
+  # Q-AMP (docs/FABRIC.md, docs/SECURITY.md): the node's sidecar listens on UDP 7410 and each grant's bridge on one of
+  # 7411-7419, on the node's tailnet address alone. Opted into on its own (deploy.sh --open-qamp); the sidecar listens
+  # once Q-AMP's pinned release has one, and a bridge only while its grant lasts (a day at most).
   if [[ $OPEN_QAMP == 1 ]] && command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
     ufw allow in on tailscale0 to any port 7410:7419 proto udp comment "Invincible Q-AMP grant bridges over Tailscale" >/dev/null &&
       echo "→ ufw: allowed 7410-7419/udp on tailscale0 only (Q-AMP grants)" || echo "ufw Q-AMP rule not added" >&2

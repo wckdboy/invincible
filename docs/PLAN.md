@@ -48,13 +48,18 @@ What the owner uses every day, built on the carried engine around the new model.
 - the web app passes the owner's bar: the screenshot review beside the benchmarks, no layout shift, nothing moving at
   rest.
 
-## Phase 2: the fabric 🔜
+## Phase 2: the fabric 🔨
 
-Q-AMP between the nodes and the agents.
+Q-AMP between the nodes and the agents ([FABRIC.md](FABRIC.md)). On main and dormant: it switches on when the pin moves
+to a Q-AMP release with the sidecar, after the fabric's independent security review and its fixes.
 
-- Q-AMP: the sidecar socket API, grants that renew themselves.
-- Node ↔ node over Q-AMP: sync, pushes and forwarded work, with HTTPS as the fallback.
-- Runs on other nodes, and agents outside the fleet, using the primary's tools with their own keys and chains.
+- 🔨 Q-AMP: the sidecar socket API ✅ (Q-AMP main); grants that renew themselves: the giver renews a run's grant and sends
+  it in on the hand-off's call, and Q-AMP's own, holder-driven renewal, spec first, is next.
+- ✅ Node ↔ node over Q-AMP: sync, pushes and forwarded work, with HTTPS as the fallback, each peer saying its path.
+- ✅ A task handed to another node's agents: streamed back, stopped from either end, its run using the giver's tools with
+  its own key and chain, its proof signed by the node that ran it and checked before "Proven". Agents outside the fleet
+  keep their grants (Q-AMP 0.1's bridges).
+- 🔜 The pin: a Q-AMP release with the sidecar, and the owner's pair switched on (FABRIC.md, the runbook).
 
 **Exit:** the first answer on a fresh connection, and sync's lag, are measured before and after (the carried grants measured 96 vs
 504 ms first answer). Revocation cuts a key off within one round trip. The fuzz targets run clean.

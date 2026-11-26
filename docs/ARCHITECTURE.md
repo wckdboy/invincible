@@ -98,6 +98,16 @@ out QAMP"). What runs over it, in order:
 daemon holds the vault, so no native QUIC stack is loaded into it (the reasoning is in the carried Q-AMP design, 25
 November 2026). The sidecar holds no secret but the node's transport key.
 
+**As built** (26 November 2026, [FABRIC.md](FABRIC.md); dormant until the pin moves to a Q-AMP release with the
+sidecar):
+- **The sidecar.** Each node starts its sidecar on UDP 7410, under a transport key of its own that its signed profile
+  names, and watches and restarts it.
+- **The link.** Its sync, pushes and forwarded work go over Q-AMP; over HTTPS with signed requests where Q-AMP can't be
+  had, each peer saying which path it is on.
+- **A task handed to another node's agents** runs there and streams back over one call. It can be stopped from either
+  end. Its run calls the giver's tools under a grant to the run's own key, held to the task and ended with it, and it
+  comes back with a proof the runner signs with its device key, which the giver checks before it says Proven.
+
 **What Q-AMP gains for this, in its own repository, spec first:**
 - the sidecar socket API;
 - P-256 `did:key` and signing by callback, so a hardware key never leaves its chip;
@@ -413,7 +423,7 @@ The models layer, carried (§10):
 |---|---|
 | `packages/core` | Contracts (routes, scopes, events, all zod), crypto, canonical JSON, the clock, pairing math, request signing, secret scanning |
 | `packages/ledger` | The log and its views, the vault, the fleet's enrolment and revocation |
-| `packages/link` | Pairing and sync (the node's side of the Q-AMP sidecar is in `packages/node` for now: its grants, `qamp-grants.ts`) |
+| `packages/link` | Pairing and sync (the node's side of the Q-AMP sidecar is in `packages/node` for now: its fabric, `src/fabric/`, and its grants, `qamp-grants.ts`) |
 | `packages/models` | Providers, plans, the roster, fallback, the gateway, prices and usage; the primary's chat and its prompt, connectors and their sign-ins, decisions, embeddings, and the evals' suites |
 | `packages/agents` | The run loop: harnesses, gates, the reviewer, rules, audits, checkpoints, shipping, the team runtime, investigations |
 | `packages/sandbox` | VM drivers and their firewall |
@@ -426,7 +436,8 @@ The models layer, carried (§10):
 
 **Coexisting with the system it succeeds on one host** (§10) until the cutover:
 - the home is `~/.invincible` and the service user is `invincible`;
-- ports: 7400 (node), 7401 (behind `tailscale serve`), 7402 (the sandboxes' bridge, `inv0`), 7410–7419/udp (Q-AMP).
+- ports: 7400 (node), 7401 (behind `tailscale serve`), 7402 (the sandboxes' bridge, `inv0`), 7410–7419/udp (Q-AMP:
+  7410 the node's sidecar, 7411–7419 grants' bridges).
 
 ## 10. From Galahad
 

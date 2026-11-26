@@ -17,7 +17,7 @@
 #   --embedder          the archive's local embedder: Ollama (pinned, checksummed) on 127.0.0.1 only,
 #                       with qwen3-embedding:0.6b, hired as the embedder role unless you chose one
 #                       (opt-in; without it a deploy changes nothing here, and leaves an earlier install)
-#   --open-qamp         allow UDP 7410-7419 on tailscale0 when UFW is active: Q-AMP grants' bridges
+#   --open-qamp         allow UDP 7410-7419 on tailscale0 when UFW is active: the node's Q-AMP sidecar and grants' bridges
 # other: --port 7400, --skip-tests,
 #   --qamp <file>       Q-AMP's binary for the host (fetched by you: its forge is sign-in only), checked
 #                       there against scripts/qamp-pin.sh and installed for the node (<home>/bin/qamp)
