@@ -147,6 +147,58 @@ describe("a run, followed", () => {
   });
 });
 
+describe("a run cut off before it ended", () => {
+  test("its process gone with no exit code (killed, its VM restarted): failed, and said to be cut off", async () => {
+    const box = vm();
+    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: "ses_1", deadline: Number.MAX_SAFE_INTEGER, workdir: "/work" }, { exec: box.exec, follow: box.follow, ...clock() }));
+    await box.until(() => box.follows.length === 1);
+    box.current().push(E(20, { type: "call", id: "toolu_1" }), S(false, null, 20));
+    const done = await run;
+    expect(done.status).toBe("failed");
+    expect(done.cutOff).toBe(true);
+    expect(done.error).toContain("it stopped without an exit code");
+    // One that ended by itself, with its own exit code, was not cut off.
+    const ended = vm();
+    const own = at(runAgent(CLAUDE, { model, prompt: "x", session: "ses_1", deadline: Number.MAX_SAFE_INTEGER, workdir: "/work" }, { exec: ended.exec, follow: ended.follow, ...clock() }));
+    await ended.until(() => ended.follows.length === 1);
+    ended.current().push(E(20, { type: "error", message: "Claude Code ended with an error" }), S(false, 1, 20));
+    expect((await own).cutOff).toBeUndefined();
+  });
+
+  test("the run loop takes its own session up again, once, on the same model, told its last run was cut off; cut off again, it goes on as any failure", async () => {
+    const box = vm();
+    const events: RunEvent[] = [];
+    const done = runLoop(
+      { goal: "Write the parser", environment: "a stand-in VM", plan: "1. Write it.\nDone when: its test passes.", agent: { driver: CLAUDE, models: [OWN_SIGN_IN], workdir: "/work/repo" } },
+      { ask: async (role) => ({ text: "PASS\nIt parses.", model: `stand-in/${role}` }), exec: box.exec, follow: box.follow, emit: (event) => events.push(event), ...clock() },
+    );
+    await box.until(() => box.follows.length === 1);
+    box.current().push(E(20, { type: "session", id: "ses_cut" }), E(40, { type: "call", id: "toolu_1" }), S(false, null, 40));
+    await box.until(() => box.follows.length === 2);
+    box.current().push(E(80, { type: "text", text: "Done: it parses." }), S(false, 0, 80));
+    const outcome = await done;
+    expect(outcome.status).toBe("done");
+    const launches = box.commands.filter((command) => command.startsWith("mkdir -p /work/.agent"));
+    expect(launches).toHaveLength(2);
+    expect(launches[1]).toContain("--session '\\''ses_cut'\\'' --cut-off");
+    const second = Buffer.from(launches[1]!.match(/printf %s '([A-Za-z0-9+/=]+)'/)![1]!, "base64").toString("utf8");
+    expect(second).toBe("Your last run was cut off before it ended (its process stopped). Continue the run from where you left off.");
+    expect(events.find((event) => event.type === "retry")).toMatchObject({ role: "engineer", error: "its own sign-in: its run was cut off before it ended, so its own session is taken up again" });
+    // Cut off twice running: the second is a failure as any is (here, its only model: it gives up, said so).
+    const twice = vm();
+    const again = runLoop(
+      { goal: "Write the parser", environment: "a stand-in VM", plan: "1. Write it.\nDone when: its test passes.", agent: { driver: CLAUDE, models: [OWN_SIGN_IN], workdir: "/work/repo" } },
+      { ask: async (role) => ({ text: "PASS\nIt parses.", model: `stand-in/${role}` }), exec: twice.exec, follow: twice.follow, ...clock() },
+    );
+    await twice.until(() => twice.follows.length === 1);
+    twice.current().push(E(20, { type: "session", id: "ses_cut" }), S(false, null, 20));
+    await twice.until(() => twice.follows.length === 2);
+    twice.current().push(S(false, null, 20));
+    expect((await again).status).toBe("gave-up");
+    expect(twice.commands.filter((command) => command.startsWith("mkdir -p /work/.agent"))).toHaveLength(2);
+  });
+});
+
 describe("your words, told as it works", () => {
   const STEER = "The owner says, while you work: use the new schema.";
 

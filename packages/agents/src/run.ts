@@ -1563,6 +1563,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     };
     /** The steers the next run's message carries: said again if that run fails on its model before it could take them up. */
     let carried = "";
+    /** A run of its was cut off (its process stopped without an exit code) and the next is its own session taken up again: once. */
+    let cutOff = false;
+    let cutOffs = 0;
     /** What a coding agent is told of steers in its session, and what to do once they are done. */
     const steerPrompt = (steers: readonly RunSteer[]): string => `${steersSaid(steers, o.unreviewed)} Then end with a short summary and the evidence.`;
     /**
@@ -1618,7 +1621,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       worked = agentModelName(model);
       const run = await runAgent(
         agent.driver,
-        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers ? { steer: steerNow, steers: steersLive } : {}) },
+        { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers ? { steer: steerNow, steers: steersLive } : {}), ...(cutOff ? { cutOff: true } : {}) },
         {
           exec: deps.exec,
           ...(deps.follow ? { follow: deps.follow } : {}),
@@ -1644,6 +1647,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         },
       );
       session = run.session ?? session;
+      cutOff = false;
       if (run.status === "stopped") return finish({ status: "stopped", summary: "Stopped at your request." });
       // (Its message reached a run that went on: what it carried needn't be said again.)
       if (run.status !== "failed") carried = "";
@@ -1669,6 +1673,15 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       if (run.status === "spent") {
         if (!o.submitAtLimit || trail.length <= judged) return finish({ status: "stopped", summary: spentSummary(), ...(review ? { review } : {}) });
         return await asItStands("Its budget was spent before it said it was done: this is the work as it stands.", `Its budget (${usd(o.budgetUsd!)}) was spent`, { status: "stopped", summary: spentSummary() });
+      }
+      // Cut off (its process stopped from outside: killed, its VM restarted), not failed by its own word: its own session
+      // is taken up again on the same model, once, the turn it was in taken up by itself where its tool can.
+      if (run.status === "failed" && run.cutOff && session && cutOffs === 0) {
+        cutOffs += 1;
+        cutOff = true;
+        emit({ type: "retry", role: "engineer", attempt: 1, error: `${agentModelName(model)}: its run was cut off before it ended, so its own session is taken up again`.slice(0, 300), waitMs: 0 });
+        prompt = `Your last run was cut off before it ended (its process stopped). Continue the run from where you left off.${carried ? `\n\n${carried}` : ""}`;
+        continue;
       }
       // A model that fails (an outage, a provider's filter) hands over to the next, which carries on the same session.
       if (run.status === "failed" && current + 1 < agent.models.length) {

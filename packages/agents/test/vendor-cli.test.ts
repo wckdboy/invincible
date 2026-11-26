@@ -733,6 +733,30 @@ describe("Claude Code, on its own sign-in", () => {
   });
 });
 
+describe("a run cut off before it ended, taken up again in its own session", () => {
+  test("Claude Code is given its own setting to take up the turn it was in (CLAUDE_CODE_RESUME_INTERRUPTED_TURN), only when told its last run was cut off", async () => {
+    const box = vm("claude");
+    expect((await box.run([...OWN, "--session", SESSION.claude, "--cut-off"], "Continue")).exit).toBe(0);
+    await box.run([...OWN, "--session", SESSION.claude], "Continue");
+    const [cut, plain] = box.runs();
+    expect(cut.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN).toBe("1");
+    expect(plain.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN).toBeUndefined();
+    expect(cut.argv).toEqual([...CLAUDE_FLAGS, "--resume", SESSION.claude]);
+    // (A run with no session to take up is a fresh one: there is no turn to take up.)
+    expect(CLAUDE.command(OWN_SIGN_IN, null, true)).not.toContain("--cut-off");
+    expect(CLAUDE.command(OWN_SIGN_IN, SESSION.claude, true)).toContain(`--session '${SESSION.claude}' --cut-off`);
+  });
+
+  test("Codex resumes its thread as any (thread/resume), and the message after says to go on: nothing is added to its environment", async () => {
+    const box = vm("codex");
+    expect((await box.run([...OWN, "--session", SESSION.codex, "--cut-off"], "Continue")).exit).toBe(0);
+    const [cut] = box.runs();
+    const added = Object.keys(cut.env).filter((name) => !(name in box.env));
+    expect(added.filter((name) => !HOST_ADDED.has(name))).toEqual([]);
+    expect(box.trace().filter((item) => "told" in item).map((item) => item.told)).toEqual(["initialized", "thread/resume", "turn/start"]);
+  });
+});
+
 describe("Claude Code, told as it works", () => {
   test("your words during its tool call: queued at once, taken once the call ends, in the same turn, and answered", async () => {
     const box = vm("claude");
@@ -835,9 +859,9 @@ describe("Codex, on its own sign-in", () => {
     const run = await box.run(OWN, "Fix it ‘now’");
     expect({ exit: run.exit, stderr: run.stderr }).toEqual({ exit: 0, stderr: "" });
     expect(run.events).toEqual([
-      { type: "call", id: "call_fake0227" },
-      // (A session worth continuing once something was done in it.)
+      // (A session worth continuing once its model has acted in it: here, as its first call began.)
       { type: "session", id: "00000000-0000-4000-8000-000000000055" },
+      { type: "call", id: "call_fake0227" },
       { type: "tool", tool: "shell", input: "/bin/sh -lc 'sleep 4 && echo slept'", output: "slept\n", ok: true, id: "call_fake0227" },
       // Each of its model calls, as its thread's totals grew.
       { type: "tokens", input: 120, output: 12 },

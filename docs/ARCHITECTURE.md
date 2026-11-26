@@ -188,6 +188,13 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - Measured on 26 November 2026 with the real pinned tools against a loopback model (10 runs each): the first event on
     the node 0.44 s after the start (it was 10.2 s), an event on the node 7 to 20 ms after the tool printed it, and your
     words accepted by the tool in 70 ms (they were taken in 6.5 s, by ending the run).
+  - A run cut off before it ended (its process stopped without an exit code: killed, its VM restarted) is taken up again
+    once, on the same model, in its own session, told it was cut off. Claude Code is given its own setting for that
+    (`CLAUDE_CODE_RESUME_INTERRUPTED_TURN`), so the turn it was in is taken up again with the message in it; Codex resumes
+    its thread. Measured with the real tools, each killed mid-command: working again 1.5 to 1.6 s after (3 runs each).
+  - A node that stops on purpose (a deploy, an update) stops its tasks' runs by each tool's own interrupt, and takes the
+    tasks up again by itself once it is back, each tool in its own session. Following a run that outlived its node, its
+    run loop's own state (its plan, its gates' first run, the steers it had taken) kept beside it, is not built yet.
 - **Seats:** an account you hold with a vendor, added once, that any agent may use (`packages/core/src/seats.ts`):
   - the kinds: a Claude plan, a ChatGPT plan (through Codex, or Sign in with ChatGPT), a Mistral plan, a coding plan's
     key, an API key;

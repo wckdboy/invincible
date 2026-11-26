@@ -214,6 +214,8 @@ def run(args):
         extra = through_gateway(env, base + "/" + args.provider, token, args.model)
     with open(args.prompt, "rb") as message:
         prompt = message.read().decode("utf-8", "replace")
+    if args.cut_off and args.session:
+        taken_up(env)
     child = subprocess.Popen(arguments(args, extra), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=sys.stderr)
     reader = Reader(child, args)
     ours, yours = Lines(LINE_LIMIT), Lines(SAID_LIMIT)
@@ -315,6 +317,8 @@ def main():
     parser.add_argument("--provider", default="")
     parser.add_argument("--model", default="")
     parser.add_argument("--session")
+    # Its last run in that session was cut off before it ended (its process stopped without an exit code).
+    parser.add_argument("--cut-off", action="store_true")
     parser.add_argument("--prompt", default="/work/.agent/prompt.md")
     parser.add_argument("--gateway-env", default="/work/.invincible-gateway.json")
     parser.add_argument("--status", action="store_true")
@@ -384,6 +388,11 @@ def account(env, seat):
 def sign_in(env):
     held = account(env, False)
     return held["method"] if held else None
+
+def taken_up(env):
+    # Its last run was cut off mid-turn: the turn it was in is taken up again by itself on --resume, by Claude Code's own
+    # setting, and the message that follows is answered in it (2.1.326, recorded 26 November 2026).
+    env["CLAUDE_CODE_RESUME_INTERRUPTED_TURN"] = "1"
 
 def through_gateway(env, base, token, model):
     # The tool's own documented way to a gateway: its endpoint, and a bearer for it.
@@ -619,6 +628,10 @@ def sign_in(env):
     held = account(env, False)
     return held["method"] if held else None
 
+def taken_up(env):
+    # (Its thread resumed as any is, thread/resume: the message that follows tells it to go on.)
+    return None
+
 def through_gateway(env, base, token, model):
     # The tool's own documented way to another endpoint: a model_providers entry on the Responses
     # API (the only one it speaks), its bearer read from the environment and never written down.
@@ -759,7 +772,9 @@ class Reader:
             if item.get("type") == "userMessage" and isinstance(item.get("clientId"), str):
                 self.heard.mark(item["clientId"], "taken")
             elif item.get("type") in CALLS and isinstance(item.get("id"), str):
-                # A call said as it begins (not a message): a steer of a tool that can't be told at once waits for it.
+                # Its model has acted (as Claude Code's first answer says its session): a run cut off in its first call
+                # is taken up again there. The call said as it begins: a steer of a tool told only between calls waits for it.
+                self.answered()
                 emit("call", id=item["id"][:256])
         elif method == "item/completed" and isinstance(params.get("item"), dict):
             self.item(params["item"])
@@ -1004,7 +1019,7 @@ const driver = (name: string, title: string, kind: AgentDriver["kind"], script: 
     const given = notes(engram);
     return { [script]: `${SHARED}${part}${withNotes(given.argv)}${MAIN}`, ...given.files };
   },
-  command: (model: AgentModel, session) => `python3 ${script} ${model.own ? "--own" : `--provider ${quote(model.provider)} --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}` : ""}`,
+  command: (model: AgentModel, session, cutOff) => `python3 ${script} ${model.own ? "--own" : `--provider ${quote(model.provider)} --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}${cutOff ? " --cut-off" : ""}` : ""}`,
   read,
 });
 

@@ -116,12 +116,15 @@ describe("a driver and the notes store", () => {
   // made anew that day, when their bridges came to run live (I15 step 5: Claude Code on its stream-json input, Codex on
   // its app server, each told your words and its stop on its own input as it works): their runs were rewritten, so these
   // are new pins (they were 8da77ff7… and 9859b640…), and what each runs and writes is held by vendor-cli.test.ts, which
-  // replays the real 2.1.326 and 0.172.0 as their bridges drove them. OpenCode's and Hermes' are as they were.
+  // replays the real 2.1.326 and 0.172.0 as their bridges drove them. OpenCode's and Hermes' are as they were. And again
+  // that day (I15 step 7), when a run cut off came to be taken up in its own session (--cut-off, and Claude Code's own
+  // setting for the turn it was in) and Codex's session came to be named once its first call began: each one's text
+  // with exactly those lines taken out is its text at 518cc3c, whose pins were 7ceaaf3f… and 7d7ef05d….
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "91daad81e7e298606abf3e1974f9b26adfa3cb50841073baed40aa037e32c5ec",
-    claude: "7ceaaf3f3a380818c83c5e48a9cd754f385897b73d8407bf430873a5cb3faf1c",
-    codex: "7d7ef05d7fd8b0a7e4629aa7dda34cb8566f8073e7b089d75273a297b5345ee5",
+    claude: "0a59dcd5e57cc974de1f4a329f5a4d7d2302a3a96c1bfa1cce7148c088fd404e",
+    codex: "37a28b0321057ea2cecb148a5129921745e87faa5e75a1282cf4be727db997ed",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

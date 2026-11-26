@@ -105,8 +105,11 @@ export interface AgentDriver {
    * server for itself, in its own way. Without one, a driver writes exactly what it did before there was a store.
    */
   files(models: readonly AgentModel[], engram?: string): Record<string, string>;
-  /** The command for one run on one model, reading its message from AGENT_DIR/prompt.md (a session id continues one). */
-  command(model: AgentModel, session: string | null): string;
+  /**
+   * The command for one run on one model, reading its message from AGENT_DIR/prompt.md (a session id continues one).
+   * `cutOff`: its last run in that session was cut off before it ended (its process stopped without an exit code).
+   */
+  command(model: AgentModel, session: string | null, cutOff?: boolean): string;
   /** One line of the event stream, or null if it's nothing to report. */
   read(line: string): AgentEvent[];
 }
@@ -244,6 +247,8 @@ export interface AgentRun {
   error?: string;
   /** Words told to it as it ran that it never took (late, or that couldn't be told): its next run says them. */
   untold?: string[];
+  /** It ended without an exit code: its process was stopped from outside (killed, its VM restarted), cut off mid-run. */
+  cutOff?: boolean;
 }
 
 /** A run being followed: FOLLOW's lines as they come, and an end to them. */
@@ -405,7 +410,7 @@ const tellCommand = (line: object, wait?: { run: string; seconds: number }): str
  */
 export async function runAgent(
   driver: AgentDriver,
-  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<boolean>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<string | null> },
+  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<boolean>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<string | null>; cutOff?: boolean },
   deps: AgentRunDeps,
 ): Promise<AgentRun> {
   const now = deps.now ?? Date.now;
@@ -449,7 +454,7 @@ export async function runAgent(
         `printf %s ${quote(prompt)} | base64 -d > ${AGENT_DIR}/prompt.md`,
         `cd ${quote(input.workdir)}`,
         // Backgrounded inside braces: `… & && …` isn't shell.
-        `{ setsid bash -c ${quote(`${agentProcessCommand("record", runId)} && ${driver.command(input.model, input.session)} ${live ? `<> ${AGENT_DIR}/input` : "< /dev/null"} >> ${AGENT_DIR}/events.jsonl 2>> ${AGENT_DIR}/stderr.log; echo $? > ${AGENT_DIR}/exit`)} > /dev/null 2>&1 & echo $! > ${AGENT_DIR}/pid; }`,
+        `{ setsid bash -c ${quote(`${agentProcessCommand("record", runId)} && ${driver.command(input.model, input.session, input.cutOff)} ${live ? `<> ${AGENT_DIR}/input` : "< /dev/null"} >> ${AGENT_DIR}/events.jsonl 2>> ${AGENT_DIR}/stderr.log; echo $? > ${AGENT_DIR}/exit`)} > /dev/null 2>&1 & echo $! > ${AGENT_DIR}/pid; }`,
         agentProcessCommand("wait_record", runId),
       ].join(" && "),
       60,
@@ -500,7 +505,7 @@ export async function runAgent(
       if (cleared.exitCode !== 0) throw new Error("Could not clear the completed worker's process marker");
       if (exit !== 0 || (!run.summary && lastError)) {
         const stderr = (await deps.exec(`tail -c 2000 ${AGENT_DIR}/stderr.log 2>/dev/null`, 30).catch(() => null))?.stdout ?? "";
-        return ended({ ...run, status: "failed", error: redact([lastError, exit === null ? "it stopped without an exit code" : `it exited with ${exit}`, stderr.trim()].filter(Boolean).join("\n")).slice(0, 3000) });
+        return ended({ ...run, status: "failed", error: redact([lastError, exit === null ? "it stopped without an exit code" : `it exited with ${exit}`, stderr.trim()].filter(Boolean).join("\n")).slice(0, 3000), ...(exit === null ? { cutOff: true } : {}) });
       }
       return ended(run);
     };
