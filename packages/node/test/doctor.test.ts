@@ -541,6 +541,11 @@ describe("each fault gives its own line and advice", () => {
     expect(byId(diagnose(none), "notify.devices")).toMatchObject({ state: "ok" });
     expect(fault((f) => (f.notify = { devices: 2, failing: [{ device: "iPhone", error: "the push service answered 403" }], keyProblem: null }), "notify.devices").state).toBe("needs-you");
     expect(fault((f) => (f.notify = { devices: 2, failing: [], keyProblem: "the key file is not a P-256 key" }), "notify.key").state).toBe("broken");
+    // A device it can't send to at all (no Apple push key): broken, and the way out is the key, not the device's switch.
+    const unsendable = fault((f) => (f.notify = { devices: 1, failing: [], keyProblem: null, unsendable: [{ device: "iPhone", why: "this node has no Apple push key: add it with `invincible notify apple-key`" }] }), "notify.devices");
+    expect(unsendable.state).toBe("broken");
+    expect(unsendable.line).toContain("no Apple push key");
+    expect(unsendable.fix).toContain("invincible notify apple-key");
   });
 
   test("notifications: it can't reach you is a finding for your Inbox once it matters; a node nobody uses isn't nagged", () => {

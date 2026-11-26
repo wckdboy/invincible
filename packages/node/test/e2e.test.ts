@@ -443,6 +443,34 @@ describe("M0: one mind, two bodies", () => {
     await expect(callA("setApplePushKey", body)).rejects.toThrow(/400.*isn't an Apple push key/);
   });
 
+  test("an iPhone that turns notifications on where this node has no Apple push key is told why, and so is the Doctor", async () => {
+    // 26 November 2026: every notification to the owner's iPhone failed for hours while the Doctor said "1 device can be
+    // reached": Ultra's node had no Apple push key, and the app subscribing again had cleared the failures it kept.
+    const callA = admin(homeA, portA);
+    const invite = await callA<{ invite: string }>("createInvite", { kind: "client", scopes: ["mind:read", "chat"] });
+    const phone = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])) as CryptoKeyPair;
+    const phoneId = clientIdFromKey(new Uint8Array(await crypto.subtle.exportKey("raw", phone.publicKey)));
+    const join = await requestPairing(invite.invite, { device: phoneId, name: "keyless-phone", kind: "client" });
+    const pending = (await callA("pairings")).pairings.find((p: any) => p.device === phoneId);
+    await callA("approvePairing", { invite: pending.invite, device: pending.device });
+    await waitForApproval(join, { intervalMs: 50 });
+    try {
+      // (No Apple push key on this node: the test before this one was refused setting a fake one.)
+      const body = utf8(JSON.stringify({ token: "ab".repeat(32), environment: "production" }));
+      const headers = await signRequest(phoneId, async (m) => new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, phone.privateKey, m)), "POST", routes.applePushSubscribe.path, body);
+      const on = await fetch(`http://127.0.0.1:${portA}${routes.applePushSubscribe.path}`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body });
+      expect(on.status).toBe(200);
+      const view = await callA<{ devices: { name: string; lastError: string | null }[] }>("notify");
+      expect(view.devices.find((d) => d.name === "keyless-phone")?.lastError).toContain("no Apple push key");
+      const doctor = await callA<{ checks: { id: string; state: string; line: string }[] }>("doctor", { quick: true, offline: true });
+      const line = doctor.checks.find((c) => c.id === "notify.devices");
+      expect(line).toMatchObject({ state: "broken" });
+      expect(line?.line).toContain("keyless-phone");
+    } finally {
+      await callA("revokeDevice", { device: phoneId });
+    }
+  });
+
   test("a kept file is fetched from whichever node holds it, under the same scope, fenced the same way", async () => {
     // The server keeps a sandbox's work (the collector stands in for docker cp).
     const kept = (await server.artifacts.save(

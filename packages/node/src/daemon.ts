@@ -574,6 +574,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     db: notifyDb,
     sender: {
       publicKey: () => webPush.publicKey(),
+      // An iPhone's can't be sent at all while the vault holds no Apple push key (looked up, never opened).
+      blocked: (target) => (appleTarget(target.endpoint) && !(vault.unlocked() && vault.info(APPLE_PUSH_SECRET)?.origin === APPLE_PUSH.production) ? "this node has no Apple push key: add it with `invincible notify apple-key`" : null),
       send: (target, payload, delivery, signal) => (collectTarget(target.endpoint) ? collected : appleTarget(target.endpoint) ? applePush : webPush).send(target, payload, delivery, signal),
       close: () => applePush.close(),
     },

@@ -105,6 +105,8 @@ export interface NotifySender {
   /** This node's VAPID key, which browsers subscribe to. */
   publicKey(): Promise<string>;
   send(target: PushTarget, payload: NotifyPayload, delivery: PushDelivery, signal?: AbortSignal): Promise<PushOutcome>;
+  /** Why it can't send to this at all, before any send is tried (an iPhone's, with no Apple push key here), or null. */
+  blocked?(target: PushTarget): string | null;
   close?(): void;
 }
 
@@ -813,7 +815,8 @@ export class NotifyService {
   }
 
   private deviceView(sub: Subscription, name: string): NotifyDeviceView {
-    return { device: sub.device, name, service: sub.service, since: sub.createdAt, lastOk: sub.lastOk, lastError: sub.lastError };
+    // What it can't send to at all is said as the device's error: every app shows that line ("Not arriving: …").
+    return { device: sub.device, name, service: sub.service, since: sub.createdAt, lastOk: sub.lastOk, lastError: this.o.sender.blocked?.(sub) ?? sub.lastError };
   }
 
   /** Everything the Settings page and `invincible notify` show. Never an endpoint or a key but this node's public one. */
@@ -850,12 +853,19 @@ export class NotifyService {
    * were lost, and how many things wait for your answer (approvals, questions, keys and connectors it needs, of the
    * kinds you have on): with nobody to reach, either is worth a word in your Inbox.
    */
-  doctorFacts(): { devices: number; failing: { device: string; error: string }[]; keyProblem: string | null; lost: number; asks: number } {
+  doctorFacts(): { devices: number; failing: { device: string; error: string }[]; keyProblem: string | null; lost: number; asks: number; unsendable: { device: string; why: string }[] } {
     const devices = this.devices();
     const prefs = this.o.db.prefs();
+    // What it can't send to at all, whatever its last sends said (a subscription made again forgets its failures).
+    const unsendable = devices.flatMap((d) => {
+      const why = this.o.sender.blocked?.(d.sub);
+      return why ? [{ device: d.name, why }] : [];
+    });
+    const blocked = new Set(unsendable.map((d) => d.device));
     return {
       devices: devices.length,
-      failing: devices.filter((d) => !reaches(d.sub) && d.sub.lastError).map((d) => ({ device: d.name, error: d.sub.lastError! })),
+      unsendable,
+      failing: devices.filter((d) => !blocked.has(d.name) && !reaches(d.sub) && d.sub.lastError).map((d) => ({ device: d.name, error: d.sub.lastError! })),
       keyProblem: this.keyProblem,
       lost: this.lostDevices().length,
       asks: this.standing(this.now()).filter((item) => (item.kind === "approval" || item.kind === "question") && prefs.kinds[item.kind]).length,

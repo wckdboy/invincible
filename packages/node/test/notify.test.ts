@@ -12,7 +12,7 @@ import type { PushDelivery, PushOutcome, PushSender, PushTarget } from "../src/p
  * it ended. The whole path over HTTP, with a stand-in push service, is notify.e2e.test.ts.
  */
 
-function harness(over: { devices?: { id: string; name: string; kind: "node" | "client"; scopes: string[] }[]; answer?: (target: PushTarget) => PushOutcome | undefined; sources?: Partial<NotifySources>; tickMs?: number | false } = {}) {
+function harness(over: { devices?: { id: string; name: string; kind: "node" | "client"; scopes: string[] }[]; answer?: (target: PushTarget) => PushOutcome | undefined; blocked?: (target: PushTarget) => string | null; sources?: Partial<NotifySources>; tickMs?: number | false } = {}) {
   let now = Date.UTC(2026, 10, 12, 12, 0, 0);
   const sent: { to: string; payload: NotifyPayload }[] = [];
   const devices = over.devices ?? [{ id: "c_phone", name: "phone", kind: "client" as const, scopes: ["mind:read", "chat", "vault:read"] }];
@@ -24,6 +24,7 @@ function harness(over: { devices?: { id: string; name: string; kind: "node" | "c
   db.put("c_phone", { endpoint: "https://web.push.apple.com/stand-in", p256dh: "p", auth: "a", service: "Apple" });
   const sender = {
     publicKey: async () => "key",
+    ...(over.blocked ? { blocked: over.blocked } : {}),
     send: async (target: PushTarget, payload: NotifyPayload, delivery: PushDelivery) => {
       sent.push({ to: target.endpoint, payload });
       // A device that collects is kept for on the node, as the daemon's own sender does it.
@@ -339,6 +340,36 @@ describe("a subscription its push service drops: lost, not turned off", () => {
     expect((await h.service.view("c_ipad")).reachable).toBe(1);
     expect((await h.service.view("c_ipad")).lost).toBeNull();
     expect(h.service.doctorFacts().failing).toEqual([{ device: "iPad", error: "Apple's push service answered 500" }]);
+  });
+});
+
+describe("what this node can't send at all", () => {
+  // 26 November 2026: Ultra had no Apple push key. Every notification to the owner's iPhone failed at the send, the
+  // device's failures were reset when its app subscribed again, and the Doctor said "1 device can be reached".
+  const noKey = "this node has no Apple push key: add it with `invincible notify apple-key`";
+  const TOKEN = "fe".repeat(32);
+
+  test("an iPhone it has no Apple key for is said so before any send fails, and its device's line says why", async () => {
+    const devices = [
+      { id: "c_phone", name: "phone", kind: "client" as const, scopes: ["mind:read"] },
+      { id: "c_ipad", name: "iPad", kind: "client" as const, scopes: ["mind:read"] },
+    ];
+    const h = harness({ devices, blocked: (target) => (target.endpoint.startsWith("apns:") ? noKey : null) });
+    h.service.subscribeApple("c_ipad", { token: TOKEN, environment: "production" });
+    expect(h.service.doctorFacts()).toMatchObject({ devices: 2, failing: [], unsendable: [{ device: "iPad", why: noKey }] });
+    const view = await h.service.view("c_ipad");
+    expect(view.devices.find((d) => d.name === "iPad")?.lastError).toBe(noKey);
+    // The browser beside it is untouched: it can be reached.
+    expect(view.devices.find((d) => d.name === "phone")?.lastError).toBeNull();
+  });
+
+  test("once it can send, nothing is said", async () => {
+    let key = false;
+    const h = harness({ blocked: (target) => (target.endpoint.startsWith("apns:") && !key ? noKey : null) });
+    h.service.subscribeApple("c_phone", { token: TOKEN, environment: "production" });
+    expect(h.service.doctorFacts().unsendable).toHaveLength(1);
+    key = true;
+    expect(h.service.doctorFacts().unsendable).toEqual([]);
   });
 });
 

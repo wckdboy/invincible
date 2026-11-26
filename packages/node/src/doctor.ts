@@ -124,9 +124,10 @@ export interface DoctorFacts {
   /**
    * Push notifications on this node (absent: a node from before them): the devices subscribed, those whose sends keep
    * failing, and (absent: gathered before these were known) how many devices' subscriptions their push service dropped,
-   * and how many things wait for your answer (approvals, questions, keys and connectors it needs).
+   * and how many things wait for your answer (approvals, questions, keys and connectors it needs). `unsendable`: devices
+   * this node can't send to at all, and why (an iPhone's, with no Apple push key here), whatever their last sends said.
    */
-  notify?: { devices: number; failing: { device: string; error: string }[]; keyProblem: string | null; lost?: number; asks?: number };
+  notify?: { devices: number; failing: { device: string; error: string }[]; keyProblem: string | null; lost?: number; asks?: number; unsendable?: { device: string; why: string }[] };
   /**
    * The agents whose own setup can stop their work here (absent: a node with no Agents): one in sensitive mode,
    * each of its models and why this node can't use it (null: it can); each key of yours it was given, and why it can't
@@ -584,7 +585,16 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
         finding: { severity: "warn", title: "Your agent can't reach you when the app is closed", body: "No device of yours has notifications on, so what needs you waits here until you look. iPhone or iPad: More → Notifications. Web app: Settings → Notifications. Android: More → Notifications." },
       });
     } else if (!n.devices) add("notify", "notify.devices", "ok", "no device has notifications turned on, so it can't reach you when the app is closed (Settings turns them on)");
-    else if (n.failing.length) {
+    else if (n.unsendable?.length) {
+      // On, and nothing can be sent to it at all: no send has to fail first, and turning it off and on again changes
+      // nothing (26 November 2026: an iPhone's notifications were on for hours while the node had no Apple push key).
+      const names = n.unsendable.map((d) => d.device);
+      const who = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]!;
+      const why = [...new Set(n.unsendable.map((d) => d.why))].join("; ");
+      add("notify", "notify.devices", "broken", `${who} ${names.length > 1 ? "have" : "has"} notifications on, but none can be sent: ${why.slice(0, 200)}`, "Give this node the Apple push key: invincible notify apple-key < key.json (the .p8 file's text, its Key ID and your Team ID). invincible notify test sends one.", {
+        finding: { severity: "alert", title: `Notifications can't reach ${who}`, body: `They're on, but this node can't send them: ${why.slice(0, 300)}` },
+      });
+    } else if (n.failing.length) {
       const names = n.failing.map((d) => d.device);
       add("notify", "notify.devices", "needs-you", `notifications aren't reaching ${n.failing.map((d) => `${d.device} (${d.error.slice(0, 80)})`).join("; ")}`, "On that device: Settings, turn notifications off and on again. invincible notify test sends one now.", {
         finding: { severity: "warn", title: `Notifications aren't reaching ${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]}`, body: "The last ones didn't arrive. On that device, turn notifications off and on again; invincible notify test sends one." },
