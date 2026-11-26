@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "name": "fixture-node",
+  "fleet": "SBTmtnaL_Cn7DBP166-R-ZZUq0tRdIQaQqRm8EIPoB4",
+  "port": 7777,
+  "keystore": "file",
+  "advertise": null
+}
