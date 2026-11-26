@@ -1,16 +1,17 @@
 import { blendHex, knightColors } from "@invincible/core/avatar";
-import { AURUM, FIELD_RIM, type FieldColours } from "./field.ts";
+import { AURUM, FIELD_RIM, project, type FieldColours } from "./field.ts";
 import { ORB_LONGEST_STEP, orbRand, orbSeed, type OrbMood } from "./orb-motion.ts";
 
 /*
- * The orbs as fields (26 November 2026): Galahad's field (lib/field.ts) is every orb, his in gold inside his heads-up
- * ring, each knight's in its own colours. The owner's words: the glyph spheres "still look a little strange/not cool
- * enough, and almost like nipples", and "i dont want them to be too visually distractin". So a field has no bright
- * middle (its core stays dark), no regular lattice of dots (the icon's rounds said a lattice on a sphere reads as a
- * disco ball), and no ring round a knight; it is still where it is one of many, and moves slowly where it is the one
- * you are looking at. Pure: whose field an orb is, how it is drawn at a size, how it moves in each mood, its embers and
- * its ink on a light page. The PWA draws it (ui/orb.ts); the Apple and Android apps will draw the same, held to these
- * numbers by the vectors (apps/apple/scripts/vectors.ts).
+ * The orbs as fields (26 November 2026): Galahad's field (lib/field.ts) is every orb, his in gold with his beam of light
+ * through it, each knight's in its own colours. The owner's words: the glyph spheres "still look a little strange/not
+ * cool enough, and almost like nipples", and "i dont want them to be too visually distractin"; then, of the heads-up ring
+ * he had worn round his field, "remove the old mark around galahad. make the primary agent distinct in some other cool
+ * way". So a field has no bright middle (its core stays dark), no regular lattice of dots (the icon's rounds said a
+ * lattice on a sphere reads as a disco ball), and no ring round it, his or a knight's; it is still where it is one of
+ * many, and moves slowly where it is the one you are looking at. Pure: whose field an orb is, how it is drawn at a size,
+ * his beam, how it moves in each mood, its embers and its ink on a light page. The PWA draws it (ui/orb.ts); the Apple
+ * and Android apps will draw the same, held to these numbers by the vectors (apps/apple/scripts/vectors.ts).
  */
 
 /** Whose field an orb is: its seed (its lines' longitudes and widths), its lean (lib/field.ts' tilt), how many lines,
@@ -56,29 +57,60 @@ export interface FieldLook {
   zoom: number;
 }
 
-/** A field at a size. In Galahad's ring (`ringed`) it is drawn smaller, clear of the ring, and with fewer of his lines
- * where he is small; a knight's fills its square. The larger, the more points along a line (so its dots stay close),
- * and the smaller, the bolder. */
-export function fieldLook(identity: FieldIdentity, size: number, ringed: boolean): FieldLook {
+/** A field at a size. His (`galahad`) keeps fewer of his 46 lines where he is small, so it reads at 18 px; every field
+ * fills its square alike (his no longer drawn in, clear of a ring). The larger, the more points along a line (so its dots
+ * stay close), and the smaller, the bolder. */
+export function fieldLook(identity: FieldIdentity, size: number, galahad: boolean): FieldLook {
   const s = Number.isFinite(size) ? Math.max(8, size) : 36;
-  const lines = ringed ? Math.min(identity.lines, s < 30 ? 26 : s < 56 ? 34 : 46) : identity.lines;
-  return { lines, steps: Math.round(Math.max(20, Math.min(96, s * 0.55))), weight: s <= 24 ? 1.5 : s <= 48 ? 1.25 : 1, zoom: ringed ? 0.86 : 0.94 };
+  const lines = galahad ? Math.min(identity.lines, s < 30 ? 26 : s < 56 ? 34 : 46) : identity.lines;
+  return { lines, steps: Math.round(Math.max(20, Math.min(96, s * 0.55))), weight: s <= 24 ? 1.5 : s <= 48 ? 1.25 : 1, zoom: 0.94 };
 }
 
-/** Galahad's heads-up ring round his field (as the mockup you chose has it): five arcs of ink a sixth of the way round
- * each, with gaps between, and at the top, alone, his seat in oxblood. Angles are degrees clockwise from the top; the
- * radius and widths are shares of the orb's width, never thinner than a pixel. */
-export const GALAHAD_RING = {
-  r: 0.465,
-  width: 1 / 64,
-  arcs: [[38, 82], [98, 142], [158, 202], [218, 262], [278, 322]] as readonly (readonly [number, number])[],
-  seat: { from: -15, to: 15, width: 1.8 },
-  ink: { dark: "#e8eaf0", paper: "#181a22", alpha: { dark: 0.26, paper: 0.28 } },
-  oxblood: { dark: "#c8323f", paper: "#9a1f2b" },
-} as const;
+/**
+ * His beam: what marks him out, now his heads-up ring has gone (the owner's word, 26 November 2026: "make the primary
+ * agent distinct in some other cool way"). A beam of light along his field's own axis, out of both its poles, as a
+ * pulsar's jets go: no knight has one. Each half runs from `from` to `to` of the field's units out
+ * of its middle (so the core, r < 0.32, stays dark), `width` of the orb's width across at its root (never under a pixel),
+ * narrowing to nothing at its tip, its light fading as it goes (beamAt). On a dark page its light is added as the
+ * field's is, with a close glow `glow.width` times as wide and `glow.alpha` as strong (no fog); on a light page it is ink,
+ * `ink.width` times as wide and `ink.alpha` times as strong as its light (ink on white reads thinner than light on black).
+ * Its outline is taken at `steps` steps along it. The field turns about it; it shines as the field does, never past its
+ * light at rest (breathing while something waits, dimmer while queued or paused, its tip red-brown when its work failed).
+ */
+export const GALAHAD_BEAM = { from: 0.36, to: 1.72, width: 1 / 40, steps: 16, glow: { width: 3.2, alpha: 0.2 }, ink: { width: 1.3, alpha: 1.2 } } as const;
 
-/** How wide his ring's line is, in pixels, for an orb `size` pixels wide (its seat's is GALAHAD_RING.seat.width as wide). */
-export const ringWidth = (size: number): number => Math.max(1, size * GALAHAD_RING.width);
+/** A direction in the field's own space turned as its lean turns its points (lib/field.ts' fieldAt: Rx·Ry·Rz). */
+function leaned([x0, y0, z0]: [number, number, number], [ax, ay, az]: [number, number, number]): [number, number, number] {
+  const [cx, sx, cy, sy, cz, sz] = [Math.cos(ax), Math.sin(ax), Math.cos(ay), Math.sin(ay), Math.cos(az), Math.sin(az)];
+  let x = x0 * cz - y0 * sz, y = x0 * sz + y0 * cz, z = z0;
+  const x2 = x * cy + z * sy, z2 = -x * sy + z * cy;
+  x = x2;
+  z = z2;
+  const y3 = y * cx - z * sx, z3 = y * sx + z * cx;
+  return [x, y3, z3];
+}
+
+/** His beam in an orb's square at a zoom (its middle 0, its edge 1; x right, y down, as an ember's): each half's root
+ * and tip, along his axis (lib/field.ts' camera, as his points are seen), the upper half first. */
+export function beamLine(identity: FieldIdentity, zoom: number): { root: [number, number]; tip: [number, number] }[] {
+  const axis = leaned([0, 1, 0], identity.tilt);
+  const seen = (k: number): [number, number] => {
+    // (Placed as a point is: lib/field.ts' points are its units times 1.05.)
+    const q = project({ x: axis[0] * k * 1.05, y: axis[1] * k * 1.05, z: axis[2] * k * 1.05, rgb: [0, 0, 0], size: 0 }, 2, { zoom });
+    return [q.x - 1, q.y - 1];
+  };
+  const L = GALAHAD_BEAM;
+  const halves = [1, -1].map((dir) => ({ root: seen(dir * L.from), tip: seen(dir * L.to) }));
+  return halves[0]!.tip[1] <= halves[1]!.tip[1] ? halves : [halves[1]!, halves[0]!];
+}
+
+/** Along a half of his beam, `u` of the way from its root (0) to its tip (1): its width as a share of the root's (it
+ * narrows to a point), how much of its light is left, and how far its colour has gone from his key's lit gold (0) through
+ * his gold (0.5) to his rim's copper (1). */
+export function beamAt(u: number): { width: number; light: number; hue: number } {
+  const t = Math.max(0, Math.min(1, u));
+  return { width: Math.pow(1 - t, 0.55), light: Math.pow(1 - t, 1.1), hue: t };
+}
 
 // ---- how it moves --------------------------------------------------------------------------------------------------
 
@@ -201,7 +233,7 @@ export interface FieldFrame {
 /**
  * His embers: how many; each lives 2.8 to 4.4 seconds (then another sets out); where they set out (a share of the way
  * from the middle to the edge of the orb's square) and how far each drifts; how much they rise as they go; how far
- * round from the rim's burning side they may set out (degrees either way); and their radius. Inside his ring always.
+ * round from the rim's burning side they may set out (degrees either way); and their radius. Always inside his square.
  */
 export const FIELD_EMBERS = { count: 7, life: [2.8, 4.4], from: [0.56, 0.64], drift: [0.1, 0.2], rise: 0.06, spread: 70, size: [0.016, 0.028] } as const;
 /** Where the rim burns, in degrees clockwise from the top (lib/field.ts' rim light, seen from the front: lower right). */

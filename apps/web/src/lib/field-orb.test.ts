@@ -3,14 +3,15 @@ import { KNIGHT_TINTS, knightColors } from "@invincible/core/avatar";
 import { AURUM, fieldPoints, project } from "./field.ts";
 import {
   FIELD_EASE, FIELD_EMBERS, FIELD_MOTION, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldSettled, fieldStep, fieldStill, fieldTone,
-  GALAHAD_FIELD, GALAHAD_RING, knightField, RIM_ANGLE, RIM_DIM, ringWidth, type FieldClock, type FieldMotion,
+  GALAHAD_FIELD, GALAHAD_BEAM, knightField, beamAt, beamLine, RIM_ANGLE, RIM_DIM, type FieldClock, type FieldMotion,
 } from "./field-orb.ts";
 import { ORB_LONGEST_STEP, ORB_MOODS } from "./orb-motion.ts";
 
 /*
- * The orbs as fields (26 November 2026): Galahad's in gold in his ring, each knight's in its own colours; calm, still
- * where they are many, moving only where they are looked at (the owner's words: "almost like nipples", "i dont want them
- * to be too visually distractin", "slow and calming movement").
+ * The orbs as fields (26 November 2026): Galahad's in gold with his beam through it, each knight's in its own colours;
+ * calm, still where they are many, moving only where they are looked at (the owner's words: "almost like nipples", "i
+ * dont want them to be too visually distractin", "slow and calming movement", "remove the old mark around galahad. make
+ * the primary agent distinct in some other cool way").
  */
 
 const HANDLES = ["ada", "gareth", "percival", "kay", "lin", "bors", "", "Will’s “iPad” \\ 🛡️", ...Array.from({ length: 200 }, (_, i) => `h${i}`)];
@@ -77,25 +78,56 @@ describe("how a field is drawn at a size", () => {
     expect([18, 34, 160].map((size) => fieldLook(ada, size, false).weight)).toEqual([1.5, 1.25, 1]);
   });
 
-  test("his field stays clear inside his ring, and a knight's inside its square, at every size and turn", () => {
-    const reach = (identity: typeof GALAHAD_FIELD, size: number, ringed: boolean, turn: number) => {
-      const look = fieldLook(identity, size, ringed);
+  test("every field stays inside its square, his as a knight's, at every size and turn", () => {
+    const reach = (identity: typeof GALAHAD_FIELD, size: number, galahad: boolean, turn: number) => {
+      const look = fieldLook(identity, size, galahad);
       const points = fieldPoints({ lines: look.lines, steps: look.steps, tilt: identity.tilt, seed: identity.seed, colours: identity.colours, weight: look.weight, turn });
       return Math.max(...points.map((p) => {
         const q = project(p, 1, { zoom: look.zoom });
         return Math.hypot(q.x - 0.5, q.y - 0.5);
       }));
     };
-    for (const size of [16, 34, 50, 160]) for (const turn of [0, 1, 2.5, 4, 5.5]) expect(reach(GALAHAD_FIELD, size, true, turn)).toBeLessThan(GALAHAD_RING.r - 0.04);
+    for (const size of [16, 34, 50, 160]) for (const turn of [0, 1, 2.5, 4, 5.5]) expect(reach(GALAHAD_FIELD, size, true, turn)).toBeLessThan(0.48);
     for (const handle of HANDLES.slice(0, 60)) for (const turn of [0, 2, 4]) expect(reach(knightField(handle), 34, false, turn)).toBeLessThan(0.46);
   });
 
-  test("his ring: five arcs of ink with gaps, his seat alone at the top, never thinner than a pixel", () => {
-    expect(GALAHAD_RING.arcs).toHaveLength(5);
-    const arcs = [[GALAHAD_RING.seat.from + 360, GALAHAD_RING.seat.to + 360], ...GALAHAD_RING.arcs.map(([from, to]) => [from + 360, to + 360])].sort((a, b) => a[0]! - b[0]!);
-    for (let i = 1; i < arcs.length; i++) expect(arcs[i]![0]! - arcs[i - 1]![1]!).toBeGreaterThan(10);
-    expect(GALAHAD_RING.seat.from + GALAHAD_RING.seat.to).toBe(0);
-    expect([ringWidth(16), ringWidth(64), ringWidth(160)]).toEqual([1, 1, 2.5]);
+  test("his beam: out of both his poles along his axis, his dark core kept, its tips inside his square", () => {
+    for (const zoom of [0.94, 0.86, 1]) {
+      const [upper, lower] = beamLine(GALAHAD_FIELD, zoom) as [{ root: [number, number]; tip: [number, number] }, { root: [number, number]; tip: [number, number] }];
+      const way = (half: typeof upper) => [half.tip[0] - half.root[0], half.tip[1] - half.root[1]] as const;
+      const [a, b] = [way(upper), way(lower)];
+      // One line through his middle: its halves point opposite ways, the upper one up (y is down in the square).
+      expect((a[0] * b[0] + a[1] * b[1]) / (Math.hypot(...a) * Math.hypot(...b))).toBeLessThan(-0.99);
+      expect(upper.tip[1]).toBeLessThan(upper.root[1]);
+      // Through his poles, so it stands up across his lobes, never lying along them.
+      expect(Math.abs(a[1])).toBeGreaterThan(2 * Math.abs(a[0]));
+      for (const half of [upper, lower]) {
+        // Rooted outside his core (which stays dark), its tip short of the square's edge.
+        expect(Math.hypot(...half.root)).toBeGreaterThan(0.1);
+        expect(Math.hypot(...half.tip)).toBeLessThan(0.9);
+        expect(Math.hypot(...half.tip)).toBeGreaterThan(2.5 * Math.hypot(...half.root));
+      }
+    }
+    // The same for the same zoom: it is his field's, not drawn by hand.
+    expect(beamLine(GALAHAD_FIELD, 0.94)).toEqual(beamLine(GALAHAD_FIELD, 0.94));
+    // A pixel across at its root at the smallest orb (16 px: its floor), and slim where he is large (160 px: four).
+    expect(16 * GALAHAD_BEAM.width).toBeLessThan(1);
+    expect(160 * GALAHAD_BEAM.width).toBeCloseTo(4, 6);
+  });
+
+  test("along his beam: it narrows to a point and fades to nothing, from his lit gold to his rim's copper", () => {
+    expect(beamAt(0)).toEqual({ width: 1, light: 1, hue: 0 });
+    expect(beamAt(1)).toEqual({ width: 0, light: 0, hue: 1 });
+    // Held to its ends either side.
+    expect([beamAt(-2), beamAt(3)]).toEqual([beamAt(0), beamAt(1)]);
+    const along = [0, 0.2, 0.4, 0.6, 0.8, 1].map(beamAt);
+    for (let i = 1; i < along.length; i++) {
+      expect(along[i]!.width).toBeLessThan(along[i - 1]!.width);
+      expect(along[i]!.light).toBeLessThan(along[i - 1]!.light);
+      expect(along[i]!.hue).toBeGreaterThan(along[i - 1]!.hue);
+    }
+    // Its light goes sooner than its width: the tip a faint point, never a bright stub.
+    expect(beamAt(0.5).light).toBeLessThan(beamAt(0.5).width);
   });
 });
 
@@ -168,7 +200,7 @@ describe("how it moves", () => {
     expect(fieldStill(FIELD_MOTION.failed)).toEqual({ turn: 0, glow: FIELD_MOTION.failed.glow, rim: 1, embers: [] });
   });
 
-  test("his embers drift off the burning rim, inside his ring, fading in and out; the same for the same moment", () => {
+  test("his embers drift off the burning rim, inside his square, fading in and out; the same for the same moment", () => {
     const working = fieldClock(FIELD_MOTION.working);
     expect(fieldFrame(working, 3).embers).toEqual([]);
     expect(fieldFrame(fieldClock(FIELD_MOTION.idle), 3, { embers: true }).embers).toEqual([]);
@@ -176,7 +208,7 @@ describe("how it moves", () => {
       const { embers } = fieldFrame(working, 1000 + t, { seed: 5, embers: true });
       expect(embers).toHaveLength(FIELD_EMBERS.count);
       for (const e of embers) {
-        expect(Math.hypot(e.x, e.y)).toBeLessThan(2 * GALAHAD_RING.r - 0.04);
+        expect(Math.hypot(e.x, e.y)).toBeLessThan(0.89);
         expect(e.alpha).toBeGreaterThanOrEqual(0);
         expect(e.alpha).toBeLessThanOrEqual(1);
         // Off the rim's side (lower right): never on the far side of the middle from it.

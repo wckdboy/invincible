@@ -11,8 +11,8 @@ import { fieldLook, GALAHAD_FIELD, knightField, type FieldIdentity } from "./fie
 const HANDLES = ["ada", "gareth", "percival", "kay", "lin", "bors", "gawain", "tristan", "lancelot", "bedivere", "", "Will’s “iPad” \\ 🛡️", ...Array.from({ length: 28 }, (_, i) => `knight-${i}`)];
 const TURNS = [0, 0.7, 1.9, 3.1, 4.4, 5.8];
 /** A field's points as an orb draws it at a size (lib/field-orb.ts' look). */
-const optionsOf = (identity: FieldIdentity, ringed: boolean, size = 160, turn = 0): FieldOptions => {
-  const look = fieldLook(identity, size, ringed);
+const optionsOf = (identity: FieldIdentity, galahad: boolean, size = 160, turn = 0): FieldOptions => {
+  const look = fieldLook(identity, size, galahad);
   return { lines: look.lines, steps: look.steps, tilt: identity.tilt, seed: identity.seed, colours: identity.colours, weight: look.weight, turn };
 };
 
@@ -52,19 +52,19 @@ describe("the field, made once and turned", () => {
 
 describe("its middle is dark", () => {
   test("no point comes inside its core, his field or any knight's, at any turn", () => {
-    for (const [identity, ringed] of [[GALAHAD_FIELD, true], ...HANDLES.map((handle) => [knightField(handle), false])] as [FieldIdentity, boolean][]) {
-      for (const turn of TURNS) for (const p of fieldPoints(optionsOf(identity, ringed, 160, turn))) expect(Math.hypot(p.x, p.y, p.z)).toBeGreaterThan(0.33);
+    for (const [identity, galahad] of [[GALAHAD_FIELD, true], ...HANDLES.map((handle) => [knightField(handle), false])] as [FieldIdentity, boolean][]) {
+      for (const turn of TURNS) for (const p of fieldPoints(optionsOf(identity, galahad, 160, turn))) expect(Math.hypot(p.x, p.y, p.z)).toBeGreaterThan(0.33);
     }
   });
 
   test("on the picture, its middle holds a fraction of the light its brightest part does, and its brightest is off the middle", () => {
     // The light in each cell of a 32 by 32 grid over its square: its middle four cells against the brightest.
     const N = 32;
-    for (const [identity, ringed, most] of [[GALAHAD_FIELD, true, 0.1], ...HANDLES.map((handle) => [knightField(handle), false, 0.25])] as [FieldIdentity, boolean, number][]) {
-      const look = fieldLook(identity, 160, ringed);
+    for (const [identity, galahad, most] of [[GALAHAD_FIELD, true, 0.1], ...HANDLES.map((handle) => [knightField(handle), false, 0.25])] as [FieldIdentity, boolean, number][]) {
+      const look = fieldLook(identity, 160, galahad);
       for (const turn of TURNS) {
         const grid = new Float64Array(N * N);
-        for (const p of fieldPoints(optionsOf(identity, ringed, 160, turn))) {
+        for (const p of fieldPoints(optionsOf(identity, galahad, 160, turn))) {
           const q = project(p, N, { zoom: look.zoom });
           const [x, y] = [Math.floor(q.x), Math.floor(q.y)];
           if (x >= 0 && y >= 0 && x < N && y < N) grid[y * N + x] = grid[y * N + x]! + 0.2126 * p.rgb[0] + 0.7152 * p.rgb[1] + 0.0722 * p.rgb[2];

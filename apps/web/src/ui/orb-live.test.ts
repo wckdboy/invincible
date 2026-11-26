@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { seat, workerAvatar } from "./avatar.ts";
-import { knightFace, orb } from "./orb.ts";
+import { appMark, knightFace, orb } from "./orb.ts";
 
 /*
  * The orbs on a canvas (26 November 2026: Galahad's field, and each knight's), drawn on one that records what is drawn
@@ -8,7 +8,8 @@ import { knightFace, orb } from "./orb.ts";
  * motion is reduced, and once a knight has come to rest; moving slowly where they are looked at.
  */
 
-/** A 2D context that keeps the name of every call made on it, and every blend it is set to. */
+/** A 2D context that keeps the name of every call made on it, and every blend it is set to. (A gradient it makes takes
+ * its stops and keeps nothing.) */
 function context(calls: string[], blends: string[]): CanvasRenderingContext2D {
   return new Proxy({} as Record<string, unknown>, {
     get(target, key) {
@@ -16,6 +17,7 @@ function context(calls: string[], blends: string[]): CanvasRenderingContext2D {
       if (key in target) return target[key];
       return () => {
         calls.push(key);
+        return key === "createLinearGradient" ? { addColorStop() {} } : undefined;
       };
     },
     set(target, key, value) {
@@ -120,7 +122,7 @@ const canvasIn = (node: Node_): Node_ | undefined => (node.tag === "canvas" ? no
 const count = (calls: string[], name: string) => calls.filter((call) => call === name).length;
 
 describe("his orb", () => {
-  test("in a mood, a canvas its own size, sharp on the screen: his field added as light, then his ring and seat", () => {
+  test("in a mood, a canvas its own size, sharp on the screen: his field and his beam added as light", () => {
     const drawn = orb({ size: 168, mood: "working", label: "Galahad: at work", key: "test:sharp" }) as unknown as Node_;
     expect(drawn.attrs.class).toBe("orb orb-live");
     expect([drawn.attrs["data-mood"], drawn.attrs.role, drawn.attrs["aria-label"]]).toEqual(["working", "img", "Galahad: at work"]);
@@ -128,20 +130,22 @@ describe("his orb", () => {
     // Nothing reaches past it: its canvas is its own square, at twice the pixels on this screen.
     expect([canvas.className, canvas.style.width, canvas.width, canvas.attrs["aria-hidden"]]).toEqual(["orb-canvas", "168px", 336, "true"]);
     // Drawn at once, so it never shows empty: its lines as strokes (a few dozen, gathered by colour, a glow and a line
-    // each), added as light; then his five arcs and his seat.
+    // each), added as light, and his beam: each half one fill, its glow and its blade (no ring: none is drawn round him).
     expect(canvas.blends).toContain("lighter");
     expect(count(canvas.calls, "stroke")).toBeGreaterThan(10);
     expect(count(canvas.calls, "stroke")).toBeLessThan(400);
-    expect(count(canvas.calls, "arc")).toBeGreaterThanOrEqual(6);
+    expect(count(canvas.calls, "createLinearGradient")).toBe(4);
     // Then a frame at a time.
     expect(frames.length).toBeGreaterThan(0);
   });
 
-  test("on a light page, ink: nothing is added as light", () => {
+  test("on a light page, ink: nothing is added as light, his beam in ink too", () => {
     root.dataset.theme = "light";
     const canvas = canvasOf(orb({ size: 50, mood: "idle", key: "test:paper" }) as unknown as Node_)!;
     expect(canvas.blends).not.toContain("lighter");
     expect(count(canvas.calls, "stroke")).toBeGreaterThan(5);
+    // Each half of his beam, once (no glow under it on paper).
+    expect(count(canvas.calls, "createLinearGradient")).toBe(2);
   });
 
   test("still where motion is reduced: drawn once, and nothing more", () => {
@@ -165,9 +169,9 @@ describe("his orb", () => {
     expect(frames).toEqual([]);
   });
 
-  test("with no canvas to draw on, his ring in SVG", () => {
+  test("with no canvas to draw on, his box alone, as a knight's", () => {
     stub("window", undefined);
-    expect((orb({ size: 28, mood: "working" }) as unknown as Node_).children[0]!.tag).toBe("svg");
+    expect((orb({ size: 28, mood: "working" }) as unknown as Node_).children).toEqual([]);
   });
 
   test("on screen it moves a frame at a time at its pace, and once off the page it is forgotten", () => {
@@ -218,7 +222,28 @@ describe("his orb", () => {
   });
 });
 
+describe("the app's mark", () => {
+  test("his field alone, still and on nothing, light on a dark page and ink on a light one: no beam, no frames", () => {
+    const dark = appMark(20) as unknown as Node_;
+    expect([dark.attrs.class, dark.attrs.style, dark.attrs["aria-hidden"]]).toEqual(["orb app-mark", "--orb-size:20px", "true"]);
+    root.dataset.theme = "light";
+    appMark(22);
+    const pictures = made.filter((node) => node.tag === "canvas" && count(node.calls, "stroke") > 0);
+    expect(pictures).toHaveLength(2);
+    expect([pictures[0]!.blends.includes("lighter"), pictures[1]!.blends.includes("lighter")]).toEqual([true, false]);
+    for (const picture of pictures) expect(count(picture.calls, "createLinearGradient")).toBe(0);
+    run(1000);
+    expect(frames).toEqual([]);
+  });
+});
+
 describe("a knight's face", () => {
+  test("never with a beam: his alone", () => {
+    knightFace({ id: "gareth", size: 50, mood: "working", key: "test:no-beam" });
+    knightFace({ id: "ada", size: 34 });
+    for (const node of made.filter((one) => one.tag === "canvas")) expect(count(node.calls, "createLinearGradient")).toBe(0);
+  });
+
   test("still unless it works: at rest, in a row or in the history, drawn once and never asking for a frame", () => {
     for (const face of [knightFace({ id: "gareth", size: 34, mood: "idle", key: "test:idle" }), knightFace({ id: "gareth", size: 34 }), workerAvatar({ id: "gareth", name: "Gareth", still: true })]) {
       const canvas = canvasIn(face as unknown as Node_)!;

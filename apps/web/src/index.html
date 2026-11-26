@@ -272,8 +272,8 @@
         flex: 1; width: 100%; outline: none;
         padding: var(--sp-5) calc(var(--sp-4) + var(--safe-right)) calc(var(--tabbar-h) + var(--safe-bottom) + var(--sp-8)) calc(var(--sp-4) + var(--safe-left));
       }
-      /* The way back to Home on a page (a phone's top bar): a chevron and the app's mark. */
-      .topbar .brand-mini img { width: 22px; height: 22px; border-radius: 6px; }
+      /* The way back to Home on a page (a phone's top bar): a chevron and the app's mark (ui/orb.ts appMark: the icon's
+         field on nothing, drawn for the page's theme, so no dark tile sits on a light page). */
       .btn.side-expand { display: none; }
 
       @media (min-width: 960px) {
@@ -297,7 +297,6 @@
       /* ---------- the sidebar (a wide screen): the mark, search, Galahad pinned, the work by attention, its foot ---------- */
       .side-head { display: flex; align-items: center; gap: 2px; min-height: 32px; padding: 0 2px 0 var(--sp-2); }
       .side-mark { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; height: 32px; color: var(--text); text-decoration: none; }
-      .side-mark img { flex: none; width: 20px; height: 20px; border-radius: 5px; }
       .wordmark-text { font-size: var(--fs-12); font-weight: 650; letter-spacing: 0.2em; text-transform: uppercase; }
       .search-trigger {
         display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: 32px; padding: 0 var(--sp-2) 0 10px;
@@ -1508,7 +1507,7 @@
       .seat { --seat-pad: 4px; position: relative; display: inline-grid; place-items: center; flex: none; padding: var(--seat-pad); }
       .seat.seat-m { --seat-pad: 7px; }
       .seat.seat-l { --seat-pad: 9px; }
-      /* Galahad's seat is his orb (ui/avatar.ts seat()): his own ring takes the seat's room. */
+      /* Galahad's seat is his orb (ui/avatar.ts seat()): his field and beam take the whole of the seat's room. */
       .seat.seat-orb { padding: 0; }
       /* A state in words in a badge (ui/avatar.ts stateChip(), a chat's, a quest's, a loop's): working's carries a live dot. */
       .badge .dot { width: 6px; height: 6px; }
@@ -1780,8 +1779,9 @@
       .chat-hero h2 { font-size: var(--fs-20); font-weight: 650; letter-spacing: -0.02em; }
       .hero-galahad { display: grid; place-items: center; margin-bottom: var(--sp-1); }
       .hero-galahad .worker-avatar { animation: emblem-in var(--d-sheet) var(--ease-out); }
-      /* The orbs (ui/orb.ts): Galahad's field in gold in his heads-up ring, a knight's in its own colours, each drawn on a
-         canvas its own size: still where it is one of many, moving slowly where it is the one you look at (lib/field-orb.ts). */
+      /* The orbs (ui/orb.ts): Galahad's field in gold with his beam of light through it, a knight's in its own colours, the
+         app's mark (his field alone), each drawn on a canvas its own size: still where it is one of many, moving slowly where
+         it is the one you look at (lib/field-orb.ts). */
       .orb { display: inline-grid; place-items: center; flex: none; width: var(--orb-size); height: var(--orb-size); }
       .orb > svg, .orb > canvas { display: block; width: 100%; height: 100%; }
       /* What he asks you, under his orb (views/galahad-asks.ts): the Inbox's own cards, read left to right. */
@@ -1885,7 +1885,6 @@
 
       /* ---------- misc ---------- */
       /* The app's own icon, in About. */
-      .about-icon { flex: none; border-radius: 10px; }
       .scope-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: var(--sp-2); }
       /* An invite's QR code: white paper whatever the theme (a camera needs the contrast), big enough to scan across a desk. */
       .invite-qr { align-self: center; width: min(240px, 72vw); aspect-ratio: 1; padding: 0; border-radius: var(--r-md); background: #fff; box-shadow: var(--shadow-1); overflow: hidden; }

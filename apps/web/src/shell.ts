@@ -10,7 +10,7 @@ import { button, dot, kbd, retryFailed } from "./ui/controls.ts";
 import { openSheet } from "./ui/dialog.ts";
 import { h, isMac, isTyping, replace, Scope } from "./ui/dom.ts";
 import { icon } from "./ui/icons.ts";
-import { knightFace, orb } from "./ui/orb.ts";
+import { appMark, knightFace, orb } from "./ui/orb.ts";
 import { knightOfCaller } from "./lib/roster.ts";
 import { type Command, isPaletteOpen, openPalette } from "./ui/palette.ts";
 import { toast } from "./ui/toast.ts";
@@ -190,7 +190,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   const topbar = h(
     "header",
     { class: "topbar" },
-    homeLink("brand-mini", "Home", icon("chevron-left", { size: 18 }), h("img", { src: "/icon-64.png", alt: "", width: 22, height: 22, decoding: "async" })),
+    homeLink("brand-mini", "Home", icon("chevron-left", { size: 18 }), appMark(22)),
     topTitle,
     h(
       "div",

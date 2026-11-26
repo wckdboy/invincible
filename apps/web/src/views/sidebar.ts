@@ -9,7 +9,7 @@ import { type WorkFold, setWorkOpen, workOpen } from "../prefs.ts";
 import { button, dot, kbd, skeletonRows } from "../ui/controls.ts";
 import { cx, h, isMac, keepPlace, replace, type Child } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
-import { orb } from "../ui/orb.ts";
+import { appMark, orb } from "../ui/orb.ts";
 import type { Signal } from "../ui/signal.ts";
 import { answerStep, chatActivity, galahadWork, nodeTurns, questsInHand, stopChat, unreadChats } from "./chat.ts";
 import { openPlaces } from "./places.ts";
@@ -53,7 +53,7 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   const head = h(
     "div",
     { class: "side-head" },
-    h("a", { class: "side-mark", href: "#/home", title: "Home: what needs you, and the work" }, h("img", { src: "/icon-64.png", alt: "", width: 20, height: 20, decoding: "async" }), h("span", { class: "wordmark-text" }, "Galahad")),
+    h("a", { class: "side-mark", href: "#/home", title: "Home: what needs you, and the work" }, appMark(20), h("span", { class: "wordmark-text" }, "Galahad")),
     canGive ? button("Give a task", { variant: "ghost", size: "sm", iconOnly: true, icon: "edit", title: "Give a task to the knight best suited to it, or to one by name", onClick: () => giveToRoundtable(ctx) }) : null,
     collapse,
   );

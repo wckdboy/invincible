@@ -1,24 +1,26 @@
 import { fieldAt, fieldBuffer, fieldLight, fieldModel, type FieldBuffer, type FieldModel } from "../lib/field.ts";
 import {
-  FIELD_STROKE, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldStep, fieldStill, fieldTone, GALAHAD_FIELD, GALAHAD_RING, knightField, ringWidth, strokeLight,
-  type FieldClock, type FieldFrame, type FieldIdentity, type FieldLook, type FieldMotion,
+  FIELD_STROKE, fieldClock, fieldColours, fieldFps, fieldFrame, fieldInk, fieldInks, fieldLook, fieldMotion, fieldStep, fieldStill, fieldTone, GALAHAD_FIELD, GALAHAD_BEAM, knightField, beamAt, beamLine, strokeLight,
+  type FieldClock, type FieldFrame, type FieldIdentity, type FieldInks, type FieldLook, type FieldMotion,
 } from "../lib/field-orb.ts";
+import type { FieldColours } from "../lib/field.ts";
 import { orbTone, type OrbTone } from "../lib/orb.ts";
 import { orbSeed, type OrbMood } from "../lib/orb-motion.ts";
-import { h, svg } from "./dom.ts";
+import { h } from "./dom.ts";
 import { motionAllowed, move } from "./motion.ts";
 
 /*
- * The orbs (26 November 2026): every orb is Galahad's field (lib/field.ts, lib/field-orb.ts). His is in gold, inside his
- * heads-up ring with its oxblood seat (your word, 23 November 2026: he is the one you talk to, "a Jarvis … like visual,
- * the orb graphic"); a knight's is in its own colours, with no ring (knightFace). Each point of a field is a dot of
- * light added to the others on a dark page (a canvas's "lighter"), with a close, faint glow of its own and no fog; on a
- * light page it is ink. Where it is one of many (a row, a conversation's history) an orb is still, and drawn once;
- * where it is the one you are looking at, it moves as its mood does (lib/field-orb.ts' FIELD_MOTION: slowly; your
- * words of 25 and 26 November 2026, "slow and calming movement", "i dont want them to be too visually distractin"),
- * on the page's one clock (ui/motion.ts), only while on screen, and never where motion is reduced. Nothing in it comes
- * from a name's meaning, a profile's words or a model: a knight's colour is one you chose or its handle's, and its
- * handle gives its field.
+ * The orbs (26 November 2026): every orb is Galahad's field (lib/field.ts, lib/field-orb.ts). His is in gold, with his
+ * beam of light through it along his axis (your word, 23 November 2026: he is the one you talk to, "a Jarvis … like
+ * visual, the orb graphic"; and 26 November, of the heads-up ring he wore until then: "remove the old mark around galahad.
+ * make the primary agent distinct in some other cool way"); a knight's is in its own colours, with no beam (knightFace).
+ * The app's own mark is his field alone (appMark). Each point of a field is a dot of light added to the others on a dark
+ * page (a canvas's "lighter"), with a close, faint glow of its own and no fog; on a light page it is ink. Where it is one
+ * of many (a row, a conversation's history) an orb is still, and drawn once; where it is the one you are looking at, it
+ * moves as its mood does (lib/field-orb.ts' FIELD_MOTION: slowly; your words of 25 and 26 November 2026, "slow and
+ * calming movement", "i dont want them to be too visually distractin"), on the page's one clock (ui/motion.ts), only
+ * while on screen, and never where motion is reduced. Nothing in it comes from a name's meaning, a profile's words or a
+ * model: a knight's colour is one you chose or its handle's, and its handle gives its field.
  */
 
 export type { OrbTone };
@@ -38,15 +40,27 @@ export interface OrbOptions {
   key?: string;
 }
 
-/** Galahad's orb: his field in gold inside his heads-up ring. */
+/** Galahad's orb: his field in gold, his beam through it. */
 export function orb(options: OrbOptions = {}): HTMLElement {
   const size = Number.isFinite(options.size) ? Math.round(Math.max(16, Math.min(320, options.size!))) : 36;
   const tone = orbTone(options.tone);
   const named = options.label ? { role: "img", "aria-label": options.label } : { "aria-hidden": "true" };
-  const canvas = fieldCanvas(size, { identity: GALAHAD_FIELD, ringed: true, knight: false, mood: options.mood, key: options.key ?? "galahad" });
+  const canvas = fieldCanvas(size, { identity: GALAHAD_FIELD, beam: true, knight: false, mood: options.mood, key: options.key ?? "galahad" });
   const box = { class: options.mood && canvas ? "orb orb-live" : "orb", "data-tone": tone, ...(options.mood ? { "data-mood": options.mood } : {}), style: `--orb-size:${size}px`, ...named };
-  // (Where there is no canvas to draw on, his ring and seat alone.)
-  return h("span", box, canvas ?? ringSvg());
+  // (Where there is no canvas to draw on, its box alone, as a knight's.)
+  return h("span", box, canvas);
+}
+
+/**
+ * The app's mark where a page shows it (the sidebar's head, a phone's way Home, Settings' About): the app icon's field,
+ * his in gold, alone (no beam: that is his as the one you talk to), still, and on nothing, so it sits on a light page as
+ * on a dark one (your word, 26 November 2026: "make sure the app icon is transparent so it works in dark and white mode"):
+ * light added to light on a dark page, ink on a light one, as every orb is. Decorative: what it is in is named.
+ */
+export function appMark(size: number): HTMLElement {
+  const px = Number.isFinite(size) ? Math.round(Math.max(16, Math.min(320, size))) : 20;
+  const canvas = fieldCanvas(px, { identity: GALAHAD_FIELD, beam: false, knight: false, mood: undefined, key: "invincible:mark" });
+  return h("span", { class: "orb app-mark", style: `--orb-size:${px}px`, "aria-hidden": "true" }, canvas);
 }
 
 /** A knight's face options: whose (its handle), its saved avatar (a colour you chose for it, core's knightColors), its
@@ -74,18 +88,18 @@ export function knightFace(options: KnightFaceOptions): HTMLElement {
   const id = String(options.id ?? "");
   const identity = knightField(id, options.profile);
   const named = options.label ? { role: "img", "aria-label": options.label } : { "aria-hidden": "true" };
-  const canvas = fieldCanvas(size, { identity, ringed: false, knight: true, mood: options.mood, key: options.key ?? `face:${id}` });
+  const canvas = fieldCanvas(size, { identity, beam: false, knight: true, mood: options.mood, key: options.key ?? `face:${id}` });
   if (canvas) canvas.className = "knight-orb-canvas";
   return h("span", { class: "knight-orb", style: `--orb-size:${size}px`, "data-tint": identity.colours.key[1], ...named }, canvas);
 }
 
 // ---- an orb on its canvas ---------------------------------------------------------------------------------------------
 
-/** What is drawn: whose field, in his ring or not, a knight's (which moves only while it works) or his (with embers),
+/** What is drawn: whose field, with his beam or not, a knight's (which moves only while it works) or his (with embers),
  * in what mood (none: still), and on what course. */
 interface Spec {
   identity: FieldIdentity;
-  ringed: boolean;
+  beam: boolean;
   knight: boolean;
   mood: OrbMood | undefined;
   key: string;
@@ -99,13 +113,13 @@ function fieldCanvas(size: number, spec: Spec): HTMLCanvasElement | null {
   const { canvas, g, dpr } = prepared;
   canvas.className = "orb-canvas";
   const px = canvas.width;
-  const look = fieldLook(spec.identity, size, spec.ringed);
+  const look = fieldLook(spec.identity, size, !spec.knight);
   const motion = spec.mood ? fieldMotion(spec.mood, spec.knight) : STILL;
   // Still: no mood (a row, the history), or a mood with nothing to move (a knight not at work) and no course under way
   // to come to rest from. Drawn once, in its mood's light.
   if (!spec.mood || (!moves(motion) && !courses.has(spec.key))) {
     const frame = fieldStill(motion);
-    const paint = () => stamp(g, px, `${who(spec.identity)}|${look.lines}/${look.steps}/${look.weight}/${look.zoom}|${spec.ringed}|${frame.glow}/${frame.rim}|${size}@${dpr}|${paper()}`, (target) => drawField(target, px, dpr, size, spec, look, frame, paper()));
+    const paint = () => stamp(g, px, `${who(spec.identity)}|${look.lines}/${look.steps}/${look.weight}/${look.zoom}|${spec.beam}|${frame.glow}/${frame.rim}|${size}@${dpr}|${paper()}`, (target) => drawField(target, px, dpr, size, spec, look, frame, paper()));
     paint();
     onTheme(canvas, paint);
     return canvas;
@@ -214,8 +228,8 @@ const toned: [number, number, number] = [0, 0, 0];
  * A frame of a field on `g`, a square `px` device pixels wide (`size` CSS pixels at `dpr`): its lines turned as the frame
  * says, as continuous strokes from point to point, each in its light as the icon shows it (lib/field-orb.ts' fieldTone),
  * added to the others on a dark page ("lighter") with a close, faint glow under them; on a light page, in ink. The
- * strokes of one colour and brightness are one path, so a frame is a few dozen draws, not one for each point. Then its
- * embers, and his ring and seat.
+ * strokes of one colour and brightness are one path, so a frame is a few dozen draws, not one for each point; his beam
+ * goes under the lines. Then his embers.
  */
 function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: number, spec: Spec, look: FieldLook, frame: FieldFrame, onPaper: boolean): void {
   g.setTransform(1, 0, 0, 1, 0, 0);
@@ -277,6 +291,8 @@ function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: n
   g.lineJoin = "round";
   g.globalCompositeOperation = onPaper ? "source-over" : "lighter";
   for (const pass of onPaper ? (["line"] as const) : (["glow", "line"] as const)) {
+    // His beam, under his lines (on a light page they cross over it; on a dark one light adds alike either way).
+    if (pass === "line" && spec.beam) beam(g, px, dpr, size, look.zoom, colours, glow, inks);
     for (const [kind, held] of paths) {
       const level = (kind & 0xf) / (LEVELS - 1);
       const hue = kind >> 4;
@@ -306,7 +322,56 @@ function drawField(g: CanvasRenderingContext2D, px: number, dpr: number, size: n
   }
   g.globalAlpha = 1;
   g.globalCompositeOperation = "source-over";
-  if (spec.ringed) ring(g, px, ringWidth(size) * dpr, onPaper);
+}
+
+/**
+ * His beam (lib/field-orb.ts' GALAHAD_BEAM, beamLine, beamAt): each half one blade, from its root out of his core to
+ * its tip, narrowing to a point and fading as it goes, filled along its length with his lit gold going to his gold and
+ * then his rim's copper (its light added, over a close glow), or on a light page his inks; as bright as his field is now
+ * (`glow`). One path and one fill a half and a pass, so no seam shows where light is added to light.
+ */
+function beam(g: CanvasRenderingContext2D, px: number, dpr: number, size: number, zoom: number, colours: FieldColours, glow: number, inks: FieldInks | null): void {
+  const L = GALAHAD_BEAM;
+  const half = px / 2;
+  // Half its width at its root, in device pixels: never under half a pixel (a pixel across).
+  const root = Math.max(0.5, (size * L.width) / 2) * dpr;
+  const strength = Math.min(1, Math.max(0, glow));
+  const hex = (value: string): [number, number, number] => [1, 3, 5].map((at) => parseInt(value.slice(at, at + 2), 16)) as [number, number, number];
+  const mix = (a: readonly number[], b: readonly number[], t: number) => a.map((v, c) => Math.round(v + (b[c]! - v) * t));
+  const lit = hex(colours.key[0]), gold = hex(colours.key[1]), rim = hex(colours.rim);
+  const colourAt = (hue: number) => (inks ? mix(inks.key, inks.rim, hue) : hue <= 0.5 ? mix(lit, gold, hue * 2) : mix(gold, rim, (hue - 0.5) * 2));
+  const STOPS = 8;
+  for (const blade of beamLine(GALAHAD_FIELD, zoom)) {
+    const x0 = half + blade.root[0] * half, y0 = half + blade.root[1] * half;
+    const x1 = half + blade.tip[0] * half, y1 = half + blade.tip[1] * half;
+    const length = Math.hypot(x1 - x0, y1 - y0) || 1;
+    const nx = -(y1 - y0) / length, ny = (x1 - x0) / length;
+    for (const pass of inks ? (["line"] as const) : (["glow", "line"] as const)) {
+      const spread = pass === "glow" ? L.glow.width : inks ? L.ink.width : 1;
+      const strong = strength * (pass === "glow" ? L.glow.alpha : inks ? L.ink.alpha : 1);
+      const fill = g.createLinearGradient(x0, y0, x1, y1);
+      for (let i = 0; i <= STOPS; i++) {
+        const at = beamAt(i / STOPS);
+        const [r, gg, b] = colourAt(at.hue);
+        fill.addColorStop(i / STOPS, `rgba(${r},${gg},${b},${Math.round(Math.min(1, at.light * strong) * 1000) / 1000})`);
+      }
+      g.fillStyle = fill;
+      g.beginPath();
+      // One side from root to tip, the other back: its width at each step its root's times beamAt's share.
+      for (let i = 0; i <= L.steps; i++) {
+        const u = i / L.steps, w = root * spread * beamAt(u).width;
+        const x = x0 + (x1 - x0) * u + nx * w, y = y0 + (y1 - y0) * u + ny * w;
+        if (i === 0) g.moveTo(x, y);
+        else g.lineTo(x, y);
+      }
+      for (let i = L.steps; i >= 0; i--) {
+        const u = i / L.steps, w = root * spread * beamAt(u).width;
+        g.lineTo(x0 + (x1 - x0) * u - nx * w, y0 + (y1 - y0) * u - ny * w);
+      }
+      g.closePath();
+      g.fill();
+    }
+  }
 }
 
 /** A path made of strokes: a Path2D, or where the page has none, its points (a NaN before each new start). */
@@ -330,48 +395,6 @@ function emberLight(colours: { key: [string, string]; rim: string }): [number, n
   const rgb = (hex: string) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
   const [a, b] = [rgb(colours.rim), rgb(colours.key[1])];
   return [0, 1, 2].map((c) => a[c]! + (b[c]! - a[c]!) / 3) as [number, number, number];
-}
-
-/** His heads-up ring: five arcs of ink, and his seat at the top in oxblood (lib/field-orb.ts' GALAHAD_RING). */
-function ring(g: CanvasRenderingContext2D, px: number, width: number, onPaper: boolean): void {
-  const R = GALAHAD_RING;
-  const r = px * R.r, c = px / 2;
-  const radians = (degrees: number) => ((degrees - 90) * Math.PI) / 180;
-  g.lineCap = "butt";
-  g.lineWidth = width;
-  g.strokeStyle = onPaper ? R.ink.paper : R.ink.dark;
-  g.globalAlpha = onPaper ? R.ink.alpha.paper : R.ink.alpha.dark;
-  g.beginPath();
-  for (const [from, to] of R.arcs) {
-    g.moveTo(c + r * Math.cos(radians(from)), c + r * Math.sin(radians(from)));
-    g.arc(c, c, r, radians(from), radians(to));
-  }
-  g.stroke();
-  g.globalAlpha = 1;
-  g.lineWidth = width * R.seat.width;
-  g.strokeStyle = onPaper ? R.oxblood.paper : R.oxblood.dark;
-  g.beginPath();
-  g.arc(c, c, r, radians(R.seat.from), radians(R.seat.to));
-  g.stroke();
-}
-
-/** His ring and seat as SVG, where there is no canvas: in the orb's square, 200 wide and centred on its middle. */
-function ringSvg(): SVGElement {
-  const R = GALAHAD_RING;
-  const onPaper = paper();
-  const point = (r: number, degrees: number) => {
-    const a = (degrees * Math.PI) / 180;
-    const round = (n: number) => String(Math.round(n * 1000) / 1000);
-    return `${round(r * Math.sin(a))} ${round(-r * Math.cos(a))}`;
-  };
-  const r = 200 * R.r;
-  const arc = (from: number, to: number) => `M${point(r, from)}A${r} ${r} 0 0 1 ${point(r, to)}`;
-  return svg(
-    "svg",
-    { viewBox: "-100 -100 200 200", focusable: "false" },
-    svg("path", { class: "orb-ring", d: R.arcs.map(([from, to]) => arc(from, to)).join(""), fill: "none", stroke: onPaper ? R.ink.paper : R.ink.dark, "stroke-width": "3", opacity: String(onPaper ? R.ink.alpha.paper : R.ink.alpha.dark) }),
-    svg("path", { class: "orb-seat", d: arc(R.seat.from, R.seat.to), fill: "none", stroke: onPaper ? R.oxblood.paper : R.oxblood.dark, "stroke-width": String(3 * R.seat.width) }),
-  );
 }
 
 /** A still orb's picture, drawn once and stamped from then on wherever the same orb is still (a knight in twenty rows is

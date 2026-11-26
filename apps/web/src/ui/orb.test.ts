@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { knightColors } from "@invincible/core/avatar";
-import { GALAHAD_RING } from "../lib/field-orb.ts";
-import { knightFace, orb, type OrbTone } from "./orb.ts";
+import { appMark, knightFace, orb, type OrbTone } from "./orb.ts";
 
 /** Captures the renderer's real createElement and createElementNS calls, without an HTML parser or a browser (and with
  * no canvas: what an orb is where there is nothing to draw it on). */
@@ -29,19 +28,15 @@ function draw<T>(make: () => T): T {
 }
 const walk = (node: Node_): Node_[] => [node, ...node.children.flatMap(walk)];
 
-// Your word, 23 November 2026: Galahad, the one you talk to, as a Jarvis-like orb; since 26 November 2026 his field.
+// Your word, 23 November 2026: Galahad, the one you talk to, as a Jarvis-like orb; since 26 November 2026 his field, and
+// since the same evening his beam in place of the heads-up ring ("remove the old mark around galahad").
 describe("Galahad's orb, where there is no canvas", () => {
-  test("his ring and his seat alone, from fixed shapes, at any size and in any state", () => {
+  test("its box alone (no ring, no seat), its tone and its size, at any size and in any state", () => {
     for (const tone of ["neutral", "accent", "warn", "ok", "danger"] as OrbTone[]) {
       const node = draw(() => orb({ tone, size: 168 }) as unknown as Node_);
       expect([node.attrs.class, node.attrs["data-tone"], node.attrs.style]).toEqual(["orb", tone, "--orb-size:168px"]);
-      const shapes = walk(node).filter((child) => child.ns === "svg");
-      expect(shapes.map((child) => child.tag)).toEqual(["svg", "path", "path"]);
-      expect(shapes.slice(1).map((child) => child.attrs.class)).toEqual(["orb-ring", "orb-seat"]);
+      expect(node.children).toEqual([]);
       for (const child of walk(node)) for (const key of Object.keys(child.attrs)) expect(key).not.toMatch(/^(on|href|xlink)/i);
-      // Five arcs of ink, and his seat in oxblood (the dark page's here: nothing says the page is light).
-      expect(shapes[1]!.attrs.d!.match(/M/g)).toHaveLength(5);
-      expect([shapes[1]!.attrs.stroke, shapes[2]!.attrs.stroke]).toEqual([GALAHAD_RING.ink.dark, GALAHAD_RING.oxblood.dark]);
     }
     // A tone it doesn't know is its rest; a size past its bounds is held to them.
     const [odd, tiny, huge] = draw(() => [orb({ tone: "pulse" as OrbTone, size: 36 }), orb({ size: 4 }), orb({ size: 900 })] as unknown as Node_[]);
@@ -54,6 +49,14 @@ describe("Galahad's orb, where there is no canvas", () => {
     expect([plain!.attrs.role, plain!.attrs["aria-hidden"]]).toEqual([undefined, "true"]);
     // (With nothing to draw on, nothing moves: no "orb-live".)
     expect([moving!.attrs.class, moving!.attrs["data-mood"]]).toEqual(["orb", "working"]);
+  });
+});
+
+describe("the app's mark, where there is no canvas", () => {
+  test("its box alone, its size held to the orbs' bounds, and never read aloud (what it is in is named)", () => {
+    const [mark, tiny] = draw(() => [appMark(20), appMark(4)] as unknown as Node_[]);
+    expect([mark!.attrs.class, mark!.attrs.style, mark!.attrs["aria-hidden"], mark!.children]).toEqual(["orb app-mark", "--orb-size:20px", "true", []]);
+    expect(tiny!.attrs.style).toBe("--orb-size:16px");
   });
 });
 

@@ -115,9 +115,9 @@ describe("a knight in its seat", () => {
     expect([shown(needs!).class, shown(needs!)["data-tone"], shown(needs!).style]).toEqual(["orb", "warn", "--orb-size:40px"]);
     expect([shown(resting!)["data-tone"], shown(card!)["data-tone"], shown(card!).style]).toEqual(["neutral", "accent", "--orb-size:102px"]);
     expect(shown(needs!)["aria-label"]).toBe("Galahad");
-    // Still in a seat: no mood. (No canvas here: his ring and seat, in SVG.)
+    // Still in a seat: no mood. (No canvas here: his orb's box alone; no ring round him, nor a seat drawn on one.)
     expect(shown(card!)["data-mood"]).toBeUndefined();
-    expect(walk(card!).map((child) => child.attrs.class).filter(Boolean)).toContain("orb-seat");
+    expect(walk(card!).map((child) => child.attrs.class).filter(Boolean)).toEqual(["seat seat-m seat-orb", "orb"]);
   });
 
   test("its state is said in words beside its name, in its tone; working with a live dot, so it isn't read as a quiet one", () => {

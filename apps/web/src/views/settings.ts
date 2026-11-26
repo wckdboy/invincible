@@ -6,6 +6,7 @@ import { button, callout, card, copyText, kv, list, listRow, note, pageHead, sec
 import { confirmAction } from "../ui/dialog.ts";
 import { h, replace } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
+import { appMark } from "../ui/orb.ts";
 import { SCOPE_INFO } from "./fleet.ts";
 import { dropBrowserSubscription, notificationsSection } from "./notifications.ts";
 
@@ -140,7 +141,7 @@ export const settingsView: View = (root, ctx, { scope }) => {
         {},
         list([
           listRow({
-            lead: h("img", { class: "about-icon", src: "/icon-192.png", alt: "", width: 40, height: 40 }),
+            lead: appMark(40),
             title: "Galahad",
             sub: `App ${APP_VERSION} · served by ${ctx.whoami.nodeName} · one mind, many bodies`,
             trail: button("Shortcuts", { size: "sm", variant: "ghost", icon: "command", onClick: () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" })) }),
