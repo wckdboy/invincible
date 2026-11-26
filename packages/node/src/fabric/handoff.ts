@@ -228,8 +228,18 @@ export class Handoffs implements FabricTools {
   }
 
   invoked(inv: Invocation, caller: Device | null): void {
-    if (inv.tool === FABRIC.hand) void this.runHanded(inv, caller);
-    else void this.agentTool(inv, caller);
+    // Its work runs in the background: an error in it fails this one invocation, and is said, never the node.
+    const failed = (doing: string) => (error: unknown) => {
+      const said = String((error as Error)?.message ?? error).slice(0, 300);
+      this.deps.log(`fabric: ${inv.tool} failed here: ${said}`);
+      try {
+        inv.fail(10, `this node failed while it ${doing}: ${said}`);
+      } catch {
+        // Its invocation had ended already.
+      }
+    };
+    if (inv.tool === FABRIC.hand) this.runHanded(inv, caller).catch(failed("ran the task"));
+    else this.agentTool(inv, caller).catch(failed("answered"));
   }
 
   /** A node revoked here: what it ran for this node stops being followed, its runs' grants end, and what it gave here stops. */
@@ -278,7 +288,7 @@ export class Handoffs implements FabricTools {
     // Signed by this node's device key, as its HTTPS request would be: its transport key alone hands nothing over.
     const call = client.call(endpoint.address, FABRIC.hand, await this.deps.fabric.seal(LINK_PATHS.hand, args), { input: true, deadlineMs: this.deps.handCallMs ?? HAND_CALL_MS });
     this.calls.set(id, { call, renew: null });
-    void this.follow(id, node, call);
+    void this.follow(id, node, call).catch((error: Error) => this.deps.log(`fabric: ${id} wasn't followed to its end: ${error.message}`));
     return this.view(this.row(id)!);
   }
 
@@ -601,7 +611,9 @@ export class Handoffs implements FabricTools {
             // Not a chain: the run's calls are refused as without one.
           }
       }
-    })();
+    })().catch(() => {
+      // Its input ended with its call: what the run does then is the call's end, below.
+    });
     // A call that ended (the giver cancelled, went away, or its link did): the work stops here too.
     inv.signal.addEventListener("abort", () => this.team?.stop(run.task, "The node that handed it over stopped following it: its call ended."), { once: true });
     let after = 0;
@@ -645,6 +657,10 @@ export class Handoffs implements FabricTools {
         endedAt: task.record?.endedAt ?? null,
       };
       inv.complete({ task: { id: task.id, status: task.status, verified: task.verified, output: task.output.slice(0, 20_000), error: task.error }, proof: signProof(this.deps.identity, statement) });
+    } catch (error) {
+      // Nobody can follow it now: the work stops here too, and the call fails (invoked says why).
+      this.team?.stop(run.task, "This node failed while it followed the task, so it was stopped.");
+      throw error;
     } finally {
       this.runs.delete(args.handoff);
       seed.fill(0);

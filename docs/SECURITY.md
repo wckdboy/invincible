@@ -515,6 +515,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   `--allow-cmd /tool/invincible` and `--max-ttl 86400`, so nothing minted through it reaches past Invincible's tools
   or a day. It listens on the node's advertised address alone: every way of writing every interface makes it dial out
   only. Tests: `fabric-sidecar.test.ts`.
+- **A failure ends one hand-off, never the node** (the review's L3). The runner's loop, a run's call back to its giver
+  and the giver's follower each catch what goes wrong in them: that hand-off fails (`INTERNAL`, with why), its task
+  stops there, and the node goes on. `invincible serve` also says, and survives, any failure nothing waited for. Test:
+  `fabric-runner.test.ts` (the review's proof of concept, which ended its process with exit 1 before the fix).
 - **Bounded input.** The node's side of the socket bounds a message's length before it buffers it (65 MiB, as the
   sidecar), decodes CBOR under Q-AMP's decode budget, checks every hand-off message with its schema, keeps a hand-off's
   trail to 2,000 lines of 4,000 characters, and takes a VM's tool input up to 1 MiB.

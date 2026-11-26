@@ -845,6 +845,8 @@ Next:
 
     case "serve":
     case "start": {
+      // A promise nobody waited on that failed is said, and the node goes on: Bun would end the whole node for it.
+      process.on("unhandledRejection", (reason) => console.error(`[invincible] a failure nothing waited for: ${String((reason as Error)?.stack ?? reason).slice(0, 2000)}`));
       const daemon = await startDaemon(home);
       const shutdown = async () => {
         await daemon.stop();
