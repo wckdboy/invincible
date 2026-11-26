@@ -22,6 +22,9 @@ describe("the desktop image", () => {
     expect(dockerfile).toMatch(/^ENV LANG=C\.UTF-8$/m);
     // Every app shows its accessibility tree, whoever starts it (deskd, or the agent from its shell).
     expect(dockerfile).toMatch(/^ENV ACCESSIBILITY_ENABLED=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1$/m);
+    // Nothing animates for show: GTK's switch, for GTK 3 and 4, which the browser's own interface follows.
+    for (const v of ["3.0", "4.0"]) expect(dockerfile).toContain(`COPY seed/gtk-settings.ini /etc/xdg/gtk-${v}/settings.ini`);
+    expect(readFileSync(fileURLToPath(new URL("seed/gtk-settings.ini", context)), "utf8")).toMatch(/^\[Settings\]\ngtk-enable-animations=false$/m);
     // No app's first-run or restore question: the seed is installed, compiled, and checked as the image is built.
     expect(dockerfile).toContain("COPY seed/90_invincible-desktop.gschema.override /usr/share/glib-2.0/schemas/\n");
     expect(dockerfile).toContain('"$(ls /usr/lib/*/glib-2.0/glib-compile-schemas)" /usr/share/glib-2.0/schemas');
@@ -71,5 +74,7 @@ print(json.dumps(started))`;
     // The browser: its profile on the workspace (a sign-in there stays with the agent's disk), its own inner sandbox
     // off (the VM forbids it), its debugging port on loopback alone, and its accessibility tree on.
     for (const flag of ["--user-data-dir=/work/.config/chromium", "--no-sandbox", "--hide-crash-restore-bubble", "--no-first-run", "--remote-debugging-port=9222", "--remote-debugging-address=127.0.0.1", "--window-size=1280,800", "--force-renderer-accessibility"]) expect(started[4]).toContain(flag);
+    // And started light, for its first page on one CPU (C1, measured on Ultra).
+    for (const flag of ["--in-process-gpu", "--disable-features=SpareRendererForSitePerProcess", "--password-store=basic"]) expect(started[4]).toContain(flag);
   });
 });

@@ -22,10 +22,12 @@ ENV LANG=C.UTF-8
 ENV ACCESSIBILITY_ENABLED=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
 
 # No app asks a first-run or restore question: Mousepad never offers to restore a session, which it would after every
-# VM that ended without its goodbye. Compiled with GLib's own copy of its compiler (the one its triggers run; the
+# VM that ended without its goodbye. And nothing animates for show (GTK's switch, which the browser follows too). Compiled with GLib's own copy of its compiler (the one its triggers run; the
 # command of that name is in a package of its own), and checked as it is built, so an image whose seed didn't take is
 # never made.
 COPY seed/90_invincible-desktop.gschema.override /usr/share/glib-2.0/schemas/
+COPY seed/gtk-settings.ini /etc/xdg/gtk-3.0/settings.ini
+COPY seed/gtk-settings.ini /etc/xdg/gtk-4.0/settings.ini
 RUN "$(ls /usr/lib/*/glib-2.0/glib-compile-schemas)" /usr/share/glib-2.0/schemas \
  && GSETTINGS_BACKEND=memory python3 -c "from gi.repository import Gio; v = Gio.Settings.new('org.xfce.mousepad.preferences.file').get_string('session-restore'); assert v == 'never', v"
 

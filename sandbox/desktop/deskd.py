@@ -1247,6 +1247,9 @@ class Pieces:
             # microVM is the boundary. Its profile is on the workspace, so what is signed in there stays with this VM's disk.
             pid = self._spawn(["chromium", "--user-data-dir=" + self.profile, "--no-sandbox", "--test-type", "--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble",
                                "--disable-gpu", "--disable-dev-shm-usage", "--remote-debugging-port=%d" % PORT, "--remote-debugging-address=127.0.0.1", "--force-renderer-accessibility",
+                               # (On one CPU, the fewer processes at its start the sooner its first page: its compositing in its own
+                               # process, no renderer started ahead of need; and its passwords where they were, not a keyring asked for.)
+                               "--in-process-gpu", "--disable-features=SpareRendererForSitePerProcess", "--password-store=basic",
                                "--window-size=%d,%d" % (W, H), "--window-position=0,0", "about:blank"], "browser.log", keep="browser")
             # (Not waited for here: what reads or opens a page waits for its port, as before.)
             self.browser = (pid, time.monotonic())
