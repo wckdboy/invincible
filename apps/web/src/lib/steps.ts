@@ -25,6 +25,8 @@ export interface StepGroup {
   from: number;
   to: number;
   at: number;
+  /** A steer's: whose words they were (absent on every other step). */
+  by?: "owner" | "primary";
 }
 
 export interface WorkSummary {
@@ -235,7 +237,7 @@ export function stepGroups(entries: readonly TeamTrailEntry[]): StepGroup[] {
     else if (line.kind === "gate") one("gate", `Gate ${line.index} of ${line.of} · ${line.exit === 0 ? "passed" : `failed, exit ${line.exit}`}`, line.exit === 0 ? "ok" : "failed", [{ text: line.command, exit: line.exit }]);
     else if (line.kind === "review") one("review", line.verdict === "pass" ? "The reviewer passed it" : "The reviewer sent it back", line.verdict === "pass" ? "ok" : "warn", line.notes ? [{ text: firstLine(line.notes), exit: null }] : []);
     else if (line.kind === "note") one("note", line.text, line.tone);
-    else if (line.kind === "steer") one("steer", `${line.by === "owner" ? "You" : "Your agent"}: ${firstLine(line.text)}`, "neutral", [{ text: line.text, exit: null }]);
+    else if (line.kind === "steer") groups.push({ kind: "steer", text: `${line.by === "owner" ? "You" : "Your agent"}: ${firstLine(line.text)}`, items: [{ text: line.text, exit: null }], tone: "neutral", from: entry.n, to: entry.n, at: entry.at, by: line.by });
   }
   close();
   return groups;

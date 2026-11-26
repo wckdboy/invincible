@@ -8,6 +8,7 @@ import { type Ctx, errorMessage } from "../context.ts";
 import { hasDesktop } from "../lib/desktop.ts";
 import { budgetFrom, gatesFrom, type Given, giveInput, givenTo } from "../lib/give.ts";
 import { growWords } from "../lib/sandbox.ts";
+import { STEER_WORDS } from "../lib/steer.ts";
 import { HANDLE_PATTERN, HARNESS, type AgentModelChoice, agentModelChoices, agentModelsLine, agentRoleLine, agentRoles, removalPlan, takenHandles, agentId, toggleAgentModel } from "../lib/team.ts";
 import { asCaps, type RoleSpec } from "../types.ts";
 import { badge, busy, button, callout, field } from "../ui/controls.ts";
@@ -276,6 +277,20 @@ export function shipTask(ctx: Ctx, task: TeamTask): void {
   editor(ctx, "Ship it as a pull request?", `${files}, on a new invincible/… branch of its repository, as it was verified. Its checks are followed after.`, [field("Pull request title", title)], "Open pull request", async () => {
     const shipped = await ctx.api.post<{ url: string | null; pr: number | null }>("/api/team/ship", { task: task.id, title: title.value.trim() });
     toast(shipped.pr ? `Pull request #${shipped.pr} opened` : "Pull request opened", { tone: "info", ...(shipped.url ? { action: { label: "Open", run: () => window.open(shipped.url!, "_blank", "noopener") } } : {}) });
+  });
+}
+
+/**
+ * Words for a running task (a steer, POST /api/team/steer): its run takes them at its next safe point, and its reviewer
+ * judges the work against them. Refused in the node's words when it has ended meanwhile; nothing secret-shaped is sent.
+ */
+export function steerTask(ctx: Ctx, task: TeamTask, name: string): void {
+  const words = h("textarea", { class: "input", required: true, rows: 4, maxlength: TEAM_LIMITS.steer, placeholder: "Use the new schema." });
+  editor(ctx, `Steer “${task.title}”`, `${name} takes your words at the task's next safe point: a command it's running finishes first. The task's reviewer judges the work against them.`, [field("What it should take up", words)], STEER_WORDS.steer, async () => {
+    const text = words.value.trim();
+    if (findSecrets(text).length) throw new Error("That looks like a secret. Remove it before sending; keys belong in the vault.");
+    await ctx.api.post("/api/team/steer", { task: task.id, text });
+    toast(`Steered: ${name} takes it at its next safe point`, { tone: "info" });
   });
 }
 

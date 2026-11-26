@@ -248,7 +248,10 @@ describe("a steer, as its trail says it", () => {
     ]);
     // Its words whole, a click away.
     expect(groups[2]!.items).toEqual([{ text: "Keep the old reader.\nIt still has users.", exit: null }]);
-    expect(groups[1]).toMatchObject({ from: 3, to: 3, tone: "neutral" });
+    expect(groups[1]).toMatchObject({ from: 3, to: 3, tone: "neutral", by: "owner" });
+    expect(groups[2]!.by).toBe("primary");
+    // No other step says whose it is.
+    expect(groups.filter((g) => g.kind !== "steer").every((g) => !("by" in g))).toBe(true);
   });
 
   test("the steers on a trail, in order, and how many the latest review judged the work against", () => {

@@ -1325,6 +1325,13 @@
       .thread-live > .btn { margin-left: auto; }
       .thread-composer-wrap { flex: none; width: 100%; max-width: 760px; margin: 0 auto; padding: var(--sp-2) var(--sp-5) var(--sp-4); }
       .thread-composer-wrap[hidden] { display: none; }
+      /* What is on its way to a running task: your steers and your agent's, until its run takes them. Still, as nothing at rest moves. */
+      .thread-steering { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-2); padding: 8px 12px; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-1), inset 0 0 0 1px var(--border); }
+      .thread-steering[hidden] { display: none; }
+      .thread-steering-title { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--text-2); }
+      .thread-steering-line { display: -webkit-box; margin: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: var(--fs-13); color: var(--text); overflow-wrap: anywhere; }
+      /* A steer among its steps: yours in ink, as what is yours is; your agent's as its other steps. */
+      .thread-step[data-kind="steer"][data-by="owner"] .step-text, .thread-step[data-kind="steer"][data-by="owner"] .step-icon { color: var(--accent); }
       .thread-composer textarea { min-height: 44px; max-height: 160px; field-sizing: content; }
       /* Its details: a card floating beside the thread on a wide screen (a sheet on a phone). */
       .thread-details { display: none; }

@@ -9,14 +9,15 @@ import { isWaiting } from "../live.ts";
 import { hashOf } from "../lib/nav.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { agentOfCaller } from "../lib/roster.ts";
-import { costWords, type GateRow, liveStep, type Proof, proofOf, type StepGroup, stepGroups, summaryWords, workedFor, workSummary } from "../lib/steps.ts";
+import { costWords, type GateRow, judgedWith, liveStep, type Proof, proofOf, type StepGroup, stepGroups, summaryWords, workedFor, workSummary } from "../lib/steps.ts";
+import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWaiting } from "../lib/steer.ts";
 import { sensitiveLine, steppedLine, taskActions, taskEnd } from "../lib/task-card.ts";
 import { teamSpeaker } from "../lib/team.ts";
 import { giveAgain } from "../lib/timeline.ts";
 import { relativeTime } from "../lib/time.ts";
 import { emptyTrail, takeTrail, type Trail, trailNext, type TrailPage } from "../lib/trail.ts";
 import { byAttention, projectsOfAgents, seenOnOpen, shortSpan, taskState } from "../lib/work.ts";
-import { setTaskDetailsShown, taskDetailsShown } from "../prefs.ts";
+import { chatEnter, setTaskDetailsShown, taskDetailsShown } from "../prefs.ts";
 import { button, callout, dot, empty, errorState, skeletonBlock } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { cx, h, keepPlace, replace, type Child } from "../ui/dom.ts";
@@ -105,11 +106,18 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   const liveLine = h("div", { class: "thread-live", role: "status", hidden: true });
   const details = h("aside", { class: "thread-details", "aria-label": "The task's details" });
 
-  // ---- the message box: words to the agent, in the task's conversation ----
+  // ---- the message box: words to the agent, in the task's conversation; while it runs, a steer of the task, or a
+  // message queued for after it (lib/steer.ts) ----
   const input = h("textarea", { rows: 1, maxlength: TEAM_LIMITS.message, placeholder: "Message…", "aria-label": "Message", autocomplete: "off", enterkeyhint: "send" });
   const hint = h("span", { class: "hint grow ellipsis" });
   const problem = h("div", { class: "team-send-error", role: "status" });
   const send = button("Send", { variant: "primary", iconOnly: true, icon: "arrow-up", type: "submit", label: "Send" });
+  // (Full size: 44 px to touch on a phone, as the Send beside them.)
+  const steerButton = button(STEER_WORDS.steer, { icon: "arrow-up", title: STEER_WORDS.steerTitle, onClick: () => void deliver("steer") });
+  const queueButton = button(STEER_WORDS.queue, { title: STEER_WORDS.queueTitle, onClick: () => void deliver("queue") });
+  steerButton.hidden = queueButton.hidden = true;
+  /** What is on its way to the work: your steers and your agent's that its run hasn't taken yet. */
+  const onItsWay = h("div", { class: "thread-steering", role: "status", hidden: true });
   const composer = h(
     "form",
     {
@@ -120,9 +128,9 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
       },
     },
     input,
-    h("div", { class: "composer-bar" }, hint, send),
+    h("div", { class: "composer-bar" }, hint, queueButton, steerButton, send),
   );
-  const composerWrap = h("div", { class: "thread-composer-wrap", hidden: true }, problem, composer);
+  const composerWrap = h("div", { class: "thread-composer-wrap", hidden: true }, onItsWay, problem, composer);
 
   replace(root, h("div", { class: "thread-page" }, head, h("div", { class: "thread-body" }, h("div", { class: "thread-column" }, scroller, liveLine, composerWrap), details)));
   // Until the team is known, the header and the thread hold their places.
@@ -322,17 +330,19 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
 
   /** A folded group of steps: its line, and what is in it a click away. */
   const groupEl = (group: StepGroup): HTMLElement => {
-    const mark = group.kind === "gate" ? (group.tone === "ok" ? "check" : "x") : group.kind === "review" ? "review" : group.kind === "note" ? (group.tone === "warn" ? "alert" : "info") : group.kind === "plan" ? "scroll" : group.kind === "edit" ? "edit" : group.kind === "read" ? "file" : group.kind === "submitted" ? "shield-check" : "terminal";
+    const mark = group.kind === "gate" ? (group.tone === "ok" ? "check" : "x") : group.kind === "review" ? "review" : group.kind === "note" ? (group.tone === "warn" ? "alert" : "info") : group.kind === "plan" ? "scroll" : group.kind === "edit" ? "edit" : group.kind === "read" ? "file" : group.kind === "submitted" ? "shield-check" : group.kind === "steer" ? "arrow-up" : "terminal";
     const line = h("span", { class: "step-line" }, h("span", { class: "step-icon", "data-tone": group.tone === "ok" ? "ok" : group.tone === "failed" ? "failed" : group.tone === "warn" ? "needs" : null }, icon(mark, { size: 13 })), h("span", { class: "step-text ellipsis" }, group.text));
-    if (!group.items.length || (group.items.length === 1 && group.kind !== "plan" && group.kind !== "review" && group.kind !== "gate")) return h("li", { class: "thread-step", "data-kind": group.kind }, line);
+    // (A steer whose words are one line says them whole in its line; a longer one opens on them.)
+    const whole = group.kind === "steer" && !group.items[0]?.text.includes("\n");
+    if (!group.items.length || whole || (group.items.length === 1 && group.kind !== "plan" && group.kind !== "review" && group.kind !== "gate" && group.kind !== "steer")) return h("li", { class: "thread-step", "data-kind": group.kind, "data-by": group.by ?? null }, line);
     return h(
       "li",
-      { class: "thread-step", "data-kind": group.kind },
+      { class: "thread-step", "data-kind": group.kind, "data-by": group.by ?? null },
       h(
         "details",
         {},
         h("summary", { "data-key": `step:${group.from}` }, line),
-        h("ul", { class: "step-items" }, ...group.items.map((item) => h("li", { class: cx(group.kind !== "plan" && group.kind !== "review" && "mono", "step-item") }, item.text, item.exit !== null && item.exit !== 0 ? h("span", { class: "step-exit" }, ` exit ${item.exit}`) : null))),
+        h("ul", { class: "step-items" }, ...group.items.map((item) => h("li", { class: cx(group.kind !== "plan" && group.kind !== "review" && group.kind !== "steer" && "mono", group.kind === "steer" && "pre-wrap", "step-item") }, item.text, item.exit !== null && item.exit !== 0 ? h("span", { class: "step-exit" }, ` exit ${item.exit}`) : null))),
       ),
     );
   };
@@ -354,6 +364,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
       !proof.gates.length && verified ? "No commands were given to prove it: the reviewer decided alone." : null,
     ].filter((line): line is string => line !== null);
     const review = proof.review;
+    // Steered work was judged against its brief and its steers, in order: said beside the verdict.
+    const judged = judgedLine(judgedWith(trail.entries), task.steers ?? []);
     return h(
       "section",
       { class: "proof", "data-verdict": verified ? "verified" : "failed", "aria-label": verified ? "Verified: by its gates and a reviewer that didn't write it" : `Not verified: ${end?.why ?? ""}` },
@@ -380,6 +392,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
           )
         : null,
       review ? h("p", { class: "proof-review" }, icon("review", { size: 13 }), h("span", {}, h("strong", {}, review.verdict === "pass" ? "The reviewer passed it" : "The reviewer sent it back"), review.notes ? `: “${review.notes.split("\n")[0]!.slice(0, 200)}”` : "")) : null,
+      review && judged ? h("p", { class: "proof-review proof-steered" }, icon("arrow-up", { size: 13 }), h("span", {}, judged)) : null,
       h(
         "div",
         { class: "proof-facts" },
@@ -477,6 +490,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
         // What the agent said of it: its own words, never the proof.
         said ? h("section", { class: "thread-said", "aria-label": `What ${n.name} said` }, h("div", { class: "thread-said-by" }, agentFace({ id: task.assignee, profile: n.agent?.avatar, size: 16 }), h("strong", {}, n.name), h("span", { class: "subtle" }, " said")), h("div", { class: "md" }, renderMarkdown(said))) : null,
         proofCard(n, proof),
+        // What you or your agent said that its run never took: it ended first.
+        ((never) => (never ? h("div", { class: "thread-ask" }, callout("quiet", never.lines.map((line) => h("p", { class: "pre-wrap" }, line)), { title: never.title, icon: "arrow-up" })) : null))(neverReached(task)),
         // What was said in its conversation since: your words and the agent's replies.
         ...talk.map((message) => {
           const owner = message.speaker === "owner";
@@ -600,35 +615,75 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     openSheet({ title: "The task's details", description: n.task.title, body: detailsBody(n) });
   }
 
+  /** What this device does on Enter while a task runs (Settings → Chat), and how it's pointed: read as the composer is drawn. */
+  const coarse = matchMedia("(pointer: coarse)");
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  let running = false;
   function drawComposer(n: Now): void {
     composerWrap.hidden = !canAct;
     if (!canAct) return;
+    running = n.task.status === "running";
+    const enter = chatEnter();
     input.placeholder = `Tell ${n.name}…`;
-    input.setAttribute("aria-label", `Message ${n.name}`);
-    hint.textContent = n.task.status === "running" ? `${n.name} answers once this work ends` : n.task.status === "queued" ? `${n.name} answers before starting on it` : "";
+    input.setAttribute("aria-label", running ? `Steer ${n.name}'s task, or queue a message for after it` : `Message ${n.name}`);
+    hint.textContent = steerHint({ status: n.task.status, name: n.name, enter, coarse: coarse.matches, mac });
+    // While it runs: steer it, or queue for after it, the one Enter does in ink. Otherwise a message, as ever.
+    send.hidden = running;
+    steerButton.hidden = queueButton.hidden = !running;
+    steerButton.classList.toggle("primary", enter === "steer");
+    queueButton.classList.toggle("primary", enter === "queue");
+    drawWaiting(n);
     syncComposer();
+  }
+
+  /** What is on its way to the work, above the message box: said once the node has it, gone once its run has taken it. */
+  function drawWaiting(n: Now): void {
+    const waiting = steersWaiting(n.task, n.name);
+    onItsWay.hidden = !waiting;
+    replace(onItsWay, ...(waiting ? [h("div", { class: "thread-steering-title" }, dot("work"), h("span", {}, waiting.title)), ...waiting.lines.map((line) => h("p", { class: "thread-steering-line", title: line }, line))] : []));
   }
 
   function syncComposer(): void {
+    const text = input.value.trim();
     const secret = findSecrets(input.value).length > 0;
-    send.disabled = sending || !input.value.trim() || secret;
-    replace(problem, secret ? callout("warn", "That looks like a secret. Remove it before sending; keys belong in the vault.") : null);
+    // (A steer holds TEAM_LIMITS.steer characters; a message, a good deal more.)
+    const long = running && text.length > TEAM_LIMITS.steer;
+    send.disabled = queueButton.disabled = sending || !text || secret;
+    steerButton.disabled = sending || !text || secret || long;
+    replace(
+      problem,
+      secret
+        ? callout("warn", "That looks like a secret. Remove it before sending; keys belong in the vault.")
+        : long
+          ? callout("quiet", `A steer holds ${TEAM_LIMITS.steer.toLocaleString("en-US")} characters at most: queue it for after this task instead.`)
+          : null,
+    );
   }
 
-  async function deliver(): Promise<void> {
+  /** Your words, as Enter or a button said: a steer of the running task, or a message (queued for after it while it runs). */
+  async function deliver(how?: "send" | "steer" | "queue"): Promise<void> {
     const n = now();
     syncComposer();
-    if (!n || send.disabled) return;
+    if (!n) return;
+    const action = how ?? steerAction({ running: n.task.status === "running", enter: chatEnter(), modifier: false });
     const text = input.value.trim();
+    if ((action === "steer" ? steerButton : action === "queue" ? queueButton : send).disabled) return;
     sending = true;
     syncComposer();
     try {
-      await ctx.api.post("/api/team/messages", { room: n.task.room, text }, scope.signal);
-      if (input.value.trim() === text) input.value = "";
-      await readRoom(n.task);
-      scroller.scrollTop = scroller.scrollHeight;
+      if (action === "steer") {
+        await ctx.api.post("/api/team/steer", { task: n.task.id, text }, scope.signal);
+        if (input.value.trim() === text) input.value = "";
+        // (The task now holds it, on its way: the team says so.)
+        await ctx.live.refreshTeam();
+      } else {
+        await ctx.api.post("/api/team/messages", { room: n.task.room, text }, scope.signal);
+        if (input.value.trim() === text) input.value = "";
+        await readRoom(n.task);
+        scroller.scrollTop = scroller.scrollHeight;
+      }
     } catch (error) {
-      if (!isAbort(error)) toast("Message wasn't sent", { tone: "error", description: errorMessage(error) });
+      if (!isAbort(error)) toast(action === "steer" ? "It wasn't steered" : "Message wasn't sent", { tone: "error", description: errorMessage(error) });
     } finally {
       sending = false;
       if (!scope.disposed) syncComposer();
@@ -638,7 +693,8 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   input.addEventListener("keydown", (event: KeyboardEvent) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
-      void deliver();
+      // While it runs, Enter does what this device chose and Ctrl or ⌘ with it the other (as a chat's composer).
+      void deliver(steerAction({ running, enter: chatEnter(), modifier: event.metaKey || event.ctrlKey }));
     }
   });
 

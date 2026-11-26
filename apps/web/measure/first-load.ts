@@ -467,11 +467,21 @@ try {
   let adaAtWork = false;
   let desktopShot = "";
   const hold = new Promise<void>((release) => held.push(release));
+  // On a checkout that can steer a task, Noa's first command waits until her task is steered (below), so its steer
+  // reaches the work at a step, and its review judges with it, every time. An older checkout's runs straight through.
+  const steering = Boolean(routes.steerTeamTask);
+  let noaAtWork = false;
+  let steeredNoa: () => void = () => {};
+  const noaHold = new Promise<void>((release) => (steeredNoa = release));
   docker.onExec = async (_container: string, command: string[]) => {
     const text = command.join("\n");
     if (text.includes("write-sync")) {
       adaAtWork = true;
       await hold;
+    }
+    if (steering && text.includes("write-keep")) {
+      noaAtWork = true;
+      await noaHold;
     }
     if (text.includes("write-give")) await hold;
     if (text.includes("desktop shot")) return { code: 0, stdout: desktopShot };
@@ -577,6 +587,8 @@ try {
   await until("the room's conversation", idle);
   const first = (await admin("createTeamTask", { room: "forge", assignee: "ada", title: "Sync survives a dropped connection", goal: "TASK_SYNC: make sync resume after a dropped connection, with a test that drops it.", dependsOn: [], gates: ["test -f result.txt # gate-sync"] })).task;
   await until("Ada's task to start", () => adaAtWork);
+  // Told something as she works: on its way to her, at her next safe point (her command is held while the run lasts).
+  if (steering) await admin("steerTeamTask", { task: first.id, text: "Keep the old reconnect path working while you add the new one: the phones still use it." });
   await admin("createTeamTask", { room: "forge", assignee: "lin", title: "The app says when sync resumed", goal: "TASK_APP: show a quiet line when sync resumes.", dependsOn: [first.id], gates: ["test -f result.txt # gate-app"] });
   const { room: direct } = await admin("directAgent", { id: "ivo" });
   await admin("postTeamMessage", { room: direct.id, text: "Take your time: what do other agents do about context rot?" });
@@ -589,6 +601,12 @@ try {
   await admin("postTeamMessage", { room: own.rio, text: "Once your VM has its desktop, can you fetch this month's export from the dashboard?" });
   await until("Rio's reply", idle);
   const kept = (await admin("createTeamTask", { room: own.noa, assignee: "noa", title: "The importer reads ISO dates", goal: "TASK_KEEP: make the importer read ISO 8601 dates as well as the day-first form, with tests.", dependsOn: [], gates: ["bun test importer # gate-keep"] })).task;
+  // Steered as its first command runs: the run takes it after that command, and its review judges the work against it.
+  if (steering) {
+    await until("Noa's first command", () => noaAtWork);
+    await admin("steerTeamTask", { task: kept.id, text: "Keep reading the day-first dates too: last year's exports still use them." });
+    steeredNoa();
+  }
   await until("Noa's task to end", ended(kept.id), 45_000);
   const failing = (await admin("createTeamTask", { room: own.max, assignee: "max", title: "Migrations run on a fresh database", goal: "TASK_FAIL: make every migration run on a fresh database, with a test.", dependsOn: [], gates: ["bun test db/ # gate-fail"] })).task;
   await until("Max's task to end", ended(failing.id), 45_000);
@@ -1005,6 +1023,8 @@ try {
       // A task as a thread of its own (since 26 November 2026): at work, verified with its changes kept, and given up.
       { name: "task-running", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps" },
       { name: "task-verified", hash: `#/task/${kept.id}`, wait: ".thread-page .proof" },
+      // Its work opened: each step, and where a steer reached it (where the checkout steers), in whose words.
+      { name: "task-verified-steps", hash: `#/task/${kept.id}`, wait: ".thread-page .proof", steps: [`document.querySelector(".thread-worked")?.setAttribute("open", "")`] },
       { name: "task-failed", hash: `#/task/${failing.id}`, wait: ".thread-page .proof" },
       { name: "inbox", hash: "#/inbox" },
       { name: "memory", hash: "#/memory", wait: "#memory-results .item" },
@@ -1031,6 +1051,8 @@ try {
       { name: "sheet-add-key", hash: "#/vault", open: [press("Add a key", "Add key")] },
       { name: "sheet-add-provider", hash: "#/models", open: [press("Add provider")] },
       { name: "sheet-add-mcp", hash: "#/connectors", open: [press("Add an MCP server")] },
+      // Words for Ada's running task, from its card (a checkout that can't steer has no Steer…, and is said to have none).
+      { name: "sheet-steer", hash: "#/team?room=forge&tab=work", open: [press("Steer…")] },
     ];
     // A phone held upright, and screens as wide as asked (--widths), each as tall as a laptop's is for its width.
     const sizes = WIDTHS.map((width) => (width < 640 ? ([width, 844, true] as const) : ([width, Math.round(width * 0.625), false] as const)));

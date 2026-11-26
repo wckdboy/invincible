@@ -5,6 +5,7 @@ import { type Api, isAbort } from "../api.ts";
 import type { Ctx } from "../context.ts";
 import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, type TaskAction, taskActions, taskBadge, taskEnd } from "../lib/task-card.ts";
 import { hashOf } from "../lib/nav.ts";
+import { STEER_WORDS } from "../lib/steer.ts";
 import { relativeTime } from "../lib/time.ts";
 import { emptyTrail, takeTrail, type Trail, trailNext, type TrailPage, trailTail } from "../lib/trail.ts";
 import { badge, button, callout, dot } from "../ui/controls.ts";
@@ -143,6 +144,8 @@ export interface CardOptions {
   act(action: TaskAction): void;
   /** Gives it again from one of its steps (PLAN #15): its workspace as it stood after that step. */
   againFrom?(step: number): void;
+  /** Words for it as it runs (a steer: views/team-forms.ts steerTask). */
+  steer?(): void;
 }
 
 /**
@@ -226,6 +229,8 @@ export function taskCard(ctx: Ctx, task: TeamTask, o: CardOptions): HTMLElement 
       "div",
       { class: "task-foot" },
       h("span", { class: "tiny subtle grow" }, `${task.status === "queued" || task.status === "running" ? "Given" : "Ended"} ${relativeTime(task.status === "queued" || task.status === "running" ? task.createdAt : task.updatedAt)}`),
+      // A task at work can be told something as it runs: its run takes it at its next safe point.
+      o.canAct && o.steer && task.status === "running" ? button("Steer…", { variant: "ghost", size: "sm", icon: "arrow-up", title: STEER_WORDS.steerTitle, onClick: () => o.steer!() }) : null,
       ...(o.canAct ? taskActions(task).map((action) => button(ACTION[action].label, { variant: action === "approve" || action === "ship" ? "primary" : "ghost", size: "sm", icon: ACTION[action].icon, onClick: () => o.act(action) })) : []),
     ),
   );
