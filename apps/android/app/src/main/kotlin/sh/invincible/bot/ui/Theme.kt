@@ -21,12 +21,14 @@ import androidx.compose.ui.unit.sp
 import sh.invincible.bot.core.AgentState
 
 /*
- * The primary's look on Android: Android's own components, with the primary's accents, as the Apple app is Apple's with them.
- * Material 3 Expressive (the owner's word, 21 Nov): its motion (springs that answer a tap or a page opening), its
- * emphasized type and its shapes. The colours are the brand's, never the wallpaper's (apps/web/src/brand.ts INK, the
- * Apple app's asset catalog and Brand.swift): ink on paper, cream on the dark, the red of what went wrong, and one colour a
- * state (blue at work, amber needs you, red failed, green done), always with its word. Only the orb in focus moves (the
- * owner's word, 26 Nov): the primary's on Home, an agent's in its own thread while it works; nothing else moves at rest.
+ * The look on Android: Android's own components, as the Apple app is Apple's. Material 3 Expressive (the owner's word, 21
+ * Nov): its motion (springs that answer a tap or a page opening), its emphasized type and its shapes. Monochrome (the
+ * owner's word, 26 November 2026: black, white and greys, bold type; colour kept for the agents, so they are told apart at
+ * a glance; red only for what went wrong; gold, amber and cream gone; the primary shown by the I-beam in one ink), as
+ * Brand.swift and the web's tokens have it, never the wallpaper's: the ink (black on light, white on dark), what is written
+ * on it, true greys, and the red. What is going on among the agents is said in ink and weight, never a colour of its own:
+ * at work and what needs you in the ink (the word beside says which), what ended in grey, only a failure in red. The words
+ * always say it; the colour never alone. Nothing moves at rest.
  */
 
 @Immutable
@@ -52,16 +54,21 @@ data class Brand(
     }
 }
 
+// (The ink and the red are scripts/brand.ts' INK, as the Apple app's asset catalog has them; the greys the web's.)
+private val LightInk = Color(0xFF0A0A0B)
+private val LightQuiet = Color(0xFF52525A)
+private val LightDanger = Color(0xFFC4141B)
 private val Light = Brand(
-    ink = Color(0xFF0A0A0B), onInk = Color(0xFFF8EBDC), paper = Color(0xFFFFFFFF), raised = Color(0xFFF4F4F5), line = Color(0x1F0A0A0B),
-    quiet = Color(0xFF5E5E66), danger = Color(0xFFC4141B), working = Color(0xFF0A5FCC), needs = Color(0xFF946200), failed = Color(0xFFC4141B),
-    done = Color(0xFF137A43),
+    ink = LightInk, onInk = Color(0xFFFFFFFF), paper = Color(0xFFFFFFFF), raised = Color(0xFFF4F4F5), line = Color(0x1F0A0A0B),
+    quiet = LightQuiet, danger = LightDanger, working = LightInk, needs = LightInk, failed = LightDanger, done = LightQuiet,
 )
 
+private val DarkInk = Color(0xFFFFFFFF)
+private val DarkQuiet = Color(0xFFA1A1A9)
+private val DarkDanger = Color(0xFFEE2C36)
 private val Dark = Brand(
-    ink = Color(0xFFF8EBDC), onInk = Color(0xFF0A0A0B), paper = Color(0xFF141416), raised = Color(0xFF1E1E21), line = Color(0x24F8EBDC),
-    quiet = Color(0xFFA3A3AB), danger = Color(0xFFEE2C36), working = Color(0xFF58A6FF), needs = Color(0xFFF0B549), failed = Color(0xFFFF6B6B),
-    done = Color(0xFF4CC38A),
+    ink = DarkInk, onInk = Color(0xFF0A0A0B), paper = Color(0xFF0A0A0B), raised = Color(0xFF17171A), line = Color(0x24FFFFFF),
+    quiet = DarkQuiet, danger = DarkDanger, working = DarkInk, needs = DarkInk, failed = DarkDanger, done = DarkQuiet,
 )
 
 val LocalBrand = staticCompositionLocalOf { Light }

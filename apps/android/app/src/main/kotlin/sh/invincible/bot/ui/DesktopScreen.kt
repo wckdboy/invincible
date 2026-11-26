@@ -139,7 +139,7 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                             }
                         },
                     )
-                } ?: Text("Looking…", color = Color(0xFFF8EBDC), style = MaterialTheme.typography.bodyMedium)
+                } ?: Text("Looking…", color = Color(0xFFEDEDEF), style = MaterialTheme.typography.bodyMedium)
             }
             Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (noDesktop) {
