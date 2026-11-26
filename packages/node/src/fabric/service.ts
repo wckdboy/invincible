@@ -66,11 +66,19 @@ export interface FabricTools {
   revoked(device: string): void;
 }
 
-/** How long a peer whose Q-AMP failed is reached over HTTPS before Q-AMP is tried again (longer each time, to a minute). */
+/**
+ * How long a peer is reached over HTTPS before Q-AMP is tried again, by why it wasn't had. A peer that couldn't be
+ * reached costs a timeout each try: 5 s, longer each time, to a minute. One that answered "not over this path" costs a
+ * round trip: refused (UNAUTHORIZED: its door doesn't know this node's key yet, which its next pull of this node's profile
+ * cures), 2 s; busy or draining (OVERLOADED, GOING_AWAY), 5 s; a node from before the fabric (UNKNOWN_TOOL), a minute.
+ */
 const RETRY_MS = { first: 5_000, max: 60_000 } as const;
-
-/** Codes a peer answers with that mean "not over this path" rather than "this failed" (Q-AMP SPEC 5.5). */
-const NOT_HERE = new Set([1, 3, 6, 7]);
+const NOT_HERE = new Map<number, number>([
+  [3, 2_000],
+  [6, 5_000],
+  [7, 5_000],
+  [1, 60_000],
+]);
 
 export class Fabric implements SyncTransport {
   private readonly now: () => number;
@@ -227,13 +235,12 @@ export class Fabric implements SyncTransport {
     return this.paths.get(peer) ?? null;
   }
 
-  private notHere(peer: string, why: string, backoff: boolean): { unavailable: string } {
+  /** It goes over HTTPS for now, and why; Q-AMP is tried again after `fixedMs`, or a while longer each time (null). */
+  private notHere(peer: string, why: string, fixedMs: number | null): { unavailable: string } {
     this.paths.set(peer, { path: "https", why, at: this.now() });
-    if (backoff) {
-      const prior = this.backoff.get(peer);
-      const ms = prior ? Math.min(prior.ms * 2, RETRY_MS.max) : RETRY_MS.first;
-      this.backoff.set(peer, { until: this.now() + ms, ms });
-    }
+    const prior = this.backoff.get(peer);
+    const ms = fixedMs ?? (prior ? Math.min(prior.ms * 2, RETRY_MS.max) : RETRY_MS.first);
+    this.backoff.set(peer, { until: this.now() + ms, ms: fixedMs === null ? ms : 0 });
     return { unavailable: why };
   }
 
@@ -282,7 +289,8 @@ export class Fabric implements SyncTransport {
         throw error;
       }
       if (error.kind === "cancelled") throw error;
-      return this.notHere(peer.id, `Q-AMP to ${peer.name} failed: ${error.message.slice(0, 160)}`, true);
+      const refused = error.kind === "remote" && error.code !== null ? (NOT_HERE.get(error.code) ?? null) : null;
+      return this.notHere(peer.id, `Q-AMP to ${peer.name} failed: ${error.message.slice(0, 160)}`, refused);
     }
   }
 
