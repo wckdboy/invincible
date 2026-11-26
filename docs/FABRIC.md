@@ -199,26 +199,34 @@ transport keys carries all of it:
 
 ## The numbers
 
-Measured with `bun bench/fabric/measure.ts --qamp <binary> --samples 30`. Three nodes in temporary homes, each with
-Q-AMP main's sidecar (`831b845`), on loopback. An Apple M3 Pro under a load average of about 5, on 26 November 2026.
-"Before" is HTTP with signed requests, which is all there was before the fabric; "after" is Q-AMP. The p50s are
-medians of the samples, in ms.
+Measured with `bun bench/fabric/measure.ts --qamp <binary> --samples 30`: three nodes in temporary homes, each with
+Q-AMP main's sidecar (`831b845`), on loopback, on an Apple M3 Pro, 26 November 2026. The two Q-AMP columns ran back to
+back on the same binary, the code before the security review's fixes (`04e7c6a`) and after them (`273e83b`), the
+machine's load average 8.4 over one minute and 23 over five through both. HTTP with signed requests is all there was
+before the fabric. p50s, in ms (10 samples for the hand-offs, 20 for the revocations).
 
-| | Before (HTTP, signed) | After (Q-AMP) |
-|---|---|---|
-| First answer on a fresh connection (beta asks alpha for what follows its frontier) | 0.44 | 1.35 (a Retry, the 1-RTT handshake, the call) |
-| The same, a sidecar process's very first call | — | 24.2 (its crypto library's first use: a long-running sidecar pays it once) |
-| An answer on a warm connection | 0.65 | 0.31 |
-| Sync's lag (an event written on alpha, until it is in beta's ledger: a push) | 3.80 | 3.29 |
-| A forwarded command's answer (a sandbox on beta) | 2.49 | 2.44 |
-| A handed task's first output back on the giver | none: no such link | 12 |
-| A handed task, given to Proven (stand-in models) | none | 37.7 |
-| A stop's round trip (the giver's stop, the work stopped and said) | none: forwarded work couldn't be stopped from its sender | 2.42 |
-| A run's key revoked, until its next call is refused | none | 10.0 (most of it the sidecar's durable write) |
-| A device revoked on alpha, until beta refuses it | 32.3 | 24.9 |
+| | HTTP, signed | Q-AMP, before the review's fixes | Q-AMP, after them |
+|---|---|---|---|
+| First answer on a fresh connection (beta asks alpha for what follows its frontier) | 0.56 | 1.30 | 1.65 |
+| The same, a sidecar process's very first call | — | 24.3 | 24.5 |
+| An answer on a warm connection | 0.62 (signed, inside its clock) | 0.29 (unsigned) | 0.75 (signed, inside its clock) |
+| Sync's lag (an event written on alpha, until it is in beta's ledger: a push) | 2.57 | 2.31 | 2.84 |
+| A forwarded command's answer (a sandbox on beta) | 3.22 | 2.35 | 4.20 |
+| A handed task's first output back on the giver | none: no such link | 17 | 20 |
+| A handed task, given to Proven (stand-in models) | none | 44.8 | 51.0 |
+| A stop's round trip (the giver's stop, the work stopped and said) | none: forwarded work couldn't be stopped from its sender | 2.90 | 3.46 |
+| A run's key revoked, until its next call is refused | none | 10.9 | 10.2 |
+| A device revoked on alpha, until beta refuses it | 31.6 | 22.8 | 21.0 |
 
+- **What the fixes cost:** each link call now carries its node's device signature (the review's M1), 0.41 ms on this
+  machine (Ed25519 in the daemon: 0.16 ms to sign, 0.25 ms to check, timed alone; the door's own cost for a forward,
+  timed alone, is the same 0.41 ms). Three more alternating runs of the link's sections put the fresh answer at
+  1.23–1.25 ms before and 1.69–1.84 after, the warm one at 0.29–0.64 and 0.74–0.85 (HTTP's, which always signed,
+  0.62–1.06), and sync's lag at 2.27–2.70 and 3.08–3.63.
+- **The forwarded command** rose more than the signature in those runs (2.18–2.27 ms before, 3.47–4.67 after), while
+  HTTP's rose 0.4 to 0.6 ms in the same runs. The signature is 0.41 ms of it; the rest isn't traced yet.
 - **On loopback the paths cost about the same, and loopback hides what matters.** On a real network every round trip
-  adds the path's latency:
+  adds the path's latency (about 17 ms between the owner's two machines, below):
   - plain HTTP's first answer is two round trips (TCP, then the request);
   - Q-AMP's is three on a first meeting (a Retry, the handshake, the call), and two once the peer's NEW_TOKEN spares the
     Retry.
@@ -227,8 +235,6 @@ medians of the samples, in ms.
   call, revocation without caching, and a post-quantum key exchange inside the tunnel (WireGuard's own is classical).
 - **The hand-off's first output and its stop** were 104 ms and 58 ms before the runner followed its agents' own changes
   (each trail line wakes it), and 12 ms and 2.4 ms after (three runs each; the commit says the medians).
-- **Across the real network** (two test nodes, one on each of the owner's two machines): the next section, once
-  measured.
 
 ## Across a real network
 
@@ -243,6 +249,30 @@ bun bench/fabric/remote.ts serve --qamp <qamp for this machine> --advertise 192.
 # on the measuring machine, with the invite the first one printed
 bun bench/fabric/remote.ts measure --qamp <qamp for this machine> --advertise 192.0.2.20 --root /tmp/q5 --invite <invite> --samples 30 --out results.json
 ```
+
+Measured on 26 November 2026, before the security review's fixes (the code of `04e7c6a`): the measuring node on a Mac
+mini (darwin/arm64), the serving node on a Linux server (linux/x64, in a container on the host's network), each with
+Q-AMP main's sidecar, over the tailnet, whose round trip between them was about 17 ms. 30 samples each (10 for the
+hand-offs); p50 and p90, in ms. The mini's own load was heavy and rising through the run (its 1-minute load average 17.6
+before, 187.8 after), so the p90s are noisy; a first run an hour earlier, without the stop and revocation parts, gave the
+same p50s within 2 ms.
+
+| | HTTP, signed | Q-AMP |
+|---|---|---|
+| First answer on a fresh connection | 34.6 (36.5) | 49.9 (52.5): a Retry, the 1-RTT handshake, the call |
+| An answer on a warm connection | 16.7 (19.1) | 16.7 (18.6) |
+| Sync's lag (a push, half an echo's round trip) | 11.6 (13.0) | 11.3 (13.9) |
+| A device revoked here, until the server refuses it (half a round trip) | 31.8 (35.8) | 20.0 (22.6) |
+| A forwarded command's answer (a sandbox on the server) | 20.9 (30.4) | 18.5 (20.4) |
+| A handed task's first output back here | none: no such link | 24 (38) |
+| A handed task, given to its end (stand-in models) | none | 45.5 (76.1) |
+| A stop's round trip (this node's stop, the work stopped there and said) | none | 18.8 (24.2) |
+| A run's key revoked here, until the server says its next call was refused | none | 53.6 (95.3) |
+
+- **The fresh connection** costs Q-AMP a round trip more than plain HTTP on a first meeting (three against two); every
+  answer after it costs the same one.
+- **A revocation** reaches the other node sooner over Q-AMP (a push on a connection already open).
+- **A run's key revoked** is three crossings: the revocation here, the run's next call there, its refusal said back.
 
 ## The runbook: switching it on for a real pair
 
@@ -282,8 +312,15 @@ answered and a Q-AMP release with the sidecar is pinned.
 ## What isn't verified yet
 
 - **The owner's real pair has never run it:** those nodes run main, where the fabric is dormant. Across a real network
-  only two throwaway test nodes have, on the same two machines (above, once measured).
-- **The security review of the fabric** is under way; its findings aren't fixed yet.
+  only two throwaway test nodes have, on the same two machines, and only with the code from before the review's fixes
+  (above).
+- **The security review's findings are fixed, each with a failing test first, and not yet reviewed again.** H1 (the
+  owner's grant for hand-offs), M1 (the transport key carries calls alone; L6 with it), L1 to L8, and I1 to I6 where
+  they were cheap. The independent re-review comes before the pin moves.
+- **A full node is still owner-equivalent in the ledger:** one that turned on you can write a grant for hand-offs as your
+  word, as it can a rule. It is a signed event every node shows, and revoking the node ends it.
+- **The native apps** say nothing yet of hand-offs, their grants, or a task a node handed over (the web app and the CLI
+  do); their parity vectors are unchanged.
 - **Q-AMP's side for grants that renew themselves** (holder-driven, in its spec first) isn't built. The giver renews
   here, and sends each renewal in on the hand-off's call.
 - **One connect timeout** in 391 fresh-connection samples on loopback: the first sample of one run, not reproduced in
