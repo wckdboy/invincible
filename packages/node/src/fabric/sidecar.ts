@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SidecarClient, within } from "./socket.ts";
 
@@ -196,10 +196,17 @@ export class Sidecar {
       return this.off(`its transport key can't be read: ${(error as Error).message}`);
     }
     if (this.stopping) return;
+    // Its socket's directory is the node's alone: the home's own (<home>/run) or one it makes now is made 0700; any
+    // other must be this user's already, with no permission for anyone else. A shared one (/tmp, /run) is refused,
+    // never changed: the sidecar refuses it too.
     const socketDir = join(this.socketPath, "..");
     try {
-      mkdirSync(socketDir, { recursive: true, mode: 0o700 });
-      chmodSync(socketDir, 0o700);
+      const made = !existsSync(socketDir);
+      if (made) mkdirSync(socketDir, { recursive: true, mode: 0o700 });
+      if (made || socketDir === join(this.opts.home, "run")) chmodSync(socketDir, 0o700);
+      const dir = lstatSync(socketDir);
+      const mine = dir.isDirectory() && (process.getuid === undefined || dir.uid === process.getuid()) && (dir.mode & 0o077) === 0;
+      if (!mine) return this.off(`its socket's directory ${socketDir} isn't this node's alone: INVINCIBLE_QAMP_SOCKET needs a directory of its own, mode 0700 (this one is ${(dir.mode & 0o7777).toString(8)})`);
     } catch (error) {
       return this.failed(`its socket's directory can't be made private: ${(error as Error).message}`);
     }

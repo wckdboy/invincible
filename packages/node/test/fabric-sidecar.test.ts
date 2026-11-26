@@ -190,3 +190,38 @@ describe("where the sidecar listens", () => {
     for (const any of ["0.0.0.0", "0", "::", "[::]", "::0", "0:0::0", "::ffff:0.0.0.0", ""]) expect([any, sidecarListen(any, 7410, unspecified)]).toEqual([any, null]);
   });
 });
+
+describe("the sidecar's socket directory (L4)", () => {
+  test("a shared directory the socket is put in is refused, never made private: its mode stays as it was", async () => {
+    const dir = temp();
+    const shared = join(dir, "shared");
+    mkdirSync(shared);
+    chmodSync(shared, 0o1777);
+    const binary = join(dir, "qamp");
+    writeFileSync(binary, "#!/bin/sh\nexit 0\n");
+    chmodSync(binary, 0o755);
+    let spawned = 0;
+    const sidecar = new Sidecar({ home: join(dir, "home"), key: someKey, binary: () => binary, listen: () => null, name: "n", log: () => {}, spawn: () => (spawned++, { ready: Promise.resolve(null), exited: Promise.resolve(1), kill() {} }), probe: () => ({ sidecar: true, version: "0.2.0" }), socket: join(shared, "q.sock") });
+    await sidecar.start();
+    const why = sidecar.why;
+    await sidecar.stop();
+    expect(statSync(shared).mode & 0o7777).toBe(0o1777);
+    expect(spawned).toBe(0);
+    expect(why).toMatch(/^its socket's directory .* isn't this node's alone: INVINCIBLE_QAMP_SOCKET needs a directory of its own, mode 0700 \(this one is 1777\)$/);
+  });
+
+  test("one it makes for itself (missing), or the home's own, is made 0700; an existing private one of this user's is used", async () => {
+    const dir = temp();
+    const binary = join(dir, "qamp");
+    writeFileSync(binary, "#!/bin/sh\nexit 0\n");
+    chmodSync(binary, 0o755);
+    const spawn = () => ({ ready: Promise.resolve(null), exited: Promise.resolve(1), kill() {} });
+    for (const socket of [join(dir, "made", "q.sock"), undefined]) {
+      const home = join(dir, `home-${socket ? "s" : "h"}`);
+      const sidecar = new Sidecar({ home, key: someKey, binary: () => binary, listen: () => null, name: "n", log: () => {}, spawn, probe: () => ({ sidecar: true, version: "0.2.0" }), ...(socket ? { socket } : {}) });
+      await sidecar.start();
+      await sidecar.stop();
+      expect(statSync(socket ? join(dir, "made") : join(home, "run")).mode & 0o777).toBe(0o700);
+    }
+  });
+});

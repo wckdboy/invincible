@@ -514,7 +514,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   calls, which need the device key); the node starts it with
   `--allow-cmd /tool/invincible` and `--max-ttl 86400`, so nothing minted through it reaches past Invincible's tools
   or a day. It listens on the node's advertised address alone: every way of writing every interface makes it dial out
-  only. Tests: `fabric-sidecar.test.ts`.
+  only. Its socket's directory is the node's own (`<home>/run`, or one it makes, made 0700); a directory it didn't make
+  must be this user's with mode 0700 already, so a socket put in a shared one (`/tmp`, `/run`) is refused, never made
+  private by changing it (the review's L4). Tests: `fabric-sidecar.test.ts`.
 - **A failure ends one hand-off, never the node** (the review's L3). The runner's loop, a run's call back to its giver
   and the giver's follower each catch what goes wrong in them: that hand-off fails (`INTERNAL`, with why), its task
   stops there, and the node goes on. `invincible serve` also says, and survives, any failure nothing waited for. Test:

@@ -24,7 +24,9 @@ answered and its fixes reviewed again.
     one at once, the sidecar starts again on the new one, and the peers refuse the old one from then on.
 - **Where it listens.** UDP 7410 (`INVINCIBLE_QAMP_PORT`) on the node's advertised address alone. An address that is
   every interface's makes it dial out only.
-- **Its socket.** `<home>/run/qamp.sock` (`INVINCIBLE_QAMP_SOCKET` when that path is too long). It is 0600 in a 0700
+- **Its socket.** `<home>/run/qamp.sock` (`INVINCIBLE_QAMP_SOCKET` when that path is too long, in a directory of its
+  own: one the node makes, or this user's already with mode 0700; a shared one such as `/tmp` is refused, never
+  changed). It is 0600 in a 0700
   directory, same-user only (Q-AMP's checks), with its state file (grants, revocations) beside it.
 - **How it is started.** `qamp sidecar --key /dev/stdin --socket … --name <node> --max-ttl 86400 --allow-cmd /tool/invincible
   --listen <address>:7410`. The binary is `<home>/bin/qamp` (`INVINCIBLE_QAMP_BIN`).
