@@ -327,7 +327,7 @@ internal fun threadAgo(at: Long, now: Long = System.currentTimeMillis()): CharSe
 private fun Dispatch(task: TeamTask, name: String, proposer: String?) {
     val ago = threadAgo(task.createdAt)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-        if (task.givenBy == "primary" || task.proposedBy == "primary") PrimaryOrb(18.dp) else Icon(LayersIcon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (task.givenBy == "primary" || task.proposedBy == "primary") PrimaryMark(18.dp) else Icon(LayersIcon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(
             buildAnnotatedString {
                 append(dispatchWords(task, name, proposer))

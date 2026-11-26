@@ -100,7 +100,7 @@ fun Sidebar(app: AppModel, nav: Nav, give: () -> Unit, places: () -> Unit, colla
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.s3),
         ) {
-            PrimaryOrb(34.dp, if (elsewhere) null else OrbMotion.mood(standing), key = "primary:side")
+            PrimaryMark(34.dp)
             Column(Modifier.weight(1f)) {
                 Text(Primary.name, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
                 Text(line, style = Type.meta, color = when (Orb.tone(table.primary.state)) { Orb.Tone.WARN -> brand.needs; Orb.Tone.ACCENT -> brand.working; Orb.Tone.OK -> brand.done; else -> MaterialTheme.colorScheme.onSurfaceVariant }, maxLines = 1, overflow = TextOverflow.Ellipsis)

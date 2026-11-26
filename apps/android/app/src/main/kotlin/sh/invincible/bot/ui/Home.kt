@@ -193,9 +193,9 @@ fun HomeScreen(app: AppModel, nav: Nav, places: () -> Unit, give: () -> Unit) {
 }
 
 /**
- * Its header: its orb (the one that moves here), its name and the line at a glance (amber when something needs you),
- * the machine it runs on (its dot says how the fleet stands), and "…" for everything else. Its orb and name open its
- * own conversation.
+ * Its header: the I-beam (the primary, in ink), its name and the line at a glance (in full ink and weight when something
+ * needs you), the machine it runs on (its dot says how the fleet stands), and "…" for everything else. Its mark and name
+ * open its own conversation.
  */
 @Composable
 private fun HomeHead(app: AppModel, glance: Work.Glance, mood: OrbMotion.Mood, open: () -> Unit, settings: () -> Unit, places: () -> Unit) {
@@ -220,13 +220,14 @@ private fun HomeHead(app: AppModel, glance: Work.Glance, mood: OrbMotion.Mood, o
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Space.s3),
         ) {
-            PrimaryOrb(48.dp, mood, key = "primary:home")
+            PrimaryMark(40.dp)
             Column(Modifier.weight(1f)) {
                 Text(Primary.name, style = Type.display, maxLines = 1)
                 Text(
                     glance.text,
                     style = Type.meta.copy(fontSize = Type.body.fontSize),
                     color = if (glance.needs) brand.needs else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (glance.needs) androidx.compose.ui.text.font.FontWeight.SemiBold else null,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },

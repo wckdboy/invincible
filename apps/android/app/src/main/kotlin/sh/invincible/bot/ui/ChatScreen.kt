@@ -101,8 +101,8 @@ fun ChatScreen(app: AppModel, back: () -> Unit, openTask: (String) -> Unit = {})
         LazyColumn(Modifier.weight(1f), state = list) {
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s2), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s3)) {
-                    // Its orb, the one in focus here: moving while it answers (before the node has said so), else still.
-                    PrimaryOrb(40.dp, if (live) sh.invincible.bot.core.OrbMotion.Mood.WORKING else null, key = "primary:chat")
+                    // The primary, the I-beam in ink (still: its line says what it is doing).
+                    PrimaryMark(40.dp)
                     Text(table.primary.line, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 }
             }

@@ -59,27 +59,6 @@ import kotlin.math.tan
  */
 
 /**
- * The primary's orb: its field in gold, its beam through it. Given a [mood] (where it stands), it moves as that mood does;
- * without one, and while the phone's animations are off, it is still. Decorative beside its name; named ([description])
- * where it stands alone. [key] says which orb it is, so one drawn again carries on where it was and a change of mood eases.
- */
-@Composable
-fun PrimaryOrb(size: Dp, mood: OrbMotion.Mood? = null, description: String? = null, key: String = "primary") {
-    FieldCanvas(size, FieldOrb.PRIMARY, beam = true, agent = false, mood = mood, key = key, description = description)
-}
-
-/**
- * The app's mark where a page shows it (the sidebar's head beside PRIMARY, Settings' About): the app icon's field, its in
- * gold, alone (no beam: that is its as the one you talk to), still, and on nothing, so it sits on a light page as on a
- * dark one (your word, 26 November 2026: "make sure the app icon is transparent so it works in dark and white mode"):
- * light added to light on a dark page, ink on a light one, as every orb is. Decorative: what it is in is named.
- */
-@Composable
-fun AppMark(size: Dp) {
-    FieldCanvas(size, FieldOrb.PRIMARY, beam = false, agent = false, mood = null, key = "primary:mark", description = null)
-}
-
-/**
  * An agent's orb: its field in its own colours (FieldOrb.agent: the colour you chose for it or its handle's, and its
  * handle's lines and lean, the same on every device). It moves only while it works ([mood] WORKING: in its own thread's
  * header); in any other mood it is still, in that mood's light (dimmer while paused or queued, its rim red-brown when its
@@ -91,10 +70,10 @@ fun AgentOrb(id: String, profile: Json?, size: Dp, mood: OrbMotion.Mood? = null,
     FieldCanvas(size, identity, beam = false, agent = true, mood = mood, key = key, description = description)
 }
 
-/** An agent's or the primary's orb by handle ("primary" is the primary's), still unless given a mood. */
+/** An agent's orb by handle, still unless given a mood; the primary's ("primary") is the I-beam. */
 @Composable
 fun Face(id: String, profile: Json?, size: Dp, mood: OrbMotion.Mood? = null, description: String? = null) {
-    if (id == "primary") PrimaryOrb(size, mood, description) else AgentOrb(id, profile, size, mood, description)
+    if (id == "primary") PrimaryMark(size, description) else AgentOrb(id, profile, size, mood, description)
 }
 
 /** Whether the page is light (the brand's paper is): a field is ink there. */
