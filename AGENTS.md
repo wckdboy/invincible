@@ -41,5 +41,5 @@ bun run bench                          # the scorecard against its baselines
   - tests use temp homes, never `~/.invincible`;
   - Galahad keeps running on the owner's machines until the cutover, so leave `~/.galahad`, its ports and its
     service alone.
-- **Landing.** The main copy is `sovware.io/amiriteorg/invincible`. Its main takes only pull requests whose checks all
+- **Landing.** The main copy is `sovware.io/wckdboy/invincible`. Its main takes only pull requests whose checks all
   passed, fast-forward only. Nobody pushes main.
