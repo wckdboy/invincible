@@ -44,6 +44,6 @@
 # Pairing, a key-derivation label and no key; and RequestAuthTests' declaration of its signer's private key's type
 # (CryptoKit's P-256), whose value is the parity vectors' test scalar (32 bytes of 0x11, apps/apple/scripts/vectors.ts):
 # obviously fake.
-d2e57b6a21abb5e5b310c37a536105545e03419a:apps/android/app/src/main/kotlin/sh/invincible/bot/core/Pairing.kt:generic-api-key:63
-d2e57b6a21abb5e5b310c37a536105545e03419a:apps/apple/Invincible/Core/Pairing.swift:generic-api-key:122
-d2e57b6a21abb5e5b310c37a536105545e03419a:apps/apple/InvincibleTests/RequestAuthTests.swift:generic-api-key:92
+cd64cd5469c851001ec9cac8abea52c2040a98fd:apps/android/app/src/main/kotlin/sh/invincible/bot/core/Pairing.kt:generic-api-key:63
+cd64cd5469c851001ec9cac8abea52c2040a98fd:apps/apple/Invincible/Core/Pairing.swift:generic-api-key:122
+cd64cd5469c851001ec9cac8abea52c2040a98fd:apps/apple/InvincibleTests/RequestAuthTests.swift:generic-api-key:92

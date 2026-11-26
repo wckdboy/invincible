@@ -12,8 +12,8 @@ struct ConnectorsTests {
     }
 
     @Test func googleSendsYouBackToTheAppsOwnAddressOnTheNode() {
-        #expect(Connectors.callback(origin: URL(string: "https://keep.example.ts.net")!) == "https://keep.example.ts.net/oauth/callback")
-        #expect(Connectors.callback(origin: URL(string: "https://keep.example.ts.net:8443/")!) == "https://keep.example.ts.net:8443/oauth/callback")
+        #expect(Connectors.callback(origin: URL(string: "https://keep.example.test")!) == "https://keep.example.test/oauth/callback")
+        #expect(Connectors.callback(origin: URL(string: "https://keep.example.test:8443/")!) == "https://keep.example.test:8443/oauth/callback")
     }
 
     @Test func aConnectorIsReadAsTheNodeListsIt() throws {

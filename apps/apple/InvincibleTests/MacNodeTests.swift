@@ -358,20 +358,20 @@ struct StayingOnTests {
     }
 
     @Test func tailscaleIsReadFromItsStatus() throws {
-        let running = #"{"Version":"1.90.6","BackendState":"Running","Self":{"DNSName":"mini.example.ts.net.","TailscaleIPs":["192.0.2.7","fd7a:115c:a1e0::7"]}}"#
+        let running = #"{"Version":"1.90.6","BackendState":"Running","Self":{"DNSName":"mini.example.test.","TailscaleIPs":["192.0.2.7","fd7a:115c:a1e0::7"]}}"#
         let status = try #require(StayingOnReading.tailscale(status: Data(running.utf8)))
-        #expect(status.running && status.state == "Running" && status.name == "mini.example.ts.net")
+        #expect(status.running && status.state == "Running" && status.name == "mini.example.test")
         let signedOut = try #require(StayingOnReading.tailscale(status: Data(#"{"BackendState":"NeedsLogin","Self":{"DNSName":""}}"#.utf8)))
         #expect(!signedOut.running && signedOut.state == "NeedsLogin" && signedOut.name == nil)
         #expect(StayingOnReading.tailscale(status: Data("tailscale: not running".utf8)) == nil)
     }
 
     @Test func wherePrimaryIsPublishedIsReadAsTheNodeReadsIt() {
-        let serve = #"{"TCP":{"443":{"HTTPS":true}},"Web":{"mini.example.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7778"}}}}}"#
-        #expect(StayingOnReading.published(serve: Data(serve.utf8), proxyPort: 7778) == "https://mini.example.ts.net")
+        let serve = #"{"TCP":{"443":{"HTTPS":true}},"Web":{"mini.example.test:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:7778"}}}}}"#
+        #expect(StayingOnReading.published(serve: Data(serve.utf8), proxyPort: 7778) == "https://mini.example.test")
         #expect(StayingOnReading.published(serve: Data(serve.utf8), proxyPort: 7780) == nil)
-        let elsewhere = #"{"Web":{"mini.example.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://localhost:7778/"}}}}}"#
-        #expect(StayingOnReading.published(serve: Data(elsewhere.utf8), proxyPort: 7778) == "https://mini.example.ts.net:8443")
+        let elsewhere = #"{"Web":{"mini.example.test:8443":{"Handlers":{"/":{"Proxy":"http://localhost:7778/"}}}}}"#
+        #expect(StayingOnReading.published(serve: Data(elsewhere.utf8), proxyPort: 7778) == "https://mini.example.test:8443")
         #expect(StayingOnReading.published(serve: Data("{}".utf8), proxyPort: 7778) == nil)
     }
 
@@ -396,7 +396,7 @@ struct StayingOnTests {
         #expect(StayingOn.reachable(.noCommand).fix == .openTailscale)
         #expect(StayingOn.reachable(.off("NeedsLogin")).fix == .openTailscale)
         #expect(StayingOn.reachable(.on(name: "mini", published: nil)).fix == .publish)
-        #expect(StayingOn.reachable(.on(name: "mini", published: "https://mini.example.ts.net")).holds == true)
+        #expect(StayingOn.reachable(.on(name: "mini", published: "https://mini.example.test")).holds == true)
         let lines = StayingOn(lines: [StayingOn.runsAtLogin(.on), StayingOn.startsAfterPowerCut(nil), StayingOn.reachable(.absent)])
         #expect(lines.holding == 1)
     }

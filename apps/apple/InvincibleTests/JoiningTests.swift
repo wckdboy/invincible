@@ -95,9 +95,9 @@ struct JoiningTests {
 
     @Test func requestsGoWhereTheLinkWasOpenedOrElseToTheInvitesEndpoint() throws {
         #expect(Joining.origin(for: pairing.url, invite: pairing.invite)?.absoluteString == "http://127.0.0.1:7778")
-        #expect(Joining.origin(for: "  https://keep.example.ts.net/#pair=\(pairing.token)\n", invite: pairing.invite)?.absoluteString == "https://keep.example.ts.net")
+        #expect(Joining.origin(for: "  https://keep.example.test/#pair=\(pairing.token)\n", invite: pairing.invite)?.absoluteString == "https://keep.example.test")
         #expect(Joining.origin(for: pairing.token, invite: pairing.invite)?.absoluteString == "http://127.0.0.1:7777")
-        #expect(Joining.origin(for: "ftp://keep.example.ts.net/#pair=\(pairing.token)", invite: pairing.invite) == nil)
+        #expect(Joining.origin(for: "ftp://keep.example.test/#pair=\(pairing.token)", invite: pairing.invite) == nil)
     }
 
     /// An `invincible:` link (the Mac opens these) hands over the invite link it carries, which keeps its address, or else the
@@ -112,7 +112,7 @@ struct JoiningTests {
         #expect(Joining.origin(for: handed, invite: try Invite.decode(handed))?.absoluteString == "http://127.0.0.1:7777")
         #expect(Joining.handed(try link("invincible://pair")) == nil)
         #expect(Joining.handed(try link("invincible://pair#pair=gi1.bm90LWFuLWludml0ZQ")) == nil)
-        #expect(Joining.handed(try link("https://keep.example.ts.net/#pair=\(pairing.token)")) == nil)
+        #expect(Joining.handed(try link("https://keep.example.test/#pair=\(pairing.token)")) == nil)
     }
 }
 

@@ -36,8 +36,8 @@ struct NodeClientTests {
 
     @Test func aPostIsSignedOverExactlyTheBytesItSends() throws {
         let body = Data(#"{"role":"planner","messages":[{"role":"user","content":"Hvad så? 🛡️"}]}"#.utf8)
-        let request = try client(origin: "https://keep.example.ts.net/").request("POST", "/api/chat", body: body)
-        #expect(request.url?.absoluteString == "https://keep.example.ts.net/api/chat")
+        let request = try client(origin: "https://keep.example.test/").request("POST", "/api/chat", body: body)
+        #expect(request.url?.absoluteString == "https://keep.example.test/api/chat")
         #expect(request.httpBody == body)
         #expect(request.value(forHTTPHeaderField: "content-type") == "application/json")
         #expect(try verifies(request, method: "POST", path: "/api/chat", body: body))

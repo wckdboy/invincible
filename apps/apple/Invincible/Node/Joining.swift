@@ -112,7 +112,7 @@ struct Joining: Sendable {
     }
 
     /// What an `invincible:` link hands this device to join with (the Mac app opens them): the invite link it carries
-    /// (`invincible:https://keep.example.ts.net/#pair=gi1.…`), whose address is where the node is, as when it is pasted; or
+    /// (`invincible:https://keep.example.test/#pair=gi1.…`), whose address is where the node is, as when it is pasted; or
     /// the invite alone (`invincible://pair#pair=gi1.…`, `invincible:gi1.…`), whose node is where the invite says. Nil for any
     /// other link, and for one that carries no invite.
     static func handed(_ url: URL) -> String? {

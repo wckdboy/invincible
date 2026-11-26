@@ -240,7 +240,7 @@
         }
       },
       {
-        "text": "  https://keep.example.ts.net/#pair=gi1.eyJlIjoiaHR0cDovLzEyNy4wLjAuMTo3Nzc3IiwiZiI6Ing0d09JeE5GcnhNdXJqeWNMbV9GbXNVZjBlQThDVnJ0Zmhwdk5XNW95Z0kiLCJpIjoiWm1GclpTMXBiblpwZEdVdGFXUXdNUSIsImsiOiJjbGllbnQiLCJzIjoiWm1GclpTMXBiblpwZEdVdGMyVmpjbVYwTFdadmNpMTBaWE4wY3kwd01ERSIsInYiOjF9\n",
+        "text": "  https://keep.example.test/#pair=gi1.eyJlIjoiaHR0cDovLzEyNy4wLjAuMTo3Nzc3IiwiZiI6Ing0d09JeE5GcnhNdXJqeWNMbV9GbXNVZjBlQThDVnJ0Zmhwdk5XNW95Z0kiLCJpIjoiWm1GclpTMXBiblpwZEdVdGFXUXdNUSIsImsiOiJjbGllbnQiLCJzIjoiWm1GclpTMXBiblpwZEdVdGMyVmpjbVYwTFdadmNpMTBaWE4wY3kwd01ERSIsInYiOjF9\n",
         "invite": {
           "v": 1,
           "e": "http://127.0.0.1:7777",
@@ -251,7 +251,7 @@
         }
       },
       {
-        "text": "https://keep.example.ts.net/?pair=gi1.eyJlIjoiaHR0cDovLzEyNy4wLjAuMTo3Nzc3IiwiZiI6Ing0d09JeE5GcnhNdXJqeWNMbV9GbXNVZjBlQThDVnJ0Zmhwdk5XNW95Z0kiLCJpIjoiWm1GclpTMXBiblpwZEdVdGFXUXdNUSIsImsiOiJjbGllbnQiLCJzIjoiWm1GclpTMXBiblpwZEdVdGMyVmpjbVYwTFdadmNpMTBaWE4wY3kwd01ERSIsInYiOjF9",
+        "text": "https://keep.example.test/?pair=gi1.eyJlIjoiaHR0cDovLzEyNy4wLjAuMTo3Nzc3IiwiZiI6Ing0d09JeE5GcnhNdXJqeWNMbV9GbXNVZjBlQThDVnJ0Zmhwdk5XNW95Z0kiLCJpIjoiWm1GclpTMXBiblpwZEdVdGFXUXdNUSIsImsiOiJjbGllbnQiLCJzIjoiWm1GclpTMXBiblpwZEdVdGMyVmpjbVYwTFdadmNpMTBaWE4wY3kwd01ERSIsInYiOjF9",
         "invite": {
           "v": 1,
           "e": "http://127.0.0.1:7777",
@@ -262,7 +262,7 @@
         }
       },
       {
-        "text": "https://keep.example.ts.net/#x=1&pair=gi1.eyJlIjoiaHR0cDovLzEyNy4wLjAuMTo3Nzc3IiwiZiI6Ing0d09JeE5GcnhNdXJqeWNMbV9GbXNVZjBlQThDVnJ0Zmhwdk5XNW95Z0kiLCJpIjoiWm1GclpTMXBiblpwZEdVdGFXUXdNUSIsImsiOiJjbGllbnQiLCJzIjoiWm1GclpTMXBiblpwZEdVdGMyVmpjbVYwTFdadmNpMTBaWE4wY3kwd01ERSIsInYiOjF9",
+        "text": "https://keep.example.test/#x=1&pair=gi1.eyJlIjoiaHR0cDovLzEyNy4wLjAuMTo3Nzc3IiwiZiI6Ing0d09JeE5GcnhNdXJqeWNMbV9GbXNVZjBlQThDVnJ0Zmhwdk5XNW95Z0kiLCJpIjoiWm1GclpTMXBiblpwZEdVdGFXUXdNUSIsImsiOiJjbGllbnQiLCJzIjoiWm1GclpTMXBiblpwZEdVdGMyVmpjbVYwTFdadmNpMTBaWE4wY3kwd01ERSIsInYiOjF9",
         "invite": {
           "v": 1,
           "e": "http://127.0.0.1:7777",
@@ -284,10 +284,10 @@
         }
       },
       {
-        "text": "gi1.eyJ2IjoxLCJlIjoiaHR0cHM6Ly9rZWVwLmV4YW1wbGUudHMubmV0IiwiZiI6Ing0d09JeE5GcnhNdXJqeWNMbV9GbXNVZjBlQThDVnJ0Zmhwdk5XNW95Z0kiLCJpIjoiWm1GclpTMXBiblpwZEdVdGFXUXdNUSIsInMiOiJabUZyWlMxcGJuWnBkR1V0YzJWamNtVjBMV1p2Y2kxMFpYTjBjeTB3TURFIiwiayI6ImNsaWVudCJ9",
+        "text": "gi1.eyJ2IjoxLCJlIjoiaHR0cHM6Ly9rZWVwLmV4YW1wbGUudGVzdCIsImYiOiJ4NHdPSXhORnJ4TXVyanljTG1fRm1zVWYwZUE4Q1ZydGZocHZOVzVveWdJIiwiaSI6IlptRnJaUzFwYm5acGRHVXRhV1F3TVEiLCJzIjoiWm1GclpTMXBiblpwZEdVdGMyVmpjbVYwTFdadmNpMTBaWE4wY3kwd01ERSIsImsiOiJjbGllbnQifQ",
         "invite": {
           "v": 1,
-          "e": "https://keep.example.ts.net",
+          "e": "https://keep.example.test",
           "f": "x4wOIxNFrxMurjycLm_FmsUf0eA8CVrtfhpvNW5oygI",
           "i": "ZmFrZS1pbnZpdGUtaWQwMQ",
           "s": "ZmFrZS1pbnZpdGUtc2VjcmV0LWZvci10ZXN0cy0wMDE",

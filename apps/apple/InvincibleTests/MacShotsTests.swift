@@ -45,7 +45,7 @@ struct MacShots {
                                        StayingOn.logsIn(autoLogin: "owner", me: "owner", fileVault: false),
                                        StayingOn.staysAwake(set: true, held: true),
                                        StayingOn.startsAfterPowerCut(false),
-                                       StayingOn.reachable(.on(name: "mini.example.ts.net", published: nil)),
+                                       StayingOn.reachable(.on(name: "mini.example.test", published: nil)),
                                    ]),
                                    command: .none,
                                    log: "[invincible] node mini up · fleet homelab · http://127.0.0.1:7777 · vault unlocked · 1 loop(s) here of 1\n[invincible] compute: Measured this node for the first time\n[invincible] node mini up · fleet homelab · http://127.0.0.1:7777 · vault unlocked · 1 loop(s) here of 1")
