@@ -323,18 +323,28 @@ struct TaskCardView: View {
             if let shipped = TaskCard.shipped(task), let url = URL(string: shipped.url) {
                 Link(destination: url) { Label(shipped.text, systemImage: "arrow.up.forward.square") }.font(.caption.weight(.semibold))
             }
-            let actions = TaskCard.actions(task)
-            if !actions.isEmpty {
-                // Its answers, none of them filled, each a thumb's size.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Space.s2) { buttons(actions) }
-                    VStack(alignment: .leading, spacing: Space.s2) { buttons(actions) }
-                }
+            // Its one answer in full, unfilled, as its thread gives it (TaskCard.answers: none for a task at work, whose
+            // Stop is in its thread's menu), the rest a long press away: a list of ten queued tasks isn't ten Stops.
+            if let answer = TaskCard.answers(task).prominent {
+                NeedButton(title: Self.title(answer)) { act(answer) }
             }
         }
         .padding(.bottom, Space.s2)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+        .contextMenu { rest }
         .accessibilityElement(children: .contain)
+    }
+
+    /// Its other answers, and giving it again from one of its steps where it can be given again.
+    @ViewBuilder private var rest: some View {
+        let answers = TaskCard.answers(task)
+        ForEach(answers.rest, id: \.rawValue) { action in
+            Button(Self.title(action)) { act(action) }
+        }
+        if answers.prominent == .again || answers.rest.contains(.again), let fromStep {
+            Button("From a step…") { fromStep() }
+        }
     }
 
     /// Its verdict as its proof allows (from its record), once it has ended.
@@ -362,12 +372,11 @@ struct TaskCardView: View {
         }
     }
 
-    @ViewBuilder private func buttons(_ actions: [TaskCard.Action]) -> some View {
-        ForEach(actions, id: \.rawValue) { action in
-            NeedButton(title: action == .ship ? "Ship it…" : action == .again ? "Give again" : Self.label[action] ?? action.rawValue.capitalized) { act(action) }
-        }
-        if actions.contains(.again), let fromStep {
-            NeedButton(title: "From a step…") { fromStep() }
+    static func title(_ action: TaskCard.Action) -> String {
+        switch action {
+        case .ship: "Ship it…"
+        case .again: "Give again"
+        default: label[action] ?? action.rawValue.capitalized
         }
     }
 

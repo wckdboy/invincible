@@ -16,6 +16,7 @@ struct Drawer: View {
     let close: () -> Void
     @State private var chats: [ConversationSummary]?
     @State private var push = PushCenter.shared
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         ScrollView {
@@ -60,7 +61,8 @@ struct Drawer: View {
         HStack(spacing: Space.s3) {
             AppMark(size: 36)
             VStack(alignment: .leading, spacing: Space.line) {
-                Text(Primary.name).font(Typeset.title)
+                // (A name, never broken across lines: smaller instead, at the largest sizes.)
+                Text(Primary.name).font(Typeset.title).lineLimit(1).minimumScaleFactor(0.6)
                 Text(session.whoami?.nodeName ?? session.node.nodeName ?? "Your node").font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -96,7 +98,7 @@ struct Drawer: View {
         Button(action: action) {
             HStack(spacing: Space.s3) {
                 DrawerGlyph(symbol: symbol, quiet: quiet)
-                Text(title).font(quiet ? .subheadline : .body.weight(.semibold)).foregroundStyle(quiet ? .secondary : .primary).lineLimit(1)
+                Text(title).font(quiet ? .subheadline : .body.weight(.semibold)).foregroundStyle(quiet ? .secondary : .primary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
                 Spacer(minLength: Space.s2)
                 if let count, count > 0 {
                     Text("\(count)").font(.subheadline.weight(quietCount ? .regular : .bold)).monospacedDigit().foregroundStyle(quietCount ? .secondary : .primary)
@@ -146,6 +148,7 @@ struct DrawerHost<Content: View>: View {
     @ViewBuilder let content: Content
     @GestureState private var dragging: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -157,9 +160,11 @@ struct DrawerHost<Content: View>: View {
                     .accessibilityLabel("Close the drawer")
                     .accessibilityAddTraits(.isButton)
                     .transition(.opacity)
-                // (Its width from the window's own, without a reader round what is under it: Home lays out once.)
+                // (Its width from the window's own, without a reader round what is under it: Home lays out once. At the
+                // accessibility sizes nearly all of it, where 340 points cut every place to a word: "New c…", "Age…".)
+                let large = typeSize.isAccessibilitySize
                 Drawer(session: session, go: { place in close(); go(place) }, chat: { id in close(); chat(id) }, close: close)
-                    .containerRelativeFrame(.horizontal) { width, _ in min(340, width * 0.86) }
+                    .containerRelativeFrame(.horizontal) { width, _ in large ? width * 0.94 : min(340, width * 0.86) }
                     .clipShape(.rect(bottomTrailingRadius: 24, topTrailingRadius: 24, style: .continuous))
                     .shadow(color: .black.opacity(0.18), radius: 24, x: 6)
                     .offset(x: min(0, dragging))

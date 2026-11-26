@@ -18,7 +18,8 @@ struct InboxView: View {
                     Section {
                         ForEach(decisions) { decision in DecisionRow(decision: decision, busy: desk.busy.contains(decision.id)) }
                     } header: {
-                        SectionHead(title: "Needs you", count: session.needsYou, strong: true)
+                        // (Decisions: the page is called Needs you already.)
+                        SectionHead(title: "Decisions", count: session.needsYou, strong: true)
                     } footer: {
                         PageNote("Nothing leaves until you approve it. Unanswered, it's a no.").padding(.top, Space.s1)
                     }

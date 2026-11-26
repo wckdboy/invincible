@@ -110,8 +110,8 @@ extension View {
 }
 
 extension Section where Parent == SectionHead, Footer == EmptyView, Content: View {
-    /// A section under its name in small capitals (SectionHead), as Home's are.
-    init(head title: String, @ViewBuilder content: () -> Content) {
+    /// A section under its name in small capitals (SectionHead), as Home's are. (On the main actor, as SectionHead is.)
+    @MainActor init(head title: String, @ViewBuilder content: () -> Content) {
         self.init(content: content, header: { SectionHead(title) })
     }
 }
