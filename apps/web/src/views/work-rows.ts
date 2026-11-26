@@ -51,8 +51,12 @@ export const projectTile = (project: WorkRow["project"]): HTMLElement => h("span
  * A task as a row of three lines. `face`: its agent's orb's size (14 to 18; still: only the orb in focus moves).
  * `current`: it is the task open now.
  */
-export function workRow(row: WorkRow, opts: { face?: number; current?: boolean } = {}): HTMLAnchorElement {
+export function workRow(row: WorkRow, opts: { face?: number; current?: boolean; project?: boolean } = {}): HTMLAnchorElement {
   const verified = row.state === "verified";
+  const stands = [h("span", { class: "work-word", "data-tone": row.tone }, verified ? icon("check", { size: 12 }) : null, row.word), row.age ? h("span", { class: "work-age tnum" }, row.age) : null];
+  // Its project named only where the work is in more than one (lib/work.ts namesProjects): a row is then two lines, its
+  // title with how it stands and its age, and its agent with what it is doing (as the iPhone's).
+  const named = opts.project ?? true;
   return h(
     "a",
     {
@@ -66,15 +70,8 @@ export function workRow(row: WorkRow, opts: { face?: number; current?: boolean }
       "aria-label": rowLabel(row),
       title: rowLabel(row),
     },
-    h(
-      "span",
-      { class: "work-l1" },
-      projectTile(row.project),
-      h("span", { class: "work-project ellipsis" }, row.project.name),
-      h("span", { class: "work-word", "data-tone": row.tone }, verified ? icon("check", { size: 12 }) : null, row.word),
-      row.age ? h("span", { class: "work-age tnum" }, row.age) : null,
-    ),
-    h("span", { class: "work-l2 ellipsis" }, row.title),
+    named ? h("span", { class: "work-l1" }, projectTile(row.project), h("span", { class: "work-project ellipsis" }, row.project.name), ...stands) : null,
+    named ? h("span", { class: "work-l2 ellipsis" }, row.title) : h("span", { class: "work-l2 work-l2-stands" }, h("span", { class: "work-title" }, row.title), ...stands),
     h(
       "span",
       { class: "work-l3" },

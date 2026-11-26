@@ -22,6 +22,7 @@ import { chatActivityPill, chatsForPalette, chatView, lookAtWork, startNewChat }
 import { filterConversations } from "./lib/chats.ts";
 import { goToOf, hashOf, homeOf, keyedOf, landingOf, placesFor, routeOf, taskOf } from "./lib/nav.ts";
 import { closesKeyboard, keyboardOpen } from "./lib/viewport.ts";
+import { fromEdge, type Point, swiped } from "./lib/swipe.ts";
 import { conversationFromHash } from "@invincible/core/notify-payload";
 import { readOpenMessage } from "./lib/push.ts";
 import { isShowingQuestion, showingAnswer } from "./lib/showing.ts";
@@ -170,8 +171,8 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     return a;
   };
 
-  // The sidebar, on a wide screen (views/sidebar.ts): the primary pinned, the work by attention, the machine and the agents
-  // at its foot, everything else under "…". A phone has none: its first screen is Home, and "…" is in each header.
+  // The sidebar, on a wide screen (views/sidebar.ts): the drawer's places, kept open, beside Home. A phone has none: Home's
+  // I-beam, "…" in a page's top bar or a swipe from the left edge opens the drawer (views/places.ts).
   const sidebar = hasWork ? sidebarNav(ctx, { toggle: () => toggleSidebar() }) : null;
   // A sidebar folded away comes back from the top of the page, as T3 Code's does.
   const expand = button("Show the sidebar", { variant: "ghost", size: "sm", iconOnly: true, icon: "sidebar", title: "Show the sidebar  ( [ )", onClick: () => toggleSidebar() });
@@ -180,7 +181,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   const searchButton = (): HTMLButtonElement =>
     button("Search", { variant: "ghost", iconOnly: true, icon: "search", onClick: (event) => ctx.palette(undefined, event.currentTarget as Element), label: `Search and commands (${isMac() ? "⌘" : "Ctrl"}+K)` });
   const placesButton = (): HTMLButtonElement => {
-    const el = button("Everything else", { variant: "ghost", iconOnly: true, icon: "more", onClick: (event) => openPlaces(ctx, event.currentTarget as Element) });
+    const el = button("Everything else", { variant: "ghost", iconOnly: true, icon: "more", onClick: () => openPlaces(ctx) });
     el.classList.add("places-button");
     return el;
   };
@@ -244,6 +245,38 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     },
     { capture: true, passive: true, signal: lifetime.signal },
   );
+
+  // ---------- the drawer by a finger ----------
+  // A swipe from the screen's left edge opens the drawer wherever no sidebar shows, as the iPhone's (lib/swipe.ts); not
+  // over a row scrolled across, which the swipe scrolls back instead.
+  const sidebarShows = (): boolean => Boolean(sidebar) && !narrow.matches && !sidebarCollapsed();
+  const scrolledAcross = (target: EventTarget | null): boolean => {
+    for (let el = target instanceof Element ? target : null; el; el = el.parentElement) if (el.scrollLeft > 0) return true;
+    return false;
+  };
+  let edge: Point | null = null;
+  document.addEventListener(
+    "touchstart",
+    (event) => {
+      const touch = event.touches[0];
+      const at = touch ? { x: touch.clientX, y: touch.clientY } : null;
+      edge = at && event.touches.length === 1 && fromEdge(at) && !sidebarShows() && !isPaletteOpen() && !document.querySelector("dialog[open]") && !scrolledAcross(event.target) ? at : null;
+    },
+    { passive: true, signal: lifetime.signal },
+  );
+  document.addEventListener(
+    "touchmove",
+    (event) => {
+      const touch = event.touches[0];
+      if (!edge || !touch) return;
+      const decided = swiped(edge, { x: touch.clientX, y: touch.clientY }, 1);
+      if (decided === null) return;
+      edge = null;
+      if (decided) openPlaces(ctx);
+    },
+    { passive: true, signal: lifetime.signal },
+  );
+  document.addEventListener("touchend", () => (edge = null), { passive: true, signal: lifetime.signal });
 
   // Warm what the first moves need once the page has settled: the primary's kept chats, so a first visit to Chat is instant.
   if (can("chat")) setTimeout(() => !lifetime.signal.aborted && chatsForPalette(base.api, { chat: true, read: false }), 600);
@@ -346,6 +379,8 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       titleObserver.observe(heading);
     }
     if (changed) {
+      // (What its line says is asked for again where it shows.)
+      if (route === "home" || route === "team") work();
       window.scrollTo({ top: 0 });
       if (document.activeElement === document.body || document.activeElement?.closest(".sidebar")) main.focus({ preventScroll: true });
     }
@@ -485,10 +520,10 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   }
 
   // ---------- go ----------
-  // Its line says what it is doing wherever it shows (the sidebar's pinned row, Home's header): asked for here while no
+  // Its line says what it is doing wherever it shows (Home's header, its seat among the agents): asked for here while no
   // chat is on screen to ask it.
   const work = (): void => {
-    if (hasWork && (!narrow.matches || current === "home")) void lookAtWork(base.api, { chat: can("chat"), read: can("mind:read") });
+    if (hasWork && (current === "home" || current === "team")) void lookAtWork(base.api, { chat: can("chat"), read: can("mind:read") });
   };
   // (Asked again when the turns or the runs change; every 15 s while the node's stream is down.)
   lifetime.signal.addEventListener("abort", live.follow(["turns", "runs"], work, 15_000));

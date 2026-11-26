@@ -296,7 +296,7 @@
         }
       }
 
-      /* ---------- the sidebar (a wide screen): the mark, search, your agent pinned, the work by attention, its foot ---------- */
+      /* ---------- the sidebar (a wide screen): the drawer's places kept open (views/sidebar.ts): the mark, search, the list, the machine ---------- */
       .side-head { display: flex; align-items: center; gap: 2px; min-height: 32px; padding: 0 2px 0 var(--sp-2); }
       .side-mark { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; height: 32px; color: var(--text); text-decoration: none; }
       .wordmark-text { font-size: var(--fs-12); font-weight: 650; letter-spacing: 0.2em; text-transform: uppercase; }
@@ -308,44 +308,10 @@
       .search-trigger:hover { border-color: var(--border-strong); color: var(--text-2); }
       .search-trigger .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .search-trigger .kbds { margin-left: auto; display: flex; gap: 2px; }
-      .side-search { flex: none; margin: var(--sp-2) 0 var(--sp-3); }
-      /* Your agent, pinned: its orb, its name, its line; it opens its own conversation. */
-      .side-primary {
-        flex: none; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 0 10px; margin-bottom: var(--sp-1);
-        padding: 9px 8px 9px 10px; border-radius: var(--r-lg); background: var(--surface); color: var(--text); text-decoration: none;
-        box-shadow: var(--shadow-1), inset 0 0 0 1px var(--border); -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
-        transition: box-shadow var(--d-1) var(--ease-out), background-color var(--d-1) var(--ease-out);
-      }
-      .side-primary:hover { box-shadow: var(--shadow-1), inset 0 0 0 1px var(--border-strong); }
-      .side-primary:active { background: var(--surface-2); }
-      .side-primary[aria-current="page"] { box-shadow: var(--shadow-1), inset 0 0 0 1px var(--accent-border); }
-      .side-primary-orb { display: grid; place-items: center; width: 34px; height: 34px; }
-      .side-primary-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
-      .side-primary-text > strong { font-size: var(--fs-14); font-weight: 600; letter-spacing: -0.005em; }
-      .side-primary-line { font-size: var(--fs-12); color: var(--text-3); }
-      .side-primary-line[data-tone="warn"] { color: var(--needs); }
-      .side-primary-line[data-tone="accent"] { color: var(--work); }
-      .side-primary-line[data-tone="ok"] { color: var(--ok); }
-      .side-primary > .btn[hidden] { display: none; }
-      .side-work { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2) var(--sp-3); scrollbar-width: thin; }
-      .side-section { display: flex; flex-direction: column; gap: 1px; }
-      .side-section + .side-section { margin-top: var(--sp-1); }
-      .side-label { display: flex; align-items: center; gap: 4px; min-height: 30px; margin: 0; padding: var(--sp-2) var(--sp-2) 2px; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
-      .side-label[data-tone="needs"] { color: var(--needs); }
-      .side-fold {
-        display: flex; align-items: center; gap: 6px; width: 100%; min-height: 30px; margin-top: 2px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-md);
-        background: none; color: var(--text-3); font: inherit; font-size: var(--fs-12); font-weight: 600; text-align: left;
-        transition: background-color var(--d-1) var(--ease-out), color var(--d-1) var(--ease-out);
-      }
-      .side-fold:hover { background: var(--surface-3); color: var(--text-2); }
-      .side-fold-count { font-weight: 500; }
-      .side-fold .chev, .home-fold .chev { transition: transform var(--d-1) var(--ease-out); }
-      .side-fold[aria-expanded="true"] .chev, .home-fold[aria-expanded="true"] .chev { transform: rotate(90deg); }
-      .side-inbox { display: flex; align-items: center; gap: var(--sp-2); min-height: 34px; padding: 0 9px; border-radius: var(--r-md); color: var(--text); text-decoration: none; font-size: var(--fs-13); font-weight: 500; }
-      .side-inbox:hover, .side-inbox:active, .side-inbox.is-current { background: var(--surface-3); }
-      .side-inbox > svg { color: var(--text-3); }
-      .side-empty, .side-note { padding: var(--sp-2) var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-12); line-height: 1.5; }
-      .side-empty p { margin-bottom: var(--sp-2); }
+      .side-search { flex: none; margin: var(--sp-2) 0 var(--sp-2); }
+      .side-places { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2) var(--sp-3); scrollbar-width: thin; }
+      .home-fold .chev { transition: transform var(--d-1) var(--ease-out); }
+      .home-fold[aria-expanded="true"] .chev { transform: rotate(90deg); }
       .side-foot { flex: none; display: flex; align-items: center; gap: 6px; padding: var(--sp-2) 2px 0; border-top: 1px solid var(--border); }
       .side-pill {
         display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 128px; height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-full);
@@ -353,6 +319,31 @@
       }
       .side-pill:hover { border-color: var(--border-strong); color: var(--text); }
       .side-pill > svg { flex: none; color: var(--text-3); }
+
+      /* ---------- everything else (views/places.ts): the drawer's list, and the sidebar's, one line a place ---------- */
+      .places-nav { display: flex; flex-direction: column; }
+      .places-group { display: flex; flex-direction: column; padding: var(--sp-1) 0; }
+      .places-group + .places-group { border-top: 1px solid var(--border); }
+      .places-chats:empty { display: none; }
+      .place {
+        display: flex; align-items: center; gap: 14px; width: 100%; min-width: 0; min-height: 44px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-md);
+        background: none; color: var(--text); font: inherit; font-size: var(--fs-16); font-weight: 650; letter-spacing: -0.01em; text-align: left; text-decoration: none;
+        -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: background-color var(--d-1) var(--ease-out);
+      }
+      .place > svg { flex: none; color: var(--text-2); }
+      .place:hover, .place:active, .place[aria-current="page"] { background: var(--surface-3); }
+      /* Your latest chats: quieter than the places, as the iPhone's. */
+      .place.quiet { font-weight: 450; color: var(--text-2); }
+      .place.quiet > svg { color: var(--text-3); }
+      .place-count { flex: none; font-size: var(--fs-15); font-weight: 650; color: var(--text-3); }
+      .place-count[data-tone="needs"] { color: var(--text); }
+      .place-count:empty { display: none; }
+      /* (A pointer's sidebar is denser; a finger's keeps 44 px a row.) */
+      @media (pointer: fine) {
+        .sidebar .place { min-height: 34px; gap: 11px; font-size: var(--fs-14); }
+        .sidebar .place > svg { width: 16px; height: 16px; }
+        .sidebar .place-count { font-size: var(--fs-13); }
+      }
 
       /* ---------- the work's rows (views/work-rows.ts): a task in three lines, as T3 Code's sidebar has it ---------- */
       .work-row {
@@ -363,6 +354,10 @@
       .work-row[aria-current="page"] { background: var(--surface); box-shadow: var(--shadow-1), inset 0 0 0 1px var(--border); }
       .work-l1, .work-l3 { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-12); line-height: 16px; color: var(--text-3); }
       .work-l2 { font-size: var(--fs-13); font-weight: 550; line-height: 18px; letter-spacing: -0.005em; color: var(--text); }
+      /* Its title, with how it stands and its age at its end (the row's first line when its project isn't named). */
+      .work-l2-stands { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+      .work-l2-stands > .work-title { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+      .work-l2-stands > :is(.work-word, .work-age) { font-size: var(--fs-12); }
       .work-badge {
         flex: none; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 4px; background: var(--surface-3); color: var(--text-2);
         font-size: 9px; font-weight: 700; line-height: 1; box-shadow: inset 0 0 0 1px var(--border);
@@ -396,9 +391,12 @@
       .home-wait { height: 240px; margin: var(--sp-2) calc(var(--sp-3) + var(--safe-right)) 0 calc(var(--sp-3) + var(--safe-left)); border-radius: var(--r-xl); }
       .home-body[hidden] { display: none; }
       .home-body { display: flex; flex-direction: column; flex: 1; }
-      .home-who { display: flex; align-items: center; gap: var(--sp-3); flex: 1; min-width: 0; color: inherit; text-decoration: none; }
+      .home-who { display: flex; align-items: center; gap: var(--sp-3); flex: 1; min-width: 0; }
       .home-orb { flex: none; display: grid; place-items: center; width: 48px; height: 48px; }
-      .home-name { min-width: 0; }
+      /* The I-beam: your agent, and the drawer's button (a finger's 48 px). */
+      .home-drawer { padding: 0; border: 0; border-radius: var(--r-lg); background: none; color: inherit; cursor: pointer; -webkit-touch-callout: none; transition: background-color var(--d-1) var(--ease-out); }
+      .home-drawer:hover, .home-drawer:active { background: var(--surface-3); }
+      .home-name { flex: 1; min-width: 0; color: inherit; text-decoration: none; }
       .home-head h1 { font-size: var(--fs-20); letter-spacing: -0.02em; line-height: 1.15; }
       .home-line { margin-top: 2px; font-size: var(--fs-13); color: var(--text-3); }
       .home-line[data-tone="needs"] { color: var(--needs); }
@@ -410,13 +408,44 @@
       }
       .home-chip:hover { border-color: var(--border-strong); color: var(--text); }
       .home-head > .btn { flex: none; }
+      /* With the sidebar beside it, the I-beam and the machine are its: Home doesn't say them twice. */
+      @media (min-width: 960px) {
+        :root:not([data-sidebar="collapsed"]) .shell:not([data-sidebar-none]) :is(.home-drawer, .home-chip) { display: none; }
+      }
+      /* The agents in a strip, across: each its mark, its name and its state's word, what needs you first. */
+      .home-strip { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; padding: var(--sp-2) calc(var(--sp-2) + var(--safe-right)) var(--sp-4) calc(var(--sp-2) + var(--safe-left)); }
+      .home-strip::-webkit-scrollbar { display: none; }
+      .home-strip[hidden] { display: none; }
+      .home-strip-agent {
+        flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 92px; min-height: 44px; padding: var(--sp-2) 4px; border-radius: var(--r-lg);
+        color: var(--text); text-decoration: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: background-color var(--d-1) var(--ease-out);
+      }
+      .home-strip-agent:hover, .home-strip-agent:active { background: var(--surface-3); }
+      .home-strip-agent > .seat { margin-bottom: 4px; }
+      .home-strip-name { max-width: 100%; font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.01em; }
+      .home-strip-agent > .state-chip { padding: 0; border: 0; background: none; box-shadow: none; font-size: var(--fs-13); font-weight: 600; }
+      .home-strip-rest { font-size: var(--fs-13); }
+      .home-strip-agent .dot.live { box-shadow: none; }
+      .home-needs-more { display: flex; align-items: center; gap: var(--sp-2); min-height: 48px; padding: 0 14px; border-top: 1px solid var(--border); color: var(--text); font-size: var(--fs-15); font-weight: 650; text-decoration: none; }
+      .home-needs-more:active { background: var(--surface-3); }
+      .home-needs-more > svg { color: var(--text-3); }
       /* What needs you: amber, only while something waits, each with its answer in place (views/needs.ts). */
       /* (Its surface, edge and light are the alerts' .alert-card, in amber.) */
-      .home-needs { margin: 0 calc(var(--sp-3) + var(--safe-right)) var(--sp-5) calc(var(--sp-3) + var(--safe-left)); }
+      .home-needs { margin: 0 calc(var(--sp-1) + var(--safe-right)) var(--sp-5) calc(var(--sp-1) + var(--safe-left)); }
       .home-needs[hidden] { display: none; }
-      .home-needs-head { display: flex; align-items: center; gap: var(--sp-2); padding: 12px 14px 2px; font-size: var(--fs-13); font-weight: 600; color: var(--needs); }
-      .need { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px 12px; }
+      /* A section's heading, as the iPhone's: small capitals in ink, and its count beside it as a figure. */
+      .home-needs-head, .home-work-head h2 { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-13); font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); }
+      .home-needs-head { padding: 12px 12px 4px; }
+      .home-needs-head > .count[data-tone] { min-width: 0; height: auto; padding: 0; background: none; color: inherit; box-shadow: none; font-size: inherit; font-weight: inherit; }
+      .need { display: flex; flex-direction: column; gap: 4px; padding: 12px; }
       .need + .need { border-top: 1px solid var(--border); }
+      /* Its answers, pills in grey: Home's one primary action is its bar (ask), as the iPhone's. */
+      .home-needs .need-acts > .btn { --btn-bg: var(--surface-3); --btn-fg: var(--text); --btn-border: transparent; background: var(--btn-bg); box-shadow: none; border-radius: var(--r-full); padding-inline: 16px; font-size: var(--fs-14); font-weight: 650; }
+      .home-needs .need-acts > .btn.icon-only { padding-inline: 0; }
+      .home-needs .need-what { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; }
+      .home-needs .need-who { font-size: var(--fs-13); }
+      .home-needs .need-acts > .btn.ghost { --btn-bg: transparent; color: var(--text-2); }
+      .home-needs .need-acts > .btn:hover { --btn-bg: var(--border-strong); }
       .need-who { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--fs-12); color: var(--text-3); }
       .need-who > .agent-orb { flex: none; }
       .need-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); }
@@ -431,7 +460,7 @@
       .need-outcome:empty { display: none; }
       .home-work { display: flex; flex-direction: column; flex: 1; }
       .home-work-head { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; padding: 0 calc(var(--sp-4) + var(--safe-right)) var(--sp-2) calc(var(--sp-4) + var(--safe-left)); }
-      .home-work-head h2 { flex: none; font-size: var(--fs-14); font-weight: 650; }
+      .home-work-head h2 { flex: none; }
       .home-filters { display: flex; justify-content: flex-end; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
       .home-filters::-webkit-scrollbar { display: none; }
       .home-filter {
@@ -441,11 +470,18 @@
       .home-filter:first-child { padding-left: 10px; }
       .home-filter[aria-pressed="true"] { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); }
       .home-filter[aria-pressed="true"] .work-badge { background: color-mix(in srgb, var(--on-accent) 18%, transparent); color: var(--on-accent); box-shadow: none; }
+      /* Home's rows, as the iPhone's: a title in bold ink, then its agent and what it is doing. */
+      .home-work-rows .work-l2 { font-size: var(--fs-16); font-weight: 650; line-height: 22px; letter-spacing: -0.012em; }
+      .home-work-rows .work-row[data-attention="working"]:not(:hover) .work-l2 { color: var(--text); font-weight: 650; }
+      .home-work-rows .work-row[data-attention="working"]:not(:hover) .agent-orb { opacity: 1; }
+      .home-work-rows :is(.work-l1, .work-l3) { font-size: var(--fs-13); line-height: 18px; }
+      .home-work-rows .work-l2-stands > :is(.work-word, .work-age) { font-size: var(--fs-14); line-height: 22px; }
       .home-work-rows > .work-row, .home-work-rows > .home-fold {
         border-radius: 0; border-top: 1px solid var(--border); padding: 10px calc(var(--sp-4) + var(--safe-right)) 11px calc(var(--sp-4) + var(--safe-left));
       }
       .home-fold { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 44px; border: 0; background: none; color: var(--text-3); font: inherit; font-size: var(--fs-13); font-weight: 550; text-align: left; }
       .home-fold:active { background: var(--surface-3); }
+      .home-fold-failed { color: var(--failed); font-weight: 650; }
       .home-empty, .home-note { padding: var(--sp-6) calc(var(--sp-4) + var(--safe-right)) var(--sp-6) calc(var(--sp-4) + var(--safe-left)); border-top: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-14); line-height: 1.5; }
       .home-empty p { max-width: 52ch; margin-bottom: var(--sp-3); }
       /* Its message box, docked at the foot; the list fades out under it. */
@@ -969,6 +1005,20 @@
         /* A sheet's buttons, in its foot or at the end of its form, thumb-sized and as wide as the sheet. */
         :is(.sheet-foot, dialog.sheet .form-actions) .btn { flex: 1; min-height: 48px; border-radius: var(--r-full); }
       }
+      /* The drawer (views/places.ts: Home's I-beam, "…", or a swipe from the left edge, wherever no sidebar shows): the
+         screen's whole height at its left, sliding in on the drawer's curve; a swipe back towards the edge closes it. */
+      dialog.sheet.drawer {
+        width: min(360px, calc(100vw - 48px)); max-width: min(360px, calc(100vw - 48px)); height: 100dvh; max-height: 100dvh; margin: 0 auto 0 0;
+        border: 0; border-right: 1px solid var(--border); border-radius: 0 28px 28px 0; box-shadow: var(--shadow-3);
+        padding: var(--safe-top) 0 var(--safe-bottom) var(--safe-left); opacity: 1; transform: translateX(-100%); touch-action: pan-y;
+        transition: transform var(--d-sheet) var(--ease-drawer), overlay var(--d-sheet) allow-discrete, display var(--d-sheet) allow-discrete;
+      }
+      dialog.sheet.drawer[open].shown { transform: none; transition: transform var(--d-sheet) var(--ease-drawer), overlay var(--d-sheet) allow-discrete, display var(--d-sheet) allow-discrete; }
+      dialog.sheet.drawer .sheet-handle { display: none; }
+      dialog.sheet.drawer .sheet-head { align-items: center; padding: var(--sp-4) var(--sp-4) var(--sp-2) var(--sp-3); }
+      dialog.sheet.drawer .sheet-head h2 { font-size: var(--fs-20); font-weight: 750; letter-spacing: -0.02em; }
+      dialog.sheet.drawer .sheet-body { gap: 0; padding: 0 var(--sp-2) var(--sp-4); }
+      .sheet-lead { flex: none; display: grid; place-items: center; width: 40px; height: 40px; }
 
       /* ---------- command palette ---------- */
       dialog.palette {

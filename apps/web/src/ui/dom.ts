@@ -1,3 +1,5 @@
+import { nextRow } from "../lib/rows.ts";
+
 /*
  * The DOM layer. Everything is built with createElement / createElementNS and
  * textContent: model output, memories, device names and anything else that is
@@ -201,3 +203,16 @@ export function isTyping(target: EventTarget | null): boolean {
 }
 
 export const isMac = (): boolean => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+/** The arrow keys through a list's rows (lib/rows.ts): each row, a link or a button, keeps its own Tab stop as well. */
+export function arrowsThrough(root: HTMLElement, rows: string): void {
+  root.addEventListener("keydown", (event: KeyboardEvent) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || isTyping(event.target)) return;
+    const shown = [...root.querySelectorAll<HTMLElement>(rows)].filter((row) => row.getClientRects().length > 0);
+    const at = shown.findIndex((row) => row === document.activeElement);
+    const next = nextRow(shown.length, at, event.key);
+    if (next === null) return;
+    event.preventDefault();
+    shown[next]?.focus();
+  });
+}

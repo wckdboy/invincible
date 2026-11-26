@@ -78,7 +78,7 @@ describe("the stylesheet", () => {
     const declares = (selector: string, declaration: RegExp) => all.some((rule) => rule.media.length === 0 && rule.selectors.includes(selector) && declaration.test(rule.body));
     expect(declares("html", /touch-action:\s*manipulation/)).toBe(true);
     // Safari reads only the prefixed user-select.
-    for (const control of [".btn", ".sidebar a", ".work-row", ".home-filter", ".selector-trigger"]) {
+    for (const control of [".btn", ".sidebar a", ".work-row", ".home-filter", ".selector-trigger", ".place", ".home-strip-agent"]) {
       expect([control, declares(control, /-webkit-touch-callout:\s*none/), declares(control, /-webkit-user-select:\s*none/)]).toEqual([control, true, true]);
     }
   });
@@ -88,9 +88,9 @@ describe("the stylesheet", () => {
     expect(all.some((rule) => rule.media.length === 0 && rule.selectors.includes(':root[data-keyboard="open"]') && /--safe-bottom:\s*0px/.test(rule.body))).toBe(true);
   });
 
-  test("what a finger presses answers at once: a task's row, your agent's row, the Inbox's, a fold and More's rows look pressed", () => {
+  test("what a finger presses answers at once: a task's row, your agent's I-beam, an agent in Home's strip, \"N more\", a fold, the drawer's places and More's rows look pressed", () => {
     const pressed = (selector: string) => all.some((rule) => rule.selectors.some((s) => s === `${selector}:active`));
-    for (const control of [".work-row", ".side-primary", ".side-inbox", ".home-fold", ".rows > a.item", ".suggestion"]) expect([control, pressed(control)]).toEqual([control, true]);
+    for (const control of [".work-row", ".home-drawer", ".home-strip-agent", ".home-needs-more", ".home-fold", ".place", ".rows > a.item", ".suggestion"]) expect([control, pressed(control)]).toEqual([control, true]);
   });
 
   test("on a phone, the palette's field lies exactly over the search button at the top bar's end (which grows into it), and Home's header lines up with the top bar at either side", () => {

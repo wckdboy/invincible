@@ -88,10 +88,11 @@ describe("the app's places", () => {
     expect(index.every((group) => group.places.length > 0)).toBe(true);
   });
 
-  // Your words, 26 November 2026: "agent first ([the primary])"; on a phone, no tab bar: Home is the primary.
-  test("a phone opens on Home and a wide screen on your agent's conversation; a device that may not chat opens on its Inbox", () => {
+  // Your words, 26 November 2026: "agent first ([the primary])"; on a phone, no tab bar: Home is the primary. And I11: at
+  // desktop width the drawer's places are a sidebar that stays open, with Home beside it.
+  test("a phone and a wide screen both open on Home; a device that may not chat opens on its Inbox", () => {
     expect(homeOf(device(...OWNER), { narrow: true })).toBe("home");
-    expect(homeOf(device(...OWNER), { narrow: false })).toBe("chat");
+    expect(homeOf(device(...OWNER), { narrow: false })).toBe("home");
     for (const narrow of [true, false]) {
       expect(homeOf(device("mind:read"), { narrow })).toBe("inbox");
       expect(homeOf(device(), { narrow })).toBe("inbox");

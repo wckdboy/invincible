@@ -1,3 +1,4 @@
+import { swiped, type Point } from "../lib/swipe.ts";
 import { type Child, h, nextId, prefersReducedMotion, Scope } from "./dom.ts";
 import { formActions } from "./controls.ts";
 import { icon } from "./icons.ts";
@@ -28,6 +29,11 @@ export interface SheetOptions {
   role?: "dialog" | "alertdialog";
   /** "danger": what it does can't be taken back; its edge and its mark beside the title are red. */
   tone?: "danger";
+  /** "left": a drawer from the screen's left edge, its whole height (the places, as the iPhone's drawer), which a swipe
+   * back towards the edge closes. */
+  side?: "left";
+  /** Beside the title, before it (the drawer's I-beam). */
+  lead?: Child;
 }
 
 export interface Sheet {
@@ -58,6 +64,7 @@ export function openSheet(options: SheetOptions): Sheet {
     "header",
     { class: "sheet-head" },
     options.tone === "danger" ? h("span", { class: "sheet-mark", "aria-hidden": "true" }, icon("alert", { size: 16 })) : null,
+    options.lead ? h("span", { class: "sheet-lead", "aria-hidden": "true" }, options.lead) : null,
     h("div", { class: "grow" }, h("h2", { id: titleId }, options.title), options.description ? h("div", { class: "sub", id: descId }, options.description) : null),
     closeButton,
   );
@@ -66,7 +73,7 @@ export function openSheet(options: SheetOptions): Sheet {
   const el = h(
     "dialog",
     {
-      class: `sheet${options.size ? ` ${options.size}` : ""}`,
+      class: `sheet${options.size ? ` ${options.size}` : ""}${options.side === "left" ? " drawer" : ""}`,
       "aria-labelledby": titleId,
       "aria-describedby": options.description ? descId : null,
       role: options.role ?? null,
@@ -95,7 +102,7 @@ export function openSheet(options: SheetOptions): Sheet {
     if (prefersReducedMotion()) finish();
     else {
       el.addEventListener("transitionend", (event) => event.target === el && finish(), { once: false });
-      setTimeout(finish, phone() ? 420 : 240);
+      setTimeout(finish, phone() || options.side === "left" ? 420 : 240);
     }
   }
 
@@ -120,7 +127,7 @@ export function openSheet(options: SheetOptions): Sheet {
   let dragging = false;
   let lastY = 0;
   const onDown = (event: PointerEvent) => {
-    if (!phone() || event.button !== 0) return;
+    if (!phone() || options.side === "left" || event.button !== 0) return;
     if (event.target instanceof HTMLElement && event.target.closest("button, input, textarea, select, a")) return;
     dragging = true;
     startY = lastY = event.clientY;
@@ -149,6 +156,24 @@ export function openSheet(options: SheetOptions): Sheet {
     target.addEventListener("pointermove", onMove);
     target.addEventListener("pointerup", onUp);
     target.addEventListener("pointercancel", onUp);
+  }
+
+  // The drawer: a finger that swipes back towards the left edge closes it (lib/swipe.ts).
+  if (options.side === "left") {
+    let from: Point | null = null;
+    el.addEventListener("touchstart", (event) => {
+      const touch = event.touches[0];
+      from = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY } : null;
+    }, { passive: true });
+    el.addEventListener("touchmove", (event) => {
+      const touch = event.touches[0];
+      if (!from || !touch) return;
+      const decided = swiped(from, { x: touch.clientX, y: touch.clientY }, -1);
+      if (decided === null) return;
+      from = null;
+      if (decided) close();
+    }, { passive: true });
+    el.addEventListener("touchend", () => (from = null), { passive: true });
   }
 
   // A sheet belongs to the page it was opened on: going to another (the phone's back gesture, a link in the

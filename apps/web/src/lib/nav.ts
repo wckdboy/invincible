@@ -5,9 +5,9 @@ import { teamHash, teamLocation, type TeamLocation } from "./team.ts";
 /*
  * The app's places, as one list (pure: no DOM; the shell gives each its view). The primary comes first everywhere (your
  * words, 26 November 2026: "agent first ([the primary])", the agents "project/tasks/coding t3code style"): on a phone the app
- * opens on Home (its orb, what needs you, the work, its message box), on a wide screen on its own conversation beside the
- * work. Each task has an address of its own (#/task/<id>), opened from its row. Every other place is reached from the
- * index under "…" (a sheet; More is the same index as a page), and from the command palette. An address (`#/fleet`) is a
+ * opens on Home (its I-beam, what needs you, the work, its message box), and so does a wide screen, beside the drawer's
+ * places kept open as its sidebar. Each task has an address of its own (#/task/<id>), opened from its row. Every other
+ * place is reached from the drawer (views/places.ts; More is the whole index as a page), and from the command palette. An address (`#/fleet`) is a
  * contract: a place is never renamed or dropped here (one that went keeps its address as a second name of another), and
  * what a device may see follows its scopes.
  */
@@ -115,13 +115,12 @@ export function landingOf(route: Route, hash: string): string {
 export const primaryOf = (visible: Place[]): Place[] => visible.filter((place) => place.under === "primary");
 
 /**
- * The place the app opens on, and falls back to: on a phone, Home (The primary's place, with what needs you and the work:
- * your words, 26 November 2026, "agent first"); on a wide screen, its own conversation, beside the work in the sidebar
- * (23 November 2026: it is the one you talk to). A device that may not chat opens on its Inbox.
+ * The place the app opens on, and falls back to: Home, the primary's place, with what needs you and the work (your
+ * words, 26 November 2026, "agent first"; on a wide screen beside the drawer's places, kept open as its sidebar: I11).
+ * A device that may not chat opens on its Inbox. (The screen is asked still, so the rule can tell them apart again.)
  */
-export function homeOf(visible: Place[], screen: { narrow: boolean }): Route {
-  const want: Route = screen.narrow ? "home" : "chat";
-  return visible.some((place) => place.id === want) ? want : (primaryOf(visible)[0]?.id ?? "inbox");
+export function homeOf(visible: Place[], _screen: { narrow: boolean }): Route {
+  return visible.some((place) => place.id === "home") ? "home" : (primaryOf(visible)[0]?.id ?? "inbox");
 }
 
 /** More's index: every other place this device may see, under its heading. */

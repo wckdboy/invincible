@@ -219,6 +219,12 @@ async function refreshProjects(api: Api): Promise<void> {
   }
 }
 
+/** For the drawer: told when your kept chats (or projects) change. */
+export function onChatsChanged(fn: () => void): () => void {
+  keptChanged.add(fn);
+  return () => keptChanged.delete(fn);
+}
+
 /** For the command palette: your kept chats and projects, fetched once when nothing is known yet. */
 export function chatsForPalette(api: Api, can: { chat: boolean; read: boolean }): { chats: ConversationSummary[]; projects: ProjectView[] } {
   if (can.chat && kept === null) void refreshKept(api);
@@ -1508,6 +1514,8 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     if (thread.turns.length) newConversation(opts.project);
     else startIn = opts.project;
   } else if (!opts.conversation && !opts.query && canChat) restoreOpenChat(ctx.api);
+  // All your chats, from the drawer.
+  if (opts.intent === "history" && canChat) openHistory();
   // (After the chat you had open is asked for, so a welcome that is only passing through shows none of it.)
   asks?.render();
   renderSub();
