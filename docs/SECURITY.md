@@ -450,8 +450,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     nobody names, a revoked node's, and one it held before), `fabric-burned.test.ts` (the reads counted).
 - **The transport key carries calls, not authority** (the review's M1). Every sync, push, forwarded route and hand-off
   carries its node's device signature, made and checked exactly as an HTTPS request's (`verifyRequestSignature`: the
-  node's own, active, within 60 s, its nonce never seen before, over the path and the body as signed), with the method
-  `QAMP`, so neither kind of signature passes for the other.
+  node's own, active, within 60 s, its nonce never seen before, over the path and the body as signed, and written only
+  as its bytes encode, so a signed call has one form), with the method `QAMP`, so neither kind of signature passes for
+  the other.
   - So the transport key alone, read from a backup or a file, syncs, pushes, forwards and hands over nothing.
   - The key is kept where the device keys are: the OS keychain, or a 0600 file where there is none. It reaches the
     sidecar on its stdin, never a file, and is made for the node's id, so a home enrolled again gets a key of its own.
