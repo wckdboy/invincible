@@ -125,7 +125,7 @@ struct NeedsYou: View {
             })
         }
         for fact in session.facts {
-            out.append(item("fact:\(fact.id)", icon: "person", who: "It noticed about you", what: Text(fact.text.components(separatedBy: "\n").first ?? "")) {
+            out.append(item("fact:\(fact.id)", icon: "person", who: "\(Primary.name) noticed about you", what: Text(fact.text.components(separatedBy: "\n").first ?? "")) {
                 primary("Keep or drop…") { sheet = .fact(fact) }
             })
         }

@@ -162,7 +162,7 @@ fun NeedsCard(app: AppModel, work: Work.Attended, openTask: (String) -> Unit, op
         Item(Lead.Icon(if (n["severity"].string == "info") InfoIcon else AlertIcon), "Noticed", n["title"].string ?: "", listOf(Answer("Dismiss", primary = false) { act { app.dismissNotice(n["key"].string!!) } }, Answer("Read", primary = false, onClick = openInbox)))
     }
     for (f in inbox.facts) items += Need("f:${f["id"].string}") {
-        Item(Lead.Icon(ReviewIcon), "It noticed about you", (f["text"].string ?: "").lineSequence().first(), listOf(Answer("Keep or drop…") {
+        Item(Lead.Icon(ReviewIcon), "${Primary.name} noticed about you", (f["text"].string ?: "").lineSequence().first(), listOf(Answer("Keep or drop…") {
             sheet = "A fact about you" to @Composable { Fact(f, keep = { words -> act { app.keepFact(f["id"].string!!, words) }; sheet = null }, drop = { act { app.dropFact(f["id"].string!!) }; sheet = null }) }
         }))
     }
