@@ -48,6 +48,23 @@ const io: Io = {
     resizes.push(handler);
     return () => void resizes.splice(resizes.indexOf(handler), 1);
   },
+  // (A line typed here: only where stdin is a terminal, so a pipe is never read as one.)
+  ...(process.stdin.isTTY
+    ? {
+        readLine: async (prompt: string) => {
+          const { createInterface } = await import("node:readline");
+          const lines = createInterface({ input: process.stdin, output: process.stderr });
+          try {
+            return await new Promise<string | null>((resolve) => {
+              lines.question(prompt, resolve);
+              lines.once("close", () => resolve(null));
+            });
+          } finally {
+            lines.close();
+          }
+        },
+      }
+    : {}),
 };
 
 const code = await run(Bun.argv.slice(2), io);

@@ -24,6 +24,7 @@
     "./qr": "./src/qr.ts",
     "./request-auth": "./src/request-auth.ts",
     "./secret-scan": "./src/secret-scan.ts",
+    "./seats": "./src/seats.ts",
     "./skills": "./src/skills.ts",
     "./spend": "./src/spend.ts",
     "./eval-reports": "./src/eval-reports.ts",

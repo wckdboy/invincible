@@ -30,6 +30,8 @@ export interface Io {
   onResize(handler: (size: { columns: number; rows: number }) => void): () => void;
   /** How long a follower waits between looks when nothing wakes it (tests shorten it). */
   pollMs?: number;
+  /** A line you type, after its prompt (a seat's sign-in: the code its page shows): only where stdin is a terminal. */
+  readLine?(prompt: string): Promise<string | null>;
 }
 
 export interface Flags {
@@ -53,6 +55,8 @@ export interface Flags {
   task?: string;
   week: boolean;
   name?: string;
+  /** inv seat add: the account's email its sign-in starts with. */
+  email?: string;
   forget: boolean;
   home?: string;
   node?: string;

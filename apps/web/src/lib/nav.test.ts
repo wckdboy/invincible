@@ -9,7 +9,7 @@ import { ALIASES, goToOf, hashOf, homeOf, keyedOf, landingOf, moreIndex, PLACES,
 const BEFORE: Record<string, [scope: AnyScope | null, alsoFor?: AnyScope]> = {
   overview: [null], inbox: [null], chat: ["chat"], team: ["chat"], projects: ["mind:read"], memory: ["mind:read"], skills: ["mind:read"],
   activity: ["mind:read"], loops: ["mind:read"], artifacts: ["mind:read"], archive: ["mind:read"], findings: ["mind:read"], evals: ["mind:read"],
-  fleet: ["mind:read"], sandboxes: ["sandbox", "fleet:admin"], vault: ["vault:read"], models: ["mind:read"],
+  fleet: ["mind:read"], sandboxes: ["sandbox", "fleet:admin"], vault: ["vault:read"], models: ["mind:read"], seats: ["mind:read"],
   connectors: ["mind:read"], settings: [null],
 };
 /** Places added since, each for any device that may chat (More for any). */

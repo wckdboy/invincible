@@ -58,6 +58,10 @@ Every command that prints a list or a result takes `--json`.
 | `inv deny <id> ["why"]` | Denies one, with your reason. A task an agent proposed is declined. |
 | `inv cost` | What the work cost, at your prices, against its budgets: today's and this node's model calls, and the tasks. `--task <id>`, `--agent <id>` or `--project <p>` narrows it. `--week` takes the last seven days. |
 | `inv pair [<invite>] [--name <name>] [--forget]` | Pairs with a node, says what it is paired with, or forgets the pairing. |
+| `inv seats` | Your seats: the accounts you hold with Claude, ChatGPT and others, that any agent may use, and where each stands. |
+| `inv seat add <claude\|chatgpt> ["label"] [--email <address>]` | Adds one, named as you say or after those you have ("Claude 2"), and signs it in on its vendor's own page. ChatGPT's: its page to open and the code to enter there. Claude's: its page to open, then the code that page shows, pasted here (in a terminal; never with `--no-ask`), which goes to its sign-in once. `--email` is the account Claude's sign-in starts on, sealed in the vault. It waits until the sign-in has ended. |
+| `inv seat sign-in <seat>` | Signs a seat in again (by its label or its id), as `add` does. |
+| `inv seat remove <seat>` | Removes a seat, and the sign-in its tool kept on its node. |
 | `inv help` | This list, briefly. |
 
 **`inv give "…"` takes:**
@@ -130,6 +134,9 @@ Errors go to stderr as `inv: <what went wrong>`. With `--json` or `--stream`, st
 - **`inv stop`, `inv again`, `inv allow`, `inv deny`:** `{"task"}`, or `{"id", "state"}` for an approval.
 - **`inv steer`:** `{"task", "waiting"}`, `waiting` being how many of its steers its run hasn't taken yet, this one
   included; with `--chat`, `{"chat", "turn", "waiting"}`.
+- **`inv seats`:** `{"seats": [seat]}`, each seat as the node says it (core's SeatView). **`inv seat add`, `inv seat
+  sign-in`:** `{"card"}` (the sign-in's card), then `{"seat", "state"}` once it has ended. **`inv seat remove`:**
+  `{"removed"}`.
 - **`inv cost`:** `{"since", "today": {"usd", "complete"}, "calls": {"usd", "complete"}, "tasks": [{"id", "title",
   "agent", "project", "usd", "complete", "budgetUsd"}], "total": {"usd", "complete"}}`.
 - **`inv "…"`:** `{"chat", "turn", "model", "text", "stopped"}`.
@@ -156,7 +163,8 @@ A promise: a code keeps its meaning, and a new one is added only with a new mean
 `inv watch`, `inv proof`, `inv give --wait` and `inv again --wait` exit with the task's verdict. Every other command
 exits 0 when it did what it says, or with 1, 2, 30 or 31. So `inv steer` exits 0 once the node has your words, and 1
 when it refuses them: a task that isn't running (its words say what to do instead), one that has taken all the steers
-it takes, or a chat with nothing running in it. Ctrl-C pressed twice leaves at once, whatever is under way,
+it takes, or a chat with nothing running in it. `inv seat add` and `inv seat sign-in` exit 0 once the seat is signed
+in, and 1 when its sign-in ended otherwise (in its words: cancelled, lapsed, failed, another account). Ctrl-C pressed twice leaves at once, whatever is under way,
 with 1.
 
 ## The proof

@@ -51,6 +51,7 @@ import { taskView } from "./views/task.ts";
 import { giveToAgents } from "./views/team-forms.ts";
 import { teamLocation } from "./lib/team.ts";
 import { openAddKey, vaultView } from "./views/vault.ts";
+import { seatsView } from "./views/seats.ts";
 
 /** Each place's page (the places themselves, and where each is reached from, are lib/nav.ts). */
 const VIEWS: Record<Route, View> = {
@@ -74,6 +75,7 @@ const VIEWS: Record<Route, View> = {
   sandboxes: sandboxesView,
   vault: vaultView,
   models: modelsView,
+  seats: seatsView,
   connectors: connectorsView,
   settings: settingsView,
 };

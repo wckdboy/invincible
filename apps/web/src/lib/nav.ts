@@ -62,6 +62,7 @@ const LIST = [
   { id: "sandboxes", label: "Sandboxes", icon: "sandbox", under: "machines", scope: "sandbox", alsoFor: "fleet:admin", key: "s", keywords: ["containers", "vm", "console"], about: "Isolated places where work runs" },
   { id: "vault", label: "Vault", icon: "vault", under: "keys", scope: "vault:read", key: "v", keywords: ["keys", "secrets", "api key"], about: "Sealed keys; no model ever sees one" },
   { id: "models", label: "Models", icon: "models", under: "keys", scope: "mind:read", key: "l", keywords: ["providers", "roster", "llm"], about: "Who answers: roles, models, providers" },
+  { id: "seats", label: "Seats", icon: "user", under: "keys", scope: "mind:read", key: "b", keywords: ["accounts", "plans", "subscriptions", "claude", "chatgpt", "codex", "sign in", "login"], about: "Your accounts with Claude, ChatGPT and others, for agents" },
   { id: "connectors", label: "Connectors", icon: "plug", under: "keys", scope: "mind:read", key: "n", keywords: ["github", "cloudflare", "home assistant", "integrations", "services", "tools", "mcp", "standing orders", "install"], about: "Services and MCP servers it may call" },
   { id: "settings", label: "Settings", icon: "settings", under: "device", scope: null, key: ",", keywords: ["preferences", "theme", "device", "notifications"], about: "Theme, notifications, this device" },
 ] as const satisfies readonly PlaceSpec[];
