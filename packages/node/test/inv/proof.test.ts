@@ -64,7 +64,7 @@ describe("the verdict, as an exit code", () => {
 describe("the proof's JSON", () => {
   test("it holds what docs/CLI.md says, in its types: gates with their exits, times and how they ran before; the review; the cost against the budget", () => {
     const shown = proof({ status: "done", verified: true, budgetUsd: 2, record: record("done"), changes: { artifact: "art_3hVZ0iW2kq6mJx0sY1aB4c", files: 2, base: "0".repeat(40) }, output: "Fixed the race in retry(); all tests pass.\n\nReview: Looks right." }, [...worked([1]), ...gated([0]), ...reviewed("pass")]);
-    expect(Object.keys(shown).sort()).toEqual(["agent", "budgetUsd", "changes", "costComplete", "costUsd", "exit", "gates", "ms", "node", "project", "review", "said", "state", "task", "title", "v", "word"].sort());
+    expect(Object.keys(shown).sort()).toEqual(["agent", "budgetUsd", "changes", "costComplete", "costUsd", "exit", "gates", "ms", "node", "project", "review", "said", "state", "steers", "task", "title", "v", "word"].sort());
     expect(shown).toMatchObject({
       v: 1,
       task: "task-a1b2c3d4e5f6",
@@ -89,5 +89,22 @@ describe("the proof's JSON", () => {
     const shown = proof({ status: "queued" }, []);
     expect(shown).toMatchObject({ review: null, changes: null, costUsd: null, costComplete: false, ms: null, said: "" });
     expect(shown.gates).toEqual([{ cmd: GATE, exit: null, ms: null, before: null, failedBefore: false, said: "" }]);
+  });
+});
+
+describe("a steered task's proof (fields added: none changes its meaning)", () => {
+  test("the old form: a task nothing was said to has no steers, and its review judged the work against none", () => {
+    const shown = proof({ status: "done", verified: true }, [...worked([1]), ...gated([0]), ...reviewed("pass")]);
+    expect(shown.steers).toEqual([]);
+    expect(shown.review).toEqual({ verdict: "pass", sameModel: false, notes: 2, steers: 0 });
+  });
+
+  test("the new form: each steer, whose and the step its run took it at (null: it never did), and how many the review judged with", () => {
+    const steered: RunEvent[] = [...worked([1]), { type: "steered", step: 2, by: "owner", text: "Use the new schema." }, ...gated([0]), ...reviewed("pass")];
+    const shown = proof({ status: "done", verified: true, steers: [{ by: "owner", text: "Use the new schema.", at: T0, taken: { at: T0, step: 2 } }, { by: "primary", text: "Keep the old reader.", at: T0 }] }, steered);
+    expect(shown.steers).toEqual([{ by: "owner", text: "Use the new schema.", step: 2 }, { by: "primary", text: "Keep the old reader.", step: null }]);
+    expect(shown.review).toMatchObject({ verdict: "pass", steers: 1 });
+    // What it proves is what it proved: the verdict follows the gates and the review, steered or not.
+    expect([shown.state, shown.exit]).toEqual(["verified", EXIT.ok]);
   });
 });

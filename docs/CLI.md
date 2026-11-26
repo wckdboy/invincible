@@ -47,6 +47,8 @@ Every command that prints a list or a result takes `--json`.
 | `inv peek <task>` | The task's last lines, or the approval it waits on. |
 | `inv proof <task>` | The gates and the reviewer's verdict, framed apart from the agent's own words. The exit code is the verdict. |
 | `inv stop <task>` | Stops a task. |
+| `inv steer <task> "…"` | Tells a task that is running something it must take up now. Its run takes your words at its next safe point (a command that's running finishes first; a coding tool takes them in its own session), its trail says them where it took them, and its reviewer judges the work against its goal and every steer, in order. It returns once the node has them. |
+| `inv steer --chat <id> "…"` | Tells your agent, as it answers in that chat: it reads your words at its next safe point, as Steer does in the apps. |
 | `inv again <task> [--from <step>] ["…"]` | Gives a task again, as a new task: from its start, or from one of its steps (`--from`), its workspace as it stood then. New words replace its goal. |
 | `inv asks` | What waits for your approval: each operation exactly, in mono, with any character you can't see made visible. |
 | `inv allow <id> [--for-task]` | Allows one. `--for-task` also answers that agent's same call, exactly, without asking again, for a day (below). A task that an agent proposed is allowed to start. |
@@ -123,6 +125,8 @@ Errors go to stderr as `inv: <what went wrong>`. With `--json` or `--stream`, st
 - **`inv watch`, `inv proof`:** the proof.
 - **`inv peek`:** `{"task", "state", "word", "lines": [{"n", "at", "text"}], "asks": [asks]}`.
 - **`inv stop`, `inv again`, `inv allow`, `inv deny`:** `{"task"}`, or `{"id", "state"}` for an approval.
+- **`inv steer`:** `{"task", "waiting"}`, `waiting` being how many of its steers its run hasn't taken yet, this one
+  included; with `--chat`, `{"chat", "turn", "waiting"}`.
 - **`inv cost`:** `{"since", "today": {"usd", "complete"}, "calls": {"usd", "complete"}, "tasks": [{"id", "title",
   "agent", "project", "usd", "complete", "budgetUsd"}], "total": {"usd", "complete"}}`.
 - **`inv "…"`:** `{"chat", "turn", "model", "text", "stopped"}`.
@@ -147,7 +151,9 @@ A promise: a code keeps its meaning, and a new one is added only with a new mean
 | 31 | **The node is unreachable:** nothing answered at its address, or what answered wasn't the node (a proxy whose node is down). |
 
 `inv watch`, `inv proof`, `inv give --wait` and `inv again --wait` exit with the task's verdict. Every other command
-exits 0 when it did what it says, or with 1, 2, 30 or 31. Ctrl-C pressed twice leaves at once, whatever is under way,
+exits 0 when it did what it says, or with 1, 2, 30 or 31. So `inv steer` exits 0 once the node has your words, and 1
+when it refuses them: a task that isn't running (its words say what to do instead), one that has taken all the steers
+it takes, or a chat with nothing running in it. Ctrl-C pressed twice leaves at once, whatever is under way,
 with 1.
 
 ## The proof
@@ -169,13 +175,14 @@ with 1.
     { "cmd": "bun test packages/link", "exit": 0, "ms": 41200, "before": 1, "failedBefore": true, "said": "38 pass" },
     { "cmd": "bun run typecheck", "exit": 0, "ms": 18900, "before": 0, "failedBefore": false, "said": "" }
   ],
-  "review": { "verdict": "pass", "sameModel": false, "notes": 2 },
+  "review": { "verdict": "pass", "sameModel": false, "notes": 2, "steers": 1 },
   "changes": { "files": 2, "artifact": "art_3hVZ0iW2kq6mJx0sY1aB4c" },
   "costUsd": 0.31,
   "costComplete": true,
   "budgetUsd": 2,
   "ms": 372000,
-  "said": "Fixed the race in retry(); all tests pass."
+  "said": "Fixed the race in retry(); all tests pass.",
+  "steers": [{ "by": "owner", "text": "Use the new retry helper.", "step": 9 }]
 }
 ```
 
@@ -189,7 +196,12 @@ with 1.
   - `ms` is the time from the line before its result to its result.
   - `before` is how it exited before any work; `failedBefore` is whether that exit was non-zero.
 - **`review`** is null when there was no review. `verdict` is `pass` or `revise`. `sameModel` says that no other model
-  could review it, so the model that did the work reviewed it. `notes` is how many lines of notes it wrote.
+  could review it, so the model that did the work reviewed it. `notes` is how many lines of notes it wrote. `steers` is
+  how many steers it judged the work against: every one its run had taken by then, in order.
+- **`steers`** is what you (`owner`) and your agent (`primary`) said to it as it ran, in order: `text` is the words,
+  and `step` the commands its run had run when it took them, or null when it never did (it ended first). Empty when
+  nothing was said. A steer changes what is wanted, never what proves it: the verdict follows the gates and the review
+  as ever.
 - **`node`, `project`, `changes`, `costUsd`, `budgetUsd` and `ms`** are null when not known.
   - `costUsd` is at your prices and is a lower bound when `costComplete` is false.
   - It is known once the task has ended: the runner records its spend then.
@@ -209,7 +221,8 @@ know. Fields and types may be added; none changes its meaning.
 | `step.started` | `n` (its line on the trail), `kind` (plan, read, edit, run, submitted, note), `text` |
 | `step.completed` | `n`, `kind`, `text`, `exit` (a command's exit, or null) |
 | `gate.result` | `phase` (`before` or `after`), `index` and `of` (from 1), `cmd`, `exit`, `ms` (null for `before`) |
-| `review.verdict` | `verdict` (`pass` or `revise`), `sameModel`, `notes` |
+| `review.verdict` | `verdict` (`pass` or `revise`), `sameModel`, `notes`, `steers` (how many it judged the work against) |
+| `task.steered` | `n` (its line on the trail), `by` (`owner` or `primary`), `text`: your words, or your agent's, where its run took them |
 | `approval.requested` | `id`, `op` (`connector.tool`), `inputs` (its arguments), `class`, `by` |
 | `approval.decided` | `id`, `state` (approved, denied, expired, done, failed, lapsed) |
 | `cost.update` | `usd`, `budgetUsd`, `complete` |
@@ -226,7 +239,7 @@ The first slice talks HTTPS with signed requests, as the browser does. Later:
 - **The diff pager:** `inv diff`, and `inv review` (←/→ files, ↑/↓ hunks, `i` a note back to the agent), and
   `inv ship`.
 - **Keys in the board:** ↵ open, space peek, `a` allow, `d` deny, `g` give, and `inv watch`'s approvals inline.
-- **The rest of §5 of the study:** `inv steer`, `inv logs`, `inv agents`, `inv projects`, `inv nodes`, `inv doctor`,
-  and `--schema` for answers in a shape you give.
+- **The rest of §5 of the study:** `inv logs`, `inv agents`, `inv projects`, `inv nodes`, `inv doctor`, and `--schema`
+  for answers in a shape you give.
 - **The installer's `inv`:** it still links `inv` to `invincible`. Until it installs this client, run it as
   `bun run inv` or `bun packages/node/src/inv/main.ts`.

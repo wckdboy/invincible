@@ -1,4 +1,4 @@
-import { type ActionView, plainLine, type TeamTrailEntry } from "@invincible/core";
+import { type ActionView, plainLine, plainText, type TeamTrailEntry } from "@invincible/core";
 import { commandKind, readTrailLine } from "../../../../apps/web/src/lib/steps.ts";
 import { hlcMs } from "../../../../apps/web/src/lib/time.ts";
 import type { ProofJson } from "./proof.ts";
@@ -36,6 +36,8 @@ export class Tracker {
   private sameModel = false;
   private told = new Map<string, string>();
   private stood: string | null = null;
+  /** The steers its run has taken so far: each review is told every one of them. */
+  private steers = 0;
 
   constructor(
     readonly task: string,
@@ -83,7 +85,12 @@ export class Tracker {
           out.push(this.event("step.completed", at, { n: entry.n, kind: "submitted", text: plainLine(line.summary), exit: null }));
           break;
         case "review":
-          out.push(this.event("review.verdict", at, { verdict: line.verdict, sameModel: this.sameModel, notes: line.notes.split("\n").filter((l) => l.trim()).length }));
+          out.push(this.event("review.verdict", at, { verdict: line.verdict, sameModel: this.sameModel, notes: line.notes.split("\n").filter((l) => l.trim()).length, steers: this.steers }));
+          break;
+        case "steer":
+          // Your words, or your agent's, where its run took them.
+          this.steers += 1;
+          out.push(this.event("task.steered", at, { n: entry.n, by: line.by, text: plainText(line.text) }));
           break;
         case "note": {
           if (line.text.startsWith("Review · by the same model")) this.sameModel = true;
@@ -94,6 +101,7 @@ export class Tracker {
         }
         case "thought":
         case "gated":
+        case "judged":
           break;
       }
       this.lastAt = at;

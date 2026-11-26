@@ -218,6 +218,14 @@ export function proofLines(proof: ProofJson, style: Style): string[] {
   if (!proof.gates.length) body.push("gate    none: no command shows the work");
   if (proof.review) body.push(`review  ${proof.review.verdict === "pass" ? "passed it" : "sent it back"}${proof.review.sameModel ? ", by the model that did the work" : ""}${proof.review.notes ? ` · ${proof.review.notes} ${proof.review.notes === 1 ? "note" : "notes"}` : ""}`);
   else body.push("review  none yet");
+  // What it was told as it ran, whose words, and what the review judged the work against: steered work is proven against its steers.
+  if (proof.steers.length) {
+    const n = proof.steers.length;
+    const reached = proof.steers.filter((steer) => steer.step !== null).length;
+    const whose = proof.steers.every((steer) => steer.by === "owner") ? "yours" : proof.steers.every((steer) => steer.by === "primary") ? "your agent's" : "yours and your agent's";
+    const judged = !proof.review ? "no review yet" : proof.review.steers === n ? `the review judged the work against ${n === 1 ? "it" : "them, in order"}` : `the review judged the work against ${proof.review.steers} of them`;
+    body.push(`steered ${n === 1 ? "once" : `${n} times`}, ${whose} · ${judged}${reached < n ? ` · ${n - reached} never reached it` : ""}`);
+  }
   if (proof.changes) body.push(`change  ${proof.changes.files} ${proof.changes.files === 1 ? "file" : "files"} · kept as ${proof.changes.artifact}`);
   const money = proof.costUsd === null ? null : `${proof.costComplete ? "" : "at least "}${usdLabel(proof.costUsd)}`;
   const spend = money ? (proof.budgetUsd !== null ? `${money} of ${usdLabel(proof.budgetUsd)}` : money) : proof.budgetUsd !== null ? `budget ${usdLabel(proof.budgetUsd)}` : null;

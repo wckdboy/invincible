@@ -118,6 +118,21 @@ describe("the proof's frame", () => {
   });
 });
 
+describe("a steered task's proof, for people", () => {
+  const steered = (steers: NonNullable<Parameters<typeof task>[0]>["steers"], events = [...worked([1]), { type: "steered" as const, step: 2, by: "owner" as const, text: "Use the new schema." }, ...gated([0]), ...reviewed("pass")]) =>
+    proofLines(proofFor(task({ status: "done", verified: true, steers }), trail(events), { word: "Verified", node: null, project: null, prices: {}, asking: false }), PLAIN);
+
+  test("its frame says how often it was steered, whose words they were, and what its review judged the work against", () => {
+    expect(steered([{ by: "owner", text: "Use the new schema.", at: T0, taken: { at: T0, step: 2 } }])).toContain("  steered once, yours · the review judged the work against it");
+    const both = steered([{ by: "owner", text: "Use the new schema.", at: T0, taken: { at: T0, step: 2 } }, { by: "primary", text: "Keep the old reader.", at: T0 }]);
+    expect(both).toContain("  steered 2 times, yours and your agent's · the review judged the work against 1 of them · 1 never reached it");
+  });
+
+  test("a task nothing was said to has no such line", () => {
+    expect(steered(undefined, [...worked([1]), ...gated([0]), ...reviewed("pass")]).some((line) => line.includes("steered"))).toBe(false);
+  });
+});
+
 describe("an approval, shown exactly", () => {
   test("its operation and inputs whole, and a character you can't see shown as its code point and counted", () => {
     const hidden = action({ args: { owner: "example-owner", title: "Fix the race\u202e in retry()", body: "line one\nline two" } });

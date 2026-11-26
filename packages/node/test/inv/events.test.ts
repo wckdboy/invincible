@@ -42,6 +42,19 @@ describe("the events a task's trail makes", () => {
     expect(events[10]).toMatchObject({ verdict: "pass", sameModel: false, notes: 2 });
   });
 
+  test("a steer, where its run took it: whose words and what they said; the review after it says how many it judged the work against", () => {
+    const entries = trail([...worked([1]), { type: "steered", step: 2, by: "owner", text: "Use the new schema." }, { type: "steered", step: 2, by: "primary", text: "Keep the old reader.\nIt still has users." }, ...gated([0]), ...reviewed("pass")]);
+    const at = entries.filter((entry) => entry.text.startsWith("Steered · ")).map((entry) => entry.n);
+    const events = new Tracker("task-a1b2c3d4e5f6", [GATE], T0).trail(entries);
+    expect(events.filter((event) => event.type === "task.steered").map(({ n, by, text }) => ({ n, by, text }))).toEqual([
+      { n: at[0], by: "owner", text: "Use the new schema." },
+      { n: at[1], by: "primary", text: "Keep the old reader.\nIt still has users." },
+    ]);
+    expect(events.find((event) => event.type === "review.verdict")).toMatchObject({ verdict: "pass", sameModel: false, notes: 2, steers: 2 });
+    // (A field added: a review nothing was said before judged with none.)
+    expect(new Tracker("t", [GATE], T0).trail(trail([...worked([1]), ...gated([0]), ...reviewed("pass")])).find((event) => event.type === "review.verdict")).toMatchObject({ steers: 0 });
+  });
+
   test("lines come in pieces as the trail grows, and each is told once", () => {
     const entries = trail([...worked([1]), ...gated([0])]);
     const whole = new Tracker("t", [GATE], T0).trail(entries);

@@ -1,5 +1,5 @@
-import { costOf, plainLine, type Prices, type TeamTask, type TeamTrailEntry, type UsageLine } from "@invincible/core";
-import { type Proof as Seen, proofOf } from "../../../../apps/web/src/lib/steps.ts";
+import { costOf, plainLine, plainText, type Prices, type TeamTask, type TeamTrailEntry, type UsageLine } from "@invincible/core";
+import { judgedWith, type Proof as Seen, proofOf } from "../../../../apps/web/src/lib/steps.ts";
 import { EXIT, type ExitCode } from "./exit.ts";
 
 /*
@@ -78,13 +78,16 @@ export interface ProofJson {
   node: string | null;
   project: string | null;
   gates: ProofGate[];
-  review: { verdict: "pass" | "revise"; sameModel: boolean; notes: number } | null;
+  /** How many steers it judged the work against: every one its run had taken (`steers`, below). */
+  review: { verdict: "pass" | "revise"; sameModel: boolean; notes: number; steers: number } | null;
   changes: { files: number; artifact: string } | null;
   costUsd: number | null;
   costComplete: boolean;
   budgetUsd: number | null;
   ms: number | null;
   said: string;
+  /** What you and your agent said to it as it ran, in order: whose words, and the step its run took them at (null: never). */
+  steers: { by: "owner" | "primary"; text: string; step: number | null }[];
 }
 
 export interface ProofFacts {
@@ -112,13 +115,14 @@ export function proofFor(task: TeamTask, entries: readonly TeamTrailEntry[], fac
     node: facts.node,
     project: facts.project,
     gates: seen.gates.map((gate) => ({ cmd: gate.command, exit: gate.exit, ms: gate.ms, before: gate.before, failedBefore: gate.before !== null && gate.before !== 0, said: plainLine(gate.said) })),
-    review: seen.review ? { verdict: seen.review.verdict, sameModel: seen.sameModel, notes: seen.review.notes.split("\n").filter((line) => line.trim()).length } : null,
+    review: seen.review ? { verdict: seen.review.verdict, sameModel: seen.sameModel, notes: seen.review.notes.split("\n").filter((line) => line.trim()).length, steers: judgedWith(entries) ?? 0 } : null,
     changes: task.changes ? { files: task.changes.files, artifact: task.changes.artifact } : null,
     costUsd: cost ? Math.round(cost.usd * 1e6) / 1e6 : null,
     costComplete: cost ? cost.complete && !cost.unpriced.length : false,
     budgetUsd: task.budgetUsd ?? null,
     ms: task.record ? Math.max(0, task.record.endedAt - task.record.startedAt) : null,
     said: plainLine(firstLine(task.output)),
+    steers: (task.steers ?? []).map((steer) => ({ by: steer.by, text: plainText(steer.text), step: steer.taken?.step ?? null })),
   };
 }
 

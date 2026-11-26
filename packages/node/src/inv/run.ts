@@ -8,6 +8,7 @@ import { costCommand } from "./cost.ts";
 import { CliError, EXIT, usageError } from "./exit.ts";
 import type { Command, Flags, Io } from "./io.ts";
 import { pairCommand } from "./pair.ts";
+import { steerCommand } from "./steer.ts";
 import { againCommand, giveCommand, peekCommand, proofCommand, stopCommand, tasksCommand, watchCommand } from "./work.ts";
 
 /*
@@ -27,6 +28,8 @@ export const HELP = `inv: your agent and its work, from a terminal (docs/CLI.md 
   inv peek <task>              its last lines, or what it waits on
   inv proof <task>             its gates and its review; the exit code is the verdict
   inv stop <task>              stops it
+  inv steer <task> "…"         tells it something as it runs: taken at its next safe point, and judged with it
+                               (inv steer --chat <id> "…" tells your agent, as it answers in that chat)
   inv again <task> [--from <step>] ["…"]
                                gives it again (from a step: its workspace as it stood then)
   inv asks                     what waits for your answer, shown exactly
@@ -77,6 +80,7 @@ const COMMANDS: Readonly<Record<string, { run: Command | "pair"; takes: readonly
   peek: { run: peekCommand, takes: ["json"] },
   proof: { run: proofCommand, takes: ["json"] },
   stop: { run: stopCommand, takes: ["json"] },
+  steer: { run: steerCommand, takes: ["chat", "json"] },
   asks: { run: asksCommand, takes: ["json"] },
   allow: { run: allowCommand, takes: ["for-task", "json"] },
   deny: { run: denyCommand, takes: ["json"] },

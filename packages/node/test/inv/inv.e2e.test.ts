@@ -26,6 +26,10 @@ const written = new Set<string>();
 let releaseHold: (() => void) | undefined;
 let holdEntered = false;
 const hold = new Promise<void>((resolve) => (releaseHold = resolve));
+/** The task inv steers: its command runs in its VM until it's let go (`write-steer`). */
+let releaseSteer: (() => void) | undefined;
+let steerEntered = false;
+const steerHold = new Promise<void>((resolve) => (releaseSteer = resolve));
 const posts: unknown[] = [];
 let daemon: Daemon;
 
@@ -100,6 +104,10 @@ beforeAll(async () => {
       holdEntered = true;
       await hold;
     }
+    if (wrote === "steer") {
+      steerEntered = true;
+      await steerHold;
+    }
     if (wrote) written.add(wrote);
     const gate = /# gate-([a-z]+)/.exec(text)?.[1];
     if (gate) return written.has(gate) ? { code: 0, stdout: "required gate passed" } : { code: 1, stdout: "result.txt is missing" };
@@ -129,6 +137,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   releaseHold?.();
+  releaseSteer?.();
   await daemon?.stop();
   model.stop(true);
   service.stop(true);
@@ -202,6 +211,26 @@ describe("inv against a node of its own", () => {
     await until(async () => (await api<TeamSnapshot>("team")).tasks.find((one) => one.id === task)?.status === "stopped");
     const proof = await run(me, "proof", task, "--json");
     expect([proof.code, json(proof.out).state]).toEqual([13, "stopped"]);
+  }, 60_000);
+
+  test("inv steer: your words reach the task as its command runs, at its next safe point; its proof says the review judged the work against them", async () => {
+    const given = await run(me, "give", "TASK_STEER: wait for it", "--agent", "ada", "--gate", "test -f result.txt # gate-steer", "--json");
+    expect(given.code).toBe(0);
+    const { task } = json(given.out);
+    await until(() => steerEntered);
+    const steered = await run(me, "steer", task, "Use the new schema.", "--json");
+    expect([steered.code, json(steered.out)]).toEqual([0, { task, waiting: 1 }]);
+    releaseSteer!();
+    const watched = await run(me, "watch", task, "--json");
+    expect(watched.code).toBe(0);
+    expect(json(watched.out)).toMatchObject({ state: "verified", exit: 0, steers: [{ by: "owner", text: "Use the new schema.", step: 1 }], review: { verdict: "pass", steers: 1 } });
+    const shown = await run(me, "proof", task);
+    expect(shown.out).toContain("steered once, yours · the review judged the work against it");
+    // Ended, it is refused in the node's words, and exits 1.
+    const late = await run(me, "steer", task, "And name it v2.");
+    expect([late.code, late.err]).toEqual([1, "inv: It has ended: give it again from a step instead.\n"]);
+    const usage = await run(me, "steer", task);
+    expect(usage.code).toBe(2);
   }, 60_000);
 
   test("inv asks shows an operation exactly, a hidden character made visible; inv allow sends it once, inv deny doesn't", async () => {
