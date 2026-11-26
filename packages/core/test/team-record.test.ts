@@ -22,7 +22,14 @@ describe("a task's record, in words", () => {
     // One call of ten unreported: what was counted is a lower bound, and says so.
     const partly = [{ ...spent[0]!, unknown: 1 }];
     expect(taskRecordFacts({ startedAt: 0, endedAt: 1000, ended: "done", commands: 1, revisions: 0, spent: partly }, prices).slice(-2)).toEqual(["94.0k+ tokens", "at least $0.05"]);
-    expect(taskRecordFacts({ startedAt: 0, endedAt: 0, ended: "stopped", commands: 0, revisions: 0, spent: [] }, prices)).toEqual(["ended stopped", "0s", "0 commands", "no model calls"]);
+    // Under a second, nothing of its time: never "0s" (the honesty the iPhone and the web keep, I9 and I11).
+    expect(taskRecordFacts({ startedAt: 0, endedAt: 0, ended: "stopped", commands: 0, revisions: 0, spent: [] }, prices)).toEqual(["ended stopped", "0 commands", "no model calls"]);
+    expect(taskRecordFacts({ startedAt: 0, endedAt: 999, ended: "stopped", commands: 0, revisions: 0, spent: [] }, prices)[1]).toBe("0 commands");
+    expect(taskRecordFacts({ startedAt: 0, endedAt: 1000, ended: "stopped", commands: 0, revisions: 0, spent: [] }, prices)[1]).toBe("1s");
+  });
+
+  test("an ending is said in words, never as the record's token", () => {
+    expect(taskRecordFacts({ startedAt: 0, endedAt: 5000, ended: "gave-up", commands: 2, revisions: 0, spent: [] }, prices)[0]).toBe("gave up");
   });
 
   test("a record is counts and times and nothing else: a field too many is refused", () => {

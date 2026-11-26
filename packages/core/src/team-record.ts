@@ -36,8 +36,9 @@ export function taskRecordFacts(record: TaskRecordRead, prices: Prices): string[
   const total = spendTotal(record.spent);
   const cost = costOf(record.spent, prices);
   return [
-    record.ended === "done" ? "" : `ended ${record.ended}`,
-    took(record.endedAt - record.startedAt),
+    record.ended === "done" ? "" : record.ended === "gave-up" ? "gave up" : `ended ${record.ended}`,
+    // (Under a second, nothing: never "0s".)
+    record.endedAt - record.startedAt < 1000 ? "" : took(record.endedAt - record.startedAt),
     `${record.commands} command${record.commands === 1 ? "" : "s"}${record.revisions ? `, sent back ${record.revisions === 1 ? "once" : `${record.revisions} times`}` : ""}`,
     !total.calls ? "no model calls" : total.unknown === total.calls ? "tokens unknown" : `${tokensLabel(total.tokens)}${total.complete ? "" : "+"} tokens`,
     money(total, cost),
