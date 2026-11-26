@@ -105,9 +105,13 @@ export function sealTo(recipient: Bytes, plaintext: Bytes, context: string): Sea
   return { eph: b64u(eph.publicKey), ...aeadSeal(key, plaintext, context) };
 }
 
-export function openSealed(recipientSecret: Bytes, box: SealedBox, context: string): Bytes {
+/**
+ * Opens a box sealed to this recipient. `domain`: the label its key was derived under, Invincible's own unless a box
+ * sealed by another system is opened (the import of the one it succeeds, which sealed its vault under its own label).
+ */
+export function openSealed(recipientSecret: Bytes, box: SealedBox, context: string, domain = "invincible/seal/v1"): Bytes {
   const eph = fromB64u(box.eph);
   const shared = x25519.getSharedSecret(recipientSecret, eph);
-  const key = deriveKey(shared, `invincible/seal/v1|${context}`, 32, concat(eph, boxPublicKey(recipientSecret)));
+  const key = deriveKey(shared, `${domain}|${context}`, 32, concat(eph, boxPublicKey(recipientSecret)));
   return aeadOpen(key, box, context);
 }

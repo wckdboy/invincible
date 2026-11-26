@@ -99,6 +99,12 @@ describe("sealing", () => {
     expect(() => openSealed(mallory.boxSecret, box, "grant|f|k|alice")).toThrow();
     expect(() => openSealed(alice.boxSecret, box, "grant|f|k|bob")).toThrow();
   });
+  test("a box opens only under the label it was sealed under: Invincible's own, unless another is named", () => {
+    const alice = newNodeIdentity();
+    const box = sealTo(alice.boxPublic, utf8("vault key"), "grant|f|k|alice");
+    expect(new TextDecoder().decode(openSealed(alice.boxSecret, box, "grant|f|k|alice", "invincible/seal/v1"))).toBe("vault key");
+    expect(() => openSealed(alice.boxSecret, box, "grant|f|k|alice", "elsewhere/seal/v1")).toThrow();
+  });
 });
 
 describe("events", () => {
