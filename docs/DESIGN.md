@@ -24,7 +24,7 @@ The look is the redesign's, carried by the owner's word (26 November 2026): the 
 | `icon-64.png` (the favicon), `icon-192.png`, `icon-512.png`, `assets/icon.png` | The app icon, Field · Aurum. Rounded tiles where a platform shows the icon as it is |
 | `icon-maskable-512.png`, `apple-touch-icon.png` | The same field edge to edge: the maskable one drawn in so its lines stay inside the 80 % every mask keeps; the touch icon as iOS rounds it |
 | `icon-mono-96.png` | A notification's badge in Android's status bar: the field in white on nothing (the system draws a badge from its alpha alone) |
-| iOS's and Android's icons | From the same renderer, with their apps (a later phase): iOS's with its dark form, a transparent dark variant, and its tinted one; Android's adaptive and themed icons |
+| iOS's and Android's icons | From the same renderer: iOS's tile edge to edge, its dark form the field alone on nothing (iOS backs it), its tinted form that field in grey, and the Mac's sizes (`bun apps/apple/scripts/brand.ts`); Android's adaptive and themed layers (`bun scripts/brand.ts --png`) |
 | `ui/orb.ts` → `appMark()` | The app icon where a page shows it (the sidebar's head beside INVINCIBLE, a phone's way Home, Settings' About): the icon's field alone, on nothing, drawn for the page's theme (light on a dark page, ink on a light one), so no dark tile sits on a light page (your word, 26 November 2026: "make sure the app icon is transparent so it works in dark and white mode"). The PNGs stay tiles where a platform shows them as an app's icon (the home screen, a manifest's icon, the favicon) |
 | `ui/emblem.ts` → `emblem()` | The mark on the welcome, pairing and boot screens: `appMark()` in its place |
 | `icon("mark")` | A flat mark on the 24 px grid, for menus: a ring |
@@ -35,7 +35,7 @@ Regenerate the icons with `bun scripts/brand.ts --png`. Tests pin each icon's si
 
 ### Wordmark
 
-"INVINCIBLE" in the system sans: capitals at 650 weight, 0.2em tracking, 12–13 px, beside the mark at the head of the sidebar (`.wordmark-text`). No custom lettering; the spacing does the work.
+"INVINCIBLE" in the system sans: capitals at 650 weight, 0.2em tracking, 12–13 px, beside the mark at the head of the sidebar (`.wordmark-text`; the Apple app's iPad and Mac sidebar, `Wordmark`; Android's sidebar). No custom lettering; the spacing does the work.
 
 ### The primary and its agents
 

@@ -56,11 +56,16 @@ Q-AMP between the nodes and the agents.
 **Exit:** the first answer on a fresh connection, and sync's lag, are measured before and after (the carried grants measured 96 vs
 504 ms first answer). Revocation cuts a key off within one round trip. The fuzz targets run clean.
 
-## Phase 3: the apps 🔜
+## Phase 3: the apps 🔨
 
-- iPhone, iPad and Mac, and Android, on the new interface, with the carried plumbing (device keys, pairing, push) and the
-  pure logic ported, held to the vectors.
-- New identities in the stores: `industries.invincible.app`. Its App Store Connect record waits on the owner.
+- 🔨 iPhone, iPad and Mac, and Android, on the new interface, with the carried plumbing (device keys, pairing, push) and
+  the pure logic ported, held to the vectors. Carried from the old system's redesign (26 November 2026) and made
+  Invincible's: its words, its API, its vectors and dev node, its icon and wordmark (`apps/apple/README.md`,
+  `apps/android/README.md`). Their tests, the Mac build and the vectors run in CI; the Apple job waits for the owner's
+  Mac runner (label `macos-xcode`).
+- New identities in the stores: `sh.invincible.bot` (iPhone and iPad; App Store Connect's "Invincible Bot", push on),
+  `sh.invincible.bot.mac` (Developer ID), and Android's `sh.invincible.bot`. The owner makes the releases: TestFlight,
+  the Android release key, and the Mac's Sparkle key (its updates stay off until then).
 
 **Exit:**
 - the vectors pass in both apps;

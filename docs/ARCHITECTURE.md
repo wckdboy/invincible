@@ -195,11 +195,16 @@ The models layer, carried (§10):
   - Every screen beside Grok Bot, OpenMausBot and T3 Code before it ships.
 - **The apps:**
   - web (a PWA the node serves);
-  - iPhone, iPad and Mac in SwiftUI (`industries.invincible.app`);
-  - Android in Kotlin and Compose;
+  - iPhone, iPad and Mac in SwiftUI (`apps/apple`: `sh.invincible.bot`, App Store Connect's "Invincible Bot", and
+    the Mac's `sh.invincible.bot.mac`, signed with a Developer ID outside the App Store);
+  - Android in Kotlin and Compose (`apps/android`: `sh.invincible.bot`);
   - the CLI, `invincible` (or `inv`).
 - **Parity:** the pure logic is written once, in TypeScript. The native apps port it, held to vectors the TypeScript
-  writes.
+  writes (`apps/apple/scripts/vectors.ts`, from `packages/core` and `apps/web/src/lib`; CI checks them).
+- **The primary's name** is the node's to say: "Invincible" until you name it. The apps take it from `whoami`'s
+  `primaryName` where a node sends one, and the app itself is called Invincible whatever the primary is named. Everything
+  that names an app (bundle IDs, the `invincible:` scheme, keychain services and tags, defaults, the update feed) is
+  Invincible's own, so its apps run beside the old system's on one device until the cutover (§10).
 - **Install:** `curl -fsSL https://invincible.sh | sh`.
 
 ## 9. Packages
@@ -213,7 +218,9 @@ The models layer, carried (§10):
 | `packages/agents` | The run loop: harnesses, gates, the reviewer, rules, audits, checkpoints, shipping, the team runtime, investigations |
 | `packages/sandbox` | VM drivers and their firewall |
 | `packages/node` | The daemon, the server, the CLI, the primary, approvals, notifications, projects, placement |
-| `apps/web` | The web client (the PWA the node serves); `apps/apple`, `apps/android` and `apps/site` (invincible.sh) come in Phase 3 |
+| `apps/web` | The web client (the PWA the node serves) |
+| `apps/apple` | The iPhone, iPad and Mac apps (SwiftUI), the parity vectors' script and fixture, the dev node they run against, their brand assets and release scripts |
+| `apps/android` | The Android app (Kotlin and Compose), held to the same vectors; `apps/site` (invincible.sh) comes back later |
 | `bench/` | The scorecard: every suite against its recorded baseline; the vocabulary check |
 
 **Coexisting with the system it succeeds on one host** (§10) until the cutover:

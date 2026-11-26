@@ -19,7 +19,11 @@ INVINCIBLE_KEYSTORE=file bun test      # tests never touch the OS keychain
 bun test packages/ledger               # one package
 bun invincible help                    # the CLI
 bun run bench                          # the scorecard against its baselines
+bun apps/apple/scripts/vectors.ts --check   # the parity vectors the Apple and Android apps test against
 ```
+
+The apps build with Xcode 27 and XcodeGen (`apps/apple/README.md`) and with JDK 17 and the Android SDK
+(`apps/android/README.md`). Never launch a Mac build on a Mac whose own device key it would load.
 
 ## Rules
 
