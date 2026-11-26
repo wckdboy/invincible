@@ -1429,7 +1429,29 @@ const marks = {
     { id: "writer", others: [{ color: 0, form: 1 }], chosen: "#ffbc63", mark: core.assignMark("writer", [{ color: 0, form: 1 }], "#ffbc63") },
     { id: "ops", others: markGiven.slice(0, 8), chosen: "#ff0000", mark: core.assignMark("ops", markGiven.slice(0, 8), "#ff0000") },
   ],
-  snaps: ["#ff0000", "#3abeff", "#6eca73", "#fa86b6", "#b9dfd4", "#000000", "#ffffff", ...core.AGENT_TINTS, ...core.MARK_PALETTE.flatMap((hue) => [hue.light, hue.dark])].map((hex) => ({ hex, color: core.snapColor(hex) })),
+  // A colour you pick, to the nearest hue of the eight (OKLCH), reckoned with + − × ÷ and √ alone from these: sRGB's
+  // levels in linear light, a cube root by Newton's method, the chroma under which a colour is a grey.
+  linear: core.MARK_LINEAR,
+  grey: core.MARK_GREY,
+  snaps: ["#b9dfd4", "#8bafff", "#c8b222", "#ff0000", "#3abeff", "#6eca73", "#fa86b6", "#000000", "#ffffff", "#808080", "#f5f5f0", "#202020", "#C8B222", ...core.AGENT_TINTS, ...core.MARK_PALETTE.flatMap((hue) => [hue.light, hue.dark])].map((hex) => ({ hex, color: core.snapColor(hex) })),
+  // Every colour of an 18-level grid (0, 15 … 255 in each channel, red slowest), its snap a digit each.
+  snapGrid: (() => {
+    let out = "";
+    for (let r = 0; r < 256; r += 15) for (let g = 0; g < 256; g += 15) for (let b = 0; b < 256; b += 15) out += core.snapColor(`#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`);
+    return out;
+  })(),
+  // Every one of the 2^24 colours: FNV-1a over each one's snap, a byte each, from #000000 to #ffffff, and how many go to
+  // each hue (an optimised build of an app can check it all; its tests check the grid).
+  snapAll: (() => {
+    let digest = 0x811c9dc5;
+    const counts = new Array(8).fill(0);
+    for (let n = 0; n < 1 << 24; n++) {
+      const k = core.snapColor(`#${n.toString(16).padStart(6, "0")}`);
+      counts[k]++;
+      digest = Math.imul(digest ^ k, 0x01000193) >>> 0;
+    }
+    return { digest: digest.toString(16).padStart(8, "0"), counts };
+  })(),
   // Profiles as an agent has them: its mark (v 3); a colour chosen before the marks (v 2); nothing; and what reads as neither.
   profiles: [
     { id: "coder", profile: { v: 3, color: "#0084ba", form: 10 } },

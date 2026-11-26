@@ -49,7 +49,9 @@ degrees: none between pink-red and red-orange, which are failure's), each in a l
 page and a dark-page one. The node gives each agent its colour and form once, as it joins, after the agents before it:
 its handle's colour or the next free one, so no two share a colour until all eight are taken, and its handle's form or
 the next one nobody wears, so colour and form both differ while they can and a ninth agent repeats a colour but never a
-form (`assignMark`). A colour you pick snaps to the nearest of the eight (`snapColor`), its form kept. Its states:
+form (`assignMark`). A colour you pick snaps to the nearest hue of the eight (OKLCH's: a pale mint is Teal's, red is
+Amber's; a grey, which has no hue, goes to the form nearest it in lightness), its form kept (`snapColor`, reckoned with +
+− × ÷ and √ alone so every app comes to the same). Its states:
 idle, solid and still; working, its slats slide in their slots, each in its own phase, a cycle every 5.5 s; asking you,
 its top slat in ink and out of line, beating every 4.2 s; queued, pale; paused, grey; done, its slots close and open
 once as it arrives (1.4 s), then still; failed, its bottom slat in the shared red, knocked loose about its middle (0.6
