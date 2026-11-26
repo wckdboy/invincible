@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { b64u, type GEvent, HlcClock, newNodeIdentity, type NodeIdentity, type Prov, signEvent } from "@invincible/core";
-import { enrollDevice, foundFleet, LedgerStore } from "../src/index.ts";
+import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../src/index.ts";
 
 /*
  * Your word that one node may hand tasks to another's agents (handoff.granted, handoff.revoked; core's fabric.ts
@@ -232,5 +232,27 @@ describe("your grants for hand-offs, in the mind", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
+  });
+});
+
+describe("who recorded a grant (the fabric re-review, I-f)", () => {
+  test("a grant says which full node recorded it, and one a node since revoked recorded ends with that node, on every replica and on a rebuild", () => {
+    const { a, b, storeA, storeB } = fleet();
+    // A third full node records a grant for another pair (as your word), and is revoked after.
+    const c = newNodeIdentity();
+    enrollDevice(storeA, a, { device: c.id, name: "third", kind: "node", box: b64u(c.boxPublic) });
+    grant(storeA, c, a.id, b.id);
+    grant(storeA, a, b.id, a.id, terms(2));
+    syncInto(storeA, storeB);
+    expect(storeB.handoffGrant(a.id, b.id)?.by).toBe(c.id);
+    expect(storeB.handoffGrant(b.id, a.id)?.by).toBe(a.id);
+    revokeDevice(storeA, a, c.id, "test: it turned on you");
+    syncInto(storeA, storeB);
+    storeB.rebuild();
+    for (const store of [storeA, storeB]) {
+      expect(store.handoffGrant(a.id, b.id)).toBeNull();
+      expect(store.handoffGrants().map((g) => [g.from, g.to, g.by])).toEqual([[b.id, a.id, a.id]]);
+    }
+    expect(storeA.digest()).toBe(storeB.digest());
   });
 });

@@ -4775,6 +4775,7 @@ export function createApp(ctx: AppContext) {
     terms: readHandoffTerms(g.terms),
     via: g.via,
     at: decodeHlc(g.hlc).ms,
+    by: { id: g.by, name: ctx.store.device(g.by)?.name ?? g.by.slice(0, 12) },
   });
 
   /** The two nodes a grant is between, each by its name or id: two, each an active full node (a revocation names any two). */

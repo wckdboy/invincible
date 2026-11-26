@@ -1490,15 +1490,24 @@ export class LedgerStore {
   // ---- rules -----------------------------------------------------------------
 
   /** Your rules in force, by name, each as it was written (open in the log: core's readRule reads it). */
-  /** Your grants for hand-offs in force, by pair (core's readHandoffTerms reads each one's terms). */
+  /**
+   * Your grants for hand-offs in force, by pair (core's readHandoffTerms reads each one's terms), each with the full node
+   * that recorded it. One a node since revoked recorded is in force no more: it ends with that node.
+   */
   handoffGrants(): HandoffGrantRecord[] {
-    return this.lwwPrefix<{ from: string; to: string; terms: Json; via?: string }>("handoff:").map((entry) => ({ from: entry.value!.from, to: entry.value!.to, terms: entry.value!.terms, hlc: entry.hlc, via: entry.value!.via ?? null }));
+    return this.lwwPrefix<HandoffGrantValue>("handoff:").flatMap((entry) => this.grantInForce(entry) ?? []);
   }
 
-  /** Your grant for `from` to hand tasks to `to`'s agents (null: none, or revoked). */
+  /** Your grant for `from` to hand tasks to `to`'s agents (null: none, revoked, or recorded by a node since revoked). */
   handoffGrant(from: string, to: string): HandoffGrantRecord | null {
-    const entry = this.lww<{ from: string; to: string; terms: Json; via?: string }>(`handoff:${from}:${to}`);
-    return entry?.value ? { from: entry.value.from, to: entry.value.to, terms: entry.value.terms, hlc: entry.hlc, via: entry.value.via ?? null } : null;
+    const entry = this.lww<HandoffGrantValue>(`handoff:${from}:${to}`);
+    return entry ? this.grantInForce(entry) : null;
+  }
+
+  private grantInForce(entry: LwwEntry<HandoffGrantValue>): HandoffGrantRecord | null {
+    const value = entry.value;
+    if (!value || !this.activeDevice(entry.device)) return null;
+    return { from: value.from, to: value.to, terms: value.terms, hlc: entry.hlc, via: value.via ?? null, by: entry.device };
   }
 
   rules(): RuleRecord[] {
@@ -1813,7 +1822,12 @@ export interface HandoffGrantRecord {
   hlc: string;
   /** The device of yours it was given from (absent: a terminal on a node). */
   via: string | null;
+  /** The full node that recorded it (its event's signer): its grants end when it is revoked. */
+  by: string;
 }
+
+/** A grant's value in the log's last-writer-wins view. */
+type HandoffGrantValue = { from: string; to: string; terms: Json; via?: string };
 
 /** A session on a Mac's own screen, as the log holds it (store.screenSessions; core's screenSession says where it stands). */
 export interface ScreenSessionRecord {

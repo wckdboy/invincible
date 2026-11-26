@@ -186,6 +186,7 @@ export class Handoffs implements FabricTools {
     // (Why it waited there for your approval: a column a table from before grants lacks.)
     if (!deps.db.query<{ name: string }, []>("PRAGMA table_info(fabric_handed)").all().some((c) => c.name === "waits")) deps.db.exec("ALTER TABLE fabric_handed ADD COLUMN waits TEXT");
     // Your grant for a pair revoked: what that node handed here under it stops now (what you approved yourself goes on).
+    // So does what was taken under a grant that ended with the node that recorded it, revoked.
     this.unsubscribe =
       typeof deps.store.onApplied === "function"
         ? deps.store.onApplied((events) => {
@@ -195,6 +196,9 @@ export class Handoffs implements FabricTools {
               if (pair.to !== deps.identity.id || typeof pair.from !== "string" || deps.store.handoffGrant(pair.from, deps.identity.id)) continue;
               for (const run of [...this.runs.values()].filter((r) => r.giver === pair.from && r.granted)) this.team?.stop(run.task, "Your grant for the node that handed it over was revoked.");
             }
+            if (!events.some((e) => e.kind === "device.revoked")) return;
+            for (const run of [...this.runs.values()].filter((r) => r.granted && !deps.store.handoffGrant(r.giver, deps.identity.id)))
+              this.team?.stop(run.task, "The grant it was taken under ended: the node that recorded it was revoked.");
           })
         : () => {};
     // A hand-off a node that stopped was following has lost its call: the runner stopped the work when it did.

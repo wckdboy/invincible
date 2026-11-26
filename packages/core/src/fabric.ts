@@ -250,6 +250,8 @@ export interface HandoffGrantView {
   /** The device of yours it was given from (null: a terminal on a node), and when (ms). */
   via: string | null;
   at: number;
+  /** The full node that recorded it: a grant ends when the node that recorded it is revoked. */
+  by: { id: string; name: string };
 }
 
 /** What the running node streams back, as structured chunks, oldest first. */

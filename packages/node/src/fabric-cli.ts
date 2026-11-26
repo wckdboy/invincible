@@ -91,7 +91,7 @@ export const FABRIC_USAGE = `usage: invincible fabric on|off|status|rotate
 function grantLine(g: HandoffGrantView): string {
   const t = g.terms;
   const terms = t ? `${t.agents ? `agents ${t.agents.join(", ")}` : "any agent"} · ${t.tools.length ? `tools ${t.tools.join(", ")}` : "no tools"} · $${t.budgetUsdPerDay} a day` : "terms this version doesn't read (a newer node's)";
-  return `${bold(`${plainLine(g.from.name)} → ${plainLine(g.to.name)}`)}  ${dim(terms)}`;
+  return `${bold(`${plainLine(g.from.name)} → ${plainLine(g.to.name)}`)}  ${dim(`${terms} · recorded by ${plainLine(g.by.name)}${g.via ? ` from ${g.via.slice(0, 12)}` : ""}`)}`;
 }
 
 /** `invincible fabric grant|grants|revoke`: your grants for hand-offs, one per pair of nodes, given once. */

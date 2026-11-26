@@ -149,7 +149,7 @@ describe("invincible fabric grant|grants|revoke: your grants for hand-offs", () 
     return out.join("\n");
   };
   const noConfig = { readConfig: () => ({}), writeConfig() {} };
-  const grant = { from: { id: "n_a", name: "alpha" }, to: { id: "n_b", name: "beta" }, terms: { agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 5 }, via: null, at: 1 };
+  const grant = { from: { id: "n_a", name: "alpha" }, to: { id: "n_b", name: "beta" }, terms: { agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 5 }, via: null, at: 1, by: { id: "n_b", name: "beta" } };
 
   test("grant: what you typed is the route's input, checked as the node checks it", async () => {
     const sent: [string, unknown][] = [];
@@ -157,7 +157,7 @@ describe("invincible fabric grant|grants|revoke: your grants for hand-offs", () 
     const text = await printed(() => fabricCommand(api as never, "grant", noConfig, ["alpha", "beta"], { budget: "5", agents: "ada", tools: "fleet" }));
     expect(sent).toEqual([["grantHandoffs", { from: "alpha", to: "beta", agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 5 }]]);
     expect(text).toContain("alpha → beta");
-    expect(text).toContain("agents ada · tools fleet · $5 a day");
+    expect(text).toContain("agents ada · tools fleet · $5 a day · recorded by beta");
   });
 
   test("a grant with no budget, or a tool no run may be given, is refused before anything is sent", async () => {
@@ -172,6 +172,10 @@ describe("invincible fabric grant|grants|revoke: your grants for hand-offs", () 
     const api = { call: async (name: string, input: unknown) => (sent.push([name, input]), name === "handoffGrants" ? { grants: [grant, { ...grant, terms: null }] } : {}) };
     const listed = await printed(() => fabricCommand(api as never, "grants", noConfig));
     expect(listed).toContain("terms this version doesn't read (a newer node's)");
+    // Who recorded each, in plain words whatever its name holds (I-f).
+    const named = await printed(() => fabricCommand({ call: async () => ({ grants: [{ ...grant, by: { id: "n_g", name: "gamma\x1b[2K" }, via: "c_phone0000000000000" }] }) } as never, "grants", noConfig));
+    expect(named).toContain("recorded by gamma[2K from c_phone00000");
+    expect(named).not.toContain("\x1b");
     await printed(() => fabricCommand(api as never, "revoke", noConfig, ["alpha", "beta"]));
     expect(sent.at(-1)).toEqual(["revokeHandoffs", { from: "alpha", to: "beta" }]);
   });
