@@ -8,7 +8,7 @@ device, client and agent talks to the others over [Q-AMP](https://sovware.io/wck
 fabric with no passwords.
 
 ```sh
-curl -fsSL https://invincible.sh | sh
+curl -fsSL https://invincible.sh | bash
 ```
 
 **Status:** being built, 26 November 2026. Invincible succeeds the owner's earlier agent system

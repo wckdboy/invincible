@@ -21,6 +21,13 @@
 # Where things go: INVINCIBLE_INSTALL_DIR (default ~/.local/share/invincible), INVINCIBLE_BIN_DIR (~/.local/bin), INVINCIBLE_HOME
 # (~/.invincible). INVINCIBLE_SOURCE=<a checkout> installs that, as it stands, instead of downloading (for trying the
 # installer itself).
+
+# A shell that isn't bash (`curl … | sh` runs dash on Debian and Ubuntu) stops here, saying so, before the first line
+# only bash reads.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "invincible install: it runs in bash: curl -fsSL https://invincible.sh | bash" >&2
+  exit 1
+fi
 set -euo pipefail
 
 REPO=wckdboy/invincible

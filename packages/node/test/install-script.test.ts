@@ -72,6 +72,19 @@ test("an option it doesn't know is refused, and --help says what it does", () =>
   expect(help).toContain("--no-expose");
 });
 
+test("run by a shell that isn't bash (`curl … | sh` on Debian is dash), it says to run it with bash and stops, having done nothing", () => {
+  const shells = ["dash", "zsh"].flatMap((name) => Bun.which(name) ?? []);
+  if (!shells.length) return void console.warn("neither dash nor zsh is installed here: not checked");
+  for (const shell of shells) {
+    const home = join(scratch, `by-${shell.split("/").pop()}`);
+    mkdirSync(home);
+    const run = Bun.spawnSync([shell], { stdin: Bun.file(script), env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" }, stdout: "pipe", stderr: "pipe" });
+    expect([shell, run.exitCode]).toEqual([shell, 1]);
+    expect(run.stderr.toString()).toContain("curl -fsSL https://invincible.sh | bash");
+    expect(readdirSync(home)).toEqual([]);
+  }
+});
+
 test("it passes shellcheck, where shellcheck is installed", () => {
   const shellcheck = Bun.which("shellcheck");
   if (!shellcheck) return void console.warn("shellcheck isn't installed here: not checked");

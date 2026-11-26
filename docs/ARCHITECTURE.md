@@ -207,7 +207,7 @@ The models layer, carried (§10):
   `primaryName` where a node sends one, and the app itself is called Invincible whatever the primary is named. Everything
   that names an app (bundle IDs, the `invincible:` scheme, keychain services and tags, defaults, the update feed) is
   Invincible's own, so its apps run beside the old system's on one device until the cutover (§10).
-- **Install:** `curl -fsSL https://invincible.sh | sh`.
+- **Install:** `curl -fsSL https://invincible.sh | bash`.
 
 ## 9. Packages
 
