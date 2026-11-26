@@ -87,30 +87,36 @@ struct WorkRowView: View {
     var body: some View {
         let quiet = quietWhenWorking && row.attention == .working && !current
         let selected = prominence == .increased
+        let projected = row.project.key != "other"
         VStack(alignment: .leading, spacing: dense ? 2 : 3) {
-            HStack(spacing: 6) {
-                // A project's name where there is one; nothing where there is none (X2: no "Other work" on every row).
-                if row.project.key != "other" {
+            // A project's name where there is one, with how it stands; where there is none, the title carries that, and
+            // the row is two lines (X2: no "Other work" on every row).
+            if projected {
+                HStack(spacing: 6) {
                     ProjectBadge(project: row.project)
                     Text(row.project.name).lineLimit(1)
+                    Spacer(minLength: Space.s2)
+                    standing
                 }
-                Spacer(minLength: Space.s2)
-                StateWord(row: row).layoutPriority(1)
-                if let age = row.age {
-                    Text(age).monospacedDigit().layoutPriority(1)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: Space.s2) {
+                Text(row.title)
+                    .font(.subheadline.weight(quiet ? .regular : .semibold))
+                    .foregroundStyle(quiet && !selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                    .lineLimit(2)
+                if !projected {
+                    Spacer(minLength: Space.s2)
+                    standing.font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            Text(row.title)
-                .font(.subheadline.weight(quiet ? .regular : .semibold))
-                .foregroundStyle(quiet && !selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                .lineLimit(2)
             HStack(spacing: 6) {
                 AgentFace(id: row.agent.id, profile: row.agent.avatar, size: face)
                     .opacity(quiet ? 0.62 : 1)
                 Text(row.agent.name).foregroundStyle(.secondary).lineLimit(1).layoutPriority(1)
-                if !row.detail.isEmpty {
+                // (Not what its word says already: "Gave up", then "gave up".)
+                if !row.detail.isEmpty, row.detail.lowercased() != (row.verdict?.word ?? row.word).lowercased() {
                     Text(row.detail)
                         .font(row.mono ? .caption.monospaced() : .footnote)
                         .foregroundStyle(.tertiary)
@@ -126,6 +132,14 @@ struct WorkRowView: View {
         .accessibilityLabel(Self.label(row))
         .accessibilityAddTraits(.isButton)
         .help(Self.label(row))
+    }
+
+    /// How it stands, and how long ago it moved.
+    private var standing: some View {
+        HStack(spacing: 6) {
+            StateWord(row: row).layoutPriority(1)
+            if let age = row.age { Text(age).monospacedDigit().layoutPriority(1) }
+        }
     }
 
     /// A row's words for VoiceOver and a tooltip: what it is, where, how it stands and who is on it.

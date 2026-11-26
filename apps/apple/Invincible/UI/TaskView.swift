@@ -138,7 +138,8 @@ struct TaskView: View {
         ToolbarItem(placement: .principal) {
             VStack(spacing: 0) {
                 Text(task.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text("\(project.name) · \(name)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                // (A project's name where there is one; never "Other work".)
+                Text(project.key == Work.other.key ? name : "\(project.name) · \(name)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .accessibilityElement(children: .combine)
         }
