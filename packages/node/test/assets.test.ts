@@ -53,7 +53,7 @@ describe("the PWA bundle", () => {
     expect(manifest.id).toBe("/");
     // Holding the icon (Android) offers the three places.
     expect(manifest.shortcuts.map((shortcut: { url: string }) => shortcut.url)).toEqual(["/#/chat", "/#/team", "/#/inbox"]);
-    // Its icon is the primary's field, rendered (scripts/field-icon.ts): pictures at the sizes installers take.
+    // Its icon is the I-beam (scripts/mark.ts): pictures at the sizes installers take.
     expect(manifest.icons[0].src).toBe("/icon-192.png");
     expect(manifest.icons.some((icon: { purpose: string }) => icon.purpose === "maskable")).toBe(true);
     for (const icon of manifest.icons as { src: string }[]) expect(assets.has(icon.src)).toBe(true);

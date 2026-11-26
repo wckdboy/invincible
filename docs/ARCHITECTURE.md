@@ -184,8 +184,9 @@ The models layer, carried (§10):
     changes, the proof, the cost.
   - It was designed and measured in the last redesign before the carry (§10), and carried over without the old theme.
 - **The look** is the new look carried from the system Invincible succeeds (§10), by the owner's word of 26 November
-  2026: the field orb (gold, with its beam) for the primary, fields in their own colours for agents, the embers,
-  Field · Aurum as the icon (with a transparent dark variant for iOS), and the INVINCIBLE wordmark.
+  2026: the field orb (gold, with its beam) for the primary, fields in their own colours for agents, the embers, and the
+  INVINCIBLE wordmark. The owner's later word that day: the I-beam as the icon (scripts/mark.ts, with a transparent dark
+  variant for iOS), and the apps monochrome, with colour kept for the agents.
 - **Its bar** is the owner's: hyper modern and super usable, measured.
   - One focal point per screen.
   - Layered hairline surfaces in each platform's own materials.

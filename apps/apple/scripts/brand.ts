@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 /*
  * Writes the Apple app's brand assets, so they can't drift from the web app's:
- *   - the app icon, Field · Aurum (the owner's choice, 26 November 2026): the primary's field in gold, rendered as light
- *     by scripts/field-icon.ts, the renderer of the web app's and the Android app's icons. iOS's "any" form is the tile,
- *     1024 px edge to edge and opaque (iOS rounds the corners itself); its dark form is the field alone on nothing, which
- *     iOS backs itself; its tinted form is that field in grey, for the system to colour. The Mac's is the tile at each
- *     size a Mac draws an icon at (macOS clips it to its own shape);
+ *   - the app icon, the I-beam (scripts/mark.ts, the owner's choice of 26 November 2026, "minimal bold monochrome"; it
+ *     replaced Field · Aurum), the same mark as the web app's and the Android app's icons. iOS's "any" form is the tile,
+ *     1024 px edge to edge and opaque, white on near black (iOS rounds the corners itself); its dark form is the mark
+ *     alone on nothing, which iOS backs itself; its tinted form is that mark in grey, for the system to colour. The Mac's
+ *     is the tile drawn at each size a Mac draws an icon at (macOS clips it to its own shape);
  *   - the app's colours: the ink (the black tile on light, the cream on dark), what is written on it, and the red of what
  *     went wrong.
  *
@@ -13,7 +13,8 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { downscale, greyscale, png, renderField, rgba } from "../../../scripts/field-icon.ts";
+import { greyscale, png } from "../../../scripts/field-icon.ts";
+import { renderMark } from "../../../scripts/mark.ts";
 
 /** The apps' inks, as the Android app's Theme.kt has them too: the black tile, the cream on dark, and the red of what went
  * wrong (its deeper form on light, its brighter one on dark). */
@@ -52,8 +53,9 @@ if (import.meta.main) {
   colour("Cream", INK.cream, INK.cream);
 
   // ---- the app icon --------------------------------------------------------------------------------------------------
-  const icon = rgba(renderField(1024));
-  const bare = rgba(renderField(1024, { tile: null }), { opaque: false });
+  // The I-beam (scripts/mark.ts): white on near black; its dark form the mark alone on nothing, which iOS backs itself.
+  const icon = renderMark(1024);
+  const bare = renderMark(1024, { tile: null });
   mkdirSync(join(ASSETS, "AppIcon.appiconset"), { recursive: true });
   writeFileSync(join(ASSETS, "AppIcon.appiconset/AppIcon.png"), png(icon, 1024));
   writeFileSync(join(ASSETS, "AppIcon.appiconset/AppIcon-dark.png"), png(bare, 1024));
@@ -70,7 +72,7 @@ if (import.meta.main) {
     }),
   );
   mkdirSync(MAC_ICON, { recursive: true });
-  for (const px of new Set(MAC_SIZES.map(([points, scale]) => points * scale))) writeFileSync(join(MAC_ICON, `icon_${px}.png`), png(px === 1024 ? icon : downscale(icon, 1024, px), px));
+  for (const px of new Set(MAC_SIZES.map(([points, scale]) => points * scale))) writeFileSync(join(MAC_ICON, `icon_${px}.png`), png(renderMark(px), px));
   writeFileSync(
     join(MAC_ICON, "Contents.json"),
     contents({ images: MAC_SIZES.map(([points, scale]) => ({ filename: `icon_${points * scale}.png`, idiom: "mac", scale: `${scale}x`, size: `${points}x${points}` })) }),

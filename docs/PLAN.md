@@ -38,8 +38,8 @@ What the owner uses every day, built on the carried engine around the new model.
   Q-AMP as its transport, grants and peers, the diff pager and keys in the board come later.
 - The look on every surface: the new look carried from the system Invincible succeeds ([ARCHITECTURE §10](ARCHITECTURE.md)),
   by the owner's word of 26 November 2026: the field orb (gold, with its beam) for the primary, fields in their own
-  colours for agents, the embers, Field · Aurum as the icon (with a transparent dark variant for iOS), and the
-  INVINCIBLE wordmark.
+  colours for agents, the embers, and the INVINCIBLE wordmark. Then, the same day: the I-beam as the icon (with a
+  transparent dark variant for iOS), and the apps monochrome, colour kept for the agents.
 
 **Exit:**
 - a task given in plain words, in a repository the agent has never seen, ends verified and shipped as a pull request,

@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { BRAND_PNGS, ZOOM } from "../../../scripts/brand.ts";
-import { downscale, greyscale, png, renderField, rgba, roundTile } from "../../../scripts/field-icon.ts";
-import { fieldPoints, project } from "./lib/field.ts";
+import { downscale, greyscale, png, roundTile } from "../../../scripts/field-icon.ts";
+import { MARK_RECTS, markCoverage, markReach, renderMark } from "../../../scripts/mark.ts";
 
 const ROOT = resolve(import.meta.dir, "../../..");
 /** A PNG's width, height and colour type (2: RGB, 6: RGBA), from its header. */
@@ -14,32 +14,41 @@ function header(path: string): { width: number; height: number; type: number } {
   return { width: view.getUint32(16), height: view.getUint32(20), type: bytes[25]! };
 }
 
-// The owner's, 26 November 2026: "field aurum", then "maybe less fog, so it reads clearer".
-describe("the app icon: your agent's field in gold, rendered as light", () => {
-  test("the same pixels every time, on every machine: no randomness the seed doesn't give", () => {
-    const a = renderField(48), b = renderField(48);
-    expect(a.rgb.every((v, i) => v === b.rgb[i])).toBe(true);
-    expect(png(rgba(a), 48)).toEqual(png(rgba(b), 48));
+// The owner's, 26 November 2026: "simpler, still sleek and cool, logo, minimal bold monochrome" (it replaced Field · Aurum).
+describe("the app icon: the I-beam, one solid form in one ink", () => {
+  test("the same pixels every time, on every machine: each pixel's share of the mark is worked out, not sampled", () => {
+    expect(png(renderMark(48), 48)).toEqual(png(renderMark(48), 48));
+    // Three rectangles that never overlap, so no pixel is counted twice: the whole mark's area, exactly.
+    const box = 0.7 * 100, unit = box / 100, area = MARK_RECTS.reduce((sum, [x0, y0, x1, y1]) => sum + (x1 - x0) * unit * ((y1 - y0) * unit), 0);
+    const covered = markCoverage(100).reduce((sum, k) => sum + k, 0);
+    expect(Math.abs(covered - area)).toBeLessThan(1e-3);
   });
 
-  test("its heart is dark: no line comes into the core, so nothing lights its middle (no bright dot, no halo round one)", () => {
-    for (const p of fieldPoints({ lines: 52 })) expect(Math.hypot(p.x, p.y, p.z)).toBeGreaterThan(0.33);
+  test("it is upright and even: the same mirrored left to right, and top to bottom", () => {
+    const n = 64, c = markCoverage(n);
+    for (let y = 0; y < n; y++)
+      for (let x = 0; x < n; x++) {
+        expect(Math.abs(c[y * n + x]! - c[y * n + (n - 1 - x)]!)).toBeLessThan(1e-5);
+        expect(Math.abs(c[y * n + x]! - c[(n - 1 - y) * n + x]!)).toBeLessThan(1e-5);
+      }
   });
 
-  test("every form a platform masks keeps the field's lines inside the circle its mask keeps", () => {
-    const reach = (zoom: number) => Math.max(...fieldPoints({ lines: 52 }).map((p) => { const q = project(p, 1, { zoom }); return Math.hypot(q.x - 0.5, q.y - 0.5); }));
-    expect(reach(ZOOM.maskable)).toBeLessThanOrEqual(0.4); // a maskable icon: 80 % of it is always shown
-    expect(reach(ZOOM.adaptive)).toBeLessThanOrEqual(66 / 108 / 2); // an adaptive icon: its 66 dp of 108
-    expect(reach(ZOOM.tile)).toBeLessThanOrEqual(0.47); // on its tile, clear of iOS's rounding
+  test("every form a platform masks keeps the whole mark inside the circle its mask keeps", () => {
+    expect(markReach(ZOOM.maskable)).toBeLessThanOrEqual(0.4); // a maskable icon: 80 % of it is always shown
+    expect(markReach(ZOOM.adaptive)).toBeLessThanOrEqual(66 / 108 / 2); // an adaptive icon: its 66 dp of 108
+    expect(markReach(ZOOM.tile)).toBeLessThanOrEqual(0.47); // on its tile, clear of iOS's rounding
+    expect(markReach(ZOOM.badge)).toBeLessThanOrEqual(0.5); // on a badge: large, and still whole
   });
 
   test("its tile is rounded where a platform shows it as it is; the full-bleed forms are opaque; the badge is white", () => {
-    const tile = roundTile(rgba(renderField(64)), 64);
+    const tile = roundTile(renderMark(64), 64);
     expect(tile[3]).toBe(0); // a corner: transparent
     expect(tile[(32 * 64 + 32) * 4 + 3]).toBe(255); // its middle: opaque
-    const badge = rgba(renderField(64, { tile: null }), { opaque: false, mono: true });
+    expect([...tile.subarray((32 * 64 + 32) * 4, (32 * 64 + 32) * 4 + 3)]).toEqual([255, 255, 255]); // the web, in white
+    const badge = renderMark(64, { tile: null });
     for (let i = 0; i < badge.length; i += 4) expect([badge[i], badge[i + 1], badge[i + 2]]).toEqual([255, 255, 255]);
-    const grey = greyscale(rgba(renderField(16)));
+    expect(badge[3]).toBe(0); // on nothing outside the mark
+    const grey = greyscale(renderMark(16));
     for (let i = 0; i < grey.length; i += 4) expect(grey[i] === grey[i + 1] && grey[i + 1] === grey[i + 2]).toBe(true);
     expect(downscale(tile, 64, 16)).toHaveLength(16 * 16 * 4);
   });
@@ -54,7 +63,7 @@ describe("the app icon: your agent's field in gold, rendered as light", () => {
     }
   });
 
-  test("the Apple app's: iOS's tile, its dark form the field alone (iOS backs it), its tinted form in grey; the Mac's at each size", () => {
+  test("the Apple app's: iOS's tile, its dark form the mark alone (iOS backs it), its tinted form in grey; the Mac's at each size", () => {
     const set = "apps/apple/Invincible/Assets.xcassets/AppIcon.appiconset";
     expect(header(`${set}/AppIcon.png`)).toEqual({ width: 1024, height: 1024, type: 2 });
     expect(header(`${set}/AppIcon-dark.png`)).toEqual({ width: 1024, height: 1024, type: 6 });
@@ -62,13 +71,12 @@ describe("the app icon: your agent's field in gold, rendered as light", () => {
     const contents = JSON.parse(readFileSync(join(ROOT, set, "Contents.json"), "utf8")) as { images: { filename: string; appearances?: { value: string }[] }[] };
     expect(contents.images.map((i) => [i.filename, i.appearances?.[0]?.value ?? "any"])).toEqual([["AppIcon.png", "any"], ["AppIcon-dark.png", "dark"], ["AppIcon-tinted.png", "tinted"]]);
     for (const px of [16, 32, 64, 128, 256, 512, 1024]) expect(header(`apps/apple/Invincible/Mac/MacAssets.xcassets/MacIcon.appiconset/icon_${px}.png`)).toMatchObject({ width: px, height: px });
-    // The dark form is the field on nothing: its corners are transparent (no more than 1 of 255 there), where the tile's are its night. (At 256 px, as
-    // at the 1024 the app takes; at 64 its bloom reaches the corners.)
-    const dark = rgba(renderField(256, { tile: null }), { opaque: false });
+    // The dark form is the mark on nothing: its corners are transparent, where the tile's are its near black.
+    const dark = renderMark(256, { tile: null });
     for (const at of [0, 255, 256 * 255, 256 * 256 - 1]) expect(dark[at * 4 + 3]).toBeLessThanOrEqual(1);
   });
 
-  test("the pages and the manifest name only icons that are there, and the favicon is the field", () => {
+  test("the pages and the manifest name only icons that are there, and the favicon is the mark", () => {
     const manifest = JSON.parse(readFileSync(join(ROOT, "apps/web/src/manifest.webmanifest"), "utf8")) as { icons: { src: string; type: string }[] };
     for (const icon of manifest.icons) {
       expect(icon.type).toBe("image/png");

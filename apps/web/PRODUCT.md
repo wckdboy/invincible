@@ -48,7 +48,7 @@ The phone in one hand, often in short glances; work runs for minutes to hours un
 
 - The name Invincible, set as the INVINCIBLE wordmark in letterspaced capitals at the head of the sidebar. The primary agent is the owner's to name, and "Invincible" until they do. No word of the old theme anywhere (`docs/ARCHITECTURE.md` §10, enforced by `bench/vocabulary.ts`).
 - The look is the redesign's, carried by the owner's word (26 November 2026): the primary is a field orb in gold (AURUM), marked apart by a beam of light along the field's axis (light on dark, gold ink on light pages, dimming with its mood, a red-brown tip on failure); each agent is a field in colours of its own; embers drift about them. They move slowly and calmly, and only as their state asks; reduced motion stills them all, and colour is never the only sign of a state.
-- The app's icon and favicon are Field · Aurum: the gold field, lines of force round a dark core, white-hot where the light strikes and burning copper at the far rim, with a transparent dark variant for iOS. In the page the app's mark is drawn without its tile.
+- The app's icon and favicon are the I-beam (the owner's choice, 26 November 2026, "minimal bold monochrome"; it replaced Field · Aurum): one solid form, white on near black, with a transparent dark variant for iOS. In the page the app's mark is drawn without its tile. The same day the owner set the apps' direction: monochrome, with colour kept for the agents.
 - The look around them takes after Vercel/shadcn (Geist, neutral greys, 1 px borders), Benji Taylor's trays and live pills, and T3 Code's composer (the owner's references).
 
 ## Evidence on Hand

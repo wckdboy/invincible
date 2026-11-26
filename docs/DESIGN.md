@@ -13,17 +13,17 @@ This is how the PWA looks, moves and behaves, and why. It is the reference for a
 
 ## Brand
 
-The look is the redesign's, carried by the owner's word (26 November 2026): the primary's field orb in gold with its beam, the agents' fields in colours of their own, the embers, Field · Aurum as the icon, and the INVINCIBLE wordmark.
+The look is the redesign's, carried by the owner's word (26 November 2026): the primary's field orb in gold with its beam, the agents' fields in colours of their own, the embers, and the INVINCIBLE wordmark. The owner's later word (26 November 2026): the icon is the I-beam, and the apps go monochrome (black, white and greys, bold type), with colour kept for the agents and for what went wrong.
 
-### The mark: the field
+### The mark: the I-beam
 
-**The primary's field in gold** is the app's mark and its icon (the owner's choice, 26 November 2026, "field aurum", then "less fog, so it reads clearer"): lines of force looping from pole to pole round a dark core, white-hot on the lobe the light strikes and burning copper on the far one, on a warm night. As an icon it is not drawn but rendered as light (`apps/web/src/lib/field.ts` the points, `scripts/field-icon.ts` the renderer: soft sprites added in linear light, a close bloom, ACES tone mapping; deterministic, no browser). In the page it is the field itself, on no tile.
+**The I-beam** is the app's mark and its icon (the owner's choice, 26 November 2026: "simpler, still sleek and cool, logo, minimal bold monochrome"; it replaced Field · Aurum, the gold field). It is one solid form in one ink, the steel section and the letter I: three rectangles in a 100-unit box (`scripts/mark.ts`, `MARK_RECTS` and `MARK_POLYGON`), white on near black (`#0a0a0b`) as the icon. Each pixel's share of it is worked out exactly, never sampled: deterministic, no browser. In the page it is the mark itself, on no tile.
 
 | File | Use |
 |---|---|
-| `icon-64.png` (the favicon), `icon-192.png`, `icon-512.png`, `assets/icon.png` | The app icon, Field · Aurum. Rounded tiles where a platform shows the icon as it is |
-| `icon-maskable-512.png`, `apple-touch-icon.png` | The same field edge to edge: the maskable one drawn in so its lines stay inside the 80 % every mask keeps; the touch icon as iOS rounds it |
-| `icon-mono-96.png` | A notification's badge in Android's status bar: the field in white on nothing (the system draws a badge from its alpha alone) |
+| `icon-64.png` (the favicon), `icon-192.png`, `icon-512.png`, `assets/icon.png` | The app icon, the I-beam. Rounded tiles where a platform shows the icon as it is |
+| `icon-maskable-512.png`, `apple-touch-icon.png` | The same tile edge to edge: the maskable one with the whole mark inside the 80 % every mask keeps; the touch icon as iOS rounds it |
+| `icon-mono-96.png` | A notification's badge in Android's status bar: the mark in white on nothing (the system draws a badge from its alpha alone) |
 | iOS's and Android's icons | From the same renderer: iOS's tile edge to edge, its dark form the field alone on nothing (iOS backs it), its tinted form that field in grey, and the Mac's sizes (`bun apps/apple/scripts/brand.ts`); Android's adaptive and themed layers (`bun scripts/brand.ts --png`) |
 | `ui/orb.ts` → `appMark()` | The app icon where a page shows it (the sidebar's head beside INVINCIBLE, a phone's way Home, Settings' About): the icon's field alone, on nothing, drawn for the page's theme (light on a dark page, ink on a light one), so no dark tile sits on a light page (your word, 26 November 2026: "make sure the app icon is transparent so it works in dark and white mode"). The PNGs stay tiles where a platform shows them as an app's icon (the home screen, a manifest's icon, the favicon) |
 | `ui/emblem.ts` → `emblem()` | The mark on the welcome, pairing and boot screens: `appMark()` in its place |

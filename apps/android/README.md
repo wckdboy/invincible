@@ -15,7 +15,7 @@ app's `lib/field.ts` and `lib/field-orb.ts`, held to them by the parity vectors'
 gold with its beam of light along its axis, its embers drifting while it works; each agent's is in the colour you chose
 for it or the one of 24 its handle picks (`core/Avatar.kt`, core's `avatar.ts`). Where orbs are many they are still; the
 one in focus moves only while something is going on, and never while the phone's animations are off. In the light theme
-a field is ink on paper. Its launcher icon is Field · Aurum (`scripts/brand.ts --png` writes its adaptive and themed
+a field is ink on paper. Its launcher icon is the I-beam (`scripts/brand.ts --png` writes its adaptive and themed
 layers), and its sidebar begins with the mark and the INVINCIBLE wordmark.
 
 It opens on the primary, the one agent you talk to, named by the node ("Invincible" until you name it: `core/Primary.kt`),

@@ -134,8 +134,8 @@ bun apps/apple/scripts/vectors.ts --check   # exits 1 if the file isn't what thi
 ## The brand
 
 `bun apps/apple/scripts/brand.ts` writes the app's colours (the ink: the black tile on light, the cream on dark; what
-is written on it; the red of what went wrong) and its icon, Field · Aurum, from `scripts/field-icon.ts`, the renderer of
-the web app's and Android's icons: iOS's tile edge to edge (iOS rounds it), its dark form the field alone on nothing
-(iOS backs it itself), its tinted form that field in grey, and the Mac's tile at each size. The app's mark inside the app
+is written on it; the red of what went wrong) and its icon, the I-beam, from `scripts/mark.ts`, the mark of
+the web app's and Android's icons: iOS's tile edge to edge (iOS rounds it), its dark form the mark alone on nothing
+(iOS backs it itself), its tinted form that mark in grey, and the Mac's tile at each size. The app's mark inside the app
 (Settings' About, joining, a Mac's first run, the sidebar's head) is the field alone (`AppMark`), beside the INVINCIBLE
 wordmark (`Wordmark`) where a sidebar begins.
