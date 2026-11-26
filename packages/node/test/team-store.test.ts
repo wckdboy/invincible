@@ -991,3 +991,34 @@ describe("keys of yours an agent may use (PLAN #17)", () => {
     expect(store.saveAgent({ id: "ada", name: "Ada", keys: null }).keys).toBeUndefined();
   });
 });
+
+describe("an agent brought whole (the import of the system Invincible succeeds)", () => {
+  const brought = { id: "scout", name: "Scout", instructions: "Finds what a task needs.", role: "researcher", harness: "native" as const, enabled: true, dailyTurns: 40, repository: null, memory: "Its notes.", createdBy: "primary", instructionsBy: "primary", createdAt: 1_000, updatedAt: 2_000 };
+
+  test("keeps whose words its job is, its notes and when it was made: one your agent wrote stays your agent's", () => {
+    const now = 10 * 86_400_000;
+    const store = make(":memory:", () => now);
+    const agent = store.adopt(brought);
+    expect([agent.createdBy, agent.instructionsBy, agent.memory, agent.createdAt, agent.updatedAt]).toEqual(["primary", "primary", "Its notes.", 1_000, 2_000]);
+    expect(store.agent("scout")!.instructionsBy).toBe("primary");
+    // Made long ago: not one your agent made today, so its allowance for the day is whole.
+    expect(store.overview().spare.today).toBe(TEAM_LIMITS.recruitsPerDay);
+    // One brought that your agent made just now would be counted: the day's allowance reads when it was made.
+    store.adopt({ ...brought, id: "fresh", createdAt: now - 1_000 });
+    expect(store.overview().spare.today).toBe(TEAM_LIMITS.recruitsPerDay - 1);
+  });
+
+  test("is held to every rule one you add is, and only ever takes a handle nobody here has", () => {
+    const store = make();
+    expect(() => store.adopt({ ...brought, id: "held", sensitive: true })).toThrow(TeamError);
+    expect(() => store.adopt({ ...brought, id: "acp", harness: "acp" })).toThrow(/Name the command/);
+    expect(() => store.adopt({ ...brought, id: "noted", memory: "sk-ant-api03-FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE" })).toThrow(/credential/);
+    expect(() => store.adopt({ ...brought, id: "who", instructionsBy: "not a handle!" })).toThrow(TeamError);
+    store.adopt(brought);
+    expect(() => store.adopt(brought)).toThrow(/is taken here already/);
+    store.saveAgent({ id: "gone", name: "Gone" });
+    store.remove("gone");
+    expect(() => store.adopt({ ...brought, id: "gone" })).toThrow(/is taken here already/);
+    expect(store.agents().map((a) => a.id)).toEqual(["scout"]);
+  });
+});

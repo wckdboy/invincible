@@ -4,7 +4,7 @@ import { AttachmentRef, findSecrets, randomId, readAlike, redact } from "@invinc
 import { isOrbProfile, type AvatarActivity } from "@invincible/core/avatar";
 import { z } from "zod";
 import {
-  TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, AgentInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,
+  TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, AgentId, AgentInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,
   type Agent, type TeamRoom, type TeamMessage, type TeamTask, type TeamDelivery, type TeamSnapshot, type TeamRoomView, type TeamWorkStatus, type TeamOverview,
   TeamOutcomeInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, heldModels, SENSITIVE_WORK,
 } from "../../core/src/team.ts";
@@ -279,6 +279,23 @@ export class TeamStore {
     // (It calls the models you set it up with, which sensitive mode can't hold it to.)
     if (harness === "acp" && sensitive) throw new TeamError(400, "An agent in sensitive mode works on your agent's own harness, OpenCode, Hermes, Claude Code or Codex: an ACP agent of yours calls the models you set it up with, which your agent can't hold it to.");
     return this.putAgent({ id: input.id, name: input.name, instructions: input.instructions ?? previous?.instructions ?? "", role: input.role ?? previous?.role ?? "engineer", ...(models ? { models } : {}), ...(sensitive ? { sensitive: true } : {}), harness, ...(acp ? { acp } : {}), ...(keys ? { keys } : {}), enabled: input.enabled ?? previous?.enabled ?? true, dailyTurns: input.dailyTurns ?? previous?.dailyTurns ?? DAILY_TURNS, repository: input.repository === undefined ? previous?.repository ?? null : input.repository, turnsToday: this.turns(input.id), workspaceNode: previous?.workspaceNode ?? null, workspace: previous?.workspace ?? null, memory: previous?.memory ?? "", avatar: input.avatar === undefined ? previous?.avatar : (input.avatar ?? undefined), createdBy: previous?.createdBy ?? TEAM_OWNER, instructionsBy: input.instructions === undefined || input.instructions === previous?.instructions ? previous?.instructionsBy ?? TEAM_OWNER : TEAM_OWNER, createdAt: previous?.createdAt ?? at, updatedAt: at });
+  }
+  /**
+   * An agent brought whole from the system Invincible succeeds (`invincible import`): its profile, held to every rule
+   * one you add is (saveAgent); its notes; when it was made; and whose words its job is, kept as they were there, so
+   * one the primary or another agent wrote stays fenced as theirs and never becomes yours by coming across. Only ever
+   * a new handle: one taken here, by an agent here or one removed, is refused.
+   */
+  adopt(raw: AgentInput & { memory: string; createdBy: string; instructionsBy: string; createdAt: number; updatedAt: number }): Agent {
+    const { memory, createdBy, instructionsBy, createdAt, updatedAt, ...profile } = raw;
+    const by = z.union([z.literal(TEAM_OWNER), z.literal(TEAM_PRIMARY), AgentId]);
+    const kept = teamInput(z.strictObject({ memory: z.string().max(TEAM_LIMITS.memory), createdBy: by, instructionsBy: by, createdAt: z.number().int().min(0), updatedAt: z.number().int().min(0) }), { memory, createdBy, instructionsBy, createdAt, updatedAt });
+    teamText(kept.memory);
+    return this.db.transaction(() => {
+      if (this.record(profile.id)) throw new TeamError(409, `The handle ${profile.id} is taken here already.`);
+      const saved = this.saveAgent(profile);
+      return this.putAgent({ ...saved, memory: kept.memory, createdBy: kept.createdBy, instructionsBy: kept.instructionsBy, createdAt: kept.createdAt, updatedAt: kept.updatedAt });
+    })();
   }
   /** How many more workers the primary may make for itself: on this node in all, and in the day now ending. */
   private spare(all: Agent[] = this.agents()): TeamOverview["spare"] {

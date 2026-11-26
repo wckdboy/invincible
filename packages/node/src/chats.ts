@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { closeSync, existsSync, openSync } from "node:fs";
-import { type AnswerStatus, AttachmentRef, type ChatMessage, chatState, type ConversationSummary, LookHeld, type LookView, type QueueHold, randomId, type StoredMessage, type StoredStep } from "@invincible/core";
+import { type AnswerStatus, AttachmentRef, type ChatMessage, chatState, ConversationId, type ConversationSummary, LookHeld, type LookView, type QueueHold, randomId, type StoredMessage, type StoredStep } from "@invincible/core";
 import { z } from "zod";
 
 /*
@@ -114,6 +114,20 @@ export interface Waits {
   actions: string[];
   secrets: string[];
   question: boolean;
+}
+
+/** A message of a chat brought whole from elsewhere (ChatStore.adopt), as it was kept there. */
+export interface AdoptedMessage {
+  role: "user" | "assistant";
+  content: string;
+  attachments?: AttachmentRef[];
+  look?: { set: number; note: string };
+  model: string | null;
+  steps: StoredStep[];
+  status: AnswerStatus;
+  error: string | null;
+  createdAt: number;
+  endedAt: number | null;
 }
 
 /** Who queued a message: enough to act as them again when its turn comes, and never more than they may do then. */
@@ -266,6 +280,38 @@ export class ChatStore {
     this.db.exec("UPDATE messages SET status = 'stopped' WHERE status = 'streaming'");
     // Nothing is sent just because the node came back: what was queued then is held until you resume it.
     this.db.exec("UPDATE conversations SET queue_held = COALESCE(queue_held, 'restart') WHERE id IN (SELECT conversation FROM queue)");
+  }
+
+  /**
+   * A chat brought whole from the system Invincible succeeds (`invincible import`), under the id it had there: its
+   * messages in their order as they were kept, when it was read, and its story (`through`: the place among `messages`
+   * of the last one it covers). Only ever a new id. What it waited on, what was queued in it and the looks it had set
+   * stay where they were.
+   */
+  adopt(
+    conversation: { id: string; title: string; project: string | null; role: string; pinned: boolean; createdAt: number; updatedAt: number; answeredAt: number | null; seenAt: number | null },
+    messages: readonly AdoptedMessage[],
+    story?: { text: string; through: number; updatedAt: number },
+  ): KeptSummary {
+    const id = ConversationId.parse(conversation.id);
+    return this.db.transaction(() => {
+      if (this.summary(id)) throw new Error(`a chat ${id} is here already`);
+      this.db
+        .query("INSERT INTO conversations (id, title, project, role, pinned, created_at, updated_at, answered_at, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(id, conversation.title, conversation.project, conversation.role, conversation.pinned ? 1 : 0, conversation.createdAt, conversation.updatedAt, conversation.answeredAt, conversation.seenAt);
+      const insert = this.db.query<{ id: number }, [string, string, string, string | null, string | null, string, string, string | null, number, number | null, number | null, string | null]>(
+        "INSERT INTO messages (conversation, role, content, attachments, model, steps, status, error, created_at, ended_at, look_set, look_note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+      );
+      const ids = messages.map((m) => {
+        const attachments = m.attachments?.length ? JSON.stringify(z.array(AttachmentRef).parse(m.attachments)) : null;
+        // An answer that was being written when that node stopped can't finish here.
+        const status = m.status === "streaming" ? "stopped" : m.status;
+        return insert.get(id, m.role, m.content, attachments, m.model, JSON.stringify(m.steps), status, m.error, m.createdAt, m.endedAt, m.look?.set ?? null, m.look?.note ?? null)!.id;
+      });
+      const through = story ? ids[story.through] : undefined;
+      if (story && through !== undefined) this.db.query("INSERT INTO stories (conversation, text, through, updated_at) VALUES (?, ?, ?, ?)").run(id, story.text, through, story.updatedAt);
+      return this.summary(id)!;
+    })();
   }
 
   create(input: { title: string; project: string | null; role: string }): KeptSummary {
