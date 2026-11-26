@@ -33,24 +33,31 @@ const shown: { title: string; options: Record<string, any> }[] = [];
 interface Page {
   url: string;
   visibilityState: string;
+  focused: boolean;
   messages: unknown[];
-  focused: number;
+  /** How often the worker brought it forward. */
+  brought: number;
   focus: () => Promise<void>;
   postMessage(message: unknown): void;
 }
 let windows: Page[] = [];
 const opened: string[] = [];
-const windowAt = (url: string, visibilityState = "visible"): Page => {
-  const p: Page = { url, visibilityState, messages: [], focused: 0, postMessage: (message) => void p.messages.push(message), focus: async () => void (p.focused += 1) };
+const windowAt = (url: string, visibilityState = "visible", focused = false): Page => {
+  const p: Page = { url, visibilityState, focused, messages: [], brought: 0, postMessage: (message) => void p.messages.push(message), focus: async () => void (p.brought += 1) };
   return p;
 };
+/** This browser's subscription, as the worker reads it: its push service names the browser (Apple's is Safari's). */
+let endpoint: string | null = "https://fcm.googleapis.com/fcm/send/fake-endpoint";
 
 beforeAll(async () => {
   (globalThis as any).addEventListener = (type: string, listener: (event: unknown) => void) => {
     if (type === "fetch") onFetch = listener;
     listeners.set(type, listener);
   };
-  (globalThis as any).registration = { showNotification: async (title: string, options: Record<string, any>) => void shown.push({ title, options }) };
+  (globalThis as any).registration = {
+    showNotification: async (title: string, options: Record<string, any>) => void shown.push({ title, options }),
+    pushManager: { getSubscription: async () => (endpoint ? { endpoint } : null) },
+  };
   (globalThis as any).clients = { claim: async () => {}, matchAll: async () => windows, openWindow: async (url: string) => void opened.push(url) };
   (globalThis as any).location = new URL(`${ORIGIN}/`);
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { setAppBadge: async (n: number) => void badges.push(n), clearAppBadge: async () => void badges.push(0) } });
@@ -208,7 +215,7 @@ describe("a tap opens the app at the right place", () => {
     expect(closed).toBe(true);
     // The page you're looking at, not just the first one.
     expect(windows[1]!.messages).toEqual([{ type: "invincible:open", open: "chat", conversation: CHAT }]);
-    expect(windows[1]!.focused).toBe(1);
+    expect(windows[1]!.brought).toBe(1);
     expect(windows[0]!.messages).toEqual([]);
     expect(opened).toEqual([]);
   });
@@ -285,5 +292,77 @@ describe("a tap opens the app at the right place", () => {
     windows = [windowAt(`${ORIGIN}/#/overview`)];
     await dispatch("pushsubscriptionchange", {});
     expect(windows[0]!.messages).toEqual([{ type: "invincible:push-changed" }]);
+  });
+});
+
+describe("quiet while you're looking at that very thing", () => {
+  const task = { v: 1, kind: "finished", title: "Your agent's task: Failed · gate 2", body: "Failed · gate 2 · $0.12. Its proof is in the app.", open: "task", task: "task-abc123def456", tag: "t-task0123456789abcdefgh" };
+  const approval = { v: 1, kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in the Inbox.", open: "inbox", tag: "t-approval0123456789abcd", action: "a_0123456789abcdefghijkl", approvable: true };
+  const reset = () => {
+    shown.length = 0;
+    badges.length = 0;
+    endpoint = "https://fcm.googleapis.com/fcm/send/fake-endpoint";
+  };
+
+  test("a task's end, while its own thread is in front: nothing over it, and nothing on the icon", async () => {
+    reset();
+    windows = [windowAt(`${ORIGIN}/#/task/task-abc123def456`, "visible", true)];
+    await push(task);
+    expect(shown).toEqual([]);
+    expect(badges).toEqual([]);
+    // Mozilla's push service and Microsoft's allow it as Google's does: a page of the app is in front.
+    for (const service of ["https://updates.push.services.mozilla.com/wpush/v2/fake", "https://wns2-db5p.notify.windows.com/w/?token=fake"]) {
+      endpoint = service;
+      await push(task);
+    }
+    expect(shown).toEqual([]);
+  });
+
+  test("an ask, while the Inbox is in front: nothing over it either", async () => {
+    reset();
+    windows = [windowAt(`${ORIGIN}/#/home`, "hidden"), windowAt(`${ORIGIN}/#/inbox`, "visible", true)];
+    await push(approval);
+    expect(shown).toEqual([]);
+  });
+
+  test("where a browser takes away a subscription whose pushes show nothing (Safari's, on Apple's service), it is shown, quietly", async () => {
+    reset();
+    endpoint = "https://web.push.apple.com/fake-endpoint";
+    windows = [windowAt(`${ORIGIN}/#/inbox`, "visible", true)];
+    await push(approval);
+    expect(shown).toHaveLength(1);
+    expect(shown[0]!.options).toMatchObject({ silent: true, renotify: false, tag: "t-approval0123456789abcd" });
+    // The page in front counts what waits exactly: the push adds nothing to it.
+    expect(badges).toEqual([]);
+    // No subscription to read (a push the browser's own tools sent): the same, to be safe.
+    endpoint = null;
+    await push(approval);
+    expect(shown).toHaveLength(2);
+    expect(shown[1]!.options).toMatchObject({ silent: true, renotify: false });
+  });
+
+  test("anything else is told as ever: another task, a page in front but not focused, or one hidden", async () => {
+    reset();
+    for (const page of [
+      windowAt(`${ORIGIN}/#/task/task-zzz999zzz999`, "visible", true),
+      windowAt(`${ORIGIN}/#/task/task-abc123def456`, "visible", false),
+      windowAt(`${ORIGIN}/#/task/task-abc123def456`, "hidden", false),
+      windowAt("https://elsewhere.example/#/task/task-abc123def456", "visible", true),
+    ]) {
+      windows = [page];
+      shown.length = 0;
+      await push(task);
+      expect(shown).toHaveLength(1);
+    }
+    // What needs you still sounds when it's about something else than what's in front.
+    windows = [windowAt(`${ORIGIN}/#/task/task-abc123def456`, "visible", true)];
+    shown.length = 0;
+    await push(approval);
+    expect(shown[0]!.options).toMatchObject({ silent: false, renotify: true });
+    // A test is always shown, Settings in front or not: it's what you asked to see.
+    windows = [windowAt(`${ORIGIN}/#/settings`, "visible", true)];
+    shown.length = 0;
+    await push({ v: 1, kind: "test", title: "Invincible", body: "This is a test. Notifications reach this device.", open: "settings", tag: "test" });
+    expect(shown).toHaveLength(1);
   });
 });

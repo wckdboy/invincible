@@ -1,5 +1,6 @@
 import { GENERIC_NOTIFICATION, isConversationId, isNotifyTaskId, isQuietKind, NOTIFY_OPENS, type NotifyOpen, type NotifyPayload, notifyUrl, readNotifyPayload } from "@invincible/core/notify-payload";
 import { afterPush, badgeCount, type BadgeState, type Badging, NO_BADGE, readBadgeMessage, readBadgeState, showBadge } from "./lib/badge.ts";
+import { showsEveryPush, showsThatVeryThing } from "./lib/showing.ts";
 
 /*
  * Service worker: keeps the app shell available offline, and shows what the primary
@@ -45,6 +46,8 @@ interface NotificationEventLike extends ExtendableEventLike {
 interface WindowClientLike {
   url?: string;
   visibilityState?: string;
+  /** Its window has the focus: it's the page you're looking at. */
+  focused?: boolean;
   focus?(): Promise<unknown>;
   postMessage(message: unknown): void;
 }
@@ -58,7 +61,7 @@ interface ServiceWorkerScope {
   addEventListener(type: "message", listener: (event: MessageEventLike) => void): void;
   skipWaiting(): Promise<void>;
   navigator: Badging;
-  registration: { showNotification(title: string, options: Record<string, unknown>): Promise<void> };
+  registration: { showNotification(title: string, options: Record<string, unknown>): Promise<void>; pushManager?: { getSubscription(): Promise<{ endpoint: string } | null> } };
   clients: { claim(): Promise<void>; matchAll(options: { type: "window"; includeUncontrolled?: boolean }): Promise<WindowClientLike[]>; openWindow(url: string): Promise<unknown> };
 }
 
@@ -169,6 +172,35 @@ function readTarget(data: unknown): OpenTarget {
   return { open, ...(conversation ? { conversation } : {}), ...(task ? { task } : {}) };
 }
 
+/** The app's own pages, open in this browser (another site's are none of its business). */
+async function appPages(): Promise<WindowClientLike[]> {
+  return (await sw.clients.matchAll({ type: "window", includeUncontrolled: true })).filter((page) => {
+    try {
+      return !page.url || new URL(page.url).origin === sw.location.origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Whether the page you're looking at (in front, its window focused) shows the very thing a notification opens. */
+async function lookingAt(target: OpenTarget): Promise<boolean> {
+  try {
+    return (await appPages()).some((page) => page.focused === true && page.visibilityState === "visible" && showsThatVeryThing(target, page.url));
+  } catch {
+    return false;
+  }
+}
+
+/** Whether this browser must show every push (Safari does, or takes the subscription away), by its push service. */
+async function mustShowEvery(): Promise<boolean> {
+  try {
+    return showsEveryPush((await sw.registration.pushManager?.getSubscription())?.endpoint);
+  } catch {
+    return true;
+  }
+}
+
 async function showPush(event: PushEventLike): Promise<void> {
   let payload: NotifyPayload | null = null;
   try {
@@ -177,9 +209,15 @@ async function showPush(event: PushEventLike): Promise<void> {
     payload = null;
   }
   const shown = payload ?? GENERIC_NOTIFICATION;
+  const target = readTarget(shown);
+  // Quiet while you're looking at that very thing (X2): the page in front already shows it, live. Nothing is said over
+  // it where the browser allows a push to show nothing while a page of the app is in front; where it doesn't (Safari),
+  // it's shown without a sound.
+  const looking = await lookingAt(target);
+  if (looking && !(await mustShowEvery())) return;
   // News (a news kind) is told quietly: no sound or vibration, and the same thing told again replaces it without a
   // word. What needs you lets you know, every time, even when it replaces its own notification.
-  const quiet = isQuietKind(shown.kind);
+  const quiet = looking || isQuietKind(shown.kind);
   await sw.registration.showNotification(shown.title, {
     body: shown.body,
     tag: shown.tag,
@@ -190,9 +228,10 @@ async function showPush(event: PushEventLike): Promise<void> {
     // square). No picture (`image`): its words are the message, and a picture would only decorate it.
     badge: "/icon-mono-96.png",
     // Where a tap opens: the place, and the chat or the task it names (a task's own thread, never the one that needs you most).
-    data: { open: shown.open, ...(shown.conversation ? { conversation: shown.conversation } : {}), ...(shown.task ? { task: shown.task } : {}) },
+    data: target,
   });
-  await countOnIcon(shown);
+  // (The page in front counts what waits exactly: a push about what it shows adds nothing.)
+  if (!looking) await countOnIcon(shown);
 }
 
 /*
@@ -231,13 +270,7 @@ sw.addEventListener("message", (event) => {
 
 async function openFromNotification(data: unknown): Promise<void> {
   const target = readTarget(data);
-  const pages = (await sw.clients.matchAll({ type: "window", includeUncontrolled: true })).filter((page) => {
-    try {
-      return !page.url || new URL(page.url).origin === sw.location.origin;
-    } catch {
-      return false;
-    }
-  });
+  const pages = await appPages();
   // The page you're looking at, else any that's open.
   const page = pages.find((p) => p.visibilityState === "visible") ?? pages[0];
   if (page) {
