@@ -159,6 +159,11 @@ describe("inv against a node of its own", () => {
     expect(json((await run(me, "pair", "--json")).out)).toMatchObject({ paired: true, nodeName: "keep" });
   }, 30_000);
 
+  /** The shortest end of a task's id, six characters at least, that doesn't begin with "-". */
+  const shortId = (id: string): string => {
+    for (let n = 6; n < id.length - 5; n++) if (!id.slice(-n).startsWith("-")) return id.slice(-n);
+    return id;
+  };
   let verifiedTask = "";
   test("inv give --gate --wait: the task runs on the node, its gate fails before the work and passes after it, and it exits 0 with the proof", async () => {
     const given = await run(me, "give", "TASK_ONE: write result.txt", "--agent", "ada", "--gate", "test -f result.txt # gate-one", "--budget", "2", "--wait", "--json");
@@ -170,7 +175,9 @@ describe("inv against a node of its own", () => {
     // inv proof says the same, and its exit code is the verdict.
     const again = await run(me, "proof", verifiedTask, "--json");
     expect([again.code, json(again.out).state]).toEqual([0, "verified"]);
-    const text = await run(me, "proof", verifiedTask.slice(-6));
+    // (Its id's end, as you would type it: never one that begins with "-", which any command reads as a flag. Task ids
+    // hold "-", so its last six alone began with one in about one run of 38: 26 November 2026, exit 2.)
+    const text = await run(me, "proof", shortId(verifiedTask));
     expect(text.code).toBe(0);
     expect(text.out).toContain("Verified · by its gates and a reviewer that didn't do the work");
     expect(text.out).toContain("failed before the work: it shows the work ✓");
