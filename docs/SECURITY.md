@@ -265,6 +265,9 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
 - **What is typed is never written down.** An action's text reaches deskd as one argument no shell reads; the ledger
   says how many characters (`packages/sandbox/test/desktop-host.test.ts`). The eyes' token goes with a look from the
   command's environment, never as an argument.
+- **The accessibility bus is the VM's own.** It starts with the desktop, as the agent's user, its sockets in deskd's
+  own directory; deskd reads it for `desktop tree` and `find`. It shows what the apps on that display already show,
+  to the same user, and reaches nothing outside the VM.
 - **Residual risk:** anything in the VM running as the agent's user can speak to deskd, as it could run the desktop's
   tools before; the VM is the boundary.
 

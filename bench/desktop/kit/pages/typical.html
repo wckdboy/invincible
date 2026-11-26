@@ -1,0 +1,16 @@
+<!doctype html><meta charset=utf-8><title>The Harbour Gazette</title>
+<style>body{font:15px sans-serif;margin:0} header,footer{background:#eef;padding:8px 16px} nav a{margin-right:10px} main{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:12px 16px} article{border:1px solid #ccd;padding:8px} h2{font-size:16px;margin:0 0 6px} footer a{margin-right:8px;font-size:13px}</style>
+<header><strong>The Harbour Gazette</strong>
+<nav id=nav></nav>
+<form role=search><input aria-label="Search the site" placeholder="Search"><button>Search</button></form></header>
+<main id=main></main>
+<footer id=foot></footer>
+<script>
+const sections = ["News", "Harbour", "Weather", "Ferries", "Markets", "Sport", "Culture", "Food", "Travel", "Science", "Opinion", "Letters", "Events", "Jobs", "Homes"];
+document.getElementById("nav").innerHTML = sections.map((s) => `<a href="#${s.toLowerCase()}">${s}</a>`).join("");
+document.getElementById("main").innerHTML = Array.from({ length: 18 }, (_, i) =>
+  `<article><h2><a href="#story-${i + 1}">Story ${i + 1}: the ${sections[i % sections.length].toLowerCase()} desk reports</a></h2>
+   <p>A short summary of story ${i + 1}, two lines long, as a front page shows it before you open the piece itself.</p>
+   <button>Save</button> <button>Share</button></article>`).join("");
+document.getElementById("foot").innerHTML = ["About", "Contact", "Advertise", "Careers", "Privacy", "Terms", "Cookies", "Accessibility", "Help", "Archive", "Newsletters", "Podcasts", "Apps", "Corrections", "Ethics", "Subscribe", "Gift", "Sitemap", "Press", "RSS"].map((s) => `<a href="#${s.toLowerCase()}">${s}</a>`).join("");
+</script>

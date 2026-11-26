@@ -1,6 +1,6 @@
 import { DEFAULT_IMAGE, DESKTOP_IMAGE } from "../../packages/sandbox/src/spec.ts";
 import { buildImages } from "../desktop/images.ts";
-import { boot, core, costs, fragile, lookActLook, paths, type Samples, typing } from "../desktop/measure.ts";
+import { a11y, boot, core, costs, fragile, lookActLook, paths, type Samples, typing } from "../desktop/measure.ts";
 import { POLICIES, runTask, TASKS, type TaskRun } from "../desktop/tasks.ts";
 import { bench, BenchVm, cannotRunHere, clearLeftovers } from "../desktop/vm.ts";
 import { sig, type Suite, type SuiteContext } from "../lib.ts";
@@ -66,6 +66,9 @@ export const suite: Suite = {
     "desktop.task.editor.careful",
     "desktop.task.editor.naive",
     "desktop.task.editor.settled",
+    "desktop.a11y.form-match",
+    "desktop.a11y.find",
+    "desktop.a11y.tree-tokens.typical",
     "desktop.f.alert-ms",
     "desktop.f.blind-type-refused",
     "desktop.cost.idle.extra-mb",
@@ -151,6 +154,14 @@ export const suite: Suite = {
       const t = await typing(vm, 20);
       for (const [app, r] of Object.entries(t.exact)) ctx.quality(`desktop.type.${app}.exact`, r.of ? r.exact / r.of : 0, "of 1", "higher", { n: Math.max(1, r.of), note: `the test string typed into ${app}, exact${r.note ? ` (${r.note})` : ""}` });
       speed(ctx, "desktop.type.ms", t.ms, "the test string (40 characters) typed into Chromium by the VM's own command (C0's typefix.sh)");
+
+      const tree = await a11y(vm, 10);
+      ctx.quality("desktop.a11y.form-match", tree.formMatch, `of ${tree.formOf}`, "higher", { n: tree.formOf, note: `the form's controls where desktop find (the accessibility tree) gives the DOM's centre within 2 px${tree.misses.length ? `; not: ${tree.misses.join("; ").slice(0, 300)}` : ""}` });
+      speed(ctx, "desktop.a11y.find", tree.findMs, `desktop find button Send on the form, ${NOTE.agent}`);
+      speed(ctx, "desktop.a11y.find-vm", tree.findInVm, `desktop find button Send, a process each, ${NOTE.vm}`);
+      speed(ctx, "desktop.a11y.tree", tree.treeMs, `desktop tree of a typical front page (typical.html), ${NOTE.agent}`);
+      ctx.quality("desktop.a11y.tree-tokens.typical", tree.typical.tokens, "tokens", "lower", { resolution: Math.max(50, tree.typical.tokens * 0.05), note: `desktop tree of a typical front page, as a model reads it: characters / 4 (${tree.typical.lines} lines)` });
+      ctx.quality("desktop.a11y.tree-tokens.settings", tree.settings.tokens, "tokens", "lower", { resolution: Math.max(50, tree.settings.tokens * 0.05), note: `desktop tree of the browser's own settings (chrome://settings/appearance): characters / 4 (${tree.settings.lines} lines)` });
 
       const runs: TaskRun[] = [];
       const tasksFrom = performance.now();

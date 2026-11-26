@@ -209,7 +209,7 @@ KEY_ALIASES = {"enter": "Return", "return": "Return", "esc": "Escape", "escape":
                "end": "End", "insert": "Insert", "ins": "Insert", "menu": "Menu", "print": "Print"}
 WM_NAMES = ("_NET_WM_NAME", "UTF8_STRING", "WM_NAME", "STRING", "WM_CLASS", "_NET_ACTIVE_WINDOW", "WINDOW", "_NET_CLIENT_LIST",
             "_NET_WM_WINDOW_TYPE", "ATOM", "_NET_WM_WINDOW_TYPE_DIALOG", "WM_TRANSIENT_FOR", "_NET_WM_PID", "CARDINAL",
-            "_NET_CLIENT_LIST_STACKING", "WM_PROTOCOLS", "WM_DELETE_WINDOW", "PRIMARY", "CLIPBOARD", "TARGETS", "TEXT", "text/plain;charset=utf-8", "text/plain", "DESKD_SELECTION")
+            "_NET_CLIENT_LIST_STACKING", "WM_PROTOCOLS", "WM_DELETE_WINDOW", "PRIMARY", "CLIPBOARD", "TARGETS", "TEXT", "text/plain;charset=utf-8", "text/plain", "DESKD_SELECTION", "AT_SPI_BUS")
 
 
 class Display:
@@ -827,6 +827,288 @@ def describe_dialog(d):
                                           ", with a text box" if d["type"] == "prompt" else "", "; desktop dialog accept <text> answers its text box" if d["type"] == "prompt" else ""))
 
 
+# ---------------------------------------------------------------- the accessibility tree (AT-SPI)
+
+LAUNCHER = "/usr/libexec/at-spi-bus-launcher"
+LAUNCHER_COMM = os.path.basename(LAUNCHER)[:15]  # (as /proc names it: a process's name is cut at 15 characters)
+# AT-SPI's roles by number (AtspiRole), in its own words.
+ROLES = ("invalid", "accelerator label", "alert", "animation", "arrow", "calendar", "canvas", "check box", "check menu item",
+         "color chooser", "column header", "combo box", "date editor", "desktop icon", "desktop frame", "dial", "dialog",
+         "directory pane", "drawing area", "file chooser", "filler", "focus traversable", "font chooser", "frame", "glass pane",
+         "html container", "icon", "image", "internal frame", "label", "layered pane", "list", "list item", "menu", "menu bar",
+         "menu item", "option pane", "page tab", "page tab list", "panel", "password text", "popup menu", "progress bar",
+         "push button", "radio button", "radio menu item", "root pane", "row header", "scroll bar", "scroll pane", "separator",
+         "slider", "spin button", "split pane", "status bar", "table", "table cell", "table column header", "table row header",
+         "tearoff menu item", "terminal", "text", "toggle button", "tool bar", "tool tip", "tree", "tree table", "unknown",
+         "viewport", "window", "extended", "header", "footer", "paragraph", "ruler", "application", "autocomplete", "edit bar",
+         "embedded", "entry", "chart", "caption", "document frame", "heading", "page", "section", "redundant object", "form",
+         "link", "input method window", "table row", "tree item", "document spreadsheet", "document presentation",
+         "document text", "document web", "document email", "comment", "list box", "grouping", "image map", "notification",
+         "info bar", "level bar", "title bar", "block quote", "audio", "video", "definition", "article", "landmark", "log",
+         "marquee", "math", "rating", "timer", "static", "math fraction", "math root", "subscript", "superscript",
+         "description list", "description term", "description value", "footnote", "content deletion", "content insertion",
+         "mark", "suggestion", "push button menu", "switch")
+# What a person acts on: clicks, types into, picks from.
+ACTABLE = {"check box", "check menu item", "combo box", "entry", "link", "list item", "menu", "menu item", "page tab",
+           "password text", "push button", "push button menu", "radio button", "radio menu item", "slider", "spin button",
+           "switch", "toggle button", "tree item", "text"}
+# The words a model may use for a role, and the role they mean.
+ROLE_WORDS = {"button": "push button", "checkbox": "check box", "combobox": "combo box", "select": "combo box", "textbox": "entry",
+              "field": "entry", "input": "entry", "tab": "page tab", "radio": "radio button", "menuitem": "menu item",
+              "toggle": "toggle button", "password": "password text", "spinbutton": "spin button", "listitem": "list item",
+              "treeitem": "tree item"}
+# AT-SPI's states by bit (AtspiStateType): those said beside a node, and those that decide whether it is on the screen.
+STATE = {"active": 1, "checked": 4, "collapsed": 5, "defunct": 6, "editable": 7, "expanded": 10, "focused": 12, "multi-line": 17,
+         "pressed": 20, "selected": 23, "sensitive": 24, "showing": 25, "visible": 30, "required": 33, "read-only": 43}
+SAID = ("focused", "checked", "selected", "pressed", "expanded", "collapsed", "required", "read-only")
+WINDOWS = ("frame", "dialog", "window", "alert", "file chooser")
+
+
+def _role(word):
+    word = re.sub(r"[_-]+", " ", word.strip().lower())
+    return ROLE_WORDS.get(word.replace(" ", ""), word)
+
+
+ACC, PROPS = "org.a11y.atspi.Accessible", "org.freedesktop.DBus.Properties"
+ALL, ANY = 1, 2  # (Collection's match types: with "invalid", a rule matches nothing)
+
+
+def _bits(numbers, words):
+    """Numbers as the bit set a match rule takes: words of 32 bits, signed."""
+    w = [0] * words
+    for n in numbers:
+        w[n // 32] |= 1 << (n % 32)
+    return [v - (1 << 32) if v >= 1 << 31 else v for v in w]
+
+
+class Tree:
+    """The accessibility tree (AT-SPI) beside the pixels, off the accessibility bus that starts with the desktop. A
+    window's nodes on the screen and acted on come in one call, the app searching its own tree (Collection.GetMatches:
+    this at-spi2-core, 2.56, has no Cache.GetItems), then each one's name, role, state and box with many calls in flight
+    (a walk, one call at a time, is mostly waiting); an app without Collection is walked the same way. GTK 4 says 0,0
+    for every place on the screen, so it is asked for its window's, and that window's place on the screen (from X) is
+    added."""
+
+    REGISTRY = ("org.a11y.atspi.Registry", "/org/a11y/atspi/accessible/root")
+    IN_FLIGHT = 8
+
+    def __init__(self, address=None, call=None, window_origin=None):
+        self.address = address  # () -> the bus's address (the display's AT_SPI_BUS)
+        self._call = call  # (tests pass their own bus)
+        self.window_origin = window_origin  # (pid, title) -> where that app's window is on the screen, or None
+        self.conn = None
+        self.known = {}  # bus name -> the app: its name, its toolkit, its process
+        self.refs = {}  # n -> the node said as [n]
+        self.lock = threading.RLock()
+        self.pool = None
+
+    def call(self, bus, path, iface, method, signature=None, args=None):
+        if self._call:
+            return self._call(bus, path, iface, method, signature, args)
+        from gi.repository import Gio, GLib
+        if self.conn is None or self.conn.is_closed():
+            address = self.address() if self.address else ""
+            if not address:
+                raise Failed("the accessibility bus isn't up (it starts with the desktop: desktop start)")
+            self.conn = Gio.DBusConnection.new_for_address_sync(address, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
+        try:
+            reply = self.conn.call_sync(bus, path, iface, method, GLib.Variant(signature, args) if signature else None, None, Gio.DBusCallFlags.NONE, int(CDP_BOUND * 1000), None)
+        except GLib.Error as error:
+            raise Failed("the accessibility bus didn't answer %s: %s" % (method, error.message))
+        return reply.unpack() if reply is not None else ()
+
+    def _many(self, fn, items):
+        """fn of each item, many in flight (the bus answers each app's calls in turn; a caller that waits for each is
+        mostly waiting)."""
+        if len(items) < 2:
+            return [fn(i) for i in items]
+        if self.pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+            self.pool = ThreadPoolExecutor(self.IN_FLIGHT, thread_name_prefix="tree")
+        return list(self.pool.map(fn, items))
+
+    def _app(self, bus, path):
+        if bus not in self.known:
+            def get(iface, name):
+                try:
+                    return self.call(bus, path, PROPS, "Get", "(ss)", (iface, name))[0]
+                except Failed:
+                    return ""
+            try:
+                pid = self.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionUnixProcessID", "(s)", (bus,))[0]
+            except Failed:
+                pid = 0
+            self.known[bus] = {"bus": bus, "path": path, "name": get(ACC, "Name"), "toolkit": get("org.a11y.atspi.Application", "ToolkitName"),
+                               "version": str(get("org.a11y.atspi.Application", "Version")), "pid": pid}
+        return self.known[bus]
+
+    def listen(self, session_bus):
+        """A resident listener: deskd's connection kept, a listener registered with the registry, and the bus's
+        IsEnabled on, so a toolkit that asks whether anything listens (Qt, Chromium without its switch) shows its tree
+        to the apps started after it."""
+        try:
+            self.call("org.a11y.atspi.Registry", "/org/a11y/atspi/registry", "org.a11y.atspi.Registry", "RegisterEvent", "(sass)", ("window:activate", [], ""))
+        except Failed:
+            self.call("org.a11y.atspi.Registry", "/org/a11y/atspi/registry", "org.a11y.atspi.Registry", "RegisterEvent", "(s)", ("window:activate",))
+        if session_bus and not self._call:
+            from gi.repository import Gio, GLib
+            bus = Gio.DBusConnection.new_for_address_sync(session_bus, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
+            bus.call_sync("org.a11y.Bus", "/org/a11y/bus", PROPS, "Set", GLib.Variant("(ssv)", ("org.a11y.Status", "IsEnabled", GLib.Variant("b", True))), None, Gio.DBusCallFlags.NONE, 2000, None)
+            bus.close_sync(None)
+
+    def apps(self):
+        (children,) = self.call(*self.REGISTRY, ACC, "GetChildren")
+        apps = [self._app(bus, path) for bus, path in children]
+        self.known = {a["bus"]: a for a in apps}  # (an app that left is forgotten)
+        return apps
+
+    @staticmethod
+    def has(node, state):
+        return bool(node["states"] >> STATE[state] & 1)
+
+    def node(self, ref, app, window=None):
+        """A node by its reference: its name, its role and its states."""
+        bus, path = ref
+        name = self.call(bus, path, PROPS, "Get", "(ss)", (ACC, "Name"))[0]
+        role = self.call(bus, path, ACC, "GetRole")[0]
+        states = self.call(bus, path, ACC, "GetState")[0]
+        return {"bus": bus, "path": path, "name": name or "", "role": ROLES[role] if role < len(ROLES) else "role %d" % role,
+                "states": sum((int(word) & 0xFFFFFFFF) << (32 * i) for i, word in enumerate(states)), "app": app, "window": window}
+
+    def windows(self, app):
+        """An app's windows (its frames and dialogs), each a node."""
+        (refs,) = self.call(app["bus"], app["path"], ACC, "GetChildren")
+        found = self._many(lambda ref: self._try(self.node, ref, app), list(refs))
+        return [w for w in found if w and w["role"] in WINDOWS]
+
+    @staticmethod
+    def _try(fn, *args):
+        try:
+            return fn(*args)
+        except Failed:
+            return None
+
+    def matches(self, window, roles):
+        """A window's nodes on the screen in those roles: the app searches its own tree when it can (Collection), else
+        the tree is walked, many calls in flight, never below a node that isn't showing."""
+        rule = ((_bits([STATE["showing"], STATE["visible"]], 2), ALL, {}, ALL, _bits([ROLES.index(r) for r in roles], 5), ANY, [], ALL, False), 1, 0, True)
+        try:
+            (refs,) = self.call(window["bus"], window["path"], "org.a11y.atspi.Collection", "GetMatches", "((aiia{ss}iaiiasib)uib)", rule)
+            return [(b or window["bus"], p) for b, p in refs]
+        except Failed as error:
+            if "Unknown" not in str(error):
+                raise
+        found, level, seen = [], [(window["bus"], window["path"])], 0
+        while level and seen < 20000:
+            seen += len(level)
+            nodes = [n for n in self._many(lambda ref: self._try(self.node, ref, window["app"]), level) if n]
+            showing = [n for n in nodes if self.has(n, "showing") or n["path"] == window["path"]]
+            found += [(n["bus"], n["path"]) for n in showing if n["role"] in roles and self.has(n, "visible")]
+            kids = self._many(lambda n: self._try(self.call, n["bus"], n["path"], ACC, "GetChildren") or ([],), showing)
+            level = [(b or window["bus"], p) for (refs,) in kids for b, p in refs]
+        return found
+
+    def box(self, node):
+        """Where a node is on the screen now: x, y, width, height."""
+        app = node["app"]
+        own = app["toolkit"].upper() == "GTK" and app["version"].startswith("4")
+        (box,) = self.call(node["bus"], node["path"], "org.a11y.atspi.Component", "GetExtents", "(u)", (1 if own else 0,))
+        x, y, w, h = box
+        if own:
+            origin = self.window_origin(app["pid"], (node.get("window") or {}).get("name", "")) if self.window_origin else None
+            if not origin:
+                raise Failed("%s's window isn't on the screen" % (app["name"] or "the app"))
+            x, y = x + origin[0], y + origin[1]
+        return x, y, w, h
+
+    def _on_screen(self, node):
+        if self.has(node, "defunct") or not (self.has(node, "showing") and self.has(node, "visible")):
+            return None
+        try:
+            x, y, w, h = self.box(node)
+        except Failed:
+            return None
+        if w <= 0 or h <= 0 or x + w <= 0 or y + h <= 0 or x >= W or y >= H:
+            return None
+        return x, y, w, h
+
+    def _chosen(self, app=None, pid=None):
+        apps = self.apps()
+        if app:
+            chosen = [a for a in apps if re.search(app, a["name"], re.I)]
+            if not chosen:
+                raise Failed("no app named like %s is on the accessibility bus (on it: %s)" % (app, ", ".join(a["name"] for a in apps) or "none"))
+            return chosen
+        return sorted(apps, key=lambda a: a["pid"] != pid) if pid else apps
+
+    def actable(self, app=None, pid=None, title=None, limit=400):
+        """The nodes a person acts on, on the screen: of the app named, else of the window with the keyboard's focus
+        (its process and title, from X), else every app's. Each is given a ref, which `click ref=N` takes."""
+        with self.lock:
+            chosen = self._chosen(app, pid)
+            if not app and pid:
+                chosen = [a for a in chosen if a["pid"] == pid] or chosen
+            found = []
+            for a in chosen:
+                windows = [w for w in self.windows(a) if self.has(w, "showing")]
+                # The window with the focus, when it is this app's; else its active one; else every one on the screen.
+                these = [w for w in windows if title and w["name"] == title] or [w for w in windows if self.has(w, "active")] or windows
+                for w in these:
+                    refs = self.matches(w, ACTABLE)
+
+                    def one(ref, a=a, w=w):
+                        n = self._try(self.node, ref, a, w)
+                        if not n or (n["role"] == "text" and not self.has(n, "editable")):
+                            return None
+                        box = self._on_screen(n)
+                        return (n, box) if box else None
+                    found += [f for f in self._many(one, refs) if f]
+                    if len(found) >= limit:
+                        break
+            found = found[:limit]
+            self.refs = {i + 1: n for i, (n, _) in enumerate(found)}
+            return [(i + 1, n, box) for i, (n, box) in enumerate(found)]
+
+    def find(self, role, name, pid=None):
+        """The first node on the screen with that role and a name like that (any case), the app with the focus searched
+        first: it, its box and a ref."""
+        role, name = _role(role), name.strip().lower()
+        if role not in ROLES:
+            raise Refused("there is no role %s (desktop tree shows the roles on the screen)" % json.dumps(role))
+        with self.lock:
+            for a in self._chosen(pid=pid):
+                for w in [w for w in self.windows(a) if self.has(w, "showing")]:
+                    for ref in self.matches(w, [role]):
+                        n = self._try(self.node, ref, a, w)
+                        if n and name in n["name"].lower():
+                            box = self._on_screen(n)
+                            if box:
+                                ref_n = max(self.refs, default=0) + 1
+                                self.refs[ref_n] = n
+                                return ref_n, n, box
+        return None
+
+    def at(self, ref):
+        """A node said before, where it is now."""
+        with self.lock:
+            node = self.refs.get(ref)
+            if node is None:
+                raise Refused("there is no ref=%d: desktop tree (or find) gives them" % ref)
+            try:
+                box = self.box(node)
+            except Failed:
+                raise Failed("ref=%d (%s \"%s\") is gone: desktop tree, again" % (ref, node["role"], node["name"]))
+            if box[2] <= 0 or box[3] <= 0:
+                raise Failed("ref=%d (%s \"%s\") isn't on the screen now" % (ref, node["role"], node["name"]))
+            return node, box
+
+
+def say_node(ref, node, box):
+    x, y, w, h = box
+    states = [s for s in SAID if Tree.has(node, s)] + ([] if Tree.has(node, "sensitive") else ["disabled"])
+    return "[%d] %s \"%s\" at %d,%d (%dx%d)%s" % (ref, node["role"], node["name"][:80], x + w // 2, y + h // 2, w, h, (" " + " ".join(states)) if states else "")
+
+
 # ---------------------------------------------------------------- the desktop's processes
 
 def _alive(pid):
@@ -859,10 +1141,13 @@ class Pieces:
         self.browser = None  # (its process id, when it was started)
         self.kept = {}  # what deskd started and keeps running: its name -> (the process, when it was started)
         self.ended = None  # told a kept piece's name as it ends (the desk's keeper)
+        self.session_bus = None  # (its address, its process id)
         self.lock = threading.Lock()  # (the keeper and a command may both find one gone: one of them starts it)
 
     def _spawn(self, argv, log, keep=None):
-        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=open(os.path.join(RUN, log), "ab"), stderr=subprocess.STDOUT, start_new_session=True, env=dict(os.environ, DISPLAY=DISPLAY))
+        # (Every app it starts shows its accessibility tree: Chromium's switch, and Qt's, as the image's own environment has them.)
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=open(os.path.join(RUN, log), "ab"), stderr=subprocess.STDOUT, start_new_session=True,
+                             env=dict(os.environ, DISPLAY=DISPLAY, ACCESSIBILITY_ENABLED="1", QT_LINUX_ACCESSIBILITY_ALWAYS_ON="1"))
         if keep:
             self.kept[keep] = (p, time.monotonic())
             threading.Thread(target=self._wait, args=(keep, p), daemon=True, name="keep-" + keep).start()
@@ -897,6 +1182,40 @@ class Pieces:
     def window_manager_running(self):
         return bool(_own("openbox"))
 
+    def a11y_bus(self):
+        """The accessibility bus's address, as the display says it (AT_SPI_BUS on its root window), or ""."""
+        try:
+            d = Display()
+            try:
+                return (d.prop(d.root, "AT_SPI_BUS", "STRING") or "").strip("\0")
+            finally:
+                d.x.XCloseDisplay(d.dpy)
+        except Exception:
+            return ""
+
+    def a11y_running(self):
+        return bool(_own(LAUNCHER_COMM))
+
+    def _buses(self):
+        """A session bus and the accessibility bus on it, up before the apps: each app on the screen after them shows
+        its tree there (Tree). What deskd starts is told the session bus; an app started elsewhere finds the
+        accessibility bus on the display (AT_SPI_BUS), as AT-SPI looks for it."""
+        if self.a11y_running():
+            return
+        # (Their sockets in deskd's own directory, not the workspace's .cache: the accessibility bus puts its socket in
+        # the runtime directory.)
+        os.environ["XDG_RUNTIME_DIR"] = RUN
+        if not (self.session_bus and _alive(self.session_bus[1])):
+            ran = subprocess.run(["dbus-daemon", "--session", "--fork", "--print-address=1", "--print-pid=1"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5)
+            lines = ran.stdout.split("\n")
+            if ran.returncode != 0 or len(lines) < 2 or not lines[1].strip().isdigit():
+                raise Failed("the session bus didn't start (%s)" % (ran.stderr.strip()[-200:] or ran.returncode))
+            self.session_bus = (lines[0].strip(), int(lines[1]))
+            os.environ["DBUS_SESSION_BUS_ADDRESS"] = self.session_bus[0]
+        # (Not waited for: an app looks for it once it is up, a second into its start; Chromium found it 26 times of 26
+        # on Ultra without the 90 ms this wait took.)
+        self._spawn([LAUNCHER, "--launch-immediately"], "a11y.log", keep="a11y")
+
     def browser_running(self):
         """Its port answers, or the browser started here is still starting. Never by a process's name: a killed browser's
         children linger after it (C1's first run: the next command found "chromium" and didn't start it again)."""
@@ -922,17 +1241,24 @@ class Pieces:
             self.until(self.display_up, "the display", "display.log")
         if not _own("openbox"):
             self._spawn(["openbox"], "windows.log", keep="windows")
+        self._buses()
         if not self.browser_running():
             # Its own inner sandbox is off: the VM's restrictions (no new privileges, no capabilities) forbid it, and the
             # microVM is the boundary. Its profile is on the workspace, so what is signed in there stays with this VM's disk.
             pid = self._spawn(["chromium", "--user-data-dir=" + self.profile, "--no-sandbox", "--test-type", "--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble",
-                               "--disable-gpu", "--disable-dev-shm-usage", "--remote-debugging-port=%d" % PORT, "--remote-debugging-address=127.0.0.1",
+                               "--disable-gpu", "--disable-dev-shm-usage", "--remote-debugging-port=%d" % PORT, "--remote-debugging-address=127.0.0.1", "--force-renderer-accessibility",
                                "--window-size=%d,%d" % (W, H), "--window-position=0,0", "about:blank"], "browser.log", keep="browser")
             # (Not waited for here: what reads or opens a page waits for its port, as before.)
             self.browser = (pid, time.monotonic())
 
     def stop(self):
-        for comm in ("chromium", "openbox", "Xvfb"):
+        if self.session_bus:
+            try:
+                os.kill(self.session_bus[1], signal.SIGTERM)
+            except OSError:
+                pass
+            self.session_bus = None
+        for comm in ("chromium", LAUNCHER_COMM, "openbox", "Xvfb"):
             for pid in _own(comm):
                 try:
                     os.kill(pid, signal.SIGTERM)
@@ -949,14 +1275,16 @@ def _whole(s, what):
 
 
 class Desk:
-    def __init__(self, pieces=None, display=None, watch=None, browser=None, now=time.monotonic, sleep=time.sleep):
+    def __init__(self, pieces=None, display=None, watch=None, browser=None, now=time.monotonic, sleep=time.sleep, tree=None):
         self.pieces = pieces or Pieces()
         self._display, self._watch, self._browser = display, watch, browser
+        self._tree = tree
         self.now, self.sleep = now, sleep
         self.lock = threading.RLock()
         self.last_click = None  # (when, x, y): clicks at one place within the double-click time count as one burst
         self.navigating_since = None
         self.stopping = False
+        self._listening = False
 
     # -- what it holds, brought up on first use (once: the first commands may come together)
     def ready(self):
@@ -1056,6 +1384,43 @@ class Desk:
     def browser(self):
         self.ready()
         return self._browser
+
+    @property
+    def tree(self):
+        self.ready()
+        # The accessibility bus's resident listener, from the first lookup on, off the answer's path (at the desktop's
+        # start it slowed the browser's first page on one CPU).
+        if not self._listening:
+            self._listening = True
+            threading.Thread(target=self._listen, daemon=True, name="listen").start()
+        return self._the_tree()
+
+    def _the_tree(self):
+        with self.lock:
+            if self._tree is None:
+                self._tree = Tree(address=self.pieces.a11y_bus, window_origin=self.window_origin)
+            return self._tree
+
+    def _listen(self):
+        try:
+            self._the_tree().listen((self.pieces.session_bus or ("",))[0] if hasattr(self.pieces, "session_bus") else "")
+        except Exception as error:
+            sys.stderr.write("deskd: the accessibility bus's listener didn't start: %s\n" % error)
+
+    def window_origin(self, pid, title=""):
+        """Where an app's window is on the screen (its inside's top left), by its process (_NET_WM_PID) and title."""
+        with self.lock:
+            mine = [w for w in self.d.clients() if (self.d.prop(w, "_NET_WM_PID", "CARDINAL", as_ulongs=True) or [0])[0] == pid]
+            box = next((self.d.window(w)["box"] for w in mine if not title or self.d.name(w) == title), None) or (self.d.window(mine[0])["box"] if mine else None)
+            return (box[0], box[1]) if box else None
+
+    def focused_app(self):
+        """The window with the keyboard's focus: its process and its title, for the tree to start from."""
+        with self.lock:
+            w = self.d.active()
+            if not w:
+                return None, None
+            return (self.d.prop(w, "_NET_WM_PID", "CARDINAL", as_ulongs=True) or [None])[0], self.d.name(w)
 
     def focus(self):
         w = self.d.active()
@@ -1414,6 +1779,10 @@ desktop key <key>... [--repeat n]  press keys, e.g. Return, Tab, Escape, ctrl+l,
 desktop settle                     wait until the screen is still (150 ms with nothing drawn, 3 s at most)
 desktop windows                    the windows on the screen, and which has the keyboard's focus
 desktop focus [window]             the window with the focus; with a name, that window brought forward with it
+desktop tree [app]                 what can be acted on in the window with the focus (or that app), from its
+                                   accessibility tree: each with a ref, its role, its name and where it is
+desktop find <role> <name>         where one is: x,y and its ref (desktop find button "Send")
+desktop click ref=<n> [button]     click a node desktop tree or find gave, where it is at that moment
 Every action answers with what it did, whether the screen changed, and the focus; the names Anthropic's computer
 toolset uses work too (left_click, mouse_move, left_click_drag, ...).
 The display is 1280 by 800; x runs right from 0, y runs down from 0. The clipboard is xclip's
@@ -1515,7 +1884,38 @@ def cli(desk, argv, cwd="/work", env=None):
                     raise Refused("--eyes names a model as provider/model")
                 eyes, args = args[1], args[2:]
             return look(desk, " ".join(args), env, eyes)
-        if verb == "click":
+        if verb == "tree":
+            pid, title = desk.focused_app()
+            said = desk.tree.actable(app=" ".join(args) or None, pid=pid, title=title)
+            if not said:
+                return 0, "nothing to act on is on the accessibility bus there (desktop tree <app> names one; desktop shot to look)\n", ""
+            lines, window = [], None
+            for ref, node, box in said:
+                w = node.get("window") or {}
+                if w.get("path") != window:
+                    window = w.get("path")
+                    lines.append("%s \"%s\"" % (node["app"]["name"], w.get("name", "")))
+                lines.append("  " + say_node(ref, node, box))
+            return 0, "\n".join(lines) + "\n", ""
+        if verb == "find":
+            if len(args) < 2:
+                raise Refused('find takes a role and a name: desktop find button "Send"')
+            pid, _ = desk.focused_app()
+            got = desk.tree.find(args[0], " ".join(args[1:]), pid=pid)
+            if not got:
+                return 1, "", "desktop: no %s named like \"%s\" is on the screen (desktop tree lists what is)\n" % (_role(args[0]), " ".join(args[1:]))
+            ref, node, (x, y, w, h) = got
+            return 0, "%d,%d · %s\n" % (x + w // 2, y + h // 2, say_node(ref, node, (x, y, w, h))), ""
+        if verb == "click" and args and args[0].startswith("ref="):
+            ref = _whole(args[0][4:], "ref=")
+            node, (x, y, w, h) = desk.tree.at(ref)
+            kind = args[1] if len(args) > 1 else "left"
+            name = {"left": "left_click", "right": "right_click", "middle": "middle_click", "double": "double_click", "triple": "triple_click"}.get(kind)
+            if not name:
+                raise Refused("the button is left, right, middle, double or triple")
+            answer = desk.tool(name, {"coordinate": [x + w // 2, y + h // 2]})
+            answer = dict(answer, did="%s (ref=%d, %s \"%s\")" % (answer.get("did", ""), ref, node["role"], node["name"][:80]))
+        elif verb == "click":
             if len(args) < 2:
                 raise Refused("click takes two whole numbers: desktop click <x> <y> [left|right|middle|double|triple]")
             x, y = _whole(args[0], "click"), _whole(args[1], "click")

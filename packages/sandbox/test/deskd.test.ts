@@ -729,7 +729,7 @@ spawned = []
 def spawn(argv, log, keep=None):
     spawned.append(argv[0]); time.sleep(0.05); return 4242
 p._spawn = spawn
-d._own = lambda comm: [1] if comm in ("Xvfb", "openbox") else []
+d._own = lambda comm: [1] if comm in ("Xvfb", "openbox", "at-spi-bus-laun") else []
 d._alive = lambda pid: True
 p.display_up = lambda: True
 p.browser_up = lambda: False
@@ -747,5 +747,199 @@ print(json.dumps(spawned))`)).toEqual(["chromium"]);
     const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? `close ${t.window}` : "stop"));
     expect(order.at(-1)).toBe("stop");
     expect(order.filter((o) => o.startsWith("close")).sort()).toEqual(["close 0x400001", "close 0x500001", "close 0x600001"]);
+  });
+});
+
+describe("the accessibility tree beside the pixels (step 6)", () => {
+  /**
+   * An accessibility bus as AT-SPI's registry and its apps answer it: Chromium (its page's form, in the window with the
+   * focus, and a window behind it), and a GTK 4 app, whose boxes are its own window's, not the screen's.
+   */
+  const BUS = `
+SHOWING, VISIBLE, SENSITIVE, FOCUSED, EDITABLE, ACTIVE, COLLAPSED = 1 << 25, 1 << 30, 1 << 24, 1 << 12, 1 << 7, 1 << 1, 1 << 5
+ON = SHOWING | VISIBLE | SENSITIVE
+ROLE = {r: i for i, r in enumerate(d.ROLES)}
+APPS = {":1.5": {"name": "Chromium", "toolkit": "Chromium", "version": "1.0", "pid": 300}, ":1.9": {"name": "notes", "toolkit": "GTK", "version": "4.18.6", "pid": 400}}
+# Each node: its app, its parent, its role, its name, its states, its box (in the screen's space; GTK 4's in its window's).
+NODES = {
+    "/f1": (":1.5", "/r", "frame", "Form - Chromium", ON | ACTIVE, (0, 0, 1280, 800)),
+    "/d1": (":1.5", "/f1", "document web", "Form", ON, (0, 80, 1280, 720)),
+    "/n1": (":1.5", "/d1", "entry", "Name", ON | FOCUSED | EDITABLE, (100, 200, 300, 24)),
+    "/n2": (":1.5", "/d1", "entry", "Email", ON | EDITABLE, (100, 240, 300, 24)),
+    "/n3": (":1.5", "/d1", "combo box", "Plan", ON | COLLAPSED, (100, 280, 200, 24)),
+    "/n4": (":1.5", "/d1", "check box", "I agree to the terms", ON, (100, 320, 13, 13)),
+    "/n5": (":1.5", "/d1", "push button", "Send", ON, (100, 360, 60, 24)),
+    "/n6": (":1.5", "/d1", "push button", "Hidden", VISIBLE | SENSITIVE, (100, 400, 60, 24)),
+    "/n7": (":1.5", "/d1", "label", "Name", ON, (100, 180, 60, 18)),
+    "/n8": (":1.5", "/d1", "link", "Far below", ON, (100, 2000, 80, 18)),
+    "/n9": (":1.5", "/d1", "text", "Read only", ON, (100, 440, 300, 18)),
+    "/n10": (":1.5", "/d1", "push button", "Not now", VISIBLE | SHOWING, (200, 360, 60, 24)),
+    "/f2": (":1.5", "/r", "frame", "Other - Chromium", ON, (0, 0, 1280, 800)),
+    "/m1": (":1.5", "/f2", "push button", "Behind", ON, (500, 500, 60, 24)),
+    "/g0": (":1.9", "/r", "frame", "Notes", ON | ACTIVE, (0, 0, 400, 300)),
+    "/g1": (":1.9", "/g0", "push button", "Save", ON, (10, 10, 60, 30)),
+}
+COLLECTION = True  # (an app without it is walked)
+calls, spaces = [], []
+def kids(bus, path):
+    return [(bus, p) for p, n in NODES.items() if n[0] == bus and n[1] == path]
+def under(bus, path):
+    out = []
+    for ref in kids(bus, path):
+        out += [ref] + under(*ref)
+    return out
+def unbits(words):
+    return {i * 32 + b for i, w in enumerate(words) for b in range(32) if (w & 0xFFFFFFFF) >> b & 1}
+def call(bus, path, iface, method, signature, args):
+    calls.append(method)
+    if method == "GetChildren":
+        return ([(b, "/r") for b in APPS],) if bus == "org.a11y.atspi.Registry" else (kids(bus, path),)
+    if method == "GetConnectionUnixProcessID":
+        return (APPS[args[0]]["pid"],)
+    if method == "Get" and path == "/r":
+        return ({"Name": APPS[bus]["name"], "ToolkitName": APPS[bus]["toolkit"], "Version": APPS[bus]["version"]}[args[1]],)
+    if path not in NODES:
+        raise d.Failed("gone")
+    n = NODES[path]
+    if method == "Get":
+        return (n[3],)
+    if method == "GetRole":
+        return (ROLE[n[2]],)
+    if method == "GetState":
+        return ([n[4] & 0xFFFFFFFF, n[4] >> 32],)
+    if method == "GetMatches":
+        if not COLLECTION:
+            raise d.Failed("the accessibility bus didn't answer GetMatches: org.freedesktop.DBus.Error.UnknownMethod")
+        (st, stm, _, _, ro, rom, _, _, _), _, _, _ = args
+        want, roles = unbits(st), unbits(ro)
+        return ([r for r in under(bus, path) if all(NODES[r[1]][4] >> s & 1 for s in want) and ROLE[NODES[r[1]][2]] in roles],)
+    if method == "GetExtents":
+        spaces.append([path, args[0]])
+        own = APPS[bus]["toolkit"] == "GTK"
+        return (n[5],) if args[0] == (1 if own else 0) else ((0, 0) + n[5][2:],)
+    raise AssertionError(method)
+origins = []
+def origin(pid, title):
+    origins.append([pid, title]); return (200, 150) if pid == 400 else None
+t = d.Tree(call=call, window_origin=origin)
+`;
+
+  test("the window with the focus, as what can be acted on in it: each node a line with its ref, role, name, centre and size; nothing off the screen, hidden, inert or behind", () => {
+    const got = py(`${BUS}
+said = t.actable(pid=300, title="Form - Chromium")
+print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "refs": sorted(t.refs), "matches": calls.count("GetMatches"), "walked": calls.count("GetChildren")}))`) as { lines: string[]; refs: number[]; matches: number; walked: number };
+    expect(got.lines).toEqual([
+      '[1] entry "Name" at 250,212 (300x24) focused',
+      '[2] entry "Email" at 250,252 (300x24)',
+      '[3] combo box "Plan" at 200,292 (200x24) collapsed',
+      '[4] check box "I agree to the terms" at 106,326 (13x13)',
+      '[5] push button "Send" at 130,372 (60x24)',
+      '[6] push button "Not now" at 230,372 (60x24) disabled',
+    ]);
+    expect(got.refs).toEqual([1, 2, 3, 4, 5, 6]);
+    // The app searches its own tree, in one call for the window: no walk (the registry's list and the app's windows only).
+    expect(got).toMatchObject({ matches: 1, walked: 2 });
+  });
+
+  test("an app that can't search its own tree (no Collection) is walked, many calls in flight, never below what isn't showing: the same nodes", () => {
+    const got = py(`${BUS}
+COLLECTION = False
+said = t.actable(pid=300, title="Form - Chromium")
+print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said]}))`) as { lines: string[] };
+    expect(got.lines).toEqual([
+      '[1] entry "Name" at 250,212 (300x24) focused',
+      '[2] entry "Email" at 250,252 (300x24)',
+      '[3] combo box "Plan" at 200,292 (200x24) collapsed',
+      '[4] check box "I agree to the terms" at 106,326 (13x13)',
+      '[5] push button "Send" at 130,372 (60x24)',
+      '[6] push button "Not now" at 230,372 (60x24) disabled',
+    ]);
+  });
+
+  test("GTK 4 says 0,0 for every place on the screen: it is asked for its window's, and that window's place on the screen (from X) is added, by its process and title; others' are the screen's already", () => {
+    const got = py(`${BUS}
+said = t.actable(app="notes")
+print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "origins": origins, "spaces": spaces}))`) as { lines: string[]; origins: unknown[]; spaces: unknown[] };
+    expect(got.lines).toEqual(['[1] push button "Save" at 240,175 (60x30)']);
+    expect(got.origins).toEqual([[400, "Notes"]]);
+    expect(got.spaces).toEqual([["/g1", 1]]);
+    expect(py(`${BUS}
+t.actable(pid=300, title="Form - Chromium")
+print(json.dumps(origins))`)).toEqual([]);
+  });
+
+  test("find: the role in a model's words, the name in any case, the app with the focus first; its centre and a ref", () => {
+    const got = py(`${BUS}
+ref, node, box = t.find("button", "send", pid=300)
+miss = t.find("checkbox", "nothing like it", pid=300)
+try:
+    t.find("gizmo", "x"); bad = None
+except d.Refused as e:
+    bad = str(e)
+print(json.dumps({"ref": ref, "role": node["role"], "box": box, "miss": miss, "line": d.say_node(ref, node, box), "bad": bad}))`) as Record<string, unknown>;
+    expect(got).toEqual({ ref: 1, role: "push button", box: [100, 360, 60, 24], miss: null, line: '[1] push button "Send" at 130,372 (60x24)', bad: 'there is no role "gizmo" (desktop tree shows the roles on the screen)' });
+  });
+
+  test("a ref is clicked where its node is at that moment, not where it was said; one that's gone says so", () => {
+    const got = py(`${BUS}
+t.actable(pid=300, title="Form - Chromium")
+NODES["/n5"] = NODES["/n5"][:5] + ((100, 500, 60, 24),)
+node, box = t.at(5)
+del NODES["/n5"]
+try:
+    t.at(5); gone = None
+except d.Failed as e:
+    gone = str(e)
+try:
+    t.at(99); unknown = None
+except d.Refused as e:
+    unknown = str(e)
+print(json.dumps({"box": box, "gone": gone, "unknown": unknown}))`) as Record<string, unknown>;
+    expect(got).toEqual({ box: [100, 500, 60, 24], gone: 'ref=5 (push button "Send") is gone: desktop tree, again', unknown: "there is no ref=99: desktop tree (or find) gives them" });
+  });
+
+  test("an app that isn't on the bus is named among those that are", () => {
+    expect(py(`${BUS}
+try:
+    t.actable(app="kicad"); said = None
+except d.Failed as e:
+    said = str(e)
+print(json.dumps(said))`)).toBe("no app named like kicad is on the accessibility bus (on it: Chromium, notes)");
+  });
+
+  test("the bus's resident listener starts with the first lookup, once, off the answer's path: not at the desktop's start, where it slowed the browser's first page", () => {
+    expect(py(`
+class FakeTree:
+    listened = 0
+    def listen(self, session_bus): FakeTree.listened += 1
+class P:
+    session_bus = ("unix:path=/tmp/example-bus", 4321)
+    def start(self): pass
+desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=d.Browser(), tree=FakeTree())
+before = FakeTree.listened
+desk.tree; desk.tree; time.sleep(0.1)
+print(json.dumps({"before": before, "after": FakeTree.listened}))`)).toEqual({ before: 0, after: 1 });
+  });
+
+  test("the accessibility bus starts before the browser, which is started with its accessibility on", () => {
+    const got = py(`
+import tempfile
+p = d.Pieces(home=tempfile.mkdtemp())
+order = []
+class Ran:
+    returncode, stdout, stderr = 0, "unix:path=/tmp/example-session-bus,guid=0\\n4321\\n", ""
+d.subprocess.run = lambda argv, **kw: (order.append(argv[0]), Ran())[1]
+def spawn(argv, log, keep=None):
+    order.append(argv[0] if argv[0] != "chromium" else "chromium " + " ".join(a for a in argv if "accessib" in a)); return 4242
+p._spawn = spawn
+d._own = lambda comm: [1] if comm in ("Xvfb", "openbox") else []
+d._alive = lambda pid: False
+p.display_up = lambda: True
+p.browser_up = lambda: False
+p.a11y_bus = lambda: "unix:path=/tmp/example-a11y-bus"
+p.start()
+print(json.dumps({"order": order, "bus": d.os.environ.get("DBUS_SESSION_BUS_ADDRESS")}))`) as { order: string[]; bus: string };
+    expect(got.order).toEqual(["dbus-daemon", "/usr/libexec/at-spi-bus-launcher", "chromium --force-renderer-accessibility"]);
+    expect(got.bus).toBe("unix:path=/tmp/example-session-bus,guid=0");
   });
 });

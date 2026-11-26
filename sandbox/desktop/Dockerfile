@@ -17,6 +17,10 @@ RUN apt-get update \
 # run without it stopped at the first letter that isn't ASCII).
 ENV LANG=C.UTF-8
 
+# Every app shows its accessibility tree, whoever starts it (deskd, or the agent from its shell): Chromium's switch and
+# Qt's. The bus they show it on starts with the desktop (deskd), its address on the display (AT_SPI_BUS).
+ENV ACCESSIBILITY_ENABLED=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
+
 # No app asks a first-run or restore question: Mousepad never offers to restore a session, which it would after every
 # VM that ended without its goodbye. Compiled with GLib's own copy of its compiler (the one its triggers run; the
 # command of that name is in a package of its own), and checked as it is built, so an image whose seed didn't take is

@@ -20,6 +20,8 @@ describe("the desktop image", () => {
     for (const pkg of ["xvfb", "openbox", "chromium", "x11-utils", "python3-websocket", "fonts-noto-cjk", "xterm", "mousepad", "xclip", "at-spi2-core", "python3-pyatspi", "python3-xlib", "libturbojpeg0"]) expect(installed).toMatch(new RegExp(`apt-get install[^\\n]* ${pkg}( |$)`, "m"));
     // Text is UTF-8 in the image's own environment: a raw exec there stopped at the first letter that isn't ASCII.
     expect(dockerfile).toMatch(/^ENV LANG=C\.UTF-8$/m);
+    // Every app shows its accessibility tree, whoever starts it (deskd, or the agent from its shell).
+    expect(dockerfile).toMatch(/^ENV ACCESSIBILITY_ENABLED=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1$/m);
     // No app's first-run or restore question: the seed is installed, compiled, and checked as the image is built.
     expect(dockerfile).toContain("COPY seed/90_invincible-desktop.gschema.override /usr/share/glib-2.0/schemas/\n");
     expect(dockerfile).toContain('"$(ls /usr/lib/*/glib-2.0/glib-compile-schemas)" /usr/share/glib-2.0/schemas');
@@ -36,7 +38,7 @@ describe("the desktop image", () => {
     expect(OWN_IMAGES[DESKTOP_IMAGE]).toEqual({ context: "desktop", keeper: "invincible-desktop-image", base: "invincible/sandbox:1" });
   });
 
-  test("deskd starts the display, the window manager and the browser as the shell command did: nothing listening outside the VM", () => {
+  test("deskd starts the display, the window manager, the buses and the browser: nothing listening outside the VM", () => {
     // deskd's own Pieces.start, with what it would start written down instead (and found up once asked for).
     const script = `
 import importlib.util, json, sys
@@ -44,10 +46,15 @@ sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("deskd", sys.argv[1]); d = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)
 started = []
 p = d.Pieces(home="/work")
-p._spawn = lambda argv, log, keep=None: started.append(argv)
+p._spawn = lambda argv, log, keep=None: started.append(argv) or 4242
+class Ran:
+    returncode, stdout, stderr = 0, "unix:path=/tmp/dbus-example,guid=0\\n4321\\n", ""
+d.subprocess.run = lambda argv, **kw: started.append(argv) or Ran()
 p.display_up = lambda: any(a[0] == "Xvfb" for a in started)
 p.browser_up = lambda: any(a[0] == "chromium" for a in started)
-d._own = lambda comm: [1] if any(a[0] == comm for a in started) else []
+p.a11y_bus = lambda: "unix:path=/tmp/at-spi-example" if any(a[0] == d.LAUNCHER for a in started) else ""
+d._own = lambda comm: [1] if any(a[0].split("/")[-1][:15] == comm for a in started) else []
+d._alive = lambda pid: pid == 4321
 import os; os.makedirs = lambda *a, **k: None
 p.start(); p.start()
 print(json.dumps(started))`;
@@ -55,10 +62,14 @@ print(json.dumps(started))`;
     expect(ran.stderr.toString()).toBe("");
     const started = JSON.parse(ran.stdout.toString()) as string[][];
     // Once: a second start finds them running.
-    expect(started.map((argv) => argv[0])).toEqual(["Xvfb", "openbox", "chromium"]);
+    expect(started.map((argv) => argv[0])).toEqual(["Xvfb", "openbox", "dbus-daemon", "/usr/libexec/at-spi-bus-launcher", "chromium"]);
     expect(started[0]).toEqual(["Xvfb", ":1", "-screen", "0", "1280x800x24", "-nolisten", "tcp"]);
+    // The session bus on its own default (a socket in the VM, no address of ours to listen on): the accessibility
+    // bus is AT-SPI's launcher's, on the same.
+    expect(started[2]).toEqual(["dbus-daemon", "--session", "--fork", "--print-address=1", "--print-pid=1"]);
+    expect(started[3]).toEqual(["/usr/libexec/at-spi-bus-launcher", "--launch-immediately"]);
     // The browser: its profile on the workspace (a sign-in there stays with the agent's disk), its own inner sandbox
-    // off (the VM forbids it), and its debugging port on loopback alone.
-    for (const flag of ["--user-data-dir=/work/.config/chromium", "--no-sandbox", "--hide-crash-restore-bubble", "--no-first-run", "--remote-debugging-port=9222", "--remote-debugging-address=127.0.0.1", "--window-size=1280,800"]) expect(started[2]).toContain(flag);
+    // off (the VM forbids it), its debugging port on loopback alone, and its accessibility tree on.
+    for (const flag of ["--user-data-dir=/work/.config/chromium", "--no-sandbox", "--hide-crash-restore-bubble", "--no-first-run", "--remote-debugging-port=9222", "--remote-debugging-address=127.0.0.1", "--window-size=1280,800", "--force-renderer-accessibility"]) expect(started[4]).toContain(flag);
   });
 });

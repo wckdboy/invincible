@@ -387,6 +387,69 @@ export async function fragile(vm: BenchVm, navigations: number): Promise<Fragile
   return { blindTypeRefused, alertMs, alertReported, frontTabRead, staleAfterNavigation, navigations, doubleClicks, browserBackMs, browserBack, afterLastTab };
 }
 
+/* ---------- the accessibility tree beside the pixels (BRIEF-C1 step 6) ---------- */
+
+/** The form's controls as the tree names them, and the element the DOM has for each (C0 compared these five). */
+const FORM_CONTROLS: [role: string, name: string, selector: string][] = [
+  ["entry", "Full name", "#name"],
+  ["entry", "Email", "#email"],
+  ["combo box", "Plan", "#plan"],
+  ["check box", "I accept the terms", "#terms"],
+  ["push button", "Send", "#send"],
+];
+
+export interface A11y {
+  /** Of the form's controls, those whose centre by the tree (desktop find) is the DOM's within 2 px. */
+  formMatch: number;
+  formOf: number;
+  /** Each that didn't, and how. */
+  misses: string[];
+  /** desktop find, through the agent's path. */
+  findMs: Samples;
+  /** desktop find in the VM, a process each (C0's 74 ms was a process with pyatspi in it). */
+  findInVm: Samples;
+  /** desktop tree of the typical page, through the agent's path. */
+  treeMs: Samples;
+  /** The tree of a typical front page, and of the browser's own settings: its size in tokens (characters / 4) and lines. */
+  typical: { tokens: number; lines: number };
+  settings: { tokens: number; lines: number };
+}
+
+const tokens = (text: string): { tokens: number; lines: number } => ({ tokens: Math.ceil(text.length / 4), lines: text.trim().split("\n").length });
+
+export async function a11y(vm: BenchVm, n: number): Promise<A11y> {
+  must(await vm.raw(["desktop", "open", PAGE("form.html")]), "open form.html");
+  let formMatch = 0;
+  const misses: string[] = [];
+  for (const [role, name, selector] of FORM_CONTROLS) {
+    const found = await vm.agent(`desktop find '${role}' '${name}'`);
+    const at = /^(\d+),(\d+)/.exec(found.stdout.trim());
+    const dom = json(await vm.raw(["python3", `${IN_VM}/oracle.py`, "dom", selector]));
+    if (!at || typeof dom.x !== "number") {
+      misses.push(`${role} "${name}": the tree said ${JSON.stringify((found.stdout + found.stderr).trim().slice(0, 120))}, the DOM ${JSON.stringify(dom)}`);
+      continue;
+    }
+    const dx = Math.abs(Number(at[1]) - dom.x), dy = Math.abs(Number(at[2]) - dom.y);
+    if (dx <= 2 && dy <= 2) formMatch++;
+    else misses.push(`${role} "${name}": the tree's ${at[1]},${at[2]}, the DOM's ${dom.x},${dom.y}`);
+  }
+  const findMs = await timed(n, async () => must(await vm.agent("desktop find button Send"), "desktop find").ms);
+  const inVmFrom = performance.now();
+  const findInVm: Samples = { samples: await inVm(vm, ["desktop", "find", "button", "Send"], n), span: [inVmFrom, 0] };
+  findInVm.span[1] = performance.now();
+  must(await vm.raw(["desktop", "open", PAGE("typical.html")]), "open typical.html");
+  const treeMs = await timed(n, async () => must(await vm.agent("desktop tree"), "desktop tree").ms);
+  const typical = tokens((await vm.agent("desktop tree")).stdout);
+  // The browser's own settings, as an agent reaches them: its address bar.
+  await vm.raw(["desktop", "key", "ctrl+l"]);
+  await vm.raw(["desktop", "type", "chrome://settings/appearance"]);
+  await vm.raw(["desktop", "key", "Return"]);
+  await Bun.sleep(1500);
+  await vm.raw(["desktop", "settle"]);
+  const settings = tokens((await vm.agent("desktop tree")).stdout);
+  return { formMatch, formOf: FORM_CONTROLS.length, misses, findMs, findInVm, treeMs, typical, settings };
+}
+
 /* ---------- 2.5 what each state costs the host, and 2.7 what watching costs ---------- */
 
 export interface Cost {

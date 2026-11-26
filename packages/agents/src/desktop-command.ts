@@ -8,7 +8,7 @@
 
 /** The verbs a held session runs: every one that needs neither the shell's environment nor its directory. */
 const DIRECT = new Set([
-  "start", "status", "open", "text", "app", "click", "move", "drag", "scroll", "type", "key", "settle", "windows", "focus", "dialog",
+  "start", "status", "open", "text", "app", "click", "move", "drag", "scroll", "type", "key", "settle", "windows", "focus", "dialog", "tree", "find",
   "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag", "mouse_move",
   "left_mouse_down", "left_mouse_up", "cursor_position", "hold_key", "wait", "screenshot", "shot", "zoom",
 ]);
