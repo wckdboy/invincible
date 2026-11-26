@@ -1,0 +1,20 @@
+{
+  "suite": "harness-overhead",
+  "commit": "15ee0f3e19cf+dirty",
+  "at": 1794495285743,
+  "seed": 20261112,
+  "machine": {
+    "name": "11th Gen Intel(R) Core(TM) i7-11700 @ 2.50GHz",
+    "calibration": 36572,
+    "cores": 16
+  },
+  "metrics": [
+    {"id":"harness.chat.rounds-run","value":8,"unit":"rounds","kind":"quality","better":"higher","note":"of 8 scripted: each tool call ran and its outcome went back to the model"},
+    {"id":"harness.chat.answered","value":1,"unit":"","kind":"quality","better":"higher","note":"the answer came after the rounds and the stream ended cleanly"},
+    {"id":"harness.chat.tool-round","value":0.1452,"unit":"ms","kind":"speed","better":"lower","spread":0.0261,"n":9,"note":"one tool round of an answer with 8 (the model and the tool return at once)"},
+    {"id":"harness.chat.plain-answer","value":0.3515,"unit":"ms","kind":"speed","better":"lower","spread":0.0594,"n":15,"note":"an answer with no tools: the prompt built, one reply streamed"},
+    {"id":"harness.quest.steps-run","value":12,"unit":"steps","kind":"quality","better":"higher","note":"of 12 scripted commands, each run and observed"},
+    {"id":"harness.quest.done","value":1,"unit":"","kind":"quality","better":"higher","note":"planned, worked, reviewed and passed"},
+    {"id":"harness.quest.step","value":0.1231,"unit":"ms","kind":"speed","better":"lower","spread":0.0197,"n":9,"note":"one step of a quest of 12 (the reply parsed, the command \"run\", its output observed and kept for the review)"}
+  ]
+}

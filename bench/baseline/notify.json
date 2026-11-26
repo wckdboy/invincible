@@ -1,0 +1,26 @@
+{
+  "suite": "notify",
+  "commit": "3607e35f5720",
+  "at": 1795637378195,
+  "seed": 20261112,
+  "machine": {
+    "name": "Apple M3 Pro",
+    "calibration": 94272,
+    "cores": 12
+  },
+  "metrics": [
+    {"id":"notify.week.asks-missed","value":0,"unit":"asks","kind":"quality","better":"lower","note":"of 21 asks, those that lapsed unanswered (no answer is no)"},
+    {"id":"notify.week.asks-answered","value":19,"unit":"asks","kind":"quality","better":"higher","note":"of 21 asks (one connector request is left standing on purpose)"},
+    {"id":"notify.week.ask-answer-p50","value":20,"unit":"min","kind":"quality","better":"lower","note":"from an ask to its answer, the median, virtual minutes"},
+    {"id":"notify.week.ask-answer-p90","value":193,"unit":"min","kind":"quality","better":"lower","note":"from an ask to its answer, the 90th percentile, virtual minutes"},
+    {"id":"notify.week.asks-unreachable-minutes","value":0,"unit":"min","kind":"quality","better":"lower","note":"minutes in which an ask stood and no device of the owner's could be reached"},
+    {"id":"notify.week.buzzes","value":46,"unit":"buzzes","kind":"quality","better":"lower","note":"deliveries that sounded, of 92 that arrived (tests and the day's-limit message aside)"},
+    {"id":"notify.week.buzzes-per-completed","value":0.851851852,"unit":"","kind":"quality","better":"lower","note":"buzzes for each of 54 knights' tasks that ended verified (the north star's denominator)"},
+    {"id":"notify.week.night-buzzes","value":0,"unit":"buzzes","kind":"quality","better":"lower","note":"buzzes between 22:00 and 07:00 in the owner's own time that weren't alerts"},
+    {"id":"notify.week.self-resolved-buzzes","value":2,"unit":"buzzes","kind":"quality","better":"lower","note":"buzzes about something that resolved without the owner (a CI failure a knight fixed, a node back online)"},
+    {"id":"notify.week.summary-overwrote-ask","value":0,"unit":"","kind":"quality","better":"lower","note":"a notification that replaced one telling of an ask still waiting, without telling of it"},
+    {"id":"notify.week.duplicates","value":0,"unit":"","kind":"quality","better":"lower","note":"the same thing told as new again while it stood"},
+    {"id":"notify.week.model-buzzes","value":8,"unit":"buzzes","kind":"quality","better":"lower","note":"buzzes about what his own judgment raised (a look or an outcome ending by asking you)"},
+    {"id":"notify.look","value":0.06156,"unit":"ms","kind":"speed","better":"lower","spread":0.015,"n":15,"note":"one look with 24 notices, 6 approvals and 2 key requests standing, all told already"}
+  ]
+}

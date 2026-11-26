@@ -1,0 +1,4 @@
+# Generated robot assets (scripts/robots/build.ts): byte-exact, their URLs are versioned by content.
+apps/web/src/world/assets/robots/** -text
+# A replica written by the store before schema versions: byte-exact, for the migration test.
+packages/mind/test/fixtures/*.db binary

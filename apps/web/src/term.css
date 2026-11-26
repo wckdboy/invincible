@@ -1,0 +1,16 @@
+/* A terminal (views/terminal.ts), with the emulator that draws it: as tall as the screen allows, above a phone's keyboard. */
+dialog.sheet.terminal-sheet { width: min(980px, calc(100vw - 32px)); height: min(86vh, 860px); }
+dialog.sheet.terminal-sheet .sheet-body { flex: 1; min-height: 0; overflow: hidden; padding-bottom: var(--sp-3); }
+.term { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.term-screen { flex: 1; min-height: 0; border: 1px solid var(--border-strong); border-radius: var(--r-lg); background: #060607; padding: 6px 4px 4px 8px; overflow: hidden; }
+.term-screen .xterm { height: 100%; }
+.term-keys { flex: none; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.term-keys .btn { flex: none; min-width: 44px; font-family: var(--font-mono); }
+.term-status { flex: none; margin: 0; color: var(--text-2); font-size: var(--fs-13); }
+.term-status:empty { display: none; }
+@media (max-width: 639px) {
+  dialog.sheet.terminal-sheet { height: calc(var(--visible, 100dvh) - var(--safe-top) - 8px); max-height: none; margin-bottom: var(--keyboard, 0px); }
+  dialog.sheet.terminal-sheet .sheet-head .sub { display: none; }
+  /* Every key in reach, none behind a scroll. */
+  .term-keys .btn { flex: 1 1 0; min-width: 0; padding-inline: 0; }
+}

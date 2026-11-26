@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="referrer" content="no-referrer" />
+<meta http-equiv="x-dns-prefetch-control" content="off" />
+<title>A page he made</title>
+<!--
+  Where a page Galahad made runs its own code, once you press Run (apps/web/src/ui/blocks.ts). The node serves this
+  with a policy of its own (packages/node/src/assets.ts): sandboxed to an origin of its own, nothing from the network,
+  framed by the app alone. It takes one page from the app, by message, and becomes it.
+-->
+<script>
+  addEventListener("message", function take(event) {
+    if (event.source !== parent || typeof event.data !== "string") return;
+    removeEventListener("message", take);
+    document.open();
+    document.write(event.data);
+    document.close();
+  });
+  parent.postMessage("galahad-frame-ready", "*");
+</script>

@@ -1,0 +1,42 @@
+{
+  "name": "@galahad/core",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./attachments": "./src/attachments.ts",
+    "./avatar": "./src/avatar.ts",
+    "./blocks": "./src/blocks.ts",
+    "./bytes": "./src/bytes.ts",
+    "./doctor": "./src/doctor.ts",
+    "./galahad-index": "./src/galahad-index.ts",
+    "./identity": "./src/identity.ts",
+    "./interventions": "./src/interventions.ts",
+    "./live": "./src/live.ts",
+    "./notify": "./src/notify.ts",
+    "./notify-payload": "./src/notify-payload.ts",
+    "./pairing": "./src/pairing.ts",
+    "./plain": "./src/plain.ts",
+    "./qr": "./src/qr.ts",
+    "./request-auth": "./src/request-auth.ts",
+    "./secret-scan": "./src/secret-scan.ts",
+    "./skills": "./src/skills.ts",
+    "./spend": "./src/spend.ts",
+    "./trial-reports": "./src/trial-reports.ts",
+    "./turns": "./src/turns.ts",
+    "./team": "./src/team.ts",
+    "./team-record": "./src/team-record.ts",
+    "./roundtable": "./src/roundtable.ts",
+    "./model-checks": "./src/model-checks.ts",
+    "./team-limits": "./src/team-limits.ts",
+    "./terminal-input": "./src/terminal-input.ts"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "zod": "^4.6.7"
+  }
+}

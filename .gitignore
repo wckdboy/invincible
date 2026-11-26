@@ -1,4 +1,20 @@
 .DS_Store
 node_modules/
+dist/
 *.log
 /build/
+*.db
+# …except the migration tests' replicas: throwaway keys, fake vault values (make-mind-v0.ts).
+!packages/mind/test/fixtures/*.db
+*.db-wal
+*.db-shm
+.galahad*/
+.env*
+REVISION
+
+# Agent worktrees (local only)
+.claude/worktrees/
+__pycache__/
+
+# The last benchmark run (bun run bench); the recorded baselines are in bench/baseline/.
+bench/out/

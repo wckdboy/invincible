@@ -1,0 +1,3 @@
+name: galahad
+version: 1.0.0
+description: "Galahad shared memory: bounded recall and explicit additive notes through a local arm token."

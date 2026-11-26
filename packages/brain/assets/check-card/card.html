@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Harbour · Quarterly ledger</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { width: 1280px; height: 800px; font: 16px/1.5 "Helvetica Neue", Arial, sans-serif; color: #1d2430; background: #f6f7f9; }
+  header { height: 64px; display: flex; align-items: center; gap: 36px; padding: 0 40px; background: #12305a; color: #fff; }
+  header strong { font-size: 20px; letter-spacing: 0.04em; margin-right: auto; }
+  header a { color: #dce6f5; text-decoration: none; font-size: 16px; }
+  main { padding: 48px 40px 0 40px; }
+  h1 { font-size: 40px; line-height: 1.15; margin-bottom: 14px; }
+  p.lead { max-width: 640px; color: #4a5568; margin-bottom: 36px; }
+  .actions { display: flex; gap: 18px; margin-bottom: 44px; }
+  button { font: inherit; font-size: 16px; padding: 12px 22px; border-radius: 8px; border: 1px solid #c5cdd8; background: #fff; color: #1d2430; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .search { display: flex; align-items: center; gap: 28px; margin-bottom: 30px; }
+  input[type=search] { font: inherit; width: 360px; padding: 11px 14px; border: 1px solid #c5cdd8; border-radius: 8px; background: #fff; }
+  label { display: flex; align-items: center; gap: 10px; }
+  input[type=checkbox] { width: 20px; height: 20px; }
+  table { border-collapse: collapse; width: 760px; background: #fff; border: 1px solid #e1e6ee; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #e1e6ee; }
+  th { background: #eef2f7; font-weight: 600; }
+  footer { position: absolute; left: 40px; right: 40px; bottom: 24px; display: flex; justify-content: space-between; color: #6b7686; font-size: 14px; }
+  footer a { color: #1f6feb; }
+</style>
+</head>
+<body>
+  <header>
+    <strong>HARBOUR</strong>
+    <a id="ships" href="#">Ships</a>
+    <a id="tides" href="#">Tides</a>
+    <a id="crew" href="#">Crew</a>
+  </header>
+  <main>
+    <h1 id="heading">Quarterly harbour ledger</h1>
+    <p class="lead">Every ship that came in or went out this quarter, with its berth, its cargo and what it paid. Export it, archive it, or share it with the crew.</p>
+    <div class="actions">
+      <button id="export" class="primary">Export CSV</button>
+      <button id="archive">Archive</button>
+      <button id="share">Share with crew</button>
+    </div>
+    <div class="search">
+      <input id="search" type="search" placeholder="Search ships">
+      <label id="anchored"><input type="checkbox"> Include anchored ships</label>
+    </div>
+    <table>
+      <tr><th>Ship</th><th>Berth</th><th>Cargo</th><th>Paid</th></tr>
+      <tr><td>Morning Star</td><td>4</td><td>Timber</td><td>1,240</td></tr>
+      <tr><td>Grey Heron</td><td>9</td><td>Salt</td><td>860</td></tr>
+      <tr><td>Kestrel</td><td>2</td><td>Wool</td><td>1,015</td></tr>
+    </table>
+  </main>
+  <footer><span>Harbour ledger · Q3</span><a id="privacy" href="#">Privacy</a></footer>
+</body>
+</html>

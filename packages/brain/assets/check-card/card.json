@@ -1,0 +1,111 @@
+{
+  "width": 1280,
+  "height": 800,
+  "heading": "Quarterly harbour ledger",
+  "targets": {
+    "ships": {
+      "name": "the Ships link in the top bar",
+      "box": [
+        1052,
+        20,
+        1092,
+        44
+      ],
+      "centre": [
+        1072,
+        32
+      ]
+    },
+    "crew": {
+      "name": "the Crew link in the top bar",
+      "box": [
+        1203,
+        20,
+        1240,
+        44
+      ],
+      "centre": [
+        1221,
+        32
+      ]
+    },
+    "export": {
+      "name": "the Export CSV button",
+      "box": [
+        40,
+        256,
+        169,
+        306
+      ],
+      "centre": [
+        105,
+        281
+      ]
+    },
+    "archive": {
+      "name": "the Archive button",
+      "box": [
+        187,
+        256,
+        286,
+        306
+      ],
+      "centre": [
+        237,
+        281
+      ]
+    },
+    "share": {
+      "name": "the Share with crew button",
+      "box": [
+        304,
+        256,
+        465,
+        306
+      ],
+      "centre": [
+        384,
+        281
+      ]
+    },
+    "search": {
+      "name": "the Search ships field",
+      "box": [
+        40,
+        350,
+        400,
+        398
+      ],
+      "centre": [
+        220,
+        374
+      ]
+    },
+    "anchored": {
+      "name": "the Include anchored ships checkbox",
+      "box": [
+        428,
+        362,
+        624,
+        386
+      ],
+      "centre": [
+        526,
+        374
+      ]
+    },
+    "privacy": {
+      "name": "the Privacy link at the bottom",
+      "box": [
+        1194,
+        755,
+        1240,
+        776
+      ],
+      "centre": [
+        1217,
+        766
+      ]
+    }
+  }
+}

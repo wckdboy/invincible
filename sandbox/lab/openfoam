@@ -1,0 +1,18 @@
+#!/bin/bash
+# Run an OpenFOAM command with its environment loaded: `openfoam blockMesh`, `openfoam icoFoam`.
+# With no command, print the version and where the tutorials are.
+root=""
+for candidate in /usr/share/openfoam /usr/lib/openfoam/openfoam*; do
+  if [[ -f $candidate/etc/bashrc ]]; then root=$candidate; break; fi
+done
+[[ -n $root ]] || { echo "OpenFOAM isn't installed in this image" >&2; exit 127; }
+# shellcheck disable=SC1091
+source "$root/etc/bashrc" >/dev/null 2>&1
+tutorials=$(dirname "$(dpkg -L openfoam-examples 2>/dev/null | grep -m1 '/cavity/cavity/system/controlDict$')" 2>/dev/null)
+tutorials=${tutorials%/incompressible/icoFoam/cavity/cavity/system}
+if [[ $# -eq 0 ]]; then
+  echo "OpenFOAM ${WM_PROJECT_VERSION:-?} (run: openfoam <command> [args], e.g. openfoam blockMesh)"
+  [[ -n $tutorials && -d $tutorials ]] && echo "tutorials: $tutorials (copy a case to /work before running it)"
+  exit 0
+fi
+exec "$@"

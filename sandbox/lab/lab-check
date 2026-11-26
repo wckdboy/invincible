@@ -1,0 +1,285 @@
+#!/opt/lab/bin/python3
+"""lab-check: prove the Lab works by computing things with known answers.
+
+Each check runs a small real computation and compares it with a reference
+(analytic, or a well-established value), so a broken or silently wrong tool
+shows up here, not halfway through an investigation.
+
+    lab-check            a table, exit 1 if anything failed
+    lab-check --json     machine-readable
+"""
+import json
+import math
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+os.makedirs(os.environ.get("MPLCONFIGDIR", "/tmp/matplotlib"), exist_ok=True)
+CHECKS = []
+
+
+def check(name, reference):
+    def wrap(fn):
+        CHECKS.append((name, reference, fn))
+        return fn
+    return wrap
+
+
+def close(value, expected, rel=1e-3, abs_=0.0):
+    if not math.isclose(value, expected, rel_tol=rel, abs_tol=abs_):
+        raise AssertionError(f"got {value:.6g}, expected {expected:.6g}")
+    return f"{value:.6g}"
+
+
+def run(cmd, timeout=60, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw)
+
+
+@check("numpy/scipy quadrature", "∫₀^π sin x dx = 2")
+def _():
+    from scipy.integrate import quad
+    return close(quad(math.sin, 0, math.pi)[0], 2.0, 1e-12)
+
+
+@check("sympy symbolics", "∫ x² e^x dx, d/dx back")
+def _():
+    import sympy as sp
+    x = sp.symbols("x")
+    f = x**2 * sp.exp(x)
+    assert sp.simplify(sp.diff(sp.integrate(f, x), x) - f) == 0
+    return "exact"
+
+
+@check("units (Pint)", "1 m/s = 3.6 km/h")
+def _():
+    import pint
+    u = pint.UnitRegistry()
+    return close((1 * u.meter / u.second).to("km/h").magnitude, 3.6, 1e-12)
+
+
+@check("uncertainty propagation", "σ(a·b) for a=2±0.1, b=3±0.2")
+def _():
+    from uncertainties import ufloat
+    r = ufloat(2, 0.1) * ufloat(3, 0.2)
+    return close(r.std_dev, math.hypot(3 * 0.1, 2 * 0.2), 1e-12)
+
+
+@check("OpenCascade B-rep (build123d)", "box 10×20×30 minus Ø10 hole: 6000 − 750π mm³")
+def _():
+    from build123d import Box, Cylinder, export_step
+    part = Box(10, 20, 30) - Cylinder(5, 30)
+    with tempfile.TemporaryDirectory() as d:
+        export_step(part, os.path.join(d, "p.step"))
+    return close(part.volume, 6000 - 750 * math.pi, 1e-6)
+
+
+@check("gmsh meshing", "unit square, triangles")
+def _():
+    import gmsh
+    gmsh.initialize(["", "-v", "0"])
+    try:
+        gmsh.model.occ.addRectangle(0, 0, 0, 1, 1)
+        gmsh.model.occ.synchronize()
+        gmsh.option.setNumber("Mesh.MeshSizeMax", 0.1)
+        gmsh.model.mesh.generate(2)
+        n = len(gmsh.model.mesh.getElementsByType(2)[0])
+        assert n > 100, f"only {n} triangles"
+        return f"{n} triangles, gmsh {gmsh.__version__}"
+    finally:
+        gmsh.finalize()
+
+
+@check("FEniCSx (dolfinx + PETSc)", "−Δu = 1 on the unit square: max u ≈ 0.07367")
+def _():
+    from mpi4py import MPI
+    import numpy as np
+    import ufl
+    from dolfinx import fem, mesh
+    from dolfinx.fem.petsc import LinearProblem
+    domain = mesh.create_unit_square(MPI.COMM_SELF, 64, 64)
+    V = fem.functionspace(domain, ("Lagrange", 2))
+    facets = mesh.locate_entities_boundary(domain, 1, lambda x: np.full(x.shape[1], True))
+    bc = fem.dirichletbc(0.0, fem.locate_dofs_topological(V, 1, facets), V)
+    u, v = ufl.TrialFunction(V), ufl.TestFunction(V)
+    a = ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
+    L = fem.Constant(domain, 1.0) * v * ufl.dx
+    uh = LinearProblem(a, L, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"}).solve()
+    return close(float(uh.x.array.max()), 0.0736713, 2e-3)
+
+
+@check("scikit-fem", "same Poisson problem, P1")
+def _():
+    import skfem
+    from skfem.helpers import dot, grad
+    m = skfem.MeshTri().refined(6)
+    basis = skfem.Basis(m, skfem.ElementTriP1())
+    A = skfem.BilinearForm(lambda u, v, w: dot(grad(u), grad(v))).assemble(basis)
+    b = skfem.LinearForm(lambda v, w: 1.0 * v).assemble(basis)
+    x = skfem.solve(*skfem.condense(A, b, D=basis.get_dofs()))
+    return close(float(x.max()), 0.0736713, 1e-2)
+
+
+@check("OpenSees frames", "cantilever tip deflection PL³/3EI")
+def _():
+    import openseespy.opensees as ops
+    E, I, A, L, P = 200e9, 8e-6, 1e-3, 2.0, 1000.0
+    ops.wipe()
+    ops.model("basic", "-ndm", 2, "-ndf", 3)
+    ops.node(1, 0, 0); ops.node(2, L, 0); ops.fix(1, 1, 1, 1)
+    ops.geomTransf("Linear", 1)
+    ops.element("elasticBeamColumn", 1, 1, 2, A, E, I, 1)
+    ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1); ops.load(2, 0, -P, 0)
+    for cmd in (("system", "BandGeneral"), ("numberer", "Plain"), ("constraints", "Plain"), ("integrator", "LoadControl", 1.0), ("algorithm", "Linear")):
+        getattr(ops, cmd[0])(*cmd[1:])
+    ops.analysis("Static"); ops.analyze(1)
+    return close(-ops.nodeDisp(2, 2), P * L**3 / (3 * E * I), 1e-9)
+
+
+@check("MuJoCo dynamics", "free fall for 1 s: Δz = g/2")
+def _():
+    import mujoco
+    xml = '<mujoco><option timestep="0.0005" integrator="RK4"/><worldbody><body pos="0 0 100"><freejoint/><geom size=".1" mass="1"/></body></worldbody></mujoco>'
+    model = mujoco.MjModel.from_xml_string(xml)
+    data = mujoco.MjData(model)
+    while data.time < 1.0 - 1e-9:
+        mujoco.mj_step(model, data)
+    return close(100 - data.qpos[2], 9.81 / 2, 1e-4)
+
+
+@check("JSBSim", "standard atmosphere at sea level: ρ = 1.225 kg/m³")
+def _():
+    import jsbsim
+    fdm = jsbsim.FGFDMExec(None)
+    fdm.set_debug_level(0)
+    fdm.load_model("c172x")
+    fdm["ic/h-sl-ft"] = 0
+    fdm.run_ic()
+    return close(fdm["atmosphere/rho-slugs_ft3"] * 515.3788, 1.225, 1e-4)
+
+
+@check("RocketPy", "standard atmosphere at 0 m: p = 101 325 Pa")
+def _():
+    from rocketpy import Environment
+    env = Environment()
+    env.set_atmospheric_model(type="standard_atmosphere")
+    return close(env.pressure(0), 101325, 1e-6)
+
+
+@check("CoolProp", "water at 25 °C, 1 atm: ρ ≈ 997.05 kg/m³")
+def _():
+    from CoolProp.CoolProp import PropsSI
+    return close(PropsSI("D", "T", 298.15, "P", 101325, "Water"), 997.047, 1e-4)
+
+
+@check("Cantera", "stoichiometric CH₄/air, adiabatic flame ≈ 2225 K")
+def _():
+    import cantera as ct
+    gas = ct.Solution("gri30.yaml")
+    gas.TP = 300, ct.one_atm
+    gas.set_equivalence_ratio(1.0, "CH4", "O2:1, N2:3.76")
+    gas.equilibrate("HP")
+    return close(gas.T, 2225, 0.01)
+
+
+@check("python-control", "1/(s+1) step response at t=1 = 1 − e⁻¹")
+def _():
+    import control
+    import numpy as np
+    t, y = control.step_response(control.tf([1], [1, 1]), T=np.linspace(0, 1, 1001))
+    return close(float(y[-1]), 1 - math.exp(-1), 1e-4)
+
+
+@check("cvxpy", "min x+y, x≥1, y≥2 = 3")
+def _():
+    import cvxpy as cp
+    x, y = cp.Variable(), cp.Variable()
+    return close(cp.Problem(cp.Minimize(x + y), [x >= 1, y >= 2]).solve(), 3.0, 1e-6)
+
+
+@check("Z3 (SMT)", "x+y=10, x−y=2 → x=6")
+def _():
+    import z3
+    x, y = z3.Ints("x y")
+    s = z3.Solver(); s.add(x + y == 10, x - y == 2)
+    assert s.check() == z3.sat
+    return f"x={s.model()[x]}"
+
+
+@check("ngspice", "RC step: v(τ) = 1 − e⁻¹")
+def _():
+    deck = """rc
+v1 in 0 pulse(0 1 0 1n 1n 1 2)
+r1 in out 1k
+c1 out 0 1u
+.tran 1u 1m
+.measure tran vt find v(out) at=1m
+.end
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".cir", delete=False) as f:
+        f.write(deck)
+    out = run(["ngspice", "-b", f.name]).stdout
+    line = next(l for l in out.splitlines() if l.strip().startswith("vt"))
+    return close(float(line.split("=")[1].split()[0]), 1 - math.exp(-1), 2e-3)
+
+
+@check("GNU Octave", "det(magic(3)) = −360")
+def _():
+    out = run(["octave", "--no-gui", "--quiet", "--eval", "printf('%.6f', det(magic(3)))"]).stdout
+    return close(float(out.strip()), -360.0, 1e-9)
+
+
+@check("Maxima (CAS)", "∫₀¹ x² dx = 1/3")
+def _():
+    out = run(["maxima", "--very-quiet", "--batch-string", "display2d:false$ integrate(x^2,x,0,1);"]).stdout
+    assert "1/3" in out, out
+    return "1/3"
+
+
+@check("OpenFOAM", "lid-driven cavity (icoFoam tutorial) runs to its end time")
+def _():
+    import glob
+    import shutil
+    info = run(["openfoam"]).stdout
+    found = glob.glob("/usr/share/**/incompressible/icoFoam/cavity/cavity", recursive=True)
+    assert found, "the cavity tutorial isn't installed (openfoam-examples)"
+    with tempfile.TemporaryDirectory() as d:
+        case = os.path.join(d, "cavity")
+        shutil.copytree(found[0], case)
+        for step in (["openfoam", "blockMesh"], ["openfoam", "icoFoam"]):
+            r = run(step, timeout=120, cwd=case)
+            assert r.returncode == 0 and "End" in r.stdout, f"{step[1]}: {(r.stdout + r.stderr)[-300:]}"
+        assert os.path.isdir(os.path.join(case, "0.5")), "no 0.5 time directory"
+    return info.splitlines()[0].split(" (")[0]
+
+
+@check("MPI", "4 ranks agree on the size")
+def _():
+    r = run(["mpirun", "-n", "4", sys.executable, "-c", "from mpi4py import MPI; print(MPI.COMM_WORLD.size)"], timeout=120)
+    sizes = r.stdout.split()
+    assert sizes == ["4"] * 4, (r.stdout + r.stderr)[-400:]
+    return "4 ranks"
+
+
+def main():
+    results = []
+    for name, reference, fn in CHECKS:
+        started = time.perf_counter()
+        try:
+            detail, ok = fn(), True
+        except Exception as error:  # noqa: BLE001 - every failure is a result here
+            detail, ok = f"{type(error).__name__}: {error}"[:300], False
+        results.append({"check": name, "reference": reference, "ok": ok, "detail": detail, "seconds": round(time.perf_counter() - started, 2)})
+    if "--json" in sys.argv:
+        print(json.dumps({"ok": all(r["ok"] for r in results), "checks": results}))
+    else:
+        for r in results:
+            print(f"{'✓' if r['ok'] else '✗'} {r['check']:<32} {r['detail']:<40} ({r['reference']}; {r['seconds']} s)")
+        failed = [r for r in results if not r["ok"]]
+        print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")
+    sys.exit(0 if all(r["ok"] for r in results) else 1)
+
+
+if __name__ == "__main__":
+    main()

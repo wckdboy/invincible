@@ -1,0 +1,23 @@
+# Reviewed false positives, by fingerprint (commit:file:rule:line). Each names what matched and why it is no secret.
+#
+# 791b19d, notify-input.ts:44: the zod pattern that checks an Apple push key's shape, and its error message, quoted the
+# PEM header and footer; no key was in it. Rewritten in the next commit so it no longer reads as one.
+791b19d8cdaaf8b7a5319f056a33e5cef4928a2f:packages/core/src/notify-input.ts:private-key:44
+
+# Q-AMP grants (PLAN #58), 25 Nov 2026: the tests' and the web app's did:key identities, each an Ed25519 or P-256 PUBLIC key
+# (two are the W3C did:key examples, the rest test agents and bridges), which the generic-api-key rule reads as
+# "key:<token>"; and in docs/ARCHITECTURE.md the name of TLS's post-quantum key exchange after the word "keys,".
+# No secret in any of them: a did:key is a public key by construction.
+9cb792080333a51a47818f70b9f6e963663ffa3b:docs/ARCHITECTURE.md:generic-api-key:161
+ae557969a5910a08a8f5bf758cfbe292b54a4e1f:apps/web/src/lib/grants.test.ts:generic-api-key:13
+5c3a0927543f1b157a1da6d74c9c0b67c98dc8e6:packages/node/test/qamp-cli.test.ts:generic-api-key:7
+5c3a0927543f1b157a1da6d74c9c0b67c98dc8e6:packages/node/test/qamp-cli.test.ts:generic-api-key:8
+5c3a0927543f1b157a1da6d74c9c0b67c98dc8e6:packages/node/test/qamp-cli.test.ts:generic-api-key:82
+b7b448e256ed0496b6af732610d1d8eb959115d4:packages/core/test/qamp.test.ts:generic-api-key:11
+b7b448e256ed0496b6af732610d1d8eb959115d4:packages/core/test/qamp.test.ts:generic-api-key:36
+b7b448e256ed0496b6af732610d1d8eb959115d4:packages/core/test/qamp.test.ts:generic-api-key:78
+c8e60058147aa5f95f4e8a35d728a544a0a92c70:packages/node/test/qamp-routes.test.ts:generic-api-key:38
+c8e60058147aa5f95f4e8a35d728a544a0a92c70:packages/node/test/qamp-routes.test.ts:generic-api-key:39
+c8e60058147aa5f95f4e8a35d728a544a0a92c70:packages/node/test/qamp-routes.test.ts:generic-api-key:171
+dbd001ca69ea5a6645f509e083d6a46561e372e8:packages/node/test/qamp-grants.test.ts:generic-api-key:20
+dbd001ca69ea5a6645f509e083d6a46561e372e8:packages/node/test/qamp-grants.test.ts:generic-api-key:21

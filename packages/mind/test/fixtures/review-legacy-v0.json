@@ -1,0 +1,20 @@
+{
+ "digest": "kQ9Il5cea4veSUXm9a2-mKJjN4ACmhVDO4chKpvck5k",
+ "rejected": [
+  {
+   "id": "HuEyLldbhg6S-qX88Kv9FJUbNYp1YD9estW-omuGi2g",
+   "reason": "signer is not an active device"
+  },
+  {
+   "id": "aGHvqVF5tgToVMUL2ZQogMh8vsvs_tzz8sPPC1fWtmM",
+   "reason": "unchained event after the fleet adopted chains"
+  }
+ ],
+ "count": 313,
+ "pending": 1,
+ "devices": {
+  "a": "n____kyAdkgrK5IGa20_42GP1HI0RhNgkZ931FFeIHD8M",
+  "b": "n_T3a7J2n0ZmDTzynZy110DM2B0xKq84dZlv5LdEYUN5M",
+  "c": "n_9D36qEEA15wyBblE30sKCxKnhTpridsyzVWw7HCKnw8"
+ }
+}
