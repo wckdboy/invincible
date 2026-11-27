@@ -302,7 +302,7 @@ struct AgentScreenView: View {
             var refused = false
             do {
                 for try await frame in session.client.frames("/api/team/desktop/stream", Watch(id: seat.id)) {
-                    try live.show(frame)
+                    try await live.show(frame)
                     if live.live, !watching, let size = live.size {
                         (watching, drawn, tries, problem, noDesktop) = (true, true, 0, nil, false)
                         status = "Live · \(size.width)×\(size.height)"
@@ -312,7 +312,7 @@ struct AgentScreenView: View {
                 // A refusal (an older node, a VM with no stream) isn't mended by asking again.
                 if let refusal = error as? NodeError, !refusal.unreachable, (400..<500).contains(refusal.status) || refusal.status == 501 { refused = true }
             }
-            live.ended()
+            await live.ended()
             if watching {
                 watching = false
                 status = "As it was last seen"

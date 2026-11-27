@@ -60,26 +60,29 @@ struct DesktopStreamTests {
     }
 }
 
-/// The glass page's recording (the vectors' desktopStream.glass), decoded by VideoToolbox as the live screen decodes it:
-/// each frame's strip read back from its pixels says the time and the clicks it was drawn with.
+/// The glass page's recording (the vectors' desktopStream.glass), decoded by VideoToolbox as the live screen decodes it,
+/// off the main actor (DesktopDecoding): each frame's strip read back from its pixels says the time and the clicks it was
+/// drawn with.
 struct DesktopVideoTests {
     let glass = Vectors.shared.desktopStream.glass
 
-    @Test func eachFrameDecodesToThePixelsItWasDrawnWith() throws {
+    @Test func eachFrameDecodesToThePixelsItWasDrawnWith() async throws {
         let url = try #require(Bundle(for: FixtureToken.self).url(forResource: "desktop-glass", withExtension: "frames"))
         var parser = DesktopFrames()
         let frames = try parser.push(Data(contentsOf: url))
         #expect(frames.map(\.kind) == glass.frames.map(\.kind))
-        let sets = try #require(DesktopStream.parameterSets(frames[0].payload))
-        let format = try DesktopVideo.format(sps: sets.sps, pps: sets.pps)
-        let size = DesktopVideo.size(format)
-        #expect(size.width == 1280 && size.height == 800)
-        let decoder = try DesktopDecoder(format: format)
+        let decoding = DesktopDecoding()
         for (i, frame) in frames.enumerated() {
-            let pixels = try decoder.decode(DesktopVideo.sample(frame.payload, format: format, time: frame.time))
-            let read = strip(pixels)
+            let picture = try #require(try await decoding.decode(frame), "frame \(i) gave no pixels")
+            #expect(picture.width == 1280 && picture.height == 800)
+            let read = strip(picture.pixels)
             #expect(read?.time == glass.frames[i].time && read?.clicks == glass.frames[i].clicks, "frame \(i): \(String(describing: read))")
         }
+        // A beat gives nothing, and after a reset a frame before the next keyframe gives nothing.
+        #expect(try await decoding.decode(DesktopFrame(kind: DesktopFrame.beat, time: 1, payload: Data())) == nil)
+        await decoding.reset()
+        #expect(try await decoding.decode(frames[1]) == nil)
+        #expect(try await decoding.decode(frames[0]) != nil)
     }
 
     /// The strip read from BGRA pixels as glass-clock.ts reads it: each block's middle, plainly black or plainly white,

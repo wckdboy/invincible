@@ -3,9 +3,9 @@ import SwiftUI
 
 /*
  * An agent's desktop live on this device (C1 step 9.4): the node's stream of its screen, each frame decoded as it comes
- * by VideoToolbox (DesktopDecoder, the hardware's) and shown at once, its pixels a layer's contents. The format comes
- * from each keyframe's SPS and PPS (DesktopVideo); a frame before the first keyframe is passed by, as the node sends
- * none. AgentScreenView watches; this shows.
+ * by VideoToolbox off the main actor (DesktopDecoding) and shown at once, its IOSurface a layer's contents. The format
+ * comes from each keyframe's SPS and PPS (DesktopVideo); a frame before the first keyframe is passed by, as the node
+ * sends none. AgentScreenView watches; this shows.
  */
 
 #if os(iOS)
@@ -48,31 +48,21 @@ final class DesktopLive {
     private(set) var size: (width: Int, height: Int)?
     /// A frame has been shown since the stream began.
     private(set) var live = false
-    @ObservationIgnored private var decoder: DesktopDecoder?
-    @ObservationIgnored private var format: CMVideoFormatDescription?
-    @ObservationIgnored private var sps: Data?
+    /// Where the frames are decoded: off the main actor, which only shows what comes out.
+    @ObservationIgnored private let decoding = DesktopDecoding()
 
-    /// One frame of the stream, decoded and shown. A keyframe whose SPS is new sets the format, and a decoder for it.
-    func show(_ frame: DesktopFrame) throws {
-        guard frame.kind == DesktopFrame.key || frame.kind == DesktopFrame.delta else { return }
-        if frame.kind == DesktopFrame.key, let sets = DesktopStream.parameterSets(frame.payload), sets.sps != sps {
-            let made = try DesktopVideo.format(sps: sets.sps, pps: sets.pps)
-            decoder = try DesktopDecoder(format: made)
-            (format, sps) = (made, sets.sps)
-            let screen = DesktopVideo.size(made)
-            if size?.width != screen.width || size?.height != screen.height { size = screen }
-        }
-        guard let format, let decoder else { return }
-        view.show(try decoder.decode(DesktopVideo.sample(frame.payload, format: format, time: frame.time)))
+    /// One frame of the stream, decoded off the main actor and then shown here: only its IOSurface goes to the layer.
+    func show(_ frame: DesktopFrame) async throws {
+        guard let picture = try await decoding.decode(frame) else { return }
+        view.show(picture.pixels)
+        if size?.width != picture.width || size?.height != picture.height { size = (picture.width, picture.height) }
         if !live { live = true }
     }
 
     /// The stream ended: the next one starts from its own keyframe; what was shown stays until then.
-    func ended() {
+    func ended() async {
         live = false
-        decoder = nil
-        format = nil
-        sps = nil
+        await decoding.reset()
     }
 }
 

@@ -4,8 +4,9 @@ import VideoToolbox
 
 /*
  * An agent's desktop's frames (DesktopStream) as VideoToolbox takes them (C1 step 9.4): the format from a keyframe's SPS
- * and PPS, each frame a sample of its slices, and DesktopDecoder, which decodes them to pixels one at a time, in order.
- * DesktopLive shows those pixels as they come; the tests read the glass clock in them.
+ * and PPS, each frame a sample of its slices, DesktopDecoder, which decodes them to pixels one at a time, in order, and
+ * DesktopDecoding, which does that off the main actor for the stream as it comes. DesktopLive shows those pixels; the
+ * tests read the glass clock in them.
  */
 
 enum DesktopVideo {
@@ -77,5 +78,40 @@ final class DesktopDecoder {
         }
         guard status == noErr, out.status == noErr, let image = out.image else { throw DesktopVideo.Unreadable(what: "a frame's pixels", status: status != noErr ? status : out.status) }
         return image
+    }
+}
+
+/// The stream's frames decoded off the main actor, one at a time, in order: a format and a decoder made from each keyframe
+/// whose SPS is new. The main actor only shows what comes out (DesktopLive), so a frame's decoding never holds it.
+actor DesktopDecoding {
+    /// One frame's pixels, and the screen's size in its own pixels, handed over to be shown: nothing here touches them again.
+    struct Picture: @unchecked Sendable {
+        let pixels: CVPixelBuffer
+        let width: Int
+        let height: Int
+    }
+
+    private var decoder: DesktopDecoder?
+    private var format: CMVideoFormatDescription?
+    private var sps: Data?
+
+    /// A keyframe's or another frame's pixels; nil for a beat, a kind this app doesn't know, and any frame before the first
+    /// keyframe (the node sends none).
+    func decode(_ frame: DesktopFrame) throws -> Picture? {
+        guard frame.kind == DesktopFrame.key || frame.kind == DesktopFrame.delta else { return nil }
+        if frame.kind == DesktopFrame.key, let sets = DesktopStream.parameterSets(frame.payload), sets.sps != sps {
+            let made = try DesktopVideo.format(sps: sets.sps, pps: sets.pps)
+            decoder = try DesktopDecoder(format: made)
+            (format, sps) = (made, sets.sps)
+        }
+        guard let format, let decoder else { return nil }
+        let pixels = try decoder.decode(DesktopVideo.sample(frame.payload, format: format, time: frame.time))
+        let size = DesktopVideo.size(format)
+        return Picture(pixels: pixels, width: size.width, height: size.height)
+    }
+
+    /// The stream ended: the next one starts from its own keyframe.
+    func reset() {
+        (decoder, format, sps) = (nil, nil, nil)
     }
 }

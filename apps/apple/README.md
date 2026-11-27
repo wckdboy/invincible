@@ -44,8 +44,8 @@ says nothing (the vectors' `live.links`, which the web app, this app and Android
 
 **An agent's screen** (`UI/AgentScreenView.swift`; its menu's Its screen) is live where its VM's desktop streams (C1):
 the node's stream of it (`POST /api/team/desktop/stream`, read whole as its bytes come by `Core/DesktopStream.swift`),
-each frame decoded as it comes by VideoToolbox (`Core/DesktopVideo.swift`) and shown as its own IOSurface, with no copy
-(`UI/DesktopLive.swift`), while it is on screen and the app is in front. A stream that ends is watched again a little
+each frame decoded as it comes by VideoToolbox off the main actor (`Core/DesktopVideo.swift`'s DesktopDecoding) and
+shown as its own IOSurface, with no copy (`UI/DesktopLive.swift`), while it is on screen and the app is in front. A stream that ends is watched again a little
 later each time (0.5, 1, 2 and 4 s), its last frame kept meanwhile; after four ends in a row, or a refusal (an older
 node, a VM with no stream), it is a picture every two seconds, as before. A tap clicks there at once and brings back no
 picture: the stream shows it. Take over and Give back sit under it from its first frame; your input takes it over too
