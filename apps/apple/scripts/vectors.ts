@@ -34,6 +34,7 @@ import { connectorState } from "../../web/src/lib/connector-state.ts";
 import { noticeFrom } from "../../web/src/lib/notices.ts";
 import { PRESETS, SIGN_INS } from "../../../packages/models/src/providers.ts";
 import { applePayload } from "../../../packages/node/src/apns-send.ts";
+import { CLONE_TIMEOUT, GIT_TIMEOUT } from "../../../packages/node/src/project-git.ts";
 import { againGoal, timeline, timelineTasks } from "../../web/src/lib/timeline.ts";
 import { activityLine, activityOf, activityShort } from "../../web/src/lib/live-activity.ts";
 import { describeTask } from "../../web/src/lib/loops.ts";
@@ -1581,9 +1582,10 @@ const linkCases: { name: string; steps: LinkStep[] }[] = [
 const links = [];
 for (const c of linkCases) links.push({ ...c, ...(await playLink(c.steps)) });
 
-// ---- an agent's own computer as the node makes it (core's computerSize) ----------------------------------------------
-// (the Mac's Build window says it before the primary's computer is made)
+// ---- an agent's own computer as the node makes it (core's computerSize), and how long the node lets a project's git run --
+// (the Mac's Build window says the first before the primary's computer is made, and waits the second out for a clone)
 const computer = { start: core.COMPUTER_START, sizes: [true, false].map((desktop) => ({ desktop, size: core.computerSize(desktop) })) };
+const projectGit = { cloneTimeoutS: CLONE_TIMEOUT, gitTimeoutS: GIT_TIMEOUT };
 
 const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELLO_WAIT_MS, retryFirstMs: RETRY_FIRST_MS, retryMaxMs: RETRY_MAX_MS, steadyMs: STEADY_MS, gapMs: GAP_MS, topics: core.LIVE_TOPICS, cursors: liveCursors, links };
 
@@ -1817,6 +1819,7 @@ const vectors = {
   loops,
   seats,
   computer,
+  projectGit,
 };
 const text = `${JSON.stringify(vectors, null, 2)}\n`;
 if (Bun.argv.includes("--check")) {

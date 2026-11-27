@@ -43655,5 +43655,9 @@
         }
       }
     ]
+  },
+  "projectGit": {
+    "cloneTimeoutS": 900,
+    "gitTimeoutS": 60
   }
 }

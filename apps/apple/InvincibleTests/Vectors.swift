@@ -448,11 +448,19 @@ struct Vectors: Decodable {
     let loops: LoopCases
     /// An agent's own computer as the node makes it (core's computerSize): ComputerStartTests.swift.
     let computer: Computer
+    /// How long the node lets a project's git run in the request that asked (packages/node's project-git.ts):
+    /// NodeClientTests.swift.
+    let projectGit: ProjectGit
 
     struct Computer: Decodable {
         struct Size: Decodable, Equatable { let cpus: Double; let memoryGb: Double; let diskGb: Double }
         struct Case: Decodable { let desktop: Bool; let size: Size }
         let sizes: [Case]
+    }
+
+    struct ProjectGit: Decodable {
+        let cloneTimeoutS: Double
+        let gitTimeoutS: Double
     }
 
     struct LoopCases: Decodable {

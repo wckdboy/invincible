@@ -21,6 +21,17 @@ struct NodeClientTests {
         return publicKey.isValidSignature(try P256.Signing.ECDSASignature(rawRepresentation: sig), for: input)
     }
 
+    @Test func aCloneIsWaitedForAsLongAsTheNodeLetsItRun() throws {
+        // The node clones a project's repository inside the request that asked, for as long as its CLONE_TIMEOUT lets it,
+        // then looks at the checkout's git (GIT_TIMEOUT), and stops the clone if the request goes: the app waits that long
+        // for the answer, not the minute anything else gets (before 27 November 2026 a clone past a minute was cut short).
+        let node = vectors.projectGit
+        let clone = try client(origin: "http://127.0.0.1:7778").request("POST", "/api/projects/clone", body: Data(#"{"id":"site"}"#.utf8))
+        #expect(clone.timeoutInterval > node.cloneTimeoutS + node.gitTimeoutS, "the app gives up on a clone after \(clone.timeoutInterval) s")
+        let commit = try client(origin: "http://127.0.0.1:7778").request("POST", "/api/projects/commit", body: Data(#"{"id":"site","message":"Fix"}"#.utf8))
+        #expect(commit.timeoutInterval == 60)
+    }
+
     @Test func aGetIsSignedOverItsPathAndQueryWithNoBody() throws {
         let request = try client(origin: "http://127.0.0.1:7778").request("GET", "/api/team?probe=1", body: nil)
         #expect(request.url?.absoluteString == "http://127.0.0.1:7778/api/team?probe=1")

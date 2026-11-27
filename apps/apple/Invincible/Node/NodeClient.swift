@@ -26,12 +26,29 @@ struct NodeClient: Sendable {
         return URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
     }()
 
-    /// The request, signed. `path` is the path and query, exactly as the node will read them back.
-    func request(_ method: String, _ path: String, body: Data?, timeout: TimeInterval = 60) throws -> URLRequest {
+    /// How long the node lets a project's git work run inside the one request that asked, in seconds (packages/node's
+    /// project-git.ts, held to it by the vectors): a clone, then a look at the checkout's git.
+    enum ProjectGit {
+        static let clonePath = "/api/projects/clone"
+        static let cloneSeconds: TimeInterval = 900
+        static let lookSeconds: TimeInterval = 60
+    }
+
+    /// How long a request waits for the node's answer: a minute, or, where the node holds the request open while it works,
+    /// as long as it lets that work run and a minute more. A project's first clone is one: the node clones inside the
+    /// request and stops the clone if the request goes, so a clone longer than a minute was cut short (until 27 November
+    /// 2026).
+    static func wait(for path: String) -> TimeInterval {
+        path == ProjectGit.clonePath ? ProjectGit.cloneSeconds + ProjectGit.lookSeconds + 60 : 60
+    }
+
+    /// The request, signed. `path` is the path and query, exactly as the node will read them back. It waits `timeout`, else
+    /// as long as its path needs (wait(for:)).
+    func request(_ method: String, _ path: String, body: Data?, timeout: TimeInterval? = nil) throws -> URLRequest {
         guard path.hasPrefix("/"), let url = URL(string: path, relativeTo: origin)?.absoluteURL else {
             throw NodeError(status: 0, message: "\(path) isn't a path on the node")
         }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout ?? Self.wait(for: path))
         request.httpMethod = method
         let headers = try RequestAuth.headers(signer: signer, method: method, path: path, body: body ?? Data(), ts: RequestAuth.timestamp(clock()), nonce: nonce())
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
