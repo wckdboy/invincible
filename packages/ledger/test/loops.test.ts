@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, type GEvent, newNodeIdentity, type NodeIdentity, type Prov, registrationDigest, signEvent, toolDigest, type EvalRecord } from "@invincible/core";
+import { b64u, type GEvent, HlcClock, newNodeIdentity, type NodeIdentity, type Prov, registrationDigest, signEvent, toolDigest, type EvalRecord } from "@invincible/core";
 import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../src/index.ts";
 
 /*
@@ -141,7 +141,7 @@ describe("the action outbox in the log", () => {
     syncInto(storeA, storeB);
     // You answer from the laptop; the first answer stands.
     storeB.emit(b, "action.decided", { id: actionId(1), verdict: "approved" }, { trust: "owner", via: "c_phone000000000000000000000000000000000000000" });
-    expect(() => storeB.emit(b, "action.decided", { id: actionId(1), verdict: "denied" })).toThrow(/already decided/);
+    expect(() => storeB.emit(b, "action.decided", { id: actionId(1), verdict: "denied" }, { trust: "owner" })).toThrow(/already decided/);
     syncInto(storeB, storeA);
     expect(storeA.lww<{ verdict: string; via: string }>(`action-decision:${actionId(1)}`)?.value).toMatchObject({ verdict: "approved" });
     // Only the node that filed it sends it and writes the receipt, and only once.
@@ -152,10 +152,10 @@ describe("the action outbox in the log", () => {
 
   test("nothing completes without an approval, and decisions need a request", () => {
     const { a, storeA } = fleet();
-    expect(() => storeA.emit(a, "action.decided", { id: actionId(2), verdict: "approved" })).toThrow(/no such action/);
+    expect(() => storeA.emit(a, "action.decided", { id: actionId(2), verdict: "approved" }, { trust: "owner" })).toThrow(/no such action/);
     storeA.emit(a, "action.requested", request(actionId(3)));
     expect(() => storeA.emit(a, "action.done", { id: actionId(3), ok: true, receipt: "sent anyway" })).toThrow(/not approved/);
-    storeA.emit(a, "action.decided", { id: actionId(3), verdict: "denied" });
+    storeA.emit(a, "action.decided", { id: actionId(3), verdict: "denied" }, { trust: "owner" });
     expect(() => storeA.emit(a, "action.done", { id: actionId(3), ok: true, receipt: "sent anyway" })).toThrow(/not approved/);
     expect(() => storeA.emit(a, "action.requested", request(actionId(3)))).toThrow(/already filed/);
   });
@@ -164,8 +164,8 @@ describe("the action outbox in the log", () => {
     const { a, b, storeA, storeB } = fleet();
     storeA.emit(a, "action.requested", request(actionId(4)));
     syncInto(storeA, storeB);
-    storeA.emit(a, "action.decided", { id: actionId(4), verdict: "denied" });
-    storeB.emit(b, "action.decided", { id: actionId(4), verdict: "approved" });
+    storeA.emit(a, "action.decided", { id: actionId(4), verdict: "denied" }, { trust: "owner" });
+    storeB.emit(b, "action.decided", { id: actionId(4), verdict: "approved" }, { trust: "owner" });
     syncInto(storeA, storeB);
     syncInto(storeB, storeA);
     const verdictA = storeA.lww<{ verdict: string }>(`action-decision:${actionId(4)}`)?.value?.verdict;
@@ -199,6 +199,63 @@ const order = (id: string, patch: Record<string, unknown> = {}) => ({
   digest: toolDigest(PR as never, "issue.create")!,
   label: "Issues in our repos",
   ...patch,
+});
+
+/*
+ * A decision says whose it is: yours (owner) or your agent's own (agent). No version of the code ever wrote one that said
+ * neither (only test fixtures did), so one stamped at or after 28 November 2026 is refused from any writer; one stamped
+ * before replays as it always did, so an old log comes out the same on every replica.
+ */
+describe("a decision says whose it is", () => {
+  const CUTOFF = Date.UTC(2026, 10, 28);
+  /** Two full nodes whose clocks read `at`. */
+  function fleetAt(at: number) {
+    const a = newNodeIdentity();
+    const b = newNodeIdentity();
+    const storeA = new LedgerStore(":memory:", new HlcClock(() => at));
+    foundFleet(storeA, a, { fleetName: "homelab", nodeName: "ultra" });
+    enrollDevice(storeA, a, { device: b.id, name: "laptop", kind: "node", box: b64u(b.boxPublic) });
+    const storeB = new LedgerStore(":memory:", new HlcClock(() => at));
+    storeB.expectFleet(storeA.fleet!);
+    syncInto(storeA, storeB);
+    return { a, b, storeA, storeB };
+  }
+  const forge = (store: LedgerStore, signer: NodeIdentity, body: unknown, prov?: Prov): GEvent =>
+    signEvent({ v: 2, fleet: store.fleet!, hlc: store.clock.tick(), device: signer.id, prev: store.head(signer.id), kind: "action.decided", body: body as never, ...(prov ? { prov } : {}) }, signer);
+
+  test("from 28 November 2026, one that says neither yours nor your agent's is refused on every replica; yours and its stand", () => {
+    const { a, b, storeA, storeB } = fleetAt(CUTOFF + 3_600_000);
+    for (const n of [30, 31, 32, 33]) storeA.emit(a, "action.requested", request(actionId(n)));
+    expect(() => storeA.emit(a, "action.decided", { id: actionId(30), verdict: "approved" })).toThrow(/says whose it is/);
+    expect(() => storeA.emit(a, "action.decided", { id: actionId(30), verdict: "denied" }, { trust: "untrusted" })).toThrow(/says whose it is/);
+    // Forged and sent on: refused the same way everywhere, and nothing of it stands.
+    const forged = forge(storeA, a, { id: actionId(31), verdict: "approved" });
+    storeA.ingest([forged]);
+    syncInto(storeA, storeB);
+    for (const store of [storeA, storeB]) {
+      expect(store.rejection(forged.id)).toBe("a decision says whose it is: yours, or your agent's own");
+      expect(store.lww(`action-decision:${actionId(31)}`)).toBeNull();
+    }
+    // Yours, from any device of yours or the terminal, and your agent's own refusal: as ever.
+    storeB.emit(b, "action.decided", { id: actionId(32), verdict: "approved" }, { trust: "owner", via: `c_${"P".repeat(43)}` });
+    storeA.emit(a, "action.decided", { id: actionId(33), verdict: "denied" }, { trust: "owner" });
+    syncInto(storeB, storeA);
+    syncInto(storeA, storeB);
+    expect(storeA.digest()).toBe(storeB.digest());
+  });
+
+  test("before it, one that said neither replays as it always did: the same on every replica, and after a rebuild", () => {
+    const { a, storeA, storeB } = fleetAt(CUTOFF - 86_400_000);
+    storeA.emit(a, "action.requested", request(actionId(34)));
+    storeA.emit(a, "action.decided", { id: actionId(34), verdict: "denied", note: "not today" });
+    syncInto(storeA, storeB);
+    for (const store of [storeA, storeB]) expect(store.lww(`action-decision:${actionId(34)}`)?.value).toMatchObject({ verdict: "denied", note: "not today" });
+    const digest = storeB.digest();
+    storeB.rebuild();
+    expect(storeB.lww(`action-decision:${actionId(34)}`)?.value).toMatchObject({ verdict: "denied" });
+    expect(storeB.digest()).toBe(digest);
+    expect(storeA.digest()).toBe(digest);
+  });
 });
 
 /*
@@ -274,7 +331,7 @@ describe("standing orders in the log", () => {
     storeA.emit(a, "order.applied", { order: orderId(1), action: actionId(10) });
     expect(storeA.lww(`action-decision:${actionId(10)}`)?.value).toMatchObject({ verdict: "approved", order: orderId(1) });
     // Once answered, nobody answers again, and the order can't be applied twice.
-    expect(() => storeA.emit(a, "action.decided", { id: actionId(10), verdict: "denied" })).toThrow(/already decided/);
+    expect(() => storeA.emit(a, "action.decided", { id: actionId(10), verdict: "denied" }, { trust: "owner" })).toThrow(/already decided/);
     expect(() => storeA.emit(a, "order.applied", { order: orderId(1), action: actionId(10) })).toThrow(/already decided/);
     storeA.emit(a, "action.done", { id: actionId(10), ok: true, receipt: "201" });
   });
@@ -432,7 +489,7 @@ describe("convergence", () => {
     storeB.emit(b, "connector.set", { id: "github", manifest: { id: "github", anything: "goes in the log" } });
     storeA.emit(a, "action.requested", request(actionId(5)));
     syncInto(storeA, storeB);
-    storeB.emit(b, "action.decided", { id: actionId(5), verdict: "approved" });
+    storeB.emit(b, "action.decided", { id: actionId(5), verdict: "approved" }, { trust: "owner" });
     storeB.emit(b, "notice.dismissed", { key: "k1" });
     syncInto(storeB, storeA);
     storeA.emit(a, "action.done", { id: actionId(5), ok: true, receipt: "ok" });

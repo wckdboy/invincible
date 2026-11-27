@@ -85,6 +85,13 @@ const SCHEMA_VERSION = 8;
 
 const MAX_PENDING = 2000;
 
+/**
+ * From when a decision must say whose it is (action.decided: yours, `owner`, or your agent's own, `agent`): 28 November
+ * 2026, 00:00 UTC, read off the event's own HLC. No version of the code ever wrote one that said neither, only test
+ * fixtures did; one stamped before this replays as it always did, so an old log comes out the same on every replica.
+ */
+export const DECISIONS_SAY_WHOSE_FROM = Date.UTC(2026, 10, 28);
+
 /** Why an event's place in its device's chain is refused (prescan, chainReason). */
 const CHAIN = {
   unchained: "unchained event in a chained fleet",
@@ -987,6 +994,10 @@ export class LedgerStore {
         if (!asked) return "no such action";
         // The first decision stands: an approval can't be flipped after the fact, nor a refusal.
         if (this.lww(`action-decision:${body.id}`)) return "action already decided";
+        // It says whose it is: yours or your agent's own. One that says neither, stamped from the day that became the rule,
+        // is refused from any writer; one stamped before replays as it always did (DECISIONS_SAY_WHOSE_FROM).
+        const trust = event.prov?.trust;
+        if (trust !== "owner" && trust !== "agent" && decodeHlc(event.hlc).ms >= DECISIONS_SAY_WHOSE_FROM) return "a decision says whose it is: yours, or your agent's own";
         // An approval recorded as an agent's is the primary's own, and every replica holds it to that rule (policy.ts
         // ownApprovalInLog) as the connector stood, as an order applied is held to what it covers: a caller of its own,
         // a call the rule allows. (Its refusal is never refused.)

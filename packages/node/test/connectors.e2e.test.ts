@@ -519,7 +519,7 @@ describe("an approval has a send deadline", () => {
     fleet.sync(fleet.storeF, fleet.storeG);
     // A node whose clock let it answer after the day was up (decide() itself refuses that).
     fleet.clocks.g += 25 * HOUR;
-    fleet.storeG.emit(fleet.g, "action.decided", { id, verdict: "approved" });
+    fleet.storeG.emit(fleet.g, "action.decided", { id, verdict: "approved" }, { trust: "owner" });
     fleet.clocks.f = fleet.clocks.g;
     fleet.sync(fleet.storeG, fleet.storeF);
     await fleet.filer.drain();
