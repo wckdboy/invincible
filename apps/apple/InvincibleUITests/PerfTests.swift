@@ -7,7 +7,8 @@ import XCTest
  *    Apple's launch metric reports nothing on a simulator), the median of five;
  *  - at rest on Home: what it asks the node in a minute, and its CPU and memory while nothing changes; and what it asks
  *    in a minute with a stall in it (the node silent long enough that the app takes its stream for dead);
- *  - live: from something needing you on the node to Home's header counting it;
+ *  - live: from something needing you on the node to Home's header counting it, the first event after opening held on
+ *    its own (it takes the path cold) and the ten after it together, each said with where its time went;
  *  - a dead link: how soon the app says it's reconnecting once the node goes silent (as a half-open connection does),
  *    and how soon it's back once the node can be reached again;
  *  - scrolling Home's long list: the frames that came late, in ms a second (Apple's hitch time ratio).
@@ -20,6 +21,7 @@ final class PerfTests: XCTestCase {
         let requestsAtRestPerMinute: Double
         let requestsThroughAStallPerMinute: Double
         let eventToScreenP95Ms: Double
+        let eventToScreenFirstMs: Double
         let deadLinkNoticedMs: Double
         let deadLinkBackMs: Double
         let cpuAtRestPercent: Double
@@ -165,18 +167,44 @@ final class PerfTests: XCTestCase {
         let app = XCUIApplication()
         try app.openHome(node)
         settle(5)
-        var took: [Double] = []
+        // The first event after opening, on its own: it takes the path cold, and on CI's loaded Mac (27 November 2026, PR
+        // #72) one such took 554 ms against 130-140 for the nine after it, which failed the steady limit, the 95th percentile
+        // of ten being their largest. It is held to a limit of its own, so a first event that got slower still fails.
+        let first = try event(app, node)
+        settle(1)
+        var each: [Event] = []
         for _ in 0..<10 {
-            let before = try XCTUnwrap(app.needsCount, "Home says no count")
-            _ = try node.poke()
-            let start = Date()
-            while (app.needsCount ?? before) <= before, Date().timeIntervalSince(start) < 20 { settle(0.02) }
-            took.append(Date().timeIntervalSince(start) * 1000)
+            each.append(try event(app, node))
             settle(1)
         }
-        report("event-to-screen", ["p50": percentile(took, 0.5), "p95": percentile(took, 0.95), "max": took.max() ?? .nan])
+        let took = each.map(\.ms)
+        report("event-to-screen", ["first": first.ms, "p50": percentile(took, 0.5), "p95": percentile(took, 0.95), "max": took.max() ?? .nan])
+        print("PERF event-to-screen first: \(first.said)")
         print("PERF event-to-screen each: \(took.map { Int($0) })")
-        XCTAssertLessThanOrEqual(percentile(took, 0.95), try budgets.eventToScreenP95Ms, "Something needing you took \(took.map { Int($0) }) ms to show")
+        for (n, one) in each.enumerated() { print("PERF event-to-screen \(n + 1): \(one.said)") }
+        XCTAssertLessThanOrEqual(first.ms, try budgets.eventToScreenFirstMs, "The first event after opening took \(first.said)")
+        XCTAssertLessThanOrEqual(percentile(took, 0.95), try budgets.eventToScreenP95Ms, "Something needing you took \(took.map { Int($0) }) ms to show: \(each.map(\.said).joined(separator: "; "))")
+    }
+
+    /// One event and how long the screen took to count it, with where the time went: when the app's reads reached the node
+    /// after it answered the poke and how long the node took over each (its stream aside), then when the screen said it, all
+    /// from the node's answer (the dev node's clock and this test's are the Mac's own).
+    struct Event {
+        let ms: Double
+        let said: String
+    }
+
+    @MainActor
+    private func event(_ app: XCUIApplication, _ node: DevNode) throws -> Event {
+        let before = try XCTUnwrap(app.needsCount, "Home says no count")
+        let poked = try node.poke()
+        let start = Date()
+        while (app.needsCount ?? before) <= before, Date().timeIntervalSince(start) < 20 { settle(0.02) }
+        let ms = Date().timeIntervalSince(start) * 1000
+        let shown = start.timeIntervalSince1970 * 1000 + ms - poked.at
+        let reads = try node.requests(since: poked.at).requests.filter { !DevNode.isStream($0.path) && $0.at - poked.at <= shown }
+        let read = reads.map { "\($0.method) \($0.path.components(separatedBy: "?")[0]) at +\(Int($0.at - poked.at)) ms, answered in \(Int($0.ms))" }
+        return Event(ms: ms, said: "\(Int(ms)) ms (\(read.isEmpty ? "no read" : read.joined(separator: "; ")); on screen at +\(Int(shown)) ms)")
     }
 
     @MainActor

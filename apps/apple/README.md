@@ -153,6 +153,7 @@ recorded in every run as an expected failure until it is):
 | From the app's first line to Home's first frame with what it shows (median of five; the whole launch is reported beside it) | 1.5 s | 0.4 s | the whole: 3.3–3.7 s → 2.0 s launched plainly; the app's part 0.42–0.45 s plainly, 0.83–1.0 s under XCUITest (I9); from its first line as it is now counted, 0.27 s plainly on a quiet Mac and 0.52 s under XCUITest, main and I10 alike (I10) |
 | What it asks the node in a minute at rest | 2 | 2 | 144 → 0; 0 (I10) |
 | From something needing you on the node to Home counting it (95th percentile) | 0.5 s | 1 s | 4.0–4.3 s → 0.18 s; 0.16–0.21 s (I10) |
+| The first such event after opening, on its own (it takes the path cold; each event's PERF line says when the app's read reached the node, how long the node took, and when the screen counted it) | 1 s | | 0.14–0.18 s alone on the Mac mini at loads of 51–115, main and the fabric's stack alike; 0.55 s once on CI's loaded Mac, which failed the row above until the first event was held apart (27 Nov) |
 | A dead link (the node gone silent) noticed / back once it can be reached | 5 s / 1.5 s | 5 s / 2 s | 63 s / 5.3–6.8 s → 4.0–4.5 s / 0.8 s; 4.2 s / 0.94–1.02 s (I10) |
 | CPU at rest on Home | 5 % | 1 % | 14–23 % → 0.0–3.7 %; 0.1 % (I10) |
 | Memory at rest on Home | 80 MB | 150 MB | 101–104 MB → 40–41 MB; 42–43 MB (I10) |
