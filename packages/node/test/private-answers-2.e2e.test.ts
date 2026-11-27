@@ -1,8 +1,8 @@
 // What private-answers left a gap in (the re-review of 27 November, B2, B3, B4; its PoCs turned around): what was
-// recorded before it, a private connector's call a standing order answers, and one removed. Against a real daemon
-// (startDaemon) and its routes, with stand-ins for Google and for Home Assistant on its LAN address: only loopback reaches
-// the network, and every other origin gets a stand-in's 404. Every name, address and message is made up; the keys are
-// obviously fake.
+// recorded before it, a private connector's call a standing order answers, and one removed. And the side doors a
+// private run's words took after it: a loop once private. Against a real daemon (startDaemon) and its routes, with
+// stand-ins for Google and for Home Assistant on its LAN address: only loopback reaches the network, and every other
+// origin gets a stand-in's 404. Every name, address and message is made up; the keys are obviously fake.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -130,4 +130,15 @@ test("B4: a private connector installed under its own id stays private once it i
   // Yours, on your devices, as it is.
   const yours = ((await admin("actions")).body.actions as ActionView[]).find((a) => a.connector === "family-mail")!;
   expect(yours.args).toEqual({ to: "lars@example.test", body: "I will pay the 18,400 on Thursday." });
+});
+
+test("a loop once private stays private: set again without its mail, or removed, its runs' words still reach no agent", async () => {
+  expect((await admin("setLoop", { name: "lease", schedule: "0 9 * * 1", task: { kind: "tell", text: "New mail came." }, wakes: [{ kind: "mail", connector: "gmail", query: "from:ingrid" }] })).status).toBe(200);
+  const t = Date.now() - 86_400_000;
+  daemon.store.emit(daemon.identity, "loop.ran", { loop: "lease", run: "wlease", slot: null, status: "ok", started: t, finished: t + 60_000, summary: "Woken by new Gmail mail from Ingrid Vestergaard <ingrid@example.test>: Quarterly rent arrears." });
+  expect((await admin("setLoop", { name: "lease", wakes: [] })).status).toBe(200);
+  expect(held(JSON.stringify((await send(agent, "loopRuns", { name: "lease" })).body))).toEqual([]);
+  expect((await admin("removeLoop", { name: "lease" })).status).toBe(200);
+  expect(held(JSON.stringify((await send(agent, "loopRuns", { name: "lease" })).body))).toEqual([]);
+  expect(JSON.stringify((await admin("loopRuns", { name: "lease" })).body)).toContain("Quarterly rent arrears");
 });

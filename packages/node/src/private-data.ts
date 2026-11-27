@@ -1,12 +1,11 @@
 import { installedConnector, privateConnector } from "@invincible/models";
 import type { LedgerStore } from "@invincible/ledger";
-import { loopRecords } from "./loops.ts";
 
 /*
  * Your private data where it isn't a private connector's own call (PRIVATE_CONNECTORS; the re-review of 27 November,
- * B1, B2, B4): a connector is private if it ever was, as the log says it was installed, not only as it stands now; and
- * a loop is private when what it runs on is: one that new mail wakes, or one that calls a private connector. What such
- * a loop's runs record, and the lines its runs' commands write, are yours alone.
+ * B1, B2, B4, and the side doors after it): a connector is private if it ever was, as the log says it was installed,
+ * not only as it stands now; and so is a loop, when what it runs on is or was: one that new mail wakes, or one whose task
+ * calls a private connector. What such a loop's runs record, and the lines its runs' commands write, are yours alone.
  */
 
 /** Whether a connector's answers are your private data: its id, its manifest now, or any manifest it was ever installed with. */
@@ -27,10 +26,15 @@ export function runOfLoops(run: unknown, loops: ReadonlySet<string>): boolean {
   return name !== null && [...loops].some((loop) => name === loop || name.startsWith(`${loop}.`));
 }
 
-/** The loops whose runs hold your private data, by name: each one new mail wakes, and each one that calls a private connector. */
+/**
+ * The loops whose runs hold your private data, by name: each one new mail ever woke, and each one whose task ever
+ * called a private connector, as the log says. So every replica decides alike, and a loop removed, or set again without
+ * them, still was (B4's way, for loops).
+ */
 export function privateLoops(store: LedgerStore): Set<string> {
-  const isPrivate = (id: string) => connectorIsPrivate(store, id);
-  return new Set(loopRecords(store).filter((loop) => loop.wakes.some((wake) => wake.kind === "mail") || (loop.task?.kind === "call" && isPrivate(loop.task.connector))).map((loop) => loop.name));
+  const loops = new Set(store.loopsMailWoke());
+  for (const { name, connector } of store.loopCalls()) if (!loops.has(name) && connectorIsPrivate(store, connector)) loops.add(name);
+  return loops;
 }
 
 /** What a run your private data woke writes in place of its command's words: that it ran one, and how that ended. */

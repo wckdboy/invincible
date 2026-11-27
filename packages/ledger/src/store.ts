@@ -1801,6 +1801,29 @@ export class LedgerStore {
     );
   }
 
+  /**
+   * The loops new mail ever woke, by name: any loop.wakes of one in the log with a mail wake. One removed since, or set
+   * again without it, still was.
+   */
+  loopsMailWoke(): string[] {
+    return this.db
+      .query<{ name: string }, []>(
+        "SELECT DISTINCT json_extract(e.raw, '$.body.name') AS name FROM events e WHERE e.kind = 'loop.wakes' AND EXISTS (SELECT 1 FROM json_each(e.raw, '$.body.wakes') w WHERE json_extract(w.value, '$.kind') = 'mail')",
+      )
+      .all()
+      .map((row) => row.name);
+  }
+
+  /** What every loop's task ever called, by the loop's name: any loop.set of one in the log with a call task. */
+  loopCalls(): { name: string; connector: string }[] {
+    return this.db
+      .query<{ name: string; connector: unknown }, []>(
+        "SELECT DISTINCT json_extract(raw, '$.body.name') AS name, json_extract(raw, '$.body.task.connector') AS connector FROM events WHERE kind = 'loop.set' AND json_extract(raw, '$.body.task.kind') = 'call'",
+      )
+      .all()
+      .flatMap((row) => (typeof row.connector === "string" ? [{ name: row.name, connector: row.connector }] : []));
+  }
+
   eventCount(): number {
     return this.loggedCount();
   }
