@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,13 @@ import { checkpointCommand, quote, REPO_TASK_START } from "@invincible/agents";
  * An agent's steps, kept as they end, and a task started from one (PLAN #15), with real git in a scratch directory:
  * what the VM would run, its paths under /work pointed here.
  */
+
+// Each test here starts its processes one after another (git, and the checkpoint's python3 with its held git: 54 for "a
+// step is kept", 38 for "a task started from a step"), so its time is the machine's to give: alone 0.6 to 0.8 s; beside
+// 144 loops starting git and python3, past bun's 5 s default in each of three runs, and up to 17 s once let run (0.43 s
+// a process; 27 November 2026, the machine at a load of 40 to 58; in a full run at a load of 50 it had timed out too).
+// The limit, a second for each process the busiest starts, is how long a busy machine may take, never what a test checks.
+setDefaultTimeout(60_000);
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
