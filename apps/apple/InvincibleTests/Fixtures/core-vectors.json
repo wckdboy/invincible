@@ -41363,5 +41363,656 @@
         "words": "Also wakes on a failed CI run on main or a new pull request in example/app · a push or a new issue in example/app; a burst within 2 min is one run."
       }
     ]
+  },
+  "seats": {
+    "now": 1795694400000,
+    "kinds": {
+      "claude-subscription": {
+        "name": "Claude plan",
+        "how": "Pro, Max or Ultra, signed in with Claude Code"
+      },
+      "chatgpt-codex": {
+        "name": "ChatGPT plan",
+        "how": "signed in with Codex"
+      },
+      "chatgpt-siwc": {
+        "name": "ChatGPT plan",
+        "how": "Sign in with ChatGPT"
+      },
+      "mistral-vibe": {
+        "name": "Mistral plan",
+        "how": "its key from Mistral's console"
+      },
+      "plan": {
+        "name": "Coding plan",
+        "how": "its key, in the vault"
+      },
+      "api": {
+        "name": "API key",
+        "how": "in the vault"
+      }
+    },
+    "quickLabels": [
+      {
+        "have": [],
+        "claude": "Claude 1",
+        "chatgpt": "ChatGPT 1"
+      },
+      {
+        "have": [
+          {
+            "label": "Claude 1"
+          },
+          {
+            "label": "Claude 3"
+          }
+        ],
+        "claude": "Claude 2",
+        "chatgpt": "ChatGPT 1"
+      }
+    ],
+    "states": [
+      {
+        "state": {
+          "is": "ready",
+          "renewBy": null
+        },
+        "plan": "max",
+        "words": {
+          "word": "Signed in · Max",
+          "tone": "ok"
+        },
+        "action": null
+      },
+      {
+        "state": {
+          "is": "ready",
+          "renewBy": 1795957200000
+        },
+        "plan": "max",
+        "words": {
+          "word": "Sign in again before 29 Nov, 13:00 UTC",
+          "tone": "warn"
+        },
+        "action": "Sign in again"
+      },
+      {
+        "state": {
+          "is": "signing-in",
+          "attempt": "sa_x",
+          "since": 1795694400000,
+          "until": 1795695000000
+        },
+        "plan": "max",
+        "words": {
+          "word": "Signing in",
+          "tone": "work"
+        },
+        "action": null
+      },
+      {
+        "state": {
+          "is": "resting",
+          "until": 1795701600000,
+          "window": "five_hour"
+        },
+        "plan": "max",
+        "words": {
+          "word": "Spent: back at 14:00 UTC",
+          "tone": "quiet"
+        },
+        "action": null
+      },
+      {
+        "state": {
+          "is": "resting",
+          "until": 9007199254740991,
+          "window": null
+        },
+        "plan": "max",
+        "words": {
+          "word": "Spent: back later",
+          "tone": "quiet"
+        },
+        "action": null
+      },
+      {
+        "state": {
+          "is": "signed-out",
+          "why": "never"
+        },
+        "plan": "max",
+        "words": {
+          "word": "Not signed in",
+          "tone": "warn"
+        },
+        "action": "Sign in"
+      },
+      {
+        "state": {
+          "is": "signed-out",
+          "why": "signed-out"
+        },
+        "plan": "max",
+        "words": {
+          "word": "Signed out",
+          "tone": "warn"
+        },
+        "action": "Sign in"
+      },
+      {
+        "state": {
+          "is": "signed-out",
+          "why": "cancelled"
+        },
+        "plan": "max",
+        "words": {
+          "word": "Sign-in cancelled",
+          "tone": "quiet"
+        },
+        "action": "Sign in"
+      },
+      {
+        "state": {
+          "is": "signed-out",
+          "why": "expired"
+        },
+        "plan": "max",
+        "words": {
+          "word": "Sign-in lapsed",
+          "tone": "quiet"
+        },
+        "action": "Sign in"
+      },
+      {
+        "state": {
+          "is": "signed-out",
+          "why": "failed"
+        },
+        "plan": "max",
+        "words": {
+          "word": "Sign-in failed",
+          "tone": "warn"
+        },
+        "action": "Sign in"
+      },
+      {
+        "state": {
+          "is": "signed-out",
+          "why": "wrong-account"
+        },
+        "plan": "max",
+        "words": {
+          "word": "Signed in to another account: refused",
+          "tone": "warn"
+        },
+        "action": "Sign in"
+      }
+    ],
+    "serves": [
+      {
+        "serves": [],
+        "roster": [
+          {
+            "id": "ada",
+            "name": "Ada",
+            "createdAt": 1000
+          },
+          {
+            "id": "bo",
+            "name": "Bo",
+            "createdAt": 2000
+          }
+        ],
+        "words": {
+          "word": "Serves no agent yet",
+          "shared": false
+        }
+      },
+      {
+        "serves": [
+          {
+            "id": "ada",
+            "made": 1000
+          }
+        ],
+        "roster": [
+          {
+            "id": "ada",
+            "name": "Ada",
+            "createdAt": 1000
+          },
+          {
+            "id": "bo",
+            "name": "Bo",
+            "createdAt": 2000
+          }
+        ],
+        "words": {
+          "word": "Serves Ada",
+          "shared": false
+        }
+      },
+      {
+        "serves": [
+          {
+            "id": "ada",
+            "made": 1000
+          },
+          {
+            "id": "bo",
+            "made": 2000
+          }
+        ],
+        "roster": [
+          {
+            "id": "bo",
+            "name": "Bo",
+            "createdAt": 2000
+          },
+          {
+            "id": "ada",
+            "name": "Ada",
+            "createdAt": 1000
+          }
+        ],
+        "words": {
+          "word": "Shared by Ada and Bo: one trust domain",
+          "shared": true
+        }
+      },
+      {
+        "serves": [
+          {
+            "id": "ada",
+            "made": 1000
+          }
+        ],
+        "roster": [
+          {
+            "id": "bo",
+            "name": "Bo",
+            "createdAt": 2000
+          }
+        ],
+        "words": {
+          "word": "Serves no agent now",
+          "shared": false
+        }
+      },
+      {
+        "serves": [
+          {
+            "id": "ada",
+            "made": 1000
+          }
+        ],
+        "roster": [
+          {
+            "id": "ada",
+            "name": "Ada",
+            "createdAt": 9000
+          }
+        ],
+        "words": {
+          "word": "Serves no agent now",
+          "shared": false
+        }
+      },
+      {
+        "serves": [
+          {
+            "id": "ada",
+            "made": 1000
+          },
+          {
+            "id": "bo",
+            "made": 2000
+          }
+        ],
+        "roster": null,
+        "words": {
+          "word": "Shared by ada and bo: one trust domain",
+          "shared": true
+        }
+      }
+    ],
+    "choices": [
+      {
+        "label": "Claude 1",
+        "before": [
+          "Ada"
+        ],
+        "after": [
+          "Ada",
+          "Bo"
+        ],
+        "words": "Ada and Bo will share Claude 1's home, and what any of their runs leave there (its tool's settings, hooks and notes) the next one runs with: they are one trust domain."
+      },
+      {
+        "label": "Claude 1",
+        "before": [
+          "Ada"
+        ],
+        "after": [
+          "Bo"
+        ],
+        "words": "Bo will run with what Ada's runs left in Claude 1's home (its tool's settings, hooks and notes): Ada and Bo are one trust domain."
+      },
+      {
+        "label": "Claude 1",
+        "before": [
+          "Ada",
+          "Cy"
+        ],
+        "after": [
+          "Bo"
+        ],
+        "words": "Bo will run with what the runs of Ada and Cy left in Claude 1's home (its tool's settings, hooks and notes): Ada, Cy and Bo are one trust domain."
+      },
+      {
+        "label": "Claude 1",
+        "before": [],
+        "after": [
+          "Ada"
+        ],
+        "words": null
+      },
+      {
+        "label": "Claude 1",
+        "before": [
+          "Ada",
+          "Bo"
+        ],
+        "after": [
+          "Ada"
+        ],
+        "words": null
+      }
+    ],
+    "windows": [
+      {
+        "window": {
+          "window": "five_hour",
+          "status": "allowed",
+          "usedPercent": 42,
+          "resetsAt": 1795701600000,
+          "at": 1795694400000
+        },
+        "words": "Five hours: 42% used, resets 14:00 UTC"
+      },
+      {
+        "window": {
+          "window": "seven_day",
+          "status": "allowed",
+          "usedPercent": 12,
+          "resetsAt": 1795953600000,
+          "at": 1795694400000
+        },
+        "words": "Week: 12% used, resets 29 Nov, 12:00 UTC"
+      },
+      {
+        "window": {
+          "window": "five_hour",
+          "status": "rejected",
+          "usedPercent": 100,
+          "resetsAt": 1795701600000,
+          "at": 1795694400000
+        },
+        "words": "Five hours: spent, resets 14:00 UTC"
+      },
+      {
+        "window": {
+          "window": "five_hour",
+          "status": "warning",
+          "usedPercent": 91,
+          "resetsAt": 1795701600000,
+          "at": 1795694400000
+        },
+        "words": "Five hours: 91% used, nearly spent, resets 14:00 UTC"
+      },
+      {
+        "window": {
+          "window": "five_hour",
+          "status": "allowed",
+          "usedPercent": null,
+          "resetsAt": null,
+          "at": 1795694400000
+        },
+        "words": "Five hours: in use"
+      },
+      {
+        "window": {
+          "window": "minutes_90",
+          "status": "allowed",
+          "usedPercent": 7.6,
+          "resetsAt": 1795701600000,
+          "at": 1795694400000
+        },
+        "words": "90 minutes: 8% used, resets 14:00 UTC"
+      }
+    ],
+    "uses": [
+      {
+        "use": null,
+        "words": null
+      },
+      {
+        "use": {
+          "since": 1795694400000,
+          "tasks": 0,
+          "tokens": 0,
+          "running": 0
+        },
+        "words": null
+      },
+      {
+        "use": {
+          "since": 1795694400000,
+          "tasks": 1,
+          "tokens": 4000,
+          "running": 0
+        },
+        "words": "1 task this week · 4,000 tokens"
+      },
+      {
+        "use": {
+          "since": 1795694400000,
+          "tasks": 3,
+          "tokens": 1204000,
+          "running": 1
+        },
+        "words": "3 tasks this week · 1.20M tokens · 1 running now"
+      },
+      {
+        "use": {
+          "since": 1795694400000,
+          "tasks": 0,
+          "tokens": 0,
+          "running": 2
+        },
+        "words": "2 running now"
+      }
+    ],
+    "meters": [
+      {
+        "windows": [
+          {
+            "window": "five_hour",
+            "status": "allowed",
+            "usedPercent": 42,
+            "resetsAt": 1795701600000,
+            "at": 1795694400000
+          },
+          {
+            "window": "seven_day_opus",
+            "status": "allowed",
+            "usedPercent": 80,
+            "resetsAt": 1795694399999,
+            "at": 1795694400000
+          }
+        ],
+        "use": {
+          "since": 1795694400000,
+          "tasks": 3,
+          "tokens": 1204000,
+          "running": 1
+        },
+        "words": [
+          "Five hours: 42% used, resets 14:00 UTC",
+          "3 tasks this week · 1.20M tokens · 1 running now"
+        ]
+      },
+      {
+        "windows": [],
+        "use": null,
+        "words": []
+      }
+    ],
+    "elsewhere": {
+      "chatgpt-codex": {
+        "words": "Its use as ChatGPT counts it: Settings → Usage",
+        "url": "https://chatgpt.com/"
+      },
+      "chatgpt-siwc": {
+        "words": "Its use as ChatGPT counts it: Settings → Usage",
+        "url": "https://chatgpt.com/"
+      }
+    },
+    "windowNames": [
+      {
+        "name": "five_hour",
+        "words": "five hours"
+      },
+      {
+        "name": "seven_day",
+        "words": "week"
+      },
+      {
+        "name": "seven_day_opus",
+        "words": "week (Opus)"
+      },
+      {
+        "name": "minutes_60",
+        "words": "1 hour"
+      },
+      {
+        "name": "minutes_1440",
+        "words": "1 day"
+      },
+      {
+        "name": "minutes_90",
+        "words": "90 minutes"
+      },
+      {
+        "name": "plan",
+        "words": "plan"
+      },
+      {
+        "name": "overage_window",
+        "words": "overage window"
+      }
+    ],
+    "plans": [
+      {
+        "plan": {
+          "seat": "st_ssssssssssssssssssssss",
+          "kind": "claude-subscription",
+          "windows": [
+            {
+              "window": "five_hour",
+              "share": 7
+            },
+            {
+              "window": "seven_day",
+              "share": 1
+            }
+          ],
+          "usd": 0.00144
+        },
+        "facts": [
+          "on your Claude plan, 7% of its five hours and 1% of its week",
+          "≈$0.0014 at API prices, covered by the plan"
+        ]
+      },
+      {
+        "plan": {
+          "seat": "st_ssssssssssssssssssssss",
+          "kind": "claude-subscription",
+          "windows": [
+            {
+              "window": "five_hour",
+              "share": 0
+            }
+          ],
+          "usd": null
+        },
+        "facts": [
+          "on your Claude plan"
+        ]
+      },
+      {
+        "plan": {
+          "seat": null,
+          "kind": "chatgpt-codex",
+          "windows": [],
+          "usd": 2.8
+        },
+        "facts": [
+          "on its own ChatGPT sign-in",
+          "≈$2.80 at API prices, covered by the plan"
+        ]
+      }
+    ],
+    "cards": [
+      {
+        "card": {
+          "kind": "device-code",
+          "code": "FAKE-1234",
+          "firstTime": true
+        },
+        "words": {
+          "title": "Sign in on ChatGPT's page",
+          "open": "Open ChatGPT's page",
+          "steps": [
+            "Open the page and sign in to the account this seat is for.",
+            "Enter this code there: FAKE-1234",
+            "This finishes by itself once you have."
+          ],
+          "first": "First, turn on device code sign-in in ChatGPT's settings (Security): this is its first ChatGPT seat."
+        }
+      },
+      {
+        "card": {
+          "kind": "device-code",
+          "code": "FAKE-1234",
+          "firstTime": false
+        },
+        "words": {
+          "title": "Sign in on ChatGPT's page",
+          "open": "Open ChatGPT's page",
+          "steps": [
+            "Open the page and sign in to the account this seat is for.",
+            "Enter this code there: FAKE-1234",
+            "This finishes by itself once you have."
+          ],
+          "first": null
+        }
+      },
+      {
+        "card": {
+          "kind": "paste-code"
+        },
+        "words": {
+          "title": "Sign in on Claude's page",
+          "open": "Open Claude's page",
+          "steps": [
+            "Open the page and sign in to the account this seat is for.",
+            "Paste the code it shows you here."
+          ],
+          "first": null
+        }
+      }
+    ]
   }
 }

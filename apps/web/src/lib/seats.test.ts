@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cardWords, quickAgent, quickLabel, RENEW_DAYS, SEAT_KIND_WORDS, seatStateWords, servesChoiceWords, servesWords, signInAction } from "./seats.ts";
+import { cardWords, quickAgent, quickLabel, RENEW_DAYS, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, seatUseWords, seatWindowWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "./seats.ts";
 
 /*
  * Seats, in words (lib/seats.ts): what each kind is, the one-tap names, where a seat stands, what its button offers and
@@ -51,6 +51,36 @@ describe("seats in words", () => {
     });
     expect(cardWords({ kind: "device-code", code: "FAKE-1234" }).first).toBeNull();
     expect(cardWords({ kind: "paste-code" })).toEqual({ title: "Sign in on Claude's page", open: "Open Claude's page", steps: ["Open the page and sign in to the account this seat is for.", "Paste the code it shows you here."], first: null });
+  });
+});
+
+describe("a seat's meter, in words", () => {
+  const window = (over: object = {}) => ({ window: "five_hour", status: "allowed" as const, usedPercent: 42, resetsAt: NOW + 2 * 3_600_000, at: NOW, ...over });
+  test("each window: how much is used and when it resets; one its tool refused is spent; one that said no share, in use", () => {
+    expect(seatWindowWords(window(), NOW)).toBe("Five hours: 42% used, resets 14:00 UTC");
+    expect(seatWindowWords(window({ window: "seven_day", usedPercent: 12, resetsAt: NOW + 3 * DAY }), NOW)).toBe("Week: 12% used, resets 29 Nov, 12:00 UTC");
+    expect(seatWindowWords(window({ status: "rejected", usedPercent: 100 }), NOW)).toBe("Five hours: spent, resets 14:00 UTC");
+    expect(seatWindowWords(window({ usedPercent: null, resetsAt: null }), NOW)).toBe("Five hours: in use");
+    expect(seatWindowWords(window({ status: "warning", usedPercent: 91 }), NOW)).toBe("Five hours: 91% used, nearly spent, resets 14:00 UTC");
+  });
+
+  test("its use lately: its tasks this week and their tokens, and its runs now; nothing yet, nothing said", () => {
+    expect(seatUseWords({ since: NOW - 7 * DAY, tasks: 3, tokens: 1_204_000, running: 1 })).toBe("3 tasks this week · 1.20M tokens · 1 running now");
+    expect(seatUseWords({ since: NOW - 7 * DAY, tasks: 1, tokens: 4_000, running: 0 })).toBe("1 task this week · 4,000 tokens");
+    expect(seatUseWords({ since: NOW - 7 * DAY, tasks: 0, tokens: 0, running: 0 })).toBeNull();
+    expect(seatUseWords(undefined)).toBeNull();
+  });
+
+  test("its meter: each window still open, the soonest to reset first (one past its reset is fresh again, and left out), then its use lately", () => {
+    const windows = [window({ window: "seven_day", usedPercent: 12, resetsAt: NOW + 3 * DAY }), window({ window: "seven_day_opus", usedPercent: 80, resetsAt: NOW - 1 }), window()];
+    expect(seatMeterWords({ windows }, { since: NOW - 7 * DAY, tasks: 2, tokens: 9_000, running: 0 }, NOW)).toEqual(["Five hours: 42% used, resets 14:00 UTC", "Week: 12% used, resets 29 Nov, 12:00 UTC", "2 tasks this week · 9,000 tokens"]);
+    expect(seatMeterWords({ windows: [] }, undefined, NOW)).toEqual([]);
+  });
+
+  test("a ChatGPT plan's use is read where OpenAI asks, in ChatGPT's own settings; a Claude plan's, here", () => {
+    expect(USE_ELSEWHERE["chatgpt-codex"]).toEqual({ words: "Its use as ChatGPT counts it: Settings → Usage", url: "https://chatgpt.com/" });
+    expect(USE_ELSEWHERE["chatgpt-siwc"]).toEqual(USE_ELSEWHERE["chatgpt-codex"]);
+    expect(USE_ELSEWHERE["claude-subscription"]).toBeUndefined();
   });
 });
 

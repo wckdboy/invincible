@@ -1,8 +1,8 @@
 import type { TeamSnapshot } from "@invincible/core/team";
 import { HOMED_KINDS, SEAT_HARNESS, servedBy } from "@invincible/core/seat-agents";
-import type { SeatSignInCard, SeatView } from "@invincible/core/seats";
+import type { SeatSignInCard, SeatUse, SeatView } from "@invincible/core/seats";
 import { errorMessage, type View } from "../context.ts";
-import { cardWords, QUICK_ADDS, quickAgent, quickLabel, SEAT_KIND_WORDS, seatStateWords, servesChoiceWords, servesWords, signInAction } from "../lib/seats.ts";
+import { cardWords, QUICK_ADDS, quickAgent, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "../lib/seats.ts";
 import { HARNESS } from "../lib/team.ts";
 import { badge, busy, button, callout, card, errorState, list, listRow, note, pageBody, pageHead, section, skeletonRows } from "../ui/controls.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
@@ -17,6 +17,7 @@ import { toast } from "../ui/toast.ts";
  * is the device's alone: never kept. The list says where each stands and whom it serves (worked out from this node's
  * agents: one you removed is served no more), and offers to sign one in again before its sign-in ends. Its agents are
  * chosen in a sheet that says, before you save, what a share means (they are one trust domain), and what a move does.
+ * Under each, its meter: its windows still open and its use lately, and where its vendor counts its use, if it asks.
  * Yours alone to change (fleet:admin); read by anyone who may read the mind.
  */
 
@@ -27,6 +28,8 @@ export const seatsView: View = (root, ctx, { scope }) => {
   let seats: SeatView[] = [];
   /** This node's agents, as its team lists them (null: not to be read here). Only a seat whose home is on this node serves them. */
   let roster: TeamSnapshot["agents"] | null = null;
+  /** This node's seats' use lately, by id (the meter: core's SeatUse). */
+  let use: Record<string, SeatUse> = {};
   const here = ctx.whoami.node;
   const rosterOf = (seat: Pick<SeatView, "node">) => (seat.node === here ? roster : null);
   /** The sign-in under way from this device, and the code field it may have. */
@@ -62,10 +65,24 @@ export const seatsView: View = (root, ctx, { scope }) => {
             button(`Remove ${seat.label}`, { size: "sm", variant: "ghost", iconOnly: true, icon: "trash", onClick: () => void remove(seat) }),
           )
         : null,
+      body: meter(seat, now),
       key: `seat:${seat.id}`,
       // (On a phone its buttons go under its words, which keep their width.)
       wrap: yours,
     });
+  }
+
+  /** A seat's meter, a line for each window and one for its use, and where its vendor counts its use (a ChatGPT plan's, in ChatGPT's settings). */
+  function meter(seat: SeatView, now: number): HTMLElement | undefined {
+    const words = seatMeterWords(seat, use[seat.id], now);
+    const elsewhere = USE_ELSEWHERE[seat.kind];
+    if (!words.length && !elsewhere) return undefined;
+    return h(
+      "div",
+      { class: "stack tight" },
+      ...words.map((line) => h("p", { class: "tiny subtle tnum" }, line)),
+      elsewhere ? h("a", { class: "tiny", href: elsewhere.url, target: "_blank", rel: "noopener noreferrer" }, elsewhere.words) : null,
+    );
   }
 
   function drawCard(): void {
@@ -97,9 +114,10 @@ export const seatsView: View = (root, ctx, { scope }) => {
 
   async function refresh(): Promise<void> {
     try {
-      const [listed, team] = await Promise.all([ctx.api.get<{ seats: SeatView[] }>("/api/seats", scope.signal), yours ? ctx.api.get<TeamSnapshot>("/api/team", scope.signal).catch(() => null) : null]);
+      const [listed, team] = await Promise.all([ctx.api.get<{ seats: SeatView[]; use?: Record<string, SeatUse> }>("/api/seats", scope.signal), yours ? ctx.api.get<TeamSnapshot>("/api/team", scope.signal).catch(() => null) : null]);
       if (scope.disposed) return;
       seats = listed.seats;
+      use = listed.use ?? {};
       roster = team?.agents ?? null;
       // Its sign-in ended (ready, or not): the card goes, and the list says how.
       if (signing && seats.find((seat) => seat.id === signing!.card.seat)?.state.is !== "signing-in") {

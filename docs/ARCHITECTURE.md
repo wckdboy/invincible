@@ -284,6 +284,15 @@ The run loop is carried and renamed (§10), the most proven part of it:
     waited (what is left is the controller's 15-second look for resting work). Choosing the seat whose remaining share
     expires soonest instead used 66.7 % of each week's window, with 31 runs cut off rather than 26 and the same tasks
     proven; the first seat free, 58.3 %. A run waiting for a busy seat has it 0.19 ms after it is let go;
+  - the meter (I15 step 10): a coding tool on its own sign-in says the model it ran on with what it spent, and Claude
+    Code its session's own count of cost (`total_cost_usd`). A task's record counts those calls in `spent` under `own
+    sign-in/<model>`, which costs no money (its plan's, `moneyPrices`), and keeps `plan`: the seat (or its VM's own
+    sign-in), the share of each window the run took, and what its calls would have cost at API prices (Claude Code's own
+    count, from the total its last run on that account ended on; else its tokens at your list price for that model; else
+    unknown), said on every surface as "on your Claude plan, 7% of its five hours" and "≈$0.0014 at API prices, covered
+    by the plan" (`taskPlanFacts`). `GET /api/seats` says each of the node's seats' use lately (`use`: its tasks and
+    their tokens over seven days, and its runs now); the Seats page and `inv seats` show each seat's open windows and
+    that use, and a ChatGPT plan's use is read in ChatGPT's own settings, as OpenAI asks (Settings → Usage);
   - seats live on a node: a run takes one of its node's, for an agent whose VM is on that node. A project's pin of a
     seat (`chooseSeat`'s `pinned`) has no setting yet;
   - routes: `GET /api/seats` (`mind:read`); `POST /api/seats`, `/api/seats/remove`, `/api/seats/policy`,

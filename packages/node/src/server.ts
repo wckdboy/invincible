@@ -156,7 +156,7 @@ import { handleSandboxSearch, SearchError, searchWeb } from "./search.ts";
 import { type Caller, ConnectorCallError, type ConnectorService } from "./connectors.ts";
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
 import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.ts";
-import { addSeat, askSeat, recordSeatStatus, removeSeat, SeatError, seatSalt, seatViews, setSeatPolicy, setSeatServes } from "./seats.ts";
+import { addSeat, askSeat, recordSeatStatus, removeSeat, SeatError, seatSalt, seatUse, seatViews, setSeatPolicy, setSeatServes } from "./seats.ts";
 import { SeatSignIns } from "./seat-sign-in.ts";
 import { SeatRuns } from "./seat-runs.ts";
 import { QuestionError, type Questions } from "./questions.ts";
@@ -4383,7 +4383,12 @@ export function createApp(ctx: AppContext) {
     },
     // Seats (seats.ts): yours alone to add, set and remove, from a terminal or a device of yours; their homes on this node,
     // each serving the agents of this node's you chose, as its team made them (one you removed is no longer one of them).
-    seats: () => ({ seats: seatViews(ctx.store) }),
+    // (And this node's seats' use lately, from its agents' tasks: the meter.)
+    seats: () => {
+      const seats = seatViews(ctx.store);
+      const here = seats.filter((seat) => seat.node === ctx.identity.id);
+      return { seats, use: seatUse(here, ctx.team?.store.tasks() ?? [], (id) => seatRuns.runs(id), Date.now()) };
+    },
     addSeat: (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can add a seat");
       // (Its name reaches the log, and its email the vault: neither may be a key.)

@@ -1408,7 +1408,7 @@ export const routes = {
    * change is yours alone. Nothing a seat route answers or takes carries a token: a seat's account is signed in on its
    * vendor's page.
    */
-  /** Every seat, and where each stands. */
+  /** Every seat, and where each stands; and `use`, each of this node's seats' use lately (seats.ts SeatUse), by its id. */
   seats: { method: "GET", path: "/api/seats", scope: "mind:read", input: null },
   /** Add a seat, its home on this node. Answers `{ seat }`. */
   addSeat: { method: "POST", path: "/api/seats", scope: "fleet:admin", input: SeatAddInput },

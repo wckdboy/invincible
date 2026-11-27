@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SEAT_KINDS, SeatId, taskRecordFacts, TeamTaskPlan, TeamTaskRecord } from "../src/index.ts";
+import { SEAT_KINDS, SeatId, taskPlanFacts, taskRecordFacts, TeamTaskPlan, TeamTaskRecord, windowName } from "../src/index.ts";
 
 /* What an agent's task came to, in words: the same at a terminal and in the app, from the record the runner kept. */
 
@@ -26,6 +26,22 @@ describe("a task's record, in words", () => {
     expect(taskRecordFacts({ startedAt: 0, endedAt: 0, ended: "stopped", commands: 0, revisions: 0, spent: [] }, prices)).toEqual(["ended stopped", "0 commands", "no model calls"]);
     expect(taskRecordFacts({ startedAt: 0, endedAt: 999, ended: "stopped", commands: 0, revisions: 0, spent: [] }, prices)[1]).toBe("0 commands");
     expect(taskRecordFacts({ startedAt: 0, endedAt: 1000, ended: "stopped", commands: 0, revisions: 0, spent: [] }, prices)[1]).toBe("1s");
+  });
+
+  test("the plan its coding tool ran on, after the rest: whose, the share of each window it took, and what it would have cost, covered by the plan", () => {
+    const plan = { seat: `st_${"s".repeat(22)}`, kind: "claude-subscription" as const, windows: [{ window: "five_hour", share: 7 }, { window: "seven_day", share: 1 }], usd: 0.00144, sessionUsd: 0.00144 };
+    const record = { startedAt: 0, endedAt: 724_000, ended: "done", commands: 8, revisions: 1, spent, plan };
+    expect(taskRecordFacts(record, prices).slice(-2)).toEqual(["on your Claude plan, 7% of its five hours and 1% of its week", "≈$0.0014 at API prices, covered by the plan"]);
+    // A window it took nothing of is left out; no window said, the plan alone; no cost said, none guessed.
+    expect(taskPlanFacts({ ...plan, windows: [{ window: "five_hour", share: 0 }], usd: null })).toEqual(["on your Claude plan"]);
+    // Its VM's own sign-in, not a seat of yours: said as that.
+    expect(taskPlanFacts({ ...plan, seat: null, kind: "chatgpt-codex", windows: [], usd: 2.8 })).toEqual(["on its own ChatGPT sign-in", "≈$2.80 at API prices, covered by the plan"]);
+    // A record without a plan says nothing of one.
+    expect(taskRecordFacts({ startedAt: 0, endedAt: 724_000, ended: "done", commands: 8, revisions: 1, spent }, prices)).toHaveLength(4);
+  });
+
+  test("a plan's window, named as its length", () => {
+    expect(["five_hour", "seven_day", "seven_day_opus", "minutes_60", "minutes_1440", "minutes_90", "plan", "overage_window"].map(windowName)).toEqual(["five hours", "week", "week (Opus)", "1 hour", "1 day", "90 minutes", "plan", "overage window"]);
   });
 
   test("an ending is said in words, never as the record's token", () => {

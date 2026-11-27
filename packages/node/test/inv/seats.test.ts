@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { RouteName, SeatSignInCard, SeatView } from "@invincible/core";
+import type { RouteName, SeatSignInCard, SeatUse, SeatView } from "@invincible/core";
 import type { NodeClient } from "../../src/inv/client.ts";
 import type { Connection } from "../../src/inv/connect.ts";
 import { EXIT } from "../../src/inv/exit.ts";
@@ -25,7 +25,7 @@ const TEAM = { agents: [{ id: "ada", name: "Ada", createdAt: 1_000, harness: "cl
 const made = (id: string) => TEAM.agents.find((agent) => agent.id === id)!.createdAt;
 
 /** A node with these seats; what it was asked, in order; how a sign-in goes (its card, and the state it ends in). */
-function node(seats: SeatView[], card: SeatSignInCard, ends: SeatView["state"] = { is: "ready", renewBy: null }) {
+function node(seats: SeatView[], card: SeatSignInCard, ends: SeatView["state"] = { is: "ready", renewBy: null }, use?: Record<string, SeatUse>) {
   const asked: { name: RouteName; input: unknown }[] = [];
   let looks = 0;
   const client: NodeClient = {
@@ -35,7 +35,7 @@ function node(seats: SeatView[], card: SeatSignInCard, ends: SeatView["state"] =
       if (name === "seats") {
         // Signing in for a look or two, then as it ended.
         const signing = asked.some((a) => a.name === "startSeatSignIn") && looks++ < 2;
-        return { seats: seats.map((seat) => ({ ...seat, ...(asked.some((a) => a.name === "startSeatSignIn") ? { state: signing ? { is: "signing-in", attempt: ATTEMPT, since: 0, until: 1 } : ends, plan: "max" } : {}) })) } as T;
+        return { seats: seats.map((seat) => ({ ...seat, ...(asked.some((a) => a.name === "startSeatSignIn") ? { state: signing ? { is: "signing-in", attempt: ATTEMPT, since: 0, until: 1 } : ends, plan: "max" } : {}) })), ...(use ? { use } : {}) } as T;
       }
       if (name === "addSeat") {
         const { kind, label, agent } = input as { kind: SeatView["kind"]; label: string; agent?: string };
@@ -176,5 +176,25 @@ describe("inv seat serve and share", () => {
     const plain = testIo({});
     expect(await seatCommand(node([], DEVICE).conn, ["add", "chatgpt"], flags(), plain)).toBe(EXIT.ok);
     expect(plain.stdout().split("\n")[0]).toBe(`Added ChatGPT 1 (${ID}). It serves no agent yet: inv seat serve ${ID} <agent>.`);
+  });
+});
+
+describe("inv seats: the meter", () => {
+  const NOW = Date.UTC(2026, 10, 27, 9, 0);
+  test("under each seat, its meter: its open windows and its use lately; a ChatGPT plan's use, where ChatGPT counts it; --json has the node's use too", async () => {
+    const claude = seatOf({ label: "Work Max", plan: "max", state: { is: "ready", renewBy: null }, windows: [{ window: "five_hour", status: "allowed", usedPercent: 42, resetsAt: NOW + 5 * 3_600_000, at: NOW }] });
+    const codex = seatOf({ id: `st_${"c".repeat(22)}`, kind: "chatgpt-codex", vendor: "openai", label: "Personal", state: { is: "ready", renewBy: null } });
+    const use = { [claude.id]: { since: NOW - 7 * 86_400_000, tasks: 3, tokens: 1_204_000, running: 1 } };
+    const io = { ...testIo({}), now: () => NOW };
+    expect(await seatsCommand(node([claude, codex], PASTE, undefined, use).conn, [], flags(), io)).toBe(EXIT.ok);
+    expect(io.stdout()).toBe(
+      `Work Max  anthropic  Signed in · Max  ${claude.id}  Serves no agent yet\n` +
+        `    Five hours: 42% used, resets 14:00 UTC · 3 tasks this week · 1.20M tokens · 1 running now\n` +
+        `Personal  openai  Signed in  ${codex.id}  Serves no agent yet\n` +
+        `    Its use as ChatGPT counts it: Settings → Usage (https://chatgpt.com/)\n`,
+    );
+    const json = { ...testIo({}), now: () => NOW };
+    expect(await seatsCommand(node([claude], PASTE, undefined, use).conn, [], flags({ json: true }), json)).toBe(EXIT.ok);
+    expect(JSON.parse(json.stdout()).use).toEqual(use);
   });
 });

@@ -328,6 +328,21 @@ export function seatView(seat: SeatFacts, now: number): SeatView {
 }
 
 
+/** How far back a seat's use is counted: a week, a plan's longest window. */
+export const SEAT_USE_DAYS = 7;
+
+/**
+ * What a seat's plan did lately for the agents of the node that holds it, as their tasks recorded it (I15 step 10): over
+ * the last SEAT_USE_DAYS (since `since`), the tasks whose coding tool ran on it and the tokens they spent there (on its
+ * own sign-in); and its runs now.
+ */
+export interface SeatUse {
+  since: number;
+  tasks: number;
+  tokens: number;
+  running: number;
+}
+
 /** Whose account a seat is. */
 export function seatVendor(seat: { kind: SeatKind; provider?: string | null }): string {
   switch (seat.kind) {

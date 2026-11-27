@@ -21,6 +21,7 @@ import { highlight } from "../../web/src/lib/highlight.ts";
 import { parseMarkdown } from "../../web/src/lib/markdown.ts";
 import { detectProvider, detectSignIn, planLine, providerSetup } from "../../web/src/lib/text.ts";
 import { desktopAddress, screenPoint, shotSource } from "../../web/src/lib/desktop.ts";
+import { cardWords, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, seatUseWords, seatWindowWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "../../web/src/lib/seats.ts";
 import { DATA_GLYPHS, dataGlyph, GLYPH_LADDER, AGENT_SPHERE, agentArcs, orbSphere, paperShades, SPHERE_FLASH, SPHERE_TURN, sphereFrame, sphereGlyph, spherePoints, sphereShades } from "../../web/src/lib/orb-sphere.ts";
 import { ORB_TONES, orbLevel, orbPalette, orbParts, orbToneOfState } from "../../web/src/lib/orb.ts";
 import { AURUM, FIELD_KEY, FIELD_RIM, fieldAt, fieldBuffer, fieldLight, fieldModel, linear, project, shadeLit, type FieldColours, type FieldOptions } from "../../web/src/lib/field.ts";
@@ -1502,6 +1503,64 @@ const loops = {
   ].map((c) => ({ ...c, words: describeWakes(c.wakes as Parameters<typeof describeWakes>[0], c.cooldownMs) })),
 };
 
+// ---- seats (I15): their words as the PWA and inv say them (web lib/seats.ts), and a task's plan (core's team-record.ts):
+// where each stands, whom it serves and what a share means, its meter, a sign-in's card. The apps show no seats yet: when
+// they do, they say these, held here.
+const SEAT_NOW = Date.UTC(2026, 10, 26, 12, 0);
+const SEAT_HOUR = 3_600_000;
+const seatWindow = (over: Partial<core.SeatView["windows"][number]> = {}): core.SeatView["windows"][number] => ({ window: "five_hour", status: "allowed", usedPercent: 42, resetsAt: SEAT_NOW + 2 * SEAT_HOUR, at: SEAT_NOW, ...over });
+const ADA = { id: "ada", name: "Ada", createdAt: 1_000 };
+const BO = { id: "bo", name: "Bo", createdAt: 2_000 };
+const serving = (...agents: { id: string; createdAt: number }[]) => agents.map((agent) => ({ id: agent.id, made: agent.createdAt }));
+const seatStates: core.SeatState[] = [
+  { is: "ready", renewBy: null },
+  { is: "ready", renewBy: SEAT_NOW + 3 * 24 * SEAT_HOUR + SEAT_HOUR },
+  { is: "signing-in", attempt: "sa_x", since: SEAT_NOW, until: SEAT_NOW + 600_000 },
+  { is: "resting", until: SEAT_NOW + 2 * SEAT_HOUR, window: "five_hour" },
+  { is: "resting", until: Number.MAX_SAFE_INTEGER, window: null },
+  ...(["never", "signed-out", "cancelled", "expired", "failed", "wrong-account"] as const).map((why): core.SeatState => ({ is: "signed-out", why })),
+];
+const seatUses: (core.SeatUse | undefined)[] = [undefined, { since: SEAT_NOW, tasks: 0, tokens: 0, running: 0 }, { since: SEAT_NOW, tasks: 1, tokens: 4_000, running: 0 }, { since: SEAT_NOW, tasks: 3, tokens: 1_204_000, running: 1 }, { since: SEAT_NOW, tasks: 0, tokens: 0, running: 2 }];
+const seats = {
+  now: SEAT_NOW,
+  kinds: SEAT_KIND_WORDS,
+  quickLabels: [[], [{ label: "Claude 1" }, { label: "Claude 3" }]].map((have) => ({ have, claude: quickLabel("claude-subscription", have), chatgpt: quickLabel("chatgpt-codex", have) })),
+  states: seatStates.map((state) => ({ state, plan: "max", words: seatStateWords(state, "max", SEAT_NOW), action: signInAction({ kind: "claude-subscription", state }, SEAT_NOW) })),
+  serves: [
+    { serves: [], roster: [ADA, BO] },
+    { serves: serving(ADA), roster: [ADA, BO] },
+    { serves: serving(ADA, BO), roster: [BO, ADA] },
+    { serves: serving(ADA), roster: [BO] },
+    { serves: serving(ADA), roster: [{ ...ADA, createdAt: 9_000 }] },
+    { serves: serving(ADA, BO), roster: null },
+  ].map(({ serves, roster }) => ({ serves, roster, words: servesWords({ serves }, roster) })),
+  choices: [
+    { before: ["Ada"], after: ["Ada", "Bo"] },
+    { before: ["Ada"], after: ["Bo"] },
+    { before: ["Ada", "Cy"], after: ["Bo"] },
+    { before: [], after: ["Ada"] },
+    { before: ["Ada", "Bo"], after: ["Ada"] },
+  ].map(({ before, after }) => ({ label: "Claude 1", before, after, words: servesChoiceWords("Claude 1", before, after) })),
+  windows: [seatWindow(), seatWindow({ window: "seven_day", usedPercent: 12, resetsAt: SEAT_NOW + 3 * 24 * SEAT_HOUR }), seatWindow({ status: "rejected", usedPercent: 100 }), seatWindow({ status: "warning", usedPercent: 91 }), seatWindow({ usedPercent: null, resetsAt: null }), seatWindow({ window: "minutes_90", usedPercent: 7.6 })].map((window) => ({ window, words: seatWindowWords(window, SEAT_NOW) })),
+  uses: seatUses.map((use) => ({ use: use ?? null, words: seatUseWords(use) })),
+  meters: [
+    { windows: [seatWindow(), seatWindow({ window: "seven_day_opus", usedPercent: 80, resetsAt: SEAT_NOW - 1 })], use: seatUses[3]! },
+    { windows: [], use: undefined },
+  ].map(({ windows, use }) => ({ windows, use: use ?? null, words: seatMeterWords({ windows }, use, SEAT_NOW) })),
+  elsewhere: USE_ELSEWHERE,
+  windowNames: ["five_hour", "seven_day", "seven_day_opus", "minutes_60", "minutes_1440", "minutes_90", "plan", "overage_window"].map((name) => ({ name, words: core.windowName(name) })),
+  plans: [
+    { seat: "st_ssssssssssssssssssssss", kind: "claude-subscription", windows: [{ window: "five_hour", share: 7 }, { window: "seven_day", share: 1 }], usd: 0.00144 },
+    { seat: "st_ssssssssssssssssssssss", kind: "claude-subscription", windows: [{ window: "five_hour", share: 0 }], usd: null },
+    { seat: null, kind: "chatgpt-codex", windows: [], usd: 2.8 },
+  ].map((plan) => ({ plan, facts: core.taskPlanFacts(plan) })),
+  cards: [
+    { kind: "device-code" as const, code: "FAKE-1234", firstTime: true },
+    { kind: "device-code" as const, code: "FAKE-1234", firstTime: false },
+    { kind: "paste-code" as const },
+  ].map((card) => ({ card, words: cardWords(card) })),
+};
+
 const vectors = {
   about: "Made by apps/apple/scripts/vectors.ts from packages/core (and the PWA's roster). Every key here is a fake made for these tests.",
   auth: { domain: "invincible-req/v1", headers: core.AUTH, maxSkewMs: core.MAX_REQUEST_SKEW_MS },
@@ -1540,6 +1599,7 @@ const vectors = {
   liveActivities,
   marks,
   loops,
+  seats,
 };
 const text = `${JSON.stringify(vectors, null, 2)}\n`;
 if (Bun.argv.includes("--check")) {

@@ -1,4 +1,4 @@
-import { HOMED_KINDS, type NodeIdentity, type Prov, randomId, type SeatAddInput, type SeatFacts, seatRuns, type SeatView, seatView } from "@invincible/core";
+import { HOMED_KINDS, type NodeIdentity, OWN_SIGN_IN_TALLY, type Prov, randomId, type SeatAddInput, type SeatFacts, seatRuns, SEAT_USE_DAYS, type SeatUse, type SeatView, seatView, type TeamTask } from "@invincible/core";
 import type { AgentDriver } from "@invincible/agents";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { keyUsable, providerRecords } from "@invincible/models";
@@ -114,6 +114,24 @@ export function setSeatServes(store: LedgerStore, node: NodeIdentity, id: string
   if (agents.length > 1 && !shared) throw new SeatError("a seat serves one agent: to share it, say so. The agents sharing a seat are one trust domain", 400);
   store.emit(node, "seat.serves", { id, agents: asMade(roster, agents) }, yourWord(via));
   return seatOf(store, id, now);
+}
+
+/**
+ * Each of these seats' use lately (core's SeatUse), from this node's tasks as they recorded it: those that ended in the
+ * last SEAT_USE_DAYS on the seat (their record's plan names it), with the tokens their coding tools spent there on its
+ * own sign-in; and its runs now (`running`). Only a seat whose home is on this node has its agents' tasks here.
+ */
+export function seatUse(seats: readonly Pick<SeatFacts, "id">[], tasks: readonly Pick<TeamTask, "record">[], running: (seat: string) => number, now: number): Record<string, SeatUse> {
+  const since = now - SEAT_USE_DAYS * 86_400_000;
+  const use: Record<string, SeatUse> = {};
+  for (const seat of seats) use[seat.id] = { since, tasks: 0, tokens: 0, running: running(seat.id) };
+  for (const { record } of tasks) {
+    const on = record?.plan?.seat;
+    if (!record || !on || !use[on] || record.endedAt < since) continue;
+    use[on].tasks += 1;
+    for (const line of record.spent) if (line.model.startsWith(`${OWN_SIGN_IN_TALLY}/`)) use[on].tokens += line.input + line.output;
+  }
+  return use;
 }
 
 /** The vault's name for the fleet's salt for seats' fingerprints: one salt, so one account is one fingerprint whatever its seat. */

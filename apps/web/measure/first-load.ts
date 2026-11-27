@@ -581,7 +581,18 @@ try {
   // Seats of yours, for the seats page and its agents' sheet: one serving Ada, one Ada and Lin share, one serving none
   // yet. (An older checkout without seats, or without agents for them, skips what it lacks.)
   const addSeat = async (input: Record<string, unknown>) => ((await admin("addSeat", input).catch(() => null)) as { seat?: { id: string } } | null)?.seat;
-  await addSeat({ kind: "claude-subscription", label: "Claude 1", agent: "ada" });
+  const firstSeat = await addSeat({ kind: "claude-subscription", label: "Claude 1", agent: "ada" });
+  // Its meter: two windows of its plan, as the node that holds its home says them as a run goes (an older checkout
+  // without seats' windows skips them).
+  if (firstSeat) {
+    for (const [window, usedPercent, hours] of [["five_hour", 42, 3], ["seven_day", 12, 50]] as const) {
+      try {
+        started.store.emit(started.identity, "seat.window" as never, { id: firstSeat.id, window, status: "allowed", usedPercent, resetsAt: Date.now() + hours * 3_600_000 } as never);
+      } catch {
+        /* an older checkout's node: no seat windows */
+      }
+    }
+  }
   const sharedSeat = await addSeat({ kind: "claude-subscription", label: "Claude 2", agent: "lin" });
   if (sharedSeat) await admin("setSeatServes", { id: sharedSeat.id, agents: ["ada", "lin"], shared: true }).catch(() => null);
   await addSeat({ kind: "chatgpt-codex", label: "ChatGPT 1" });

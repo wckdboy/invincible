@@ -1,10 +1,12 @@
 import { SEAT_HARNESS, seatServes, servedBy } from "@invincible/core/seat-agents";
-import type { SeatKind, SeatSignInCard, SeatState, SeatView } from "@invincible/core/seats";
+import type { SeatKind, SeatSignInCard, SeatState, SeatUse, SeatView } from "@invincible/core/seats";
+import { tokensLabel } from "@invincible/core/spend";
+import { windowName } from "@invincible/core/team-record";
 
 /*
  * Seats, in words (pure: no DOM): an account you hold with a vendor, that serves the agents you chose (core's seats.ts).
  * What each kind is called, where a seat stands, whom it serves (and what a share means, said wherever you choose one),
- * what a sign-in's card asks of you, and when to sign one in again. The views and `inv` say these. (The iPhone and
+ * its meter (each window, and its use lately), what a sign-in's card asks of you, and when to sign one in again. The views and `inv` say these. (The iPhone and
  * Android apps show no seats yet: when they do, they port these words, held to the vectors.)
  */
 
@@ -143,3 +145,43 @@ export function quickAgent<A extends { id: string; createdAt: number; harness: s
   const free = on.find((agent) => !seats.some((seat) => seat.kind === kind && seatServes(seat, { id: agent.id, made: agent.createdAt })));
   return free ?? on[0] ?? null;
 }
+
+/**
+ * One of a seat's windows on its meter: how much of it is used and when it resets ("Five hours: 42% used, resets 14:00
+ * UTC"); one its tool refused, spent; one its tool warned of, nearly spent; one it said no share of, in use.
+ */
+export function seatWindowWords(window: SeatView["windows"][number], now: number): string {
+  const name = windowName(window.window);
+  const used = window.status === "rejected" ? "spent" : window.usedPercent === null ? "in use" : `${Math.round(window.usedPercent)}% used${window.status === "warning" ? ", nearly spent" : ""}`;
+  const back = window.resetsAt === null ? null : (when(window.resetsAt, now) ?? "later");
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)}: ${used}${back ? `, resets ${back}` : ""}`;
+}
+
+/**
+ * A seat's meter in words, the PWA's and inv's: each window still open (one past its reset is fresh again), the soonest
+ * to reset first (one that said no reset last, then by name), then its use lately.
+ */
+export function seatMeterWords(seat: Pick<SeatView, "windows">, use: SeatUse | undefined, now: number): string[] {
+  const later = (at: number | null) => at ?? Number.MAX_SAFE_INTEGER;
+  const open = seat.windows
+    .filter((window) => window.resetsAt === null || window.resetsAt > now)
+    .sort((a, b) => later(a.resetsAt) - later(b.resetsAt) || a.window.localeCompare(b.window))
+    .map((window) => seatWindowWords(window, now));
+  const lately = seatUseWords(use);
+  return lately ? [...open, lately] : open;
+}
+
+/** A seat's use lately, in words: its tasks this week and their tokens, and its runs now. Nothing yet: null. */
+export function seatUseWords(use: SeatUse | undefined): string | null {
+  if (!use || (!use.tasks && !use.running)) return null;
+  return [use.tasks ? `${use.tasks} task${use.tasks === 1 ? "" : "s"} this week` : "", use.tasks ? `${tokensLabel(use.tokens)} tokens` : "", use.running ? `${use.running} running now` : ""].filter(Boolean).join(" · ");
+}
+
+/**
+ * Where a seat's vendor shows its use itself, where it asks that it be read there: a ChatGPT plan's, in ChatGPT's own
+ * settings (OpenAI's word, read 26 November 2026, help.openai.com article 20001542, which names the place and no address).
+ */
+export const USE_ELSEWHERE: Readonly<Partial<Record<SeatKind, { words: string; url: string }>>> = {
+  "chatgpt-codex": { words: "Its use as ChatGPT counts it: Settings → Usage", url: "https://chatgpt.com/" },
+  "chatgpt-siwc": { words: "Its use as ChatGPT counts it: Settings → Usage", url: "https://chatgpt.com/" },
+};

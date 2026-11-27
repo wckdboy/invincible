@@ -1,12 +1,13 @@
-import { plainLine, type SeatKind, type SeatSignInCard, type SeatView, type TeamSnapshot } from "@invincible/core";
-import { quickLabel, seatStateWords, servesChoiceWords, servesWords } from "../../../../apps/web/src/lib/seats.ts";
+import { plainLine, type SeatKind, type SeatSignInCard, type SeatUse, type SeatView, type TeamSnapshot } from "@invincible/core";
+import { quickLabel, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, USE_ELSEWHERE } from "../../../../apps/web/src/lib/seats.ts";
 import { CliError, EXIT, usageError } from "./exit.ts";
 import type { Command, Io } from "./io.ts";
 
 /*
  * Seats from a terminal (docs/CLI.md; core's seats.ts): the accounts you hold with a vendor, each serving the agents you
  * chose.
- *   inv seats                        each seat, where it stands, and whom it serves
+ *   inv seats                        each seat, where it stands, and whom it serves; under it, its meter (its
+ *                                    windows, its use lately) and where its vendor counts its use, if it asks
  *   inv seat add <claude|chatgpt> ["label"] [--email <address>] [--agent <agent>]
  *                                    adds one (for that agent: without one, it serves none until you choose) and signs
  *                                    it in: its page to open (and Codex's code to enter there); for Claude, the code its
@@ -50,9 +51,9 @@ const servedNow = (seat: SeatView, roster: Roster): string[] => {
 export const seatsCommand: Command = async (conn, args, flags, io) => {
   if (args.length) throw usageError("usage: inv seats [--json]");
   const { client } = await conn();
-  const { seats } = await client.call<{ seats: SeatView[] }>("seats");
+  const { seats, use } = await client.call<{ seats: SeatView[]; use?: Record<string, SeatUse> }>("seats");
   if (flags.json) {
-    io.out(`${JSON.stringify({ seats })}\n`);
+    io.out(`${JSON.stringify(use ? { seats, use } : { seats })}\n`);
     return EXIT.ok;
   }
   if (!seats.length) {
@@ -60,7 +61,14 @@ export const seatsCommand: Command = async (conn, args, flags, io) => {
     return EXIT.ok;
   }
   const roster = await rosterOf(client);
-  for (const seat of seats) io.out(`${plainLine(seat.label)}  ${seat.vendor}  ${seatStateWords(seat.state, seat.plan, io.now()).word}  ${seat.id}  ${servesOf(seat, roster).word}\n`);
+  for (const seat of seats) {
+    io.out(`${plainLine(seat.label)}  ${seat.vendor}  ${seatStateWords(seat.state, seat.plan, io.now()).word}  ${seat.id}  ${servesOf(seat, roster).word}\n`);
+    // Its meter under it, when there is one to say; and where its vendor counts its use, where it asks that it be read there.
+    const meter = seatMeterWords(seat, use?.[seat.id], io.now());
+    if (meter.length) io.out(`    ${meter.join(" · ")}\n`);
+    const elsewhere = USE_ELSEWHERE[seat.kind];
+    if (elsewhere) io.out(`    ${elsewhere.words} (${elsewhere.url})\n`);
+  }
   return EXIT.ok;
 };
 

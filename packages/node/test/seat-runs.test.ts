@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { newNodeIdentity, seatState, type SeatKind } from "@invincible/core";
 import { enrollDevice, foundFleet, LedgerStore } from "@invincible/ledger";
-import { recordSeatStatus, yourWord } from "../src/seats.ts";
+import { recordSeatStatus, seatUse, yourWord } from "../src/seats.ts";
 import { SEAT_REST_MAX_MS, SEAT_VM_MINUTES, SeatRuns } from "../src/seat-runs.ts";
 
 /*
@@ -81,6 +81,24 @@ function host(options: { refuse?: (seat: string) => number | null; leftover?: st
 
 const ask = (over: Partial<{ agent: string; made: number; harness: string; from: { seat: string | null; kind: SeatKind } | null; wait: boolean }> = {}) => ({ agent: ADA.id, made: ADA.made, vm: AGENT_VM, harness: "claude", from: null, wait: false, ...over });
 const live = () => new AbortController().signal;
+
+describe("a seat's use lately", () => {
+  test("the tasks whose coding tool ran on it in the last seven days, the tokens they spent there, and its runs now: this node's seats alone", () => {
+    const m = mind();
+    m.add(A);
+    m.add(B);
+    m.add(ELSEWHERE, "claude-subscription", "E", m.other.id);
+    const own = (input: number, output: number) => ({ role: "tool", model: "own sign-in/claude-opus-5-5", calls: 1, unknown: 0, input, output, cached: 0, reasoning: 0 });
+    const gateway = { role: "tool", model: "anthropic/claude-opus-5-5", calls: 1, unknown: 0, input: 50_000, output: 5_000, cached: 0, reasoning: 0 };
+    const record = (seat: string | null, endedHoursAgo: number, spent: object[]) => ({ record: { startedAt: 0, endedAt: NOW - endedHoursAgo * HOUR, ended: "done" as const, commands: 1, revisions: 0, spent: spent as never, plan: { seat, kind: "claude-subscription" as const, windows: [], usd: null } } });
+    const tasks = [record(A, 2, [own(1000, 100), gateway]), record(A, 30, [own(2000, 200)]), record(A, 8 * 24, [own(9000, 900)]), record(null, 1, [own(5, 5)]), { record: undefined }, record(B, 1, [])];
+    const use = seatUse(m.store.seats().filter((seat) => seat.node === m.node.id), tasks, (id) => (id === B ? 1 : 0), NOW);
+    expect(use).toEqual({
+      [A]: { since: NOW - 7 * 24 * HOUR, tasks: 2, tokens: 3300, running: 0 },
+      [B]: { since: NOW - 7 * 24 * HOUR, tasks: 1, tokens: 0, running: 1 },
+    });
+  });
+});
 
 describe("the agent a seat serves", () => {
   test("another agent can't take a seat you didn't share with it: its run takes none, and waits or rests only for its own", async () => {
