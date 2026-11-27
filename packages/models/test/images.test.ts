@@ -118,6 +118,41 @@ describe("pictures in tool results", () => {
     }
     expect(withoutImages("words", undefined)).toBe("words");
   });
+
+  test("a preset that names the models of it that see: those see, and none of its others", () => {
+    for (const model of ["kimi-k3.1-pro", "kimi-k3", "qwen4-max", "qwen3.8-max"]) expect(seesImages({ id: "opencode-go", kind: "openai" }, model)).toBe(true);
+    for (const model of ["glm-5.3", "deepseek-v4-pro"]) expect(seesImages({ id: "opencode-go", kind: "openai" }, model)).toBe(false);
+  });
+
+  test("a preset that names none, as before: none of its models see, whatever a catalog says of them elsewhere; nor a provider of your own making", () => {
+    // (DeepSeek's V4 Flash and Z.ai's GLM-5.3 Flash take images by models.dev; nothing here has seen one read through these addresses.)
+    expect(seesImages({ id: "deepseek", kind: "openai" }, "deepseek-v4-flash")).toBe(false);
+    expect(seesImages({ id: "zai", kind: "openai" }, "glm-5.3-flash")).toBe(false);
+    expect(seesImages({ id: "my-router", kind: "openai" }, "kimi-k3.1-pro")).toBe(false);
+  });
+
+  test("a plan's model that sees (OpenCode Go's Kimi K3.1 Pro) gets the screen after the tool's words, as the user's; its model that doesn't, in words", async () => {
+    const identity = newNodeIdentity();
+    const store = new LedgerStore(":memory:");
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "n" });
+    const vault = new Vault(store, identity);
+    vault.set("go", "test-opencode-go-key-FAKE-0000", { provider: "opencode-go", origin: "https://opencode.test" });
+    store.emit(identity, "provider.set", { id: "opencode-go", kind: "openai", baseUrl: "https://opencode.test/v1", secret: "go" });
+    for (const [model, sees] of [["kimi-k3.1-pro", true], ["glm-5.3", false]] as const) {
+      store.emit(identity, "roster.set", { role: "engineer", models: [`opencode-go/${model}`] });
+      const said = scripted([callSketch(), say("A circle.")]);
+      await collect(chat({ store, vault, fetch: said.fetch }, { role: "engineer", coding: true, messages: ask, tools: sketchTool() }));
+      const last = said.bodies[1].messages.at(-1);
+      if (sees) {
+        expect(last.role).toBe("user");
+        expect(last.content[1]).toEqual({ type: "image_url", image_url: { url: `data:image/png;base64,${PICTURE.data}` } });
+      } else {
+        expect(last.role).toBe("tool");
+        expect(last.content).toContain("this model can't see pictures");
+        expect(JSON.stringify(said.bodies[1])).not.toContain(PICTURE.data);
+      }
+    }
+  });
 });
 
 describe("pictures you attach to a message", () => {

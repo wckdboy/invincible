@@ -180,15 +180,16 @@ export function withoutImages(content: string, images: ToolImage[] | undefined):
  * Whether an OpenAI-compatible model takes a picture, as a user message after the
  * tool results (their tool messages are text only). Only where the provider's
  * documentation says so, and its message order allows it: Ollama's vision models
- * (base64 image_url parts, docs.ollama.com/api/openai-compatibility). Everything
- * else gets the picture described: DeepSeek's models are text only; Mistral
- * refuses a user message after a tool message; gateways and routers depend on
- * the model behind them, which isn't known here.
+ * (base64 image_url parts, docs.ollama.com/api/openai-compatibility), and the
+ * models a provider's preset names as seeing (providers.ts `sees`: OpenCode Go's
+ * Kimi and Qwen). Everything else gets the picture described: DeepSeek's models
+ * are text only; Mistral refuses a user message after a tool message; gateways
+ * and routers depend on the model behind them, which isn't known here.
  */
 export function seesImages(provider: Pick<ResolvedProvider, "id" | "kind">, model: string): boolean {
   if (provider.kind === "anthropic") return true;
   if (provider.id === "ollama") return /^(llava|bakllava|llama3\.2-vision|llama4|gemma3|qwen2\.5vl|qwen3-vl|minicpm-v|moondream|granite3\.2-vision)(:|$)/.test(model);
-  return false;
+  return preset(provider.id)?.sees?.includes(model) ?? false;
 }
 
 /** How a turn ended: the tools it called (none: the answer is complete), or cut off by the output limit. */

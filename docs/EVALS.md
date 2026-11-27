@@ -253,6 +253,13 @@ within two minutes. Asked where three things were, whose centres are at about (3
 reading, not a measure. On 16 November, `orcarouter/anthropic/claude-opus-5.5` landed 8 of 8 clicks, 12 px off on
 average, in the old system's own check.
 
+On 27 November, the check below (reads and places, one card each) went through a node's gateway to OpenCode Go's
+models. Each of `kimi-k3.1-pro`, `kimi-k3`, `qwen4-max` and `qwen3.8-max` read the heading exactly and landed 8 of 8
+clicks, 11 to 13 px off. `qwen3.8-max` answered in 0 to 1000, the others in pixels. Kimi K3.1 Pro took 2.6 s to read
+and 3.4 s to place; Qwen 4 Max took 2.6 s and 5.1 s; Kimi K3 took 2.0 s and 9.4 s; Qwen 3.8 Max took 4.1 s and 47 s. A
+look is about 1,100 to 1,600 tokens in. So OpenCode Go's preset names these four as seeing (`sees` in
+`packages/models/src/providers.ts`), and an engineer on one of them is shown its screen as a picture, not in words.
+
 So in Invincible the `eyes` role has no model until you name one, and where its clicks land is measured, not assumed.
 `invincible roster check <provider/model> --only places` asks for the centres of eight things on one page, and judges
 each in the picture's pixels, the model's own 0 to 1000, or a frame of its own, whichever lands more. An agent's desktop

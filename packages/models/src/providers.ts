@@ -27,6 +27,12 @@ export interface ProviderPreset {
    * Empty: they are yours to name (a gateway's are whatever you set it up to route to).
    */
   models?: string[];
+  /**
+   * The models of it that see pictures (adapters.ts seesImages): each one a catalog says takes images and that was seen
+   * reading one through this address, so a screen it is shown goes as a picture, not in words. Absent: none of them,
+   * as for every OpenAI-compatible provider before (a provider of your own making has none).
+   */
+  sees?: readonly string[];
   /** A subscription sold for coding tools, not the vendor's ordinary API (see CodingPlan). */
   plan?: CodingPlan;
 }
@@ -164,6 +170,10 @@ export const PRESETS: ProviderPreset[] = [
     // catalog OpenCode itself reads: GLM-5.3 and Kimi K3.1 Pro low, high or max, DeepSeek V4 Pro high or max). Its Qwen
     // models are served at its Anthropic-compatible address, so they are asked as now.
     effort: { field: "reasoning_effort", models: { "glm-5.3": ["low", "high", "max"], "kimi-k3.1-pro": ["low", "high", "max"], "deepseek-v4-pro": ["high", "max"] } },
+    // Its models that see (models.dev's opencode-go says they take images): each read the check card's heading through
+    // this address and placed 8 of 8 clicks, 11 to 13 px off (27 November 2026, docs/EVALS.md). GLM-5.3 and DeepSeek V4
+    // Pro take none.
+    sees: ["kimi-k3.1-pro", "kimi-k3", "qwen4-max", "qwen3.8-max"],
     note: "OpenCode Go ($10 a month; Go Plus $40), on your OpenCode Console key at its own address (pay-as-you-go has another). Each model has a monthly allowance, a fifth of it in any five hours and half in a week. DeepSeek's models want Global chosen under Regions in the Console.",
   },
   {
