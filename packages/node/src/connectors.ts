@@ -17,6 +17,7 @@ import {
   findSecrets,
   isMcpTool,
   MAX_CLOCK_DRIFT_MS,
+  MAIL_SENDS,
   MAX_ORDER_DAYS,
   mayCall,
   type NativeName,
@@ -29,6 +30,7 @@ import {
   primaryCaller,
   randomId,
   redact,
+  sendCovered,
   toolDigest,
 } from "@invincible/core";
 import {
@@ -181,8 +183,12 @@ export class ConnectorService {
       const id = `a_${randomId(16)}`;
       const expires = this.now() + ACTION_TTL_MS;
       const digest = toolDigest(manifest, input.tool);
-      const order = this.activeOrders().find((o) =>
-        orderCovers(o, { connector: manifest.id, tool: input.tool, class: request.class, args, by: caller.by, digest }, this.now()),
+      const defined = manifest.tools[input.tool];
+      const native = defined && !isMcpTool(defined) ? defined.native : undefined;
+      // A send of mail goes only where its order names, from now on here (sendCovered), whatever the date the replicas
+      // read it by: what this node applies is so on every replica, before SENDS_NAME_RECIPIENTS_FROM and after.
+      const order = this.activeOrders().find(
+        (o) => orderCovers(o, { connector: manifest.id, tool: input.tool, class: request.class, args, by: caller.by, digest, ...(native ? { native } : {}) }, this.now()) && (native === undefined || !MAIL_SENDS.has(native) || sendCovered(o, args)),
       );
       this.o.store.emit(this.o.identity, "action.requested", {
         id,

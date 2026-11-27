@@ -14,6 +14,8 @@ import { sha256B64u } from "./crypto.ts";
  *   - every path parameter (where the request goes) is named, and at least one is
  *     pinned without wildcards: an order says where, not "anywhere"
  *   - a delete is pinned exactly, with no wildcards at all: one named thing, never a family
+ *   - a send of mail names every address it may send to (to, and cc where it allows one), none of them a pattern: a
+ *     call that names anyone else, in to or in cc, asks
  *   - it expires, at most a year out
  *   - it is pinned to the tool as it was when you signed: if the connector's tool
  *     changes (another path, other parameters, another origin), the order no longer applies
@@ -43,6 +45,42 @@ export const OrderTerms = z.strictObject({
 export type OrderTerms = z.infer<typeof OrderTerms>;
 
 const wild = (pattern: string) => pattern.includes("*");
+
+/**
+ * The tools that send mail (their natives): an order for one names whom it may send to. A send goes to everyone in its
+ * `to` and its `cc`, so an order that left either free would send your words to anyone a planted line chose.
+ */
+export const MAIL_SENDS: ReadonlySet<string> = new Set(["gmail.send", "outlook.send"]);
+/** A mail send's arguments that say whom it goes to, as the mail tools take them: addresses, comma-separated. */
+export const RECIPIENTS = ["to", "cc"] as const;
+/**
+ * From when a send's order is held to its named recipients on every replica, read off the application's own clock:
+ * 28 November 2026, 00:00 UTC. One applied before replays as it always did, each argument a pattern, so an old log comes
+ * out the same everywhere; this node holds every application it makes now to both (sendCovered).
+ */
+export const SENDS_NAME_RECIPIENTS_FROM = Date.UTC(2026, 10, 28);
+
+/** The addresses a recipients argument names, lowercased: null if any of them isn't a plain address (as mail.ts takes them). */
+export function mailAddresses(list: string): string[] | null {
+  const each = list.split(",").map((part) => part.trim()).filter(Boolean);
+  if (!each.every((address) => /^[^\s@<>(),;:"\\[\]*]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$/.test(address))) return null;
+  return each.map((address) => address.toLowerCase());
+}
+
+/** Whether a send's recipients, in to and in cc, are all among those its order names (and it names at least one). */
+export function sendCovered(order: Pick<OrderTerms, "args">, args: Record<string, unknown>): boolean {
+  const named = new Set(RECIPIENTS.flatMap((name) => (order.args[name] === undefined ? [] : (mailAddresses(order.args[name]!) ?? []))));
+  if (!named.size) return false;
+  let any = false;
+  for (const name of RECIPIENTS) {
+    const value = args[name];
+    if (value === undefined || value === null || value === "") continue;
+    const each = typeof value === "string" ? mailAddresses(value) : null;
+    if (!each || !each.every((address) => named.has(address))) return false;
+    any ||= each.length > 0;
+  }
+  return any;
+}
 
 export function globMatch(pattern: string, value: string): boolean {
   const source = pattern
@@ -74,6 +112,14 @@ export function orderProblems(terms: Omit<OrderTerms, "digest" | "label"> & { la
     return [`${manifest.id}.${terms.tool} is ${tool.class}: your agent does that without asking, so it needs no order`];
   }
   if (terms.class !== tool.class) problems.push(`${manifest.id}.${terms.tool} is ${tool.class}, not ${terms.class}`);
+  // A send of mail names whom it may send to: every address, never a pattern.
+  if (!isMcpTool(tool) && tool.native !== undefined && MAIL_SENDS.has(tool.native)) {
+    if (terms.args.to === undefined) problems.push(`an order to send mail names whom it may send to: pin to (and cc, if it may copy anyone), each address in full`);
+    for (const name of RECIPIENTS) {
+      const pattern = terms.args[name];
+      if (pattern !== undefined && (wild(pattern) || !mailAddresses(pattern)?.length)) problems.push(`${name}: name each address in full, comma-separated, with no *`);
+    }
+  }
   const params: Record<string, { required?: boolean }> = tool.params ?? {};
   for (const name of Object.keys(terms.args)) {
     if (!Object.hasOwn(params, name)) problems.push(`${manifest.id}.${terms.tool} takes no "${name}"`);
@@ -107,6 +153,8 @@ export interface CoveredCall {
   by: string;
   /** The tool's digest now. */
   digest: string | null;
+  /** The tool's native, as the manifest has it now (a mail send's order is held to its recipients: MAIL_SENDS). */
+  native?: string;
 }
 
 /**
@@ -120,7 +168,11 @@ export const callerName = (by: string) => (by.startsWith("arm:") ? by.slice(4) :
 export function orderCovers(order: OrderTerms, call: CoveredCall, at: number): boolean {
   if (order.connector !== call.connector || order.tool !== call.tool || order.class !== call.class) return false;
   if (at >= order.until || call.digest === null || call.digest !== order.digest) return false;
+  // A send of mail, from SENDS_NAME_RECIPIENTS_FROM: whom it goes to is judged as addresses, the rest as patterns.
+  const send = call.native !== undefined && MAIL_SENDS.has(call.native) && at >= SENDS_NAME_RECIPIENTS_FROM;
+  if (send && !sendCovered(order, call.args)) return false;
   for (const [name, pattern] of Object.entries(order.args)) {
+    if (send && (RECIPIENTS as readonly string[]).includes(name)) continue;
     const value = call.args[name];
     if (value === undefined || value === null || typeof value === "object") return false;
     if (order.class === "delete" ? String(value) !== pattern : !globMatch(pattern, String(value))) return false;

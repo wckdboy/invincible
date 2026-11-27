@@ -36,7 +36,9 @@ Google Drive is a connector of its own (`gdrive`), to read. It writes, changes a
 
 A send or a trash waits for you in Needs you for a day, and no answer is no. You can change a send's words before your
 yes (`invincible action approve <id> --edit body="…"`). A standing order you sign can answer for you
-([POLICY.md](POLICY.md)); one for `trash` names one message.
+([POLICY.md](POLICY.md)); one for `trash` names one message, and one for `send` names every address it may send to,
+in `to` and in `cc`, never a pattern: a send that names anyone else asks
+(`invincible order add gmail.send --arg to=someone@example.test --label "Replies to someone"`).
 
 ## Private, in the primary's answers
 

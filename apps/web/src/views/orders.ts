@@ -12,6 +12,7 @@ import {
   orderSentence,
   parseCallers,
   patternShape,
+  recipientsOf,
   rowsForTool,
   rowsToArgs,
   splitOrders,
@@ -419,7 +420,7 @@ export function openNewOrder(ctx: Ctx, connectors: ConnectorView[]): void {
       replace(formBox);
       return;
     }
-    const rows = rowsForTool(tool.params, tool.class, tool.path);
+    const rows = rowsForTool(tool.params, tool.class, tool.path, recipientsOf({ connector: connectorSelect.value, tool: tool.name }));
     form = orderForm({ rows, cls: tool.class, locked: false, hints: paramHints(tool), who: { kind: "names" }, label: `${connectorSelect.value}.${tool.name}`, connector: connectorSelect.value, tool: tool.name });
     replace(toolNote, h("p", { class: "small muted" }, tool.description));
     replace(formBox, ...form.parts);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ConnectorManifest, globMatch, orderCovers, orderProblems, type OrderTerms, toolDigest } from "../src/index.ts";
+import { ConnectorManifest, globMatch, mailAddresses, orderCovers, orderProblems, type OrderTerms, SENDS_NAME_RECIPIENTS_FROM, sendCovered, toolDigest } from "../src/index.ts";
 
 /*
  * Standing orders as pure rules: what can be signed, and exactly which calls an
@@ -159,5 +159,56 @@ describe("standing orders for a native tool", () => {
     const terms = { connector: "github", tool: "ship", class: "outward" as const, args: { owner: "amiriteorg", repo: "invincible", branch: "invincible/*" }, until: NOW + 86_400_000 };
     expect(orderProblems(terms, manifest, NOW)).toEqual([]);
     expect(orderProblems({ ...terms, args: { branch: "invincible/*" } }, manifest, NOW).join(" ")).toMatch(/owner|repo/);
+  });
+});
+
+// The lead's word of 27 November 2026: an order for gmail.send or outlook.send must pin its recipients. Before, a send
+// has no path to pin, so one order with no arguments answered every send, to anyone (orders.ts said "it names where").
+describe("an order to send mail names whom it may send to", () => {
+  const compose = { to: { type: "string", required: true }, cc: { type: "string" }, subject: { type: "string" }, body: { type: "string", required: true }, replyTo: { type: "string" } } as const;
+  const gmail = ConnectorManifest.parse({
+    id: "gmail",
+    label: "Gmail",
+    origin: "https://gmail.googleapis.com",
+    tools: { send: { description: "Send.", native: "gmail.send", method: "POST", path: "/gmail/v1/users/me/messages/send", params: compose, class: "outward" } },
+  });
+  const sendDigest = toolDigest(gmail, "send")!;
+  const terms = (args: Record<string, string>) => ({ connector: "gmail", tool: "send", class: "outward" as const, args, until: NOW + 30 * DAY, digest: sendDigest, label: "Replies to Anna" });
+  const send = (args: Record<string, unknown>) => ({ connector: "gmail", tool: "send", class: "outward", args: { body: "Thanks.", ...args }, by: "primary", digest: sendDigest, native: "gmail.send" });
+
+  test("its recipients are named in full: to, and cc if it may copy anyone; never a pattern, never left free", () => {
+    expect(orderProblems(terms({}), gmail, NOW)).toEqual(["an order to send mail names whom it may send to: pin to (and cc, if it may copy anyone), each address in full"]);
+    for (const to of ["*@example.test", "anna@*", "*", "Anna <anna@example.test>", "anna"]) expect([to, orderProblems(terms({ to }), gmail, NOW)]).toEqual([to, ["to: name each address in full, comma-separated, with no *"]]);
+    expect(orderProblems(terms({ to: "anna@example.test", cc: "*@example.test" }), gmail, NOW)).toEqual(["cc: name each address in full, comma-separated, with no *"]);
+    expect(orderProblems(terms({ to: "anna@example.test" }), gmail, NOW)).toEqual([]);
+    expect(orderProblems(terms({ to: "anna@example.test, Bob@Example.test", cc: "carl@example.test", subject: "Re: *" }), gmail, NOW)).toEqual([]);
+  });
+
+  test("it answers a send only to whom it names: every address in to and in cc, whatever their case and order", () => {
+    const order = terms({ to: "anna@example.test, bob@example.test", cc: "carl@example.test" }) as OrderTerms;
+    for (const args of [{ to: "anna@example.test" }, { to: "Bob@Example.test, anna@example.test" }, { to: "anna@example.test", cc: "carl@example.test" }, { to: "carl@example.test", cc: "bob@example.test" }]) {
+      expect([args, orderCovers(order, send(args), NOW)]).toEqual([args, true]);
+    }
+    // Anyone else, in to or in cc, asks; and so does a recipient that isn't an address.
+    for (const args of [{ to: "eve@example.test" }, { to: "anna@example.test, eve@example.test" }, { to: "anna@example.test", cc: "eve@example.test" }, { to: "Anna <anna@example.test>" }, { to: "" }]) {
+      expect([args, orderCovers(order, send(args), NOW)]).toEqual([args, false]);
+    }
+    // Without cc it may copy nobody; and one that names nobody (signed before this) answers no send.
+    const toAnna = terms({ to: "anna@example.test" }) as OrderTerms;
+    expect([orderCovers(toAnna, send({ to: "anna@example.test" }), NOW), orderCovers(toAnna, send({ to: "anna@example.test", cc: "anna@example.test" }), NOW), orderCovers(toAnna, send({ to: "anna@example.test", cc: "bob@example.test" }), NOW)]).toEqual([true, true, false]);
+    expect(orderCovers(terms({}) as OrderTerms, send({ to: "anna@example.test" }), NOW)).toBe(false);
+    // Its other arguments are patterns as ever.
+    expect(orderCovers(terms({ to: "anna@example.test", subject: "Re: *" }) as OrderTerms, send({ to: "anna@example.test", subject: "Hello" }), NOW)).toBe(false);
+  });
+
+  test("applied before 28 November 2026, it replays as it always did: each argument a pattern, the rest free", () => {
+    const before = SENDS_NAME_RECIPIENTS_FROM - DAY;
+    const old = { ...terms({ to: "anna@example.test" }), until: SENDS_NAME_RECIPIENTS_FROM + DAY } as OrderTerms;
+    expect(orderCovers(old, send({ to: "anna@example.test", cc: "eve@example.test" }), before)).toBe(true);
+    expect(orderCovers(old, send({ to: "anna@example.test", cc: "eve@example.test" }), SENDS_NAME_RECIPIENTS_FROM)).toBe(false);
+    // The node holds what it applies now to both, so a replica reading it by either date agrees.
+    expect(sendCovered(old, { to: "anna@example.test", cc: "eve@example.test" })).toBe(false);
+    expect(mailAddresses("Anna@Example.test, bob@example.test")).toEqual(["anna@example.test", "bob@example.test"]);
+    expect([mailAddresses("anna@*"), mailAddresses("Anna <anna@example.test>")]).toEqual([null, null]);
   });
 });

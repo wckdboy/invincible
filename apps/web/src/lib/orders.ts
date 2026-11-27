@@ -43,6 +43,14 @@ const scalar = (value: unknown) => typeof value === "string" || typeof value ===
 /** An argument's value as an order compares it: the text of a scalar. */
 export const argText = (value: unknown): string => (typeof value === "string" ? value : typeof value === "object" ? JSON.stringify(value) : String(value));
 
+/**
+ * Whom a send of mail goes to (core orders.ts MAIL_SENDS: an order for one names every address in to and cc, none a
+ * pattern): where it goes, as a path's placeholders are for another tool, so the editor keeps them named and exact.
+ */
+export function recipientsOf(call: { connector?: string; tool?: string }): string[] {
+  return call.connector !== undefined && ["gmail.send", "outlook.send"].includes(`${call.connector}.${call.tool}`) ? ["to", "cc"] : [];
+}
+
 /** The {placeholders} of a tool's path template, in order. */
 export const pathPlaceholders = (path: string): string[] => [...path.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]!);
 
@@ -82,8 +90,8 @@ function ordered(rows: ArgRow[], path: string[]): ArgRow[] {
  * pinned to exactly this, everything else starts free. A delete pins everything
  * it can (lists and objects can't be pinned).
  */
-export function rowsFromCall(call: { class: string; target: string; args: Record<string, unknown> }): ArgRow[] {
-  const path = pathArgs(call.target, call.args);
+export function rowsFromCall(call: { class: string; target: string; args: Record<string, unknown>; connector?: string; tool?: string }): ArgRow[] {
+  const path = [...pathArgs(call.target, call.args), ...recipientsOf(call).filter((name) => Object.hasOwn(call.args, name))];
   const rows = Object.entries(call.args).map(([name, value]): ArgRow => {
     const inPath = path.includes(name);
     const pinnable = scalar(value);
@@ -98,8 +106,8 @@ export function rowsFromCall(call: { class: string; target: string; args: Record
  * has no path, so everything a call always carries starts pinned, and you loosen
  * what you mean to.
  */
-export function rowsForTool(params: Record<string, { required: boolean; type?: string }>, cls: string, path: string | null): ArgRow[] {
-  const placeholders = path ? pathPlaceholders(path) : [];
+export function rowsForTool(params: Record<string, { required: boolean; type?: string }>, cls: string, path: string | null, recipients: readonly string[] = []): ArgRow[] {
+  const placeholders = [...(path ? pathPlaceholders(path) : []), ...recipients.filter((name) => Object.hasOwn(params, name))];
   const rows = Object.entries(params).map(([name, p]): ArgRow => {
     const inPath = placeholders.includes(name);
     const always = p.required || inPath;

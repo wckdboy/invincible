@@ -1169,7 +1169,10 @@ export class LedgerStore {
         // Replayed in log order, the connector view here is the manifest as it stood when the order was applied.
         const manifest = this.lww<Pick<ConnectorManifest, "origin" | "basePath" | "tools">>(`connector:${request.value.connector}`)?.value;
         const digest = manifest && typeof manifest === "object" && manifest.tools ? toolDigest(manifest, request.value.tool) : null;
-        const covered = orderCovers(order, { ...request.value, digest }, decodeHlc(event.hlc).ms);
+        // (Its native, as the manifest stood: a send of mail is held to the recipients its order names, from orders.ts's date.)
+        const defined = manifest && typeof manifest === "object" && manifest.tools && Object.hasOwn(manifest.tools, request.value.tool) ? (manifest.tools[request.value.tool] as { native?: unknown }) : undefined;
+        const native = typeof defined?.native === "string" ? defined.native : undefined;
+        const covered = orderCovers(order, { ...request.value, digest, ...(native ? { native } : {}) }, decodeHlc(event.hlc).ms);
         if (!covered) return "the order doesn't cover this action";
         this.putLww(`action-decision:${body.action}`, event, { id: body.action, verdict: "approved", order: body.order, note: `standing order: ${order.label}` });
         return null;

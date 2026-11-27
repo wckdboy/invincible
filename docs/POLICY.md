@@ -68,6 +68,7 @@ You grant standing orders by signed amendment, and each one is scoped narrowly a
 
 - An order covers one tool, only one that would otherwise ask. It names where the calls go, and it lasts at most a year.
 - An order to delete names exactly one thing, never a pattern, so "never delete without approval" keeps its meaning.
+- An order to send mail names every address it may send to, in `to` and `cc`, never a pattern: a send that names anyone else asks.
 - Only you sign orders, from your terminal or a paired device. Every replica checks again that an order really covered what it approved.
 - If the tool an order was signed for changes, the order stops applying.
 

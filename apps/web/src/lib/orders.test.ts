@@ -10,6 +10,7 @@ import {
   pathArgs,
   patternShape,
   patternWords,
+  recipientsOf,
   rowsForTool,
   rowsFromCall,
   rowsToArgs,
@@ -110,6 +111,22 @@ describe("standing orders: where a call went", () => {
     expect(modesFor({ always: true, pinnable: true }, "delete")).toEqual(["exact"]);
     expect(modesFor({ always: false, pinnable: true }, "delete")).toEqual(["exact", "any"]);
     expect(modesFor({ always: false, pinnable: true }, "outward")).toEqual(["exact", "pattern", "any"]);
+  });
+});
+
+// An order to send mail names every address it may send to (core orders.ts MAIL_SENDS, 27 November 2026): its to and
+// cc are where it goes, so the editor starts them named and exact, made from a send or from scratch.
+describe("standing orders: whom a send of mail goes to", () => {
+  test("a send's to and cc start pinned to exactly whom it went to; the rest of it starts free", () => {
+    const send = { connector: "gmail", tool: "send", class: "outward", target: "POST /gmail/v1/users/me/messages/send (send)", args: { to: "anna@example.test", cc: "carl@example.test", subject: "Re: rent", body: "Paid." } };
+    expect(rowsFromCall(send).map((r) => [r.name, r.mode, r.inPath])).toEqual([["to", "exact", true], ["cc", "exact", true], ["subject", "any", false], ["body", "any", false]]);
+    expect(recipientsOf({ connector: "outlook", tool: "send" })).toEqual(["to", "cc"]);
+    expect([recipientsOf({ connector: "gmail", tool: "draft" }), recipientsOf({ connector: "github", tool: "pr.create" }), recipientsOf({})]).toEqual([[], [], []]);
+  });
+
+  test("from scratch too: its recipients are named and exact before anything else", () => {
+    const params = { to: { required: true }, cc: { required: false }, subject: { required: false }, body: { required: true } };
+    expect(rowsForTool(params, "outward", "/gmail/v1/users/me/messages/send", ["to", "cc"]).map((r) => [r.name, r.mode, r.inPath])).toEqual([["to", "exact", true], ["cc", "exact", true], ["body", "any", false], ["subject", "any", false]]);
   });
 });
 

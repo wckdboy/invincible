@@ -381,6 +381,59 @@ describe("standing orders in the log", () => {
   });
 });
 
+// The lead's word of 27 November 2026: a send of mail goes only where its order names (orders.ts MAIL_SENDS), held so by
+// every replica from 28 November 2026 by the application's own clock; one applied before replays as it always did.
+describe("a standing order to send mail, in the log", () => {
+  const FROM = Date.UTC(2026, 10, 28);
+  const GMAIL = {
+    id: "gmail",
+    label: "Gmail",
+    origin: "https://gmail.googleapis.com",
+    tools: { send: { description: "Send.", native: "gmail.send", method: "POST", path: "/gmail/v1/users/me/messages/send", params: { to: { type: "string", required: true }, cc: { type: "string" }, body: { type: "string", required: true } }, class: "outward" } },
+  };
+  function fleetAt(at: number) {
+    const a = newNodeIdentity();
+    const b = newNodeIdentity();
+    const storeA = new LedgerStore(":memory:", new HlcClock(() => at));
+    foundFleet(storeA, a, { fleetName: "homelab", nodeName: "ultra" });
+    enrollDevice(storeA, a, { device: b.id, name: "laptop", kind: "node", box: b64u(b.boxPublic) });
+    const storeB = new LedgerStore(":memory:", new HlcClock(() => at));
+    storeB.expectFleet(storeA.fleet!);
+    storeA.emit(a, "connector.set", { id: "gmail", manifest: GMAIL });
+    storeA.emit(a, "order.set", { id: orderId(40), connector: "gmail", tool: "send", class: "outward", args: { to: "anna@example.test" }, until: FROM + 30 * 86_400_000, digest: toolDigest(GMAIL as never, "send")!, label: "Replies to Anna" }, { trust: "owner" });
+    return { a, storeA, storeB };
+  }
+  const sending = (n: number, args: Record<string, string>) => ({ id: actionId(n), connector: "gmail", tool: "send", args: { body: "Thanks.", ...args }, class: "outward" as const, target: "POST /gmail/v1/users/me/messages/send (send)", by: "primary", expires: FROM + 86_400_000 });
+
+  test("from 28 November 2026, it answers a send only to whom it names, on every replica", () => {
+    const { a, storeA, storeB } = fleetAt(FROM + 3_600_000);
+    storeA.emit(a, "action.requested", sending(41, { to: "Anna@example.test" }));
+    storeA.emit(a, "order.applied", { order: orderId(40), action: actionId(41) });
+    for (const [n, args] of [[42, { to: "anna@example.test", cc: "eve@example.test" }], [43, { to: "eve@example.test" }]] as const) {
+      storeA.emit(a, "action.requested", sending(n, args));
+      expect(() => storeA.emit(a, "order.applied", { order: orderId(40), action: actionId(n) })).toThrow(/doesn't cover/);
+    }
+    syncInto(storeA, storeB);
+    for (const store of [storeA, storeB]) {
+      expect(store.lww(`action-decision:${actionId(41)}`)?.value).toMatchObject({ verdict: "approved", order: orderId(40) });
+      expect(store.lww(`action-decision:${actionId(42)}`)).toBeNull();
+    }
+    expect(storeA.digest()).toBe(storeB.digest());
+  });
+
+  test("applied before it, as the code then did, it replays as it did: the same on every replica, and after a rebuild", () => {
+    const { a, storeA, storeB } = fleetAt(FROM - 86_400_000);
+    storeA.emit(a, "action.requested", sending(44, { to: "anna@example.test", cc: "eve@example.test" }));
+    storeA.emit(a, "order.applied", { order: orderId(40), action: actionId(44) });
+    syncInto(storeA, storeB);
+    for (const store of [storeA, storeB]) expect(store.lww(`action-decision:${actionId(44)}`)?.value).toMatchObject({ verdict: "approved", order: orderId(40) });
+    const digest = storeB.digest();
+    storeB.rebuild();
+    expect(storeB.digest()).toBe(digest);
+    expect(storeA.digest()).toBe(digest);
+  });
+});
+
 describe("investigations in the log", () => {
   const registration = {
     question: "Is f1 near 2 Hz?",
