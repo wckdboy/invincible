@@ -591,6 +591,7 @@ class AppModel(context: Context) {
     }
 
     private fun moved(link: LiveLink) {
+        session?.newNetwork()
         link.renew()
         chat.linkLost()
     }

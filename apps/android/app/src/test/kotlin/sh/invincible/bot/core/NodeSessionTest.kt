@@ -245,6 +245,33 @@ class NodeSessionTest {
         assertTrue(pin.isOpen)
     }
 
+    // ---- the lead's word (27 November 2026): a network change asks whoami past the pause too, its pauses anew ----
+
+    @Test fun aNetworkChangeAsksWhoamiAtOncePastThePauseAndItsPausesStartAgain() = runBlocking {
+        var clock = NodeProof.NAMED_FROM - 86_400_000L
+        val pin = NodePin(a, proofFirst = true)
+        val seen = Seen()
+        var reachable = false
+        val s = session(pin, seen, now = { clock }) { challenge -> if (reachable) answer(a, challenge) else throw unreachable }
+        // Five unanswered whoamis, each after its pause (2, 4, 8, 16 s): the next pause is 32 s.
+        repeat(5) {
+            assertFalse(s.prove())
+            clock += 20_000L
+        }
+        clock -= 20_000L
+        // Another network, 5 s into that pause: the stream opened again on it asks at once.
+        clock += 5_000L
+        s.newNetwork()
+        assertFalse("still no answer", s.prove(fresh = true))
+        assertEquals("asked at once on the new network", 6, seen.asked)
+        // Its pauses from the first again: 2 s, not a minute.
+        clock += 3_000L
+        reachable = true
+        assertTrue(s.prove(fresh = true))
+        assertEquals(7, seen.asked)
+        assertTrue(pin.isOpen)
+    }
+
     // ---- K3 (the re-check): what the app asks as it comes to the front waits for the first proof, then goes ----
 
     @Test fun whatTheAppAsksAsItComesToTheFrontWaitsForTheFirstProofThenGoes() = runBlocking {

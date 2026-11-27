@@ -61,6 +61,10 @@ class NodeSession(
             pin.refused?.let { return@withLock refusedNow(it) }
             if (proven && !fresh) return@withLock true
             // (Asked a moment ago and unanswered: the next whoami waits; nothing else goes meanwhile.)
+            if (anew.getAndSet(false)) {
+                retryAt = 0L
+                pause = FIRST_PAUSE_MS
+            }
             if (!pastThePause && now() < retryAt) return@withLock pin.isOpen
             val challenge = NodeProof.challenge()
             val who = try {
@@ -84,6 +88,16 @@ class NodeSession(
             }
         }
     }
+
+    /**
+     * The phone moved to another network (AppModel.moved): the next whoami is asked at once, past any pause, and its pauses
+     * start again from the first. A new network is a fresh chance; waiting out the old one's pause only delays live data
+     * (the lead's word, 27 November 2026).
+     */
+    fun newNetwork() = anew.set(true)
+
+    /** Another network came since the last whoami (newNetwork): taken by the next, under [asking]. */
+    private val anew = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /**
      * Try again: whoami asked at once, past any pause an unanswered one set (K2 of the re-check). At a node refused, asked
