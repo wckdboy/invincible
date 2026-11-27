@@ -61,6 +61,11 @@ interface Active {
 const ANSWERS = { atOnce: 3, timeoutMs: 10 * 60_000 } as const;
 /** A goal as giving it again is judged: its words, whatever their spacing and case. */
 const sameGoal = (goal: string): string => goal.replace(/\s+/g, " ").trim().toLowerCase();
+/** How a refusal of its own word names what it would have done (TeamService.whyYours). */
+const YOURS_DOING = {
+  give: { agent: "giving it work", room: "giving work in it", goal: "giving it again" },
+  approve: { agent: "approving work for it", room: "approving work in it", goal: "approving it again" },
+} as const;
 
 const Destination = z.union([z.strictObject({ room: TeamRoomId }), z.strictObject({ agent: AgentId })]);
 const selected = (job: TeamJob, select: TeamSelection): boolean => (!select.room || job.room === select.room) && (!select.agent || job.agent === select.agent) && (!select.task || job.id === select.task);
@@ -215,21 +220,29 @@ export class TeamService {
     return bound;
   }
   /**
+   * Why work is yours to give or approve, not its own word's, or null; one rule for its giving (giveOwn) and its yes
+   * (approveOwn), what the backlog says when its proposal waits for you. Never behind a pause of yours: it would wait
+   * there, holding its money, and run the moment you resume (the review of 27 November, S1, and its re-review, T1), as
+   * work given again would (againOwn). Nor a goal you stopped, paused or declined in the last day, anew as another task,
+   * as that work is never given again (againOwn; S9).
+   */
+  whyYours(work: { assignee: string; room: string; goal: string }, doing: keyof typeof YOURS_DOING): string | null {
+    const words = YOURS_DOING[doing];
+    if (this.store.agent(work.assignee)?.enabled === false) return `You paused @${work.assignee}: ${words.agent} is yours.`;
+    if (this.store.room(work.room)?.paused) return `Its conversation is paused: ${words.room} is yours.`;
+    const goal = sameGoal(work.goal);
+    const ended = this.store.yoursEnded(this.store.now() - 86_400_000).find((task) => sameGoal(task.goal) === goal);
+    return ended ? `${YOURS_STOPPED.get(ended.error!)!.replace(/ it$/, "")} that work in the last day (“${ended.title}”, ${ended.id}): ${words.goal} is yours.` : null;
+  }
+  /**
    * A task the primary gives on its own word (team_give, team_again, from your conversation): within mayGiveOwn, judged
    * again as it is written (nothing between the two awaits) so two at once can't both take what one fits. It waits its
    * turn like any task, and its trail says whose word it was (`said`) and what it was within.
    */
   giveOwn(input: TeamTaskInput, said = "Given by your agent on its own word", fix?: TeamTaskFix): TeamTask {
     this.accepting();
-    // Never behind a pause of yours: it would wait there, holding its money, and run the moment you resume (the review of
-    // 27 November, S1), as work given again would (againOwn).
-    if (this.store.agent(input.assignee)?.enabled === false) throw new TeamError(409, `You paused @${input.assignee}: giving it work is yours.`);
-    if (this.store.room(input.room)?.paused) throw new TeamError(409, "Its conversation is paused: giving work in it is yours.");
-    // Nor a goal you stopped, paused or declined in the last day, given anew as another task, as that work is never
-    // given again (againOwn; the review of 27 November, S9).
-    const goal = sameGoal(input.goal);
-    const ended = this.store.yoursEnded(this.store.now() - 86_400_000).find((task) => sameGoal(task.goal) === goal);
-    if (ended) throw new TeamError(409, `${YOURS_STOPPED.get(ended.error!)!.replace(/ it$/, "")} that work in the last day (“${ended.title}”, ${ended.id}): giving it again is yours.`);
+    const yours = this.whyYours(input, "give");
+    if (yours) throw new TeamError(409, yours);
     const bound = this.mayGiveOwn(input.budgetUsd);
     const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, own: true, ...(fix ? { fix } : {}) });
     this.store.noteTask(task.id, `${said}, within its budget of $${input.budgetUsd}, ${this.within(bound)}`.slice(0, 500));
@@ -259,6 +272,8 @@ export class TeamService {
     const proposed = this.proposal(task);
     // A task another node handed over beyond your grant is yours alone to approve, whatever it would spend.
     if (proposed.proposedBy?.startsWith("node:")) throw new TeamError(403, "Another node handed it over beyond your grant: approving it is yours alone, whatever it would spend.");
+    const yours = this.whyYours(proposed, "approve");
+    if (yours) throw new TeamError(409, yours);
     const bound = this.ownMoney(proposed.budgetUsd, "approve", "Approve it yourself, or decline it.");
     const approved = this.store.approve(task, true);
     this.store.noteTask(task, `Approved by your agent itself: ${why}, within its budget of $${proposed.budgetUsd}, ${this.within(bound)}`.slice(0, 500));

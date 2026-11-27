@@ -113,6 +113,30 @@ describe("work for idle agents, from your backlog", () => {
     expect(w.notices()[0]!.body).toBe(`A template of outcomes\nIt may spend $2, more than is left of the $1 a day your agent may commit on its own ($1.00; yours to set: invincible agents daily), so it waits in your conversation with Ada, and starts when you approve it there (or invincible agents approve ${task!.id}).`);
   });
 
+  // The re-review of 27 November, T1 (R7): its own yes is held by a word of yours as its own giving is.
+  test("in its conversation with you that you paused, or of a goal you declined in the last day, what it proposes waits for you, holding nothing, and your Inbox says why", async () => {
+    const w = world([PROPOSAL, PROPOSAL]);
+    // You pause your conversation with Ada (not Ada): what it proposes there waits for you.
+    const room = w.store.direct("ada").id;
+    w.service.control({ action: "pause", room });
+    const paused = await w.runner.tick();
+    expect(paused).toMatchObject({ assignee: "ada", room, proposedBy: "primary", status: "proposed", budgetUsd: 2 });
+    expect(w.trail(paused!.id).filter((t) => t.startsWith("Approved by your agent itself"))).toEqual([]);
+    expect(w.service.ownLeft()).toEqual({ usd: 10, of: "day" });
+    expect(w.notices().map((n) => n.body)).toEqual([`A template of outcomes\nIts conversation is paused: approving work in it is yours, so it waits in your conversation with Ada for you to approve or decline (invincible agents approve ${paused!.id}).`]);
+    // Half a day on you resume it and decline the proposal: at its next look, the same goal proposed again waits for you
+    // too, said why.
+    w.clock.add(BACKLOG.perAgentMs / 2);
+    w.service.control({ action: "resume", room });
+    w.service.control({ action: "stop", task: paused!.id });
+    expect(w.store.task(paused!.id)).toMatchObject({ status: "stopped", error: "Declined by you." });
+    w.clock.add(BACKLOG.perAgentMs / 2);
+    const again = await w.runner.tick();
+    expect(again).toMatchObject({ title: "A template of outcomes", status: "proposed" });
+    expect(w.service.ownLeft()).toEqual({ usd: 10, of: "day" });
+    expect(w.notices().find((n) => n.body.includes(again!.id))?.body).toBe(`A template of outcomes\nYou declined that work in the last day (“A template of outcomes”, ${paused!.id}): approving it again is yours, so it waits in your conversation with Ada for you to approve or decline (invincible agents approve ${again!.id}).`);
+  });
+
   test("a proposal that names no budget is given the backlog's cap: money nobody capped is never its to spend", async () => {
     const w = world([JSON.stringify({ title: "The board view", goal: "Show an outcome's tasks as a board, by agent and state.", gates: ["bun run typecheck"] })]);
     const task = await w.runner.tick();

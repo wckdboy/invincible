@@ -581,6 +581,70 @@ describe("task orchestration", () => {
     now += 86_400_000 + 60_000;
     expect(give("Drop the old tables (Stopped by you.)")).toMatchObject({ status: "queued" });
   });
+  // The re-review of 27 November, T1 (R1, R2): its own yes to a proposal is held by your pause as its own giving is.
+  test("its own yes queues nothing behind your pause: an agent's proposal for one you paused, or in a conversation you paused, waits for you, holding nothing, and its yes from your chat says why", async () => {
+    const ran: string[] = [];
+    const { store, service } = setup({
+      respond: async (agent, _room, _history, context) => {
+        if (agent.id === "ada") context.delegate({ assignee: "lin", title: "Drop the old tables", goal: "Drop the old tables from the production database.", budgetUsd: 2 });
+        return "";
+      },
+      executeTask: async (_agent, task) => { ran.push(task.title); return { verified: true, output: "Verified" }; },
+    });
+    // You paused Lin. Ada, at work in the same room, proposes work to her: it waits for your yes, nothing of its day
+    // committed and nothing held, and its yes from your chat is refused in words it can tell you.
+    service.control({ action: "pause", agent: "lin" });
+    service.post({ room: "workshop", text: "@ada: get the release ready." });
+    service.start();
+    await service.settled();
+    const task = store.tasks("workshop").find((t) => t.title === "Drop the old tables")!;
+    expect(task).toMatchObject({ assignee: "lin", status: "proposed", proposedBy: "ada" });
+    expect(store.trail(task.id).entries.map((e) => e.text).filter((t) => t.startsWith("Approved by your agent itself"))).toEqual([]);
+    expect(service.ownLeft()).toEqual({ usd: 10, of: "day" });
+    expect(store.heldUsd()).toBe(0);
+    expect(() => service.approveOwnOrSay(task.id, "it is the next step")).toThrow("You paused @lin: approving work for it is yours.");
+    // You resume Lin: nothing runs on its word.
+    service.control({ action: "resume", agent: "lin" });
+    await service.settled();
+    expect(ran).toEqual([]);
+    expect(store.task(task.id)).toMatchObject({ status: "proposed" });
+    // You pause the conversation it waits in: its yes is refused there too, and nothing is committed.
+    service.control({ action: "pause", room: "workshop" });
+    expect(service.approveOwn(task.id, "proposed by @ada in Workshop")).toBeNull();
+    expect(() => service.approveOwnOrSay(task.id, "it is the next step")).toThrow("Its conversation is paused: approving work in it is yours.");
+    expect(store.task(task.id)).toMatchObject({ status: "proposed" });
+    expect(service.ownLeft()).toEqual({ usd: 10, of: "day" });
+    // Neither paused, it is its to approve, within its money.
+    service.control({ action: "resume", room: "workshop" });
+    expect(service.approveOwnOrSay(task.id, "it is the next step")).toMatchObject({ status: "queued" });
+    expect(service.ownLeft()).toEqual({ usd: 8, of: "day" });
+  });
+  // The re-review of 27 November, T1 (R3): nor does its own yes bring back a goal you stopped.
+  test("its own yes gives no goal you stopped in the last day: an agent's proposal of it waits for you, its yes from your chat says why, and yours gives it", async () => {
+    const ran: string[] = [];
+    const { store, service } = setup({
+      respond: async (agent, _room, _history, context) => {
+        if (agent.id === "ada") context.delegate({ assignee: "lin", title: "Drop the old tables", goal: "Drop the old tables from the production database.", budgetUsd: 1 });
+        return "";
+      },
+      executeTask: async (_agent, task) => { ran.push(task.title); return { verified: true, output: "Verified" }; },
+    });
+    const given = service.giveOwn({ room: "workshop", assignee: "ada", title: "Drop the old tables", goal: "Drop the old tables from the production database.", budgetUsd: 1 });
+    service.control({ action: "stop", task: given.id });
+    expect(store.task(given.id)).toMatchObject({ status: "stopped", error: "Stopped by you." });
+    // Ada proposes the same goal to Lin: it waits for you.
+    service.post({ room: "workshop", text: "@ada: what's left for the release?" });
+    service.start();
+    await service.settled();
+    const again = store.tasks("workshop").find((t) => t.proposedBy === "ada")!;
+    expect(again).toMatchObject({ goal: "Drop the old tables from the production database.", assignee: "lin", status: "proposed" });
+    expect(ran).toEqual([]);
+    expect(() => service.approveOwnOrSay(again.id, "it is the next step")).toThrow(`You stopped that work in the last day (“Drop the old tables”, ${given.id}): approving it again is yours.`);
+    // Your yes gives it.
+    service.control({ action: "approve", task: again.id });
+    await service.settled();
+    expect(ran).toEqual(["Drop the old tables"]);
+  });
   // The review of 27 November, N8 (A5, A5b, A10, A12): each refusal of its own tools, tested.
   test("your agent takes up again no work of an agent or a conversation you paused, stops no proposal, and gives again nothing still under way", () => {
     const { store, service } = setup();

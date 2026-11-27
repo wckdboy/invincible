@@ -14,7 +14,8 @@ import type { TeamService } from "./team.ts";
  * 23 November 2026: it approves its own decisions and its agents'; what is monetary asks you): its money is its budget,
  * always set and at most BACKLOG.taskUsd, which must fit what it may commit on its own: what is left of yours past what
  * approved work holds when you set one (`invincible usage budget`), else its own daily cap, yours to set (`invincible
- * agents daily`; TeamService.approveOwn holds the rule). Past that it waits for you as a proposal, to approve or decline. Each look is one answer of the planner's,
+ * agents daily`; TeamService.approveOwn holds the rule). Past that it waits for you as a proposal, to approve or decline,
+ * as it does in a conversation you paused or for a goal you stopped or declined in the last day (TeamService.whyYours). Each look is one answer of the planner's,
  * at a plan's care (roster.ts STEP_EFFORT). On until you say otherwise: `invincible agents backlog off`.
  *
  * A proposal you leave unanswered for a day is looked at again with the repository as it is then: kept when it is still
@@ -243,11 +244,16 @@ export class BacklogRunner {
     const task = this.o.service().proposeTask({ room: room.id, assignee: agent.id, title: found.title, goal: found.goal, gates: found.gates, budgetUsd: found.budgetUsd ?? BACKLOG.taskUsd });
     if (waiting) this.withdraw(waiting, `"${found.title}" comes first now`);
     if (this.approveIfHis(task, agent)) return this.o.store.task(task.id);
-    // Past what it may commit on its own it is money, so yours: in your Inbox, in the node's own words, it waits in its
-    // conversation with you, to approve or decline. The words say which bound it met: your budget, or its daily cap.
+    // Behind a word of yours (a pause, a goal you stopped or declined: TeamService.whyYours), or past what it may commit on
+    // its own, which is money, it is yours: in your Inbox, in the node's own words, it waits in its conversation with you,
+    // to approve or decline. The words say which: your word, your budget, or its daily cap.
+    const yours = this.o.service().whyYours(task, "approve");
     const left = this.o.service().ownLeft();
     const past = left.of === "budget" ? "more than is left of your budget" : `more than is left of the ${capLabel(this.o.service().ownDaily())} a day your agent may commit on its own ($${left.usd.toFixed(2)}; yours to set: invincible agents daily)`;
-    this.o.mind.emit(this.o.identity, "notice.raised", { key: `backlog:${task.id}`, severity: "info", title: `Work proposed for ${agent.name}`, body: `${found.title}\nIt may spend $${task.budgetUsd}, ${past}, so it waits in your conversation with ${agent.name}, and starts when you approve it there (or invincible agents approve ${task.id}).`.slice(0, 600), source: "backlog", at: this.now() });
+    const why = yours
+      ? `${yours.replace(/\.$/, "")}, so it waits in your conversation with ${agent.name} for you to approve or decline (invincible agents approve ${task.id}).`
+      : `It may spend $${task.budgetUsd}, ${past}, so it waits in your conversation with ${agent.name}, and starts when you approve it there (or invincible agents approve ${task.id}).`;
+    this.o.mind.emit(this.o.identity, "notice.raised", { key: `backlog:${task.id}`, severity: "info", title: `Work proposed for ${agent.name}`, body: `${found.title}\n${why}`.slice(0, 600), source: "backlog", at: this.now() });
     return task;
   }
 
