@@ -127,6 +127,10 @@ of its own; "agents" and "team" are the same command)
                                     (once a failing commit or review, three at most), whose push your agent approves in a
                                     repository you gave the agent unless it changes the CI; off, they are yours, though an
                                     outcome gives its own back within its budget
+  agents first [on|off]          when a task your agent gave from a chat of yours ends, it writes first there: say
+                                    whether it does, or turn it on or off. On (the default), its turn says what came
+                                    of it and the next step, which it starts where that is its to do; work you
+                                    stopped, paused or declined it only says is yours
   agents backlog [on|off]        work for idle agents: one with a repository and nothing to do is given the next
                                     step of its repository's plan, a task a day at most, on your agent's own yes within its
                                     budget ($3 at most); one that may spend more than it may commit on its own (below)

@@ -339,6 +339,8 @@ export const TeamEngramInput = z.strictObject({ on: z.boolean() });
 export type TeamEngramInput = z.infer<typeof TeamEngramInput>;
 /** Whether a pull request's failing checks go back to the agent whose work it was when no outcome gives them back (PLAN #29). */
 export const TeamCiInput = z.strictObject({ on: z.boolean() });
+/** Whether the primary writes first in a chat of yours when a task it gave there ends (on until you turn it off). */
+export const TeamFirstInput = z.strictObject({ on: z.boolean() });
 /** Whether the primary offers idle agents work from your backlog (on until you turn it off). */
 export const TeamBacklogInput = z.strictObject({ on: z.boolean() });
 /** What the primary may commit on its own word in a day while you set no usage budget: the budgets of the tasks it gives,
@@ -735,6 +737,8 @@ export interface TeamSnapshot {
   engram?: boolean;
   /** Failing checks go back to the agent whose work it was, outside an outcome too (PLAN #29): said only when on. */
   ciBack?: boolean;
+  /** It writes first in a chat of yours when a task it gave there ends: said only when on (absent: off, or a node from before it could be turned off). */
+  writesFirst?: boolean;
   /** The primary offers idle agents work from your backlog, a proposal each, which it approves itself when its cost fits
    * what it may commit on its own and which otherwise waits for you (on unless you turned it off). */
   backlog?: boolean;

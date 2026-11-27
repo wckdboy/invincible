@@ -59,6 +59,8 @@ interface Active {
 
 /** The primary answers in this many rooms at once, and takes this long at most over one answer. */
 const ANSWERS = { atOnce: 3, timeoutMs: 10 * 60_000 } as const;
+/** A goal as giving it again is judged: its words, whatever their spacing and case. */
+const sameGoal = (goal: string): string => goal.replace(/\s+/g, " ").trim().toLowerCase();
 
 const Destination = z.union([z.strictObject({ room: TeamRoomId }), z.strictObject({ agent: AgentId })]);
 const selected = (job: TeamJob, select: TeamSelection): boolean => (!select.room || job.room === select.room) && (!select.agent || job.agent === select.agent) && (!select.task || job.id === select.task);
@@ -147,6 +149,8 @@ export class TeamService {
   setEngram(on: boolean): boolean { this.accepting(); const set = this.store.setEngram(on); this.changed(); return set; }
   /** Whether failing checks go back to the agent whose work it was, outside an outcome too (ci-back.ts reads it when they fail). */
   setCiBack(on: boolean): boolean { this.accepting(); const set = this.store.setCiBack(on); this.changed(); return set; }
+  /** Whether it writes first in a chat of yours when a task it gave there ends (write-first.ts): yours to turn off. */
+  setWritesFirst(on: boolean): boolean { this.accepting(); const set = this.store.setWritesFirst(on); this.changed(); return set; }
   setBacklog(on: boolean): boolean { this.accepting(); const set = this.store.setBacklog(on); this.changed(); return set; }
   /** Whether it merges its agents' proven work itself in a repository: yours to turn off there, and on again. */
   setMerge(input: TeamMergeInput): TeamMergeInput { this.accepting(); const set = this.store.setMerge(input); this.changed(); return set; }
@@ -221,6 +225,11 @@ export class TeamService {
     // 27 November, S1), as work given again would (againOwn).
     if (this.store.agent(input.assignee)?.enabled === false) throw new TeamError(409, `You paused @${input.assignee}: giving it work is yours.`);
     if (this.store.room(input.room)?.paused) throw new TeamError(409, "Its conversation is paused: giving work in it is yours.");
+    // Nor a goal you stopped, paused or declined in the last day, given anew as another task, as that work is never
+    // given again (againOwn; the review of 27 November, S9).
+    const goal = sameGoal(input.goal);
+    const ended = this.store.yoursEnded(this.store.now() - 86_400_000).find((task) => sameGoal(task.goal) === goal);
+    if (ended) throw new TeamError(409, `${YOURS_STOPPED.get(ended.error!)!.replace(/ it$/, "")} that work in the last day (“${ended.title}”, ${ended.id}): giving it again is yours.`);
     const bound = this.mayGiveOwn(input.budgetUsd);
     const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, own: true, ...(fix ? { fix } : {}) });
     this.store.noteTask(task.id, `${said}, within its budget of $${input.budgetUsd}, ${this.within(bound)}`.slice(0, 500));

@@ -275,6 +275,32 @@ test("agents engram says whether the notes store is on, and turns it on or off b
   expect(asked).toHaveLength(before);
 });
 
+// The review of 27 November, S9: writing first is the owner's to turn off.
+test("agents first says whether your agent writes first when a task it gave from a chat ends, and turns it on or off by the one route for it", async () => {
+  const lines: string[] = [];
+  const asked: { name: RouteName; input: unknown }[] = [];
+  let on = true;
+  const api = {
+    async call<T>(name: RouteName, input?: unknown): Promise<T> {
+      asked.push({ name, input });
+      if (name === "team") return { agents: [], rooms: [], tasks: [], deliveries: [], ...(on ? { writesFirst: true } : {}) } as T;
+      if (name === "teamFirst") { on = (input as { on: boolean }).on; return { first: on } as T; }
+      throw new Error(`unexpected call: ${name}`);
+    },
+  };
+  const say = (line: string) => lines.push(line);
+  await teamCommand(api, "first", [], {}, say);
+  expect(lines.at(-1)).toBe("When a task your agent gave from a chat of yours ends, it writes first there: what came of it, and the next step, which it starts itself where that is its to do, within its money. Work you stopped, paused or declined it only says is yours. Turn it off with: invincible agents first off");
+  await teamCommand(api, "first", ["off"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "teamFirst", input: { on: false } });
+  expect(lines.at(-1)).toBe("Your agent doesn't write first when a task it gave ends: you're told of it as ever, and what came of it is on the Agents page. Turn it on with: invincible agents first on");
+  await teamCommand(api, "first", ["on"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "teamFirst", input: { on: true } });
+  const before = asked.length;
+  await expect(teamCommand(api, "first", ["maybe"], {}, say)).rejects.toThrow(/invincible agents first \[on\|off\]/);
+  expect(asked).toHaveLength(before);
+});
+
 test("agents ci says whether failing checks and reviews go back to the agent, and turns it on or off by the one route for it", async () => {
   const lines: string[] = [];
   const asked: { name: RouteName; input: unknown }[] = [];

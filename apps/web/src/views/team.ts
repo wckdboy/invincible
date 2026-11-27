@@ -29,7 +29,7 @@ import { noteSaid, seatFace, tableOf } from "./roster.ts";
 import { openConsole } from "./sandboxes.ts";
 import { desktopViewer, type DesktopViewer } from "./desktop.ts";
 import { showLatest, taskCard } from "./task-card.ts";
-import { controlTeam, editAgent, editNotes, editRoom, exportAgent, giveTask, growVm, provisionVm, remakeVm, removeAgent, setCiBack, setEngram, shipTask, steerTask } from "./team-forms.ts";
+import { controlTeam, editAgent, editNotes, editRoom, exportAgent, giveTask, growVm, provisionVm, remakeVm, removeAgent, setCiBack, setEngram, setWritesFirst, shipTask, steerTask } from "./team-forms.ts";
 import { openTerminal } from "./terminal.ts";
 import { openWorkspace } from "./workspace.ts";
 import { rosterBack } from "./sidebar.ts";
@@ -503,6 +503,33 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
                     h("div", { class: "grow" }, h("strong", { class: "small" }, "Engram, for every agent on this node"), h("p", { class: "meta" }, notes.text)),
                     badge(notes.badge, notes.tone),
                     canEdit ? button(notes.badge === "Off" ? "Turn on" : "Turn off", { size: "sm", onClick: () => void setEngram(ctx, notes.badge === "Off").then((changed) => changed && !scope.disposed && void refreshWorkspace(person.id)) }) : null,
+                  ),
+                ),
+              ),
+            )
+          : null,
+        snapshot
+          ? section(
+              "When a task ends",
+              {},
+              h(
+                "div",
+                { class: "card" },
+                h(
+                  "div",
+                  { class: "rows" },
+                  h(
+                    "div",
+                    { class: "item" },
+                    icon("chat", { size: 16 }),
+                    h(
+                      "div",
+                      { class: "grow" },
+                      h("strong", { class: "small" }, "Your agent writes first in your chat when a task it gave there ends"),
+                      h("p", { class: "meta" }, snapshot.writesFirst ? "On: it says what came of it and the next step, which it starts itself where that is its to do, within its money. Work you stopped, paused or declined it only says is yours." : "Off: you're told a task ended as ever, and it writes nothing in your chat."),
+                    ),
+                    badge(snapshot.writesFirst ? "On" : "Off", snapshot.writesFirst ? "ok" : "neutral"),
+                    canEdit ? button(snapshot.writesFirst ? "Turn off" : "Turn on", { size: "sm", onClick: () => void setWritesFirst(ctx, !snapshot?.writesFirst) }) : null,
                   ),
                 ),
               ),

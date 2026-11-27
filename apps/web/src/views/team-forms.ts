@@ -570,6 +570,27 @@ export async function setEngram(ctx: Ctx, on: boolean): Promise<boolean> {
   } catch (error) { if (!isAbort(error)) toast("Couldn't change the notes store", { tone: "error", description: errorMessage(error) }); return false; }
 }
 
+/** Writing first when a task it gave from a chat of yours ends (write-first.ts): one switch, yours. Turning it on says first what it does. */
+export async function setWritesFirst(ctx: Ctx, on: boolean): Promise<boolean> {
+  if (on) {
+    const ok = await confirmAction({
+      title: "Let your agent write first?",
+      body: [
+        h("p", {}, "When a task your agent gave from a chat of yours ends, it writes first there: what came of it, and the next step, which it starts itself where that is its to do, within its money."),
+        h("p", {}, "Work you stopped, paused or declined it only says is yours. What the task's run said reaches it as data, never as instructions, and it writes first at most 6 times an hour."),
+      ],
+      confirmLabel: "Turn on",
+    });
+    if (!ok) return false;
+  }
+  try {
+    await ctx.api.post("/api/team/first", { on });
+    toast(on ? "Your agent writes first when a task ends" : "Your agent doesn't write first when a task ends", { tone: "info" });
+    await ctx.live.refreshTeam();
+    return true;
+  } catch (error) { if (!isAbort(error)) toast("Couldn't change it", { tone: "error", description: errorMessage(error) }); return false; }
+}
+
 /** Failing checks and reviews back to the agent whose work it was (PLAN #29): one switch for every agent here. Turning it on says first what it does. */
 export async function setCiBack(ctx: Ctx, on: boolean): Promise<boolean> {
   if (on) {

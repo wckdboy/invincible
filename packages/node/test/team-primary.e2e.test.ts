@@ -447,6 +447,30 @@ test("when a task it gave from a kept chat ends, it writes first there: a turn o
   expect(daemon.chats.looksWaiting(id)).toEqual([]);
 });
 
+// The review of 27 November, S9: writing first is yours to turn off, by its route (fleet:admin), and it says so.
+test("with writing first turned off, a task it gave from a kept chat ends and nothing is written first there; on again, the next is", async () => {
+  await settled();
+  daemon.looks.tick();
+  for (let i = 0; i < 200 && daemon.turns.running().length; i++) await Bun.sleep(20);
+  expect((await api<{ first: boolean }>("teamFirst", { on: false })).first).toBe(false);
+  expect((await api<{ writesFirst?: boolean }>("team")).writesFirst).toBeUndefined();
+  // (Room in its day for this give, whatever the tests before it gave.)
+  await api("teamOwnDaily", { usd: 100 });
+  try {
+    script = [callTool("team_give", { goal: "Count the importer's tests.", title: "Count the tests" }), say("Ada has it.")];
+    const response = await request("chat", { messages: [{ role: "user", content: "Have an agent count the importer's tests." }], save: true });
+    const events = (await response.text()).split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)) as ChatStreamEvent);
+    const id = (events.find((e) => e.type === "conversation") as { id: string }).id;
+    expect(["done", "failed"]).toContain((await settled()).tasks.find((t) => t.title === "Count the tests")!.status);
+    daemon.looks.tick();
+    expect(daemon.chats.looksWaiting(id)).toEqual([]);
+  } finally {
+    expect((await api<{ first: boolean }>("teamFirst", { on: true })).first).toBe(true);
+    await api("teamOwnDaily", { usd: 10 });
+  }
+  expect((await api<{ writesFirst?: boolean }>("team")).writesFirst).toBe(true);
+});
+
 test("what it gives on its own word fits what it may commit: past its daily cap (yours to set) or a budget of yours, the work is yours to give", async () => {
   expect((await api<{ usd: number }>("teamOwnDaily", { usd: 1 })).usd).toBe(1);
   try {

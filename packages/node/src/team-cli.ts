@@ -380,6 +380,14 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     return;
   }
   // A pull request of an agent's work that fails its checks, or that a review asks changes of: given back to that agent, outside an outcome too (PLAN #29).
+  if (sub === "first") {
+    if (args.length > 1 || (args.length === 1 && args[0] !== "on" && args[0] !== "off")) throw new Error("usage: invincible agents first [on|off]");
+    const on = args.length ? (await api.call<{ first: boolean }>("teamFirst", { on: args[0] === "on" })).first : (await api.call<TeamSnapshot>("team")).writesFirst === true;
+    print(on
+      ? "When a task your agent gave from a chat of yours ends, it writes first there: what came of it, and the next step, which it starts itself where that is its to do, within its money. Work you stopped, paused or declined it only says is yours. Turn it off with: invincible agents first off"
+      : "Your agent doesn't write first when a task it gave ends: you're told of it as ever, and what came of it is on the Agents page. Turn it on with: invincible agents first on");
+    return;
+  }
   if (sub === "ci") {
     if (args.length > 1 || (args.length === 1 && args[0] !== "on" && args[0] !== "off")) throw new Error("usage: invincible agents ci [on|off]");
     const on = args.length ? (await api.call<{ ci: boolean }>("teamCi", { on: args[0] === "on" })).ci : (await api.call<TeamSnapshot>("team")).ciBack === true;

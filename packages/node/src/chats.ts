@@ -63,12 +63,17 @@ interface LookRow {
   held: string | null;
   state: LookView["state"];
   why: string | null;
+  origin: string | null;
 }
 
-/** A look as the node keeps it: who set it going (whose device it runs as when it comes), and what its answer held. */
+/**
+ * A look as the node keeps it: who set it going (whose device it runs as when it comes), and what its answer held.
+ * `origin` "ended": the node's own, for a task it gave that ended (write-first.ts), never one it set itself.
+ */
 export interface KeptLook extends LookView {
   by: QueuedBy;
   held: LookHeld | null;
+  origin?: "ended";
 }
 
 const lookOf = (row: LookRow): KeptLook => {
@@ -80,7 +85,7 @@ const lookOf = (row: LookRow): KeptLook => {
     // What it held can't be read back: held as the strictest there is.
     held = { what: "private" };
   }
-  return { id: row.id, conversation: row.conversation, at: row.at, note: row.note, set: row.set_at, zone: row.zone, state: row.state, why: row.why, by: { kind: row.by_kind, device: row.by_device }, held };
+  return { id: row.id, conversation: row.conversation, at: row.at, note: row.note, set: row.set_at, zone: row.zone, state: row.state, why: row.why, by: { kind: row.by_kind, device: row.by_device }, held, ...(row.origin === "ended" ? { origin: "ended" as const } : {}) };
 };
 
 /** A row's attachments, read back: what was kept (each still checked to be one), or none. */
@@ -263,6 +268,9 @@ export class ChatStore {
     for (const [column, type] of [["by_kind", "TEXT"], ["by_device", "TEXT"], ["zone", "TEXT"], ["told", "TEXT"]] as const) {
       if (!handed.has(column)) this.db.exec(`ALTER TABLE handoffs ADD COLUMN ${column} ${type}`);
     }
+    // A database from before the node wrote first in its own words: whose each look is (null: one it set itself).
+    const looked = new Set(this.db.query<{ name: string }, []>("PRAGMA table_info(looks)").all().map((c) => c.name));
+    if (!looked.has("origin")) this.db.exec("ALTER TABLE looks ADD COLUMN origin TEXT");
     // A database from before queues: two more columns on a conversation (why its queue is held; what waits on you).
     const columns = new Set(this.db.query<{ name: string }, []>("PRAGMA table_info(conversations)").all().map((c) => c.name));
     if (!columns.has("queue_held")) this.db.exec("ALTER TABLE conversations ADD COLUMN queue_held TEXT");
@@ -496,13 +504,18 @@ export class ChatStore {
 
   /** A chat's queued messages, in the order they'll be sent. */
   /** A look it set in a chat, waiting until it comes. */
-  lookAdd(look: { conversation: string; at: number; note: string; zone: string; by: QueuedBy; held: LookHeld | null; set?: number }): KeptLook {
+  lookAdd(look: { conversation: string; at: number; note: string; zone: string; by: QueuedBy; held: LookHeld | null; set?: number; origin?: "ended" }): KeptLook {
     const id = `lk_${randomId(12)}`;
     // (Set now, or, for the one each task it gives from a chat comes with, when it gave it: write-first.ts.)
     this.db
-      .query("INSERT INTO looks (id, conversation, at, note, set_at, zone, by_kind, by_device, held) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(id, look.conversation, look.at, look.note, look.set ?? this.now(), look.zone, look.by.kind, look.by.device, look.held ? JSON.stringify(look.held) : null);
+      .query("INSERT INTO looks (id, conversation, at, note, set_at, zone, by_kind, by_device, held, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(id, look.conversation, look.at, look.note, look.set ?? this.now(), look.zone, look.by.kind, look.by.device, look.held ? JSON.stringify(look.held) : null, look.origin ?? null);
     return this.look(id)!;
+  }
+
+  /** How many looks the node wrote first since `since` (write-first.ts: WRITE_FIRST.perHour), whatever became of them. */
+  looksWrittenFirst(since: number): number {
+    return this.db.query<{ n: number }, [number]>("SELECT COUNT(*) AS n FROM looks WHERE origin = 'ended' AND at > ?").get(since)!.n;
   }
 
   look(id: string): KeptLook | null {
@@ -537,14 +550,23 @@ export class ChatStore {
       .run(conversation, task, this.now(), from?.by.kind ?? null, from?.by.device ?? null, from?.zone ?? null);
   }
 
-  /** The tasks it gave whose end it may still tell, oldest first: given by a device's turn, and not told as ended for good. */
-  handoffsToTell(limit = 200): { conversation: string; task: string; at: number; by: QueuedBy; zone: string; told: string | null }[] {
+  /**
+   * The tasks it gave whose end it may still tell, oldest first: given by a device's turn, and not told as ended for good.
+   * Every one of them (handoffsLetGo bounds how many there are), so tasks that never end for good hide no newer one's end
+   * (the review of 27 November, S12); a thousand at most.
+   */
+  handoffsToTell(limit = 1000): { conversation: string; task: string; at: number; by: QueuedBy; zone: string; told: string | null }[] {
     return this.db
       .query<{ conversation: string; task: string; at: number; by_kind: string; by_device: string; zone: string; told: string | null }, [number]>(
         "SELECT conversation, task, at, by_kind, by_device, zone, told FROM handoffs WHERE by_device IS NOT NULL AND (told IS NULL OR told = 'interrupted') ORDER BY at, task LIMIT ?",
       )
       .all(limit)
       .map((row) => ({ conversation: row.conversation, task: row.task, at: row.at, by: { kind: row.by_kind as QueuedBy["kind"], device: row.by_device }, zone: row.zone, told: row.told }));
+  }
+
+  /** Lets go of the hand-offs given before `before` whose end it may still tell: never told, never read again ("gone"). */
+  handoffsLetGo(before: number): void {
+    this.db.query("UPDATE handoffs SET told = 'gone' WHERE by_device IS NOT NULL AND (told IS NULL OR told = 'interrupted') AND at <= ?").run(before);
   }
 
   /** How it told of a task's end (its status then), or that it never will ("gone"). */

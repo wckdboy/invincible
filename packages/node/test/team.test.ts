@@ -559,6 +559,28 @@ describe("task orchestration", () => {
     expect(service.againOwn(failed, { why: "with a type check too", gates: ["bun test", "bun run lint", "bun run typecheck"] }).gates).toEqual(["bun test", "bun run lint", "bun run typecheck"]);
     expect(service.againOwn(ended("Gated again", null, { gates: ["bun test"] }), { why: "as it was" }).gates).toEqual(["bun test"]);
   });
+  // The review of 27 November, S9: a goal you stopped, paused or declined isn't given again as a new task either.
+  test("your agent gives no goal you stopped, paused or declined in the last day, as it gives no such work again; another goal, or a day later, it may", () => {
+    let now = Date.UTC(2026, 10, 27, 12);
+    const store = new TeamStore(":memory:", () => now);
+    for (const [id, name] of [["ada", "Ada"], ["lin", "Lin"]] as const) store.saveAgent({ id, name });
+    store.saveRoom({ id: "workshop", name: "Workshop", members: ["ada", "lin"], turnBudget: 8 });
+    const service = new TeamService({ store, respond: async () => "", executeTask: async () => ({ verified: true, output: "Verified" }) });
+    fixtures.push({ store, service });
+    const give = (goal: string, assignee = "ada") => service.giveOwn({ room: "workshop", assignee, title: "Drop the old tables", goal, budgetUsd: 1 });
+    for (const [error, said] of [["Stopped by you.", "You stopped"], ["Paused by you.", "You paused"], ["Declined by you.", "You declined"]] as const) {
+      const goal = `Drop the old tables (${error})`;
+      const ended = give(goal);
+      store.finish(ended.id, "stopped", error);
+      // The same goal, said the same way or with other spacing and case, to the same agent or another: yours.
+      expect(() => give(goal)).toThrow(`${said} that work in the last day (“Drop the old tables”, ${ended.id}): giving it again is yours.`);
+      expect(() => give(`  ${goal.toUpperCase()}  `, "lin")).toThrow(`${said} that work`);
+    }
+    // Another goal is its to give; and what you stopped more than a day ago is too.
+    expect(give("Index the new tables.")).toMatchObject({ status: "queued" });
+    now += 86_400_000 + 60_000;
+    expect(give("Drop the old tables (Stopped by you.)")).toMatchObject({ status: "queued" });
+  });
   // The review of 27 November, N8 (A5, A5b, A10, A12): each refusal of its own tools, tested.
   test("your agent takes up again no work of an agent or a conversation you paused, stops no proposal, and gives again nothing still under way", () => {
     const { store, service } = setup();

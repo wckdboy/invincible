@@ -155,9 +155,12 @@ Its event kinds are Invincible's own (`chat.*`, `task.*`, `run.*`, `project.*`, 
   approves on its own word spends at most $3 a task, within what is left of your budget past what approved work holds,
   or, while you set no budget, within $10 a day, which you set; past that the money is yours.
 - **Initiative:** it writes first when something happened while you were away, and it proposes the next step when a
-  task ends: each task it gives from a chat of yours comes with a look of its there for when it ends, a turn of its in
-  that chat as the device that gave it, once for each way the task ends, which says what came of it and starts the next
-  step where that is its to do (`write-first.ts`). Loops and triggers (a schedule, a webhook, a failed CI run) wake it.
+  task ends: each task it gives from a chat of yours comes with a look there for when it ends, the node's, a turn of its
+  in that chat as the device that gave it, which says what came of it and starts the next step where that is its to do
+  (`write-first.ts`). It is told once when the task ends, and again only after an interruption. Work you stopped, paused
+  or declined it only says is yours; what the task's run said reaches it fenced as the task's output; a node writes first
+  at most 6 times an hour; and it is yours to turn off (`invincible agents first off`). Loops and triggers (a schedule, a
+  webhook, a failed CI run) wake it.
 
 ## 6. Agents, tasks and runs
 

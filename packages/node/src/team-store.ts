@@ -335,6 +335,20 @@ export class TeamStore {
     this.db.query("INSERT INTO team_settings(key,value) VALUES('ci',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(on ? "on" : "off");
     return on;
   }
+  /** Whether it writes first in a chat of yours when a task it gave there ends (write-first.ts): on until you turn it off (the review of 27 November, S9). */
+  writesFirst(): boolean { return this.db.query<DocRow, []>("SELECT value FROM team_settings WHERE key='first'").get()?.value !== "off"; }
+  setWritesFirst(raw: boolean): boolean {
+    const on = teamInput(z.boolean(), raw);
+    this.db.query("INSERT INTO team_settings(key,value) VALUES('first',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(on ? "on" : "off");
+    return on;
+  }
+  /** The tasks you stopped, paused or declined since `since` (YOURS_STOPPED), newest first: what its own giving keeps off (TeamService.giveOwn). */
+  yoursEnded(since: number): TeamTask[] {
+    return this.db
+      .query<JobRow, [string, string, string, number]>("SELECT * FROM team_jobs WHERE kind='task' AND error IN (?, ?, ?) AND updated_at > ? ORDER BY seq DESC LIMIT 200")
+      .all(...([...YOURS_STOPPED.keys()] as [string, string, string]), since)
+      .map((row) => this.taskOf(row));
+  }
   /** A room's story so far: what its agents summed up of the conversation before `through` (a message's id), so a
    * long one keeps what it settled. Null: nothing has been summed up yet. */
   story(room: string): { text: string; through: string; updatedAt: number } | null {
@@ -886,7 +900,7 @@ export class TeamStore {
     const computer = this.computer();
     // Where its own merging stands: each repository you gave an agent, and each where you turned it off.
     const merging = mergingOf(this.agents(), this.mergeOff());
-    return { northStar: this.northStar(this.now() - 30 * 86_400_000), agents: this.agents(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.primaryAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ownDailyUsd: this.ownDaily(), ...(this.mergeOff().length ? { mergeOff: this.mergeOff() } : {}), ...(merging.length ? { merging } : {}), ...(computer ? { computer } : {}), seen: this.seen() };
+    return { northStar: this.northStar(this.now() - 30 * 86_400_000), agents: this.agents(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.primaryAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.writesFirst() ? { writesFirst: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ownDailyUsd: this.ownDaily(), ...(this.mergeOff().length ? { mergeOff: this.mergeOff() } : {}), ...(merging.length ? { merging } : {}), ...(computer ? { computer } : {}), seen: this.seen() };
   }
   /**
    * Which writing of the team this is, for the live stream: the rows this store has written, and the database's

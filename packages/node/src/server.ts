@@ -1821,7 +1821,7 @@ export function createApp(ctx: AppContext) {
   // (as a queued message's is), with its note as the message that starts it, kept as its. What the answer that set it
   // held of yours, this turn starts holding.
   // It writes first when a task it gave from a chat of yours ends: a look of its there, due at once (write-first.ts).
-  ctx.looks?.setBefore(() => void writeFirst({ chats: ctx.chats, task: (id) => ctx.team?.store?.task(id) ?? null }));
+  ctx.looks?.setBefore(() => void writeFirst({ chats: ctx.chats, task: (id) => ctx.team?.store?.task(id) ?? null, on: () => ctx.team?.store?.writesFirst() !== false }));
   ctx.looks?.setPrepare((look: KeptLook) => {
     const p = askerNow(look.by);
     const kept = ctx.chats.summary(look.conversation);
@@ -3235,6 +3235,7 @@ export function createApp(ctx: AppContext) {
     teamMemory: (input, p) => { ownerOnly(p); return { agent: teamOf().remember(input.id, input.text) }; },
     teamEngram: (input, p) => { ownerOnly(p); return { engram: teamOf().setEngram(input.on) }; },
     teamCi: (input, p) => { ownerOnly(p); return { ci: teamOf().setCiBack(input.on) }; },
+    teamFirst: (input, p) => { ownerOnly(p); return { first: teamOf().setWritesFirst(input.on) }; },
     teamBacklog: (input, p) => { ownerOnly(p); return { backlog: teamOf().setBacklog(input.on) }; },
     teamOwnDaily: (input, p) => { ownerOnly(p); return { usd: teamOf().setOwnDaily(input.usd) }; },
     teamMerge: (input, p) => { ownerOnly(p); return teamOf().setMerge(input); },

@@ -44,9 +44,14 @@ export function lookTime(at: number, zone: string, now: number): string {
   return `${day}, ${clock}`;
 }
 
-/** The message a look comes back as, for the model and kept in the chat as its: when it set it, its note, what to do. */
-export function lookMessage(look: { set: number; note: string; at: number; zone: string }, now: number): string {
+/**
+ * The message a look comes back as, for the model and kept in the chat as its: when it set it, its note, what to do. One
+ * the node set (`origin` "ended": a task it gave ended, write-first.ts) is said to be the node's, never one it set itself:
+ * its note says what to do (the review of 27 November, S10).
+ */
+export function lookMessage(look: { set: number; note: string; at: number; zone: string; origin?: "ended" }, now: number): string {
   const late = now - look.at > 10 * 60_000 ? ` It came due at ${lookTime(look.at, look.zone, now)}, while this node was away: it is late.` : "";
+  if (look.origin === "ended") return `(Your node writes this, not the owner and not you: ${look.note})${late}`;
   return `(A look you set yourself at ${lookTime(look.set, look.zone, now)}, not the owner's words: ${look.note})${late} Look now, with your tools, and say what you found and what comes next: the owner reads it here.`;
 }
 
