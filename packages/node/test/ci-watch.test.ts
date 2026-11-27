@@ -111,12 +111,12 @@ describe("following the checks", () => {
     const asked: unknown[] = [];
     const h = harness([{ ...pull, connector: "github-amiriteorg" }], (shippedPull, failure) => {
       asked.push({ shippedPull, failure });
-      return { said: "Given back to @noa as task task_1: once its fix is verified, pushing it waits for your approval.", fixing: true };
+      return { said: "Given back to @noa as task task_1: once its fix is verified, your agent approves its push onto the pull request's branch itself (never forced), as it may in a repository you gave an agent.", fixing: true };
     });
     h.set({ total_count: 2, check_runs: [failed(7, "test", "a".repeat(40)), run(8, "lint", "completed", "success")] });
     h.annotate(7, [{ path: "src/importer.ts", start_line: 14, message: "Expected 3, received 2" }]);
     await h.watch.tick();
-    expect(h.notices()[0]!.body).toBe("1 of 2 checks failed: test.\nGiven back to @noa as task task_1: once its fix is verified, pushing it waits for your approval.\nsrc/importer.ts:14 Expected 3, received 2");
+    expect(h.notices()[0]!.body).toBe("1 of 2 checks failed: test.\nGiven back to @noa as task task_1: once its fix is verified, your agent approves its push onto the pull request's branch itself (never forced), as it may in a repository you gave an agent.\nsrc/importer.ts:14 Expected 3, received 2");
     // An agent is fixing it: a note for the day's digest, not a warning that needs you (PLAN #59).
     expect(h.notices()[0]!.severity).toBe("info");
     expect(asked).toEqual([{ shippedPull: expect.objectContaining({ action: "a_ship1" }), failure: { head: "a".repeat(40), failing: ["test"], lines: ["src/importer.ts:14 Expected 3, received 2"] } }]);

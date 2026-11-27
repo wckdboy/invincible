@@ -405,7 +405,7 @@ export const routes = {
   teamEngram: { method: "POST", path: "/api/team/engram", scope: "fleet:admin", input: TeamEngramInput },
   /** Whether a pull request's failing checks go back to the agent whose work it was, outside an outcome too (PLAN #29): yours alone to say. `team` says when it is on. */
   teamCi: { method: "POST", path: "/api/team/ci", scope: "fleet:admin", input: TeamCiInput },
-  /** Whether the primary offers idle agents work from your backlog: one task a day at most for each, waiting for your approval. */
+  /** Whether the primary offers idle agents work from your backlog: one task a day at most for each, which it approves itself when its cost fits its rule (at most $3, within your budget), and which otherwise waits for you. */
   teamBacklog: { method: "POST", path: "/api/team/backlog", scope: "fleet:admin", input: TeamBacklogInput },
   /** An agent's verified work as a pull request, on your word (PLAN #37): filed as its agent's ship and answered by you at once, so the outbox (and the CI watcher) has it. */
   shipTeamTask: { method: "POST", path: "/api/team/ship", scope: "fleet:admin", input: TeamShipInput },

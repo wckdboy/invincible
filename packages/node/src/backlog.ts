@@ -192,7 +192,7 @@ export class BacklogRunner {
     return await this.looking;
   }
 
-  /** What the agent's repository asks for next, proposed to it: a task waiting for your approval, or nothing. */
+  /** What the agent's repository asks for next, proposed to it (approved by your agent itself when it fits the rule, else waiting for you), or nothing. */
   async look(agent: Agent): Promise<TeamTask | null> {
     this.o.store.setBacklogLooked(agent.id, this.now());
     const read = await this.o.exec(agent, BACKLOG_READ, 60, this.halt.signal);

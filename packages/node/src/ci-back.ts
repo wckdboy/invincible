@@ -9,15 +9,16 @@ import type { TeamService } from "./team.ts";
  * CI and review back to the agent (PLAN #29). When a pull request of an agent's work fails its checks, or someone who
  * may push to the repository asks for changes in a review (ci-watch.ts), the agent whose work it was can be given
  * the fix: a task on the pull request's branch (its worktree starts there), with the work's gates and budget, what
- * failed or what was asked said as data, and the independent reviewer as ever. A fix that ends verified is offered to
- * you as a push onto that branch (github.ship.update: one commit on top, from exactly where the fix began, never
- * forced); you approve it, the pull request updates, and the watcher follows it again.
+ * failed or what was asked said as data, and the independent reviewer as ever. A fix that ends verified is pushed onto
+ * that branch (github.ship.update: one commit on top, from exactly where the fix began, never forced): your agent
+ * approves that push itself in a repository you gave an agent (policy.ts ownApproval), and anywhere else it waits for
+ * you; the pull request updates, and the watcher follows it again.
  *
  * Who says it goes back: an outcome the work was a step of, within that outcome's budget (your ruling of 18 November
  * 2026: it gives an outcome's agents its tasks); anywhere else you, once (invincible agents ci on), since nothing
  * else gives an agent work without your word, and then within the primary's daily giving. Either way once for each commit
- * whose checks failed and each review, at most three times for one pull request (then it's yours); the push always
- * asks. It is said in the work's trail and in the fix's, and a failure's in its notice too.
+ * whose checks failed and each review, at most three times for one pull request (then it's yours). It is said in the
+ * work's trail and in the fix's, and a failure's in its notice too.
  */
 
 /** At most this many fixes go back for one pull request. */
@@ -47,7 +48,7 @@ const yours = (said: string): GivenBack => ({ said, fixing: false });
 const given = (task: TeamTask): GivenBack =>
   task.status === "failed" || task.status === "stopped"
     ? yours(`Given back to @${task.assignee} as task ${task.id}, which ended without a verified fix: it's yours now.`)
-    : { said: `Given back to @${task.assignee} as task ${task.id}: once its fix is verified, pushing it waits for your approval.`, fixing: true };
+    : { said: `Given back to @${task.assignee} as task ${task.id}: once its fix is verified, your agent approves its push onto the pull request's branch itself (never forced), as it may in a repository you gave an agent.`, fixing: true };
 
 const where = (pull: ShippedPull) => `${pull.owner}/${pull.repo}${pull.pr ? `#${pull.pr}` : ""}`;
 

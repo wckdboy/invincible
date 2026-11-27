@@ -2628,7 +2628,8 @@ export function createApp(ctx: AppContext) {
       },
     });
     outcomes.start();
-    // Work for idle agents from your backlog (backlog.ts): one proposal a day at most for each, waiting for your tap.
+    // Work for idle agents from your backlog (backlog.ts): one proposal a day at most for each, which your agent approves
+    // itself when its cost fits its rule (TeamService.approveOwn), and which otherwise waits for your tap.
     const backlog = new BacklogRunner({
       store: team.store,
       service: () => team.service!,

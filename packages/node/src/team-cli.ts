@@ -361,7 +361,7 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     if (args.length > 1 || (args.length === 1 && args[0] !== "on" && args[0] !== "off")) throw new Error("usage: invincible agents ci [on|off]");
     const on = args.length ? (await api.call<{ ci: boolean }>("teamCi", { on: args[0] === "on" })).ci : (await api.call<TeamSnapshot>("team")).ciBack === true;
     print(on
-      ? "Failing checks, and reviews that ask for changes, go back to the agent whose work it was: a fix on the pull request's branch, once for each commit that failed or review, three times at most, within your agent's daily giving. Pushing a fix still waits for your approval. Turn it off with: invincible agents ci off"
+      ? "Failing checks, and reviews that ask for changes, go back to the agent whose work it was: a fix on the pull request's branch, once for each commit that failed or review, three times at most, within your agent's daily giving. A verified fix is pushed onto its branch on your agent's own approval (never forced), as it may in a repository you gave an agent. Turn it off with: invincible agents ci off"
       : "Failing checks and reviews stay yours, except in an outcome, which gives them back on its own within its budget. Turn it on with: invincible agents ci on");
     return;
   }
@@ -370,7 +370,7 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     if (args.length > 1 || (args.length === 1 && args[0] !== "on" && args[0] !== "off")) throw new Error("usage: invincible agents backlog [on|off]");
     const on = args.length ? (await api.call<{ backlog: boolean }>("teamBacklog", { on: args[0] === "on" })).backlog : (await api.call<TeamSnapshot>("team")).backlog === true;
     print(on
-      ? "An agent with a repository and nothing to do is offered one task a day at most, the next step of its repository's own plan (docs/PLAN.md, PLAN.md, ROADMAP.md or TODO.md): a proposal in its conversation with you, which starts when you approve it. Turn it off with: invincible agents backlog off"
+      ? "An agent with a repository and nothing to do is offered one task a day at most, the next step of its repository's own plan (docs/PLAN.md, PLAN.md, ROADMAP.md or TODO.md): a proposal in its conversation with you, which your agent approves itself and starts when its cost fits its rule (at most $3, within your budget), and which otherwise waits for you. Turn it off with: invincible agents backlog off"
       : "Idle agents are offered nothing: their work is what you and its outcomes give them. Turn it on with: invincible agents backlog on");
     return;
   }
