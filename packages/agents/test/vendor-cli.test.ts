@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,11 @@ import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
 import { GatewayTokens, handleGateway } from "@invincible/models";
 import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
 import { CLAUDE_BRIDGE, CODEX_BRIDGE } from "../src/vendor-cli.ts";
+
+// Every test here starts a bridge and a stand-in tool as processes of their own, so its time is the machine's to
+// give: "a result that is an error ends the run as failed" took 0.6 s alone and 5.0 s (bun's default limit) in a full
+// run at a load of 24 (27 November 2026). The limit is how long a busy machine may take, never what a test checks.
+setDefaultTimeout(20_000);
 
 /*
  * The vendors' own CLIs as harnesses: Claude Code and Codex, each run headless and live by a bridge inside the agent's
