@@ -27,7 +27,8 @@ the node's stream of it (`core/NodeClient.kt`'s `frames`, read whole as its byte
 frame handed to MediaCodec, the phone's own H.264 decoder, and drawn on a SurfaceView as it comes
 (`ui/DesktopDecoder.kt`), while it is on screen and the app is in front. It is watched again after an end, its last
 frame kept meanwhile, and given up for a picture every two seconds after four ends in a row or a refusal (never a node that
-didn't answer), as the web app and the iPhone do (the vectors' `desktopStream`; `core/DesktopWatch.kt`, tested on
+didn't answer), or after falling behind three times in a row, each within 30 s of the last (at most 20 frames wait to be
+decoded: past that the stream ends and starts again from a keyframe), as the web app and the iPhone do (the vectors' `desktopStream`; `core/DesktopWatch.kt`, tested on
 stand-in streams). A tap clicks there and brings back no picture; Take over and Give back
 sit under it from its first frame, the row saying until when by the clock. On an emulator its decoder
 (`c2.goldfish.h264.decoder`) gives back each frame of the glass page's recording with the pixels it was drawn with.
