@@ -128,7 +128,7 @@ struct NodeLine: View {
         let name = session.whoami?.nodeName ?? session.node.nodeName ?? "Your node"
         let fleet = session.whoami?.fleetName ?? session.node.fleetName
         let (state, color): (String, Color) = if let trouble = session.trouble {
-            trouble.unreachable ? ("Can't be reached", .secondary) : ("Doesn't accept this Mac", .danger)
+            trouble.notYourNode != nil ? ("Isn't the node this Mac paired with", .danger) : trouble.unreachable ? ("Can't be reached", .secondary) : ("Doesn't accept this Mac", .danger)
         } else if session.whoami != nil {
             ("Connected", .green)
         } else {

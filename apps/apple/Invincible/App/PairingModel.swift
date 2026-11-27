@@ -133,10 +133,21 @@ import Observation
     }
 
     private func finish(app: AppModel, key: DeviceKey, origin: URL, invite: Invite, name: String) async {
-        let me = try? await NodeClient(origin: origin, signer: key).get("/api/whoami", as: WhoAmI.self)
+        // Approved: what the node says this device is, and which node it is, proven: pinned from the pairing, and named in
+        // what this device signs from then on (the slice 8 note's item 11). A node from before proves nothing: pinned at
+        // the first proof it gives.
+        let challenge = NodeProof.challenge()
+        let me = try? await NodeClient(origin: origin, signer: key).provenWhoami(challenge: challenge)
+        let proven = me.map { NodeProof.judge(pinned: nil, node: $0.node, proof: $0.proof, challenge: challenge, check: .app) }
+        if proven == .failed {
+            stage = .stopped("The node's proof of which node it is didn't hold: this device isn't paired with it.")
+            return
+        }
         stage = .approved
         link = ""
         try? await Task.sleep(for: .milliseconds(700))
-        app.paired(key: key, node: PairedNode(origin: origin, device: key.device, name: name, fleet: invite.f, nodeName: me?.nodeName, fleetName: me?.fleetName))
+        var paired = PairedNode(origin: origin, device: key.device, name: name, fleet: invite.f, nodeName: me?.nodeName, fleetName: me?.fleetName)
+        if case .pin(let id) = proven { paired.nodeId = id }
+        app.paired(key: key, node: paired)
     }
 }

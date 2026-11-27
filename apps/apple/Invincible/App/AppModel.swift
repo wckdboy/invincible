@@ -11,6 +11,9 @@ struct PairedNode: Codable, Equatable, Sendable {
     var fleet: String
     var nodeName: String?
     var fleetName: String?
+    /// The node's id, as that node proved it (NodeProof): what every request names. Absent from a pairing made before it,
+    /// or with a node from before it: proved, and kept, at the next whoami.
+    var nodeId: String?
 
     private static let key = "sh.invincible.bot.paired-node"
 

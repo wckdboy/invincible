@@ -58,7 +58,8 @@ enum NoticeAnswers {
         let said: (title: String, body: String)
         do {
             guard let key = try DeviceKey.load(), let node = PairedNode.load(), node.device == key.device else { throw Unpaired() }
-            _ = try await NodeClient(origin: node.origin, signer: key).post("/api/actions/decide", Decision(id: action, approve: false), as: JSONValue.self)
+            // (Signed for the node it proved to be, as every request of this device's is.)
+            _ = try await NodeClient(origin: node.origin, signer: key, pin: NodePin(node.nodeId)).post("/api/actions/decide", Decision(id: action, approve: false), as: JSONValue.self)
             said = ("Declined", "Nothing was sent.")
         } catch {
             said = ("Not answered", "\(error.localizedDescription) It still waits in Needs you.")

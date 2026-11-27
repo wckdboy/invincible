@@ -6,6 +6,10 @@ import Foundation
 struct Vectors: Decodable {
     struct Auth: Decodable {
         let domain: String
+        /// A request for one node (v2), whoami's proof's domain, and the challenge's shape (the slice 8 note's item 11).
+        let domainNamed: String
+        let nodeProofDomain: String
+        let nodeChallenge: String
         let headers: [String: String]
         let maxSkewMs: Int
     }
@@ -35,6 +39,28 @@ struct Vectors: Decodable {
         let signatureHighS: String
         let signatureDer: String
         let headers: [String: String]
+    }
+
+    /// A request core signed for one node (v2): its id last in what is signed.
+    struct NodeRequest: Decodable {
+        let method: String
+        let path: String
+        let ts: String
+        let nonce: String
+        let body: String
+        let node: String
+        let signingInput: String
+        let signature: String
+        let headers: [String: String]
+    }
+
+    /// A node's proof of its id: its Ed25519 signature of a device's challenge, which another node's id doesn't verify.
+    struct NodeProofCase: Decodable {
+        let node: String
+        let anotherNode: String
+        let challenge: String
+        let signingInput: String
+        let proof: String
     }
 
     struct Canonical: Decodable {
@@ -387,6 +413,8 @@ struct Vectors: Decodable {
     let base64url: Base64URLCases
     let identity: Identity
     let requests: [Request]
+    let requestsForNode: [NodeRequest]
+    let nodeProofs: [NodeProofCase]
     let canonical: [Canonical]
     let pairing: Pairing
     let agents: AgentsSection

@@ -20,12 +20,15 @@ protocol RequestSigner: Sendable {
 }
 
 /**
- * Every request to a node is signed by this device's key over (method, path, time, nonce, body hash), as
- * `packages/core/src/request-auth.ts` verifies it: domain-separated by `invincible-req/v1`, the parts joined by newlines,
- * the body hashed with SHA-256 into base64url. The node verifies IEEE P1363 signatures (r || s, 64 bytes): never DER.
+ * Every request to a node is signed by this device's key over (method, path, time, nonce, body hash) and the node it is
+ * for, as `packages/core/src/request-auth.ts` verifies it: domain-separated by `invincible-req/v2`, the parts joined by
+ * newlines, the body hashed with SHA-256 into base64url, the node's id last, so another node refuses it (the slice 8
+ * note's item 11). Without a node, `invincible-req/v1` and no id: what whoami's proof is asked with (NodeProof), and what
+ * a node from before reads. The node verifies IEEE P1363 signatures (r || s, 64 bytes): never DER.
  */
 enum RequestAuth {
     static let domain = "invincible-req/v1"
+    static let domainNamed = "invincible-req/v2"
 
     enum Header {
         static let device = "x-invincible-device"
@@ -37,9 +40,11 @@ enum RequestAuth {
         static let zone = "x-invincible-tz"
     }
 
-    /// The bytes signed. `path` is the path and query exactly as the request carries them.
-    static func signingInput(method: String, path: String, ts: String, nonce: String, body: Data) -> Data {
-        Data("\(domain)\n\([method.uppercased(), path, ts, nonce, bodyHash(body)].joined(separator: "\n"))".utf8)
+    /// The bytes signed. `path` is the path and query exactly as the request carries them; `node`, the node it is for, as
+    /// that node proved it (v2), or none (v1).
+    static func signingInput(method: String, path: String, ts: String, nonce: String, body: Data, node: String? = nil) -> Data {
+        let parts = [method.uppercased(), path, ts, nonce, bodyHash(body)] + (node.map { [$0] } ?? [])
+        return Data("\(node == nil ? domain : domainNamed)\n\(parts.joined(separator: "\n"))".utf8)
     }
 
     static func bodyHash(_ body: Data) -> String { Data(SHA256.hash(data: body)).base64URLEncodedString() }
@@ -49,8 +54,8 @@ enum RequestAuth {
         try P256.Signing.ECDSASignature(derRepresentation: der).rawRepresentation
     }
 
-    static func headers(signer: some RequestSigner, method: String, path: String, body: Data, ts: String, nonce: String) throws -> [String: String] {
-        let signature = try signer.sign(signingInput(method: method, path: path, ts: ts, nonce: nonce, body: body))
+    static func headers(signer: some RequestSigner, method: String, path: String, body: Data, ts: String, nonce: String, node: String? = nil) throws -> [String: String] {
+        let signature = try signer.sign(signingInput(method: method, path: path, ts: ts, nonce: nonce, body: body, node: node))
         return [Header.device: signer.device, Header.ts: ts, Header.nonce: nonce, Header.sig: signature.base64URLEncodedString()]
     }
 

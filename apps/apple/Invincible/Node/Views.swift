@@ -16,6 +16,8 @@ struct WhoAmI: Decodable, Sendable, Equatable {
     let fleetName: String?
     /// What the primary is called, where the node names it (absent: unnamed, "Invincible"; Primary.name).
     var primaryName: String? = nil
+    /// Asked with a challenge: the node's proof that it is the node `node` names (NodeProof; absent from a node from before it).
+    var proof: String? = nil
 }
 
 /// `GET /api/team`: the team's agents, their conversations and their work, in one snapshot.

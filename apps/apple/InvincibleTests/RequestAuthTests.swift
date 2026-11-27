@@ -22,6 +22,7 @@ struct RequestAuthTests {
 
     @Test func theHeaderNamesAndDomainAreCores() {
         #expect(RequestAuth.domain == vectors.auth.domain)
+        #expect(RequestAuth.domainNamed == vectors.auth.domainNamed)
         #expect(RequestAuth.Header.device == vectors.auth.headers["device"])
         #expect(RequestAuth.Header.ts == vectors.auth.headers["ts"])
         #expect(RequestAuth.Header.nonce == vectors.auth.headers["nonce"])
@@ -42,6 +43,24 @@ struct RequestAuthTests {
             let input = RequestAuth.signingInput(method: request.method, path: request.path, ts: request.ts, nonce: request.nonce, body: Data(request.body.utf8))
             #expect(input == Data(request.signingInput.utf8), "\(request.method) \(request.path)")
             #expect(RequestAuth.bodyHash(Data(request.body.utf8)) == request.bodySha256)
+        }
+    }
+
+    // The slice 8 note's item 11: a request names the node it is for, last, so another node refuses it.
+    @Test func aRequestForANodeIsSignedOverCoresBytesWithTheNodeLast() throws {
+        let key = try P256.Signing.PrivateKey(rawRepresentation: #require(Data(hex: vectors.identity.scalarHex)))
+        #expect(!vectors.requestsForNode.isEmpty)
+        for request in vectors.requestsForNode {
+            let body = Data(request.body.utf8)
+            #expect(RequestAuth.signingInput(method: request.method, path: request.path, ts: request.ts, nonce: request.nonce, body: body, node: request.node) == Data(request.signingInput.utf8), "\(request.method) \(request.path)")
+            // Core's own signature verifies here, over those bytes and no others: not the same request for no node.
+            let signature = try P256.Signing.ECDSASignature(rawRepresentation: #require(Data(base64URLEncoded: request.signature)))
+            #expect(key.publicKey.isValidSignature(signature, for: Data(request.signingInput.utf8)))
+            #expect(!key.publicKey.isValidSignature(signature, for: RequestAuth.signingInput(method: request.method, path: request.path, ts: request.ts, nonce: request.nonce, body: body)))
+            // And the headers this device sends for it are signed over exactly them.
+            let headers = try RequestAuth.headers(signer: FakeSigner(key: key), method: request.method, path: request.path, body: body, ts: request.ts, nonce: request.nonce, node: request.node)
+            let sig = try #require(headers[RequestAuth.Header.sig].flatMap { Data(base64URLEncoded: $0) })
+            #expect(key.publicKey.isValidSignature(try P256.Signing.ECDSASignature(rawRepresentation: sig), for: Data(request.signingInput.utf8)))
         }
     }
 

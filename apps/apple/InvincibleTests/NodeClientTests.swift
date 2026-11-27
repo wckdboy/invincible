@@ -8,17 +8,53 @@ import Testing
 struct NodeClientTests {
     let vectors = Vectors.shared
 
-    func client(origin: String) throws -> NodeClient {
+    func client(origin: String, pin: NodePin = NodePin()) throws -> NodeClient {
         let key = try P256.Signing.PrivateKey(rawRepresentation: #require(Data(hex: vectors.identity.scalarHex)))
-        return try NodeClient(origin: #require(URL(string: origin)), signer: FakeSigner(key: key), clock: { Date(timeIntervalSince1970: 1_763_200_000) }, nonce: { "nonce-for-tests1" })
+        return try NodeClient(origin: #require(URL(string: origin)), signer: FakeSigner(key: key), pin: pin, clock: { Date(timeIntervalSince1970: 1_763_200_000) }, nonce: { "nonce-for-tests1" })
     }
 
-    func verifies(_ request: URLRequest, method: String, path: String, body: Data) throws -> Bool {
+    func verifies(_ request: URLRequest, method: String, path: String, body: Data, node: String? = nil) throws -> Bool {
         let publicKey = try P256.Signing.PublicKey(x963Representation: #require(Data(base64URLEncoded: vectors.identity.publicKey)))
         let headers = request.allHTTPHeaderFields ?? [:]
         let sig = try #require(headers[RequestAuth.Header.sig].flatMap { Data(base64URLEncoded: $0) })
-        let input = RequestAuth.signingInput(method: method, path: path, ts: try #require(headers[RequestAuth.Header.ts]), nonce: try #require(headers[RequestAuth.Header.nonce]), body: body)
+        let input = RequestAuth.signingInput(method: method, path: path, ts: try #require(headers[RequestAuth.Header.ts]), nonce: try #require(headers[RequestAuth.Header.nonce]), body: body, node: node)
         return publicKey.isValidSignature(try P256.Signing.ECDSASignature(rawRepresentation: sig), for: input)
+    }
+
+    // The slice 8 note's item 11: what this device signs names the node it proved to be, and never whoami's proof.
+    @Test func aPinnedClientSignsEveryRequestForItsNodeAndWhoamisProofForNone() throws {
+        let node = vectors.nodeProofs[0].node
+        let pin = NodePin()
+        let before = try client(origin: "http://127.0.0.1:7778", pin: pin).request("GET", "/api/team", body: nil)
+        #expect(try verifies(before, method: "GET", path: "/api/team", body: Data()))
+        pin.pin(node)
+        // Every copy of the client shares the pin: the one made before signs for the node from now on.
+        let pinned = try client(origin: "http://127.0.0.1:7778", pin: pin)
+        for request in [try pinned.request("GET", "/api/team", body: nil), try pinned.request("POST", "/api/chat", body: Data("{}".utf8))] {
+            let body = request.httpBody ?? Data()
+            #expect(try verifies(request, method: request.httpMethod!, path: request.url!.path(), body: body, node: node))
+            #expect(try !verifies(request, method: request.httpMethod!, path: request.url!.path(), body: body))
+        }
+        let whoami = try pinned.request("GET", "/api/whoami?challenge=c2xpY2UtOC1jaGFsbGVuZ2U", body: nil, named: false)
+        #expect(try verifies(whoami, method: "GET", path: "/api/whoami?challenge=c2xpY2UtOC1jaGFsbGVuZ2U", body: Data()))
+    }
+
+    @Test func aClientWhoseNodeProvedToBeAnotherSendsNothingUntilAskedAgain() throws {
+        let pin = NodePin(vectors.nodeProofs[0].node)
+        let client = try client(origin: "http://127.0.0.1:7778", pin: pin)
+        pin.refuse(.notYours(other: vectors.nodeProofs[0].anotherNode))
+        #expect(throws: NodeError.self) { try client.request("GET", "/api/team", body: nil) }
+        #expect(throws: NodeError.self) { try client.request("GET", "/api/whoami?challenge=c2xpY2UtOC1jaGFsbGVuZ2U", body: nil, named: false) }
+        do {
+            _ = try client.request("POST", "/api/chat", body: Data("{}".utf8))
+            Issue.record("a request was made for a node that proved to be another")
+        } catch let error as NodeError {
+            #expect(error.notYourNode == vectors.nodeProofs[0].anotherNode)
+            #expect(error.message == "It proved to be another node (\(vectors.nodeProofs[0].anotherNode.dropFirst(2).prefix(8))), not the one this device paired with.")
+        }
+        #expect(NodeError.notYours(other: nil).notYourNode == "")
+        pin.clear()
+        #expect(try verifies(client.request("GET", "/api/team", body: nil), method: "GET", path: "/api/team", body: Data(), node: vectors.nodeProofs[0].node))
     }
 
     @Test func aCloneIsWaitedForAsLongAsTheNodeLetsItRun() throws {

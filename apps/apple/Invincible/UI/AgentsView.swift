@@ -442,17 +442,22 @@ struct TroubleRow: View {
         }
     }
 
+    /// It names nothing of this device's: the node at its address isn't the one this device paired with (NodePin).
+    private var notYours: Bool { trouble.notYourNode != nil }
+
     private var skew: TimeInterval? {
         trouble.serverTime.map { $0.timeIntervalSinceNow }.flatMap { abs($0) > 60 ? $0 : nil }
     }
 
     private var title: String {
+        if notYours { return "This isn't the node this device paired with" }
         if trouble.unreachable { return "No connection to your node" }
         if skew != nil { return "This device's clock is off" }
         return trouble.status == 401 ? "The node doesn't accept this device" : "The node refused"
     }
 
     private var detail: String {
+        if notYours { return "\(trouble.message) Nothing more is sent to it. If you set your node up anew at this address, forget this device in More, then pair it again." }
         if trouble.unreachable { return "\(trouble.message) On a phone, open the Tailscale app and check it says Connected." }
         if let skew { return "It is \(Int((abs(skew) / 60).rounded())) minutes from the node's. Set the date and time to set themselves, in Settings." }
         return trouble.status == 401 ? "It may have been removed from the fleet. Forget this device in More, then pair it again." : trouble.message

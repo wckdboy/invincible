@@ -338,7 +338,7 @@ struct MachineChip: View {
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.capsule)
-        .accessibilityLabel("\(name): \(session.trouble != nil ? "can't be reached" : reached ? "answering" : "not answered yet")")
+        .accessibilityLabel("\(name): \(session.trouble?.notYourNode != nil ? "isn't the node this device paired with" : session.trouble != nil ? "can't be reached" : reached ? "answering" : "not answered yet")")
         .accessibilityHint("Opens Settings")
     }
 }

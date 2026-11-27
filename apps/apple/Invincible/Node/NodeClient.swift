@@ -1,19 +1,46 @@
 import Foundation
+import Synchronization
+
+/**
+ * The node this device speaks to, as that node proved it (NodeProof), shared by every copy of a client: what each request
+ * signs names (RequestAuth's v2), and, once the node at its address proved to be another or its proof failed, why nothing
+ * more is sent there (the slice 8 note's item 11).
+ */
+final class NodePin: Sendable {
+    private struct State: Sendable {
+        var node: String?
+        var refused: NodeError?
+    }
+
+    private let state: Mutex<State>
+
+    init(_ node: String? = nil) { state = Mutex(State(node: node)) }
+
+    var node: String? { state.withLock { $0.node } }
+    var refused: NodeError? { state.withLock { $0.refused } }
+    func pin(_ node: String) { state.withLock { $0.node = node } }
+    func refuse(_ why: NodeError) { state.withLock { $0.refused = why } }
+    /// Asked again (Try again): its proof is judged afresh, and nothing else is sent until it holds.
+    func clear() { state.withLock { $0.refused = nil } }
+}
 
 /**
  * This device talking to its node. Every /api request is signed with the device key over (method, path, time, nonce,
- * body hash) and sent with exactly those bytes, as the PWA's `signedFetch` does (apps/web/src/api.ts). Nothing is
- * cached, no cookie is kept, and a redirect is never followed: a signed request goes only where it was meant to go.
+ * body hash) and the node it is for (`pin`), and sent with exactly those bytes, as the PWA's `signedFetch` does
+ * (apps/web/src/api.ts). Nothing is cached, no cookie is kept, and a redirect is never followed: a signed request goes
+ * only where it was meant to go.
  */
 struct NodeClient: Sendable {
     let origin: URL
     let signer: any RequestSigner
+    let pin: NodePin
     private let clock: @Sendable () -> Date
     private let nonce: @Sendable () -> String
 
-    init(origin: URL, signer: any RequestSigner, clock: @escaping @Sendable () -> Date = { .now }, nonce: @escaping @Sendable () -> String = { RequestAuth.newNonce() }) {
+    init(origin: URL, signer: any RequestSigner, pin: NodePin = NodePin(), clock: @escaping @Sendable () -> Date = { .now }, nonce: @escaping @Sendable () -> String = { RequestAuth.newNonce() }) {
         self.origin = origin
         self.signer = signer
+        self.pin = pin
         self.clock = clock
         self.nonce = nonce
     }
@@ -43,14 +70,16 @@ struct NodeClient: Sendable {
     }
 
     /// The request, signed. `path` is the path and query, exactly as the node will read them back. It waits `timeout`, else
-    /// as long as its path needs (wait(for:)).
-    func request(_ method: String, _ path: String, body: Data?, timeout: TimeInterval? = nil) throws -> URLRequest {
+    /// as long as its path needs (wait(for:)). Signed for the pinned node (`named`; never for whoami's proof), and never
+    /// made once a node at this address proved to be another (NodePin.refused).
+    func request(_ method: String, _ path: String, body: Data?, timeout: TimeInterval? = nil, named: Bool = true) throws -> URLRequest {
+        if let refused = pin.refused { throw refused }
         guard path.hasPrefix("/"), let url = URL(string: path, relativeTo: origin)?.absoluteURL else {
             throw NodeError(status: 0, message: "\(path) isn't a path on the node")
         }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: timeout ?? Self.wait(for: path))
         request.httpMethod = method
-        let headers = try RequestAuth.headers(signer: signer, method: method, path: path, body: body ?? Data(), ts: RequestAuth.timestamp(clock()), nonce: nonce())
+        let headers = try RequestAuth.headers(signer: signer, method: method, path: path, body: body ?? Data(), ts: RequestAuth.timestamp(clock()), nonce: nonce(), node: named ? pin.node : nil)
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue(TimeZone.current.identifier, forHTTPHeaderField: RequestAuth.Header.zone)
         if let body {
@@ -62,6 +91,12 @@ struct NodeClient: Sendable {
 
     func get<T: Decodable>(_ path: String, as type: T.Type = T.self) async throws -> T {
         try decode(T.self, from: await send(request("GET", path, body: nil)))
+    }
+
+    /// Whoami, asked with `challenge`, which the node answers with its proof of which node it is (NodeProof). Signed for
+    /// no node, as whoami's always is taken: so another node at this address still says which it is.
+    func provenWhoami(challenge: String) async throws -> WhoAmI {
+        try decode(WhoAmI.self, from: await send(request("GET", "/api/whoami?challenge=\(challenge)", body: nil, named: false)))
     }
 
     /// A GET answered as `T`, and the bytes it came in (to keep a part of them: KeptTable).
@@ -263,6 +298,14 @@ struct NodeError: LocalizedError, Sendable, Equatable {
     var serverTime: Date? = nil
     /// Nothing answered, or a proxy answered for a node that's away: try again later; it isn't a refusal.
     var unreachable = false
+    /// The node at this address proved to be another than the one this device paired with (its id), or its proof failed
+    /// (""): nothing more is sent there (NodePin).
+    var notYourNode: String? = nil
+
+    /// The node at this address isn't this device's: it proved to be `other`, or its proof failed (nil).
+    static func notYours(other: String?) -> NodeError {
+        NodeError(status: 0, message: other.map { "It proved to be another node (\(String($0.dropFirst(2).prefix(8)))), not the one this device paired with." } ?? "Its proof of which node it is didn't hold.", notYourNode: other ?? "")
+    }
 
     var errorDescription: String? { message }
 

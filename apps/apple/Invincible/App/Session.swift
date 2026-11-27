@@ -6,8 +6,11 @@ import Observation
 /// the agents are the one this device last saw, where it keeps one (KeptTable).
 @MainActor @Observable final class Session {
     let key: DeviceKey
-    let node: PairedNode
+    /// The pairing, its node's id pinned once that node proved it (readMe; NodeProof).
+    private(set) var node: PairedNode
     let client: NodeClient
+    /// How whoami's proof of which node it is, is checked (NodeProof.Checker).
+    @ObservationIgnored private let proofs: NodeProof.Checker
     let chat = ChatModel()
 
     private(set) var whoami: WhoAmI?
@@ -53,10 +56,12 @@ import Observation
     /// device forgetting its node).
     @ObservationIgnored private var keeping: KeptTable.Store?
 
-    init(key: DeviceKey, node: PairedNode, kept: KeptTable.Kept? = nil, keeping: KeptTable.Store? = nil) {
+    init(key: DeviceKey, node: PairedNode, kept: KeptTable.Kept? = nil, keeping: KeptTable.Store? = nil, proofs: NodeProof.Checker = .app) {
         self.key = key
         self.node = node
-        self.client = NodeClient(origin: node.origin, signer: key)
+        self.proofs = proofs
+        // Every request it signs names the node it proved to be, where it proved one (the slice 8 note's item 11).
+        self.client = NodeClient(origin: node.origin, signer: key, pin: NodePin(node.nodeId))
         self.kept = kept
         self.keeping = keeping
         // The chat on screen read: its answers in it stop being new here at once, not at the next look.
@@ -229,8 +234,9 @@ import Observation
                 return { reading.cancel() }
             },
             // An older node without the stream (404), a device that may not read it (403), one revoked (401, which the
-            // reads then say): read on a timer instead, and opened again only when asked.
-            refused: { ($0 as? NodeError).map { [401, 403, 404].contains($0.status) } ?? false }
+            // reads then say), or a node that isn't this device's (NodePin): read on a timer instead, and opened again only
+            // when asked.
+            refused: { ($0 as? NodeError).map { [401, 403, 404].contains($0.status) || $0.notYourNode != nil } ?? false }
         )
         link.attach(.init(
             up: { [weak self] _, at, changed in
@@ -343,7 +349,7 @@ import Observation
     private static func settled(_ error: any Error) -> Bool {
         if error is CancellationError { return true }
         guard let error = error as? NodeError else { return false }
-        return (400..<500).contains(error.status)
+        return (400..<500).contains(error.status) || error.notYourNode != nil
     }
 
     /// What a view shows, read again as these topics change (at once and every `every` ms while the stream is down; nil:
@@ -369,8 +375,14 @@ import Observation
     /// The Inbox's parts, each read by its own route.
     private static let inboxTopics = ["actions", "secretRequests", "pairings", "aboutYou", "notices", "screenSessions", "questions", "loopDrafts", "connectorRequests"]
 
-    /// Everything, now (pulled to refresh, or Try again): each part read as the stream would have it read.
+    /// Everything, now (pulled to refresh, or Try again): each part read as the stream would have it read. A node at its
+    /// address that proved to be another is first asked again only which node it is, and nothing more until it proves to
+    /// be this device's.
     func refresh() async {
+        if client.pin.refused != nil {
+            client.pin.clear()
+            guard await readMe(), client.pin.refused == nil else { return }
+        }
         async let me = readMe()
         async let team = readTeam()
         async let inbox = readInbox(nil)
@@ -380,10 +392,25 @@ import Observation
         _ = await (me, team, inbox, turns, runs, usage)
     }
 
-    /// Whoami, read: whether it was answered (false: owed, Followers).
+    /// Whoami, read and proven (NodeProof): whether it was answered (false: owed, Followers). The first proof pins the node
+    /// with the pairing, and what this device signs names it from then on; a node that proves to be another, or whose
+    /// proof fails, is asked nothing more (NodePin) until you try again.
     @discardableResult private func readMe() async -> Bool {
-        switch await attempt({ [client] in try await client.get("/api/whoami", as: WhoAmI.self) }) {
+        let challenge = NodeProof.challenge()
+        switch await attempt({ [client] in try await client.provenWhoami(challenge: challenge) }) {
         case .success(let me):
+            switch NodeProof.judge(pinned: client.pin.node, node: me.node, proof: me.proof, challenge: challenge, check: proofs) {
+            case .pin(let id):
+                client.pin.pin(id)
+                node.nodeId = id
+                node.save()
+            case .other(let id):
+                return notYours(.notYours(other: id))
+            case .failed:
+                return notYours(.notYours(other: nil))
+            case .same, .older:
+                break
+            }
             (whoami, trouble) = (me, nil)
             Primary.named(me.primaryName)
             return true
@@ -392,6 +419,13 @@ import Observation
             return Self.settled(error)
         case .failure(let error): return Self.settled(error)
         }
+    }
+
+    /// The node at this address isn't this device's: said above everything, and nothing more is sent there (NodePin).
+    private func notYours(_ why: NodeError) -> Bool {
+        client.pin.refuse(why)
+        trouble = why
+        return true
     }
 
     @discardableResult private func readTeam() async -> Bool {
