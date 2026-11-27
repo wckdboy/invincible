@@ -27,7 +27,7 @@ struct MacShots {
     let node = URL(fileURLWithPath: ProcessInfo.processInfo.environment["INVINCIBLE_DEV_NODE"] ?? "/nonexistent")
     let shots = URL(fileURLWithPath: ProcessInfo.processInfo.environment["INVINCIBLE_SHOTS"] ?? "/nonexistent")
 
-    @Test(.timeLimit(.minutes(5))) func theMacAsItLooks() async throws {
+    @Test(.timeLimit(.minutes(20))) func theMacAsItLooks() async throws {
         try FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
         let tag = "sh.invincible.bot.tests.shots.\(UUID().uuidString)"
         defer {
@@ -93,10 +93,21 @@ struct MacShots {
             try await snap(first, "first-run-1-join-\(look)")
             run.way = .start
         }
+        // The first run in the smallest window the app allows (the audit's: does it fit?).
+        NSApp.appearance = NSAppearance(named: .aqua)
+        first.setContentSize(NSSize(width: 820, height: 560))
+        for (step, name) in [(FirstRun.Step.node, "1-node"), (.stayOn, "2-keep-on"), (.vms, "3-vms")] {
+            run.step = step
+            try await Task.sleep(for: .seconds(1.5))
+            try await snap(first, "first-run-\(name)-min-light")
+        }
+        run.step = .node
         first.close()
         NSApp.appearance = nil
         MacApp.shared.vmSetup.show(setUp)
-        // Just the app: joining, with an `invincible:` link's invite filled in.
+        // Just the app: joining, with an `invincible:` link's invite filled in. (Hosted by a test the app doesn't start itself:
+        // it is told to, with the test's own key, which isn't made yet, so it is unpaired and reads nothing of this Mac's.)
+        MacApp.shared.app.start(tag: tag)
         MacApp.shared.firstRun.active = false
         main.makeKeyAndOrderFront(nil)
         MacApp.shared.handed = try String(contentsOf: node.appending(path: "invite.txt"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -108,7 +119,17 @@ struct MacShots {
         NSApp.appearance = nil
 
         let session = try await pair(tag: tag)
+        // (The node's live stream open, as the app's own start keeps it, which a test-hosted app doesn't do by itself.)
+        session.live(true)
         try await until(30) { session.team != nil && session.inboxLoaded }
+        // Paired in the app's life (as a first run's join does), the menus that need a fleet are there at once.
+        try await Task.sleep(for: .seconds(2))
+        let fileMenu = try #require(NSApp.mainMenu?.items.first { $0.submenu?.items.contains { $0.keyEquivalent == "n" } == true }?.submenu)
+        fileMenu.update()
+        for title in ["New Chat", "Search or Ask…", "Build with \(Primary.name)"] {
+            let item = fileMenu.items.first { $0.title == title }
+            #expect(item?.isEnabled == true, "\(title) is \(item == nil ? "missing" : "greyed out") once this Mac is paired, among \(fileMenu.items.map { "\($0.title)\($0.isEnabled ? "" : " (off)")" })")
+        }
 
         // Files with a message, sent up to the node as the paperclip sends them: a picture of Writer's orb, and a log.
         try await openSettings().close()
@@ -157,6 +178,16 @@ struct MacShots {
             try await Task.sleep(for: .seconds(1))
             let settings = try await openSettings()
             try await snap(settings, "settings-\(look)")
+            // Its other tabs, each as a click on it in the window's toolbar chooses it.
+            for (label, name) in [("Keys", "keys"), ("Connectors", "connectors"), ("This Mac", "")] {
+                guard let item = settings.toolbar?.items.first(where: { $0.label == label }), let action = item.action else {
+                    Issue.record("Settings has no \(label) tab among \(settings.toolbar?.items.map(\.label) ?? [])")
+                    continue
+                }
+                NSApp.sendAction(action, to: item.target, from: item)
+                try await Task.sleep(for: .seconds(2))
+                if !name.isEmpty { try await snap(settings, "settings-\(name)-\(look)") }
+            }
             settings.close()
             main.makeKeyAndOrderFront(nil)
             // The app menu, open, with Check for Updates (off in a build that carries no update key).
@@ -172,6 +203,10 @@ struct MacShots {
             try await snap(panel, "menu-bar-\(look)")
             panel.orderOut(nil)
         }
+        // Every place at every size, and the Build window (the audit of 27 November 2026).
+        try await sweep(main)
+        try await buildWindow()
+        main.makeKeyAndOrderFront(nil)
         // ⌘N: a new chat, its message box holding the keys.
         NSApp.appearance = NSAppearance(named: .aqua)
         MacApp.shared.newChat()
@@ -193,6 +228,66 @@ struct MacShots {
         #expect(session.chat.outbox.waiting.map(\.name) == ["Pasted picture.png"])
         try await Task.sleep(for: .seconds(1.5))
         try await snap(main, "main-new-chat-pasted-light")
+    }
+
+    /// The dev node's tasks by what they show (its /__dev/tasks): one at work, one that failed, one proven (--heavy's).
+    private struct DevTasks: Decodable {
+        let working: String?
+        let failed: String?
+        let proven: String?
+    }
+
+    private func devTasks() async throws -> DevTasks {
+        let front = try String(contentsOf: node.appending(path: "front.txt"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let (data, _) = try await URLSession.shared.data(from: try #require(URL(string: front + "/__dev/tasks")))
+        return try JSONDecoder().decode(DevTasks.self, from: data)
+    }
+
+    /// Every place of the main window at four sizes, from the smallest the app allows to the whole screen, in light and dark:
+    /// where does it fall apart? Named sweep-<size>-<place>-<look>.
+    private func sweep(_ main: NSWindow) async throws {
+        let tasks = try await devTasks()
+        var places: [(Place, String)] = [(.home, "home"), (.primary, "chat"), (.chats, "chats"), (.agents, "agents"), (.agent("builder"), "agent"), (.inbox, "needs"), (.more, "more"), (.thisMac, "this-mac"), (.keys, "keys"), (.connectors, "connectors")]
+        if let working = tasks.working { places.insert((.task(working), "task-working"), at: 2) }
+        if let failed = tasks.failed { places.insert((.task(failed), "task-failed"), at: 3) }
+        let screen = try #require(NSScreen.main).visibleFrame
+        let sizes: [(String, NSSize?)] = [("min", NSSize(width: 820, height: 560)), ("default", NSSize(width: 1180, height: 780)), ("wide", NSSize(width: 1600, height: 1000)), ("screen", nil)]
+        for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            for (size, content) in sizes {
+                if let content { main.setContentSize(content) } else { main.setFrame(screen, display: true) }
+                for (place, name) in places {
+                    MacApp.shared.place = place
+                    try await Task.sleep(for: .seconds(2))
+                    try await snap(main, "sweep-\(size)-\(name)-\(look)")
+                }
+            }
+        }
+        NSApp.appearance = nil
+        main.setContentSize(NSSize(width: 1280, height: 800))
+        MacApp.shared.place = .home
+    }
+
+    /// The Build window, opened as its menu item (⇧⌘B) opens it, at its default size and the smallest, light and dark.
+    private func buildWindow() async throws {
+        let file = try #require(NSApp.mainMenu?.items.first { $0.submenu?.items.contains { $0.keyEquivalent == "b" && $0.keyEquivalentModifierMask.contains(.shift) } == true }?.submenu)
+        let item = try #require(file.items.firstIndex { $0.keyEquivalent == "b" && $0.keyEquivalentModifierMask.contains(.shift) })
+        file.performActionForItem(at: item)
+        try await Task.sleep(for: .seconds(3))
+        guard let build = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix(MacApp.build) == true }) else {
+            Issue.record("Build with \(Primary.name) (⇧⌘B) opened no window: its item is \(file.items[item].isEnabled ? "on" : "off")")
+            return
+        }
+        for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            for (size, content) in [("default", NSSize(width: 1360, height: 860)), ("min", NSSize(width: 820, height: 560))] {
+                build.setContentSize(content)
+                try await Task.sleep(for: .seconds(2.5))
+                try await snap(build, "build-\(size)-\(look)")
+            }
+        }
+        NSApp.appearance = nil
+        build.close()
     }
 
     /// Pairs as you would with the dev node's invite: asks, compares the node's code with this Mac's, then approves.
