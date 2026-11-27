@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { preset } from "@invincible/models";
 import { CONTAINER_IMAGES, CONTAINER_UNMADE } from "@invincible/sandbox";
 import { type Capabilities, isAlwaysOn, RUNTIME_PROBES, sandboxHostOf, servedOriginFrom } from "../src/capabilities.ts";
-import { refreshCapabilities } from "../src/daemon.ts";
+import { refreshCapabilities, startDaemon } from "../src/daemon.ts";
+import { Home } from "../src/home.ts";
 
 describe("the local runtimes a node looks for", () => {
   test("are asked what they serve where their presets point, so the two never part ways", () => {
@@ -122,5 +126,23 @@ describe("which sandbox host a body is", () => {
   test("Linux hosts through Docker, whatever else it has", () => {
     expect(sandboxHostOf("linux", container(true), docker)).toEqual({ sandbox: docker });
     expect(sandboxHostOf("linux", null, null)).toEqual({ sandbox: null });
+  });
+});
+
+/*
+ * Capabilities given by hand (the tests, the benches, the dev nodes) are a stand-in's, so a node given them hosts
+ * sandboxes only through the engine given with them. Without one it would drive this machine's own Docker (or Apple's
+ * container): it would make the real sandbox networks there, and every later test's node would find the gateway's address
+ * on the machine (27 November 2026, on GitHub's runners: desktop-watch.e2e's node "keep").
+ */
+describe("capabilities given by hand", () => {
+  test("that host sandboxes, with no engine given, are refused at the start, before anything of this machine's is asked", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "invincible-hand-caps-"));
+    const hand: Capabilities = { os: "linux", arch: "x64", hostname: "hand", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null, sandbox: { image: false, networks: false, vm: false } };
+    try {
+      await expect(startDaemon(new Home(dir), { capabilities: hand, log: () => {} })).rejects.toThrow("capabilities given by hand host sandboxes only through an engine given with them");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

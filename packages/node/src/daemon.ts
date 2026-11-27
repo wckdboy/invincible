@@ -296,6 +296,11 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     say(message);
   };
   const env = loadEnv();
+  // Capabilities given by hand (the tests, the benches, the dev nodes) are a stand-in's: they host sandboxes only through
+  // the engine given with them, never through this machine's own Docker or container, whose networks, containers and
+  // images are the machine's. (27 November 2026: a test's node made Docker's real sandbox networks on GitHub's runners,
+  // so the gateway's address, 172.31.248.1, was there for every test after it.)
+  if (opts.capabilities?.sandbox && !opts.docker) throw new Error("capabilities given by hand host sandboxes only through an engine given with them: give it docker (a stand-in), or no sandbox host");
   const config = home.readConfig();
   if (!config.fleet) throw new Error("this node has not joined a fleet");
   const identity = await home.loadIdentity(config.keystore);

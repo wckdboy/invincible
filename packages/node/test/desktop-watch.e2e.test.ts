@@ -27,7 +27,9 @@ const boxPort = freePort();
 let keep: Daemon;
 let box: Daemon;
 let armToken: string;
-const caps = (hostname: string, over: Partial<Capabilities> = {}): Capabilities => ({ os: "linux", arch: "x64", hostname, cores: 16, cpu: "test", memoryGb: 32, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null, sandbox: { image: false, networks: false, vm: false }, ...over });
+// (No sandbox host unless one is given, as the box's is, beside its stand-in for Docker: your node hosts none, so nothing of
+// it ever reaches this machine's own Docker.)
+const caps = (hostname: string, over: Partial<Capabilities> = {}): Capabilities => ({ os: "linux", arch: "x64", hostname, cores: 16, cpu: "test", memoryGb: 32, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null, ...over });
 const measure: Measure = async (reason, body, limit): Promise<Calibration> => {
   const threads = ceilingThreads(body, limit);
   return { at: Date.now(), tookMs: 1, reason, body: bodyFingerprint(body, limit), cpu: { single: REFERENCE_SINGLE, multi: REFERENCE_SINGLE * threads * 0.75, threads, kernel: KERNEL }, memoryGbps: 9.5 };
