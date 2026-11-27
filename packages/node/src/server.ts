@@ -168,7 +168,7 @@ import type { Assets } from "./assets.ts";
 import { compressedJson } from "./compress.ts";
 import { type Capabilities, isAlwaysOn } from "./capabilities.ts";
 import { handleGitGateway } from "./git-gateway.ts";
-import { handleKeyGateway, keyScope, ungivable } from "./key-gateway.ts";
+import { handleKeyGateway, leasedScopes, ungivable } from "./key-gateway.ts";
 import { handleSandboxSearch, SearchError, searchWeb } from "./search.ts";
 import { type Caller, ConnectorCallError, type ConnectorService } from "./connectors.ts";
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
@@ -2423,7 +2423,7 @@ export function createApp(ctx: AppContext) {
   }
   /** The providers with a key now: what an agent's task lease covers when the task starts, and a VM made (again) with. */
   const keyedProviders = (): string[] => providerViews(ctx.store, ctx.vault).filter((v) => v.hasKey).map((v) => v.id).slice(0, 16);
-  async function prepareTeam(member: Agent, signal: AbortSignal, models?: readonly string[]) {
+  async function prepareTeam(member: Agent, signal: AbortSignal, models?: readonly string[], opts?: { handed?: boolean }) {
     const workspace = await provisionTeam(member.id, {}, signal);
     // Its lease covers the providers with a key now: one you added since the VM was made reaches it, unmade. Work in
     // sensitive mode (heldModels) is leased its models alone: their providers, and on them no other model. So is
@@ -2435,14 +2435,15 @@ export function createApp(ctx: AppContext) {
     // before replacing its lease or allowing any new writer into this VM.
     if (workspace.status === "running") await stopTeamWorker(member);
     if (signal.aborted) throw new HttpError(409, "agent stopped");
-    // The keys of yours it may use but never see (PLAN #17): its lease is good for them, at their own addresses alone.
-    const keys = (member.keys ?? []).map(keyScope);
-    await inProcess(teamOwner, signal).call("prepareTeamWorkspace", { on: workspace.node, id: workspace.id, run: armRun(agentLabel(member.id)), ...(member.repository ? { repository: member.repository } : {}), providers, ...(models?.length ? { models: [...models] } : {}), ...(keys.length ? { keys } : {}) });
-    if (member.repository) {
+    // The keys of yours it may use but never see (PLAN #17): its lease is good for them, at their own addresses alone. Not
+    // another node's task's: its lease carries neither those nor its agent's repository (leasedScopes).
+    const { repository, keys } = leasedScopes(member, opts?.handed === true);
+    await inProcess(teamOwner, signal).call("prepareTeamWorkspace", { on: workspace.node, id: workspace.id, run: armRun(agentLabel(member.id)), ...(repository ? { repository } : {}), providers, ...(models?.length ? { models: [...models] } : {}), ...(keys.length ? { keys } : {}) });
+    if (repository) {
       // No key in command text or git config. The leased token is read inside the VM; the remote is reset to its public URL.
       const script = `import json,os,subprocess,sys\nd=json.load(open('/work/.invincible-gateway.json'))\np='/work/repo'\nif os.path.exists(p):\n sys.exit(0 if os.path.isdir(p+'/.git') else 1)\nr=subprocess.run(['git','-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'clone','--quiet',d['INVINCIBLE_REPO_URL'],p],capture_output=True)\nif r.returncode: print('Repository clone failed through the read-only gateway'); sys.exit(r.returncode)\nsubprocess.run(['git','-C',p,'remote','set-url','origin',sys.argv[1]],check=True)`;
       const encoded = Buffer.from(script).toString("base64");
-      const cloned = await execTeam(member, `python3 -I -c "import base64; exec(base64.b64decode('${encoded}'))" '${member.repository}'`, 900, signal);
+      const cloned = await execTeam(member, `python3 -I -c "import base64; exec(base64.b64decode('${encoded}'))" '${repository}'`, 900, signal);
       if (cloned.exitCode !== 0) throw new HttpError(424, "could not clone the agent's repository through its GitHub connector");
     }
   }

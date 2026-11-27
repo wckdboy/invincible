@@ -18,6 +18,16 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
 /** A key's scope on a VM's lease: which secret, the header it goes in, and whether writes may go. */
 export const keyScope = (grant: TeamKeyGrant): string => `key:${grant.secret}:${grant.header}:${grant.write ? "write" : "read"}`;
 
+/**
+ * What an agent's VM lease carries besides its models: its repository's read scope and the keys of yours it may use. A
+ * task another node handed over gets neither (the owner's decision, 27 November 2026): its lease is for the models its
+ * budget counts alone, unless a grant names more one day.
+ */
+export function leasedScopes(member: { repository?: string | null; keys?: readonly TeamKeyGrant[] | null }, handed: boolean): { repository?: string; keys: string[] } {
+  if (handed) return { keys: [] };
+  return { ...(member.repository ? { repository: member.repository } : {}), keys: (member.keys ?? []).map(keyScope) };
+}
+
 const PATH = /^\/key\/([A-Za-z0-9._-]{1,64})(\/[^?#]*)?$/;
 const SCOPE = /^key:([A-Za-z0-9._-]{1,64}):([a-z][a-z0-9-]{0,63}):(read|write)$/;
 const TOKEN = /^gw_[A-Za-z0-9_-]{43}$/;

@@ -728,6 +728,23 @@ test("another node's task's VM is leased only the models its budget counts at mo
   expect(leases).toEqual([undefined]);
 });
 
+/* Nor does its lease carry your keys or its agent's repository (the owner's decision, 27 November 2026): the keys of
+ * yours its agent may use (PLAN #17) and its repository's read scope are its agent's own work's, never another node's,
+ * unless a grant names them one day. Its VM is prepared as another node's, and the server leases it neither. */
+test("another node's task's VM is prepared as another node's; your own task's as before", async () => {
+  const asked: ({ handed?: boolean } | undefined)[] = [];
+  const prepare = async (_m: Agent, _s: AbortSignal, _models?: readonly string[], opts?: { handed?: boolean }) => void asked.push(opts);
+  const script = () => [say("1. Do it."), say("DONE\nDone."), say("PASS\nFine.")];
+  const f = fixture(script(), { prepare, paid: () => true });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await f.runtime.executeTask(member, handedTask, f.context);
+  expect(asked).toEqual([{ handed: true }]);
+  asked.length = 0;
+  const g = fixture(script(), { prepare });
+  await g.runtime.executeTask(member, task, g.context);
+  expect(asked).toEqual([undefined]);
+});
+
 test("what a harness runs another node's task on: never the tool's own sign-in or setup, only models through the gateway", () => {
   const claude = AGENTS.claude!;
   const ok = (told: object) => ({ exitCode: 0, stdout: JSON.stringify({ type: "status", installed: true, ...told }) });

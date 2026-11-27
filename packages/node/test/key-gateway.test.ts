@@ -4,7 +4,7 @@ import { newNodeIdentity } from "@invincible/core";
 import { GatewayTokens } from "@invincible/models";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
-import { handleKeyGateway, keyScope, ungivable } from "../src/key-gateway.ts";
+import { handleKeyGateway, keyScope, leasedScopes, ungivable } from "../src/key-gateway.ts";
 
 /*
  * Keys an agent uses but never sees (PLAN #17): its script calls the key gateway with its VM's token where the key would
@@ -116,4 +116,13 @@ describe("the key gateway", () => {
     expect(store.ledgerCount("key.stripe", 0)).toBe(3);
     expect(store.ledgerCount("key.stripe", Date.now() + 60_000, "sandbox:0123456789")).toBe(0);
   });
+});
+
+/* What an agent's lease carries besides its models (the owner's decision, 27 November 2026): its repository's read scope
+ * and the keys of yours it may use, for its own work; for a task another node handed over, neither. */
+test("a lease carries its agent's repository and keys for its own work, and neither for another node's task", () => {
+  const member = { repository: "https://github.com/example/app", keys: [{ secret: "stripe", header: "authorization", write: false }] };
+  expect(leasedScopes(member, false)).toEqual({ repository: "https://github.com/example/app", keys: ["key:stripe:authorization:read"] });
+  expect(leasedScopes(member, true)).toEqual({ keys: [] });
+  expect(leasedScopes({}, false)).toEqual({ keys: [] });
 });

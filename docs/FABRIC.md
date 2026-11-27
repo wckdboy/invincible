@@ -119,10 +119,11 @@ transport keys carries all of it:
      it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its work runs only on
      models its budget counts at more than $0 (one you've priced above nothing, on no coding plan): its agent's own
      loop, its coding tool, and its commands, whose VM's lease is good for those models alone, the gateway refusing
-     any other (the third re-review's R3-4). Never on one it counts as nothing, nor on a coding tool's own sign-in in the
-     VM (a seat), nor in an ACP agent of yours. Two things it doesn't bound (I-l): a paid model's call that reports no
-     usage counts nothing, whatever the budget, and a command can start a coding tool itself on that tool's own sign-in
-     in the VM, if it has one, which no lease reaches.
+     any other (the third re-review's R3-4). That lease carries nothing else: not the keys of yours its agent may use,
+     nor its agent's repository, which are its agent's own work's. Never on one it counts as nothing, nor on a coding
+     tool's own sign-in in the VM (a seat), nor in an ACP agent of yours. Two things it doesn't bound (I-l): a paid
+     model's call that reports no usage counts nothing, whatever the budget, and a command can start a coding tool
+     itself on that tool's own sign-in in the VM, if it has one, which no lease reaches.
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node

@@ -81,8 +81,12 @@ export interface TeamRuntimeDeps {
   keyAddress?(secret: string): string | null;
   /** A step of a task's work, kept as a commit in its agent's VM as it ended (PLAN #15): told once each. */
   checkpoint?(task: TeamTask, point: TeamCheckpoint): void;
-  /** Its VM, ready, with a fresh lease; `models`: work in sensitive mode, whose lease is good for them alone (heldModels). */
-  prepare(agent: Agent, signal: AbortSignal, models?: readonly string[]): Promise<void>;
+  /**
+   * Its VM, ready, with a fresh lease; `models`: a lease good for them alone (work in sensitive mode, heldModels; or another
+   * node's task, its paid models). `handed`: another node's task, whose lease carries neither the keys of yours its agent
+   * may use (PLAN #17) nor its agent's repository: those are its agent's own work's.
+   */
+  prepare(agent: Agent, signal: AbortSignal, models?: readonly string[], opts?: { handed?: boolean }): Promise<void>;
   /** Keeps an agent's lease while its task runs (asked every TEAM_LEASE_RENEW_MINUTES as the work goes on): whether it was. */
   renew?(agent: Agent, signal: AbortSignal): Promise<boolean>;
   /** (Tests: how long a model call may say nothing before it is ended, in milliseconds; TEAM_CALL_QUIET_MINUTES otherwise.) */
@@ -705,7 +709,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // coding tool's, and its eyes' when they're paid), so that its commands work on nothing its budget counts as
       // nothing: the gateway refuses any other model (the third re-review's R3-4). None of them: it reaches no provider.
       const leaseModels = handed ? handedLease(agent, held) : held;
-      await deps.prepare(agent, ctx.signal, leaseModels ?? undefined);
+      await deps.prepare(agent, ctx.signal, leaseModels ?? undefined, handed ? { handed: true } : undefined);
       /** When its lease was last written or renewed, and whether one that couldn't be kept was said. */
       let leaseKept = Date.now();
       let leaseLost = false;
