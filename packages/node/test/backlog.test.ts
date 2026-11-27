@@ -23,7 +23,7 @@ afterEach(async () => {
   }
 });
 
-function world(answers: string[] = [], options: { read?: Partial<ExecResult>; busy?: string[]; issues?: string; left?: number | null } = {}) {
+function world(answers: string[] = [], options: { read?: Partial<ExecResult>; busy?: string[]; issues?: string; left?: number | null; onRead?: () => void } = {}) {
   let now = Date.UTC(2026, 10, 19, 18, 0);
   const identity = newNodeIdentity();
   const mind = new LedgerStore(":memory:");
@@ -49,6 +49,7 @@ function world(answers: string[] = [], options: { read?: Partial<ExecResult>; bu
     brain: () => ({ store: mind, vault: undefined as never }),
     exec: async (agent: Agent, command: string) => {
       read.push(`${agent.id}: ${command}`);
+      options.onRead?.();
       return { exitCode: 0, stdout: PLAN, stderr: "", durationMs: 1, truncated: false, ...options.read };
     },
     busy: (agent) => (options.busy ?? []).includes(agent),
@@ -113,12 +114,31 @@ describe("work for idle agents, from your backlog", () => {
     expect(w.notices()[0]!.body).toBe(`A template of outcomes\nIt may spend $2, more than is left of the $1 a day your agent may commit on its own ($1.00; yours to set: invincible agents daily), so it waits in your conversation with Ada, and starts when you approve it there (or invincible agents approve ${task!.id}).`);
   });
 
-  // The re-review of 27 November, T1 (R7): its own yes is held by a word of yours as its own giving is.
-  test("in its conversation with you that you paused, or of a goal you declined in the last day, what it proposes waits for you, holding nothing, and your Inbox says why", async () => {
-    const w = world([PROPOSAL, PROPOSAL]);
-    // You pause your conversation with Ada (not Ada): what it proposes there waits for you.
+  // The lead's word of 27 November 2026, on the re-check: a conversation you paused gets no work, and a look at its agent
+  // (a read in its VM, a question to the planner) is work spent for it, so the backlog looks at that agent no more until
+  // you resume it.
+  test("an agent whose conversation with you you paused isn't looked at: nothing is read in its VM nor asked of the planner until you resume it", async () => {
+    const w = world([PROPOSAL]);
     const room = w.store.direct("ada").id;
     w.service.control({ action: "pause", room });
+    expect(w.runner.idle()).toEqual([]);
+    expect(await w.runner.tick()).toBeNull();
+    expect(w.read).toEqual([]);
+    expect(w.asked).toEqual([]);
+    w.service.control({ action: "resume", room });
+    expect(w.runner.idle().map((k) => k.id)).toEqual(["ada"]);
+    expect(await w.runner.tick()).toMatchObject({ assignee: "ada", room, title: "A template of outcomes" });
+    expect(w.read).toHaveLength(1);
+  });
+
+  // The re-review of 27 November, T1 (R7): its own yes is held by a word of yours as its own giving is.
+  test("in its conversation with you that you paused as it looked, or of a goal you declined in the last day, what it proposes waits for you, holding nothing, and your Inbox says why and what then", async () => {
+    // You pause your conversation with Ada (not Ada) while the backlog looks at her (it looks at no one whose conversation
+    // you paused before): what it proposes there waits for you.
+    let room = "";
+    let pauseAtRead = true;
+    const w = world([PROPOSAL, PROPOSAL], { onRead: () => void (pauseAtRead && ((pauseAtRead = false), w.service.control({ action: "pause", room }))) });
+    room = w.store.direct("ada").id;
     const paused = await w.runner.tick();
     expect(paused).toMatchObject({ assignee: "ada", room, proposedBy: "primary", status: "proposed", budgetUsd: 2 });
     expect(w.trail(paused!.id).filter((t) => t.startsWith("Approved by your agent itself"))).toEqual([]);

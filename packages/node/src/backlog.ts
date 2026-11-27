@@ -7,8 +7,8 @@ import type { TeamService } from "./team.ts";
 
 /*
  * Work for idle agents, from your backlog (PLAN #37's last part). An agent with a repository and nothing to do (no
- * task of its waiting, running or proposed, none of an outcome's, nothing ended in the last few minutes) is offered one
- * task by the primary, at most once a day: the next small step of its repository's own plan (docs/PLAN.md, PLAN.md,
+ * task of its waiting, running or proposed, none of an outcome's, nothing ended in the last few minutes), neither it nor
+ * its conversation with you paused, is offered one task by the primary, at most once a day: the next small step of its repository's own plan (docs/PLAN.md, PLAN.md,
  * ROADMAP.md or TODO.md, read in the agent's VM as it last fetched it, with its newest commits) or of its open issues
  * (read through your GitHub connector), in its conversation with you. It approves it itself and it starts (your word,
  * 23 November 2026: it approves its own decisions and its agents'; what is monetary asks you): its money is its budget,
@@ -164,15 +164,20 @@ export class BacklogRunner {
   }
 
   /**
-   * The agents that may be offered work now, in your order: idle, with a repository, not looked at in the last day. A
-   * proposal waiting for you keeps an agent from being offered more, until it has waited a day: then it is looked at again.
+   * The agents that may be offered work now, in your order: idle, with a repository, not looked at in the last day, and
+   * not one whose conversation with you you paused (no work goes there, and a look at it is work spent for it: the lead's
+   * word of 27 November 2026). A proposal waiting for you keeps an agent from being offered more, until it has waited a
+   * day: then it is looked at again.
    */
   idle(): Agent[] {
     const now = this.now();
     const tasks = this.o.store.tasks();
     const waited = (t: TeamTask) => t.proposedBy === TEAM_PRIMARY && t.createdAt <= now - BACKLOG.perAgentMs;
+    // (Read, never made: direct() would make the conversation it doesn't find.)
+    const paused = new Set(this.o.store.rooms().filter((r) => r.direct && r.paused && r.members.length === 1).map((r) => r.members[0]));
     return this.o.store.agents().filter((k) =>
       k.enabled &&
+      !paused.has(k.id) &&
       !!k.repository &&
       !this.o.busy(k.id) &&
       this.o.store.backlogLooked(k.id) <= now - BACKLOG.perAgentMs &&
