@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { desktopAddress, DESKTOP_KEYS, hasDesktop, saysNoDesktop, screenPoint, shotSource } from "./desktop.ts";
+import { desktopAddress, DESKTOP_KEYS, hasDesktop, hasHardware, saysNoDesktop, screenPoint, shotSource } from "./desktop.ts";
 
 const SCREEN = { width: 1280, height: 800 };
 
@@ -61,6 +61,11 @@ describe("whether a VM has a desktop", () => {
     expect(hasDesktop({ image: "invincible/workshop:1" })).toBe(false);
     expect(hasDesktop(null)).toBe(false);
     expect(hasDesktop(undefined)).toBe(false);
+    // The hardware image (C1 step 11) is a desktop's, with KiCad and FreeCAD on it.
+    expect(hasDesktop({ image: "invincible/desktop-hardware:1" })).toBe(true);
+    expect(hasHardware({ image: "invincible/desktop-hardware:1" })).toBe(true);
+    for (const image of ["invincible/desktop:1", "invincible/sandbox:1"]) expect(hasHardware({ image })).toBe(false);
+    expect(hasHardware(null)).toBe(false);
   });
 
   test("the node's refusal that a VM has none is told apart from every other", () => {

@@ -41,6 +41,8 @@ export const DESKTOP_KEYS = [
 
 /** A VM made from the desktop image has a display, a window manager and a browser. */
 export const hasDesktop = (workspace: { image: string } | null | undefined): boolean => Boolean(workspace?.image.includes("desktop"));
+/** A VM made from the hardware image (C1 step 11) has KiCad and FreeCAD on its desktop too. */
+export const hasHardware = (workspace: { image: string } | null | undefined): boolean => Boolean(workspace?.image.includes("hardware"));
 
 /**
  * A tap on the picture as a place on the agent's screen, in the screen's own pixels: the picture may be drawn at

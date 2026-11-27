@@ -1147,6 +1147,9 @@ try {
       { name: "sheet-chat-menu", hash: "#/chat", open: [press("Chat options")], wait: "dialog.selector-pop[open], dialog.selector-sheet[open]" },
       { name: "sheet-all-chats", hash: "#/chat", open: [press("Chat options"), press("All chats…", "All chats")] },
       { name: "sheet-new-agent", hash: "#/team", open: [press("New agent", "Add an agent")] },
+      // Rio's VM made again: its desktop chosen, and on it the hardware tools (C1 step 11). (Its provisioning shows the
+      // same choice, on an agent with no VM yet: here every agent has one.)
+      { name: "sheet-remake-vm", hash: `#/team?room=${own.rio}&tab=workspace`, open: [press("Make VM again")] },
       { name: "sheet-new-project", hash: "#/projects", open: [press("New project")] },
       { name: "sheet-add-loop", hash: "#/loops", open: [press("Add loop", "Add a loop")] },
       { name: "sheet-add-tripwire", hash: "#/loops", open: [press("Add rule")] },

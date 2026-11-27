@@ -5,7 +5,7 @@ import type { TeamControlInput, TeamKeyGrant, TeamRoom, TeamSnapshot, TeamTask, 
 import { TEAM_LIMITS } from "@invincible/core/team-limits";
 import { isAbort } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
-import { hasDesktop } from "../lib/desktop.ts";
+import { hasDesktop, hasHardware } from "../lib/desktop.ts";
 import { budgetFrom, gatesFrom, type Given, giveInput, givenTo } from "../lib/give.ts";
 import { growWords } from "../lib/sandbox.ts";
 import { STEER_WORDS } from "../lib/steer.ts";
@@ -472,7 +472,7 @@ export function provisionVm(ctx: Ctx, person: Agent, done: (workspace: SandboxVi
     desktop.el,
     callout("info", "The workspace keeps its files between tasks. Model access goes through the gateway; keys stay outside the VM."),
   ], person.workspace ? "Check / provision VM" : "Provision VM", async () => {
-    const result = await ctx.api.post<{ agent: Agent; workspace: SandboxView | null }>("/api/team/provision", { id: person.id, ...(host.value ? { on: host.value } : {}), cpus: Number(cpus.value), memoryGb: Number(memory.value), diskGb: Number(disk.value), network: network.value, ...(desktop.box.checked ? {} : { desktop: false }) });
+    const result = await ctx.api.post<{ agent: Agent; workspace: SandboxView | null }>("/api/team/provision", { id: person.id, ...(host.value ? { on: host.value } : {}), cpus: Number(cpus.value), memoryGb: Number(memory.value), diskGb: Number(disk.value), network: network.value, ...(desktop.box.checked ? {} : { desktop: false }), ...(desktop.hardware.checked ? { hardware: true } : {}) });
     toast(result.workspace ? "Workspace ready" : "Workspace saved; checking status", result.workspace && desktop.box.checked && !hasDesktop(result.workspace) ? { description: "Made without a desktop: its host makes none (a Mac). The ledger says why." } : undefined);
     done(result.workspace);
   });
@@ -481,14 +481,14 @@ export function provisionVm(ctx: Ctx, person: Agent, done: (workspace: SandboxVi
 /** Its VM made again from its image as it is now: the same VM and /work, a new container. `want`: a desktop chosen already. */
 export function remakeVm(ctx: Ctx, person: Pick<Agent, "id" | "name">, workspace: SandboxView, done: (workspace: SandboxView) => void, want: { desktop?: boolean } = {}): void {
   const network = networkChoice(workspace.network === "online");
-  const desktop = desktopChoice(want.desktop ?? hasDesktop(workspace));
+  const desktop = desktopChoice(want.desktop ?? hasDesktop(workspace), hasHardware(workspace));
   editor(ctx, `Make ${person.name}'s VM again`, "The same VM, made again from its image as it is now. A fix to the image, or a newer tool in it, reaches an agent only this way.", [
     field("It can reach", network, { hint: "May be chosen again here: nothing else changes it once a VM is made." }),
     desktop.el,
     callout("info", "Everything in /work is kept: its repository, its files, a coding tool's own sign-in. Whatever is running in the VM ends, so this is refused while the agent is working."),
   ], "Make VM again", async () => {
-    const result = await ctx.api.post<{ agent: Agent; workspace: SandboxView }>("/api/team/remake", { id: person.id, network: network.value, desktop: desktop.box.checked });
-    toast(desktop.box.checked ? "VM made again, with a desktop" : "VM made again, with no desktop");
+    const result = await ctx.api.post<{ agent: Agent; workspace: SandboxView }>("/api/team/remake", { id: person.id, network: network.value, desktop: desktop.box.checked, hardware: desktop.hardware.checked });
+    toast(desktop.hardware.checked ? "VM made again, with a desktop and the hardware tools" : desktop.box.checked ? "VM made again, with a desktop" : "VM made again, with no desktop");
     done(result.workspace);
   });
 }
@@ -523,13 +523,29 @@ export function growVm(ctx: Ctx, person: Pick<Agent, "id" | "name">, workspace: 
 
 /**
  * Whether an agent's VM has a desktop: every one does unless you say otherwise (the owner's standard, 26 November 2026),
- * chosen when it is made or made again. `box` is checked for a desktop; what you tick is "No desktop".
+ * chosen when it is made or made again. `box` is checked for a desktop; what you tick is "No desktop". And whether its
+ * desktop has the hardware tools (C1 step 11), a choice per agent: they come with a desktop, so without one they can't
+ * be ticked.
  */
-function desktopChoice(withDesktop: boolean): { el: HTMLElement; box: { readonly checked: boolean } } {
+function desktopChoice(withDesktop: boolean, withHardware = false): { el: HTMLElement; box: { readonly checked: boolean }; hardware: { readonly checked: boolean } } {
   const none = h("input", { type: "checkbox", name: "no-desktop", checked: !withDesktop });
+  const tools = h("input", { type: "checkbox", name: "hardware", checked: withDesktop && withHardware });
+  // (Each choice a card, all of it the target, as the app's other choices are.)
+  const choice = (box: HTMLInputElement, name: string, says: string) => h("label", { class: "scope" }, box, h("span", { class: "stack", style: "gap:2px" }, h("span", {}, name), h("span", { class: "tiny subtle" }, says)));
+  const hardware = choice(tools, "KiCad and FreeCAD", "The hardware tools on its desktop: KiCad for boards and schematics, FreeCAD for parts. Your agent scripts them first, and uses their windows only where they have no other way in. Their image is larger, and is made on its host the first time an agent needs it.");
+  const desktopOrNot = () => {
+    tools.disabled = none.checked;
+    if (none.checked) tools.checked = false;
+    hardware.classList.toggle("off", none.checked);
+  };
+  none.addEventListener("change", desktopOrNot);
+  desktopOrNot();
   return {
     box: { get checked() { return !none.checked; } },
-    el: h("div", { class: "stack", style: "gap:2px" }, h("label", { class: "row" }, none, h("span", {}, "No desktop")), h("p", { class: "tiny subtle" }, "Every agent's VM has a desktop unless you tick this: a screen, a browser, a terminal and an editor, that you can watch and take over from the Workspace. Its VM grows from 2 GB to 4 GB of memory the first time its desktop is used, and an unused desktop stops after 10 minutes. Without one it is a shell alone.")),
+    hardware: { get checked() { return !none.checked && tools.checked; } },
+    el: h("div", { class: "stack", style: "gap:var(--sp-2)" },
+      choice(none, "No desktop", "Every agent's VM has a desktop unless you tick this: a screen, a browser, a terminal and an editor, that you can watch and take over from the Workspace. Its VM grows from 2 GB to 4 GB of memory the first time its desktop is used, and an unused desktop stops after 10 minutes. Without one it is a shell alone."),
+      hardware),
   };
 }
 

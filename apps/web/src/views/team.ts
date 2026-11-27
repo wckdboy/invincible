@@ -7,7 +7,7 @@ import { avatarExpression } from "@invincible/core/avatar";
 import { isAbort, isUnavailable } from "../api.ts";
 import { errorMessage, type View } from "../context.ts";
 import { PRIMARY } from "../lib/arrange.ts";
-import { hasDesktop } from "../lib/desktop.ts";
+import { hasDesktop, hasHardware } from "../lib/desktop.ts";
 import { besideChip } from "../lib/agent-state.ts";
 import { rosterRows } from "../lib/roster.ts";
 import { handedFrom, type TaskAction, taskStanding } from "../lib/task-card.ts";
@@ -446,7 +446,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
               h(
                 "div",
                 { class: "card-body stack" },
-                h("div", { class: "row wrap" }, icon("sandbox"), h("strong", {}, vm.name), badge(vm.status), badge(vm.isolation === "vm" ? "MicroVM" : "Container", vm.isolation === "vm" ? "ok" : "warn"), hasDesktop(vm) ? badge("Desktop", "neutral", "monitor") : badge("No desktop")),
+                h("div", { class: "row wrap" }, icon("sandbox"), h("strong", {}, vm.name), badge(vm.status), badge(vm.isolation === "vm" ? "MicroVM" : "Container", vm.isolation === "vm" ? "ok" : "warn"), hasDesktop(vm) ? badge("Desktop", "neutral", "monitor") : badge("No desktop"), hasHardware(vm) ? badge("KiCad · FreeCAD") : null),
                 h("p", { class: "small muted" }, `On ${vm.node} · ${vm.cpus} CPUs · ${vm.memoryGb} GB memory · ${vm.disk ? `${vm.disk.limitGb} GB disk limit` : "Unlimited disk"} · ${vm.network}`),
                 h(
                   "div",
