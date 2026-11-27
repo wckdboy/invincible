@@ -13,8 +13,14 @@ export const docker = (): DockerRunner => fakeDocker().runner;
 
 let hold: { since: number; last: number } | null = null;
 
-/** deskd's sessions: the agent's and yours told apart by how they were started, your hold kept as deskd keeps it. */
-export function spawnSession(args: string[]): SessionProcess {
+/** A picture of the screen (a JPEG, base64), as deskd's screenshot gives one. */
+export type StandInPicture = { data: string; width: number; height: number };
+
+/**
+ * deskd's sessions: the agent's and yours told apart by how they were started, your hold kept as deskd keeps it. A look
+ * asked for as a picture is `picture`'s where one is given (the apps' dev node), and refused otherwise: watch it live.
+ */
+export function spawnSession(args: string[], picture?: () => StandInPicture): SessionProcess {
   const yours = args.includes("--owner-session");
   let take: ((line: string) => void) | null = null;
   let ended!: (code: number) => void;
@@ -35,7 +41,10 @@ export function spawnSession(args: string[]): SessionProcess {
             hold = { since: hold?.since ?? Date.now(), last: Date.now() };
           }
           Object.assign(answer, { code: 0, stdout: "", stderr: "" });
-        } else if (q.name === "screenshot") Object.assign(answer, { ok: false, error: "the stand-in has no picture: watch it live" });
+        } else if (q.name === "screenshot") {
+          const shot = picture?.();
+          Object.assign(answer, shot ? { action: "screenshot", image: { media_type: "image/jpeg", ...shot, settled: null } } : { ok: false, error: "the stand-in has no picture: watch it live" });
+        }
         if (yours) answer.hold = now();
         queueMicrotask(() => take?.(JSON.stringify(answer)));
       }

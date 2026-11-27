@@ -129,7 +129,10 @@ The node lets one app in: give each app a node of its own.
 
 With `--heavy` it holds what a busy fleet does, to use the app hard: ten agents, a hundred more tasks (proven, reviewed
 but not proven, failed, queued), long chats with the primary and more approvals waiting. With `--auto-approve` the first
-device that asks is let in without a code (the UI tests pair that way). The app comes in through a front of the dev
+device that asks is let in without a code (the UI tests pair that way). With `--desktop-frames <file>` Operator's screen
+is live: a recording of a desktop's stream (core's `desktop-frames.ts`) replayed as its VM's encoder while it is
+watched, deskd's sessions stood in for (`bench/desktop/glass-stand-in.ts`), so Take over holds as on a real VM; a
+picture of it is its blank tab. The app comes in through a front of the dev
 node's own, which counts every request the app sends and, under `/__dev/`, answers the UI tests: the invite, the
 requests since a moment, a dead link on demand (nothing goes through either way, as a half-open connection), a poke
 (a device asking to join, at once), the fixture's tasks by what they show, and a demo task stepped through for the Live

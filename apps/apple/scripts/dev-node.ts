@@ -20,6 +20,12 @@
  * With --heavy it holds what a busy fleet does, to use the app hard: ten agents, a hundred more tasks (proven, reviewed
  * but not proven, failed, queued), long chats with the primary, and more approvals waiting.
  *
+ * With --desktop-frames <file> Operator's desktop is live, as apps/web/measure/first-load.ts's Rio's is: a recording of a
+ * desktop's stream (core's desktop-frames.ts) replayed as its VM's encoder while it is watched, and deskd's two sessions
+ * stood in for, yours keeping your take-over as deskd does (bench/desktop/glass-stand-in.ts). A look asked for as a
+ * picture is its blank tab's. Without it, Operator's screen is a picture every two seconds, as a node's VM without a
+ * stream shows it.
+ *
  * The app comes in through a front of the dev node's own (never a node's): every /api request it sends is counted, and
  * under /__dev/ it answers the UI tests (apps/apple/InvincibleUITests):
  *   GET  /__dev/invite             the invite link
@@ -38,7 +44,8 @@
  *                                  a demo let go step by step until it is there (review: its reviewer held, reading it),
  *                                  answered once it is: { status, held }; 504 after four minutes
  *
- *   bun apps/apple/scripts/dev-node.ts [--dir <dir>] [--heavy] [--auto-approve]   (SIGINT or SIGTERM stops it, deleting its home)
+ *   bun apps/apple/scripts/dev-node.ts [--dir <dir>] [--heavy] [--auto-approve] [--desktop-frames <file>]
+ *   (SIGINT or SIGTERM stops it, deleting its home)
  *
  * <dir> (default: a new temp directory, printed) receives invite.txt, front.txt (the front's address), and pairing.txt
  * while a request waits. The node's home is made inside it too, so a run that is killed outright leaves its home there,
@@ -54,6 +61,7 @@ import { Home } from "../../../packages/node/src/home.ts";
 import { CHANGES_SCRIPT, LIST_SCRIPT, READ_SCRIPT } from "../../../packages/node/src/workspace-look.ts";
 import { fakeDocker } from "../../../packages/node/test/fake-docker.ts";
 import { freePort } from "../../../packages/node/test/ports.ts";
+import { spawnFrames, spawnSession } from "../../../bench/desktop/glass-stand-in.ts";
 import { keptAlive } from "./kept-alive.ts";
 
 const flag = (name: string): string | undefined => {
@@ -105,6 +113,11 @@ let builderAtWork = false;
 // Operator's VM has a desktop: its screen is a browser on a blank tab until you open an address, then a page.
 const SCREENS = ["screen-blank.jpg", "screen-page.jpg"].map((file) => readFileSync(join(import.meta.dir, "fixtures", file)).toString("base64"));
 let screen = 0;
+// (--desktop-frames: Operator's desktop live, from a recording; its sessions stood in for, its picture the blank tab's.)
+const desktopFrames = flag("desktop-frames");
+const liveDesktop = desktopFrames
+  ? { spawnFrames: spawnFrames(readFileSync(desktopFrames)), spawnSession: (args: string[]) => spawnSession(args, () => ({ data: SCREENS[0]!, width: 1280, height: 800 })) }
+  : {};
 // An agent's workspace to look into (its /work), made here: a small repository, and a task's worktree with its change in
 // it. The workspace's own scripts (packages/node/src/workspace-look.ts) run on it for real, /work read as this folder.
 const work = join(tmp, "work");
@@ -368,6 +381,7 @@ const standInShell = (_argv: string[], _size: { cols: number; rows: number }, on
 // ---------- start ----------
 const proxyPort = freePort();
 const started = await startDaemon(home, {
+  ...liveDesktop,
   capabilities: caps,
   proxyPort,
   log: () => {},

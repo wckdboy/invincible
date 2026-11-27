@@ -77,8 +77,8 @@ block. `bun apps/android/scripts/perf.ts --front http://127.0.0.1:<port>` holds 
 
 ## Running it against a throwaway node
 
-The Apple app's dev node serves this app too (a temp home, stand-in models, loopback only). An emulator reaches its
-host's loopback through `adb reverse`:
+The Apple app's dev node serves this app too (a temp home, stand-in models, loopback only; with `--desktop-frames
+<file>`, Operator's screen is live). An emulator reaches its host's loopback through `adb reverse`:
 
 ```sh
 bun apps/apple/scripts/dev-node.ts --dir /tmp/invincible-dev      # from the repository's root; prints the invite link
