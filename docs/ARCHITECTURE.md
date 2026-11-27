@@ -409,9 +409,10 @@ The models layer, carried (§10):
   - The Mac app tells you what the node tells your other devices while it runs, its window or the agents in the menu
     bar: it collects them from the node as the Android app does, when the live stream says `notify` changed, and shows
     them as its own notifications with the iPhone's buttons. Nothing goes through Apple's push service for a Mac.
-  - The iPhone shows a task's proof on its Lock Screen and in its Dynamic Island (core's live-activity.ts): a Live
-    Activity the app starts for a task it gives or opens in hand, kept up by the app while it's in front and by the node
-    through Apple's `liveactivity` pushes otherwise (each gate, the reviewer, the verdict; fixed words, never a title).
+  - The iPhone shows a task's proof on its Lock Screen and in its Dynamic Island (core's live-activity.ts): one Live
+    Activity for the team, for the task it gave or opened in hand last, with how many of the others are at work, kept up
+    by the app while it's in front and by the node through Apple's `liveactivity` pushes otherwise (each gate, the
+    reviewer, the verdict, the count; fixed words, never a title; one for each device).
   - While the primary answers, its chat's message box stays open: a message steers it or is queued on the node, a held
     queue says why with Resume, and a side question is answered apart (lib/turns.ts, the apps held to its words).
   - Wide screens: three panes. Your agent pinned atop the work, a task's thread, and its details: the VM, the

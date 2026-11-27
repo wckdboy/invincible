@@ -513,10 +513,13 @@ struct Vectors: Decodable {
         let name: String
         let task: Task
         let entries: [TrailEntry]
+        /// How many of the team's other tasks are at work besides it, and what its Lock Screen says of them.
+        let others: Int
         let at: Double
         let state: TaskActivityState
         let line: String
         let short: String
+        let othersLine: String
     }
 
     struct VerdictCase: Decodable {

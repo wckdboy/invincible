@@ -171,6 +171,12 @@ import Observation
     /// A task, as the agents are drawn.
     func task(_ id: String) -> TeamTask? { drawnTeam?.tasks.first { $0.id == id } }
 
+    /// How many of the team's tasks are at work or queued besides this one, as its Live Activity says (the node counts them
+    /// alike for its pushes).
+    func othersAtWork(besides task: String) -> Int {
+        (drawnTeam?.tasks ?? []).filter { $0.id != task && ($0.status == "running" || $0.status == "queued") }.count
+    }
+
     /// Your projects, asked for once.
     func askProjects() async {
         guard !projectsAsked, can("mind:read") else { return }

@@ -3,7 +3,8 @@ import Foundation
 extension TaskActivityState {
     /// How a task stands on its Live Activity, from the task and its trail (the web lib's activityOf, held to it by the
     /// vectors' liveActivities): what the app says to its own activity while it is in front.
-    static func of(status: String, verified: Bool, error: String?, gates commands: [String], record: TeamTask.Record?, entries: [TrailEntry], at: Double) -> TaskActivityState {
+    static func of(status: String, verified: Bool, error: String?, gates commands: [String], record: TeamTask.Record?, entries: [TrailEntry], at: Double, others: Int = 0) -> TaskActivityState {
+        let others = min(max(0, others), 999)
         let proof = Steps.proof(status: status, gates: commands, entries)
         let recorded = Steps.facts(record: record)
         let facts = !entries.isEmpty ? Steps.facts(proof) : recorded ?? Steps.facts(proof)
@@ -20,9 +21,9 @@ extension TaskActivityState {
         if let said {
             let failing = facts.gates.firstIndex { $0.exit != nil && $0.exit != 0 }
             let gate = said.verdict == .failed ? failing.flatMap { $0 < gates.count ? $0 + 1 : nil } : nil
-            return TaskActivityState(phase: "ended", gates: gates, review: review == "reading" || review == "waits" ? nil : review, verdict: said.verdict.rawValue, gate: gate, at: at)
+            return TaskActivityState(phase: "ended", gates: gates, review: review == "reading" || review == "waits" ? nil : review, verdict: said.verdict.rawValue, gate: gate, others: others, at: at)
         }
         let phase = status == "queued" ? "queued" : status == "interrupted" ? "interrupted" : proof.reviewer == "reading" ? "review" : "running"
-        return TaskActivityState(phase: phase, gates: gates, review: phase == "queued" ? nil : review, verdict: nil, gate: nil, at: at)
+        return TaskActivityState(phase: phase, gates: gates, review: phase == "queued" ? nil : review, verdict: nil, gate: nil, others: others, at: at)
     }
 }

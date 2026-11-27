@@ -4,7 +4,8 @@ import WidgetKit
 
 /*
  * Invincible's widgets: a task's proof on the Lock Screen and in the Dynamic Island (I10, 26 November 2026; the X2
- * study's seventh item: no rival shows proof there). The agent's mark is the only colour, as in the app, still, how its
+ * study's seventh item: no rival shows proof there), one for the team: the task given or opened last, and how many of
+ * its other tasks are at work. The agent's mark is the only colour, as in the app, still, how its
  * task stands in its shape; red only where it went wrong. What it says is the activity's state alone (TaskActivityState:
  * where it is, each gate, the reviewer, the verdict), and its title, which the app gave it on the device.
  */
@@ -33,7 +34,7 @@ struct TaskActivityWidget: Widget {
                 DynamicIslandExpandedRegion(.center) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(context.attributes.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                        Text(context.attributes.agentName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(context.state.othersLine.isEmpty ? context.attributes.agentName : "\(context.attributes.agentName) · \(context.state.othersLine)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -76,6 +77,8 @@ struct LockScreenActivity: View {
                     .font(.subheadline)
                     .lineLimit(2)
                 GateMarks(state: state)
+                // (The one activity for the team: how many of its other tasks are at work besides this one.)
+                if !state.othersLine.isEmpty { Text(state.othersLine).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer(minLength: 0)
             if state.ended { VerdictMark(state: state, size: 28) }

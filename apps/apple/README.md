@@ -179,11 +179,11 @@ Without a dev node each UI test says it was skipped, unverified.
 
 ## A task's proof on the Lock Screen
 
-A Live Activity and the Dynamic Island (I10; core's `live-activity.ts`): the app starts one when you give a task from the
-phone or open one in hand (`App/LiveActivities.swift`), and it shows the agent's mark, still, how the task stands in its
-shape, the task's title (given
-on the phone: it never goes to Apple), each gate's state, the reviewer when it answers, then the verdict, kept a quarter of
-an hour once the task ends. While the app is in front it updates the activity itself from the task's trail
+A Live Activity and the Dynamic Island (I10; core's `live-activity.ts`): one for the team, for the task you gave from the
+phone or opened in hand last (`App/LiveActivities.swift`; another task's ends the one before at once, as one for each task
+stacked up), and it shows the agent's mark, still, how the task stands in its shape, the task's title (given on the phone:
+it never goes to Apple), each gate's state, the reviewer when it answers, then the verdict, kept a quarter of an hour once
+the task ends, and how many of the team's other tasks are at work ("2 more at work"). While the app is in front it updates the activity itself from the task's trail
 (`TaskActivityState.of`, held to the web lib's `activityOf` by the vectors' `liveActivities`); otherwise the node does,
 through Apple's push service: the app hands it the activity's own push token (`POST /api/notify/activity`, `mind:read`, a
 paired device's own), and the node sends a `liveactivity` push whenever the team moves and the state changed

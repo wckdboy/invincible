@@ -182,8 +182,8 @@ struct TaskView: View {
         await session.opened(task: task.id)
         #if os(iOS)
         // Its proof on the Lock Screen: started for one in hand you open, and told how it stands (its end too).
-        if task.status == "running" || task.status == "queued" { LiveActivities.shared.start(task, agent: session.drawn(task.assignee), state: activityState(task, thread), session: session) }
-        await LiveActivities.shared.update(task.id, activityState(task, thread))
+        if task.status == "running" || task.status == "queued" { LiveActivities.shared.start(task, agent: session.drawn(task.assignee), state: activityState(task, thread, session), session: session) }
+        await LiveActivities.shared.update(task.id, activityState(task, thread, session))
         #endif
         // At work (or about to be): read again as the node says the agents moved (each step it takes moves them), its
         // trail within half a second, its conversation within two; nothing is asked while nothing moves.
@@ -191,7 +191,7 @@ struct TaskView: View {
         let steps = session.follow(["team"], every: 4_000, gap: 500) {
             await thread.readTrail(with: client)
             #if os(iOS)
-            if let now = session.task(task.id) { await LiveActivities.shared.update(task.id, activityState(now, thread)) }
+            if let now = session.task(task.id) { await LiveActivities.shared.update(task.id, activityState(now, thread, session)) }
             #endif
         }
         let talk = session.follow(["team"], every: 8_000, gap: 2_000) { await thread.room.load(room: task.room, with: client) }
@@ -202,8 +202,8 @@ struct TaskView: View {
 }
 
 /// How a task stands on its Live Activity, from its trail as read here.
-@MainActor private func activityState(_ task: TeamTask, _ thread: TaskThread) -> TaskActivityState {
-    TaskActivityState.of(status: task.status, verified: task.verified, error: task.error, gates: task.gates ?? [], record: task.record, entries: thread.entries, at: Date.now.timeIntervalSince1970 * 1000)
+@MainActor private func activityState(_ task: TeamTask, _ thread: TaskThread, _ session: Session) -> TaskActivityState {
+    TaskActivityState.of(status: task.status, verified: task.verified, error: task.error, gates: task.gates ?? [], record: task.record, entries: thread.entries, at: Date.now.timeIntervalSince1970 * 1000, others: session.othersAtWork(besides: task.id))
 }
 
 /// Whether a thread has room for its details in a column beside it: the thread keeps a working width of its own (its

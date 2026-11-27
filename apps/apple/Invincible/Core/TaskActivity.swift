@@ -21,6 +21,9 @@ struct TaskActivityState: Codable, Hashable, Sendable {
     var verdict: String?
     /// The gate that failed, counted from 1.
     var gate: Int?
+    /// How many of the team's other tasks are at work or queued besides this one: the app keeps one activity for the team
+    /// (nil: a node from before said none).
+    var others: Int? = nil
     /// When it was said, in milliseconds since 1970.
     var at: Double
 
@@ -43,6 +46,12 @@ struct TaskActivityState: Codable, Hashable, Sendable {
             if verdict == "failed", let gate { return "Failed · gate \(gate)" }
             return Self.verdictWords[verdict ?? ""] ?? "Ended"
         }
+    }
+
+    /// What its Lock Screen says of the team's other work (the web lib's activityOthers): none, nothing.
+    var othersLine: String {
+        guard let others, others > 0 else { return "" }
+        return "\(others) more at work"
     }
 
     /// The word its Dynamic Island says beside its orb (the web lib's activityShort).

@@ -3,9 +3,11 @@ import ActivityKit
 import Foundation
 
 /**
- * The app's side of a task's Live Activity (I10; core's live-activity.ts): it starts one when you give a task from this
- * phone or open one in hand, tells it how its task stands while the app is in front, and hands its node the activity's
- * own push token, so the node keeps it up through Apple's push service while the app isn't (`POST /api/notify/activity`).
+ * The app's side of the team's Live Activity (I10; core's live-activity.ts): one at a time, for the task you gave from this
+ * phone or opened in hand last, with how many of the team's other tasks are at work (27 November 2026: one for each task
+ * opened stacked up on the Lock Screen). Another task's ends the one before at once. It tells it how its task stands while
+ * the app is in front, and hands its node the activity's own push token, so the node keeps it up through Apple's push
+ * service while the app isn't (`POST /api/notify/activity`; the node keeps one for each device, as the app does).
  * Its title is given here, on the device: the node's pushes carry none. A node that doesn't know the route refuses the
  * token, and the activity is still kept up from here while the app is in front.
  */
@@ -34,14 +36,17 @@ import Foundation
         Activity<TaskActivityAttributes>.activities.first { $0.attributes.task == task }
     }
 
-    /// One for a task in hand, once (never for one that has ended, and only where this device lets Live Activities run);
-    /// one already running is watched again.
+    /// The team's, for a task in hand (never for one that has ended, and only where this device lets Live Activities run):
+    /// one already showing it is watched again; any other task's is ended at once (one an app from before left stacked
+    /// too), its node told as its end is seen.
     func start(_ task: TeamTask, agent: Agent?, state: TaskActivityState, session: Session) {
         if let running = activity(for: task.id) {
+            Self.endSoon(Self.showing(besides: task.id))
             watch(running, client: session.client)
             return
         }
         guard !state.ended, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        Self.endSoon(Self.showing(besides: task.id))
         let mark = AgentMark.of(id: task.assignee, profile: agent?.avatar)
         let attributes = TaskActivityAttributes(task: task.id, title: task.title, agentName: agent?.name ?? task.assignee, colour: AgentMark.palette[mark.color].forms.light, form: mark.form)
         guard let started = try? Activity.request(attributes: attributes, content: .init(state: state, staleDate: Date.now.addingTimeInterval(3600)), pushType: .token) else { return }
@@ -51,7 +56,7 @@ import Foundation
     /// A task this device just gave (or opened in hand): its activity started, as it stands now.
     func begin(_ task: String, session: Session) {
         guard let given = session.task(task) else { return }
-        let state = TaskActivityState.of(status: given.status, verified: given.verified, error: given.error, gates: given.gates ?? [], record: given.record, entries: [], at: Date.now.timeIntervalSince1970 * 1000)
+        let state = TaskActivityState.of(status: given.status, verified: given.verified, error: given.error, gates: given.gates ?? [], record: given.record, entries: [], at: Date.now.timeIntervalSince1970 * 1000, others: session.othersAtWork(besides: task))
         start(given, agent: session.drawn(given.assignee), state: state, session: session)
     }
 
@@ -68,7 +73,7 @@ import Foundation
                 let thread = threads[id] ?? TaskThread(task: task)
                 threads[id] = thread
                 await thread.readTrail(with: session.client)
-                await update(id, TaskActivityState.of(status: task.status, verified: task.verified, error: task.error, gates: task.gates ?? [], record: task.record, entries: thread.entries, at: Date.now.timeIntervalSince1970 * 1000))
+                await update(id, TaskActivityState.of(status: task.status, verified: task.verified, error: task.error, gates: task.gates ?? [], record: task.record, entries: thread.entries, at: Date.now.timeIntervalSince1970 * 1000, others: session.othersAtWork(besides: id)))
             }
         }
         await Session.held()
@@ -79,6 +84,24 @@ import Foundation
     /// kept on the Lock Screen a quarter of an hour.
     func update(_ task: String, _ state: TaskActivityState) async {
         await Self.tell(task, state)
+    }
+
+    /// The other tasks' activities showing now, by their own ids: taken as a task's is started, before it is asked for, so
+    /// the ending a start sets off never ends one a later start asked for (two tasks opened in quick turn ended both).
+    private static func showing(besides task: String) -> [String] {
+        Activity<TaskActivityAttributes>.activities.filter { $0.attributes.task != task }.map(\.id)
+    }
+
+    /// Those activities, ended at once (as it was before one for the team, one stayed for each task opened).
+    private static func endSoon(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        Task { await end(ids) }
+    }
+
+    nonisolated private static func end(_ ids: [String]) async {
+        for activity in Activity<TaskActivityAttributes>.activities where ids.contains(activity.id) {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
     }
 
     /// (Away from the main actor: an activity isn't Sendable, so it is looked up where it is told.)
