@@ -590,6 +590,11 @@ describe("the vendors' own CLIs are harnesses", () => {
       expect(driver.command({ provider: "anthropic", model: "claude-opus-5-5" }, null)).toContain("--provider 'anthropic' --model 'claude-opus-5-5'");
       expect(driver.read("not json")).toEqual([]);
       expect(driver.read('{"type":"tokens","input":-1,"output":1}')).toEqual([]);
+      // The model it ran on, passed on only when its name is one; what its session has cost, only when it is a sum.
+      expect(driver.read('{"type":"tokens","input":3,"output":1,"model":"claude-opus-5-5"}')).toEqual([{ type: "tokens", input: 3, output: 1, model: "claude-opus-5-5" }]);
+      for (const model of ["<synthetic>", "x".repeat(81), "a b", 7]) expect(driver.read(JSON.stringify({ type: "tokens", input: 3, output: 1, model }))).toEqual([{ type: "tokens", input: 3, output: 1 }]);
+      expect(driver.read('{"type":"cost","usd":0.00216}')).toEqual([{ type: "cost", usd: 0.00216 }]);
+      for (const usd of [-1, 1e6, "0.1", null, true]) expect(driver.read(JSON.stringify({ type: "cost", usd }))).toEqual([]);
       // Your words said back: only by an id of the node's own shape, and only how far they got.
       expect(driver.read('{"type":"steer","id":"abc_DEF-123","state":"taken"}')).toEqual([{ type: "steer", id: "abc_DEF-123", state: "taken" }]);
       expect(driver.read('{"type":"steer","id":"abc; rm -rf /","state":"taken"}')).toEqual([]);
@@ -624,7 +629,9 @@ describe("Claude Code, on its own sign-in", () => {
       { type: "call", id: "toolu_fake0223" },
       { type: "tool", tool: "Bash", input: "sleep 4 && echo slept", output: "slept", ok: true, id: "toolu_fake0223" },
       { type: "text", text: "PROBE-DONE: the command said slept." },
-      { type: "tokens", input: 240, output: 24 },
+      // What it spent, with the model it ran on as it said it; then what its session has cost so far, as it counts it.
+      { type: "tokens", input: 240, output: 24, model: "claude-fake-1" },
+      { type: "cost", usd: 0.00144 },
     ]);
     const [started] = box.runs();
     // The vendor's own flags and nothing else; its message the first on its input.
@@ -653,6 +660,8 @@ describe("Claude Code, on its own sign-in", () => {
     expect(resumed.exit).toBe(0);
     expect(resumed.events[0]).toEqual({ type: "session", id: SESSION.claude });
     expect(box.runs()[0].argv).toEqual([...CLAUDE_FLAGS, "--resume", SESSION.claude]);
+    // Its session's cost goes on from its own total (its first run's 0.00072, then this one's): the node counts each run from the last.
+    expect(resumed.events.filter((event) => event.type === "tokens" || event.type === "cost")).toEqual([{ type: "tokens", input: 120, output: 12, model: "claude-fake-1" }, { type: "cost", usd: 0.00144 }]);
     const unknown = await box.run([...OWN, "--session", "00000000-0000-4000-8000-00000000dead"], "continue");
     expect(unknown.exit).toBe(1);
     expect(unknown.events.filter((event) => event.type === "session")).toEqual([]);
@@ -696,7 +705,7 @@ describe("Claude Code, on its own sign-in", () => {
   test("what the tool prints is data: half a character, a line that isn't JSON and an event that isn't one are passed over, and the run goes on", async () => {
     const run = await vm("claude").run(OWN, "work", "half a character");
     expect({ exit: run.exit, stderr: run.stderr }).toEqual({ exit: 0, stderr: "" });
-    expect(run.events.map((event) => event.type)).toEqual(["session", "text", "tokens"]);
+    expect(run.events.map((event) => event.type)).toEqual(["session", "text", "tokens", "cost"]);
     expect(run.events[1]).toEqual({ type: "text", text: "cut here ?" });
   });
 
@@ -711,6 +720,8 @@ describe("Claude Code, on its own sign-in", () => {
       // Its windows as it said them: the one it was refused in, and the other it lists.
       { type: "window", name: "five_hour", status: "rejected", resetsAt: 1767240000000 },
       { type: "window", name: "seven_day", status: "allowed", usedPercent: 25, resetsAt: 1767240000000 },
+      // (What its session has cost so far, as its result said it: a refused turn says it too.)
+      { type: "cost", usd: 0.00072 },
       { type: "error", message: "Claude Code's allowance is spent; it resets 2026-01-01 04:00 UTC" },
     ]);
     expect(box.trace().filter((item) => item.signal)).toEqual([{ signal: 2 }]);
@@ -843,8 +854,9 @@ describe("Claude Code, told as it works", () => {
     expect(done.exit).toBe(0);
     expect(done.events.filter((event) => event.type === "steer").map((event) => event.type === "steer" && event.state)).toEqual(["queued", "taken"]);
     expect(done.events.filter((event) => event.type === "text").map((event) => event.type === "text" && event.text)).toEqual(["PROBE-DONE: the command said slept.", "STEER-ACK: also say the word banana."]);
-    // Two turns, so two results: what it spent is both.
-    expect(done.events.filter((event) => event.type === "tokens")).toEqual([{ type: "tokens", input: 240, output: 24 }, { type: "tokens", input: 120, output: 12 }]);
+    // Two turns, so two results: what it spent is both, and its session's cost grew with each.
+    expect(done.events.filter((event) => event.type === "tokens")).toEqual([{ type: "tokens", input: 240, output: 24, model: "claude-fake-1" }, { type: "tokens", input: 120, output: 12, model: "claude-fake-1" }]);
+    expect(done.events.filter((event) => event.type === "cost")).toEqual([{ type: "cost", usd: 0.00144 }, { type: "cost", usd: 0.00216 }]);
   });
 
   test("your stop during its tool call: its own interrupt (SIGINT) ends its turn and the tool, and the run is no failure", async () => {
@@ -923,10 +935,10 @@ describe("Codex, on its own sign-in", () => {
       { type: "session", id: "00000000-0000-4000-8000-000000000055" },
       { type: "call", id: "call_fake0227" },
       { type: "tool", tool: "shell", input: "/bin/sh -lc 'sleep 4 && echo slept'", output: "slept\n", ok: true, id: "call_fake0227" },
-      // Each of its model calls, as its thread's totals grew.
-      { type: "tokens", input: 120, output: 12 },
+      // Each of its model calls, as its thread's totals grew, with the model its thread runs on as it said it.
+      { type: "tokens", input: 120, output: 12, model: "fake-model" },
       { type: "text", text: "PROBE-DONE: the command said slept." },
-      { type: "tokens", input: 120, output: 12 },
+      { type: "tokens", input: 120, output: 12, model: "fake-model" },
     ]);
     const [started] = box.runs();
     expect(started.argv).toEqual(CODEX_RUN);
@@ -947,7 +959,7 @@ describe("Codex, on its own sign-in", () => {
     expect(box.trace().filter((item) => "told" in item).map((item) => item.told)).toEqual(["initialized", "thread/resume", "turn/start"]);
     expect(resumed.events.filter((event) => event.type === "session")).toEqual([{ type: "session", id: SESSION.codex }]);
     // (Resumed, its thread says its totals so far before this run's turn: they are not this run's.)
-    expect(resumed.events.filter((event) => event.type === "tokens")).toEqual([{ type: "tokens", input: 120, output: 12 }]);
+    expect(resumed.events.filter((event) => event.type === "tokens")).toEqual([{ type: "tokens", input: 120, output: 12, model: "fake-model" }]);
     const unknown = await box.run([...OWN, "--session", "019a0000-0000-7000-8000-00000000dead"], "continue");
     expect(unknown.exit).toBe(1);
     expect(unknown.events).toEqual([{ type: "error", message: "The saved Codex session is not one it knows; it was not replaced (no rollout found for thread id 019a0000-0000-7000-8000-00000000dead)" }]);
@@ -1003,7 +1015,7 @@ describe("Codex, on its own sign-in", () => {
     expect(dead.events.at(-1)).toEqual({ type: "error", message: "Codex stopped: unexpected status 404 Not Found: no such route /responses" });
     const recovered = await vm("codex").run(OWN, "work", "reconnects");
     expect(recovered.exit).toBe(0);
-    expect(recovered.events.at(-1)).toEqual({ type: "tokens", input: 120, output: 12 });
+    expect(recovered.events.at(-1)).toEqual({ type: "tokens", input: 120, output: 12, model: "fake-model" });
     // Each reconnection is a retry on the trail (its reason where it gives one), so a run that waits isn't taken for one that hangs.
     expect(recovered.events.filter((event) => event.type === "retry")).toEqual([
       { type: "retry", attempt: 1, error: "reconnecting", waitMs: 0 },

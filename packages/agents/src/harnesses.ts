@@ -47,7 +47,10 @@ export type AgentEvent =
   | { type: "tool"; tool: string; input: string; output: string; ok: boolean; id?: string }
   /** A tool call that began, by its id, where its stream says so: a steer waits for it to end (runAgent). */
   | { type: "call"; id: string }
-  | { type: "tokens"; input: number; output: number }
+  /** What a call (or a turn) spent, with the model it ran on as its tool said it, where it says one. */
+  | { type: "tokens"; input: number; output: number; model?: string }
+  /** What its session has cost so far at API prices, as its tool counts it (Claude Code's total_cost_usd): on a plan, notional. */
+  | { type: "cost"; usd: number }
   | { type: "error"; message: string }
   /** The tool asking a provider again by itself after a refusal: which try this is, why, and how long it waits first. */
   | { type: "retry"; attempt: number; error: string; waitMs: number }

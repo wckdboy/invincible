@@ -89,6 +89,12 @@ def resets(at):
 
 WINDOW = re.compile(r"[a-z0-9][a-z0-9_]{0,31}")
 
+MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}")
+
+def named(model):
+    # The model a tool says it ran on, when its name is one: passed on with what it spent, nothing else of its account.
+    return {"model": model} if isinstance(model, str) and MODEL.fullmatch(model) else {}
+
 def window(name, status, used=None, at=None):
     # One of its plan's windows as the tool said it: its name, allowed, warning or rejected, how much of it is used (%)
     # and when it resets (seconds or ms since the epoch). Nothing else of what the tool says of its account is passed on.
@@ -442,6 +448,8 @@ class Reader:
         # not yet ended; whether it says each one's lifecycle (msg_lifecycle_v1, in system/init's capabilities).
         self.given, self.open, self.lifecycle, self.heard = {}, set(), False, Told()
         self.closed, self.stopping, self.turned = False, False, False
+        # The model its session runs on, as it says it.
+        self.model = None
 
     def write(self, message):
         if self.closed:
@@ -503,6 +511,7 @@ class Reader:
         kind = e.get("type")
         if kind == "system" and e.get("subtype") == "init" and isinstance(e.get("session_id"), str):
             self.session = e["session_id"]
+            self.model = e.get("model") if named(e.get("model")) else self.model
             self.lifecycle = isinstance(e.get("capabilities"), list) and "msg_lifecycle_v1" in e["capabilities"]
         elif kind == "command_lifecycle" and e.get("command_uuid") in self.given:
             mark, state = e["command_uuid"], e.get("state")
@@ -569,7 +578,12 @@ class Reader:
             spent_in = count(e.get("usage"), "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
             spent_out = count(e.get("usage"), "output_tokens")
             if spent_in or spent_out:
-                emit("tokens", input=spent_in, output=spent_out)
+                emit("tokens", input=spent_in, output=spent_out, **named(self.model))
+            # What its session has cost so far at API prices, as Claude Code counts it (total_cost_usd: on a plan, what the
+            # plan covers). A session taken up again goes on from its own total: the node counts each run from the last.
+            total = e.get("total_cost_usd")
+            if type(total) in (int, float) and 0 <= total < 10 ** 6:
+                emit("cost", usd=round(total, 6))
             text = e.get("result") if isinstance(e.get("result"), str) else ""
             subtype = e["subtype"] if isinstance(e.get("subtype"), str) and re.fullmatch(r"[a-z_]{1,40}", e["subtype"]) else ""
             # (A result of an error's kind is one, whatever its flag says. A turn its stop ended is no fault.)
@@ -713,7 +727,7 @@ class Reader:
         # said before its first turn began, to be told once it has; the token counts its thread had before this run.
         self.asked, self.count = {}, 0
         self.thread, self.turn, self.ended, self.started, self.mine = None, None, set(), False, set()
-        self.early, self.totals = [], None
+        self.early, self.totals, self.model = [], None, None
 
     def write(self, message):
         if self.closed:
@@ -857,7 +871,7 @@ class Reader:
         grew = [max(0, n - t) for n, t in zip(now, self.totals)]
         self.totals = now
         if any(grew):
-            emit("tokens", input=grew[0], output=grew[1])
+            emit("tokens", input=grew[0], output=grew[1], **named(self.model))
 
     def item(self, item):
         what = item.get("type")
@@ -910,6 +924,7 @@ class Reader:
                 self.failed = ("The saved " + NAME + " session is not one it knows; it was not replaced" if self.resuming else NAME + " didn't start a thread") + (" (" + clip(said, 300) + ")" if said else "")
                 return
             self.thread = self.session = thread["id"]
+            self.model = result.get("model") if named(result.get("model")) else None
             self.request("turn/start", {"threadId": self.thread, "input": as_input(self.prompt)}, ("turn",))
         elif why[0] == "turn":
             turn = result.get("turn") if result else None

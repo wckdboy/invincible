@@ -124,12 +124,15 @@ describe("a driver and the notes store", () => {
   // with exactly those lines taken out is its text at b6d7835, whose pins were 0a59dcd5… and 37a28b03…. Hermes', Claude
   // Code's and Codex's again on 27 November 2026, when every Python they start came to be started isolated (`python3 -I`,
   // so a repository's own select.py or json.py is never imported): each one's text with each `-I ` taken out hashes to
-  // its pin from before (91daad81…, 1a94bf08…, ba84ed24…). OpenCode's starts no Python, and is as it was.
+  // its pin from before (91daad81…, 1a94bf08…, ba84ed24…). OpenCode's starts no Python, and is as it was. Claude Code's
+  // and Codex's again that day (I15 step 10), when each came to say the model it ran on with what it spent, and Claude
+  // Code what its session has cost so far as it counts it (total_cost_usd): each one's text with exactly those lines put
+  // back as they were hashes to its pin from before (5f97b17a…, 63403aba…), so nothing else changed.
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "4c07aaa475159fa7d3d441d2a7a7ea4c39958625bae8ee249d9cba62f9f0e97b",
-    claude: "5f97b17a1e274816d165b4ce2dc9d1b7da581e5f41341f233d8d44969727e290",
-    codex: "63403abaaeef989ba8c646c37f3b376ca86035d016e591698905b34c908f7c18",
+    claude: "df2588eb31ee380ffe59cecca18c0e0a3eb300b96a1e5f02aeaf032de7f85d39",
+    codex: "6c8cc4d20b97fb8d2d8f562aca7b31e03000dd064617c058ba990f3fad784863",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

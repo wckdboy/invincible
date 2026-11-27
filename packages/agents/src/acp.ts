@@ -333,6 +333,8 @@ export const notesServer = (project: string) => {
 
 /** A tool call's id as a bridge passes it on (the agent's own: a string of its, kept short); never shown, only paired. */
 const callId = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 256;
+/** A model's name as a tool says it ran on it (vendor-cli.ts named()): one plain word, nothing else of its account. */
+const MODEL_SAID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
 
 /** One line a bridge in the sandbox printed: its normalised event, checked and redacted (the sandbox's words are data). */
 export function readBridge(line: string): AgentEvent[] {
@@ -347,7 +349,10 @@ export function readBridge(line: string): AgentEvent[] {
   }
   // A call that began: only its id, which pairs it with its end (runAgent: a steer waits for it).
   if (e.type === "call" && callId(e.id)) return [{ type: "call", id: e.id }];
-  if (e.type === "tokens" && [e.input, e.output].every((v) => Number.isSafeInteger(v) && v >= 0)) return [{ type: "tokens", input: e.input, output: e.output }];
+  // What it spent, with the model it ran on when it names one; and what its session has cost so far at API prices, as
+  // its tool counts it (Claude Code's total_cost_usd), when that is a sum of money.
+  if (e.type === "tokens" && [e.input, e.output].every((v) => Number.isSafeInteger(v) && v >= 0)) return [{ type: "tokens", input: e.input, output: e.output, ...(typeof e.model === "string" && MODEL_SAID.test(e.model) ? { model: e.model as string } : {}) }];
+  if (e.type === "cost" && typeof e.usd === "number" && Number.isFinite(e.usd) && e.usd >= 0 && e.usd < 1_000_000) return [{ type: "cost", usd: e.usd }];
   if (e.type === "retry" && Number.isSafeInteger(e.attempt) && e.attempt > 0 && typeof e.error === "string") return [{ type: "retry", attempt: e.attempt, error: redact(e.error), waitMs: Number.isSafeInteger(e.waitMs) && e.waitMs >= 0 ? e.waitMs : 0 }];
   // One of its plan's windows, as its tool said it (vendor-cli.ts window): its name, its status, used %, its reset.
   if (e.type === "window" && typeof e.name === "string" && /^[a-z0-9][a-z0-9_]{0,31}$/.test(e.name) && (e.status === "allowed" || e.status === "warning" || e.status === "rejected")) {
