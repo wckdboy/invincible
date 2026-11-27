@@ -22,6 +22,15 @@ While it's on screen it keeps the node's live stream open (`core/LiveLink.kt`: t
 iPhone's LiveLink.swift) and reads again only what the stream says changed, so at rest it asks the node nothing; a link
 silent for three of the node's beats is said lost at once, and a change of network opens a fresh stream.
 
+An agent's screen (`ui/DesktopScreen.kt`; its page's Its VM, then Its screen) is live where its VM's desktop streams:
+the node's stream of it (`core/NodeClient.kt`'s `frames`, read whole as its bytes come by `core/DesktopStream.kt`), each
+frame handed to MediaCodec, the phone's own H.264 decoder, and drawn on a SurfaceView as it comes
+(`ui/DesktopDecoder.kt`), while it is on screen and the app is in front. It is watched again after an end, its last
+frame kept meanwhile, and given up for a picture every two seconds after four ends in a row or a refusal, as the web app
+and the iPhone do (the vectors' `desktopStream`). A tap clicks there and brings back no picture; Take over and Give back
+sit under it from its first frame, the row saying until when by the clock. On an emulator its decoder
+(`c2.goldfish.h264.decoder`) gives back each frame of the glass page's recording with the pixels it was drawn with.
+
 It opens on the primary, the one agent you talk to, named by the node ("Invincible" until you name it: `core/Primary.kt`),
 with no tab bar (the iPhone's Home): Home (`ui/Home.kt`) is the I-beam and the line at a glance, the agents in a strip,
 what needs you (three decisions, each with its one answer in place, counted once everywhere), the work by proof

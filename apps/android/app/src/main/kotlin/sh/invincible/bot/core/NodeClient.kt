@@ -142,6 +142,49 @@ class NodeClient(val origin: String, private val signer: Signer) {
      */
     fun events(path: String, body: Json, alive: () -> Unit = {}): Flow<Json> = sse("POST", path, body.text().toByteArray(Charsets.UTF_8), 120_000, alive)
 
+    /**
+     * An agent's desktop as you watch it (POST /api/team/desktop/stream): its frames, each whole as its last byte comes
+     * ([DesktopFrames]). Ending the collection ends the watching: the node ends the VM's encoder when its last watcher
+     * goes. The node's beats keep it within the read timeout while the screen is still.
+     */
+    fun frames(path: String, body: Json): Flow<DesktopFrame> = flow {
+        val c = try {
+            open("POST", path, body.text().toByteArray(Charsets.UTF_8), 60_000)
+        } catch (e: IOException) {
+            throw unreachable(e)
+        }
+        // (A connection's own close does nothing before it connects: one asked before then is kept, and holds after.)
+        val shut = java.util.concurrent.atomic.AtomicBoolean(false)
+        // Closing the connection is how a blocked read ends when the collector goes: at once, as it is cancelled.
+        val watching = closeOnCancel {
+            shut.set(true)
+            c.disconnect()
+        }
+        try {
+            val status = c.responseCode
+            if (shut.get()) throw IOException("closed")
+            if (status !in 200..299) {
+                val said = c.errorStream?.use { it.readBytes() } ?: ByteArray(0)
+                throw NodeError.from(status, c.getHeaderField("content-type"), c.getHeaderField("date"), said)
+            }
+            val frames = DesktopFrames()
+            val chunk = ByteArray(64 * 1024)
+            c.inputStream.use { input ->
+                while (true) {
+                    val n = input.read(chunk)
+                    if (n < 0) break
+                    if (shut.get()) throw IOException("closed")
+                    for (frame in frames.push(chunk, 0, n)) emit(frame)
+                }
+            }
+        } catch (e: IOException) {
+            throw unreachable(e)
+        } finally {
+            watching.cancel()
+            c.disconnect()
+        }
+    }.flowOn(Dispatchers.IO)
+
     /** A request answered with server-sent events: each `data:` payload as it arrives, and `alive` on every line; `opened`
      * is handed how to close it, from any thread. */
     private fun sse(method: String, path: String, bytes: ByteArray?, readTimeoutMs: Int, alive: () -> Unit, opened: (close: () -> Unit) -> Unit = {}): Flow<Json> = flow {
