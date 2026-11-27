@@ -53,6 +53,35 @@ struct DesktopStreamTests {
         #expect(DesktopStream.parameterSets(Data(base64Encoded: cases.frames[1].payload)!) == nil)
     }
 
+    @Test func aStreamThatFallsBehindEndsAfterWhatWaitsAndIsWatchedAgain() async throws {
+        let frame = { (n: Int) in DesktopFrame(kind: n == 0 ? DesktopFrame.key : DesktopFrame.delta, time: UInt64(n), payload: Data([0, 0, 1, 0x41])) }
+        #expect(DesktopStream.behind == 20)
+        // A watcher that keeps up never falls behind, however many come.
+        let kept = DesktopStream.queue()
+        var each = kept.frames.makeAsyncIterator()
+        for n in 0..<100 {
+            #expect(DesktopStream.enqueue(frame(n), on: kept.queue))
+            #expect(try await each.next()?.time == UInt64(n))
+        }
+        // One that doesn't: twenty wait, and the next ends the stream; nothing more is taken.
+        let slow = DesktopStream.queue()
+        for n in 0..<DesktopStream.behind { #expect(DesktopStream.enqueue(frame(n), on: slow.queue)) }
+        #expect(!DesktopStream.enqueue(frame(DesktopStream.behind), on: slow.queue))
+        #expect(!DesktopStream.enqueue(frame(DesktopStream.behind + 1), on: slow.queue))
+        slow.queue.finish()
+        // What waited comes, in order, then the end: Behind, which is no refusal, so the watch opens it again (and the
+        // new stream starts from its keyframe: DesktopVideoTests).
+        var got: [UInt64] = []
+        do {
+            for try await f in slow.frames { got.append(f.time) }
+            Issue.record("the stream ended without saying it fell behind")
+        } catch {
+            #expect(error is DesktopStream.Behind)
+            #expect(!DesktopWatch.refuses(error))
+        }
+        #expect(got == (0..<20).map { UInt64($0) })
+    }
+
     @Test func aHoldEndsWhenTheNodeSaidAndWatchingAgainWaitsALittleLongerEachTime() {
         for each in cases.holds { #expect(each.held.ends(said: each.at) == each.ends) }
         for each in cases.again { #expect(DesktopStream.againIn(each.n) == each.ms, "try \(each.n)") }

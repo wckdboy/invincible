@@ -43,7 +43,8 @@ is down only if it isn't up again within three seconds of going, so a fresh one 
 says nothing (the vectors' `live.links`, which the web app, this app and Android's play alike).
 
 **An agent's screen** (`UI/AgentScreenView.swift`; its menu's Its screen) is live where its VM's desktop streams (C1):
-the node's stream of it (`POST /api/team/desktop/stream`, read whole as its bytes come by `Core/DesktopStream.swift`),
+the node's stream of it (`POST /api/team/desktop/stream`, read whole as its bytes come by `Core/DesktopStream.swift`,
+at most 20 frames waiting to be decoded: past that it is watched again from a keyframe, as the web app's is),
 each frame decoded as it comes by VideoToolbox off the main actor (`Core/DesktopVideo.swift`'s DesktopDecoding) and
 shown as its own IOSurface, with no copy (`UI/DesktopLive.swift`), while it is on screen and the app is in front. A stream that ends is watched again a little
 later each time (0.5, 1, 2 and 4 s), its last frame kept meanwhile; after four ends in a row, or a refusal (an older

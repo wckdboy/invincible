@@ -121,6 +121,37 @@ enum DesktopStream {
 
     /// After this many ends in a row, the live screen gives way to a picture every two seconds, and says so.
     static let liveTries = 4
+
+    /// The most frames that may wait to be decoded (the web's BEHIND, in its views/desktop.ts). Past that, this device
+    /// has fallen behind the screen: the stream is ended and watched again from a fresh keyframe, so what it holds and
+    /// how far behind it shows stay bounded.
+    static let behind = 20
+
+    /// A stream that fell behind: more than `behind` of its frames waited to be decoded. It is no refusal: the watch opens
+    /// the stream again, and the new one starts from its keyframe.
+    struct Behind: Error, Equatable {}
+
+    /// Where a stream's frames wait to be decoded: at most `behind` of them, the oldest first.
+    static func queue() -> (frames: AsyncThrowingStream<DesktopFrame, any Error>, queue: AsyncThrowingStream<DesktopFrame, any Error>.Continuation) {
+        let made = AsyncThrowingStream.makeStream(of: DesktopFrame.self, throwing: (any Error).self, bufferingPolicy: .bufferingOldest(behind))
+        return (made.stream, made.continuation)
+    }
+
+    /// One frame queued to be decoded; false once the stream is over: its watcher went, or it fell behind, and then it
+    /// ends with Behind, after the frames that wait.
+    static func enqueue(_ frame: DesktopFrame, on queue: AsyncThrowingStream<DesktopFrame, any Error>.Continuation) -> Bool {
+        switch queue.yield(frame) {
+        case .enqueued:
+            return true
+        case .dropped:
+            queue.finish(throwing: Behind())
+            return false
+        case .terminated:
+            return false
+        @unknown default:
+            return false
+        }
+    }
 }
 
 /// Your take-over as the node says it (`held`, on each answer of /api/team/desktop and of take and release).

@@ -5,7 +5,8 @@ import Foundation
  * is on screen and the app is in front. A stream that ends is watched again a little later each time (0.5, 1, 2 and 4 s),
  * its last frame kept on screen meanwhile. After DesktopStream.liveTries ends in a row it gives way to the picture every
  * two seconds, saying why; at once, saying nothing, when the node refuses it (an older node, a VM with no stream: a 4xx,
- * or 501). A node that didn't answer isn't a refusal: it is asked again. A frame drawn starts the count again.
+ * or 501). A node that didn't answer isn't a refusal: it is asked again, as is a stream that fell behind
+ * (DesktopStream.Behind), from its keyframe. A frame drawn starts the count again.
  *
  * The stream, the drawing and the waiting are handed in (AgentScreenView hands in the node's, DesktopLive's and a sleep),
  * so the tests run it on stand-ins.

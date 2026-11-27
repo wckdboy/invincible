@@ -108,31 +108,34 @@ struct NodeClient: Sendable {
     }
 
     /// An agent's desktop as you watch it (POST /api/team/desktop/stream): its frames, each whole as its last byte comes
-    /// (DesktopFrames). Ending the stream (its consumer goes away) ends the watching: the node ends the VM's encoder when
-    /// its last watcher goes. The node's beats keep it from timing out while the screen is still.
+    /// (DesktopFrames), at most DesktopStream.behind of them waiting to be decoded (past that it ends with Behind). Ending
+    /// the stream (its consumer goes away) ends the watching: the node ends the VM's encoder when its last watcher goes.
+    /// The node's beats keep it from timing out while the screen is still.
     func frames(_ path: String, _ body: some Encodable) -> AsyncThrowingStream<DesktopFrame, any Error> {
         let request = Result { try self.request("POST", path, body: JSONEncoder().encode(body), timeout: 120) }
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    let (bytes, response) = try await Self.session.bytes(for: request.get())
-                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    guard (200..<300).contains(status) else {
-                        var said = Data()
-                        for try await byte in bytes where said.count < 65_536 { said.append(byte) }
-                        throw NodeError.from(status: status, headers: Self.headers(of: response), body: said)
-                    }
-                    var frames = DesktopFrames()
-                    for try await byte in bytes {
-                        if let frame = try frames.push(byte: byte) { continuation.yield(frame) }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: Self.plain(error, host: request))
+        // (At most DesktopStream.behind frames wait to be decoded: past that the stream ends, and is watched again.)
+        let (frames, queue) = DesktopStream.queue()
+        let task = Task {
+            do {
+                let (bytes, response) = try await Self.session.bytes(for: request.get())
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200..<300).contains(status) else {
+                    var said = Data()
+                    for try await byte in bytes where said.count < 65_536 { said.append(byte) }
+                    throw NodeError.from(status: status, headers: Self.headers(of: response), body: said)
                 }
+                var parser = DesktopFrames()
+                for try await byte in bytes {
+                    // (Over, by its watcher going or by falling behind: nothing more is read.)
+                    if let frame = try parser.push(byte: byte), !DesktopStream.enqueue(frame, on: queue) { return }
+                }
+                queue.finish()
+            } catch {
+                queue.finish(throwing: Self.plain(error, host: request))
             }
-            continuation.onTermination = { _ in task.cancel() }
         }
+        queue.onTermination = { _ in task.cancel() }
+        return frames
     }
 
     private func stream<Event: Sendable>(_ request: Result<URLRequest, any Error>, alive: (@Sendable () -> Void)?, as read: @escaping @Sendable (String) -> Event?) -> AsyncThrowingStream<Event, any Error> {
