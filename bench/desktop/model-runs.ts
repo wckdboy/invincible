@@ -79,7 +79,7 @@ const round = (n: number, places = 4) => Number(n.toFixed(places));
 
 /**
  * The runs by task, as the desktop suite keeps its model baseline (bench/baseline/desktop-model.json): passes of the
- * runs, the model calls and actions a run took (median and most), the most calls per action a passing run took, the
+ * runs, the model calls and actions a run took (median and most), the calls per action a passing run took (median and most), the
  * tokens, the dollars (the node's meter, and the runner's upper bound) and the minutes. `bar`: the passes it is held to.
  */
 export function recordOf(report: { at: string; commit: string; model: string; route: string; runs: readonly RunRecord[] }, bar: { passed: number; of: number }) {
@@ -89,6 +89,8 @@ export function recordOf(report: { at: string; commit: string; model: string; ro
       const passing = these.filter((r) => r.pass);
       const loops = these.map((r) => r.loop).filter((l): l is NonNullable<TaskRun["loop"]> => Boolean(l));
       const sum = (f: (l: NonNullable<TaskRun["loop"]>) => number) => loops.reduce((total, l) => total + f(l), 0);
+      /** Each passing run's model calls over its actions: the record gives the median beside the worst. */
+      const ratios = passing.map((r) => r.loop!.calls / Math.max(1, r.loop!.actions));
       return [
         task,
         {
@@ -97,7 +99,7 @@ export function recordOf(report: { at: string; commit: string; model: string; ro
           ...(these.some((r) => !r.pass) ? { failed: these.filter((r) => !r.pass).map((r) => `run ${r.run}: ${r.why.slice(0, 200)}`) } : {}),
           calls: { median: median(loops.map((l) => l.calls)), most: Math.max(0, ...loops.map((l) => l.calls)) },
           actions: { median: median(loops.map((l) => l.actions)), most: Math.max(0, ...loops.map((l) => l.actions)) },
-          callsPerAction: passing.length ? round(Math.max(...passing.map((r) => r.loop!.calls / Math.max(1, r.loop!.actions))), 2) : null,
+          callsPerAction: ratios.length ? { median: round(median(ratios)!, 2), most: round(Math.max(...ratios), 2) } : null,
           tokens: { input: sum((l) => l.usage.input), cached: sum((l) => l.usage.cached ?? 0), output: sum((l) => l.usage.output), unreported: sum((l) => l.unknown) },
           dollars: { meter: these.every((r) => r.meter !== null) ? round(these.reduce((total, r) => total + r.meter!, 0)) : null, upperBound: round(these.reduce((total, r) => total + r.dollars, 0)) },
           minutes: { median: round(median(these.map((r) => r.minutes)) ?? 0, 2), most: round(Math.max(0, ...these.map((r) => r.minutes)), 2) },

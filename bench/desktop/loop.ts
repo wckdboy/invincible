@@ -38,7 +38,10 @@ export interface LoopRun {
   error: string | null;
   /** The engineer's model calls (each a turn). */
   calls: number;
-  /** The toolset's actions that ran, and the other commands. */
+  /**
+   * The desktop's actions that ran: each `desktop <verb>` a command gave, the toolset's (one a call) or inside a shell's
+   * own command, so a run that worked the desktop through bash counts its actions too (C1 step 7). `commands`: those with none.
+   */
   actions: number;
   commands: number;
   /** Each command it ran, as said (an action as its desktop command), redacted and cut short: what a run did. */
@@ -180,6 +183,9 @@ export function loopAsk(ctx: ModelsContext, counted: { calls: number; usage: Usa
 export const ENVIRONMENT = `Your persistent Linux VM; your workspace is /work.${desktopBriefing()}`;
 
 /** One task through the loop: its goal, the model's way (ask), the VM's commands (exec). Never throws: an error is said. */
+/** How many of the desktop's commands a command gives: each `desktop <verb>` where a command begins in it (as actsOnDesktop reads it). */
+export const desktopActions = (command: string): number => command.match(/(^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+[a-z_]+/g)?.length ?? 0;
+
 export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command: string, timeoutSec: number) => Promise<ExecResult>, counted: { calls: number; usage: Usage; unknown?: number }, maxSteps = 40, signal?: AbortSignal): Promise<LoopRun> {
   const events: RunEvent[] = [];
   const t0 = performance.now();
@@ -194,6 +200,6 @@ export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command:
     error = String((e as Error).message ?? e).slice(0, 300);
   }
   const commands = events.filter((e): e is Extract<RunEvent, { type: "command" }> => e.type === "command").map((e) => e.command);
-  const actions = commands.filter((c) => COMPUTER_MEMBERS.has(c.split(" ")[1] ?? "") && c.startsWith("desktop ")).length;
-  return { outcome, error, calls: counted.calls, actions, commands: commands.length - actions, said: commands.map((c) => redact(c).slice(0, 200)), usage: counted.usage, ms: performance.now() - t0 };
+  const each = commands.map(desktopActions);
+  return { outcome, error, calls: counted.calls, actions: each.reduce((sum, n) => sum + n, 0), commands: each.filter((n) => n === 0).length, said: commands.map((c) => redact(c).slice(0, 200)), usage: counted.usage, ms: performance.now() - t0 };
 }

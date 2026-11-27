@@ -51,7 +51,7 @@ function tasks(ctx: SuiteContext, runs: TaskRun[], n: number, span: [number, num
         if (looped.length) {
           const most = (f: (l: NonNullable<TaskRun["loop"]>) => number) => Math.max(...looped.map((r) => f(r.loop!)));
           ctx.quality(`desktop.task.${task}.${policy}.calls`, most((l) => l.calls), "model calls", "lower", { note: `${task}, ${policy}: the engineer's model calls a passing run took, each a turn` });
-          ctx.quality(`desktop.task.${task}.${policy}.actions`, most((l) => l.actions), "actions", "lower", { note: `${task}, ${policy}: the toolset's actions a passing run ran, each the VM's desktop command` });
+          ctx.quality(`desktop.task.${task}.${policy}.actions`, most((l) => l.actions), "actions", "lower", { note: `${task}, ${policy}: the desktop's actions a passing run ran, each a desktop command: the toolset's, or inside a shell's own` });
           ctx.quality(`desktop.task.${task}.${policy}.calls-per-action`, sig(most((l) => l.calls / Math.max(1, l.actions)), 2), "calls per action", "lower", { resolution: 0.05, note: `${task}, ${policy}: model calls over the actions they made (today's agent: a turn a command, and an eyes call a look)` });
         }
       }

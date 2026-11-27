@@ -46,7 +46,7 @@ test("the runs are kept by task as the suite's model baseline: passes against th
   expect(record).toMatchObject({ suite: "desktop-model", passed: 2, of: 3, held: false, dollars: { meter: 0.16 } });
   expect(record.tasks.form).toEqual({
     passed: 2, of: 2,
-    calls: { median: 5, most: 6 }, actions: { median: 8, most: 8 }, callsPerAction: 0.75,
+    calls: { median: 5, most: 6 }, actions: { median: 8, most: 8 }, callsPerAction: { median: 0.63, most: 0.75 },
     tokens: { input: 10_000, cached: 8_000, output: 1_000, unreported: 0 },
     dollars: { meter: 0.08, upperBound: 0.1 }, minutes: { median: 1.5, most: 1.8 },
   });

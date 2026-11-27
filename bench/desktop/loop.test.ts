@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ExecResult } from "../../packages/core/src/index.ts";
 import { UNPROVEN } from "../../packages/agents/src/run.ts";
-import { type Asked, dollarsOf, loopAsk, modelsContext, standIn, throughGateway, viaLoop } from "./loop.ts";
+import { type Asked, desktopActions, dollarsOf, loopAsk, modelsContext, standIn, throughGateway, viaLoop } from "./loop.ts";
 import { GOALS, shapeOf, standInTurns } from "./tasks.ts";
 
 /*
@@ -102,4 +102,10 @@ test("a real model's calls go to the node's gateway as to Anthropic's own API, a
   expect(sent).toEqual(["http://192.0.2.10:7811/gw/claude/v1/messages?beta=true"]);
   // A million fresh input tokens (priced as cache writes), a million read from the cache, and a million out.
   expect(dollarsOf({ input: 2_000_000, cached: 1_000_000, output: 1_000_000 })).toBeCloseTo(5 + 0.2 + 20, 6);
+});
+
+test("an action is each desktop command a run gave, the toolset's or inside a shell's own command; a command with none is another command", () => {
+  // (A run that worked the desktop through bash, as two form runs on Opus 5.5 did, counts its actions too: C1 step 7.)
+  const said = ["desktop left_click 400 200", "desktop click 1 2 && desktop key Return", "cd /work && desktop type 'hi'", "echo \"$(desktop text)\"", "echo desktop click", "ls -la"];
+  expect(said.map(desktopActions)).toEqual([1, 2, 1, 1, 0, 0]);
 });
