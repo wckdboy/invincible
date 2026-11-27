@@ -153,7 +153,11 @@ try {
     document.addEventListener("pointerdown", (event) => { if (event.target.closest && event.target.closest(".desktop-shot")) glass.clicks.push(Date.now()); }, true);
   })()`);
   const frames = () => evaluate<{ at: number; vm: number; clicks: number }[]>("window.__glass.frames");
-  const typed = (text: string) => evaluate(`(() => { const input = document.querySelector("input[name=type]"); input.value = ${JSON.stringify(text)}; input.form.requestSubmit(); })()`);
+  /**
+   * One of the app's own keys beside the screen (Return, Escape), pressed as a person presses it. (Not typed text: deskd
+   * types only into what takes text, and the glass page has nothing that does, so a typed g was refused and never seen.)
+   */
+  const pressed = (label: string) => evaluate(`(() => { const key = [...document.querySelectorAll(".desktop button")].find((b) => b.textContent.trim() === ${JSON.stringify(label)}); if (!key) throw new Error("the app has no ${label} key"); key.click(); })()`);
   /** A click on the middle of the agent's screen in the app (its panel on the glass page), as a mouse does. */
   const click = async (): Promise<void> => {
     const box = await evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector(".desktop-shot canvas").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.6 }; })()`);
@@ -165,7 +169,7 @@ try {
   await sleep(1000);
 
   // ---------- running: glass to glass ----------
-  await typed("g");
+  await pressed("Return");
   await sleep(1000);
   const ranFrom = now();
   await sleep(SECONDS * 1000);
@@ -194,7 +198,7 @@ try {
   }
 
   // ---------- still: the stream's beats alone ----------
-  await typed("s");
+  await pressed("Escape");
   await sleep(1500);
   const stillFrom = now();
   await sleep(STILL * 1000);

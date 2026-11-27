@@ -3,8 +3,10 @@ import { bitsOf, STRIP } from "./glass-clock.ts";
 /*
  * The page the glass-to-glass harness opens on the agent's screen (C1 step 9.3): its own time and its clicks, drawn as
  * the strip glass-clock.ts reads.
- * - While it runs (g pressed), the strip is drawn on each of the browser's frames, so the stream carries it at its own
- *   pace. While it is still (s, as it opens), it holds the last, so the stream sends nothing but its beats.
+ * - While it runs (Return pressed, or g), the strip is drawn on each of the browser's frames, so the stream carries it at
+ *   its own pace. While it is still (Escape, or s; as it opens), it holds the last, so the stream sends nothing but its
+ *   beats. Keys, not text: deskd types text only into what takes it, and this page has nothing that does, so the
+ *   harness presses the app's own Return and Escape (glass.ts).
  * - A click anywhere counts, at once, and turns the panel below the strip to its other colour: what you see of a click.
  * - `?t=<ms>&c=<clicks>` draws that once and nothing more: the strip checked through H.264 without a clock.
  * The rest of the page is mid-grey, which the reader takes for no block at all.
@@ -45,11 +47,11 @@ if (fixed.has("t")) {
 } else {
   draw(Date.now());
   addEventListener("keydown", (event) => {
-    if (event.key === "g" && !running) {
+    if ((event.key === "Enter" || event.key === "g") && !running) {
       running = true;
       state.textContent = "Running";
       requestAnimationFrame(frame);
-    } else if (event.key === "s") {
+    } else if (event.key === "Escape" || event.key === "s") {
       running = false;
       state.textContent = "Still";
     }
