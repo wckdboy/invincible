@@ -76,13 +76,14 @@ describe("the page's sprite", () => {
 });
 
 describe("its stylesheet", () => {
-  test("only working breathes, by opacity; still where motion is reduced (unless set to full); paused while the page is hidden", () => {
+  test("only working breathes, by opacity; still where motion is reduced (by the system, unless set to full, or by Settings); paused while the page is hidden", () => {
     expect(GLASS_CSS).toContain('.agent-glass[data-state="working"]::before { animation: gl-pool');
     expect(GLASS_CSS).toMatch(/@keyframes gl-pool \{ 0%, 100% \{ opacity: [0-9.]+; \} 50% \{ opacity: 1; \} \}/);
-    expect(GLASS_CSS).toContain('@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass::before, :root:not([data-motion="full"]) .agent-glass::after { animation: none; } }');
+    expect(GLASS_CSS).toContain('@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="working"]::before, :root:not([data-motion="full"]) .agent-glass[data-state="working"]::after { animation: none; } }');
+    expect(GLASS_CSS).toContain(':root[data-motion="reduce"] .agent-glass[data-state="working"]::before, :root[data-motion="reduce"] .agent-glass[data-state="working"]::after { animation: none; }');
     expect(GLASS_CSS).toContain(":root[data-hidden] .agent-glass::before, :root[data-hidden] .agent-glass::after { animation-play-state: paused; }");
-    // Nothing else in it moves.
-    expect(GLASS_CSS.match(/animation:/g)).toHaveLength(3);
+    // Nothing else in it moves: its two breaths, and the two rules that still them.
+    expect(GLASS_CSS.match(/animation:/g)).toHaveLength(4);
   });
 
   test("its glow follows the page's theme by itself: the pool on a dark page, the shadow on a light one", () => {

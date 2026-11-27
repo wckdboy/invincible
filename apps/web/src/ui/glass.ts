@@ -66,7 +66,8 @@ export const GLASS_CSS = `
 @keyframes gl-pool { 0%, 100% { opacity: ${GLASS_GLOW.pool.breathe}; } 50% { opacity: 1; } }
 @keyframes gl-shade { 0%, 100% { opacity: ${GLASS_GLOW.shadow.breathe}; } 50% { opacity: 1; } }
 :root[data-hidden] .agent-glass::before, :root[data-hidden] .agent-glass::after { animation-play-state: paused; }
-@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass::before, :root:not([data-motion="full"]) .agent-glass::after { animation: none; } }
+:root[data-motion="reduce"] .agent-glass[data-state="working"]::before, :root[data-motion="reduce"] .agent-glass[data-state="working"]::after { animation: none; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="working"]::before, :root:not([data-motion="full"]) .agent-glass[data-state="working"]::after { animation: none; } }
 .gl-dot { position: absolute; right: calc(-1 * var(--gl-dot-out)); bottom: calc(-1 * var(--gl-dot-out)); width: var(--gl-dot); height: var(--gl-dot); border-radius: 50%; background: var(--gl-dot-c); box-shadow: 0 0 0 var(--gl-dot-cut) var(--gl-surface, var(--bg)); }
 [data-state="working"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.working.light}, ${GLASS_DOT.colors.working.dark}); }
 [data-state="needs"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.needs.light}, ${GLASS_DOT.colors.needs.dark}); }

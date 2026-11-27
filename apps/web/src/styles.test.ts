@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { GLASS_CSS } from "./ui/glass.ts";
 
 /* The app's stylesheet, as rules: a selector list and its declarations. */
 const css = readFileSync(join(import.meta.dir, "index.html"), "utf8").match(/<style>([^]*?)<\/style>/)![1]!;
@@ -27,7 +28,8 @@ function placed(text: string, media: string[] = []): Placed[] {
   }
   return out;
 }
-const all = placed(css.replace(/\/\*[^]*?\*\//g, ""));
+/* (With the rules the agents' glass brings as it is first drawn, ui/glass.ts', which the same rules hold.) */
+const all = placed((css + GLASS_CSS).replace(/\/\*[^]*?\*\//g, ""));
 
 interface Screen { width: number; touch: boolean }
 /** Whether a media query holds on a screen: width and pointer are known; anything else might hold, so it's taken to. */
@@ -182,10 +184,11 @@ describe("the stylesheet", () => {
     expect(unstilled).toEqual([]);
   });
 
-  test("nothing animates at rest: what repeats for ever says only that something is loading or being written", () => {
+  test("nothing animates at rest: what repeats for ever says only that something is loading, being written or worked on", () => {
     // (Your word, 26 November 2026: a hyper-modern interface with nothing animating at rest. A state's dot is lit, still;
-    // the banner's line of light passes once as it tries again. Loading and writing are not rest.)
-    const ALLOWED = [".spinner", ".skeleton::after", ".caret", ".boot img"];
+    // the banner's line of light passes once as it tries again. Loading and writing are not rest, nor is an agent's work:
+    // a working agent's light breathes, by opacity alone, the lead's call for the glass of 27 November 2026.)
+    const ALLOWED = [".spinner", ".skeleton::after", ".caret", ".boot img", '.agent-glass[data-state="working"]::before', '.agent-glass[data-state="working"]::after'];
     const forever = all.filter((r) => /(?:^|;)\s*animation(?:-iteration-count)?\s*:[^;]*\binfinite\b/.test(r.body)).flatMap((r) => r.selectors);
     expect(forever.filter((selector) => !ALLOWED.includes(selector))).toEqual([]);
   });
