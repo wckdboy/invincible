@@ -1042,7 +1042,7 @@ export const TOOLS: PrimaryTool[] = [
   tool({
     name: "team_merge",
     title: "Merge an agent's proven work",
-    description: "Merge the pull request you shipped of an agent's task whose gates and independent reviewer passed it, through GitHub's own merge: only once GitHub says it is clean (every check and review its rules require has passed), only while its head is still what was pushed, never forced, by a method the repository allows. In a repository the user gave an agent it is yours to merge, unless the user turned that off there or the work changes what the repository's CI runs; anywhere else it waits for the user. Merge once its checks are green: if they aren't yet, you are told so, and can look again later.",
+    description: "Merge the pull request you shipped of an agent's task whose gates and independent reviewer passed it, through GitHub's own merge: only once GitHub says it is clean (every check and review its rules require has passed) and the checks its workflows run on a pull request have passed, only into the default branch from the branch you shipped, only while its head is the very commit this node last pushed and every commit it lands is this node's own push of proven work (your ship, and verified fixes), never forced, by a method the repository allows. In a repository the user gave an agent it is yours to merge, unless the user turned that off there or the work changes what the repository's CI runs; anywhere else it waits for the user. Merge once its checks are green: if they aren't yet, you are told so, and can look again later.",
     input: {
       task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("The task's id, as team lists it: one you shipped"),
     },
