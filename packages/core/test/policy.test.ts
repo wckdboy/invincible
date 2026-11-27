@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decide, type OwnCall, ownApproval } from "../src/index.ts";
+import { decide, type OwnCall, ownApproval, ownApprovalInLog, primaryCaller } from "../src/index.ts";
 
 describe("approvals", () => {
   test("creating infrastructure is free; deleting it asks", () => {
@@ -61,5 +61,21 @@ describe("what your agent approves itself", () => {
     expect(ownApproval(github({ args: { owner: ["amiriteorg"], repo: "invincible" } }), AGENTS)).toBeNull();
     // A pull request from a branch that isn't its (yours, or another fork's), or from none, is yours (Ivo's review).
     for (const head of ["feat/orders", "main", "someone:invincible/units", "invincible/", undefined]) expect([head, ownApproval(github({ args: { owner: "amiriteorg", repo: "invincible", ...(head === undefined ? {} : { head }) } }), AGENTS)]).toEqual([head, null]);
+  });
+});
+
+describe("what every replica holds your agent's own approval to", () => {
+  test("its own callers: it, its agents' work as the node carries it out, and its loops; never a tool you run with a token of its own, nor another node", () => {
+    for (const by of ["primary", "arm:primary", "team.0123456789.ada", "loop:nightly"]) expect([by, primaryCaller(by)]).toEqual([by, true]);
+    for (const by of ["arm:claude-code", "arm:team.0123456789.ada", "n_node", "you", ""]) expect([by, primaryCaller(by)]).toEqual([by, false]);
+  });
+
+  test("from the log alone: a call of its own caller that ownApproval allows, in the repository the call names", () => {
+    const call = { class: "outward" as const, origin: "https://api.github.com", method: "POST", path: "/repos/{owner}/{repo}/issues", args: { owner: "amiriteorg", repo: "invincible" } };
+    expect(ownApprovalInLog({ ...call, by: "team.0123456789.ada" })).toBe("an issue in amiriteorg/invincible, a repository you gave an agent");
+    expect(ownApprovalInLog({ ...call, by: "arm:claude-code" })).toBeNull();
+    expect(ownApprovalInLog({ ...call, class: "delete", method: "DELETE", path: "/repos/{owner}/{repo}", by: "primary" })).toBeNull();
+    expect(ownApprovalInLog({ ...call, origin: "https://forge.example.test", by: "primary" })).toBeNull();
+    expect(ownApprovalInLog({ ...call, args: { repo: "invincible" }, by: "primary" })).toBeNull();
   });
 });

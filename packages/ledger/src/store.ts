@@ -5,6 +5,7 @@ import {
   canonical,
   compareEvents,
   type ConnectorManifest,
+  type ConnectorTool,
   decodeHlc,
   type DeviceId,
   type EventKind,
@@ -12,9 +13,11 @@ import {
   HlcClock,
   HOMED_KINDS,
   isKnownKind,
+  isMcpTool,
   isNodeId,
   type Json,
   orderCovers,
+  ownApprovalInLog,
   type OrderTerms,
   parseEvent,
   type Prov,
@@ -980,9 +983,21 @@ export class LedgerStore {
       case "action.decided": {
         if (!isFullNode(signer)) return "only full nodes may record decisions";
         const body = bodyOf(event, "action.decided");
-        if (!this.lww(`action:${body.id}`)) return "no such action";
+        const asked = this.lww<{ connector: string; tool: string; args: Record<string, unknown>; class: string; by: string }>(`action:${body.id}`)?.value;
+        if (!asked) return "no such action";
         // The first decision stands: an approval can't be flipped after the fact, nor a refusal.
         if (this.lww(`action-decision:${body.id}`)) return "action already decided";
+        // An approval recorded as an agent's is the primary's own, and every replica holds it to that rule (policy.ts
+        // ownApprovalInLog) as the connector stood, as an order applied is held to what it covers: a caller of its own,
+        // a call the rule allows. (Its refusal is never refused.)
+        if (event.prov?.trust === "agent" && body.verdict === "approved") {
+          const manifest = this.lww<Pick<ConnectorManifest, "origin" | "tools">>(`connector:${asked.connector}`)?.value;
+          const tool = manifest?.tools?.[asked.tool];
+          const plain = tool && !isMcpTool(tool) ? (tool as ConnectorTool) : null;
+          if (!manifest || !plain || !ownApprovalInLog({ class: asked.class as never, origin: manifest.origin, ...(plain.native ? { native: plain.native } : {}), method: plain.method, path: plain.path, args: asked.args ?? {}, by: asked.by })) {
+            return "not one your agent may approve itself";
+          }
+        }
         // One recorded as an agent's, not yours, is the primary's own approval (policy.ts ownApproval): it says so where it shows.
         this.putLww(`action-decision:${body.id}`, event, { ...body, ...(event.prov?.via ? { via: event.prov.via } : {}), ...(event.prov?.trust === "agent" ? { self: true } : {}) } as Json);
         return null;

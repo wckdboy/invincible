@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, type GEvent, newNodeIdentity, registrationDigest, toolDigest, type EvalRecord } from "@invincible/core";
+import { b64u, type GEvent, newNodeIdentity, type NodeIdentity, type Prov, registrationDigest, signEvent, toolDigest, type EvalRecord } from "@invincible/core";
 import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../src/index.ts";
 
 /*
@@ -199,6 +199,65 @@ const order = (id: string, patch: Record<string, unknown> = {}) => ({
   digest: toolDigest(PR as never, "issue.create")!,
   label: "Issues in our repos",
   ...patch,
+});
+
+/*
+ * Your agent's own approvals (policy.ts ownApproval): recorded as an agent's, and held by every replica to that rule as
+ * the connector stood, as an order applied is held to what it covers. Which repositories you gave your agents is each
+ * node's team's to know, not the log's; everything else of the rule is the log's to check.
+ */
+describe("your agent's own approvals in the log", () => {
+  const forge = (store: LedgerStore, signer: NodeIdentity, kind: string, body: unknown, prov?: Prov): GEvent =>
+    signEvent({ v: 2, fleet: store.fleet!, hlc: store.clock.tick(), device: signer.id, prev: store.head(signer.id), kind, body: body as never, ...(prov ? { prov } : {}) }, signer);
+  const GH = {
+    ...PR,
+    tools: {
+      ...PR.tools,
+      "repo.delete": { description: "Delete a repository.", method: "DELETE", path: "/repos/{owner}/{repo}", params: { owner: { type: "string" }, repo: { type: "string" } }, class: "delete" },
+    },
+  };
+  const its = (n: number, over: Record<string, unknown> = {}) => ({ ...request(actionId(n)), by: "team.0123456789.ada", ...over });
+  const own = { trust: "agent" } as const;
+
+  test("every replica holds an approval recorded as your agent's to its rule: an issue its agents' work asked for, yes; a caller not its own, a delete, or another connector's call, refused", () => {
+    const { a, b, storeA, storeB } = fleet();
+    storeA.emit(a, "connector.set", { id: "github", manifest: GH });
+    storeA.emit(a, "connector.set", { id: "forge", manifest: { ...PR, id: "forge", label: "Forge", origin: "https://forge.example.test" } });
+    // An issue its agent's work asked for, in the repository the call names: its own to approve, and said to be.
+    storeA.emit(a, "action.requested", its(20));
+    storeA.emit(a, "action.decided", { id: actionId(20), verdict: "approved", note: "Your agent approved it itself: an issue" }, own);
+    expect(storeA.lww(`action-decision:${actionId(20)}`)?.value).toMatchObject({ verdict: "approved", self: true });
+    // A tool you run with a token of its own is not its caller: yours to answer.
+    storeA.emit(a, "action.requested", its(21, { by: "arm:claude-code" }));
+    expect(() => storeA.emit(a, "action.decided", { id: actionId(21), verdict: "approved" }, own)).toThrow(/not one your agent may approve itself/);
+    // A delete is never its, whoever asked.
+    storeA.emit(a, "action.requested", its(22, { tool: "repo.delete", class: "delete", target: "DELETE /repos/amiriteorg/invincible", args: { owner: "amiriteorg", repo: "invincible" } }));
+    expect(() => storeA.emit(a, "action.decided", { id: actionId(22), verdict: "approved" }, own)).toThrow(/not one your agent may approve itself/);
+    // Another connector's call, though its tool reads the same.
+    storeA.emit(a, "action.requested", its(23, { connector: "forge" }));
+    expect(() => storeA.emit(a, "action.decided", { id: actionId(23), verdict: "approved" }, own)).toThrow(/not one your agent may approve itself/);
+    // Forged and sent on anyway: every replica refuses it the same way, and nothing of it stands.
+    const forged = forge(storeA, a, "action.decided", { id: actionId(22), verdict: "approved" }, own);
+    storeA.ingest([forged]);
+    syncInto(storeA, storeB);
+    for (const store of [storeA, storeB]) {
+      expect(store.rejection(forged.id)).toBe("not one your agent may approve itself");
+      expect(store.lww(`action-decision:${actionId(22)}`)).toBeNull();
+      expect(store.lww(`action-decision:${actionId(20)}`)?.value).toMatchObject({ verdict: "approved", self: true });
+    }
+    expect(storeA.digest()).toBe(storeB.digest());
+    // Yours to answer still, and its own refusal is never refused.
+    storeB.emit(b, "action.decided", { id: actionId(22), verdict: "approved" }, { trust: "owner", via: `c_${"P".repeat(43)}` });
+    storeA.emit(a, "action.decided", { id: actionId(21), verdict: "denied" }, own);
+  });
+
+  test("held to the connector as it stood when it was approved: a tool changed under it is no longer its", () => {
+    const { a, storeA } = fleet();
+    storeA.emit(a, "connector.set", { id: "github", manifest: GH });
+    storeA.emit(a, "action.requested", its(24));
+    storeA.emit(a, "connector.set", { id: "github", manifest: { ...GH, tools: { ...GH.tools, "issue.create": { ...GH.tools["issue.create"], method: "DELETE" } } } });
+    expect(() => storeA.emit(a, "action.decided", { id: actionId(24), verdict: "approved" }, own)).toThrow(/not one your agent may approve itself/);
+  });
 });
 
 describe("standing orders in the log", () => {

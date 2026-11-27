@@ -26,6 +26,7 @@ import {
   type OrderTerms,
   type OrderView,
   ownApproval,
+  primaryCaller,
   randomId,
   redact,
   toolDigest,
@@ -47,7 +48,6 @@ import {
 } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
-import { PRIMARY_ARM } from "./arms.ts";
 
 /*
  * Connector calls, through approvals:
@@ -119,12 +119,8 @@ export interface ConnectorServiceOptions {
 /** How long an action waits for you. No answer means no. */
 export const ACTION_TTL_MS = 24 * 60 * 60_000;
 
-/**
- * The primary's own callers, whose calls it may approve itself: it (its chat's tools, and the node's work for it), its
- * agents' work as the node carries it out, and its loops; no token you mint can take these names (arms.ts). Not a
- * tool you run with a token of its own (arm:…), another node, or you asking to be asked (run).
- */
-const isHis = (by: string): boolean => by === PRIMARY_ARM || by === `arm:${PRIMARY_ARM}` || by.startsWith("team.") || by.startsWith("loop:");
+/** The primary's own callers, whose calls it may approve itself (core's policy.ts primaryCaller, the rule every replica holds it to). */
+const isHis = primaryCaller;
 
 export class ConnectorService {
   private readonly now: () => number;

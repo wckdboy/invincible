@@ -110,6 +110,28 @@ export function ownApproval(call: OwnCall, repositories: readonly string[]): str
   return `${what} in ${where}`;
 }
 
+/**
+ * The primary's own callers, whose calls it may approve itself: it (its chat's tools, and the node's work for it, by its
+ * handle "primary"), its agents' work as the node carries it out (`team.…`), and its loops (`loop:…`). Not a tool you run
+ * with a token of its own (`arm:…`), another node, or you asking to be asked. No token you mint can take these names.
+ */
+export function primaryCaller(by: string): boolean {
+  return by === "primary" || by === "arm:primary" || by.startsWith("team.") || by.startsWith("loop:");
+}
+
+/**
+ * What every replica holds the primary's own approval to, from the log alone (ledger: an action.decided recorded as an
+ * agent's): a call of one of its own callers (primaryCaller) that ownApproval allows, in the repository the call itself
+ * names, as the connector stood. Which repositories you gave your agents is each node's team's to know, not the log's:
+ * the node that approved it checked that part. Null: not one it may approve itself.
+ */
+export function ownApprovalInLog(call: OwnCall & { by: string }): string | null {
+  if (!primaryCaller(call.by)) return null;
+  const { owner, repo } = call.args;
+  if (typeof owner !== "string" || typeof repo !== "string") return null;
+  return ownApproval(call, [`https://github.com/${owner}/${repo}`]);
+}
+
 /** A branch of the primary's own, as the GitHub connector's shipments pin it (connector-catalog.ts). */
 const PRIMARY_BRANCH = /^invincible\/[A-Za-z0-9._-]{1,80}(\/[A-Za-z0-9._-]{1,80})?$/;
 
