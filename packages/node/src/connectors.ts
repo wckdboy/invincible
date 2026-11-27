@@ -272,7 +272,9 @@ export class ConnectorService {
     if (!tool || isMcpTool(tool) || !isHis(caller.by) || caller.yours) return null;
     const pushes = tool.native === "github.ship" || tool.native === "github.ship.update";
     const shipment = pushes && typeof args.artifact === "string" ? (this.o.shipment?.(args.artifact) ?? null) : null;
-    const call: OwnCall = { class: cls, origin: manifest.origin, ...(tool.native ? { native: tool.native } : {}), method: tool.method, path: tool.path, args, by: caller.by, ...(shipment ? { changes: shipment.files, base: shipment.base } : {}) };
+    // A merge lands every push this node sent onto the pull request's branch: their files, from their kept shipments.
+    const merged = tool.native === "github.merge" ? this.pulledFiles(args.owner, args.repo, args.number) : undefined;
+    const call: OwnCall = { class: cls, origin: manifest.origin, ...(tool.native ? { native: tool.native } : {}), method: tool.method, path: tool.path, args, by: caller.by, ...(shipment ? { changes: shipment.files, base: shipment.base } : merged ? { changes: merged } : {}) };
     // A fix's own branch, a pull request's head: what it last pushed there.
     const onto = tool.native === "github.ship" ? undefined : judgedBranch(call, undefined);
     if (onto !== undefined && typeof args.owner === "string" && typeof args.repo === "string") {
@@ -285,6 +287,27 @@ export class ConnectorService {
     if (now) return now;
     if (ownApproval(call, repositories, supposedFacts(call)) === null) return null;
     return ownApproval(call, repositories, await this.githubFacts(manifest, call, givenRepository(call, repositories)));
+  }
+
+  /**
+   * What a pull request this node shipped changes, as a merge of it would land it: the files of each push it sent there
+   * (its ship, and every fix since onto its branch), from their kept shipments. Undefined when this node shipped no such
+   * pull request, or a push's files can't be read: then such a merge is yours.
+   */
+  private pulledFiles(owner: unknown, repo: unknown, number: unknown): readonly string[] | undefined {
+    if (typeof owner !== "string" || typeof repo !== "string" || typeof number !== "number") return undefined;
+    const there = (a: ActionView) => String(a.args.owner).toLowerCase() === owner.toLowerCase() && String(a.args.repo).toLowerCase() === repo.toLowerCase();
+    const pushed = this.actions(10_000).filter((a) => a.state === "done" && a.node === this.o.identity.id && (a.tool === "ship" || a.tool === "ship.update") && there(a));
+    // (A receipt opens with the status GitHub answered: "201 pull request #7: …".)
+    const ship = pushed.find((a) => a.tool === "ship" && new RegExp(`^(\\d{3} )?pull request #${number}:`).test(a.receipt ?? ""));
+    if (!ship) return undefined;
+    const files = new Set<string>();
+    for (const push of pushed.filter((a) => a.args.branch === ship.args.branch)) {
+      const kept = typeof push.args.artifact === "string" ? this.o.shipment?.(push.args.artifact) : null;
+      if (!kept) return undefined;
+      for (const file of kept.files) files.add(file);
+    }
+    return [...files];
   }
 
   private manifest(id: string): ConnectorManifest {

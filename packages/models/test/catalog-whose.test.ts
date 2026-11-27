@@ -40,7 +40,8 @@ const asCall = (t: (typeof tools)[number], args: Record<string, unknown> = ARGS)
   method: "method" in t.definition ? t.definition.method : "POST",
   path: "path" in t.definition ? t.definition.path : "",
   args,
-  by: "arm:primary",
+  // The node's own call for the primary: the caller of what only it files (a merge of proven work) as of all else.
+  by: "primary",
   changes: ["src/units.ts"],
   base: SHA,
   pushed: SHA.slice(0, 12),

@@ -229,6 +229,23 @@ export const CATALOG: Record<string, CatalogEntry> = {
           params: { owner, repo, number, event: { type: "string", enum: ["COMMENT", "REQUEST_CHANGES"], required: true }, body: { type: "string", required: true } },
           class: "outward",
         },
+        // A merge of its agents' proven work, through GitHub's own merge (merge.ts): only once GitHub says every check and
+        // review its rules require has passed, while the head is still what was proven, by a method the repository allows;
+        // never forced, never past a protection, even with a key that could pass one.
+        merge: {
+          description: "Merge a pull request of its agents' proven work through GitHub's own merge, once GitHub says every check and review its rules require has passed, and only while its head is still the commit that was proven: never forced, never past a protection. Your agent merges its agents' proven work itself in the repositories you gave them, unless you turned that off for one; anything else asks you first.",
+          native: "github.merge",
+          method: "PUT",
+          path: "/repos/{owner}/{repo}/pulls/{number}/merge",
+          params: {
+            owner,
+            repo,
+            number,
+            sha: { type: "string", pattern: "[0-9a-f]{7,40}", required: true, description: "The head commit that was proven (at least its first seven hex digits)" },
+            method: { type: "string", enum: ["merge", "squash", "rebase"], description: "How it merges (by default one the repository allows: a merge commit, squash, then rebase)" },
+          },
+          class: "outward",
+        },
       },
     },
   },

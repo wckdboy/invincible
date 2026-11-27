@@ -60,6 +60,7 @@ import { loadEnv } from "./env.ts";
 import type { Home } from "./home.ts";
 import { createApp, listening } from "./server.ts";
 import { shipmentFiles, shipNative } from "./ship.ts";
+import { mergeNative } from "./merge.ts";
 import { type DoctorDeps, type DoctorOptions, type DoctorRun, type DoctorSystem, heartbeatFromDoctor, noSystem, realSystem, runDoctor, TroubleLog } from "./doctor-facts.ts";
 import { NotifyService } from "./notify.ts";
 import { Terminals } from "./terminals.ts";
@@ -618,7 +619,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
 
   // MCP servers' questions mid-call (questions.ts): each waits in your Inbox for you, and its call with it.
   const questions = new Questions({ log });
-  const connectors = new ConnectorService({ store, vault, identity, local, ledger, log, fetch: opts.fetch, ask: (connector, params, signal) => questions.ask(connector, params, signal), ...(opts.oauthEndpoints ? { oauthEndpoints: opts.oauthEndpoints } : {}), natives: { "github.ship": shipNative(artifacts), "github.ship.update": shipNative(artifacts, true), ...gmailNatives, ...outlookNatives, ...cloudflareNatives }, repositories: () => team.store.agents().flatMap((k) => (k.repository ? [k.repository] : [])), shipment: shipmentFiles(artifacts) });
+  const connectors = new ConnectorService({ store, vault, identity, local, ledger, log, fetch: opts.fetch, ask: (connector, params, signal) => questions.ask(connector, params, signal), ...(opts.oauthEndpoints ? { oauthEndpoints: opts.oauthEndpoints } : {}), natives: { "github.ship": shipNative(artifacts), "github.ship.update": shipNative(artifacts, true), "github.merge": mergeNative(), ...gmailNatives, ...outlookNatives, ...cloudflareNatives }, repositories: () => team.store.agents().flatMap((k) => (k.repository ? [k.repository] : [])), shipment: shipmentFiles(artifacts) });
   const taskDeps: LoopTaskDeps = {
     store,
     vault,

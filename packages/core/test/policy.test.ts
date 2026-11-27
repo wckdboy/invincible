@@ -208,6 +208,20 @@ describe("what your agent approves itself in a repository you gave an agent", ()
     expect(ownApproval(fix({ changes: undefined }), AGENTS, at("invincible/units", PUSHED))).toBeNull();
   });
 
+  // Your word, 27 November 2026 (slice 5): merging is its, of proven work, in the repositories you gave your agents.
+  test("a merge is its own only as the node's own (which checked the work was proven and shipped), in a repository you gave an agent, landing nothing the CI runs", () => {
+    const merge = (over: Partial<OwnCall> = {}): OwnCall => github({ native: "github.merge", method: "PUT", path: "/repos/{owner}/{repo}/pulls/{number}/merge", args: { owner: "amiriteorg", repo: "invincible", number: 7, sha: "c".repeat(12) }, by: "primary", changes: CODE, ...over });
+    expect(ownApproval(merge(), AGENTS)).toBe("a merge of its agents' proven work, through GitHub's own merge once every check its rules require passed, in amiriteorg/invincible, a repository you gave an agent");
+    // One its chat, its agents or its loops ask for themselves is yours: none of them checked what the node checks.
+    for (const by of ["arm:primary", "team.0123456789.ada", "arm:team.0123456789.ada", "loop:release", "arm:claude-code"]) expect([by, ownApproval(merge({ by }), AGENTS)]).toEqual([by, null]);
+    // Landing a change to what the CI runs, or changes not known: yours. Anyone else's repository, or a private one of
+    // yours: yours too.
+    expect(ownApproval(merge({ changes: [...CODE, ".github/workflows/release.yml"] }), AGENTS)).toBeNull();
+    expect(ownApproval(merge({ changes: undefined }), AGENTS)).toBeNull();
+    expect(ownApproval(merge(), [])).toBeNull();
+    expect(ownApproval(merge(), [], { user: { id: 501 }, repo: { name: "amiriteorg/invincible", private: true, fork: false, ownerId: 501, ownerType: "User" } })).toBeNull();
+  });
+
   test("everything else waits for you", () => {
     // Someone else's repository: it speaks for you in another's place.
     expect(ownApproval(ship({}, { owner: "oven-sh", repo: "bun" }), AGENTS, at("main", MAIN))).toBeNull();
@@ -353,6 +367,10 @@ describe("what every replica holds your agent's own approval to", () => {
     expect(ownApprovalInLog({ ...call, path: "/repos/{owner}/{repo}/issues/{number}/comments", args: { owner: "lin-example", repo: "notes", number: 4 }, by: "arm:primary" })).toBe("a comment on its own thread #4 in lin-example/notes, a repository you gave an agent");
     // And so do its words, which the node reads before it files them: one approved before that was the rule replays.
     expect(ownApprovalInLog({ ...call, path: "/repos/{owner}/{repo}/issues/{number}/comments", args: { owner: "lin-example", repo: "notes", number: 4, body: "@lin-example thanks, merged" }, by: "arm:primary" })).toStartWith("a comment on its own thread #4");
+    // A merge is held to its caller in the log too: the node's own, never its chat's or an agent's.
+    const merge = { ...call, native: "github.merge", method: "PUT", path: "/repos/{owner}/{repo}/pulls/{number}/merge", args: { owner: "amiriteorg", repo: "invincible", number: 7, sha: "c".repeat(12) } };
+    expect(ownApprovalInLog({ ...merge, by: "primary" })).toStartWith("a merge of its agents' proven work");
+    for (const by of ["arm:primary", "team.0123456789.ada", "arm:team.0123456789.ada", "loop:release"]) expect([by, ownApprovalInLog({ ...merge, by })]).toEqual([by, null]);
   });
 
   test("what would make a call its own, were GitHub to say it, keeps what the node itself knows of it", () => {

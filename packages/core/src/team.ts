@@ -337,6 +337,10 @@ export const TeamBacklogInput = z.strictObject({ on: z.boolean() });
  * and of the proposals it approves itself (TEAM_LIMITS.ownDailyUsd until you set another; 0: none, all of them yours). */
 export const TeamOwnDailyInput = z.strictObject({ usd: z.number().min(0).max(1000) });
 export type TeamOwnDailyInput = z.infer<typeof TeamOwnDailyInput>;
+/** Your switch for the primary's own merging of its agents' proven work in a repository you gave an agent (`owner/repo`):
+ * on until you turn it off there (your word, 27 November 2026). */
+export const TeamMergeInput = z.strictObject({ repository: z.string().regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/, "a repository as owner/repo"), on: z.boolean() });
+export type TeamMergeInput = z.infer<typeof TeamMergeInput>;
 
 /** What an agent's Workspace is told of the notes store: the node's switch, and whether this VM has the pinned binary. */
 export interface TeamEngramStatus {
@@ -698,6 +702,8 @@ export interface TeamSnapshot {
   backlog?: boolean;
   /** What the primary may commit on its own word in a day while you set no usage budget (TeamOwnDailyInput; absent from an older node). */
   ownDailyUsd?: number;
+  /** The repositories where you turned the primary's own merging off (TeamMergeInput; absent: none). */
+  mergeOff?: string[];
   /** The primary's own computer, when it has one: its persistent VM, made and watched as an agent's is (under its handle). */
   computer?: TeamWorkspace;
   /** When you last looked, on any device, at each agent's page (`agent:<id>`) and each room (`room:<id>`): what ended

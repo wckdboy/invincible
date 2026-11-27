@@ -677,3 +677,37 @@ test("export writes an agent as a file you carry; import shows it, then makes it
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Your word, 27 November 2026 (slice 5): merging is its, on by default, in the repositories you gave your agents.
+test("agents merge says whether your agent merges its agents' proven work itself in a repository, and turns it off or on there by the one route for it", async () => {
+  const lines: string[] = [];
+  const asked: { name: RouteName; input: unknown }[] = [];
+  const off = new Set<string>();
+  const api = {
+    async call<T>(name: RouteName, input?: unknown): Promise<T> {
+      asked.push({ name, input });
+      if (name === "team") return { agents: [], rooms: [], tasks: [], deliveries: [], ...(off.size ? { mergeOff: [...off] } : {}) } as T;
+      if (name === "teamMerge") {
+        const { repository, on } = input as { repository: string; on: boolean };
+        if (on) off.delete(repository.toLowerCase());
+        else off.add(repository.toLowerCase());
+        return { repository, on } as T;
+      }
+      throw new Error(`unexpected call: ${name}`);
+    },
+  };
+  const say = (line: string) => lines.push(line);
+  await teamCommand(api, "merge", ["amiriteorg/shipyard"], {}, say);
+  expect(lines.at(-1)).toBe("Your agent merges its agents' proven work in amiriteorg/shipyard itself, as it may in a repository you gave an agent: once GitHub says a pull request is clean (every check and review its rules require has passed), through GitHub's own merge, never forced, and never one that changes what the repository's CI runs. Turn it off there with: invincible agents merge amiriteorg/shipyard off");
+  await teamCommand(api, "merge", ["amiriteorg/shipyard", "off"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "teamMerge", input: { repository: "amiriteorg/shipyard", on: false } });
+  expect(lines.at(-1)).toBe("Merging in amiriteorg/shipyard is yours: your agent ships its agents' work there and leaves the merge to you. Turn its own merging on again with: invincible agents merge amiriteorg/shipyard on");
+  await teamCommand(api, "merge", ["AmiriteOrg/Shipyard"], {}, say);
+  expect(lines.at(-1)).toStartWith("Merging in AmiriteOrg/Shipyard is yours");
+  await teamCommand(api, "merge", ["amiriteorg/shipyard", "on"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "teamMerge", input: { repository: "amiriteorg/shipyard", on: true } });
+  // Anything but owner/repo, and on or off, is not sent anywhere.
+  const before = asked.length;
+  for (const bad of [[], ["shipyard"], ["amiriteorg/shipyard", "maybe"], ["https://github.com/amiriteorg/shipyard"], ["amiriteorg/shipyard", "on", "now"]]) await expect(teamCommand(api, "merge", bad, {}, say)).rejects.toThrow(/invincible agents merge <owner\/repo> \[on\|off\]/);
+  expect(asked).toHaveLength(before);
+});

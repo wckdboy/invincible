@@ -7,7 +7,7 @@ import { z } from "zod";
 import {
   TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, AgentId, AgentInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,
   type Agent, type TeamRoom, type TeamMessage, type TeamTask, type TeamDelivery, type TeamSnapshot, type TeamRoomView, type TeamWorkStatus, type TeamOverview,
-  TeamOutcomeInput, TeamOwnDailyInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, type TeamSteer, heldModels, SENSITIVE_WORK,
+  TeamMergeInput, TeamOutcomeInput, TeamOwnDailyInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, type TeamSteer, heldModels, SENSITIVE_WORK,
 } from "../../core/src/team.ts";
 import { type InterventionKind, type NorthStar, northStar } from "../../core/src/interventions.ts";
 import { TaskAccount } from "../../core/src/seats.ts";
@@ -297,6 +297,16 @@ export class TeamStore {
   heldUsd(): number {
     return this.db.query<{ usd: number }, []>("SELECT COALESCE(SUM(json_extract(data,'$.budgetUsd')),0) AS usd FROM team_jobs WHERE kind='task' AND status IN ('queued','running')").get()!.usd;
   }
+  /** Whether the primary merges its agents' proven work itself in a repository (owner/repo, whatever its case): on until you turn it off there. */
+  mergeOn(repository: string): boolean { return this.db.query<DocRow, [string]>("SELECT value FROM team_settings WHERE key=?").get(`merge:${repository.toLowerCase()}`)?.value !== "off"; }
+  setMerge(raw: TeamMergeInput): TeamMergeInput {
+    const { repository, on } = teamInput(TeamMergeInput, raw);
+    if (on) this.db.query("DELETE FROM team_settings WHERE key=?").run(`merge:${repository.toLowerCase()}`);
+    else this.db.query("INSERT INTO team_settings(key,value) VALUES(?,'off') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(`merge:${repository.toLowerCase()}`);
+    return { repository, on };
+  }
+  /** The repositories where you turned it off, lowercased. */
+  mergeOff(): string[] { return this.db.query<{ key: string }, []>("SELECT key FROM team_settings WHERE key LIKE 'merge:%' AND value='off' ORDER BY key").all().map((r) => r.key.slice("merge:".length)); }
   /** Whether failing checks go back to the agent whose work it was when no outcome gives them back (PLAN #29): off until you turn it on. */
   ciBack(): boolean { return this.db.query<DocRow, []>("SELECT value FROM team_settings WHERE key='ci'").get()?.value === "on"; }
   setCiBack(raw: boolean): boolean {
@@ -853,7 +863,7 @@ export class TeamStore {
     const direct = this.rooms().filter((room) => room.direct).sort((a, b) => a.members.length - b.members.length);
     const removed = this.removed().map(({ id, name, removedAt }) => { const conversations = direct.filter((room) => room.members.includes(id)).map((room) => room.id); return { id, name, removedAt, ...(conversations.length ? { conversations } : {}) }; });
     const computer = this.computer();
-    return { northStar: this.northStar(this.now() - 30 * 86_400_000), agents: this.agents(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.primaryAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ownDailyUsd: this.ownDaily(), ...(computer ? { computer } : {}), seen: this.seen() };
+    return { northStar: this.northStar(this.now() - 30 * 86_400_000), agents: this.agents(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.primaryAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ownDailyUsd: this.ownDaily(), ...(this.mergeOff().length ? { mergeOff: this.mergeOff() } : {}), ...(computer ? { computer } : {}), seen: this.seen() };
   }
   /**
    * Which writing of the team this is, for the live stream: the rows this store has written, and the database's

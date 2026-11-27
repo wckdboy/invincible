@@ -3,7 +3,7 @@ import {
   TEAM_PRIMARY, TEAM_LIMITS, capLabel, TeamControlInput, TeamRoomId, type TeamSayInput, AgentId, TeamSteerInput, type TeamSteer,
   type Agent, type AgentInput, type TeamRecruitInput, type TeamRoom, type TeamRoomInput, type TeamPostInput, type TeamWorkspace,
   type TeamMessage, type TeamTask, type TeamTaskChanges, type TeamTaskInput, type TeamTaskRecord, type TeamTrailEntry, type TeamSnapshot, type TeamRoomView, type TeamOverview, type TeamSeenInput,
-  type InterventionKind, type TeamWorkStatus, type TeamTaskFix, type TeamTaskShipped,
+  type InterventionKind, type TeamWorkStatus, type TeamTaskFix, type TeamTaskShipped, type TeamMergeInput,
 } from "../../core/src/team.ts";
 import { CUT_OFF, TeamStore, TeamError, teamInput, teamOutput, teamText, WITHDRAWN, YOURS_STOPPED, type TeamAnswer, type TeamAsker, type TeamJob, type TeamSelection } from "./team-store.ts";
 
@@ -141,6 +141,8 @@ export class TeamService {
   /** Whether failing checks go back to the agent whose work it was, outside an outcome too (ci-back.ts reads it when they fail). */
   setCiBack(on: boolean): boolean { this.accepting(); const set = this.store.setCiBack(on); this.changed(); return set; }
   setBacklog(on: boolean): boolean { this.accepting(); const set = this.store.setBacklog(on); this.changed(); return set; }
+  /** Whether it merges its agents' proven work itself in a repository: yours to turn off there, and on again. */
+  setMerge(input: TeamMergeInput): TeamMergeInput { this.accepting(); const set = this.store.setMerge(input); this.changed(); return set; }
   /**
    * Work proposed to an agent, waiting for a yes: the primary's from your backlog (backlog.ts), which it may approve
    * itself; or a task another node handed over beyond your grant (`node:<id>`, fabric/handoff.ts), which only you approve.

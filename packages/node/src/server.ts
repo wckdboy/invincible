@@ -2590,6 +2590,50 @@ export function createApp(ctx: AppContext) {
     if (yours) steppedIn({ task: task.id }, "approval", "shipped it");
     return { receipt, url, pr };
   }
+  /** Where a task's shipped work stands, as this node itself sent it: the ship of its kept work (its connector, repository
+   * and branch), and the head it last pushed onto that branch (its ship's commit, or a proven fix's since), as the
+   * receipts say it. Null: it shipped nothing of it from here. */
+  function shippedHead(artifact: string): { connector: string; owner: string; repo: string; branch: string; head: string | null } | null {
+    const pushed = ctx.connectors.actions(10_000).filter((a) => a.state === "done" && a.node === ctx.identity.id && (a.tool === "ship" || a.tool === "ship.update"));
+    const ship = pushed.find((a) => a.tool === "ship" && a.args.artifact === artifact);
+    if (!ship) return null;
+    const { owner, repo, branch } = ship.args as { owner: string; repo: string; branch: string };
+    const doneAt = (id: string) => { const hlc = ctx.store.lww(`action-done:${id}`)?.hlc; return hlc ? decodeHlc(hlc).ms : 0; };
+    const last = pushed.filter((a) => String(a.args.owner).toLowerCase() === owner.toLowerCase() && String(a.args.repo).toLowerCase() === repo.toLowerCase() && a.args.branch === branch).sort((x, y) => doneAt(x.id) - doneAt(y.id)).at(-1);
+    return { connector: ship.connector, owner, repo, branch, head: /commit ([0-9a-f]{12})/.exec(last?.receipt ?? "")?.[1] ?? null };
+  }
+  /* Its agents' proven work that it shipped, merged (team_merge; your word, 27 November 2026: merging is its, on by
+   * default, in the repositories you gave your agents): filed as the node's own merge ("primary"), its own approval only
+   * there and only where it lands nothing the repository's CI runs (policy.ts ownApproval), through GitHub's own merge
+   * once GitHub says it is clean, its head still what this node pushed (merge.ts). Where you turned merging off it is
+   * refused, and anywhere else the merge waits for you. Said on the task's trail either way, with what proved it. */
+  async function mergeTask(id: string): Promise<{ merged: string } | { asked: string }> {
+    const task = ctx.team!.store.task(id);
+    if (!task) throw new HttpError(404, `no task ${id}`);
+    if (task.status !== "done" || !task.verified || !task.changes) throw new HttpError(409, "only work its gates and an independent reviewer passed is merged");
+    if (!task.shipped?.pr) throw new HttpError(409, "only work your agent shipped as a pull request is merged: ship it first (team_ship)");
+    const where = shippedHead(task.changes.artifact);
+    if (!where?.head) throw new HttpError(409, "this node shipped no pull request of it that it can follow: merging it is yours");
+    const repository = `${where.owner}/${where.repo}`;
+    if (!teamOf().store.mergeOn(repository)) throw new HttpError(409, `You turned merging off for ${repository}: merging there is yours (invincible agents merge ${repository} on)`);
+    if (!Object.hasOwn(installedConnector(ctx.store, where.connector)?.tools ?? {}, "merge")) throw new HttpError(409, `${where.connector} has no merge tool yet: add it, and only it, with invincible connector tools ${where.connector} --add merge`);
+    const filed = await connectorErrors(() =>
+      ctx.connectors.call(
+        { connector: where.connector, tool: "merge", args: { owner: where.owner, repo: where.repo, number: task.shipped!.pr!, sha: where.head! }, why: `Your agent's word, on @${task.assignee}'s work (task ${task.id}), which its gates and an independent reviewer passed and which it shipped.` },
+        { kind: "agent", by: "primary" },
+      ),
+    );
+    if (filed.status === "asked") {
+      teamOf().noteTask(task.id, `Merging it waits for you: a merge there isn't your agent's own (Inbox, action ${filed.action})`.slice(0, 500));
+      return { asked: filed.action };
+    }
+    if (!filed.result.ok) {
+      teamOf().noteTask(task.id, `Not merged · ${filed.result.body}`.slice(0, 500));
+      throw new HttpError(409, filed.result.body);
+    }
+    teamOf().noteTask(task.id, `Merged by your agent itself · ${filed.result.body}, its gates, its independent reviewer and the pull request's required checks having passed`.slice(0, 500));
+    return { merged: filed.result.body };
+  }
   /** The stop's word to a coding agent's run in its VM (its tool's own interrupt): bound to its VM as every command is, and sent once its task has stopped. */
   async function stopTellTeam(member: Agent, command: string, timeout: number) {
     const bound = teamMember(member.id).workspace;
@@ -3095,6 +3139,7 @@ export function createApp(ctx: AppContext) {
     teamCi: (input, p) => { ownerOnly(p); return { ci: teamOf().setCiBack(input.on) }; },
     teamBacklog: (input, p) => { ownerOnly(p); return { backlog: teamOf().setBacklog(input.on) }; },
     teamOwnDaily: (input, p) => { ownerOnly(p); return { usd: teamOf().setOwnDaily(input.usd) }; },
+    teamMerge: (input, p) => { ownerOnly(p); return teamOf().setMerge(input); },
     /* An agent's verified work as a pull request, on your word (PLAN #37's next step), answered by you at once from the
      * device you tapped on (shipTask). Only from this node, which keeps the work. */
     shipTeamTask: (input, p) => {
@@ -3152,6 +3197,11 @@ export function createApp(ctx: AppContext) {
     primaryShip: (input, p) => {
       if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself ships the agents' work this way; you ship it among the agents");
       return shipTask(input, null);
+    },
+    // Its agents' proven work it shipped, merged (team_merge): only where it may, and said on the trail (mergeTask).
+    primaryMerge: (input, p) => {
+      if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself merges its agents' work this way; you merge on GitHub");
+      return mergeTask(input.task);
     },
     provisionAgent: (input, p, req) => {
       ownerOnly(p);

@@ -101,6 +101,7 @@ export const CATALOG_WHOSE = {
   "github.pr.create": { its: "a pull request from a branch it shipped, still where it last pushed it, into your default branch: it runs the repository's CI", where: ["given"] },
   "github.ship": { its: "its work as a pull request on a new invincible/… branch, built on your default branch's head as GitHub says it stands, changing nothing the repository's CI runs", where: ["given"] },
   "github.ship.update": { its: "a fix pushed onto a branch it shipped, from the commit it last pushed there, never forced, changing nothing the repository's CI runs", where: ["given"] },
+  "github.merge": { its: "a merge of its agents' proven work (the node's own, of a task whose gates and independent reviewer passed and that it shipped), through GitHub's own merge once every check and review its rules require passed, never forced, landing nothing the repository's CI runs", where: ["given"] },
   "github.branch.create": { yours: "security", why: "a branch at a commit runs that commit's own workflows with the repository's secrets, which are your keys, whoever made the commit (a stranger's pull request too)" },
   "cloudflare.r2.bucket.delete": { yours: "destructive", why: "a bucket deleted can't be had back" },
   "home-assistant.service": { yours: "security", why: "the physical world: what moves, heats, unlocks or opens in your home" },
@@ -263,9 +264,15 @@ export function givenRepository(call: Pick<OwnCall, "args">, repositories: reado
 }
 
 /** Its, its agents' and its loops' work in a repository you gave an agent: an issue, its words on its own threads, a
- * pull request from a branch it shipped, and its pushes. */
+ * pull request from a branch it shipped, its pushes, and the node's own merge of its agents' proven work. */
 function inGiven(call: OwnCall, named: string, facts: GitHubFacts): string | null {
   const where = `${named}, a repository you gave an agent`;
+  if (call.native === "github.merge") {
+    // Only the node's own merge of its agents' proven work, which it checked was proven and shipped (primaryMerge): one its
+    // chat, an agent or a loop asks for itself is yours, as is one landing a change to what the repository's CI runs.
+    if (call.by !== "primary" || !call.changes || changesCi(call.changes)) return null;
+    return `a merge of its agents' proven work, through GitHub's own merge once every check its rules require passed, in ${where}`;
+  }
   if (call.native === "github.ship" || call.native === "github.ship.update") return itsPush(call, named, where, facts);
   if (call.native !== undefined) return null;
   const what = GITHUB_OWN[`${call.method} ${call.path}`];

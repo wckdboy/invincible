@@ -45,7 +45,7 @@ export const taskRecordLine = (task: Pick<TeamTask, "record">, prices: Prices): 
 /** What a task changed in its repository and where that is kept (`invincible ship <artifact>` opens a pull request from it). Empty when it kept nothing. */
 export const taskChangesLine = (task: Pick<TeamTask, "changes">): string => (task.changes ? ` · ${task.changes.files} file${task.changes.files === 1 ? "" : "s"} changed, kept as ${task.changes.artifact}` : "");
 
-const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
+const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
 
 /** What an agent works on, in a sentence: its own models or its role's, and whether it is in sensitive mode. */
 const agentModels = (m: Agent): string =>
@@ -381,6 +381,16 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     print(usd > 0
       ? `With no usage budget of yours, your agent may commit ${capLabel(usd)} a day on its own word: the budgets of the tasks it gives and of the proposals it approves itself, ${capLabel(TEAM_LIMITS.ownTaskUsd)} a task at most; past that they are yours. With a budget (invincible usage budget), what is left of it past what approved work holds is the bound instead. Change it with: invincible agents daily <usd>`
       : "With no usage budget of yours, your agent commits nothing on its own word: the tasks it would give are yours to give, and its proposals and its agents' wait for you. Change it with: invincible agents daily <usd>");
+    return;
+  }
+  // Your agent's own merging of its agents' proven work, in a repository you gave an agent: said, or turned off or on there.
+  if (sub === "merge") {
+    if (args.length < 1 || args.length > 2 || !/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(args[0]!) || (args[1] !== undefined && args[1] !== "on" && args[1] !== "off")) throw new Error("usage: invincible agents merge <owner/repo> [on|off]");
+    const repository = args[0]!;
+    const on = args[1] ? (await api.call<{ on: boolean }>("teamMerge", { repository, on: args[1] === "on" })).on : !((await api.call<TeamSnapshot>("team")).mergeOff ?? []).includes(repository.toLowerCase());
+    print(on
+      ? `Your agent merges its agents' proven work in ${repository} itself, as it may in a repository you gave an agent: once GitHub says a pull request is clean (every check and review its rules require has passed), through GitHub's own merge, never forced, and never one that changes what the repository's CI runs. Turn it off there with: invincible agents merge ${repository} off`
+      : `Merging in ${repository} is yours: your agent ships its agents' work there and leaves the merge to you. Turn its own merging on again with: invincible agents merge ${repository} on`);
     return;
   }
   // (An agent by either word: `agent` is what the command took before it was called agents.)

@@ -51,6 +51,9 @@ export const NATIVE_TOOLS = {
   "github.ship": "https://api.github.com",
   /** A fix to a pull request already shipped: one commit on top of its branch, moved forward from exactly where the fix began. */
   "github.ship.update": "https://api.github.com",
+  /** A pull request of its agents' proven work merged through GitHub's own merge: only once GitHub says it is clean (every
+   *  check and review its rules require passed), while its head is still what was proven, by a method it allows; never forced. */
+  "github.merge": "https://api.github.com",
   /** Mail (the node's mail.ts): a search reads each message's headers; a message is read as its words; a reply is
    *  drafted in its thread; nothing comes back as raw MIME. */
   "gmail.search": "https://gmail.googleapis.com",

@@ -132,6 +132,9 @@ of its own; "agents" and "team" are the same command)
                                     the budgets of the tasks it gives and of the proposals it approves itself ($3 a task
                                     at most); $10 until you set another, 0 for none. With a budget (usage budget), what is
                                     left of it past what approved work holds (queued and running tasks) is the bound
+  agents merge <owner/repo> [on|off]  whether your agent merges its agents' proven work itself in a repository you gave
+                                    an agent (on until you turn it off there): through GitHub's own merge once GitHub says
+                                    it is clean, never forced, and never one that changes what the repository's CI runs
   agents avatar <id> [--color #rrggbb | --reset]
                                     an agent's mark, the Grille: pick its colour (its node snaps it to the
                                     nearest of eight), or give it the mark it would get now; with neither, its

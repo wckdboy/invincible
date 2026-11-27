@@ -46,6 +46,8 @@ const macShell: ShellRun = async (command) => {
 const BASE = "a".repeat(40);
 const TOKEN = "github_pat_FAKEFAKEFAKEFAKE0000_fakefakefakefakefakefakefakefakefakefakefakefake";
 const toGitHub: string[] = [];
+/** Its pull requests, numbered as GitHub numbers them, from 7. */
+let pulls = 6;
 const github = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   // (Anything else this node reaches, its models included, is reached as ever.)
@@ -58,13 +60,17 @@ const github = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // Your default branch stands where the work began (so the shipment is built on it); a new branch isn't there yet.
   if (method === "GET" && path === "/git/ref/heads/main") return Response.json({ ref: "refs/heads/main", object: { sha: BASE, type: "commit" } });
   if (method === "GET" && path.startsWith("/git/ref/heads/")) return Response.json({}, { status: 404 });
-  if (method === "GET" && path === "") return Response.json({ full_name: "amiriteorg/shipyard", private: false, fork: false, default_branch: "main", owner: { login: "amiriteorg", id: 600, type: "Organization" } });
+  if (method === "GET" && path === "") return Response.json({ full_name: "amiriteorg/shipyard", private: false, fork: false, default_branch: "main", owner: { login: "amiriteorg", id: 600, type: "Organization" }, allow_merge_commit: false, allow_squash_merge: true, allow_rebase_merge: false });
+  // A pull request of its work, clean (every check and review its rules require passed), its head the commit shipped.
+  const pull = /^\/pulls\/(\d+)(\/merge)?$/.exec(path);
+  if (pull && method === "GET" && !pull[2]) return Response.json({ number: Number(pull[1]), state: "open", merged: false, mergeable: true, mergeable_state: "clean", head: { sha: "c".repeat(40) }, base: { ref: "main" }, html_url: `https://github.com/amiriteorg/shipyard/pull/${pull[1]}` });
+  if (pull && method === "PUT" && pull[2]) return Response.json({ merged: true, sha: "d".repeat(40), message: "Pull Request successfully merged" });
   if (method === "GET" && path === `/git/commits/${BASE}`) return Response.json({ tree: { sha: "f".repeat(40) } });
   if (path === "/git/blobs") return Response.json({ sha: "b".repeat(40) }, { status: 201 });
   if (path === "/git/trees") return Response.json({ sha: "e".repeat(40) }, { status: 201 });
   if (path === "/git/commits") return Response.json({ sha: "c".repeat(40) }, { status: 201 });
   if (path === "/git/refs") return Response.json({}, { status: 201 });
-  if (method === "POST" && path === "/pulls") return Response.json({ number: 7, html_url: "https://github.com/amiriteorg/shipyard/pull/7" }, { status: 201 });
+  if (method === "POST" && path === "/pulls") return (++pulls, Response.json({ number: pulls, html_url: `https://github.com/amiriteorg/shipyard/pull/${pulls}` }, { status: 201 }));
   return Response.json({}, { status: 404 });
 }) as unknown as typeof fetch;
 /** An agent's kept work as a shipment: its manifest and one changed file, on the repository it was cloned from. */
@@ -112,7 +118,7 @@ async function settled(): Promise<TeamSnapshot> {
   return state;
 }
 // Its own tools: the ones to the agents, its own computer, giving a VM more, proposing a fact about you, and a look later.
-const OWN = ["about_you", "computer", "look_later", "mac", "team", "team_again", "team_approve", "team_give", "team_grow", "team_message", "team_outcome", "team_recruit", "team_resume", "team_ship", "team_steer", "team_stop"];
+const OWN = ["about_you", "computer", "look_later", "mac", "team", "team_again", "team_approve", "team_give", "team_grow", "team_merge", "team_message", "team_outcome", "team_recruit", "team_resume", "team_ship", "team_steer", "team_stop"];
 /** One of your own devices, paired with these scopes: its requests are signed, as a phone's are. */
 async function pairDevice(name: string, scopes: Scope[]) {
   const keys = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])) as CryptoKeyPair;
@@ -512,6 +518,63 @@ test("it ships its agents' proven work itself where its rule allows: filed as th
   // Shipped once: a second ship of it is refused.
   script = [callTool("team_ship", { task: proven }), say("It was shipped already.")];
   expect(results(await ask("Ship it again."))).toEqual([expect.objectContaining({ name: "team_ship", ok: false, summary: expect.stringContaining("it was shipped already") })]);
+}, 20_000);
+
+// Your word, 27 November 2026 (slice 5): merging is its, on by default, of proven work in the repositories you gave your
+// agents, through GitHub's own merge once it is clean; you turn it off for a repository.
+test("it merges its agents' proven work itself where it may: once GitHub says it is clean, by a method the repository allows, said on the task; never where you turned that off, nor what it didn't ship", async () => {
+  await api("setConnector", { id: "github" });
+  await api("setSecret", { name: "github", value: TOKEN, provider: "github" });
+  const collector = async (_s: string, _f: string, dest: string) => {
+    const out = { files: [] as { path: string; size: number; sha256: string }[], bytes: 0, skipped: [] as { path: string; reason: string }[] };
+    for (const [path, bytes] of Object.entries(SHIPMENT)) {
+      const target = join(dest, ...path.split("/"));
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, bytes);
+      out.files.push({ path, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
+      out.bytes += bytes.length;
+    }
+    return out;
+  };
+  const proven = async (title: string) => {
+    const artifact = (await daemon.artifacts.save(collector, { sandbox: "0123456789", label: title })).artifact!.id;
+    const team = new TeamStore(join(home.dir, "team.db"));
+    try {
+      team.saveAgent({ id: "noa", name: "Noa", repository: "https://github.com/amiriteorg/shipyard" });
+      const work = team.createTask({ room: team.direct("noa").id, assignee: "noa", title, goal: `${title}, as SI.` });
+      team.finish(work.id, "done", null, { verified: true, output: `${title}: done.\n\nReview: PASS`, changes: { artifact, files: 1, base: BASE } });
+      return work.id;
+    } finally {
+      team.close();
+    }
+  };
+  const trail = async (task: string) => (await api<{ entries: TeamTrailEntry[] }>("teamTrail", { task })).entries.map((e) => e.text);
+  const units = await proven("Format SI units");
+  const before = toGitHub.length;
+  script = [callTool("team_merge", { task: units }), callTool("team_ship", { task: units }), callTool("team_merge", { task: units }), say("Shipped and merged.")];
+  const events = await ask("Ship Noa's formatting work, and merge it once it's green.");
+  // Not shipped yet: nothing to merge; shipped, merged by GitHub's own merge, by the method the repository allows.
+  expect(results(events).map((r) => [r.name, r.ok])).toEqual([["team_merge", false], ["team_ship", true], ["team_merge", true]]);
+  expect(results(events)[0]!.summary).toContain("only work your agent shipped as a pull request is merged");
+  const shipped = (await api<TeamSnapshot>("team")).tasks.find((t) => t.id === units)!.shipped!;
+  expect(told("team_merge")).toContain(`merged #${shipped.pr} into main (squash) at ${"d".repeat(12)}`);
+  expect(toGitHub.slice(before).filter((r) => r.startsWith("PUT "))).toEqual([`PUT /repos/amiriteorg/shipyard/pulls/${shipped.pr}/merge`]);
+  expect(await trail(units)).toContain(`Merged by your agent itself · merged #${shipped.pr} into main (squash) at ${"d".repeat(12)}: ${shipped.url}, its gates, its independent reviewer and the pull request's required checks having passed`);
+  const merge = (await api<{ actions: ActionView[] }>("actions")).actions.find((a) => a.tool === "merge" && a.args.number === shipped.pr)!;
+  expect([merge.state, merge.self, merge.note]).toEqual(["done", true, "Your agent approved it itself: a merge of its agents' proven work, through GitHub's own merge once every check its rules require passed, in amiriteorg/shipyard, a repository you gave an agent"]);
+  expect((await api<TeamSnapshot>("team")).tasks.find((t) => t.id === units)!.interventions).toBeUndefined();
+  // Off for that repository, it is yours there: it ships, and the merge is refused, naming how you turn it on again.
+  expect(await api("teamMerge", { repository: "amiriteorg/shipyard", on: false })).toEqual({ repository: "amiriteorg/shipyard", on: false });
+  expect((await api<TeamSnapshot>("team")).mergeOff).toEqual(["amiriteorg/shipyard"]);
+  const docs = await proven("Document SI units");
+  script = [callTool("team_ship", { task: docs }), callTool("team_merge", { task: docs }), say("Shipped; the merge is yours.")];
+  const off = results(await ask("Ship and merge Noa's docs."));
+  expect(off.map((r) => [r.name, r.ok])).toEqual([["team_ship", true], ["team_merge", false]]);
+  expect(off[1]!.summary).toContain("You turned merging off for amiriteorg/shipyard: merging there is yours (invincible agents merge amiriteorg/shipyard on)");
+  expect(await api("teamMerge", { repository: "amiriteorg/shipyard", on: true })).toEqual({ repository: "amiriteorg/shipyard", on: true });
+  expect((await api<TeamSnapshot>("team")).mergeOff).toBeUndefined();
+  // Its route is its alone, and the switch is yours alone.
+  expect((await request("primaryMerge", { task: docs })).status).toBe(403);
 }, 20_000);
 
 test("the Mac itself: it asks, and nothing of it is its until you let it; then each step answers with its screen, your tripwires hold on its commands, and it ends it", async () => {
