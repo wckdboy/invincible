@@ -233,6 +233,50 @@ describe("your grants for hand-offs, in the mind", () => {
       rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
+
+  // Main's schema 7 is its seats and 8 the agents a seat serves; grants are 9. A node on main's 8 knew both and
+  // applied them, and kept the grant events another node sent it without applying them: it applies them as it opens
+  // at 9, its seats and what they serve as they were, the digest the same.
+  test("a node on main's 8 (seats and what they serve, not grants) that kept grant events applies them as it opens at 9", () => {
+    const dir = mkdtempSync(join(tmpdir(), "invincible-handoffs-"));
+    try {
+      const path = join(dir, "ledger.db");
+      const a = newNodeIdentity();
+      const b = newNodeIdentity();
+      const store = new LedgerStore(path);
+      foundFleet(store, a, { fleetName: "homelab", nodeName: "laptop" });
+      enrollDevice(store, a, { device: b.id, name: "server", kind: "node", box: b64u(b.boxPublic) });
+      const seat = `st_${"7".repeat(22)}`;
+      store.emit(a, "seat.added", { id: seat, kind: "claude-subscription", label: "Work Max", node: a.id, runs: 1 }, YOURS);
+      store.emit(a, "seat.serves", { id: seat, agents: [{ id: "ada", made: 1_795_000_000_000 }] }, YOURS);
+      grant(store, a, a.id, b.id);
+      grant(store, a, b.id, a.id, terms(2));
+      revoke(store, a, b.id, a.id);
+      grant(store, a, b.id, a.id, terms(3));
+      const sent = forged(store, a, "handoff.granted", { from: b.id, to: a.id, terms: terms(100) }, { trust: "agent" });
+      store.ingest([sent]);
+      const digest = store.digest();
+      const grants = seen(store);
+      const seats = store.seats();
+      expect(grants).toHaveLength(2);
+      expect(seats).toHaveLength(1);
+      expect(seats[0]!.serves).toEqual([{ id: "ada", made: 1_795_000_000_000 }]);
+      store.close();
+      // As main's 8 left it: its seats and what they serve applied; the grants in the log, nothing of them in the views.
+      const raw = new Database(path);
+      raw.exec(`DELETE FROM v_lww WHERE k LIKE 'handoff:%'; DELETE FROM v_rejected WHERE id = '${sent.id}'; PRAGMA user_version = 8;`);
+      raw.close();
+      const upgraded = new LedgerStore(path);
+      expect(upgraded.schemaVersion()).toBe(9);
+      expect(seen(upgraded)).toEqual(grants);
+      expect(upgraded.rejection(sent.id)).toBe("a hand-off grant is your word alone");
+      expect(upgraded.seats()).toEqual(seats);
+      expect(upgraded.digest()).toBe(digest);
+      upgraded.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
 });
 
 describe("who recorded a grant (the fabric re-review, I-f)", () => {
