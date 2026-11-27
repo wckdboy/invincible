@@ -300,10 +300,10 @@ export const withGateway = (command: string, lease?: string): string => {
  * fetch came through (`fetched`) or the clone had to do as it was (`stale`), and printed. A task taken up again
  * finds its worktree and what was written; one from before this was written says `unknown`. A fix to a pull
  * request (`<branch>`, a third argument) starts on that branch as fetched, or not at all. Its git holds the
- * repository's own configuration off (held-git.ts: the fourth fabric review's R4-4), so nothing written in the
- * repository (another node's task shares it) runs as the agent here: a repository whose configuration names a filter,
- * an include, another worktree or a hooks path isn't started in, and one whose configuration would take the fetch
- * elsewhere isn't fetched (`stale`, and why on stderr).
+ * repository's own configuration off (held-git.ts: the fourth fabric review's R4-4, and the fifth's R5-6), so nothing
+ * written in the repository (another node's task shares it) runs as the agent here: no hook, filter or fsmonitor of its
+ * runs, a repository whose configuration names another worktree isn't started in, and one whose configuration would
+ * take the fetch elsewhere isn't fetched (`stale`, and why on stderr).
  */
 export const REPO_TASK_START = `${HELD_GIT}root, kept, repo = sys.argv[1], sys.argv[2], '/work/repo'
 branch = sys.argv[3] if len(sys.argv) > 3 else ''
@@ -409,7 +409,7 @@ bad = refused('.')
 if bad: sys.exit(bad)
 if git('.','add','-A',timeout=300).returncode: sys.exit('could not read the workspace')
 with open(patch,'wb') as f:
-    r = subprocess.run(['git','-C','.',*HELD_OFF,'diff','--cached','--binary','--no-ext-diff','--no-textconv','--ignore-submodules=dirty',base],stdout=f,stderr=subprocess.PIPE,timeout=300,env=GIT_ENV)
+    r = subprocess.run(['git','-C','.',*HELD_OFF,'diff','--cached','--binary','--no-ext-diff','--no-textconv','--ignore-submodules=dirty',base],stdout=f,stderr=subprocess.PIPE,timeout=300,env=held_env('.'))
 git('.','reset','-q',timeout=300)
 if r.returncode: sys.exit('could not write the patch: '+r.stderr.decode(errors='replace')[-200:])`;
 

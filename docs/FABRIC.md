@@ -188,10 +188,13 @@ transport keys carries all of it:
        longest a hand-off may last, from then (R3-6).
      - Not bounded: the VM time its work takes isn't counted itself (its budget's dollars and its life bound it), and
        what it leaves in the workspace it shares (the repository's scripts, a toolchain it installed) is there for the
-       agent's later work, as SECURITY.md's layout 2 section says. The node itself runs none of it (the fourth
-       re-review's R4-4): its own git in that repository (the agent's next task's setup, its steps' checkpoints, its
-       evidence, what it keeps to ship) holds the repository's configuration off, so no hook, fsmonitor, filter or
-       signing program written there runs, and a fetch with the agent's lease goes to the gateway alone.
+       agent's later work, as SECURITY.md's layout 2 section says. The node's own git in that repository (the agent's
+       next task's setup, its steps' checkpoints, its evidence, what it keeps to ship) holds the repository's
+       configuration off (the fourth re-review's R4-4, and the fifth's R5-6): no hook, fsmonitor or signing program
+       written there runs, nor a filter its configuration names when the command starts, and a fetch with the agent's
+       lease goes to the gateway alone. Three paths still run what a task writes there (an alternate's refs command,
+       a nested repository's filter, the backlog look's `git log`: the fifth re-review's R5-3), to be closed before
+       the fabric is switched on.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:

@@ -297,6 +297,11 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   prepares). Off, every agent's VM is made and kept in layout 1, nothing of any store is moved, and another node's task
   is refused there, since it would share a HOME. Turned off after it was on, no VM is moved from then on, and one already
   moved stays in layout 2 (`packages/node/test/layout-switch.test.ts`).
+- **What changes on every node, with the fabric and layout 2 off:**
+  - the node's own git in an agent's repository holds the repository's configuration off (below). So no hook of the
+    repository's runs when the node makes a task's worktree or keeps a step, no filter (Git LFS's included), and no
+    global configuration of the VM's. A repository naming another worktree isn't used, and one whose configuration
+    would take the fetch elsewhere isn't fetched with the lease.
 - **The trees are checked before every mount** (the fourth fabric review's R4-1). Before a VM is made, made again or
   started on an agent's store in layout 2, and before a VM that shares it is made, the host checks each tree as it is
   about to mount it, in a one-off container of the store's own (`MOVE_PY`'s check): a folder at the store's root, by
@@ -339,15 +344,32 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   shares a workspace (no run on a seat, no other node's task), and a HOME apart would keep nothing from anyone. A Mac
   refuses a VM that would share one, and layout 2 itself (`container-spec.test.ts`, `container-host.test.ts`), and its
   node takes no other node's task at all (`fabric-handoff.test.ts`).
-- **The node's own git there runs nothing of it** (the fourth fabric review's R4-4; `packages/agents/src/held-git.ts`,
-  tested in `packages/agents/test/held-git.test.ts` and `held-git-evidence.test.ts`). A VM that shares the workspace
-  shares the repository's `.git`, so a hook, an fsmonitor, a filter or a URL rewrite could be written there. A task's
-  setup, its steps' checkpoints, its evidence and what it keeps to ship run git with the repository's own configuration
-  held off: no system or global configuration, no hooks, no fsmonitor, no signing, no external diff or textconv, no
-  submodule's own git, no credential helper or proxy, and no transport but HTTP and HTTPS. A repository whose own
-  configuration names a filter, an include, another worktree or a hooks path isn't used by them, saying so. One whose
-  configuration would take a fetch elsewhere (a URL rewrite, an HTTP setting, a credential helper) isn't fetched with
-  the agent's lease: the task starts on the clone as it was, and says so.
+- **The node's own git there holds the repository's configuration off** (the fourth fabric review's R4-4, and the
+  fifth's R5-6; `packages/agents/src/held-git.ts`, tested in `packages/agents/test/held-git.test.ts` and
+  `held-git-evidence.test.ts`). A VM that shares the workspace shares the repository's `.git`, so a hook, an fsmonitor,
+  a filter or a URL rewrite could be written there. A task's setup, its steps' checkpoints, its evidence and what it
+  keeps to ship run git with none of these:
+  - a system or global configuration;
+  - a hook, whatever hooks path the repository names (husky's among them), an fsmonitor, a signing program, an
+    external diff or textconv, or an askpass program;
+  - a credential helper or proxy, a fetch of a submodule's (which would carry the lease to its own remote), or a
+    transport but HTTP and HTTPS;
+  - a filter the repository's configuration names, its own or one it includes: none is run or required, so its files
+    are read and written as they are. A repository with Git LFS in it is used, with its pointers checked out as stored.
+
+  An ordinary repository is used as it is. One whose configuration names another worktree (`core.worktree`) isn't, as
+  git reads that before anything the node sets. One whose configuration would take a fetch, and the agent's lease with
+  it, elsewhere isn't fetched with the lease: the task starts on the clone as it was, and says so. That is a URL rewrite,
+  an HTTP proxy, an address of its own for the gateway's host, a credential helper, or a remote named by the gateway's
+  own address.
+- **Not yet held off** (the fifth review's R5-3, to be fixed before the fabric is switched on):
+  - an alternate object store's refs command, which the setup's fetch runs;
+  - a nested repository's own filter, which `git add -A` and `git status` run;
+  - the backlog look's `git log`, which isn't held at all.
+
+  The filters are also listed just before each git command, so one written between that list and the command runs. Only
+  the agent and another node's task write in an agent's repository, and what the agent writes there runs as itself
+  anyway, so each of these matters only with the fabric on.
 - **Residual risk.** The workspace is shared by design: what the agent's own work later runs from it (its repository's
   scripts, a hook its own commands run, a toolchain it installed into it) is code a VM sharing it could have changed. A
   toolchain moved to HOME that baked its old place into its own files (a virtualenv's scripts, for one) doesn't run
