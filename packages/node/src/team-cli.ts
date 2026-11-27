@@ -1,12 +1,21 @@
 import { capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
-import { MARK_PALETTE, markForm, markOf } from "@invincible/core/agent-mark";
+import { MARK_PALETTE } from "@invincible/core/agent-mark";
+import { GLASS_RAMPS, GLASS_SHAPES, glassOf, readGlassProfile } from "@invincible/core/glass";
 
-/** An agent's mark as the CLI says it (agent-mark.ts): its hue's name and both its forms (light page, dark page), and its
- * form: its number, how many slots, at what angle. */
-function markJson(id: string, avatar: unknown): string {
-  const mark = markOf(id, avatar);
-  const hue = MARK_PALETTE[mark.color]!;
-  return JSON.stringify({ name: hue.name, light: hue.light, dark: hue.dark, form: mark.form, ...markForm(mark.form) });
+/** An agent's glass as the CLI says it (glass.ts): its colour's name and both its forms (light page, dark page), the ramp
+ * it is lit by, and its shape: its number and its name. */
+function glassJson(id: string, avatar: unknown): string {
+  const glass = glassOf(id, avatar);
+  const hue = MARK_PALETTE[glass.color]!;
+  return JSON.stringify({ name: hue.name, light: hue.light, dark: hue.dark, ramp: GLASS_RAMPS[glass.color]!.name, shape: glass.shape, shapeName: GLASS_SHAPES[glass.shape]!.name });
+}
+
+/** A shape as you name it: its number (0 to 21) or its name, whatever the case; else nothing. */
+function shapeNamed(said: string): number | null {
+  const n = Number(said);
+  if (/^\d+$/.test(said) && n < GLASS_SHAPES.length) return n;
+  const at = GLASS_SHAPES.findIndex((s) => s.id === said.trim().toLowerCase());
+  return at >= 0 ? at : null;
 }
 
 interface Api { call<T>(name: RouteName, input?: unknown): Promise<T> }
@@ -187,11 +196,19 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     const member = state.agents.find((m) => m.id === args[0]);
     if (!member) throw new Error("No such agent");
     const color = string("color");
-    if (flags.reset || color !== undefined) {
+    const shape = string("shape");
+    if (shape !== undefined) {
+      // A shape you name, its colour kept: the glass as you chose it.
+      const at = shapeNamed(shape);
+      if (at === null) throw new Error(`No such shape: ${plainLine(shape)}. The shapes are 0 to ${GLASS_SHAPES.length - 1}: ${GLASS_SHAPES.map((s) => s.id).join(", ")}`);
+      const own = readGlassProfile(member.avatar) ?? glassOf(member.id, member.avatar);
+      const { agent } = await api.call<{ agent: Agent }>("saveAgent", { id: member.id, name: member.name, avatar: { v: 4, color: MARK_PALETTE[own.color]!.light, shape: at } });
+      print(glassJson(agent.id, agent.avatar));
+    } else if (flags.reset || color !== undefined) {
       // What isn't a colour is the node's to refuse: nothing here guesses at it.
       const { agent } = await api.call<{ agent: Agent }>("saveAgent", { id: member.id, name: member.name, avatar: flags.reset ? null : { v: 2, color: color!.trim().toLowerCase() } });
-      print(markJson(agent.id, agent.avatar));
-    } else print(markJson(member.id, member.avatar));
+      print(glassJson(agent.id, agent.avatar));
+    } else print(glassJson(member.id, member.avatar));
     return;
   }
   if (sub === "room") {

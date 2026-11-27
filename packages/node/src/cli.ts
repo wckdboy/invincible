@@ -135,10 +135,10 @@ of its own; "agents" and "team" are the same command)
   agents merge <owner/repo> [on|off]  whether your agent merges its agents' proven work itself in a repository you gave
                                     an agent (on until you turn it off there): through GitHub's own merge once GitHub says
                                     it is clean, never forced, and never one that changes what the repository's CI runs
-  agents avatar <id> [--color #rrggbb | --reset]
-                                    an agent's mark, the Grille: pick its colour (its node snaps it to the
-                                    nearest of eight), or give it the mark it would get now; with neither, its
-                                    mark is printed (its colour, light and dark, and its form)
+  agents avatar <id> [--color #rrggbb | --shape <name|0-21> | --reset]
+                                    an agent's glass: pick its colour (its node snaps it to the nearest of
+                                    eight) or its shape, or give it the glass it would get now; with none, its
+                                    glass is printed (its colour, light and dark, its ramp and its shape)
   agents pause|resume|stop <room|agent|task> <id>
   agents remove <id> [--destroy-workspace] [--yes]
                                     remove an agent for good: it leaves its rooms and does no more work; what it
@@ -707,6 +707,7 @@ async function main(): Promise<void> {
       instructions: { type: "string" },
       after: { type: "string" },
       color: { type: "string" },
+      shape: { type: "string" },
       "instructions-file": { type: "string" },
       base: { type: "string" },
       branch: { type: "string" },

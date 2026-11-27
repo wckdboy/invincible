@@ -1757,6 +1757,41 @@ const marks = {
   trig: [0, 1, -2.5, 100, Math.PI / 4, Math.PI / 2, Math.PI, -Math.PI, 3 * Math.PI / 2, 2.1, 6.283185307179586, 98_700.1, -98_700.1, 1e-9, -0.785398, ...core.MARK_ANGLES.map((a) => (a * Math.PI) / 180)].map((x) => ({ x, sin: core.markSin(x), cos: core.markCos(x) })),
 };
 
+// ---- an agent's glass (core's glass.ts), which every app draws from the same numbers -------------------------------
+// The shapes (lines and curves alone; each with the bounds of every point its path names, to hold a parser to), the
+// I-beam, the ramps and the Guardian's pearl, the paint, the glow, the dot, the state each mark state shows, and an
+// agent's glass read from what it has: its own (v 4), a mark's colour (v 3), a colour chosen before (v 2), or its
+// handle's, for anything else (a profile from a version yet to come too).
+const pointsOf = (d: string) => (d.match(/-?\d*\.?\d+/g) ?? []).map(Number);
+const boundsOf = (d: string) => {
+  const n = pointsOf(d), xs = n.filter((_, i) => i % 2 === 0), ys = n.filter((_, i) => i % 2 === 1);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+};
+const glassReads: { id: string; profile: unknown }[] = [
+  { id: "scout", profile: core.glassProfile({ color: 5, shape: 7 }) },
+  { id: "scout", profile: { v: 3, color: core.MARK_PALETTE[2]!.light, form: 9 } },
+  { id: "scout", profile: { v: 2, color: "#ff0000" } },
+  { id: "scout", profile: null },
+  { id: "coder", profile: { v: 5, color: core.MARK_PALETTE[1]!.light, shape: 3 } },
+  { id: "coder", profile: { v: 4, color: "#123456", shape: 1 } },
+  { id: "coder", profile: { v: 4, color: core.MARK_PALETTE[0]!.light, shape: 22 } },
+  { id: "coder", profile: { v: 4, color: core.MARK_PALETTE[0]!.light, shape: 1, glow: true } },
+  { id: "planner", profile: "glass" },
+  ...markFleet.slice(0, 6).map((id) => ({ id, profile: null })),
+];
+const glass = {
+  shapes: core.GLASS_SHAPES.map((s) => ({ ...s, bounds: boundsOf(s.d) })),
+  ibeam: { points: core.IBEAM_POINTS, glass: { ...core.GLASS_IBEAM, bounds: boundsOf(core.GLASS_IBEAM.d) } },
+  ramps: core.GLASS_RAMPS,
+  pearl: core.GLASS_PEARL,
+  pearlTile: core.GLASS_PEARL_TILE,
+  paint: core.GLASS_PAINT,
+  glow: core.GLASS_GLOW,
+  dot: core.GLASS_DOT,
+  states: core.MARK_STATES.map((state) => ({ state, glass: core.glassState(state) })),
+  reads: glassReads.map((r) => ({ ...r, glass: core.glassOf(r.id, r.profile), own: core.isGlassProfile(r.profile) })),
+};
+
 // ---- a loop's task and what wakes it, in words (lib/loops.ts, lib/wakes.ts): a loop it drafted, in Needs you --------
 const loops = {
   tasks: [
@@ -1885,6 +1920,7 @@ const vectors = {
   verdicts,
   liveActivities,
   marks,
+  glass,
   loops,
   seats,
   computer,

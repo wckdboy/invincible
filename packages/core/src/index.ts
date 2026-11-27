@@ -2,6 +2,7 @@ export * from "./api.ts";
 export * from "./attachments.ts";
 export * from "./avatar.ts";
 export * from "./agent-mark.ts";
+export * from "./glass.ts";
 export * from "./archive.ts";
 export * from "./chats.ts";
 export * from "./team.ts";

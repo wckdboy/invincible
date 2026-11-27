@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ABOUT_YOU_TAG, assignMark, exportIdentity, markProfile, newNodeIdentity, nodeIdentity, sha256Bytes, teamArmLabel, utf8 } from "@invincible/core";
+import { ABOUT_YOU_TAG, assignGlass, exportIdentity, glassProfile, newNodeIdentity, nodeIdentity, sha256Bytes, teamArmLabel, utf8 } from "@invincible/core";
 import { LedgerStore, Vault } from "@invincible/ledger";
 import { CATALOG, resolveProvider } from "@invincible/models";
 import { ChatStore } from "../../src/chats.ts";
@@ -217,8 +217,8 @@ describe("what comes, kind by kind", () => {
       workspaceNode: null,
       workspace: null,
       memory: "The app's CI runs on the forge; bun test is its gate.",
-      // Its look stays behind: it comes with the mark a node gives an agent as it joins (agent-mark.ts), the first here.
-      avatar: markProfile(assignMark("builder", [])),
+      // Its look stays behind: it comes with the glass a node gives an agent as it joins (glass.ts), the first here.
+      avatar: glassProfile(assignGlass("builder", [])),
       createdBy: "owner",
       instructionsBy: "owner",
       createdAt: builder.createdAt,

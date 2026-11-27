@@ -1,6 +1,7 @@
 import type { Agent, TeamTask, TeamDelivery } from "./team.ts";
 // (Each uses the other only inside its functions, so they may import each other.)
 import { MARK_PALETTE, readMarkProfile } from "./agent-mark.ts";
+import { readGlassProfile } from "./glass.ts";
 
 /** Cosmetic identity only. This module stays schema-free for the apps. An agent is an orb (AGENT_TINTS, agentColors):
  * its colour one you chose (OrbProfile) or one picked by its handle. */
@@ -79,10 +80,10 @@ export interface AgentColors {
 
 export function agentColors(id: string, profile?: unknown): AgentColors {
   const seed = handleSeed(String(id ?? ""));
-  // A mark its node gave it (agent-mark.ts) colours its orb in its hue's bright form, as the tints are bright, until
-  // every app draws the marks themselves.
-  const mark = readMarkProfile(profile);
-  const chosen = mark ? MARK_PALETTE[mark.color]!.dark : isOrbProfile(profile) ? profile.color.toLowerCase() : null;
+  // A glass (glass.ts) or a mark (agent-mark.ts) its node gave it colours its orb in its hue's bright form, as the
+  // tints are bright.
+  const given = readGlassProfile(profile) ?? readMarkProfile(profile);
+  const chosen = given ? MARK_PALETTE[given.color]!.dark : isOrbProfile(profile) ? profile.color.toLowerCase() : null;
   const at = chosen ? nearestTint(chosen) : seed % AGENT_TINTS.length;
   const tint = chosen ?? AGENT_TINTS[at]!;
   return { tint, light: blendHex(tint, "#ffffff", 0.45), deep: blendHex(tint, "#000000", 0.52), second: AGENT_TINTS[(at + 3 + ((seed >>> 8) % 4)) % AGENT_TINTS.length]!, chosen: chosen !== null };

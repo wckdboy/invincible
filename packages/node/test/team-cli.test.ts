@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentInput, type RouteName, type Agent, type TeamMessage, type TeamRoom, type TeamRoomView, type TeamSnapshot } from "@invincible/core";
-import { MARK_PALETTE, markForm, markOf } from "@invincible/core/agent-mark";
+import { MARK_PALETTE } from "@invincible/core/agent-mark";
+import { GLASS_RAMPS, GLASS_SHAPES, glassOf } from "@invincible/core/glass";
 import { teamCommand } from "../src/team-cli.ts";
 
 /* `invincible agents` at a terminal, against what the node would answer. */
@@ -135,38 +136,48 @@ test("names, titles and notes a model can write are shown as plain text too", as
   for (const line of [...lines, ...notes]) expect(line).not.toMatch(STEERS);
 });
 
-/** An agent's mark as the CLI says it (agent-mark.ts): its hue, in both its forms, and its form. */
-const markSaid = (id: string, avatar?: unknown) => {
-  const mark = markOf(id, avatar);
-  const hue = MARK_PALETTE[mark.color]!;
-  return { name: hue.name, light: hue.light, dark: hue.dark, form: mark.form, ...markForm(mark.form) };
+/** An agent's glass as the CLI says it (glass.ts): its colour, in both its forms, its ramp, and its shape. */
+const glassSaid = (id: string, avatar?: unknown) => {
+  const glass = glassOf(id, avatar);
+  const hue = MARK_PALETTE[glass.color]!;
+  return { name: hue.name, light: hue.light, dark: hue.dark, ramp: GLASS_RAMPS[glass.color]!.name, shape: glass.shape, shapeName: GLASS_SHAPES[glass.shape]!.name };
 };
 
-test("an agent's mark: --color picks its colour (snapped by its node), --reset gives it the one it would get now, reading saves nothing", async () => {
+test("an agent's glass: --color picks its colour (snapped by its node), --shape its shape, --reset gives it the one it would get now, reading saves nothing", async () => {
   const { api, saved } = node([member("ada")]);
   const lines: string[] = [];
   const say = (line: string) => lines.push(line);
   await teamCommand(api, "avatar", ["ada"], { color: "#A8C9DB" }, say);
   expect(saved.at(-1)).toEqual({ name: "saveAgent", input: { id: "ada", name: "Ada", avatar: { v: 2, color: "#a8c9db" } } });
-  expect(JSON.parse(lines.at(-1)!)).toEqual(markSaid("ada", { v: 2, color: "#a8c9db" }));
+  expect(JSON.parse(lines.at(-1)!)).toEqual(glassSaid("ada", { v: 2, color: "#a8c9db" }));
   // What isn't a colour is the node's to refuse, as it was: nothing here guesses at it.
   await teamCommand(api, "avatar", ["ada"], { color: "blue" }, say);
   expect(saved.at(-1)!.input.avatar).toEqual({ v: 2, color: "blue" });
   await teamCommand(api, "avatar", ["ada"], { reset: true }, say);
   expect(saved.at(-1)!.input.avatar).toBeNull();
-  // Reading it changes nothing, and says its mark: here, from a node before the marks, the one its handle gives it.
+  // A shape by its name or its number, the colour it has kept; one there isn't, refused before anything is sent.
+  const own = glassOf("ada", undefined);
+  await teamCommand(api, "avatar", ["ada"], { shape: "Bloom" }, say);
+  expect(saved.at(-1)!.input.avatar).toEqual({ v: 4, color: MARK_PALETTE[own.color]!.light, shape: GLASS_SHAPES.findIndex((s) => s.id === "bloom") });
+  await teamCommand(api, "avatar", ["ada"], { shape: "21" }, say);
+  expect(saved.at(-1)!.input.avatar).toEqual({ v: 4, color: MARK_PALETTE[own.color]!.light, shape: 21 });
+  const sent = saved.length;
+  await expect(teamCommand(api, "avatar", ["ada"], { shape: "sprout" }, say)).rejects.toThrow("No such shape");
+  await expect(teamCommand(api, "avatar", ["ada"], { shape: "22" }, say)).rejects.toThrow("No such shape");
+  expect(saved).toHaveLength(sent);
+  // Reading it changes nothing, and says its glass: here, from a node before the glass, the one its handle gives it.
   const before = saved.length;
   const read = node([member("ada")]);
   const shown: string[] = [];
   await teamCommand(read.api, "avatar", ["ada"], {}, (line) => shown.push(line));
   expect(read.saved).toHaveLength(0);
   expect(saved).toHaveLength(before);
-  expect(JSON.parse(shown[0]!)).toEqual(markSaid("ada"));
-  // From a node that gave it its mark: that one.
-  const marked = node([{ ...member("ada"), avatar: { v: 3, color: "#0084ba", form: 10 } }]);
+  expect(JSON.parse(shown[0]!)).toEqual(glassSaid("ada"));
+  // From a node that gave it its glass: that one.
+  const given = node([{ ...member("ada"), avatar: { v: 4, color: "#0084ba", shape: 3 } }]);
   const told: string[] = [];
-  await teamCommand(marked.api, "avatar", ["ada"], {}, (line) => told.push(line));
-  expect(JSON.parse(told[0]!)).toEqual({ name: "Sky", light: "#0084ba", dark: "#3bb7f7", form: 10, slots: 3, angle: 27 });
+  await teamCommand(given.api, "avatar", ["ada"], {}, (line) => told.push(line));
+  expect(JSON.parse(told[0]!)).toEqual({ name: "Sky", light: "#0084ba", dark: "#3bb7f7", ramp: "Glacier", shape: 3, shapeName: "Spiral" });
 });
 
 test("removing an agent asks first and says what goes with it; a no, or a VM nobody said may go, removes nothing", async () => {
