@@ -153,6 +153,29 @@ describe("every sandbox takes a slot first", () => {
     expect(governor.usage().cores).toBe(0);
   });
 
+  test("an agent's desktop's first use grows its VM within the ceiling; with no room left it runs with what it has, never made again, and the ledger says why", async () => {
+    const run = "arm.team.abcdef0123.ada";
+    const look = async (memoryGb: number) => {
+      const { sandbox, governor, docker, ledger } = host({ microVMs: true, capacity: () => capacity({ cores: 32, memoryGb }) });
+      docker.onExec = (_container, command) => (command.join(" ").includes("base64 -w0") ? { code: 0, stdout: "/9j/4AAQ" } : { code: 0, stdout: "" });
+      const vm = await sandbox.create(request({ run, persistent: true, cpus: 1, memoryGb: 2, isolation: "vm", desktop: true }));
+      expect(governor.usage().memoryGb).toBe(2 + VM_OVERHEAD.memoryGb);
+      const made = docker.running();
+      expect(await sandbox.desktop(vm.id, run, { do: "look" })).toMatchObject({ width: 1280, height: 800 });
+      expect(docker.running()).toBe(made);
+      return { governor, ledger, now: (await sandbox.get(vm.id))! };
+    };
+    // Room: grown to 4 GB as it runs, and held of the ceiling.
+    const roomy = await look(16);
+    expect(roomy.now.memoryGb).toBe(4);
+    expect(roomy.governor.usage().memoryGb).toBe(4 + VM_OVERHEAD.memoryGb);
+    // None: it stays at 2 GB, nothing more is held of the ceiling for it, and the ledger says why.
+    const full = await look(5);
+    expect(full.now.memoryGb).toBe(2);
+    expect(full.governor.usage().memoryGb).toBe(2 + VM_OVERHEAD.memoryGb);
+    expect(full.ledger.find((e) => e.resource === "docker.container" && e.verdict === "deny")).toMatchObject({ reason: expect.stringContaining("its desktop starts with 2 GB, not grown to 4"), detail: expect.stringContaining("its work as it was") });
+  });
+
   test("more than the ceiling gets the ceiling; a microVM's overhead comes out of it", async () => {
     const plain = host();
     expect(await plain.sandbox.create(request({ cpus: 64, memoryGb: 512 }))).toMatchObject({ cpus: 8, memoryGb: 16 });

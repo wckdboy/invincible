@@ -11,14 +11,25 @@ const ID = "0123456789";
 const RUN = "arm.team.abcdef0123.builder";
 const PICTURE = "/9j/4AAQSkZJRgABAQ"; // (the beginning of a JPEG, in base64)
 
-function desk(options: { status?: string; labels?: Record<string, string>; missing?: boolean; fail?: string; image?: string } = {}) {
+function desk(options: { status?: string; labels?: Record<string, string>; missing?: boolean; fail?: string; image?: string; memoryGb?: number; updateFails?: boolean } = {}) {
   const ledger: LedgerEntryInput[] = [];
   const execs: string[][] = [];
+  // Every docker call, and its updates; and the VM's memory as Docker says it (none: no limit of its own).
+  const calls: string[][] = [];
+  const updates: string[][] = [];
+  let memoryGb = options.memoryGb;
   const labels = { [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.run`]: RUN, [`${LABEL}.network`]: "online", [`${LABEL}.ephemeral`]: "false", [`${LABEL}.isolation`]: "vm", ...options.labels };
   const runner: DockerRunner = async (args) => {
+    calls.push(args);
     if (args[0] === "info") return { code: 0, stdout: "29.0.0", stderr: "" };
     if (args[0] === "ps") return { code: 0, stdout: ID, stderr: "" };
-    if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: options.image ?? "invincible/desktop:1" }, State: { Status: options.status ?? "running" } }]), stderr: "" };
+    if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: options.image ?? "invincible/desktop:1" }, State: { Status: options.status ?? "running" }, ...(memoryGb ? { HostConfig: { NanoCpus: 1e9, Memory: memoryGb * 2 ** 30 } } : {}) }]), stderr: "" };
+    if (args[0] === "update") {
+      updates.push(args);
+      if (options.updateFails) return { code: 1, stdout: "", stderr: "kata: could not hot-add memory" };
+      memoryGb = Number(args[args.indexOf("--memory") + 1]!.replace(/m$/, "")) / 1024;
+      return { code: 0, stdout: containerName(ID), stderr: "" };
+    }
     if (args[0] === "exec") {
       // After the container: timeout --signal=KILL <n>s <cmd…>
       const cmd = args.slice(args.indexOf(containerName(ID)) + 4);
@@ -30,7 +41,7 @@ function desk(options: { status?: string; labels?: Record<string, string>; missi
     return { code: 0, stdout: "", stderr: "" };
   };
   const host = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true }, ledger: (entry) => { ledger.push(entry); }, runner });
-  return { host, ledger, execs };
+  return { host, ledger, execs, calls, updates };
 }
 
 describe("an agent's desktop, from outside its VM", () => {
@@ -392,5 +403,43 @@ describe("the stream of an agent's desktop you watch", () => {
     await d.host.destroy(ID, { approvedBy: "owner" });
     expect(await a.read()).toEqual({ done: true, value: undefined });
     expect(d.f.made[0]!.closed).toBe(true);
+  });
+});
+
+describe("room for its desktop (C1 step 10): an agent's VM made with 2 GB grows to 4 the first time its desktop is used", () => {
+  test("the owner's first look grows it, live, before the look, and the ledger says why; once", async () => {
+    const d = desk({ memoryGb: 2 });
+    expect(await d.host.desktop(ID, RUN, { do: "look" })).toMatchObject({ width: 1280, height: 800 });
+    expect(d.updates).toEqual([["update", "--cpus", "1", "--memory", "4096m", "--memory-swap", "4096m", containerName(ID)]]);
+    expect(d.calls.findIndex((a) => a[0] === "update")).toBeLessThan(d.calls.findIndex((a) => a[0] === "exec"));
+    expect(d.ledger).toEqual([expect.objectContaining({ resource: "docker.container", verdict: "allow", run: RUN, detail: "grown while it runs: 1 cpu · 4 GB", reason: expect.stringContaining("its desktop's first use") })]);
+    await d.host.desktop(ID, RUN, { do: "look" });
+    expect(d.updates).toHaveLength(1);
+  });
+
+  test("asking whether it is up, how to use it, or stopping it grows nothing; the agent's first command that does something does", async () => {
+    const d = desk({ memoryGb: 2 });
+    for (const verb of ["status", "help", "stop"]) await d.host.exec(ID, ["desktop", verb]);
+    expect(d.updates).toHaveLength(0);
+    await d.host.exec(ID, ["desktop", "click", "10", "20"]);
+    expect(d.updates).toHaveLength(1);
+  });
+
+  test("a VM without a desktop, with no limit of its own, with as much already, or not an agent's own, is left as it is", async () => {
+    for (const d of [desk({ memoryGb: 2, image: "invincible/sandbox:1" }), desk(), desk({ memoryGb: 4 }), desk({ memoryGb: 2, labels: { [`${LABEL}.ephemeral`]: "true" } })]) {
+      await d.host.desktop(ID, RUN, { do: "look" }).catch(() => null);
+      await d.host.exec(ID, ["desktop", "click", "1", "2"]).catch(() => null);
+      expect(d.updates).toHaveLength(0);
+    }
+  });
+
+  test("one that can't grow is never made again: its desktop runs with what it has, the ledger says why, and it isn't tried again within a minute", async () => {
+    const d = desk({ memoryGb: 2, updateFails: true });
+    expect(await d.host.desktop(ID, RUN, { do: "look" })).toMatchObject({ width: 1280, height: 800 });
+    expect(d.updates).toHaveLength(1);
+    expect(d.ledger.find((e) => e.verdict === "deny")).toMatchObject({ resource: "docker.container", reason: expect.stringContaining("its desktop starts with 2 GB, not grown to 4"), detail: "kept as it is, 1 cpu · 2 GB, its work as it was" });
+    expect(d.calls.filter((a) => ["run", "rm", "stop", "create", "start"].includes(a[0]!))).toEqual([]);
+    await d.host.desktop(ID, RUN, { do: "look" });
+    expect(d.updates).toHaveLength(1);
   });
 });

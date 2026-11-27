@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type ActionClass, type Decision, decide, type ExecResult, isReservedGatewayScope, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead } from "@invincible/core";
+import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isReservedGatewayScope, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead } from "@invincible/core";
 import {
   CONTAINER_MAJOR,
   containerBuildArgs,
@@ -341,6 +341,10 @@ export interface DesktopDone {
 
 /** What the owner is told of a VM made without a desktop. */
 const NO_DESKTOP = "this agent's VM has no desktop: have it made again with one (invincible agents provision <id> --remake --desktop)";
+/** What asks only whether a desktop is up, or how to use it, or stops it: none of it needs the room a desktop takes (deskd's ASKING, and stop). */
+const DESKTOP_ASKING = new Set(["help", "--help", "-h", "status", "stop"]);
+/** How soon a VM that couldn't grow for its desktop is tried again, at the soonest. */
+const DESKTOP_ROOM_AGAIN_MS = 60_000;
 
 /** The uid your own session with an agent's desktop runs as, never the agent's (deskd.py's OWNER_UID). */
 export const DESKTOP_OWNER_UID = 1001;
@@ -467,6 +471,8 @@ export class SandboxHost {
   private readonly sessions = new Map<string, { session: DesktopSession; view: SandboxView; owner?: DesktopSession | null }>();
   /** Each desktop VM's stream while you watch it (desktop-stream.ts): one encoder in it however many devices watch; ended with the VM. */
   private readonly streams = new Map<string, DesktopStream>();
+  /** When a VM was last grown for its desktop, or tried and couldn't be (ms): desktopRoom tries again a minute on at the soonest. */
+  private readonly desktopRoomTried = new Map<string, number>();
 
   constructor(opts: SandboxHostOptions) {
     this.apple = opts.engine === "container";
@@ -1153,7 +1159,7 @@ export class SandboxHost {
    * smaller this way: what a running VM was given isn't taken from under it (`remakeTeam` makes it again, and a smaller
    * size takes effect then). `fits` says why what it adds doesn't fit the node's ceiling, or null. Returns it as it is now.
    */
-  async resizeTeam(id: string, run: string, opts: { cpus?: number; memoryGb?: number; diskGb?: number; approvedBy: string; why?: string; fits?: (more: { cpus: number; memoryGb: number }) => string | null; /** Told when it had to stop and start again to take it (a Mac's VM). */ paused?: () => void }): Promise<SandboxView> {
+  async resizeTeam(id: string, run: string, opts: { cpus?: number; memoryGb?: number; diskGb?: number; approvedBy: string; why?: string; /** The node's own reason, where it grows a VM itself (its desktop's first use). */ reason?: string; fits?: (more: { cpus: number; memoryGb: number }) => string | null; /** Told when it had to stop and start again to take it (a Mac's VM). */ paused?: () => void }): Promise<SandboxView> {
     const sandbox = await this.get(id);
     if (!sandbox) throw new SandboxError("the agent's VM is missing; its workspace must be recovered, not replaced", 404);
     if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") {
@@ -1186,9 +1192,10 @@ export class SandboxHost {
         class: "modify",
         resource: "docker.container",
         target: name,
-        // The primary's own giving (growAgent) is its, and says why; anything else was approved by a device of yours.
-        verdict: opts.why ? "allow" : "approved",
-        reason: opts.why ? `grown by your agent: ${redact(opts.why).slice(0, 200)}` : `approved by ${opts.approvedBy.slice(0, 12)}`,
+        // The primary's own giving (growAgent) is its, and says why; the node's own (a desktop's first use) says why too;
+        // anything else was approved by a device of yours.
+        verdict: opts.why || opts.reason ? "allow" : "approved",
+        reason: opts.reason ? opts.reason.slice(0, 240) : opts.why ? `grown by your agent: ${redact(opts.why).slice(0, 200)}` : `approved by ${opts.approvedBy.slice(0, 12)}`,
         run,
         detail: `${this.apple ? "paused to grow (a Mac's VM can't grow while it runs)" : "grown while it runs"}: ${now.cpus} cpu · ${now.memoryGb} GB${grows ? ` · ${opts.diskGb} GB disk` : disk !== null ? ` · ${disk} GB disk` : ""}`,
       });
@@ -1227,6 +1234,42 @@ export class SandboxHost {
    * again every second or two); what is typed is carried to the VM as one argument no shell reads, and the ledger says
    * only how much.
    */
+  /**
+   * Room for an agent's desktop as it is about to be used (C1 step 10, light by default). An agent's VM is made with 2 GB,
+   * desktop or not (COMPUTER_START), so one whose desktop is never used holds of the ceiling what one without a desktop
+   * does. Before the first use that may start its desktop (anything but asking whether it is up, how to use it, or
+   * stopping it), it is grown, live, to COMPUTER_START.desktopMemoryGb, as a browser needs room. It is never made again
+   * for it: where it can't grow (the ceiling has no room, the microVM can't take more), its desktop runs with what the VM
+   * has, its work as it was, the ledger says why, and it is tried again a minute later at the soonest. A VM with no limit
+   * of its own, or as much already, or not an agent's own, is left as it is.
+   */
+  private async desktopRoom(sandbox: SandboxView, verb: string): Promise<void> {
+    if (this.apple || !sandbox.image.includes("desktop") || DESKTOP_ASKING.has(verb)) return;
+    if (!sandbox.run || sandbox.ephemeral || sandbox.isolation !== "vm") return;
+    if (!sandbox.memoryGb || sandbox.memoryGb >= COMPUTER_START.desktopMemoryGb) return;
+    // (Once grown it has as much, and is left as it is; a view from before reaches resizeTeam, which finds nothing to add.)
+    const tried = this.desktopRoomTried.get(sandbox.id);
+    if (tried !== undefined && Date.now() - tried < DESKTOP_ROOM_AGAIN_MS) return;
+    this.desktopRoomTried.set(sandbox.id, Date.now());
+    try {
+      await this.resizeTeam(sandbox.id, sandbox.run, {
+        memoryGb: COMPUTER_START.desktopMemoryGb,
+        approvedBy: "node",
+        reason: `its desktop's first use: an agent's VM is made with ${COMPUTER_START.memoryGb} GB and grows to ${COMPUTER_START.desktopMemoryGb} GB as its desktop starts`,
+      });
+    } catch (error) {
+      this.opts.ledger({
+        class: "modify",
+        resource: "docker.container",
+        target: sandbox.name,
+        verdict: "deny",
+        reason: `its desktop starts with ${sandbox.memoryGb} GB, not grown to ${COMPUTER_START.desktopMemoryGb}: ${redact((error as Error).message).slice(0, 240)}`,
+        run: sandbox.run,
+        detail: `kept as it is, ${sandbox.cpus} cpu · ${sandbox.memoryGb} GB, its work as it was`,
+      });
+    }
+  }
+
   async desktop(id: string, run: string, action: DesktopAction, picture = true): Promise<DesktopView | DesktopDone> {
     const whole = (n: number, max: number) => Number.isInteger(n) && n >= 0 && n <= max;
     const refuse = (why: string): never => { throw new SandboxError(why, 400); };
@@ -1261,6 +1304,7 @@ export class SandboxHost {
         break;
     }
     const sandbox = await this.desktopVm(id, run);
+    await this.desktopRoom(sandbox, action.do);
     const ledger = (detail: string) => this.opts.ledger({ class: "modify", resource: "sandbox.desktop", target: sandbox.name, verdict: "allow", run, detail });
     const what = did || redact(argv?.slice(1).join(" ") ?? "").slice(0, 300);
     /** The action and the picture on a held session, in one exchange: yours, with whether you have the desktop. */
@@ -1328,6 +1372,7 @@ export class SandboxHost {
    */
   async desktopHold(id: string, run: string, take: boolean): Promise<DesktopHold | null> {
     const sandbox = await this.desktopVm(id, run);
+    if (take) await this.desktopRoom(sandbox, "take");
     const desk = sandbox.image.includes("desktop");
     const older = new SandboxError(desk ? "this agent's desktop is older than take-over: have its VM made again (invincible agents provision <id> --remake --desktop)" : NO_DESKTOP, 424);
     const owner = desk ? this.ownerSession(sandbox) : null;
@@ -1356,6 +1401,7 @@ export class SandboxHost {
   async desktopWatch(id: string, run: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
     const sandbox = await this.desktopVm(id, run);
     if (this.apple || !sandbox.image.includes("desktop")) throw new SandboxError(NO_DESKTOP, 424);
+    await this.desktopRoom(sandbox, "stream");
     // (An engine run by tests has a stream only where they give one.)
     if (this.opts.runner && !this.opts.spawnFrames) throw new SandboxError("this node streams no desktop: its engine is a stand-in", 424);
     let stream = this.streams.get(id);
@@ -1465,6 +1511,7 @@ export class SandboxHost {
     const started = performance.now();
     let result: Run | null = null;
     if (cmd[0] === "desktop" && cmd.length > 1 && sandbox.image.includes("desktop")) {
+      await this.desktopRoom(sandbox, String(cmd[1]));
       const session = this.desktopSession(sandbox);
       try {
         const done = session ? await session.call({ argv: cmd.slice(1) }, timeoutSec * 1000) : null;

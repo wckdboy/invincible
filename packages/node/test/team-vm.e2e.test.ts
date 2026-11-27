@@ -592,8 +592,9 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   const made = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "sam" })).workspace;
   // An agent's VM can use the internet, by the owner's word: it is made online unless you say otherwise.
   expect(made.network).toBe("online");
-  // And with a desktop unless you say otherwise (the owner's standard, 26 November 2026), with room for its browser.
-  expect(made).toMatchObject({ image: "invincible/desktop:1", memoryGb: 4 });
+  // And with a desktop unless you say otherwise (the owner's standard, 26 November 2026), made with 2 GB as one without
+  // is: its browser's room comes the first time its desktop is used (C1 step 10, light by default; below).
+  expect(made).toMatchObject({ image: "invincible/desktop:1", memoryGb: 2 });
   const ran = (id: string) => runs.find((args) => args[0] === "run" && args.some((arg) => arg.includes(id)))!;
   expect(ran(made.id).filter((arg, i, all) => all[i - 1] === "--network")).toEqual([NETWORKS.online.name, NETWORKS.gateway.name]);
   await api("saveAgent", { id: "una", name: "UNA", role: "engineer" });
@@ -622,8 +623,16 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   const answered = docker.onExec;
   docker.onExec = (container, command) => (command.join(" ").includes("base64 -w0") ? { code: 0, stdout: "/9j/4AAQ" } : (answered?.(container, command) ?? { code: 0, stdout: "" }));
   try {
+    const runsBeforeLook = runs.length;
     const seen = await api<{ shot: { mediaType: string; data: string }; width: number; height: number }>("teamDesktop", { id: "una" });
     expect(seen).toEqual({ shot: { mediaType: "image/jpeg", data: "/9j/4AAQ" }, width: 1280, height: 800 });
+    // That was her desktop's first use: her VM, made with 2 GB, grew to 4 GB as it runs, before the look (C1 step 10). The
+    // same VM, never made again: nothing stopped or started, her work as it was. Once: the next look grows nothing.
+    expect(updates).toEqual([["update", "--cpus", "1", "--memory", "4096m", "--memory-swap", "4096m", `invincible-sbx-${kept.id}`]]);
+    expect(runs.length).toBe(runsBeforeLook);
+    expect((await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "docker.container" && e.detail === "grown while it runs: 1 cpu · 4 GB")).toMatchObject({ verdict: "allow", target: `invincible-sbx-${kept.id}`, reason: expect.stringContaining("its desktop's first use") });
+    await api("teamDesktop", { id: "una" });
+    expect(updates).toHaveLength(1);
     const asked = docker.execs.length;
     await api("teamDesktop", { id: "una", action: { do: "type", text: "a secret you typed" } });
     await api("teamDesktop", { id: "una", action: { do: "click", x: 10, y: 20 } });
@@ -642,23 +651,24 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   expect(grown).toMatchObject({ id: kept.id, cpus: 2, memoryGb: 6, status: "running" });
   expect(runs.length).toBe(runsBefore);
   expect(updates.at(-1)).toEqual(["update", "--cpus", "2", "--memory", "6144m", "--memory-swap", "6144m", `invincible-sbx-${kept.id}`]);
-  expect((await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "docker.container" && e.class === "modify" && e.detail?.startsWith("grown while it runs"))).toMatchObject({ verdict: "approved", target: `invincible-sbx-${kept.id}`, detail: "grown while it runs: 2 cpu · 6 GB" });
+  expect((await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((e) => e.resource === "docker.container" && e.class === "modify" && e.detail === "grown while it runs: 2 cpu · 6 GB")).toMatchObject({ verdict: "approved", target: `invincible-sbx-${kept.id}` });
   // Never smaller this way, never past the node's ceiling (8 threads here), and never nothing.
   await expect(api("resizeAgent", { id: "una", cpus: 1 })).rejects.toThrow(/409 .*only grows/);
   await expect(api("resizeAgent", { id: "una", cpus: 64 })).rejects.toThrow(/409 .*threads it may use/);
   await expect(api("resizeAgent", { id: "una" })).rejects.toThrow(/400/);
-  expect(updates).toHaveLength(1);
+  // (Two in all: her desktop's own, and yours.)
+  expect(updates).toHaveLength(2);
   // An agent with no VM has none to make again, and an agent that isn't there is not found.
   await api("saveAgent", { id: "vmless", name: "VMLESS", role: "engineer" });
   await expect(api("remakeAgent", { id: "vmless" })).rejects.toThrow(/424 .*no VM yet/);
   await expect(api("resizeAgent", { id: "vmless", cpus: 2 })).rejects.toThrow(/424 .*no VM yet/);
   await expect(api("remakeAgent", { id: "nobody" })).rejects.toThrow(/404/);
   expect(await api("removeAgent", { id: "una", destroyWorkspace: true })).toMatchObject({ workspace: "destroyed" });
-  // An agent may be given a desktop from the start, with room for a browser whatever memory was asked.
-  // (Here, once una's VM has gone: this host carries only so many at once.)
+  // An agent may be given a desktop from the start, made with the memory asked: its browser's room comes as its desktop
+  // is first used. (Here, once una's VM has gone: this host carries only so many at once.)
   await api("saveAgent", { id: "dex", name: "DEX", role: "engineer" });
   const dex = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "dex", desktop: true, memoryGb: 2 })).workspace;
-  expect(dex).toMatchObject({ image: "invincible/desktop:1", memoryGb: 4, isolation: "vm" });
+  expect(dex).toMatchObject({ image: "invincible/desktop:1", memoryGb: 2, isolation: "vm" });
   expect(await api("removeAgent", { id: "dex", destroyWorkspace: true })).toMatchObject({ workspace: "destroyed" });
   // The primary's own computer: made under its reserved handle, with a desktop unless you say otherwise, and in no list of agents.
   expect((await snapshot()).computer).toBeUndefined();

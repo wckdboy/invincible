@@ -529,7 +529,7 @@ function desktopChoice(withDesktop: boolean): { el: HTMLElement; box: { readonly
   const none = h("input", { type: "checkbox", name: "no-desktop", checked: !withDesktop });
   return {
     box: { get checked() { return !none.checked; } },
-    el: h("div", { class: "stack", style: "gap:2px" }, h("label", { class: "row" }, none, h("span", {}, "No desktop")), h("p", { class: "tiny subtle" }, "Every agent's VM has a desktop unless you tick this: a screen, a browser, a terminal and an editor, with at least 4 GB of memory, that you can watch and take over from the Workspace. Without one it is a shell alone.")),
+    el: h("div", { class: "stack", style: "gap:2px" }, h("label", { class: "row" }, none, h("span", {}, "No desktop")), h("p", { class: "tiny subtle" }, "Every agent's VM has a desktop unless you tick this: a screen, a browser, a terminal and an editor, that you can watch and take over from the Workspace. Its VM grows from 2 GB to 4 GB of memory the first time its desktop is used, and an unused desktop stops after 10 minutes. Without one it is a shell alone.")),
   };
 }
 

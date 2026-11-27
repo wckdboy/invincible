@@ -400,12 +400,14 @@ describe("the Index per effort level", () => {
 });
 
 describe("an agent's own computer", () => {
-  test("starts with one processor, 2 GB and 20 GB of disk, and with a desktop 4 GB at least, unless asked for more", () => {
+  test("starts with one processor, 2 GB and 20 GB of disk, with a desktop too, unless asked for more: a desktop's 4 GB come as it first starts", () => {
     expect(computerSize(false)).toEqual({ cpus: 1, memoryGb: 2, diskGb: 20 });
-    expect(computerSize(true)).toEqual({ cpus: 1, memoryGb: 4, diskGb: 20 });
-    // What was asked for, where more; a desktop's memory never below its least.
+    // (C1 step 10: an agent that never looks holds of the ceiling what one without a desktop does.)
+    expect(computerSize(true)).toEqual({ cpus: 1, memoryGb: 2, diskGb: 20 });
+    expect(COMPUTER_START.desktopMemoryGb).toBe(4);
+    // What was asked for, desktop or not.
     expect(computerSize(true, { cpus: 2, memoryGb: 8, diskGb: 40 })).toEqual({ cpus: 2, memoryGb: 8, diskGb: 40 });
-    expect(computerSize(true, { memoryGb: 1 })).toEqual({ cpus: 1, memoryGb: COMPUTER_START.desktopMemoryGb, diskGb: 20 });
+    expect(computerSize(true, { memoryGb: 1 })).toEqual({ cpus: 1, memoryGb: 1, diskGb: 20 });
     expect(computerSize(false, { memoryGb: 1 })).toEqual({ cpus: 1, memoryGb: 1, diskGb: 20 });
   });
 });

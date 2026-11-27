@@ -45271,7 +45271,7 @@
         "desktop": true,
         "size": {
           "cpus": 1,
-          "memoryGb": 4,
+          "memoryGb": 2,
           "diskGb": 20
         }
       },
