@@ -804,7 +804,14 @@ export class LedgerStore {
       // From the cutoff, by the enrollment's own HLC, no node key that fails Ed25519's strict rule is enrolled through the
       // log either, as enrollDevice enrolls none: an older node's enrollment of one is refused here alike on every replica
       // (the review of apps-name-node, M1). One stamped before is applied as it always was.
-      if (isNodeId(body.device) && !isStrictNodeId(body.device) && decodeHlc(event.hlc).ms >= SIGNATURES_STRICT_FROM) return "its key fails Ed25519's strict rule";
+      if (isNodeId(body.device) && !isStrictNodeId(body.device) && decodeHlc(event.hlc).ms >= SIGNATURES_STRICT_FROM) {
+        // Refused, it is still known from here, and never active (revoked as it is enrolled): its events are then logged,
+        // and refused, alike on every replica, whatever else of it comes late (the review of log-strict, F2).
+        this.db
+          .query(`INSERT INTO v_devices (id, name, kind, role, box, scopes, enrolled_by, enrolled_hlc, revoked_hlc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(body.device, body.name, body.kind, body.role, body.box ?? null, JSON.stringify(body.scopes), event.device, event.hlc, event.hlc);
+        return "its key fails Ed25519's strict rule";
+      }
       if (body.kind === "client" && body.role !== "client") return "clients must have the client role";
       this.db
         .query(

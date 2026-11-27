@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { b64u, encodeHlc, eventId, type GEvent, HlcClock, newNodeIdentity, type NodeIdentity, OWNER_SCOPES, signEvent, SIGNATURES_STRICT_FROM, type UnsignedEvent } from "@invincible/core";
-import { enrollDevice, foundFleet, LedgerStore } from "../src/index.ts";
+import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../src/index.ts";
 
 /*
  * The lead's word of 27 November 2026: no node whose key fails Ed25519's strict rule (core's isStrictNodeId: a small-order
@@ -127,6 +127,60 @@ describe("the log, from the cutoff", () => {
       store.rebuild();
       expect(store.digest()).toBe([...digests][0]!);
     }
+  });
+
+  // The review of log-strict, F2 (its P2): before the cutoff's refusal, a weak key's second enrollment (from the cutoff)
+  // made it known on every replica, whatever came late; refused, it must still leave every replica the same.
+  test("a weak key enrolled before the cutoff and again from it, its first enroller's revocation arriving late: every replica the same", () => {
+    let now = SIGNATURES_STRICT_FROM - 3 * 3_600_000;
+    const founder = newNodeIdentity();
+    const x = newNodeIdentity();
+    const sF = new LedgerStore(":memory:", new HlcClock(() => now));
+    const fleet = foundFleet(sF, founder, { fleetName: "homelab", nodeName: "f" });
+    now += 1_000;
+    enrollDevice(sF, founder, { device: x.id, name: "x", kind: "node", box: b64u(x.boxPublic) });
+    const sX = new LedgerStore(":memory:", new HlcClock(() => now));
+    sX.expectFleet(fleet);
+    sX.ingest(sF.eventsSince({}, 100_000).events);
+    now += 1_000;
+    revokeDevice(sF, founder, x.id, "lost"); // x doesn't hear of it
+    now += 1_000;
+    // x, an older node, enrolls the weak key before the cutoff (E0), as its enrollDevice wrote one.
+    const box = b64u(new Uint8Array(32).fill(9));
+    sX.emit(x, "device.enrolled", { device: WEAK, name: "weak", kind: "node", role: "full", box, scopes: OWNER_SCOPES });
+    // The weak key's forgery (R the identity, S zero), stamped before the cutoff.
+    const universal = new Uint8Array(64);
+    universal.set(identityPoint, 0);
+    const unsigned: UnsignedEvent = { v: 2, fleet, hlc: encodeHlc({ ms: now + 1_000, counter: 0 }), device: WEAK, prev: null, kind: "memory.added", body: { text: "weak's note" } };
+    const forged = { ...unsigned, id: eventId(unsigned), sig: b64u(universal) } as GEvent;
+    // From the cutoff the founder, an older node too, enrolls the weak key again (E1).
+    now = SIGNATURES_STRICT_FROM + 60_000;
+    const e1 = signEvent({ v: 2, fleet, hlc: encodeHlc({ ms: now, counter: 0 }), device: founder.id, prev: sF.head(founder.id), kind: "device.enrolled", body: { device: WEAK, name: "weak-again", kind: "node", role: "full", box, scopes: OWNER_SCOPES } }, founder);
+    const union = new Map<string, GEvent>();
+    for (const store of [sF, sX]) for (const event of store.eventsSince({}, 100_000).events) union.set(event.id, event);
+    const events = [...union.values(), forged, e1];
+    const revoked = events.find((e) => e.kind === "device.revoked")!;
+    // The revocation, and the vault's rotation after it: what replica A hears of last.
+    const late = events.filter((e) => e.device === founder.id && e.hlc >= revoked.hlc && e.id !== e1.id);
+    now = SIGNATURES_STRICT_FROM + 86_400_000;
+    const replica = () => {
+      const store = new LedgerStore(":memory:", new HlcClock(() => now));
+      store.expectFleet(fleet);
+      return store;
+    };
+    const a = replica();
+    a.ingest(events.filter((e) => !late.includes(e)));
+    a.ingest(late);
+    const b = replica();
+    b.ingest(events);
+    // Gossip both ways, as sync would.
+    a.ingest(b.eventsSince({}, 100_000).events);
+    b.ingest(a.eventsSince({}, 100_000).events);
+    expect([a.pendingCount(), b.pendingCount()]).toEqual([0, 0]);
+    expect(a.eventCount()).toBe(b.eventCount());
+    expect(a.digest()).toBe(b.digest());
+    // The weak key is active on neither: its first enrollment's signer was revoked before it, and its second is refused.
+    for (const store of [a, b]) expect(store.activeDevice(WEAK)).toBeFalsy();
   });
 });
 
