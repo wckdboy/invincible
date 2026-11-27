@@ -3,6 +3,18 @@
 # without a desktop (Computer Use). Built on a sandbox host by `invincible sandbox build --desktop`, after the workshop
 # image it is made from. Same rules: unprivileged uid 1000, read-only at runtime, no capabilities. Nothing listens
 # outside the VM.
+
+# The stream you watch (C1 step 9): the screen as H.264 while someone watches it, encoded by OpenH264 (BSD-2-Clause;
+# H.264's patents: docs/ARCHITECTURE.md). Built in a stage of its own, so its headers stay out of the image.
+FROM invincible/sandbox:1 AS stream
+USER root
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libopenh264-dev libx11-dev libxext-dev libxdamage-dev libxfixes-dev \
+ && rm -rf /var/lib/apt/lists/*
+COPY stream.c /tmp/stream.c
+RUN cc -O3 -Wall -Wextra -Werror -o /tmp/desktop-stream /tmp/stream.c -lopenh264 -lXfixes -lXdamage -lXext -lX11
+
 FROM invincible/sandbox:1
 
 USER root
@@ -10,6 +22,7 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       xvfb openbox chromium xdotool scrot x11-utils xauth dbus-x11 python3-websocket \
       xterm mousepad xclip at-spi2-core python3-pyatspi python3-xlib libturbojpeg0 \
+      libopenh264-8 libx11-6 libxext6 libxdamage1 libxfixes3 \
       fonts-dejavu-core fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
  && rm -rf /var/lib/apt/lists/*
 
@@ -38,5 +51,6 @@ COPY deskd.py /usr/local/lib/invincible/deskd.py
 COPY desktop.c /tmp/desktop.c
 RUN cc -O2 -Wall -Wextra -Werror -o /usr/local/bin/desktop /tmp/desktop.c && rm /tmp/desktop.c \
  && chmod 0755 /usr/local/bin/desktop && chmod 0644 /usr/local/lib/invincible/deskd.py
+COPY --from=stream /tmp/desktop-stream /usr/local/bin/desktop-stream
 
 USER 1000:1000

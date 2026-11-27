@@ -328,6 +328,21 @@ The run loop is carried and renamed (§10), the most proven part of it:
     at the desktop is an eval case as any other is: its eval's sandboxes are made from the desktop image. A Mac makes
     none yet: there an agent's VM is made without one, and the
     ledger says why. What it costs and how fast it is: the scorecard's desktop suite ([BENCHMARKS.md](BENCHMARKS.md)).
+  - **The stream you watch:**
+    - `desktop stream` is the screen as H.264 Constrained Baseline, encoded in the VM only while someone watches. The
+      node runs it in a held exec of its own, so the encoder lives as long as its reader and nothing listens in the VM.
+    - It sends 10 frames a second while the screen changes, and nothing while it is still. A `fast` on its stdin, which
+      your own input will send, makes it 25 for 2 s. Each frame is the whole screen with the pointer drawn in, its
+      capture time beside it.
+    - **The codec's licence:** its encoder, `desktop-stream`, is built against OpenH264 (BSD-2-Clause), Debian's
+      `libopenh264-8`.
+    - **H.264's patents:**
+      - H.264 is covered by patents, licensed as a pool by Via LA (MPEG LA's, until it joined Via Licensing in 2023).
+      - Cisco pays those royalties only for its own prebuilt OpenH264 binaries, downloaded from Cisco on its
+        conditions, and an attribution is one of them.
+      - A build from source, as Debian's is, carries no patent licence; nor does x264, which is GPL besides.
+      - Which one the images carry is the owner's decision: a build from source, Cisco's binary fetched at install time
+        (Debian's `libopenh264-cisco8`, from contrib), or another codec.
 - **Shipping:** a run's verified changes become a pull request. Its CI and the review comments come back to the same
   task.
 - **Each agent's mark:** the Grille (core's `agent-mark.ts`; the look in DESIGN.md), the node's to give, once, as the

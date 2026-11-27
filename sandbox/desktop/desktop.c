@@ -6,6 +6,7 @@
  *
  *   desktop <verb> [arguments...]   one command (desktop help lists them); its exit code is deskd's
  *   desktop --session               JSON lines both ways, for the node's held session (SandboxHost)
+ *   desktop stream                  the screen as H.264 on stdout, for the node's watching (desktop-stream)
  *
  * INVINCIBLE_DESKTOP_RUN is the directory of its socket (default /tmp/invincible-desktop), INVINCIBLE_DESKD the
  * process to start (default /usr/local/lib/invincible/deskd.py), INVINCIBLE_DESKTOP_WAIT how long it waits for it
@@ -168,21 +169,17 @@ static int relay(int fd) {
   }
 }
 
-int main(int argc, char **argv) {
-  signal(SIGPIPE, SIG_IGN);
-  if (argc < 2 || !strcmp(argv[1], "help") || !strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")) {
-    execlp("python3", "python3", "-E", "-s", setting("INVINCIBLE_DESKD", "/usr/local/lib/invincible/deskd.py"), "help", (char *)0);
-    perror("desktop: python3");
-    return 127;
-  }
-  int session = !strcmp(argv[1], "--session");
+/*
+ * One command to deskd, its arguments argv[1..]: what it prints goes to `to` (stdout; stderr for `desktop stream`, whose
+ * stdout carries frames), what it says to stderr. Its exit code is deskd's.
+ */
+static int command(int argc, char **argv, int to) {
   for (int attempt = 0; attempt < 2; attempt++) {
     int fd = reach();
     if (fd < 0) {
       fprintf(stderr, "desktop: the desktop process did not start (see %s/deskd.log)\n", setting("INVINCIBLE_DESKTOP_RUN", "/tmp/invincible-desktop"));
       return 1;
     }
-    if (session) return relay(fd);
     buf b = {0};
     puts_(&b, "ARGV\n{\"argv\":[");
     for (int i = 1; i < argc; i++) {
@@ -226,10 +223,41 @@ int main(int argc, char **argv) {
       fprintf(stderr, "desktop: the desktop process ended before it answered\n");
       return 1;
     }
-    write_all(1, text, out);
+    write_all(to, text, out);
     write_all(2, text + out, err);
     return code;
   }
   fprintf(stderr, "desktop: the desktop process ended before it answered (see %s/deskd.log)\n", setting("INVINCIBLE_DESKTOP_RUN", "/tmp/invincible-desktop"));
   return 1;
+}
+
+int main(int argc, char **argv) {
+  signal(SIGPIPE, SIG_IGN);
+  if (argc < 2 || !strcmp(argv[1], "help") || !strcmp(argv[1], "--help") || !strcmp(argv[1], "-h")) {
+    execlp("python3", "python3", "-E", "-s", setting("INVINCIBLE_DESKD", "/usr/local/lib/invincible/deskd.py"), "help", (char *)0);
+    perror("desktop: python3");
+    return 127;
+  }
+  if (!strcmp(argv[1], "--session")) {
+    int fd = reach();
+    if (fd < 0) {
+      fprintf(stderr, "desktop: the desktop process did not start (see %s/deskd.log)\n", setting("INVINCIBLE_DESKTOP_RUN", "/tmp/invincible-desktop"));
+      return 1;
+    }
+    return relay(fd);
+  }
+  /*
+   * desktop stream: the screen as H.264, for the node's held exec of its own (C1 step 9). The desktop is started as
+   * `desktop start` starts it, its words said on stderr, then this process becomes the encoder (desktop-stream, on the
+   * PATH): its frames on stdout until its reader goes.
+   */
+  if (!strcmp(argv[1], "stream")) {
+    char *start[] = {argv[0], (char *)"start", NULL};
+    int code = command(2, start, 2);
+    if (code) return code;
+    execlp("desktop-stream", "desktop-stream", (char *)0);
+    perror("desktop: desktop-stream");
+    return 127;
+  }
+  return command(argc, argv, 1);
 }

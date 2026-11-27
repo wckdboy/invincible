@@ -1813,6 +1813,7 @@ class Desk:
 # ---------------------------------------------------------------- the command line, as `desktop` speaks it
 
 HELP = """desktop start                      bring up the display, the window manager and the browser
+desktop stream                     the screen as H.264 on stdout while it runs (the node's watching: desktop-stream)
 desktop status | desktop stop
 desktop open <address>             open an address in the browser (http, https, file or about)
 desktop text                       the page in front, as text: its title, its address, what it says

@@ -221,6 +221,19 @@ describe("the desktop command: deskd's thin client", () => {
     return true;
   };
 
+  test("desktop stream starts the desktop, says so on stderr, and becomes the encoder: its stdout is the frames alone", async () => {
+    if (!needs()) return;
+    const r = await deskd();
+    // (The encoder, stood in on the PATH as the image has it: what it prints is all that stdout carries.)
+    const bin = r.env.PATH!.split(":")[0]!;
+    writeFileSync(join(bin, "desktop-stream"), "#!/bin/sh\nprintf 'FRAMES'\n");
+    chmodSync(join(bin, "desktop-stream"), 0o755);
+    const streamed = desktop(r, ["stream"]);
+    expect(streamed).toMatchObject({ code: 0, out: "FRAMES" });
+    // (What `desktop start` says, on stderr: the desktop is up before the encoder runs.)
+    expect(streamed.err).toContain("The desktop is up");
+  });
+
   test("a click is one short command: it prints what happened, and exits 0", async () => {
     if (!needs()) return;
     const r = await deskd();
