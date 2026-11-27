@@ -12,7 +12,16 @@ export interface SessionProcess {
   onLine(take: (line: string) => void): void;
   kill(): void;
   exited: Promise<number>;
+  /** Why the host ended it, when the host did (a line longer than any answer). */
+  readonly why?: string | null;
 }
+
+/**
+ * The longest line a desktop's session may answer with: a picture of its screen (a PNG where it can't make a JPEG) fits
+ * well within it. deskd runs as the agent, so the line is the agent's to make: past this, the session is ended, never
+ * held.
+ */
+export const SESSION_LINE_MAX = 16 * 1024 * 1024;
 
 export type SpawnSession = (args: string[]) => SessionProcess;
 
@@ -21,16 +30,31 @@ export const spawnSession = (bin: string): SpawnSession => (args) => {
   const proc = Bun.spawn([bin, ...args], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
   proc.unref();
   const takers: ((line: string) => void)[] = [];
+  let why: string | null = null;
   void (async () => {
     const decoder = new TextDecoder();
-    let buffer = "";
+    // (A line held as its pieces until its end, each searched once: a long one costs its length, never its square.)
+    let held: string[] = [];
+    let heldLength = 0;
     for await (const chunk of proc.stdout) {
-      buffer += decoder.decode(chunk, { stream: true });
+      let text = decoder.decode(chunk, { stream: true });
       let at: number;
-      while ((at = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, at);
-        buffer = buffer.slice(at + 1);
+      while ((at = text.indexOf("\n")) >= 0) {
+        const line = held.length ? held.join("") + text.slice(0, at) : text.slice(0, at);
+        held = [];
+        heldLength = 0;
+        text = text.slice(at + 1);
         for (const take of takers) take(line);
+      }
+      if (text) {
+        held.push(text);
+        heldLength += text.length;
+      }
+      if (heldLength > SESSION_LINE_MAX) {
+        why = `its desktop answered with a line of more than ${SESSION_LINE_MAX / 2 ** 20} MB, longer than any answer`;
+        held = [];
+        proc.kill();
+        return;
       }
     }
   })().catch(() => {});
@@ -42,13 +66,19 @@ export const spawnSession = (bin: string): SpawnSession => (args) => {
     onLine: (take) => void takers.push(take),
     kill: () => proc.kill(),
     exited: proc.exited,
+    get why() {
+      return why;
+    },
   };
 };
 
 /** The session ended before it answered: `code` is the exec's (127, or 2 from the older `desktop` that took no --session: no deskd in this VM's image). */
 export class SessionEnded extends Error {
-  constructor(readonly code: number) {
-    super(code === 127 ? "this VM's desktop has no session (its image is older than deskd)" : `the desktop session ended (exit ${code})`);
+  constructor(
+    readonly code: number,
+    why?: string | null,
+  ) {
+    super(why ? `the desktop session was ended: ${why}` : code === 127 ? "this VM's desktop has no session (its image is older than deskd)" : `the desktop session ended (exit ${code})`);
   }
 }
 
@@ -79,7 +109,7 @@ export class DesktopSession {
         this.ended = code;
         for (const w of this.waiting.values()) {
           clearTimeout(w.timer);
-          w.reject(new SessionEnded(code));
+          w.reject(new SessionEnded(code, proc.why));
         }
         this.waiting.clear();
       });

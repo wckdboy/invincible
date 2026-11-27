@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { extname, join, resolve, sep } from "node:path";
 import { type ArtifactSkipped, type ArtifactView, type NodeIdentity, randomId, redact } from "@invincible/core";
 import type { LedgerStore } from "@invincible/ledger";
-import type { ExtractLimits, ExtractResult, LedgerEntryInput } from "@invincible/sandbox";
+import type { CollectResult, ExtractLimits, LedgerEntryInput } from "@invincible/sandbox";
 
 /*
  * Artifacts: a sandbox's work products, kept after the sandbox is gone. A run
@@ -21,27 +21,33 @@ const LISTED_BYTES = 40 * 1024;
 const LEFT_OUT_CHARS = 300;
 
 /**
- * What a folder kept left out (the walk's and the extractor's skipped list): how many, and as many named, each with why,
- * as fit in LEFT_OUT_CHARS. The ledger's line and the answer to whoever kept it say the same ones: none is left out in
- * silence. A name is the VM's to choose, so no control character of it, nor anything that looks like a secret, is said.
+ * What a folder kept left out (the walk's and the extractor's skipped list): how many (counting those the walk counted
+ * past the ones it named), and as many named, each with why, as fit in LEFT_OUT_CHARS; and whether the VM's account of
+ * it was cut, so that more may be left out than counted. The ledger's line and the answer to whoever kept it say the
+ * same: none is left out in silence. A name is the VM's to choose, so no control character of it, nor anything that
+ * looks like a secret, is said.
  */
-export function leftOut(skipped: ExtractResult["skipped"]): ArtifactSkipped {
+export function leftOut(result: Pick<CollectResult, "skipped" | "skippedCount" | "skippedCut">): ArtifactSkipped {
   const shown = (text: string, max: number) => redact(text.slice(0, max * 2).replace(/[\u0000-\u001f\u007f]/g, "?")).slice(0, max);
   const named: ArtifactSkipped["named"] = [];
   let used = 0;
-  for (const s of skipped) {
+  for (const s of result.skipped) {
     const one = { path: shown(s.path, 120), reason: shown(s.reason, 80) };
     used += one.path.length + one.reason.length + 5;
     if (used > LEFT_OUT_CHARS) break;
     named.push(one);
   }
-  return { count: skipped.length, named };
+  return { count: Math.max(result.skippedCount ?? 0, result.skipped.length), named, ...(result.skippedCut ? { cut: true as const } : {}) };
 }
 
-/** Those named, in words, then how many more: "a (why); b (why); … and 3 more". */
+/** How many were left out, in words: "3", or "at least 3" where the VM's account was cut. */
+export const leftOutCount = (left: ArtifactSkipped): string => `${left.cut ? "at least " : ""}${left.count}`;
+
+/** Those named, in words, then how many more: "a (why); b (why); … and 3 more" (and where cut, why only at least). */
 export function leftOutNames(left: ArtifactSkipped): string {
   const more = left.count - left.named.length;
-  return [...left.named.map((s) => `${s.path} (${s.reason})`), ...(more ? [`… and ${more} more`] : [])].join("; ");
+  const rest = more ? [`… and ${left.cut ? "at least " : ""}${more} more${left.cut ? ": the VM said more of it than the node reads" : ""}`] : left.cut ? ["… and maybe more: the VM said more of it than the node reads"] : [];
+  return [...left.named.map((s) => `${s.path} (${s.reason})`), ...rest].join("; ");
 }
 
 export class ArtifactError extends Error {
@@ -53,7 +59,7 @@ export class ArtifactError extends Error {
   }
 }
 
-type Collect = (sandbox: string, from: string, dest: string, limits: ExtractLimits) => Promise<ExtractResult | null>;
+type Collect = (sandbox: string, from: string, dest: string, limits: ExtractLimits) => Promise<CollectResult | null>;
 
 export interface ArtifactStoreOptions {
   store: LedgerStore;
@@ -142,14 +148,14 @@ export class ArtifactStore {
     const staging = join(this.o.dir, `${id}.part`);
     const files = join(staging, "files");
     mkdirSync(files, { recursive: true, mode: 0o700 });
-    let result: ExtractResult | null;
+    let result: CollectResult | null;
     try {
       result = await collect(input.sandbox, input.path ?? "/work/out", files, { ...ARTIFACT_LIMITS, maxBytes: Math.min(ARTIFACT_LIMITS.maxBytes, left) });
     } catch (error) {
       rmSync(staging, { recursive: true, force: true });
       throw new ArtifactError(413, `nothing was kept: ${(error as Error).message}`);
     }
-    const skipped = result?.skipped.length ? leftOut(result.skipped) : null;
+    const skipped = result && (result.skipped.length || result.skippedCount || result.skippedCut) ? leftOut(result) : null;
     const said = skipped ? { skipped } : {};
     if (!result || result.files.length === 0) {
       rmSync(staging, { recursive: true, force: true });
@@ -182,7 +188,7 @@ export class ArtifactStore {
       target: id,
       verdict: "allow",
       ...(input.run ? { run: input.run } : {}),
-      detail: `${result.files.length} file(s), ${result.bytes} bytes from sandbox ${input.sandbox}${skipped ? ` · left out ${skipped.count}: ${leftOutNames(skipped)}` : ""}`,
+      detail: `${result.files.length} file(s), ${result.bytes} bytes from sandbox ${input.sandbox}${skipped ? ` · left out ${leftOutCount(skipped)}: ${leftOutNames(skipped)}` : ""}`,
     });
     return { artifact: this.get(id)!, ...said };
   }

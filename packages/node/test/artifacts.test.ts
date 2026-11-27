@@ -21,12 +21,12 @@ import { freePort } from "./ports.ts";
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** A collector that "finds" these files in the sandbox, and leaves out what it is told was left out there. */
-function collector(files: Record<string, string>, skipped: ExtractResult["skipped"] = []) {
+function collector(files: Record<string, string>, skipped: ExtractResult["skipped"] = [], said: { skippedCount?: number; skippedCut?: true } = {}) {
   return async (_sandbox: string, _from: string, dest: string, limits: ExtractLimits): Promise<ExtractResult | null> => {
     const entries = Object.entries(files);
     if (!entries.length) return null;
     let bytes = 0;
-    const out: ExtractResult = { files: [], bytes: 0, skipped: [...skipped] };
+    const out: ExtractResult & typeof said = { files: [], bytes: 0, skipped: [...skipped], ...said };
     for (const [path, text] of entries) {
       bytes += text.length;
       if (bytes > limits.maxBytes) throw new Error("too big");
@@ -88,6 +88,19 @@ describe("keeping a sandbox's work", () => {
     expect(line).not.toMatch(/[\u0000-\u001f\u007f]/);
     const named = line.split("; ").length - 1;
     expect(line).toEndWith(`… and ${5000 - named} more`);
+  });
+
+  test("what was left out past those named is counted; a VM's account cut is said to be, and the count is then the least", async () => {
+    const two = [
+      { path: "out/closed", reason: "it can't be read here (PermissionError)" },
+      { path: "out/peek", reason: "link" },
+    ];
+    const counted = await artifacts.save(collector({ "report.md": "# r\n" }, two, { skippedCount: 1100 }), { sandbox: "0123456789" });
+    expect(counted.skipped).toEqual({ count: 1100, named: two });
+    expect(ledger.at(-1)!.detail).toBe("1 file(s), 4 bytes from sandbox 0123456789 · left out 1100: out/closed (it can't be read here (PermissionError)); out/peek (link); … and 1098 more");
+    const cut = await artifacts.save(collector({ "report.md": "# r\n" }, two, { skippedCount: 1100, skippedCut: true }), { sandbox: "0123456789" });
+    expect(cut.skipped).toEqual({ count: 1100, named: two, cut: true });
+    expect(ledger.at(-1)!.detail).toBe("1 file(s), 4 bytes from sandbox 0123456789 · left out at least 1100: out/closed (it can't be read here (PermissionError)); out/peek (link); … and at least 1098 more: the VM said more of it than the node reads");
   });
 
   test("nothing in /work/out: nothing kept, nothing recorded", async () => {

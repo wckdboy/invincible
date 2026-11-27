@@ -2070,6 +2070,8 @@ export interface ArtifactView {
 export interface ArtifactSkipped {
   count: number;
   named: { path: string; reason: string }[];
+  /** The VM said more of what it left out than the node reads (512 KB of it): more may be left out than `count`. */
+  cut?: true;
 }
 
 export interface OrderView {

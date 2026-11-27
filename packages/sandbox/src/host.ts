@@ -843,7 +843,7 @@ export class SandboxHost {
    * Copy a directory out of a sandbox (by default its /work/out) into `dest`, treating
    * what comes out as hostile: see tar.ts. Null when there's nothing there.
    */
-  async collect(id: string, from: string, dest: string, limits: ExtractLimits): Promise<ExtractResult | null> {
+  async collect(id: string, from: string, dest: string, limits: ExtractLimits): Promise<CollectResult | null> {
     const sandbox = await this.get(id);
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
     const path = `/${from.split("/").filter(Boolean).join("/")}`;
@@ -858,21 +858,7 @@ export class SandboxHost {
     const proc = Bun.spawn([this.bin, ...(this.apple ? containerCollectArgs(id, path) : collectArgs(id, path))], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => proc.kill(), 15 * 60_000);
     try {
-      const [result, err, code] = await Promise.all([
-        extractTar(proc.stdout, dest, limits, 1).catch((error: Error) => {
-          proc.kill();
-          throw error;
-        }),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ]);
-      if (code !== 0) {
-        if (code === COLLECT_MISSING) return null;
-        if (code === COLLECT_REFUSED) throw new SandboxError(`${path} isn't kept: it is outside the workspace, or what the agent's tools keep for themselves`, 403);
-        throw new SandboxError(`could not copy ${path}: ${redact(err.trim()).slice(0, 300)}`, 500);
-      }
-      // What the VM couldn't read, named with why (collectSkipped): in the artifact's skipped list, never left out in silence.
-      return { ...result, skipped: [...result.skipped, ...collectSkipped(err)] };
+      return await collectFrom(proc, path, dest, limits);
     } finally {
       clearTimeout(timer);
     }
@@ -1854,15 +1840,69 @@ export async function probeContainer(runner?: DockerRunner, bin = "container"): 
   return { container, sandbox: { image: image.code === 0, networks: gw.code === 0 && net.code === 0, vm: true, engine: "container", cannot: [...CONTAINER_UNMADE], grows: false, images: [...CONTAINER_IMAGES] } };
 }
 
+/**
+ * The most of a collect's stderr the node keeps: what the walk says of what it left out (COLLECT_SKIPPED_MAX lines at most,
+ * and a count) fits well within it. Past it, the rest is drained and never kept, and the collect says it was cut.
+ */
+export const COLLECT_STDERR_MAX = 512 * 1024;
+
+/** A collect's result: the extractor's, with what the walk left out beside what the extractor refused. */
+export interface CollectResult extends ExtractResult {
+  /** How many were left out in all, when that is more than `skipped` names (the walk names a thousand, and counts the rest). */
+  skippedCount?: number;
+  /** The VM said more of what it left out than the node reads (COLLECT_STDERR_MAX): more may be left out than counted. */
+  skippedCut?: true;
+}
+
+/** A collect's process, as the node reads it: its tar on stdout, the walk's words on stderr, and its end. */
+export interface CollectProcess {
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  exited: Promise<number>;
+  kill(): void;
+}
+
+/**
+ * A collect read as the node reads it (SandboxHost.collect): its tar into the extractor, within `limits`, and what the
+ * walk says on its stderr (collectSkipped) beside what the extractor refused. Null: no such folder there.
+ */
+export async function collectFrom(proc: CollectProcess, path: string, dest: string, limits: ExtractLimits): Promise<CollectResult | null> {
+  const [result, err, code] = await Promise.all([
+    extractTar(proc.stdout, dest, limits, 1).catch((error: Error) => {
+      proc.kill();
+      throw error;
+    }),
+    // (Within its cap, the rest drained and never kept: the VM writes it, so it says what it likes, as much as it likes.)
+    readCapped(proc.stderr, COLLECT_STDERR_MAX),
+    proc.exited,
+  ]);
+  if (code !== 0) {
+    if (code === COLLECT_MISSING) return null;
+    if (code === COLLECT_REFUSED) throw new SandboxError(`${path} isn't kept: it is outside the workspace, or what the agent's tools keep for themselves`, 403);
+    throw new SandboxError(`could not copy ${path}: ${redact(err.text.trim()).slice(0, 300)}`, 500);
+  }
+  // What the VM couldn't read, named with why (collectSkipped): in the artifact's skipped list, never left out in silence;
+  // past those it names, how many more; and its words cut, said to be.
+  const walk = collectSkipped(err.text);
+  const skipped = [...result.skipped, ...walk.named];
+  return {
+    ...result,
+    skipped,
+    ...(walk.more || err.truncated ? { skippedCount: skipped.length + walk.more } : {}),
+    ...(err.truncated ? { skippedCut: true as const } : {}),
+  };
+}
+
 /** The binary's commands, spawned: what each prints, and its exit code. */
 const runnerOf =
   (bin: string): DockerRunner =>
   async (args, timeoutMs) => {
     const proc = Bun.spawn([bin, ...args], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const timer = setTimeout(() => proc.kill(), timeoutMs);
-    const [stdout, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    // (Within the cap of every engine command's answer, the rest drained: a binary's words are no more than that.)
+    const [out, code] = await Promise.all([readCapped(proc.stdout, MAX_OUTPUT), proc.exited]);
     clearTimeout(timer);
-    return { code, stdout, stderr: "" };
+    return { code, stdout: out.text, stderr: "" };
   };
 
 /**

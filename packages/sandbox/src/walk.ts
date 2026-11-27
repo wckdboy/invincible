@@ -75,6 +75,9 @@ def at(names):
 export const COLLECT_REFUSED = 3;
 export const COLLECT_MISSING = 4;
 
+/** The most entries a collect names as left out (its own reasons), so that what it says is bounded as what it keeps. */
+export const COLLECT_SKIPPED_MAX = 1000;
+
 /**
  * `python3 -I -c COLLECT <folder>`: a folder of a VM's /work as a tar on its stdout, for the node to keep (SandboxHost.collect:
  * an artifact), its entries named under the folder's own name as docker cp named them. The folder is reached by the walk;
@@ -98,9 +101,13 @@ def entry(name,seen,kind):
     e=tarfile.TarInfo(name);e.mtime=int(seen.st_mtime);e.mode=stat.S_IMODE(seen.st_mode);e.type=kind
     return e
 top=names[-1] if names else (os.path.basename(root) or 'work')
+said=[0]
 def skip(path,why):
-    # (Named with why, never left out in silence: the node adds it to the artifact's skipped list.)
-    sys.stderr.write(json.dumps({"skipped":path,"reason":why})+'\\n')
+    # (Named with why, never left out in silence: the node adds it to the artifact's skipped list. A thousand at most, and
+    # the rest counted in one closing line, so that what it says is bounded as what it keeps.)
+    said[0]+=1
+    if said[0]<=${COLLECT_SKIPPED_MAX}:
+        sys.stderr.write(json.dumps({"skipped":path[:512],"reason":why[:200]})+'\\n')
 def cannot(e):
     return "it can't be read here ("+type(e).__name__+")"
 tar.addfile(entry(top,os.fstat(held[-1]),tarfile.DIRTYPE))
@@ -164,29 +171,39 @@ while stack:
         tar.addfile(e)
     else:
         skip(path,"neither a file, a folder nor a link")
-tar.close()`;
+tar.close()
+if said[0]>${COLLECT_SKIPPED_MAX}:
+    sys.stderr.write(json.dumps({"more":said[0]-${COLLECT_SKIPPED_MAX}})+'\\n')`;
 
 /** The command that collects a VM's folder (COLLECT_SCRIPT), as the VM runs it; `root` names another /work, for tests. */
 export const collectCommand = (folder: string, root?: string): string[] => ["python3", "-I", "-c", COLLECT_SCRIPT, folder, ...(root ? [root] : [])];
 
-/** The most entries a collect names as left out (its own reasons), so that what it says is bounded as what it keeps. */
-export const COLLECT_SKIPPED_MAX = 1000;
 
 /**
- * What a collect left out, each entry with why (COLLECT_SCRIPT says them on its stderr, one JSON line each): beside the
- * extractor's skipped entries, so nothing is left out of an artifact in silence. Lines that aren't one are passed over.
+ * What a collect left out, as COLLECT_SCRIPT says it on its stderr: each entry with why, one JSON line each, a thousand at
+ * most (`named`), and how many more it left out in one closing line (`more`). They go beside the extractor's skipped
+ * entries, so nothing is left out of an artifact in silence. Lines that aren't one are passed over.
  */
-export function collectSkipped(stderr: string): { path: string; reason: string }[] {
-  const out: { path: string; reason: string }[] = [];
+export function collectSkipped(stderr: string): { named: { path: string; reason: string }[]; more: number } {
+  const named: { path: string; reason: string }[] = [];
+  let more = 0;
   for (const line of stderr.split("\n")) {
-    if (out.length >= COLLECT_SKIPPED_MAX) break;
-    if (!line.startsWith('{"skipped":')) continue;
+    if (line.startsWith('{"more":')) {
+      try {
+        const said = (JSON.parse(line) as { more?: unknown }).more;
+        if (typeof said === "number" && Number.isSafeInteger(said) && said > 0) more = said;
+      } catch {
+        // (Not a line of the script's: passed over.)
+      }
+      continue;
+    }
+    if (named.length >= COLLECT_SKIPPED_MAX || !line.startsWith('{"skipped":')) continue;
     try {
       const said = JSON.parse(line) as { skipped?: unknown; reason?: unknown };
-      if (typeof said.skipped === "string" && typeof said.reason === "string") out.push({ path: said.skipped.slice(0, 512), reason: said.reason.slice(0, 200) });
+      if (typeof said.skipped === "string" && typeof said.reason === "string") named.push({ path: said.skipped.slice(0, 512), reason: said.reason.slice(0, 200) });
     } catch {
       // (Not a line of the script's: passed over.)
     }
   }
-  return out;
+  return { named, more };
 }

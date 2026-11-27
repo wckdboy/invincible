@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectCommand, collectSkipped, COLLECT_MISSING, COLLECT_REFUSED, extractTar } from "../src/index.ts";
+import { spawnSync } from "node:child_process";
+import { collectCommand, collectFrom, collectSkipped, COLLECT_MISSING, COLLECT_REFUSED, COLLECT_SKIPPED_MAX, COLLECT_STDERR_MAX, extractTar } from "../src/index.ts";
 
 /*
  * A folder of a VM's /work kept as an artifact (SandboxHost.collect, 27 November 2026): the VM writes its tar by the walk
@@ -56,8 +57,43 @@ async function collect(path: string, work: string, home: string, opts: { fds?: n
   const [result, stderr, code] = await Promise.all([extractTar(proc.stdout, dest, { maxBytes: 1 << 22, maxFiles: opts.maxFiles ?? 1000, maxEntries: 4000 }, 1).catch(() => null), new Response(proc.stderr).text(), proc.exited]);
   const files = (result?.files ?? []).map((f) => f.path).sort();
   const read = files.map((f) => readFileSync(join(dest, f), "utf8")).join("\n");
-  return { code, files, read, skipped: [...(result?.skipped ?? []), ...collectSkipped(stderr)], stderr };
+  const said = collectSkipped(stderr);
+  return { code, files, read, skipped: [...(result?.skipped ?? []), ...said.named], more: said.more, stderr };
 }
+
+/** `count` FIFOs in `dir`: neither a file, a folder nor a link, so left out, and named, whoever runs the walk (root too). */
+const fifos = (dir: string, count: number) =>
+  expect(spawnSync("python3", ["-I", "-c", "import os, sys\nfor i in range(int(sys.argv[2])): os.mkfifo(os.path.join(sys.argv[1], 'p%05d' % i))", dir, String(count)]).status).toBe(0);
+
+describe("what a collect left out, said within bounds (F3)", () => {
+  test("the walk names a thousand at most, and counts the rest in one closing line: never a line for each", async () => {
+    const { work } = workspace();
+    fifos(join(work, "out"), COLLECT_SKIPPED_MAX + 100);
+    const kept = await collect(join(work, "out"), work, folder());
+    expect(kept.code).toBe(0);
+    expect(kept.files).toEqual(["report.md"]);
+    expect(kept.skipped.length).toBe(COLLECT_SKIPPED_MAX);
+    expect(kept.more).toBe(100);
+    expect(kept.stderr.split("\n").filter(Boolean).length).toBe(COLLECT_SKIPPED_MAX + 1);
+  });
+
+  test("read as the node reads it: the rest counted beside those named; past its cap of the VM's words, cut, and said so", async () => {
+    const { work } = workspace();
+    fifos(join(work, "out"), COLLECT_SKIPPED_MAX + 100);
+    const read = (argv: string[]) => collectFrom(Bun.spawn(argv, { env: { ...process.env, HOME: folder() }, stdout: "pipe", stderr: "pipe" }), "/work/out", folder(), { maxBytes: 1 << 20, maxFiles: 100, maxEntries: 400 });
+    const counted = (await read(collectCommand(join(work, "out"), work)))!;
+    expect(counted.files.map((f) => f.path)).toEqual(["report.md"]);
+    expect([counted.skipped.length, counted.skippedCount, counted.skippedCut]).toEqual([COLLECT_SKIPPED_MAX, COLLECT_SKIPPED_MAX + 100, undefined]);
+    // A VM that says more of what it left out than the node reads (its own words, before the walk's): cut, and said to be.
+    const words = `import json, sys\nfor i in range(4000): sys.stderr.write(json.dumps({"skipped": "out/" + "w" * 300 + str(i), "reason": "link"}) + "\\n")`;
+    const cut = (await read(["sh", "-c", 'python3 -I -c "$0"; exec "$@"', words, ...collectCommand(join(work, "out"), work)]))!;
+    expect(4000 * 330).toBeGreaterThan(COLLECT_STDERR_MAX);
+    expect(cut.files.map((f) => f.path)).toEqual(["report.md"]);
+    expect(cut.skippedCut).toBe(true);
+    expect(cut.skipped.length).toBeLessThanOrEqual(COLLECT_SKIPPED_MAX);
+    expect(cut.skippedCount).toBeGreaterThanOrEqual(cut.skipped.length);
+  });
+});
 
 describe("a folder of a VM's workspace, kept as an artifact", () => {
   test("in a VM whose HOME is its /work, /work is kept without what its tools keep for themselves there: the workspace's own and the rest stay", async () => {

@@ -249,6 +249,25 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
 - **Who can read them, fleet-wide.** Fetching a kept file needs `mind:read` and nothing more, and since November 2026 that reaches files kept on any node: an agent (an arm, a loop's run, an MCP client) given `mind:read` on one node can read the work kept on every other node through it. Before, a file kept on another node answered 421, and an agent's token is valid only on the node that minted it, so an agent read only the work kept where it ran. So `mind:read` is read access to every kept file in the fleet, as it already was to every memory; grant it as such.
 - **Agents keep, you delete.** An arm or a loop can keep only its own sandboxes' work; removing kept work needs `fleet:admin`.
 
+## What a VM's processes write (tested)
+
+- **Nothing a VM's process writes is read into the node's memory without bound.** A VM's processes are the agent's to
+  make, so what they write is as hostile as its files. Each way the node reads one has a cap. Past it the rest is drained
+  and never kept, so the process never blocks on a full pipe:
+  - a command's answer (an exec: the looks, the file view, a task's changes): 1 MB of each of stdout and stderr, said to
+    be truncated;
+  - a held exec's lines (a coding tool's follow, a seat's sign-in): 64 KB a line, a longer one dropped whole;
+  - a desktop's session with deskd: 16 MB a line, which a picture of its screen fits well within. Past it the session is
+    ended, and says why;
+  - the desktop's stream: 8 MB a frame, past which it is refused;
+  - a folder kept: its tar within the extractor's caps, and 512 KB of its stderr, past which the collect says it was cut.
+    The walk names a thousand of what it left out at most, and counts the rest in one closing line;
+  - a terminal: 256 KB of scrollback;
+  - not a VM's, but read the same way: Apple's `container` CLI's answers, 1 MB.
+- Tested in `packages/sandbox/test/vm-output.test.ts`. For each reader, a stand-in for a VM's process writes 100 MB on
+  stdout and on stderr, read in a process of its own whose peak memory stays under 64 MB. Before, the collect's stderr, a
+  desktop session's line and the container CLI's answer were read whole: 301 MB, 1.2 to 1.6 GB, and 302 MB.
+
 ## MicroVM sandboxes (tested)
 
 - **A kernel of its own.** On a host with KVM, an `online` sandbox runs inside its own Kata microVM by default, so a container escape or kernel exploit lands in a throwaway VM, not on the host. Tested on ultra: the guest runs its own kernel, as uid 1000 with no capabilities, a read-only root, Docker's seccomp filter enforced in the guest, the disk limit holding through the VM, the internet and the model gateway reachable, and the host not (`packages/sandbox/test/docker.integration.test.ts`).
