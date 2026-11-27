@@ -215,10 +215,10 @@ export class TeamService {
    * again as it is written (nothing between the two awaits) so two at once can't both take what one fits. It waits its
    * turn like any task, and its trail says whose word it was (`said`) and what it was within.
    */
-  giveOwn(input: TeamTaskInput, said = "Given by your agent on its own word"): TeamTask {
+  giveOwn(input: TeamTaskInput, said = "Given by your agent on its own word", fix?: TeamTaskFix): TeamTask {
     this.accepting();
     const bound = this.mayGiveOwn(input.budgetUsd);
-    const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, own: true });
+    const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, own: true, ...(fix ? { fix } : {}) });
     this.store.noteTask(task.id, `${said}, within its budget of $${input.budgetUsd}, ${this.within(bound)}`.slice(0, 500));
     this.changed();
     this.kick();

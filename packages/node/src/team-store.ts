@@ -310,8 +310,9 @@ export class TeamStore {
   }
   /** The repositories where you turned it off, lowercased. */
   mergeOff(): string[] { return this.db.query<{ key: string }, []>("SELECT key FROM team_settings WHERE key LIKE 'merge:%' AND value='off' ORDER BY key").all().map((r) => r.key.slice("merge:".length)); }
-  /** Whether failing checks go back to the agent whose work it was when no outcome gives them back (PLAN #29): off until you turn it on. */
-  ciBack(): boolean { return this.db.query<DocRow, []>("SELECT value FROM team_settings WHERE key='ci'").get()?.value === "on"; }
+  /** Whether failing checks go back to the agent whose work it was when no outcome gives them back (PLAN #29), on your
+   * agent's own word within its money: on until you turn it off (your word, 27 November 2026: it decides this itself). */
+  ciBack(): boolean { return this.db.query<DocRow, []>("SELECT value FROM team_settings WHERE key='ci'").get()?.value !== "off"; }
   setCiBack(raw: boolean): boolean {
     const on = teamInput(z.boolean(), raw);
     this.db.query("INSERT INTO team_settings(key,value) VALUES('ci',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(on ? "on" : "off");

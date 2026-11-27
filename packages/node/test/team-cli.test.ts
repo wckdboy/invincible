@@ -293,6 +293,9 @@ test("agents ci says whether failing checks and reviews go back to the agent, an
   await teamCommand(api, "ci", ["on"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamCi", input: { on: true } });
   expect(lines.at(-1)).toStartWith("Failing checks, and reviews that ask for changes, go back to the agent whose work it was: a fix on the pull request's branch");
+  // On your agent's own word, within its money, and on unless you turn it off, with why.
+  expect(lines.at(-1)).toContain("on your agent's own word within its money (the work's budget, $3 at most, counted in its day)");
+  expect(lines.at(-1)).toContain("It is on unless you turn it off: the fix is its own agent's work on its own branch, its gates and an independent reviewer judge it, and what it may spend is bounded.");
   expect(lines.at(-1)).toContain("A verified fix is pushed onto its branch on your agent's own approval (never forced), as it may in a repository you gave an agent, unless it changes what the repository's CI runs or the branch moved since it last pushed it.");
   await teamCommand(api, "ci", ["off"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamCi", input: { on: false } });

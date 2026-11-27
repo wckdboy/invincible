@@ -122,10 +122,11 @@ of its own; "agents" and "team" are the same command)
                                     On (the default), an agent's harness can search and keep notes in its own
                                     VM, where the VM's image has the pinned Engram; off, nothing is given
   agents ci [on|off]             failing checks, or a review asking for changes, on a pull request of an agent's
-                                    work: say whether they go back to that agent, or turn it on or off. On, it gets
-                                    the fix on that branch (once a failing commit or review, three at most), whose
-                                    push your agent approves in a repository you gave the agent; off (the default), they
-                                    are yours, though an outcome gives its own back within its budget
+                                    work: say whether they go back to that agent, or turn it on or off. On (the
+                                    default), it gets the fix on that branch on your agent's own word within its money
+                                    (once a failing commit or review, three at most), whose push your agent approves in a
+                                    repository you gave the agent unless it changes the CI; off, they are yours, though an
+                                    outcome gives its own back within its budget
   agents backlog [on|off]        work for idle agents: one with a repository and nothing to do is given the next
                                     step of its repository's plan, a task a day at most, on your agent's own yes within its
                                     budget ($3 at most); one that may spend more than it may commit on its own (below)
