@@ -13,7 +13,7 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const folder = () => { const dir = mkdtempSync(join(tmpdir(), "invincible-look-")); dirs.push(dir); return dir; };
 const run = (script: string, ...args: string[]) => {
-  const ran = Bun.spawnSync(["python3", "-c", script, ...args], { stdout: "pipe", stderr: "pipe" });
+  const ran = Bun.spawnSync(["python3", "-I", "-c", script, ...args], { stdout: "pipe", stderr: "pipe" });
   expect(ran.exitCode).toBe(0);
   return ran.stdout.toString();
 };
@@ -244,7 +244,8 @@ for _ in range(times):
 describe("a VM whose HOME is its /work", () => {
   /** A look as such a VM runs it: its HOME its /work (or elsewhere, a HOME of its own). */
   const look = (home: string, script: string, ...args: string[]) => {
-    const ran = Bun.spawnSync(["python3", "-c", script, ...args], { stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: home } });
+    // (As the node runs a look, -I: Apple's own python3 otherwise writes its caches in the HOME it is given, this /work.)
+    const ran = Bun.spawnSync(["python3", "-I", "-c", script, ...args], { stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: home } });
     expect(ran.exitCode).toBe(0);
     return ran.stdout.toString();
   };
