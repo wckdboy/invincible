@@ -44,6 +44,36 @@ export function verifyEd25519(signature: Bytes, message: Bytes, publicKey: Bytes
   }
 }
 
+/**
+ * Whether 32 bytes are a point fit for a node's Ed25519 key, or a signature's R, under the strict rule (the lead's word
+ * of 27 November 2026): a canonical encoding (y < p, never x = 0 with x's sign bit set), a point of the prime-order
+ * subgroup, and not the identity. So no small-order point (the identity's key verifies any signature for any message),
+ * and no mixed-order one, which a cofactored check and a cofactorless one judge differently: core, Swift and Kotlin
+ * answer alike on every input. (noble's own default, ZIP-215, takes non-canonical encodings and small-order keys.)
+ */
+export function strictEd25519Point(bytes: Bytes): boolean {
+  if (bytes.length !== 32) return false;
+  try {
+    const point = ed25519.Point.fromBytes(bytes, false);
+    return !point.is0() && point.isTorsionFree();
+  } catch {
+    return false;
+  }
+}
+
+/** An Ed25519 signature under the strict rule: A and R strict points (strictEd25519Point), S < L, and [S]B = R + [k]A. */
+export function verifyEd25519Strict(signature: Bytes, message: Bytes, publicKey: Bytes): boolean {
+  if (signature.length !== 64 || !strictEd25519Point(publicKey) || !strictEd25519Point(signature.subarray(0, 32))) return false;
+  let s = 0n;
+  for (let i = 63; i >= 32; i--) s = (s << 8n) | BigInt(signature[i]!);
+  if (s >= ed25519.Point.Fn.ORDER) return false;
+  try {
+    return ed25519.verify(signature, message, publicKey, { zip215: false });
+  } catch {
+    return false;
+  }
+}
+
 // --- P-256: browser/PWA client keys (WebCrypto, non-extractable) ------------
 
 /**

@@ -121,6 +121,15 @@ The review also confirmed what held up:
   - **The web app asks again at every start.** A node that proves to be another, or whose proof fails, is asked
     nothing more, and the page says so. `inv`, not yet pinned, exits 30 on a proof that fails.
   - **A node from before, which proves nothing,** is spoken to as before, until the cutoff.
+  - **Held to Ed25519's strict rule** (`verifyEd25519Strict`, the lead's word of 27 November 2026): A and R are
+    canonical points of the prime-order subgroup, neither the identity, S < L, and the equation holds. noble's default
+    (ZIP-215) took a small-order key, among them the identity, with which a signature verifies for any message: a node
+    id that is such a point "proved" itself for any challenge. Under the rule it proves nothing.
+  - **No such key is enrolled, from today:** pairing, enrollment and a fleet's founding refuse any node key that fails
+    the rule (`isStrictNodeId`: `pairing-host.ts`, `enrollDevice`, `foundFleet`), so the forgery has no way in. The
+    log's own check of what is already in it moves to the rule at the cutoff, so a log rebuilds to the same state and a
+    fleet mid-update agrees. The tests: `packages/core/test/core.test.ts` ("Ed25519's strict rule"),
+    `packages/ledger/test/strict-keys.test.ts` and `packages/link/test/pairing-host.test.ts`.
   - **What the proof doesn't do:** it doesn't bind the connection. Something in the middle that passed whoami, and the
     requests after it, on to your node is kept out by the tailnet's encryption and `tailscale serve`'s HTTPS, not by
     this.

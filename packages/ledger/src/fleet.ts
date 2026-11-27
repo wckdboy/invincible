@@ -1,10 +1,12 @@
-import { b64u, type NodeIdentity, OWNER_SCOPES, type Scope } from "@invincible/core";
+import { b64u, isNodeId, isStrictNodeId, type NodeIdentity, OWNER_SCOPES, type Scope } from "@invincible/core";
 import { LedgerStore } from "./store.ts";
 import { Vault } from "./vault.ts";
 
 /** Found a new fleet: genesis, self-enrollment as the first full node, first vault key. */
 export function foundFleet(store: LedgerStore, identity: NodeIdentity, opts: { fleetName: string; nodeName: string }): string {
   if (store.fleet) throw new Error(`this replica already belongs to fleet ${store.fleet}`);
+  // A key that fails the strict rule founds nothing: its signatures could be forged (core's isStrictNodeId).
+  if (!isStrictNodeId(identity.id)) throw new Error("this node's key fails Ed25519's strict rule: it can found no fleet");
   const genesis = store.emit(identity, "fleet.genesis", { name: opts.fleetName, created: Date.now() });
   store.emit(identity, "device.enrolled", {
     device: identity.id,
@@ -28,6 +30,9 @@ export interface EnrollInput {
 
 /** Enroll a paired device; full nodes also receive every vault key in use. */
 export function enrollDevice(store: LedgerStore, approver: NodeIdentity, input: EnrollInput): void {
+  // No node, nor any device with a node's id, whose key fails the strict rule is enrolled (the lead's word of 27
+  // November 2026): from today, as what is enrolled; from the cutoff, the log holds every signature to it as well.
+  if ((input.kind === "node" || isNodeId(input.device)) && !isStrictNodeId(input.device)) throw new Error(`${input.device.slice(0, 10)}… isn't enrolled: its key fails Ed25519's strict rule`);
   store.emit(approver, "device.enrolled", {
     device: input.device,
     name: input.name,

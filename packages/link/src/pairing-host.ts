@@ -5,6 +5,7 @@ import {
   type Invite,
   isClientId,
   isNodeId,
+  isStrictNodeId,
   newInvite,
   type NodeIdentity,
   type PairingView,
@@ -90,6 +91,9 @@ export class PairingHost {
     if (!proofMatches(pairProof(record.secret, fields), proof)) throw new PairingError("invalid invite proof", 403);
     if (req.kind !== record.invite.k) throw new PairingError(`this invite is for a ${record.invite.k}`);
     if (req.kind === "node" && (!isNodeId(req.device) || !req.box)) throw new PairingError("nodes must present an ed25519 id and box key");
+    // A key that fails the strict rule (a small-order or mixed-order point, or one written two ways) is never enrolled:
+    // its signatures could be forged (core's isStrictNodeId; the lead's word of 27 November 2026).
+    if (req.kind === "node" && !isStrictNodeId(req.device)) throw new PairingError("that node's key isn't one a node may have: it fails Ed25519's strict rule");
     if (req.kind === "client" && !isClientId(req.device)) throw new PairingError("clients must present a P-256 id");
     if (this.store.device(req.device)) throw new PairingError("device already enrolled", 409);
 

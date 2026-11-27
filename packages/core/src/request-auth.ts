@@ -1,6 +1,7 @@
 import { b64u, type Bytes, fromB64u, randomBytes, randomId } from "./bytes.ts";
 import { sha256B64u } from "./crypto.ts";
-import { type DeviceId, domain, isNodeId, verifyDeviceSignature } from "./identity.ts";
+import { verifyEd25519Strict } from "./crypto.ts";
+import { type DeviceId, domain, isStrictNodeId, verifyDeviceSignature } from "./identity.ts";
 
 /**
  * Every node-to-node and client-to-node request is signed by the caller's device
@@ -123,17 +124,18 @@ export const NODE_CHALLENGE = /^[A-Za-z0-9_-]{16,64}$/;
 
 /**
  * Whether `proof` (base64url) is the node `node`'s signature of `challenge` (nodeProofInput): it holds the key its id is,
- * so it is that node. A device pins the id it proved and names it in what it signs (whoami's `proof`).
+ * so it is that node. A device pins the id it proved and names it in what it signs (whoami's `proof`). Held to the strict
+ * rule (crypto.ts verifyEd25519Strict), as the apps hold it, so a node id that is a small-order point proves nothing.
  */
 export function verifyNodeProof(node: string, challenge: string, proof: string): boolean {
-  if (!isNodeId(node) || !NODE_CHALLENGE.test(challenge)) return false;
+  if (!isStrictNodeId(node) || !NODE_CHALLENGE.test(challenge)) return false;
   let signature: Bytes;
   try {
     signature = fromB64u(proof);
   } catch {
     return false;
   }
-  return b64u(signature) === proof && verifyDeviceSignature(node as DeviceId, signature, nodeProofInput(challenge));
+  return b64u(signature) === proof && verifyEd25519Strict(signature, nodeProofInput(challenge), fromB64u(node.slice(2)));
 }
 
 /** A fresh challenge, as a device poses one to whoami (NODE_CHALLENGE). */

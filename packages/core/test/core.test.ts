@@ -33,7 +33,12 @@ import {
   nodeProofInput,
   REQUESTS_NAME_THEIR_NODE_FROM,
   verifyNodeProof,
+  isStrictNodeId,
+  strictEd25519Point,
+  verifyEd25519,
+  verifyEd25519Strict,
 } from "../src/index.ts";
+import { ed25519 } from "@noble/curves/ed25519.js";
 
 describe("canonical json", () => {
   test("is independent of key order and drops undefined", () => {
@@ -200,6 +205,25 @@ describe("request signing", () => {
     expect(verifyNodeProof(`c_${"A".repeat(87)}`, challenge, proof)).toBe(false);
   });
 
+  // The lead's word of 27 November 2026: a node's key, and a signature's R, are held to the strict rule.
+  test("whoami's proof is held to Ed25519's strict rule: a node id that is a small-order point proves nothing, though it would verify anything", () => {
+    const identityPoint = new Uint8Array(32);
+    identityPoint[0] = 1;
+    const weak = `n_${b64u(identityPoint)}`;
+    const challenge = nodeChallenge();
+    // R the identity, S zero: under ZIP-215's rules this verifies for any message by the identity's key.
+    const forgery = new Uint8Array(64);
+    forgery.set(identityPoint, 0);
+    expect(verifyEd25519(forgery, nodeProofInput(challenge), identityPoint)).toBe(true);
+    expect(isStrictNodeId(weak)).toBe(false);
+    expect(verifyNodeProof(weak, challenge, b64u(forgery))).toBe(false);
+    expect(judgeNodeProof(undefined, { node: weak, proof: b64u(forgery) }, challenge)).toEqual({ kind: "false" });
+    // A real node's proof still holds.
+    const node = newNodeIdentity();
+    expect(isStrictNodeId(node.id)).toBe(true);
+    expect(verifyNodeProof(node.id, challenge, b64u(node.sign(nodeProofInput(challenge))))).toBe(true);
+  });
+
   test("a device judges whoami's proof against the node it pinned: the first it pins, the same it keeps, another and a failed one it refuses", () => {
     const [node, other] = [newNodeIdentity(), newNodeIdentity()];
     const challenge = nodeChallenge();
@@ -284,5 +308,62 @@ describe("pairing", () => {
     for (const name of ["evil\x1b]0;owned\x07", "two\nlines", "back\rspace", "nul\x00", "del\x7f", "c1\x9b31m", "flip\u202Egnp.exe", "iso\u2066late"]) {
       expect(PairRequestFields.safeParse({ ...fields, name }).success).toBe(false);
     }
+  });
+});
+
+// The lead's word of 27 November 2026: one strict rule for a node's Ed25519 signature, in core, Swift and Kotlin.
+describe("Ed25519's strict rule", () => {
+  const hex = (h: string) => Uint8Array.from(h.match(/../g)!, (b) => parseInt(b, 16));
+  // The eight points of small order, as they are written canonically (libsodium's blocklist): the identity, and those of
+  // order 2, 4 and 8.
+  const SMALL = [
+    "0100000000000000000000000000000000000000000000000000000000000000",
+    "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+    "0000000000000000000000000000000000000000000000000000000000000000",
+    "0000000000000000000000000000000000000000000000000000000000000080",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+    "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+    "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+  ].map(hex);
+  // Points written another way: y = p + 1 (the identity's y, unreduced), y = 1 with x's sign bit set (Wycheproof's
+  // tc151), and y = p (zero's, unreduced).
+  const NONCANONICAL = ["eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f", "0100000000000000000000000000000000000000000000000000000000000080", "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"].map(hex);
+  const node = newNodeIdentity();
+  const key = fromB64u(node.id.slice(2));
+  const message = utf8("a node signs this");
+
+  test("a key, or a signature's R, is a canonical point of the prime-order subgroup and never the identity", () => {
+    expect(strictEd25519Point(key)).toBe(true);
+    for (const point of SMALL) expect(strictEd25519Point(point)).toBe(false);
+    for (const point of NONCANONICAL) expect(strictEd25519Point(point)).toBe(false);
+    // A mixed-order key: a real one with a point of order 8 added. It is a point, but outside the prime-order subgroup.
+    const mixed = ed25519.Point.fromBytes(key, false).add(ed25519.Point.fromBytes(SMALL[4]!, false)).toBytes();
+    expect(strictEd25519Point(mixed)).toBe(false);
+    expect(strictEd25519Point(key.subarray(0, 31))).toBe(false);
+  });
+
+  test("a signature holds under it only by a strict key, with a strict R and S < L, and over its own message", () => {
+    const signature = node.sign(message);
+    expect(verifyEd25519Strict(signature, message, key)).toBe(true);
+    expect(verifyEd25519Strict(signature, utf8("another message"), key)).toBe(false);
+    // S + L is the same scalar written past L: refused.
+    let s = 0n;
+    for (let i = 63; i >= 32; i--) s = (s << 8n) | BigInt(signature[i]!);
+    let t = s + ed25519.Point.Fn.ORDER;
+    const malleable = Uint8Array.from(signature);
+    for (let i = 32; i < 64; i++, t >>= 8n) malleable[i] = Number(t & 0xffn);
+    expect(verifyEd25519Strict(malleable, message, key)).toBe(false);
+    // R written non-canonically, or replaced by a small-order point: refused.
+    for (const r of [...SMALL, ...NONCANONICAL]) {
+      const forged = Uint8Array.from(signature);
+      forged.set(r, 0);
+      expect(verifyEd25519Strict(forged, message, key)).toBe(false);
+    }
+    // Each small-order key's forgery (R the identity, S zero) is refused, whatever ZIP-215 says of it.
+    const forgery = new Uint8Array(64);
+    forgery.set(SMALL[0]!, 0);
+    for (const point of SMALL) expect(verifyEd25519Strict(forgery, message, point)).toBe(false);
+    expect(verifyEd25519Strict(signature.subarray(0, 63), message, key)).toBe(false);
   });
 });

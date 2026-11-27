@@ -8,6 +8,7 @@ import {
   signEd25519,
   signingPublicKey,
   signP256,
+  strictEd25519Point,
   verifyEd25519,
   verifyP256,
 } from "./crypto.ts";
@@ -22,6 +23,20 @@ export type DeviceId = string;
 export const nodeIdFromKey = (publicKey: Bytes): DeviceId => `n_${b64u(publicKey)}`;
 export const clientIdFromKey = (publicKey: Bytes): DeviceId => `c_${b64u(publicKey)}`;
 export const isNodeId = (id: string): boolean => /^n_[A-Za-z0-9_-]{43}$/.test(id);
+
+/**
+ * A node id whose key holds the strict rule (crypto.ts strictEd25519Point): what pairing, enrollment and a fleet's
+ * founding take, so no small-order or mixed-order key is ever enrolled (the lead's word of 27 November 2026).
+ */
+export function isStrictNodeId(id: string): boolean {
+  if (!isNodeId(id)) return false;
+  try {
+    const key = fromB64u(id.slice(2));
+    return b64u(key) === id.slice(2) && strictEd25519Point(key);
+  } catch {
+    return false;
+  }
+}
 export const isClientId = (id: string): boolean => /^c_[A-Za-z0-9_-]{87}$/.test(id);
 
 export function verifyDeviceSignature(device: DeviceId, signature: Bytes, message: Bytes): boolean {
