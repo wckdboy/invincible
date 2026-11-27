@@ -129,7 +129,7 @@ export function renderRevoked(root: HTMLElement): void {
       h(
         "section",
         { class: "card" },
-        h("p", { class: "small muted" }, "To pair again, forget this browser's key, then open a fresh invite from ", h("span", { class: "mono" }, "invincible invite --client"), "."),
+        h("p", { class: "small muted" }, "To pair again, forget this browser's key, then open a fresh invite from ", h("span", { class: "mono cmd" }, "invincible invite --client"), "."),
         h("p", { class: "tiny subtle" }, "If this browser was approved on another node only moments ago, the news may still be on its way here: try again first."),
         h("div", { class: "row wrap centered" }, forget, button("Try again", { icon: "retry", onClick: () => location.reload() })),
       ),
@@ -164,7 +164,7 @@ export function renderNotYourNode(root: HTMLElement, proven: { kind: "other"; no
       h(
         "section",
         { class: "card" },
-        h("p", { class: "small muted" }, "Nothing more is sent to it. If you set your node up anew at this address, forget this browser's key, then open a fresh invite from ", h("span", { class: "mono" }, "invincible invite --client"), "."),
+        h("p", { class: "small muted" }, "Nothing more is sent to it. If you set your node up anew at this address, forget this browser's key, then open a fresh invite from ", h("span", { class: "mono cmd" }, "invincible invite --client"), "."),
         h("div", { class: "row wrap centered" }, button("Try again", { variant: "primary", icon: "retry", onClick: () => location.reload() }), forget),
       ),
       footer(),
