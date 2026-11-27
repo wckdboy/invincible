@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { chat } from "../src/index.ts";
+import { apartMatches, chat } from "../src/index.ts";
 
 function brain(models: string[]) {
   const identity = newNodeIdentity();
@@ -55,5 +55,18 @@ describe("a review asked apart from a model", () => {
     expect(modelsAsked(events)).toEqual(["local/beta"]);
     expect(events.map((e) => e.type)).toEqual(["model", "text", "done"]);
     expect(events.some((e) => e.type === "text" && (e as { text: string }).text.includes("Only beta."))).toBe(true);
+  });
+});
+
+describe("a review asked apart from every model that did the work, and from a vendor's own sign-in", () => {
+  test("each model in the list goes last, and a vendor's family (its own sign-in's: family:claude) every model of it", async () => {
+    const events = await collect(chat({ ...brain(["local/claude-opus-5-5", "local/beta", "local/gamma", "local/delta"]), fetch: models(never, saying(["From delta."])) }, { messages: ask, apart: ["other/beta", "family:claude"] }));
+    // gamma first (it failed), then delta: beta and every claude-* model are put last, after every other.
+    expect(modelsAsked(events)).toEqual(["local/gamma", "local/delta"]);
+    expect(apartMatches("orcarouter/anthropic/claude-opus-5.5", "family:claude")).toBe(true);
+    expect(apartMatches("openai/gpt-5.5-codex", "family:claude")).toBe(false);
+    expect(apartMatches("openai/gpt-5.5-codex", "family:gpt")).toBe(true);
+    expect(apartMatches("local/beta", "p/beta")).toBe(true);
+    expect(apartMatches("local/beta", "family:")).toBe(false);
   });
 });

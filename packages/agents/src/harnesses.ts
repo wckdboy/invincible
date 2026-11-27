@@ -97,6 +97,11 @@ export interface AgentDriver {
     seatCheck(salt: string): string;
   };
   /**
+   * What the names of the models its own sign-in runs on begin with (Claude Code's: claude): a review of its work there is
+   * kept apart from every model of that vendor's. Absent: its own sign-in names nothing to keep apart from.
+   */
+  family?: readonly string[];
+  /**
    * It runs as you set it up in the sandbox (an ACP agent you named: acp.ts), its own sign-in or configuration, with the
    * role's model offered through the gateway for it to use: with none to offer, it runs on its setup alone.
    */

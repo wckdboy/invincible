@@ -3,7 +3,7 @@ import { desktopArgv } from "./desktop-command.ts";
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
-import { chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
+import { apartMatches, chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
 import { commandsRun, runLoop, type RunEvent, type RunSteer } from "./run.ts";
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
@@ -458,7 +458,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
    * of a budget of yours, which only a model whose spend it can count may do; `turn`: a turn of its work loop, with the
    * engineer's own tools when it works with them, whose calls it runs).
    */
-  const ask = async (agent: Agent, role: string, messages: ChatMessage[], signal: AbortSignal, context?: string, spent?: (model: string, usage: Usage | null) => void, turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: string }, own?: readonly string[], budgeted?: boolean) => {
+  const ask = async (agent: Agent, role: string, messages: ChatMessage[], signal: AbortSignal, context?: string, spent?: (model: string, usage: Usage | null) => void, turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }, own?: readonly string[], budgeted?: boolean) => {
     const leave = await deps.enter(signal);
     // A call that says nothing for so long is ended, and asked again as any failed call is: a task has no clock that would end it.
     const quietMs = deps.callQuietMs ?? TEAM_CALL_QUIET_MINUTES * 60_000;
@@ -808,7 +808,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // (A coding tool's run isn't stepped through by the primary: its steps aren't kept.)
       steps.on = Boolean(agent.repository) && !coding;
       // The model that did the work last: in sensitive mode the review goes to another of its models first, where it has another.
-      let worked = coding?.models[0] && !coding.models[0].own ? `${coding.models[0].provider}/${coding.models[0].model}` : undefined;
+      let workedBy: readonly string[] = coding?.models[0] && !coding.models[0].own ? [`${coding.models[0].provider}/${coding.models[0].model}`] : [];
       // A review answered by the same model as the work is said once, whatever it is answered by on later submissions.
       let saidSameReview = false;
       /** How many steers the work has taken (each review is told every one of them). */
@@ -827,24 +827,17 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         // and the independent review stay the planner's and the reviewer's, whoever did the work.
         // In sensitive mode every call is on its models alone, the plan's and the review's too.
         ask: async (role, messages, turn) => {
-          // The model the work's latest answer came from, wherever the run knows it: runRun says a coding agent's
-          // (turn.apart, correct across its fallbacks); otherwise the model that answered this task's own calls here.
-          // Outside sensitive mode the reviewer is asked apart from it; in sensitive mode its own models are put in
-          // that order directly (same model last, none dropped). `worked` is carried forward so the trail's
-          // same-model check below reads the same value.
-          const by = role === "reviewer" ? turn?.apart ?? worked : undefined;
-          if (role === "reviewer") worked = by;
-          const apart = role === "reviewer" && !held ? by : undefined;
-          const own = held
-            ? role === "reviewer"
-              ? by
-                ? [...held.filter((m) => !sameModel(m, by)), ...held.filter((m) => sameModel(m, by))]
-                : held
-              : held
-            : role === "engineer" ? agent.models : undefined;
-          const answer = await ask(agent, role === "engineer" ? workRole(agent.role) : role, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined);
-          if (role !== "reviewer") worked = answer.model;
-          return answer;
+          // A review is asked apart from every model that did the work, as the run says them (turn.apart: across a coding
+          // agent's fallbacks, and for a tool on its own sign-in its vendor's family). An audit, which only steers, is
+          // asked in the roster's order, as the run asks it: its money is the run's. In sensitive mode its own models are
+          // put in that order directly (the same last, none dropped). What a review was kept apart from is kept for the
+          // trail's same-model check below.
+          const by = role === "reviewer" ? turn?.apart : undefined;
+          if (by?.length) workedBy = by;
+          const apart = by?.length && !held ? by : undefined;
+          const same = (model: string) => (by ?? []).some((from) => apartMatches(model, from));
+          const own = held ? (by?.length ? [...held.filter((m) => !same(m)), ...held.filter(same)] : held) : role === "engineer" ? agent.models : undefined;
+          return ask(agent, role === "engineer" ? workRole(agent.role) : role, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined);
         },
         exec, signal: ctx.signal,
         emit: (event) => {
@@ -858,9 +851,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           }
           trail.on(event);
           // A review answered by the same model that did the work after all is said, once, before its verdict.
-          if (event.type === "review" && !saidSameReview && worked !== undefined && sameModel(event.model, worked)) {
+          const same = event.type === "review" && !saidSameReview ? workedBy.find((from) => apartMatches(event.model, from)) : undefined;
+          if (event.type === "review" && same) {
             saidSameReview = true;
-            ctx.emit(`Review · by the same model that did the work (${event.model}): no other reviewer model could answer`);
+            ctx.emit(same.startsWith("family:") ? `Review · by a model of the vendor whose own sign-in did the work (${event.model}): no other reviewer model could answer` : `Review · by the same model that did the work (${event.model}): no other reviewer model could answer`);
           }
           // What a review judged the work against, when the work was steered: its goal and every steer it had taken, in order.
           if (event.type === "steered") steered += 1;

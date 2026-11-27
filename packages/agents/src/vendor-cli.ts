@@ -1039,10 +1039,11 @@ function read(line: string): AgentEvent[] {
   });
 }
 
-const driver = (name: string, title: string, kind: AgentDriver["kind"], script: string, part: string, notes: Notes, signIn: Omit<NonNullable<AgentDriver["signIn"]>, "read" | "seatCheck">): AgentDriver => ({
+const driver = (name: string, title: string, kind: AgentDriver["kind"], script: string, part: string, notes: Notes, signIn: Omit<NonNullable<AgentDriver["signIn"]>, "read" | "seatCheck">, family: readonly string[]): AgentDriver => ({
   name,
   title,
   kind,
+  family,
   // Each is told your words as it works on its own input (its bridge's), resumes its own session, and says its windows:
   // Claude Code's rate_limit_event on a claude.ai sign-in, Codex's account/rateLimits/updated.
   capabilities: { steer: "live", streams: true, resumes: true, readsWindows: true },
@@ -1058,6 +1059,8 @@ const driver = (name: string, title: string, kind: AgentDriver["kind"], script: 
   read,
 });
 
-export const CLAUDE = driver("claude", "Claude Code", "anthropic", "/work/.agent/claude-code.py", CLAUDE_PART, claudeNotes, { login: "claude auth login", roster: "an Anthropic-API model" });
+// (What its own sign-in runs on is Anthropic's: a review of it is kept apart from every claude-* model.)
+export const CLAUDE = driver("claude", "Claude Code", "anthropic", "/work/.agent/claude-code.py", CLAUDE_PART, claudeNotes, { login: "claude auth login", roster: "an Anthropic-API model" }, ["claude"]);
 /** (Codex speaks only the Responses API: a roster model on an endpoint without it fails, and the next takes over.) */
-export const CODEX = driver("codex", "Codex", "openai", "/work/.agent/codex.py", CODEX_PART, codexNotes, { login: "codex login --device-auth", roster: "an OpenAI-compatible model that speaks the Responses API" });
+// (What its own sign-in runs on is OpenAI's: GPT and its reasoning models, Codex's own.)
+export const CODEX = driver("codex", "Codex", "openai", "/work/.agent/codex.py", CODEX_PART, codexNotes, { login: "codex login --device-auth", roster: "an OpenAI-compatible model that speaks the Responses API" }, ["gpt", "codex", "chatgpt", "o1", "o3", "o4"]);

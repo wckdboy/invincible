@@ -32,7 +32,7 @@ export interface RunDeps {
   ask(
     role: RunRole,
     messages: ChatMessage[],
-    turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: string },
+    turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] },
   ): Promise<{ text: string; model: string; skipped?: { model: string; error: string }[]; calls?: ClientCall[]; carry?: string }>;
   /** Run one shell command in the run's workspace. */
   exec(command: string, timeoutSec: number): Promise<ExecResult>;
@@ -1219,7 +1219,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
   const toldSkipped = new Set<string>();
   // Every message is redacted before it goes to a model: command output can contain anything, and so can what a tool
   // was called with and what it came to. (A carry is the model's own, and its provider's to check: it goes as it came.)
-  const ask = async (role: RunRole, messages: ChatMessage[], turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: string }) => {
+  const ask = async (role: RunRole, messages: ChatMessage[], turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }) => {
     const redacted = messages.map((m) => ({
       role: m.role,
       content: redact(m.content),
@@ -1255,8 +1255,16 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
   let plan = "";
   let steps = 0;
   let revisions = 0;
-  /** The model the work's last answer came from (the reviewer is asked apart from it: another model first). */
+  /** The model the work's last answer came from. */
   let worked = "";
+  /**
+   * Every model that did the work, in order (the reviewer is asked apart from each: another model first): across a coding
+   * agent's fallbacks and the engineer's escalations, and for a tool on its own sign-in, its vendor's family (family:claude).
+   */
+  const workedBy: string[] = [];
+  const workedOn = (ref: string) => {
+    if (ref && !workedBy.includes(ref)) workedBy.push(ref);
+  };
   /** Replies that had no command to run: each spent a turn (it is one of `steps`) and ran nothing. */
   let malformed = 0;
   // The gates: yours as you gave them, then the planner's proposals (once the plan is known).
@@ -1484,12 +1492,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           : reviewQuestion({ goal: o.goal, plan, steps: trail, summary, gated, evidence, steers: taken }),
       },
     ];
-    let reviewed = await ask("reviewer", question, worked ? { apart: worked } : {});
+    let reviewed = await ask("reviewer", question, workedBy.length ? { apart: [...workedBy] } : {});
     // A reply that is no verdict is asked again once, told why: on 22 November 2026 a reviewer with no tools answered
     // three times with a call to read the file it judged, each taken as REVISE, and finished work ended unverified.
     // (Still none, it is sent back as ever: an unsure reviewer is no approval.)
     if (!o.review && !VERDICT.test(reviewed.text.trim())) {
-      reviewed = await ask("reviewer", [...question, { role: "assistant", content: reviewed.text }, { role: "user", effort: STEP_EFFORT.review, content: NO_VERDICT }], worked ? { apart: worked } : {});
+      reviewed = await ask("reviewer", [...question, { role: "assistant", content: reviewed.text }, { role: "user", effort: STEP_EFFORT.review, content: NO_VERDICT }], workedBy.length ? { apart: [...workedBy] } : {});
     }
     const verdict: { verdict: "pass" | "revise"; notes: string; conclusion?: string } = o.review ? o.review.read(reviewed.text) : parseVerdict(reviewed.text);
     emit({ type: "review", verdict: verdict.verdict, notes: verdict.notes, model: reviewed.model });
@@ -1670,6 +1678,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       // The reviewer and the audit are asked apart from the model the work's last answer came from here too: the
       // coding agent's own model, named as a ref (provider/model), so its same model is asked last, wherever it is.
       worked = agentModelName(model);
+      // (A tool on its own sign-in names no model: the review is kept apart from every model of its vendor's.)
+      if (model.own) for (const word of agent.driver.family ?? []) workedOn(`family:${word}`);
+      else workedOn(worked);
       toldNow = [];
       const run = await runAgent(
         agent.driver,
@@ -2056,6 +2067,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         continue;
       }
       worked = reply.model;
+      workedOn(reply.model);
       const kept = keptReply(reply.text);
       // (With tools: the calls it made, as many as are run, each long input kept short once it has run, with what its provider needs back.)
       const calls = o.tools ? reply.calls?.slice(0, MAX_CALLS) : undefined;

@@ -8,7 +8,7 @@ import { windowScope, windowsOf } from "./windows.ts";
 import { refusedKeysOf } from "./refused-keys.ts";
 import { followsFormat, readModelCheck, readsScreens, type ModelCheck } from "@invincible/core";
 import { offeredModels, onPlan, planOf, providerRecords, QUIET_MS, quietly, resolveProvider, whyNoKey } from "./providers.ts";
-import { effortFor, parseRef, pinnedEffort, roleModels, rotated, sameModel } from "./roster.ts";
+import { apartMatches, effortFor, parseRef, pinnedEffort, roleModels, rotated } from "./roster.ts";
 
 export interface ModelsContext {
   store: LedgerStore;
@@ -62,7 +62,7 @@ export interface ChatRequest {
    * model as this are asked last, keeping their order, after every other. None is dropped, so a role with nothing
    * else still answers.
    */
-  apart?: string;
+  apart?: string | readonly string[];
   /** Messages the owner sends while this answer is under way: each reaches the model at the next safe point. */
   steering?: Steering;
 }
@@ -230,8 +230,10 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
   let candidates = req.rotate ? rotated(listed, req.rotate) : listed;
   // Asked to be independent of a model (`apart`, a review usually): its candidates that are the same model are
   // asked last, keeping their order, after every other; none is dropped, so a role with nothing else still answers.
-  const apartFrom = req.apart;
-  if (apartFrom) candidates = [...candidates.filter((ref) => !sameModel(ref, apartFrom)), ...candidates.filter((ref) => sameModel(ref, apartFrom))];
+  // (Apart from each of a list: every model that did the work, and a vendor's own sign-in's family, apartMatches.)
+  const apartFrom = req.apart === undefined ? [] : typeof req.apart === "string" ? [req.apart] : [...req.apart];
+  const same = (ref: string) => apartFrom.some((from) => apartMatches(ref, from));
+  if (apartFrom.length) candidates = [...candidates.filter((ref) => !same(ref)), ...candidates.filter(same)];
   const tools = req.tools?.specs.length ? req.tools : undefined;
   const steering = req.steering;
   // Every message handed over so far: a model that takes over (or starts again without tools) is handed them too.

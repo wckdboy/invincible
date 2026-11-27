@@ -35,6 +35,17 @@ export function sameModel(a: string, b: string): boolean {
   return modelOf(a) === modelOf(b);
 }
 
+/**
+ * Whether a candidate is one a call is to be apart from: the same model (sameModel), or, for `family:<word>`, any model
+ * whose name begins with that word (a vendor's own sign-in, which names no model: Claude Code's are claude-*).
+ */
+export function apartMatches(ref: string, from: string): boolean {
+  if (!from.startsWith("family:")) return sameModel(ref, from);
+  const word = from.slice("family:".length).toLowerCase();
+  const slash = ref.lastIndexOf("/");
+  return word.length > 0 && ref.slice(slash + 1).toLowerCase().replace(/[._]/g, "-").startsWith(word);
+}
+
 export interface RoleSpec {
   description: string;
   defaults: string[];

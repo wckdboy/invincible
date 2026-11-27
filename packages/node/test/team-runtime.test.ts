@@ -1377,6 +1377,19 @@ test("a task has no count of commands: it works on past forty, audited every twe
   expect(JSON.stringify(f.bodies[1])).toContain("Your commands have no fixed number. An independent audit looks at your work every 20 commands or 15 minutes");
 });
 
+test("inside a task an audit is asked in the roster's order, as its run asks it; only the review that decides is kept apart from the work's model", async () => {
+  // (The reviewer's role has two models, the first the one that did the work: an audit asks it first, the review the other.)
+  const f = fixture([say("1. Make the change."), ...echoes(0, 20), say("ON\nIt is making the change."), say("DONE\nMade and checked."), say("PASS\nThe gate passes.")]);
+  f.setRoster("engineer", ["local/fake"]);
+  f.setRoster("reviewer", ["local/fake", "local/other"]);
+  const outcome = await f.runtime.executeTask(member, task, f.context);
+  expect(outcome.verified).toBe(true);
+  const asked = f.bodies.map((body) => body.model as string);
+  // The audit (after twenty commands) went to the first of the reviewer's models; the review to the one that didn't do the work.
+  expect(asked.at(-2)).toBe("fake");
+  expect(asked.at(-1)).toBe("other");
+});
+
 test("an agent that finishes its work and goes on without saying so is told to by its audit, and never stopped by one: its work is judged when it says so", async () => {
   // Seen on ultra, 14 November 2026: max made its change to this repository, went on checking it, and ran out of
   // commands. The work was right and nobody was asked: the task ended stopped and unverified. Nothing runs out now,
