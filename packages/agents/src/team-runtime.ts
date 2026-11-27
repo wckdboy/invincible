@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { desktopArgv, desktopBriefing } from "./desktop-command.ts";
+import { desktopArgv, desktopBriefing, hardwareBriefing } from "./desktop-command.ts";
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
@@ -721,9 +721,12 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         ctx.emit(`Notes · ${notes}`);
       }
       // (With the store, every command is told where it is and which project: the engineer's own loop has only a shell.)
-      // A desktop in this VM (the desktop image: a display, a window manager, a browser)? Asked of the VM as the task
-      // starts, so the agent is told what it has and how to operate it, and one without is told nothing of one.
-      const desktop = (await deps.exec(agent, "command -v desktop", 30, ctx.signal).catch(() => null))?.stdout.trim().endsWith("/desktop") === true;
+      // A desktop in this VM (the desktop image: a display, a window manager, a browser), and on it the hardware tools
+      // (KiCad and FreeCAD: the hardware image, C1 step 11)? Asked of the VM as the task starts, in one question, so the
+      // agent is told what it has and how to operate it, and one without is told nothing of either.
+      const found = ((await deps.exec(agent, "command -v desktop kicad-cli", 30, ctx.signal).catch(() => null))?.stdout ?? "").split("\n").map((line) => line.trim());
+      const desktop = found.some((path) => path.endsWith("/desktop"));
+      const hardware = desktop && found.some((path) => path.endsWith("/kicad-cli"));
       // Its eyes: the model `desktop look` asks, named to every command of the task (the VM's own gateway token does the
       // asking), and beside its name the space its check measured it answering places in (C1 step 7).
       const given = desktop ? (deps.eyes?.(agent) ?? null) : null;
@@ -732,7 +735,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const space = sees && typeof given === "object" && given?.space && /^(per-mille|scaled:[0-9.]+)$/.test(given.space) ? given.space : null;
       const looking = sees ? ' Then `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).' : "";
       // (C1 step 7: an app scripted first; on the screen, the tree's words before pixels, and the eyes after them.)
-      const screen = desktop ? desktopBriefing(looking) : "";
+      const screen = desktop ? desktopBriefing(looking) + (hardware ? hardwareBriefing() : "") : "";
       // A temporary directory of the task's own, on the workspace: a sandbox's /tmp is mounted noexec, so a test that
       // writes a script there and runs it fails with exit 126 (and with it a gate that passes everywhere else).
       const temp = `/work/.tmp/${task.id}`;

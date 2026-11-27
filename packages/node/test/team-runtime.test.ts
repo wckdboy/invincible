@@ -10,6 +10,8 @@ import { HANDED_GATE_SECONDS, HANDED_MARGIN_SECONDS, harnessReadiness, keysLine,
 import type { SeatAnswer, SeatRun, TeamRunContext } from "@invincible/agents";
 import type { TaskAccount } from "@invincible/core";
 
+/** What a task asks its VM as it starts: whether it has a desktop, and on it the hardware tools (KiCad's command). */
+const PROBE = "command -v desktop kicad-cli";
 const stores: LedgerStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
 const member: Agent = { id: "ada", name: "Ada", instructions: "Keep changes small.", role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 0, repository: null, workspaceNode: "host", workspace: { node: "host", id: "0123456789" }, memory: "private working note", createdAt: 1, updatedAt: 1 };
@@ -365,7 +367,7 @@ test("an agent on the tool loop whose VM has a desktop works it by Claude's comp
   const argvs: string[][] = [];
   const f = fixture([call("left_click", { coordinate: [640, 450] }), say("DONE\nSent."), say("PASS\nThe evidence supports it.")], {
     toolsLoop: true,
-    exec: async (_m, command) => result(command === "command -v desktop" ? { stdout: "/usr/local/bin/desktop\n" } : {}),
+    exec: async (_m, command) => result(command === PROBE ? { stdout: "/usr/local/bin/desktop\n" } : {}),
     execArgv: async (m, argv) => {
       expect(m.id).toBe("ada");
       argvs.push(argv);
@@ -1620,7 +1622,7 @@ test("an agent sees whole what it reads, and its commands have as long as one ma
 
 test("an agent whose VM has a desktop is told so, and how to operate it; one without is told nothing of one", async () => {
   const told = async (has: boolean) => {
-    const f = fixture([say("1. Make the change."), say("DONE\nBuilt."), say("PASS\nFine.")], { exec: async (_m, command) => (command === "command -v desktop" ? (has ? result({ stdout: "/usr/local/bin/desktop\n" }) : result({ exitCode: 1, stdout: "" })) : result()) });
+    const f = fixture([say("1. Make the change."), say("DONE\nBuilt."), say("PASS\nFine.")], { exec: async (_m, command) => (command === PROBE ? (has ? result({ stdout: "/usr/local/bin/desktop\n" }) : result({ exitCode: 1, stdout: "" })) : result()) });
     await f.runtime.executeTask(member, task, f.context);
     return String(f.bodies[1].messages.find((m: any) => m.role === "user").content);
   };
@@ -1630,13 +1632,24 @@ test("an agent whose VM has a desktop is told so, and how to operate it; one wit
   expect(desk).toContain("Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do.");
   expect(desk).toContain('To find something on the screen, ask `desktop find` first (`desktop find button "Send"` says where it is), then `desktop tree` (what can be acted on in the window with the focus).');
   expect(await told(false)).not.toContain("desktop");
+  // Its desktop with the hardware tools (C1 step 11): told of them too, after the desktop's own words; without them, not.
+  const f = fixture([say("1. Make the change."), say("DONE\nBuilt."), say("PASS\nFine.")], { exec: async (_m, command) => (command === PROBE ? result({ exitCode: 0, stdout: "/usr/local/bin/desktop\n/usr/bin/kicad-cli\n" }) : result()) });
+  await f.runtime.executeTask(member, task, f.context);
+  const hardware = String(f.bodies[1].messages.find((m: any) => m.role === "user").content);
+  expect(hardware).toContain("This VM has a desktop");
+  expect(hardware).toContain("This desktop has the hardware tools: KiCad 9 for boards and schematics, and FreeCAD 1.0 for parts. Script them first.");
+  expect(hardware.indexOf("This desktop has the hardware tools")).toBeGreaterThan(hardware.indexOf("This VM has a desktop"));
+  // (No angle brackets in what an agent is told: a model copied them onto its own command fence, and nothing ran.)
+  const tools = hardware.indexOf("This desktop has the hardware tools");
+  expect(hardware.slice(tools, hardware.indexOf("TechDraw.", tools) + 9)).not.toMatch(/[<>]/);
+  expect(desk).not.toContain("hardware tools");
 });
 
 test("an agent with a desktop and a model that can see is given its eyes: each command knows which model looks, and the agent is told how to ask it", async () => {
   const run = async (eyes: string | { ref: string; space: string } | null) => {
     const commands: string[] = [];
     const f = fixture([say("1. Make the change."), say("```sh\ndesktop look \"Where is Sign in?\"\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
-      exec: async (_m, command) => { commands.push(command); return command === "command -v desktop" ? result({ stdout: "/usr/local/bin/desktop\n" }) : result(); },
+      exec: async (_m, command) => { commands.push(command); return command === PROBE ? result({ stdout: "/usr/local/bin/desktop\n" }) : result(); },
       eyes: () => eyes,
     });
     await f.runtime.executeTask(member, task, f.context);

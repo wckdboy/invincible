@@ -33,6 +33,14 @@ export function desktopBriefing(looking = ""): string {
   return " This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it. Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do. To find something on the screen, ask `desktop find` first (`desktop find button \"Send\"` says where it is), then `desktop tree` (what can be acted on in the window with the focus)." + looking + " Computer tools of your own (screenshot, left_click, type and the rest), if you have them, work this same screen, in its pixels. The owner can take this desktop over: while they have it, your desktop commands wait, and one that waits too long does nothing, exits 75 and says so. Do something else meanwhile, and try again after. Left unused for 10 minutes with no one watching, the desktop stops, its windows closed: your next desktop command starts it again, on a fresh screen, and says so.";
 }
 
+/**
+ * What an agent is told of the hardware tools its VM's desktop has (C1 step 11, the hardware image), after the desktop's
+ * own briefing: each scripted first, and its output checked by its own tools; the screen only where they have no way.
+ */
+export function hardwareBriefing(): string {
+  return " This desktop has the hardware tools: KiCad 9 for boards and schematics, and FreeCAD 1.0 for parts. Script them first. `kicad-cli` makes every output (Gerbers and drill files, STEP, PDF, a bill of materials), and its checks are gates: `kicad-cli pcb drc --format json --exit-code-violations board.kicad_pcb` and `kicad-cli sch erc --format json --exit-code-violations board.kicad_sch` fail when anything is wrong, and the JSON says what. A board is edited through KiCad's API, `kipy` in python3 (`KiCad().get_board()`; it was made for KiCad 9.0.1, so ask whether KiCad answers with `ping()`, not `check_version()`), with pcbnew open on the desktop (`desktop app pcbnew /work/board.kicad_pcb`), and where the API has no way, through pcbnew's own Python module on the file. A part is made by a script that `freecadcmd` runs, FreeCAD's Python with no window, and read back (its volume, its faces) before it is called done. Their windows (`desktop app kicad`, `eeschema`, `pcbnew` or `freecad`, with a file of /work) are for what only a screen does: routing by hand, looking a board or a part over, FreeCAD's views and TechDraw.";
+}
+
 /** The words of a command as a POSIX shell would split them, or null where it would do anything but split them. */
 export function plainWords(command: string): string[] | null {
   const words: string[] = [];

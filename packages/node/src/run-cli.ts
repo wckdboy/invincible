@@ -34,7 +34,7 @@ import {
   type AttachmentRef,
 } from "@invincible/core";
 import type { ModelMessage, ToolImage } from "@invincible/models";
-import { DESKTOP_EVIDENCE, desktopBriefing, SHIPMENT_SCRIPT, stepsNamed } from "@invincible/agents";
+import { DESKTOP_EVIDENCE, desktopBriefing, hardwareBriefing, SHIPMENT_SCRIPT, stepsNamed } from "@invincible/agents";
 import { learnedLines, learnFromRun, type RunTrail, runTrail } from "@invincible/agents";
 import { AGENTS, attemptInstructions, chooseAgentModels, commandsRun, type EffortEvent, type EffortPick, type EffortResult, ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramShell, evidenceCollector, gateBy, type GateResult, investigate, type InvestigationOutcome, observation, RUN_DEFAULTS, type RunEvent, type RunOptions, type RunOutcome, runStanding, readResults, runEffort, runLoop, standingAfter, type Trip, timingLine } from "@invincible/agents";
 
@@ -336,7 +336,8 @@ const NETWORK: Record<SandboxNetwork, string> = {
   online: "the internet",
 };
 
-function environment(sandbox: SandboxView, host: string): string {
+/** What a run's agent is told of its sandbox: where it is, its tools, its network, its limits, and its desktop where it has one. */
+export function environment(sandbox: SandboxView, host: string): string {
   return [
     `a Debian Linux sandbox on ${host}${sandbox.isolation === "vm" ? ", inside its own KVM microVM" : ""}: unprivileged user, no sudo, no package installs via apt.`,
     "Workspace /work (kept for the whole run); /tmp is scratch. Put what should outlive the sandbox (reports, plots, data, models, code) in /work/out: it's kept, with hashes, when the run ends.",
@@ -352,7 +353,7 @@ function environment(sandbox: SandboxView, host: string): string {
       : "",
     `Limits: ${sandbox.cpus} CPUs, ${sandbox.memoryGb} GB of memory.`,
     // (A sandbox of the desktop image has a desktop: what an agent's task is told of its own, C1 step 8.)
-    hasDesktop(sandbox) ? desktopBriefing().trim() : "",
+    hasDesktop(sandbox) ? `${desktopBriefing()}${hasHardware(sandbox) ? hardwareBriefing() : ""}`.trim() : "",
   ].join(" ");
 }
 
@@ -383,7 +384,9 @@ export const pictureName = (picture: ToolImage): string =>
   `${picture.alt.replace(/[/\\\u0000-\u001f\u007f]/g, " ").replace(/[.\s]+$/, "").slice(0, 180) || "The desktop"}.${picture.mediaType.split("/")[1]}`;
 
 /** Whether a sandbox was made from the desktop image. */
-const hasDesktop = (sandbox: SandboxView): boolean => /(^|\/)desktop:/.test(sandbox.image);
+const hasDesktop = (sandbox: SandboxView): boolean => /(^|\/)desktop(-[a-z]+)?:/.test(sandbox.image);
+/** The hardware image's (C1 step 11): the desktop with KiCad and FreeCAD. */
+const hasHardware = (sandbox: SandboxView): boolean => /(^|\/)desktop-hardware:/.test(sandbox.image);
 
 /** One of a run's events as `invincible do` prints it. */
 export function printRunEvent(event: RunEvent): void {

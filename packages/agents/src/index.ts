@@ -15,6 +15,6 @@ export * from "./ship.ts";
 export * from "./skills-run.ts";
 export * from "./team-runtime.ts";
 // What a run on a desktop is told of it, and whether a command acted on it (C1 steps 7 and 8).
-export { actsOnDesktop, desktopBriefing } from "./desktop-command.ts";
+export { actsOnDesktop, desktopBriefing, hardwareBriefing } from "./desktop-command.ts";
 // The test files a gate names: a run locks them, and an eval of your own work grades by the same lock.
 export { testFilesOf } from "./shell-paths.ts";
