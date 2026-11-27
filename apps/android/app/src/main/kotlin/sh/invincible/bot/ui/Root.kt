@@ -210,7 +210,7 @@ private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy:
         "agent" -> AgentScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })
         "room" -> RoomScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })
         "agents" -> AgentsScreen(app, back = back, openChat = { app.chat.fresh(); nav.go("chat") }, openAgent = { nav.go(Nav.agent(it)) }, openRoom = { nav.go(Nav.room(it)) })
-        "inbox" -> InboxScreen(app, watch = { nav.go("mac:$it") }, back = back, openConnectors = { nav.go("connectors") })
+        "inbox" -> InboxScreen(app, watch = { nav.go("mac:$it") }, back = back, openTask = { nav.go(Nav.task(it)) }, openConnectors = { nav.go("connectors") })
         "search" -> SearchScreen(app, nav, back = back)
         "settings" -> SettingsScreen(app, openKeys = { nav.go("keys") }, openConnectors = { nav.go("connectors") }, back = back)
         "keys" -> KeysScreen(app, back)

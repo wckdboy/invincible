@@ -31,6 +31,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import sh.invincible.bot.app.AppModel
+import sh.invincible.bot.app.Inbox
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Roster
@@ -77,9 +79,11 @@ private class Decision(val key: String, val lead: Lead, val who: String, val wha
  * What needs you, decisions only, as the one count counts them (AppModel.needsYou): each approval once (an agent's under
  * its task's name), each task only you can move on, devices, keys, questions and asks to use a machine. Home shows the
  * first [limit] and "N more" ([openAll]: Needs you). [openTask] opens a task's thread, [watch] a machine it is using.
+ * Needs you itself ([page]) shows every one, then the news (what was noticed for you, counted nowhere), each a row too,
+ * and opens at once the approval its notification's Approve… asked to see (as the iPhone's Needs you does).
  */
 @Composable
-fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit, openConnectors: () -> Unit = {}) {
+fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit, openConnectors: () -> Unit = {}, page: Boolean = false) {
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
     val count by app.needsYou.collectAsState()
@@ -203,17 +207,55 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
         }
         decisions += Decision(key, Lead.Icon(PlugIcon), "${c["by"].string ?: "An agent"} asks for a connector", name, answer = Answer("Review…", onClick = review), rest = emptyList(), open = review)
     }
+    // What was noticed for you, on Needs you itself: news, counted nowhere, each a row as a decision is (the iPhone's).
+    val news = ArrayList<Decision>()
+    if (page) {
+        for (n in inbox.notices) {
+            val key = "n:${n["key"].string}"
+            val dismiss = { act(key) { app.dismissNotice(n["key"].string!!) } }
+            val see = { sheet = "Noticed" to @Composable { Notice(n) { dismiss(); sheet = null } } }
+            news += Decision(key, Lead.Icon(if (n["severity"].string == "info") InfoIcon else AlertIcon), Inbox.from(n["source"].string ?: ""), n["title"].string ?: "", answer = null, rest = listOf(Answer("Dismiss") { dismiss() }), open = see)
+        }
+        for (f in inbox.facts) {
+            val id = f["id"].string ?: continue
+            val key = "f:$id"
+            val see = { sheet = "A fact about you" to @Composable { Fact(f, keep = { words -> act(key) { app.keepFact(id, words) }; sheet = null }, drop = { act(key) { app.dropFact(id) }; sheet = null }) } }
+            news += Decision(key, Lead.Icon(EditIcon), "${Primary.name} noticed about you", (f["text"].string ?: "").lineSequence().first(), answer = Answer("Keep") { act(key) { app.keepFact(id) } }, rest = listOf(Answer("Drop", danger = true) { act(key) { app.dropFact(id) } }, Answer("In my words", onClick = see)), open = see)
+        }
+        // An approval its notification's Approve… asked to see: its card at once, the whole request in front of you.
+        val asked by app.approvalAsked.collectAsState()
+        LaunchedEffect(asked, waiting) {
+            val a = asked?.let { id -> waiting.firstOrNull { it["id"].string == id } } ?: return@LaunchedEffect
+            app.approvalAsked.value = null
+            card(a)
+        }
+    }
     // (Before the list may end: the loop just added has left it by the time its secret is said.)
     hook?.let { (name, secret) -> HookSecret(name, secret) { hook = null } }
-    if (decisions.isEmpty()) return
+    if (!page && decisions.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
+        if (page) {
+            said?.let { Text(it, style = Type.meta, color = brand.danger, modifier = Modifier.padding(horizontal = Space.margin)) }
+            if (decisions.isEmpty() && news.isEmpty()) Text("Nothing needs you.", style = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin))
+            // (Decisions: the page is called Needs you already.)
+            if (decisions.isNotEmpty()) {
+                SectionHead("Decisions", count.takeIf { it > 0 } ?: decisions.size, tone = brand.needs)
+                Rows(decisions, busy)
+                Hairline(inset = Space.margin)
+                PageNote("Nothing leaves until you approve it. Unanswered, it's a no.")
+            }
+            if (news.isNotEmpty()) {
+                SectionHead("Noticed")
+                Rows(news, busy)
+                Hairline(inset = Space.margin)
+                PageNote("What your rules and the heartbeat told you, and what ${Primary.name} noticed about you. News: counted nowhere, and one you dismiss stays quiet until it changes.")
+            }
+            return@Column
+        }
         // (The one count, as Home's line says it: the decisions below are the same ones.)
         SectionHead("Needs you", count.takeIf { it > 0 } ?: decisions.size, tone = brand.needs)
         said?.let { Text(it, style = Type.meta, color = brand.danger, modifier = Modifier.padding(horizontal = Space.margin)) }
-        decisions.take(limit).forEachIndexed { i, d ->
-            if (i > 0) Hairline(inset = Space.margin + 32.dp + Space.s3)
-            key(d.key) { DecisionRow(d, d.key in busy) }
-        }
+        Rows(decisions.take(limit), busy)
         if (decisions.size > limit) {
             Hairline(inset = Space.margin)
             Row(
@@ -248,6 +290,21 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
             }
         }
     }
+}
+
+/** Decisions as rows, between hairlines. */
+@Composable
+private fun Rows(decisions: List<Decision>, busy: Set<String>) {
+    decisions.forEachIndexed { i, d ->
+        if (i > 0) Hairline(inset = Space.margin + 32.dp + Space.s3)
+        key(d.key) { DecisionRow(d, d.key in busy) }
+    }
+}
+
+/** A section's note, under it: quiet words. */
+@Composable
+private fun PageNote(text: String) {
+    Text(text, style = Type.meta, color = LocalBrand.current.quiet, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2))
 }
 
 /**

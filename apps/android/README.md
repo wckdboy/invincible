@@ -26,6 +26,8 @@ It opens on the primary, the one agent you talk to, named by the node ("Invincib
 with no tab bar (the iPhone's Home): Home (`ui/Home.kt`) is the I-beam and the line at a glance, the agents in a strip,
 what needs you (three decisions, each with its one answer in place, counted once everywhere), the work by proof
 (Working, Proven, Failed, the rest folded), and at its foot a bar: search and ask, the message box, a task to give.
+Needs you (`ui/InboxScreen.kt`: Home's "N more", or the drawer) is every one of those decisions as the same rows under
+the one count, then what was noticed for you, news counted nowhere; a tap opens its card in a sheet.
 Every other place is in the drawer (`ui/Drawer.kt`), from the I-beam or the left edge. A task opens as a thread of its
 own (`ui/TaskScreen.kt`), its verdict as its proof allows (Proven, Reviewed, not proven, Failed · gate 2…). A tablet
 (600 dp and wider) has the panes: the sidebar (`ui/Sidebar.kt`) beside the page. `invincible://task/<id>`,

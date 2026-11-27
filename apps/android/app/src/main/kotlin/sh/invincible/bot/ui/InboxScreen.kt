@@ -10,9 +10,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -25,13 +25,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,13 +38,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.app.Inbox
 import sh.invincible.bot.app.Table
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.Loops
-import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Roster
 import sh.invincible.bot.core.bool
 import sh.invincible.bot.core.double
@@ -58,84 +54,24 @@ import sh.invincible.bot.core.text
 import sh.invincible.bot.core.Primary
 
 /**
- * What only you can answer, as the iPhone's Inbox has it and in its order: devices asking to join, services' questions,
- * its use of a Mac itself, approvals (read what it would do, then yes or no; no answer before it expires is no), keys a
- * agent or the primary asked for, the facts it noticed about you, and what your node noticed. Each answer goes to the node
- * at once, signed by this phone's key; nothing here is answered for you. [watch]: a Mac it is using, by its node.
+ * What needs you, every one, as the iPhone's Needs you and the web's have it (I10's list, Home's own rows in full): each
+ * decision with its one answer in place, the rest a long press away, the whole of it a tap (its card, in a sheet, or its
+ * task); then what was noticed for you, news counted nowhere (NeedsYou, with `page`). Each answer goes to the node at once,
+ * signed by this phone's key; nothing here is answered for you. [watch]: a Mac it is using, by its node.
  */
 @Composable
-fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit, openConnectors: () -> Unit = {}) {
-    val inbox by app.inbox.collectAsState()
-    val table by app.table.collectAsState()
-    var said by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-    fun act(block: suspend () -> Unit) = scope.launch {
-        try {
-            block()
-            said = null
-        } catch (e: NodeError) {
-            said = e.message
-        }
-    }
-    val asker = askerIn(table)
-    // A loop a webhook wakes, just added: its secret, said this once (its card has left the list by then).
-    var hook by remember { mutableStateOf<Pair<String, String>?>(null) }
-    // An approval opened from its notification's Approve…: its card first, the whole request in front of you.
-    val asked by app.approvalAsked.collectAsState()
-    val first = asked?.let { id -> inbox.actions.firstOrNull { it["id"].string == id } }
+fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit, openTask: (String) -> Unit, openConnectors: () -> Unit = {}) {
+    val work = rememberWork(app)
+    // An approval opened from its notification's Approve…: its card opens at once (NeedsYou), and is forgotten here after.
     DisposableEffect(Unit) { onDispose { app.approvalAsked.value = null } }
-
     Column(Modifier.fillMaxSize()) {
-    PageBar("Needs you", back)
-    LazyColumn(Modifier.fillMaxSize()) {
-        said?.let { item { Problem(it) } }
-        first?.let { a ->
-            item(key = "asked") {
-                SectionTitle("From its notification")
-                Approval(a, asker(a["by"].string ?: "")) { approve -> act { app.decide(a["id"].string!!, approve) } }
-            }
+        PageBar("Needs you", back)
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            if (work == null) Text("Asking your node…", style = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin))
+            else NeedsYou(app, work, openTask = openTask, openAll = {}, watch = watch, openConnectors = openConnectors, page = true)
+            Spacer(Modifier.height(Space.s10))
         }
-        if (inbox.count == 0) {
-            item { Text("Nothing needs you.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Space.margin)) }
-        }
-        if (inbox.pairings.isNotEmpty()) item { SectionTitle("Devices asking to join") }
-        items(inbox.pairings, key = Inbox::pairingKey) { p -> Pairing(p) { approve -> act { app.answerPairing(p["invite"].string!!, p["device"].string!!, approve) } } }
-        if (inbox.questions.isNotEmpty()) item { SectionTitle("Services ask you") }
-        items(inbox.questions, key = { "q:${it["id"].string}" }) { q -> Question(q) { accept, content -> act { app.answerQuestion(q["id"].string!!, accept, content) } } }
-        if (inbox.screens.isNotEmpty()) item { SectionTitle("Its use of a Mac itself") }
-        items(inbox.screens, key = { "s:${it["id"].string}" }) { s ->
-            MacSession(
-                s,
-                answer = { allow -> act { app.decideScreen(s["id"].string!!, allow) } },
-                end = { act { app.endScreen(s["id"].string!!) } },
-                watch = { s["node"].string?.let(watch) },
-            )
-        }
-        val others = inbox.actions.filter { it !== first }
-        if (others.isNotEmpty()) item { SectionTitle("Waiting for your approval") }
-        items(others, key = { "a:${it["id"].string}" }) { a -> Approval(a, asker(a["by"].string ?: "")) { approve -> act { app.decide(a["id"].string!!, approve) } } }
-        if (inbox.keys.isNotEmpty()) item { SectionTitle("Keys ${Primary.name} asked for") }
-        items(inbox.keys, key = { "k:${it["name"].string}" }) { k ->
-            KeyAsked(k, asker(k["requestedBy"].string ?: ""), seal = { value -> act { app.sealKey(k["name"].string!!, value, k["provider"].string) } }, dismiss = { act { app.dismissKey(k["name"].string!!) } })
-        }
-        if (inbox.drafts.isNotEmpty()) item { SectionTitle("Loops ${Primary.name} drafted") }
-        items(inbox.drafts, key = { "d:${it["id"].string}" }) { d ->
-            LoopDrafted(d, add = { act { app.addLoop(d)?.let { hook = (d["name"].string ?: "") to it } } }, dismiss = { act { app.dismissDraft(d["id"].string!!) } })
-        }
-        if (inbox.connectors.isNotEmpty()) item { SectionTitle("Connectors asked for") }
-        items(inbox.connectors, key = { "c:${it["id"].string}" }) { c ->
-            ConnectorAsked(c, allow = { act { app.allowConnector(c) } }, dismiss = { act { app.dismissConnectorRequest(c["id"].string!!) } }, openConnectors = openConnectors)
-        }
-        if (inbox.facts.isNotEmpty()) item { SectionTitle("Facts it noticed about you") }
-        items(inbox.facts, key = { "f:${it["id"].string}" }) { f ->
-            Fact(f, keep = { words -> act { app.keepFact(f["id"].string!!, words) } }, drop = { act { app.dropFact(f["id"].string!!) } })
-        }
-        if (inbox.notices.isNotEmpty()) item { SectionTitle("Noticed") }
-        items(inbox.notices, key = { "n:${it["key"].string}" }) { n -> Notice(n) { act { app.dismissNotice(n["key"].string!!) } } }
-        item { Spacer(Modifier.height(Space.s10)) }
     }
-    }
-    hook?.let { (name, secret) -> HookSecret(name, secret) { hook = null } }
 }
 
 /**
