@@ -14,10 +14,10 @@ import Observation
     let chat = ChatModel()
 
     private(set) var whoami: WhoAmI?
-    private(set) var team: TeamSnapshot?
+    private(set) var team: TeamSnapshot? { didSet { drawn &+= 1 } }
     /// Why the agents couldn't be read, when it couldn't.
     private(set) var teamProblem: String?
-    private(set) var actions: [ActionView] = []
+    private(set) var actions: [ActionView] = [] { didSet { drawn &+= 1 } }
     private(set) var requests: [SecretRequestView] = []
     private(set) var pairings: [PairingView] = []
     /// The facts about you it proposed, waiting for you (what you kept goes with every answer it gives).
@@ -49,7 +49,7 @@ import Observation
     private(set) var trouble: NodeError?
     /// The last team this device saw (KeptTable), drawn until the node first answers, and only ever looked at:
     /// whatever you change starts from the node's word (`team`).
-    private(set) var kept: KeptTable.Kept?
+    private(set) var kept: KeptTable.Kept? { didSet { drawn &+= 1 } }
     /// The node has been a moment answering while the kept team is drawn.
     private var slow = false
     /// Where what the node says of the agents is kept for the next time the app opens; nil: nowhere (a Mac, or a
@@ -131,7 +131,7 @@ import Observation
     var seats: [String] { Roster.seats(agents: drawnTeam?.agents.map(\.id) ?? []) }
 
     /// Your projects (GET /api/projects), for the names the work's projects go by: asked once, where this device may read.
-    private(set) var projects: [ProjectView] = []
+    private(set) var projects: [ProjectView] = [] { didSet { drawn &+= 1 } }
     private var projectsAsked = false
     /// Your prices as money goes (GET /api/prices, a coding plan's calls costing nothing more): asked once a task's cost
     /// is shown; nil until then, or where they can't be read.
@@ -140,10 +140,32 @@ import Observation
 
     /// The work by attention (Work.attended): every task a row of three lines in its section, from the agents as it is
     /// drawn, your projects' names and the approvals waiting. Nil until the agents are known.
+    ///
+    /// Worked out once for each change of what it is drawn from (`drawn`), and again as the minute turns (its rows' times),
+    /// however many read it. Until 27 November 2026 each read worked it all out again, over a busy fleet's hundred tasks on
+    /// the main thread: Home's line, its count of what needs you and its sections each did, so a change cost the work several
+    /// times over. On CI's loaded Mac one event took 460 ms to be drawn (PR #89's testEventToScreen, 514 ms against 500).
     var attended: Attended? {
-        guard let snapshot = drawnTeam else { return nil }
-        return Work.attended(agents: snapshot.agents, tasks: snapshot.tasks, seen: snapshot.seen, projects: projects.map(Work.Named.init), asks: team == nil ? kept?.asks ?? [] : asks, now: Date.now.timeIntervalSince1970 * 1000)
+        let minute = Int(Date.now.timeIntervalSince1970 / 60)
+        if let memo = attendedMemo, memo.drawn == drawn, memo.minute == minute { return memo.value }
+        let value: Attended?
+        if let snapshot = drawnTeam {
+            workedOut += 1
+            value = Work.attended(agents: snapshot.agents, tasks: snapshot.tasks, seen: snapshot.seen, projects: projects.map(Work.Named.init), asks: team == nil ? kept?.asks ?? [] : asks, now: Date.now.timeIntervalSince1970 * 1000)
+        } else {
+            value = nil
+        }
+        attendedMemo = (drawn, minute, value)
+        return value
     }
+
+    /// Bumped as anything the work is drawn from changes (the agents, the kept agents, the approvals waiting, your projects):
+    /// read with the work, so whoever reads the work is told when it changes, as reading those would tell them.
+    private var drawn = 0
+    /// The work as last worked out, for the change and the minute it was worked out at.
+    @ObservationIgnored private var attendedMemo: (drawn: Int, minute: Int, value: Attended?)?
+    /// How many times the work has been worked out (WorkOnceTests counts it).
+    @ObservationIgnored private(set) var workedOut = 0
 
     /// What needs you, decisions only, counted one way for every place that says how many (Home's line and its Needs you,
     /// the Inbox's count, the primary's line among the agents, the sidebar, a Mac's menu bar, the launch cache): every

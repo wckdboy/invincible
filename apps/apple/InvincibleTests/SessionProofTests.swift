@@ -143,6 +143,8 @@ final class LocalNode: @unchecked Sendable {
     private let lock = NSLock()
     private var current: Mode
     private var log: [Asked] = []
+    /// What it answers at /api/team (nil: not here, as any other route).
+    private var team: Data?
     private var streams: [NWConnection] = []
 
     /// Who a connection is handed to, once the node is made.
@@ -243,11 +245,13 @@ final class LocalNode: @unchecked Sendable {
     private func answer(_ connection: NWConnection, _ head: String) {
         let words = (head.components(separatedBy: "\r\n").first ?? "").split(separator: " ").map(String.init)
         let method = words.first ?? "", path = words.count > 1 ? words[1] : ""
-        let mode = lock.withLock {
+        let (mode, team) = lock.withLock {
             log.append(Asked(at: .now, method: method, path: path))
-            return current
+            return (current, self.team)
         }
-        if path.hasPrefix("/api/whoami") {
+        if path.split(separator: "?").first == "/api/team", let team {
+            send(connection, status: 200, body: team)
+        } else if path.hasPrefix("/api/whoami") {
             send(connection, status: 200, body: whoami(path, mode))
         } else if path.hasPrefix("/api/live") {
             stream(connection)
@@ -255,6 +259,9 @@ final class LocalNode: @unchecked Sendable {
             send(connection, status: 404, body: Data(#"{"error":"not here"}"#.utf8))
         }
     }
+
+    /// Answers /api/team with this snapshot from now on (WorkOnceTests).
+    func serve(team body: Data) { lock.withLock { team = body } }
 
     private func whoami(_ path: String, _ mode: Mode) -> Data {
         let challenge = URLComponents(string: path)?.queryItems?.first { $0.name == "challenge" }?.value ?? ""
