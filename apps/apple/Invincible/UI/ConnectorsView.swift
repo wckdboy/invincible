@@ -34,7 +34,7 @@ struct ConnectorsView: View {
                 } header: {
                     SectionHead("Add")
                 } footer: {
-                    PageNote("Each reaches its service as you allow: reading, making and changing run freely, and anything sent out or deleted asks you first.")
+                    PageNote("Each reaches its service as you allow: reading, making and changing run freely, and anything sent out, pushed or deleted asks you first, but your agent's own work on GitHub, which it approves itself and says so: its pushes in the repositories you gave its agents, built where GitHub says your default branch stands, and its words on its own threads.")
                 }
             }
         }

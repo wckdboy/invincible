@@ -147,7 +147,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
           class: "read",
         },
         "branch.create": {
-          description: "Create a branch at a commit (ref is refs/heads/<name>).",
+          description: "Create a branch at a commit (ref is refs/heads/<name>). It runs that commit's own workflows with the repository's secrets: your agent asks first.",
           method: "POST",
           path: "/repos/{owner}/{repo}/git/refs",
           params: {
@@ -156,7 +156,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
             ref: { type: "string", pattern: "refs/heads/[A-Za-z0-9._/-]{1,200}", required: true },
             sha: { type: "string", pattern: "[a-f0-9]{40}", required: true },
           },
-          class: "create",
+          class: "outward",
         },
         "issue.create": {
           description: "Open an issue. Others see it: your agent asks first.",

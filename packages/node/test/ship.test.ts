@@ -48,29 +48,41 @@ const SHIPMENT = shipmentFiles(
 function fakeGitHub(options: { branchExists?: boolean; prFails?: boolean; heads?: Record<string, string>; moveFails?: boolean } = {}) {
   const calls: { method: string; path: string; body?: any }[] = [];
   let blobs = 0;
+  // Where each branch stands: a new one where it was made, one moved where it was moved to.
+  const heads: Record<string, string> = { ...options.heads };
   const github: ShipDeps["github"] = async (method, path, body) => {
     calls.push({ method, path, ...(body === undefined ? {} : { body }) });
     if (method === "GET" && path.includes("/git/ref/heads/")) {
-      const at = options.heads?.[path.split("/git/ref/heads/")[1]!];
-      return at ? { status: 200, json: { object: { sha: at } } } : { status: options.branchExists ? 200 : 404, json: {} };
+      const branch = decodeURIComponent(path.split("/git/ref/heads/")[1]!);
+      const at = heads[branch];
+      return at ? { status: 200, json: { ref: `refs/heads/${branch}`, object: { sha: at, type: "commit" } } } : { status: options.branchExists ? 200 : 404, json: {} };
     }
-    if (method === "PATCH" && path.includes("/git/refs/heads/")) return options.moveFails ? { status: 422, json: { message: "Update is not a fast forward" } } : { status: 200, json: {} };
+    if (method === "PATCH" && path.includes("/git/refs/heads/")) {
+      if (options.moveFails) return { status: 422, json: { message: "Update is not a fast forward" } };
+      heads[decodeURIComponent(path.split("/git/refs/heads/")[1]!)] = (body as { sha: string }).sha;
+      return { status: 200, json: {} };
+    }
     if (method === "GET" && path.split("?")[0]!.endsWith("/pulls")) return { status: 200, json: [{ number: 7, html_url: "https://github.com/amiriteorg/shipyard/pull/7" }] };
-    if (method === "GET" && path === "/repos/amiriteorg/shipyard") return { status: 200, json: { default_branch: "main" } };
+    if (method === "GET" && path === "/repos/amiriteorg/shipyard") return { status: 200, json: { full_name: "amiriteorg/shipyard", private: false, fork: false, default_branch: "main", owner: { login: "amiriteorg", id: 600, type: "Organization" } } };
     // Whose the key is (a person's account, by its id), a private repository of it, an organization's, and two threads:
     // one opened under your account, one by someone else.
     if (method === "GET" && path === "/user") return { status: 200, json: { login: "lin-example", id: 501, type: "User" } };
-    if (method === "GET" && path === "/repos/lin-example/notes") return { status: 200, json: { full_name: "lin-example/notes", private: true, fork: false, owner: { login: "lin-example", id: 501, type: "User" } } };
-    if (method === "GET" && path === "/repos/amiriteorg/docs") return { status: 200, json: { full_name: "amiriteorg/docs", private: true, fork: false, owner: { login: "amiriteorg", id: 600, type: "Organization" } } };
+    if (method === "GET" && path === "/repos/lin-example/notes") return { status: 200, json: { full_name: "lin-example/notes", private: true, fork: false, default_branch: "main", owner: { login: "lin-example", id: 501, type: "User" } } };
+    if (method === "GET" && path === "/repos/amiriteorg/docs") return { status: 200, json: { full_name: "amiriteorg/docs", private: true, fork: false, default_branch: "main", owner: { login: "amiriteorg", id: 600, type: "Organization" } } };
     if (method === "GET" && path === "/repos/lin-example/notes/issues/4") return { status: 200, json: { number: 4, user: { id: 501 } } };
     if (method === "GET" && path === "/repos/lin-example/notes/issues/5") return { status: 200, json: { number: 5, user: { id: 777 } } };
     if (method === "POST" && path.endsWith("/issues")) return { status: 201, json: { number: 4, html_url: "https://github.com/lin-example/notes/issues/4" } };
     if (method === "POST" && path.endsWith("/comments")) return { status: 201, json: { id: 1 } };
-    if (method === "GET" && path === `/repos/amiriteorg/shipyard/git/commits/${BASE}`) return { status: 200, json: { tree: { sha: "f".repeat(40) } } };
+    // Any commit the repository has (where main stood, a commit the node pushed): its tree.
+    if (method === "GET" && /^\/repos\/amiriteorg\/shipyard\/git\/commits\/[0-9a-f]{40}$/.test(path)) return { status: 200, json: { tree: { sha: "f".repeat(40) } } };
     if (path.endsWith("/git/blobs")) return { status: 201, json: { sha: String(++blobs).padStart(40, "b") } };
     if (path.endsWith("/git/trees")) return { status: 201, json: { sha: "e".repeat(40) } };
     if (path.endsWith("/git/commits")) return { status: 201, json: { sha: "c".repeat(40) } };
-    if (path.endsWith("/git/refs")) return { status: 201, json: {} };
+    if (path.endsWith("/git/refs")) {
+      const made = body as { ref: string; sha: string };
+      heads[made.ref.replace(/^refs\/heads\//, "")] = made.sha;
+      return { status: 201, json: {} };
+    }
     if (path.endsWith("/pulls"))
       return options.prFails
         ? { status: 422, json: { message: "Validation Failed", errors: [{ message: "No commits between main and invincible/units" }] } }
@@ -308,7 +320,8 @@ describe("the gate, end to end", () => {
   const port = freePort();
   const TOKEN = "github_pat_FAKEFAKEFAKEFAKE0000_fakefakefakefakefakefakefakefakefakefakefakefake";
   const seen: { method: string; url: string; auth: string | null }[] = [];
-  const gh = fakeGitHub({ heads: { "invincible/fixing": BASE } });
+  // Your default branch stands where the shipments began, and so does the pull request's branch a fix begins on.
+  const gh = fakeGitHub({ heads: { main: BASE, "invincible/fixing": BASE } });
   let daemon: Daemon;
   let armToken: string;
   let artifact: string;
@@ -354,6 +367,23 @@ describe("the gate, end to end", () => {
     await daemon?.stop();
     rmSync(root, { recursive: true, force: true });
   });
+  /** Kept work holding a shipment of these files, built on `base`. */
+  const keep = async (label: string, files: { path: string; mode?: string; deleted?: boolean }[], base = BASE) => {
+    const contents = Object.fromEntries(files.filter((f) => !f.deleted).map((f) => [f.path, `// ${f.path}\n`]));
+    const all = shipmentFiles({ v: 1, base, remote: REMOTE, files: files.map((f) => (f.deleted ? f : { mode: "100644", ...f })) }, contents);
+    const collector = async (_s: string, _f: string, dest: string) => {
+      const out = { files: [] as { path: string; size: number; sha256: string }[], bytes: 0, skipped: [] as { path: string; reason: string }[] };
+      for (const [path, bytes] of Object.entries(all)) {
+        const target = join(dest, ...path.split("/"));
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, bytes);
+        out.files.push({ path, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
+        out.bytes += bytes.length;
+      }
+      return out;
+    };
+    return (await daemon.artifacts.save(collector, { sandbox: "0123456789", label })).artifact!.id;
+  };
 
   test("an agent's shipment waits for you; approved, it ships once, with the key and only to GitHub", async () => {
     const args = { ...ARGS, artifact };
@@ -450,28 +480,35 @@ describe("the gate, end to end", () => {
     }
     const agent = { kind: "agent" as const, by: "team.0123456789.liv" };
     const actions = async () => (await send(home.adminToken(), "actions")).body.actions as ActionView[];
-    const why = "a pull request of the work, on an invincible/… branch, in amiriteorg/shipyard, a repository you gave an agent";
+    const why = "a pull request of the work on a new branch invincible/its-own, built on main as it stands, in amiriteorg/shipyard, a repository you gave an agent";
     let before = seen.length;
     const shipped = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "invincible/its-own" }, why: "its gates and its reviewer passed" }, agent);
     expect(shipped.status).toBe("done");
     expect(shipped.status === "done" && shipped.own).toBe(why);
     expect(seen.slice(before).filter((s) => s.method === "POST" && s.url.endsWith("/pulls"))).toHaveLength(1);
+    // Where main stands was asked of GitHub just before, with the key: the shipment is built on it.
+    expect(seen.slice(before, before + 2).map((s) => `${s.method} ${s.url}`)).toEqual(["GET https://api.github.com/repos/amiriteorg/shipyard", "GET https://api.github.com/repos/amiriteorg/shipyard/git/ref/heads/main"]);
     const filed = (await actions()).find((a) => a.id === (shipped.status === "done" ? shipped.action : ""))!;
     expect([filed.state, filed.self, filed.note]).toEqual(["done", true, `Your agent approved it itself: ${why}`]);
-    // A fix pushed onto its branch, likewise.
+    // A fix pushed onto a branch it shipped (invincible/fixing, by your approval, earlier), from the commit it last pushed
+    // there, likewise.
+    const fixed = await keep("fix", [{ path: "src/units.ts" }], "c".repeat(40));
     before = seen.length;
-    const pushed = await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact, branch: "invincible/fixing", title: "Fix the failing checks" }, why: "its checks failed" }, agent);
-    expect(pushed.status === "done" && pushed.own).toBe("a fix pushed onto its invincible/… branch, in amiriteorg/shipyard, a repository you gave an agent");
+    const pushed = await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact: fixed, branch: "invincible/fixing", title: "Fix the failing checks" }, why: "its checks failed" }, agent);
+    expect(pushed.status === "done" && pushed.own).toBe("a fix pushed onto invincible/fixing, a branch it shipped, from where it last pushed it, in amiriteorg/shipyard, a repository you gave an agent");
     expect(seen.slice(before).filter((s) => s.method === "PATCH")).toHaveLength(1);
-    // Its own tools in chat, in a repository you gave an agent.
+    // A fix that began on another commit than the one it last pushed there waits for you.
+    expect((await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact, branch: "invincible/fixing", title: "Fix" } }, agent)).status).toBe("asked");
+    // Its own tools in chat: a pull request from the branch it shipped, into main.
     const opened = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/its-own", base: "main", title: "Parse SI units" } }, { kind: "agent", by: "arm:primary" });
-    expect(opened.status === "done" && opened.own).toBe("a pull request in amiriteorg/shipyard, a repository you gave an agent");
+    expect(opened.status === "done" && opened.own).toBe("a pull request from invincible/its-own, a branch it shipped, into main, in amiriteorg/shipyard, a repository you gave an agent");
     // Its agent's own call, from its VM (arm:team.…: a name no token you mint can take, and none older authenticates as):
-    // the same rule, its to approve.
+    // the same rule, its to approve from a branch it shipped; from one it didn't, it waits for you.
     before = seen.length;
-    const agents = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/liv-own", base: "main", title: "Units in the docs" } }, { kind: "agent", by: "arm:team.0123456789.liv" });
-    expect(agents.status === "done" && agents.own).toBe("a pull request in amiriteorg/shipyard, a repository you gave an agent");
+    const agents = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/its-own", base: "main", title: "Units in the docs" } }, { kind: "agent", by: "arm:team.0123456789.liv" });
+    expect(agents.status === "done" && agents.own).toStartWith("a pull request from invincible/its-own, a branch it shipped");
     expect(seen.slice(before).filter((s) => s.method === "POST" && s.url.endsWith("/pulls"))).toHaveLength(1);
+    expect((await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/liv-own", base: "main", title: "Units in the docs" } }, { kind: "agent", by: "arm:team.0123456789.liv" })).status).toBe("asked");
   });
 
   // Your word, 27 November 2026, as the review of 27 November drew it: in a private repository of yours its own threads
@@ -490,6 +527,7 @@ describe("the gate, end to end", () => {
       "GET https://api.github.com/user true",
       "GET https://api.github.com/repos/lin-example/notes true",
       "POST https://api.github.com/repos/lin-example/notes/issues true",
+      "GET https://api.github.com/repos/lin-example/notes true",
       "GET https://api.github.com/repos/lin-example/notes/issues/4 true",
       "POST https://api.github.com/repos/lin-example/notes/issues/4/comments true",
     ]);
@@ -503,33 +541,36 @@ describe("the gate, end to end", () => {
     expect(seen.slice(after).filter((s) => s.method !== "GET")).toEqual([]);
   });
 
-  test("a shipment that changes what the repository's CI runs waits for you, in a repository you gave an agent too: it would run with the repository's secrets", async () => {
-    const collector = async (_s: string, _f: string, dest: string) => {
-      const files = shipmentFiles({ v: 1, base: BASE, remote: REMOTE, files: [{ path: "src/units.ts", mode: "100644" }, { path: ".github/workflows/ci.yml", mode: "100644" }] }, { "src/units.ts": "export const k = 1e3;\n", ".github/workflows/ci.yml": "on: push\n" });
-      const out = { files: [] as { path: string; size: number; sha256: string }[], bytes: 0, skipped: [] as { path: string; reason: string }[] };
-      for (const [path, bytes] of Object.entries(files)) {
-        const target = join(dest, ...path.split("/"));
-        mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, bytes);
-        out.files.push({ path, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
-        out.bytes += bytes.length;
-      }
-      return out;
-    };
-    const workflows = (await daemon.artifacts.save(collector, { sandbox: "0123456789", label: "units-ci" })).artifact!.id;
-    // (The repository is one you gave an agent: its work that changes no CI is its own to ship there.)
+  test("a shipment that changes what the repository's CI runs, or isn't built on your default branch's head, waits for you, in a repository you gave an agent too: it would run with the repository's secrets", async () => {
+    // (The repository is one you gave an agent: its work that changes no CI, on main as it stands, is its own to ship there.)
     const team = new TeamStore(join(home.dir, "team.db"));
     try {
       team.saveAgent({ id: "liv", name: "Liv", repository: "https://github.com/amiriteorg/shipyard" });
     } finally {
       team.close();
     }
-    const clean = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "invincible/no-ci" }, why: "its gates and its reviewer passed" }, { kind: "agent", by: "team.0123456789.liv" });
+    const liv = { kind: "agent" as const, by: "team.0123456789.liv" };
+    const clean = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "invincible/no-ci" }, why: "its gates and its reviewer passed" }, liv);
     expect(clean.status).toBe("done");
+    const yours = {
+      // A workflow, added or changed.
+      "invincible/with-ci": await keep("units-ci", [{ path: "src/units.ts" }, { path: ".github/workflows/ci.yml" }]),
+      // The workflows' folder itself, deleted (everything in it goes).
+      "invincible/no-workflows": await keep("units-no-ci", [{ path: "src/units.ts" }, { path: ".github/workflows", deleted: true }]),
+      // A local action at the root (uses: ./), which a workflow runs with the inputs it passes, secrets too.
+      "invincible/action": await keep("units-action", [{ path: "action.yml" }]),
+      // Built on a contributor's pull request's head (GitHub keeps it as refs/pull/7/head): the branch would carry their
+      // workflows, though the shipment lists one source file.
+      "invincible/on-theirs": await keep("units-theirs", [{ path: "src/units.ts" }], "7".repeat(40)),
+    };
     const before = seen.length;
-    const shipped = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact: workflows, branch: "invincible/with-ci" }, why: "its gates and its reviewer passed" }, { kind: "agent", by: "team.0123456789.liv" });
-    expect(shipped.status).toBe("asked");
-    expect(seen.length).toBe(before);
+    for (const [branch, work] of Object.entries(yours)) {
+      const shipped = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact: work, branch }, why: "its gates and its reviewer passed" }, liv);
+      expect([branch, shipped.status]).toEqual([branch, "asked"]);
+    }
+    // Nothing went out: GitHub was asked only where main stands, for the one built elsewhere.
+    expect(seen.slice(before).filter((s) => s.method !== "GET")).toEqual([]);
+    expect(seen.slice(before).map((s) => s.url)).toEqual(["https://api.github.com/repos/amiriteorg/shipyard", "https://api.github.com/repos/amiriteorg/shipyard/git/ref/heads/main"]);
   });
 
   test("what isn't its still waits for you: another repository, a tool you run with a token of its own, your own tap", async () => {

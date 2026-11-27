@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { argStrings, buildCall, buildRequest, ConnectorArgs, ConnectorError, ConnectorManifest, isPrivateHost, localToolName, proposedClass } from "../src/index.ts";
+import { argStrings, buildCall, buildRequest, ConnectorArgs, ConnectorError, ConnectorManifest, heldClass, isPrivateHost, localToolName, proposedClass } from "../src/index.ts";
 
 const base = {
   id: "forge",
@@ -73,6 +73,29 @@ describe("connector manifests", () => {
     expect(isPrivateHost("172.20.0.1")).toBe(true);
     expect(isPrivateHost("172.32.0.1")).toBe(false);
     expect(isPrivateHost("8.8.8.8")).toBe(false);
+  });
+});
+
+// Your word, 27 November 2026, as the re-review drew it: a branch asks for every caller, a connector installed while it
+// was free too.
+describe("the class a tool is held to", () => {
+  const GITHUB = { origin: "https://api.github.com" };
+  const tool = (method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", path: string, cls: "read" | "create" | "modify" | "outward" | "delete") => ({ description: "t", method, path, class: cls });
+
+  test("at GitHub's API a write to a repository's refs is outward, whatever its label: a branch or a tag made or moved runs that commit's workflows", () => {
+    expect(heldClass(GITHUB, tool("POST", "/repos/{owner}/{repo}/git/refs", "create"))).toBe("outward");
+    expect(heldClass(GITHUB, tool("PATCH", "/repos/{owner}/{repo}/git/refs/heads/{branch}", "modify"))).toBe("outward");
+    expect(heldClass(GITHUB, tool("PUT", "/repos/lin-example/site/git/refs/tags/v1", "create"))).toBe("outward");
+    expect(heldClass({ ...GITHUB, basePath: "/repos/lin-example/site" }, tool("POST", "/git/refs", "create"))).toBe("outward");
+  });
+
+  test("anything else keeps its own: a read of refs, a delete, another path, another origin", () => {
+    expect(heldClass(GITHUB, tool("GET", "/repos/{owner}/{repo}/git/refs/heads/{branch}", "read"))).toBe("read");
+    expect(heldClass(GITHUB, tool("DELETE", "/repos/{owner}/{repo}/git/refs/heads/{branch}", "delete"))).toBe("delete");
+    expect(heldClass(GITHUB, tool("POST", "/repos/{owner}/{repo}/git/blobs", "create"))).toBe("create");
+    expect(heldClass(GITHUB, tool("POST", "/repos/{owner}/{repo}/labels", "create"))).toBe("create");
+    expect(heldClass({ origin: "https://forge.example.test" }, tool("POST", "/repos/{owner}/{repo}/git/refs", "create"))).toBe("create");
+    expect(heldClass({ origin: "https://api.github.com.example.test" }, tool("POST", "/repos/{owner}/{repo}/git/refs", "create"))).toBe("create");
   });
 });
 

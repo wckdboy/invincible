@@ -2,9 +2,9 @@
  * The Approvals: every side-effecting action is classified before it runs.
  *
  *   read      look, list, fetch                                  → allow
- *   create    new bucket, prefix, branch, container, credential  → allow (logged)
+ *   create    new bucket, prefix, container, credential          → allow (logged)
  *   modify    change config, write objects, edit files           → allow (logged)
- *   outward   push, send, post, deploy, purchase                 → ask
+ *   outward   push, branch, send, post, deploy, purchase         → ask
  *   delete    remove anything persistent                         → ask
  *   forbidden breaks a hard limit                                → deny
  *
@@ -59,20 +59,26 @@ export function decide(action: Action): Decision {
  * agents'; what is monetary, legal or destructive still asks you; and 27 November: what is your own and can be undone is
  * its, and money, legal, destructive and security stay yours). An outward call is its to answer only when what it does
  * is known, and is none of those. On GitHub that is, and nothing more:
- *   - in a repository you gave an agent: its and its agents' work, as a pull request from an invincible/… branch, a fix
- *     pushed onto one, an issue, a comment on an issue or a pull request, or a review that comments or asks for changes;
- *     but never a push that changes what the repository's CI runs (CI_CONFIG: it runs with the repository's secrets,
- *     which are your keys), nor one whose changes aren't known;
+ *   - in a repository you gave an agent, for it, its agents and its loops:
+ *       an issue;
+ *       a comment, or a review that comments or asks for changes, on its own thread (one opened under your account);
+ *       its work on a new invincible/… branch, built on your default branch's head as GitHub says it stands when it
+ *         ships (never a contributor's pull request, nor an older commit, whose CI isn't main's now), and a fix onto a
+ *         branch it shipped, from the commit it last pushed there: each known by what it changes, and changing no file
+ *         or folder the repository's CI runs (CI_CONFIG: it runs with the repository's secrets, which are your keys);
+ *       a pull request from a branch it shipped, still where it last pushed it, into your default branch;
  *   - in a private repository of your own (GitHub says so, of a repository not a fork, owned by the account your key is,
  *     by its id): for the primary itself alone, an issue, and a comment or a review that isn't an approval on its own
- *     thread, one it, its agents or you opened. Anyone else's thread speaks to them, and a public repository to everyone;
- *     a pull request or a push there runs the repository's CI with its secrets.
- * Only you give an agent its repository, and the account is the key you gave, so it can't widen this itself. Everything
- * else asks as before: a delete, which can't be undone; whatever spends or books money; whatever speaks for you to other
- * people or in their places (mail, a repository of anyone else's, an organization's you gave no agent, a public one,
- * someone else's thread); the physical world; a review that approves (your word on your account, which branch
- * protection counts); a tool whose effects aren't known (an MCP server's outward tool). CATALOG_WHOSE says it of every
- * action the connector catalog ships that asks, and CATALOG_FREE of every one that writes and doesn't.
+ *     thread. A public repository speaks to everyone, and a pull request or a push there runs its CI with its secrets;
+ *   - nowhere: words with a line a repository's bots read as a command (BOT_COMMAND: a merge bot or ChatOps acts on it
+ *     as your word).
+ * Anyone else's thread, in any repository, speaks to them. Only you give an agent its repository, and the account is the
+ * key you gave, so it can't widen this itself. Everything else asks as before: a branch (one at any commit runs that
+ * commit's own workflows with the repository's secrets); a delete, which can't be undone; whatever spends or books money;
+ * whatever speaks for you to other people or in their places (mail, a repository of anyone else's, an organization's you
+ * gave no agent, someone else's thread); the physical world; a review that approves (your word on your account, which
+ * branch protection counts); a tool whose effects aren't known (an MCP server's outward tool). CATALOG_WHOSE says it of
+ * every action the connector catalog ships that asks, and CATALOG_FREE of every one that writes and doesn't.
  */
 
 /** The parts of what stays yours (your word, 27 November 2026). */
@@ -83,17 +89,19 @@ export type Whose = { its: string; where: readonly ("given" | "private")[] } | {
 
 /**
  * Whose each action the connector catalog ships is to decide, of those that ask (outward, delete). The catalog's test
- * (packages/models/test/catalog-whose.test.ts) classes every action by what it does (a GET reads; any other request is
- * free only in CATALOG_FREE) and holds each that asks to an entry here, and each entry to ownApproval: an action added
- * without its place fails, and so does an entry for an action the catalog no longer has.
+ * (packages/models/test/catalog-whose.test.ts) classes every action by what it does (a template's GET reads; a native
+ * declared GET must be one that reads, at the path it reads; any other request is free only in CATALOG_FREE) and holds
+ * each that asks to an entry here, and each entry to ownApproval: an action added without its place fails, and so does an
+ * entry for an action the catalog no longer has.
  */
 export const CATALOG_WHOSE = {
   "github.issue.create": { its: "an issue", where: ["given", "private"] },
-  "github.issue.comment": { its: "a comment on an issue or a pull request (in a private repository of yours, only on its own thread)", where: ["given", "private"] },
-  "github.pull.review": { its: "a review that comments or asks for changes (in a private repository of yours, only of its own pull request; one that approves is yours: your word on your account, which branch protection counts)", where: ["given", "private"] },
-  "github.pr.create": { its: "a pull request from a branch of its own (invincible/…): it runs the repository's CI", where: ["given"] },
-  "github.ship": { its: "its work as a pull request on a new invincible/… branch, when it changes nothing the repository's CI runs", where: ["given"] },
-  "github.ship.update": { its: "a fix pushed onto one of its invincible/… branches, never forced, when it changes nothing the repository's CI runs", where: ["given"] },
+  "github.issue.comment": { its: "a comment on its own thread, one opened under your account (anyone else's speaks to them)", where: ["given", "private"] },
+  "github.pull.review": { its: "a review that comments or asks for changes, of its own pull request (one that approves is yours: your word on your account, which branch protection counts)", where: ["given", "private"] },
+  "github.pr.create": { its: "a pull request from a branch it shipped, still where it last pushed it, into your default branch: it runs the repository's CI", where: ["given"] },
+  "github.ship": { its: "its work as a pull request on a new invincible/… branch, built on your default branch's head as GitHub says it stands, changing nothing the repository's CI runs", where: ["given"] },
+  "github.ship.update": { its: "a fix pushed onto a branch it shipped, from the commit it last pushed there, never forced, changing nothing the repository's CI runs", where: ["given"] },
+  "github.branch.create": { yours: "security", why: "a branch at a commit runs that commit's own workflows with the repository's secrets, which are your keys, whoever made the commit (a stranger's pull request too)" },
   "cloudflare.r2.bucket.delete": { yours: "destructive", why: "a bucket deleted can't be had back" },
   "home-assistant.service": { yours: "security", why: "the physical world: what moves, heats, unlocks or opens in your home" },
   "gmail.send": { yours: "legal", why: "mail speaks for you to other people" },
@@ -107,7 +115,6 @@ export const CATALOG_WHOSE = {
  * every request that isn't a GET to an entry here or in CATALOG_WHOSE, so one labelled free that isn't fails there.
  */
 export const CATALOG_FREE: Readonly<Record<string, string>> = {
-  "github.branch.create": "a new branch at a commit, nothing else moved (free as it always was; a branch is a push of a ref, so it runs the repository's on-push and on-create workflows: SECURITY.md says so)",
   "cloudflare.r2.bucket.create": "an empty bucket: free, and nothing in it until something is put there",
   "gmail.draft": "a draft, which nobody reads until you send it",
   "gmail.archive": "out of the inbox, kept and found as before",
@@ -130,24 +137,33 @@ export interface OwnCall {
   by?: string;
   /** The files a push changes (a shipment's kept manifest says): absent, not known, and a push it can't see is yours. */
   changes?: readonly string[];
+  /** The commit a push is built on (a shipment's kept manifest says): absent, not known. */
+  base?: string;
+  /** The commit your agent last pushed onto the branch the call names (its done shipment's or fix's receipt says it, at
+   * least 12 hex): absent, it pushed none there, and the branch isn't one it shipped. */
+  pushed?: string;
 }
 
 /**
  * What GitHub said, asked with your key at its own origin before the call is filed (connectors.ts githubFacts): whose
- * the key is (its user's id, which a rename never changes), the repository the call names, and the issue or pull request
- * it answers. A part absent was not asked, or not said: nothing of it is its then.
+ * the key is (its user's id, which a rename never changes), the repository the call names, the issue or pull request it
+ * answers, and where the branch a push or a pull request is judged on stands. A part absent was not asked, or not said:
+ * nothing of it is its then.
  */
 export interface GitHubFacts {
   user?: { id: number };
   /** `name`: the repository's own "owner/repo", as GitHub gives it: facts of another repository are never this one's. */
-  repo?: { name: string; private: boolean; fork: boolean; ownerId: number; ownerType: string };
+  /** `defaultBranch`: the branch a shipment or a pull request of its own goes into, absent when GitHub didn't say. */
+  repo?: { name: string; private: boolean; fork: boolean; ownerId: number; ownerType: string; defaultBranch?: string };
   /** `number`: the issue's or pull request's, as GitHub gives it: facts of another thread are never this one's. */
   thread?: { number: number; authorId: number };
+  /** A branch, and the commit GitHub says it stands at: facts of another branch are never this one's. */
+  head?: { branch: string; sha: string };
 }
 
 const GITHUB = "https://api.github.com";
-/** GitHub's request templates its agents' work may use in their repositories, by what each does. */
-const GITHUB_OWN: Record<string, string> = {
+/** GitHub's request templates its words and its pull requests may use, by what each is. */
+const GITHUB_OWN: Record<string, "an issue" | "a comment" | "a pull request" | "a review"> = {
   "POST /repos/{owner}/{repo}/issues": "an issue",
   "POST /repos/{owner}/{repo}/issues/{number}/comments": "a comment",
   "POST /repos/{owner}/{repo}/pulls": "a pull request",
@@ -156,59 +172,130 @@ const GITHUB_OWN: Record<string, string> = {
 /** The primary itself: its chat's tools, and the node's work for it. Not its agents', nor its loops. */
 const ITSELF = new Set(["primary", "arm:primary"]);
 
-/**
- * Files a repository's CI runs, with its secrets (your word, 27 November 2026: a push that changes one is the security
- * part, yours everywhere): the workflows and actions of GitHub, Forgejo and Gitea, and the pipelines of the CI services a
- * repository names by a file of its own. Matched whatever their case, as a path from the repository's root.
+/*
+ * Files and folders a repository's CI runs, with its secrets (your word, 27 November 2026: a push that changes one is the
+ * security part, yours everywhere; and as the re-review drew it, whether it is added, changed or deleted). Matched
+ * whatever their case, as a path from the repository's root; a path names one when it is one, is inside one, or is a
+ * folder that holds one (deleted or replaced by a file, everything in it goes).
  */
-const CI_CONFIG: readonly RegExp[] = [
-  /^\.(github|forgejo|gitea)\/(workflows|actions)\//i,
-  /^\.gitlab-ci\.ya?ml$/i,
-  /^\.gitlab\/ci\//i,
-  /^\.circleci\//i,
-  /^\.travis\.ya?ml$/i,
-  /^azure-pipelines\.ya?ml$/i,
-  /^\.azure-pipelines\//i,
-  /(^|\/)jenkinsfile$/i,
-  /^\.buildkite\//i,
-  /^bitbucket-pipelines\.ya?ml$/i,
-  /^\.drone\.ya?ml$/i,
-  /^\.woodpecker(\.ya?ml$|\/)/i,
-  /^\.?appveyor\.ya?ml$/i,
-  /^cloudbuild\.ya?ml$/i,
-  /^\.semaphore\//i,
-];
-/** Whether a push of these files changes what the repository's CI runs. */
-export const changesCi = (paths: readonly string[]): boolean => paths.some((path) => CI_CONFIG.some((pattern) => pattern.test(path.replace(/^\.\//, ""))));
+/** Folders: GitHub's, Forgejo's and Gitea's whole (their workflows, their actions, what their automation reads), and the
+ * CI services' own. */
+const CI_FOLDERS = [".github", ".forgejo", ".gitea", ".gitlab/ci", ".circleci", ".azure-pipelines", ".buildkite", ".woodpecker", ".semaphore", ".tekton", ".builds", ".teamcity"];
+/** The CI services' own files at the root: GitLab, Travis, Azure, Bitbucket, Drone, Woodpecker, AppVeyor, Cloud Build,
+ * Buildkite, Cirrus, sourcehut, CodeBuild, Codefresh, Bitrise, Codemagic, and the hosts that build each push (Netlify,
+ * Vercel, Amplify) with their environments' secrets. */
+const CI_FILES = new Set(
+  [
+    ".gitlab-ci.yml",
+    ".travis.yml",
+    "azure-pipelines.yml",
+    "bitbucket-pipelines.yml",
+    ".drone.yml",
+    ".drone.jsonnet",
+    ".drone.star",
+    ".woodpecker.yml",
+    "appveyor.yml",
+    ".appveyor.yml",
+    "cloudbuild.yml",
+    "cloudbuild.json",
+    "buildkite.yml",
+    "buildkite.json",
+    ".cirrus.yml",
+    ".cirrus.star",
+    ".build.yml",
+    "buildspec.yml",
+    "codefresh.yml",
+    "bitrise.yml",
+    "codemagic.yml",
+    "netlify.toml",
+    "vercel.json",
+    "amplify.yml",
+  ].flatMap((name) => (name.endsWith(".yml") ? [name, `${name.slice(0, -4)}.yaml`] : [name])),
+);
+/** Files in any folder: a Jenkinsfile, and a local action (a workflow runs one from anywhere: uses: ./…). */
+const CI_ANYWHERE = new Set(["jenkinsfile", "action.yml", "action.yaml"]);
+
+/** Whether a path names a file or a folder the repository's CI runs (CI_FOLDERS, CI_FILES, CI_ANYWHERE). */
+function namesCi(path: string): boolean {
+  const p = path.replace(/^\.\//, "").toLowerCase();
+  const segments = p.split("/");
+  if (segments.some((segment) => CI_ANYWHERE.has(segment))) return true;
+  if (CI_FILES.has(segments[0]!)) return true;
+  return CI_FOLDERS.some((folder) => p === folder || p.startsWith(`${folder}/`) || folder.startsWith(`${p}/`));
+}
+/** Whether a push of these paths changes what the repository's CI runs. */
+export const changesCi = (paths: readonly string[]): boolean => paths.some(namesCi);
+
+/** The merge bot that takes a command by its bare name at a line's start (its name then r+, try, retry): the name is
+ * one of the old theme's words, so it is written backwards here, as bench/vocabulary.ts writes them. */
+const MERGE_BOT = [..."srob"].reverse().join("");
+/** A line a repository's bots read as a command: a leading /word (ChatOps: /deploy, /release, /merge), the merge bot's
+ * name and a word, or @name word (@mergifyio queue, @dependabot merge), whatever its case, after any spaces. */
+const BOT_COMMAND = new RegExp(`^[^\\S\\n]*(\\/[a-z]|${MERGE_BOT}:?[^\\S\\n]+\\S|@[a-z0-9][a-z0-9-]*(\\[bot\\])?[,:]?[^\\S\\n]+[a-z])`, "im");
+/** Whether the words a call writes (its title, its body) have a line a repository's bots read as a command. */
+export const commandsABot = (args: Record<string, unknown>): boolean => [args.title, args.body].some((text) => typeof text === "string" && BOT_COMMAND.test(text));
 
 /**
  * Why the primary may approve this call itself, or null when it waits for you. `repositories` are the ones you gave your
- * agents (github.com addresses, as you gave them); `facts`, what GitHub said of your key, the repository and the thread.
+ * agents (github.com addresses, as you gave them); `facts`, what GitHub said of your key, the repository, the thread and
+ * the branch, asked just before.
  */
 export function ownApproval(call: OwnCall, repositories: readonly string[], facts: GitHubFacts = {}): string | null {
+  // Words a repository's bots read as a command are yours wherever they would go: its automation acts on them as yours.
+  // (Each node reads them before it files the call; the log's rule, ownApprovalInLog, holds approvals to the rest.)
+  if (commandsABot(call.args)) return null;
+  return whereIts(call, repositories, facts);
+}
+
+function whereIts(call: OwnCall, repositories: readonly string[], facts: GitHubFacts): string | null {
   if (call.class !== "outward" || call.origin !== GITHUB) return null;
   const { owner, repo } = call.args;
   if (typeof owner !== "string" || typeof repo !== "string") return null;
-  const theirs = repositories.some((remote) => githubRepository(remote) === `${owner}/${repo}`.toLowerCase());
-  if (theirs) return inGiven(call, `${owner}/${repo}, a repository you gave an agent`);
-  return ownPrivate(call, `${owner}/${repo}`, facts) ? inPrivate(call, `${owner}/${repo}, a private repository of yours`, facts) : null;
+  const named = `${owner}/${repo}`;
+  if (givenRepository(call, repositories)) return inGiven(call, named, facts);
+  return ownPrivate(call, named, facts) ? inPrivate(call, `${named}, a private repository of yours`, facts) : null;
 }
 
-/** Its and its agents' work in a repository you gave an agent: what they do there, but a push to its CI. */
-function inGiven(call: OwnCall, where: string): string | null {
-  if (call.native === "github.ship" || call.native === "github.ship.update") {
-    // A push it can't see, or one that changes what the repository's CI runs, is yours (CI_CONFIG).
-    if (!call.changes || changesCi(call.changes)) return null;
-    return call.native === "github.ship" ? `a pull request of the work, on an invincible/… branch, in ${where}` : `a fix pushed onto its invincible/… branch, in ${where}`;
-  }
+/** Whether the repository a call names is one you gave an agent (`repositories`, as you gave them), whatever its case. */
+export function givenRepository(call: Pick<OwnCall, "args">, repositories: readonly string[]): boolean {
+  const { owner, repo } = call.args;
+  return typeof owner === "string" && typeof repo === "string" && repositories.some((remote) => githubRepository(remote) === `${owner}/${repo}`.toLowerCase());
+}
+
+/** Its, its agents' and its loops' work in a repository you gave an agent: an issue, its words on its own threads, a
+ * pull request from a branch it shipped, and its pushes. */
+function inGiven(call: OwnCall, named: string, facts: GitHubFacts): string | null {
+  const where = `${named}, a repository you gave an agent`;
+  if (call.native === "github.ship" || call.native === "github.ship.update") return itsPush(call, named, where, facts);
   if (call.native !== undefined) return null;
   const what = GITHUB_OWN[`${call.method} ${call.path}`];
-  if (!what) return null;
-  if (what === "a review" && !reviewsOnly(call)) return null;
-  // A pull request is its only from a branch of its own, as a shipment's is (Ivo's review, 23 November 2026: the
-  // template's head was any branch, a branch of yours too).
-  if (what === "a pull request" && !(typeof call.args.head === "string" && PRIMARY_BRANCH.test(call.args.head))) return null;
-  return `${what} in ${where}`;
+  if (what === "an issue") return `an issue in ${where}`;
+  if (what === "a pull request") {
+    const { head, base } = call.args;
+    // From a branch of its own (Ivo's review, 23 November 2026), one it shipped and still where it left it, into the
+    // default branch: a pull request's checks run from its merge with what it goes into.
+    if (typeof head !== "string" || !PRIMARY_BRANCH.test(head) || facts.head?.branch !== head || !lastPushedAt(call.pushed, facts.head.sha)) return null;
+    const into = defaultBranchOf(named, facts);
+    return into !== undefined && base === into ? `a pull request from ${head}, a branch it shipped, into ${into}, in ${where}` : null;
+  }
+  return what ? onItsThread(call, what, where, facts) : null;
+}
+
+/**
+ * A push of its work, as GitHub says the branch stands just before it goes, known by what it changes, and changing no
+ * file or folder the repository's CI runs: a shipment on a new branch built on your default branch's head (its CI is the
+ * default branch's now, plus what the shipment lists), or a fix onto a branch it shipped, from the commit it last pushed
+ * there (the branch is then its own commits on the default branch's head).
+ */
+function itsPush(call: OwnCall, named: string, where: string, { repo, head }: GitHubFacts): string | null {
+  if (!call.changes || changesCi(call.changes) || !isCommit(call.base) || !head || head.sha !== call.base) return null;
+  if (call.native === "github.ship") {
+    // Into the default branch (named, or not named at all), on its head.
+    const into = defaultBranchOf(named, { repo });
+    const asked = typeof call.args.base === "string" ? call.args.base : into;
+    return into !== undefined && asked === into && head.branch === into ? `a pull request of the work on a new branch ${String(call.args.branch)}, built on ${into} as it stands, in ${where}` : null;
+  }
+  return head.branch === call.args.branch && lastPushedAt(call.pushed, head.sha) ? `a fix pushed onto ${head.branch}, a branch it shipped, from where it last pushed it, in ${where}` : null;
 }
 
 /** A repository GitHub says is your own (private, not a fork, your key's account's by its id), for the primary itself. */
@@ -217,12 +304,16 @@ function ownPrivate(call: OwnCall, named: string, { user, repo }: GitHubFacts): 
 }
 
 /** Its own words there: an issue; a comment or a review that isn't an approval on its own thread. No push, no pull request. */
-function inPrivate(call: OwnCall, where: string, { user, thread }: GitHubFacts): string | null {
+function inPrivate(call: OwnCall, where: string, facts: GitHubFacts): string | null {
   if (call.native !== undefined) return null;
   const what = GITHUB_OWN[`${call.method} ${call.path}`];
   if (what === "an issue") return `an issue in ${where}`;
-  if (what !== "a comment" && what !== "a review") return null;
-  // Its own thread: one opened under your account (it, its agents and you all open them with your key).
+  return what === "a comment" || what === "a review" ? onItsThread(call, what, where, facts) : null;
+}
+
+/** A comment, or a review that isn't an approval, on its own thread: one opened under your account (it, its agents and
+ * you all open them with your key). Anyone else's thread speaks to them. */
+function onItsThread(call: OwnCall, what: "a comment" | "a review", where: string, { user, thread }: GitHubFacts): string | null {
   if (thread === undefined || user === undefined || thread.number !== call.args.number || thread.authorId !== user.id) return null;
   if (what === "a review") return reviewsOnly(call) ? `a review of its own pull request #${call.args.number} in ${where}` : null;
   return `a comment on its own thread #${call.args.number} in ${where}`;
@@ -230,6 +321,42 @@ function inPrivate(call: OwnCall, where: string, { user, thread }: GitHubFacts):
 
 /** A review that comments or asks for changes, never one that approves. */
 const reviewsOnly = (call: OwnCall) => ["COMMENT", "REQUEST_CHANGES"].includes(String(call.args.event ?? "").toUpperCase());
+const isCommit = (sha: unknown): sha is string => typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha);
+/** Whether a branch standing at `sha` stands where your agent last pushed it (`pushed`: that commit's first 12 hex or more). */
+const lastPushedAt = (pushed: unknown, sha: string): boolean => typeof pushed === "string" && /^[0-9a-f]{12,40}$/.test(pushed) && sha.startsWith(pushed);
+/** The repository's default branch, as GitHub said it of this repository. */
+const defaultBranchOf = (named: string, { repo }: GitHubFacts): string | undefined => (repo && repo.name.toLowerCase() === named.toLowerCase() ? repo.defaultBranch : undefined);
+
+/**
+ * The branch whose head a call is judged on (GitHubFacts.head): a shipment's, the branch it goes into (the default one,
+ * unless it names one); a fix's, its own; a pull request's, the branch it comes from. None for anything else.
+ */
+export function judgedBranch(call: OwnCall, defaultBranch: string | undefined): string | undefined {
+  const { base, branch, head } = call.args;
+  if (call.native === "github.ship") return typeof base === "string" ? base : defaultBranch;
+  if (call.native === "github.ship.update") return typeof branch === "string" ? branch : undefined;
+  if (call.native === undefined && GITHUB_OWN[`${call.method} ${call.path}`] === "a pull request") return typeof head === "string" ? head : undefined;
+  return undefined;
+}
+
+/**
+ * What GitHub would have to say for a call to be its own, given what the node itself knows of it (a push's changes and
+ * base, the commit it last pushed): a key's account, a private repository of it whose default branch is the one the call
+ * names (or main), its own thread, and the branch the call is judged on standing where the call needs it. What the node
+ * asks GitHub at all (connectors.ts), and what a replica takes as said (ownApprovalInLog).
+ */
+export function supposedFacts(call: OwnCall): GitHubFacts {
+  const { owner, repo, number, base } = call.args;
+  const defaultBranch = typeof base === "string" ? base : "main";
+  const branch = judgedBranch(call, defaultBranch);
+  const sha = isCommit(call.base) ? call.base : typeof call.pushed === "string" ? call.pushed.padEnd(40, "0") : "";
+  return {
+    user: { id: 1 },
+    repo: { name: `${String(owner)}/${String(repo)}`, private: true, fork: false, ownerId: 1, ownerType: "User", defaultBranch },
+    ...(typeof number === "number" ? { thread: { number, authorId: 1 } } : {}),
+    ...(branch !== undefined ? { head: { branch, sha } } : {}),
+  };
+}
 
 /**
  * The primary's own callers, whose calls it may approve itself: it (its chat's tools, and the node's work for it, by its
@@ -245,16 +372,19 @@ export function primaryCaller(by: string): boolean {
 /**
  * What every replica holds the primary's own approval to, from the log alone (ledger: an action.decided recorded as an
  * agent's): a call of one of its own callers (primaryCaller) that ownApproval allows, in the repository the call itself
- * names, as the connector stood. Which repositories you gave your agents, whose your key and a repository are, who opened
- * a thread and what a push changed are each node's to know, not the log's: the node that approved it checked those parts
- * (in the log it is judged as if the repository were one you gave an agent). Null: not one it may approve itself.
+ * names, as the connector stood. Which repositories you gave your agents, what GitHub said (whose your key and a
+ * repository are, who opened a thread, where a branch stood), what a push changed and was built on, the commit it last
+ * pushed, and whether its words read as a command to a bot are each node's to check before it files the call, not the
+ * log's: the node that approved it checked those parts (in the log it is judged as if the repository were one you gave
+ * an agent and GitHub had said what it needed). Null: not one it may approve itself.
  */
 export function ownApprovalInLog(call: OwnCall & { by: string }): string | null {
   if (!primaryCaller(call.by)) return null;
   const { owner, repo } = call.args;
   if (typeof owner !== "string" || typeof repo !== "string") return null;
-  // (What a push changed is the approving node's to have seen, as whose the repository is: not in the log.)
-  return ownApproval({ ...call, changes: call.changes ?? [] }, [`https://github.com/${owner}/${repo}`]);
+  const sha = isCommit(call.base) ? call.base : "0".repeat(40);
+  const told: OwnCall = { ...call, changes: call.changes ?? [], base: sha, pushed: call.pushed ?? sha.slice(0, 12) };
+  return whereIts(told, [`https://github.com/${owner}/${repo}`], supposedFacts(told));
 }
 
 /** A branch of the primary's own, as the GitHub connector's shipments pin it (connector-catalog.ts). */

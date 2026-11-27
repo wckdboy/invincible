@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { canonical } from "./canonical.ts";
-import { type ConnectorManifest, isMcpTool } from "./connectors.ts";
+import { type ConnectorManifest, heldClass, isMcpTool } from "./connectors.ts";
 import { sha256B64u } from "./crypto.ts";
 
 /*
@@ -108,10 +108,12 @@ export function orderProblems(terms: Omit<OrderTerms, "digest" | "label"> & { la
   const problems: string[] = [];
   const tool = Object.hasOwn(manifest.tools, terms.tool) ? manifest.tools[terms.tool] : undefined;
   if (!tool) return [`${manifest.id} has no tool "${terms.tool}"`];
-  if (tool.class !== "outward" && tool.class !== "delete") {
-    return [`${manifest.id}.${terms.tool} is ${tool.class}: your agent does that without asking, so it needs no order`];
+  // What it is held to (heldClass): a write to GitHub's refs asks, and an order may cover it, whatever its label.
+  const held = isMcpTool(tool) ? tool.class : heldClass(manifest, tool);
+  if (held !== "outward" && held !== "delete") {
+    return [`${manifest.id}.${terms.tool} is ${held}: your agent does that without asking, so it needs no order`];
   }
-  if (terms.class !== tool.class) problems.push(`${manifest.id}.${terms.tool} is ${tool.class}, not ${terms.class}`);
+  if (terms.class !== held) problems.push(`${manifest.id}.${terms.tool} is ${held}, not ${terms.class}`);
   // A send of mail names whom it may send to: every address, never a pattern.
   if (!isMcpTool(tool) && tool.native !== undefined && MAIL_SENDS.has(tool.native)) {
     if (terms.args.to === undefined) problems.push(`an order to send mail names whom it may send to: pin to (and cc, if it may copy anyone), each address in full`);

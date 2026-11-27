@@ -8,8 +8,9 @@ import { z } from "zod";
  * changes in its kept work as a shipment (ship/manifest.json: the commit it started
  * from, each changed file's path and mode, deletions; ship/files/…: the new contents).
  * `github.ship` is one outward action: you approve it (or a standing order does, or it
- * does: its and its agents' work in a repository you gave an agent, when it changes nothing
- * the repository's CI runs, policy.ts ownApproval),
+ * does: its and its agents' work in a repository you gave an agent, when GitHub says it is
+ * built on the default branch's head and it changes nothing the repository's CI runs,
+ * policy.ts ownApproval),
  * and then the node, with the connector's key on its pinned origin (api.github.com),
  * commits the files on a new branch with GitHub's Git Data API and opens the pull
  * request. A branch that already exists is never touched.

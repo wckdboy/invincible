@@ -56,12 +56,14 @@ export function shipNative(artifacts: ArtifactStore, update = false): NativeTool
   };
 }
 
-/** The files a kept shipment changes, as its manifest says (connectors.ts: a push that changes a repository's CI is
- * yours); null when the work isn't kept here or holds no shipment. */
-export function shipmentFiles(artifacts: ArtifactStore): (artifact: string) => string[] | null {
+/** The files a kept shipment changes and the commit it is built on, as its manifest says (connectors.ts: a push that
+ * changes a repository's CI, or isn't built where the branch it goes into stands, is yours); null when the work isn't
+ * kept here or holds no shipment. */
+export function shipmentFiles(artifacts: ArtifactStore): (artifact: string) => { files: string[]; base: string } | null {
   return (artifact) => {
     try {
-      return ShipManifest.parse(JSON.parse(new TextDecoder().decode(artifacts.read(artifact, "ship/manifest.json").bytes))).files.map((file) => file.path);
+      const shipment = ShipManifest.parse(JSON.parse(new TextDecoder().decode(artifacts.read(artifact, "ship/manifest.json").bytes)));
+      return { files: shipment.files.map((file) => file.path), base: shipment.base };
     } catch {
       return null;
     }

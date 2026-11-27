@@ -27,12 +27,16 @@ import {
   type OrderTerms,
   type OrderView,
   type GitHubFacts,
+  givenRepository,
+  heldClass,
+  judgedBranch,
   type OwnCall,
   ownApproval,
   primaryCaller,
   randomId,
   redact,
   sendCovered,
+  supposedFacts,
   toolDigest,
 } from "@invincible/core";
 import {
@@ -113,9 +117,9 @@ export interface ConnectorServiceOptions {
   natives?: Partial<Record<NativeName, NativeTool>>;
   /** The repositories you gave your agents (as you gave them): its and their work there is its to approve (ownApproval). Absent: none. */
   repositories?: () => readonly string[];
-  /** The files a kept shipment changes (its ship/manifest.json), so a push that changes a repository's CI is seen before
-   * it could be its own to approve. Null, or absent: not known, and such a push is yours. */
-  shipment?: (artifact: string) => readonly string[] | null;
+  /** What a kept shipment changes and the commit it is built on (its ship/manifest.json), so a push is known before it
+   * could be its own to approve. Null, or absent: not known, and such a push is yours. */
+  shipment?: (artifact: string) => { files: readonly string[]; base: string } | null;
   /** Where Google's and Microsoft's sign-ins are reached (tests: a stand-in). */
   oauthEndpoints?: Partial<OAuthEndpoints>;
   /**
@@ -127,22 +131,28 @@ export interface ConnectorServiceOptions {
 
 /** How long an action waits for you. No answer means no. */
 export const ACTION_TTL_MS = 24 * 60 * 60_000;
-/** GitHub's API; what it says of a key, a repository or a thread is kept this long, said or not, and asked again after. */
+/** GitHub's API; whose a key is, it says once in this long (said or not) for each version of the key, and is asked again
+ * after. Everything else it is asked afresh before each act: a repository renamed, transferred or made public, a thread's,
+ * a branch moved, are said at once. */
 const GITHUB_API = "https://api.github.com";
 const FACTS_MS = 10 * 60_000;
-/** What GitHub says, read as it gives it: a person's account (never an organization's or an app's), a repository, a thread. */
+/** What GitHub says, read as it gives it: a person's account (never an organization's or an app's), a repository, a
+ * thread, a branch's head. */
 const readUser = (b: any): GitHubFacts["user"] | null => (b?.type === "User" && Number.isSafeInteger(b.id) && b.id > 0 ? { id: b.id } : null);
 const readRepo = (b: any): GitHubFacts["repo"] | null =>
   typeof b?.full_name === "string" && typeof b.private === "boolean" && typeof b.fork === "boolean" && Number.isSafeInteger(b.owner?.id) && typeof b.owner?.type === "string"
-    ? { name: b.full_name, private: b.private, fork: b.fork, ownerId: b.owner.id, ownerType: b.owner.type }
+    ? { name: b.full_name, private: b.private, fork: b.fork, ownerId: b.owner.id, ownerType: b.owner.type, ...(typeof b.default_branch === "string" ? { defaultBranch: b.default_branch } : {}) }
     : null;
 const readThread = (b: any): GitHubFacts["thread"] | null => (Number.isSafeInteger(b?.number) && Number.isSafeInteger(b.user?.id) ? { number: b.number, authorId: b.user.id } : null);
-/** Whether a call could be the primary's own in a private repository of yours, were GitHub to say so: only then is it asked. */
-const couldBeYours = (call: OwnCall): boolean => {
-  const { owner, repo, number } = call.args;
-  if (typeof owner !== "string" || typeof repo !== "string") return false;
-  return ownApproval(call, [], { user: { id: 1 }, repo: { name: `${owner}/${repo}`, private: true, fork: false, ownerId: 1, ownerType: "User" }, ...(typeof number === "number" ? { thread: { number, authorId: 1 } } : {}) }) !== null;
-};
+/** A branch's head, from GitHub's ref for it: facts of another ref, or of no commit, are none. */
+const readHead =
+  (branch: string) =>
+  (b: any): GitHubFacts["head"] | null =>
+    b?.ref === `refs/heads/${branch}` && b.object?.type === "commit" && typeof b.object.sha === "string" && /^[0-9a-f]{40}$/.test(b.object.sha) ? { branch, sha: b.object.sha } : null;
+/** A ref's path segment by segment, as GitHub's git/ref route takes a branch with slashes. */
+const refPath = (branch: string) => branch.split("/").map(encodeURIComponent).join("/");
+/** The commit a done shipment's or fix's receipt says it pushed ("… commit 9f2c1d0e4b7a …"). */
+const PUSHED_COMMIT = /\bcommit ([0-9a-f]{12})\b/;
 
 /** The primary's own callers, whose calls it may approve itself (core's policy.ts primaryCaller, the rule every replica holds it to). */
 const isHis = primaryCaller;
@@ -160,20 +170,20 @@ export class ConnectorService {
     o.local.exec("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, state TEXT NOT NULL, at INTEGER NOT NULL)");
   }
 
-  /** What GitHub said, by connector, key version and path: kept FACTS_MS, said or not. */
+  /** Whose each key is, as GitHub said it, by connector and key version: kept FACTS_MS, said or not. */
   private readonly githubSaid = new Map<string, { at: number; value: unknown }>();
 
   /**
    * GitHub's answer to a fixed read of its own (never a tool of the manifest's), with the connector's key at its pinned
-   * origin: kept FACTS_MS for this connector, this version of its key and this path alone, null when it didn't say. Each
-   * one asked anew is said in the ledger.
+   * origin, null when it didn't say; each one asked is said in the ledger. Asked afresh each time, but for whose the key
+   * is (`keep`), which is kept FACTS_MS for this connector and this version of its key.
    */
-  private async githubRead<T>(manifest: ConnectorManifest, path: string, read: (body: unknown) => T | null): Promise<T | null> {
+  private async githubRead<T>(manifest: ConnectorManifest, path: string, read: (body: unknown) => T | null, keep = false): Promise<T | null> {
     const secret = manifest.auth?.secret;
     const info = secret ? this.o.vault.info(secret) : null;
     if (manifest.origin !== GITHUB_API || !secret || !info) return null;
     const key = JSON.stringify([manifest.id, secret, info.hlc, path]);
-    const kept = this.githubSaid.get(key);
+    const kept = keep ? this.githubSaid.get(key) : undefined;
     if (kept && this.now() - kept.at < FACTS_MS) return kept.value as T | null;
     let value: T | null = null;
     try {
@@ -182,43 +192,99 @@ export class ConnectorService {
     } catch (error) {
       this.o.log(`${manifest.label}: GET ${path} wasn't said (${(error as Error).message})`);
     }
-    this.githubSaid.set(key, { at: this.now(), value });
-    this.o.ledger({ class: "read", resource: `connector.${manifest.id}`, target: `GET ${path}`, verdict: "allow", reason: "what GitHub says of your key, a repository or a thread, before your agent may answer its own call there", detail: value === null ? "not said: nothing there is its to approve" : JSON.stringify(value) });
+    if (keep) this.githubSaid.set(key, { at: this.now(), value });
+    this.o.ledger({ class: "read", resource: `connector.${manifest.id}`, target: `GET ${path}`, verdict: "allow", reason: "what GitHub says of your key, a repository, a thread or a branch, before your agent may answer its own call there", detail: value === null ? "not said: nothing there is its to approve" : JSON.stringify(value) });
     return value;
   }
 
   /**
-   * What GitHub says of a call of the primary's itself (GitHubFacts): whose your key is, by its account's id; the
-   * repository the call names; and, in a private repository of yours, who opened the issue or pull request it answers.
+   * What GitHub says of a call that could be its own (GitHubFacts), asked of what the call needs and nothing more: whose
+   * your key is (for who opened a thread, and whose a repository is), the repository the call names (whose it is, its
+   * default branch), the issue or pull request its words go on, and where the branch it is judged on stands. `given`: the
+   * repository is one you gave an agent, where only its threads and its branches are asked of.
    */
-  private async githubFacts(manifest: ConnectorManifest, call: OwnCall): Promise<GitHubFacts> {
+  private async githubFacts(manifest: ConnectorManifest, call: OwnCall, given: boolean): Promise<GitHubFacts> {
     const { owner, repo, number } = call.args;
     if (typeof owner !== "string" || typeof repo !== "string") return {};
-    const user = await this.githubRead(manifest, "/user", readUser);
-    if (!user) return {};
     const at = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-    const named = await this.githubRead(manifest, at, readRepo);
-    if (!named) return { user };
-    const yours = named.private && !named.fork && named.ownerType === "User" && named.ownerId === user.id;
-    const thread = yours && typeof number === "number" ? await this.githubRead(manifest, `${at}/issues/${number}`, readThread) : null;
-    return { user, repo: named, ...(thread ? { thread } : {}) };
+    const onThread = call.native === undefined && typeof number === "number";
+    const facts: GitHubFacts = {};
+    if (!given || onThread) {
+      const user = await this.githubRead(manifest, "/user", readUser, true);
+      if (!user) return {};
+      facts.user = user;
+    }
+    // Its default branch, for a shipment or a pull request into it (a template judged on a branch is one); and outside the
+    // repositories you gave an agent, whether it is yours: nothing more is asked of one that isn't.
+    const intoDefault = call.native === "github.ship" || (call.native === undefined && judgedBranch(call, undefined) !== undefined);
+    if (!given || intoDefault) {
+      const named = await this.githubRead(manifest, at, readRepo);
+      if (!named) return facts;
+      facts.repo = named;
+      if (!given && !(named.private && !named.fork && named.ownerType === "User" && named.ownerId === facts.user!.id)) return facts;
+    }
+    if (onThread) {
+      const thread = await this.githubRead(manifest, `${at}/issues/${number}`, readThread);
+      if (thread) facts.thread = thread;
+    }
+    const branch = judgedBranch(call, facts.repo?.defaultBranch);
+    if (branch !== undefined) {
+      const head = await this.githubRead(manifest, `${at}/git/ref/heads/${refPath(branch)}`, readHead(branch));
+      if (head) facts.head = head;
+    }
+    return facts;
+  }
+
+  /**
+   * The commit your agent last pushed onto a branch: the latest of its done shipments and fixes there, as each one's
+   * receipt says it (12 hex). Undefined: it never pushed there, so the branch isn't one it shipped.
+   */
+  private lastPushed(owner: string, repo: string, branch: string): string | undefined {
+    const pushes = new Map<string, boolean>();
+    const pushesWith = (connector: string, tool: string) => {
+      const key = `${connector}\u0000${tool}`;
+      if (!pushes.has(key)) {
+        const definition = installedConnector(this.o.store, connector)?.tools[tool];
+        pushes.set(key, !!definition && !isMcpTool(definition) && (definition.native === "github.ship" || definition.native === "github.ship.update"));
+      }
+      return pushes.get(key)!;
+    };
+    let last: { hlc: string; sha: string } | undefined;
+    for (const entry of this.o.store.lwwPrefix<{ id: string; connector: string; tool: string; args: Record<string, unknown> }>("action:")) {
+      const asked = entry.value;
+      if (asked?.args?.branch !== branch || String(asked.args.owner).toLowerCase() !== owner.toLowerCase() || String(asked.args.repo).toLowerCase() !== repo.toLowerCase()) continue;
+      if (!pushesWith(asked.connector, asked.tool)) continue;
+      const done = this.o.store.lww<{ ok: boolean; receipt: string }>(`action-done:${asked.id}`);
+      const sha = done?.value?.ok ? PUSHED_COMMIT.exec(String(done.value.receipt))?.[1] : undefined;
+      if (sha && (!last || done!.hlc > last.hlc)) last = { hlc: done!.hlc, sha };
+    }
+    return last?.sha;
   }
 
   /**
    * Whether an agent's call is its own to approve, and why (ownApproval), judged before it is filed: nothing awaits
-   * between filing it and its own yes, so your answer never meets it half made. What a push changes is read from its kept
-   * shipment; what GitHub says is asked only of a call that could be the primary's itself in a private repository of yours.
+   * between filing it and its own yes, so your answer never meets it half made. What a push changes and is built on is
+   * read from its kept shipment, and the commit it last pushed onto a branch from the log; GitHub is asked only of a call
+   * that could be its own were GitHub to say so, and only what that call needs.
    */
   private async ownAnswer(manifest: ConnectorManifest, name: string, cls: ConnectorRequest["class"], args: Record<string, ArgValue>, caller: Extract<Caller, { kind: "agent" }>): Promise<string | null> {
     const tool = Object.hasOwn(manifest.tools, name) ? manifest.tools[name] : undefined;
     if (!tool || isMcpTool(tool) || !isHis(caller.by) || caller.yours) return null;
     const pushes = tool.native === "github.ship" || tool.native === "github.ship.update";
-    const changes = pushes && typeof args.artifact === "string" ? (this.o.shipment?.(args.artifact) ?? undefined) : undefined;
-    const call: OwnCall = { class: cls, origin: manifest.origin, ...(tool.native ? { native: tool.native } : {}), method: tool.method, path: tool.path, args, by: caller.by, ...(changes ? { changes } : {}) };
+    const shipment = pushes && typeof args.artifact === "string" ? (this.o.shipment?.(args.artifact) ?? null) : null;
+    const call: OwnCall = { class: cls, origin: manifest.origin, ...(tool.native ? { native: tool.native } : {}), method: tool.method, path: tool.path, args, by: caller.by, ...(shipment ? { changes: shipment.files, base: shipment.base } : {}) };
+    // A fix's own branch, a pull request's head: what it last pushed there.
+    const onto = tool.native === "github.ship" ? undefined : judgedBranch(call, undefined);
+    if (onto !== undefined && typeof args.owner === "string" && typeof args.repo === "string") {
+      const pushed = this.lastPushed(args.owner, args.repo, onto);
+      if (pushed) call.pushed = pushed;
+    }
     const repositories = this.o.repositories?.() ?? [];
-    const given = ownApproval(call, repositories);
-    if (given || !couldBeYours(call)) return given;
-    return ownApproval(call, repositories, await this.githubFacts(manifest, call));
+    // Its own with nothing of GitHub said (an issue in a repository you gave an agent), or not its own whatever it says.
+    const now = ownApproval(call, repositories);
+    if (now) return now;
+    if (ownApproval(call, repositories, supposedFacts(call)) === null) return null;
+    return ownApproval(call, repositories, await this.githubFacts(manifest, call, givenRepository(call, repositories)));
   }
 
   private manifest(id: string): ConnectorManifest {
@@ -340,7 +406,8 @@ export class ConnectorService {
     }
     const tool = Object.hasOwn(manifest.tools, input.tool) ? manifest.tools[input.tool]! : null;
     if (!tool) throw new ConnectorCallError(404, `${manifest.id} has no tool "${input.tool}" (it has: ${Object.keys(manifest.tools).join(", ") || "none yet"})`);
-    const view = { connector: manifest.id, tool: input.tool, class: tool.class, asks: tool.class === "outward" || tool.class === "delete" };
+    const held = isMcpTool(tool) ? tool.class : heldClass(manifest, tool);
+    const view = { connector: manifest.id, tool: input.tool, class: held, asks: held === "outward" || held === "delete" };
     if (!isMcpTool(tool)) {
       const properties = Object.fromEntries(Object.entries(tool.params ?? {}).map(([name, p]) => [name, { type: p.type, ...(p.description ? { description: p.description } : {}), ...(p.enum ? { enum: p.enum } : {}), ...(p.pattern ? { pattern: p.pattern } : {}) }]));
       const required = Object.entries(tool.params ?? {}).filter(([name, p]) => p.required || tool.path.includes(`{${name}}`)).map(([name]) => name);
@@ -804,7 +871,7 @@ export class ConnectorService {
     const terms = {
       connector: manifest.id,
       tool: input.tool,
-      class: tool.class as OrderTerms["class"],
+      class: (isMcpTool(tool) ? tool.class : heldClass(manifest, tool)) as OrderTerms["class"],
       args: input.args,
       ...(input.callers?.length ? { callers: input.callers } : {}),
       until: now + Math.min(input.days ?? 30, MAX_ORDER_DAYS) * DAY_MS,

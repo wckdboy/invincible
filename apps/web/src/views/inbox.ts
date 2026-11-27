@@ -264,7 +264,7 @@ export function actionCard(ctx: Ctx, action: ActionView): HTMLElement {
       ". No answer means no. ",
       destructive
         ? "Deleting anything persistent asks you, unless a standing order of yours names exactly this."
-        : "Outward actions (posting, sending, pushing, the physical world) ask you, unless a standing order of yours covers them, or they are its and its agents' work in the repositories you gave them (a push that changes their CI excepted), or its own threads in a private repository of yours, which it approves itself.",
+        : "Outward actions (posting, sending, pushing, the physical world) ask you, unless a standing order of yours covers them, or they are its own work on GitHub, which it approves itself: its and its agents' work in the repositories you gave them (a push built where GitHub says your default branch stands, or where it last pushed, changing none of their CI; a branch alone asks), and its words on its own threads there and in a private repository of yours. A line a bot reads as a command (/deploy, @mergifyio queue, a merge bot's r+) asks.",
     ),
     admin
       ? formActions(decline, similar, edit, approve)

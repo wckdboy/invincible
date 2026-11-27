@@ -99,7 +99,7 @@ fun ConnectorsScreen(app: AppModel, back: () -> Unit) {
                 SectionTitle("Add")
                 for (c in catalog) ConnectorRow(c) { open = c.id }
                 Text(
-                    "Each reaches its service as you allow: reading, making and changing run freely, and anything sent out or deleted asks you first.",
+                    "Each reaches its service as you allow: reading, making and changing run freely, and anything sent out, pushed or deleted asks you first, but your agent's own work on GitHub, which it approves itself and says so: its pushes in the repositories you gave its agents, built where GitHub says your default branch stands, and its words on its own threads.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2),

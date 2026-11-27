@@ -59,7 +59,7 @@ struct MoreView<Leading: View>: View {
                 } header: {
                     SectionHead("Keys and services")
                 } footer: {
-                    PageNote("Keys are sealed for your full nodes, each pinned to the one address it may go to; no model ever sees one. A service's call that sends something out or deletes something asks you first.")
+                    PageNote("Keys are sealed for your full nodes, each pinned to the one address it may go to; no model ever sees one. A service's call that sends something out or deletes something asks you first, but your agent's own work on GitHub, which it approves itself and says so.")
                 }
             }
             Section {

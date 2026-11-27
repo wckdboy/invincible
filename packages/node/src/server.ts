@@ -47,6 +47,7 @@ import {
   type ConnectorView,
   type FindingView,
   type InvestigationView,
+  heldClass,
   isMcpTool,
   mayCall,
   Preregistration,
@@ -1389,13 +1390,15 @@ export function createApp(ctx: AppContext) {
         };
       }
       const manifest = mine?.manifest ?? catalog?.manifest ?? null;
+      // Each tool by what it is held to: a write to GitHub's refs asks whatever its label says (core's heldClass).
+      const held = (tool: NonNullable<typeof manifest>["tools"][string]) => (isMcpTool(tool) || !manifest ? tool.class : heldClass(manifest, tool));
       const tools = Object.entries(manifest?.tools ?? {}).map(([name, tool]) => ({
         name,
         description: tool.description,
         method: isMcpTool(tool) ? "MCP" : tool.method,
         path: isMcpTool(tool) ? null : tool.path,
-        class: tool.class,
-        asks: tool.class === "outward" || tool.class === "delete",
+        class: held(tool),
+        asks: held(tool) === "outward" || held(tool) === "delete",
         params: Object.fromEntries(
           Object.entries(tool.params ?? {}).map(([pname, param]) => [
             pname,

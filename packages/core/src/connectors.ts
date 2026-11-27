@@ -278,6 +278,17 @@ function classFits(method: ConnectorTool["method"], cls: ConnectorTool["class"])
   return cls !== "read";
 }
 
+/**
+ * The class a tool is held to: its own, but outward where its label would let a request go unasked that asks whatever it
+ * is called. At GitHub's API that is a write to a repository's refs: a branch or a tag made or moved, which runs that
+ * commit's own workflows with the repository's secrets, whoever made the commit (your word, 27 November 2026: it asks,
+ * for every caller). A GitHub connector installed while branch.create was free keeps that definition, and is held to this.
+ */
+export function heldClass(manifest: { origin?: string; basePath?: string }, tool: ConnectorTool): ConnectorTool["class"] {
+  const writesRefs = manifest.origin === "https://api.github.com" && tool.method !== "GET" && /^\/repos\/[^/]+\/[^/]+\/git\/refs(\/|$)/.test(`${manifest.basePath ?? ""}${tool.path}`);
+  return writesRefs && (tool.class === "create" || tool.class === "modify") ? "outward" : tool.class;
+}
+
 export function isPrivateHost(host: string): boolean {
   const h = host.replace(/^\[|\]$/g, "").toLowerCase();
   if (h === "localhost" || h.endsWith(".local") || h.endsWith(".ts.net") || h === "::1") return true;
@@ -389,7 +400,7 @@ function buildHttpOrNative(manifest: ConnectorManifest, toolName: string, args: 
   const url = new URL(`${manifest.origin}${fullPath}${search}`);
   // Belt and braces: whatever the arguments were, the request goes to the pinned origin.
   if (url.origin !== new URL(manifest.origin).origin) throw new ConnectorError("refusing a request off the connector's origin");
-  if (tool.native) return { kind: "native", native: tool.native, args: checked, class: tool.class, target: `${tool.method} ${url.pathname} (${toolName})`.slice(0, 256) };
+  if (tool.native) return { kind: "native", native: tool.native, args: checked, class: heldClass(manifest, tool), target: `${tool.method} ${url.pathname} (${toolName})`.slice(0, 256) };
   const hasBody = tool.method !== "GET" && tool.method !== "DELETE" && Object.keys(body).length > 0;
   return {
     kind: "http",
@@ -397,7 +408,7 @@ function buildHttpOrNative(manifest: ConnectorManifest, toolName: string, args: 
     url: url.toString(),
     headers: { ...(manifest.headers ?? {}) },
     ...(hasBody ? { body: JSON.stringify(body) } : {}),
-    class: tool.class,
+    class: heldClass(manifest, tool),
     target: `${tool.method} ${url.pathname}${search}`.slice(0, 256),
   };
 }

@@ -757,7 +757,7 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
     h(
       "div",
       { class: "page" },
-      pageHead("Connectors", "How your agent reaches the services you use. Reading, creating and changing are its to do, and logged. Anything outward, and every delete, asks you first, but its and the agents' work in the repositories you gave them (a push that changes their CI excepted), and its own threads in a private repository of yours, which it approves itself."),
+      pageHead("Connectors", "How your agent reaches the services you use. Reading, creating and changing are its to do, and logged. Anything outward, and every delete, asks you first, but its own work on GitHub, which it approves itself: its and its agents' work in the repositories you gave them (a push built where GitHub says your default branch stands, or where it last pushed, changing none of their CI; a branch alone asks), and its words on its own threads there and in a private repository of yours."),
       ctx.can("brain:write") ? null : callout("quiet", "This device can see connectors but not install or remove them (no brain:write scope)."),
       note,
       // Shown whole once the connectors and the orders have answered: each part came in on its own, pushing the next.
