@@ -545,3 +545,43 @@ test("a held lease's call goes without what its budget can't count, or is refuse
   expect((await ask(plainToken, "openai/responses", plain)).status).toBe(200);
   expect(sent.at(-1)).toBe(plain);
 });
+
+/*
+ * Nor does a held lease's call name a stored object of yours by its id, which the provider would read with your key
+ * (the fifth fabric review's R5-5): a stored response or conversation, a stored prompt, a file, a vector store.
+ */
+test("a held lease's calls name no stored object of yours by its id: a response, a conversation, a prompt, a file, an item, a thread (R5-5)", async () => {
+  reached.length = 0;
+  const identity = newNodeIdentity();
+  const store = new LedgerStore(":memory:");
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
+  const vault = new Vault(store, identity);
+  vault.set("openai", HELD_KEY, { provider: "openai", origin: `http://127.0.0.1:${provider.port}` });
+  store.emit(identity, "provider.set", { id: "openai", kind: "openai", baseUrl: `http://127.0.0.1:${provider.port}/v1`, secret: "openai" });
+  vault.set("anthropic", HELD_KEY, { provider: "anthropic", origin: `http://127.0.0.1:${provider.port}` });
+  store.emit(identity, "provider.set", { id: "anthropic", kind: "anthropic", baseUrl: `http://127.0.0.1:${provider.port}`, secret: "anthropic" });
+  const tokens = new GatewayTokens(new Database(":memory:"));
+  const heldToken = tokens.mint({ label: "sandbox:0123456789", providers: ["openai", "anthropic"], models: ["openai/gpt-paid", "anthropic/claude-paid"], ttlMinutes: 30, maxRequests: 500 }).token;
+  const plainToken = tokens.mint({ label: "sandbox:0123456789", providers: ["openai", "anthropic"], ttlMinutes: 30, maxRequests: 500 }).token;
+  const ask = (token: string, path: string, body: Record<string, unknown>) =>
+    handleGateway(new Request(`http://127.0.0.1:7400/gw/${path}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) }), { store, vault, tokens });
+  for (const [path, body] of [
+    ["openai/responses", { model: "gpt-paid", input: "x", previous_response_id: "resp_owner_conversation" }],
+    ["openai/responses", { model: "gpt-paid", input: "x", conversation: "conv_owner_thread" }],
+    ["openai/responses", { model: "gpt-paid", prompt: { id: "pmpt_owner", version: "2" } }],
+    ["openai/responses", { model: "gpt-paid", input: [{ role: "user", content: [{ type: "input_file", file_id: "file-owner-contract" }] }] }],
+    ["openai/chat/completions", { model: "gpt-paid", messages: [{ role: "user", content: [{ type: "file", file: { file_id: "file-owner-contract" } }] }] }],
+    ["anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [{ role: "user", content: [{ type: "document", source: { type: "file", file_id: "file_owner" } }] }] }],
+    // A stored response's item, by its id; and a thread of yours, which the provider keeps, gone on from.
+    ["openai/responses", { model: "gpt-paid", input: [{ type: "item_reference", id: "msg_owner_turn" }] }],
+    ["anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [{ role: "user", content: "x" }], thread: { type: "continue", previous_message_id: "msg_owner" } }],
+  ] as const) {
+    const refused = await ask(heldToken, path, body);
+    expect([path, JSON.stringify(body).slice(0, 70), refused.status]).toEqual([path, JSON.stringify(body).slice(0, 70), 403]);
+    expect(((await refused.json()) as { error: { message: string } }).error.message).toStartWith("this lease's calls name no stored object of yours");
+  }
+  expect(reached).toEqual([]);
+  // What a call sends itself passes (an image or a document of its own, in the call), and a lease not held is as before.
+  expect((await ask(heldToken, "anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [{ role: "user", content: [{ type: "document", source: { type: "text", media_type: "text/plain", data: "its own" } }] }] })).status).toBe(200);
+  expect((await ask(plainToken, "openai/responses", { model: "gpt-paid", input: "x", previous_response_id: "resp_1" })).status).toBe(200);
+});

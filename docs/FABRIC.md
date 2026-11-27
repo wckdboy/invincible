@@ -121,21 +121,21 @@ transport keys carries all of it:
      agent's own loop, its coding tool, and its commands, whose VM's lease is good for those models' calls alone. The
      gateway refuses any other model (the third re-review's R3-4), and on that lease any route but its protocol's
      model calls (a POST, embeddings among them: the fifth re-review's R5-7) and their listing (a GET), so nothing
-     else of yours with that provider (its files, stored responses, batches, vector stores) is read with your key, nor
-     a batch made (the fourth re-review's R4-3). That lease carries nothing else: not the keys of yours its agent may
-     use, nor its agent's repository, which are its agent's own work's. Never on one it counts as nothing, nor on a
-     coding tool's own sign-in in the VM (a seat), nor in an ACP agent of yours. Every call on that lease is counted,
-     whether or not its answer says its usage (the fourth re-review's I-l): a streamed OpenAI-style call is asked to
-     say it (`stream_options.include_usage`), and one whose answer says none all the same is counted at the most it
-     could have been, every byte it sent an input token and every byte it was answered with an output token. A call
-     cut before its answer ends is counted as it ends (the fifth re-review's R5-2): each byte sent an input token, and
-     the most output it allowed itself, for each answer it asked for, or what was answered if more. What its budget
-     can't count is taken out of a call where the call means the same without it (R5-4): the providers' own tools,
-     billed per use or run by another model, a fallback to another model, and a dearer speed or tier. Codex, which
-     declares OpenAI's web search in every call, goes on without it. A background response, chat's web search, a
-     tool_choice for a tool taken out and US-only inference are refused. Every held call is sent as it was read. Nor
-     is this: a command can start a coding tool itself on that tool's own sign-in in the VM, if it has one, which no
-     lease reaches (a task's own VM starts with an empty HOME, so it has none).
+     else of yours with that provider (its files, stored responses, batches, vector stores) is read with your key, by a
+     route or by its id in a call's body (the fifth re-review's R5-5), nor a batch made (the fourth re-review's R4-3).
+     That lease carries nothing else: not the keys of yours its agent may use, nor its agent's repository, which are its
+     agent's own work's. Never on one it counts as nothing, nor on a coding tool's own sign-in in the VM (a seat), nor
+     in an ACP agent of yours. Every call on that lease is counted, whether or not its answer says its usage (the fourth
+     re-review's I-l): a streamed OpenAI-style call is asked to say it (`stream_options.include_usage`), and one whose
+     answer says none all the same is counted at the most it could have been, every byte it sent an input token and
+     every byte it was answered with an output token. A call cut before its answer ends is counted as it ends (the fifth
+     re-review's R5-2): each byte sent an input token, and the most output it allowed itself, for each answer it asked
+     for, or what was answered if more. What its budget can't count is taken out of a call where the call means the same
+     without it (R5-4): the providers' own tools, billed per use or run by another model, a fallback to another model,
+     and a dearer speed or tier. Codex, which declares OpenAI's web search in every call, goes on without it. A
+     background response, chat's web search, a tool_choice for a tool taken out and US-only inference are refused. Every
+     held call is sent as it was read. Nor is this: a command can start a coding tool itself on that tool's own sign-in
+     in the VM, if it has one, which no lease reaches (a task's own VM starts with an empty HOME, so it has none).
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node

@@ -177,6 +177,31 @@ const json = (status: number, error: string) =>
   Response.json({ error: { type: "invincible_gateway", message: error } }, { status });
 
 /*
+ * A stored object of yours a call names by its id, which the provider reads with your key (the fifth fabric review's
+ * R5-5): a stored response or conversation it goes on from, a stored prompt, a file (OpenAI's input_file and file parts,
+ * Anthropic's file sources), a vector store, a stored response's item (Responses' item_reference), a thread the provider
+ * keeps of yours (Anthropic's `previous_message_id`). Named anywhere in the body, so a part nested in a message is
+ * found. A held lease's call names none: what it works with it sends itself.
+ */
+const STORED = new Set(["previous_response_id", "conversation", "file_id", "vector_store_ids", "previous_message_id"]);
+function storedNamed(call: Record<string, unknown>): string | null {
+  // A stored prompt: Responses' `prompt` names one by its id.
+  const prompt = call.prompt;
+  if (prompt && typeof prompt === "object" && "id" in prompt) return "prompt";
+  const look = (value: unknown, depth: number): string | null => {
+    if (depth > 64 || !value || typeof value !== "object") return null;
+    if (!Array.isArray(value) && (value as { type?: unknown }).type === "item_reference") return "item_reference";
+    for (const [key, inner] of Array.isArray(value) ? value.map((v, i) => [String(i), v] as const) : Object.entries(value)) {
+      if (!Array.isArray(value) && STORED.has(key) && inner !== null && inner !== undefined) return key;
+      const found = look(inner, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+  return look(call, 0);
+}
+
+/*
  * What a lease held to models (work in sensitive mode, another node's task) may ask of a provider with your key: its
  * models' calls and their listing, nothing else (the fourth fabric review's R4-3). So no file, stored response, batch or
  * vector store of yours is read through it, nor a batch made, by any method. By the provider's protocol, each after an
@@ -382,6 +407,8 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   const shaped = held && body ? heldCall(body, provider.kind, rest) : null;
   if (held && shaped && !held.includes(`${providerId}/${shaped.model}`)) return json(403, `this lease is for ${held.join(", ")} alone`);
   if (shaped?.refused) return json(403, `this lease's budget can't count ${shaped.refused}: it isn't asked on this lease`);
+  const stored = shaped?.call ? storedNamed(shaped.call) : null;
+  if (stored) return json(403, `this lease's calls name no stored object of yours (${stored}): the provider would read it with your key`);
   const model = shaped?.model ?? modelOf(body);
   // A plan whose allowance is spent past the next minute (windows.ts) isn't asked a model call again until it resets;
   // nor is a model of any other provider's that was told to wait that long (its others are asked as ever).
