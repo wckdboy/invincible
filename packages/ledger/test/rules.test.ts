@@ -256,7 +256,7 @@ describe("your rules in the mind", () => {
       raw.exec(`DELETE FROM v_lww WHERE k LIKE 'rule:%'; DELETE FROM v_rejected WHERE id = '${sent.id}'; PRAGMA user_version = 3;`);
       raw.close();
       const upgraded = new LedgerStore(path);
-      expect(upgraded.schemaVersion()).toBe(7);
+      expect(upgraded.schemaVersion()).toBe(8);
       expect(seen(upgraded)).toEqual(rules);
       expect(upgraded.rejection(sent.id)).toBe("a rule is your word alone");
       expect(upgraded.digest()).toBe(digest);

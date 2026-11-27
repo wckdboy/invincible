@@ -135,6 +135,9 @@ beforeAll(async () => {
   // A Claude plan of yours, signed in in its home on this node.
   daemon.store.emit(daemon.identity, "seat.added", { id: SEAT, kind: "claude-subscription", label: "Work Max", node: daemon.identity.id, runs: 1 }, yourWord(null));
   recordSeatStatus(daemon.store, daemon.identity, daemon.store.seats().find((seat) => seat.id === SEAT)!, { signedIn: true, method: "claude.ai", plan: "max", fingerprint: "F".repeat(22) });
+  // It serves Ada, as the agent this node's team made.
+  const ada = (await api<TeamSnapshot>("team")).agents.find((a) => a.id === "ada")!;
+  daemon.store.emit(daemon.identity, "seat.serves", { id: SEAT, agents: [{ id: ada.id, made: ada.createdAt }] }, yourWord(null));
 });
 afterAll(async () => {
   await daemon?.stop();

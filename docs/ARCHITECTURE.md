@@ -220,18 +220,26 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - A node that stops on purpose (a deploy, an update) stops its tasks' runs by each tool's own interrupt, and takes the
     tasks up again by itself once it is back, each tool in its own session. Following a run that outlived its node, its
     run loop's own state (its plan, its gates' first run, the steers it had taken) kept beside it, is not built yet.
-- **Seats:** an account you hold with a vendor, added once, that any agent may use (`packages/core/src/seats.ts`):
+- **Seats:** an account you hold with a vendor, added once, that serves the agents you choose
+  (`packages/core/src/seats.ts`):
   - the kinds: a Claude plan, a ChatGPT plan (through Codex, or Sign in with ChatGPT), a Mistral plan, a coding plan's
     key, an API key;
   - a subscription seat's sign-in lives in its own home on its node, made there by the vendor's own tool in the vendor's
     own flow. The node never reads its files: only the tool's own status command, and five things of what it says;
-  - in the ledger (`seat.added`, `seat.policy`, `seat.removed` on your word alone; `seat.signin`, `seat.window`,
-    `seat.rested`, `seat.back` from the seat's own node alone). None of them carries a sign-in's address, its code or a
-    token. A seat's email is sealed in the vault, and the account its first sign-in was to is kept: a sign-in to
-    another is refused on every replica;
+  - in the ledger (`seat.added`, `seat.policy`, `seat.serves`, `seat.removed` on your word alone; `seat.signin`,
+    `seat.window`, `seat.rested`, `seat.back` from the seat's own node alone). None of them carries a sign-in's address,
+    its code or a token. A seat's email is sealed in the vault, and the account its first sign-in was to is kept: a
+    sign-in to another is refused on every replica;
   - the rule, your word (26 November 2026, "All, never switch"): every account works side by side, and work running on
     one never moves to a second subscription seat of the same vendor. A spent seat's work waits for its reset, goes to
     another vendor's tool, or uses that plan's own sanctioned capacity. No setting switches accounts (`mayCarryOn`);
+  - the agents a seat serves, your word (27 November 2026, "One trust domain"): one, the one you choose, and others only
+    when you share it. Its home is shared by every run on it, and what one run leaves there (its tool's settings, hooks
+    and notes) the next runs with, so the agents sharing a seat are one trust domain. A seat names each agent as itself,
+    its handle and when its node's team made it (`seat.serves`), so an agent you remove, or a later one given its
+    handle, is never served: which agents it serves now is worked out from its node's roster wherever it is used or
+    shown (`servedBy`, `seatServes`), and nothing is written for you when an agent goes. A seat added without one serves
+    none, and so does a key's seat, which has no home (a key reaches the agents you grant it);
   - runs at once on one subscription seat: one until shared runs are shown safe, then three, your word given
     (`SHARED_RUNS_PROVEN`); Codex's homes stay one at a time;
   - a seat's home is a volume of its own (`invincible-seat-<id>`), mounted at `/seats/<id>` only in a VM made for that
@@ -250,11 +258,11 @@ The run loop is carried and renamed (§10), the most proven part of it:
     stands; another account than the seat's is refused and signed out again by the tool's own command. A Mistral plan
     is a key seat (Vibe's sign-in ends in an API key), and Sign in with ChatGPT is the node's own (to come);
   - which seat a run takes is Invincible's to choose, and nothing asks you (`chooseSeat`, `seat-runs.ts`): of its node's
-    seats whose plan runs the agent's tool (Claude Code on a Claude plan, Codex on a ChatGPT plan), signed in, not
-    resting, with a run to spare and some of their plan left, the one with the most headroom (the share its most used
-    open window has used), then the soonest reset. A task's first run takes a free seat; with none free it runs in its
-    agent's own VM as before seats; with no other way to go on it waits for a busy seat (it has it the moment that one
-    is let go) or rests until a spent one opens. Work in sensitive mode never takes one;
+    seats that serve its agent, whose plan runs the agent's tool (Claude Code on a Claude plan, Codex on a ChatGPT
+    plan), signed in, not resting, with a run to spare and some of their plan left, the one with the most headroom (the
+    share its most used open window has used), then the soonest reset. A task's first run takes a free seat; with none
+    free it runs in its agent's own VM as before seats; with no other way to go on it waits for a busy seat (it has it
+    the moment that one is let go) or rests until a spent one opens. Work in sensitive mode never takes one;
   - a run on a seat is in a VM made for it from the pinned tools' image, with the seat's home and the agent's own
     `/work`, as big as the agent's VM. The tool's check, launch, follow and stop are there; the work's gates, its
     evidence and its review stay in the agent's own VM, on the same files. It has no desktop: the agent's stays in its

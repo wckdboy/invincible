@@ -73,12 +73,15 @@ export const suite: Suite = {
 
     // What one choice costs: of 32 seats with 8 windows each (the most a node keeps), as every run's start pays it.
     const NOW = Date.UTC(2026, 10, 27, 9, 0);
+    // (Every one serving the agent that asks: each is weighed, as a seat you share with it would be.)
+    const AGENT = { id: "ada", made: NOW - 86_400_000 };
     const seats: SeatView[] = Array.from({ length: 32 }, (_, n) => ({
       id: `st_${String(n).padStart(22, "0")}`, kind: n % 3 ? "claude-subscription" : "chatgpt-codex", vendor: n % 3 ? "anthropic" : "openai", label: `seat ${n}`, node: "n_bench", provider: null, runs: 1, plan: null, method: null,
       state: n % 7 ? { is: "ready", renewBy: null } : { is: "resting", until: NOW + 3_600_000, window: null },
       windows: Array.from({ length: 8 }, (_, w) => ({ window: `w${w}`, status: "allowed" as const, usedPercent: (n * 13 + w * 7) % 100, resetsAt: NOW + (w + 1) * 3_600_000, at: NOW })),
+      serves: [AGENT],
     }));
-    ctx.time("seats.choose", () => chooseSeat("claude", seats, () => 0, NOW), { n: 25, warm: 5, batch: 200, note: "one choice of seat for a run, of 32 seats with 8 windows each" });
+    ctx.time("seats.choose", () => chooseSeat("claude", seats, () => 0, NOW, { agent: AGENT }), { n: 25, warm: 5, batch: 200, note: "one choice of seat for a run, of 32 seats with 8 windows each" });
 
     // How soon a run waiting for a busy seat has it once its run lets it go (the real SeatRuns, a host that answers at once).
     const node = newNodeIdentity();
@@ -86,6 +89,9 @@ export const suite: Suite = {
     foundFleet(store, node, { fleetName: "bench", nodeName: "bench" });
     const SEAT = `st_${"q".repeat(22)}`;
     store.emit(node, "seat.added", { id: SEAT, kind: "claude-subscription", label: "Max", node: node.id, runs: 1 }, yourWord(null));
+    // (It serves the agent whose runs wait for it, as that agent.)
+    const ADA_MADE = Date.UTC(2026, 10, 20, 8, 0);
+    store.emit(node, "seat.serves", { id: SEAT, agents: [{ id: "ada", made: ADA_MADE }] }, yourWord(null));
     recordSeatStatus(store, node, store.seats()[0]!, { signedIn: true, method: "claude.ai", fingerprint: "F".repeat(22) });
     const vms = new Set<string>();
     let made = 0;
@@ -103,7 +109,7 @@ export const suite: Suite = {
       stream: async () => ({ lines: (async function* () {})(), write() {}, close() {}, kill() {}, exited: Promise.resolve(0) }),
     };
     const runs = new SeatRuns({ store, node, host: () => host, pollMs: 60_000 });
-    const ask = { agent: "ada", vm: "agent-vm", harness: "claude", from: null, wait: true };
+    const ask = { agent: "ada", made: ADA_MADE, vm: "agent-vm", harness: "claude", from: null, wait: true };
     const live = new AbortController().signal;
     const samples: number[] = [];
     const from = performance.now();

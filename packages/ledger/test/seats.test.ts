@@ -7,7 +7,7 @@ import { b64u, type GEvent, HlcClock, isKnownKind, newNodeIdentity, type NodeIde
 import { enrollDevice, foundFleet, LedgerStore } from "../src/index.ts";
 
 /*
- * Seats in the mind (seat.added, seat.policy, seat.removed by you; seat.signin, seat.window, seat.rested, seat.back by
+ * Seats in the mind (seat.added, seat.policy, seat.serves, seat.removed by you; seat.signin, seat.window, seat.rested, seat.back by
  * the node that holds the seat's home; core's seats.ts). Every replica applies them the same way, so they converge like
  * everything else: any order, duplicates, a rebuild; and a replica that held them before it knew them applies them
  * once it is upgraded. A kind of the seat's this version doesn't know is kept and ignored.
@@ -62,13 +62,16 @@ let n = 0;
 const seatId = () => `st_${String(++n).padStart(22, "0")}`;
 const attempt = () => `sa_${String(++n).padStart(22, "0")}`;
 const ACCOUNT = "fp_account_one_0000000";
+/** Agents a seat serves, each as itself: its id, and when it was made. */
+const ADA = { id: "ada", made: 1_795_000_000_000 };
+const BO = { id: "bo", made: 1_795_000_360_000 };
 const OTHER = "fp_account_two_0000000";
 const add = (store: LedgerStore, signer: NodeIdentity, node: NodeIdentity, id = seatId(), kind: "claude-subscription" | "chatgpt-codex" = "claude-subscription") =>
   (store.emit(signer, "seat.added", { id, kind, label: "Work Max", node: node.id, runs: 1 }, YOURS), id);
 const ready = (store: LedgerStore, node: NodeIdentity, id: string, fingerprint = ACCOUNT, extra: Record<string, unknown> = {}) =>
   store.emit(node, "seat.signin", { id, attempt: attempt(), phase: "ended", outcome: "ready", method: "claude.ai", plan: "max", fingerprint, ...extra });
 const seen = (store: LedgerStore) =>
-  store.seats().map((s) => ({ id: s.id, label: s.label, runs: s.runs, sign: s.signIn ? (s.signIn.phase === "ended" ? s.signIn.outcome : "started") : null, account: s.account, windows: s.windows.map((w) => `${w.window}:${w.status}`), rest: s.rest?.until ?? null }));
+  store.seats().map((s) => ({ id: s.id, label: s.label, runs: s.runs, sign: s.signIn ? (s.signIn.phase === "ended" ? s.signIn.outcome : "started") : null, account: s.account, windows: s.windows.map((w) => `${w.window}:${w.status}`), rest: s.rest?.until ?? null, serves: s.serves }));
 
 function forged(store: LedgerStore, signer: NodeIdentity, kind: string, body: unknown, p?: Prov): GEvent {
   return signEvent({ v: 2, fleet: store.fleet!, hlc: store.clock.tick(), device: signer.id, prev: store.head(signer.id), kind, body: body as never, ...(p ? { prov: p } : {}) }, signer);
@@ -131,6 +134,42 @@ describe("seats in the mind", () => {
     expect(() => storeA.emit(a, "seat.removed", { id }, { trust: "agent" })).toThrow("a seat is yours alone to set");
     expect(() => storeA.emit(a, "seat.policy", { id: seatId(), runs: 3 }, YOURS)).toThrow("no such seat");
     expect(storeA.seats().map((s) => s.id)).toEqual([id]);
+  });
+
+  test("the agents a seat serves: yours alone to choose, on a full node, each as itself; the last word stands; a seat with no home of its own serves none", () => {
+    const { a, b, storeA, storeB } = fleet();
+    const id = add(storeA, a, a);
+    syncInto(storeA, storeB);
+    // Added, it serves no agent until you choose one.
+    expect(storeA.seats()[0]!.serves).toEqual([]);
+    for (const prov of [{ trust: "agent" }, { trust: "untrusted" }, undefined] as (Prov | undefined)[]) {
+      expect(() => storeA.emit(a, "seat.serves", { id, agents: [ADA] }, prov)).toThrow("a seat is yours alone to set");
+    }
+    expect(() => storeA.emit(a, "seat.serves", { id: seatId(), agents: [ADA] }, YOURS)).toThrow("no such seat");
+    const limited = newNodeIdentity();
+    storeA.emit(a, "device.enrolled", { device: limited.id, name: "sensor", kind: "node", role: "limited", box: b64u(limited.boxPublic), scopes: [] });
+    expect(() => storeA.emit(limited, "seat.serves", { id, agents: [ADA] }, YOURS)).toThrow("only full nodes may record seats");
+    // Each agent as itself, and nothing else: a body with more than its own fields, or an id no handle has, is refused.
+    expect(() => storeA.emit(a, "seat.serves", { id, agents: [{ ...ADA, name: "Ada" }] } as never, YOURS)).toThrow();
+    expect(() => storeA.emit(a, "seat.serves", { id, agents: [{ id: "Ada!", made: ADA.made }] }, YOURS)).toThrow();
+    expect(() => storeA.emit(a, "seat.serves", { id, agents: [{ id: "ada", made: -1 }] }, YOURS)).toThrow();
+    storeA.emit(a, "seat.serves", { id, agents: [ADA] }, YOURS);
+    syncInto(storeA, storeB);
+    // Shared later from another node of yours: the last word stands, on every replica.
+    storeB.emit(b, "seat.serves", { id, agents: [ADA, BO] }, YOURS);
+    syncInto(storeB, storeA);
+    for (const store of [storeA, storeB]) expect(store.seats()[0]!.serves).toEqual([ADA, BO]);
+    // And none: it serves no one.
+    storeA.emit(a, "seat.serves", { id, agents: [] }, YOURS);
+    syncInto(storeA, storeB);
+    for (const store of [storeA, storeB]) expect(store.seats()[0]!.serves).toEqual([]);
+    expect(storeA.digest()).toBe(storeB.digest());
+    // A key's seat (or Sign in with ChatGPT's, whose tokens the node holds) has no home its agents share: it serves none.
+    const keyed = seatId();
+    storeA.emit(a, "seat.added", { id: keyed, kind: "api", label: "Key", node: a.id, provider: "anthropic", runs: 1 }, YOURS);
+    expect(() => storeA.emit(a, "seat.serves", { id: keyed, agents: [ADA] }, YOURS)).toThrow("only a seat with a home of its own serves agents");
+    storeA.emit(a, "seat.removed", { id }, YOURS);
+    expect(storeA.seats().map((s) => s.id)).toEqual([keyed]);
   });
 
   test("only the node that holds a seat's home says how it stands, on every replica", () => {
@@ -220,6 +259,11 @@ describe("seats in the mind", () => {
         else if (pick < 0.9) quietly(() => store.emit(signer, "seat.removed", { id }, prov));
         else store.ingest([forged(store, signer, "seat.signin", { id, attempt: attempt(), phase: "ended", outcome: "ready", fingerprint: OTHER })]);
       }
+      if (ids.length && random() < 0.3) {
+        const id = ids[Math.floor(random() * ids.length)]!;
+        const agents = [[], [ADA], [BO], [ADA, BO], [{ id: "ada", made: ADA.made + 1 }]][Math.floor(random() * 5)]!;
+        quietly(() => store.emit(signer, "seat.serves", { id, agents }, random() < 0.15 ? { trust: "agent" } : YOURS));
+      }
       store.remember(signer, `note ${round}`);
       if (round % 11 === 10) {
         syncInto(storeA, storeB);
@@ -229,6 +273,7 @@ describe("seats in the mind", () => {
     const everything = [...new Map([...allEvents(storeA), ...allEvents(storeB)].map((e) => [e.id, e])).values()];
     expect(everything.filter((e) => e.kind === "seat.signin").length).toBeGreaterThan(10);
     expect(everything.filter((e) => e.kind === "seat.removed").length).toBeGreaterThan(0);
+    expect(everything.filter((e) => e.kind === "seat.serves").length).toBeGreaterThan(3);
     let reference: { digest: string; seats: unknown } | null = null;
     for (let seed = 1; seed <= 8; seed++) {
       const order = rng(seed);
@@ -271,9 +316,40 @@ describe("seats in the mind", () => {
       raw.exec(`DELETE FROM v_lww WHERE k LIKE 'seat%'; DELETE FROM v_rejected WHERE id = '${wrong.id}'; PRAGMA user_version = 6;`);
       raw.close();
       const upgraded = new LedgerStore(path);
-      expect(upgraded.schemaVersion()).toBe(7);
+      expect(upgraded.schemaVersion()).toBe(8);
       expect(seen(upgraded)).toEqual(seats);
+      // A log from before seats served agents names none: its seats serve no one until you choose.
+      expect(upgraded.seats().map((s) => s.serves)).toEqual([[]]);
       expect(upgraded.rejection(wrong.id)).toBe("signed in to another account than the seat's");
+      expect(upgraded.digest()).toBe(digest);
+      upgraded.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a replica of the version before seats served agents kept seat.serves unknown, and applies it when it's upgraded", () => {
+    const dir = mkdtempSync(join(tmpdir(), "invincible-seats-"));
+    try {
+      const path = join(dir, "ledger.db");
+      const a = newNodeIdentity();
+      const store = new LedgerStore(path);
+      foundFleet(store, a, { fleetName: "homelab", nodeName: "ultra" });
+      const chosen = add(store, a, a);
+      const plain = add(store, a, a);
+      store.emit(a, "seat.serves", { id: chosen, agents: [ADA] }, YOURS);
+      store.emit(a, "seat.serves", { id: chosen, agents: [ADA, BO] }, YOURS);
+      const digest = store.digest();
+      const seats = seen(store);
+      store.close();
+      // As that version left it: the kind in the log, unknown there and so applied to nothing, at schema version 7.
+      const raw = new Database(path);
+      raw.exec(`DELETE FROM v_lww WHERE k LIKE 'seat-serves:%'; PRAGMA user_version = 7;`);
+      raw.close();
+      const upgraded = new LedgerStore(path);
+      expect(upgraded.schemaVersion()).toBe(8);
+      expect(seen(upgraded)).toEqual(seats);
+      expect(Object.fromEntries(upgraded.seats().map((s) => [s.id, s.serves]))).toEqual({ [chosen]: [ADA, BO], [plain]: [] });
       expect(upgraded.digest()).toBe(digest);
       upgraded.close();
     } finally {

@@ -10,6 +10,7 @@ import {
   type EventKind,
   type GEvent,
   HlcClock,
+  HOMED_KINDS,
   isKnownKind,
   isNodeId,
   type Json,
@@ -18,6 +19,7 @@ import {
   parseEvent,
   type Prov,
   type Scope,
+  type SeatAgent,
   type SeatFacts,
   type SeatSignInBody,
   type SeatWindowBody,
@@ -73,8 +75,10 @@ CREATE TABLE IF NOT EXISTS pending (id TEXT PRIMARY KEY, device TEXT NOT NULL, h
  *    way by a replica that held them before it knew them.
  * 7: seats (seat.added and the rest; in v_lww as seat:<id>, seat-policy:<id>, seat-signin:<id>, seat-account:<id>,
  *    seat-window:<id>:<window>, seat-rest:<id>), applied the same way by a replica that held them before it knew them.
+ * 8: the agents a seat serves (seat.serves; in v_lww as seat-serves:<id>), applied the same way by a replica that held
+ *    them before it knew them.
  */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 const MAX_PENDING = 2000;
 
@@ -301,6 +305,9 @@ export class LedgerStore {
         this.replay();
       } else if (from < 7 && this.db.query("SELECT 1 FROM events WHERE kind LIKE 'seat.%' LIMIT 1").get()) {
         // Seats a newer node wrote while this replica didn't know them: applied now, as a rebuild would.
+        this.replay();
+      } else if (from < 8 && this.db.query("SELECT 1 FROM events WHERE kind = 'seat.serves' LIMIT 1").get()) {
+        // The agents a seat serves, chosen on a newer node while this replica didn't know the kind: applied now, as a rebuild would.
         this.replay();
       }
       if (from < SCHEMA_VERSION) this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -1165,9 +1172,10 @@ export class LedgerStore {
         this.putLww(`rule:${body.name}`, event, { name: body.name, rule: body.rule as Json, ...(event.prov.via ? { via: event.prov.via } : {}) });
         return null;
       }
-      // Seats (core's seats.ts): yours alone to add, set and remove, on a full node. How one stands is said by the node
-      // that holds its home and by no other. The last writer wins; the account its first sign-in was to is kept, and a
-      // later sign-in to another account is refused on every replica.
+      // Seats (core's seats.ts): yours alone to add, set and remove, on a full node, and to choose the agents each serves
+      // (only a seat with a home of its own serves agents). How one stands is said by the node that holds its home and by
+      // no other. The last writer wins; the account its first sign-in was to is kept, and a later sign-in to another
+      // account is refused on every replica.
       case "seat.added": {
         if (!isFullNode(signer)) return "only full nodes may record seats";
         if (event.prov?.trust !== "owner") return "a seat is yours alone to add";
@@ -1178,13 +1186,18 @@ export class LedgerStore {
         return null;
       }
       case "seat.policy":
+      case "seat.serves":
       case "seat.removed": {
         if (!isFullNode(signer)) return "only full nodes may record seats";
         if (event.prov?.trust !== "owner") return "a seat is yours alone to set";
-        const id = event.kind === "seat.removed" ? bodyOf(event, "seat.removed").id : bodyOf(event, "seat.policy").id;
-        if (!this.lww(`seat:${id}`)?.value) return "no such seat";
+        const id = bodyOf(event, event.kind).id;
+        const seat = this.lww<{ kind: SeatFacts["kind"] }>(`seat:${id}`)?.value;
+        if (!seat) return "no such seat";
         if (event.kind === "seat.removed") this.putLww(`seat:${id}`, event, null);
-        else this.putLww(`seat-policy:${id}`, event, bodyOf(event, "seat.policy").runs);
+        else if (event.kind === "seat.serves") {
+          if (!HOMED_KINDS.includes(seat.kind)) return "only a seat with a home of its own serves agents";
+          this.putLww(`seat-serves:${id}`, event, bodyOf(event, "seat.serves").agents as Json);
+        } else this.putLww(`seat-policy:${id}`, event, bodyOf(event, "seat.policy").runs);
         return null;
       }
       case "seat.signin":
@@ -1458,6 +1471,7 @@ export class LedgerStore {
           // (The newest few: a seat's node names its windows, and a list of them stays short.)
           windows: (windows.get(added.id) ?? []).sort((a, b) => b.at - a.at || a.window.localeCompare(b.window)).slice(0, 8),
           rest: rest?.value ? { until: rest.value.until, window: rest.value.window ?? null, at: decodeHlc(rest.hlc).ms } : null,
+          serves: this.lww<SeatAgent[]>(`seat-serves:${added.id}`)?.value ?? [],
         };
       })
       .sort((a, b) => a.addedAt - b.addedAt || a.id.localeCompare(b.id));

@@ -16,6 +16,8 @@ import {
   SeatIdInput,
   SeatPolicyInput,
   seatRuns,
+  seatServes,
+  servedBy,
   SeatSignInAnswerInput,
   SeatSignInCancelInput,
   seatState,
@@ -53,6 +55,7 @@ const facts = (over: Partial<SeatFacts> = {}): SeatFacts => ({
   account: null,
   windows: [],
   rest: null,
+  serves: [],
   ...over,
 });
 
@@ -193,19 +196,90 @@ describe("a sign-in's card", () => {
 describe("which seat a run takes", () => {
   const NOW = Date.UTC(2026, 10, 27, 9, 0);
   const HOUR = 3_600_000;
-  const seat = (id: string, over: Partial<SeatView> = {}): SeatView => ({ id: `st_${id.padEnd(22, "0")}`, kind: "claude-subscription", vendor: "anthropic", label: id, node: "n_node", provider: null, runs: 1, plan: "max", method: "claude.ai", state: { is: "ready", renewBy: null }, windows: [], ...over });
+  /** The agent each of these seats serves, as that agent: its id, and when it was made. */
+  const ADA = { id: "ada", made: Date.UTC(2026, 10, 20, 8, 0) };
+  const seat = (id: string, over: Partial<SeatView> = {}): SeatView => ({ id: `st_${id.padEnd(22, "0")}`, kind: "claude-subscription", vendor: "anthropic", label: id, node: "n_node", provider: null, runs: 1, plan: "max", method: "claude.ai", state: { is: "ready", renewBy: null }, windows: [], serves: [ADA], ...over });
   const used = (share: number, resetsIn: number, status: "allowed" | "warning" | "rejected" = "allowed") => ({ window: "five_hour", status, usedPercent: share, resetsAt: NOW + resetsIn, at: NOW - HOUR });
   const idle = () => 0;
+
+  test("a seat serves the agent you chose for it, as that agent: another agent's run, or a later agent given its id, never takes it", () => {
+    const BO = { id: "bo", made: ADA.made + HOUR };
+    const ours = seat("ours", { windows: [used(10, HOUR)] });
+    // Bo has no seat of its own: Ada's isn't one it may take, however much of its plan is left.
+    expect(chooseSeat("claude", [ours], idle, NOW, { agent: BO })).toBeNull();
+    // An agent given Ada's id after Ada was removed (its node's team made again, say) was made later: another agent.
+    expect(chooseSeat("claude", [ours], idle, NOW, { agent: { id: "ada", made: ADA.made + 1 } })).toBeNull();
+    expect(chooseSeat("claude", [ours], idle, NOW, { agent: ADA })?.label).toBe("ours");
+    // Of two seats, the one with more headroom that serves Bo, never Ada's with more.
+    const bos = seat("bos", { windows: [used(80, HOUR)], serves: [BO] });
+    expect(chooseSeat("claude", [ours, bos], idle, NOW, { agent: BO })?.label).toBe("bos");
+    // A seat that serves none (added without an agent, or from before seats served one) is taken by no run.
+    expect(chooseSeat("claude", [seat("none", { serves: [] })], idle, NOW, { agent: ADA })).toBeNull();
+    // A seat you share serves each agent it names, each as itself: one trust domain.
+    const shared = seat("shared", { serves: [ADA, BO] });
+    expect(chooseSeat("claude", [shared], idle, NOW, { agent: BO })?.label).toBe("shared");
+    expect(chooseSeat("claude", [shared], idle, NOW, { agent: ADA })?.label).toBe("shared");
+    expect([seatServes(shared, BO), seatServes(shared, { id: "bo", made: BO.made - 1 }), seatServes(ours, BO)]).toEqual([true, false, false]);
+  });
+
+  test("the agents a seat serves now: those it names that are on the roster as themselves, in its order; one removed, or a later one with its id, isn't", () => {
+    const roster = [
+      { id: "bo", name: "Bo", createdAt: ADA.made + HOUR },
+      { id: "ada", name: "Ada", createdAt: ADA.made },
+    ];
+    expect(servedBy(seat("s", { serves: [ADA, { id: "bo", made: ADA.made + HOUR }] }), roster).map((a) => a.name)).toEqual(["Ada", "Bo"]);
+    expect(servedBy(seat("s", { serves: [{ id: "bo", made: ADA.made + HOUR }, ADA] }), roster).map((a) => a.name)).toEqual(["Bo", "Ada"]);
+    // Ada removed: the roster no longer has her, and the seat serves no one, though the log still names her.
+    expect(servedBy(seat("s"), roster.slice(0, 1))).toEqual([]);
+    // A later agent given Ada's id: not the one the seat names.
+    expect(servedBy(seat("s"), [{ id: "ada", name: "Ada", createdAt: ADA.made + 5 }])).toEqual([]);
+    // A seat that names one twice serves it once.
+    expect(servedBy(seat("s", { serves: [ADA, ADA] }), roster).map((a) => a.id)).toEqual(["ada"]);
+  });
+
+  test("PROPERTY: on any roster, made of agents added, removed and their ids given again, a seat serves exactly the agents it names as themselves, whatever the order", () => {
+    let state = 0xa9e17;
+    const random = () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const ids = ["ada", "bo", "cy", "dee"];
+    for (let round = 0; round < 300; round++) {
+      // A team's history: agents added (each made at its own time), some removed, and some of their ids given again.
+      let clock = ADA.made;
+      const ever: { id: string; createdAt: number; removed: boolean }[] = [];
+      for (let step = 0; step < 1 + Math.floor(random() * 10); step++) {
+        const id = ids[Math.floor(random() * ids.length)]!;
+        const current = ever.find((a) => a.id === id && !a.removed);
+        if (current && random() < 0.5) current.removed = true;
+        else if (!current) ever.push({ id, createdAt: (clock += 1 + Math.floor(random() * 1000)), removed: false });
+      }
+      // The seat names some of those that ever were, as each was when it was chosen.
+      const named = ever.filter(() => random() < 0.5).map((a) => ({ id: a.id, made: a.createdAt }));
+      const roster = ever.filter((a) => !a.removed);
+      const served = servedBy(seat("s", { serves: named }), roster);
+      // Exactly those named that are on the roster as themselves: never a removed one, never a later one with its id.
+      const expected = roster.filter((a) => named.some((one) => one.id === a.id && one.made === a.createdAt));
+      expect(new Set(served)).toEqual(new Set(expected));
+      for (const agent of served) expect(ever.find((a) => a.id === agent.id && a.createdAt === agent.createdAt)?.removed).toBe(false);
+      // The roster's order doesn't change who is served, and each is served as the run asks for it.
+      expect(new Set(servedBy(seat("s", { serves: named }), [...roster].reverse()))).toEqual(new Set(served));
+      for (const agent of ever) expect(seatServes(seat("s", { serves: named }), { id: agent.id, made: agent.createdAt })).toBe(named.some((one) => one.id === agent.id && one.made === agent.createdAt));
+    }
+  });
 
   test("the most headroom, then the soonest reset; its harness's seats alone; the same whatever their order", () => {
     const a = seat("a", { windows: [used(60, 2 * HOUR)] });
     const b = seat("b", { windows: [used(20, 4 * HOUR)] });
     const c = seat("c", { windows: [used(20, 1 * HOUR)] });
     const codex = seat("x", { kind: "chatgpt-codex", vendor: "openai", windows: [] });
-    expect(chooseSeat("claude", [a, b, c, codex], idle, NOW)?.label).toBe("c");
-    expect(chooseSeat("claude", [codex, c, b, a], idle, NOW)?.label).toBe("c");
-    expect(chooseSeat("codex", [a, b, c, codex], idle, NOW)?.label).toBe("x");
-    expect(chooseSeat("opencode", [a, b, c, codex], idle, NOW)).toBeNull();
+    expect(chooseSeat("claude", [a, b, c, codex], idle, NOW, { agent: ADA })?.label).toBe("c");
+    expect(chooseSeat("claude", [codex, c, b, a], idle, NOW, { agent: ADA })?.label).toBe("c");
+    expect(chooseSeat("codex", [a, b, c, codex], idle, NOW, { agent: ADA })?.label).toBe("x");
+    expect(chooseSeat("opencode", [a, b, c, codex], idle, NOW, { agent: ADA })).toBeNull();
     expect(SEAT_HARNESS).toEqual({ "claude-subscription": "claude", "chatgpt-codex": "codex" });
   });
 
@@ -217,31 +291,31 @@ describe("which seat a run takes", () => {
     const out = seat("out", { state: { is: "signed-out", why: "expired" } });
     const busy = seat("busy");
     const free = seat("free", { windows: [used(95, HOUR)] });
-    expect(chooseSeat("claude", [spent, resting, out, busy, free], (id) => (id === busy.id ? 1 : 0), NOW)?.label).toBe("free");
-    expect(chooseSeat("claude", [spent, resting, out, busy], (id) => (id === busy.id ? 1 : 0), NOW)).toBeNull();
+    expect(chooseSeat("claude", [spent, resting, out, busy, free], (id) => (id === busy.id ? 1 : 0), NOW, { agent: ADA })?.label).toBe("free");
+    expect(chooseSeat("claude", [spent, resting, out, busy], (id) => (id === busy.id ? 1 : 0), NOW, { agent: ADA })).toBeNull();
   });
 
   test("work that ran on a seat goes on on it, never on a second subscription seat of the vendor's (D1, D2); a pin is that seat or none", () => {
     const mine = seat("mine", { windows: [used(70, HOUR)] });
     const other = seat("other", { windows: [used(5, HOUR)] });
-    expect(chooseSeat("claude", [mine, other], idle, NOW)?.label).toBe("other");
-    expect(chooseSeat("claude", [mine, other], idle, NOW, { from: mine })?.label).toBe("mine");
+    expect(chooseSeat("claude", [mine, other], idle, NOW, { agent: ADA })?.label).toBe("other");
+    expect(chooseSeat("claude", [mine, other], idle, NOW, { agent: ADA, from: mine })?.label).toBe("mine");
     // Its seat spent, it isn't carried on another of the vendor's: there is none to take it.
-    expect(chooseSeat("claude", [{ ...mine, state: { is: "resting", until: NOW + HOUR, window: "five_hour" } }, other], idle, NOW, { from: mine })).toBeNull();
-    expect(chooseSeat("claude", [mine, other], idle, NOW, { pinned: mine.id })?.label).toBe("mine");
-    expect(chooseSeat("claude", [mine, other], (id) => (id === mine.id ? 1 : 0), NOW, { pinned: mine.id })).toBeNull();
+    expect(chooseSeat("claude", [{ ...mine, state: { is: "resting", until: NOW + HOUR, window: "five_hour" } }, other], idle, NOW, { agent: ADA, from: mine })).toBeNull();
+    expect(chooseSeat("claude", [mine, other], idle, NOW, { agent: ADA, pinned: mine.id })?.label).toBe("mine");
+    expect(chooseSeat("claude", [mine, other], (id) => (id === mine.id ? 1 : 0), NOW, { agent: ADA, pinned: mine.id })).toBeNull();
   });
 
   test("a window its tool refused without saying when it resets is spent for five hours from when it was said, then fresh; an own VM's sign-in is an account no seat of its vendor's carries on", () => {
     const refused = { window: "five_hour", status: "rejected" as const, usedPercent: null, resetsAt: null, at: NOW - HOUR };
     expect(seatHeadroom({ windows: [refused] }, NOW)).toEqual({ used: 100, resetsAt: null });
     expect(seatHeadroom({ windows: [refused] }, NOW - HOUR + SEAT_LIMITS.restMinutes * 60_000)).toEqual({ used: 0, resetsAt: null });
-    expect(chooseSeat("claude", [seat("r", { windows: [refused] })], idle, NOW)).toBeNull();
-    expect(chooseSeat("claude", [seat("r", { windows: [refused] })], idle, NOW + 4 * HOUR)?.label).toBe("r");
+    expect(chooseSeat("claude", [seat("r", { windows: [refused] })], idle, NOW, { agent: ADA })).toBeNull();
+    expect(chooseSeat("claude", [seat("r", { windows: [refused] })], idle, NOW + 4 * HOUR, { agent: ADA })?.label).toBe("r");
     // Work that began on its agent's own VM's sign-in: no seat of that vendor's takes it on (it is another account).
     const own = accountSeat({ seat: null, kind: "claude-subscription" });
-    expect(chooseSeat("claude", [seat("a")], idle, NOW, { from: own })).toBeNull();
-    expect(chooseSeat("codex", [seat("x", { kind: "chatgpt-codex", vendor: "openai" })], idle, NOW, { from: own })?.label).toBe("x");
+    expect(chooseSeat("claude", [seat("a")], idle, NOW, { agent: ADA, from: own })).toBeNull();
+    expect(chooseSeat("codex", [seat("x", { kind: "chatgpt-codex", vendor: "openai" })], idle, NOW, { agent: ADA, from: own })?.label).toBe("x");
     expect(accountSeat({ seat: seat("a").id, kind: "claude-subscription" }).id).toBe(seat("a").id);
     expect([seatKindOf("claude"), seatKindOf("codex"), seatKindOf("opencode")]).toEqual(["claude-subscription", "chatgpt-codex", null]);
     expect(TaskAccount.safeParse({ seat: null, kind: "chatgpt-codex" }).success).toBe(true);
@@ -273,14 +347,14 @@ describe("which seat a run takes", () => {
       const seats: SeatView[] = Array.from({ length: 1 + Math.floor(random() * 6) }, (_, n) => {
         const kind = pick(["claude-subscription", "chatgpt-codex", "plan"] as const);
         const states: SeatView["state"][] = [{ is: "ready", renewBy: null }, { is: "ready", renewBy: null }, { is: "resting", until: NOW + HOUR, window: null }, { is: "signed-out", why: "never" }];
-        return seat(`s${n}`, { kind, vendor: kind === "chatgpt-codex" ? "openai" : "anthropic", runs: 1 + Math.floor(random() * 3), state: pick(states), windows: Array.from({ length: Math.floor(random() * 3) }, () => used(Math.floor(random() * 101), Math.floor((random() * 10 - 2) * HOUR), random() < 0.1 ? "rejected" : "allowed")) });
+        return seat(`s${n}`, { kind, vendor: kind === "chatgpt-codex" ? "openai" : "anthropic", runs: 1 + Math.floor(random() * 3), state: pick(states), serves: pick([[ADA], [ADA], [], [{ id: "bo", made: 1 }], [ADA, { id: "bo", made: 1 }], [{ id: "ada", made: ADA.made + 1 }]]), windows: Array.from({ length: Math.floor(random() * 3) }, () => used(Math.floor(random() * 101), Math.floor((random() * 10 - 2) * HOUR), random() < 0.1 ? "rejected" : "allowed")) });
       });
       const load = new Map(seats.map((s) => [s.id, Math.floor(random() * 3)]));
       const busy = (id: string) => load.get(id) ?? 0;
       const harness = pick(["claude", "codex"]);
       const from = random() < 0.3 ? pick(seats) : null;
-      const able = seats.filter((s) => SEAT_HARNESS[s.kind] === harness && s.state.is === "ready" && busy(s.id) < s.runs && seatHeadroom(s, NOW).used < 100 && (!from || mayCarryOn(from, s)));
-      const chosen = chooseSeat(harness, seats, busy, NOW, { from });
+      const able = seats.filter((s) => seatServes(s, ADA) && SEAT_HARNESS[s.kind] === harness && s.state.is === "ready" && busy(s.id) < s.runs && seatHeadroom(s, NOW).used < 100 && (!from || mayCarryOn(from, s)));
+      const chosen = chooseSeat(harness, seats, busy, NOW, { agent: ADA, from });
       expect(chosen === null).toBe(able.length === 0);
       if (!chosen) continue;
       expect(able).toContain(chosen);
@@ -291,8 +365,8 @@ describe("which seat a run takes", () => {
       }
       // Never a second subscription seat of the vendor's for work that ran on one.
       if (from && from.id !== chosen.id) expect(mayCarryOn(from, chosen)).toBe(true);
-      expect(chooseSeat(harness, [...seats].reverse(), busy, NOW, { from })?.id).toBe(chosen.id);
-      expect(chooseSeat(harness, seats, busy, NOW, { from })?.id).toBe(chosen.id);
+      expect(chooseSeat(harness, [...seats].reverse(), busy, NOW, { agent: ADA, from })?.id).toBe(chosen.id);
+      expect(chooseSeat(harness, seats, busy, NOW, { agent: ADA, from })?.id).toBe(chosen.id);
     }
   });
 });

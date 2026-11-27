@@ -1,4 +1,4 @@
-import { accountSeat, chooseSeat, mayCarryOn, SEAT_HARNESS, type SeatKind, seatHeadroom, seatOpensAt, type SeatView, seatVendor, type TaskAccount } from "../../packages/core/src/index.ts";
+import { accountSeat, chooseSeat, mayCarryOn, SEAT_HARNESS, type SeatKind, seatHeadroom, seatOpensAt, seatServes, type SeatView, seatVendor, type TaskAccount } from "../../packages/core/src/index.ts";
 import { intBelow, rng, subSeed } from "../lib.ts";
 
 /*
@@ -16,6 +16,9 @@ import { intBelow, rng, subSeed } from "../lib.ts";
  * proven, each window's share used by its reset (what expires unused), and time a seat sat idle while work waited that
  * it could take (target 0). The same week is run with two other ways to choose (the first seat free, by id; and the one
  * whose remaining share would expire soonest, per minute left), so the choice made is measured against them.
+ *
+ * Every seat here serves the one agent whose week it is (a seat serves the agent you chose for it, and the agents you
+ * share it with are one trust domain: either way, the choice among the seats that serve it is the one measured).
  */
 
 const SECOND = 1_000;
@@ -24,6 +27,8 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 /** Monday 23 November 2026, 00:00 UTC. */
 export const SIM_START = Date.UTC(2026, 10, 23);
+/** The agent whose week it is, as its node's team made it: every seat here serves it. */
+export const SIM_AGENT = { id: "sim", made: SIM_START };
 /** The step, and how often the team controller looks for work whose rest is over. */
 export const STEP_MS = 5 * SECOND;
 export const TICK_MS = 15 * SECOND;
@@ -122,14 +127,15 @@ function view(seat: Seat, now: number): SeatView {
     method: null,
     state: resting ? { is: "resting", until: seat.restUntil!, window: null } : { is: "ready", renewBy: null },
     windows: seat.windows.filter((w) => w.resetsAt !== null).map((w) => ({ window: w.name, status: w.used >= w.capacity ? "rejected" : "allowed", usedPercent: share(w), resetsAt: w.resetsAt, at: now })),
+    serves: [SIM_AGENT],
   };
 }
 
 /** The seat a policy takes for a task now: the real choice, or one of the two it is measured against. */
 function choose(policy: Policy, harness: string, seats: readonly SeatView[], busy: (id: string) => number, now: number, from: TaskAccount | null): SeatView | null {
   const carried = from ? accountSeat(from) : null;
-  if (policy === "headroom") return chooseSeat(harness, seats, busy, now, { from: carried });
-  const able = seats.filter((s) => SEAT_HARNESS[s.kind] === harness && s.state.is === "ready" && busy(s.id) < s.runs && seatHeadroom(s, now).used < 100 && (!carried || mayCarryOn(carried, s)));
+  if (policy === "headroom") return chooseSeat(harness, seats, busy, now, { agent: SIM_AGENT, from: carried });
+  const able = seats.filter((s) => seatServes(s, SIM_AGENT) && SEAT_HARNESS[s.kind] === harness && s.state.is === "ready" && busy(s.id) < s.runs && seatHeadroom(s, now).used < 100 && (!carried || mayCarryOn(carried, s)));
   if (policy === "first-free") return [...able].sort((a, b) => (a.id < b.id ? -1 : 1))[0] ?? null;
   // What would expire unused soonest, per minute left: the most perishable first (a window not yet begun perishes nothing).
   const perishing = (s: SeatView) => {

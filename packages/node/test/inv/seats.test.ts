@@ -17,7 +17,7 @@ import { testIo } from "./fixtures.ts";
 const flags = (over: Partial<Flags> = {}): Flags => ({ json: false, stream: false, wait: false, noAsk: false, gate: [], forTask: false, needsYou: false, working: false, done: false, week: false, forget: false, help: false, ...over });
 const ID = `st_${"a".repeat(22)}`;
 const ATTEMPT = `sa_${"b".repeat(22)}`;
-const seatOf = (over: Partial<SeatView> = {}): SeatView => ({ id: ID, kind: "claude-subscription", vendor: "anthropic", label: "Claude 1", node: "n_node", provider: null, runs: 1, plan: null, method: null, state: { is: "signed-out", why: "never" }, windows: [], ...over });
+const seatOf = (over: Partial<SeatView> = {}): SeatView => ({ id: ID, kind: "claude-subscription", vendor: "anthropic", label: "Claude 1", node: "n_node", provider: null, runs: 1, plan: null, method: null, state: { is: "signed-out", why: "never" }, windows: [], serves: [], ...over });
 
 /** A node with these seats; what it was asked, in order; how a sign-in goes (its card, and the state it ends in). */
 function node(seats: SeatView[], card: SeatSignInCard, ends: SeatView["state"] = { is: "ready", renewBy: null }) {

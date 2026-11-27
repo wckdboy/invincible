@@ -2475,11 +2475,13 @@ export function createApp(ctx: AppContext) {
         if (window.own && window.status === "rejected" && window.resetsAt) signInWindowsOf(ctx.store).hold(`${member.id}/${harness}`, window.resetsAt, `${harness}'s own sign-in in ${member.name}'s VM: its ${window.name} window is spent`);
       },
       // A seat of yours for a coding agent's run (seat-runs.ts): one of this node's, for an agent whose VM is here (the
-      // seat's VM shares its /work). Its windows are the seat's to keep.
+      // seat's VM shares its /work), and a seat that serves it as itself: its handle, and when this node's team made it.
+      // Its windows are the seat's to keep.
       seat: async (member, harness, opts, signal) => {
-        const bound = teamMember(member.id).workspace;
+        const current = teamMember(member.id);
+        const bound = current.workspace;
         if (!bound || bound.node !== ctx.identity.id || !ctx.sandbox) return { none: true };
-        return seatRuns.take({ agent: member.id, vm: bound.id, harness, from: opts.from, wait: opts.wait }, signal);
+        return seatRuns.take({ agent: current.id, made: current.createdAt, vm: bound.id, harness, from: opts.from, wait: opts.wait }, signal);
       },
       seatWindow: (seat, window) => seatRuns.window(seat.id, window),
       // An agent on the roster's engineer models works with its own tools, as was measured (team-runtime toolsLoop).

@@ -1,4 +1,4 @@
-import { accountSeat, chooseSeat, mayCarryOn, type NodeIdentity, redact, SEAT_HARNESS, SEAT_LIMITS, type SeatFacts, seatOpensAt, type SeatView, type TaskAccount } from "@invincible/core";
+import { accountSeat, chooseSeat, mayCarryOn, type NodeIdentity, redact, SEAT_HARNESS, SEAT_LIMITS, type SeatFacts, seatOpensAt, seatServes, type SeatView, type TaskAccount } from "@invincible/core";
 import { agentCleanupCommand, FOLLOW_SECONDS, followArgv, type FollowedRun, type SeatAnswer, type SeatRun } from "@invincible/agents";
 import type { LedgerStore } from "@invincible/ledger";
 import type { SandboxHost } from "@invincible/sandbox";
@@ -9,7 +9,8 @@ import { seatViews } from "./seats.ts";
  * chooses, and nothing asks you), the VM made for it from the pinned tools' image with the seat's home and the agent's
  * own /work (host.createSeatVm), and the seat let go once the run ends. A seat takes no more runs at once than it may
  * (D4). A run with no other way to go on waits for a seat that is busy, or rests until a spent one resets. Work that
- * began on a seat goes on on that seat alone among its vendor's (mayCarryOn: the rule).
+ * began on a seat goes on on that seat alone among its vendor's (mayCarryOn: the rule). A run takes, waits and rests
+ * only for a seat that serves its agent, as that agent (core's seatServes): never one you chose for another.
  *
  * Seats live on a node: a run takes one of this node's, for an agent whose VM is on this node (its VM shares that /work).
  */
@@ -43,9 +44,13 @@ export interface SeatRunsOptions {
   log?(line: string): void;
 }
 
-/** What a run asks for: its agent, the agent's VM on this node (and its size), its harness, the account its work began on. */
+/**
+ * What a run asks for: its agent (its handle, and when its node's team made it: `made`, so a later agent given the handle
+ * is another), the agent's VM on this node (and its size), its harness, the account its work began on.
+ */
 export interface SeatAsk {
   agent: string;
+  made: number;
   vm: string;
   harness: string;
   from: TaskAccount | null;
@@ -118,14 +123,15 @@ export class SeatRuns {
       if (!host) return { none: true };
       for (const [id, run] of [...this.lingering]) await this.remove(host, id, run);
       const now = this.now();
-      const seats = seatViews(this.opts.store, now).filter((seat) => seat.node === this.opts.node.id && SEAT_HARNESS[seat.kind] === ask.harness);
+      const agent = { id: ask.agent, made: ask.made };
+      const seats = seatViews(this.opts.store, now).filter((seat) => seat.node === this.opts.node.id && SEAT_HARNESS[seat.kind] === ask.harness && seatServes(seat, agent));
       const from = ask.from ? accountSeat(ask.from) : null;
       // The best seat first; one whose home turns out to be in use (a sign-in's VM, say) is passed over for the next, and
       // one whose VM this node can't make (no Docker on Linux here, say) isn't waited for.
       const passed = new Set<string>();
       const broken = new Set<string>();
       for (;;) {
-        const chosen = chooseSeat(ask.harness, seats, (id) => (passed.has(id) ? Number.MAX_SAFE_INTEGER : this.runs(id)), now, { from });
+        const chosen = chooseSeat(ask.harness, seats, (id) => (passed.has(id) ? Number.MAX_SAFE_INTEGER : this.runs(id)), now, { agent, from });
         if (!chosen) break;
         const opened = await this.open(host, chosen, ask).catch((error: Error & { status?: number }) => {
           if (error?.status !== 409) {

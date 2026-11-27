@@ -7,7 +7,8 @@ import { SEAT_REST_MAX_MS, SEAT_VM_MINUTES, SeatRuns } from "../src/seat-runs.ts
 /*
  * Runs on this node's seats (seat-runs.ts): the seat a coding agent's run takes, its VM beside the agent's (sharing its
  * /work), the seat let go as the run ends; waiting for a busy seat, resting for a spent one; never another account of a
- * vendor's for work that began on one; and what a run says of the seat's windows, kept in the log.
+ * vendor's for work that began on one; never a seat that doesn't serve its agent, as that agent; and what a run says of
+ * the seat's windows, kept in the log.
  */
 
 const stores: LedgerStore[] = [];
@@ -20,6 +21,9 @@ const NOW = Date.UTC(2026, 10, 27, 9, 0);
 const HOUR = 3_600_000;
 const id = (c: string) => `st_${c.repeat(22)}`;
 const A = id("a"), B = id("b"), X = id("x"), ELSEWHERE = id("e");
+/** The agents a seat may serve, each as itself: its id, and when its node's team made it. */
+const ADA = { id: "ada", made: Date.UTC(2026, 10, 20, 8, 0) };
+const BO = { id: "bo", made: Date.UTC(2026, 10, 21, 8, 0) };
 
 function mind() {
   const node = newNodeIdentity();
@@ -29,8 +33,9 @@ function mind() {
   foundFleet(store, node, { fleetName: "homelab", nodeName: "ultra" });
   enrollDevice(store, node, { device: other.id, name: "mini", kind: "node", box: Buffer.from(other.boxPublic).toString("base64url") });
   let n = 0;
-  const add = (seat: string, kind: SeatKind = "claude-subscription", label = seat.slice(3, 4).toUpperCase(), on = node.id) => {
+  const add = (seat: string, kind: SeatKind = "claude-subscription", label = seat.slice(3, 4).toUpperCase(), on = node.id, serves: { id: string; made: number }[] = [ADA]) => {
     store.emit(node, "seat.added", { id: seat, kind, label, node: on, runs: 1 }, yourWord(null));
+    if (serves.length) store.emit(node, "seat.serves", { id: seat, agents: serves }, yourWord(null));
     if (on === node.id) recordSeatStatus(store, node, store.seats().find((s) => s.id === seat)!, { signedIn: true, method: kind === "chatgpt-codex" ? "chatgpt" : "claude.ai", fingerprint: String.fromCharCode(65 + n++).repeat(22) });
     return seat;
   };
@@ -74,8 +79,44 @@ function host(options: { refuse?: (seat: string) => number | null; leftover?: st
   return { fake, vms, calls };
 }
 
-const ask = (over: Partial<{ harness: string; from: { seat: string | null; kind: SeatKind } | null; wait: boolean }> = {}) => ({ agent: "ada", vm: AGENT_VM, harness: "claude", from: null, wait: false, ...over });
+const ask = (over: Partial<{ agent: string; made: number; harness: string; from: { seat: string | null; kind: SeatKind } | null; wait: boolean }> = {}) => ({ agent: ADA.id, made: ADA.made, vm: AGENT_VM, harness: "claude", from: null, wait: false, ...over });
 const live = () => new AbortController().signal;
+
+describe("the agent a seat serves", () => {
+  test("another agent can't take a seat you didn't share with it: its run takes none, and waits or rests only for its own", async () => {
+    const m = mind();
+    m.add(A);
+    m.add(B, "claude-subscription", "B", m.node.id, [BO]);
+    m.window(B, 100, HOUR, "rejected");
+    const h = host();
+    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => h.fake, now: () => NOW });
+    // Ada's seat is free, with all its plan left: Bo's run never takes it, and rests until Bo's own resets.
+    expect(await runs.take(ask({ agent: BO.id, made: BO.made }), live())).toEqual({ none: true });
+    expect(await runs.take(ask({ agent: BO.id, made: BO.made, wait: true }), live())).toEqual({ rest: { until: NOW + HOUR, why: "Every seat of yours that could take it is spent (B)" } });
+    // An agent given Ada's id after Ada was removed was made later: another agent, with no seat to take or wait for.
+    expect(await runs.take(ask({ made: ADA.made + 1, wait: true }), live())).toEqual({ none: true });
+    expect(h.calls.filter((call) => call.startsWith("made"))).toEqual([]);
+    // Ada's run takes hers.
+    const taken = await runs.take(ask(), live());
+    expect("run" in taken && taken.run.seat.id).toBe(A);
+  });
+
+  test("a seat that serves no agent is taken by no run; a seat you share serves each agent it names, as many at once as it takes", async () => {
+    const m = mind();
+    m.add(A, "claude-subscription", "A", m.node.id, []);
+    const h = host();
+    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => h.fake, now: () => NOW });
+    expect(await runs.take(ask({ wait: true }), live())).toEqual({ none: true });
+    m.store.emit(m.node, "seat.serves", { id: A, agents: [ADA, BO] }, yourWord(null));
+    const bo = await runs.take(ask({ agent: BO.id, made: BO.made }), live());
+    expect("run" in bo && bo.run.seat.id).toBe(A);
+    // One run at once (D4): Ada's run finds it busy, and takes it once Bo's has let it go.
+    expect(await runs.take(ask(), live())).toEqual({ none: true });
+    if ("run" in bo) await bo.run.release();
+    const ada = await runs.take(ask(), live());
+    expect("run" in ada && ada.run.seat.id).toBe(A);
+  });
+});
 
 describe("the seat a run takes", () => {
   test("this node's seat of its harness with the most headroom; its VM shares the agent's /work and is as big; let go, it goes and the seat is free", async () => {

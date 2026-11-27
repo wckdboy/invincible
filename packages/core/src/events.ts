@@ -332,8 +332,9 @@ export const Bodies = {
   "rule.removed": z.strictObject({ name: RuleName }),
 
   /*
-   * Seats (seats.ts): accounts you hold with a vendor, that any agent may use. Added, set and removed by you alone; how
-   * each stands (its sign-in, its windows, a rest until a reset) is said by the node that holds its home, and by no other.
+   * Seats (seats.ts): accounts you hold with a vendor, each serving the agents you chose. Added, set and removed by you
+   * alone; how each stands (its sign-in, its windows, a rest until a reset) is said by the node that holds its home, and
+   * by no other.
    * None carries a sign-in's address, its code or a token, and a seat's email is in the vault. The last writer wins.
    * (Checked here only by length and alphabet, as every body is: the routes refuse anything shaped like a token, and a
    * newer scanner must never make a replica refuse an event an older one took.)
@@ -347,6 +348,14 @@ export const Bodies = {
     runs: z.number().int().min(1).max(SEAT_LIMITS.runs),
   }),
   "seat.policy": z.strictObject({ id: SeatId, runs: z.number().int().min(1).max(SEAT_LIMITS.runs) }),
+  /**
+   * The agents a seat serves, as you chose them: each as that agent, its handle and when its node's team made it (a
+   * later agent given the handle is another). None: it serves none. Only a seat with a home of its own serves agents.
+   */
+  "seat.serves": z.strictObject({
+    id: SeatId,
+    agents: z.array(z.strictObject({ id: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/), made: z.number().int().min(0) })).max(SEAT_LIMITS.serves),
+  }),
   "seat.removed": z.strictObject({ id: SeatId }),
   /** A sign-in begun, or ended (by a sign-in, or as its node found it when it asked the tool). */
   "seat.signin": SeatSignInBody,

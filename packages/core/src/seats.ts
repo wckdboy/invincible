@@ -2,7 +2,7 @@ import { z } from "zod";
 import { findSecrets } from "./secret-scan.ts";
 
 /*
- * Seats: one account you hold with a vendor, added once, that any agent may use (docs/ARCHITECTURE.md §6):
+ * Seats: one account you hold with a vendor, added once, that serves the agents you choose (docs/ARCHITECTURE.md §6):
  *   claude-subscription  a Claude Pro, Max or Ultra plan, signed in with Claude Code in the seat's own home;
  *   chatgpt-codex        a ChatGPT plan, signed in with Codex in the seat's own home;
  *   chatgpt-siwc         a ChatGPT plan through Sign in with ChatGPT, its tokens held by the node (never in a VM);
@@ -18,9 +18,17 @@ import { findSecrets } from "./secret-scan.ts";
  * work waits for its reset, goes to another vendor's tool, or uses that plan's own sanctioned capacity (such as the API
  * credits a Claude plan comes with). There is no setting that switches accounts: mayCarryOn says so for every caller.
  *
+ * A seat serves one agent, the one you choose for it, and others only when you share it (the owner's word, 27 November
+ * 2026, "One trust domain"). Its home is shared by every run on it, and what one run leaves there (its tool's settings,
+ * hooks and notes) is what the next one runs with: the agents sharing a seat are one trust domain, and that is said
+ * wherever you choose it. A seat names each agent as that agent, its handle and when its node's team made it, so an
+ * agent you remove, or a later one given its handle, is never served. Whether one is served is worked out from the
+ * roster wherever a seat is used or shown (servedBy, seatServes), never written into the log on anyone's behalf.
+ *
  * Where a seat stands is worked out here, the same on every node and in every app, from what the log holds (the mind's
- * seats: seat.added, seat.signin, seat.window, seat.rested, seat.back, seat.policy, seat.removed). None of those carries
- * a sign-in's address, its code or a token; the email a sign-in starts with is sealed in the vault, never in the log.
+ * seats: seat.added, seat.signin, seat.window, seat.rested, seat.back, seat.policy, seat.serves, seat.removed). None of
+ * those carries a sign-in's address, its code or a token; the email a sign-in starts with is sealed in the vault, never
+ * in the log.
  */
 
 export const SEAT_KINDS = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "plan", "api"] as const;
@@ -45,6 +53,8 @@ export const SEAT_LIMITS = {
   windows: 8,
   /** How long a window its tool refused without saying when it resets counts as spent: the shortest plan window, five hours. */
   restMinutes: 300,
+  /** Agents one seat serves, at most: as many as a node's team holds (TEAM_LIMITS.agents). */
+  serves: 32,
 } as const;
 
 /**
@@ -60,6 +70,12 @@ export const SeatId = z.string().regex(/^st_[A-Za-z0-9_-]{22}$/, "a seat's id");
 export type SeatId = z.infer<typeof SeatId>;
 /** One sign-in, from its start to its end: the node's own, never anything of the vendor's. */
 export const SeatAttemptId = z.string().regex(/^sa_[A-Za-z0-9_-]{22}$/, "a sign-in's id");
+
+/** An agent a seat serves, as that agent: its handle, and when its node's team made it (a later agent given the handle is another). */
+export interface SeatAgent {
+  id: string;
+  made: number;
+}
 
 /** How a tool says it is signed in: one of these words is all that is passed on of what its status command prints. */
 export const SIGN_IN_METHODS = ["claude.ai", "oauth_token", "api_key", "api_key_helper", "third_party", "chatgpt", "api-key", "signed in"] as const;
@@ -234,6 +250,8 @@ export interface SeatFacts {
   windows: { window: string; status: z.infer<typeof SeatWindowStatus>; usedPercent: number | null; resetsAt: number | null; at: number }[];
   /** Resting until its window resets, as its node said (`window`: the one that is spent). */
   rest: { until: number; window: string | null; at: number } | null;
+  /** The agents it serves, as you chose them (seat.serves), each as that agent: none until you choose one. */
+  serves: SeatAgent[];
 }
 
 export type SeatState =
@@ -273,6 +291,8 @@ export interface SeatView {
   method: string | null;
   state: SeatState;
   windows: SeatFacts["windows"];
+  /** The agents it serves, each as that agent: which of them are on a roster now is servedBy's to say. */
+  serves: SeatAgent[];
 }
 
 export function seatView(seat: SeatFacts, now: number): SeatView {
@@ -289,7 +309,27 @@ export function seatView(seat: SeatFacts, now: number): SeatView {
     method: signed?.method ?? null,
     state: seatState(seat, now),
     windows: seat.windows,
+    serves: seat.serves,
   };
+}
+
+/** Whether a seat serves this agent: one it names as this agent, its handle and when it was made. */
+export function seatServes(seat: Pick<SeatView, "serves">, agent: SeatAgent): boolean {
+  return seat.serves.some((one) => one.id === agent.id && one.made === agent.made);
+}
+
+/**
+ * The agents a seat serves now, in the order it names them: each one it names that is on `roster` as itself (the same
+ * handle, made when it says). One you removed isn't on a roster of your agents, and a later agent given its handle was
+ * made later: neither is served. `roster`: the agents of the node that holds the seat, as its team lists them.
+ */
+export function servedBy<A extends { id: string; createdAt: number }>(seat: Pick<SeatView, "serves">, roster: readonly A[]): A[] {
+  const served: A[] = [];
+  for (const one of seat.serves) {
+    const agent = roster.find((candidate) => candidate.id === one.id && candidate.createdAt === one.made);
+    if (agent && !served.includes(agent)) served.push(agent);
+  }
+  return served;
 }
 
 /** Whose account a seat is. */
@@ -339,21 +379,22 @@ export function seatHeadroom(seat: Pick<SeatView, "windows">, now: number): { us
 
 /**
  * The seat a run of `harness` takes now (I15 step 9: Invincible chooses, and nothing asks the owner), or null when none
- * can. Of the seats whose own plan runs that harness, ready (not signed out, signing in or resting), with a run to spare
- * (`busy` below its runs), with some of their plan left, and that the work may go on on (mayCarryOn from the seat it ran
- * on, if it ran on one: never a second subscription seat of that vendor's): the most headroom first (the share its most
- * used open window has used), then, of the equally used, the soonest reset (what would expire unused goes first), then
- * its id. `pinned`: that seat or none (a project's pin keeps its work off another account). The same seats at the same
- * time always give the same choice, whatever their order.
+ * can. Of the seats that serve its `agent` as that agent (never another agent's, nor a later agent given its handle),
+ * whose own plan runs that harness, ready (not signed out, signing in or resting), with a run to spare (`busy` below its
+ * runs), with some of their plan left, and that the work may go on on (mayCarryOn from the seat it ran on, if it ran on
+ * one: never a second subscription seat of that vendor's): the most headroom first (the share its most used open window
+ * has used), then, of the equally used, the soonest reset (what would expire unused goes first), then its id. `pinned`:
+ * that seat or none (a project's pin keeps its work off another account). The same seats at the same time always give
+ * the same choice, whatever their order.
  */
 export function chooseSeat(
   harness: string,
   seats: readonly SeatView[],
   busy: (seat: string) => number,
   now: number,
-  opts: { pinned?: string | null; from?: Pick<SeatView, "id" | "kind" | "provider"> | null } = {},
+  opts: { agent: SeatAgent; pinned?: string | null; from?: Pick<SeatView, "id" | "kind" | "provider"> | null },
 ): SeatView | null {
-  const able = seats.filter((seat) => SEAT_HARNESS[seat.kind] === harness && seat.state.is === "ready" && busy(seat.id) < seat.runs && seatHeadroom(seat, now).used < 100 && (!opts.from || mayCarryOn(opts.from, seat)));
+  const able = seats.filter((seat) => seatServes(seat, opts.agent) && SEAT_HARNESS[seat.kind] === harness && seat.state.is === "ready" && busy(seat.id) < seat.runs && seatHeadroom(seat, now).used < 100 && (!opts.from || mayCarryOn(opts.from, seat)));
   if (opts.pinned) return able.find((seat) => seat.id === opts.pinned) ?? null;
   const later = (at: number | null) => (at === null ? Number.MAX_SAFE_INTEGER : at);
   const ranked = able

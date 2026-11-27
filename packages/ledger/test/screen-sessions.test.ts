@@ -193,7 +193,7 @@ describe("screen sessions in the mind", () => {
       raw.exec(`DELETE FROM v_lww WHERE k LIKE 'screen%'; DELETE FROM v_rejected WHERE id = '${sent.id}'; PRAGMA user_version = 4;`);
       raw.close();
       const upgraded = new LedgerStore(path);
-      expect(upgraded.schemaVersion()).toBe(7);
+      expect(upgraded.schemaVersion()).toBe(8);
       expect(seen(upgraded)).toEqual(sessions);
       expect(upgraded.rejection(sent.id)).toBe("a screen session is yours alone to allow");
       expect(upgraded.digest()).toBe(digest);
