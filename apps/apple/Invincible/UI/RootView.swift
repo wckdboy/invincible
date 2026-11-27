@@ -97,7 +97,7 @@ struct PhoneRoot: View {
     var body: some View {
         DrawerHost(open: $drawer, session: session, current: path.last ?? .primary, go: pick) {
             NavigationStack(path: $path) {
-                ChatView(session: session, roster: { withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { drawer = true } }, give: mayGive ? { giving = true } : nil)
+                ChatView(session: session, roster: { withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { drawer = true } }, give: mayGive ? { giving = true } : nil, forget: { try app.forget() })
                     .navigationDestination(for: Place.self) { place in destination(place) }
             }
         }
@@ -258,7 +258,7 @@ struct SplitPlaces: View {
         switch place {
         case .home: HomeView(session: session, go: { place = $0 }, search: { searching = true }, give: mayGive ? { giving = true } : nil)
         case .task(let id): TaskView(session: session, id: id, wide: true)
-        case .primary: ChatView(session: session)
+        case .primary: ChatView(session: session, forget: { try app.forget() })
         case .agents: AgentsView(session: session, selection: board) { place = Place($0) }
         case .agent(let id): AgentView(session: session, id: id)
         case .room(let id): RoomView(session: session, id: id)

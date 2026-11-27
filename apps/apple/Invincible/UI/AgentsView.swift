@@ -464,9 +464,9 @@ struct TroubleRow: View {
     }
 
     private var detail: String {
-        if notYours { return "\(trouble.message) Nothing more is sent to it. If you set your node up anew at this address, forget this device in More, then pair it again." }
+        if notYours { return "\(trouble.message) Nothing more is sent to it. If you set your node up anew at this address, forget this device in Settings, then pair it again." }
         if trouble.unreachable { return "\(trouble.message) On a phone, open the Tailscale app and check it says Connected." }
         if let skew { return "It is \(Int((abs(skew) / 60).rounded())) minutes from the node's. Set the date and time to set themselves, in Settings." }
-        return trouble.status == 401 ? "It may have been removed from the fleet. Forget this device in More, then pair it again." : trouble.message
+        return trouble.status == 401 ? "It may have been removed from the fleet. Forget this device in Settings, then pair it again." : trouble.message
     }
 }

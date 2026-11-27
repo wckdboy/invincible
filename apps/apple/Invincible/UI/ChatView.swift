@@ -12,6 +12,8 @@ struct ChatView: View {
     /// Gives the agents a task, from its menu where the roster is a drawer (nil: this device may not, or elsewhere, where
     /// the work has its own button).
     private let give: (() -> Void)?
+    /// Forgets this device (its key, its pairing), from the refusal of a node that proves to be another (nil: Settings has it).
+    private let forget: (() throws -> Void)?
     @FocusState private var composing: Bool
     @State private var listing = false
     /// Its own computer, watched from here: its screen, or its terminal.
@@ -27,12 +29,16 @@ struct ChatView: View {
     /// A side question asked apart (its menu's Ask on the side…, or "/btw …" typed into the box).
     @State private var aside: SideQuestion?
 
-    init(session: Session, chat: ChatModel? = nil, roster: (() -> Void)? = nil, give: (() -> Void)? = nil) {
+    init(session: Session, chat: ChatModel? = nil, roster: (() -> Void)? = nil, give: (() -> Void)? = nil, forget: (() throws -> Void)? = nil) {
         self.session = session
         shown = chat
         self.roster = roster
         self.give = give
+        self.forget = forget
     }
+
+    /// The refusal said on the chat, where the app opens: the node at this device's address proves to be another (NodePin).
+    static func refusal(_ trouble: NodeError?) -> NodeError? { trouble?.notYourNode == nil ? nil : trouble }
 
     private var chat: ChatModel { shown ?? session.chat }
     private var latestAnswer: Int? { chat.thread.turns.last { $0.role == .assistant }?.id }
@@ -81,16 +87,7 @@ struct ChatView: View {
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            // The link's trouble, where nothing else on the screen says it (an iPhone's: the roster is a drawer).
-            if roster != nil {
-                if session.reconnecting {
-                    ReconnectingLine(session: session).padding(.horizontal, Metrics.margin).background(.bar)
-                } else if let trouble = session.trouble {
-                    TroubleRow(trouble: trouble).font(.callout).padding(.horizontal, Metrics.margin).padding(.vertical, Space.s2).frame(maxWidth: .infinity, alignment: .leading).background(.bar)
-                }
-            }
-        }
+        .modifier(LinkTrouble(session: session, said: build == nil && shown == nil, drawer: roster != nil, forget: forget))
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Space.s2) {
                 // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait.
@@ -250,6 +247,78 @@ struct ChatView: View {
             chat.draft = text
             composing = true
         }
+    }
+}
+
+/// The link's trouble over the chat. A node that proves to be another is said wherever the chat is the session's own, with
+/// Try again and Forget this device (confirmed first). Where the roster is a drawer (an iPhone's), nothing else on the screen
+/// says the rest, so it is said here too: reconnecting, or what went wrong.
+private struct LinkTrouble: ViewModifier {
+    let session: Session
+    /// The chat is the session's own (not a Build thread's, nor one in a window of its own).
+    let said: Bool
+    let drawer: Bool
+    let forget: (() throws -> Void)?
+    @State private var forgetting = false
+    @State private var problem: String?
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .top, spacing: 0) { line }
+            .confirmationDialog("Forget this device?", isPresented: $forgetting, titleVisibility: .visible) {
+                Button("Forget this device", role: .destructive) {
+                    do { try forget?() } catch { problem = error.localizedDescription }
+                }
+            } message: {
+                Text("Its key is deleted and can't be brought back.")
+            }
+            .alert("That didn't go through", isPresented: .init(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(problem ?? "")
+            }
+    }
+
+    @ViewBuilder private var line: some View {
+        if said, let refused = ChatView.refusal(session.trouble) {
+            NotYourNodeCard(trouble: refused, retry: { Task { await session.refresh() } }, forget: forget.map { _ in { forgetting = true } })
+        } else if drawer {
+            if Session.showsReconnecting(session.reconnecting, trouble: session.trouble) {
+                ReconnectingLine(session: session).padding(.horizontal, Metrics.margin).background(.bar)
+            } else if let trouble = session.trouble {
+                TroubleRow(trouble: trouble).font(.callout).padding(.horizontal, Metrics.margin).padding(.vertical, Space.s2).frame(maxWidth: .infinity, alignment: .leading).background(.bar)
+            }
+        }
+    }
+}
+
+/// The node at this device's address proves to be another (NodePin): said on the chat, where the app opens, with Try again
+/// (whoami asked again, nothing else) and Forget this device, to pair it anew (Settings has it too). The lead's word of 27
+/// November 2026: Android found the refusal said only on the old Home and Agents once its app opened on the chat.
+struct NotYourNodeCard: View {
+    let trouble: NodeError
+    let retry: () -> Void
+    /// Asks to forget this device (nil: not offered here; Settings has it).
+    let forget: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            TroubleRow(trouble: trouble).font(.callout)
+            HStack(spacing: Space.s2) {
+                NeedButton(title: "Try again", prominent: true, action: retry)
+                    .accessibilityIdentifier("chat.refused.retry")
+                if let forget {
+                    NeedButton(title: "Forget this device…", action: forget)
+                        .accessibilityIdentifier("chat.refused.forget")
+                }
+            }
+        }
+        .padding(.horizontal, Metrics.margin)
+        .padding(.vertical, Space.s3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat.refused")
     }
 }
 
