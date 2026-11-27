@@ -747,6 +747,99 @@
       }
     }
   ],
+  "words": {
+    "domain": "invincible-word/v1",
+    "signedFrom": 4102444800000,
+    "skewMs": 300000,
+    "nonce": "^[A-Za-z0-9_-]{16,64}$",
+    "scopes": {
+      "action.decided": "fleet:admin",
+      "order.set": "fleet:admin",
+      "order.revoked": "fleet:admin",
+      "rule.set": "fleet:admin",
+      "rule.removed": "fleet:admin",
+      "seat.added": "fleet:admin",
+      "seat.policy": "fleet:admin",
+      "seat.serves": "fleet:admin",
+      "seat.removed": "fleet:admin",
+      "screen.decided": "fleet:admin",
+      "skill.written": "mind:write",
+      "skill.approved": "fleet:admin",
+      "skill.marked": "fleet:admin",
+      "skill.reverted": "fleet:admin",
+      "handoff.granted": "fleet:admin",
+      "handoff.revoked": "fleet:admin",
+      "price.set": "brain:write",
+      "compute.limit": "fleet:admin",
+      "project.set": "brain:write"
+    },
+    "cases": [
+      {
+        "kind": "rule.set",
+        "body": {
+          "name": "quiet",
+          "rule": {
+            "after": "22:00",
+            "until": "07:00"
+          }
+        },
+        "bodyCanonical": "{\"name\":\"quiet\",\"rule\":{\"after\":\"22:00\",\"until\":\"07:00\"}}",
+        "statement": {
+          "v": 1,
+          "fleet": "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio",
+          "kind": "rule.set",
+          "digest": "lkC93pNPRkOLrziNB6Sw9_hiU0SgxnDDrutjaaRcx2g",
+          "nonce": "nonce-for-words1",
+          "at": 1797206400000
+        },
+        "signingInput": "invincible-word/v1\n{\"at\":1797206400000,\"digest\":\"lkC93pNPRkOLrziNB6Sw9_hiU0SgxnDDrutjaaRcx2g\",\"fleet\":\"KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio\",\"kind\":\"rule.set\",\"nonce\":\"nonce-for-words1\",\"v\":1}",
+        "device": "c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+        "signature": "ykcw12XgfqfD0-LVrSwAzZ_94UWmo_Y0YrCUhMLOL4pDA5B0oSsl2H2RQuf_FUHQodlIlWtIeniFns51Qxpnzw"
+      },
+      {
+        "kind": "action.decided",
+        "body": {
+          "id": "a_AAAAAAAAAAAAAAAAAAAAAA",
+          "verdict": "approved",
+          "note": "Hvad så? 🛡️ «quoted» \\ \n"
+        },
+        "bodyCanonical": "{\"id\":\"a_AAAAAAAAAAAAAAAAAAAAAA\",\"note\":\"Hvad så? 🛡️ «quoted» \\\\ \\n\",\"verdict\":\"approved\"}",
+        "statement": {
+          "v": 1,
+          "fleet": "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio",
+          "kind": "action.decided",
+          "digest": "o_mnJsThl6g73DLwEvtSu3Qa11PVrNTYSZQv8Tr1iik",
+          "nonce": "AAECAwQFBgcICQoL",
+          "at": 4102444800001
+        },
+        "signingInput": "invincible-word/v1\n{\"at\":4102444800001,\"digest\":\"o_mnJsThl6g73DLwEvtSu3Qa11PVrNTYSZQv8Tr1iik\",\"fleet\":\"KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio\",\"kind\":\"action.decided\",\"nonce\":\"AAECAwQFBgcICQoL\",\"v\":1}",
+        "device": "c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+        "signature": "ScnsnxLkzX7-a0ESv9wg5H3-vWD8hRqv7PMfoD0bEEllqrTi0xoPewKHzhlv5n_ycMAKEtJAWHRkYojTtaKh6A"
+      },
+      {
+        "kind": "price.set",
+        "body": {
+          "model": "stand-in/model",
+          "price": {
+            "output": 2.5,
+            "input": 0.125
+          }
+        },
+        "bodyCanonical": "{\"model\":\"stand-in/model\",\"price\":{\"input\":0.125,\"output\":2.5}}",
+        "statement": {
+          "v": 1,
+          "fleet": "KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio",
+          "kind": "price.set",
+          "digest": "7bQHpvBsU6-oqyYDthZI6jMeUmV0flxfh9p3sLHaXy4",
+          "nonce": "_-_-_-_-_-_-_-_-",
+          "at": 0
+        },
+        "signingInput": "invincible-word/v1\n{\"at\":0,\"digest\":\"7bQHpvBsU6-oqyYDthZI6jMeUmV0flxfh9p3sLHaXy4\",\"fleet\":\"KioqKioqKioqKioqKioqKioqKioqKioqKioqKioqKio\",\"kind\":\"price.set\",\"nonce\":\"_-_-_-_-_-_-_-_-\",\"v\":1}",
+        "device": "c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+        "signature": "wMHFgV_uzoKKJncj-zmTRY8k5ltb19OUQq7Qx883G1gW27U4xD7QN2i4QrX0ipC-sgf33mnAbFpCwLLKS88T-g"
+      }
+    ]
+  },
   "ed25519": [
     {
       "source": "RFC 8032 TEST 1",

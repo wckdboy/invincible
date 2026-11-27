@@ -184,6 +184,36 @@ const judgedNodeProofs = (() => {
   return cases;
 })();
 
+// ---- your word, signed (slice 8a): the statement a device of yours signs for each word of yours, as core makes it -----
+// Each app builds these bytes and signs them with the key it already has (8c): the statement's six fields as canonical
+// JSON after the domain, the body's digest as SHA-256 of its canonical JSON. Every signature here is the fake device's,
+// checked against core first, and refused for any field changed.
+const words = (() => {
+  const fleet = b64u(new Uint8Array(32).fill(0x2a));
+  const cases = [
+    { kind: "rule.set", body: { name: "quiet", rule: { after: "22:00", until: "07:00" } }, nonce: "nonce-for-words1", at: 1_797_206_400_000 },
+    { kind: "action.decided", body: { id: `a_${"A".repeat(22)}`, verdict: "approved", note: "Hvad så? 🛡️ «quoted» \\ \n" }, nonce: b64u(bytesOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)), at: 4_102_444_800_001 },
+    { kind: "price.set", body: { model: "stand-in/model", price: { output: 2.5, input: 0.125 } }, nonce: "_-_-_-_-_-_-_-_-", at: 0 },
+  ].map(({ kind, body, nonce, at }) => {
+    const statement = { v: 1 as const, fleet, kind, digest: core.wordDigest(body), nonce, at };
+    const input = core.wordSigningInput(statement);
+    const signature = b64u(p256.sign(input, scalar));
+    if (!core.verifyWordSignature(device, signature, statement)) fail(`core refuses the word's signature for ${kind}`);
+    for (const changed of [{ fleet: b64u(new Uint8Array(32).fill(0x2b)) }, { kind: `${kind}x` }, { digest: core.wordDigest({ ...body, extra: 1 }) }, { nonce: `${nonce}x` }, { at: at + 1 }]) {
+      if (core.verifyWordSignature(device, signature, { ...statement, ...changed })) fail(`core takes the word's signature for ${kind} with ${Object.keys(changed)[0]} changed`);
+    }
+    return { kind, body, bodyCanonical: core.canonical(body), statement, signingInput: fromUtf8(input), device, signature };
+  });
+  return {
+    domain: core.WORD_DOMAIN,
+    signedFrom: core.WORDS_SIGNED_FROM,
+    skewMs: core.WORD_SKEW_MS,
+    nonce: core.WORD_NONCE.source,
+    scopes: core.WORD_SCOPES,
+    cases,
+  };
+})();
+
 // ---- Ed25519's strict rule (the lead's word of 27 November 2026): RFC 8032's test vectors and all of Wycheproof's -------
 // Each with the rule's answer as core gives it (verifyEd25519Strict), and whether its key and its R are points the rule
 // takes (strictEd25519Point): the apps hold their verifiers to these, so TS, Swift and Kotlin answer alike on every one.
@@ -1958,6 +1988,7 @@ const vectors = {
   requestsForNode,
   nodeProofs,
   judgedNodeProofs,
+  words,
   ed25519,
   canonical,
   pairing,
