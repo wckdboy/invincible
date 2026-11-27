@@ -113,23 +113,26 @@ transport keys carries all of it:
      recorded it (`invincible fabric grants` says which, and the device of yours it came from, which is that node's
      own word, its `via`), and every grant a node since revoked recorded ends with that node. So does a grant of yours
      for the same pair that it overwrote: the last writer wins, so yours isn't restored, and you grant it again.
-   - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of its
-     day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among those it
-     names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever smaller budget
-     it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its work runs only on
-     models its budget counts at more than $0 (one you've priced above nothing, on no coding plan): its agent's own
-     loop, its coding tool, and its commands, whose VM's lease is good for those models' calls alone. The gateway
-     refuses any other model (the third re-review's R3-4), and on that lease any route but its protocol's model calls
-     (a POST, embeddings among them: the fifth re-review's R5-7) and their listing (a GET), so nothing else of yours
-     with that provider (its files, stored responses, batches, vector stores) is read with your key, nor a batch made
-     (the fourth re-review's R4-3). That lease carries nothing else: not the keys of yours its agent may use, nor its
-     agent's repository, which are its agent's own work's. Never on one it counts as nothing, nor on a coding tool's
-     own sign-in in the VM (a seat), nor in an ACP agent of yours. Every call on that lease is counted, whether or not
-     its answer says its usage (the fourth re-review's I-l): a streamed OpenAI-style call is asked to say it
-     (`stream_options.include_usage`), and one whose answer says none all the same is counted at the most it could
-     have been, every byte it sent an input token and every byte it was answered with an output token. One thing it
-     doesn't bound: a command can start a coding tool itself on that tool's own sign-in in the VM, if it has one,
-     which no lease reaches (a task's own VM starts with an empty HOME, so it has none).
+   - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of
+     its day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among
+     those it names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever
+     smaller budget it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its work
+     runs only on models its budget counts at more than $0 (one you've priced above nothing, on no coding plan): its
+     agent's own loop, its coding tool, and its commands, whose VM's lease is good for those models' calls alone. The
+     gateway refuses any other model (the third re-review's R3-4), and on that lease any route but its protocol's
+     model calls (a POST, embeddings among them: the fifth re-review's R5-7) and their listing (a GET), so nothing
+     else of yours with that provider (its files, stored responses, batches, vector stores) is read with your key, nor
+     a batch made (the fourth re-review's R4-3). That lease carries nothing else: not the keys of yours its agent may
+     use, nor its agent's repository, which are its agent's own work's. Never on one it counts as nothing, nor on a
+     coding tool's own sign-in in the VM (a seat), nor in an ACP agent of yours. Every call on that lease is counted,
+     whether or not its answer says its usage (the fourth re-review's I-l): a streamed OpenAI-style call is asked to
+     say it (`stream_options.include_usage`), and one whose answer says none all the same is counted at the most it
+     could have been, every byte it sent an input token and every byte it was answered with an output token. A call
+     cut before its answer ends is counted as it ends (the fifth re-review's R5-2): each byte sent an input token, and
+     the most output it allowed itself, for each answer it asked for, or what was answered if more. What a call runs
+     outside its answer (a background response, per-use tool fees, a dearer service tier) isn't bounded yet (R5-4).
+     Nor is this: a command can start a coding tool itself on that tool's own sign-in in the VM, if it has one, which
+     no lease reaches (a task's own VM starts with an empty HOME, so it has none).
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node

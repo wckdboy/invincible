@@ -216,6 +216,33 @@ function askedForUsage(body: ArrayBuffer | undefined, kind: "openai" | "anthropi
  */
 const heldUsage = (sent: number, answered: number): Usage => ({ input: sent, output: answered });
 
+/**
+ * A held call cut before its answer ended (its client gone, or the answer broken: the fifth fabric review's R5-2): the
+ * provider bills what it was sent and what it generated all the same, the rest of a call not streamed among it. So it is
+ * counted at its most from what was sent: each byte sent an input token, and as many output tokens as the call allowed
+ * itself (its max_tokens), or as were said or answered, whichever is more.
+ */
+const cutUsage = (said: Usage | null, sent: number, answered: number, allowed: number): Usage => ({
+  input: Math.max(said?.input ?? 0, sent),
+  output: Math.max(said?.output ?? 0, answered, allowed),
+});
+
+/**
+ * The most output a call allows itself, by any of the protocols' words for it, or 0 where it names none: as many times
+ * over as it asks for answers (chat's `n`, at most 128), each up to its cap.
+ */
+function allowedOutput(body: ArrayBuffer | undefined): number {
+  if (!body || body.byteLength > 4 << 20) return 0;
+  try {
+    const call = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown> | null;
+    const caps = [call?.max_tokens, call?.max_completion_tokens, call?.max_output_tokens].filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n > 0);
+    const answers = typeof call?.n === "number" && Number.isInteger(call.n) && call.n > 1 ? Math.min(call.n, 128) : 1;
+    return caps.length ? Math.floor(Math.max(...caps)) * answers : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /*
  * A plan's allowance spent, as a tool hears it. Told by its provider to try again in a day and a half, OpenCode 2.3.0
  * waits fifteen minutes and asks again, for as long as that lasts, and Codex 0.169.0 waits all of it; told 402, each ends
@@ -279,14 +306,23 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   if (open && open.until - windows.now() > WAIT_OUT_MS) return spent(open.provider, open, windows);
   // (Asked to say its usage, on a held lease.)
   const sent = held ? askedForUsage(body, provider.kind, rest) : body;
-  const upstream = await (ctx.fetch ?? fetch)(target, {
-    method: request.method,
-    headers,
-    body: sent,
-    // The key is pinned to this provider's origin: it never chases a Location header to another host.
-    redirect: "manual",
-    signal: request.signal,
-  });
+  const report = ctx.onUsage;
+  const call = { label: ctx.tokens.labelOf(token) ?? "unknown", provider: providerId, model: modelOf(body) };
+  let upstream: Response;
+  try {
+    upstream = await (ctx.fetch ?? fetch)(target, {
+      method: request.method,
+      headers,
+      body: sent,
+      // The key is pinned to this provider's origin: it never chases a Location header to another host.
+      redirect: "manual",
+      signal: request.signal,
+    });
+  } catch (error) {
+    // (A held call cut before any answer came, by its client or the network: counted at its most all the same. R5-2.)
+    if (report && held && request.method === "POST") report({ ...call, usage: cutUsage(null, sent?.byteLength ?? 0, 0, allowedOutput(body)) });
+    throw error;
+  }
   const responseHeaders = new Headers();
   for (const name of ["content-type", "cache-control", "request-id", "x-request-id", "retry-after"]) {
     const value = upstream.headers.get(name);
@@ -311,31 +347,56 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   // list their models to anyone, with a key or none.)
   if (request.method === "POST") refusedKeysOf(ctx.store).forget(providerId);
   // A model call (a POST) is counted as its answer goes by; a listing or a lookup isn't one.
-  const report = ctx.onUsage;
   if (!report || request.method !== "POST" || !upstream.body) return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   const reader = usageReader(provider.kind, EMBEDDINGS.test(rest));
-  const call = { label: ctx.tokens.labelOf(token) ?? "unknown", provider: providerId, model: modelOf(body) };
+  const allowed = held ? allowedOutput(body) : 0;
   let answered = 0;
-  const counted = upstream.body.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        controller.enqueue(chunk);
-        answered += chunk.byteLength;
-        try {
-          reader.feed(chunk);
-        } catch {
-          /* counting never gets in the answer's way */
-        }
-      },
-      flush() {
-        try {
-          const said = reader.end();
-          report({ ...call, usage: said ?? (held ? heldUsage(sent?.byteLength ?? 0, answered) : null) });
-        } catch {
-          /* nor does the one told of it */
-        }
-      },
-    }),
-  );
+  let told = false;
+  // Counted once, however its answer ends: read to its end, cut by its client, or broken (R5-2). A held call cut is
+  // counted at its most from what was sent; any other, at what its answer said by then.
+  const tell = (whole: boolean) => {
+    if (told) return;
+    told = true;
+    try {
+      const said = reader.end();
+      report({ ...call, usage: whole ? (said ?? (held ? heldUsage(sent?.byteLength ?? 0, answered) : null)) : held ? cutUsage(said, sent?.byteLength ?? 0, answered, allowed) : said });
+    } catch {
+      /* nor does the one told of it */
+    }
+  };
+  const source = upstream.body.getReader();
+  const counted = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      let next: Awaited<ReturnType<typeof source.read>>;
+      try {
+        next = await source.read();
+      } catch (error) {
+        tell(false);
+        controller.error(error);
+        return;
+      }
+      if (next.done) {
+        tell(true);
+        controller.close();
+        return;
+      }
+      answered += next.value.byteLength;
+      try {
+        reader.feed(next.value);
+      } catch {
+        /* counting never gets in the answer's way */
+      }
+      controller.enqueue(next.value);
+    },
+    cancel(reason) {
+      tell(false);
+      return source.cancel(reason);
+    },
+  });
+  // (A client that goes may never cancel an answer it stops reading: its request's end says so too.)
+  request.signal.addEventListener("abort", () => {
+    tell(false);
+    source.cancel().catch(() => {});
+  }, { once: true });
   return new Response(counted, { status: upstream.status, headers: responseHeaders });
 }

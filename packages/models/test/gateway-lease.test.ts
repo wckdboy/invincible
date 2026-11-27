@@ -316,3 +316,87 @@ test("a held lease's embeddings pass by either route, and are counted as their a
   await plain.call("openai/chat/completions");
   expect(plain.usage.at(-1)).toBeNull();
 });
+
+/*
+ * A held call whose client goes before its answer ends (the fifth fabric review's R5-2, its PoC turned around): the
+ * provider bills what it was sent, and what it generated, all the same. So the call is counted as it ends, however it
+ * ends, at its upper bound from what was sent: each byte sent an input token, and as many output tokens as it was
+ * allowed (its max_tokens), or as many bytes as were answered if that is more. Never $0.
+ */
+let holding = false;
+const slow = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: async (req) => {
+    await req.arrayBuffer();
+    const first = new TextEncoder().encode('data: {"choices":[{"delta":{"content":"the start of a long answer"}}]}\n\n');
+    // One event, then nothing more until the client goes, as a long generation is.
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(first);
+        holding = true;
+      },
+    });
+    return new Response(stream, { headers: { "content-type": "text/event-stream" } });
+  },
+});
+afterAll(async () => await slow.stop(true));
+
+test("a held call whose client goes before its answer ends is counted at once at its most, from what was sent (R5-2)", async () => {
+  const identity = newNodeIdentity();
+  const store = new LedgerStore(":memory:");
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
+  const vault = new Vault(store, identity);
+  vault.set("openai", HELD_KEY, { provider: "openai", origin: `http://127.0.0.1:${slow.port}` });
+  store.emit(identity, "provider.set", { id: "openai", kind: "openai", baseUrl: `http://127.0.0.1:${slow.port}/v1`, secret: "openai" });
+  const tokens = new GatewayTokens(new Database(":memory:"));
+  const { token } = tokens.mint({ label: "sandbox:0123456789", providers: ["openai"], models: ["openai/gpt-paid"], ttlMinutes: 30, maxRequests: 500 });
+  const usage: (Usage | null)[] = [];
+  const ask = { model: "gpt-paid", stream: true, max_tokens: 4000, messages: [{ role: "user", content: "x".repeat(100_000) }] };
+  const client = new AbortController();
+  holding = false;
+  const answer = await handleGateway(new Request("http://127.0.0.1:7400/gw/openai/chat/completions", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(ask), signal: client.signal }), { store, vault, tokens, onUsage: (c) => void usage.push(c.usage) });
+  const body = answer.body!.getReader();
+  // The client reads the answer's first event, then goes.
+  const first = await body.read();
+  expect(first.done).toBe(false);
+  await body.cancel();
+  client.abort();
+  for (let i = 0; i < 100 && usage.length === 0; i++) await Bun.sleep(10);
+  expect(usage).toHaveLength(1);
+  const counted = usage[0]!;
+  // (Every byte sent an input token: at least its prompt, and the stream_options the gateway asked for with it.)
+  expect(counted.input).toBeGreaterThanOrEqual(JSON.stringify(ask).length);
+  expect(counted.output).toBeGreaterThanOrEqual(4000);
+  const lines: UsageLine[] = [];
+  addUsage(lines, "engineer", "openai/gpt-paid", counted);
+  expect(costOf(lines, { "openai/gpt-paid": { input: 10, output: 40 } }).usd).toBeGreaterThan(0);
+});
+
+test("a held call whose client goes before any answer comes is counted at its most all the same (R5-2)", async () => {
+  // A provider that answers nothing until its caller goes, as one generating a long answer not streamed does.
+  const silent = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => new Promise<Response>((resolve) => req.signal.addEventListener("abort", () => resolve(new Response("late")))) });
+  try {
+    const identity = newNodeIdentity();
+    const store = new LedgerStore(":memory:");
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
+    const vault = new Vault(store, identity);
+    vault.set("openai", HELD_KEY, { provider: "openai", origin: `http://127.0.0.1:${silent.port}` });
+    store.emit(identity, "provider.set", { id: "openai", kind: "openai", baseUrl: `http://127.0.0.1:${silent.port}/v1`, secret: "openai" });
+    const tokens = new GatewayTokens(new Database(":memory:"));
+    const { token } = tokens.mint({ label: "sandbox:0123456789", providers: ["openai"], models: ["openai/gpt-paid"], ttlMinutes: 30, maxRequests: 500 });
+    const usage: (Usage | null)[] = [];
+    // (Three answers asked, each up to its cap: it allowed itself three times as much.)
+    const ask = { model: "gpt-paid", max_completion_tokens: 2500, n: 3, messages: [{ role: "user", content: "y".repeat(50_000) }] };
+    const client = new AbortController();
+    const asked = handleGateway(new Request("http://127.0.0.1:7400/gw/openai/chat/completions", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(ask), signal: client.signal }), { store, vault, tokens, onUsage: (c) => void usage.push(c.usage) });
+    await Bun.sleep(100);
+    client.abort();
+    await asked.catch(() => {});
+    expect(usage).toHaveLength(1);
+    expect(usage[0]!.input).toBeGreaterThanOrEqual(JSON.stringify(ask).length);
+    expect(usage[0]!.output).toBe(7500);
+  } finally {
+    await silent.stop(true);
+  }
+});

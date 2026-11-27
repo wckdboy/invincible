@@ -758,9 +758,13 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       its agent's repository), never on a coding tool's own sign-in (a seat) or an ACP agent, so what they spend is
       counted. Every call on that lease is counted, whether or not its answer says its usage (the fourth re-review's
       I-l, `gateway-lease.test.ts`): a streamed OpenAI-style call is asked to say it, and one whose answer says none
-      all the same counts at the most it could have been, every byte sent and answered a token. But not: a command can
-      start a coding tool itself on that tool's own sign-in in the VM, if it has one, which no lease reaches (a task's
-      own VM starts with an empty HOME).
+      all the same counts at the most it could have been, every byte sent and answered a token. A call cut before its
+      answer ends, by its client or the network, is counted as it ends (the fifth re-review's R5-2): each byte sent an
+      input token, and the most output it allowed itself (its `max_tokens`, for each answer it asked for: chat's `n`),
+      or what was said or answered if more. What a call runs outside its answer (a background response, a provider's
+      per-use tool fees, a dearer service tier) isn't bounded yet (R5-4). But not: a command can start a coding tool
+      itself on that tool's own sign-in in the VM, if it has one, which no lease reaches (a task's own VM starts with
+      an empty HOME).
     - **In a VM of its own** (the owner's decision of 27 November 2026, the third re-review's R3-1;
       `packages/node/src/task-vms.ts`, `createTaskVm`, tested in `task-vms.test.ts`, `team-layout.test.ts`,
       `team-runtime.test.ts` and `fabric-handoff.e2e.test.ts`). Every command of it, its agent's, its coding tool's and
