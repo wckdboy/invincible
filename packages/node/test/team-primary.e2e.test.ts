@@ -447,23 +447,46 @@ test("when a task it gave from a kept chat ends, it writes first there: a turn o
   expect(daemon.chats.looksWaiting(id)).toEqual([]);
 });
 
-// The review of 27 November, S9: writing first is yours to turn off, by its route (fleet:admin), and it says so.
-test("with writing first turned off, a task it gave from a kept chat ends and nothing is written first there; on again, the next is", async () => {
+// The review of 27 November, S9: writing first is yours to turn off, by its route (fleet:admin), and it says so. (Its
+// re-review, T6: a look written first is taken in the tick that sets it, so none waiting proves nothing; what does is that
+// no turn of its ran and no look was kept, and that on again the next end is written first.)
+test("with writing first turned off, a task it gave from a kept chat ends and no turn of its runs there, nor is a look kept; on again, the next is written first", async () => {
   await settled();
   daemon.looks.tick();
   for (let i = 0; i < 200 && daemon.turns.running().length; i++) await Bun.sleep(20);
   expect((await api<{ first: boolean }>("teamFirst", { on: false })).first).toBe(false);
   expect((await api<{ writesFirst?: boolean }>("team")).writesFirst).toBeUndefined();
-  // (Room in its day for this give, whatever the tests before it gave.)
+  /** A task it gives from a kept chat, ended: that chat. */
+  const given = async (goal: string, title: string) => {
+    script = [callTool("team_give", { goal, title }), say("Ada has it.")];
+    const response = await request("chat", { messages: [{ role: "user", content: `Have an agent do this: ${goal}` }], save: true });
+    const events = (await response.text()).split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)) as ChatStreamEvent);
+    expect(["done", "failed"]).toContain((await settled()).tasks.find((t) => t.title === title)!.status);
+    return (events.find((e) => e.type === "conversation") as { id: string }).id;
+  };
+  /** The next look, and the turn it starts there, if any, run through. */
+  const looked = async (id: string) => {
+    his.length = 0;
+    daemon.looks.tick();
+    for (let i = 0; i < 200 && daemon.turns.runningIn(id); i++) await Bun.sleep(20);
+  };
+  const kept = async (id: string) => (await api<{ conversation: { messages: { look?: unknown }[] } }>("conversation", { id })).conversation.messages.some((m) => m.look);
+  // (Room in its day for these gives, whatever the tests before it gave.)
   await api("teamOwnDaily", { usd: 100 });
   try {
-    script = [callTool("team_give", { goal: "Count the importer's tests.", title: "Count the tests" }), say("Ada has it.")];
-    const response = await request("chat", { messages: [{ role: "user", content: "Have an agent count the importer's tests." }], save: true });
-    const events = (await response.text()).split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)) as ChatStreamEvent);
-    const id = (events.find((e) => e.type === "conversation") as { id: string }).id;
-    expect(["done", "failed"]).toContain((await settled()).tasks.find((t) => t.title === "Count the tests")!.status);
-    daemon.looks.tick();
-    expect(daemon.chats.looksWaiting(id)).toEqual([]);
+    const off = await given("Count the importer's tests.", "Count the tests");
+    await looked(off);
+    expect(his).toEqual([]);
+    expect(await kept(off)).toBe(false);
+    // On again: the next task's end is written first; the one that ended while it was off is never told.
+    expect((await api<{ first: boolean }>("teamFirst", { on: true })).first).toBe(true);
+    const on = await given("Count the importer's files.", "Count the files");
+    script = [say("Ada counted them.")];
+    await looked(on);
+    expect(String(his[0]?.messages?.at(-1)?.content)).toStartWith("(Your node writes this, not the owner and not you: When the task you gave @");
+    expect(String(his[0]?.messages?.at(-1)?.content)).toContain("“Count the files”");
+    expect(await kept(on)).toBe(true);
+    expect(await kept(off)).toBe(false);
   } finally {
     expect((await api<{ first: boolean }>("teamFirst", { on: true })).first).toBe(true);
     await api("teamOwnDaily", { usd: 10 });
