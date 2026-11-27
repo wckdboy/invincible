@@ -471,7 +471,7 @@ export function createApp(ctx: AppContext) {
     if (!proof) return null;
     const device = ctx.store.activeDevice(proof.device);
     if (!device) return null;
-    if (!nonces.claim(proof.device, proof.nonce)) return null;
+    if (!nonces.claim(proof.device, proof.nonce, Date.now(), proof.ts)) return null;
     // Full nodes already hold the vault: they are owner-equivalent, including scopes added later.
     const fullNode = device.kind === "node" && device.role === "full";
     return { device: device.id, kind: device.kind, scopes: fullNode ? OWNER_SCOPES : device.scopes };

@@ -204,7 +204,7 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
       as(to, () => {
         const proof = verifyRequestSignature(headers, "POST", path, body, timeOf(to));
         const device = proof ? to.store.activeDevice(proof.device) : null;
-        if (!proof || !device || device.kind !== "node" || !to.nonces.claim(proof.device, proof.nonce, timeOf(to))) {
+        if (!proof || !device || device.kind !== "node" || !to.nonces.claim(proof.device, proof.nonce, timeOf(to), proof.ts)) {
           stats.refused++;
           return { status: 401, answer: { error: "link requests must come from an enrolled node" } };
         }
@@ -275,7 +275,8 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
     const makeNode = (index: number, name: string): SimNode => {
       const identity = nodeIdentity(bytes32(keys), bytes32(keys));
       const offsetMs = index === 0 ? 0 : Math.round((keys() * 2 - 1) * HEALTHY_SKEW_MS);
-      const node = { name, identity, endpoint: `http://${name}.sim`, offsetMs, nonces: new NonceCache(), offline: false, replays: 0, loop: `poll-${name}`, slot: EPOCH } as SimNode;
+      // (Its nonces from the start of time: a simulated node never restarts, so none of them was taken before it began.)
+      const node = { name, identity, endpoint: `http://${name}.sim`, offsetMs, nonces: new NonceCache(0), offline: false, replays: 0, loop: `poll-${name}`, slot: EPOCH } as SimNode;
       node.store = new LedgerStore(":memory:", new HlcClock(() => timeOf(node)));
       node.vault = new Vault(node.store, identity);
       node.engine = new SyncEngine(node.store, identity, { fetch: transport });

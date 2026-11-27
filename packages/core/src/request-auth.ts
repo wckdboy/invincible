@@ -88,12 +88,24 @@ export function verifyRequestSignature(
   return { device, nonce, ts: time };
 }
 
-/** Remembers nonces for the skew window so a captured request cannot be replayed. */
+/**
+ * Remembers nonces for the skew window so a captured request cannot be replayed. It remembers only since it began (a
+ * node that restarts forgets what it saw), so a request signed before then is refused: it may have been taken already
+ * (the slice 8 note's item 11, 27 November 2026). `since`: when it began.
+ */
 export class NonceCache {
   private readonly seen = new Map<string, number>();
 
-  /** Returns false if this (device, nonce) was already used. */
-  claim(device: string, nonce: string, now = Date.now()): boolean {
+  constructor(private readonly since = Date.now()) {}
+
+  /** Whether a request signed at `signedAt` was signed before this cache began, so it may have been taken already. */
+  signedBefore(signedAt: number): boolean {
+    return signedAt < this.since;
+  }
+
+  /** Returns false if this (device, nonce) was already used, or was signed (`signedAt`) before this cache began. */
+  claim(device: string, nonce: string, now: number, signedAt: number): boolean {
+    if (signedAt < this.since) return false;
     if (this.seen.size > 10_000) this.sweep(now);
     const key = `${device}:${nonce}`;
     const expiry = this.seen.get(key);

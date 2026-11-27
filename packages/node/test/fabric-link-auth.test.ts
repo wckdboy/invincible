@@ -136,6 +136,8 @@ describe("a link call is its node's own word, not its transport key's", () => {
       [await signed(b.identity, LINK_PATHS.sync, { have: {} }), FABRIC.sync, "refused: it is signed by another device than the node whose transport key called"],
       [await a.fabric.seal(LINK_PATHS.push, { have: {} }), FABRIC.sync, `refused: that call isn't signed for ${FABRIC.sync}`],
       [await signed(a.identity, LINK_PATHS.sync, { have: {} }, Date.now() - 5 * 60_000), FABRIC.sync, "refused: its signature doesn't verify, or it is outside its time window"],
+      // Within its minute, but signed before the node it reached began: what that node saw before is forgotten (item 11).
+      [await signed(a.identity, LINK_PATHS.sync, { have: {} }, Date.now() - 30_000), FABRIC.sync, "refused: it was signed before this node began: it may have been taken already"],
     ];
     for (const [args, tool, why] of cases) expect((await answered(knock(tool, args))).failed()).toEqual({ code: 3, message: why });
     // A body changed after it was signed doesn't verify.

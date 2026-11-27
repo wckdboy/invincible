@@ -150,10 +150,19 @@ describe("request signing", () => {
     expect(verifyRequestSignature(headers, "POST", "/link/push", body, 10_000)).toBeNull();
     expect(verifyRequestSignature(headers, "POST", "/link/sync", utf8("{}"), 10_000)).toBeNull();
     expect(verifyRequestSignature(headers, "POST", "/link/sync", body, 10_000 + 120_000)).toBeNull();
-    const nonces = new NonceCache();
+    const nonces = new NonceCache(10_000);
     const proof = verifyRequestSignature(headers, "POST", "/link/sync", body, 10_000)!;
-    expect(nonces.claim(proof.device, proof.nonce, 10_000)).toBe(true);
-    expect(nonces.claim(proof.device, proof.nonce, 10_001)).toBe(false);
+    expect(nonces.claim(proof.device, proof.nonce, 10_000, proof.ts)).toBe(true);
+    expect(nonces.claim(proof.device, proof.nonce, 10_001, proof.ts)).toBe(false);
+  });
+
+  // The slice 8 note's item 11 (the lead's word of 27 November): a node that restarts forgets the nonces it saw, so a
+  // request signed before it began is refused, however fresh its nonce looks to it.
+  test("a request signed before the node began is refused: what it saw before is forgotten", () => {
+    const nonces = new NonceCache(20_000);
+    expect(nonces.claim("c_x", "n1", 20_010, 19_999)).toBe(false);
+    expect(nonces.claim("c_x", "n2", 20_010, 20_000)).toBe(true);
+    expect(nonces.claim("c_x", "n2", 20_011, 20_000)).toBe(false);
   });
 
   test("a signature counts only as its bytes encode: one written another way (its last character's unused bits set) is refused", async () => {

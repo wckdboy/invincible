@@ -143,7 +143,7 @@ export class Fabric implements SyncTransport {
   /** Peers' endpoints as their profiles prove them (their transport keys' own signatures), until a profile changes. */
   private readonly endpoints = new Map<string, QampEndpoint | null>();
   /** Link calls' nonces, for their signatures' window: a call sent twice is refused the second time. */
-  private readonly nonces = new NonceCache();
+  private readonly nonces: NonceCache;
   private readonly running = new Map<string, Set<Invocation>>();
   /** Each tracked call's own signal's controller, so a revocation stops its work. */
   private readonly cuts = new WeakMap<Invocation, AbortController>();
@@ -152,6 +152,8 @@ export class Fabric implements SyncTransport {
 
   constructor(private readonly deps: FabricDeps) {
     this.now = deps.now ?? Date.now;
+    // (What it remembers of the nonces it saw begins now: a link call signed before it began is refused.)
+    this.nonces = new NonceCache(this.now());
     // A node revoked, or a profile changed: who each key is is read again; a revoked node's calls end at once.
     this.unsubscribe = deps.store.onApplied((events, rebuilt) => {
       if (rebuilt || events.some((e) => e.kind === "node.profile" || e.kind.startsWith("device."))) {
@@ -253,7 +255,8 @@ export class Fabric implements SyncTransport {
     if (!proof) return { refused: "its signature doesn't verify, or it is outside its time window" };
     if (proof.device !== caller.id) return { refused: "it is signed by another device than the node whose transport key called" };
     if (!this.deps.store.activeDevice(proof.device)) return { refused: "it is signed by a node that isn't active" };
-    if (!this.nonces.claim(proof.device, proof.nonce, this.now())) return { refused: "it was sent before: its nonce is spent" };
+    if (this.nonces.signedBefore(proof.ts)) return { refused: "it was signed before this node began: it may have been taken already" };
+    if (!this.nonces.claim(proof.device, proof.nonce, this.now(), proof.ts)) return { refused: "it was sent before: its nonce is spent" };
     try {
       return { path, body: JSON.parse(body) as unknown };
     } catch {

@@ -73,6 +73,17 @@ The review also confirmed what held up:
 - the sandbox's Docker flags
 - the PWA's DOM-only rendering
 
+## Signed requests (tested)
+
+- **What a request proves.** Every request of a device or a node is signed by its key over its method, path, time,
+  nonce and the hash of its body (`packages/core/src/request-auth.ts`). The node takes it only within a minute of its
+  time, only from an active device, and only once: it remembers each device's nonces for two minutes.
+- **Once, across a restart too.** A node that restarts forgets the nonces it saw, so it refuses a request signed before
+  it began: that one may have been taken already. A device's next request is signed after, and is taken. The same holds
+  for a node's link calls over Q-AMP (`packages/node/test/request-auth.e2e.test.ts`,
+  `packages/node/test/fabric-link-auth.test.ts`). Residual: just after a node starts, a device whose clock runs behind
+  the node's is refused until the node's start is behind it too.
+
 ## Secret scanning (tested)
 
 - **What's refused** (422, pointing to the vault): known key formats, private keys, Invincible's own tokens and invites, high-entropy tokens, and a credential's name with a value: `password=`, `DB_PASSWORD=`, `GITHUB_TOKEN=`, `AWS_SECRET_ACCESS_KEY=` and JSON keys like `"password":` (the last four were missed before November 2026). Every chat message is scanned, whoever wrote it, and so is everything that enters memory.
