@@ -65,6 +65,7 @@ const sameGoal = (goal: string): string => goal.replace(/\s+/g, " ").trim().toLo
 const YOURS_DOING = {
   give: { agent: "giving it work", room: "giving work in it", goal: "giving it again" },
   approve: { agent: "approving work for it", room: "approving work in it", goal: "approving it again" },
+  resume: { agent: "taking its work up again", room: "taking its work up again", goal: "taking it up again" },
 } as const;
 
 const Destination = z.union([z.strictObject({ room: TeamRoomId }), z.strictObject({ agent: AgentId })]);
@@ -338,7 +339,8 @@ export class TeamService {
    * Work it takes up again (team_resume): what stopped, failed or a restart cut off, its budget committed again on its own
    * word, as a run spends it anew (ownMoney). Never what you stopped, paused or declined (your word stands), nor what a
    * crash cut off mid-work (what it had done is yours to review), nor a step of an outcome (its outcome's to give again,
-   * within its budget), nor work whose agent or conversation you paused.
+   * within its budget), nor work whose agent or conversation you paused, nor a goal you stopped, paused or declined in the
+   * last day through an earlier task of it (whyYours).
    */
   resumeOwn(task: string, why: string): TeamTask {
     this.accepting();
@@ -354,6 +356,10 @@ export class TeamService {
     if (work.outcome) throw new TeamError(409, "It is a step of an outcome, which gives its work again within its own budget.");
     if (this.store.agent(work.assignee)?.enabled === false) throw new TeamError(409, "You paused its agent: taking its work up again is yours.");
     if (this.store.room(work.room)?.paused) throw new TeamError(409, "Its conversation is paused: taking its work up again is yours.");
+    // Nor a goal you stopped, paused or declined in the last day, through an earlier task of it (the re-check of 27
+    // November, U2): its pauses are asked above, in its own words, so only the goal rule answers here.
+    const yours = this.whyYours(work, "resume");
+    if (yours) throw new TeamError(409, yours);
     if ([...this.active.values()].some((a) => a.job.id === task)) throw new TeamError(409, "This work is still stopping. Wait for its current command to finish.");
     const bound = this.ownMoney(work.budgetUsd, "take up again", "Take it up again yourself.");
     this.store.resume({ task });

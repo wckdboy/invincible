@@ -35,7 +35,7 @@ Avatar profiles are cosmetic, versioned data: fixed enums and six-digit hex colo
     error, or its output) reaches it only fenced as the task's output under a mark of its own digest, 200 characters at
     most: an agent's VM can write a task's error, so those words are data, never its instructions.
   - **Your word stands:** work you stopped, paused or declined it only says is yours, in a line, and proposes nothing;
-    nor does it give that goal again as a new task within a day, nor approve itself a proposal of it (`whyYours`, as it never gives that work again). That is the goal's own words, whatever their spacing and case: said another way it is another goal to the node, held back only by the turn being told to propose nothing (the re-review of 27 November, T3).
+    nor does it give that goal again as a new task within a day, nor approve itself a proposal of it, nor take it up again through an earlier task of that goal (`whyYours`, as it never gives that work again). That is the goal's own words, whatever their spacing and case: said another way it is another goal to the node, held back only by the turn being told to propose nothing (the re-review of 27 November, T3).
   - **Bounded:** once when a task ends, and again only after an interruption; at most 6 such turns on a node in an hour,
     so a chain of its own turns waits between (each still within its gives and its money); a hand-off still under way
     after 30 days is let go of.

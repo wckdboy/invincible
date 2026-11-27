@@ -645,6 +645,21 @@ describe("task orchestration", () => {
     await service.settled();
     expect(ran).toEqual(["Drop the old tables"]);
   });
+  // The re-check of 27 November, U2 (R10): nor does its own resume take up a goal you stopped, through an earlier task.
+  test("its own resume takes up no goal you stopped in the last day through an earlier task of it: said why, and nothing is committed", () => {
+    const { store, service } = setup();
+    const goal = "Drop the old tables from the production database.";
+    const failed = service.giveOwn({ room: "workshop", assignee: "ada", title: "Drop the old tables", goal, budgetUsd: 2 });
+    store.finish(failed.id, "failed", "Its gates failed: 3 tables are still read by the billing job.");
+    // Given again, the same goal by default; you stop that one.
+    const again = service.againOwn(failed.id, { why: "the billing job is moved off them now" });
+    service.control({ action: "stop", task: again.id });
+    expect(store.task(again.id)).toMatchObject({ status: "stopped", error: "Stopped by you." });
+    const left = service.ownLeft();
+    expect(() => service.resumeOwn(failed.id, "its gates may pass now")).toThrow(`You stopped that work in the last day (“Drop the old tables”, ${again.id}): taking it up again is yours.`);
+    expect(store.task(failed.id)).toMatchObject({ status: "failed" });
+    expect(service.ownLeft()).toEqual(left);
+  });
   // The review of 27 November, N8 (A5, A5b, A10, A12): each refusal of its own tools, tested.
   test("your agent takes up again no work of an agent or a conversation you paused, stops no proposal, and gives again nothing still under way", () => {
     const { store, service } = setup();
