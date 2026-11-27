@@ -379,12 +379,11 @@ import Observation
 
     /// Everything, now (pulled to refresh, or Try again): each part read as the stream would have it read, once the node has
     /// proved itself (NodePin.ready). A node at its address that proved to be another is asked again only which node it
-    /// is, its refusal standing until a proof holds; then the stream, refused with it, opens again (the review of
+    /// is, its refusal standing until a proof holds; then the stream, refused with it, opens again (readMe; the review of
     /// apps-name-node, rule 2 and I3).
     func refresh() async {
         if client.pin.refused != nil {
             guard await readMe(), client.pin.refused == nil else { return }
-            if liveOn { link.retry() }
         }
         async let me = readMe()
         async let team = readTeam()
@@ -397,9 +396,12 @@ import Observation
 
     /// Whoami, read and proven (NodeClient.prove): whether it was answered (false: owed, Followers). The first proof pins
     /// the node, kept with the pairing while it is still this one, and what this device signs names it from then on; a
-    /// node that proves to be another, or whose proof fails, is asked nothing more (NodePin) until you try again, and an
-    /// answer that proves nothing leaves that as it was, said as it was.
+    /// node that proves to be another, or whose proof fails, is asked nothing more but this (NodePin): at Try again, and by
+    /// the fleet follower every 15 s while the stream is down, so a node put right comes back. An answer that proves
+    /// nothing leaves that as it was, said as it was; a proof that holds lifts it, and the stream, refused with it, opens
+    /// again, whichever asked (the re-check of apps-name-node, R2).
     @discardableResult private func readMe() async -> Bool {
+        let wasRefused = client.pin.refused != nil
         switch await attempt({ [client, proofs] in try await client.prove(check: proofs) }) {
         case .success(let answer):
             switch answer.proven {
@@ -418,6 +420,7 @@ import Observation
                 trouble = refused
                 return true
             }
+            if wasRefused, liveOn { link.retry() }
             guard let me = answer.me else {
                 trouble = NodeError(status: 200, message: "The node's answer to whoami wasn't what this app reads.")
                 return true

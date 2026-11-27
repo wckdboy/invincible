@@ -5,11 +5,22 @@ import Testing
 @testable import Invincible
 
 /// What a session does as its node answers whoami, against a node on this machine's loopback (LocalNode): a refusal
-/// stands until a proof holds (the re-check of apps-name-node, R1).
+/// stands until a proof holds, and a proof that lifts it opens the stream again (the re-check of apps-name-node, R1 and
+/// R2).
 @MainActor @Suite(.serialized) struct SessionProofTests {
     func session(at node: LocalNode, pinned: String?, tag: String) throws -> Session {
         let key = try DeviceKey.create(tag: tag)
         return Session(key: key, node: PairedNode(origin: node.origin, device: key.device, name: "tests", fleet: "f_tests", nodeId: pinned))
+    }
+
+    /// Waits until `done` holds, or `seconds` pass: whether it held.
+    func eventually(_ seconds: Double, _ done: () -> Bool) async -> Bool {
+        let end = Date.now.addingTimeInterval(seconds)
+        while !done() {
+            if Date.now > end { return false }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return true
     }
 
     // R1 (rule 2): an answer that gives no proof at all (a node from before, judged so only unpinned and before the cutoff)
@@ -58,6 +69,32 @@ import Testing
         #expect(session.whoami == nil)
         let asked = node.asked()
         #expect(!asked.isEmpty && asked.allSatisfy { $0.path.hasPrefix("/api/whoami") }, "Try again asked \(asked.map(\.path))")
+    }
+
+    // R2 (rule 2, I3): while refused, whoami alone is asked (by the fleet follower, every 15 s while the stream is down, so
+    // a node put right comes back); a proof that then holds lifts the refusal, and the stream, refused with it, opens again.
+    @Test func aProofThatLiftsARefusalOpensTheStreamAgain() async throws {
+        let node = try await LocalNode(.b)
+        defer { node.stop() }
+        let tag = "sh.invincible.bot.tests.proof.r2"
+        defer { try? DeviceKey.delete(tag: tag) }
+        let session = try session(at: node, pinned: node.a, tag: tag)
+        await session.refresh()
+        #expect(session.trouble?.notYourNode == node.b)
+        _ = node.asked()
+        session.live(true)
+        defer { session.live(false) }
+        // The stream is refused with it, so it is down at once, and the fleet follower asks whoami past the refusal.
+        #expect(await eventually(5) { node.seen().contains { $0.path.hasPrefix("/api/whoami") } })
+        let refused = node.asked()
+        #expect(refused.allSatisfy { $0.path.hasPrefix("/api/whoami") }, "while refused it asked \(refused.map(\.path))")
+        #expect(!session.linkUp)
+        // The node is put right, and the follower's next look (as every 15 s) proves it.
+        node.mode = .a
+        await session.reread(["fleet"], force: true)
+        #expect(session.client.pin.refused == nil && session.trouble == nil)
+        #expect(await eventually(5) { session.linkUp }, "the stream never opened again: it asked \(node.seen().map(\.path))")
+        #expect(!session.reconnecting)
     }
 }
 
