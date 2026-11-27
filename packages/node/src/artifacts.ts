@@ -3,6 +3,7 @@ import { extname, join, resolve, sep } from "node:path";
 import { type ArtifactSkipped, type ArtifactView, type NodeIdentity, randomId, redact } from "@invincible/core";
 import type { LedgerStore } from "@invincible/ledger";
 import type { CollectResult, ExtractLimits, LedgerEntryInput } from "@invincible/sandbox";
+import { loopOf, privateLoops } from "./private-data.ts";
 
 /*
  * Artifacts: a sandbox's work products, kept after the sandbox is gone. A run
@@ -172,7 +173,10 @@ export class ArtifactStore {
       if (size > LISTED_BYTES || listed.length >= 200) break;
       listed.push(file);
     }
-    const label = (input.label ?? input.path ?? "/work/out").slice(0, 200);
+    // (What a private loop's run keeps is named by its loop, not as it was asked to be: such a run is named by its goal,
+    // which says who wrote and what about. Its record replicates to every node: private-data.ts.)
+    const loop = loopOf(input.run, privateLoops(this.o.store));
+    const label = (loop !== null ? `Loop ${loop}` : (input.label ?? input.path ?? "/work/out")).slice(0, 200);
     this.o.store.emit(this.o.identity, "artifact.saved", {
       id,
       label,

@@ -1,12 +1,17 @@
 // Which runs are a private loop's (private-data.ts): by every id a loop's runs go by, a loop's name holding a dot too.
 import { expect, test } from "bun:test";
-import { callerOfLoops, runOfLoops, withheldRunLine } from "../src/private-data.ts";
+import { callerOfLoops, loopOf, runOfLoops, withheldRunLine } from "../src/private-data.ts";
 
 test("a run is a loop's as the loop calls it, as its arm runs it, and as its arm names a run of its own; no other", () => {
   const loops = new Set(["rent", "mail.home"]);
   for (const run of ["loop.rent", "arm.loop.rent", "arm.loop.rent.t1", "arm.loop.mail.home", "arm.loop.mail.home.t2", "loop.mail.home"]) expect([run, runOfLoops(run, loops)]).toEqual([run, true]);
   for (const run of ["loop.rental", "arm.loop.ren", "arm.coder", "arm.rent", "rent", "q-check", "arm.loop.mail", "loop.mail.homes", undefined, null, 7]) expect([run, runOfLoops(run, loops)]).toEqual([run, false]);
   expect(runOfLoops("arm.loop.rent", new Set())).toBe(false);
+});
+
+test("a run's loop is the longest of the loops' names that fits it, as a loop's name may hold a dot", () => {
+  const loops = new Set(["mail", "mail.home"]);
+  expect([loopOf("arm.loop.mail.home.t1", loops), loopOf("arm.loop.mail.t1", loops), loopOf("loop.mail", loops), loopOf("arm.loop.rent", loops)]).toEqual(["mail.home", "mail", "mail", null]);
 });
 
 test("a call is a loop's run's as the loop makes it (loop:<name>) and as its arm does (arm:loop.<name>); no other caller's", () => {

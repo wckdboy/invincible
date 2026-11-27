@@ -57,6 +57,16 @@ describe("keeping a sandbox's work", () => {
   const ledger: { resource: string; class: string; detail?: string }[] = [];
   const artifacts = new ArtifactStore({ store, identity, dir: temp(), ledger: (e) => ledger.push(e) });
 
+  test("what a private loop's run keeps is named by its loop, not by the goal it was given; any other run's as it asks", async () => {
+    // A loop that new mail wakes (wakes.ts): its runs are told who wrote and what about, in their goal, which names them.
+    store.emit(identity, "loop.wakes", { name: "rent", wakes: [{ kind: "mail", connector: "gmail", query: "from:ingrid" }], cooldownMs: 0 });
+    const goal = "Note who wrote and what about.\n\nWhat woke this run: new Gmail mail\n  From: Ingrid Vestergaard <ingrid@example.test>";
+    const kept = await artifacts.save(collector({ "out/triage.md": "noted" }), { sandbox: "0123456789", label: goal, run: "arm.loop.rent" });
+    const plain = await artifacts.save(collector({ "out/report.md": "a report" }), { sandbox: "abcdef0123", label: "A report", run: "arm.coder" });
+    expect([kept.artifact?.label, plain.artifact?.label]).toEqual(["Loop rent", "A report"]);
+    expect(JSON.stringify(store.lwwPrefix("artifact:").map((e) => e.value))).not.toContain("Ingrid");
+  });
+
   test("files are kept with their hashes, and the mind records what they are", async () => {
     const { artifact: kept } = await artifacts.save(collector({ "report.md": "# Beam\nδ = 1.67 mm\n", "plots/mode1.png": "PNG…", "data/u.csv": "x,u\n0,0\n" }), {
       sandbox: "0123456789",

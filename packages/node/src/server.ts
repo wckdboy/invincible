@@ -4265,7 +4265,12 @@ export function createApp(ctx: AppContext) {
         throw error;
       }
     },
-    artifacts: () => ({ artifacts: ctx.artifacts.list() }),
+    // (What a private loop's run kept is yours alone: listed on your devices only, and to anyone else not there.)
+    artifacts: (_input, p) => {
+      if (p.scopes.includes("fleet:admin")) return { artifacts: ctx.artifacts.list() };
+      const loops = privateLoops(ctx.store);
+      return { artifacts: ctx.artifacts.list().filter((artifact) => !runOfLoops(artifact.run, loops)) };
+    },
     saveArtifact: (input, p) => {
       const { on, run: relayed, ...rest } = input;
       const run = p.kind === "arm" ? armRun(p.label!) : p.kind === "node" ? relayed : undefined;
@@ -4293,6 +4298,8 @@ export function createApp(ctx: AppContext) {
     },
     artifactFile: async (input, p) => {
       const artifact = ctx.artifacts.get(input.id);
+      // (A node relaying your device's ask was asked as you, and checked it there.)
+      if (artifact && p.kind !== "node" && !p.scopes.includes("fleet:admin") && runOfLoops(artifact.run, privateLoops(ctx.store))) throw new HttpError(404, "no such artifact");
       // Any device can fetch any artifact: the files stay where they were kept, so ask that node,
       // signed as this one (it checks the same scope). A forwarded request is never sent on.
       if (artifact && !artifact.here && p.kind !== "node") {

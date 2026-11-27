@@ -1,9 +1,10 @@
 // What private-answers left a gap in (the re-review of 27 November, B2, B3, B4; its PoCs turned around): what was
 // recorded before it, a private connector's call a standing order answers, and one removed. And the side doors a
-// private run's words took after it: a loop once private, a run's web searches, and a private loop's calls to
-// connectors that aren't private. Against a real daemon (startDaemon) and its routes, with stand-ins for Google, for
-// Home Assistant on its LAN address, for a notes service and for the search engine: only loopback reaches the network,
-// and every other origin gets a stand-in's 404. Every name, address and message is made up; the keys are obviously fake.
+// private run's words took after it: a loop once private, a run's web searches, a private loop's calls to connectors that
+// aren't private, and what a private run kept. Against a real daemon (startDaemon) and its routes, with stand-ins for
+// Google, for Home Assistant on its LAN address, for a notes service and for the search engine: only loopback reaches
+// the network, and every other origin gets a stand-in's 404. Every name, address and message is made up; the keys are
+// obviously fake.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -176,4 +177,21 @@ test("a private loop's calls to a connector that isn't private are written as a 
   expect([theirs.state, theirs.args, theirs.target, held(JSON.stringify(theirs))]).toEqual(["waiting", {}, "notes.post", []]);
   const yours = ((await admin("actions")).body.actions as ActionView[]).find((a) => a.by === "loop:mailpost")!;
   expect(yours.args).toEqual({ text: "Ingrid wrote about the rent arrears" });
+});
+
+test("what a private run kept is listed on your devices alone, and an agent is told it isn't there", async () => {
+  // (A loop that runs on a node with sandboxes; its mail is what makes it private.)
+  expect((await admin("setLoop", { name: "keeper", schedule: "0 9 * * 1", task: { kind: "tell", text: "New mail came." }, wakes: [{ kind: "mail", connector: "gmail", query: "from:ingrid" }] })).status).toBe(200);
+  // As a loop's run keeps its /work/out (run-cli.ts closeWorkshop): recorded for its sandbox's run, arm.loop.<name>.
+  const file = (path: string) => ({ path, size: 10, sha256: "0".repeat(64) });
+  const kept = "art_PRIVATEPRIVATEPRIVATE0";
+  daemon.store.emit(daemon.identity, "artifact.saved", { id: kept, label: "Ingrid Vestergaard: Quarterly rent arrears", run: "arm.loop.keeper", sandbox: "0123456789", bytes: 10, count: 1, files: [file("ingrid-rent-arrears.md")] });
+  daemon.store.emit(daemon.identity, "artifact.saved", { id: "art_PLAINPLAINPLAINPLAIN00", label: "A report", run: "arm.coder", sandbox: "abcdef0123", bytes: 10, count: 1, files: [file("report.md")] });
+  const theirs = (await send(agent, "artifacts")).body.artifacts as { id: string }[];
+  expect([theirs.some((a) => a.id === kept), theirs.some((a) => a.id === "art_PLAINPLAINPLAINPLAIN00"), held(JSON.stringify(theirs))]).toEqual([false, true, []]);
+  const unknown = await send(agent, "artifactFile", { id: "art_NOWHERENOWHERENOWHERE0", path: "a.md" });
+  expect([unknown.status, (await send(agent, "artifactFile", { id: kept, path: "ingrid-rent-arrears.md" })).body]).toEqual([404, unknown.body]);
+  // Yours: listed, and its file asked of the node that holds it (here none: the stand-in kept no files).
+  expect(((await admin("artifacts")).body.artifacts as { id: string }[]).some((a) => a.id === kept)).toBe(true);
+  expect((await admin("artifactFile", { id: kept, path: "ingrid-rent-arrears.md" })).status).toBe(421);
 });

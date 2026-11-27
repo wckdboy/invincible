@@ -6,8 +6,8 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
  * Your private data where it isn't a private connector's own call (PRIVATE_CONNECTORS; the re-review of 27 November,
  * B1, B2, B4, and the side doors after it): a connector is private if it ever was, as the log says it was installed,
  * not only as it stands now; and so is a loop, when what it runs on is or was: one that new mail wakes, or one whose task
- * calls a private connector. What such a loop's runs record, the lines they write in their own words and the calls
- * they make are yours alone.
+ * calls a private connector. What such a loop's runs record, the lines they write in their own words, the calls they
+ * make and what they keep are yours alone.
  */
 
 /** Whether a connector's answers are your private data: its id, its manifest now, or any manifest it was ever installed with. */
@@ -19,13 +19,20 @@ export function connectorIsPrivate(store: LedgerStore, id: string): boolean {
 export const loopRun = (run: unknown): run is string => typeof run === "string" && /^(?:arm\.)?loop\./.test(run);
 
 /**
- * Whether a run is one of these loops' runs, by its id: as the loop calls it (`loop.<name>`), as its arm runs it
+ * Which of these loops a run is one of, by its id: as the loop calls it (`loop.<name>`), as its arm runs it
  * (`arm.loop.<name>`), or as its arm names a run of its own (`arm.loop.<name>.<id>`, server.ts runRef). A loop's name
- * may hold a dot, so each of the loops is tried.
+ * may hold a dot, so it is the longest of the loops' names that fits; null when none does.
  */
-export function runOfLoops(run: unknown, loops: ReadonlySet<string>): boolean {
+export function loopOf(run: unknown, loops: ReadonlySet<string>): string | null {
   const name = loopRun(run) ? run.replace(/^(?:arm\.)?loop\./, "") : null;
-  return name !== null && [...loops].some((loop) => name === loop || name.startsWith(`${loop}.`));
+  let found: string | null = null;
+  if (name !== null) for (const loop of loops) if ((name === loop || name.startsWith(`${loop}.`)) && (found === null || loop.length > found.length)) found = loop;
+  return found;
+}
+
+/** Whether a run is one of these loops' runs (loopOf). */
+export function runOfLoops(run: unknown, loops: ReadonlySet<string>): boolean {
+  return loopOf(run, loops) !== null;
 }
 
 /** Whether a call's caller (an action's `by`) is one of these loops' runs: as the loop calls (`loop:<name>`), or as its arm does (`arm:loop.<name>`). */
