@@ -77,6 +77,15 @@ describe("every action the connector catalog ships is yours or your agent's to d
     }
   });
 
+  // (The re-review of 27 November, A2: a native is held to what the node's code for it does. The catalog says just that.)
+  test("each of its natives is held to just its own label: the class the catalog gives it is what the node's code does", () => {
+    for (const [id, entry] of Object.entries(CATALOG)) {
+      for (const [name, tool] of Object.entries(entry.manifest?.tools ?? {})) {
+        if ("native" in tool && tool.native) expect([`${id}.${name}`, heldClass(entry.manifest!, tool)]).toEqual([`${id}.${name}`, tool.class]);
+      }
+    }
+  });
+
   test("each that doesn't ask is free, and logged: reading, creating, changing", () => {
     const free = tools.filter((t) => !asking.includes(t));
     expect(free.length).toBeGreaterThan(0);

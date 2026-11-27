@@ -295,21 +295,60 @@ const GITHUB_WRITES: readonly RegExp[] = [
   /^\/repos\/[^/]+\/[^/]+\/pulls\/[^/]+\/update-branch$/, // a pull request's branch merged forward
   /^\/repos\/[^/]+\/[^/]+\/actions\/workflows\/[^/]+\/dispatches$/, // a workflow run, with the secrets
   /^\/repos\/[^/]+\/[^/]+\/dispatches$/, // a repository_dispatch: the workflows that listen to it run
+  // (The re-review of 27 November, A2.)
+  /^\/repos\/[^/]+\/[^/]+\/pulls\/[^/]+\/merge$/, // a pull request merged into its base
+  /^\/repos\/[^/]+\/[^/]+\/statuses\/[^/]+$/, // a commit status: a check a protection requires, passed, where it doesn't pin its source
+  /^\/repos\/[^/]+\/[^/]+\/branches\/[^/]+\/rename$/, // a branch renamed, its protections and pull requests with it
 ];
 
 /**
- * The class a tool is held to: its own, but outward where its label would let a request go unasked that asks whatever it
- * is called. At GitHub's API that is a write of a branch, a tag or a commit, or a run of a workflow (GITHUB_WRITES): each
- * runs a commit's own workflows, or a workflow itself, with the repository's secrets, whoever made the commit; and a
- * GraphQL request whose body holds a mutation (createRef, updateRef, createCommitOnBranch, mergePullRequest…), judged by
- * the call's arguments when there are any. A GitHub connector installed while branch.create was free keeps that
- * definition, and is held to this.
+ * What each of the node's natives does, as the least it is held to: the node's own code, so what a manifest that names
+ * one labels it doesn't free it (the re-review of 27 November, A2). A label may hold one stricter. The catalog labels
+ * each as this (packages/models/test/catalog-whose.test.ts).
+ */
+const NATIVE_HELD: Record<NativeName, ConnectorTool["class"]> = {
+  "github.ship": "outward",
+  "github.ship.update": "outward",
+  "github.merge": "outward",
+  "gmail.search": "read",
+  "gmail.read": "read",
+  "gmail.draft": "create",
+  "gmail.send": "outward",
+  "gmail.archive": "modify",
+  "gmail.trash": "delete",
+  "outlook.search": "read",
+  "outlook.read": "read",
+  "outlook.draft": "create",
+  "outlook.send": "outward",
+  "outlook.archive": "modify",
+  "outlook.trash": "delete",
+  "cloudflare.verify": "read",
+};
+/** How far a class lets a call go unasked: a read furthest; a delete and an outward call ask alike. */
+const FREEDOM: Record<ConnectorTool["class"], number> = { read: 3, create: 2, modify: 1, delete: 0, outward: 0 };
+
+/**
+ * The class a tool is held to: its own, but stricter where its label would let a request go unasked that asks whatever
+ * it is called.
+ * - A native is held to what the node's code for it does (NATIVE_HELD): a merge, a ship, a mail sent, whatever its label.
+ * - At GitHub's API, a write of a branch, a tag or a commit, a merge, a status, or a run of a workflow (GITHUB_WRITES) is
+ *   outward: each runs a commit's own workflows, or a workflow itself, with the repository's secrets, whoever made the
+ *   commit. So is a GraphQL request whose body holds a mutation (createRef, updateRef, createCommitOnBranch,
+ *   mergePullRequest…), judged by the call's arguments when there are any.
+ * - The path is judged as the template says it and, given the call's arguments, as the request it builds says it: a
+ *   template may name its segments through parameters (/repos/{owner}/{repo}/{kind}/refs, /{api}).
+ * A GitHub connector installed while branch.create was free keeps that definition, and is held to this.
  */
 export function heldClass(manifest: { origin?: string; basePath?: string }, tool: ConnectorTool, args?: Record<string, ArgValue>): ConnectorTool["class"] {
+  const own = tool.native === undefined ? undefined : NATIVE_HELD[tool.native];
+  if (own !== undefined && FREEDOM[own] < FREEDOM[tool.class]) return own;
   if (manifest.origin !== "https://api.github.com" || tool.method === "GET" || (tool.class !== "create" && tool.class !== "modify")) return tool.class;
-  const path = `${manifest.basePath ?? ""}${tool.path}`;
-  if (GITHUB_WRITES.some((write) => write.test(path))) return "outward";
-  if (path === "/graphql" && args !== undefined && /\bmutation\b/i.test(JSON.stringify(args))) return "outward";
+  const template = `${manifest.basePath ?? ""}${tool.path}`;
+  // (A path parameter as the request goes out: its value, slashes and all, which GitHub may read as its segments.)
+  const built = args === undefined ? template : template.replace(/\{([^}]+)\}/g, (whole, name: string) => (args[name] === undefined || typeof args[name] === "object" ? whole : String(args[name])));
+  const paths = [template, built];
+  if (paths.some((path) => GITHUB_WRITES.some((write) => write.test(path)))) return "outward";
+  if (paths.includes("/graphql") && args !== undefined && /\bmutation\b/i.test(JSON.stringify(args))) return "outward";
   return tool.class;
 }
 

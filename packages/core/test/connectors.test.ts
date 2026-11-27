@@ -89,6 +89,24 @@ describe("the class a tool is held to", () => {
     expect(heldClass({ ...GITHUB, basePath: "/repos/lin-example/site" }, tool("POST", "/git/refs", "create"))).toBe("outward");
   });
 
+  // The re-review of 27 November, A2: a native is the node's own code, held to what that code does, whatever a manifest
+  // that names it labels it. A label may hold it stricter.
+  test("a native of the node's is held to what it does, whatever a manifest that names it labels it: stricter is kept, freer never", () => {
+    const named = (native: string, cls: "read" | "create" | "modify" | "outward" | "delete", method: "GET" | "POST" | "PATCH" | "PUT" = "POST") => ({ description: "t", method, path: "/x", native, class: cls }) as never;
+    const GMAIL = { origin: "https://gmail.googleapis.com" };
+    const OUTLOOK = { origin: "https://graph.microsoft.com" };
+    expect(heldClass(GMAIL, named("gmail.send", "create"))).toBe("outward");
+    expect(heldClass(OUTLOOK, named("outlook.send", "modify"))).toBe("outward");
+    expect(heldClass(GMAIL, named("gmail.trash", "modify"))).toBe("delete");
+    expect(heldClass(OUTLOOK, named("outlook.trash", "create"))).toBe("delete");
+    expect(heldClass(GITHUB, named("github.merge", "modify", "PUT"))).toBe("outward");
+    expect(heldClass(GITHUB, named("github.ship", "create"))).toBe("outward");
+    expect(heldClass(GITHUB, named("github.ship.update", "modify", "PATCH"))).toBe("outward");
+    // Held stricter by its label, it is as labeled; and one that only reads is a read.
+    expect(heldClass(GMAIL, named("gmail.archive", "outward"))).toBe("outward");
+    expect(heldClass(GMAIL, named("gmail.read", "read", "GET"))).toBe("read");
+  });
+
   // The review of 27 November, N7: every other way GitHub's API writes a branch or runs a workflow is held too.
   test("at GitHub's API a commit, a merge, a release, a fork's sync, a branch updated, a workflow run or a repository dispatch is outward, whatever its label", () => {
     for (const [method, path] of [
