@@ -213,14 +213,14 @@ struct SplitPlaces: View {
             RosterList(session: session, current: place, go: { place = $0 })
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
                 .toolbar {
-                    // Its head, as the web's: the app's mark and name, and search (⌘K).
+                    // Its head: the app's mark, alone and on no glass of its own (a bar's item has no room for the wordmark
+                    // beside it: on 27 November 2026 the two were cut to an "I" over an "N…" in a glass circle), and search (⌘K).
                     ToolbarItem(placement: .topBarLeading) {
-                        HStack(spacing: 9) {
-                            AppMark(size: 20)
-                            Wordmark()
-                        }
-                        .accessibilityElement(children: .combine)
+                        AppMark(size: 22)
+                            .accessibilityElement()
+                            .accessibilityLabel("Invincible")
                     }
+                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { searching = true } label: { Label("Search, or ask", systemImage: "magnifyingglass") }
                             .help("Search, or ask (⌘K)")

@@ -35,7 +35,7 @@ Regenerate the icons with `bun scripts/brand.ts --png`. Tests pin each icon's si
 
 ### Wordmark
 
-"INVINCIBLE" in the system sans: capitals at 650 weight, 0.2em tracking, 12–13 px, beside the mark at the head of the sidebar (`.wordmark-text`; the Apple app's iPad and Mac sidebar, `Wordmark`; Android's sidebar). No custom lettering; the spacing does the work.
+"INVINCIBLE" in the system sans: capitals at 650 weight, 0.2em tracking, 12–13 px, beside the mark at the head of the sidebar (`.wordmark-text`; the Mac app's sidebar, `Wordmark`; Android's sidebar). An iPad's sidebar heads its bar with the mark alone: a bar item has no room for the wordmark beside it. No custom lettering; the spacing does the work.
 
 ### The primary and its agents
 
