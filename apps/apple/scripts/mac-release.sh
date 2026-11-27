@@ -8,7 +8,7 @@
 #   - the feed written for that one release: apps/site/public/mac/appcast.xml, which the site's deploy serves at
 #     https://invincible.sh/mac/appcast.xml. Its archive is the GitHub release mac-<build>, too big for the site.
 #
-#   apps/apple/scripts/mac-release.sh     then publish as it says: the release first, then the feed (commit and push)
+#   apps/apple/scripts/mac-release.sh     then publish as it says: the release first, then the feed (commit it and land it through a pull request)
 #
 # Needs Xcode, xcodegen, the Developer ID and the notarytool profile invincible-notary in this Mac's keychain, and Sparkle's
 # tools, which the build resolves into build/SourcePackages.
@@ -68,6 +68,7 @@ XML
 
 echo "→ ready: apps/apple/$OUT/$NAME, and the feed in apps/site/public/mac/appcast.xml"
 echo "  publish the archive first: its tag on sovware.io, then the release on GitHub (a tag made there is deleted by the mirror):"
-echo "    scripts/release-tag.sh mac-$BUILD $COMMIT"
+echo "    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.github.url GIT_CONFIG_VALUE_0=https://github.com/$REPO.git \\"
+echo "      scripts/release-tag.sh mac-$BUILD $COMMIT     (its watch for the mirror is given a github remote for this run only, as apps/android/scripts/publish.sh does)"
 echo "    gh release create mac-$BUILD apps/apple/$OUT/$NAME --repo $REPO --verify-tag --title 'Invincible for Mac $VERSION ($BUILD)' --notes '…'"
-echo "  then the feed: commit apps/site/public/mac/appcast.xml and push (the site deploys from main)"
+echo "  then the feed: commit apps/site/public/mac/appcast.xml and land it through a pull request into main (main takes only what passed CI); the site deploys from main"
