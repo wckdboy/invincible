@@ -311,8 +311,11 @@ with its own sidecar on its tailnet address. It never touches the owner's nodes,
 times every round trip on its own clock: an event comes back as the other's echo (two pushes, halved), and a device it
 revokes comes back as the other's word that it refuses it.
 
+Each takes a directory of its own as `--root`, empty or not there yet, of any mode, and removes it when it ends. It keeps
+its node's home there, and its sidecars' sockets in a folder it makes inside with mode 0700, as a sidecar's socket needs.
+
 ```sh
-# on the serving machine (its tailnet address, an empty directory, two ports open to the tailnet: 7470/tcp, 7471/udp)
+# on the serving machine (its tailnet address, a directory of its own, two ports open to the tailnet: 7470/tcp, 7471/udp)
 bun bench/fabric/remote.ts serve --qamp <qamp for this machine> --advertise 192.0.2.10 --root /tmp/q5 --port 7470 --qamp-port 7471
 # on the measuring machine, with the invite the first one printed
 bun bench/fabric/remote.ts measure --qamp <qamp for this machine> --advertise 192.0.2.20 --root /tmp/q5 --invite <invite> --samples 30 --out results.json

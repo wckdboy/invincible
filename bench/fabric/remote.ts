@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { bodyFingerprint, ceilingThreads, clientIdentity, type DeviceId, FABRIC, type HandedView, KERNEL, LINK_PATHS, newClientSecret, REFERENCE_SINGLE, routes, type RouteName, signRequest, utf8 } from "../../packages/core/src/index.ts";
@@ -38,6 +38,9 @@ const PORT = Number(values.port ?? 7470);
 const QPORT = Number(values["qamp-port"] ?? 7471);
 const N = Number(values.samples ?? 30);
 mkdirSync(ROOT, { recursive: true, mode: 0o700 });
+// Its sidecars' sockets, in a folder of its own made here (mkdtemp's, mode 0700): a sidecar takes a socket only in a folder
+// that is its node's alone, and a root made beforehand (mkdir's, 0755) isn't.
+const SOCKETS = mkdtempSync(join(ROOT, "s-"));
 
 const caps = (hostname: string, extra: Partial<Capabilities> = {}): Capabilities => ({ os: process.platform, arch: process.arch, hostname, cores: 32, cpu: "bench", memoryGb: 128, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: ["git"], localModels: [], tailscale: null, ...extra });
 const measure: NonNullable<DaemonOptions["measure"]> = async (reason, body, limit) => {
@@ -271,13 +274,13 @@ try {
   }
   record("first answer, fresh connection · HTTP, signed request", freshHttp);
   // A sidecar of this node's key, warmed on a throwaway one of its own on loopback, then its first call to the server.
-  const warmer = new Sidecar({ home: join(ROOT, "warmer"), key: async () => transportKeyOf(randomBytes(32), "n_warmer"), binary: () => QAMP, listen: () => `127.0.0.1:${QPORT + 10}`, name: "warmer", log: () => {}, socket: join(ROOT, "w.sock") });
+  const warmer = new Sidecar({ home: join(ROOT, "warmer"), key: async () => transportKeyOf(randomBytes(32), "n_warmer"), binary: () => QAMP, listen: () => `127.0.0.1:${QPORT + 10}`, name: "warmer", log: () => {}, socket: join(SOCKETS, "w.sock") });
   await warmer.start();
   const freshQamp: number[] = [];
   const coldQamp: number[] = [];
   for (let i = 0; i < N; i++) {
     // This node's own transport key, from its keystore; each call signed by its device key, before the clock starts.
-    const fresh = new Sidecar({ home: join(ROOT, "node"), key: () => home.transportKey("file", me.identity.id), binary: () => QAMP, listen: () => null, name: "fresh", log: () => {}, socket: join(ROOT, `f${i % 2}.sock`) });
+    const fresh = new Sidecar({ home: join(ROOT, "node"), key: () => home.transportKey("file", me.identity.id), binary: () => QAMP, listen: () => null, name: "fresh", log: () => {}, socket: join(SOCKETS, `f${i % 2}.sock`) });
     await fresh.start();
     if (fresh.state !== "up") throw new Error(`a fresh sidecar didn't start: ${fresh.why}`);
     const toWarmer = await me.fabric.seal(LINK_PATHS.sync, { have });
