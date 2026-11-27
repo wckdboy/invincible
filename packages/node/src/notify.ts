@@ -841,6 +841,11 @@ export class NotifyService {
     return this.o.db.remove(device);
   }
 
+  /** The live stream's `notify`: moves when what Settings shows moves, or something is kept for a device to collect. */
+  stamp(): string {
+    return this.o.db.stamp();
+  }
+
   /** The zone your day is read in: the one your devices last said, else quiet hours' (the node's own until you set one). */
   zone(): string {
     return this.ownerZone();

@@ -30,7 +30,7 @@ import { badgeMessage, type Badging, showBadge } from "./lib/badge.ts";
 import { readsFor } from "./lib/prefetch.ts";
 import { reachability } from "./lib/reach.ts";
 import { connectionBanner } from "./ui/banner.ts";
-import { syncPush } from "./views/notifications.ts";
+import { syncPush, takeDownWithdrawn } from "./views/notifications.ts";
 import { connectorsView } from "./views/connectors.ts";
 import { findingsView } from "./views/findings.ts";
 import { fleetView, openInvite } from "./views/fleet.ts";
@@ -538,6 +538,8 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   };
   // (Asked again when the turns or the runs change; every 15 s while the node's stream is down.)
   lifetime.signal.addEventListener("abort", live.follow(["turns", "runs"], work, 15_000));
+  // What was answered on another device is taken down here as soon as the node says your notifications changed.
+  if (can("mind:read")) lifetime.signal.addEventListener("abort", live.follow(["notify"], () => takeDownWithdrawn(base.api, true), null));
   chatFromAddress();
   const initial = routeFromHash() ?? home();
   // (Tidied to its page; Team's address keeps its room and tab, and a task's its id, which is what a reload comes back to.)

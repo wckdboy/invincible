@@ -1834,6 +1834,8 @@ export function createApp(ctx: AppContext) {
       screenSessions: timedStamp(() => mindCounts.of("screenSessions"), (now) => screenSessionViews(now), (s) => (s.state === "waiting" ? s.answerBy : s.state === "allowed" ? s.until : null)),
       questions: () => (ctx.questions?.list() ?? []).map((q) => q.id).join(","),
       notices: () => String(mindCounts.of("notices")),
+      // Your notifications as Settings shows them, and what's kept for a device that collects its own (it collects on this).
+      notify: () => ctx.notify.stamp(),
       // Which runs are in hand and how each stands; not each step one reports.
       runs: () => ctx.runs.list().map((q) => `${q.by}\u0000${q.run}\u0000${q.state}\u0000${q.silent ? 1 : 0}`).join("\u0001"),
       team: () => ctx.team?.store.version() ?? "",

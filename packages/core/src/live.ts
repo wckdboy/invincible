@@ -35,6 +35,11 @@ import type { RouteName } from "./api.ts";
  *    the mind's count of events.
  *  - `turns`: a turn began or ended, or your chats changed; not each step a turn takes.
  *  - `runs`: a run began or ended, changed its state or fell silent; not each step it reports.
+ *
+ * And one is told a little more widely than its route answers: `notify` moves when what your notifications' settings show
+ * moves (who is told and how sends to them went, what was sent, lost or withdrawn), and when a notification is kept for a
+ * device that collects its own, which collects it then (the Mac app). A keeping is a sending, which the day's sent list
+ * shows too; a device's own collecting moves nothing.
  */
 
 /** What the stream tells of: each the name of a route a device reads, a GET under one scope. */
@@ -49,6 +54,7 @@ export const LIVE_TOPICS = [
   "screenSessions",
   "questions",
   "notices",
+  "notify",
   "runs",
   "team",
   "turns",

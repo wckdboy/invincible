@@ -106,10 +106,11 @@ async function takeDown(reg: ServiceWorkerRegistration, withdrawn: readonly stri
   }
 }
 
-/** When the app comes back into view: what was answered elsewhere meanwhile is taken down here (at most once a minute). */
+/** When the app comes back into view: what was answered elsewhere meanwhile is taken down here (at most once a minute);
+ * and at once when the node's stream says your notifications changed (`told`). */
 let lastTakeDown = 0;
-export async function takeDownWithdrawn(api: Api): Promise<void> {
-  if (!capable() || Notification.permission !== "granted" || Date.now() - lastTakeDown < 60_000) return;
+export async function takeDownWithdrawn(api: Api, told = false): Promise<void> {
+  if (!capable() || Notification.permission !== "granted" || (!told && Date.now() - lastTakeDown < 60_000)) return;
   lastTakeDown = Date.now();
   try {
     const reg = await registration();
@@ -443,5 +444,23 @@ export function notificationsSection(ctx: Ctx, scope: Scope): HTMLElement | null
 
   render();
   void refresh();
+  // Read again when the node says your notifications changed (a device turned on, one sent, your settings set elsewhere);
+  // not under your hands while you edit here: then once you leave the section.
+  let stale = false;
+  scope.add(
+    ctx.live.follow(
+      ["notify"],
+      () => {
+        if (el.contains(document.activeElement)) stale = true;
+        else void refresh();
+      },
+      null,
+    ),
+  );
+  el.addEventListener("focusout", (event) => {
+    if (!stale || el.contains(event.relatedTarget as Node | null)) return;
+    stale = false;
+    void refresh();
+  });
   return el;
 }

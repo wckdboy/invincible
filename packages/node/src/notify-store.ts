@@ -108,6 +108,8 @@ const COLLECT_KEPT = 60;
 
 export class NotifyStore {
   private readonly db: Database;
+  /** How many were kept for devices that collect since this began (each a sending): what tells them to collect. */
+  private keptCount = 0;
 
   constructor(
     path: string,
@@ -373,6 +375,29 @@ export class NotifyStore {
         .run(device, payload.tag, JSON.stringify(payload), this.now(), expires);
       this.db.query("DELETE FROM collect WHERE device = ? AND rowid NOT IN (SELECT rowid FROM collect WHERE device = ? ORDER BY at DESC, rowid DESC LIMIT ?)").run(device, device, COLLECT_KEPT);
     })();
+    this.keptCount += 1;
+  }
+
+  /**
+   * The live stream's `notify` (core's live.ts): a short string that moves when what GET /api/notify answers from moves
+   * (the subscriptions and how sends to them went, what was sent, lost and withdrawn, the Live Activities, the zones your
+   * devices said, the prefs), or when something was kept for a device that collects. Not when one collects, nor when a
+   * tag is withdrawn again: what it tells is no more than the route and the day's sent list say, and a device isn't told
+   * to collect again by its own collecting.
+   */
+  stamp(): string {
+    const row = this.db
+      .query<{ s: string }, []>(
+        `SELECT (SELECT COUNT(*) || '.' || COALESCE(MAX(updated_at), 0) || '.' || COALESCE(SUM(last_ok), 0) || '.' || COALESCE(SUM(failures), 0) FROM subscriptions)
+           || ':' || (SELECT COALESCE(MAX(id), 0) FROM sent)
+           || ':' || (SELECT COUNT(*) || '.' || COALESCE(MAX(at), 0) FROM lost)
+           || ':' || (SELECT COUNT(*) || '.' || COALESCE(MAX(rowid), 0) FROM withdrawn)
+           || ':' || (SELECT COUNT(*) FROM activities)
+           || ':' || COALESCE((SELECT group_concat(zone, ',') FROM (SELECT COALESCE(zone, '') AS zone FROM presence ORDER BY device)), '')
+           || ':' || COALESCE((SELECT v FROM settings WHERE k = 'prefs'), '') AS s`,
+      )
+      .get();
+    return `${this.keptCount}:${row?.s ?? ""}`;
   }
 
   /** What's kept for that device and hasn't expired, the oldest first: handed over once, and forgotten. */

@@ -83,11 +83,19 @@ async function pair(name: string, scopes: Scope[]) {
     const response = await fetch(`http://127.0.0.1:${port}${r.path}`, { method: r.method, headers });
     return { status: response.status, body: (await response.json().catch(() => ({}))) as T };
   };
+  /** A route with a body, signed over it as it is sent. */
+  const call = async <T = any>(route: RouteName, input: unknown = {}): Promise<{ status: number; body: T }> => {
+    const r = routes[route];
+    const body = utf8(JSON.stringify(input));
+    const headers = await signRequest(device, signer, r.method, r.path, body);
+    const response = await fetch(`http://127.0.0.1:${port}${r.path}`, { method: r.method, headers: { ...headers, "content-type": "application/json" }, body });
+    return { status: response.status, body: (await response.json().catch(() => ({}))) as T };
+  };
   /** Its stream, opened again from where one left off when `since` is given (core's livePath). */
   const listen = async (since?: string): Promise<Listening> => listenAt(livePath(since));
   /** Its stream at exactly this path and query, signed over them as they are sent. */
   const listenAt = async (path: string): Promise<Listening> => listenWith(await signRequest(device, signer, "GET", path, new Uint8Array()), path);
-  return { device, read, listen, listenAt };
+  return { device, read, call, listen, listenAt };
 }
 
 async function listenWith(headers: Record<string, string>, path: string = routes.live.path): Promise<Listening> {
@@ -273,6 +281,21 @@ describe("your devices' live stream", () => {
     daemon.chats.create({ title: "Release notes", project: null, role: "planner" });
     const heard = await live.next(told("turns"), 0);
     expect(heard.at - wrote).toBeLessThan(1_000);
+    live.close();
+  });
+
+  test("a notification kept for a device that collects its own is told to it as `notify` within a look: it collects on that", async () => {
+    const mac = await pair("mac-4", CLIENT_DEFAULT_SCOPES);
+    const live = await mac.listen();
+    await live.next((e) => e.type === "hello", 0);
+    expect((await mac.call("collectSubscribe")).status).toBe(200);
+    const asked = performance.now();
+    expect((await mac.call("notifyTest")).status).toBe(200);
+    const heard = await live.next(told("notify"), asked);
+    expect(heard.at - asked).toBeLessThan(1_000);
+    const { body } = await mac.call<{ on: boolean; notifications: { kind: string }[] }>("notifyCollect");
+    expect(body.on).toBe(true);
+    expect(body.notifications.map((n) => n.kind)).toContain("test");
     live.close();
   });
 

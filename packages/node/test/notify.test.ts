@@ -849,3 +849,45 @@ describe("the day's digest", () => {
     expect(h.sent).toHaveLength(1);
   });
 });
+
+describe("the live stream's `notify`: what tells a device that collects to collect", () => {
+  const scopes = ["mind:read", "chat"];
+  const devices = [
+    { id: "c_phone", name: "phone", kind: "client" as const, scopes },
+    { id: "c_mac", name: "Mac", kind: "client" as const, scopes },
+  ];
+
+  test("it moves when something is kept for a device that collects, a tag is withdrawn, or Settings would show otherwise; not when one collects, nor at rest", async () => {
+    const h = harness({ devices });
+    h.service.subscribeCollect("c_mac");
+    let last = h.service.stamp();
+    const moved = (): boolean => {
+      const stamp = h.service.stamp();
+      const yes = stamp !== last;
+      last = stamp;
+      return yes;
+    };
+    // Told as every device is, and kept for the Mac to collect.
+    h.run({ run: "q-1", state: "working" });
+    h.run({ run: "q-1", state: "done" });
+    await h.look();
+    expect(moved()).toBe(true);
+    // It collects: that moves nothing, so its own collecting never tells it to collect again.
+    expect(h.service.collect("c_mac").notifications).toHaveLength(1);
+    expect(moved()).toBe(false);
+    // What went away is taken down where it shows; withdrawn again, nothing more is told.
+    h.db.withdraw("t-0123456789abcdefghijkl");
+    expect(moved()).toBe(true);
+    h.advance(1_000);
+    h.db.withdraw("t-0123456789abcdefghijkl");
+    expect(moved()).toBe(false);
+    // What Settings shows: your settings, and another device turned on.
+    h.db.setPrefs({ ...h.db.prefs(), perDay: 7 });
+    expect(moved()).toBe(true);
+    h.db.put("c_phone", { endpoint: "https://web.push.apple.com/stand-in-2", p256dh: "p", auth: "a", service: "Apple" });
+    expect(moved()).toBe(true);
+    // At rest, nothing.
+    h.advance(60_000);
+    expect(moved()).toBe(false);
+  });
+});
