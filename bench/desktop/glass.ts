@@ -54,6 +54,8 @@ const local = /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(setup.endpoint);
 const chrome = Bun.spawn([CHROME, "--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--use-mock-keychain", "--password-store=basic", "--hide-scrollbars", "--mute-audio", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--window-size=1280,1000",
   // (The node is plain HTTP on the tailnet: this origin alone is a secure one to this browser, which WebCodecs needs.)
   ...(local ? [] : [`--unsafely-treat-insecure-origin-as-secure=${setup.endpoint}`]),
+  // (Run as root, on the VM's own host, as first-load.ts is in CI: Chrome's sandbox refuses root.)
+  ...(process.env.INVINCIBLE_CHROME_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
   `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdout: "ignore", stderr: "ignore" });
 const portFile = join(profile, "DevToolsActivePort");
 for (let i = 0; i < 300 && !existsSync(portFile); i++) await sleep(100);
