@@ -21,7 +21,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,8 +103,14 @@ fun RosterFoot(app: AppModel, current: String, go: (String) -> Unit, places: () 
     val paired by app.paired.collectAsState()
     val fleet by app.fleet.collectAsState()
     val brand = LocalBrand.current
+    // A newer build out (Updates: its feed asked once a day; a developer's build asks nothing): said at the foot's head
+    // until it's taken, in ink; Settings has its download.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var newer by remember { mutableStateOf<sh.invincible.bot.app.Updates.Newer?>(null) }
+    LaunchedEffect(Unit) { newer = sh.invincible.bot.app.Updates.newer(context) }
     Column(Modifier.fillMaxWidth().padding(bottom = Space.s1)) {
         Hairline(Modifier.padding(bottom = Space.s1))
+        if (newer != null) RosterPlace(UpdateIcon, "Update Invincible", selected = current == "settings") { go("settings") }
         RosterPlace(LayersIcon, "Work", quiet = true, selected = current == Nav.HOME) { go(Nav.HOME) }
         RosterPlace(GearIcon, "Settings", quiet = true, selected = current == "settings") { go("settings") }
         RosterPlace(MoreIcon, "Everything else", quiet = true, onClick = places)

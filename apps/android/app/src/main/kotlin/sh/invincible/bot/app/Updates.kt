@@ -34,6 +34,11 @@ object Updates {
         val feed = if (fresh && cached != null) cached else fetch()?.also {
             prefs.edit().putString("update", it.canonical()).putLong("update-at", System.currentTimeMillis()).apply()
         } ?: cached ?: return null
+        return newer(feed, mine)
+    }
+
+    /** What [feed] (invincible.sh's android/latest.json) offers over this build ([mine]): a later build of this app, else none. */
+    fun newer(feed: Json, mine: String): Newer? {
         val build = feed["build"].string ?: return null
         val url = feed["url"].string ?: return null
         // Only a build of this app, published where the source is: anything else in the feed is no update.

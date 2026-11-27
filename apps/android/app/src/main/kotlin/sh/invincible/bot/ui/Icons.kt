@@ -247,6 +247,11 @@ val PanelIcon: ImageVector = icon("Details") {
     line { moveTo(4f, 5f); lineTo(20f, 5f); lineTo(20f, 19f); lineTo(4f, 19f); close(); moveTo(14.5f, 5f); lineTo(14.5f, 19f) }
 }
 
+/** A newer build to take: an arrow down onto a line. */
+val UpdateIcon: ImageVector = icon("Update") {
+    line { moveTo(12f, 4.5f); lineTo(12f, 15f); moveTo(7.5f, 10.5f); lineTo(12f, 15f); lineTo(16.5f, 10.5f); moveTo(5f, 19.5f); lineTo(19f, 19.5f) }
+}
+
 /** Again: a turning arrow. */
 val RetryIcon: ImageVector = icon("Again") {
     line { moveTo(19.5f, 12f); arcTo(7.5f, 7.5f, 0f, true, true, 17.3f, 6.7f); moveTo(19.5f, 4f); lineTo(19.5f, 8.5f); lineTo(15f, 8.5f) }
