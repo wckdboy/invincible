@@ -4,7 +4,7 @@ import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { apartMatches, chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
-import { commandsRun, runLoop, type RunEvent, type RunSteer } from "./run.ts";
+import { commandsRun, DESKTOP_EVIDENCE, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
@@ -405,6 +405,7 @@ export function progress(event: RunEvent): string {
     case "plan": return `Plan · ${event.text}`;
     case "command": return `Running · ${event.command}`;
     case "observation": return `Exit ${event.exitCode} · ${event.output}`;
+    case "pictured": return `Pictured · the desktop, ${stepsNamed(event.first, event.last)}: ${[event.before && `before ${event.before}`, event.after && `after ${event.after}`].filter(Boolean).join(", ")} (kept in ${DESKTOP_EVIDENCE} by SHA-256)`;
     case "gate": return `Gate ${event.index}/${event.of} · exit ${event.exitCode} · ${event.command}\n${event.output}`;
     case "review": return `Review · ${event.verdict}\n${event.notes}`;
     case "thought": return `Thinking · ${event.text}`;

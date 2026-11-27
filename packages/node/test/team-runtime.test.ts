@@ -350,7 +350,10 @@ test("a task's plain desktop command goes to its VM as its words alone (the held
     execArgv: async (m, argv) => { expect(m.id).toBe("ada"); argvs.push(argv); return result({ stdout: "clicked at 640,450 · the screen changed (9 ms)\n" }); },
   });
   expect((await f.runtime.executeTask(member, task, f.context)).verified).toBe(true);
-  expect(argvs).toEqual([["desktop", "click", "640", "450"]]);
+  // (Each batch that acts on the desktop is pictured before and after, through the held session too: C1 step 8. This
+  // stand-in's screen gives no picture, so the shell's batch, next, takes a before of its own, and an after.)
+  const kept = ["desktop", "screenshot", "--base64", "--keep", "/work/.evidence/desktop"];
+  expect(argvs).toEqual([kept, ["desktop", "click", "640", "450"], kept, kept, kept]);
   // (Besides the task's own look for a desktop as it starts, `command -v desktop`.)
   expect(f.commands.filter((command) => command.includes("desktop click"))).toHaveLength(1);
   expect(f.commands.find((command) => command.includes("desktop click"))).toContain("desktop click 1 2 && desktop key Return");
@@ -371,7 +374,8 @@ test("an agent on the tool loop whose VM has a desktop works it by Claude's comp
   });
   expect((await f.runtime.executeTask(member, task, f.context)).verified).toBe(true);
   // Each through the VM's held desktop session: the action, then one look at the end of the turn.
-  expect(argvs).toEqual([["desktop", "left_click", "640", "450"], ["desktop", "tree"], ["desktop", "screenshot", "--base64"]]);
+  const kept = ["desktop", "screenshot", "--base64", "--keep", "/work/.evidence/desktop"];
+  expect(argvs).toEqual([kept, ["desktop", "left_click", "640", "450"], ["desktop", "tree"], kept]);
   // (This stand-in model takes no toolset: it is offered the engineer's own tools alone, as Claude's would not be.)
   expect(f.bodies[0].tools.map((t: any) => t.function.name)).toEqual(["bash", "read", "edit", "write"]);
   const next = JSON.stringify(f.bodies[1].messages);

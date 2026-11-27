@@ -43,12 +43,15 @@ test("the stand-in drives a task through the loop in the toolset's own shape: se
   expect([run.calls, run.actions, run.commands]).toEqual([3, 14, 0]);
   // What it ran, as said: the toolset's actions as the VM's desktop commands.
   expect(run.said.slice(0, 3)).toEqual(["desktop key ctrl+l", "desktop type http://127.0.0.1:8000/form.html", "desktop key Return"]);
+  // (Each batch of actions pictured before and after it, kept for the trail: C1 step 8. The second's before is the first's after.)
+  const kept = "desktop screenshot --base64 --keep /work/.evidence/desktop";
   expect(vm.ran).toEqual([
+    kept,
     "desktop key ctrl+l",
     "desktop type http://127.0.0.1:8000/form.html",
     "desktop key Return",
     "desktop tree",
-    "desktop screenshot --base64",
+    kept,
     "desktop left_click 400 200",
     "desktop type 'Søren Ærø'",
     "desktop left_click 400 260",
@@ -61,7 +64,7 @@ test("the stand-in drives a task through the loop in the toolset's own shape: se
     "desktop type 'Ready by Friday'",
     "desktop left_click 640 600",
     "desktop tree",
-    "desktop screenshot --base64",
+    kept,
   ]);
   // Each request offered the toolset; each turn came back as the toolset's, its results too, with one picture.
   expect(asked.map((a) => a.toolset)).toEqual([true, true, true]);

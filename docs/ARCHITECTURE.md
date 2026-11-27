@@ -309,7 +309,10 @@ The run loop is carried and renamed (§10), the most proven part of it:
     pixels, their own 0 to 1000, or a frame of their own), and their places come back in the screen's pixels: the space
     goes beside their name to every command (`INVINCIBLE_EYES_SPACE`, or `--space` to the held session). Desktop work
     is proven by a gate that reads what it was for (what a form received, a file's content, a stored setting, an
-    export read back): work whose trail acted on the desktop, with no gate, is never verified. A task whose gate looks
+    export read back): work whose trail acted on the desktop, with no gate, is never verified. Each batch of its
+    actions on the desktop is pictured before and after, each picture kept in the VM's `/work/.evidence/desktop` by
+    its SHA-256, the hashes in the task's trail, and the latest shown to the reviewer with the criteria: evidence,
+    never the proof. A task whose gate looks
     at the desktop is an eval case as any other is: its eval's sandboxes are made from the desktop image. A Mac makes
     none yet: there an agent's VM is made without one, and the
     ledger says why. What it costs and how fast it is: the scorecard's desktop suite ([BENCHMARKS.md](BENCHMARKS.md)).

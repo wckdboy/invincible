@@ -19,12 +19,12 @@ afterAll(() => {
 type Reply = string | { text?: string; calls: Omit<ClientCall, "id">[] } | { error: string };
 let ids = 0;
 
-function harness(engineer: Reply[], options: { gates?: string[]; maxSteps?: number; rules?: NamedRule[]; reviewer?: string[]; computer?: boolean } = {}) {
+function harness(engineer: Reply[], options: { gates?: string[]; maxSteps?: number; rules?: NamedRule[]; reviewer?: string[]; computer?: boolean; desktop?: string } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "invincible-run-tools-"));
   dirs.push(dir);
   // The VM's desktop command, stood in for: each verb it is given kept, in order, and answered as deskd answers it.
   mkdirSync(join(dir, "bin"));
-  writeFileSync(join(dir, "bin", "desktop"), DESKTOP);
+  writeFileSync(join(dir, "bin", "desktop"), options.desktop ?? DESKTOP);
   chmodSync(join(dir, "bin", "desktop"), 0o755);
   const script = [...engineer];
   const reviews = [...(options.reviewer ?? ["PASS\nLooks right."])];
@@ -59,7 +59,7 @@ function harness(engineer: Reply[], options: { gates?: string[]; maxSteps?: numb
 const DESKTOP = `#!/bin/bash
 printf '%s\\n' "$*" >> desk.log
 case "$1" in
-  screenshot|zoom) echo "data:image/png;base64,iVBORw0KGgo=" ;;
+  screenshot|zoom) echo "data:image/png;base64,$(printf 'picture %s' "$(wc -l < desk.log | tr -d ' ')" | base64)" ;;
   tree) printf 'Chromium "Form"\\n  ref=1 push button "Send" 640,450 80x30\\n' ;;
   type) if [ "$2" = FAIL ]; then echo "desktop: nothing that takes text has the focus (click there first)" >&2; exit 1; fi; echo "typed \${#2} characters into the page · the screen changed (4 ms)" ;;
   *) echo "$1 at $2,$3 · the screen changed (5 ms)" ;;
@@ -242,7 +242,10 @@ describe("the engineer with tools", () => {
 });
 
 describe("the engineer with Claude's computer toolset (C1 step 7)", () => {
-  const SCREEN = { mediaType: "image/png" as const, data: "iVBORw0KGgo=", alt: "The screen after this turn's actions: 1280 by 800, the pointer drawn in." };
+  /** The picture the stand-in desktop gave as the nth command it was given (each one's bytes its own). */
+  const shot = (n: number, alt = "The screen after this turn's actions: 1280 by 800, the pointer drawn in.") => ({ mediaType: "image/png" as const, data: Buffer.from(`picture ${n}`).toString("base64"), alt });
+  /** A picture kept for the trail, as the run asks for one (C1 step 8). */
+  const KEPT = "screenshot --base64 --keep /work/.evidence/desktop";
   const TREE = 'What can be acted on now, in the window with the focus (desktop tree):\nChromium "Form"\n  ref=1 push button "Send" 640,450 80x30';
   const commands = (h: ReturnType<typeof harness>) => h.events.filter((e) => e.type === "command").map((e) => (e as { command: string }).command);
 
@@ -260,20 +263,21 @@ describe("the engineer with Claude's computer toolset (C1 step 7)", () => {
     const asks = engineerAsks(h);
     expect(asks[0]!.tools).toEqual(["bash", "read", "edit", "write", "computer"]);
     expect(commands(h)).toEqual(["desktop left_click 640 450", "desktop type Ada", "desktop key Return"]);
-    // One look at the end of the turn, not one an action.
-    expect(h.desk()).toEqual(["left_click 640 450", "type Ada", "key Return", "tree", "screenshot --base64"]);
+    // One look at the end of the turn, not one an action (and the screen before it, kept with it: C1 step 8).
+    expect(h.desk()).toEqual([KEPT, "left_click 640 450", "type Ada", "key Return", "tree", KEPT]);
     const results = asks[1]!.messages.at(-1)!.results!;
-    expect(results.map((r) => r.images)).toEqual([undefined, undefined, [SCREEN]]);
+    expect(results.map((r) => r.images)).toEqual([undefined, undefined, [shot(6)]]);
     expect(results.map((r) => r.content)).toEqual(["left_click at 640,450 · the screen changed (5 ms)", "typed 3 characters into the page · the screen changed (4 ms)", `key at Return, · the screen changed (5 ms)\n\n${TREE}`]);
   });
 
   test("a turn that ends with a screenshot ends with no second; its picture is its result, and its bytes reach no trail and no event", async () => {
     const h = harness([{ calls: [{ name: "left_click", input: { coordinate: [10, 20] } }, { name: "screenshot", input: {} }] }, "DONE\nLooked."], { computer: true });
     await h.run;
-    expect(h.desk()).toEqual(["left_click 10 20", "screenshot --base64", "tree"]);
-    const [, shot] = engineerAsks(h)[1]!.messages.at(-1)!.results!;
-    expect(shot).toMatchObject({ content: `The screen as it is now: 1280 by 800, the pointer drawn in.\n\n${TREE}`, images: [{ ...SCREEN, alt: "The screen as it is now: 1280 by 800, the pointer drawn in." }] });
-    expect(JSON.stringify(h.events)).not.toContain("iVBORw0KGgo");
+    // (Its own screenshot is its model's; the trail keeps one of its own, before and after: C1 step 8.)
+    expect(h.desk()).toEqual([KEPT, "left_click 10 20", "screenshot --base64", "tree", KEPT]);
+    const [, own] = engineerAsks(h)[1]!.messages.at(-1)!.results!;
+    expect(own).toMatchObject({ content: `The screen as it is now: 1280 by 800, the pointer drawn in.\n\n${TREE}`, images: [shot(3, "The screen as it is now: 1280 by 800, the pointer drawn in.")] });
+    for (const n of [1, 3, 5]) expect(JSON.stringify(h.events)).not.toContain(shot(n).data);
   });
 
   test("an action that fails stops the turn's others, each told it wasn't executed, as the toolset asks; its other tools still run", async () => {
@@ -296,10 +300,11 @@ describe("the engineer with Claude's computer toolset (C1 step 7)", () => {
       [false, "exit 0 · 1 ms"],
       [true, "Not executed: an earlier computer action in this turn failed."],
     ]);
-    expect(first!.at(-1)).toMatchObject({ images: [SCREEN] });
+    expect(first!.at(-1)).toMatchObject({ images: [shot(4)] });
     // A call that isn't one it can run stops the rest too, and acts on nothing: the turn ends without a look.
     expect(second!.map((r) => r.content)).toEqual(["left_click's coordinate is [x, y] on the screen: x from 0 to 1279, y from 0 to 799.", "Not executed: an earlier computer action in this turn failed."]);
-    expect(h.desk()).toEqual(["type FAIL", "tree", "screenshot --base64"]);
+    // (Its second turn ran no action: no picture after it, and the one before was the first turn's after.)
+    expect(h.desk()).toEqual([KEPT, "type FAIL", "tree", KEPT]);
   });
 
   test("without a desktop the toolset is neither offered nor run: its call is a tool there isn't", async () => {
@@ -329,5 +334,71 @@ describe("desktop work is proven by a gate (C1 step 8)", () => {
     expect((await gated.run).status).toBe("done");
     const looked = harness([{ calls: [{ name: "screenshot", input: {} }, bash("desktop tree")] }, "DONE\nRead what it says."], { computer: true });
     expect((await looked.run).status).toBe("done");
+  });
+});
+
+describe("the desktop's pictures before and after the work's actions on it (C1 step 8)", () => {
+  const click = { name: "left_click", input: { coordinate: [640, 450] } };
+  const KEEP = "screenshot --base64 --keep /work/.evidence/desktop";
+  /** The picture the stand-in desktop gave as the nth command it was given, and its SHA-256. */
+  const nth = (n: number) => {
+    const data = Buffer.from(`picture ${n}`).toString("base64");
+    return { data, sha256: new Bun.CryptoHasher("sha256").update(Buffer.from(data, "base64")).digest("hex") };
+  };
+  const pictured = (h: ReturnType<typeof harness>) => h.events.filter((e) => e.type === "pictured");
+
+  test("a batch that acts on the desktop is pictured before and after, each kept under its SHA-256, named in the trail and shown to the reviewer", async () => {
+    const h = harness([{ calls: [click] }, "DONE\nSent the form."], { computer: true, gates: ["true"] });
+    expect((await h.run).status).toBe("done");
+    // Before: a fresh picture, kept; after: the turn's own end picture, kept as well.
+    expect(h.desk()).toEqual([KEEP, "left_click 640 450", "tree", KEEP]);
+    const [before, after] = [nth(1), nth(4)];
+    expect(pictured(h)).toEqual([{ type: "pictured", first: 1, last: 1, before: before.sha256, after: after.sha256 }]);
+    const review = h.asked.find((a) => a.role === "reviewer")!.messages[0]! as { content: string; images?: { mediaType: string; data: string; alt: string }[] };
+    expect(review.images?.map((i) => [i.mediaType, i.data])).toEqual([["image/png", before.data], ["image/png", after.data]]);
+    expect(review.images?.map((i) => i.alt)).toEqual([`The desktop before step 1 (SHA-256 ${before.sha256.slice(0, 16)}…).`, `The desktop after step 1 (SHA-256 ${after.sha256.slice(0, 16)}…).`]);
+    expect(review.content).toContain(`With this go pictures of the desktop, before and after the work's batches of actions on it (the latest 2: before step 1, ${before.sha256.slice(0, 16)}…; after step 1, ${after.sha256.slice(0, 16)}…)`);
+    expect(review.content).toContain("evidence, never the proof");
+  });
+
+  test("the next batch's before is the last batch's after while nothing ran between; a batch that runs other commands leaves it stale", async () => {
+    const h = harness([{ calls: [click] }, { calls: [click] }, { calls: [bash("echo moved")] }, { calls: [click] }, "DONE\nClicked."], { computer: true, gates: ["true"] });
+    await h.run;
+    expect(h.desk()).toEqual([KEEP, "left_click 640 450", "tree", KEEP, "left_click 640 450", "tree", KEEP, KEEP, "left_click 640 450", "tree", KEEP]);
+    const events = pictured(h) as { before?: string; after?: string }[];
+    expect(events).toHaveLength(3);
+    expect(events[1]!.before).toBe(events[0]!.after);
+    expect(events[2]!.before).not.toBe(events[1]!.after);
+    // The reviewer is shown each picture once: the second batch's before is the first's after, one picture named both ways.
+    const review = h.asked.find((a) => a.role === "reviewer")!.messages[0]! as { content: string; images?: { data: string; alt: string }[] };
+    expect(review.images?.map((i) => i.data)).toEqual([nth(1), nth(4), nth(7), nth(8), nth(11)].map((p) => p.data));
+    expect(review.images?.[1]!.alt).toBe(`The desktop after step 1, and before step 2 (SHA-256 ${nth(4).sha256.slice(0, 16)}…).`);
+    expect(review.content).toContain(`(the latest 5: before step 1, ${nth(1).sha256.slice(0, 16)}…; after step 1 and before step 2, ${nth(4).sha256.slice(0, 16)}…; after step 2, `);
+  });
+
+  test("a batch is named by its steps; a picture taken twice, the screen unchanged, is shown once, named both ways", async () => {
+    const still = DESKTOP.replace(`printf 'picture %s' "$(wc -l < desk.log | tr -d ' ')"`, "printf 'the same screen'");
+    expect(still).not.toBe(DESKTOP);
+    const h = harness([{ calls: [click, { name: "type", input: { text: "hi" } }] }, "DONE\nTyped."], { computer: true, gates: ["true"], desktop: still });
+    expect((await h.run).status).toBe("done");
+    const same = new Bun.CryptoHasher("sha256").update("the same screen").digest("hex");
+    expect(pictured(h)).toEqual([{ type: "pictured", first: 1, last: 2, before: same, after: same }]);
+    const review = h.asked.find((a) => a.role === "reviewer")!.messages[0]! as { content: string; images?: { alt: string }[] };
+    expect(review.images?.map((i) => i.alt)).toEqual([`The desktop before steps 1–2, and after steps 1–2 (SHA-256 ${same.slice(0, 16)}…).`]);
+    expect(review.content).toContain(`(the latest 1: before steps 1–2 and after steps 1–2, ${same.slice(0, 16)}…)`);
+  });
+
+  test("only looking is not pictured, and a run with no desktop work shows the reviewer no pictures", async () => {
+    const h = harness([{ calls: [{ name: "screenshot", input: {} }, bash("desktop tree")] }, "DONE\nRead it."], { computer: true });
+    await h.run;
+    expect(pictured(h)).toEqual([]);
+    expect((h.asked.find((a) => a.role === "reviewer")!.messages[0] as { images?: unknown[] }).images).toBeUndefined();
+  });
+
+  test("a shell's own desktop command is pictured too, before and after it", async () => {
+    const h = harness([{ calls: [bash("desktop click 640 450")] }, "DONE\nClicked."], { gates: ["true"] });
+    await h.run;
+    expect(h.desk()).toEqual([KEEP, "click 640 450", KEEP]);
+    expect(pictured(h)).toEqual([{ type: "pictured", first: 1, last: 1, before: nth(1).sha256, after: nth(3).sha256 }]);
   });
 });

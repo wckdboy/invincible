@@ -19,6 +19,7 @@ display's libraries are loaded only when a display is used, so this file imports
 import base64
 import ctypes
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -1819,7 +1820,8 @@ desktop dialog accept [text] | dismiss   answer a JavaScript dialog on the page 
 desktop app <terminal|editor>      start a terminal (xterm) or an editor (mousepad) on the screen
 desktop shot [file.png|file.jpg]   a screenshot (the pointer drawn in), once the screen has settled; prints its path
 desktop zoom <x0> <y0> <x1> <y1> [file]   that part of the screen, larger
-                                   (shot or zoom --base64: printed as a PNG's data address on one line, no file)
+                                   (shot or zoom --base64: printed as a PNG's data address on one line, no file;
+                                   with --keep <folder>, kept there too, named by its SHA-256)
 desktop look [--eyes p/m] "<question>"   ask a model that can see what is on the screen, or where something is
                                    (it answers a place as x,y, to click or move to; --space per-mille|scaled:f
                                    or INVINCIBLE_EYES_SPACE: the space it answers in, its places given in pixels)
@@ -1930,6 +1932,14 @@ def cli(desk, argv, cwd="/work", env=None):
         if verb in ("screenshot", "zoom"):
             now, printed = "--now" in args, "--base64" in args
             args = [a for a in args if a not in ("--now", "--base64")]
+            # (--keep <dir>: a printed picture's own bytes kept there too, named by their SHA-256: evidence, C1 step 8.)
+            keep = None
+            if "--keep" in args:
+                at = args.index("--keep")
+                keep = args[at + 1] if at + 1 < len(args) else ""
+                args = args[:at] + args[at + 2:]
+                if not printed or not keep.startswith("/") or "\0" in keep:
+                    raise Refused("--keep keeps a printed picture (--base64) in a folder named by its whole path")
             region = None
             if verb == "zoom":
                 if len(args) < 4:
@@ -1940,6 +1950,10 @@ def cli(desk, argv, cwd="/work", env=None):
                 if args:
                     raise Refused("--base64 prints the picture: it writes no file")
                 got = desk.tool(verb, {"format": "png", "settle": not now, **({"region": region} if region else {})})["image"]
+                if keep:
+                    os.makedirs(keep, exist_ok=True)
+                    with open(os.path.join(keep, hashlib.sha256(got["data"]).hexdigest() + ".png"), "wb") as f:
+                        f.write(got["data"])
                 return 0, "data:%s;base64,%s\n" % (got["media_type"], base64.b64encode(got["data"]).decode()), ""
             path = args[0] if args else os.path.join(RUN, "shot-%d%d.png" % (int(time.time()), os.getpid()))
             path = path if os.path.isabs(path) else os.path.join(cwd, path)

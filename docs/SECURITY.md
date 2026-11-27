@@ -267,9 +267,11 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
 - **What is typed is never written down.** An action's text reaches deskd as one argument no shell reads; the ledger
   says how many characters (`packages/sandbox/test/desktop-host.test.ts`). The eyes' token goes with a look from the
   command's environment, never as an argument.
-- **Its screen goes to its own model.** A computer action's result carries a picture of the agent's own screen to the
-  model its run asks, and to no other; the node scans what results and calls say for secrets, not pictures (what is on
-  that screen is what the agent already sees). Your take-over's screens are step 9's.
+- **Its screen goes to its own models.** A computer action's result carries a picture of the agent's own screen to the
+  model its run asks; the pictures before and after its desktop work go to the run's reviewer too (the latest six),
+  and are kept in its VM's `/work/.evidence/desktop` by their SHA-256; to no other model. The node scans what results
+  and calls say for secrets, not pictures (what is on that screen is what the agent already sees). Your take-over's
+  screens are step 9's.
 - **The accessibility bus is the VM's own.** It starts with the desktop, as the agent's user, its sockets in deskd's
   own directory; deskd reads it for `desktop tree` and `find`. It shows what the apps on that display already show,
   to the same user, and reaches nothing outside the VM.

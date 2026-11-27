@@ -58,8 +58,10 @@ test("a picture printed as a data address (--base64) and an action with keys hel
   expect(desktopArgv("desktop zoom 0 0 640 400 --base64")).toEqual(["zoom", "0", "0", "640", "400", "--base64"]);
   expect(desktopArgv("desktop shot --now --base64")).toEqual(["shot", "--now", "--base64"]);
   expect(desktopArgv("desktop left_click 10 20 --hold ctrl+shift")).toEqual(["left_click", "10", "20", "--hold", "ctrl+shift"]);
-  // A file named beside it is still a file, relative or not.
+  // A file named beside it is still a file, relative or not; a folder it is kept in too (--keep, C1 step 8).
   expect(desktopArgv("desktop shot --base64 mine.png")).toBeNull();
+  expect(desktopArgv("desktop screenshot --base64 --keep /work/.evidence/desktop")).toEqual(["screenshot", "--base64", "--keep", "/work/.evidence/desktop"]);
+  expect(desktopArgv("desktop screenshot --base64 --keep evidence")).toBeNull();
 });
 
 test("a look goes to the session only told its eyes by name (the task's own): their gateway and token are the VM's lease's, never an argument", () => {

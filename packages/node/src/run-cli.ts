@@ -30,8 +30,10 @@ import {
   type Usage,
   type UsageLine,
   type ClientCall,
+  type ChatMessage,
 } from "@invincible/core";
-import { desktopBriefing, SHIPMENT_SCRIPT } from "@invincible/agents";
+import type { ModelMessage } from "@invincible/models";
+import { DESKTOP_EVIDENCE, desktopBriefing, SHIPMENT_SCRIPT, stepsNamed } from "@invincible/agents";
 import { learnedLines, learnFromRun, type RunTrail, runTrail } from "@invincible/agents";
 import { AGENTS, attemptInstructions, chooseAgentModels, commandsRun, type EffortEvent, type EffortPick, type EffortResult, ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramShell, evidenceCollector, gateBy, type GateResult, investigate, type InvestigationOutcome, observation, RUN_DEFAULTS, type RunEvent, type RunOptions, type RunOutcome, runStanding, readResults, runEffort, runLoop, standingAfter, type Trip, timingLine } from "@invincible/agents";
 
@@ -353,6 +355,16 @@ function environment(sandbox: SandboxView, host: string): string {
   ].join(" ");
 }
 
+/**
+ * A run's messages as the node's chat route takes them: with no pictures on a question (the reviewer's of the desktop,
+ * C1 step 8), each said where it would have gone, named above by its hash and kept in the sandbox.
+ */
+export function withoutPictures(messages: readonly ModelMessage[]): ChatMessage[] {
+  return messages.map(({ images, ...message }) =>
+    images?.length ? { ...message, content: `${message.content}\n\n(The ${images.length === 1 ? "picture" : `${images.length} pictures`} named above can't go with this through the node's chat route: ${images.length === 1 ? "it is" : "each is"} kept in the sandbox's ${DESKTOP_EVIDENCE} under its SHA-256.)` } : message,
+  );
+}
+
 /** Whether a sandbox was made from the desktop image. */
 const hasDesktop = (sandbox: SandboxView): boolean => /(^|\/)desktop:/.test(sandbox.image);
 
@@ -375,6 +387,9 @@ export function printRunEvent(event: RunEvent): void {
     }
     case "format":
       console.log(dim(`  (step ${event.step}: ${event.problem})`));
+      return;
+    case "pictured":
+      console.log(dim(`  (the desktop pictured, ${stepsNamed(event.first, event.last)}: ${[event.before && `before ${event.before.slice(0, 12)}…`, event.after && `after ${event.after.slice(0, 12)}…`].filter(Boolean).join(", ")}; kept in ${DESKTOP_EVIDENCE} by SHA-256)`));
       return;
     case "submitted":
       console.log(`\n${bold("◇ Submitted")}\n${indent(firstLines(event.summary, 6))}`);
@@ -646,7 +661,7 @@ async function workIn(
         let called: { calls: ClientCall[]; carry?: string } | null = null;
         const input = {
           role,
-          messages,
+          messages: withoutPictures(messages),
           tools: false,
           // A run is coding work, whichever of its roles speaks: a coding plan on the role may answer it.
           coding: true,

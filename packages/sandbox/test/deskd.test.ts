@@ -269,6 +269,20 @@ describe("the desktop command: deskd's thin client", () => {
     expect(Bun.spawnSync(["ls", "-A", r.run]).stdout.toString()).toBe(before);
   });
 
+  test("a printed picture can be kept as well (--keep): its own bytes in the folder named, under their SHA-256, so the trail's hash names its file", async () => {
+    if (!needs()) return;
+    const r = await deskd();
+    const kept = join(realpathSync(join(r.run, "..")), "evidence");
+    const shot = desktop(r, ["screenshot", "--base64", "--keep", kept]);
+    expect(shot).toMatchObject({ code: 0, err: "" });
+    const bytes = Buffer.from(/^data:image\/png;base64,(\S+)\n$/.exec(shot.out)![1]!, "base64");
+    const sha = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+    expect(readFileSync(join(kept, `${sha}.png`)).equals(bytes)).toBe(true);
+    // A folder that isn't absolute is refused, and so is keeping a picture that isn't printed.
+    expect(desktop(r, ["screenshot", "--base64", "--keep", "evidence"]).code).toBe(2);
+    expect(desktop(r, ["screenshot", "--keep", kept]).code).toBe(2);
+  });
+
   test("a click, a drag or a scroll holds the keys it is given (--hold) while it acts, as the toolset's own text asks", async () => {
     if (!needs()) return;
     const r = await deskd();

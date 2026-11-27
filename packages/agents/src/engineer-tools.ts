@@ -331,12 +331,20 @@ function shown(result: ExecResult, alt: string): { result: ExecResult; told: str
   return { result: quiet, told: alt, image: { mediaType: printed[1] as ResultImage["mediaType"], data: printed[2]!, alt } };
 }
 
+/** A picture's SHA-256, of its own bytes, as the folder it is kept in names it (desktop screenshot --keep). */
+export const sha256Of = (image: ResultImage): string => createHash("sha256").update(Buffer.from(image.data, "base64")).digest("hex");
+
+/** The desktop's screen, once it has settled: a picture of it, kept in `keep` (by its SHA-256) when given; else what went wrong. */
+export async function screenNow(exec: Exec, timeoutSec: number, keep?: string): Promise<{ image?: ResultImage; told: string }> {
+  return shown(await safely(exec, `desktop screenshot --base64${keep ? ` --keep ${shellWord(keep)}` : ""}`, Math.min(timeoutSec, 30)), `The screen: ${SCREEN.width} by ${SCREEN.height}, the pointer drawn in.`);
+}
+
 /**
  * What a turn that acted on the desktop ends with (C1 step 7): what can be acted on in the window with the focus, as
  * text first (desktop tree: each with its ref, role, name and place), then, unless its last action showed the screen
- * already, a picture of it once it has settled. Each said when it can't be had, never left out unsaid.
+ * already, a picture of it once it has settled (kept in `keep` too, when given). Each said when it can't be had.
  */
-export async function screenAfter(exec: Exec, timeoutSec: number, picture: boolean): Promise<{ text: string; image?: ResultImage }> {
+export async function screenAfter(exec: Exec, timeoutSec: number, picture: boolean, keep?: string): Promise<{ text: string; image?: ResultImage }> {
   const tree = await safely(exec, "desktop tree", Math.min(timeoutSec, 30));
   const listed = tree.stdout.trim();
   const text =
@@ -344,7 +352,7 @@ export async function screenAfter(exec: Exec, timeoutSec: number, picture: boole
       ? `What can be acted on now, in the window with the focus (desktop tree):\n${listed.length > TREE_CHARS ? `${listed.slice(0, TREE_CHARS)}\n(… the rest isn't shown.)` : listed}`
       : `(What can be acted on now couldn't be read: ${why(tree)}.)`;
   if (!picture) return { text: redact(text) };
-  const seen = shown(await safely(exec, "desktop screenshot --base64", Math.min(timeoutSec, 30)), `The screen after this turn's actions: ${SCREEN.width} by ${SCREEN.height}, the pointer drawn in.`);
+  const seen = shown(await safely(exec, `desktop screenshot --base64${keep ? ` --keep ${shellWord(keep)}` : ""}`, Math.min(timeoutSec, 30)), `The screen after this turn's actions: ${SCREEN.width} by ${SCREEN.height}, the pointer drawn in.`);
   return seen.image ? { text: redact(text), image: seen.image } : { text: redact(`${text}\n${seen.told}`) };
 }
 

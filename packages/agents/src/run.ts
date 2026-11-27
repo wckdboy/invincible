@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { type ChatMessage, type ClientCall, type ClientResult, type ExecResult, type GateBy, MAX_PROPOSED_GATES, type NamedCheck, type NamedRule, redact, type RuleDoes } from "@invincible/core";
-import { COMPUTER, type ToolSpec } from "@invincible/models";
+import { type ChatMessage, type ClientCall, type ClientResult, type ExecResult, type GateBy, MAX_PROPOSED_GATES, type NamedCheck, type NamedRule, redact, type ResultImage, type RuleDoes } from "@invincible/core";
+import { COMPUTER, type ModelMessage, type ToolSpec } from "@invincible/models";
 import { type AgentDriver, type AgentModel, type AgentRunDeps, agentModelName, runAgent } from "./harnesses.ts";
 import { actsOnDesktop } from "./desktop-command.ts";
-import { COMPUTER_MEMBERS, ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput, NOT_EXECUTED, screenAfter } from "./engineer-tools.ts";
+import { COMPUTER_MEMBERS, ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput, NOT_EXECUTED, screenAfter, screenNow, sha256Of } from "./engineer-tools.ts";
 import { engramBriefing, engramProject } from "./engram.ts";
 import { changesOf, checkOf, contentsOf, readOf, readsOf, testFilesOf, writesOf } from "./shell-paths.ts";
 import { STEP_EFFORT } from "@invincible/models";
@@ -33,7 +33,8 @@ export interface RunDeps {
    */
   ask(
     role: RunRole,
-    messages: ChatMessage[],
+    /** (A message may carry pictures: the desktop's, before and after the work's actions on it, to the reviewer.) */
+    messages: ModelMessage[],
     turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] },
   ): Promise<{ text: string; model: string; skipped?: { model: string; error: string }[]; calls?: ClientCall[]; carry?: string }>;
   /** Run one shell command in the run's workspace. */
@@ -331,6 +332,8 @@ export type RunEvent =
   | { type: "thought"; step: number; text: string; model: string }
   | { type: "command"; step: number; command: string }
   | { type: "observation"; step: number; exitCode: number; durationMs: number; output: string }
+  /** The desktop's pictures before and after a batch of the work's actions on it, steps first to last, by SHA-256 (C1 step 8): its trail's. */
+  | { type: "pictured"; first: number; last: number; before?: string; after?: string }
   /** A reply with no command to run: what was wrong with it, and how it began (redacted), so it can be read afterwards. */
   | { type: "format"; step: number; problem: string; reply: string }
   | { type: "submitted"; summary: string }
@@ -752,6 +755,15 @@ export const MAX_CALLS = 16;
 /** How much of one call's result is kept: a little under what the chat route takes of one (core ClientResult, 200,000). */
 const RESULT_KEPT = { head: 140_000, tail: 50_000 } as const;
 
+/** What the reviewer is told of the desktop's pictures that go with its question (C1 step 8). */
+export function picturesSaid(shown: readonly { named: readonly string[]; sha256: string }[]): string {
+  const named = shown.map((p) => `${p.named.join(" and ")}, ${p.sha256.slice(0, 16)}…`).join("; ");
+  return `With this go pictures of the desktop, before and after the work's batches of actions on it (the latest ${shown.length}: ${named}), each kept with the trail under its SHA-256. They show what the screen showed: evidence, never the proof. Desktop work is proven by a gate that reads what it was for.`;
+}
+
+/** A batch's steps as its pictures are named by: "step 4", or "steps 4–6". */
+export const stepsNamed = (first: number, last: number): string => (first === last ? `step ${last}` : `steps ${first}–${last}`);
+
 /** Why work that acted on the desktop, with no gate, isn't verified (C1 step 8). */
 export const UNPROVEN =
   "Its desktop work has no gate to prove it: what it did on the screen is evidence, never the proof. A gate proves it by reading what the work was for: what a form received, a file's content, a stored setting, an export read back.";
@@ -772,6 +784,17 @@ interface Step {
   exitCode: number;
   excerpt: string;
 }
+
+/** A picture of the desktop's screen, and its SHA-256 (the name it is kept under, in DESKTOP_EVIDENCE). */
+interface Picture {
+  sha256: string;
+  image: ResultImage;
+}
+
+/** Where the desktop's pictures before and after each batch of the work's actions on it are kept, by their SHA-256. */
+export const DESKTOP_EVIDENCE = "/work/.evidence/desktop";
+/** At most this many of them go to the reviewer: the latest, each once however often it was taken. */
+const REVIEW_PICTURES = 6;
 
 /** Whose words a steer is, as the reviewer and an audit are told it, and where it reached the work. */
 const steerLine = (steer: TakenSteer, i: number, leads: string): string =>
@@ -1251,14 +1274,16 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
   const toldSkipped = new Set<string>();
   // Every message is redacted before it goes to a model: command output can contain anything, and so can what a tool
   // was called with and what it came to. (A carry is the model's own, and its provider's to check: it goes as it came.)
-  const ask = async (role: RunRole, messages: ChatMessage[], turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }) => {
-    const redacted = messages.map((m) => ({
+  const ask = async (role: RunRole, messages: ModelMessage[], turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }) => {
+    const redacted = messages.map((m): ModelMessage => ({
       role: m.role,
       content: redact(m.content),
       ...(m.effort ? { effort: m.effort } : {}),
       ...(m.calls ? { calls: m.calls.map((c) => ({ ...c, input: Object.fromEntries(Object.entries(c.input).map(([k, v]) => [k, typeof v === "string" ? redact(v) : v])) })) } : {}),
       ...(m.carry !== undefined ? { carry: m.carry } : {}),
       ...(m.results ? { results: m.results.map((r) => ({ ...r, content: redact(r.content) })) } : {}),
+      // (A message's own pictures go with it: the desktop's, to the reviewer, C1 step 8.)
+      ...(m.images?.length ? { images: m.images } : {}),
     }));
     for (let attempt = 0; ; attempt++) {
       check();
@@ -1332,6 +1357,39 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
   };
   /** The run's trail as its commands ran (the engineer's loop's, or a coding agent's): what its end must know of it. */
   let ranTrail: readonly Step[] = [];
+  /**
+   * The desktop's pictures (C1 step 8): before and after each batch of the work's commands that acts on it, hashed,
+   * kept on the VM's disk by their hash and in the trail, and shown to the reviewer. Evidence, never the proof: a gate
+   * is. Each is named where it was taken ("before steps 4–6") and kept once: a batch's before that is the last one's
+   * after, or an after the same as its before, is one picture, named both ways. `lastPicture`: the screen as it was
+   * last pictured, while nothing has run since.
+   */
+  const pictures: (Picture & { named: string[] })[] = [];
+  let lastPicture: Picture | null = null;
+  const picturedAs = (picture: Picture, named: string): void => {
+    const latest = pictures.at(-1);
+    if (latest?.sha256 === picture.sha256) latest.named.push(named);
+    else pictures.push({ ...picture, named: [named] });
+  };
+  const pictureNow = async (): Promise<Picture | null> => {
+    const seen = await screenNow(deps.exec, o.commandTimeoutSec, DESKTOP_EVIDENCE).catch(() => null);
+    return seen?.image ? { sha256: sha256Of(seen.image), image: seen.image } : null;
+  };
+  /** Before a batch: its picture when it acts on the desktop (the last, if nothing ran since); any batch makes the last stale. */
+  const beforeBatch = async (acting: boolean): Promise<Picture | null> => {
+    const before = acting ? (lastPicture ?? (await pictureNow())) : null;
+    lastPicture = null;
+    return before;
+  };
+  /** After a batch (steps first to last) that acted on the desktop: its picture after (`given`, the turn's own, where it took one), both kept. */
+  const afterBatch = async (acting: boolean, before: Picture | null, first: number, last: number, given?: ResultImage): Promise<void> => {
+    if (!acting) return;
+    const after = given ? { sha256: sha256Of(given), image: given } : await pictureNow();
+    if (before) picturedAs(before, `before ${stepsNamed(first, last)}`);
+    if (after) picturedAs(after, `after ${stepsNamed(first, last)}`);
+    if (before || after) emit({ type: "pictured", first, last, ...(before ? { before: before.sha256 } : {}), ...(after ? { after: after.sha256 } : {}) });
+    lastPicture = after;
+  };
   const finish = (given: Omit<RunOutcome, "steps" | "revisions" | "plan" | "gates">): RunOutcome => {
     // Desktop work is proven by a gate (C1 step 8): what it did on the screen is evidence, never the proof. Work whose
     // trail acted on the desktop, accepted with no gate in force, is unverified, whoever accepted it.
@@ -1522,14 +1580,18 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         evidence += `$ ${command}\n(could not run: ${(error as Error).message})\n\n`;
       }
     }
-    const question: ChatMessage[] = [
+    // The desktop's pictures go with it (C1 step 8): the latest, each named as the trail names it.
+    const pictured = pictures.slice(-REVIEW_PICTURES);
+    const question: ModelMessage[] = [
       {
         role: "user",
         effort: STEP_EFFORT.review,
         // The steers it took are part of what is judged: every one, in order, as whose words they are.
-        content: o.review
-          ? o.review.prompt({ goal: `${o.goal}${steersAsked(taken)}`, plan, steps: shown, summary, evidence: [evidence.trim(), gated].filter(Boolean).join("\n\n") })
-          : reviewQuestion({ goal: o.goal, plan, steps: shown, summary, gated, evidence, steers: taken, earlier: trail.length - shown.length }),
+        content:
+          (o.review
+            ? o.review.prompt({ goal: `${o.goal}${steersAsked(taken)}`, plan, steps: shown, summary, evidence: [evidence.trim(), gated].filter(Boolean).join("\n\n") })
+            : reviewQuestion({ goal: o.goal, plan, steps: shown, summary, gated, evidence, steers: taken, earlier: trail.length - shown.length })) + (pictured.length ? `\n\n${picturesSaid(pictured)}` : ""),
+        ...(pictured.length ? { images: pictured.map((p) => ({ mediaType: p.image.mediaType, data: p.image.data, alt: `The desktop ${p.named.join(", and ")} (SHA-256 ${p.sha256.slice(0, 16)}…).` })) } : {}),
       },
     ];
     let reviewed = await ask("reviewer", question, workedBy.length ? { apart: [...workedBy] } : {});
@@ -2178,6 +2240,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           throw new Halted(found[halt]!, batch[halt]!);
         }
         tripped += found.filter(Boolean).length;
+        const acting = batch.some((command, i) => !found[i] && actsOnDesktop(command));
+        const before = await beforeBatch(acting);
         for (const [i, command] of batch.entries()) if (!found[i]) emit({ type: "command", step: first + i, command });
         check();
         const results = await Promise.all(
@@ -2194,6 +2258,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           if (result) emit({ type: "observation", step: first + i, exitCode: result.exitCode, durationMs: result.durationMs, output: seen[i]! });
           trail.push({ command: trailCommand(command), exitCode: result ? result.exitCode : -1, excerpt: result ? clip(seen[i]!.split("\n").slice(1).join("\n"), 600, 300) : seen[i]! });
         }
+        await afterBatch(acting, before, first, first + batch.length - 1);
         // What your rules tell you of: each command of the batch that ran, however it ended.
         for (const [i, command] of batch.entries()) if (results[i]) tell(rules, command, results[i]!.exitCode);
         const stuck = notes.findIndex((n) => n.stop);
@@ -2238,6 +2303,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           tripped += runs.length - wrong;
           throw new Halted(found[halt]!, (read[halt] as EngineerStep).said);
         }
+        // (A batch that acts on the desktop is pictured before and after it: C1 step 8.)
+        const acting = read.some((r, i) => "said" in r && !found[i] && actsOnDesktop(r.said));
+        const before = await beforeBatch(acting);
+        let turnPicture: ResultImage | undefined;
+        /** One of its desktop actions ran: the screen may have changed (one never started changed nothing). */
+        let actedOnDesktop = false;
         const results: ClientResult[] = [];
         const checks: NamedCheck[] = [];
         /** A call failed as it failed before: the next turn is a hard one (the only one that is, with tools). */
@@ -2292,6 +2363,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           emit({ type: "command", step: at, command: r.said });
           check();
           const { result, told: seen, image } = await r.run(deps.exec, o.commandTimeoutSec);
+          if (actsOnDesktop(r.said)) actedOnDesktop = true;
           if (r.member) {
             acted = true;
             showed = Boolean(image);
@@ -2314,10 +2386,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         // A turn that acted on the desktop ends with it: what can be acted on, as text, then the screen, with its last result.
         if (acted && results.length) {
           check();
-          const end = await screenAfter(deps.exec, o.commandTimeoutSec, !showed);
+          const end = await screenAfter(deps.exec, o.commandTimeoutSec, !showed, acting ? DESKTOP_EVIDENCE : undefined);
           const last = results.at(-1)!;
           results[results.length - 1] = { ...last, content: `${last.content}\n\n${end.text}`.trim(), ...(end.image ? { images: [...(last.images ?? []), end.image] } : {}) };
+          turnPicture = end.image;
         }
+        await afterBatch(actedOnDesktop, before, first, first + runs.length - 1, turnPicture);
         // Calls past the commands left get their results too; those past MAX_CALLS were never kept, and are only said.
         const outOf = action.calls.length - runs.length;
         const more = (reply.calls?.length ?? 0) - action.calls.length;
@@ -2366,6 +2440,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           messages.push({ role: "user", content: `${said}${again.note}${cut}${await afterStep()}`, effort: STEP_EFFORT.routine });
           continue;
         }
+        const acting = actsOnDesktop(action.command);
+        const before = await beforeBatch(acting);
         emit({ type: "command", step: steps, command: action.command });
         check();
         let result: ExecResult;
@@ -2377,6 +2453,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         const seen = observation(result, shownFor(action.command));
         emit({ type: "observation", step: steps, exitCode: result.exitCode, durationMs: result.durationMs, output: seen });
         trail.push({ command: trailCommand(action.command), exitCode: result.exitCode, excerpt: clip(seen.split("\n").slice(1).join("\n"), 600, 300) });
+        await afterBatch(acting, before, steps, steps);
         tell(rules, action.command, result.exitCode);
         const again = repeated(action.command, steps, result, seen);
         if (again.stop) return looped(action.command, seen);
