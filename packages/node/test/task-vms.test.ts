@@ -12,10 +12,12 @@ const STARTED = Date.UTC(2026, 10, 27, 11, 0);
 const done = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
 
 /** A host as TaskVms uses it: VMs made for tasks, their commands, their streams, their removal. */
-function host(options: { left?: string[]; failRemove?: string } = {}) {
+function host(options: { left?: string[]; failRemove?: string; failTimes?: number; stays?: string; refused?: string } = {}) {
   const vms = new Map<string, { createdAt: number; run: string }>();
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
   const asked: unknown[] = [], ran: { vm: string; cmd: string[] }[] = [], removed: string[] = [];
+  /** Each step of a removal, in order: a lease ended, a VM removed. */
+  const steps: string[] = [];
   let made = 0;
   const fake = {
     get: async (id: string) => (vms.has(id) ? ({ id, createdAt: vms.get(id)!.createdAt, run: vms.get(id)!.run } as unknown as SandboxView) : null),
@@ -30,15 +32,26 @@ function host(options: { left?: string[]; failRemove?: string } = {}) {
     stream: async () => ({ lines: (async function* () {})(), write: () => {}, close: () => {}, kill: () => {}, exited: Promise.resolve(0) }),
     destroy: async (vm: string) => {
       if (options.failRemove === vm) {
-        options.failRemove = undefined;
+        if (!options.failTimes || --options.failTimes <= 0) options.failRemove = undefined;
         throw new Error("docker couldn't remove it");
       }
+      if (options.refused === vm) {
+        options.refused = undefined;
+        return { verdict: "deny", reason: "not its run's" } as never;
+      }
+      // (Docker said nothing, and the VM is still there.)
+      if (options.stays === vm) {
+        options.stays = undefined;
+        return { verdict: "allow" } as never;
+      }
+      steps.push(`removed ${vm}`);
       removed.push(vm);
       vms.delete(vm);
       return { verdict: "allow" } as never;
     },
+    endLease: (vm: string) => void steps.push(`lease ended ${vm}`),
   };
-  return { fake, vms, asked, ran, removed };
+  return { fake, vms, asked, ran, removed, steps };
 }
 
 const ask = { vm: "agent-vm", task: "task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"] };
@@ -79,6 +92,37 @@ describe("another node's task's VM, on this node", () => {
     expect(logged.some((line) => line.includes("couldn't be removed"))).toBe(true);
     await vms.open({ ...ask, task: "task-mnopqrstuvwx" }, new AbortController().signal);
     expect(h.removed).toEqual(["vm-1"]);
+  });
+
+  test("its lease ends as its task does, whatever becomes of it: one that can't be removed spends nothing more, and goes on a timer (R4-7)", async () => {
+    const h = host({ failRemove: "vm-1", failTimes: 2 });
+    const logged: string[] = [];
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED, log: (line) => void logged.push(line), retryMs: 10 });
+    await (await vms.open(ask, new AbortController().signal)).release();
+    // Its lease first, before its removal is tried; the removal failed, and nothing more was made.
+    expect(h.steps).toEqual(["lease ended vm-1"]);
+    expect(h.vms.has("vm-1")).toBe(true);
+    expect(logged.at(-1)).toContain("its lease has ended, and it is tried again");
+    // Tried again on its own, with no other task to make one: it fails once more, then goes.
+    const until = Date.now() + 5_000;
+    while (h.vms.has("vm-1") && Date.now() < until) await Bun.sleep(5);
+    expect(h.removed).toEqual(["vm-1"]);
+    expect(h.steps).toEqual(["lease ended vm-1", "lease ended vm-1", "lease ended vm-1", "removed vm-1"]);
+    // And once it is gone, nothing more is tried.
+    await Bun.sleep(60);
+    expect(h.steps).toHaveLength(4);
+  });
+
+  test("a removal that was refused, or that Docker said nothing of while the VM stayed, is no removal: it is tried again", async () => {
+    for (const how of ["refused", "stays"] as const) {
+      const h = host({ [how]: "vm-1" });
+      const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED, retryMs: 10 });
+      await (await vms.open(ask, new AbortController().signal)).release();
+      expect([how, h.vms.has("vm-1")]).toEqual([how, true]);
+      const until = Date.now() + 5_000;
+      while (h.vms.has("vm-1") && Date.now() < until) await Bun.sleep(5);
+      expect([how, h.removed]).toEqual([how, ["vm-1"]]);
+    }
   });
 
   test("none is made for work that has stopped, nor where this node has no VMs", async () => {

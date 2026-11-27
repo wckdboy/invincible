@@ -715,8 +715,12 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       network, sharing the agent's workspace alone (its `work/` tree: never its HOME, nor its notes), with a HOME of its
       own in memory. Its lease is the task's paid models alone, never your keys nor its repository, counted under its
       agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. The VM
-      goes as the task ends, however it ends, and with it everything the task started there; one an earlier process of
-      the node left is removed as the node starts; no route reaches into it. It is made only beside an agent's VM in
+      goes as the task ends, however it ends, and with it everything the task started there; after a revocation, once
+      the command in flight there returns, up to that command's deadline (15 minutes and its helper's 10 seconds: the
+      host's exec isn't cut by the task's end, the fourth re-review's I-1). Its lease ends as the task does, whatever
+      becomes of the VM (R4-7, `task-vms.test.ts`, `team-layout.test.ts`): one whose removal fails spends nothing more
+      of yours, is never renewed with its agent's again, and is tried again on a timer until it goes. One an earlier
+      process of the node left is removed as the node starts; no route reaches into it. It is made only beside an agent's VM in
       layout 2, on a Linux host with Docker; beside one whose HOME is its workspace it is refused. On a node with no
       room beside the agent's VM for one as big, the task waits for room as any sandbox does, within its life.
     - **A Mac takes no other node's task** (`fabric-handoff.test.ts`, `container-host.test.ts`). No VM on a Mac shares

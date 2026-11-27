@@ -2112,6 +2112,17 @@ export class SandboxHost {
     return vm;
   }
 
+  /**
+   * A VM's lease ended now, whatever becomes of the VM (another node's task's, as its task ends: the fourth fabric
+   * review's R4-7): its token revoked and forgotten here, so renewTeam, which renews only a token this host still holds,
+   * never renews it again. A VM that then can't be removed spends nothing more of yours.
+   */
+  endLease(id: string): void {
+    const hash = this.tokenStore.take(id);
+    if (hash) this.opts.tokens.revoke(hash);
+    this.leased.delete(id);
+  }
+
   /** The VMs on this host made for other nodes' tasks, in any state, by their own ids: null when docker can't say. */
   async taskVms(): Promise<string[] | null> {
     const listed = await this.docker(["ps", "-a", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.task`, "--format", `{{.Label "${LABEL}.id"}}`]);

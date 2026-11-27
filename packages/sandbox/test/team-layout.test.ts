@@ -483,6 +483,23 @@ describe("another node's task's VM", () => {
     expect(await f.host.taskVms()).toEqual([]);
   });
 
+  test("its lease ended as its task ends (R4-7) is revoked then, and never renewed with its agent's again, whatever becomes of the VM", async () => {
+    const f = fake({ layout: "2" });
+    await f.host.prepareTeam(ID, RUN, undefined, ["anthropic"]);
+    const vm = await f.host.createTaskVm(task);
+    f.host.endLease(vm.id);
+    expect(f.tokens.revoked).toEqual(["test-only-hash-2"]);
+    // The VM is still there (its removal yet to come, or failed), and its agent's lease is renewed: never its own.
+    expect(await f.host.taskVms()).toEqual([vm.id]);
+    await f.host.renewTeam(ID, RUN);
+    await f.host.renewTeam(ID, RUN);
+    expect(f.tokens.extended).toEqual(["test-only-hash-1", "test-only-hash-1"]);
+    // Ended again, or removed after: nothing more to revoke.
+    f.host.endLease(vm.id);
+    await f.host.destroy(vm.id, { run: task.run });
+    expect(f.tokens.revoked).toEqual(["test-only-hash-2"]);
+  });
+
   test("is listed by its id while it is there, and is a task's in its view", async () => {
     const f = fake({ layout: "2" });
     f.agent().status = "running";
