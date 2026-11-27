@@ -295,7 +295,9 @@ before the fabric. p50s, in ms (10 samples for the hand-offs, 20 for the revocat
 fixes, which weren't measured again. Of those, N1's turn (one node's hand-offs looked at one at a time, which a single
 hand-off doesn't wait on) and the door's map of keys (N4, cheaper) are on a path measured here, and so is a revocation,
 which now also looks through the team's tasks for those it ends. The helper adds a `python3` process to each command of
-a handed task, which no row here times.
+a handed task, which no row here times. Nor does any row time the VM each hand-off now has of its own (R3-1): it is made
+from its agent's VM's image as the task starts, and removed as it ends, and the benches' Docker is a stand-in that makes
+no VM. On a real node that is a microVM's start (Kata's), and its trees' check, before the task's first command runs.
 
 | | HTTP, signed | Q-AMP, before the review's fixes | Q-AMP, after them |
 |---|---|---|---|
