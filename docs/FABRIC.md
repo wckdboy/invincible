@@ -161,12 +161,12 @@ transport keys carries all of it:
        Its lease is the task's paid models alone (never your keys, nor its repository), counted under its agent's
        label, so its budget counts what it spends. None of its commands runs in the agent's own VM.
      - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
-       the task started there. After a revocation it goes once the command in flight there returns, which can take up
-       to that command's deadline (15 minutes, and its helper's 10 seconds): the host's exec isn't cut by the task's end
-       (the fourth re-review's I-1). Its lease ends as the task does, whatever becomes of the VM (R4-7): one whose
-       removal fails spends nothing more of yours, is never renewed with its agent's lease again, and is tried again on
-       a timer until it goes, as well as before the next is made. One an earlier process of the node left is removed as
-       the node starts. No route reaches into it, yours included.
+       the task started there. When its work ends (a revocation among its ends: your brake), its lease ends and the VM
+       is removed at once, the command in flight there with it, never once that command returns (the fifth re-review's
+       I-1). Its lease ends as the task does, whatever becomes of the VM (R4-7): one whose removal fails spends
+       nothing more of yours, is never renewed with its agent's lease again, and is tried again on a timer until it
+       goes, as well as before the next is made. One an earlier process of the node left is removed as the node
+       starts. No route reaches into it, yours included.
      - It is made on a Linux host with Docker, beside an agent's VM whose HOME is apart from its workspace (layout 2,
        SECURITY.md); beside one still in layout 1 it is refused, since that VM's HOME is its workspace. Layout 2 is each
        node's own setting, off by default (`invincible sandbox layout on`): until it is on, every task handed to that

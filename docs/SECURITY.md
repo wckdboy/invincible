@@ -774,20 +774,21 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       in the VM, if it has one, which no lease reaches (a task's own VM starts with an empty HOME).
     - **In a VM of its own** (the owner's decision of 27 November 2026, the third re-review's R3-1;
       `packages/node/src/task-vms.ts`, `createTaskVm`, tested in `task-vms.test.ts`, `team-layout.test.ts`,
-      `team-runtime.test.ts` and `fabric-handoff.e2e.test.ts`). Every command of it, its agent's, its coding tool's and
-      its gates, runs in a VM made for it beside its agent's: from the agent's VM's image, as big as it and on its
-      network, sharing the agent's workspace alone (its `work/` tree: never its HOME, nor its notes), with a HOME of its
-      own in memory. Its lease is the task's paid models alone, never your keys nor its repository, counted under its
-      agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. The VM
-      goes as the task ends, however it ends, and with it everything the task started there; after a revocation, once
-      the command in flight there returns, up to that command's deadline (15 minutes and its helper's 10 seconds: the
-      host's exec isn't cut by the task's end, the fourth re-review's I-1). Its lease ends as the task does, whatever
-      becomes of the VM (R4-7, `task-vms.test.ts`, `team-layout.test.ts`): one whose removal fails spends nothing more
-      of yours, is never renewed with its agent's again, and is tried again on a timer until it goes. One an earlier
-      process of the node left is removed as the node starts; no route reaches into it. It is made only beside an agent's VM in
-      layout 2, on a Linux host with Docker; beside one whose HOME is its workspace it is refused. On a node with no
-      room beside the agent's VM for one as big, the task waits for room as any sandbox does, within its life: a task
-      that ends while it waits leaves the queue, and no VM is made for it (I-2, `governed-host.test.ts`).
+      `team-runtime.test.ts` and `fabric-handoff.e2e.test.ts`). Every command of it, its agent's, its coding tool's
+      and its gates, runs in a VM made for it beside its agent's: from the agent's VM's image, as big as it and on its
+      network, sharing the agent's workspace alone (its `work/` tree: never its HOME, nor its notes), with a HOME of
+      its own in memory. Its lease is the task's paid models alone, never your keys nor its repository, counted under
+      its agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. The
+      VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
+      ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
+      flight there with it, never once that command returns (the fifth re-review's I-1, `task-vms.test.ts`). Its lease
+      ends as the task does, whatever becomes of the VM (R4-7, `task-vms.test.ts`, `team-layout.test.ts`): one whose
+      removal fails spends nothing more of yours, is never renewed with its agent's again, and is tried again on a
+      timer until it goes. One an earlier process of the node left is removed as the node starts; no route reaches
+      into it. It is made only beside an agent's VM in layout 2, on a Linux host with Docker; beside one whose HOME is
+      its workspace it is refused. On a node with no room beside the agent's VM for one as big, the task waits for
+      room as any sandbox does, within its life: a task that ends while it waits leaves the queue, and no VM is made
+      for it (I-2, `governed-host.test.ts`).
     - **A Mac takes no other node's task** (`fabric-handoff.test.ts`, `container-host.test.ts`). No VM on a Mac shares
       an agent's workspace (below: a Mac's VMs stay in layout 1), so there a task would run in its agent's own VM,
       beside its sign-ins. A Mac's node refuses every task handed to it at once, before it reads anything of it, and

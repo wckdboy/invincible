@@ -12,7 +12,7 @@ const STARTED = Date.UTC(2026, 10, 27, 11, 0);
 const done = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
 
 /** A host as TaskVms uses it: VMs made for tasks, their commands, their streams, their removal. */
-function host(options: { left?: string[]; failRemove?: string; failTimes?: number; stays?: string; refused?: string } = {}) {
+function host(options: { left?: string[]; failRemove?: string; failTimes?: number; stays?: string; refused?: string; slow?: number } = {}) {
   const vms = new Map<string, { createdAt: number; run: string }>();
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
   const asked: unknown[] = [], ran: { vm: string; cmd: string[] }[] = [], removed: string[] = [];
@@ -31,7 +31,12 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       vms.set(id, { createdAt: STARTED + made, run: (input as { run: string }).run });
       return { id } as SandboxView;
     },
-    exec: async (vm: string, cmd: string[]) => (ran.push({ vm, cmd }), done()),
+    // (A command that takes `slow` ms, as one in flight does: it returns then, whatever became of its VM meanwhile.)
+    exec: async (vm: string, cmd: string[]) => {
+      ran.push({ vm, cmd });
+      if (options.slow) await Bun.sleep(options.slow);
+      return done();
+    },
     stream: async () => ({ lines: (async function* () {})(), write: () => {}, close: () => {}, kill: () => {}, exited: Promise.resolve(0) }),
     destroy: async (vm: string) => {
       if (options.failRemove === vm) {
@@ -129,6 +134,26 @@ describe("another node's task's VM, on this node", () => {
       while (h.vms.has("vm-1") && Date.now() < until) await Bun.sleep(5);
       expect([how, h.removed]).toEqual([how, ["vm-1"]]);
     }
+  });
+
+  test("its work's signal ending ends its lease and removes its VM at once, never once the command in flight returns (I-1)", async () => {
+    const h = host({ slow: 400 });
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
+    const work = new AbortController();
+    const vm = await vms.open(ask, work.signal);
+    const began = Date.now();
+    const inFlight = vm.exec("sleep 900", 900, new AbortController().signal);
+    await Bun.sleep(20);
+    // The owner's brake: its hand-off revoked, its work's signal ends.
+    work.abort();
+    for (let i = 0; i < 100 && !h.removed.includes("vm-1"); i++) await Bun.sleep(2);
+    expect(h.steps).toEqual(["lease ended vm-1", "removed vm-1"]);
+    // (Before the command, which takes 400 ms, came back.)
+    expect(Date.now() - began).toBeLessThan(300);
+    await inFlight;
+    // Released after, nothing more is done.
+    await vm.release();
+    expect(h.removed).toEqual(["vm-1"]);
   });
 
   test("none is made for work that has stopped, nor where this node has no VMs", async () => {

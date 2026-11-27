@@ -75,6 +75,16 @@ export class TaskVms {
     // (Its work's own signal: a task that ends while its VM waits for room has none made.)
     const vm = (await host.createTaskVm({ task: ask.task, shares: ask.vm, run, providers: ask.providers, models: ask.models, ttlMinutes: TASK_VM_MINUTES }, signal)).id;
     let released = false;
+    // When its work's signal ends (its hand-off revoked: your brake), its lease ends and its VM goes at once, and the
+    // command in flight with it: none keeps model access until it returns. The fifth fabric review's I-1.
+    const brake = () => {
+      // (Released already, its stop may still be running before its removal: its lease ends now all the same.)
+      if (released) return host.endLease(vm);
+      released = true;
+      void this.remove(host, vm, run);
+    };
+    if (signal.aborted) brake();
+    else signal.addEventListener("abort", brake, { once: true });
     const stopped = async () => {
       const ended = await host.exec(vm, ["bash", "-lc", agentCleanupCommand()], 15);
       if (ended.exitCode !== 0) throw new Error("the task's run could not be safely stopped");
@@ -94,6 +104,7 @@ export class TaskVms {
       },
       stop: stopped,
       release: async () => {
+        signal.removeEventListener("abort", brake);
         if (released) return;
         released = true;
         // (Its VM goes, and with it everything the task started there: its stop first, so its coding tool ends as it would.)
