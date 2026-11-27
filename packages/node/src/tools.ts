@@ -1002,13 +1002,13 @@ export const TOOLS: PrimaryTool[] = [
   tool({
     name: "team_again",
     title: "Give an agent's task again",
-    description: `Give a task that ended again, as a new one for the same agent in the same conversation: with its own goal and gates, or yours when you give them (narrower, clearer, with what you learned), and from a step of it (from, as its steps list them) to keep the work done up to there. On your own word: $${TEAM_LIMITS.ownTaskUsd} unless you name less, within what you may commit on your own. Say why: it goes on the new task's trail.`,
+    description: `Give a task that ended again, as a new one for the same agent in the same conversation: with its own goal, or yours when you give one (narrower, clearer, with what you learned), with its own gates and any you add (never fewer), and from a step of it (from, as its steps list them) to keep the work done up to there. On your own word: $${TEAM_LIMITS.ownTaskUsd} unless you name less, within what you may commit on your own. Say why: it goes on the new task's trail.`,
     input: {
       task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("The ended task's id, as team lists it"),
       why: z.string().min(1).max(500).describe("Why again, in a sentence: it goes on the new task's trail"),
       from: z.number().int().min(1).describe("A step of it to start from, as its steps list them").optional(),
       goal: z.string().min(1).max(8000).describe("Its goal, when you give it a new one. Never a key or a password.").optional(),
-      gates: z.array(z.string().min(1).max(1000)).max(16).describe("Its gates, when you give it new ones").optional(),
+      gates: z.array(z.string().min(1).max(1000)).max(16).describe("Its gates: all it had, and any you add (none is dropped or replaced)").optional(),
       budgetUsd: z.number().positive().max(TEAM_LIMITS.ownTaskUsd).describe(`What its model calls may spend, in US dollars: $${TEAM_LIMITS.ownTaskUsd} unless you name less`).optional(),
     },
     routes: ["primaryAgain"],

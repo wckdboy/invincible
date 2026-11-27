@@ -535,6 +535,31 @@ describe("task orchestration", () => {
     // None of it is you stepping in.
     for (const task of [fits, no, own]) expect(store.task(task.id)!.interventions).toBeUndefined();
   });
+  // The review of 27 November, N4: what it may not take up again, it may not give again either; and its gates stay.
+  test("your agent never gives again what you stopped or declined, nor work of an agent or a conversation you paused; and what it gives again keeps its gates", () => {
+    const { store, service } = setup();
+    const ended = (title: string, error: string | null, over: { gates?: string[]; room?: string } = {}) => {
+      const task = store.createTask({ room: over.room ?? "workshop", assignee: "ada", title, goal: title, gates: over.gates ?? ["bun test"], budgetUsd: 1 });
+      store.finish(task.id, error === null ? "failed" : "stopped", error ?? "Its gates failed.");
+      return task.id;
+    };
+    expect(() => service.againOwn(ended("You stopped", "Stopped by you."), { why: "it should finish" })).toThrow("You stopped it: giving it again is yours.");
+    expect(() => service.againOwn(ended("You declined", "Declined by you."), { why: "it is needed" })).toThrow("You declined it: giving it again is yours.");
+    const paused = ended("Its agent paused", null);
+    store.enable("ada", false);
+    expect(() => service.againOwn(paused, { why: "try again" })).toThrow("You paused its agent: giving its work again is yours.");
+    store.enable("ada", true);
+    store.pauseRoom("workshop", true);
+    expect(() => service.againOwn(paused, { why: "try again" })).toThrow("Its conversation is paused: giving its work again is yours.");
+    store.pauseRoom("workshop", false);
+    // Its gates stay: it may add one, never drop or replace one.
+    const failed = ended("Gated", null, { gates: ["bun test", "bun run lint"] });
+    expect(() => service.againOwn(failed, { why: "narrower", gates: ["bun test"] })).toThrow("Its gates stay when it is given again: bun run lint would be dropped. Add gates, never drop or replace them.");
+    expect(() => service.againOwn(failed, { why: "other gates", gates: ["true"] })).toThrow("would be dropped");
+    expect(service.againOwn(failed, { why: "with a type check too", gates: ["bun test", "bun run lint", "bun run typecheck"] }).gates).toEqual(["bun test", "bun run lint", "bun run typecheck"]);
+    expect(service.againOwn(ended("Gated again", null, { gates: ["bun test"] }), { why: "as it was" }).gates).toEqual(["bun test"]);
+  });
+
   test("your agent stops its agents' work and takes it up again: within its money, never what you stopped or paused, nor what a crash cut off, nor an outcome's", async () => {
     // Its work runs until it is stopped.
     const { store, service } = setup({ executeTask: (_agent, _task, context) => new Promise((resolve) => context.signal.addEventListener("abort", () => resolve({ verified: false, output: "Stopped" }))) });
@@ -600,8 +625,9 @@ describe("task orchestration", () => {
     // Its words or the old ones, and its money: $3 at most though the old had more.
     expect(again).toMatchObject({ room: "workshop", assignee: "ada", title: "Parse units", goal: "Parse SI units.", gates: ["bun test"], budgetUsd: 3, givenBy: "primary", status: "queued" });
     expect(store.trail(again.id).entries.map((e) => e.text)).toContain(`Given again by your agent after “Parse units” (${old.id}): its reviewer found the gap, within its budget of $3, and of the $10.00 left of the $10 a day it may commit on its own`);
-    const rewritten = service.againOwn(old.id, { why: "narrower", goal: "Parse kilo and mega only.", gates: ["bun test units"], budgetUsd: 1 });
-    expect(rewritten).toMatchObject({ goal: "Parse kilo and mega only.", gates: ["bun test units"], budgetUsd: 1 });
+    // (A narrower goal, a gate added: its own gate stays, N4.)
+    const rewritten = service.againOwn(old.id, { why: "narrower", goal: "Parse kilo and mega only.", gates: ["bun test", "bun test units"], budgetUsd: 1 });
+    expect(rewritten).toMatchObject({ goal: "Parse kilo and mega only.", gates: ["bun test", "bun test units"], budgetUsd: 1 });
     expect(service.ownLeft()).toEqual({ usd: 6, of: "day" });
     // From a step it never kept: said so, and nothing is given.
     expect(() => service.againOwn(old.id, { why: "from a step", from: 2 })).toThrow(`Task ${old.id} has no step 2 kept to start from.`);

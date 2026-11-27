@@ -341,6 +341,15 @@ export class TeamService {
     if (!before) throw new TeamError(404, "No such team task to give again.");
     if (before.status === "queued" || before.status === "running" || before.status === "proposed") throw new TeamError(409, "It hasn't ended: steer it, or stop it first.");
     if (before.outcome) throw new TeamError(409, "It is a step of an outcome, which gives its work again within its own budget.");
+    // What you stopped or declined, or work of an agent or a conversation you paused, is yours to give again, as it is
+    // yours to take up again (resumeOwn; the review of 27 November, N4).
+    const yoursSaid = before.error === null ? undefined : YOURS_STOPPED.get(before.error);
+    if (yoursSaid) throw new TeamError(409, `${yoursSaid}: giving it again is yours.`);
+    if (this.store.agent(before.assignee)?.enabled === false) throw new TeamError(409, "You paused its agent: giving its work again is yours.");
+    if (this.store.room(before.room)?.paused) throw new TeamError(409, "Its conversation is paused: giving its work again is yours.");
+    // Its gates stay: it may add to them, never drop or replace one (what proves the work again is at least what proved it).
+    const dropped = before.gates.filter((gate) => give.gates !== undefined && !give.gates.includes(gate));
+    if (dropped.length) throw new TeamError(409, `Its gates stay when it is given again: ${dropped.join(", ")} would be dropped. Add gates, never drop or replace them.`);
     const budgetUsd = give.budgetUsd ?? Math.min(before.budgetUsd ?? TEAM_LIMITS.ownTaskUsd, TEAM_LIMITS.ownTaskUsd);
     const input: TeamTaskInput = {
       room: before.room,

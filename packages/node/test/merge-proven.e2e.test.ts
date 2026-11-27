@@ -1,6 +1,7 @@
 // What the primary's own merge (team_merge, primaryMerge, github.merge) lands: only its own pushes of proven work, into
-// the default branch, at the very commit it last pushed (the review of f805030..9fbcdd2, 27 November 2026: N1, N2a, N3;
-// its PoCs, poc45-merge.e2e, turned into tests that fail at 9fbcdd2). Against a real daemon (startDaemon), the real
+// the default branch, at the very commit it last pushed; and what it gives again: never what you stopped or declined
+// (the review of f805030..9fbcdd2, 27 November 2026: N1, N2a, N3, N4; its PoCs, poc45-merge.e2e, turned into tests that
+// fail at 9fbcdd2). Against a real daemon (startDaemon), the real
 // routes, the real natives (shipNative, mergeNative) and policy, with a stand-in model and a stand-in GitHub that keeps
 // its branches, its commits and its pull requests. No real service is called; the key is obviously fake.
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -204,4 +205,38 @@ test("N3: a commit the node never pushed, sharing the first 12 hex of the one it
   script = [callTool("team_merge", { task: proven }), say("The merge waits for you.")];
   expect((await ask("Merge the docs.")).map((r) => [r.name, r.ok])).toEqual([["team_merge", true]]);
   expect(merged.find((m) => m.number === pr.pr)).toBeUndefined();
+}, 30_000);
+
+// The review of 27 November, N4: what it may not take up again, it may not give again either.
+test("N4: what you declined or stopped, it may neither take up again nor give again: both are yours", async () => {
+  const room = (await api<{ room: { id: string } }>("directAgent", { id: "ada" })).room.id;
+  const { message } = await api<{ message: { chainId: string } }>("postTeamMessage", { room, text: "Ada, plan the migration checks." });
+  const team = new TeamStore(join(home.dir, "team.db"));
+  let declined: string, stopped: string;
+  try {
+    declined = team.createTask({ room, assignee: "ada", title: "Drop the old tables", goal: "Drop them.", budgetUsd: 2 }, { agent: "ada", chainId: message.chainId }).id;
+    // Work you gave and stopped while it waited: written as your stop writes it (TeamStore.stop: "Stopped by you.").
+    stopped = team.createTask({ room, assignee: "ada", title: "Rewrite history", goal: "Force-push a cleaned history.", budgetUsd: 2 }).id;
+    team.finish(stopped, "stopped", "Stopped by you.");
+  } finally {
+    team.close();
+  }
+  // You decline the proposal (as `invincible agents decline <task>` does).
+  await api("controlTeam", { action: "stop", task: declined });
+  await api("teamOwnDaily", { usd: 100 });
+  script = [
+    callTool("team_resume", { task: declined, why: "it is needed after all" }),
+    callTool("team_again", { task: declined, why: "it is needed after all" }),
+    callTool("team_resume", { task: stopped, why: "it should finish" }),
+    callTool("team_again", { task: stopped, why: "it should finish" }),
+    say("Given again."),
+  ];
+  const results = await ask("Sort out Ada's work.");
+  expect(results.map((r) => [r.name, r.ok])).toEqual([["team_resume", false], ["team_again", false], ["team_resume", false], ["team_again", false]]);
+  expect(results[0]!.summary).toContain("You declined it: taking it up again is yours.");
+  expect(results[1]!.summary).toContain("You declined it: giving it again is yours.");
+  expect(results[2]!.summary).toContain("You stopped it: taking it up again is yours.");
+  expect(results[3]!.summary).toContain("You stopped it: giving it again is yours.");
+  const again = (await api<TeamSnapshot>("team")).tasks.filter((t) => t.givenBy === "primary" && (t.goal === "Drop them." || t.goal === "Force-push a cleaned history."));
+  expect(again).toEqual([]);
 }, 30_000);
