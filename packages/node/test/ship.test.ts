@@ -57,6 +57,15 @@ function fakeGitHub(options: { branchExists?: boolean; prFails?: boolean; heads?
     if (method === "PATCH" && path.includes("/git/refs/heads/")) return options.moveFails ? { status: 422, json: { message: "Update is not a fast forward" } } : { status: 200, json: {} };
     if (method === "GET" && path.split("?")[0]!.endsWith("/pulls")) return { status: 200, json: [{ number: 7, html_url: "https://github.com/amiriteorg/shipyard/pull/7" }] };
     if (method === "GET" && path === "/repos/amiriteorg/shipyard") return { status: 200, json: { default_branch: "main" } };
+    // Whose the key is (a person's account, by its id), a private repository of it, an organization's, and two threads:
+    // one opened under your account, one by someone else.
+    if (method === "GET" && path === "/user") return { status: 200, json: { login: "lin-example", id: 501, type: "User" } };
+    if (method === "GET" && path === "/repos/lin-example/notes") return { status: 200, json: { full_name: "lin-example/notes", private: true, fork: false, owner: { login: "lin-example", id: 501, type: "User" } } };
+    if (method === "GET" && path === "/repos/amiriteorg/docs") return { status: 200, json: { full_name: "amiriteorg/docs", private: true, fork: false, owner: { login: "amiriteorg", id: 600, type: "Organization" } } };
+    if (method === "GET" && path === "/repos/lin-example/notes/issues/4") return { status: 200, json: { number: 4, user: { id: 501 } } };
+    if (method === "GET" && path === "/repos/lin-example/notes/issues/5") return { status: 200, json: { number: 5, user: { id: 777 } } };
+    if (method === "POST" && path.endsWith("/issues")) return { status: 201, json: { number: 4, html_url: "https://github.com/lin-example/notes/issues/4" } };
+    if (method === "POST" && path.endsWith("/comments")) return { status: 201, json: { id: 1 } };
     if (method === "GET" && path === `/repos/amiriteorg/shipyard/git/commits/${BASE}`) return { status: 200, json: { tree: { sha: "f".repeat(40) } } };
     if (path.endsWith("/git/blobs")) return { status: 201, json: { sha: String(++blobs).padStart(40, "b") } };
     if (path.endsWith("/git/trees")) return { status: 201, json: { sha: "e".repeat(40) } };
@@ -463,6 +472,64 @@ describe("the gate, end to end", () => {
     const agents = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/liv-own", base: "main", title: "Units in the docs" } }, { kind: "agent", by: "arm:team.0123456789.liv" });
     expect(agents.status === "done" && agents.own).toBe("a pull request in amiriteorg/shipyard, a repository you gave an agent");
     expect(seen.slice(before).filter((s) => s.method === "POST" && s.url.endsWith("/pulls"))).toHaveLength(1);
+  });
+
+  // Your word, 27 November 2026, as the review of 27 November drew it: in a private repository of yours its own threads
+  // are its to speak in; anyone else's thread, an organization's place, and its agents' and loops' calls are yours.
+  test("in a private repository of yours the primary itself speaks on its own threads: GitHub is asked first whose the key is, the repository and the thread; anyone else's thread, an organization's repository and its agents' calls wait for you", async () => {
+    const before = seen.length;
+    const primary = { kind: "agent" as const, by: "arm:primary" };
+    const issue = await daemon.connectors.call({ connector: "github", tool: "issue.create", args: { owner: "lin-example", repo: "notes", title: "Units in the docs" } }, primary);
+    expect(issue.status === "done" && issue.own).toBe("an issue in lin-example/notes, a private repository of yours");
+    const comment = await daemon.connectors.call({ connector: "github", tool: "issue.comment", args: { owner: "lin-example", repo: "notes", number: 4, body: "Done in #5." } }, primary);
+    expect(comment.status === "done" && comment.own).toBe("a comment on its own thread #4 in lin-example/notes, a private repository of yours");
+    const filed = ((await send(home.adminToken(), "actions")).body.actions as ActionView[]).find((a) => a.id === (issue.status === "done" ? issue.action : ""))!;
+    expect([filed.state, filed.self, filed.note]).toEqual(["done", true, "Your agent approved it itself: an issue in lin-example/notes, a private repository of yours"]);
+    // Asked of GitHub, with the key, before each was filed; then what it sent.
+    expect(seen.slice(before).map((s) => `${s.method} ${s.url} ${s.auth === `Bearer ${TOKEN}`}`)).toEqual([
+      "GET https://api.github.com/user true",
+      "GET https://api.github.com/repos/lin-example/notes true",
+      "POST https://api.github.com/repos/lin-example/notes/issues true",
+      "GET https://api.github.com/repos/lin-example/notes/issues/4 true",
+      "POST https://api.github.com/repos/lin-example/notes/issues/4/comments true",
+    ]);
+    // Someone else's thread, an organization's repository, its agents' own calls from their VMs: they wait, nothing is sent.
+    const after = seen.length;
+    expect((await daemon.connectors.call({ connector: "github", tool: "issue.comment", args: { owner: "lin-example", repo: "notes", number: 5, body: "Thanks." } }, primary)).status).toBe("asked");
+    expect((await daemon.connectors.call({ connector: "github", tool: "issue.create", args: { owner: "amiriteorg", repo: "docs", title: "Units" } }, primary)).status).toBe("asked");
+    expect((await daemon.connectors.call({ connector: "github", tool: "issue.comment", args: { owner: "lin-example", repo: "notes", number: 4, body: "Me too." } }, { kind: "agent", by: "arm:team.0123456789.liv" })).status).toBe("asked");
+    // A tool you run with a token of its own isn't its anywhere.
+    expect((await daemon.connectors.call({ connector: "github", tool: "issue.create", args: { owner: "lin-example", repo: "notes", title: "Units" } }, { kind: "agent", by: "arm:coder" })).status).toBe("asked");
+    expect(seen.slice(after).filter((s) => s.method !== "GET")).toEqual([]);
+  });
+
+  test("a shipment that changes what the repository's CI runs waits for you, in a repository you gave an agent too: it would run with the repository's secrets", async () => {
+    const collector = async (_s: string, _f: string, dest: string) => {
+      const files = shipmentFiles({ v: 1, base: BASE, remote: REMOTE, files: [{ path: "src/units.ts", mode: "100644" }, { path: ".github/workflows/ci.yml", mode: "100644" }] }, { "src/units.ts": "export const k = 1e3;\n", ".github/workflows/ci.yml": "on: push\n" });
+      const out = { files: [] as { path: string; size: number; sha256: string }[], bytes: 0, skipped: [] as { path: string; reason: string }[] };
+      for (const [path, bytes] of Object.entries(files)) {
+        const target = join(dest, ...path.split("/"));
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, bytes);
+        out.files.push({ path, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
+        out.bytes += bytes.length;
+      }
+      return out;
+    };
+    const workflows = (await daemon.artifacts.save(collector, { sandbox: "0123456789", label: "units-ci" })).artifact!.id;
+    // (The repository is one you gave an agent: its work that changes no CI is its own to ship there.)
+    const team = new TeamStore(join(home.dir, "team.db"));
+    try {
+      team.saveAgent({ id: "liv", name: "Liv", repository: "https://github.com/amiriteorg/shipyard" });
+    } finally {
+      team.close();
+    }
+    const clean = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact, branch: "invincible/no-ci" }, why: "its gates and its reviewer passed" }, { kind: "agent", by: "team.0123456789.liv" });
+    expect(clean.status).toBe("done");
+    const before = seen.length;
+    const shipped = await daemon.connectors.call({ connector: "github", tool: "ship", args: { ...ARGS, artifact: workflows, branch: "invincible/with-ci" }, why: "its gates and its reviewer passed" }, { kind: "agent", by: "team.0123456789.liv" });
+    expect(shipped.status).toBe("asked");
+    expect(seen.length).toBe(before);
   });
 
   test("what isn't its still waits for you: another repository, a tool you run with a token of its own, your own tap", async () => {

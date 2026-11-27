@@ -26,6 +26,8 @@ import {
   orderProblems,
   type OrderTerms,
   type OrderView,
+  type GitHubFacts,
+  type OwnCall,
   ownApproval,
   primaryCaller,
   randomId,
@@ -111,6 +113,9 @@ export interface ConnectorServiceOptions {
   natives?: Partial<Record<NativeName, NativeTool>>;
   /** The repositories you gave your agents (as you gave them): its and their work there is its to approve (ownApproval). Absent: none. */
   repositories?: () => readonly string[];
+  /** The files a kept shipment changes (its ship/manifest.json), so a push that changes a repository's CI is seen before
+   * it could be its own to approve. Null, or absent: not known, and such a push is yours. */
+  shipment?: (artifact: string) => readonly string[] | null;
   /** Where Google's and Microsoft's sign-ins are reached (tests: a stand-in). */
   oauthEndpoints?: Partial<OAuthEndpoints>;
   /**
@@ -122,6 +127,22 @@ export interface ConnectorServiceOptions {
 
 /** How long an action waits for you. No answer means no. */
 export const ACTION_TTL_MS = 24 * 60 * 60_000;
+/** GitHub's API; what it says of a key, a repository or a thread is kept this long, said or not, and asked again after. */
+const GITHUB_API = "https://api.github.com";
+const FACTS_MS = 10 * 60_000;
+/** What GitHub says, read as it gives it: a person's account (never an organization's or an app's), a repository, a thread. */
+const readUser = (b: any): GitHubFacts["user"] | null => (b?.type === "User" && Number.isSafeInteger(b.id) && b.id > 0 ? { id: b.id } : null);
+const readRepo = (b: any): GitHubFacts["repo"] | null =>
+  typeof b?.full_name === "string" && typeof b.private === "boolean" && typeof b.fork === "boolean" && Number.isSafeInteger(b.owner?.id) && typeof b.owner?.type === "string"
+    ? { name: b.full_name, private: b.private, fork: b.fork, ownerId: b.owner.id, ownerType: b.owner.type }
+    : null;
+const readThread = (b: any): GitHubFacts["thread"] | null => (Number.isSafeInteger(b?.number) && Number.isSafeInteger(b.user?.id) ? { number: b.number, authorId: b.user.id } : null);
+/** Whether a call could be the primary's own in a private repository of yours, were GitHub to say so: only then is it asked. */
+const couldBeYours = (call: OwnCall): boolean => {
+  const { owner, repo, number } = call.args;
+  if (typeof owner !== "string" || typeof repo !== "string") return false;
+  return ownApproval(call, [], { user: { id: 1 }, repo: { name: `${owner}/${repo}`, private: true, fork: false, ownerId: 1, ownerType: "User" }, ...(typeof number === "number" ? { thread: { number, authorId: 1 } } : {}) }) !== null;
+};
 
 /** The primary's own callers, whose calls it may approve itself (core's policy.ts primaryCaller, the rule every replica holds it to). */
 const isHis = primaryCaller;
@@ -137,6 +158,67 @@ export class ConnectorService {
   constructor(private readonly o: ConnectorServiceOptions) {
     this.now = o.now ?? Date.now;
     o.local.exec("CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, state TEXT NOT NULL, at INTEGER NOT NULL)");
+  }
+
+  /** What GitHub said, by connector, key version and path: kept FACTS_MS, said or not. */
+  private readonly githubSaid = new Map<string, { at: number; value: unknown }>();
+
+  /**
+   * GitHub's answer to a fixed read of its own (never a tool of the manifest's), with the connector's key at its pinned
+   * origin: kept FACTS_MS for this connector, this version of its key and this path alone, null when it didn't say. Each
+   * one asked anew is said in the ledger.
+   */
+  private async githubRead<T>(manifest: ConnectorManifest, path: string, read: (body: unknown) => T | null): Promise<T | null> {
+    const secret = manifest.auth?.secret;
+    const info = secret ? this.o.vault.info(secret) : null;
+    if (manifest.origin !== GITHUB_API || !secret || !info) return null;
+    const key = JSON.stringify([manifest.id, secret, info.hlc, path]);
+    const kept = this.githubSaid.get(key);
+    if (kept && this.now() - kept.at < FACTS_MS) return kept.value as T | null;
+    let value: T | null = null;
+    try {
+      const result = await this.send(manifest, { kind: "http", method: "GET", url: `${GITHUB_API}${path}`, headers: { ...(manifest.headers ?? {}) }, class: "read", target: `GET ${path}` });
+      value = result.ok ? read(JSON.parse(result.body)) : null;
+    } catch (error) {
+      this.o.log(`${manifest.label}: GET ${path} wasn't said (${(error as Error).message})`);
+    }
+    this.githubSaid.set(key, { at: this.now(), value });
+    this.o.ledger({ class: "read", resource: `connector.${manifest.id}`, target: `GET ${path}`, verdict: "allow", reason: "what GitHub says of your key, a repository or a thread, before your agent may answer its own call there", detail: value === null ? "not said: nothing there is its to approve" : JSON.stringify(value) });
+    return value;
+  }
+
+  /**
+   * What GitHub says of a call of the primary's itself (GitHubFacts): whose your key is, by its account's id; the
+   * repository the call names; and, in a private repository of yours, who opened the issue or pull request it answers.
+   */
+  private async githubFacts(manifest: ConnectorManifest, call: OwnCall): Promise<GitHubFacts> {
+    const { owner, repo, number } = call.args;
+    if (typeof owner !== "string" || typeof repo !== "string") return {};
+    const user = await this.githubRead(manifest, "/user", readUser);
+    if (!user) return {};
+    const at = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    const named = await this.githubRead(manifest, at, readRepo);
+    if (!named) return { user };
+    const yours = named.private && !named.fork && named.ownerType === "User" && named.ownerId === user.id;
+    const thread = yours && typeof number === "number" ? await this.githubRead(manifest, `${at}/issues/${number}`, readThread) : null;
+    return { user, repo: named, ...(thread ? { thread } : {}) };
+  }
+
+  /**
+   * Whether an agent's call is its own to approve, and why (ownApproval), judged before it is filed: nothing awaits
+   * between filing it and its own yes, so your answer never meets it half made. What a push changes is read from its kept
+   * shipment; what GitHub says is asked only of a call that could be the primary's itself in a private repository of yours.
+   */
+  private async ownAnswer(manifest: ConnectorManifest, name: string, cls: ConnectorRequest["class"], args: Record<string, ArgValue>, caller: Extract<Caller, { kind: "agent" }>): Promise<string | null> {
+    const tool = Object.hasOwn(manifest.tools, name) ? manifest.tools[name] : undefined;
+    if (!tool || isMcpTool(tool) || !isHis(caller.by) || caller.yours) return null;
+    const pushes = tool.native === "github.ship" || tool.native === "github.ship.update";
+    const changes = pushes && typeof args.artifact === "string" ? (this.o.shipment?.(args.artifact) ?? undefined) : undefined;
+    const call: OwnCall = { class: cls, origin: manifest.origin, ...(tool.native ? { native: tool.native } : {}), method: tool.method, path: tool.path, args, by: caller.by, ...(changes ? { changes } : {}) };
+    const repositories = this.o.repositories?.() ?? [];
+    const given = ownApproval(call, repositories);
+    if (given || !couldBeYours(call)) return given;
+    return ownApproval(call, repositories, await this.githubFacts(manifest, call));
   }
 
   private manifest(id: string): ConnectorManifest {
@@ -183,6 +265,9 @@ export class ConnectorService {
       const id = `a_${randomId(16)}`;
       const expires = this.now() + ACTION_TTL_MS;
       const digest = toolDigest(manifest, input.tool);
+      // Whether it is its own, judged before it is filed (ownAnswer); and whether an order of yours covers it, as your
+      // orders stand once that is known. From here to its answer nothing awaits.
+      const own = await this.ownAnswer(manifest, input.tool, request.class, args, caller);
       const defined = manifest.tools[input.tool];
       const native = defined && !isMcpTool(defined) ? defined.native : undefined;
       // A send of mail goes only where its order names, from now on here (sendCovered), whatever the date the replicas
@@ -214,8 +299,6 @@ export class ConnectorService {
           return { status: "done", class: request.class, target: request.target, result: sent.result, order: { id: order.id, label: order.label }, action: id };
         }
       }
-      const tool = manifest.tools[input.tool];
-      const own = tool && !isMcpTool(tool) && isHis(caller.by) && !caller.yours ? ownApproval({ class: request.class, origin: manifest.origin, ...(tool.native ? { native: tool.native } : {}), method: tool.method, path: tool.path, args }, this.o.repositories?.() ?? []) : null;
       if (own) {
         this.o.store.emit(this.o.identity, "action.decided", { id, verdict: "approved", note: `Your agent approved it itself: ${own}`.slice(0, 500) }, { trust: "agent" });
         const filed = this.actions(10_000).find((a) => a.id === id);

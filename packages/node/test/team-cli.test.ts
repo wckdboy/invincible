@@ -282,7 +282,7 @@ test("agents ci says whether failing checks and reviews go back to the agent, an
   await teamCommand(api, "ci", ["on"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamCi", input: { on: true } });
   expect(lines.at(-1)).toStartWith("Failing checks, and reviews that ask for changes, go back to the agent whose work it was: a fix on the pull request's branch");
-  expect(lines.at(-1)).toContain("A verified fix is pushed onto its branch on your agent's own approval (never forced), as it may in a repository you gave an agent.");
+  expect(lines.at(-1)).toContain("A verified fix is pushed onto its branch on your agent's own approval (never forced), as it may in a repository you gave an agent, unless it changes what the repository's CI runs.");
   await teamCommand(api, "ci", ["off"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamCi", input: { on: false } });
   expect(lines.at(-1)).toStartWith("Failing checks and reviews stay yours");

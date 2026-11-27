@@ -73,7 +73,7 @@ describe("a pull request of an agent's work fails its checks", () => {
     // An agent's fix is under way: the failure's notice is a note for the digest, not a warning that needs you (PLAN #59).
     expect(said?.fixing).toBe(true);
     const [fix] = w.fixes();
-    expect(said?.said).toBe(`Given back to @noa as task ${fix!.id}: once its fix is verified, your agent approves its push onto the pull request's branch itself (never forced), as it may in a repository you gave an agent.`);
+    expect(said?.said).toBe(`Given back to @noa as task ${fix!.id}: once its fix is verified, your agent approves its push onto the pull request's branch itself (never forced), as it may in a repository you gave an agent, unless the fix changes what the repository's CI runs.`);
     expect(fix).toMatchObject({
       room: work.room,
       assignee: "noa",
@@ -217,7 +217,7 @@ describe("a pull request of an agent's work conflicts with its base", () => {
     const said = giveBack(w.deps, pull, conflict());
     expect(said?.fixing).toBe(true);
     const [fix] = w.fixes();
-    expect(said?.said).toBe(`Given back to @noa as task ${fix!.id}: once its fix is verified, your agent approves its push onto the pull request's branch itself (never forced), as it may in a repository you gave an agent.`);
+    expect(said?.said).toBe(`Given back to @noa as task ${fix!.id}: once its fix is verified, your agent approves its push onto the pull request's branch itself (never forced), as it may in a repository you gave an agent, unless the fix changes what the repository's CI runs.`);
     expect(fix).toMatchObject({
       room: work.room,
       assignee: "noa",

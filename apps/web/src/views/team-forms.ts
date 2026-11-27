@@ -561,7 +561,7 @@ export async function setCiBack(ctx: Ctx, on: boolean): Promise<boolean> {
       title: "Give failing checks and reviews back?",
       body: [
         h("p", {}, "When a pull request of an agent's work fails its checks, or someone who may push asks for changes in a review, that agent gets the fix as a task on the pull request's branch, without asking you: once for each commit that failed or review, three times at most, within your agent's daily giving."),
-        h("p", {}, "Its fix is checked by its gates and an independent reviewer, and pushed onto the branch on your agent's own approval (never forced), as it may in a repository you gave an agent."),
+        h("p", {}, "Its fix is checked by its gates and an independent reviewer, and pushed onto the branch on your agent's own approval (never forced), as it may in a repository you gave an agent, unless it changes what the repository's CI runs."),
       ],
       confirmLabel: "Turn on",
     });

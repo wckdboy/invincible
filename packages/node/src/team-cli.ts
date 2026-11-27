@@ -361,7 +361,7 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     if (args.length > 1 || (args.length === 1 && args[0] !== "on" && args[0] !== "off")) throw new Error("usage: invincible agents ci [on|off]");
     const on = args.length ? (await api.call<{ ci: boolean }>("teamCi", { on: args[0] === "on" })).ci : (await api.call<TeamSnapshot>("team")).ciBack === true;
     print(on
-      ? "Failing checks, and reviews that ask for changes, go back to the agent whose work it was: a fix on the pull request's branch, once for each commit that failed or review, three times at most, within your agent's daily giving. A verified fix is pushed onto its branch on your agent's own approval (never forced), as it may in a repository you gave an agent. Turn it off with: invincible agents ci off"
+      ? "Failing checks, and reviews that ask for changes, go back to the agent whose work it was: a fix on the pull request's branch, once for each commit that failed or review, three times at most, within your agent's daily giving. A verified fix is pushed onto its branch on your agent's own approval (never forced), as it may in a repository you gave an agent, unless it changes what the repository's CI runs. Turn it off with: invincible agents ci off"
       : "Failing checks and reviews stay yours, except in an outcome, which gives them back on its own within its budget. Turn it on with: invincible agents ci on");
     return;
   }

@@ -264,7 +264,7 @@ export function actionCard(ctx: Ctx, action: ActionView): HTMLElement {
       ". No answer means no. ",
       destructive
         ? "Deleting anything persistent asks you, unless a standing order of yours names exactly this."
-        : "Outward actions (posting, sending, pushing, the physical world) ask you, unless a standing order of yours covers them, or they are its agents' work in the repositories you gave them, which it approves itself.",
+        : "Outward actions (posting, sending, pushing, the physical world) ask you, unless a standing order of yours covers them, or they are its and its agents' work in the repositories you gave them (a push that changes their CI excepted), or its own threads in a private repository of yours, which it approves itself.",
     ),
     admin
       ? formActions(decline, similar, edit, approve)

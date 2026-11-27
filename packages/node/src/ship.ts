@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { shipToGitHub } from "@invincible/agents";
+import { ShipManifest, shipToGitHub } from "@invincible/agents";
 import type { ArtifactStore } from "./artifacts.ts";
 import type { NativeTool } from "./connectors.ts";
 
@@ -53,5 +53,17 @@ export function shipNative(artifacts: ArtifactStore, update = false): NativeTool
       update,
     );
     return { ok: result.ok, status: result.status, contentType: "text/plain", body: result.receipt, truncated: false, durationMs: Math.round(performance.now() - started) };
+  };
+}
+
+/** The files a kept shipment changes, as its manifest says (connectors.ts: a push that changes a repository's CI is
+ * yours); null when the work isn't kept here or holds no shipment. */
+export function shipmentFiles(artifacts: ArtifactStore): (artifact: string) => string[] | null {
+  return (artifact) => {
+    try {
+      return ShipManifest.parse(JSON.parse(new TextDecoder().decode(artifacts.read(artifact, "ship/manifest.json").bytes))).files.map((file) => file.path);
+    } catch {
+      return null;
+    }
   };
 }
