@@ -279,6 +279,27 @@ struct GlassTests {
         #expect(GlassPictures.picture(shape: pill, ramp: 4, size: 40, theme: .dark, scale: 2)!.image === at40.image)
     }
 
+    /// A view, drawn as the screen would at twice its points: its pixels, straight, and how wide it is.
+    @MainActor private func drawn(_ view: some View, width: CGFloat, height: CGFloat) throws -> (bytes: [UInt8], width: Int) {
+        let renderer = ImageRenderer(content: view.frame(width: width, height: height))
+        renderer.scale = 2
+        let image = try #require(renderer.cgImage)
+        return (pixels(image), image.width)
+    }
+
+    @Test @MainActor func aStatesDotIsCutOutOfWhatItSitsOn() throws {
+        // The dot (GlassCut, the app's and a Live Activity's) on a red 40 pt box, set 10 pt in: working's blue at its
+        // middle, the ring round it taken out of the red, the red elsewhere as it was.
+        let red = Color(.sRGB, red: 1, green: 0, blue: 0)
+        let (bytes, width) = try drawn(GlassCut(size: 40, state: .working, theme: .light) { red.frame(width: 40, height: 40) }.padding(10), width: 60, height: 60)
+        func at(_ x: Double, _ y: Double) -> [Int] { let i = (Int(y * 2) * width + Int(x * 2)) * 4; return (0..<4).map { Int(bytes[i + $0]) } }
+        // At 40 pt: a dot of 10, 1 past the corner, cut 2 wide: its middle at 36 of the box, its ring out to 7 from it.
+        let middle = 10 + 40 + 1 - 5.0
+        #expect(at(middle, middle) == [0x15, 0x5d, 0xfc, 255], "\(at(middle, middle))")
+        #expect(at(middle - 4.4, middle - 4.4)[3] == 0, "the cut: \(at(middle - 4.4, middle - 4.4))")
+        #expect(at(20, 20) == [255, 0, 0, 255] && at(45, 20) == [255, 0, 0, 255])
+    }
+
     @Test @MainActor func anAgentsFaceIsItsGlass() throws {
         // AgentFace draws the glass its avatar names: the Pill in Sky's ramp, its middle solid and blue.
         let pill = AgentGlass.shapes.firstIndex { $0.id == "pill" }!

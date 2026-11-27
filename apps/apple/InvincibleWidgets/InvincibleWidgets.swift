@@ -1,4 +1,5 @@
 import ActivityKit
+import CoreImage
 import SwiftUI
 import WidgetKit
 
@@ -148,8 +149,9 @@ struct VerdictMark: View {
     }
 }
 
-/// The agent's glass, still, as the app draws it (Core/GlassDrawing.swift): its shape in its ramp, as the app gave them;
-/// how its task stands is said beside it. One an app from before the glass started (no shape) is a disc of its colour.
+/// The agent's glass, still, as the app draws it (Core/GlassDrawing.swift): its shape in its ramp, as the app gave them,
+/// its blur from 40 pt (the Dynamic Island opened), and its task's state as the app's dot (UI/GlassCut.swift), the word
+/// beside it saying which. One an app from before the glass started (no shape) is a disc of its colour.
 struct AgentDisc: View {
     let attributes: TaskActivityAttributes
     let state: TaskActivityState
@@ -157,11 +159,19 @@ struct AgentDisc: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.displayScale) private var displayScale
 
+    /// Its blur's renderer, made once for the extension's life (in software: a picture this small needs no GPU).
+    private static let blur = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+    /// A picture spans this much of the disc's box past it on each side: room for its blur.
+    private static let pad: CGFloat = 0.3
+
     var body: some View {
+        let theme: AgentMark.Theme = scheme == .dark ? .dark : .light
         Group {
             if let shape = attributes.shape, (0..<AgentGlass.shapes.count).contains(shape), let color = AgentMark.palette.firstIndex(where: { $0.forms.light == attributes.colour }),
-               let picture = GlassDrawing.draw(shape: AgentGlass.shapes[shape], ramp: AgentGlass.ramps[color], size: size, theme: scheme == .dark ? .dark : .light, scale: displayScale, pad: 0, blur: nil) {
-                Image(decorative: picture, scale: displayScale).resizable()
+               let picture = GlassDrawing.draw(shape: AgentGlass.shapes[shape], ramp: AgentGlass.ramps[color], size: size, theme: theme, scale: displayScale, pad: Self.pad, blur: size >= AgentGlass.Glow.blurFrom ? Self.blur : nil) {
+                GlassCut(size: size, state: AgentGlass.state(state.markState), theme: theme) {
+                    Image(decorative: picture, scale: displayScale).resizable().frame(width: size * (1 + 2 * Self.pad), height: size * (1 + 2 * Self.pad))
+                }
             } else {
                 Circle().fill(Color(hex: attributes.colour))
             }

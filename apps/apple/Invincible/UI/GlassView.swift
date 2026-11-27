@@ -61,45 +61,6 @@ struct GuardianMark: View {
     }
 }
 
-/// The dot an avatar's state is shown by, cut out of what is under it: the content first, a ring the dot's cut wide
-/// taken out of it where the dot goes, then the dot (idle: a ring in its colour round nothing).
-private struct GlassCut<Content: View>: View {
-    let size: CGFloat
-    let state: AgentGlass.State?
-    let theme: AgentMark.Theme
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        if let state {
-            let dot = AgentGlass.Dot.size(for: size)
-            let colour = Color(hex: AgentGlass.Dot.colors[state]!.on(theme))
-            let at = CGPoint(x: size + dot.out - dot.size / 2, y: size + dot.out - dot.size / 2)
-            ZStack(alignment: .topLeading) {
-                content.frame(width: size, height: size)
-                Circle()
-                    .frame(width: dot.size + 2 * dot.cut, height: dot.size + 2 * dot.cut)
-                    .position(at)
-                    .blendMode(.destinationOut)
-            }
-            .compositingGroup()
-            .overlay(alignment: .topLeading) {
-                Group {
-                    if state == .idle {
-                        Circle().strokeBorder(colour, lineWidth: AgentGlass.Dot.idleRing)
-                    } else {
-                        Circle().fill(colour)
-                    }
-                }
-                .frame(width: dot.size, height: dot.size)
-                .position(at)
-            }
-            .frame(width: size, height: size)
-        } else {
-            content.frame(width: size, height: size)
-        }
-    }
-}
-
 /// Its glow: a pool of its light behind it on a dark page (from 24 pt), a tinted shadow under it on a light one (from 20
 /// pt). Still, it is drawn as any view is. While it works it breathes, and then it is a gradient layer of its own whose
 /// opacity Core Animation turns: the render server's work, as a page's compositor runs the web's breath, so a screen of

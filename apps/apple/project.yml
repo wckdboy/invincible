@@ -98,6 +98,8 @@ targets:
       - path: Invincible/Core/Glass.swift
       - path: Invincible/Core/GlassData.swift
       - path: Invincible/Core/GlassDrawing.swift
+      # Its state's dot, as the app cuts it.
+      - path: Invincible/UI/GlassCut.swift
       - path: Invincible/Core/JSONValue.swift
     info:
       path: InvincibleWidgets/Info.plist
