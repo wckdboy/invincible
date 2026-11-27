@@ -111,6 +111,37 @@ describe("an outcome it owns", () => {
     expect(w.prompts[0]).toContain("Done when: not said yet");
     expect(w.prompts[0]).toContain("@ada");
   });
+  // The re-check of 27 November, U1 (R11a, R11b): an outcome's look gives no work behind a pause of yours, as nothing it
+  // gives on its own word does (TeamService.whyYours); it is told an agent you paused is paused, not free.
+  test("a look gives no task to an agent you paused, nor in its room once you paused it: it is told so, and nothing waits behind your pause", async () => {
+    const ran: string[] = [];
+    const w = world([{ calls: [give("lin", "Port the login screen", 3), give("ada", "Set up the Gradle project", 2)] }, {}, { calls: [give("ada", "Write the build script", 2)] }], (title) => (ran.push(title), { verified: true }));
+    w.service.control({ action: "pause", agent: "lin" });
+    const made = w.runner.create({ title: "Android app", goal: "Port the iPhone app to Android.", agents: ["ada", "lin"], budgetUsd: 20 });
+    await until(() => w.results.length === 2);
+    // Told Lin is paused, never free; given nothing for her.
+    expect(w.prompts[0]).toMatch(/@lin \(Lin[^\n]*; now paused by the owner: give it nothing/);
+    expect(w.prompts[0]).not.toMatch(/@lin \(Lin[^\n]*now free/);
+    expect(w.results[0]).toBe("Not done: You paused @lin: giving it work is yours.");
+    expect(w.results[1]).toMatch(/^Given: task-.+ to @ada/);
+    await until(() => ran.length === 1);
+    expect(w.store.tasks(made.room).map((t) => t.assignee)).toEqual(["ada"]);
+    // You pause its room: its next look is told so, and gives nothing in it.
+    await until(() => w.prompts.length === 2);
+    w.service.control({ action: "pause", room: made.room });
+    w.clock.set(w.clock.get() + 6 * 3600_000 + 60_000);
+    await w.runner.tick();
+    await until(() => w.results.length === 3);
+    expect(w.prompts[2]).toContain("The owner paused this outcome's room: give no task in it until they resume it.");
+    expect(w.results[2]).toBe("Not done: Its conversation is paused: giving work in it is yours.");
+    expect(w.store.tasks(made.room).map((t) => t.title)).toEqual(["Set up the Gradle project"]);
+    expect(w.runner.view(w.store.outcome(made.id)!).committedUsd).toBe(0);
+    // You resume them both: nothing runs that it gave behind your pause.
+    w.service.control({ action: "resume", agent: "lin" });
+    w.service.control({ action: "resume", room: made.room });
+    await w.service.settled();
+    expect(ran).toEqual(["Set up the Gradle project"]);
+  });
 
   test("a look plans coding work and spends its budget: a coding plan may give it, and only a model the budget can count", async () => {
     const w = world([{ text: "Planned." }]);

@@ -307,7 +307,8 @@ export class OutcomeRunner {
     const agents = outcome.agents.map((id) => {
       const k = team.agents.find((t) => t.id === id);
       const running = this.o.store.tasks(outcome.room).find((t) => t.assignee === id && t.status === "running");
-      const state = busy.has(id) ? (running ? `working on "${running.title}"` : "busy elsewhere") : "free";
+      // One you paused is paused, never free: nothing it gives waits behind your pause (TeamService.whyYours).
+      const state = k?.enabled === false ? "paused by the owner: give it nothing" : busy.has(id) ? (running ? `working on "${running.title}"` : "busy elsewhere") : "free";
       const passed = [...new Set(all.filter((t) => t.assignee === id && t.status === "done" && t.verified).sort((a, b) => b.updatedAt - a.updatedAt).flatMap((t) => t.gates))].slice(0, PASSED_GATES);
       return [
         `- @${id}${k ? ` (${k.name}, ${k.role}): ${(k.instructions || "").split("\n")[0]!.slice(0, 160)}` : " (no longer among the agents)"}; now ${state}`,
@@ -334,6 +335,7 @@ export class OutcomeRunner {
       "",
       "Its agents (give tasks to these only):",
       ...agents,
+      ...(this.o.store.room(outcome.room)?.paused ? ["", "The owner paused this outcome's room: give no task in it until they resume it."] : []),
       "",
       `Budget ${usdLabel(view.budgetUsd)}: spent ${usdLabel(view.spentUsd)}, held by tasks still to run ${usdLabel(view.committedUsd)}, left ${usdLabel(Math.max(0, left))}. (Spend is counted at the owner's prices; its work runs only on models it can count.)`,
       "",
@@ -414,6 +416,11 @@ export class OutcomeRunner {
       case "start_task": {
         const agent = text("agent", 32).replace(/^@/, "");
         if (!outcome.agents.includes(agent)) throw new Error(`@${agent} isn't one of this outcome's agents (${outcome.agents.map((k) => `@${k}`).join(", ")})`);
+        // Its look gives on its own word, so never behind a pause of yours, nor a goal you stopped in the last day: it
+        // would wait there, holding the outcome's money, and run the moment you resume (the re-check of 27 November, U1).
+        const goal = text("goal", 8000);
+        const yours = this.o.service().whyYours({ assignee: agent, room: outcome.room, goal }, "give");
+        if (yours) throw new Error(yours);
         const budget = Number(input.budgetUsd);
         if (!Number.isFinite(budget) || budget <= 0) throw new Error("give it a budget in US dollars");
         if (budget > OUTCOME_LIMITS.taskUsd) throw new Error(`a task's budget is at most ${usdLabel(OUTCOME_LIMITS.taskUsd)}`);
@@ -426,7 +433,7 @@ export class OutcomeRunner {
         const gates = Array.isArray(input.gates) ? input.gates.filter((g): g is string => typeof g === "string" && g.trim().length > 0).slice(0, 16) : [];
         const after = Array.isArray(input.after) ? input.after.filter((a): a is string => typeof a === "string") : [];
         const task = this.o.service().createTask(
-          { room: outcome.room, assignee: agent, title: text("title", 200), goal: text("goal", 8000), ...(gates.length ? { gates } : {}), budgetUsd: round(budget), ...(after.length ? { dependsOn: after } : {}), outcome: id },
+          { room: outcome.room, assignee: agent, title: text("title", 200), goal, ...(gates.length ? { gates } : {}), budgetUsd: round(budget), ...(after.length ? { dependsOn: after } : {}), outcome: id },
           "primary",
         );
         return `Given: ${task.id} to @${agent}, "${task.title}", budget ${usdLabel(budget)}. It runs when @${agent} is free${after.length ? " and what it waits on is done and verified" : ""}.`;
