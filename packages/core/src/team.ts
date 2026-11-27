@@ -434,8 +434,9 @@ export interface TeamDelivery {
 /**
  * What a task's run came to, as the runner counted it (never the agent's own account): when the agent began on
  * it and when it ended, how its run ended, its commands, how often the work was sent back, and its model calls by
- * role and model as the providers reported them (counts only). A coding harness's own calls, through the gateway
- * or on its own sign-in, are not in `spent` yet: with a harness it holds the planner's and the reviewer's.
+ * role and model as the providers reported them (counts only). A coding harness's own calls are in `spent` under the
+ * role "tool": through the gateway as the gateway counted them, and on its own sign-in as its tool said them, under
+ * `own sign-in/<model>` (spend.ts OWN_SIGN_IN_TALLY), which costs no money: its plan's (`plan`).
  */
 /**
  * What proves a task, as the runner saw it (never the agent's own account): each gate's exit before any work (`before`,
@@ -452,6 +453,24 @@ export const TeamTaskProof = z.strictObject({
 });
 export type TeamTaskProof = z.infer<typeof TeamTaskProof>;
 
+/**
+ * What a task's work took of a plan of yours (I15 step 10), when its coding tool ran on one: a seat (its id) or its tool's
+ * own sign-in in its agent's VM (null), of that kind (seats.ts SeatKind); the share of each of the plan's windows it took,
+ * as its tool said them (the points the window's used share grew by, from its first word in this run to its last); and
+ * what its calls would have cost at API prices, which the plan covers (`usd`: its tool's own count where it keeps one,
+ * Claude Code's; else its tokens at your price for that model's API; null: neither was said). `sessionUsd`: its tool's
+ * own count for its session as this run ended, for the next run on that session to be counted from.
+ * (Its seat's id and kinds are seats.ts's, said again here, where team.ts can't import them: core's tests hold them equal.)
+ */
+export const TeamTaskPlan = z.strictObject({
+  seat: z.string().regex(/^st_[A-Za-z0-9_-]{22}$/).nullable(),
+  kind: z.enum(["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "plan", "api"]),
+  windows: z.array(z.strictObject({ window: z.string().regex(/^[a-z0-9][a-z0-9_]{0,31}$/), share: z.number().int().min(0).max(100) })).max(8),
+  usd: z.number().min(0).max(1_000_000).nullable(),
+  sessionUsd: z.number().min(0).max(1_000_000).optional(),
+});
+export type TeamTaskPlan = z.infer<typeof TeamTaskPlan>;
+
 export const TeamTaskRecord = z.strictObject({
   startedAt: z.number().int().min(0),
   endedAt: z.number().int().min(0),
@@ -461,6 +480,8 @@ export const TeamTaskRecord = z.strictObject({
   spent: SpendLines,
   /** What proves it (absent: a record from before proof was kept, or a run that never reached a gate or a review). */
   proof: TeamTaskProof.optional(),
+  /** The plan of yours its coding tool ran on, and what it took of it (absent: none, or a record from before the meter). */
+  plan: TeamTaskPlan.optional(),
 });
 export type TeamTaskRecord = z.infer<typeof TeamTaskRecord>;
 

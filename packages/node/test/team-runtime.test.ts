@@ -2,10 +2,10 @@ import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newNodeIdentity, type ExecResult, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
+import { costOf, moneyPrices, newNodeIdentity, type ExecResult, type Prices, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
 import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { acpDriver, AGENTS, OWN_SIGN_IN, type RunEvent } from "@invincible/agents";
+import { acpDriver, AGENTS, OWN_SIGN_IN, planTaken, type RunEvent } from "@invincible/agents";
 import { harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
 import type { SeatAnswer, SeatRun, TeamRunContext } from "@invincible/agents";
 import type { TaskAccount } from "@invincible/core";
@@ -891,7 +891,7 @@ const SEAT = `st_${"s".repeat(22)}`;
 const RESET = Date.UTC(2026, 10, 27, 14, 0);
 type Told = { exitCode?: number; stdout: string };
 /** An agent on a vendor's tool with seats of yours: its own VM and a seat's VM answer the status question as told, and a run there ends at once, saying a window of its plan. */
-function seatTask(harness: "claude" | "codex", options: { own: Told; seat?: Told; roster?: { provider: string; model: string }[]; answers?: SeatAnswer[]; account?: TaskAccount | null; agent?: Partial<Agent>; task?: Partial<TeamTask>; fails?: (command: string) => boolean }) {
+function seatTask(harness: "claude" | "codex", options: { own: Told; seat?: Told; roster?: { provider: string; model: string }[]; answers?: SeatAnswer[]; account?: TaskAccount | null; agent?: Partial<Agent>; task?: Partial<TeamTask>; fails?: (command: string) => boolean; lines?: string[]; listPrices?: Prices }) {
   const inAgent: string[] = [], inSeat: string[] = [], said: string[] = [], kept: TaskAccount[] = [], released: string[] = [], stopped: string[] = [];
   const asks: { from: TaskAccount | null; wait: boolean }[] = [];
   const windows: string[] = [], seatWindows: string[] = [];
@@ -899,7 +899,7 @@ function seatTask(harness: "claude" | "codex", options: { own: Told; seat?: Told
   const kind = harness === "claude" ? "claude-subscription" : "chatgpt-codex";
   const play = (command: string, told: Told) => {
     if (command.includes("--status")) return result({ stdout: told.stdout, exitCode: told.exitCode ?? 0 });
-    if (command.includes('"next": nxt')) return result({ stdout: JSON.stringify({ alive: false, exit: 0, next: 42, lines: [JSON.stringify({ type: "session", id: "00000000-0000-4000-8000-000000000001" }), JSON.stringify({ type: "window", name: "five_hour", status: "allowed", usedPercent: 12, resetsAt: RESET }), JSON.stringify({ type: "text", text: "Built and checked." })] }) });
+    if (command.includes('"next": nxt')) return result({ stdout: JSON.stringify({ alive: false, exit: 0, next: 42, lines: options.lines ?? [JSON.stringify({ type: "session", id: "00000000-0000-4000-8000-000000000001" }), JSON.stringify({ type: "window", name: "five_hour", status: "allowed", usedPercent: 12, resetsAt: RESET }), JSON.stringify({ type: "text", text: "Built and checked." })] }) });
     if (command.includes("command -v desktop")) return result({ stdout: options.agent?.name === "Desk" ? "/usr/local/bin/desktop" : "" });
     return result({ stdout: command.includes("cat ") ? "" : "0" });
   };
@@ -927,6 +927,7 @@ function seatTask(harness: "claude" | "codex", options: { own: Told; seat?: Told
     },
     window: (_m, _h, window) => void windows.push(`${window.name} ${window.usedPercent}`),
     seatWindow: (seat, window) => void seatWindows.push(`${seat.id} ${window.name} ${window.usedPercent}`),
+    ...(options.listPrices ? { listPrices: () => options.listPrices! } : {}),
   });
   const context: TeamRunContext = { ...f.context, emit: (line) => void said.push(line), account: options.account ?? null, onAccount: (account) => void kept.push(account) };
   const launch = (where: string[]) => where.find((c) => c.includes("setsid"));
@@ -957,6 +958,61 @@ test("a run on a seat of yours: its tool's check, launch and follow are in the s
     expect(t.seatWindows).toEqual([`${SEAT} five_hour 12`]);
     expect(t.windows).toEqual([]);
   }
+});
+
+test("a run on a plan is on the meter: its tool's own calls are in what the task spent, covered by the plan, with the share of each window it took and what they would have cost at API prices", async () => {
+  const line = (event: object) => JSON.stringify(event);
+  const window = (used: number) => line({ type: "window", name: "five_hour", status: "allowed", usedPercent: used, resetsAt: RESET });
+  const session = line({ type: "session", id: "00000000-0000-4000-8000-000000000001" });
+  const said = line({ type: "text", text: "Built and checked." });
+  const claude = (cost: number) => [session, window(12), line({ type: "tokens", input: 240, output: 24, model: "claude-fake-1" }), line({ type: "cost", usd: cost }), window(19), said];
+  const done = await seatTask("claude", { own: { stdout: signedOut }, roster: [opus], lines: claude(0.00144) }).go();
+  expect(done.verified).toBe(true);
+  // Its tool's own calls are in what it spent, under its own sign-in's name: no price of yours makes them cost money.
+  const own = done.record.spent.filter((l) => l.model.startsWith("own sign-in/"));
+  expect(own).toEqual([{ role: "tool", model: "own sign-in/claude-fake-1", calls: 1, unknown: 0, input: 240, output: 24, cached: 0, reasoning: 0 }]);
+  expect(costOf(own, moneyPrices({ "anthropic/*": { input: 15, output: 75, cached: 1.5 }, "claude-fake-1/*": { input: 1, output: 1, cached: 1 } }, []))).toEqual({ usd: 0, unpriced: [], complete: true });
+  // The plan it ran on: the seat, the share of its five hours the task took, and what Claude Code counts its calls cost.
+  expect(done.record.plan).toEqual({ seat: SEAT, kind: "claude-subscription", windows: [{ window: "five_hour", share: 7 }], usd: 0.00144, sessionUsd: 0.00144 });
+  // Taken up again in its session: counted from the total its last run ended on, never again from nothing.
+  const again = await seatTask("claude", { own: { stdout: signedOut }, roster: [opus], lines: claude(0.00216), account: { seat: SEAT, kind: "claude-subscription" }, task: { record: done.record } }).go();
+  expect(again.record.plan).toEqual({ seat: SEAT, kind: "claude-subscription", windows: [{ window: "five_hour", share: 7 }], usd: 0.00072, sessionUsd: 0.00216 });
+  // Codex counts no cost of its own: its tokens at your price for its model's API, where you priced it; else unknown.
+  const codex = [session, line({ type: "tokens", input: 120, output: 12, model: "fake-model" }), said];
+  const priced = await seatTask("codex", { own: { stdout: signedOut }, roster: [opus], lines: codex, listPrices: { "openai/fake-model": { input: 2, output: 8, cached: 0.2 } } }).go();
+  expect(priced.record.plan).toMatchObject({ seat: SEAT, kind: "chatgpt-codex", windows: [] });
+  expect(priced.record.plan?.usd).toBeCloseTo((120 * 2 + 12 * 8) / 1_000_000, 12);
+  expect((await seatTask("codex", { own: { stdout: signedOut }, roster: [opus], lines: codex }).go()).record.plan?.usd).toBeNull();
+  // On its own VM's sign-in (no seat to take), the plan is that account's; through the gateway, there is none.
+  const inOwn = await seatTask("claude", { own: { stdout: signedIn() }, roster: [opus], answers: [{ none: true }], lines: claude(0.00072) }).go();
+  expect(inOwn.record.plan).toEqual({ seat: null, kind: "claude-subscription", windows: [{ window: "five_hour", share: 7 }], usd: 0.00072, sessionUsd: 0.00072 });
+  const gateway = await seatTask("claude", { own: { stdout: signedOut }, roster: [opus], answers: [{ none: true }] }).go();
+  expect(gateway.record.plan).toBeUndefined();
+  expect(gateway.record.spent.some((l) => l.model.startsWith("own sign-in/"))).toBe(false);
+});
+
+test("a window that resets as the run goes on: its share is what it grew by before the reset and after it", async () => {
+  const line = (event: object) => JSON.stringify(event);
+  const window = (used: number, resetsAt: number) => line({ type: "window", name: "five_hour", status: "allowed", usedPercent: used, resetsAt });
+  const lines = [line({ type: "session", id: "00000000-0000-4000-8000-000000000001" }), window(90, RESET), window(97, RESET), window(3, RESET + 5 * 3_600_000), line({ type: "text", text: "Built and checked." })];
+  const done = await seatTask("claude", { own: { stdout: signedOut }, roster: [opus], lines }).go();
+  expect(done.record.plan?.windows).toEqual([{ window: "five_hour", share: 10 }]);
+});
+
+test("a plan's share is whole points, never below naught; its cost counts from the last run only on the same account and the same session", () => {
+  const on = { seat: SEAT, kind: "claude-subscription" as const };
+  const shares = new Map([["five_hour", { grown: 30, first: 0, last: 4 }], ["seven_day", { grown: 0, first: 40, last: 38.4 }]]);
+  expect(planTaken(on, [], null, shares, undefined, undefined)).toEqual({ seat: SEAT, kind: "claude-subscription", windows: [{ window: "five_hour", share: 34 }, { window: "seven_day", share: 0 }], usd: null });
+  const before = { seat: SEAT, kind: "claude-subscription" as const, windows: [], usd: 0.5, sessionUsd: 0.5 };
+  expect(planTaken(on, [], 0.75, new Map(), before, undefined).usd).toBe(0.25);
+  // Another account's run, or a session that began anew (its total under the last), is counted whole.
+  expect(planTaken({ seat: null, kind: "claude-subscription" }, [], 0.75, new Map(), before, undefined).usd).toBe(0.75);
+  expect(planTaken(on, [], 0.2, new Map(), before, undefined).usd).toBe(0.2);
+  // Without a count of its tool's own, its tokens at your list price; a model you didn't price leaves it unknown.
+  const lines = [{ role: "tool", model: "own sign-in/fake-model", calls: 2, unknown: 0, input: 1_000_000, output: 100_000, cached: 0, reasoning: 0 }];
+  const codex = { seat: null, kind: "chatgpt-codex" as const };
+  expect(planTaken(codex, lines, null, new Map(), undefined, { "openai/fake-model": { input: 2, output: 8, cached: 0.2 } }).usd).toBe(2.8);
+  expect(planTaken(codex, lines, null, new Map(), undefined, { "openai/other": { input: 2, output: 8, cached: 0.2 } }).usd).toBeNull();
 });
 
 test("a seat whose tool isn't signed in there is let go, said and marked; the work goes on in its own VM, as before seats", async () => {

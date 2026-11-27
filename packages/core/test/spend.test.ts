@@ -9,6 +9,7 @@ import {
   evalIndex,
   mergeSpend,
   moneyPrices,
+  OWN_SIGN_IN_TALLY,
   parseVariant,
   priceFor,
   PricedModel,
@@ -78,6 +79,16 @@ describe("money as it goes: a coding plan's calls are paid for already", () => {
     expect(priceFor(moneyPrices({ "opencode/x": { input: 1, output: 1 } }, ["opencode-go"]), "opencode/x")).toEqual({ input: 1, output: 1 });
     const line = { role: "engineer", calls: 1, unknown: 0, input: 1_000_000, output: 1_000_000, cached: 0, reasoning: 0 };
     expect(costOf([{ ...line, model: "mimo-token/mimo-v2.6-pro" }, { ...line, model: "deepseek/deepseek-v4-pro" }], money)).toEqual({ usd: 2.5, unpriced: [], complete: true });
+  });
+
+  test("a coding tool's calls on its own sign-in are a plan's: no price of yours makes them cost money, and none is one for them", () => {
+    const yours = { "anthropic/*": { input: 15, output: 75, cached: 1.5 } };
+    const line = { role: "tool", model: `${OWN_SIGN_IN_TALLY}/claude-opus-5-5`, calls: 3, unknown: 0, input: 1_000_000, output: 100_000, cached: 0, reasoning: 0 };
+    expect(priceFor(moneyPrices(yours, []), line.model)).toEqual({ input: 0, output: 0, cached: 0 });
+    expect(costOf([line], moneyPrices(yours, []))).toEqual({ usd: 0, unpriced: [], complete: true });
+    // At your prices as you set them it has none: what it would have cost is said by the task's plan (its usd).
+    expect(costOf([line], yours)).toEqual({ usd: 0, unpriced: [line.model], complete: false });
+    expect(OWN_SIGN_IN_TALLY).toContain(" ");
   });
 });
 

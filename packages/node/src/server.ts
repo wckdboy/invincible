@@ -2505,6 +2505,8 @@ export function createApp(ctx: AppContext) {
       },
       // What a task spends against its budget is money: a coding plan's calls are paid for already (moneyPrices).
       prices: () => moneyOf(ctx.store),
+      // What a plan's calls would have cost at API prices, where its tool keeps no count of its own (a task's plan, its usd).
+      listPrices: () => pricesOf(ctx.store),
       countable: (ref) => countable(ctx.store, ctx.vault, ref),
       // Its skills for an agent's task, as for a run of its: chosen once from its goal, under the task's own ref.
       skills: (_member, task) => {

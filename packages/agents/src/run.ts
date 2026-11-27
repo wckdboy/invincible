@@ -344,6 +344,13 @@ export type RunEvent =
    * on the model named. Allowed, warning or rejected; how much of it is used (%); when it resets (ms).
    */
   | { type: "window"; model: string; own?: true; name: string; status: "allowed" | "warning" | "rejected"; usedPercent?: number; resetsAt?: number }
+  /**
+   * What a coding agent's tool spent on its own sign-in (a plan's: a seat of yours, or its VM's own), as it said it: the
+   * model it ran on (absent: it named none) and a turn's or a call's tokens. Through the gateway, the gateway counts them.
+   */
+  | { type: "used"; model?: string; input: number; output: number }
+  /** What its session on its own sign-in has cost so far at API prices, as its tool counts it (Claude Code's): notional. */
+  | { type: "cost"; usd: number }
   /** A model of the role's couldn't answer and another did (`answered`): said once for each, never passed over in silence. */
   | { type: "skipped"; role: RunRole; model: string; error: string; answered: string }
   /** A gate failed again as it failed the submission before: the rest of the work is that role's (escalate). */
@@ -1805,6 +1812,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
               if (event.status === "rejected" && event.resetsAt !== undefined) refusedUntil = Math.max(refusedUntil, event.resetsAt);
               emit({ type: "window", model: agentModelName(model), ...(model.own ? { own: true as const } : {}), name: event.name, status: event.status, ...(event.usedPercent !== undefined ? { usedPercent: event.usedPercent } : {}), ...(event.resetsAt !== undefined ? { resetsAt: event.resetsAt } : {}) });
             }
+            // On its own sign-in, what it spent is counted here, as its tool says it (the gateway counts the rest).
+            if (model.own && event.type === "tokens") emit({ type: "used", ...(event.model ? { model: event.model } : {}), input: event.input, output: event.output });
+            if (model.own && event.type === "cost") emit({ type: "cost", usd: event.usd });
             if (event.type === "text") emit({ type: "thought", step: steps, text: event.text, model: `${agent.driver.name} · ${agentModelName(model)}` });
             if (event.type === "retry") emit({ type: "retry", role: "engineer", attempt: event.attempt, error: redact(event.error), waitMs: event.waitMs });
             if (event.type === "tool") {

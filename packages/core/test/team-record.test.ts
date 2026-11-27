@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { taskRecordFacts, TeamTaskRecord } from "../src/index.ts";
+import { SEAT_KINDS, SeatId, taskRecordFacts, TeamTaskPlan, TeamTaskRecord } from "../src/index.ts";
 
 /* What an agent's task came to, in words: the same at a terminal and in the app, from the record the runner kept. */
 
@@ -30,6 +30,19 @@ describe("a task's record, in words", () => {
 
   test("an ending is said in words, never as the record's token", () => {
     expect(taskRecordFacts({ startedAt: 0, endedAt: 5000, ended: "gave-up", commands: 2, revisions: 0, spent: [] }, prices)[0]).toBe("gave up");
+  });
+
+  test("a record may say the plan its coding tool ran on: a seat (or its VM's own sign-in), each window's share, what it would have cost", () => {
+    const base = { startedAt: 0, endedAt: 1, ended: "done", commands: 0, revisions: 0, spent: [] };
+    const plan = { seat: `st_${"s".repeat(22)}`, kind: "claude-subscription", windows: [{ window: "five_hour", share: 7 }], usd: 0.00144, sessionUsd: 0.00144 };
+    expect(TeamTaskRecord.safeParse({ ...base, plan }).success).toBe(true);
+    expect(TeamTaskRecord.safeParse({ ...base, plan: { ...plan, seat: null, usd: null, sessionUsd: undefined } }).success).toBe(true);
+    for (const bad of [{ ...plan, seat: "st_x" }, { ...plan, kind: "gemini" }, { ...plan, windows: [{ window: "five_hour", share: 101 }] }, { ...plan, windows: [{ window: "Five Hours", share: 1 }] }, { ...plan, usd: -1 }, { ...plan, account: "fp_x" }]) {
+      expect(TeamTaskRecord.safeParse({ ...base, plan: bad }).success).toBe(false);
+    }
+    // Its seat's id and its kinds are seats.ts's, said again where team.ts can't import them: held equal here.
+    expect([...TeamTaskPlan.shape.kind.options]).toEqual([...SEAT_KINDS]);
+    for (const id of [`st_${"a".repeat(22)}`, "st_short", `st_${"a".repeat(23)}`, `ST_${"a".repeat(22)}`]) expect(TeamTaskPlan.shape.seat.safeParse(id).success).toBe(SeatId.safeParse(id).success);
   });
 
   test("a record is counts and times and nothing else: a field too many is refused", () => {

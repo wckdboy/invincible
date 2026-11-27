@@ -118,10 +118,18 @@ export function priceFor(prices: Prices, model: string): Price | null {
 }
 
 /**
+ * The name a coding tool's calls on its own sign-in are counted under, before the model it said it ran on
+ * (`own sign-in/<model>`): a plan's (a seat of yours, or its VM's own sign-in), paid for already. No provider's id has
+ * a space, so no price of yours is ever one for it.
+ */
+export const OWN_SIGN_IN_TALLY = "own sign-in";
+
+/**
  * Your prices as money goes (your word, 23 November 2026: a budget of yours is outside the coding plans): a coding
  * plan's calls are paid for already, so every model of one of `plans` (their provider ids) costs nothing more, priced
- * by you or not. What each would cost at your prices stays yours to see (`invincible price`, the evals). Budgets, the
- * usage meter and what a task or an outcome spent are counted this way.
+ * by you or not, and so does every call a coding tool made on its own sign-in (OWN_SIGN_IN_TALLY: a plan's). What each
+ * would cost at your prices stays yours to see (`invincible price`, the evals; a task's plan, its notional cost).
+ * Budgets, the usage meter and what a task or an outcome spent are counted this way.
  */
 export function moneyPrices(prices: Prices, plans: readonly string[]): Prices {
   const free: Price = { input: 0, output: 0, cached: 0 };
@@ -131,6 +139,7 @@ export function moneyPrices(prices: Prices, plans: readonly string[]): Prices {
     out[ref] = slash > 0 && plans.includes(ref.slice(0, slash)) ? free : price;
   }
   for (const plan of plans) out[`${plan}/*`] = free;
+  out[`${OWN_SIGN_IN_TALLY}/*`] = free;
   return out;
 }
 

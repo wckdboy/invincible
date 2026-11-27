@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { apartMatches, chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
@@ -94,6 +94,11 @@ export interface TeamRuntimeDeps {
   tools(agent: Agent, signal: AbortSignal): ChatTools;
   /** Your prices (models without one are counted, not priced): what a task's budget is measured in. */
   prices?(): Prices;
+  /**
+   * Your prices as you set them, a plan's models priced too (not money: core's moneyPrices): what a coding tool's calls on
+   * a plan of yours would have cost at API prices, where its tool keeps no count of its own (a task's plan, `usd`).
+   */
+  listPrices?(): Prices;
   /** Whether a task's budget can count what this model spends (brain's countable): priced by you, or on this machine. */
   countable?(ref: string): boolean;
   /**
@@ -374,6 +379,32 @@ export interface HarnessReadiness {
  * one in: with nothing to run on, the reason says what the owner can do. `outside`: roster models it could speak
  * to, on providers this VM's token doesn't cover (a task's token covers the providers with a key when it began).
  */
+/** Dollars to the millionth: what a tool's own count says, and what the record keeps. */
+const micro = (usd: number): number => Math.round(usd * 1_000_000) / 1_000_000;
+
+/**
+ * What a task's run took of the plan it ran on (core's TeamTaskPlan): each window's share, as its tool said them (the
+ * points its used share grew by in this run), and what its calls would have cost at API prices. Its tool's own count
+ * where it keeps one (Claude Code's, for its session), from the total its last run on the same plan ended on (`before`:
+ * that run's plan); else its tokens on its own sign-in at your price for that model's API (`listed`), where every one of
+ * them is priced; else null.
+ */
+export function planTaken(on: TaskAccount, spent: readonly UsageLine[], sessionUsd: number | null, shares: ReadonlyMap<string, { grown: number; first: number; last: number }>, before: TeamTaskPlan | undefined, listed: Prices | undefined): TeamTaskPlan {
+  const windows = [...shares].slice(0, 8).map(([window, { grown, first, last }]) => ({ window, share: Math.max(0, Math.min(100, Math.round(grown + last - first))) }));
+  let usd: number | null = null;
+  if (sessionUsd !== null) {
+    const same = before && before.seat === on.seat && before.kind === on.kind && before.sessionUsd !== undefined && before.sessionUsd <= sessionUsd;
+    usd = micro(sessionUsd - (same ? before.sessionUsd! : 0));
+  } else {
+    // (Its own sign-in's lines, as that vendor's API names its models: priced only where you priced every one of them.)
+    const own = spent.filter((line) => line.model.startsWith(`${OWN_SIGN_IN_TALLY}/`));
+    const vendor = seatVendor({ kind: on.kind });
+    const cost = own.length && listed ? costOf(own.map((line) => ({ ...line, model: `${vendor}/${line.model.slice(OWN_SIGN_IN_TALLY.length + 1)}` })), listed) : null;
+    usd = cost?.complete ? micro(cost.usd) : null;
+  }
+  return { seat: on.seat, kind: on.kind, windows, usd, ...(sessionUsd !== null ? { sessionUsd: micro(sessionUsd) } : {}) };
+}
+
 export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "exitCode" | "stdout">, roster: readonly AgentModel[], outside: readonly AgentModel[] = [], role = "engineer", held = false, ownSpent: { until: number } | null = null, bound = false): HarnessReadiness {
   const on = role === "engineer" ? "the engineer's roster" : `the ${role} role`;
   if (probe.exitCode !== 0) return { ready: false, models: [], reason: `Install ${driver.title} in this agent's VM (Your agent never installs or signs in a harness)` };
@@ -634,6 +665,15 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // What the run comes to is counted here, by the runner: when it began, and every model call as its provider reports it.
       const startedAt = Date.now();
       const spent: UsageLine[] = [];
+      /**
+       * The plan of yours its coding tool runs on (a seat, or its VM's own sign-in), once it begins on one; and what its
+       * tool says of it as it works: its session's own count of cost (Claude Code's), and each window's used share, the
+       * first said in this run and the last, with its reset (a window that reset in between is counted on from naught,
+       * what it grew by before kept in `grown`).
+       */
+      let onPlan: TaskAccount | null = null;
+      let sessionUsd: number | null = null;
+      const shares = new Map<string, { grown: number; first: number; last: number; resetsAt: number | null }>();
       // Sensitive mode, the task's or its agent's (heldModels): every call of its work on those models alone. A task
       // held to models its agent in sensitive mode isn't is never begun.
       const held = heldModels(deps.agent(agent.id), task);
@@ -808,6 +848,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           // The account its work begins on, kept with the task: taken up again, it goes on on that one alone.
           const began: TaskAccount | null = onSeat ? { seat: onSeat.seat.id, kind: onSeat.seat.kind } : kind && ready.models[0] === OWN_SIGN_IN ? { seat: null, kind } : null;
           if (began && (began.seat !== account?.seat || began.kind !== account?.kind)) ctx.onAccount?.(began);
+          onPlan = began;
           if (onSeat) ctx.emit(`Seat · ${driver.title} runs on your seat ${onSeat.seat.label}`);
         } catch (error) {
           await letGo();
@@ -850,8 +891,25 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         },
         exec, signal: ctx.signal,
         emit: (event) => {
+          // What its tool spent on its own sign-in, as it said it: in what the task spent, under its own sign-in's name (it
+          // costs no money: its plan's), and its session's own count of what that would have cost at API prices.
+          if (event.type === "used") {
+            addUsage(spent, "tool", `${OWN_SIGN_IN_TALLY}/${event.model ?? "unknown"}`, { input: event.input, output: event.output });
+            return;
+          }
+          if (event.type === "cost") {
+            sessionUsd = Math.max(sessionUsd ?? 0, event.usd);
+            return;
+          }
           // A window its coding agent's tool said: the node's to remember (a spent own sign-in goes last until its reset).
           if (event.type === "window") {
+            if (event.own && event.usedPercent !== undefined) {
+              const reset = event.resetsAt ?? null;
+              const seen = shares.get(event.name);
+              if (!seen) shares.set(event.name, { grown: 0, first: event.usedPercent, last: event.usedPercent, resetsAt: reset });
+              else if (seen.resetsAt === reset) seen.last = event.usedPercent;
+              else shares.set(event.name, { grown: seen.grown + Math.max(0, seen.last - seen.first), first: 0, last: event.usedPercent, resetsAt: reset });
+            }
             // (A window of a seat's plan is the seat's to keep: seat.window, and when it is spent seat.rested.)
             const seat = onSeat;
             if (seat && event.own) deps.seatWindow?.(seat.seat, event);
@@ -914,7 +972,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // (A reply with no command to run spent a turn and ran nothing: it is not one of the commands.)
       // (Its coding tool's calls are in what it spent, under the role "tool".)
       const proven = proof.before.length || proof.after.length || proof.review ? { proof: { before: proof.before, after: proof.after, review: proof.review, sameModel: proof.review !== null && saidSameReview } } : {};
-      const record: TeamTaskRecord = { startedAt, endedAt: Date.now(), ended: outcome.status, commands: commandsRun(outcome), revisions: outcome.revisions, spent: mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), ...proven };
+      const plan = onPlan ? planTaken(onPlan, spent, sessionUsd, shares, task.record?.plan, deps.listPrices?.()) : null;
+      const record: TeamTaskRecord = { startedAt, endedAt: Date.now(), ended: outcome.status, commands: commandsRun(outcome), revisions: outcome.revisions, spent: mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), ...proven, ...(plan ? { plan } : {}) };
       const verified = outcome.status === "done";
       // Its verified work may teach a skill, as its own runs do (it waits for you): told, never waited on. Not work in
       // sensitive mode: what a skill is made of would go to its models.
