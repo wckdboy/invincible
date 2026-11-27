@@ -568,6 +568,15 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   if (location.hash !== landing) history.replaceState(null, "", landing);
   render();
   work();
+  // A phone's roster is a drawer, made as it opens (views/sidebar.ts openRoster), and a phone's chat doesn't watch the
+  // team: the team it lists is read once the page is up, so the drawer opens whole the first time (the lead's note, 27
+  // November 2026). Not on the page's way up: the sidebar's reading there slowed a phone's first render.
+  if (hasWork && can("chat")) {
+    const early = setTimeout(() => {
+      if (narrow.matches && !live.team.value) void live.refreshTeam();
+    }, 2000);
+    lifetime.signal.addEventListener("abort", () => clearTimeout(early));
+  }
   return {
     dispose() {
       lifetime.abort();
