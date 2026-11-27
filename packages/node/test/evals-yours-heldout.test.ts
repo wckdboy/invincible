@@ -1,4 +1,8 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
+
+// (Each case runs its gates in sh beside git, as the node does: real processes, which take more than bun's default
+// 5 s on a loaded machine. Bun then ends the test and kills the gate it was waiting on, "1 dangling process".)
+setDefaultTimeout(30_000);
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
