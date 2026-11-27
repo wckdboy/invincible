@@ -3,7 +3,7 @@ import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { p256 } from "@noble/curves/nist.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { hmac } from "@noble/hashes/hmac.js";
-import { sha256 } from "@noble/hashes/sha2.js";
+import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { b64u, type Bytes, concat, fromB64u, randomBytes, utf8 } from "./bytes.ts";
 
 /*
@@ -51,24 +51,57 @@ export function verifyEd25519(signature: Bytes, message: Bytes, publicKey: Bytes
  * and no mixed-order one, which a cofactored check and a cofactorless one judge differently: core, Swift and Kotlin
  * answer alike on every input. (noble's own default, ZIP-215, takes non-canonical encodings and small-order keys.)
  */
-export function strictEd25519Point(bytes: Bytes): boolean {
-  if (bytes.length !== 32) return false;
+export const strictEd25519Point = (bytes: Bytes): boolean => strictPoint(bytes) !== null;
+
+type EdPoint = ReturnType<typeof ed25519.Point.fromBytes>;
+function strictPoint(bytes: Bytes): EdPoint | null {
+  if (bytes.length !== 32) return null;
   try {
     const point = ed25519.Point.fromBytes(bytes, false);
-    return !point.is0() && point.isTorsionFree();
+    return !point.is0() && point.isTorsionFree() ? point : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-/** An Ed25519 signature under the strict rule: A and R strict points (strictEd25519Point), S < L, and [S]B = R + [k]A. */
+/**
+ * Each key's point under the strict rule (null: it fails it), kept: a fleet's few node keys sign all that it checks, and
+ * the subgroup check is a whole scalar multiplication. A key's verdict is its bytes' alone. At most 4096 are kept.
+ */
+const strictKeys = new Map<string, EdPoint | null>();
+function strictKey(publicKey: Bytes): EdPoint | null {
+  const id = b64u(publicKey);
+  let point = strictKeys.get(id);
+  if (point === undefined) {
+    point = strictPoint(publicKey);
+    if (strictKeys.size >= 4096) strictKeys.clear();
+    strictKeys.set(id, point);
+  }
+  return point;
+}
+
+/**
+ * An Ed25519 signature under the strict rule: A and R strict points (strictEd25519Point), S < L, and [S]B = R + [k]A.
+ * The equation is checked exactly (cofactorless), so R = [S]B − [k]A lies in the prime-order subgroup with B and A: R
+ * needs only a canonical encoding that isn't the identity, not a subgroup check of its own, and the answer is the one
+ * checking both points would give (the parity vectors hold it to that), at about a ZIP-215 verification's cost.
+ */
 export function verifyEd25519Strict(signature: Bytes, message: Bytes, publicKey: Bytes): boolean {
-  if (signature.length !== 64 || !strictEd25519Point(publicKey) || !strictEd25519Point(signature.subarray(0, 32))) return false;
+  if (signature.length !== 64) return false;
+  const a = strictKey(publicKey);
+  if (!a) return false;
+  const order = ed25519.Point.Fn.ORDER;
   let s = 0n;
   for (let i = 63; i >= 32; i--) s = (s << 8n) | BigInt(signature[i]!);
-  if (s >= ed25519.Point.Fn.ORDER) return false;
+  if (s >= order) return false;
   try {
-    return ed25519.verify(signature, message, publicKey, { zip215: false });
+    const encodedR = signature.subarray(0, 32);
+    const r = ed25519.Point.fromBytes(encodedR, false);
+    if (r.is0()) return false;
+    const digest = sha512(concat(encodedR, publicKey, message));
+    let k = 0n;
+    for (let i = 63; i >= 0; i--) k = (k << 8n) | BigInt(digest[i]!);
+    return ed25519.Point.BASE.multiplyUnsafe(s).equals(r.add(a.multiplyUnsafe(k % order)));
   } catch {
     return false;
   }

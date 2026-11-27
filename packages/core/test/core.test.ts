@@ -7,6 +7,7 @@ import {
   aeadSeal,
   b64u,
   canonical,
+  concat,
   ClockSkewError,
   clientIdFromKey,
   decodeInvite,
@@ -44,6 +45,7 @@ import {
   verifyEd25519Strict,
 } from "../src/index.ts";
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { sha512 } from "@noble/hashes/sha2.js";
 
 describe("canonical json", () => {
   test("is independent of key order and drops undefined", () => {
@@ -390,6 +392,36 @@ describe("Ed25519's strict rule", () => {
     forgery.set(SMALL[0]!, 0);
     for (const point of SMALL) expect(verifyEd25519Strict(forgery, message, point)).toBe(false);
     expect(verifyEd25519Strict(signature.subarray(0, 63), message, key)).toBe(false);
+  });
+
+  // What only a key's own holder can sign, which a cofactored equation can't tell apart: R the identity, or R of mixed
+  // order. ZIP-215, and noble's own strict mode, take both; the rule takes neither (A and R in the prime-order subgroup,
+  // neither the identity), however it is checked.
+  test("a key's own holder can't sign with R the identity, nor with R of mixed order: ZIP-215 takes both, the rule neither", () => {
+    const { scalar: a, pointBytes: key } = ed25519.utils.getExtendedPublicKey(randomBytes(32));
+    const order = ed25519.Point.Fn.ORDER;
+    const message = utf8("a log event's id");
+    const le = (bytes: Uint8Array) => bytes.reduceRight((n, byte) => (n << 8n) | BigInt(byte), 0n);
+    const signed = (encodedR: Uint8Array, r: bigint) => {
+      const k = le(sha512(concat(encodedR, key, message))) % order;
+      let s = (r + k * a) % order;
+      const signature = new Uint8Array(64);
+      signature.set(encodedR, 0);
+      for (let i = 32; i < 64; i++, s >>= 8n) signature[i] = Number(s & 0xffn);
+      return signature;
+    };
+    const r = (le(randomBytes(32)) % (order - 1n)) + 1n;
+    // R the identity, S = k·a: [S]B = R + [k]A holds exactly.
+    const withIdentity = signed(SMALL[0]!, 0n);
+    // R = [r]B plus the point of order 2: the equation holds only once the cofactor clears it.
+    const withMixed = signed(ed25519.Point.BASE.multiply(r).add(ed25519.Point.fromBytes(SMALL[1]!)).toBytes(), r);
+    for (const signature of [withIdentity, withMixed]) {
+      expect(verifyEd25519(signature, message, key)).toBe(true);
+      expect(ed25519.verify(signature, message, key, { zip215: false })).toBe(true);
+      expect(verifyEd25519Strict(signature, message, key)).toBe(false);
+    }
+    // Signed as it should be, by the same key: taken.
+    expect(verifyEd25519Strict(signed(ed25519.Point.BASE.multiply(r).toBytes(), r), message, key)).toBe(true);
   });
 
   // The lead's word of 27 November 2026: the log's and link calls' node signatures are held to the rule from 14 December
