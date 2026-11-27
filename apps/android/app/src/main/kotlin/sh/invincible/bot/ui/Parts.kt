@@ -145,8 +145,9 @@ fun Problem(text: String) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.s2),
     ) {
-        Dot(LocalBrand.current.needs)
-        Text(text, style = MaterialTheme.typography.bodyMedium)
+        // (Beside the first line, its foot on that line's baseline: centred on a paragraph, it read as a list's bullet.)
+        androidx.compose.foundation.layout.Box(Modifier.alignBy { it.measuredHeight }) { Dot(LocalBrand.current.needs) }
+        Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.alignByBaseline())
     }
 }
 
