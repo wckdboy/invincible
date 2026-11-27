@@ -51,9 +51,13 @@ describe("what your agent approves itself in a repository you gave an agent", ()
     expect(ownApproval(ship(), AGENTS, at("main", MAIN))).toBe(`a pull request of the work on a new branch invincible/units, built on main as it stands, in ${WHERE}`);
     // Into the default branch named as such, the same.
     expect(ownApproval(ship({}, { base: "main" }), AGENTS, at("main", MAIN))).toStartWith("a pull request of the work on a new branch invincible/units");
-    expect(ownApproval(words("/repos/{owner}/{repo}/issues", { title: "Units" }), AGENTS)).toBe(`an issue in ${WHERE}`);
+    // An issue, where GitHub said the repository's workflows run on no issue (the re-review of 27 November, A3).
+    const QUIET: GitHubFacts = { issueDriven: false };
+    expect(ownApproval(words("/repos/{owner}/{repo}/issues", { title: "Units" }), AGENTS, QUIET)).toBe(`an issue in ${WHERE}`);
+    // Where they run on issues, an issue's words drive them; unread, that is unknown: yours, both.
+    for (const issueDriven of [true, undefined]) expect([issueDriven, ownApproval(words("/repos/{owner}/{repo}/issues", { title: "Units" }), AGENTS, { issueDriven })]).toEqual([issueDriven, null]);
     // A repository is the same one however its address is written, whatever its case.
-    expect(ownApproval(words("/repos/{owner}/{repo}/issues", { owner: "WCKDboy", repo: "engram", title: "Units" }), AGENTS)).toBe("an issue in WCKDboy/engram, a repository you gave an agent");
+    expect(ownApproval(words("/repos/{owner}/{repo}/issues", { owner: "WCKDboy", repo: "engram", title: "Units" }), AGENTS, QUIET)).toBe("an issue in WCKDboy/engram, a repository you gave an agent");
   });
 
   test("a shipment built on anything but your default branch's head is yours: a contributor's pull request, an older commit, a branch GitHub didn't say, another base", () => {
@@ -359,7 +363,7 @@ describe("words a repository's bots read as a command", () => {
   test("is yours wherever it would be its own: an issue, a comment or a review on its own thread, a pull request, a shipment, a fix", () => {
     const GIVEN = ["https://github.com/lin-example/notes"];
     const SHA = "c".repeat(40);
-    const facts: GitHubFacts = { user: { id: 501 }, repo: { name: "lin-example/notes", private: true, fork: false, ownerId: 501, ownerType: "User", defaultBranch: "main" }, thread: { number: 4, authorId: 501 }, commentDriven: false };
+    const facts: GitHubFacts = { user: { id: 501 }, repo: { name: "lin-example/notes", private: true, fork: false, ownerId: 501, ownerType: "User", defaultBranch: "main" }, thread: { number: 4, authorId: 501 }, commentDriven: false, issueDriven: false };
     const call = (over: Partial<OwnCall>, args: Record<string, unknown>): OwnCall => ({ class: "outward", origin: "https://api.github.com", method: "POST", path: "/repos/{owner}/{repo}/issues", by: "arm:primary", ...over, args: { owner: "lin-example", repo: "notes", ...args } });
     const cases: [OwnCall, GitHubFacts][] = [
       [call({}, { title: "Units" }), facts],
@@ -384,7 +388,7 @@ describe("words a repository's bots read as a command", () => {
 // fork, your account's by GitHub's id for it), its own threads are its to speak in; anyone else's thread speaks to them,
 // a public repository speaks to everyone, and a push or a pull request runs the repository's CI with its secrets.
 describe("what your agent approves itself in a private repository of your own", () => {
-  const FACTS: GitHubFacts = { user: { id: 501 }, repo: { name: "lin-example/notes", private: true, fork: false, ownerId: 501, ownerType: "User", defaultBranch: "main" } };
+  const FACTS: GitHubFacts = { user: { id: 501 }, repo: { name: "lin-example/notes", private: true, fork: false, ownerId: 501, ownerType: "User", defaultBranch: "main" }, issueDriven: false };
   const OWN_THREAD: GitHubFacts = { ...FACTS, thread: { number: 4, authorId: 501 }, commentDriven: false };
   const call = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}): OwnCall => ({ class: "outward", origin: "https://api.github.com", method: "POST", path: "/repos/{owner}/{repo}/issues", by: "arm:primary", ...over, args: { owner: "lin-example", repo: "notes", ...args } });
   const comment = { path: "/repos/{owner}/{repo}/issues/{number}/comments" };

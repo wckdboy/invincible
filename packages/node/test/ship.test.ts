@@ -536,11 +536,12 @@ describe("the gate, end to end", () => {
     expect(seen.slice(before).map((s) => `${s.method} ${s.url} ${s.auth === `Bearer ${TOKEN}`}`)).toEqual([
       "GET https://api.github.com/user true",
       "GET https://api.github.com/repos/lin-example/notes true",
+      // Whether its workflows run on issues, or on comments (none here): its words would drive them. Read once, for
+      // the issue, and kept for the comment (the re-review of 27 November, A3).
+      "GET https://api.github.com/repos/lin-example/notes/contents/.github/workflows?ref=main true",
       "POST https://api.github.com/repos/lin-example/notes/issues true",
       "GET https://api.github.com/repos/lin-example/notes true",
       "GET https://api.github.com/repos/lin-example/notes/issues/4 true",
-      // Whether its workflows run on comments (none here): its words would drive them.
-      "GET https://api.github.com/repos/lin-example/notes/contents/.github/workflows?ref=main true",
       "POST https://api.github.com/repos/lin-example/notes/issues/4/comments true",
     ]);
     // Someone else's thread, an organization's repository, its agents' own calls from their VMs: they wait, nothing is sent.

@@ -179,6 +179,9 @@ export interface GitHubFacts {
   /** Whether a workflow of the repository's runs on a comment or a review (issue_comment, pull_request_review,
    * pull_request_review_comment): there, comments drive its automation, and its words on a thread are yours (N5). */
   commentDriven?: boolean;
+  /** Whether a workflow of the repository's runs on an issue (issues): there, an issue's words drive its automation
+   * (IssueOps), and an issue its word would make is yours (the re-review of 27 November, A3). */
+  issueDriven?: boolean;
 }
 
 const GITHUB = "https://api.github.com";
@@ -304,7 +307,7 @@ function inGiven(call: OwnCall, named: string, facts: GitHubFacts): string | nul
   if (call.native === "github.ship" || call.native === "github.ship.update") return itsPush(call, named, where, facts);
   if (call.native !== undefined) return null;
   const what = GITHUB_OWN[`${call.method} ${call.path}`];
-  if (what === "an issue") return `an issue in ${where}`;
+  if (what === "an issue") return anIssue(where, facts);
   if (what === "a pull request") {
     const { head, base } = call.args;
     // From a branch of its own (Ivo's review, 23 November 2026), one it shipped and still where it left it, into the
@@ -367,9 +370,12 @@ function ownPrivate(call: OwnCall, named: string, { user, repo }: GitHubFacts): 
 function inPrivate(call: OwnCall, where: string, facts: GitHubFacts): string | null {
   if (call.native !== undefined) return null;
   const what = GITHUB_OWN[`${call.method} ${call.path}`];
-  if (what === "an issue") return `an issue in ${where}`;
+  if (what === "an issue") return anIssue(where, facts);
   return what === "a comment" || what === "a review" ? onItsThread(call, what, where, facts) : null;
 }
+
+/** An issue of its: where the repository's workflows run on issues, its words drive them, so yours (asked; unread: yours). */
+const anIssue = (where: string, { issueDriven }: GitHubFacts): string | null => (issueDriven === false ? `an issue in ${where}` : null);
 
 /** A comment, or a review that isn't an approval, on its own thread: one opened under your account (it, its agents and
  * you all open them with your key). Anyone else's thread speaks to them. */
@@ -424,6 +430,7 @@ export function supposedFacts(call: OwnCall): GitHubFacts {
     ...(typeof number === "number" ? { thread: { number, authorId: 1 } } : {}),
     ...(branch !== undefined ? { head: { branch, sha } } : {}),
     commentDriven: false,
+    issueDriven: false,
     ...merge,
   };
 }

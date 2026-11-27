@@ -69,13 +69,14 @@ describe("your agent's own words in a private repository of yours", () => {
     expect(done.status === "done" && done.own).toBe("an issue in lin-example/notes, a private repository of yours");
     const again = await w.service.call(comment("lin-example", "notes", 4), primary);
     expect(again.status === "done" && again.own).toBe("a comment on its own thread #4 in lin-example/notes, a private repository of yours");
-    expect(w.asked).toEqual(["GET /user", "GET /repos/lin-example/notes", "POST /repos/lin-example/notes/issues", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4", "GET /repos/lin-example/notes/contents/.github/workflows", "POST /repos/lin-example/notes/issues/4/comments"]);
+    // (Its workflows, read for the issue, are kept for the comment: whether they run on issues or on comments. A3.)
+    expect(w.asked).toEqual(["GET /user", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/contents/.github/workflows", "POST /repos/lin-example/notes/issues", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4", "POST /repos/lin-example/notes/issues/4/comments"]);
     expect(w.service.actions().map((a) => [a.state, a.self, a.note])).toEqual([
       ["done", true, "Your agent approved it itself: a comment on its own thread #4 in lin-example/notes, a private repository of yours"],
       ["done", true, "Your agent approved it itself: an issue in lin-example/notes, a private repository of yours"],
     ]);
     // Each read is in the ledger, with what GitHub said.
-    expect(w.ledgered.filter((e) => e.target.startsWith("GET ")).map((e) => e.target)).toEqual(["GET /user", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4", "GET /repos/lin-example/notes/contents/.github/workflows?ref=main"]);
+    expect(w.ledgered.filter((e) => e.target.startsWith("GET ")).map((e) => e.target)).toEqual(["GET /user", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/contents/.github/workflows?ref=main", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4"]);
   });
 
   // The re-review of 27 November (R4b, R8): a repository made public, or a name renamed and taken, is seen at once.
@@ -174,7 +175,7 @@ describe("your agent's own words in a private repository of yours", () => {
     w.store.emit(w.identity, "connector.set", { id: "github-amiriteorg", manifest: { ...CATALOG.github!.manifest, id: "github-amiriteorg", auth: { secret: "github-amiriteorg", scheme: "bearer" } } });
     expect((await w.service.call(issue("lin-example", "notes"), primary)).status).toBe("done");
     expect((await w.service.call({ ...issue("lin-example", "notes"), connector: "github-amiriteorg" }, primary)).status).toBe("asked");
-    expect(w.reads()).toEqual(["GET /user", "GET /repos/lin-example/notes", "GET /user", "GET /repos/lin-example/notes"]);
+    expect(w.reads()).toEqual(["GET /user", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/contents/.github/workflows", "GET /user", "GET /repos/lin-example/notes"]);
   });
 
   test("whose your key is, as GitHub said it, is kept ten minutes, said or not, then asked again; and a new key is asked at once", async () => {
@@ -371,9 +372,10 @@ describe("its pushes and its words in a repository you gave an agent", () => {
     // Whose the key is (once), then each thread afresh, with the repository (its default branch, whose workflows say
     // whether they run on comments: none here, read once).
     expect(w.reads()).toEqual(["GET /user", "GET /repos/lin-example/site", "GET /repos/lin-example/site/issues/4", "GET /repos/lin-example/site/contents/.github/workflows", "GET /repos/lin-example/site", "GET /repos/lin-example/site/issues/7", "GET /repos/lin-example/site", "GET /repos/lin-example/site/issues/7", "GET /repos/lin-example/site", "GET /repos/lin-example/site/issues/7"]);
-    // An issue there is its own as before: nothing to ask.
+    // An issue there is its own where its workflows run on no issue: the repository afresh, for its default branch, and
+    // the workflows as they were kept (the re-review of 27 November, A3).
     const before = w.reads().length;
     expect((await w.service.call(issue("lin-example", "site"), vm)).status).toBe("done");
-    expect(w.reads().length).toBe(before);
+    expect(w.reads().slice(before)).toEqual(["GET /repos/lin-example/site"]);
   });
 });

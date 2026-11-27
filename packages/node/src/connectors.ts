@@ -173,7 +173,7 @@ const readPull = (b: any): GitHubFacts["pull"] | null =>
 const PULL_COMMITS_MAX = 250;
 const PULL_FILES_MAX = 3000;
 /** The events a workflow runs on that this reads (a word anywhere in its file counts: it reads more, never less). */
-const WORKFLOW_EVENTS = /\b(pull_request_review_comment|pull_request_review|pull_request_target|pull_request|issue_comment)\b/g;
+const WORKFLOW_EVENTS = /\b(pull_request_review_comment|pull_request_review|pull_request_target|pull_request|issue_comment|issues)\b/g;
 /** A ref's path segment by segment, as GitHub's git/ref route takes a branch with slashes. */
 const refPath = (branch: string) => branch.split("/").map(encodeURIComponent).join("/");
 /** The commit a done shipment's or fix's receipt says it pushed, whole ("… commit <40 hex, or 64> …"): a receipt that
@@ -237,6 +237,8 @@ export class ConnectorService {
     if (typeof owner !== "string" || typeof repo !== "string") return {};
     const at = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
     const onThread = call.native === undefined && typeof number === "number";
+    // An issue it would make: where the repository's workflows run on issues, its words drive them (A3).
+    const issue = call.native === undefined && `${call.method} ${call.path}` === "POST /repos/{owner}/{repo}/issues";
     const facts: GitHubFacts = {};
     if (!given || onThread) {
       const user = await this.githubRead(manifest, "/user", readUser, true);
@@ -246,7 +248,7 @@ export class ConnectorService {
     // Its default branch, for a shipment or a pull request into it (a template judged on a branch is one); and outside the
     // repositories you gave an agent, whether it is yours: nothing more is asked of one that isn't.
     const intoDefault = call.native === "github.ship" || call.native === "github.merge" || (call.native === undefined && judgedBranch(call, undefined) !== undefined);
-    if (!given || intoDefault || onThread) {
+    if (!given || intoDefault || onThread || issue) {
       const named = await this.githubRead(manifest, at, readRepo);
       if (!named) return facts;
       facts.repo = named;
@@ -258,6 +260,11 @@ export class ConnectorService {
       // Whether its workflows run on a comment or a review: its words on a thread would drive them (unread: unknown).
       const events = await this.workflowEvents(manifest, at, facts.repo?.defaultBranch);
       if (events) facts.commentDriven = events.has("issue_comment") || events.has("pull_request_review") || events.has("pull_request_review_comment");
+    }
+    if (issue) {
+      // Whether its workflows run on an issue: an issue's words would drive them (unread: unknown).
+      const events = await this.workflowEvents(manifest, at, facts.repo?.defaultBranch);
+      if (events) facts.issueDriven = events.has("issues");
     }
     const branch = judgedBranch(call, facts.repo?.defaultBranch);
     if (branch !== undefined) {
