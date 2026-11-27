@@ -31,6 +31,10 @@
  *                   --shots and --shifts
  *     --rest        only what Chat and the agents cost at rest, and what they ask the node for (below): no page
  *                   loads are measured
+ *     --desktop-frames <file>  Rio's desktop live: a recording of a desktop's stream (core's desktop-frames.ts) replayed
+ *                   as its VM's encoder while it is watched, beside a stand-in for deskd's sessions (your take-over);
+ *                   --shots then also shoots it live, and taken over. Without it, as on a checkout that has no
+ *                   stream, it is a picture every two seconds.
  *
  * It starts a throwaway node on loopback (a temp home, the file keystore, a stand-in Docker and
  * stand-in models: nothing leaves this machine, and ~/.invincible is never touched), fills it with a
@@ -86,6 +90,8 @@ const wanted = (name: string): boolean => !ONLY || ONLY.includes(name);
 const MOVES = Math.max(0, Number(flag("moves") ?? 0));
 /** Only the cost at rest (--rest): no loads. */
 const REST = process.argv.includes("--rest");
+/** A recording of a desktop's stream, replayed as Rio's (--desktop-frames). */
+const DESKTOP_FRAMES = flag("desktop-frames");
 /** Chrome, wherever this machine keeps it (CHROME names another). */
 const CHROME =
   process.env.CHROME ??
@@ -488,9 +494,82 @@ try {
     if (text.includes("gate-fail")) return { code: 1, stdout: "", stderr: "error: connect ECONNREFUSED 127.0.0.1:5432" };
     return { code: 0, stdout: text.includes("gate-") ? "required gate passed" : "command completed" };
   };
+  // Rio's desktop live (--desktop-frames): the recording replayed at its own pace while it is watched, from its first
+  // keyframe again whenever a watcher asks for one (or it ends), each frame stamped with the time it is sent; and deskd's
+  // two sessions stood in for, yours keeping your take-over as deskd does (your input takes it if it is free).
+  const live = DESKTOP_FRAMES && core.DesktopFrames && routes.teamDesktopStream ? (new core.DesktopFrames().push(new Uint8Array(readFileSync(DESKTOP_FRAMES))) as { kind: number; time: number; bytes: Uint8Array }[]) : null;
+  if (DESKTOP_FRAMES && !live) console.error("--desktop-frames: this checkout streams no desktop, so Rio's is a picture");
+  const spawnFrames = () => {
+    let next = 0;
+    let ended = false;
+    const queue: Uint8Array[] = [];
+    let wake: (() => void) | null = null;
+    let exit!: (code: number) => void;
+    const exited = new Promise<number>((resolve) => (exit = resolve));
+    let tick: ReturnType<typeof setTimeout>;
+    const send = (): void => {
+      if (ended) return;
+      const frame = live![next]!;
+      const out = frame.bytes.slice();
+      new DataView(out.buffer).setBigUint64(5, BigInt(Date.now()));
+      queue.push(out);
+      wake?.();
+      const after = live![next + 1];
+      next = after ? next + 1 : 0;
+      tick = setTimeout(send, after ? Math.max(10, after.time - frame.time) : 100);
+    };
+    tick = setTimeout(send, 0);
+    const end = (code: number): void => {
+      ended = true;
+      clearTimeout(tick);
+      wake?.();
+      exit(code);
+    };
+    async function* chunks(): AsyncIterable<Uint8Array> {
+      for (;;) {
+        if (queue.length) yield queue.shift()!;
+        else if (ended) return;
+        else await new Promise<void>((resolve) => (wake = resolve));
+      }
+    }
+    return { chunks: chunks(), write: (text: string) => void (text.includes("key") && (next = 0)), close: () => end(0), kill: () => end(137), exited };
+  };
+  let rioHold: { since: number; last: number } | null = null;
+  const spawnSession = (args: string[]) => {
+    const yours = args.includes("--owner-session");
+    let take: ((line: string) => void) | null = null;
+    let ended!: (code: number) => void;
+    const exited = new Promise<number>((resolve) => (ended = resolve));
+    const holdNow = () => (rioHold ? { since: rioHold.since / 1000, idle: 120, most: 900, ends_in: Math.max(0, Math.min(rioHold.last + 120_000, rioHold.since + 900_000) - Date.now()) / 1000 } : null);
+    return {
+      write: (text: string) => {
+        for (const line of text.trim().split("\n")) {
+          const q = JSON.parse(line);
+          const answer: Record<string, unknown> = { id: q.id, ok: true };
+          if (yours && q.name === "take") rioHold = { since: Date.now(), last: Date.now() };
+          else if (yours && q.name === "release") {
+            answer.released = rioHold !== null;
+            rioHold = null;
+          } else if (q.argv) {
+            if (yours && !["status", "help"].includes(q.argv[0])) {
+              if (!rioHold) answer.took = true;
+              rioHold = { since: rioHold?.since ?? Date.now(), last: Date.now() };
+            }
+            Object.assign(answer, { code: 0, stdout: "", stderr: "" });
+          } else if (q.name === "screenshot") Object.assign(answer, { action: "screenshot", image: { media_type: "image/jpeg", data: desktopShot, width: 1280, height: 800, settled: null } });
+          if (yours) answer.hold = holdNow();
+          queueMicrotask(() => take?.(JSON.stringify(answer)));
+        }
+      },
+      onLine: (fn: (line: string) => void) => void (take = fn),
+      kill: () => ended(-15),
+      exited,
+    };
+  };
   // The browser comes in as a phone does behind `tailscale serve`: through the proxied port.
   const proxyPort = freePort();
   const started = await startDaemon(home, {
+    ...(live ? { spawnFrames, spawnSession } : {}),
     capabilities: caps,
     proxyPort,
     log: () => {},
@@ -1037,7 +1116,14 @@ try {
       { name: "noa-kept-changes", hash: `#/team?room=${own.noa}&tab=work`, wait: ".team-task" },
       { name: "max-failed-task", hash: `#/team?room=${own.max}&tab=work`, wait: ".team-task" },
       { name: "forge-work", hash: "#/team?room=forge&tab=work", wait: ".team-task" },
-      { name: "rio-workspace-desktop", hash: `#/team?room=${own.rio}&tab=workspace`, wait: ".team-panel .card, .desktop-shot img[data-shown]" },
+      { name: "rio-workspace-desktop", hash: `#/team?room=${own.rio}&tab=workspace`, wait: ".team-panel .card, .desktop-shot img[data-shown], .desktop-shot canvas[data-shown]" },
+      // Live (--desktop-frames): the recording drawn as it comes; then taken over, Give back in place of Take over.
+      ...(live
+        ? [
+            { name: "rio-desktop-live", hash: `#/team?room=${own.rio}&tab=workspace`, wait: ".desktop-shot canvas[data-shown]" },
+            { name: "rio-desktop-held", hash: `#/team?room=${own.rio}&tab=workspace`, steps: [press("Take over")], wait: ".desktop-hold button[hidden] + button:not([hidden])", around: { route: "teamDesktopRelease", before: { id: "rio" }, after: { id: "rio" } } },
+          ]
+        : []),
       // A task as a thread of its own (since 26 November 2026): at work, verified with its changes kept, and given up.
       { name: "task-running", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps" },
       { name: "task-verified", hash: `#/task/${kept.id}`, wait: ".thread-page .proof" },
