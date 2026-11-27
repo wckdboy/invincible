@@ -482,27 +482,54 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     hand-off at least $0.10 whatever smaller budget it asks for, so the day bounds how many there are too (the
     re-review's N5). A handed task's gates (its giver's commands, in your agent's VM) get 15 minutes in all, every
     round counted.
-  - What a handed task does is bounded with it (the second re-review's N7):
-    - It runs only on models its budget counts at more than $0, never on a coding tool's own sign-in (a seat) or an
-      ACP agent, so what it spends is counted.
-    - Each of its commands runs under a fixed helper (`handed-process.ts`), in a process group of its own and under
-      its own deadline. In the VM (Linux) the helper is the command's subreaper, so a process that left the group with
-      setsid is still found. What a gate starts ends with the gate; what its other commands leave running, its coding
-      tool's included, is kept by identity and ends with the task.
-    - The runner ends it at its call's deadline or after 24 hours, whichever comes first.
+  - What a handed task does is bounded with it (the second re-review's N7), but for the known gaps below:
+    - Its agent's own loop and its coding tool run only on models its budget counts at more than $0, never on a coding
+      tool's own sign-in (a seat) or an ACP agent, so what they spend is counted, but for a paid model's call that
+      reports no usage, which counts nothing for any budget (I-l). Its commands aren't held to those models (R3-4).
+    - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
+      in a process group of its own and under its own deadline: not its `desktop` verbs (R3-3), nor the commands its
+      coding tool runs itself, which are the tool's children, and a command that ends or stops its own helper is held
+      to neither from then on (R3-1). In the VM (Linux) the helper is the command's subreaper while it lives, so a
+      process that left the group with setsid is still found. What a gate starts ends with the gate; what its other
+      commands leave running as they end, its coding tool's included, is listed by identity and ended with the task
+      when it is done, fails, or is stopped or revoked. Not when a command ends or stops its own helper, nor a leftover
+      that double-forks out with setsid after its command ended (R3-1), nor when the task's agent is paused or turned
+      off, or after a crash (R3-5), nor a desktop session it started (R3-3).
+    - The runner stops it at its call's deadline or after 24 hours, whichever comes first, unless that stop doesn't
+      take (the node stopping, or a write that fails): then the runner's loop spins and the node hangs (R3-2). A task
+      you take up again by its id has no such bound (R3-6).
     - Residual: work it hands to a process that was already running in the VM isn't one it started, and isn't ended.
-      Its VM time isn't counted itself.
+      Its VM time isn't counted itself. And the known gaps:
+    - **Known gaps, until they're fixed** (the third re-review: Lows, and R3-6 an Info; the fabric runs only when you
+      switch it on):
+      - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
+        ends, or, in the VM, fork successors faster than its helper's scan; and the task's list of what to end is a
+        file in the VM that its commands can rewrite. What it started then outlives the gate, the task, the grant and
+        the node's revocation.
+      - R3-2: when the stop at the end of its life doesn't take, the runner's loop spins, and the node hangs until it
+        is killed.
+      - R3-3: its `desktop` verbs bypass the helper (the desktop's fast path runs before it), so what they start is
+        never listed or ended.
+      - R3-4: its VM's gateway lease serves every keyed provider and any model, so its commands can work on models its
+        budget counts at $0.
+      - R3-5: a pause of its agent, or turning it off, ends the task but refuses the cleanup of what it left running,
+        and after a crash that cleanup never runs.
+      - R3-6: a resume by id runs a handed task with nobody following it, not counted against the 8 at once, with no
+        life bound, even after its node or its grant was revoked.
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
-    these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1).
+    these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1),
+    but for tasks you take up again by id (R3-6).
   - Anything else waits on the node that would run it as a proposal that only you approve; its own agent never does,
     whatever it would spend.
   - Either way the task is recorded as the giving node's (`givenBy: node:<id>`), never yours.
   - A grant revoked stops what was handed under it, whether a call still follows it or not, and a revocation that
     lands while a task is being given stops it. So does a grant ending with the node that recorded it (I-f), and a
     restart: a planned one ends a handed task as stopped and never takes it up again, and one a crash cut off ends as
-    the node comes back (N2). A handed task never outlives the call that follows it: a pause ends it, and a resume of
-    an agent or a room passes over it, so it can't come back unfollowed or past the 8 at once (the second re-review's
-    N6). Named by its id, you can still take one up again yourself; revoking its node or your grant still ends it.
+    the node comes back (N2). A pause ends a handed task, and a resume of an agent or a room passes over it, so
+    neither brings it back unfollowed or past the 8 at once (the second re-review's N6). Named by its id you can still
+    take one up again yourself (the web offers it in one tap): then nobody follows it, it isn't counted against the 8,
+    it has no life bound, and only a revocation that comes after ends it, so one taken up after its node's or your
+    grant's revocation runs on (R3-6).
   - Tests: `fabric-hand-grant.test.ts` (the review's proof of concept, which failed before the fix: a node's hand call
     made a task as yours, queued at once), `fabric-hand-burst.test.ts` and `fabric-hand-burst.e2e.test.ts` (a burst
     naming no agent: 12 taken against 8, and $36 against a $3 day, before the fix), `fabric-hand-day.test.ts`,

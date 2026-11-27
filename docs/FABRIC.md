@@ -116,34 +116,62 @@ transport keys carries all of it:
    - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of its
      day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among those it
      names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever smaller budget
-     it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its work runs only on a
-     model its budget counts at more than $0 (one you've priced above nothing, on no coding plan): never on one it
-     counts as nothing, nor on a coding tool's own sign-in in the VM (a seat), nor in an ACP agent of yours.
+     it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its agent's own loop and
+     its coding tool run only on models its budget counts at more than $0 (one you've priced above nothing, on no coding
+     plan): never on one it counts as nothing, nor on a coding tool's own sign-in in the VM (a seat), nor in an ACP
+     agent of yours. Its commands aren't held to those models yet (R3-4, below), and a paid model's call that reports
+     no usage counts nothing, whatever the budget (I-l).
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node
-     are open there at once (waiting for you, queued or running, and those still waiting their turn to be given). One
-     node's hand-offs are looked at one at a time: each is counted, given and written before the next, so a burst keeps
-     the day's budget and the 8 at once.
+     are open there at once (waiting for you, queued or running, and those still waiting their turn to be given), but
+     for those you take up again by their id (R3-6). One node's hand-offs are looked at one at a time: each is counted,
+     given and written before the next, so a burst keeps the day's budget and the 8 at once.
    - **It ends with what it was taken under, and with its call.** Your grant revoked stops what was handed under it,
      and so does a grant whose recorder is revoked (below), whether a call still follows the task or not. A pause ends
      it too (its agent, its room or the task paused, or the agent turned off): its call ends then, and nobody follows
      it after, so it stops rather than wait for a resume, and its proof says so. A resume of an agent or a room passes
-     over another node's task; named by its id you can still take one up again, with nobody following it, and
-     revoking its node or your grant still ends it. A node that restarts ends what was handed to it before, as nobody
-     follows it any more: a planned restart (a deploy, an update) ends it as stopped and never takes it up again, and
-     one a crash cut off ends as the node comes back.
-   - **Its work is bounded.**
+     over another node's task. Named by its id (the web offers it in one tap) you can still take one up again, with
+     nobody following it: a revocation that comes after still ends it, but one that came before doesn't, and it is
+     neither counted against the 8 at once nor bounded in its life (R3-6). A node that restarts ends what was handed
+     to it before, as nobody follows it any more: a planned restart (a deploy, an update) ends it as stopped and never
+     takes it up again, and one a crash cut off ends as the node comes back.
+   - **Its work is bounded, but for the known gaps below.**
      - Its gates are its giver's commands, run in your agent's VM: all of them together get as long as one command may
        (15 minutes), every round counted, and once that is spent they aren't run and the work isn't done.
-     - Each of its commands runs in a process group of its own under its own deadline. What a gate starts ends with
-       the gate: in the background, under nohup, and in the VM (Linux) even having left its group with setsid. What
-       its other commands leave running (a server the next one uses), its coding tool's included, ends with the task,
-       however it ends.
-     - It lives on the runner no longer than its call's deadline or 24 hours, whichever comes first, waiting for your
-       approval included.
-     - Not bounded: work it hands to a process that was running in the VM before it began isn't one it started, so it
-       isn't ended. The VM time its work takes isn't counted itself: its budget's dollars and its life bound it.
+     - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
+       in a process group of its own under its own deadline. Its `desktop` verbs don't: they go straight to the VM's
+       desktop session (R3-3). Nor do the commands its coding tool runs itself, which are the tool's own children. A
+       command that ends or stops its own helper is held to neither from then on (R3-1).
+     - What a gate starts ends with the gate: in the background, under nohup, and in the VM (Linux) having left its
+       group with setsid, while the gate's helper lives. A command can end or stop its own helper (R3-1).
+     - What its other commands leave running as they end (a server the next one uses), its coding tool's included, is
+       listed then, and ended with the task when it is done, fails, or is stopped or revoked. Not when its agent is
+       paused or turned off, which refuses that cleanup, nor after a crash, which leaves the list unread (R3-5). Nor a
+       leftover that double-forks out with setsid after its command ended, nor what a command that ended its helper
+       started (R3-1), nor a desktop session it started (R3-3). The list is a file in the VM, which its commands can
+       rewrite (R3-1).
+     - The runner stops it at its call's deadline or after 24 hours, whichever comes first, waiting for your approval
+       included. If that stop doesn't take (the node stopping, or a write that fails), the runner's loop spins and the
+       node hangs (R3-2). A task you take up again by its id has no life bound (R3-6).
+     - Not bounded, besides the known gaps: work it hands to a process that was running in the VM before it began
+       isn't one it started, so it isn't ended. The VM time its work takes isn't counted itself: its budget's dollars
+       and its life bound it.
+     - **Known gaps, until they're fixed** (the third re-review: Lows, and R3-6 an Info). The fabric runs only when you
+       switch it on.
+       - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
+         ends, or, in the VM, fork successors faster than its helper's scan. What it started then outlives the gate,
+         the task, your grant and its node's revocation.
+       - R3-2: when the stop at the end of its life doesn't take, the runner's loop spins, and the node hangs until
+         it is killed.
+       - R3-3: its `desktop` verbs (`desktop start`, `desktop app …`, its gates' too) bypass the helper, so what they
+         start is never listed or ended.
+       - R3-4: its VM's gateway lease serves every provider you've keyed and any model, so its commands can work on
+         models its budget counts at $0.
+       - R3-5: a pause of its agent, or turning it off, ends the task but refuses the cleanup of what it left
+         running. After a crash, that cleanup never runs.
+       - R3-6: a task you take up again by its id is followed by nobody, isn't counted against the 8 at once, has no
+         life bound, and runs even after its node or your grant was revoked.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:
@@ -243,9 +271,11 @@ Measured with `bun bench/fabric/measure.ts --qamp <binary> --samples 30`: three 
 Q-AMP main's sidecar (`831b845`), on loopback, on an Apple M3 Pro, 26 November 2026. The two Q-AMP columns ran back to
 back on the same binary, the code before the security review's fixes (`418b924`) and after them (`f3f46ad`), the
 machine's load average 8.4 over one minute and 23 over five through both. HTTP with signed requests is all there was
-before the fabric. p50s, in ms (10 samples for the hand-offs, 20 for the revocations). They predate the re-review's
-fixes, which weren't measured again: of those, only N1's turn (one node's hand-offs looked at one at a time, which a
-single hand-off doesn't wait on) and the door's map of keys (N4, cheaper) are on a path measured here.
+before the fabric. p50s, in ms (10 samples for the hand-offs, 20 for the revocations). They predate the re-reviews'
+fixes, which weren't measured again. Of those, N1's turn (one node's hand-offs looked at one at a time, which a single
+hand-off doesn't wait on) and the door's map of keys (N4, cheaper) are on a path measured here, and so is a revocation,
+which now also looks through the team's tasks for those it ends. The helper adds a `python3` process to each command of
+a handed task, which no row here times.
 
 | | HTTP, signed | Q-AMP, before the review's fixes | Q-AMP, after them |
 |---|---|---|---|
