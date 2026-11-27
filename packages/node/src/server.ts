@@ -3760,10 +3760,11 @@ export function createApp(ctx: AppContext) {
       ownerOnly(p);
       const project = projectNamed(input.id);
       if (!project.repo) throw new HttpError(409, "this project has no repository to clone: give it one, or ask your agent to start it");
-      return looked(async () => {
+      // (A large repository takes minutes: answered as it goes, as making a computer is.)
+      return longRunning(looked(async () => {
         actionDone(await lookInWorkspace(TEAM_PRIMARY, CLONE_SCRIPT, [project.checkout, project.repo!], req.signal, CLONE_TIMEOUT));
         return gitView(await lookInWorkspace(TEAM_PRIMARY, GIT_SCRIPT, [project.checkout], req.signal, GIT_TIMEOUT), project.checkout);
-      });
+      }));
     },
     removeProject: (input) => {
       if (!projectsView().some((x) => x.id === input.id)) throw new HttpError(404, `no project ${input.id}`);

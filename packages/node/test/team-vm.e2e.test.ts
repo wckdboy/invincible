@@ -39,6 +39,10 @@ let steerHold: Promise<void> | undefined;
 let hisEntered = false;
 let releaseHis: (() => void) | undefined;
 let hisHold: Promise<void> | undefined;
+/** A project's first clone on its computer (project-git.ts's CLONE_SCRIPT), held in its VM until it's let go. */
+let cloneEntered = false;
+let releaseClone: (() => void) | undefined;
+let cloneHold: Promise<void> | undefined;
 let cleanupFailure = false;
 let dockerSilent = false;
 /** What a vendor's tool says of itself in a VM, when its bridge is asked (`--status`): by tool. */
@@ -157,6 +161,9 @@ beforeAll(async () => {
       if (text.includes("write-alpha")) { alphaEntered = true; await alphaHold; }
       if (text.includes("write-steer")) { steerEntered = true; await steerHold; }
       if (text.includes("hold-its")) { hisEntered = true; await hisHold; }
+      // A project's clone, and a look at its checkout, answered as their scripts print (project-git.ts).
+      if (text.includes("['git','clone'")) { cloneEntered = true; await cloneHold; return { code: 0, stdout: JSON.stringify({ ok: true, said: "Cloning into '/work/projects/slow'..." }) }; }
+      if (text.includes("'symbolic-ref','--short'")) return { code: 0, stdout: JSON.stringify({ state: "ready", branch: "main", head: "abc1234", branches: ["main"], changed: 0, upstream: "origin/main", ahead: 0, behind: 0, remote: "https://example.test/slow.git", log: [] }) };
       return { code: 0, stdout: text.includes("gate-") ? "required gate passed" : "command completed" };
     } finally { active.set(container, count - 1); }
   };
@@ -167,7 +174,7 @@ beforeAll(async () => {
   for (const id of ["ada", "lin"]) await api("saveAgent", { id, name: id.toUpperCase(), role: "engineer" });
   await api("saveTeamRoom", { id: "vm-forge", name: "VM Forge", members: ["ada", "lin"] });
 });
-afterAll(async () => { releaseAlpha?.(); releaseSteer?.(); await daemon?.stop(); model.stop(true); rmSync(root, { recursive: true, force: true }); });
+afterAll(async () => { releaseAlpha?.(); releaseSteer?.(); releaseClone?.(); await daemon?.stop(); model.stop(true); rmSync(root, { recursive: true, force: true }); });
 
 test("first task provisions one persistent VM; same-worker tasks serialize and verified dependencies cross agents", async () => {
   expect(runs).toHaveLength(0);
@@ -730,6 +737,26 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   expect(await ledgered("tom")).toMatchObject({ detail: "its VM was on a node that has left the fleet; nothing there was touched" });
   expect((await snapshot()).removed?.map((member) => member.id).sort()).toEqual(["ada", "dex", "lin", "sam", "tom", "una"]);
 }, 20000);
+
+test("a project's first clone is answered as it goes: its head comes while the clone runs, and the listener lets it run on", async () => {
+  // The node clones inside the request that asked (projectClone), as long as a large repository takes. Silent, the request
+  // was closed at its listener's idle timer (255 s, daemon.ts) and the clone stopped with it (27 November 2026); answered as
+  // making a computer is (longRunning), its head comes at once, heartbeats follow, and the listener lets it run on.
+  await api("provisionAgent", { id: "primary" });
+  await api("setProject", { id: "slow", name: "Slow", repo: "https://example.test/slow.git" });
+  cloneHold = new Promise<void>((resolve) => { releaseClone = resolve; });
+  try {
+    const asked = fetch(`http://127.0.0.1:${port}${routes.projectClone.path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify({ id: "slow" }) });
+    const head = await Promise.race([asked.then((response) => response.status), Bun.sleep(3_000).then(() => "nothing yet")]);
+    expect(cloneEntered).toBe(true);
+    expect(head).toBe(200);
+    releaseClone!();
+    expect(JSON.parse((await (await asked).text()).trim())).toMatchObject({ checkout: "/work/projects/slow", state: "ready", branch: "main" });
+  } finally {
+    releaseClone?.();
+    await api("removeProject", { id: "slow" });
+  }
+});
 
 test("its computer's model access, a lease of 30 minutes, is renewed before a command of its could outlive it, never under one still running", async () => {
   const his = (await snapshot()).computer!;
