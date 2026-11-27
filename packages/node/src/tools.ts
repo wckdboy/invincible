@@ -944,6 +944,101 @@ export const TOOLS: PrimaryTool[] = [
     },
   }),
 
+  // Your word, 27 November 2026: everything but money, legal, destructive and security is its to decide, with a trail.
+  tool({
+    name: "team_approve",
+    title: "Approve or decline an agent's proposal",
+    description: `Answer a task an agent proposed (it waits in that agent's conversation with the user until someone answers): approve it, and it starts, when it names a budget of $${TEAM_LIMITS.ownTaskUsd} at most that fits what you may commit on your own word (what is left of the user's budget past what approved work holds, or with none, your daily cap); or decline it. Past that it is the user's to approve, and you are told why. Say why you decided: it goes on the task's trail, as yours.`,
+    input: {
+      task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("The proposal's id, as team lists it"),
+      approve: z.boolean().describe("true to approve it, false to decline it"),
+      why: z.string().min(1).max(500).describe("Why, in a sentence: it goes on the task's trail"),
+    },
+    routes: ["primaryControl"],
+    flow: "egress",
+    own: true,
+    async run(api, { task, approve, why }) {
+      const { task: decided } = await api.call<{ task: TeamTask }>("primaryControl", { task, action: approve ? "approve" : "decline", why });
+      return approve
+        ? `Approved “${decided.title}” (${decided.id}) for ${decided.assignee}: it is ${decided.status}, within its budget of $${decided.budgetUsd}, and its trail says it was your yes and why.`
+        : `Declined “${decided.title}” (${decided.id}): it won't run, and its trail says why.`;
+    },
+  }),
+
+  tool({
+    name: "team_stop",
+    title: "Stop an agent's task",
+    description: "Stop a task that is waiting or running when it is going the wrong way or isn't needed any more: its work stops at once and nothing more of it is spent. It can be taken up again (team_resume) or given again (team_again). Say why: it goes on its trail, as yours. A proposal is declined (team_approve), not stopped.",
+    input: {
+      task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("The task's id, as team lists it"),
+      why: z.string().min(1).max(500).describe("Why, in a sentence: it goes on the task's trail"),
+    },
+    routes: ["primaryControl"],
+    flow: "egress",
+    own: true,
+    async run(api, { task, why }) {
+      const { task: stopped } = await api.call<{ task: TeamTask }>("primaryControl", { task, action: "stop", why });
+      return `Stopped “${stopped.title}” (${stopped.id}): take it up again with team_resume, or give it again with team_again.`;
+    },
+  }),
+
+  tool({
+    name: "team_resume",
+    title: "Take an agent's task up again",
+    description: `Take up again a task that stopped, failed or was cut off by a restart, when what stopped it is fixed. Its run spends its budget anew, so it must name one of $${TEAM_LIMITS.ownTaskUsd} at most that fits what you may commit on your own word. Never what the user stopped, paused or declined, nor work a crash cut off mid-work: those are theirs, and you are told so. Say why: it goes on its trail.`,
+    input: {
+      task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("The task's id, as team lists it"),
+      why: z.string().min(1).max(500).describe("Why now, in a sentence: it goes on the task's trail"),
+    },
+    routes: ["primaryControl"],
+    flow: "egress",
+    own: true,
+    async run(api, { task, why }) {
+      const { task: resumed } = await api.call<{ task: TeamTask }>("primaryControl", { task, action: "resume", why });
+      return `Taken up again: “${resumed.title}” (${resumed.id}) is ${resumed.status} for ${resumed.assignee}, within its budget of $${resumed.budgetUsd}.`;
+    },
+  }),
+
+  tool({
+    name: "team_again",
+    title: "Give an agent's task again",
+    description: `Give a task that ended again, as a new one for the same agent in the same conversation: with its own goal and gates, or yours when you give them (narrower, clearer, with what you learned), and from a step of it (from, as its steps list them) to keep the work done up to there. On your own word: $${TEAM_LIMITS.ownTaskUsd} unless you name less, within what you may commit on your own. Say why: it goes on the new task's trail.`,
+    input: {
+      task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("The ended task's id, as team lists it"),
+      why: z.string().min(1).max(500).describe("Why again, in a sentence: it goes on the new task's trail"),
+      from: z.number().int().min(1).describe("A step of it to start from, as its steps list them").optional(),
+      goal: z.string().min(1).max(8000).describe("Its goal, when you give it a new one. Never a key or a password.").optional(),
+      gates: z.array(z.string().min(1).max(1000)).max(16).describe("Its gates, when you give it new ones").optional(),
+      budgetUsd: z.number().positive().max(TEAM_LIMITS.ownTaskUsd).describe(`What its model calls may spend, in US dollars: $${TEAM_LIMITS.ownTaskUsd} unless you name less`).optional(),
+    },
+    routes: ["primaryAgain"],
+    flow: "egress",
+    own: true,
+    async run(api, { task, why, from, goal, gates, budgetUsd }) {
+      const { task: given } = await api.call<{ task: TeamTask }>("primaryAgain", { task, why, ...(from !== undefined ? { from } : {}), ...(goal ? { goal } : {}), ...(gates?.length ? { gates } : {}), ...(budgetUsd !== undefined ? { budgetUsd } : {}) });
+      return `Given again as ${given.id} to ${given.assignee}, in its conversation with the user (${given.room}), within its budget of $${given.budgetUsd}: its gates and an independent reviewer decide when it is done.`;
+    },
+  }),
+
+  tool({
+    name: "team_ship",
+    title: "Ship an agent's proven work",
+    description: "Open a pull request of an agent's task whose gates and independent reviewer passed it and whose changes were kept: a new invincible/… branch on the repository the work was done on. In a repository the user gave an agent it is yours to approve and it opens at once, unless it changes what the repository's CI runs (its workflows, its pipelines); anywhere else it waits for the user in their Inbox. Each task ships once.",
+    input: {
+      task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("The task's id, as team lists it"),
+      title: z.string().min(1).max(120).describe("The pull request's title (the task's when absent)").optional(),
+    },
+    routes: ["primaryShip"],
+    flow: "egress",
+    own: true,
+    async run(api, { task, title }) {
+      const shipped = await api.call<{ receipt: string; url: string | null } | { asked: string }>("primaryShip", { task, ...(title ? { title } : {}) });
+      return "asked" in shipped
+        ? `It waits for the user in their Inbox (action ${shipped.asked}): a pull request there isn't yours to open.`
+        : `Shipped: ${shipped.url ?? shipped.receipt}. Its checks are followed, and a failure goes back to its agent when that is on.`;
+    },
+  }),
+
   tool({
     name: "look_later",
     title: "Look again later",

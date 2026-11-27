@@ -2,7 +2,7 @@ import { capLabel, type ExecResult, heldModels, type NodeIdentity, redact, TEAM_
 import { chat, STEP_EFFORT } from "@invincible/models";
 import type { LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
-import type { TeamStore } from "./team-store.ts";
+import { type TeamStore, WITHDRAWN } from "./team-store.ts";
 import type { TeamService } from "./team.ts";
 
 /*
@@ -24,8 +24,8 @@ import type { TeamService } from "./team.ts";
  */
 
 export const BACKLOG = { everyMs: 60 * 60_000, firstMs: 5 * 60_000, perAgentMs: 24 * 3600_000, settleMs: 10 * 60_000, planChars: 30_000, taskUsd: TEAM_LIMITS.ownTaskUsd, recent: 8, issues: 20 } as const;
-/** How a proposal it took back reads (its task's error): withdrawn, never declined by you. */
-export const WITHDRAWN = "Withdrawn by your agent";
+/** How a proposal it took back reads (its task's error): withdrawn, never declined by you (team-store.ts). */
+export { WITHDRAWN };
 const PLANS = ["docs/PLAN.md", "PLAN.md", "ROADMAP.md", "docs/ROADMAP.md", "TODO.md"];
 
 /** What a look reads in the agent's VM: the first plan its repository has, as last fetched, and its newest commits. */

@@ -2510,6 +2510,60 @@ export function createApp(ctx: AppContext) {
     const task = opts.propose ? teamOf().proposeTask(fields, by) : by === TEAM_PRIMARY ? teamOf().giveOwn(fields) : teamOf().createTask(fields, by);
     return { task, choice, considered };
   }
+  /* An agent's verified work as a pull request (PLAN #37): filed as its agent's ship, so it is in the outbox that the CI
+   * watcher follows (and a failure can go back to that agent). On your word (`yours`: the device you tapped on) you answer
+   * it at once; on your agent's (null), it is its own approval where its rule allows (policy.ts ownApproval: a repository
+   * you gave an agent, when it changes nothing the repository's CI runs), and otherwise it waits for you. Only from this
+   * node, which keeps the work. */
+  async function shipTask(input: { task: string; title?: string }, yours: Principal | null): Promise<{ receipt: string; url: string | null; pr: number | null } | { asked: string }> {
+    const task = ctx.team!.store.task(input.task);
+    if (!task) throw new HttpError(404, `no task ${input.task}`);
+    if (task.status !== "done" || !task.verified || !task.changes) throw new HttpError(409, "only work that was verified, and kept, is shipped");
+    if (task.fix) throw new HttpError(409, "a fix goes onto its pull request's branch: its push waits in Needs you");
+    if (task.shipped) throw new HttpError(409, `it was shipped already: ${task.shipped.url}`);
+    const artifact = task.changes.artifact;
+    let shipment: ShipManifest;
+    try {
+      shipment = ShipManifest.parse(JSON.parse(new TextDecoder().decode(ctx.artifacts.read(artifact, "ship/manifest.json").bytes)));
+    } catch {
+      throw new HttpError(404, `${artifact} isn't kept on this node, or holds no shipment: ship it from where it is kept (invincible ship ${artifact})`);
+    }
+    const where = githubRepo(shipment.remote);
+    if (!where) throw new HttpError(422, `the work was done on ${shipment.remote}, which isn't a github.com repository`);
+    const own = `github-${where.owner.toLowerCase()}`;
+    const connector = installedConnector(ctx.store, own) ? own : "github";
+    const title = input.title ?? task.title.slice(0, 120);
+    const said = task.output.split("\n\nReview:")[0]!.trim();
+    const body = [said, `_Made by @${task.assignee} in task ${task.id}, verified by its gates and an independent reviewer; the work is kept as ${artifact}._`].filter(Boolean).join("\n\n").slice(0, 20_000);
+    const filed = await connectorErrors(() =>
+      ctx.connectors.call(
+        { connector, tool: "ship", args: { owner: where.owner, repo: where.repo, artifact, branch: shipBranch(title, task.id.slice(-8)), title, body }, why: yours ? `Your word, in the app, on @${task.assignee}'s verified work (task ${task.id}).` : `Your agent's word, on @${task.assignee}'s work (task ${task.id}), which its gates and an independent reviewer passed.` },
+        { kind: "agent", by: agentLabel(task.assignee), ...(yours ? { yours: true as const } : {}) },
+      ),
+    );
+    let receipt: string;
+    if (filed.status === "done") {
+      if (!filed.result.ok) throw new HttpError(502, `not shipped: ${filed.result.body}`);
+      receipt = filed.result.body;
+    } else if (yours) {
+      await connectorErrors(() => ctx.connectors.decide(filed.action, true, yours.kind === "client" ? yours.device : null));
+      await ctx.connectors.drain();
+      const action = ctx.connectors.actions(10_000).find((a) => a.id === filed.action);
+      if (action?.state !== "done") throw new HttpError(502, `not shipped: ${action?.receipt ?? "it hasn't been sent yet (invincible action ls)"}`);
+      receipt = action.receipt ?? "";
+    } else {
+      // Not its to approve there (policy.ts ownApproval): it waits for you, as any of its agents' ships does.
+      teamOf().noteTask(task.id, `Shipping it waits for you: its pull request there isn't your agent's to open (Inbox, action ${filed.action})`.slice(0, 500));
+      return { asked: filed.action };
+    }
+    const url = /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.exec(receipt)?.[0] ?? null;
+    const pr = Number(/pull request #(\d+)/.exec(receipt)?.[1]) || null;
+    if (url) teamOf().markShipped(task.id, { url, pr });
+    teamOf().noteTask(task.id, `${yours ? "Shipped" : "Shipped by your agent itself"} · ${receipt}`.slice(0, 500));
+    // Your tap is stepping in (#28); your agent's own ship is not.
+    if (yours) steppedIn({ task: task.id }, "approval", "shipped it");
+    return { receipt, url, pr };
+  }
   /** The stop's word to a coding agent's run in its VM (its tool's own interrupt): bound to its VM as every command is, and sent once its task has stopped. */
   async function stopTellTeam(member: Agent, command: string, timeout: number) {
     const bound = teamMember(member.id).workspace;
@@ -3015,53 +3069,11 @@ export function createApp(ctx: AppContext) {
     teamCi: (input, p) => { ownerOnly(p); return { ci: teamOf().setCiBack(input.on) }; },
     teamBacklog: (input, p) => { ownerOnly(p); return { backlog: teamOf().setBacklog(input.on) }; },
     teamOwnDaily: (input, p) => { ownerOnly(p); return { usd: teamOf().setOwnDaily(input.usd) }; },
-    /* An agent's verified work as a pull request, on your word (PLAN #37's next step): filed as its agent's ship, so it is
-     * in the outbox that the CI watcher follows (and a failure can go back to that agent), and answered by you at once,
-     * from the device you tapped on. Only from this node, which keeps the work. */
-    shipTeamTask: async (input, p) => {
+    /* An agent's verified work as a pull request, on your word (PLAN #37's next step), answered by you at once from the
+     * device you tapped on (shipTask). Only from this node, which keeps the work. */
+    shipTeamTask: (input, p) => {
       ownerOnly(p);
-      const task = ctx.team!.store.task(input.task);
-      if (!task) throw new HttpError(404, `no task ${input.task}`);
-      if (task.status !== "done" || !task.verified || !task.changes) throw new HttpError(409, "only work that was verified, and kept, is shipped");
-      if (task.fix) throw new HttpError(409, "a fix goes onto its pull request's branch: its push waits in Needs you");
-      if (task.shipped) throw new HttpError(409, `it was shipped already: ${task.shipped.url}`);
-      const artifact = task.changes.artifact;
-      let shipment: ShipManifest;
-      try {
-        shipment = ShipManifest.parse(JSON.parse(new TextDecoder().decode(ctx.artifacts.read(artifact, "ship/manifest.json").bytes)));
-      } catch {
-        throw new HttpError(404, `${artifact} isn't kept on this node, or holds no shipment: ship it from where it is kept (invincible ship ${artifact})`);
-      }
-      const where = githubRepo(shipment.remote);
-      if (!where) throw new HttpError(422, `the work was done on ${shipment.remote}, which isn't a github.com repository`);
-      const own = `github-${where.owner.toLowerCase()}`;
-      const connector = installedConnector(ctx.store, own) ? own : "github";
-      const title = input.title ?? task.title.slice(0, 120);
-      const said = task.output.split("\n\nReview:")[0]!.trim();
-      const body = [said, `_Made by @${task.assignee} in task ${task.id}, verified by its gates and an independent reviewer; the work is kept as ${artifact}._`].filter(Boolean).join("\n\n").slice(0, 20_000);
-      const filed = await connectorErrors(() =>
-        ctx.connectors.call(
-          { connector, tool: "ship", args: { owner: where.owner, repo: where.repo, artifact, branch: shipBranch(title, task.id.slice(-8)), title, body }, why: `Your word, in the app, on @${task.assignee}'s verified work (task ${task.id}).` },
-          { kind: "agent", by: agentLabel(task.assignee), yours: true },
-        ),
-      );
-      let receipt: string;
-      if (filed.status === "done") {
-        if (!filed.result.ok) throw new HttpError(502, `not shipped: ${filed.result.body}`);
-        receipt = filed.result.body;
-      } else {
-        connectorErrors(() => ctx.connectors.decide(filed.action, true, p.kind === "client" ? p.device : null));
-        await ctx.connectors.drain();
-        const action = ctx.connectors.actions(10_000).find((a) => a.id === filed.action);
-        if (action?.state !== "done") throw new HttpError(502, `not shipped: ${action?.receipt ?? "it hasn't been sent yet (invincible action ls)"}`);
-        receipt = action.receipt ?? "";
-      }
-      const url = /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.exec(receipt)?.[0] ?? null;
-      const pr = Number(/pull request #(\d+)/.exec(receipt)?.[1]) || null;
-      if (url) teamOf().markShipped(task.id, { url, pr });
-      teamOf().noteTask(task.id, `Shipped · ${receipt}`.slice(0, 500));
-      steppedIn({ task: task.id }, "approval", "shipped it");
-      return { receipt, url, pr };
+      return shipTask(input, p);
     },
     /* Removing a worker is yours alone (never its: it only adds), and for good. One that has a VM goes only together
      * with it, when you say so and from a device that may destroy a sandbox: the destroy is your own request, approved
@@ -3094,6 +3106,26 @@ export function createApp(ctx: AppContext) {
       if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself steers the agents' work as itself; you steer a task among the agents");
       guardAgainstSecrets(input.text);
       return teamOf().steer(input, TEAM_PRIMARY);
+    },
+    // Its own word on its agents' work (its team_approve, team_stop, team_resume): said on the trail as its, never yours (#28).
+    primaryControl: (input, p) => {
+      if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself decides on the agents' work this way; you decide among the agents");
+      guardAgainstSecrets(input.why);
+      const team = teamOf();
+      const task = input.action === "approve" ? team.approveOwnOrSay(input.task, input.why) : input.action === "decline" ? team.declineOwn(input.task, input.why) : input.action === "stop" ? team.stopOwn(input.task, input.why) : team.resumeOwn(input.task, input.why);
+      return { task };
+    },
+    // Its give again (team_again): on its own word, within its money (TeamService.againOwn).
+    primaryAgain: (input, p) => {
+      if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself gives the agents' work again this way; you give it again among the agents");
+      guardAgainstSecrets([input.why, input.goal ?? "", ...(input.gates ?? [])].join("\n"));
+      const { task, ...give } = input;
+      return { task: teamOf().againOwn(task, give) };
+    },
+    // Its agents' proven work shipped (team_ship): its own approval where its rule allows, else it waits for you (shipTask).
+    primaryShip: (input, p) => {
+      if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself ships the agents' work this way; you ship it among the agents");
+      return shipTask(input, null);
     },
     provisionAgent: (input, p, req) => {
       ownerOnly(p);

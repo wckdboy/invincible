@@ -18,7 +18,7 @@ import { PricedModel, PriceSchema, SpendLines, type EvalSpent, UsageBudgetInput 
 import { COMPUTER_START, type ComputeUsage, EffortAsk, EffortLevel } from "./compute.ts";
 import { DecisionRequest } from "./decisions.ts";
 import { CancelLookInput, ConversationId, LookLaterInput, ProjectBranchInput, ProjectCommitInput, ProjectGitInput, ProjectId, ProjectInput } from "./chats.ts";
-import { AgentId, AgentInput, TeamBacklogInput, TeamOwnDailyInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamSteerInput, TeamWorkspaceRun, AgentModels } from "./team.ts";
+import { AgentId, AgentInput, TeamBacklogInput, TeamOwnDailyInput, TeamPrimaryAgainInput, TeamPrimaryControlInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamSteerInput, TeamWorkspaceRun, AgentModels } from "./team.ts";
 import { RunGates, RunProgressInput } from "./runs.ts";
 import { type StopReason, TURN_ID } from "./turns.ts";
 import { type ArchiveContextEntry, ArchiveBudgetInput, ArchiveDeleteInput, ArchiveId, ArchiveReindexInput, ArchiveSearchInput, NoteIdeaInput } from "./archive.ts";
@@ -412,7 +412,7 @@ export const routes = {
   /** An agent's verified work as a pull request, on your word (PLAN #37): filed as its agent's ship and answered by you at once, so the outbox (and the CI watcher) has it. */
   shipTeamTask: { method: "POST", path: "/api/team/ship", scope: "fleet:admin", input: TeamShipInput },
   /* The primary's own way to the other agents, from your conversation with it (its tools: team, team_recruit, team_message,
-   * team_give, team_steer).
+   * team_give, team_steer, team_approve, team_stop, team_resume, team_again, team_ship).
    * Refused to everyone else whatever their scopes, you included: the routes above are yours. */
   teamOverview: { method: "POST", path: "/api/team/overview", scope: "mind:read", input: z.strictObject({ room: TeamRoomId.optional() }) },
   recruitAgent: { method: "POST", path: "/api/team/recruit", scope: "mind:write", input: TeamRecruitInput },
@@ -421,6 +421,12 @@ export const routes = {
   giveToTeam: { method: "POST", path: "/api/team/primary-give", scope: "mind:write", input: TeamGiveInput },
   /** Its words to a running task (its team_steer), as yours reach one: said as its ("Your agent: …"), and within the task's steers. */
   primarySteer: { method: "POST", path: "/api/team/primary-steer", scope: "mind:write", input: TeamSteerInput },
+  /** Its own word on a task of the agents' (its team_approve, team_stop, team_resume): a proposal approved within what it may commit on its own, or declined; work stopped, or taken up again within the same money; said on the task's trail as its, never counted as yours (#28). */
+  primaryControl: { method: "POST", path: "/api/team/primary-control", scope: "mind:write", input: TeamPrimaryControlInput },
+  /** An ended task given again (its team_again), from a step of it when it names one: on its own word, within its money. */
+  primaryAgain: { method: "POST", path: "/api/team/primary-again", scope: "mind:write", input: TeamPrimaryAgainInput },
+  /** Its agents' proven work as a pull request (its team_ship): filed as its agent's ship, which it approves itself where its rule allows (policy.ts ownApproval), and which otherwise waits for you. */
+  primaryShip: { method: "POST", path: "/api/team/primary-ship", scope: "mind:write", input: TeamShipInput },
   teamWorkspace: { method: "POST", path: "/api/team/workspace", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32) }) },
   /** A folder of an agent's workspace (its VM's /work; `primary`: its computer's), read; yours alone. */
   teamFiles: { method: "POST", path: "/api/team/files", scope: "sandbox", input: TeamFilesInput },

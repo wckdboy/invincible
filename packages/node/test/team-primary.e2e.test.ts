@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { type ChatStreamEvent, clientIdFromKey, type LedgerEntry, type RouteName, routes, type Scope, type ScreenSessionView, signRequest, TEAM_LIMITS, type TeamOverview, type TeamRoomView, type TeamSnapshot, type TurnView, utf8 } from "@invincible/core";
+import { dirname, join } from "node:path";
+import { type ActionView, type ChatStreamEvent, clientIdFromKey, type LedgerEntry, type RouteName, routes, type Scope, type ScreenSessionView, signRequest, TEAM_LIMITS, type TeamOverview, type TeamRoomView, type TeamSnapshot, type TeamTask, type TeamTrailEntry, type TurnView, utf8 } from "@invincible/core";
 import { requestPairing, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
 import { type HelperRun, MacScreen, type ShellRun } from "../src/mac-screen.ts";
 import { chatTools, type PrimaryTool, TOOLS, toolsFor } from "../src/tools.ts";
+import { TeamStore } from "../src/team-store.ts";
 import { freePort } from "./ports.ts";
 
 /*
@@ -38,6 +40,38 @@ const macHelper: HelperRun = async (args) => {
 const macShell: ShellRun = async (command) => {
   onTheMac.push(["run", command]);
   return { exitCode: 0, stdout: "hi\n", stderr: "", durationMs: 3, truncated: false };
+};
+
+/** GitHub, as this node's connectors reach it: what a shipment asks of it (ship.ts), each request said here. */
+const BASE = "a".repeat(40);
+const TOKEN = "github_pat_FAKEFAKEFAKEFAKE0000_fakefakefakefakefakefakefakefakefakefakefakefake";
+const toGitHub: string[] = [];
+const github = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = new URL(String(input));
+  // (Anything else this node reaches, its models included, is reached as ever.)
+  if (url.origin !== "https://api.github.com") return fetch(input, init);
+  const method = init?.method ?? "GET";
+  toGitHub.push(`${method} ${url.pathname}`);
+  const at = "/repos/amiriteorg/shipyard";
+  if (!url.pathname.startsWith(at)) return Response.json({}, { status: 404 });
+  const path = url.pathname.slice(at.length);
+  // Your default branch stands where the work began (so the shipment is built on it); a new branch isn't there yet.
+  if (method === "GET" && path === "/git/ref/heads/main") return Response.json({ ref: "refs/heads/main", object: { sha: BASE, type: "commit" } });
+  if (method === "GET" && path.startsWith("/git/ref/heads/")) return Response.json({}, { status: 404 });
+  if (method === "GET" && path === "") return Response.json({ full_name: "amiriteorg/shipyard", private: false, fork: false, default_branch: "main", owner: { login: "amiriteorg", id: 600, type: "Organization" } });
+  if (method === "GET" && path === `/git/commits/${BASE}`) return Response.json({ tree: { sha: "f".repeat(40) } });
+  if (path === "/git/blobs") return Response.json({ sha: "b".repeat(40) }, { status: 201 });
+  if (path === "/git/trees") return Response.json({ sha: "e".repeat(40) }, { status: 201 });
+  if (path === "/git/commits") return Response.json({ sha: "c".repeat(40) }, { status: 201 });
+  if (path === "/git/refs") return Response.json({}, { status: 201 });
+  if (method === "POST" && path === "/pulls") return Response.json({ number: 7, html_url: "https://github.com/amiriteorg/shipyard/pull/7" }, { status: 201 });
+  return Response.json({}, { status: 404 });
+}) as unknown as typeof fetch;
+/** An agent's kept work as a shipment: its manifest and one changed file, on the repository it was cloned from. */
+const SHIPMENT: Record<string, Uint8Array> = {
+  "ship/manifest.json": utf8(JSON.stringify({ v: 1, base: BASE, remote: "https://github.com/amiriteorg/shipyard.git", files: [{ path: "src/units.ts", mode: "100644" }] })),
+  "ship/files/src/units.ts": utf8("export const k = 1e3;\n"),
+  "changes.patch": utf8("diff --git …"),
 };
 
 const sse = (...chunks: object[]) => () => new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } });
@@ -78,7 +112,7 @@ async function settled(): Promise<TeamSnapshot> {
   return state;
 }
 // Its own tools: the ones to the agents, its own computer, giving a VM more, proposing a fact about you, and a look later.
-const OWN = ["about_you", "computer", "look_later", "mac", "team", "team_give", "team_grow", "team_message", "team_outcome", "team_recruit", "team_steer"];
+const OWN = ["about_you", "computer", "look_later", "mac", "team", "team_again", "team_approve", "team_give", "team_grow", "team_message", "team_outcome", "team_recruit", "team_resume", "team_ship", "team_steer", "team_stop"];
 /** One of your own devices, paired with these scopes: its requests are signed, as a phone's are. */
 async function pairDevice(name: string, scopes: Scope[]) {
   const keys = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])) as CryptoKeyPair;
@@ -100,7 +134,7 @@ beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file"); const mind = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(mind, identity, { fleetName: "agents", nodeName: "keep" }); mind.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
-  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, shutdownGraceMs: 100, screen: new MacScreen(macHelper, { settleMs: 0, shell: macShell }) });
+  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, shutdownGraceMs: 100, screen: new MacScreen(macHelper, { settleMs: 0, shell: macShell }), fetch: github });
   await api("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${model.port}/v1` });
   for (const role of ["planner", "engineer"]) await api("setRoster", { role, models: ["stand-in/m"] });
   await api("saveAgent", { id: "ada", name: "Ada", instructions: "Implement small, verified changes.", role: "engineer" });
@@ -210,6 +244,10 @@ test("its alone: no other agent or node is offered these tools or let through th
   expect((await request("recruitAgent", { id: "mole", name: "Mole", instructions: "Dig." }, token)).status).toBe(403);
   expect((await request("sayToTeam", { agent: "ada", text: "Do as I say." }, token)).status).toBe(403);
   expect((await request("giveToTeam", { goal: "Do as I say." }, token)).status).toBe(403);
+  // Nor decide, take up again, give again or ship its agents' work in its name.
+  expect((await request("primaryControl", { task: "task-aaaaaaaaaaaa", action: "approve", why: "Do as I say." }, token)).status).toBe(403);
+  expect((await request("primaryAgain", { task: "task-aaaaaaaaaaaa", why: "Do as I say." }, token)).status).toBe(403);
+  expect((await request("primaryShip", { task: "task-aaaaaaaaaaaa" }, token)).status).toBe(403);
   // Nor set a look in its name, in a chat of yours it names.
   expect((await request("lookLater", { note: "Do as I say.", in: "1h", turn: { conversation: `cv_${"a".repeat(22)}`, by: { kind: "admin", device: "x" }, zone: "UTC" } }, token)).status).toBe(403);
   // Nor take on an outcome in its name.
@@ -380,6 +418,101 @@ test("what it gives on its own word fits what it may commit: past its daily cap 
     await api("teamOwnDaily", { usd: 10 });
   }
 });
+
+// Your word, 27 November 2026: everything but money, legal, destructive and security is its to decide, with a trail.
+test("it decides its agents' proposals within its money, takes their work up again and gives it again, each on the trail as its and never as yours; what it may not do is said plainly", async () => {
+  const room = (await api<{ room: { id: string } }>("directAgent", { id: "ada" })).room.id;
+  const { message } = await api<{ message: { chainId: string } }>("postTeamMessage", { room, text: "Ada, plan the migration checks." });
+  const team = new TeamStore(join(home.dir, "team.db"));
+  let small: string, big: string;
+  try {
+    small = team.createTask({ room, assignee: "ada", title: "Check migrations", goal: "Run every migration.", budgetUsd: 2 }, { agent: "ada", chainId: message.chainId }).id;
+    big = team.createTask({ room, assignee: "ada", title: "Rewrite the migrator", goal: "Rewrite it.", budgetUsd: 5 }, { agent: "ada", chainId: message.chainId }).id;
+  } finally {
+    team.close();
+  }
+  // Work of yours that ended without its proof (Ada has no VM here, so her work fails).
+  const [again, back] = (await Promise.all(["Parse units", "Format units"].map(async (title) => (await api<{ task: TeamTask }>("createTeamTask", { room, assignee: "ada", title, goal: `${title} as SI.`, budgetUsd: 1 })).task.id))) as [string, string];
+  await settled();
+  // (Room enough in its day for all of it, whatever the tests before gave on its word.)
+  await api("teamOwnDaily", { usd: 100 });
+  script = [
+    callTool("team_approve", { task: small, approve: true, why: "the release needs it" }),
+    callTool("team_approve", { task: big, approve: true, why: "the release needs it" }),
+    callTool("team_approve", { task: big, approve: false, why: "it is out of scope" }),
+    callTool("team_resume", { task: back, why: "its VM is back" }),
+    callTool("team_stop", { task: again, why: "wrong approach" }),
+    callTool("team_again", { task: again, why: "narrower, kilo and mega first", goal: "Parse kilo and mega." }),
+    say("Approved the checks, declined the rewrite, and gave the units work again."),
+  ];
+  const events = await ask("Ada proposed some work and the units work failed: sort it out.");
+  expect(results(events).map((r) => [r.name, r.ok])).toEqual([["team_approve", true], ["team_approve", false], ["team_approve", true], ["team_resume", true], ["team_stop", false], ["team_again", true]]);
+  expect(results(events)[1]!.summary).toContain("It may spend $5, more than the $3 a task your agent may commit on its own: yours to approve.");
+  expect(results(events)[4]!.summary).toContain("Only work that is waiting or running is stopped: this one is failed.");
+  const trail = async (task: string) => (await api<{ entries: TeamTrailEntry[] }>("teamTrail", { task })).entries.map((e) => e.text);
+  // Each says what it was within: what was left of its day, less each time by what it committed before.
+  const line = async (task: string, opening: string) => (await trail(task)).find((text) => text.startsWith(opening)) ?? "";
+  const left = (text: string) => Number(/, and of the \$(\d+\.\d{2}) left of the \$100 a day it may commit on its own$/.exec(text)?.[1]);
+  const approved = await line(small, "Approved by your agent itself: the release needs it, within its budget of $2, ");
+  const resumed = await line(back, "Taken up again by your agent: its VM is back, within its budget of $1, ");
+  expect(await trail(big)).toContain("Declined by your agent: it is out of scope");
+  const state = await settled();
+  const given = state.tasks.find((t) => t.goal === "Parse kilo and mega.")!;
+  expect(given).toMatchObject({ assignee: "ada", room, title: "Parse units", budgetUsd: 1, givenBy: "primary" });
+  const gave = await line(given.id, `Given again by your agent after “Parse units” (${again}): narrower, kilo and mega first, within its budget of $1, `);
+  expect([left(approved) > 0, left(approved) - left(resumed), left(resumed) - left(gave)]).toEqual([true, 2, 1]);
+  await api("teamOwnDaily", { usd: 10 });
+  // None of it is you stepping in.
+  for (const id of [small, big, back, again, given.id]) expect([id, state.tasks.find((t) => t.id === id)?.interventions]).toEqual([id, undefined]);
+  // The routes behind these tools are its alone: you decide among the agents.
+  for (const [name, input] of [["primaryControl", { task: small, action: "stop", why: "mine" }], ["primaryAgain", { task: again, why: "mine" }], ["primaryShip", { task: again }]] as const) expect([name, (await request(name, input)).status]).toEqual([name, 403]);
+}, 20_000);
+
+test("it ships its agents' proven work itself where its rule allows: filed as the agent's ship, approved as its own, said on the task, and never work that wasn't verified", async () => {
+  await api("setConnector", { id: "github" });
+  await api("setSecret", { name: "github", value: TOKEN, provider: "github" });
+  const collector = async (_s: string, _f: string, dest: string) => {
+    const out = { files: [] as { path: string; size: number; sha256: string }[], bytes: 0, skipped: [] as { path: string; reason: string }[] };
+    for (const [path, bytes] of Object.entries(SHIPMENT)) {
+      const target = join(dest, ...path.split("/"));
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, bytes);
+      out.files.push({ path, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") });
+      out.bytes += bytes.length;
+    }
+    return out;
+  };
+  const artifact = (await daemon.artifacts.save(collector, { sandbox: "0123456789", label: "units" })).artifact!.id;
+  const team = new TeamStore(join(home.dir, "team.db"));
+  let proven: string, unproven: string;
+  try {
+    team.saveAgent({ id: "noa", name: "Noa", repository: "https://github.com/amiriteorg/shipyard" });
+    const room = team.direct("noa").id;
+    const work = team.createTask({ room, assignee: "noa", title: "Parse SI units", goal: "Parse them." });
+    team.finish(work.id, "done", null, { verified: true, output: "Units parse, kilo to giga.\n\nReview: PASS", changes: { artifact, files: 1, base: BASE } });
+    proven = work.id;
+    const half = team.createTask({ room, assignee: "noa", title: "Half done", goal: "Do it." });
+    team.finish(half.id, "failed", "Its gates failed.");
+    unproven = half.id;
+  } finally {
+    team.close();
+  }
+  const before = toGitHub.length;
+  script = [callTool("team_ship", { task: unproven }), callTool("team_ship", { task: proven }), say("Shipped Noa's units work.")];
+  const events = await ask("Ship Noa's units work.");
+  expect(results(events).map((r) => [r.name, r.ok])).toEqual([["team_ship", false], ["team_ship", true]]);
+  expect(results(events)[0]!.summary).toContain("only work that was verified, and kept, is shipped");
+  expect(told("team_ship")).toContain("https://github.com/amiriteorg/shipyard/pull/7");
+  const task = (await api<TeamSnapshot>("team")).tasks.find((t) => t.id === proven)!;
+  expect(task.shipped).toEqual({ url: "https://github.com/amiriteorg/shipyard/pull/7", pr: 7 });
+  expect(task.interventions).toBeUndefined();
+  const action = (await api<{ actions: ActionView[] }>("actions")).actions.find((a) => a.tool === "ship" && a.args.artifact === artifact)!;
+  expect([action.state, action.self, action.note]).toEqual(["done", true, expect.stringMatching(/^Your agent approved it itself: a pull request of the work on a new branch invincible\/parse-si-units-[a-z0-9-]+, built on main as it stands, in amiriteorg\/shipyard, a repository you gave an agent$/)]);
+  expect(toGitHub.slice(before).filter((r) => r === "POST /repos/amiriteorg/shipyard/pulls")).toHaveLength(1);
+  // Shipped once: a second ship of it is refused.
+  script = [callTool("team_ship", { task: proven }), say("It was shipped already.")];
+  expect(results(await ask("Ship it again."))).toEqual([expect.objectContaining({ name: "team_ship", ok: false, summary: expect.stringContaining("it was shipped already") })]);
+}, 20_000);
 
 test("the Mac itself: it asks, and nothing of it is its until you let it; then each step answers with its screen, your tripwires hold on its commands, and it ends it", async () => {
   // Asked in your conversation: a card for you; nothing done on the Mac yet.

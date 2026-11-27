@@ -552,6 +552,31 @@ export interface TeamTaskShipped {
 
 /** An agent's verified work shipped as a pull request, on your word; `title` is the pull request's (the task's when absent). */
 export const TeamShipInput = z.strictObject({ task: TeamTaskId, title: z.string().trim().min(1).max(120).optional() });
+/**
+ * Your agent's own word on a task of the agents', from your conversation (its team_approve, team_stop, team_resume): a
+ * proposal approved within what it may commit on its own, or declined; work waiting or running stopped; work that
+ * stopped, failed or a restart cut off taken up again, within the same money. Never what you stopped, paused or declined.
+ * `why` goes on the task's trail.
+ */
+export const TeamPrimaryControlInput = z.strictObject({
+  task: TeamTaskId,
+  action: z.enum(["approve", "decline", "stop", "resume"]),
+  why: z.string().trim().min(1).max(500),
+});
+export type TeamPrimaryControlInput = z.infer<typeof TeamPrimaryControlInput>;
+/**
+ * Your agent's give again (its team_again): an ended task given again to the same agent, from a step of it when `from`
+ * names one, its goal and gates its own words when it gives them; on its own word, within its money, $3 at most.
+ */
+export const TeamPrimaryAgainInput = z.strictObject({
+  task: TeamTaskId,
+  why: z.string().trim().min(1).max(500),
+  from: z.number().int().min(1).max(1_000_000).optional(),
+  goal: z.string().trim().min(1).max(8000).optional(),
+  gates: z.array(z.string().trim().min(1).max(1000)).max(16).optional(),
+  budgetUsd: z.number().positive().max(TEAM_LIMITS.ownTaskUsd).optional(),
+});
+export type TeamPrimaryAgainInput = z.infer<typeof TeamPrimaryAgainInput>;
 
 /**
  * A pull request a task fixes (PLAN #29, the node's ci-back.ts): its checks failed on `head`, so the agent whose work it

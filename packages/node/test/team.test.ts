@@ -509,6 +509,104 @@ describe("task orchestration", () => {
     expect(service.approveOwn(handed.id, "a node handed it")).toBeNull();
     expect(store.task(handed.id)?.status).toBe("proposed");
   });
+  // Your word, 27 November 2026: everything but money, legal, destructive and security is its to decide, with a trail.
+  test("your agent's own word on its agents' work: a proposal approved within its money or declined, each said on the trail and why not when it can't, and never counted as yours", () => {
+    const { store, service } = setup();
+    const chainId = service.post({ room: "workshop", text: "Plan the release." }).chainId;
+    const propose = (title: string, budgetUsd?: number) => store.createTask({ room: "workshop", assignee: "lin", title, goal: title, ...(budgetUsd !== undefined ? { budgetUsd } : {}) }, { agent: "ada", chainId });
+    const trail = (task: string) => store.trail(task).entries.map((e) => e.text);
+    const fits = propose("Fits", 2);
+    expect(service.approveOwnOrSay(fits.id, "the release needs it").status).toBe("queued");
+    expect(trail(fits.id)).toContain("Approved by your agent itself: the release needs it, within its budget of $2, and of the $10.00 left of the $10 a day it may commit on its own");
+    // Why not, when it isn't its to give: in words it can tell you.
+    expect(() => service.approveOwnOrSay(propose("Uncapped").id, "why not")).toThrow("It names no budget: money nobody capped is yours to approve.");
+    expect(() => service.approveOwnOrSay(propose("Big", 4).id, "why not")).toThrow("It may spend $4, more than the $3 a task your agent may commit on its own: yours to approve.");
+    expect(() => service.approveOwnOrSay(fits.id, "again")).toThrow("That task isn't a proposal waiting for a yes.");
+    service.setOwnDaily(3);
+    expect(() => service.approveOwnOrSay(propose("Past its day", 2).id, "why not")).toThrow("That's past what your agent may commit on its own: $1.00 is left of the $3 a day it may commit on its own (yours to set: invincible agents daily). Approve it yourself, or decline it.");
+    // Declined: said as its, never as yours, and it never ran.
+    const no = propose("Not now", 1);
+    expect(service.declineOwn(no.id, "the release is frozen")).toMatchObject({ status: "stopped", error: "Declined by your agent: the release is frozen" });
+    expect(trail(no.id)).toContain("Declined by your agent: the release is frozen");
+    expect(() => service.declineOwn(no.id, "twice")).toThrow("That task isn't a proposal waiting for a yes.");
+    // One of its own (from your backlog) is withdrawn, never said to be declined, as the backlog says it.
+    const own = service.proposeTask({ room: "workshop", assignee: "ada", title: "Its own", goal: "Its own step.", budgetUsd: 1 });
+    expect(service.declineOwn(own.id, "another step comes first").error).toBe("Withdrawn by your agent: another step comes first.");
+    // None of it is you stepping in.
+    for (const task of [fits, no, own]) expect(store.task(task.id)!.interventions).toBeUndefined();
+  });
+  test("your agent stops its agents' work and takes it up again: within its money, never what you stopped or paused, nor what a crash cut off, nor an outcome's", async () => {
+    // Its work runs until it is stopped.
+    const { store, service } = setup({ executeTask: (_agent, _task, context) => new Promise((resolve) => context.signal.addEventListener("abort", () => resolve({ verified: false, output: "Stopped" }))) });
+    const give = (title: string, budgetUsd?: number) => service.createTask({ room: "workshop", assignee: "ada", title, goal: title, ...(budgetUsd !== undefined ? { budgetUsd } : {}) });
+    const trail = (task: string) => store.trail(task).entries.map((e) => e.text);
+    service.start();
+    const running = give("Running", 2);
+    await Bun.sleep(30);
+    expect(store.task(running.id)!.status).toBe("running");
+    const waiting = give("Waiting", 2);
+    for (const task of [running, waiting]) expect(service.stopOwn(task.id, "its approach is wrong")).toMatchObject({ status: "stopped", error: "Stopped by your agent: its approach is wrong" });
+    expect(trail(running.id)).toContain("Stopped by your agent: its approach is wrong");
+    expect(() => service.stopOwn(running.id, "twice")).toThrow("Only work that is waiting or running is stopped: this one is stopped.");
+    // While its run winds down it can't be taken up again; once it has, it can.
+    expect(() => service.resumeOwn(running.id, "too soon")).toThrow("This work is still stopping. Wait for its current command to finish.");
+    await service.settled();
+    // Taken up again within its money: its budget is committed again on its word, as a run spends it anew.
+    expect(service.resumeOwn(running.id, "the approach is fixed")).toMatchObject({ status: "queued", error: null });
+    expect(trail(running.id)).toContain("Taken up again by your agent: the approach is fixed, within its budget of $2, and of the $10.00 left of the $10 a day it may commit on its own");
+    expect(service.ownLeft()).toEqual({ usd: 8, of: "day" });
+    // Yours stays yours: what you stopped, what a crash cut off, money nobody capped, more than its own cap a task.
+    const yours = give("Yours", 1);
+    service.control({ action: "stop", task: yours.id });
+    expect(() => service.resumeOwn(yours.id, "why not")).toThrow("You stopped it: taking it up again is yours.");
+    const crashed = give("Crashed", 1);
+    store.finish(crashed.id, "interrupted", "The node stopped during this work. Review it before resuming.");
+    expect(() => service.resumeOwn(crashed.id, "why not")).toThrow("A crash cut it off mid-work: what it had done is yours to review before it runs again.");
+    for (const [title, budget, said] of [["Uncapped", undefined, "It names no budget: money nobody capped is yours to take up again."], ["Big", 5, "It may spend $5, more than the $3 a task your agent may commit on its own: yours to take up again."]] as const) {
+      const task = give(title, budget);
+      store.finish(task.id, "failed", "Its gates failed.");
+      expect(() => service.resumeOwn(task.id, "why not")).toThrow(said);
+    }
+    // Its outcome gives its own work again, within the outcome's budget.
+    const outcome = store.createOutcome({ title: "Units", goal: "Parse SI units everywhere.", agents: ["ada"], budgetUsd: 10 });
+    const step = store.createTask({ room: outcome.room, assignee: "ada", title: "A step", goal: "Do it.", budgetUsd: 1, outcome: outcome.id }, { givenBy: "primary" });
+    store.finish(step.id, "failed", "Its gates failed.");
+    expect(() => service.resumeOwn(step.id, "why not")).toThrow("It is a step of an outcome, which gives its work again within its own budget.");
+    // Past its day it is yours too.
+    service.setOwnDaily(2);
+    expect(() => service.resumeOwn(waiting.id, "why not")).toThrow("That's past what your agent may commit on its own: $0.00 is left of the $2 a day it may commit on its own (yours to set: invincible agents daily). Take it up again yourself.");
+  });
+  test("your agent leaves be work a planned restart cut off: it is taken up again by itself once its VM command has surely ended, and cut off a second time it is yours", () => {
+    const { store, service } = setup();
+    const give = (title: string) => service.createTask({ room: "workshop", assignee: "ada", title, goal: title, budgetUsd: 1 });
+    const cut = give("Cut off");
+    expect(store.claim(cut.id)).toBe(true);
+    store.interruptForRestart(cut.id, Date.now() + 60_000, 5);
+    expect(() => service.resumeOwn(cut.id, "why not")).toThrow("A restart cut it off, and it is taken up again by itself once the command it was running has surely ended: leave it be.");
+    // Its wait over it is taken up again by itself; cut off then a second time, it waits for you, its room held.
+    const twice = give("Cut off twice");
+    expect(store.claim(twice.id)).toBe(true);
+    store.interruptForRestart(twice.id, Date.now() - 1, 5);
+    expect(store.resumeRestarted()).toBeGreaterThan(0);
+    expect(store.claim(twice.id)).toBe(true);
+    store.interruptForRestart(twice.id, Date.now() + 60_000, 5);
+    expect(() => service.resumeOwn(twice.id, "why not")).toThrow("A restart cut it off a second time: what it had done is yours to review before it runs again.");
+  });
+  test("your agent gives work again, from a step of it when it names one: on its own word and within its money, the new task said to be given again after the old", () => {
+    const { store, service } = setup();
+    const old = service.createTask({ room: "workshop", assignee: "ada", title: "Parse units", goal: "Parse SI units.", gates: ["bun test"], budgetUsd: 5 });
+    store.finish(old.id, "failed", "Its gates failed.");
+    const again = service.againOwn(old.id, { why: "its reviewer found the gap" });
+    // Its words or the old ones, and its money: $3 at most though the old had more.
+    expect(again).toMatchObject({ room: "workshop", assignee: "ada", title: "Parse units", goal: "Parse SI units.", gates: ["bun test"], budgetUsd: 3, givenBy: "primary", status: "queued" });
+    expect(store.trail(again.id).entries.map((e) => e.text)).toContain(`Given again by your agent after “Parse units” (${old.id}): its reviewer found the gap, within its budget of $3, and of the $10.00 left of the $10 a day it may commit on its own`);
+    const rewritten = service.againOwn(old.id, { why: "narrower", goal: "Parse kilo and mega only.", gates: ["bun test units"], budgetUsd: 1 });
+    expect(rewritten).toMatchObject({ goal: "Parse kilo and mega only.", gates: ["bun test units"], budgetUsd: 1 });
+    expect(service.ownLeft()).toEqual({ usd: 6, of: "day" });
+    // From a step it never kept: said so, and nothing is given.
+    expect(() => service.againOwn(old.id, { why: "from a step", from: 2 })).toThrow(`Task ${old.id} has no step 2 kept to start from.`);
+    expect(store.task(again.id)!.interventions).toBeUndefined();
+  });
   test("tasks you give run at once: only an agent's waits for you", async () => {
     const { store, service } = setup();
     const given = service.createTask({ room: "workshop", assignee: "ada", title: "Yours", goal: "Yours" });

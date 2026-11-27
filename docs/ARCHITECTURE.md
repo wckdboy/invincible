@@ -142,7 +142,8 @@ Its event kinds are Invincible's own (`chat.*`, `task.*`, `run.*`, `project.*`, 
 - **Memory:** what it learned about you (each fact yours to keep or drop), notes, and the archive it searches.
 - **Tools:** search and fetch, files, code in its own computer (a persistent VM with a desktop you can watch and take
   over: docs/AGENTS.md), connectors you add.
-- **Orchestration:** the primary's tools for work are give, check, steer, stop, again-from-a-step, and ship (its steer is
+- **Orchestration:** the primary's tools for work are give, check, steer, approve or decline, stop, take up again,
+  again-from-a-step, and ship, each on its own word with a trail and within its money (its steer is
   `team_steer`: its words reach a task that is running, as yours do, §6). It decides who does what:
   - small work it does itself;
   - work in a repository it gives to a coding agent;

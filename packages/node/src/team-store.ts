@@ -40,6 +40,13 @@ export class TeamError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
 
+/** How work reads that you stopped, paused or declined: your word, which only you take back (TeamService.resumeOwn). */
+export const YOURS_STOPPED: ReadonlyMap<string, string> = new Map([["Stopped by you.", "You stopped it"], ["Paused by you.", "You paused it"], ["Declined by you.", "You declined it"]]);
+/** How work a crash cut off reads: what it had done is yours to review before it runs again. */
+export const CUT_OFF = "The node stopped during this work. Review it before resuming.";
+/** How a proposal of the primary's own reads that it took back (backlog.ts, TeamService.declineOwn): never one you declined. */
+export const WITHDRAWN = "Withdrawn by your agent";
+
 export function teamInput<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
   if (!result.success) throw new TeamError(400, result.error.issues[0]?.message ?? "Invalid team request");
@@ -275,7 +282,12 @@ export class TeamStore {
     this.db.query("INSERT INTO team_settings(key,value) VALUES('own-daily',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(usd));
     return usd;
   }
-  /** What the primary committed on its own word in the last day: the budgets of the tasks it gave, and of the proposals it approved itself, as each was then (team_own). */
+  /** A commitment of the primary's own word beyond a give or a yes (TeamService.resumeOwn: a run taken up again spends its
+   * budget anew), kept as one (team_own, under its own key). */
+  commitOwn(key: string, usd: number): void {
+    this.db.query("INSERT INTO team_own(task,usd,at) VALUES(?,?,?)").run(key, usd, this.now());
+  }
+  /** What the primary committed on its own word in the last day: the budgets of the tasks it gave, of the proposals it approved itself, and of the runs it took up again, as each was then (team_own). */
   ownCommitted(): number {
     return this.db.query<{ usd: number }, [number]>("SELECT COALESCE(SUM(usd),0) AS usd FROM team_own WHERE at > ?").get(this.now() - 86_400_000)!.usd;
   }
@@ -1103,6 +1115,14 @@ export class TeamStore {
     data.acted = true;
     this.db.query("UPDATE team_jobs SET data=? WHERE id=?").run(JSON.stringify(data), key);
   }
+  /** Whether work a planned restart cut off is to be left be: "waits" while it waits to be taken up again by itself (its
+   * command in the VM may still be running), "yours" once cut off a second time (it waits for you, its room held). */
+  restartHold(key: string): "waits" | "yours" | null {
+    const row = this.jobRow(key);
+    if (!row || row.status !== "interrupted") return null;
+    const restart = JSON.parse(row.data).restart as { until?: unknown; resumed?: unknown } | undefined;
+    return typeof restart?.until === "number" ? "waits" : restart?.resumed === true ? "yours" : null;
+  }
   /** Agents with work a restart cut off that isn't due yet: nothing else of theirs starts before it, in the same VM. */
   restartWaits(): Set<string> {
     const now = this.now();
@@ -1152,7 +1172,7 @@ export class TeamStore {
     this.db.transaction(() => {
       const running = this.db.query<JobRow, []>("SELECT * FROM team_jobs WHERE status='running'").all();
       for (const row of running) {
-        this.finish(row.id, "interrupted", "The node stopped during this work. Review it before resuming.");
+        this.finish(row.id, "interrupted", CUT_OFF);
         this.pauseRoom(row.room, true);
       }
       // Its answer is never given twice: one the node stopped during is said to be cut off, and asked for again by you.

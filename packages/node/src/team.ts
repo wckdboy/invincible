@@ -5,7 +5,7 @@ import {
   type TeamMessage, type TeamTask, type TeamTaskChanges, type TeamTaskInput, type TeamTaskRecord, type TeamTrailEntry, type TeamSnapshot, type TeamRoomView, type TeamOverview, type TeamSeenInput,
   type InterventionKind, type TeamWorkStatus, type TeamTaskFix, type TeamTaskShipped,
 } from "../../core/src/team.ts";
-import { TeamStore, TeamError, teamInput, teamOutput, teamText, type TeamAnswer, type TeamAsker, type TeamJob, type TeamSelection } from "./team-store.ts";
+import { CUT_OFF, TeamStore, TeamError, teamInput, teamOutput, teamText, WITHDRAWN, YOURS_STOPPED, type TeamAnswer, type TeamAsker, type TeamJob, type TeamSelection } from "./team-store.ts";
 
 export { TeamError } from "./team-store.ts";
 import type { TeamRunContext } from "@invincible/agents";
@@ -179,24 +179,38 @@ export class TeamService {
   mayGiveOwn(budget: number | undefined): OwnBound {
     if (budget === undefined || budget > TEAM_LIMITS.ownTaskUsd) throw new TeamError(400, `A task your agent gives on its own word names its budget, ${capLabel(TEAM_LIMITS.ownTaskUsd)} at most: more is yours to give.`);
     const bound = this.ownBound();
-    if (bound.usd < budget) {
-      const left = bound.of === "budget"
-        ? `$${bound.usd.toFixed(2)} is left of your budget${bound.held > 0 ? " past what approved work holds" : ""}`
-        : `$${bound.usd.toFixed(2)} is left of the ${capLabel(bound.daily)} a day it may commit on its own (yours to set: invincible agents daily)`;
-      throw new TeamError(409, `That's past what your agent may commit on its own: ${left}. Give it among the agents yourself.`);
-    }
+    if (bound.usd < budget) throw new TeamError(409, `${this.past(bound)} Give it among the agents yourself.`);
+    return bound;
+  }
+  /** What is left that a commitment past it meets, as a refusal says it. */
+  private past(bound: OwnBound): string {
+    const left = bound.of === "budget"
+      ? `$${bound.usd.toFixed(2)} is left of your budget${bound.held > 0 ? " past what approved work holds" : ""}`
+      : `$${bound.usd.toFixed(2)} is left of the ${capLabel(bound.daily)} a day it may commit on its own (yours to set: invincible agents daily)`;
+    return `That's past what your agent may commit on its own: ${left}.`;
+  }
+  /**
+   * The bound a task's budget fits, committed again on the primary's own word (approving it, taking it up again), or why
+   * not: no budget (money nobody capped), more than TEAM_LIMITS.ownTaskUsd, or more than it may still commit (ownLeft).
+   * `yours`: what you would do then; `instead`: what the refusal ends on.
+   */
+  private ownMoney(budget: number | undefined, yours: string, instead: string): OwnBound {
+    if (budget === undefined) throw new TeamError(409, `It names no budget: money nobody capped is yours to ${yours}.`);
+    if (budget > TEAM_LIMITS.ownTaskUsd) throw new TeamError(409, `It may spend $${budget}, more than the ${capLabel(TEAM_LIMITS.ownTaskUsd)} a task your agent may commit on its own: yours to ${yours}.`);
+    const bound = this.ownBound();
+    if (bound.usd < budget) throw new TeamError(409, `${this.past(bound)} ${instead}`);
     return bound;
   }
   /**
-   * A task the primary gives on its own word (team_give, from your conversation): within mayGiveOwn, judged again as it is
-   * written (nothing between the two awaits) so two at once can't both take what one fits. It waits its turn like any
-   * task, and its trail says whose word it was and what it was within.
+   * A task the primary gives on its own word (team_give, team_again, from your conversation): within mayGiveOwn, judged
+   * again as it is written (nothing between the two awaits) so two at once can't both take what one fits. It waits its
+   * turn like any task, and its trail says whose word it was (`said`) and what it was within.
    */
-  giveOwn(input: TeamTaskInput): TeamTask {
+  giveOwn(input: TeamTaskInput, said = "Given by your agent on its own word"): TeamTask {
     this.accepting();
     const bound = this.mayGiveOwn(input.budgetUsd);
     const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, own: true });
-    this.store.noteTask(task.id, `Given by your agent on its own word, within its budget of $${input.budgetUsd}, ${this.within(bound)}`.slice(0, 500));
+    this.store.noteTask(task.id, `${said}, within its budget of $${input.budgetUsd}, ${this.within(bound)}`.slice(0, 500));
     this.changed();
     this.kick();
     return task;
@@ -206,19 +220,26 @@ export class TeamService {
    * 2026: it approves its own decisions and its agents'; what is monetary asks you): only when it names its budget, at
    * most TEAM_LIMITS.ownTaskUsd, and that fits what it may still commit on its own (ownLeft). It waits its turn like any
    * task, and its trail says whose yes it was, why, and what it was within. Null when it isn't its to approve: it waits
-   * for yours.
+   * for yours (approveOwnOrSay says why).
    */
   approveOwn(task: string, why: string): TeamTask | null {
     this.accepting();
-    const proposed = this.store.task(task);
-    const budget = proposed?.budgetUsd;
-    if (proposed?.status !== "proposed" || budget === undefined || budget > TEAM_LIMITS.ownTaskUsd) return null;
+    try {
+      return this.approveOwnOrSay(task, why);
+    } catch (error) {
+      if (error instanceof TeamError) return null;
+      throw error;
+    }
+  }
+  /** Its yes to a proposal (approveOwn), from your conversation (team_approve): why not, said, when it isn't its to give. */
+  approveOwnOrSay(task: string, why: string): TeamTask {
+    this.accepting();
+    const proposed = this.proposal(task);
     // A task another node handed over beyond your grant is yours alone to approve, whatever it would spend.
-    if (proposed.proposedBy?.startsWith("node:")) return null;
-    const bound = this.ownBound();
-    if (bound.usd < budget) return null;
+    if (proposed.proposedBy?.startsWith("node:")) throw new TeamError(403, "Another node handed it over beyond your grant: approving it is yours alone, whatever it would spend.");
+    const bound = this.ownMoney(proposed.budgetUsd, "approve", "Approve it yourself, or decline it.");
     const approved = this.store.approve(task, true);
-    this.store.noteTask(task, `Approved by your agent itself: ${why}, within its budget of $${budget}, ${this.within(bound)}`.slice(0, 500));
+    this.store.noteTask(task, `Approved by your agent itself: ${why}, within its budget of $${proposed.budgetUsd}, ${this.within(bound)}`.slice(0, 500));
     this.changed();
     this.kick();
     return approved;
@@ -241,6 +262,95 @@ export class TeamService {
     this.store.finish(task, "stopped", why);
     this.changed();
     this.kick();
+  }
+  private proposal(task: string): TeamTask {
+    const proposed = this.store.task(task);
+    if (!proposed) throw new TeamError(404, "No such team task.");
+    if (proposed.status !== "proposed") throw new TeamError(409, "That task isn't a proposal waiting for a yes.");
+    return proposed;
+  }
+  /**
+   * A proposal it declines (team_approve): an agent's is said to be declined by it, never by you; one of its own (from
+   * your backlog) is withdrawn, as the backlog says it, so the backlog never takes it for one you declined. It never ran.
+   */
+  declineOwn(task: string, why: string): TeamTask {
+    this.accepting();
+    const proposed = this.proposal(task);
+    const said = (proposed.proposedBy === TEAM_PRIMARY ? `${WITHDRAWN}: ${why}.` : `Declined by your agent: ${why}`).slice(0, 500);
+    this.store.finish(task, "stopped", said);
+    this.store.noteTask(task, said);
+    this.changed();
+    return this.store.task(task)!;
+  }
+  /** Work it stops (team_stop): waiting or running, said as its, and taken up again by it (resumeOwn) or by you. */
+  stopOwn(task: string, why: string): TeamTask {
+    this.accepting();
+    const work = this.store.task(task);
+    if (!work) throw new TeamError(404, "No such team task.");
+    if (work.status === "proposed") throw new TeamError(409, "A proposal is declined, not stopped: approve it or decline it.");
+    if (work.status !== "queued" && work.status !== "running") throw new TeamError(409, `Only work that is waiting or running is stopped: this one is ${work.status}.`);
+    const said = `Stopped by your agent: ${why}`.slice(0, 500);
+    this.cancel({ task }, "stopped", said);
+    this.store.finish(task, "stopped", said);
+    this.store.noteTask(task, said);
+    this.changed();
+    this.kick();
+    return this.store.task(task)!;
+  }
+  /**
+   * Work it takes up again (team_resume): what stopped, failed or a restart cut off, its budget committed again on its own
+   * word, as a run spends it anew (ownMoney). Never what you stopped, paused or declined (your word stands), nor what a
+   * crash cut off mid-work (what it had done is yours to review), nor a step of an outcome (its outcome's to give again,
+   * within its budget), nor work whose agent or conversation you paused.
+   */
+  resumeOwn(task: string, why: string): TeamTask {
+    this.accepting();
+    const work = this.store.task(task);
+    if (!work) throw new TeamError(404, "No such team task.");
+    if (work.status !== "stopped" && work.status !== "failed" && work.status !== "interrupted") throw new TeamError(409, `Only work that stopped, failed or was cut off is taken up again: this one is ${work.status}.`);
+    const yoursSaid = work.error === null ? undefined : YOURS_STOPPED.get(work.error);
+    if (yoursSaid) throw new TeamError(409, `${yoursSaid}: taking it up again is yours.`);
+    if (work.error === CUT_OFF) throw new TeamError(409, "A crash cut it off mid-work: what it had done is yours to review before it runs again.");
+    const hold = this.store.restartHold(task);
+    if (hold === "waits") throw new TeamError(409, "A restart cut it off, and it is taken up again by itself once the command it was running has surely ended: leave it be.");
+    if (hold === "yours") throw new TeamError(409, "A restart cut it off a second time: what it had done is yours to review before it runs again.");
+    if (work.outcome) throw new TeamError(409, "It is a step of an outcome, which gives its work again within its own budget.");
+    if (this.store.agent(work.assignee)?.enabled === false) throw new TeamError(409, "You paused its agent: taking its work up again is yours.");
+    if (this.store.room(work.room)?.paused) throw new TeamError(409, "Its conversation is paused: taking its work up again is yours.");
+    if ([...this.active.values()].some((a) => a.job.id === task)) throw new TeamError(409, "This work is still stopping. Wait for its current command to finish.");
+    const bound = this.ownMoney(work.budgetUsd, "take up again", "Take it up again yourself.");
+    this.store.resume({ task });
+    this.store.commitOwn(`${task}@${this.store.now()}`, work.budgetUsd!);
+    this.store.noteTask(task, `Taken up again by your agent: ${why}, within its budget of $${work.budgetUsd}, ${this.within(bound)}`.slice(0, 500));
+    const resumed = this.store.task(task)!;
+    this.changed();
+    this.kick();
+    return resumed;
+  }
+  /**
+   * Work it gives again (team_again): to the same agent in the same conversation, its title, goal and gates the old ones
+   * unless it gives its own, from a step of it when `from` names one, held to the same models when the old one was in
+   * sensitive mode (yours, kept, never its to name); on its own word and within its money (giveOwn), its budget at most
+   * TEAM_LIMITS.ownTaskUsd, the old one's when that is less. Not what is still under way, nor a step of an outcome.
+   */
+  againOwn(task: string, give: { why: string; from?: number; goal?: string; gates?: string[]; budgetUsd?: number }): TeamTask {
+    this.accepting();
+    const before = this.store.task(task);
+    if (!before) throw new TeamError(404, "No such team task to give again.");
+    if (before.status === "queued" || before.status === "running" || before.status === "proposed") throw new TeamError(409, "It hasn't ended: steer it, or stop it first.");
+    if (before.outcome) throw new TeamError(409, "It is a step of an outcome, which gives its work again within its own budget.");
+    const budgetUsd = give.budgetUsd ?? Math.min(before.budgetUsd ?? TEAM_LIMITS.ownTaskUsd, TEAM_LIMITS.ownTaskUsd);
+    const input: TeamTaskInput = {
+      room: before.room,
+      assignee: before.assignee,
+      title: before.title,
+      goal: give.goal ?? before.goal,
+      gates: give.gates ?? before.gates,
+      budgetUsd,
+      ...(give.from ? { from: { task: before.id, step: give.from } } : {}),
+      ...(before.models?.length ? { models: before.models } : {}),
+    };
+    return this.giveOwn(input, `Given again by your agent after “${before.title}” (${before.id})${give.from ? `, from its step ${give.from}` : ""}: ${give.why}`);
   }
   /** One it proposed, taken back before you answered it (backlog.ts: its step done, or another first): it never ran. */
   withdrawProposal(task: string, why: string): void {
