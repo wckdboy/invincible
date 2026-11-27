@@ -143,6 +143,27 @@ const nodeProofs = ["c2xpY2UtOC1jaGFsbGVuZ2U", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
   return { node: theNode.id, anotherNode: anotherNode.id, challenge, signingInput: fromUtf8(core.nodeProofInput(challenge)), proof };
 });
 
+// ---- Ed25519's strict rule (the lead's word of 27 November 2026): RFC 8032's test vectors and all of Wycheproof's -------
+// Each with the rule's answer as core gives it (verifyEd25519Strict), and whether its key and its R are points the rule
+// takes (strictEd25519Point): the apps hold their verifiers to these, so TS, Swift and Kotlin answer alike on every one.
+// The fixtures are others' as they are (NOTICE): Wycheproof's testvectors_v1/ed25519_test.json, and RFC 8032's §7.1.
+// Every RFC vector and every one Wycheproof marks valid holds; every one it marks invalid, and every small-order or
+// mixed-order key it calls acceptable, doesn't.
+const fixture = (name: string) => JSON.parse(readFileSync(join(import.meta.dir, "../InvincibleTests/Fixtures", name), "utf8")) as unknown;
+const hexBytes = (text: string): Uint8Array => Uint8Array.from(text.match(/../g) ?? [], (b) => parseInt(b, 16));
+const rfc8032 = fixture("rfc8032-ed25519.json") as { name: string; publicKey: string; message: string; signature: string }[];
+const wycheproof = fixture("wycheproof-ed25519.json") as { testGroups: { publicKey: { pk: string }; tests: { tcId: number; msg: string; sig: string; result: "valid" | "invalid" | "acceptable" }[] }[] };
+const ed25519 = [
+  ...rfc8032.map((t) => ({ source: `RFC 8032 ${t.name}`, key: t.publicKey, msg: t.message, sig: t.signature, said: "valid" })),
+  ...wycheproof.testGroups.flatMap((group) => group.tests.map((t) => ({ source: `Wycheproof tc${t.tcId}`, key: group.publicKey.pk, msg: t.msg, sig: t.sig, said: t.result }))),
+].map((v) => {
+  const sig = hexBytes(v.sig);
+  const valid = core.verifyEd25519Strict(sig, hexBytes(v.msg), hexBytes(v.key));
+  if (valid !== (v.said === "valid")) fail(`the strict rule says ${valid} of ${v.source}, which is ${v.said}`);
+  return { source: v.source, key: v.key, msg: v.msg, sig: v.sig, valid, keyStrict: core.strictEd25519Point(hexBytes(v.key)), rStrict: sig.length === 64 && core.strictEd25519Point(sig.subarray(0, 32)) };
+});
+if (ed25519.length !== 5 + 210) fail(`${ed25519.length} Ed25519 vectors, not RFC 8032's 5 and Wycheproof's 210`);
+
 // ---- canonical JSON (what the pairing proof is a MAC over) -----------------------------------------------------------
 const canonical = [
   { kind: "client", name: "Invincible app on iPhone", invite: "abc", device: "c_x" },
@@ -1895,6 +1916,7 @@ const vectors = {
   requests,
   requestsForNode,
   nodeProofs,
+  ed25519,
   canonical,
   pairing,
   agentOrbs,

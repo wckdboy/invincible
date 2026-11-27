@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   AUTH,
   aeadOpen,
@@ -313,7 +315,7 @@ describe("pairing", () => {
 
 // The lead's word of 27 November 2026: one strict rule for a node's Ed25519 signature, in core, Swift and Kotlin.
 describe("Ed25519's strict rule", () => {
-  const hex = (h: string) => Uint8Array.from(h.match(/../g)!, (b) => parseInt(b, 16));
+  const hex = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (b) => parseInt(b, 16));
   // The eight points of small order, as they are written canonically (libsodium's blocklist): the identity, and those of
   // order 2, 4 and 8.
   const SMALL = [
@@ -341,6 +343,26 @@ describe("Ed25519's strict rule", () => {
     const mixed = ed25519.Point.fromBytes(key, false).add(ed25519.Point.fromBytes(SMALL[4]!, false)).toBytes();
     expect(strictEd25519Point(mixed)).toBe(false);
     expect(strictEd25519Point(key.subarray(0, 31))).toBe(false);
+  });
+
+  // The published vectors themselves (apps/apple/InvincibleTests/Fixtures, as NOTICE says): RFC 8032's and Wycheproof's.
+  test("it takes every one of RFC 8032's test vectors and Wycheproof's valid ones, and refuses every other: its invalid ones, and the small-order and mixed-order keys it calls acceptable", () => {
+    const fixtures = join(import.meta.dir, "../../../apps/apple/InvincibleTests/Fixtures");
+    const rfc = JSON.parse(readFileSync(join(fixtures, "rfc8032-ed25519.json"), "utf8")) as { publicKey: string; message: string; signature: string }[];
+    expect(rfc).toHaveLength(5);
+    for (const t of rfc) expect(verifyEd25519Strict(hex(t.signature), hex(t.message), hex(t.publicKey))).toBe(true);
+    const wycheproof = JSON.parse(readFileSync(join(fixtures, "wycheproof-ed25519.json"), "utf8")) as { testGroups: { publicKey: { pk: string }; tests: { tcId: number; msg: string; sig: string; result: string }[] }[] };
+    const taken: Record<string, number> = {};
+    let n = 0;
+    for (const group of wycheproof.testGroups) {
+      for (const t of group.tests) {
+        n++;
+        const valid = verifyEd25519Strict(hex(t.sig), hex(t.msg), hex(group.publicKey.pk));
+        expect([t.tcId, valid]).toEqual([t.tcId, t.result === "valid"]);
+        if (valid) taken[t.result] = (taken[t.result] ?? 0) + 1;
+      }
+    }
+    expect([n, taken]).toEqual([210, { valid: 117 }]);
   });
 
   test("a signature holds under it only by a strict key, with a strict R and S < L, and over its own message", () => {

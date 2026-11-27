@@ -5,3 +5,10 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
 It is built from Galahad, Copyright 2026 wckdboy and Galahad's contributors, licensed under the Apache License,
 Version 2.0 (see docs/ARCHITECTURE.md §10).
+
+Its Ed25519 test vectors are others' work, kept as they are:
+- apps/apple/InvincibleTests/Fixtures/wycheproof-ed25519.json is Project Wycheproof's testvectors_v1/ed25519_test.json
+  (https://github.com/C2SP/wycheproof, commit a3d5d1423f2592d6646836a45a21a1b209da9f4d), licensed under the Apache
+  License, Version 2.0.
+- apps/apple/InvincibleTests/Fixtures/rfc8032-ed25519.json holds the Ed25519 test vectors of RFC 8032, section 7.1
+  (Copyright (c) 2017 IETF Trust and the persons identified as the document authors).
