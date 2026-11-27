@@ -1,4 +1,4 @@
-import { HOMED_KINDS, type NodeIdentity, OWN_SIGN_IN_TALLY, type Prov, randomId, type SeatAddInput, type SeatFacts, seatRuns, SEAT_USE_DAYS, type SeatUse, type SeatView, seatView, type TeamTask } from "@invincible/core";
+import { HOMED_KINDS, type NodeIdentity, seatKindBehind, OWN_SIGN_IN_TALLY, type Prov, randomId, type SeatAddInput, type SeatFacts, seatRuns, SEAT_USE_DAYS, type SeatUse, type SeatView, seatView, type TeamTask } from "@invincible/core";
 import type { AgentDriver } from "@invincible/agents";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { keyUsable, providerRecords } from "@invincible/models";
@@ -57,6 +57,11 @@ function seatOf(store: LedgerStore, id: string, now: number): SeatView {
  * for an agent serves it, as this node's team made it; one added without serves none until you choose.
  */
 export function addSeat(store: LedgerStore, vault: Vault, node: NodeIdentity, input: SeatAddInput, via: string | null, roster: SeatRoster, now = Date.now()): SeatView {
+  // A kind another node of the fleet can't read yet would hold back that node's sync of all this one writes after it:
+  // never added until each says it reads it (core's seatKindBehind), and nothing written meanwhile.
+  const others = store.devices().filter((device) => device.kind === "node" && device.id !== node.id);
+  const behind = seatKindBehind(input.kind, others.map((device) => ({ id: device.id, name: device.name, caps: device.profile?.caps ?? null })));
+  if (behind) throw new SeatError(behind, 409);
   if (store.seats().length >= MAX_SEATS) throw new SeatError(`you may keep at most ${MAX_SEATS} seats: remove one first`, 400);
   const serves = input.agent ? asMade(roster, [input.agent]) : [];
   if (input.provider) {

@@ -253,6 +253,11 @@ The run loop is carried and renamed (§10), the most proven part of it:
   (`packages/core/src/seats.ts`):
   - the kinds: a Claude plan, a ChatGPT plan (through Codex, or Sign in with ChatGPT), a Mistral plan, a Gemini plan
     (Google AI Pro or Ultra, through Google's Antigravity CLI, agy), a coding plan's key, an API key;
+  - a seat of a kind some node of the fleet can't read yet is never added: that node would refuse its `seat.added`,
+    and hold back its sync of everything the adding node writes after it. Each node says in its profile which kinds it
+    reads (`caps.seats`, core's `SEATS_READ`, as `caps.requests` says which requests it reads); one that says nothing is
+    older and reads the first six alone. The add is refused (409) naming the nodes to update first ("Update mini first:
+    it runs a release that doesn't know Gemini plans"), before anything is written (`seatKindBehind`);
   - a subscription seat's sign-in lives in its own home on its node, made there by the vendor's own tool in the vendor's
     own flow. The node never reads its files: only the tool's own status command, and five things of what it says;
   - in the ledger (`seat.added`, `seat.policy`, `seat.serves`, `seat.removed` on your word alone; `seat.signin`,

@@ -4,6 +4,9 @@ import {
   chooseSeat,
   HOMED_KINDS,
   mayCarryOn,
+  readsSeatKind,
+  SEATS_READ,
+  seatKindBehind,
   seatKindOf,
   seatOpensAt,
   TaskAccount,
@@ -282,6 +285,39 @@ describe("a sign-in's card", () => {
     ]) expect([url, signInUrlOk("google-antigravity", url)]).toEqual([url, false]);
     expect(signInUrlOk("claude-subscription", google)).toBe(false);
     expect(signInUrlOk("chatgpt-codex", google)).toBe(false);
+  });
+});
+
+/*
+ * A seat of a kind some node of the fleet can't read is never added (the lead's word, 27 November 2026): that node
+ * would refuse its seat.added, and hold back everything the adding node writes after it. Each node says in its profile
+ * which kinds it reads (`caps.seats`, as `caps.requests` says what requests it reads); one that says nothing is older and
+ * reads the first six alone.
+ */
+describe("which nodes can read a seat of a kind", () => {
+  test("a node that says nothing of seats reads the first six kinds alone; one that names a kind reads it", () => {
+    for (const kind of ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "plan", "api"] as const) {
+      expect([kind, readsSeatKind({}, kind), readsSeatKind(undefined, kind)]).toEqual([kind, true, true]);
+    }
+    expect(readsSeatKind({}, "google-antigravity")).toBe(false);
+    expect(readsSeatKind({ requests: 2 }, "google-antigravity")).toBe(false);
+    expect(readsSeatKind({ seats: SEATS_READ }, "google-antigravity")).toBe(true);
+    // This release says every kind it has.
+    expect(SEATS_READ).toEqual({ kinds: [...SEAT_KINDS] });
+    // What isn't a list of kinds says nothing: read as an older node's.
+    for (const seats of [null, "google-antigravity", { kinds: "google-antigravity" }, { kinds: [7] }, { kinds: Array(65).fill("google-antigravity") }]) {
+      expect([seats, readsSeatKind({ seats }, "google-antigravity")]).toEqual([seats, false]);
+    }
+  });
+
+  test("the nodes behind are named, and what to do is said: update them first", () => {
+    const older = { id: "n_mini", name: "mini", caps: { requests: 2 } };
+    const newer = { id: "n_book", name: "book", caps: { seats: SEATS_READ } };
+    expect(seatKindBehind("google-antigravity", [newer])).toBeNull();
+    expect(seatKindBehind("claude-subscription", [older])).toBeNull();
+    expect(seatKindBehind("google-antigravity", [older, newer])).toBe("Update mini first: it runs a release that doesn't know Gemini plans");
+    // A node that has said nothing at all yet (no profile) is behind too.
+    expect(seatKindBehind("google-antigravity", [older, { id: "n_new", name: "studio", caps: null }])).toBe("Update mini and studio first: they run a release that doesn't know Gemini plans");
   });
 });
 

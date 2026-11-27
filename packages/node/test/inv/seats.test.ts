@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { RouteName, SeatSignInCard, SeatUse, SeatView } from "@invincible/core";
 import type { NodeClient } from "../../src/inv/client.ts";
 import type { Connection } from "../../src/inv/connect.ts";
+import { refusal } from "../../src/inv/client.ts";
 import { EXIT } from "../../src/inv/exit.ts";
 import type { Flags } from "../../src/inv/io.ts";
 import { run } from "../../src/inv/run.ts";
@@ -88,6 +89,20 @@ describe("inv seat add", () => {
     expect(n.asked.find((a) => a.name === "addSeat")?.input).toEqual({ kind: "google-antigravity", label: "Gemini 1" });
     expect(io.stdout()).toContain("Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account.\nOpen https://accounts.google.com/o/oauth2/v2/auth?state=FAKE and sign in to the account this seat is for.\n");
     expect(n.asked.filter((a) => a.name === "answerSeatSignIn").map((a) => a.input)).toEqual([{ id: ID, attempt: ATTEMPT, code: "4/0FAKE-code-0000" }]);
+  });
+
+  test("a kind a node of the fleet can't read yet: the node's words, which node to update first, and nothing signed in", async () => {
+    const n = node([], PASTE);
+    const behind = "Update mini first: it runs a release that doesn't know Gemini plans";
+    const real = n.conn;
+    // The node refuses the add (409), as the client says any refusal: in the node's own words.
+    const conn = async () => {
+      const made = await real();
+      return { ...made, client: { ...made.client, call: async (name: string, input?: unknown) => (name === "addSeat" ? Promise.reject(refusal(409, behind, "the node", "unknown")) : made.client.call(name as never, input)) } as typeof made.client };
+    };
+    const io = testIo({});
+    await expect(seatCommand(conn, ["add", "gemini"], flags(), io)).rejects.toMatchObject({ message: behind, exit: EXIT.error });
+    expect(n.asked.map((a) => a.name)).not.toContain("startSeatSignIn");
   });
 
   test("where it can't read a code (a pipe, --no-ask) it says to run it in a terminal; no code given cancels it; not signed in is 1", async () => {

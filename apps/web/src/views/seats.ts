@@ -1,6 +1,7 @@
 import type { TeamSnapshot } from "@invincible/core/team";
 import { HOMED_KINDS, SEAT_HARNESS, servedBy } from "@invincible/core/seat-agents";
 import type { SeatSignInCard, SeatUse, SeatView } from "@invincible/core/seats";
+import { ApiError } from "../api.ts";
 import { errorMessage, type View } from "../context.ts";
 import { cardWords, QUICK_ADDS, quickAgent, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "../lib/seats.ts";
 import { HARNESS } from "../lib/team.ts";
@@ -34,6 +35,8 @@ export const seatsView: View = (root, ctx, { scope }) => {
   const rosterOf = (seat: Pick<SeatView, "node">) => (seat.node === here ? roster : null);
   /** The sign-in under way from this device, and the code field it may have. */
   let signing: { card: SeatSignInCard; label: string; kind: SeatView["kind"] } | null = null;
+  /** Why a seat you asked for wasn't added yet, said where its card would be: a node of the fleet that can't read its kind, to update first. */
+  let held: string | null = null;
   let poll: ReturnType<typeof setInterval> | null = null;
 
   const adds = yours ? h("div", { class: "row wrap" }, ...QUICK_ADDS.map((quick) => button(quick.button, { variant: "primary", icon: "plus", onClick: (event) => void add(event.currentTarget as HTMLButtonElement, quick.kind) }))) : null;
@@ -87,7 +90,7 @@ export const seatsView: View = (root, ctx, { scope }) => {
 
   function drawCard(): void {
     if (!signing) {
-      replace(cardBox);
+      replace(cardBox, held ? callout("warn", h("p", { class: "small" }, held), { title: "Not added yet", actions: button("Dismiss", { variant: "ghost", onClick: () => ((held = null), drawCard()) }) }) : null);
       return;
     }
     const { card: open, label, kind } = signing;
@@ -146,6 +149,7 @@ export const seatsView: View = (root, ctx, { scope }) => {
 
   async function begin(seat: Pick<SeatView, "id" | "kind" | "label" | "node" | "serves">): Promise<void> {
     const started = await ctx.api.post<{ card: SeatSignInCard }>("/api/seats/sign-in", { id: seat.id }, scope.signal);
+    held = null;
     const serves = servesWords(seat, rosterOf(seat));
     signing = { card: started.card, label: seat.serves.length ? `${seat.label}, ${serves.word.charAt(0).toLowerCase()}${serves.word.slice(1)}` : seat.label, kind: seat.kind };
     drawCard();
@@ -153,14 +157,23 @@ export const seatsView: View = (root, ctx, { scope }) => {
   }
 
   async function add(trigger: HTMLButtonElement, kind: SeatView["kind"]): Promise<void> {
+    held = null;
+    drawCard();
     await busy(trigger, async () => {
+      let added: { seat: SeatView } | null = null;
       try {
         // For the first of your agents on its tool that no seat of its kind serves yet (its card and its row say whom).
         const agent = roster ? quickAgent(kind, seats, roster) : null;
-        const added = await ctx.api.post<{ seat: SeatView }>("/api/seats", { kind, label: quickLabel(kind, seats), ...(agent ? { agent: agent.id } : {}) }, scope.signal);
+        added = await ctx.api.post<{ seat: SeatView }>("/api/seats", { kind, label: quickLabel(kind, seats), ...(agent ? { agent: agent.id } : {}) }, scope.signal);
         await refresh();
         await begin(added.seat);
       } catch (error) {
+        // Not added: a node of the fleet can't read its kind yet. Its card says which, and that it is updated first.
+        if (!added && error instanceof ApiError && error.status === 409) {
+          held = error.message;
+          drawCard();
+          return;
+        }
         toast("The seat wasn't signed in", { tone: "error", description: errorMessage(error) });
         await refresh();
       }

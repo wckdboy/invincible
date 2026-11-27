@@ -43,6 +43,49 @@ export const SEAT_KINDS = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc
 export const SeatKind = z.enum(SEAT_KINDS);
 export type SeatKind = z.infer<typeof SeatKind>;
 
+/**
+ * The kinds every release has read, the six of the first: a node whose profile says nothing of seats reads these alone,
+ * and refuses a seat.added of any other kind, which holds back its sync of everything the adding node writes after it.
+ */
+const FIRST_SEAT_KINDS: readonly SeatKind[] = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "plan", "api"];
+
+/**
+ * What a node's profile says of seats (`caps.seats`, as `caps.requests` says which requests it reads): the kinds it
+ * reads. A seat of a kind some node of the fleet doesn't read yet is never added (seatKindBehind).
+ */
+export const SEATS_READ: { kinds: readonly SeatKind[] } = { kinds: [...SEAT_KINDS] };
+
+/** Whether a node reads a seat of this kind, by what its profile says (`caps`): one that says nothing reads the first six alone. */
+export function readsSeatKind(caps: unknown, kind: SeatKind): boolean {
+  const said = caps && typeof caps === "object" ? (caps as { seats?: unknown }).seats : undefined;
+  const kinds = said && typeof said === "object" ? (said as { kinds?: unknown }).kinds : undefined;
+  if (Array.isArray(kinds) && kinds.length <= 64 && kinds.every((one) => typeof one === "string")) return kinds.includes(kind);
+  return FIRST_SEAT_KINDS.includes(kind);
+}
+
+/** A kind as a sentence names many of them. */
+const KIND_PLURALS: Readonly<Record<SeatKind, string>> = {
+  "claude-subscription": "Claude plans",
+  "chatgpt-codex": "ChatGPT plans",
+  "chatgpt-siwc": "ChatGPT plans",
+  "mistral-vibe": "Mistral plans",
+  "google-antigravity": "Gemini plans",
+  plan: "coding plans",
+  api: "API keys",
+};
+
+/**
+ * Why a seat of this kind can't be added yet, in a sentence, or null: the fleet's other nodes (each with what its profile
+ * says, null where it has said nothing yet) that don't read it, named, to be updated first. Each would refuse its
+ * seat.added and hold back its sync of everything this node writes after it (the lead's word, 27 November 2026).
+ */
+export function seatKindBehind(kind: SeatKind, nodes: readonly { id: string; name: string; caps: unknown }[]): string | null {
+  const behind = nodes.filter((node) => !readsSeatKind(node.caps, kind)).map((node) => node.name.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ").trim() || node.id);
+  if (!behind.length) return null;
+  const named = behind.length === 1 ? behind[0]! : `${behind.slice(0, -1).join(", ")} and ${behind.at(-1)}`;
+  return `Update ${named} first: ${behind.length === 1 ? "it runs" : "they run"} a release that doesn't know ${KIND_PLURALS[kind]}`;
+}
+
 /** The kinds that are an account of a vendor's own, signed in through its own flow: the rest are keys in the vault. */
 export const SUBSCRIPTION_KINDS: readonly SeatKind[] = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "google-antigravity"];
 
