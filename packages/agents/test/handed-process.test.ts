@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
@@ -59,14 +59,68 @@ test("a gate's processes end with it, and its exit code and output pass through"
   }
 });
 
+/**
+ * A gate as handedCommand runs it, its helper's clock held (this test's, never the node's): no time passes until the gate's
+ * command has written in `said` what it started, and then its time is out at once. On the real clock a gate of 1 s raced
+ * its own shell: under load the shell hadn't started anything when its time ran out, and the test read a pid file that
+ * wasn't there (the mini, 27 November 2026; made up below by pausing the shell).
+ */
+function heldUntil(said: string, gate: string): string {
+  const run = "\nsys.exit(run(";
+  const command = handedCommand(gate, { task: "task-test", limitSec: 1, ends: "gate" });
+  if (command.split(run).length !== 2) throw new Error("handedCommand no longer ends with run(): hold its clock anew");
+  const clock = `\n_real = time.monotonic\ndef _held():\n    try:\n        return _real() + 1e9 if os.path.getsize(${JSON.stringify(said)}) > 0 else 0.0\n    except OSError:\n        return 0.0\ntime.monotonic = _held`;
+  return command.replace(run, `${clock}${run}`);
+}
+
+test("a gate whose time runs out is ended, exit 137, on its own clock: whatever it got to do", () => {
+  const began = Date.now();
+  const ran = shell(handedCommand("sleep 30", { task: "task-test", limitSec: 1, ends: "gate" }));
+  expect(ran.status).toBe(137);
+  expect(ran.stderr).toContain("time ran out after 1 s");
+  expect(Date.now() - began).toBeLessThan(15_000);
+});
+
 test("a gate whose time runs out is ended with what it started, exit 137", async () => {
   const s = scratch();
   try {
     const began = Date.now();
-    const ran = shell(handedCommand(`sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("bg")}; sleep 30`, { task: "task-test", limitSec: 1, ends: "gate" }));
+    const ran = shell(heldUntil(s.path("bg"), `sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("bg")}; sleep 30`));
     expect(ran.status).toBe(137);
     expect(ran.stderr).toContain("time ran out");
     expect(Date.now() - began).toBeLessThan(15_000);
+    expect(await gone(pidIn(s.path("bg")))).toBe(true);
+  } finally {
+    s.done();
+  }
+});
+
+/** A process's state, as ps says it ("T" stopped), or "" once it is gone. */
+const state = (pid: number) => spawnSync("ps", ["-o", "state=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+async function until(what: () => boolean, ms = 10_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!what()) {
+    if (Date.now() > end) throw new Error("it never came");
+    await Bun.sleep(10);
+  }
+}
+
+test("a gate whose time runs out is ended with what it started, even when its shell was held up first, as load holds it", async () => {
+  const s = scratch();
+  try {
+    // Load, made up: the gate's shell is paused (SIGSTOP) before it starts anything, for longer than the gate's time.
+    const gate = `echo $$ > ${s.path("shell")}; kill -STOP $$; sleep 30 >/dev/null 2>&1 & echo $! > ${s.path("bg")}; sleep 30`;
+    const run = Bun.spawn(["bash", "-c", heldUntil(s.path("bg"), gate)], { stdout: "pipe", stderr: "pipe" });
+    await until(() => existsSync(s.path("shell")) && readFileSync(s.path("shell"), "utf8").endsWith("\n"));
+    const shell_ = pidIn(s.path("shell"));
+    await until(() => state(shell_).startsWith("T") || state(shell_) === "");
+    await Bun.sleep(1_500);
+    try {
+      process.kill(shell_, "SIGCONT");
+    } catch {}
+    const [code, stderr] = await Promise.all([run.exited, new Response(run.stderr).text()]);
+    expect(code).toBe(137);
+    expect(stderr).toContain("time ran out");
     expect(await gone(pidIn(s.path("bg")))).toBe(true);
   } finally {
     s.done();
