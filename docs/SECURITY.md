@@ -175,8 +175,11 @@ The review also confirmed what held up:
       2026, or since then by a node still on an older release, with your approval of its pairing. Once in, as a full
       node, anyone can act as it for good by stamping before the cutoff: enroll devices with no pairing and no approval,
       revoke other nodes, set providers and loops, and publish its profile, which then names where others sync from.
-      `invincible doctor` names such a node (`mind.keys`); revoking it (`invincible revoke <id>`) pins its head, so
-      nothing signed as it afterwards counts (F4). Fabric's transport claims and statements, and Q-AMP's envelopes
+      `invincible doctor` names every device whose key fails the rule, of any kind, and every device enrolled through
+      one, however far down, since whoever signed as it may hold those: a full node of their own, which signs as itself
+      past the cutoff, or a client (`mind.keys`). Revoking each (`invincible revoke <id>`) pins its head, so nothing
+      signed as it afterwards counts; what it signed before stays as it was applied (F4; the final re-check of the v2
+      stack, D1: `packages/node/test/doctor-weak-keys.test.ts`). Fabric's transport claims and statements, and Q-AMP's envelopes
       (`fabric.ts`, `qdt.ts`), still verify a node's signature under ZIP-215, not the rule, at any date: theirs is
       Q-AMP's work, after R5-3.
   - **The apps check the proof under the same rule, and answer alike:** the parity vectors hold RFC 8032's test vectors

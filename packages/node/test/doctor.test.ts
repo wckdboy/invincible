@@ -163,6 +163,13 @@ describe("each fault gives its own line and advice", () => {
     expect(weak.line).toContain("old-pi");
     expect(weak.line).toContain("Ed25519's strict rule");
     expect(weak.fix).toContain(`invincible revoke ${weakId}`);
+    // The final re-check of the v2 stack, D1: what was enrolled through one is named as such, each with its revoke.
+    const backupId = `n_${"B".repeat(42)}A`;
+    const through = fault((f) => (f.mind.weakKeys = [{ id: weakId, name: "old-pi" }, { id: backupId, name: "backup", through: "old-pi" }]), "mind.keys");
+    expect(through.state).toBe("broken");
+    expect(through.line).toContain("backup, enrolled through old-pi");
+    expect(through.fix).toContain(`invincible revoke ${weakId}`);
+    expect(through.fix).toContain(`invincible revoke ${backupId}`);
     expect(fault((f) => (f.mind.weakKeys = []), "mind.keys").state).toBe("ok");
 
     const unsynced = fault((f) => (f.mind.timeSynced = false), "mind.clock");

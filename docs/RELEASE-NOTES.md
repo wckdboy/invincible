@@ -23,7 +23,9 @@ What a release has to say beyond its commits: what you must do, and by when. The
     signs always holds it.
   - **What you must do: run this release on every node before 14 December 2026.** A node still on an older release past
     that day checks signatures the old way: it takes a forgery the others refuse, and keeps it, and serves it, after it
-    upgrades, so its log no longer agrees with theirs. Then run `invincible doctor` on one of them: it names any node
-    whose key fails the rule (`mind.keys`), which `invincible revoke <id>` ends. What a log holds from before is judged
+    upgrades, so its log no longer agrees with theirs. Then run `invincible doctor` on one of them: it names every
+    device whose key fails the rule, and every device enrolled through one, since whoever signed as it may hold those
+    (`mind.keys`). Revoke each (`invincible revoke <id>`): from then nothing signed as it counts, and what it signed
+    before stays as it was applied. Pair any device of yours among them again. What a log holds from before is judged
     as it always was.
   - **Where it is said:** docs/SECURITY.md, "Held to Ed25519's strict rule".

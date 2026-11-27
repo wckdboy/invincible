@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync, statfsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type DoctorReport, freeSlots, isStrictNodeId, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, qampEndpointOf, redact, type Agent } from "@invincible/core";
+import { type DoctorReport, freeSlots, isNodeId, isStrictNodeId, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, qampEndpointOf, redact, type Agent } from "@invincible/core";
 import { type ModelsContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, onPlan, parseRef, planOf, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { containerKernel, macFirewallInstalled, readImagesRecord, type SandboxHost } from "@invincible/sandbox";
@@ -597,8 +597,30 @@ export async function heartbeatFromDoctor(deps: DoctorDeps): Promise<DoctorFindi
   return doctorFindings((await runDoctor(deps, { quick: true, offline: true })).diagnoses);
 }
 
-/** The enrolled nodes, not revoked, whose key fails Ed25519's strict rule (doctor's mind.keys; the review of log-strict, F4). */
-export function weakNodeKeys(store: LedgerStore): { id: string; name: string }[] {
-  return store.devices().filter((d) => d.kind === "node" && !isStrictNodeId(d.id)).map((d) => ({ id: d.id, name: d.name }));
+/**
+ * The devices, not revoked, that whoever can sign as a weak key may hold (doctor's mind.keys): each whose Ed25519 key
+ * fails the strict rule, of any kind, and each enrolled through one, however far down (`through`: the weak one). Anyone
+ * signs as a weak key, stamping before the cutoff, so what was enrolled as it may be a forger's own: a full node, which
+ * then signs and enrolls as itself, or a client (the review of log-strict, F4; the final re-check of the v2 stack, D1).
+ */
+export function weakNodeKeys(store: LedgerStore): { id: string; name: string; through?: string }[] {
+  const all = store.devices(true);
+  // Each weak device, and each enrolled through one: by the weak one it came through (null: its own key fails).
+  const weak = new Map<string, string | null>(all.filter((d) => isNodeId(d.id) && !isStrictNodeId(d.id)).map((d) => [d.id, null]));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const d of all) {
+      if (weak.has(d.id) || !weak.has(d.enrolledBy)) continue;
+      weak.set(d.id, weak.get(d.enrolledBy) ?? d.enrolledBy);
+      grew = true;
+    }
+  }
+  const name = (id: string) => all.find((d) => d.id === id)?.name ?? id.slice(0, 12);
+  return all
+    .filter((d) => !d.revokedHlc && weak.has(d.id))
+    .map((d) => {
+      const through = weak.get(d.id);
+      return through ? { id: d.id, name: d.name, through: name(through) } : { id: d.id, name: d.name };
+    });
 }
 

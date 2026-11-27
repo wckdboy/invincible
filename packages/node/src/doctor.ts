@@ -54,10 +54,12 @@ export interface DoctorFacts {
     head: string | null;
     forks: { id: string; name: string }[];
     /**
-     * Enrolled nodes whose key fails Ed25519's strict rule (isStrictNodeId), each enrolled before the cutoff: anyone can
-     * sign as one, stamping before the cutoff, until it is revoked (the review of log-strict, F4). Absent: not looked at.
+     * Enrolled devices, not revoked, whose key fails Ed25519's strict rule (isStrictNodeId), each enrolled before the
+     * cutoff: anyone can sign as one, stamping before the cutoff, until it is revoked (the review of log-strict, F4); and
+     * those enrolled through one, however far down (`through`: the weak one), which may be a forger's own (the final
+     * re-check of the v2 stack, D1). Absent: not looked at.
      */
-    weakKeys?: { id: string; name: string }[];
+    weakKeys?: { id: string; name: string; through?: string }[];
     /** The time of the newest event held, by its own clock stamp. */
     newestEventAt: number | null;
     /**
@@ -298,14 +300,20 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
   } else add("mind", "mind.chain", "ok", f.mind.head ? `its own hash chain ends at ${f.mind.head.slice(0, 10)}, and no device has signed two histories` : "no device has signed two histories");
 
   if (f.mind.weakKeys?.length) {
+    const own = f.mind.weakKeys.filter((d) => !d.through);
+    const through = f.mind.weakKeys.filter((d) => d.through);
+    const said = [
+      own.length ? `${own.map((d) => d.name).join(", ")}: ${own.length === 1 ? "its key fails" : "their keys fail"} Ed25519's strict rule, so anyone can sign as ${own.length === 1 ? "it" : "them"}, stamping before 14 December 2026` : "",
+      through.length ? `${through.map((d) => `${d.name}, enrolled through ${d.through}`).join("; ")}: whoever signed as that key may hold ${through.length === 1 ? "it" : "them"}` : "",
+    ];
     add(
       "mind",
       "mind.keys",
       "broken",
-      `${f.mind.weakKeys.map((d) => d.name).join(", ")}: its key fails Ed25519's strict rule, so anyone can sign as it, stamping before 14 December 2026`,
-      `Revoke it (${f.mind.weakKeys.map((d) => `invincible revoke ${d.id}`).join("; ")}): its head is pinned, and nothing signed as it afterwards counts.`,
+      said.filter(Boolean).join(". "),
+      `Revoke each (${f.mind.weakKeys.map((d) => `invincible revoke ${d.id}`).join("; ")}): its head is pinned, and nothing signed as it afterwards counts. Then pair again any device of yours among them, through a node whose key holds the rule.`,
     );
-  } else if (f.mind.weakKeys) add("mind", "mind.keys", "ok", "every node's key holds Ed25519's strict rule");
+  } else if (f.mind.weakKeys) add("mind", "mind.keys", "ok", "every device's key holds Ed25519's strict rule, and none was enrolled through one that fails it");
 
   {
     const ahead = f.mind.newestEventAt === null ? 0 : f.mind.newestEventAt - f.now;
