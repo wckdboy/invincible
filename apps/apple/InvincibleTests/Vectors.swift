@@ -431,6 +431,15 @@ struct Vectors: Decodable {
     let verdicts: [VerdictCase]
     /// A task on its Live Activity: its state from the task and its trail, and its words (lib/live-activity.ts).
     let liveActivities: [LiveActivityCase]
+    /// A loop's task, and what wakes it, in words (the PWA's lib/loops.ts and lib/wakes.ts): LoopsTests.swift.
+    let loops: LoopCases
+
+    struct LoopCases: Decodable {
+        struct TaskCase: Decodable { let task: JSONValue?; let words: String }
+        struct WakesCase: Decodable { let wakes: [JSONValue]; let cooldownMs: Double?; let words: String }
+        let tasks: [TaskCase]
+        let wakes: [WakesCase]
+    }
 
     struct LiveActivityCase: Decodable {
         struct Task: Decodable {

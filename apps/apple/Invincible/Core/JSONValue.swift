@@ -46,3 +46,27 @@ enum JSONValue: Decodable, Equatable, Sendable {
         }
     }
 }
+
+/// Sent back as it came: a loop it drafted (its task and what wakes it) is added as it was drafted.
+extension JSONValue: Encodable {
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let bool): try container.encode(bool)
+        case .number(let number): try container.encode(number)
+        case .string(let string): try container.encode(string)
+        case .array(let array): try container.encode(array)
+        case .object(let object): try container.encode(object)
+        }
+    }
+}
+
+extension JSONValue {
+    /// An object's member by its name (nil: none, or not an object).
+    subscript(_ key: String) -> JSONValue? { if case .object(let object) = self { object[key] } else { nil } }
+    var string: String? { if case .string(let string) = self { string } else { nil } }
+    var bool: Bool? { if case .bool(let bool) = self { bool } else { nil } }
+    var array: [JSONValue]? { if case .array(let array) = self { array } else { nil } }
+    var object: [String: JSONValue]? { if case .object(let object) = self { object } else { nil } }
+}

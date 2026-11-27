@@ -29,6 +29,10 @@ import Observation
     var shipToOpen: String?
     /// MCP servers' questions to you, mid-call: each holds its call until you answer, say no, or its time runs out.
     private(set) var questions: [QuestionView] = []
+    /// Loops it drafted when you asked for one in a chat: each runs nothing until you add it.
+    private(set) var loopDrafts: [LoopDraftView] = []
+    /// Connectors it or an agent asked for: to add, or (one that's its alone) to let the asker use.
+    private(set) var connectorRequests: [ConnectorRequestView] = []
     private(set) var turns: [TurnView] = []
     /// Its chats with an answer you haven't read yet, on any device (its ring is green while there are some).
     private(set) var unreadChats: [UnreadChat] = []
@@ -82,7 +86,7 @@ import Observation
     func can(_ scope: String) -> Bool { whoami?.scopes.contains(scope) ?? true }
 
     var waiting: [ActionView] { actions.filter { $0.waiting() } }
-    var inboxCount: Int { waiting.count + requests.count + pairings.count + facts.count + notices.count + screenSessions.count + questions.count }
+    var inboxCount: Int { waiting.count + requests.count + pairings.count + facts.count + notices.count + screenSessions.count + questions.count + loopDrafts.count + connectorRequests.count }
     var asks: [Ask] { waiting.map { Ask(by: $0.by, connector: $0.connector, tool: $0.tool) } }
     var rows: [RosterRow] {
         if let team { return Roster.rows(snapshot: team, asks: asks) }
@@ -137,12 +141,21 @@ import Observation
     /// What needs you, decisions only, counted one way for every place that says how many (Home's line and its Needs you,
     /// the Inbox's count, the primary's line among the agents, the sidebar, a Mac's menu bar, the launch cache): every
     /// approval waiting once, each task only you can move on (an agent asking for your approval is that approval's),
-    /// devices asking to join, keys it asked for, a service's question while it can be answered, and its asks to use a
-    /// Mac. What it noticed (a notice, a fact about you) is news, not a decision: shown in the Inbox, counted nowhere.
+    /// devices asking to join, keys it asked for, a service's question while it can be answered, its asks to use a Mac,
+    /// loops it drafted and connectors asked for (the PWA's needsCount: the same decisions on every client). What it
+    /// noticed (a notice, a fact about you) is news, not a decision: shown in the Inbox, counted nowhere.
     func needsCount(_ work: Attended?) -> Int {
-        let now = Date.now.timeIntervalSince1970 * 1000
+        Self.needsCount(
+            work, waiting: waiting.count, pairings: pairings.count, keys: requests.count, questions: questions.map(\.expires),
+            screens: screenSessions.count, loops: loopDrafts.count, connectors: connectorRequests.count, now: Date.now.timeIntervalSince1970 * 1000
+        )
+    }
+
+    /// The count itself, of what waits: each task row that needs you but one an approval stands for, and each other
+    /// decision (a service's question while it can be answered).
+    nonisolated static func needsCount(_ work: Attended?, waiting: Int, pairings: Int, keys: Int, questions: [Double], screens: Int, loops: Int, connectors: Int, now: Double) -> Int {
         let tasks = work?.needs.filter { $0.word != "Allow?" }.count ?? 0
-        return waiting.count + tasks + pairings.count + requests.count + questions.filter { $0.expires > now }.count + screenSessions.count
+        return waiting + tasks + pairings + keys + questions.filter { $0 > now }.count + screens + loops + connectors
     }
 
     /// What needs you, as every place counts it (needsCount, of the work as it is drawn).
@@ -337,7 +350,7 @@ import Observation
     }
 
     /// The Inbox's parts, each read by its own route.
-    private static let inboxTopics = ["actions", "secretRequests", "pairings", "aboutYou", "notices", "screenSessions", "questions"]
+    private static let inboxTopics = ["actions", "secretRequests", "pairings", "aboutYou", "notices", "screenSessions", "questions", "loopDrafts", "connectorRequests"]
 
     /// Everything, now (pulled to refresh, or Try again): each part read as the stream would have it read.
     func refresh() async {
@@ -426,6 +439,10 @@ import Observation
         case "notices": return await read({ try await client.get("/api/notices", as: Listed.self).notices ?? [] }) { notices = Notices.open($0) }
         case "screenSessions": return await read({ try await client.get("/api/screen/sessions", as: Listed.self).sessions ?? [] }) { list in screenSessions = list.filter { $0.state == "waiting" || $0.state == "allowed" } }
         case "questions": return await read({ try await client.get("/api/questions", as: Listed.self).questions ?? [] }) { questions = $0 }
+        case "loopDrafts": return await read({ try await client.get("/api/loops/drafts", as: Listed.self).drafts ?? [] }) { loopDrafts = $0 }
+        case "connectorRequests":
+            struct Asked: Decodable { let requests: [ConnectorRequestView]? }
+            return await read({ try await client.get("/api/connectors/requests", as: Asked.self).requests ?? [] }) { connectorRequests = $0 }
         default: return true
         }
     }
@@ -564,6 +581,51 @@ import Observation
         await reread(["questions"])
     }
 
+    /// Adds a loop it drafted, as it was drafted (POST /api/loops, naming the draft): it runs from now. A loop a webhook
+    /// wakes comes back with its secret, said this once (nil: none).
+    func add(_ draft: LoopDraftView) async throws -> String? {
+        struct Add: Encodable {
+            let name: String
+            let schedule: String
+            let tz: String
+            let task: JSONValue
+            let wakes: [JSONValue]?
+            let cooldownMs: Double?
+            let on: String?
+            let label: String?
+            let draft: String
+        }
+        struct Added: Decodable { let hookSecret: String? }
+        let add = Add(
+            name: draft.name, schedule: draft.schedule, tz: draft.tz, task: draft.task, wakes: draft.wakes.isEmpty ? nil : draft.wakes,
+            cooldownMs: draft.cooldownMs.flatMap { $0 == 0 ? nil : $0 }, on: draft.on, label: draft.label, draft: draft.id
+        )
+        let added = try await client.post("/api/loops", add, as: Added.self)
+        await reread(["loopDrafts"])
+        return added.hookSecret
+    }
+
+    /// Dismisses a loop it drafted: nothing is added.
+    func dismiss(_ draft: LoopDraftView) async throws {
+        struct Dismiss: Encodable { let id: String }
+        _ = try await client.post("/api/loops/drafts/dismiss", Dismiss(id: draft.id), as: JSONValue.self)
+        await reread(["loopDrafts"])
+    }
+
+    /// Lets the asker use a connector that's its alone, until you stop it (POST /api/connectors/access).
+    func allow(_ request: ConnectorRequestView) async throws {
+        struct Access: Encodable { let id: String; let agent: String; let allow: Bool }
+        _ = try await client.post("/api/connectors/access", Access(id: request.connector, agent: request.agent, allow: true), as: JSONValue.self)
+        await reread(["connectorRequests"])
+    }
+
+    /// Dismisses a connector asked for: nothing is installed or allowed.
+    func dismiss(_ request: ConnectorRequestView) async throws {
+        struct Dismiss: Encodable { let id: String }
+        _ = try await client.post("/api/connectors/requests/dismiss", Dismiss(id: request.id), as: JSONValue.self)
+        await reread(["connectorRequests"])
+    }
+
     /// Ends its session on a Mac now: nothing of it is its after this.
     func end(screen: ScreenSessionView) async throws {
         struct End: Encodable { let id: String }
@@ -650,6 +712,7 @@ import Observation
         var notices: [NoticeView]?
         var sessions: [ScreenSessionView]?
         var questions: [QuestionView]?
+        var drafts: [LoopDraftView]?
         var turns: [TurnView]?
         /// Which writing of the chats this is (on `GET /api/turns`).
         var chats: String?

@@ -29,6 +29,10 @@ struct NeedsYou: View {
         case screen(ScreenSessionView)
         /// What the node noticed for you: its whole words, to read and dismiss.
         case notice(NoticeView)
+        /// A loop it drafted: what it runs and when, to add or dismiss.
+        case draft(LoopDraftView)
+        /// A connector asked for: to let the asker use it, to add it from Connectors, or to dismiss.
+        case connector(ConnectorRequestView)
 
         var id: String {
             switch self {
@@ -39,6 +43,8 @@ struct NeedsYou: View {
             case .question(let q): "question:\(q.id)"
             case .screen(let s): "screen:\(s.id)"
             case .notice(let n): "notice:\(n.id)"
+            case .draft(let d): "draft:\(d.id)"
+            case .connector(let c): "connector:\(c.id)"
             }
         }
     }
@@ -251,6 +257,8 @@ struct NeedSheetView: View {
     let session: Session
     let sheet: NeedsYou.NeedSheet
     @Environment(\.dismiss) private var dismiss
+    /// A row holds its sheet open after what it answered has left its list (a loop's webhook secret, said once).
+    @State private var holding = false
 
     var body: some View {
         switch sheet {
@@ -267,6 +275,8 @@ struct NeedSheetView: View {
                         case .question(let question): QuestionRow(session: session, question: question)
                         case .screen(let screen): ScreenSessionRow(session: session, screen: screen)
                         case .notice(let notice): NoticeRow(session: session, notice: notice)
+                        case .draft(let draft): LoopDraftRow(session: session, draft: draft, holding: $holding)
+                        case .connector(let request): ConnectorRequestRow(session: session, request: request)
                         case .approval: EmptyView()
                         }
                     }
@@ -277,7 +287,9 @@ struct NeedSheetView: View {
             }
             .presentationDetents([.medium, .large])
             .sheetSize(width: 520, height: 480)
-            .onChange(of: present) { if !present { dismiss() } }
+            // (Held while a loop it just added says its webhook's secret, which it says this once.)
+            .onChange(of: present) { if !present && !holding { dismiss() } }
+            .onChange(of: holding) { if !holding && !present { dismiss() } }
         }
     }
 
@@ -289,6 +301,8 @@ struct NeedSheetView: View {
         case .question(let question): "\(question.label) asks"
         case .screen(let screen): screen.nodeName
         case .notice: "Noticed"
+        case .draft(let draft): "A loop: \(draft.label ?? draft.name)"
+        case .connector(let request): "A connector: \(request.label ?? request.connector)"
         case .approval: ""
         }
     }
@@ -302,6 +316,8 @@ struct NeedSheetView: View {
         case .question(let question): session.questions.contains(question)
         case .screen(let screen): session.screenSessions.contains { $0.id == screen.id }
         case .notice(let notice): session.notices.contains(notice)
+        case .draft(let draft): session.loopDrafts.contains(draft)
+        case .connector(let request): session.connectorRequests.contains(request)
         case .approval(let action): session.waiting.contains(action)
         }
     }

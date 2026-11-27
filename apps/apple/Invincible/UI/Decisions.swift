@@ -17,7 +17,8 @@ extension EnvironmentValues {
     var trouble: String?
 
     /// Every decision that waits, as the count counts them (Session.needsYou): each approval once (an agent's under its
-    /// task's name), each task only you can move on, devices, keys, questions and asks to use a Mac.
+    /// task's name), each task only you can move on, devices, keys, questions, asks to use a Mac, loops it drafted and
+    /// connectors asked for (the PWA's decisions, in its order).
     func decisions(_ session: Session, _ work: Attended, go: @escaping (Place) -> Void) -> [Decision] {
         let now = Date.now.timeIntervalSince1970 * 1000
         let admin = session.can("fleet:admin")
@@ -47,6 +48,12 @@ extension EnvironmentValues {
         for screen in session.screenSessions {
             let using = screen.state == "allowed"
             out.append(Decision(id: "screen:\(screen.id)", lead: .symbol("display"), who: using ? "\(Primary.name) is using \(screen.nodeName)" : "\(Primary.name) asks to use \(screen.nodeName)", what: screen.why, answer: (using ? "See it…" : "Answer…", { self.sheet = .screen(screen) }), rest: [], open: { self.sheet = .screen(screen) }))
+        }
+        for draft in session.loopDrafts {
+            out.append(Decision(id: "draft:\(draft.id)", lead: .symbol("repeat"), who: "\(Primary.name) drafted a loop", what: draft.label ?? draft.name, answer: ("Review…", { self.sheet = .draft(draft) }), rest: [], open: { self.sheet = .draft(draft) }))
+        }
+        for request in session.connectorRequests {
+            out.append(Decision(id: "connector:\(request.id)", lead: .symbol("powerplug"), who: "\(request.by) asks for a connector", what: request.label ?? request.connector, answer: ("Review…", { self.sheet = .connector(request) }), rest: [], open: { self.sheet = .connector(request) }))
         }
         return out
     }

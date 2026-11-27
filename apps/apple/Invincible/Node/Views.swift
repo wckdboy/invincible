@@ -236,6 +236,49 @@ struct SecretRequestView: Decodable, Sendable, Identifiable, Equatable {
     var id: String { name }
 }
 
+/// `GET /api/loops/drafts`: a loop the primary drafted when you asked for one in a chat (core's LoopDraftView). It runs
+/// nothing until you add it; unanswered by `expires`, it's gone. Its task and what wakes it are kept whole, to add it as
+/// it was drafted (Loops says them in words).
+struct LoopDraftView: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    /// Its schedule as written ("0 7 * * 1-5", "every 30m"), or "never": only when something wakes it.
+    let schedule: String
+    let tz: String
+    /// The node it would run on, by name, when it names one.
+    let on: String?
+    let task: JSONValue
+    let wakes: [JSONValue]
+    let cooldownMs: Double?
+    let label: String?
+    let why: String?
+    /// Who drafted it: the primary, in a chat.
+    let by: String
+    /// Milliseconds.
+    let at: Double
+    let expires: Double
+    /// Adding it replaces the loop that has its name.
+    let replaces: Bool
+}
+
+/// `GET /api/connectors/requests`: a connector the primary or an agent asked for (core's ConnectorRequestView): to add,
+/// or, where it's installed and the primary's alone (`access`), to let the asker use it. Asking installs nothing.
+struct ConnectorRequestView: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let connector: String
+    let access: Bool
+    /// The asker's label, as a connector's access names it.
+    let agent: String
+    /// Its name, when the node ships it; nil for a service it doesn't have yet.
+    let label: String?
+    let why: String
+    /// Who asked: the primary, an agent by name, or an agent's label.
+    let by: String
+    /// Milliseconds.
+    let at: Double
+    let expires: Double
+}
+
 /// `GET /api/notices`: something the node noticed for you (a heartbeat's finding, a rule of yours that told you), kept
 /// until you dismiss it. Its title and body are the node's own words.
 struct NoticeView: Decodable, Sendable, Identifiable, Equatable {

@@ -41,7 +41,7 @@ struct InboxView: View {
             if !session.inboxLoaded {
                 ProgressView()
             } else if session.inboxCount == 0 {
-                ContentUnavailableView("Nothing needs you", systemImage: "checkmark.circle", description: Text("Approvals, keys \(Primary.name) asks for, devices asking to join and its asks to use a Mac wait here, each with its answer in place."))
+                ContentUnavailableView("Nothing needs you", systemImage: "checkmark.circle", description: Text("Approvals, keys \(Primary.name) asks for, devices asking to join, its asks to use a Mac, loops it drafted and connectors asked for wait here, each with its answer in place."))
             }
         }
         .screen("needs.screen")
@@ -505,6 +505,159 @@ struct NoticeRow: View {
         defer { dismissing = false }
         do {
             try await session.dismiss(notice)
+            problem = nil
+        } catch {
+            problem = error.localizedDescription
+        }
+    }
+}
+
+/// A loop it drafted when you asked for one in a chat (the PWA's loopDraftCard): what it is, when it runs and where,
+/// what it runs and what else wakes it (Loops, the PWA's words), why, and whether it replaces one of yours; then Add
+/// loop or Dismiss. It runs nothing until you add it. A loop a webhook wakes comes back with its secret, said this once:
+/// its sheet holds it until you're done.
+struct LoopDraftRow: View {
+    let session: Session
+    let draft: LoopDraftView
+    @Binding var holding: Bool
+    @State private var busy = false
+    @State private var problem: String?
+    /// Its webhook's secret, once it was added (said this once).
+    @State private var secret: String?
+    @Environment(\.dismiss) private var dismiss
+
+    private var when: String {
+        draft.schedule == "never" ? "Only when woken" : "\(draft.schedule)\(draft.tz != "UTC" ? " (\(draft.tz))" : "")"
+    }
+
+    var body: some View {
+        InboxRow(symbol: "repeat") {
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(draft.label ?? draft.name).font(.headline)
+                if draft.label != nil { Text(draft.name).font(.caption.monospaced()).foregroundStyle(.secondary) }
+                Text("\(when)\(draft.on.map { " on \($0)" } ?? "")").font(.subheadline.monospaced())
+                Text(Loops.describeTask(draft.task)).font(.subheadline)
+                let wakes = Loops.describeWakes(draft.wakes, cooldownMs: draft.cooldownMs)
+                if !wakes.isEmpty { Text(wakes).font(.subheadline) }
+                if let why = draft.why, !why.isEmpty { Text(why).font(.subheadline).foregroundStyle(.secondary) }
+                if draft.replaces { Text("Adding it replaces your loop \(draft.name).").font(.footnote).foregroundStyle(Color.danger) }
+                Text("Drafted by \(draft.by == "primary" ? Primary.name : draft.by) · \(Text(Date(timeIntervalSince1970: draft.at / 1000), style: .relative)) ago")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            if let secret {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    Text("Its webhook's secret, shown this once. Keep it where the sender keeps its keys; a new one, from the loop on a computer, retires it.").font(.footnote)
+                    Text(secret).font(.callout.monospaced()).textSelection(.enabled)
+                    Button("Done") {
+                        holding = false
+                        dismiss()
+                    }
+                    .buttonStyle(.glass)
+                }
+            } else if session.can("brain:write") {
+                InboxButtons {
+                    Button("Dismiss") { Task { await act { try await session.dismiss(draft) } } }
+                        .buttonStyle(.glass)
+                        .disabled(busy)
+                    Button {
+                        Task {
+                            await act {
+                                holding = true
+                                let said = try await session.add(draft)
+                                if let said { secret = said } else { holding = false }
+                            }
+                        }
+                    } label: {
+                        Text(draft.replaces ? "Add, replacing yours" : "Add loop").fontWeight(.semibold).foregroundStyle(Prominent.label())
+                    }
+                    .buttonStyle(.glassProminent)
+                    .disabled(busy)
+                }
+            } else {
+                Text("This device can't add a loop (it has no brain:write scope).").font(.footnote).foregroundStyle(.secondary)
+            }
+            if let problem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Color.danger)
+            }
+        }
+    }
+
+    private func act(_ work: () async throws -> Void) async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await work()
+            problem = nil
+        } catch {
+            holding = false
+            problem = error.localizedDescription
+        }
+    }
+}
+
+/// A connector it or an agent asked for (the PWA's connectorRequestCard): who asked and why. One that's its alone,
+/// installed, it lets the asker use (Allow); one it doesn't have is added from Connectors; or it's dismissed. Asking
+/// installs nothing.
+struct ConnectorRequestRow: View {
+    let session: Session
+    let request: ConnectorRequestView
+    @State private var busy = false
+    @State private var problem: String?
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openPlace) private var openPlace
+
+    private var name: String { request.label ?? request.connector }
+
+    var body: some View {
+        InboxRow(symbol: "powerplug") {
+            VStack(alignment: .leading, spacing: Space.s1) {
+                Text(request.access ? "\(request.by) asks to use \(name)" : "\(request.by) asks for \(name)").font(.headline)
+                Text(request.why).font(.subheadline)
+                Text(request.access ? "\(name) is \(Primary.name)'s alone: allowed, \(request.by) may read it too, until you stop it." : "Asking installs nothing: it waits for you to add it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text("Asked \(Text(Date(timeIntervalSince1970: request.at / 1000), style: .relative)) ago")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            if session.can("brain:write") {
+                InboxButtons {
+                    Button("Dismiss") { Task { await act { try await session.dismiss(request) } } }
+                        .buttonStyle(.glass)
+                        .disabled(busy)
+                    if request.access {
+                        Button {
+                            Task { await act { try await session.allow(request) } }
+                        } label: {
+                            Text("Allow \(request.by)").fontWeight(.semibold).foregroundStyle(Prominent.label())
+                        }
+                        .buttonStyle(.glassProminent)
+                        .disabled(busy)
+                    } else if let openPlace {
+                        Button("Add it in Connectors") {
+                            dismiss()
+                            openPlace(.connectors)
+                        }
+                        .buttonStyle(.glass)
+                    }
+                }
+            } else {
+                Text("This device can't answer it (it has no brain:write scope).").font(.footnote).foregroundStyle(.secondary)
+            }
+            if let problem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Color.danger)
+            }
+        }
+    }
+
+    private func act(_ work: () async throws -> Void) async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await work()
             problem = nil
         } catch {
             problem = error.localizedDescription
