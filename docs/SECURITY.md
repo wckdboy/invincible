@@ -121,10 +121,23 @@ The review also confirmed what held up:
   - **The web app asks again at every start.** A node that proves to be another, or whose proof fails, is asked
     nothing more, and the page says so. `inv`, not yet pinned, exits 30 on a proof that fails.
   - **The iPhone, iPad, Mac and Android apps** pin it the same way: from the pairing, or a pairing from before at its
-    first proven whoami, kept with the pairing; every request they sign names it. A node that proves to be another, or
-    whose proof fails, gets nothing more: the app says "This isn't the node this device paired with", and pulling to
-    refresh (or Try again, on Android) asks that node only which it is, until it proves to be the paired one.
-  - **A node from before, which proves nothing,** is spoken to as before, until the cutoff.
+    first proven whoami, kept with the pairing while it is still that pairing (a late first proof never writes over a
+    newer one); every request they sign names it. The review of apps-name-node's rules, in both apps:
+    - **Every session proves first.** Nothing but whoami is sent until the node at the address has proved itself in
+      this session: no read, no live stream, no post, no answer from a notification. What is sent then is signed for the
+      node it proved, so a pairing with no pin yet proves, pins and then signs v2 (`NodePin.ready`, iPhone and Mac; the
+      session's proof gate, Android).
+    - **A node that proves to be another, or whose proof fails, gets nothing more:** the app says "This isn't the node
+      this device paired with", and hides the "can't reach" line, which would say otherwise. Pulling to refresh (Try
+      again, on Android) asks that node only which it is, its refusal standing until a proof holds; then the live
+      stream opens again. A notification's answer sees the same refusal (one pin per pairing in the process).
+    - **Once a node is pinned, a whoami with no proof is a proof that fails,** as is one whose proof isn't one (null, not
+      a string, no node), pinned or not (core's `judgeNodeProof`, Swift's `NodeProof.judge`, Kotlin's, held to the
+      parity vectors' `judgedNodeProofs`).
+    - **Android verifies the proof off the main thread,** and takes nothing from a node, its primary's name included,
+      before the proof holds.
+  - **A node from before, which proves nothing,** is spoken to as before while nothing is pinned and until the cutoff.
+    From 14 December 2026 every node proves which it is, so a whoami with no proof fails, pinned or not.
   - **Held to Ed25519's strict rule** (`verifyEd25519Strict`, the lead's word of 27 November 2026): A and R are
     canonical points of the prime-order subgroup, neither the identity, S < L, and the equation holds. noble's default
     (ZIP-215) took a small-order key, among them the identity, with which a signature verifies for any message: a node
@@ -145,8 +158,8 @@ The review also confirmed what held up:
     rule binds a forgery only by when it says it was made. A key that fails the rule and was enrolled before the cutoff
     (by any node before today, or by an older node since) stays enrolled, and its events stamped before the cutoff still
     count: anyone can forge those for it. Only a node of the fleet can enroll a key, and only with your approval of its
-    pairing. Fabric's transport claims and statements and Q-AMP's
-    envelopes (`fabric.ts`, `qdt.ts`) are held as they always were.
+    pairing. Fabric's transport claims and statements, and Q-AMP's envelopes (`fabric.ts`, `qdt.ts`), still verify a
+    node's signature under ZIP-215, not the rule, at any date: theirs is Q-AMP's work, after R5-3.
   - **The apps check the proof under the same rule, and answer alike:** the parity vectors hold RFC 8032's test vectors
     and all 210 of Wycheproof's, each with core's answer (`apps/apple/scripts/vectors.ts`), and core, Swift and Kotlin
     are each held to every one.
