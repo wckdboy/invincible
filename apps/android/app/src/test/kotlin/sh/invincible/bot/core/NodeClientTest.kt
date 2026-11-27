@@ -22,9 +22,28 @@ class NodeClientTest {
         override fun sign(message: ByteArray) = ByteArray(64)
     }
 
+    /** A test's node, on the address its client dials (127.0.0.1): there no other socket can bind its port after it. */
+    private fun server() = ServerSocket(0, 50, java.net.InetAddress.getLoopbackAddress())
+
+    // Seen on a busy Mac (27 November 2026): a test's node listening on every address let another process bind 127.0.0.1
+    // on its port afterwards (as a harness binds a free port it found), and the client, which dials 127.0.0.1, reached
+    // that process instead: a stream with no event, a 401 from a node that answers 200.
+    @Test
+    fun aTestsNodeCantBeTakenByALateBindOnTheAddressItsClientDials() {
+        server().use { mine ->
+            val late = ServerSocket()
+            val bound = runCatching {
+                late.reuseAddress = true
+                late.bind(java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), mine.localPort))
+            }
+            late.close()
+            assertTrue("a late bind of 127.0.0.1:${mine.localPort} is refused", bound.exceptionOrNull() is java.net.BindException)
+        }
+    }
+
     @Test
     fun aConnectionDroppedBeforeAnAnswerIsSaidInWords() = runBlocking<Unit> {
-        ServerSocket(0).use { server ->
+        server().use { server ->
             // Takes each request, then hangs up without a word (Java's own client asks a second time).
             thread { runCatching { while (true) server.accept().use { it.getInputStream().read(ByteArray(1024)) } } }
             val e = runCatching { NodeClient("http://127.0.0.1:${server.localPort}", signer).get("/api/team") }.exceptionOrNull() as NodeError
@@ -35,7 +54,7 @@ class NodeClientTest {
 
     @Test
     fun eachRequestSaysThisDevicesTimeZoneBesideItsSignature() = runBlocking<Unit> {
-        ServerSocket(0).use { server ->
+        server().use { server ->
             var head = ""
             thread {
                 runCatching {
@@ -70,7 +89,7 @@ class NodeClientTest {
     // went on blocking, and the app never said it couldn't reach its node. A cancelled read must end at once.
     @Test
     fun aSilentAnswerStreamIsClosedAtOnceWhenItsReaderGoes() {
-        ServerSocket(0).use { server ->
+        server().use { server ->
             silentAfterOne(server)
             val got = CountDownLatch(1)
             val done = CountDownLatch(1)
@@ -105,7 +124,7 @@ class NodeClientTest {
 
     @Test
     fun aSilentLiveStreamIsClosedAtOnceByWhoOpenedIt() {
-        ServerSocket(0).use { server ->
+        server().use { server ->
             silentAfterOne(server)
             val got = CountDownLatch(1)
             val done = CountDownLatch(1)
@@ -147,7 +166,7 @@ class NodeClientTest {
     // read on, unseen, for as long as its node beat.
     @Test
     fun aLiveStreamClosedBeforeItsConnectionIsMadeIsNeverRead() {
-        ServerSocket(0).use { server ->
+        server().use { server ->
             beating(server)
             val heard = java.util.concurrent.atomic.AtomicInteger(0)
             val done = CountDownLatch(1)
@@ -166,7 +185,7 @@ class NodeClientTest {
 
     @Test
     fun nothingListeningIsSaidInWords() = runBlocking<Unit> {
-        val port = ServerSocket(0).use { it.localPort }
+        val port = server().use { it.localPort }
         val e = runCatching { NodeClient("http://127.0.0.1:$port", signer).get("/api/team") }.exceptionOrNull() as NodeError
         assertEquals("Nothing answers at 127.0.0.1. Is the node running?", e.message)
         assertTrue(e.unreachable)
