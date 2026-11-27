@@ -12,8 +12,8 @@ a Mac's own part (its VMs, and a Mac itself) in MAC.md.
   says), each stream of its output clipped to 20,000 characters. `desktop …` works its screen, and `desktop look` asks a
   model that can see (`packages/node/src/tools.ts`).
 - **Who makes it:** you alone: Give it a computer in its chat on the web, Make Its Computer in the Mac's Build window,
-  or `invincible agents provision primary`. It goes to a node that can make VMs, with one processor, 4 GB with a desktop
-  (2 without), 20 GB and the internet. A Mac can't make the desktop image yet, so there it comes without one, and the
+  or `invincible agents provision primary`. It goes to a node that can make VMs, with one processor, 2 GB (grown live to 4
+  the first time its desktop is used), 20 GB and the internet. A Mac can't make the desktop image yet, so there it comes without one, and the
   ledger says why.
 - **What it holds:** no provider key. Its models come through the node's gateway on a lease (30 minutes, 500 requests),
   renewed before a command could outlive it, for the providers it was made with. No harness and no notes store; the
@@ -34,7 +34,9 @@ allow (MAC.md, M4; the app's `--desktop`, `apps/apple/Invincible/Mac/MacScreen.s
 ## The agents' VMs
 
 - **Each agent has one,** kept between tasks and restarts, made on its first task or with
-  `invincible agents provision <id>`: one processor, 2 GB (4 with a desktop) and 20 GB. A task works in
+  `invincible agents provision <id>`: one processor, 2 GB and 20 GB. With a desktop it is made so too, and grows, live, to
+  4 GB the first time its desktop is used; an unused desktop stops after 10 minutes, and the next desktop command starts it
+  again (C1 step 10, [DESKTOP.md](DESKTOP.md)). A task works in
   `/work/tasks/<id>`; an agent's repository is cloned once into `/work/repo`, through the read-only git gateway.
 - **Its network,** chosen when it is made: online (the internet and the model gateway, the default) or the model gateway
   alone. It holds no provider key, and reaches neither the node's API nor another sandbox. On Linux it is a Kata

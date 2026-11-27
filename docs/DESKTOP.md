@@ -13,7 +13,8 @@ sandbox host: the harness is built (below).
 ## What runs where
 
 - **In the agent's VM** (the desktop image, `sandbox/desktop/`):
-  - **deskd** (`deskd.py`): the one process that holds the desktop. It is reached only through sockets in a directory
+  - **deskd** (`deskd.py`): the one process that holds the desktop. It starts it on its first use, and stops it when it
+    is unused (below). It is reached only through sockets in a directory
     of its own in the VM's `/tmp` (0700, each socket 0600): the agent's, and beside it yours (`<run>.owner.sock`),
     which counts a connection as yours only from the uid the kernel names (`SO_PEERCRED`, uid 1001, never the
     agent's).
@@ -73,6 +74,30 @@ sandbox host: the harness is built (below).
 - **How it ends:** Give back; 120 s with no input from you; 15 minutes in all; or the node's session ending. The row
   under the screen says until when, by the clock, changing when the node says so and once at the end: nothing counts
   down.
+
+## Light by default
+
+C1 step 10. An agent whose desktop isn't used costs what an agent without one does.
+- **It stops when unused.** deskd stops the desktop as `desktop stop` does (each window asked to close as a person would,
+  then the display, the browser and the rest) once it has had, for 10 minutes (`INVINCIBLE_DESKTOP_IDLE`):
+  - nothing asked of it but whether it is up, or how to use it (`help`, `status`): any other request of the agent's, from
+    any path, and any of the owner's, their looks included, is use;
+  - no one holding it: a take-over keeps it up for as long as it lasts;
+  - no one watching it: the stream's encoder (`desktop-stream`) runs only while someone watches.
+- **It starts again on the next command.** The agent's next command that does something is told, once: "this desktop
+  was stopped after 10 minutes with nothing done on it and no one watching, its windows closed as a person closes them;
+  this command started it again, a fresh screen (the browser's profile, and what is signed in there, are kept in
+  /work)". The node's own `status`, and the owner's look, leave the word for the agent.
+- **Its memory comes with its first use.** An agent's VM is made with 2 GB, desktop or not (core's COMPUTER_START).
+  Before the first use that may start its desktop (the agent's command, the owner's look, input or take-over, the
+  stream), the node grows it, live, to 4 GB (the sandbox host's `desktopRoom`, through the governor, so within the
+  ceiling, and in the ledger). It is never made again for it: where it can't grow (no room under the ceiling, a microVM
+  that can't take more), its desktop runs with what it has, its work as it was, the ledger says why, and it is tried
+  again a minute later at the soonest. A `desktop` command inside a shell command reaches deskd and starts the desktop,
+  but not the node's growing: the VM grows at the next command that comes through the node.
+- **Held to** (to be measured on a sandbox host): a desktop never started at most +50 MB, with 2 GB given; growing to
+  4 GB within 1 s; after an idle stop, the browser gone and the guest's memory freed; started again to its first page
+  within 2 s; started and idle at most +600 MB.
 
 ## Watching, on each device
 

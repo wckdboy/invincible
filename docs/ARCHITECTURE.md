@@ -323,7 +323,12 @@ The run loop is carried and renamed (§10), the most proven part of it:
     (deskd: input by XTEST, pictures by MIT-SHM, settling by DAMAGE, the browser over its loopback port), its actions
     named as Anthropic's computer toolset names them; the host speaks to it over one held session per VM, and an
     agent's plain `desktop …` goes there too. It keeps the window manager and the browser running, says a page's
-    dialog as it opens, and closes apps as a person does before it stops them. Beside the pixels, the accessibility
+    dialog as it opens, and closes apps as a person does before it stops them. Light by default (C1 step 10): the
+    desktop starts on its first use, and stops, as `desktop stop` stops it, after 10 minutes with nothing asked of it, no
+    one holding it and no one watching it; the next command starts it again, and the agent's next command says why its
+    screen is fresh. The VM is made with 2 GB, desktop or not, and grown, live, to 4 GB just before its desktop's first
+    use (the sandbox host's desktopRoom), never made again for it: so an agent that never looks holds of the ceiling
+    what one without a desktop does ([DESKTOP.md](DESKTOP.md)). Beside the pixels, the accessibility
     tree (AT-SPI): `desktop tree` lists what can be acted on in the window with the focus, `desktop find` gives where
     one is, and `desktop click ref=N` clicks it where it is at that moment. An agent's model that takes Claude's computer
     toolset is offered it in the engineer's tool loop: each action is one of its commands, the VM's `desktop` verb of the
