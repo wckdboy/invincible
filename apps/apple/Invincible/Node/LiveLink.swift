@@ -108,9 +108,14 @@ final class LiveLink {
         var lost: @MainActor () -> Void = {}
     }
 
-    /// Opens the stream (from `since`, the last cursor its node gave, when there is one): its events as they come;
-    /// `alive` is called on everything that arrives, its beats too.
-    private let open: @MainActor (_ since: String?, _ alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error>
+    /// Opens the stream (from `since`, the last cursor its node gave, when there is one): `alive` on everything that arrives
+    /// (its beats too), `event` for each event, `ended` once when it closes (nil: it ended; else why it failed), each on the
+    /// main actor. Returns how to close it, after which `ended` may still come, and is let be. Its opener reads the stream
+    /// and hands the link what it says (Session's, around NodeClient.live), as Android's LiveLink.kt is handed its: what the
+    /// link does with each is then in order and at once, and its tests have nothing to wait for.
+    typealias Open = @MainActor (_ since: String?, _ alive: @escaping @MainActor @Sendable () -> Void, _ event: @escaping @MainActor @Sendable (LiveEvent) -> Void, _ ended: @escaping @MainActor @Sendable ((any Error)?) -> Void) -> (@MainActor () -> Void)
+
+    private let open: Open
     /// A failure that is the node's refusal: not tried again on a timer.
     private let refused: (any Error) -> Bool
     private let clock: LiveClock
@@ -120,7 +125,9 @@ final class LiveLink {
     /// The stream being opened or open, by its number; nil: none.
     private var current: Int?
     private var opened = 0
-    private var reading: Task<Void, Never>?
+    /// How to close the stream open now, and when it said hello.
+    private var closing: (@MainActor () -> Void)?
+    private var helloAt: Double?
     private(set) var up = false
     /// When the open stream said hello, and what it tells of.
     private var upAt: Double = 0
@@ -140,7 +147,7 @@ final class LiveLink {
     /// The stream that went silent, closed for it (its end says it was lost).
     private var quiet: Int?
 
-    init(open: @escaping @MainActor (_ since: String?, _ alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error>, refused: @escaping (any Error) -> Bool, clock: LiveClock = .real) {
+    init(open: @escaping Open, refused: @escaping (any Error) -> Bool, clock: LiveClock = .real) {
         self.open = open
         self.refused = refused
         self.clock = clock
@@ -161,8 +168,7 @@ final class LiveLink {
     func stop() {
         running = false
         current = nil
-        reading?.cancel()
-        reading = nil
+        closing = off(closing)
         retrying = off(retrying)
         downing = off(downing)
         silence = off(silence)
@@ -184,8 +190,7 @@ final class LiveLink {
         guard running else { return }
         let was = up
         current = nil
-        reading?.cancel()
-        reading = nil
+        closing = off(closing)
         silence = off(silence)
         retrying = off(retrying)
         up = false
@@ -246,7 +251,8 @@ final class LiveLink {
             // Gone quiet: closed, and its end opens another.
             guard let self, self.current == stream else { return }
             self.quiet = stream
-            self.reading?.cancel()
+            let close = self.closing
+            close?()
         }
     }
 
@@ -255,53 +261,54 @@ final class LiveLink {
         opened += 1
         let stream = opened
         current = stream
+        helloAt = nil
         let since = cursor
         watch(stream)
         waitForHello()
-        let events = open(since) { [weak self] in
+        let close = open(since, { [weak self] in
             guard let self, self.current == stream else { return }
             self.watch(stream)
-        }
-        reading = Task { @MainActor [weak self] in
-            var failure: (any Error)?
-            var helloAt: Double?
-            do {
-                for try await event in events {
-                    guard let self, self.current == stream else { return }
-                    switch event {
-                    case .hello(let topics, let beat, let at, let changed):
-                        helloAt = self.clock.now()
-                        // What changed since, trusted from a stream opened from a cursor that tells of what the last told of.
-                        let same = topics.count == self.topics.count && topics.allSatisfy { self.topics.contains($0) }
-                        let resumed = since != nil && same ? changed.map { $0.filter { topics.contains($0) } } : nil
-                        self.cursor = at.flatMap { Self.isCursor($0) ? $0 : nil }
-                        self.goUp(topics, beat: beat, changed: resumed)
-                        // (The node's beat, now known: three of them silent and it is gone.)
-                        self.watch(stream)
-                    case .changed(let topics, let at):
-                        if self.up {
-                            if let at, Self.isCursor(at) { self.cursor = at }
-                            self.handlers?.changed(topics)
-                        }
-                    case .bye:
-                        break
-                    }
-                    if case .bye = event { break }
-                }
-            } catch {
-                failure = error
+        }, { [weak self] event in
+            self?.took(event, from: stream, since: since)
+        }, { [weak self] failure in
+            self?.ended(stream, failure: failure)
+        })
+        // (One that ended as it opened, refused at once, has nothing left to close.)
+        if current == stream { closing = close }
+    }
+
+    /// What the stream open now said (another's is let be).
+    private func took(_ event: LiveEvent, from stream: Int, since: String?) {
+        guard current == stream else { return }
+        switch event {
+        case .hello(let topics, let beat, let at, let changed):
+            helloAt = clock.now()
+            // What changed since, trusted from a stream opened from a cursor that tells of what the last told of.
+            let same = topics.count == self.topics.count && topics.allSatisfy { self.topics.contains($0) }
+            let resumed = since != nil && same ? changed.map { $0.filter { topics.contains($0) } } : nil
+            cursor = at.flatMap { Self.isCursor($0) ? $0 : nil }
+            goUp(topics, beat: beat, changed: resumed)
+            // (The node's beat, now known: three of them silent and it is gone.)
+            watch(stream)
+        case .changed(let topics, let at):
+            if up {
+                if let at, Self.isCursor(at) { cursor = at }
+                handlers?.changed(topics)
             }
-            guard let self else { return }
-            self.ended(stream, helloAt: helloAt, failure: failure)
+        case .bye:
+            // Its node is going: it has ended, and is closed.
+            let close = closing
+            ended(stream, failure: nil)
+            close?()
         }
     }
 
     /// A stream ended (it was closed, it failed, or it went quiet): opened again as its kind of end says.
-    private func ended(_ stream: Int, helloAt: Double?, failure: (any Error)?) {
+    private func ended(_ stream: Int, failure: (any Error)?) {
         // Closed on purpose (stopped, renewed), or another opened since: nothing more of this one.
         guard current == stream else { return }
         current = nil
-        reading = nil
+        closing = nil
         silence = off(silence)
         let was = up
         up = false

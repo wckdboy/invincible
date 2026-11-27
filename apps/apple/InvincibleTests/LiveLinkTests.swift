@@ -61,37 +61,56 @@ final class HeldClock {
     var pending: [Double] { state.timers.filter { !$0.off }.map { $0.at - state.now } }
 }
 
-/// Streams the test opens and feeds: each `open` is one, with its events pushed and its end or failure said.
+/// Streams the test opens and feeds: each `open` is one, its events, its end or its failure handed to the link at once, as
+/// its opener hands them on the main actor (Session's; Android's LiveLinkTest feeds its link the same way).
 @MainActor
 final class HeldStreams {
-    final class Opened: @unchecked Sendable {
-        let continuation: AsyncThrowingStream<LiveEvent, any Error>.Continuation
-        let alive: @MainActor @Sendable () -> Void
+    @MainActor
+    final class Opened {
         /// The cursor it was opened from (nil: afresh).
         let since: String?
-        /// The link closed it (it went quiet, it was stopped or renewed).
+        private let alive: @MainActor @Sendable () -> Void
+        private let event: @MainActor @Sendable (LiveEvent) -> Void
+        private let ended: @MainActor @Sendable ((any Error)?) -> Void
+        /// The link closed it (it went quiet, it was stopped or renewed, its node said bye).
         var aborted = false
-        init(_ continuation: AsyncThrowingStream<LiveEvent, any Error>.Continuation, since: String?, alive: @escaping @MainActor @Sendable () -> Void) {
-            self.continuation = continuation
+        private var over = false
+        init(since: String?, alive: @escaping @MainActor @Sendable () -> Void, event: @escaping @MainActor @Sendable (LiveEvent) -> Void, ended: @escaping @MainActor @Sendable ((any Error)?) -> Void) {
             self.since = since
             self.alive = alive
+            self.event = event
+            self.ended = ended
         }
-        @MainActor func push(_ event: LiveEvent) { alive(); continuation.yield(event) }
-        @MainActor func beat() { alive() }
-        func end() { continuation.finish() }
-        func fail(_ error: any Error) { continuation.finish(throwing: error) }
+        func push(_ event: LiveEvent) {
+            alive()
+            self.event(event)
+        }
+        func beat() { alive() }
+        func end() {
+            guard !over else { return }
+            over = true
+            ended(nil)
+        }
+        func fail(_ error: any Error) {
+            guard !over else { return }
+            over = true
+            ended(error)
+        }
+        /// Closed by the link: it ends as a read called off does.
+        func close() {
+            aborted = true
+            fail(CancellationError())
+        }
     }
 
     var opened: [Opened] = []
     var refuseWith: (any Error)?
 
-    func open(since: String?, alive: @escaping @MainActor @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error> {
-        let (stream, continuation) = AsyncThrowingStream<LiveEvent, any Error>.makeStream()
-        let one = Opened(continuation, since: since, alive: alive)
-        continuation.onTermination = { end in if case .cancelled = end { one.aborted = true } }
-        if let refuseWith { continuation.finish(throwing: refuseWith) }
+    func open(since: String?, alive: @escaping @MainActor @Sendable () -> Void, event: @escaping @MainActor @Sendable (LiveEvent) -> Void, ended: @escaping @MainActor @Sendable ((any Error)?) -> Void) -> @MainActor () -> Void {
+        let one = Opened(since: since, alive: alive, event: event, ended: ended)
         opened.append(one)
-        return stream
+        if let refuseWith { one.fail(refuseWith) }
+        return { one.close() }
     }
 
     var last: Opened { opened[opened.count - 1] }
@@ -106,7 +125,7 @@ private func link() -> (clock: HeldClock, streams: HeldStreams, told: () -> [Str
     let streams = HeldStreams()
     final class Told: @unchecked Sendable { var lines: [String] = [] }
     let told = Told()
-    let link = LiveLink(open: { since, alive in streams.open(since: since, alive: alive) }, refused: { $0 is Refused }, clock: clock.clock)
+    let link = LiveLink(open: { since, alive, event, ended in streams.open(since: since, alive: alive, event: event, ended: ended) }, refused: { $0 is Refused }, clock: clock.clock)
     link.attach(.init(
         up: { topics, _, changed in told.lines.append("up \(topics.joined(separator: ","))" + (changed.map { " changed:\($0.joined(separator: ","))" } ?? "")) },
         changed: { topics in told.lines.append("changed \(topics.joined(separator: ","))") },
@@ -126,9 +145,9 @@ private func play(_ steps: [Vectors.Live.Step], beat: Double) async -> (told: [S
         var opened: [Double] = []
     }
     let played = Played()
-    let link = LiveLink(open: { since, alive in
+    let link = LiveLink(open: { since, alive, event, ended in
         played.opened.append(clock.now)
-        return streams.open(since: since, alive: alive)
+        return streams.open(since: since, alive: alive, event: event, ended: ended)
     }, refused: { $0 is Refused }, clock: clock.clock)
     link.attach(.init(
         up: { topics, _, _ in played.told.append("\(Int(clock.now)) up \(topics.joined(separator: ","))") },

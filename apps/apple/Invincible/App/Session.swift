@@ -209,8 +209,19 @@ import Observation
     @ObservationIgnored private(set) lazy var link: LiveLink = {
         let client = self.client
         let link = LiveLink(
-            // (Opened again from where the last left off: only what changed since is read.)
-            open: { since, alive in client.live(since: since, alive: { Task { @MainActor in alive() } }) },
+            // (Opened again from where the last left off: only what changed since is read.) Read here, and each event and
+            // its end handed to the link on the main actor; closed, the read is called off, and its end says so.
+            open: { since, alive, event, ended in
+                let reading = Task { @MainActor in
+                    do {
+                        for try await each in client.live(since: since, alive: { Task { @MainActor in alive() } }) { event(each) }
+                        ended(nil)
+                    } catch {
+                        ended(error)
+                    }
+                }
+                return { reading.cancel() }
+            },
             // An older node without the stream (404), a device that may not read it (403), one revoked (401, which the
             // reads then say): read on a timer instead, and opened again only when asked.
             refused: { ($0 as? NodeError).map { [401, 403, 404].contains($0.status) } ?? false }
