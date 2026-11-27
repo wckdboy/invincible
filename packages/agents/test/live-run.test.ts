@@ -498,6 +498,30 @@ describe("steering a coding agent's task", () => {
     expect(run.events.filter((event) => event.type === "steered")).toHaveLength(1);
   });
 
+  test("a word it never took is said again with every word told after it, in order: its last word is the last said", async () => {
+    const box = vm();
+    const waiting: RunSteer[] = [];
+    const run = task(CLAUDE, box, waiting);
+    await box.until(() => box.follows.length === 1);
+    box.current().push(E(20, { type: "session", id: "ses_live" }), E(40, { type: "call", id: "call_1" }));
+    const first = { by: "owner" as const, text: "Use the new schema." };
+    const then = { by: "owner" as const, text: "No: keep the old one." };
+    waiting.push(first);
+    await box.until(() => box.told.length === 1);
+    waiting.push(then);
+    await box.until(() => box.told.length === 2);
+    const [a, b] = box.told as { id: string }[];
+    // The first came back late; the second was taken: then its run ended.
+    box.current().push(E(60, { type: "steer", id: a!.id, state: "late" }), E(80, { type: "steer", id: b!.id, state: "taken" }), S(false, 0, 80));
+    await box.until(() => box.follows.length === 2);
+    box.current().push(E(120, { type: "text", text: "Kept the old one." }), S(false, 0, 120));
+    expect((await run.done).status).toBe("done");
+    const launches = box.commands.filter((command) => command.startsWith("mkdir -p /work/.agent"));
+    const second = Buffer.from(launches[1]!.match(/printf %s '([A-Za-z0-9+/=]+)'/)![1]!, "base64").toString("utf8");
+    expect(second.indexOf("Use the new schema.")).toBeGreaterThanOrEqual(0);
+    expect(second.indexOf("No: keep the old one.")).toBeGreaterThan(second.indexOf("Use the new schema."));
+  });
+
   test("words a live run never took (it had stopped taking any) are said in its next run, in its own session", async () => {
     const box = vm();
     const waiting: RunSteer[] = [];

@@ -895,10 +895,15 @@ export class TeamStore {
     return this.db.transaction(() => {
       const row = this.jobRow(key);
       if (!row || row.kind !== "task") throw new TeamError(404, "No such team task.");
-      if (row.status !== "running") throw new TeamError(409, NOT_STEERED[row.status]);
-      const data = JSON.parse(row.data) as { steers?: TeamSteer[]; interventions?: Partial<Record<InterventionKind, number>> };
+      const data = JSON.parse(row.data) as { steers?: TeamSteer[]; interventions?: Partial<Record<InterventionKind, number>>; rest?: { until?: unknown }; restart?: { until?: unknown } };
+      // (Resting until its plan resets, or waiting out a planned restart, it goes on by itself: kept for that run.)
+      const goesOn = row.status === "interrupted" && (typeof data.rest?.until === "number" || typeof data.restart?.until === "number");
+      if (row.status !== "running" && !goesOn) throw new TeamError(409, NOT_STEERED[row.status]);
       const steers = Array.isArray(data.steers) ? data.steers : [];
       if (steers.length >= TEAM_LIMITS.steers) throw new TeamError(429, `It has been steered ${steers.length} times, as many as one task takes: give it again with what you want now.`);
+      // Your agent may say at most half of what one task takes: what you say always reaches it.
+      const its = steers.filter((s) => s.by !== TEAM_OWNER).length;
+      if (by !== TEAM_OWNER && its >= TEAM_LIMITS.steers / 2) throw new TeamError(429, `Your agent has said ${its} things to this task, as many as it may: yours still reach it.`);
       const steer: TeamSteer = { by, text, at: this.now() };
       const interventions = by === TEAM_OWNER ? { ...data.interventions, steer: (data.interventions?.steer ?? 0) + 1 } : data.interventions;
       this.db.query("UPDATE team_jobs SET data=? WHERE id=?").run(JSON.stringify({ ...data, steers: [...steers, steer], ...(interventions ? { interventions } : {}) }), key);
@@ -943,7 +948,9 @@ export class TeamStore {
   }
   private trailLine(key: string, at: number, text: string): void {
     const n = (this.db.query<{ n: number | null }, [string]>("SELECT MAX(n) AS n FROM team_trail WHERE task=?").get(key)?.n ?? 0) + 1;
-    this.db.query("INSERT INTO team_trail(task,n,at,text) VALUES(?,?,?,?)").run(key, n, at, teamOutput(text, TRAIL.text));
+    // (A steer's line is kept whole: its words are what every client says it was told.)
+    const limit = text.startsWith("Steered · ") ? Math.max(TRAIL.text, TEAM_LIMITS.steer + 64) : TRAIL.text;
+    this.db.query("INSERT INTO team_trail(task,n,at,text) VALUES(?,?,?,?)").run(key, n, at, teamOutput(text, limit));
     if (n > TRAIL.keep) this.db.query("DELETE FROM team_trail WHERE task=? AND n<=?").run(key, n - TRAIL.keep);
   }
   /** What a task did, as it happened: its lines after number `after` (0: from the first kept), a page at a time; `more`: there are further lines. */

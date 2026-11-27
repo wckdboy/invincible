@@ -170,8 +170,13 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - The reviewer judges the work against its goal and every steer, in order, and the trail says so before its verdict.
     A steer changes what is wanted; it is never a way around the gates or the review. One that comes while the work is
     judged comes before its end: the work takes it up and is judged again.
-  - A task takes 20 at most, of 4,000 characters each. One that isn't running is refused in words ("It has ended: give
-    it again from a step instead"). A message to a busy agent is queued, as ever: it waits until the agent is free.
+  - A task takes 20 at most, of 4,000 characters each, your agent's at most half of them, so yours always reach it.
+    One that isn't running is refused in words ("It has ended: give it again from a step instead"); one resting until
+    its plan's window resets, or waiting out a planned restart, goes on by itself, and keeps what you say for then. A
+    message to a busy agent is queued, as ever: it waits until the agent is free.
+  - Each steer's words are its speaker's alone: every line after its first is set in, so none begins as a steer does,
+    and the reviewer is told the owner's words stand over the primary's where they differ. A harness that keeps no
+    session is told them too: its next run starts again from its briefing with them.
 - **The work as commits:** each step a commit, so a task can be given again from a step.
 - **Effort per step,** and escalation when stuck.
 - **Harnesses:**

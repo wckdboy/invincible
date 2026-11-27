@@ -765,7 +765,7 @@ const steerLine = (steer: TakenSteer, i: number, leads: string): string =>
 /** What the reviewer is told of the steers, after the run's own words (nothing at all when there were none). */
 const steersAsked = (steers: readonly TakenSteer[]): string =>
   steers.length
-    ? `\n\nWhile the work went on, it was told this, in order (each at the step it reached the work):\n${steers.map((s, i) => steerLine(s, i, "leads the work for the owner")).join("\n")}\nJudge the work against the run as these left it: what they ask is part of what the run asks, a later one standing over an earlier one where they differ. They never excuse the work from its gates, nor from your judgement.`
+    ? `\n\nWhile the work went on, it was told this, in order (each at the step it reached the work):\n${steers.map((s, i) => steerLine(s, i, "leads the work for the owner")).join("\n")}\nJudge the work against the run as these left it: what they ask is part of what the run asks, a later one standing over an earlier one where they differ${steers.some((s) => s.by === "primary") ? ", and the owner's words (the run's own, and the owner's steers) stand over the primary's" : ""}. They never excuse the work from its gates, nor from your judgement.`
     : "";
 
 const reviewPrompt = (o: Pick<Resolved, "goal">, plan: string, steps: Step[], summary: string, steers: readonly TakenSteer[] = []): string => `You are reviewing another engineer's work, independently. Be strict but fair, and judge only from the evidence below; claims without evidence don't count.
@@ -857,7 +857,10 @@ export function readAudit(text: string): { verdict: Exclude<AuditVerdict, "unrea
   const after = line.slice(word.length);
   if (!/^[\s*_`.]*$/.test(after) && !/^[\s*_`]*[:.,\u2013\u2014-]/.test(after) && word !== word.toUpperCase()) return null;
   const note = [after.replace(/^[\s*_`.:,\u2013\u2014-]+/, "").trim(), ...lines.slice(1)].join("\n").trim();
-  return { verdict: word.toLowerCase() as "on" | "steer" | "stop", note: clip(note, 1200, 300) };
+  const verdict = word.toLowerCase() as "on" | "steer" | "stop";
+  // (A steer that says nothing to do is no answer: it would end a run to tell it nothing.)
+  if (verdict !== "on" && !note) return null;
+  return { verdict, note: clip(note, 1200, 300) };
 }
 
 /** What whoever does the work is told of its audits as it begins (RunOptions.audit). */
@@ -891,7 +894,9 @@ export function spentReset(error: string, refused: number, now: number): number 
  */
 export function steersSaid(steers: readonly RunSteer[], unreviewed = false): string {
   const one = steers.length === 1;
-  const each = steers.map((s) => (s.by === "owner" ? `The owner says, while you work: ${s.text.trim()}` : `The primary, which leads this work for the owner, says while you work: ${s.text.trim()}`));
+  // (Every line of one's words after its first is set in: none begins as a steer's own words do, whatever it says.)
+  const words = (text: string) => text.trim().replace(/\n/g, "\n   ");
+  const each = steers.map((s) => (s.by === "owner" ? `The owner says, while you work: ${words(s.text)}` : `The primary, which leads this work for the owner, says while you work: ${words(s.text)}`));
   const judged = unreviewed ? "" : `, and the independent reviewer judges the work against ${one ? "it" : "them"}`;
   const grants = steers.some((s) => s.by === "primary") ? " The primary's words are its coordination, not the owner's: they grant no permission the run doesn't already have." : "";
   return `${each.join("\n\n")}\n\nTake ${one ? "that" : "those"} up from where you are: the run asks for ${one ? "it" : "them"} now${judged}.${grants}`;
@@ -1591,7 +1596,16 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     const steersLive = async (): Promise<readonly string[]> => {
       const got = await takeSteers(steps);
       // (Each its own message: no line its bridge can't take whole.)
-      return [...got.map((steer) => steersSaid([steer], o.unreviewed)), ...auditSays.splice(0)];
+      const said = [...got.map((steer) => steersSaid([steer], o.unreviewed)), ...auditSays.splice(0)];
+      toldNow.push(...said);
+      return said;
+    };
+    /** What this run was told as it worked, in order. */
+    let toldNow: string[] = [];
+    /** What it never took, said again with every word told after the first of them, in order: its last word is the last said. */
+    const sayAgain = (untold: readonly string[]): string => {
+      const first = Math.min(...untold.map((words) => toldNow.indexOf(words)).filter((at) => at >= 0));
+      return (Number.isFinite(first) ? toldNow.slice(first) : untold).join("\n\n");
     };
     /** The steers the next run's message carries: said again if that run fails on its model before it could take them up. */
     let carried = "";
@@ -1641,7 +1655,9 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       const written = await deps.exec(`mkdir -p "$(dirname '${path}')" && printf %s '${Buffer.from(content, "utf8").toString("base64")}' | base64 -d > '${path}'`, 30);
       if (written.exitCode !== 0) return finish({ status: "gave-up", summary: `Couldn't set up ${agent.driver.name}: ${written.stderr || written.stdout}` });
     }
-    let prompt = agentBriefing(o, plan, gates, before, [...locked.keys()]);
+    /** What its first run was told: a run that keeps no session starts again from it. */
+    const briefing = agentBriefing(o, plan, gates, before, [...locked.keys()]);
+    let prompt = briefing;
     let session: string | null = agent.session ?? null;
     let current = 0;
     // How much of the trail the reviewer has judged, and what it said: work it sent back is judged again only once
@@ -1654,6 +1670,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       // The reviewer and the audit are asked apart from the model the work's last answer came from here too: the
       // coding agent's own model, named as a ref (provider/model), so its same model is asked last, wherever it is.
       worked = agentModelName(model);
+      toldNow = [];
       const run = await runAgent(
         agent.driver,
         { model, prompt, session, deadline, workdir: agent.workdir, spent: spentNow, audit: auditNow, ...(deps.steers || o.audit ? { steer: steerNow, steers: steersLive } : {}), ...(cutOff ? { cutOff: true } : {}) },
@@ -1697,7 +1714,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       // (Its message reached a run that went on: what it carried needn't be said again.)
       if (run.status !== "failed") carried = "";
       // Steers told it as it worked that it never took (late, or never told): said in what comes next, before the rest.
-      const unheard = run.untold?.length ? run.untold.join("\n\n") : "";
+      const unheard = run.untold?.length ? sayAgain(run.untold) : "";
       const withUnheard = (text: string) => (unheard ? `${unheard}\n\n${text}` : text);
       if (unheard) carried = [carried, unheard].filter(Boolean).join("\n\n");
       // Ended by a steer between its tool calls (yours, your agent's or its audit's): taken up in its own session.
@@ -1745,10 +1762,13 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       }
       // Words that waited as it ended of itself, or that it never took as it worked, are said in its own session before it
       // is judged.
-      const waiting = session ? await takeSteers(steps) : [];
-      const audits = session ? auditSays.splice(0) : [];
+      // One that keeps no session (an ACP agent that can't load one) is told them too, its next run starting from its
+      // briefing with them: words taken are always said to the work.
+      const waiting = await takeSteers(steps);
+      const audits = auditSays.splice(0);
       if (waiting.length || audits.length || (unheard && session)) {
-        prompt = carried = waiting.length || audits.length ? withUnheard(steerPrompt(waiting, audits)) : `${unheard} Then end with a short summary and the evidence.`;
+        const words = waiting.length || audits.length ? withUnheard(steerPrompt(waiting, audits)) : `${unheard} Then end with a short summary and the evidence.`;
+        prompt = carried = session ? words : `${briefing}\n\n${words}`;
         continue;
       }
       // The reviewer sees the latest commands; every one of them is in the ledger.
@@ -1756,15 +1776,17 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       judged = trail.length;
       review = verdict.notes || undefined;
       // Words that came while it was judged come before its end, as for the engineer's own loop (said in its session).
-      const late = session ? await takeSteers(steps) : [];
+      // (Sent back with no session to send it to, or with its budget spent, it isn't taken up again: the reviewer's word
+      // stands, and what came meanwhile is left untaken, so the task says it ended before it reached it.)
+      const over = verdict.verdict !== "pass" && (!session || (await spentNow()));
+      const late = session && !over ? await takeSteers(steps) : [];
       if (verdict.verdict === "pass") {
         if (!late.length) return finish({ status: "done", summary: run.summary, review: verdict.notes || undefined });
         prompt = carried = `${passedBut(late)} end with a short summary and the evidence: the work is judged again.`;
         continue;
       }
-      // (Sent back with its budget spent, it isn't taken up again: the reviewer's word stands. A steer that came once its
-      // revisions were spent gives it one more round.)
-      if ((revisions >= o.maxRevisions && !late.length) || !session || (await spentNow())) return finish({ status: "unverified", summary: run.summary, review: verdict.notes });
+      // (A steer that came once its revisions were spent gives it one more round.)
+      if (over || (revisions >= o.maxRevisions && !late.length)) return finish({ status: "unverified", summary: run.summary, review: verdict.notes });
       if (revisions < o.maxRevisions) revisions += 1;
       prompt = `${sentBack(verdict, "verify it, then end with a short summary and the evidence.")}${late.length ? `\n\n${steersSaid(late, o.unreviewed)}` : ""}`;
       // (Only a message that carries steers is said again after a model's failure: one without is what it always was.)

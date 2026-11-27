@@ -1091,6 +1091,33 @@ describe("a steer of a running task", () => {
     expect(store.task(task.id)!.interventions).toEqual({ steer: 2 });
   });
 
+  test("your agent may say at most half of what one task takes, so yours always reach it; a task resting for its plan keeps what you say for when it goes on; a steer's line on its trail is whole", () => {
+    let clock = 1_000;
+    const store = make(":memory:", () => clock);
+    const task = running(store);
+    const half = TEAM_LIMITS.steers / 2;
+    for (let n = 0; n < half; n++) store.steer(task.id, "primary", `Note ${n}.`);
+    expect(() => store.steer(task.id, "primary", "One more.")).toThrow(`Your agent has said ${half} things to this task, as many as it may: yours still reach it.`);
+    for (let n = 0; n < half; n++) store.steer(task.id, "owner", `Yours ${n}.`);
+    expect(() => store.steer(task.id, "owner", "And another.")).toThrow("as many as one task takes");
+    // Resting until its plan's window resets, it goes on by itself: what you say now is kept for that run.
+    const other = make(":memory:", () => clock);
+    const resting = running(other);
+    other.rest(resting.id, clock + 3_600_000, "Every seat of yours that could take it is spent (Work Max)");
+    expect(other.steer(resting.id, "owner", "Use the new schema.")).toMatchObject({ by: "owner", text: "Use the new schema." });
+    clock += 3_600_000;
+    expect(other.resumeRestarted()).toBe(1);
+    expect(other.claim(resting.id)).toBe(true);
+    expect(other.takeSteers(resting.id, 0).map((s) => s.text)).toEqual(["Use the new schema."]);
+    // (Interrupted any other way, it waits for you, and says so.)
+    other.finish(resting.id, "interrupted", "The node stopped during this work.");
+    expect(() => other.steer(resting.id, "owner", "x")).toThrow("It isn't running: it was interrupted. Resume it, then steer it.");
+    // Its line on the trail is whole, however long the steer.
+    const long = "w".repeat(TEAM_LIMITS.steer);
+    store.progress(task.id, `Steered · You: ${long}`);
+    expect(store.trail(task.id).entries.at(-1)!.text).toBe(`Steered · You: ${long}`);
+  });
+
   test("a task that isn't running is refused in words that say what to do instead", () => {
     const store = make();
     setup(store);
