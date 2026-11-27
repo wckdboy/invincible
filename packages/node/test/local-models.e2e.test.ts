@@ -64,7 +64,7 @@ beforeAll(async () => {
   const { fleet: joinedFleet } = await waitForApproval(join, { intervalMs: 20 });
   const storeB = new LedgerStore(homeB.ledgerPath);
   storeB.expectFleet(joinedFleet);
-  storeB.ingest((await signedPost<SyncPage>(joined.identity, ultra.endpoint, "/link/sync", { have: {} })).events);
+  storeB.ingest((await signedPost<SyncPage>(joined.identity, { id: ultra.identity.id, endpoint: ultra.endpoint }, "/link/sync", { have: {} })).events);
   storeB.close();
   homeB.writeConfig({ v: 1, name: "mini", fleet: joinedFleet, port: portB, keystore: joined.keystore, advertise: "127.0.0.1" });
   mini = await startDaemon(homeB, {
@@ -116,7 +116,7 @@ test("a node's local runtime is asked by full nodes alone, and only for a model 
   // You (an owner's device) never call it: it is the fleet's way, not a way to a node's runtime from outside it.
   expect((await admin(homeB, portB)("localModelCall", { provider: "ollama", request: { model: "mimo-v2.6:9b", messages: [] } })).status).toBe(403);
   // A full node asking for a model the mini doesn't serve, or of a runtime that isn't local there, is told so.
-  const asNode = (input: unknown) => signedFetch(ultra.identity, `http://127.0.0.1:${portB}`, routes.localModelCall.path, input);
+  const asNode = (input: unknown) => signedFetch(ultra.identity, { id: mini.identity.id, endpoint: `http://127.0.0.1:${portB}` }, routes.localModelCall.path, input);
   expect((await asNode({ provider: "ollama", request: { model: "gemma4:26b", messages: [] } })).status).toBe(404);
   expect((await asNode({ provider: "deepseek", request: { model: "deepseek-v4-pro", messages: [] } })).status).toBe(404);
   expect(asked).toHaveLength(1);

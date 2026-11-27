@@ -123,6 +123,26 @@ const requests = [
   };
 });
 
+// ---- a request for one node, and that node's proof of its id (the slice 8 note's item 11) ----------------------------
+// What a device signs names the node it is for (v2: its id, last in what is signed), so another node refuses it; the
+// device learns that id from whoami, which proves it: the node's Ed25519 signature of the device's challenge.
+const theNode = core.nodeIdentity(new Uint8Array(32).fill(7), new Uint8Array(32).fill(9));
+const anotherNode = core.nodeIdentity(new Uint8Array(32).fill(8), new Uint8Array(32).fill(10));
+const requestsForNode = requests.map((request) => {
+  const body = utf8(request.body);
+  const input = core.requestSigningInput(request.method, request.path, request.ts, request.nonce, body, theNode.id);
+  const signature = p256.sign(input, scalar);
+  const headers = { [core.AUTH.device]: device, [core.AUTH.ts]: request.ts, [core.AUTH.nonce]: request.nonce, [core.AUTH.sig]: b64u(signature) };
+  if (core.verifyRequestSignature(new Headers(headers), request.method, request.path, body, Number(request.ts), theNode.id)?.named !== true) fail(`core refuses the request for its node at ${request.path}`);
+  if (core.verifyRequestSignature(new Headers(headers), request.method, request.path, body, Number(request.ts), anotherNode.id) !== null) fail(`another node takes the request for ${theNode.id} at ${request.path}`);
+  return { method: request.method, path: request.path, ts: request.ts, nonce: request.nonce, body: request.body, node: theNode.id, signingInput: fromUtf8(input), signature: b64u(signature), headers };
+});
+const nodeProofs = ["c2xpY2UtOC1jaGFsbGVuZ2U", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"].map((challenge) => {
+  const proof = b64u(theNode.sign(core.nodeProofInput(challenge)));
+  if (!core.verifyNodeProof(theNode.id, challenge, proof) || core.verifyNodeProof(anotherNode.id, challenge, proof)) fail(`core's node proof for ${challenge} isn't the node's alone`);
+  return { node: theNode.id, anotherNode: anotherNode.id, challenge, signingInput: fromUtf8(core.nodeProofInput(challenge)), proof };
+});
+
 // ---- canonical JSON (what the pairing proof is a MAC over) -----------------------------------------------------------
 const canonical = [
   { kind: "client", name: "Invincible app on iPhone", invite: "abc", device: "c_x" },
@@ -1895,10 +1915,20 @@ const seats = {
 
 const vectors = {
   about: "Made by apps/apple/scripts/vectors.ts from packages/core (and the PWA's roster). Every key here is a fake made for these tests.",
-  auth: { domain: "invincible-req/v1", headers: core.AUTH, maxSkewMs: core.MAX_REQUEST_SKEW_MS },
+  auth: {
+    domain: "invincible-req/v1",
+    domainNamed: "invincible-req/v2",
+    nodeProofDomain: "invincible-node/v1",
+    nodeChallenge: core.NODE_CHALLENGE.source,
+    namedFrom: core.REQUESTS_NAME_THEIR_NODE_FROM,
+    headers: core.AUTH,
+    maxSkewMs: core.MAX_REQUEST_SKEW_MS,
+  },
   base64url,
   identity: { scalarHex: hex(scalar), publicKey: b64u(publicKey), device },
   requests,
+  requestsForNode,
+  nodeProofs,
   canonical,
   pairing,
   agentOrbs,

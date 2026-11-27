@@ -124,7 +124,7 @@ async function node(name: string, founder: Node | null, extra: Partial<DaemonOpt
     const approved = await waitForApproval(join_, { intervalMs: 20 });
     const store = new LedgerStore(home.ledgerPath);
     store.expectFleet(approved.fleet);
-    store.ingest((await signedPost<SyncPage>(joining.identity, founder.d.endpoint, "/link/sync", { have: {} })).events);
+    store.ingest((await signedPost<SyncPage>(joining.identity, { id: founder.d.identity.id, endpoint: founder.d.endpoint }, "/link/sync", { have: {} })).events);
     store.close();
     home.writeConfig({ v: 1, name, fleet: approved.fleet, port, keystore: joining.keystore, advertise: "127.0.0.1", fabric: true });
   }
@@ -163,7 +163,7 @@ try {
     const https: number[] = [];
     for (let i = 0; i < N; i++) {
       const body = utf8(JSON.stringify({ have }));
-      const headers = await signRequest(b.identity.id, b.identity.sign, "POST", "/link/sync", body);
+      const headers = await signRequest(b.identity.id, b.identity.sign, "POST", "/link/sync", body, Date.now(), a.identity.id);
       const t0 = performance.now();
       const res = await fetch(`${a.endpoint}/link/sync`, { method: "POST", headers: { ...headers, "content-type": "application/json", connection: "close" }, body, keepalive: false } as RequestInit);
       await res.json();
@@ -213,7 +213,7 @@ try {
     const warmQamp: number[] = [];
     for (let i = 0; i < N; i++) {
       const t0 = performance.now();
-      await signedPost(b.identity, a.endpoint, "/link/sync", { have });
+      await signedPost(b.identity, { id: a.identity.id, endpoint: a.endpoint }, "/link/sync", { have });
       warmHttps.push(performance.now() - t0);
       // Signed inside the clock, as signedPost signs inside its own: each path's whole call, as a sync makes it.
       const t1 = performance.now();

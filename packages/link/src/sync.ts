@@ -1,6 +1,6 @@
 import { compareEvents, type GEvent, type NodeIdentity, type PeerPath, type PeerStatus, type SyncPage, type SyncRequest } from "@invincible/core";
 import { type Device, type LedgerStore, PullState } from "@invincible/ledger";
-import { type FetchLike, signedPost } from "./client.ts";
+import { type FetchLike, peerOf, signedPost } from "./client.ts";
 
 /*
  * Gossip-style sync. Every node periodically pulls from every reachable peer
@@ -141,7 +141,7 @@ export class SyncEngine {
         if (refused) throw new Error(refused);
         const result =
           viaQamp ??
-          (await signedPost<SyncPage>(this.identity, peer.profile!.endpoint!, "/link/sync", request, { fetch: this.opts.fetch, timeoutMs: 8000 }));
+          (await signedPost<SyncPage>(this.identity, peerOf(peer), "/link/sync", request, { fetch: this.opts.fetch, timeoutMs: 8000 }));
         presence = result.presence ?? presence;
         if (result.sets === true) this.comparesSets.add(peer.id);
         const taken = pull.receive(result);
@@ -190,7 +190,7 @@ export class SyncEngine {
     for (const peer of this.peers()) {
       if (this.statuses.get(peer.id)?.online === false) continue;
       // (Never over plain HTTP off the tailnet to a peer that speaks Q-AMP: its pull takes the events later.)
-      const https = () => (this.opts.transport?.httpRefused?.(peer) ? Promise.resolve() : signedPost(this.identity, peer.profile!.endpoint!, "/link/push", { events }, { fetch: this.opts.fetch, timeoutMs: 5000 }).catch(() => {}));
+      const https = () => (this.opts.transport?.httpRefused?.(peer) ? Promise.resolve() : signedPost(this.identity, peerOf(peer), "/link/push", { events }, { fetch: this.opts.fetch, timeoutMs: 5000 }).catch(() => {}));
       if (!this.opts.transport) {
         void https();
         continue;

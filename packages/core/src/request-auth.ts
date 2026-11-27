@@ -1,11 +1,12 @@
 import { b64u, type Bytes, fromB64u, randomId } from "./bytes.ts";
 import { sha256B64u } from "./crypto.ts";
-import { type DeviceId, domain, verifyDeviceSignature } from "./identity.ts";
+import { type DeviceId, domain, isNodeId, verifyDeviceSignature } from "./identity.ts";
 
 /**
  * Every node-to-node and client-to-node request is signed by the caller's device
- * key over (method, path, time, nonce, body hash). Tailscale already encrypts the
- * wire; this proves *which enrolled device* is calling, independently of the network.
+ * key over (method, path, time, nonce, body hash) and the node it is for. Tailscale
+ * already encrypts the wire; this proves *which enrolled device* is calling, and to
+ * which node, independently of the network.
  */
 export const AUTH = {
   device: "x-invincible-device",
@@ -17,22 +18,38 @@ export const AUTH = {
 export const MAX_REQUEST_SKEW_MS = 60_000;
 
 /**
+ * From 14 December 2026, a request names the node it is for in what it signs, or it is refused: one for one node is no
+ * request at another (the slice 8 note's item 11; the lead's word of 27 November 2026). Before then, one that names
+ * none (v1, what a device signed before) is taken too. Whoami's always is: a device asks it to learn, proven, which node
+ * it speaks to (verifyNodeProof), before it can name it.
+ */
+export const REQUESTS_NAME_THEIR_NODE_FROM = Date.UTC(2026, 11, 14);
+
+/**
+ * What a node's profile says it reads (`caps.requests`): requests that name it (v2). A node names a peer that says so;
+ * one that doesn't yet (an older node, which reads v1 alone) it asks as before, until REQUESTS_NAME_THEIR_NODE_FROM,
+ * so a fleet whose nodes update one by one keeps its sync.
+ */
+export const REQUESTS_READ = 2;
+export const readsNamedRequests = (caps: unknown): boolean =>
+  typeof caps === "object" && caps !== null && typeof (caps as { requests?: unknown }).requests === "number" && (caps as { requests: number }).requests >= REQUESTS_READ;
+
+/**
  * The asking device's time zone (an IANA name), sent with each request beside the signature: what time it is where you
  * are, in an answer of its. Only a hint, outside what is signed, and trusted for nothing else; a node from before it
  * ignores it, and one with none, or a name that isn't a zone, reads your day in your notifications' zone.
  */
 export const ZONE_HEADER = "x-invincible-tz";
 
-export const requestSigningInput = (
-  method: string,
-  path: string,
-  ts: string,
-  nonce: string,
-  body: Bytes,
-): Uint8Array<ArrayBuffer> => domain("invincible-req/v1", [method.toUpperCase(), path, ts, nonce, sha256B64u(body)].join("\n"));
+/** What a request's signature covers: v2 names the node it is for, last; v1, from before, names none. */
+export const requestSigningInput = (method: string, path: string, ts: string, nonce: string, body: Bytes, node?: DeviceId): Uint8Array<ArrayBuffer> =>
+  node === undefined
+    ? domain("invincible-req/v1", [method.toUpperCase(), path, ts, nonce, sha256B64u(body)].join("\n"))
+    : domain("invincible-req/v2", [method.toUpperCase(), path, ts, nonce, sha256B64u(body), node].join("\n"));
 
 export type Signer = (message: Uint8Array<ArrayBuffer>) => Bytes | Promise<Bytes>;
 
+/** A request's headers, signed by `device` for the node `node` (v2); without `node`, for none (v1, as before). */
 export async function signRequest(
   device: DeviceId,
   signer: Signer,
@@ -40,10 +57,11 @@ export async function signRequest(
   path: string,
   body: Bytes,
   now = Date.now(),
+  node?: DeviceId,
 ): Promise<Record<string, string>> {
   const ts = String(now);
   const nonce = randomId(12);
-  const sig = await signer(requestSigningInput(method, path, ts, nonce, body));
+  const sig = await signer(requestSigningInput(method, path, ts, nonce, body, node));
   return { [AUTH.device]: device, [AUTH.ts]: ts, [AUTH.nonce]: nonce, [AUTH.sig]: b64u(sig) };
 }
 
@@ -51,19 +69,28 @@ export interface RequestProof {
   device: DeviceId;
   nonce: string;
   ts: number;
+  /** Whether it names the node that checked it (v2); false: it names none (v1). */
+  named: boolean;
 }
 
 interface HeaderReader {
   get(name: string): string | null;
 }
 
-/** Returns the proven device, or null. Callers must still check enrollment, scope and nonce reuse. */
+/**
+ * Returns the proven device, or null. Callers must still check enrollment, scope and nonce reuse. `node`: the node
+ * checking it, by its own id: a request that names it (v2) is taken, and one that names none (v1) only while `legacy`
+ * says so (before REQUESTS_NAME_THEIR_NODE_FROM; or whoami's, which its caller says). Without `node`, v1 alone: a link
+ * call over Q-AMP, which its transport key already binds to its caller.
+ */
 export function verifyRequestSignature(
   headers: HeaderReader,
   method: string,
   path: string,
   body: Bytes,
   now = Date.now(),
+  node?: DeviceId,
+  legacy = now < REQUESTS_NAME_THEIR_NODE_FROM,
 ): RequestProof | null {
   const device = headers.get(AUTH.device);
   const ts = headers.get(AUTH.ts);
@@ -84,8 +111,29 @@ export function verifyRequestSignature(
   // since WebCrypto's signatures aren't low-S (verifyP256): harmless, as the nonce cache keys on the device and the
   // nonce, and refuses the second form of a request once the first is seen.
   if (b64u(signature) !== sig) return null;
-  if (!verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body))) return null;
-  return { device, nonce, ts: time };
+  if (node !== undefined && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body, node))) return { device, nonce, ts: time, named: true };
+  if ((node === undefined || legacy) && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body))) return { device, nonce, ts: time, named: false };
+  return null;
+}
+
+/** What a node signs to prove, to a device that asks, that it is the node its id names: the device's challenge. */
+export const nodeProofInput = (challenge: string): Uint8Array<ArrayBuffer> => domain("invincible-node/v1", challenge);
+/** A challenge as a device poses one: 16 to 64 base64url characters, fresh each time it asks. */
+export const NODE_CHALLENGE = /^[A-Za-z0-9_-]{16,64}$/;
+
+/**
+ * Whether `proof` (base64url) is the node `node`'s signature of `challenge` (nodeProofInput): it holds the key its id is,
+ * so it is that node. A device pins the id it proved and names it in what it signs (whoami's `proof`).
+ */
+export function verifyNodeProof(node: string, challenge: string, proof: string): boolean {
+  if (!isNodeId(node) || !NODE_CHALLENGE.test(challenge)) return false;
+  let signature: Bytes;
+  try {
+    signature = fromB64u(proof);
+  } catch {
+    return false;
+  }
+  return b64u(signature) === proof && verifyDeviceSignature(node as DeviceId, signature, nodeProofInput(challenge));
 }
 
 /**

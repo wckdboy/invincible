@@ -2,8 +2,8 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { bodyFingerprint, ceilingThreads, clientIdentity, FABRIC, type HandedView, KERNEL, LINK_PATHS, newClientSecret, REFERENCE_SINGLE, routes, type RouteName, signRequest, utf8 } from "../../packages/core/src/index.ts";
-import { requestPairing, signedPost, type SyncPage, waitForApproval } from "../../packages/link/src/index.ts";
+import { bodyFingerprint, ceilingThreads, clientIdentity, type DeviceId, FABRIC, type HandedView, KERNEL, LINK_PATHS, newClientSecret, REFERENCE_SINGLE, routes, type RouteName, signRequest, utf8 } from "../../packages/core/src/index.ts";
+import { provenNode, requestPairing, signedPost, type SyncPage, waitForApproval } from "../../packages/link/src/index.ts";
 import { enrollDevice, foundFleet, LedgerStore, revokeDevice } from "../../packages/ledger/src/index.ts";
 import type { Capabilities } from "../../packages/node/src/capabilities.ts";
 import { type Daemon, type DaemonOptions, startDaemon } from "../../packages/node/src/daemon.ts";
@@ -212,7 +212,10 @@ try {
   const store = new LedgerStore(home.ledgerPath);
   store.expectFleet(approved.fleet);
   const serverEndpoint = join_.invite.e;
-  store.ingest((await signedPost<SyncPage>(joining.identity, serverEndpoint, "/link/sync", { have: {} })).events);
+  // (Which node serves, proven: what it signs names it. An invite names only its address.)
+  const proven = await provenNode(joining.identity, serverEndpoint);
+  const serving = { ...(proven ? { id: proven } : {}), endpoint: serverEndpoint };
+  store.ingest((await signedPost<SyncPage>(joining.identity, serving, "/link/sync", { have: {} })).events);
   store.close();
   home.writeConfig({ v: 1, name: "client", fleet: approved.fleet, port: PORT, keystore: joining.keystore, advertise: ADVERTISE, fabric: true });
   node = await startDaemon(home, base("client"));
@@ -259,7 +262,7 @@ try {
   const freshHttp: number[] = [];
   for (let i = 0; i < N; i++) {
     const body = utf8(JSON.stringify({ have }));
-    const headers = await signRequest(me.identity.id, me.identity.sign, "POST", "/link/sync", body);
+    const headers = await signRequest(me.identity.id, me.identity.sign, "POST", "/link/sync", body, Date.now(), serving.id as DeviceId | undefined);
     const t0 = performance.now();
     const res = await fetch(`${serverEndpoint}/link/sync`, { method: "POST", headers: { ...headers, "content-type": "application/json", connection: "close" }, body, keepalive: false } as RequestInit);
     await res.json();
@@ -293,7 +296,7 @@ try {
   const warmQamp: number[] = [];
   for (let i = 0; i < N; i++) {
     const t0 = performance.now();
-    await signedPost(me.identity, serverEndpoint, "/link/sync", { have });
+    await signedPost(me.identity, serving, "/link/sync", { have });
     warmHttp.push(performance.now() - t0);
     // Signed inside the clock, as signedPost signs inside its own: each path's whole call, as a sync makes it.
     const t1 = performance.now();

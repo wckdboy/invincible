@@ -148,7 +148,7 @@ describe("your rules", () => {
       ["removeRule", { name: "no-locks" }, "only you can remove a rule"],
     ] as const) {
       // (A full node holds every scope: it is refused for who it is, after its signature was checked.)
-      const refused = await signedFetch(other, `http://127.0.0.1:${port}`, routes[route].path, body);
+      const refused = await signedFetch(other, { id: daemon.identity.id, endpoint: `http://127.0.0.1:${port}` }, routes[route].path, body);
       expect({ status: refused.status, error: ((await refused.json()) as { error: string }).error }).toEqual({ status: 403, error: why });
     }
     const reader = await pair("tablet", ["mind:read"]);

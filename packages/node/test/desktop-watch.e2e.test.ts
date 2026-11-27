@@ -150,7 +150,7 @@ beforeAll(async () => {
   const approved = await waitForApproval(join, { intervalMs: 20 });
   const boxStore = new LedgerStore(boxHome.ledgerPath);
   boxStore.expectFleet(approved.fleet);
-  boxStore.ingest((await signedPost<SyncPage>(joined.identity, keep.endpoint, "/link/sync", { have: {} })).events);
+  boxStore.ingest((await signedPost<SyncPage>(joined.identity, { id: keep.identity.id, endpoint: keep.endpoint }, "/link/sync", { have: {} })).events);
   boxStore.close();
   boxHome.writeConfig({ v: 1, name: "box", fleet: approved.fleet, port: boxPort, keystore: joined.keystore, advertise: "127.0.0.1" });
   box = await startDaemon(boxHome, {
@@ -252,11 +252,11 @@ describe("an agent's desktop, from your node, on the node its VM is on", () => {
     const vm = (await api<{ agents: { id: string; workspace: { id: string; node: string } | null }[] }>("team")).agents.find((a) => a.id === "una")!.workspace!;
     const run = `arm.${teamArmLabel(keep.identity.id, "una")}`;
     const before = { asked: sessions.flatMap((s) => s.asked).length, encoders: encoders.length };
-    const asLent = (port: number, name: RouteName, input: unknown) => signedFetch(lent, `http://127.0.0.1:${port}`, routes[name].path, input).then((r) => r.status);
-    for (const [port, on] of [[boxPort, {}], [keepPort, { on: vm.node }]] as const) {
-      expect(await asLent(port, "teamDesktopOn", { id: vm.id, ...on, run, action: { do: "click", x: 1, y: 1 } })).toBe(403);
-      expect(await asLent(port, "teamDesktopHoldOn", { id: vm.id, ...on, run, take: true })).toBe(403);
-      expect(await asLent(port, "teamDesktopStreamOn", { id: vm.id, ...on, run })).toBe(403);
+    const asLent = (port: number, id: string, name: RouteName, input: unknown) => signedFetch(lent, { id, endpoint: `http://127.0.0.1:${port}` }, routes[name].path, input).then((r) => r.status);
+    for (const [port, id, on] of [[boxPort, box.identity.id, {}], [keepPort, keep.identity.id, { on: vm.node }]] as const) {
+      expect(await asLent(port, id, "teamDesktopOn", { id: vm.id, ...on, run, action: { do: "click", x: 1, y: 1 } })).toBe(403);
+      expect(await asLent(port, id, "teamDesktopHoldOn", { id: vm.id, ...on, run, take: true })).toBe(403);
+      expect(await asLent(port, id, "teamDesktopStreamOn", { id: vm.id, ...on, run })).toBe(403);
     }
     // None of it reached the VM's desktop.
     expect(sessions.flatMap((s) => s.asked)).toHaveLength(before.asked);

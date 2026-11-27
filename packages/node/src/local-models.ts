@@ -22,6 +22,8 @@ export const serves = (models: LocalModels, runtime: string, model: string): boo
 
 /** A node of the fleet that may answer for its local models: its name, where it is reached, and what it serves. */
 export interface ModelPeer {
+  /** The node's id, which what it is sent names (absent: an older node, asked as before: link's peerOf). */
+  id?: string;
   name: string;
   endpoint: string;
   models: LocalModels;
@@ -38,7 +40,7 @@ export function viaFleet(opts: {
   runtimes: () => Map<string, string>;
   here: () => LocalModels;
   peers: () => ModelPeer[];
-  send: (endpoint: string, payload: { provider: string; request: Record<string, unknown> }, signal?: AbortSignal) => Promise<Response>;
+  send: (peer: { id?: string; endpoint: string }, payload: { provider: string; request: Record<string, unknown> }, signal?: AbortSignal) => Promise<Response>;
 }): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -54,7 +56,7 @@ export function viaFleet(opts: {
       const model = typeof request?.model === "string" ? request.model : null;
       if (request && model && !serves(opts.here(), provider, model)) {
         const peer = opts.peers().find((p) => serves(p.models, provider, model));
-        if (peer) return opts.send(peer.endpoint, { provider, request }, init?.signal ?? undefined);
+        if (peer) return opts.send({ ...(peer.id ? { id: peer.id } : {}), endpoint: peer.endpoint }, { provider, request }, init?.signal ?? undefined);
       }
     }
     return opts.base(input, init);

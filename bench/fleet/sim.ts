@@ -1,4 +1,4 @@
-import { b64u, compareEvents, type GEvent, HlcClock, MAX_CLOCK_DRIFT_MS, NonceCache, nodeIdentity, type NodeIdentity, PushRequest, signEvent, SyncRequest, verifyRequestSignature } from "../../packages/core/src/index.ts";
+import { b64u, compareEvents, type GEvent, HlcClock, MAX_CLOCK_DRIFT_MS, NonceCache, nodeIdentity, type NodeIdentity, PushRequest, REQUESTS_READ, signEvent, SyncRequest, verifyRequestSignature } from "../../packages/core/src/index.ts";
 import { answerPush, answerSync, type FetchLike, signedPost, SyncEngine } from "../../packages/link/src/index.ts";
 import { enrollDevice, foundFleet, LedgerStore, revokeDevice, Vault } from "../../packages/ledger/src/index.ts";
 import { intBelow, rng, shuffle, subSeed } from "../lib.ts";
@@ -202,7 +202,7 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
     /** The door: what server.ts does for a link request. */
     const deliver = (to: SimNode, path: string, headers: Headers, body: Uint8Array): { status: number; answer: unknown } =>
       as(to, () => {
-        const proof = verifyRequestSignature(headers, "POST", path, body, timeOf(to));
+        const proof = verifyRequestSignature(headers, "POST", path, body, timeOf(to), to.identity.id, false);
         const device = proof ? to.store.activeDevice(proof.device) : null;
         if (!proof || !device || device.kind !== "node" || !to.nonces.claim(proof.device, proof.nonce, timeOf(to), proof.ts)) {
           stats.refused++;
@@ -299,7 +299,8 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
       byDevice.set(identity.id, node);
       return node;
     };
-    const caps = (index: number) => ({ os: "linux", arch: "x64", cores: 8 + 4 * (index % 4), memoryGb: 16 * (1 + (index % 3)), docker: index % 2 === 1, tools: ["git"], gpu: [], localModels: [], vm: { kvm: false, tools: [] } });
+    // (Today's nodes, each saying it reads requests that name it: peers name it, and the doors refuse one that names none.)
+    const caps = (index: number) => ({ requests: REQUESTS_READ, os: "linux", arch: "x64", cores: 8 + 4 * (index % 4), memoryGb: 16 * (1 + (index % 3)), docker: index % 2 === 1, tools: ["git"], gpu: [], localModels: [], vm: { kvm: false, tools: [] } });
 
     const founder = makeNode(0, "n0");
     as(founder, () => {
@@ -576,13 +577,13 @@ export async function runFleetSim(options: FleetSimOptions): Promise<FleetSimRes
       };
     const carriedBefore = stats.eventsCarried;
     const refusedBefore = stats.refused;
-    for (const node of active()) await signedPost(stranger, node.endpoint, "/link/push", { events: foreign }, { fetch: knock(node) }).catch(() => {});
+    for (const node of active()) await signedPost(stranger, { id: node.identity.id, endpoint: node.endpoint }, "/link/push", { events: foreign }, { fetch: knock(node) }).catch(() => {});
     if (stats.refused - refusedBefore !== active().length) problems.push("a stranger's request passed the door");
     const relay = active()[active().length - 1]!;
     for (const node of active()) {
       if (node === relay) continue;
       current = relay;
-      await signedPost(relay.identity, node.endpoint, "/link/push", { events: [...foreign, ...(tampered ? [tampered] : [])] }, { fetch: knock(node) });
+      await signedPost(relay.identity, { id: node.identity.id, endpoint: node.endpoint }, "/link/push", { events: [...foreign, ...(tampered ? [tampered] : [])] }, { fetch: knock(node) });
       current = null;
     }
     // What a stranger sent isn't sync's cost.

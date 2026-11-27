@@ -152,7 +152,7 @@ describe("refused at the door", () => {
     const other = newNodeIdentity();
     daemon.store.emit(daemon.identity, "device.enrolled", { device: other.id, name: "mini", kind: "node", role: "full", box: b64u(other.boxPublic), scopes: [] });
     for (const [route, body] of [["qampGrant", { agent: AGENT, tools: ["fleet"] }], ["qampRevoke", { all: true }]] as const) {
-      const refused = await signedFetch(other, `http://127.0.0.1:${port}`, routes[route].path, body);
+      const refused = await signedFetch(other, { id: daemon.identity.id, endpoint: `http://127.0.0.1:${port}` }, routes[route].path, body);
       expect({ route, status: refused.status, error: ((await refused.json()) as { error: string }).error }).toEqual({ route, status: 403, error: "only you grant, list and end an agent's access over Q-AMP" });
     }
     const reader = await pair("reader", ["mind:read"]);

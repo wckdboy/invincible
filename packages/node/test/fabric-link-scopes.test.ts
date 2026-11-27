@@ -27,7 +27,7 @@ async function limitedNode(scopes: Scope[]) {
   const node = newNodeIdentity();
   p.a.store.emit(p.a.identity, "device.enrolled", { device: node.id, name: `sensor-${scopes.length}`, kind: "node", role: "limited", box: b64u(node.boxPublic), scopes });
   const answer = (path: string, body: unknown) =>
-    signedPost(node, p.a.endpoint, path, body).then(
+    signedPost(node, { id: p.a.identity.id, endpoint: p.a.endpoint }, path, body).then(
       () => 200,
       (error: Error) => Number(/→ (\d{3})/.exec(error.message)?.[1] ?? 0),
     );

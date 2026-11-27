@@ -20,15 +20,15 @@ function fleet(here: LocalModels, peers: ModelPeer[]) {
     runtimes: () => new Map([[`${OLLAMA}/chat/completions`, "ollama"]]),
     here: () => here,
     peers: () => peers,
-    send: async (endpoint, payload, signal) => {
-      sent.push({ endpoint, payload, ...(signal ? { signal } : {}) });
+    send: async (peer, payload, signal) => {
+      sent.push({ endpoint: peer.endpoint, payload, ...(signal ? { signal } : {}) });
       return new Response("there");
     },
   });
   return { fetch, based, sent };
 }
 
-const MINI: ModelPeer = { name: "mini", endpoint: "http://mini.test:7400", models: [{ runtime: "ollama", models: ["mimo-v2.6:9b", "qwen3.8:27b"] }] };
+const MINI: ModelPeer = { id: `n_${"M".repeat(43)}`, name: "mini", endpoint: "http://mini.test:7400", models: [{ runtime: "ollama", models: ["mimo-v2.6:9b", "qwen3.8:27b"] }] };
 
 describe("a model call over the fleet", () => {
   test("a local model only a peer serves is asked of that peer, as it was sent, with the caller's signal", async () => {

@@ -101,7 +101,7 @@ export async function startPair(opts: { a?: Partial<DaemonOptions>; b?: Partial<
   const approved = await waitForApproval(join_, { intervalMs: 50 });
   const storeB = new LedgerStore(homeB.ledgerPath);
   storeB.expectFleet(approved.fleet);
-  storeB.ingest((await signedPost<SyncPage>(joining.identity, a.endpoint, "/link/sync", { have: {} })).events);
+  storeB.ingest((await signedPost<SyncPage>(joining.identity, { id: a.identity.id, endpoint: a.endpoint }, "/link/sync", { have: {} })).events);
   storeB.close();
   homeB.writeConfig({ v: 1, name: "beta", fleet: approved.fleet, port: portB, keystore: joining.keystore, advertise: "127.0.0.1", fabric: true });
   const b = await startDaemon(homeB, { capabilities: fakeCaps("beta"), syncIntervalMs: 200, proxyPort: freePort(), log: logOf("beta"), sidecar: { binary: QAMP, port: await freeUdpPort() }, defaultHeartbeat: false, archiveIntervalMs: false, ...opts.b });

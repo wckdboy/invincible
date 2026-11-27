@@ -72,6 +72,10 @@ import {
   type FleetView,
   type NodeIdentity,
   NonceCache,
+  b64u,
+  NODE_CHALLENGE,
+  nodeProofInput,
+  REQUESTS_NAME_THEIR_NODE_FROM,
   OWNER_SCOPES,
   type AttachmentRef,
   type InterventionKind,
@@ -136,7 +140,7 @@ import {
 } from "@invincible/core";
 import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME } from "@invincible/models";
-import { answerPush, answerSync, PairingError, type PairingHost, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
+import { answerPush, answerSync, PairingError, type PairingHost, peerOf, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, type HandoffGrantRecord, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
 import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, type SandboxStream, STREAM_LINE_LIMIT, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
 import type { GovernedSandboxHost } from "./compute/governed-host.ts";
@@ -447,7 +451,7 @@ export function createApp(ctx: AppContext) {
   const nonces = new NonceCache();
   const adminBytes = utf8(ctx.adminToken);
 
-  function authenticate(req: Request, body: Uint8Array, pathAndQuery: string, listener: Listener): Principal | null {
+  function authenticate(req: Request, body: Uint8Array, pathAndQuery: string, listener: Listener, route?: RouteName): Principal | null {
     // A route a node forwarded over Q-AMP: the node its key proved, if it is still an active one (never cached).
     if (listener === "fabric") {
       const by = fabricPrincipalOf(req);
@@ -467,7 +471,10 @@ export function createApp(ctx: AppContext) {
         ? { device: ctx.identity.id, kind: "admin", scopes: OWNER_SCOPES }
         : null;
     }
-    const proof = verifyRequestSignature(req.headers, req.method, pathAndQuery, body);
+    // A request names the node it is for (v2), this one; one that names none (v1) is taken until the cutoff, and for
+    // whoami always: a device learns from it, proven, which node it speaks to (the slice 8 note's item 11).
+    const now = Date.now();
+    const proof = verifyRequestSignature(req.headers, req.method, pathAndQuery, body, now, ctx.identity.id, now < REQUESTS_NAME_THEIR_NODE_FROM || route === "whoami");
     if (!proof) return null;
     const device = ctx.store.activeDevice(proof.device);
     if (!device) return null;
@@ -540,7 +547,7 @@ export function createApp(ctx: AppContext) {
     const refused = ctx.fabric?.httpRefused(target) ?? null;
     if (refused) throw new HttpError(424, refused);
     try {
-      result = await signedPost<T>(ctx.identity, target.profile.endpoint, path, body, { timeoutMs: 75 * 60_000 });
+      result = await signedPost<T>(ctx.identity, peerOf(target), path, body, { timeoutMs: 75 * 60_000 });
     } catch (error) {
       const match = String((error as Error).message).match(/→ (\d{3}) (.*)$/s);
       if (!match) throw new HttpError(502, `${target.name} is unreachable`);
@@ -583,7 +590,7 @@ export function createApp(ctx: AppContext) {
     if (!holder.profile?.endpoint) throw new HttpError(424, `${holder.name} has no reachable endpoint`);
     let upstream: Response;
     try {
-      upstream = await signedFetch(ctx.identity, holder.profile.endpoint, routes.artifactFile.path, input, { timeoutMs: 10 * 60_000 });
+      upstream = await signedFetch(ctx.identity, peerOf(holder), routes.artifactFile.path, input, { timeoutMs: 10 * 60_000 });
     } catch {
       throw new HttpError(502, `${holder.name} is unreachable`);
     }
@@ -822,7 +829,7 @@ export function createApp(ctx: AppContext) {
     if (!target.profile?.endpoint) throw new HttpError(424, `${target.name} has no reachable endpoint`);
     let upstream: Response;
     try {
-      upstream = await signedFetch(ctx.identity, target.profile.endpoint, path, body, { signal });
+      upstream = await signedFetch(ctx.identity, peerOf(target), path, body, { signal });
     } catch {
       throw new HttpError(502, `${target.name} is unreachable`);
     }
@@ -903,10 +910,10 @@ export function createApp(ctx: AppContext) {
   const ownLocalModels = () => localModelsOf(ctx.store.activeDevice(ctx.identity.id)?.profile?.caps);
   /** The full nodes that may answer for their local models: each one that can be reached, and what it serves. */
   const modelPeers = (): ModelPeer[] =>
-    ctx.store.devices().flatMap((d) => (d.kind === "node" && d.role === "full" && d.id !== ctx.identity.id && d.profile?.endpoint ? [{ name: d.name, endpoint: d.profile.endpoint, models: localModelsOf(d.profile.caps) }] : []));
+    ctx.store.devices().flatMap((d) => (d.kind === "node" && d.role === "full" && d.id !== ctx.identity.id && d.profile?.endpoint ? [{ ...peerOf(d), name: d.name, models: localModelsOf(d.profile.caps) }] : []));
   /** Model calls over the fleet, on `base`: one for a local model only a peer serves goes there, signed; the rest as they would. */
   const overFleet = (base: typeof fetch): typeof fetch =>
-    viaFleet({ base, runtimes: localRuntimes, here: ownLocalModels, peers: modelPeers, send: (endpoint, payload, signal) => signedFetch(ctx.identity, endpoint, routes.localModelCall.path, payload, signal ? { signal } : { timeoutMs: 30 * 60_000 }) });
+    viaFleet({ base, runtimes: localRuntimes, here: ownLocalModels, peers: modelPeers, send: (peer, payload, signal) => signedFetch(ctx.identity, peer, routes.localModelCall.path, payload, signal ? { signal } : { timeoutMs: 30 * 60_000 }) });
   const modelFetch = overFleet(((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)) as typeof fetch);
 
   /** The brain, counting what each call cost on this node (counts only); a local model only a peer serves is asked there. */
@@ -3379,7 +3386,10 @@ export function createApp(ctx: AppContext) {
         return ctx.sandbox!.checkoutRepository(input.id, { connector, ...repo }, input.commit, input.path);
       }, { sandbox: input.id }));
     },
-    whoami: (_input, p) => ({
+    whoami: (_input, p, req) => ({
+      // Asked with a challenge, the node proves it is the node its id names (verifyNodeProof): a device pins the id it
+      // proved, and names it in what it signs (the slice 8 note's item 11).
+      ...whoamiProof(req),
       device: p.device,
       kind: p.kind,
       scopes: p.scopes,
@@ -5115,6 +5125,11 @@ export function createApp(ctx: AppContext) {
   };
 
   const routeTable = new Map(Object.entries(routes).map(([name, r]) => [`${r.method} ${r.path}`, name as RouteName]));
+  /** Whoami's proof, when its caller poses a challenge (`?challenge=`, in what it signed): this node's signature of it. */
+  const whoamiProof = (req: Request): { proof?: string } => {
+    const challenge = new URL(req.url).searchParams.get("challenge");
+    return challenge !== null && NODE_CHALLENGE.test(challenge) ? { proof: b64u(ctx.identity.sign(nodeProofInput(challenge))) } : {};
+  };
   /** The run that holds one of this node's sandboxes, as its host says (a gateway token names only its sandbox). */
   const sandboxRun = async (id: string): Promise<string | undefined> => (await ctx.sandbox?.get(id))?.run || undefined;
 
@@ -5177,7 +5192,7 @@ export function createApp(ctx: AppContext) {
       const name = routeTable.get(`${req.method} ${path}`);
       if (!name) throw new HttpError(404, "no such route");
       const route = routes[name];
-      const principal = authenticate(req, body, pathAndQuery, listener);
+      const principal = authenticate(req, body, pathAndQuery, listener, name);
       if (!principal) throw new HttpError(401, "sign the request with an enrolled device key");
       if (route.scope && !principal.scopes.includes(route.scope)) throw new HttpError(403, `requires scope ${route.scope}`);
       // One of your devices asked: where you are (its zone, a hint outside what's signed, trusted for nothing else) and

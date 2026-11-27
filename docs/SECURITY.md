@@ -78,6 +78,25 @@ The review also confirmed what held up:
 - **What a request proves.** Every request of a device or a node is signed by its key over its method, path, time,
   nonce and the hash of its body (`packages/core/src/request-auth.ts`). The node takes it only within a minute of its
   time, only from an active device, and only once: it remembers each device's nonces for two minutes.
+- **The node it is for.** What a request signs names the node it is for, last: `invincible-req/v2`, the node's id.
+  - **At another node:** a request for one node is refused, so a node that was sent one can't relay it to another of
+    yours within its minute.
+  - **What names a peer:** a node names each peer it asks by the id the signed log gives that peer, once that peer's
+    profile says it reads requests that name it (`caps.requests`), and from 14 December 2026 every peer. Until then an
+    older peer is asked as before, so a fleet that updates node by node keeps its sync.
+  - **One joining by an invite:** an invite names only its node's address. Such a node asks that node to prove which
+    node it is first (`provenNode`). An older node offers no proof, and is asked as before; a proof that fails is never
+    taken.
+  - **Until 14 December 2026,** a request that names no node (v1, what a device signed before) is taken too. After
+    that it is refused, but for whoami's: a device asks whoami to learn which node it speaks to, before it can name
+    it (`REQUESTS_NAME_THEIR_NODE_FROM`).
+  - **A node's link calls over Q-AMP** stay v1. They are bound to the node whose transport key sent them, so one
+    relayed by another node is refused there already.
+  - **The tests:** `packages/node/test/request-auth.e2e.test.ts`, `packages/core/test/core.test.ts`,
+    `packages/link/test/client.test.ts`.
+- **Which node it speaks to, proven.** Asked with a challenge (`/api/whoami?challenge=…`), whoami answers with the
+  node's signature of it under its own domain (`invincible-node/v1`), by the key its id is. A device checks that against
+  the id it says (`verifyNodeProof`), so a node can't say it is another, and pins it.
 - **Once, across a restart too.** A node that restarts forgets the nonces it saw, so it refuses a request signed before
   it began: that one may have been taken already. A device's next request is signed after, and is taken. The same holds
   for a node's link calls over Q-AMP (`packages/node/test/request-auth.e2e.test.ts`,

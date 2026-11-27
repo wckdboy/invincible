@@ -27,6 +27,9 @@ import {
   utf8,
   verifyRequestSignature,
   NonceCache,
+  nodeProofInput,
+  REQUESTS_NAME_THEIR_NODE_FROM,
+  verifyNodeProof,
 } from "../src/index.ts";
 
 describe("canonical json", () => {
@@ -154,6 +157,44 @@ describe("request signing", () => {
     const proof = verifyRequestSignature(headers, "POST", "/link/sync", body, 10_000)!;
     expect(nonces.claim(proof.device, proof.nonce, 10_000, proof.ts)).toBe(true);
     expect(nonces.claim(proof.device, proof.nonce, 10_001, proof.ts)).toBe(false);
+  });
+
+  // The slice 8 note's item 11 (the lead's word of 27 November): a request names the node it is for in what it signs, so
+  // a node that was sent one for another refuses it. One that names none (v1) is taken until 14 December 2026, then not,
+  // but for whoami's, which a device asks to learn which node it speaks to.
+  test("a request names the node it is for: taken there, refused at any other, and one naming none taken only before the cutoff", async () => {
+    const client = newNodeIdentity(); // (any device's key signs alike: a node's here)
+    const [a, b] = [newNodeIdentity().id, newNodeIdentity().id];
+    const body = utf8('{"q":"units"}');
+    const at = REQUESTS_NAME_THEIR_NODE_FROM - 60_000;
+    const forA = new Headers(await signRequest(client.id, client.sign, "POST", "/api/memories/search", body, at, a));
+    expect(verifyRequestSignature(forA, "POST", "/api/memories/search", body, at, a)).toEqual({ device: client.id, nonce: forA.get(AUTH.nonce)!, ts: at, named: true });
+    expect(verifyRequestSignature(forA, "POST", "/api/memories/search", body, at, b)).toBeNull();
+    // (Read as one that names no node, it isn't one either: its domain is another.)
+    expect(verifyRequestSignature(forA, "POST", "/api/memories/search", body, at)).toBeNull();
+    const old = new Headers(await signRequest(client.id, client.sign, "POST", "/api/memories/search", body, at));
+    expect(verifyRequestSignature(old, "POST", "/api/memories/search", body, at, a)?.named).toBe(false);
+    const after = REQUESTS_NAME_THEIR_NODE_FROM + 1;
+    const late = new Headers(await signRequest(client.id, client.sign, "POST", "/api/memories/search", body, after));
+    expect(verifyRequestSignature(late, "POST", "/api/memories/search", body, after, a)).toBeNull();
+    // Whoami's is taken all the same (its caller says so): a device learns from it which node it speaks to.
+    expect(verifyRequestSignature(late, "POST", "/api/memories/search", body, after, a, true)?.named).toBe(false);
+    const named = new Headers(await signRequest(client.id, client.sign, "POST", "/api/memories/search", body, after, a));
+    expect(verifyRequestSignature(named, "POST", "/api/memories/search", body, after, a)?.named).toBe(true);
+  });
+
+  test("a node proves its id to a device that asks: its signature of the device's challenge, under its own domain", () => {
+    const node = newNodeIdentity();
+    const challenge = "c2xpY2UtOC1jaGFsbGVuZ2U";
+    const proof = b64u(node.sign(nodeProofInput(challenge)));
+    expect(verifyNodeProof(node.id, challenge, proof)).toBe(true);
+    expect(verifyNodeProof(newNodeIdentity().id, challenge, proof)).toBe(false);
+    expect(verifyNodeProof(node.id, "c2xpY2UtOC1jaGFsbGVuZ2X", proof)).toBe(false);
+    // Under its own domain: an event's or a request's signature by that key is no proof.
+    expect(verifyNodeProof(node.id, challenge, b64u(node.sign(utf8(`invincible-event/v1\n${challenge}`))))).toBe(false);
+    // A challenge as a device poses one, and a client's id never proves to be a node.
+    expect(verifyNodeProof(node.id, "short", b64u(node.sign(nodeProofInput("short"))))).toBe(false);
+    expect(verifyNodeProof(`c_${"A".repeat(87)}`, challenge, proof)).toBe(false);
   });
 
   // The slice 8 note's item 11 (the lead's word of 27 November): a node that restarts forgets the nonces it saw, so a

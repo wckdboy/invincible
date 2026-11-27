@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, decodeHlc, type FabricSettingView, fitLedger, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, screenSessionView } from "@invincible/core";
+import { canonical, decodeHlc, type FabricSettingView, fitLedger, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, REQUESTS_READ, screenSessionView } from "@invincible/core";
 import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, signInWindowsOf, windowsOf } from "@invincible/models";
 // The apps' own words for a task's verdict, cost and what can be done with it (the CLI reads them too).
 import { activityOf } from "../../../apps/web/src/lib/live-activity.ts";
@@ -224,7 +224,8 @@ const SHUTDOWN_GRACE_MS = 10_000;
 
 /** Publish this node's endpoint + capabilities, only when they changed (idempotent). */
 function publishProfile(store: LedgerStore, identity: NodeIdentity, endpoint: string, caps: Capabilities): void {
-  const body = { endpoint, caps: caps as unknown as Record<string, unknown> };
+  // (And that it reads requests that name it, so its peers name it: core's REQUESTS_READ.)
+  const body = { endpoint, caps: { ...(caps as unknown as Record<string, unknown>), requests: REQUESTS_READ } };
   const current = store.device(identity.id)?.profile;
   if (current && canonical(current) === canonical(body)) return;
   store.emit(identity, "node.profile", body);

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { type ArtifactView, type AwayView, b64u, type LookView, type ChatStreamEvent, decodeInvite, encodeQr, type FleetView, type InvestigationView, qrToTerminal, type RouteName, routes, type SandboxView, type ScreenSessionView, type ScreenStatus, type ScreenView, type TeamOutcome, type SlackView, SLACK_APP_MANIFEST, type TelegramView, type EvalView, type QuestionView, plainLine, type LiveEvent } from "@invincible/core";
 import { onPlan, planOf, sseData } from "@invincible/models";
-import { requestPairing, signedPost, type SyncPage, waitForApproval } from "@invincible/link";
+import { provenNode, requestPairing, signedPost, type SyncPage, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import { artifactTarget, leftOutCount, leftOutNames } from "./artifacts.ts";
 import { servedOrigin, tailscaleInfo } from "./capabilities.ts";
@@ -834,10 +834,13 @@ Next:
       });
       console.log(`\n  Confirmation code:  ${bold(join.sas)}\n\n  Approve on the inviting node if it shows the same code. Waiting…`);
       const { fleet } = await waitForApproval(join);
+      // (Which node it joined, proven: what it signs names it. An invite names only its address.)
+      const proven = await provenNode(identity, invite.e);
+      const inviter = { ...(proven ? { id: proven } : {}), endpoint: invite.e };
       const store = new LedgerStore(home.ledgerPath);
       store.expectFleet(fleet);
       for (let page = 0; page < 1000; page++) {
-        const result = await signedPost<SyncPage>(identity, invite.e, "/link/sync", { have: store.frontier() });
+        const result = await signedPost<SyncPage>(identity, inviter, "/link/sync", { have: store.frontier() });
         store.ingest(result.events);
         if (!result.more) break;
       }

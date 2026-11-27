@@ -50,7 +50,7 @@ beforeAll(async () => {
   const approved = await waitForApproval(join_, { intervalMs: 50 });
   const storeB = new LedgerStore(homeB.ledgerPath);
   storeB.expectFleet(approved.fleet);
-  storeB.ingest((await signedPost<SyncPage>(joining.identity, a.endpoint, "/link/sync", { have: {} })).events);
+  storeB.ingest((await signedPost<SyncPage>(joining.identity, { id: a.identity.id, endpoint: a.endpoint }, "/link/sync", { have: {} })).events);
   storeB.close();
   homeB.writeConfig({ v: 1, name: "beta", fleet: approved.fleet, port: portB, keystore: joining.keystore, advertise: "127.0.0.1" });
   b = await startDaemon(homeB, { capabilities: fakeCaps("beta"), syncIntervalMs: 200, proxyPort: freePort(), log: () => {}, sidecar: false, defaultHeartbeat: false, archiveIntervalMs: false });
@@ -102,7 +102,7 @@ const byAlpha = () => `node:${a.identity.id}`;
 
 describe("who may give beta's agents work", () => {
   test("over HTTPS, alpha (a full node) is refused: giving agents work is yours alone", async () => {
-    const give = await signedPost(a.identity, b.endpoint, "/api/team/give", { goal: "given by a node" }).then(
+    const give = await signedPost(a.identity, { id: b.identity.id, endpoint: b.endpoint }, "/api/team/give", { goal: "given by a node" }).then(
       () => "accepted",
       (e: Error) => e.message,
     );
@@ -200,7 +200,7 @@ describe("who may give beta's agents work", () => {
   });
 
   test("a grant is yours alone, from one active full node to another: a node's own is refused, and so is one for itself", async () => {
-    await expect(signedPost(a.identity, b.endpoint, "/api/fabric/grants", { from: "alpha", to: "beta", budgetUsdPerDay: 5 })).rejects.toThrow("403");
+    await expect(signedPost(a.identity, { id: b.identity.id, endpoint: b.endpoint }, "/api/fabric/grants", { from: "alpha", to: "beta", budgetUsdPerDay: 5 })).rejects.toThrow("403");
     await expect(callB("grantHandoffs", { from: "beta", to: "beta", budgetUsdPerDay: 5 })).rejects.toThrow("400");
   });
 });

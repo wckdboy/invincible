@@ -134,7 +134,7 @@ describe("M0: one mind, two bodies", () => {
     const { fleet } = await waitForApproval(join, { intervalMs: 50 });
     const store = new LedgerStore(homeB.ledgerPath);
     store.expectFleet(fleet);
-    const page = await signedPost<SyncPage>(identity, laptop.endpoint, "/link/sync", { have: {} });
+    const page = await signedPost<SyncPage>(identity, { id: laptop.identity.id, endpoint: laptop.endpoint }, "/link/sync", { have: {} });
     store.ingest(page.events);
     expect(store.activeDevice(identity.id)?.name).toBe("server");
     store.close();
@@ -436,7 +436,7 @@ describe("M0: one mind, two bodies", () => {
     const callA = admin(homeA, portA);
     const dashes = "-".repeat(5);
     const body = { key: `${dashes}BEGIN PRIVATE KEY${dashes}\nRkFLRQ==\n${dashes}END PRIVATE KEY${dashes}`, keyId: "FAKEKEY001", teamId: "FAKETEAM01", topic: "org.example.fake" };
-    const asNode = await signedFetch(server.identity, laptop.endpoint, routes.setApplePushKey.path, body);
+    const asNode = await signedFetch(server.identity, { id: laptop.identity.id, endpoint: laptop.endpoint }, routes.setApplePushKey.path, body);
     expect(asNode.status).toBe(403);
     expect(await asNode.text()).toContain("notifications are yours alone");
     // You at a terminal are asked for a key that can sign, as ever.
@@ -532,7 +532,7 @@ describe("M0: one mind, two bodies", () => {
     expect(missing.status).toBe(404);
     expect(((await missing.json()) as { error: string }).error).toMatch(/server: no such file/);
     // A node's forwarded request runs where it lands: the laptop never forwards one on.
-    const relayed = await signedPost(server.identity, laptop.endpoint, routes.artifactFile.path, { id: kept.id, path: "report.md" }).catch((error: Error) => error.message);
+    const relayed = await signedPost(server.identity, { id: laptop.identity.id, endpoint: laptop.endpoint }, routes.artifactFile.path, { id: kept.id, path: "report.md" }).catch((error: Error) => error.message);
     expect(String(relayed)).toMatch(/421/);
   });
 

@@ -2,6 +2,10 @@
   "about": "Made by apps/apple/scripts/vectors.ts from packages/core (and the PWA's roster). Every key here is a fake made for these tests.",
   "auth": {
     "domain": "invincible-req/v1",
+    "domainNamed": "invincible-req/v2",
+    "nodeProofDomain": "invincible-node/v1",
+    "nodeChallenge": "^[A-Za-z0-9_-]{16,64}$",
+    "namedFrom": 1797206400000,
     "headers": {
       "device": "x-invincible-device",
       "ts": "x-invincible-ts",
@@ -169,6 +173,88 @@
         "x-invincible-nonce": "_-_-_-_-_-_-_-_-",
         "x-invincible-sig": "mbKCVWuCwvGn631L3yrtyGmLtTIak4cejxpRnpkLk7ADH1kNPBBC6SeLW1Uhn2MBsNfT5XJdQvjfrmr-tFXP5A"
       }
+    }
+  ],
+  "requestsForNode": [
+    {
+      "method": "GET",
+      "path": "/api/whoami",
+      "ts": "1763200000000",
+      "nonce": "AAECAwQFBgcICQoL",
+      "body": "",
+      "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "signingInput": "invincible-req/v2\nGET\n/api/whoami\n1763200000000\nAAECAwQFBgcICQoL\n47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU\nn_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "signature": "AQi3xumWk3aq5loogejY-H_uQMU1w-Rcx9TZCyhgP6QEVEPPmRTH4fAHrZ8tfIXlfb9ZG-Ke3PAfReutw-Cjzg",
+      "headers": {
+        "x-invincible-device": "c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+        "x-invincible-ts": "1763200000000",
+        "x-invincible-nonce": "AAECAwQFBgcICQoL",
+        "x-invincible-sig": "AQi3xumWk3aq5loogejY-H_uQMU1w-Rcx9TZCyhgP6QEVEPPmRTH4fAHrZ8tfIXlfb9ZG-Ke3PAfReutw-Cjzg"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/team?probe=1",
+      "ts": "1763200000001",
+      "nonce": "nonce-for-tests1",
+      "body": "",
+      "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "signingInput": "invincible-req/v2\nGET\n/api/team?probe=1\n1763200000001\nnonce-for-tests1\n47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU\nn_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "signature": "_VUgmq3alwrNzR_5xyTY4_AC3JegVCDGrZcID_5MkA9EFdSYlPdf7d5zC68_QT5mKU4tE-JoY5CFo7F7onvSgg",
+      "headers": {
+        "x-invincible-device": "c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+        "x-invincible-ts": "1763200000001",
+        "x-invincible-nonce": "nonce-for-tests1",
+        "x-invincible-sig": "_VUgmq3alwrNzR_5xyTY4_AC3JegVCDGrZcID_5MkA9EFdSYlPdf7d5zC68_QT5mKU4tE-JoY5CFo7F7onvSgg"
+      }
+    },
+    {
+      "method": "post",
+      "path": "/api/chat",
+      "ts": "1763200000002",
+      "nonce": "AAAAAAAAAAAAAAAA",
+      "body": "{\"role\":\"planner\",\"save\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Hvad så, Invincible? 🛡️ «quoted» \\\\ \\n\"}]}",
+      "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "signingInput": "invincible-req/v2\nPOST\n/api/chat\n1763200000002\nAAAAAAAAAAAAAAAA\nX3Qt9CdvdaininyFW20WrgMwE2qaVWg20mpJohGLhX0\nn_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "signature": "w3lCmWGQusW1wIsrhIBqsnfj6dJNXOuuskUweuNJLahfvsTIOqq9l6Eu_aTxyvgp0lVWjYA5zZHl5PHHGV0mjQ",
+      "headers": {
+        "x-invincible-device": "c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+        "x-invincible-ts": "1763200000002",
+        "x-invincible-nonce": "AAAAAAAAAAAAAAAA",
+        "x-invincible-sig": "w3lCmWGQusW1wIsrhIBqsnfj6dJNXOuuskUweuNJLahfvsTIOqq9l6Eu_aTxyvgp0lVWjYA5zZHl5PHHGV0mjQ"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/secrets",
+      "ts": "1763200000003",
+      "nonce": "_-_-_-_-_-_-_-_-",
+      "body": "{\"name\":\"github-token\",\"value\":\"not-a-real-key\"}",
+      "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "signingInput": "invincible-req/v2\nPOST\n/api/secrets\n1763200000003\n_-_-_-_-_-_-_-_-\nwR50_T5yuM3yd1dH-OVP14U5519Alc_9MvF1W_yj2Kc\nn_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "signature": "UF3oBfVYYCjjOioGfoZjFxZTJAfqPZUQkpgrnHLmT0tEYm0U8tCEDQTKuw63WDB-dCRgNF5HZNP1xem_tZ7hCA",
+      "headers": {
+        "x-invincible-device": "c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q",
+        "x-invincible-ts": "1763200000003",
+        "x-invincible-nonce": "_-_-_-_-_-_-_-_-",
+        "x-invincible-sig": "UF3oBfVYYCjjOioGfoZjFxZTJAfqPZUQkpgrnHLmT0tEYm0U8tCEDQTKuw63WDB-dCRgNF5HZNP1xem_tZ7hCA"
+      }
+    }
+  ],
+  "nodeProofs": [
+    {
+      "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "anotherNode": "n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "signingInput": "invincible-node/v1\nc2xpY2UtOC1jaGFsbGVuZ2U",
+      "proof": "jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA"
+    },
+    {
+      "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "anotherNode": "n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o",
+      "challenge": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "signingInput": "invincible-node/v1\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "proof": "x9t79sg6bKtE5TR9T0MK6tc8lILQXnlaGbu9LS1st84U7dsLAiOFyMr39ivovpsMsTwp2I62dweLbjBvGsLfDw"
     }
   ],
   "canonical": [
