@@ -71,6 +71,8 @@ const measure: Measure = async (reason, body, limit): Promise<Calibration> => {
 const asked: { role: string; model: string; attempt: number }[] = [];
 let thinking = 0;
 let peakThinking = 0;
+/** How many engineers think together in the test at hand: the effort-3 test's three, 1 otherwise. */
+let together = 1;
 const fence = "```";
 const models = Bun.serve({
   port: 0,
@@ -90,11 +92,17 @@ const models = Bun.serve({
       text = "PASS\nThe file is there.";
     } else if (first.startsWith("Run:")) {
       role = "engineer";
+      const done = turns.filter((m) => m.role === "assistant").length;
+      // (With three together, the third attempt's engineer comes 150 ms after the others, as a loaded machine can make
+      // it: past both of their turns, so only holding them shows the three at work at once.)
+      if (together > 1 && attempt === 3 && done === 0) await Bun.sleep(150);
       thinking += 1;
       peakThinking = Math.max(peakThinking, thinking);
+      // Each attempt's first call is held until they all think at once, or 5 s: attempts run side by side all get
+      // there, however late one starts; attempts taken in turn never do. (A fixed 40 ms alone read a late one as two.)
+      for (const by = Date.now() + 5_000; done === 0 && thinking < together && Date.now() < by; ) await Bun.sleep(5);
       await Bun.sleep(40);
       thinking -= 1;
-      const done = turns.filter((m) => m.role === "assistant").length;
       text = done === 0 ? `Writing it.\n${fence}sh\necho hi > /work/out/hi.txt && cat /work/out/hi.txt\n${fence}` : `DONE\nDone by attempt ${attempt}.`;
     }
     asked.push({ role, model: body.model, attempt });
@@ -265,6 +273,7 @@ describe("effort that scales", () => {
     const grants: EffortGrant[] = [];
     const started: number[] = [];
     let running = 0;
+    together = 3;
     const { outcome, effort, run } = await runOnNode(
       client(),
       { goal: "write hi to a file", network: "isolated", effort: 3 },
@@ -278,7 +287,7 @@ describe("effort that scales", () => {
           running = Math.max(running, docker.running());
         },
       },
-    );
+    ).finally(() => (together = 1));
     // The node granted three: three slots were free, and the day's budget had room.
     expect(grants[0]).toMatchObject({ attempts: 3, asked: 3, host: "ultra" });
     expect(started.sort()).toEqual([1, 2, 3]);
