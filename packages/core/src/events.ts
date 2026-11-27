@@ -12,6 +12,7 @@ import { Scope } from "./scopes.ts";
 import { SkillId, SkillVersionId } from "./skills-input.ts";
 import { EvalId, EvalRecord, EvalRunId } from "./evals.ts";
 import { SEAT_LIMITS, SeatId, SeatKind, SeatSignInBody, SeatWindowBody, SeatWindowName } from "./seats.ts";
+import { WORD_NONCE } from "./words.ts";
 
 /** How hard a model thinks for an answer (Anthropic's `effort`; other providers' models choose for themselves). */
 export const THINKING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -395,6 +396,20 @@ export const Bodies = {
   /** A grant, given or replaced. Its terms are open in the log: a newer node's never make this one refuse the event (readHandoffTerms reads them). */
   "handoff.granted": z.strictObject({ from: DeviceRef, to: DeviceRef, terms: Open }),
   "handoff.revoked": z.strictObject({ from: DeviceRef, to: DeviceRef }),
+  /**
+   * Your word's companion (slice 8; core's words.ts): written by the node that records a word of yours just before it,
+   * so the word's prev is this. It carries the statement a device of yours signed, and its P-256 signature. Applying it
+   * changes nothing and refuses nothing: the word that follows is judged by it, from WORDS_SIGNED_FROM.
+   */
+  "word.signed": z.strictObject({
+    v: z.literal(1),
+    device: z.string().regex(/^c_[A-Za-z0-9_-]{87}$/),
+    nonce: z.string().regex(WORD_NONCE),
+    at: z.number().int().nonnegative(),
+    kind: z.string().regex(/^[a-z]+(\.[a-z_]+)+$/).max(64),
+    digest: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    sig: z.string().regex(/^[A-Za-z0-9_-]{86}$/),
+  }),
 } as const;
 
 export type EventKind = keyof typeof Bodies;
