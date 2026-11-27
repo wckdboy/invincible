@@ -175,6 +175,20 @@ const json = (status: number, error: string) =>
   Response.json({ error: { type: "invincible_gateway", message: error } }, { status });
 
 /*
+ * What a lease held to models (work in sensitive mode, another node's task) may ask of a provider with your key: its
+ * models' calls and their listing, nothing else (the fourth fabric review's R4-3). So no file, stored response, batch or
+ * vector store of yours is read through it, nor a batch made, by any method. By the provider's protocol, each after an
+ * optional `v1/`, as its base URL may or may not hold it.
+ */
+const MODEL_CALLS: Record<"openai" | "anthropic", RegExp> = {
+  openai: /^(?:v1\/)?(?:chat\/completions|completions|responses)$/,
+  anthropic: /^(?:v1\/)?messages(?:\/count_tokens)?$/,
+};
+const MODEL_LISTING = /^(?:v1\/)?models(?:\/[A-Za-z0-9._:@/-]+)?$/;
+const heldMay = (method: string, kind: "openai" | "anthropic", rest: string): boolean =>
+  method === "GET" || method === "HEAD" ? MODEL_LISTING.test(rest) : method === "POST" && MODEL_CALLS[kind].test(rest);
+
+/*
  * A plan's allowance spent, as a tool hears it. Told by its provider to try again in a day and a half, OpenCode 2.3.0
  * waits fifteen minutes and asks again, for as long as that lasts, and Codex 0.169.0 waits all of it; told 402, each ends
  * within seconds, as Claude Code does either way, and the next model on an agent's list takes over (measured 21 Nov
@@ -227,6 +241,7 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   // them alone: any other, on this provider or another, is refused before a byte of the call leaves (a provider that
   // serves others' models too, as NEAR AI's does, serves only those).
   const held = ctx.tokens.modelsOf(token);
+  if (held && !heldMay(request.method, provider.kind, rest)) return json(403, `this lease is for model calls alone (${held.join(", ")}): ${request.method} ${rest.slice(0, 80)} isn't one`);
   if (held && body && !held.includes(`${providerId}/${modelOf(body)}`)) return json(403, `this lease is for ${held.join(", ")} alone`);
   // A plan whose allowance is spent past the next minute (windows.ts) isn't asked a model call again until it resets;
   // nor is a model of any other provider's that was told to wait that long (its others are asked as ever).

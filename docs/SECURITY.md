@@ -688,8 +688,11 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     round counted.
   - What a handed task does is bounded with it (the second re-review's N7), but for the known gaps below:
     - Its agent's own loop, its coding tool and its commands run only on models its budget counts at more than $0 (its
-      VM's lease is good for those alone, and the gateway refuses any other: the third re-review's R3-4; the lease
-      carries neither the keys of yours its agent may use nor its agent's repository), never on a coding tool's own
+      VM's lease is good for those models' calls alone: the gateway refuses any other model, the third re-review's
+      R3-4, and on that lease any route but its protocol's model calls, a POST, and their listing, a GET, so nothing
+      else of yours with that provider, its files, stored responses, batches or vector stores, is reached with your
+      key: R4-3, `packages/models/test/gateway-lease.test.ts`; the lease carries neither the keys of yours its agent may
+      use nor its agent's repository), never on a coding tool's own
       sign-in (a seat) or an ACP agent, so what they spend is counted. But not (I-l): a paid model's call that reports
       no usage counts nothing, for any budget, and a command can start a coding tool itself on that tool's own sign-in
       in the VM, if it has one, which no lease reaches.

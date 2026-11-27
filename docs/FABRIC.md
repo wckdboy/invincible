@@ -118,9 +118,12 @@ transport keys carries all of it:
      names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever smaller budget
      it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its work runs only on
      models its budget counts at more than $0 (one you've priced above nothing, on no coding plan): its agent's own
-     loop, its coding tool, and its commands, whose VM's lease is good for those models alone, the gateway refusing
-     any other (the third re-review's R3-4). That lease carries nothing else: not the keys of yours its agent may use,
-     nor its agent's repository, which are its agent's own work's. Never on one it counts as nothing, nor on a coding
+     loop, its coding tool, and its commands, whose VM's lease is good for those models' calls alone. The gateway
+     refuses any other model (the third re-review's R3-4), and on that lease any route but its protocol's model calls
+     (a POST) and their listing (a GET), so nothing else of yours with that provider (its files, stored responses,
+     batches, vector stores) is read with your key, nor a batch made (the fourth re-review's R4-3). That lease carries
+     nothing else: not the keys of yours its agent may use, nor its agent's repository, which are its agent's own
+     work's. Never on one it counts as nothing, nor on a coding
      tool's own sign-in in the VM (a seat), nor in an ACP agent of yours. Two things it doesn't bound (I-l): a paid
      model's call that reports no usage counts nothing, whatever the budget, and a command can start a coding tool
      itself on that tool's own sign-in in the VM, if it has one, which no lease reaches.
