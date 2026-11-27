@@ -537,3 +537,101 @@ export async function costs(b: Bench, seed: number, seconds: number): Promise<Co
     await vm.remove();
   }
 }
+
+/** What the stream you watch costs on one scene (C1 step 9), read as the node reads it. */
+export interface LiveCost {
+  /** Frames a second while it keeps moving: the cadence from the window's first frame to its last (0 when it sent none). */
+  fps: number;
+  /** What the window's frames made, kbit/s, their framing included. */
+  kbit: number;
+  /** The encoder's own CPU, and deskd's beside it, % of a core (in the VM, from /proc). */
+  encoderPct: number;
+  deskdPct: number;
+  /** From the exec's start to its first frame (a keyframe), ms. */
+  firstFrameMs: number;
+  /** From each frame's capture (the VM's clock, a Kata guest's being the host's) to its arrival here: the median, ms. */
+  lagMs: number;
+}
+
+/** C0's scrolling page (§2.7): the kit's long page, scrolled by C0's own script. */
+const SCROLLING = "<script>let d=6;setInterval(()=>{scrollBy(0,d);if(innerHeight+scrollY>=document.body.scrollHeight-2||scrollY<=0)d=-d},33)</script>";
+
+const pidOf = async (vm: BenchVm, args: string[]): Promise<string> => (await vm.raw(["pgrep", ...args])).stdout.trim().split("\n")[0] ?? "";
+
+/** A process's CPU ticks in the VM (utime and stime), by its PID. */
+async function ticks(vm: BenchVm, pid: string): Promise<number> {
+  const stat = (await vm.raw(["cat", `/proc/${pid}/stat`])).stdout;
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  return Number(fields[11]) + Number(fields[12]);
+}
+
+/**
+ * The stream on the screen as it is: `desktop stream` in a held exec of its own, as the node runs it (its frames: a
+ * 4-byte length, a kind, an 8-byte capture time, then Annex B), read here for `seconds`, then ended by closing its stdin.
+ */
+async function liveFor(vm: BenchVm, deskd: string, hz: number, seconds: number): Promise<LiveCost> {
+  const proc = Bun.spawn(["docker", "exec", "-i", vm.container, "desktop", "stream"], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  const t0 = performance.now();
+  const frames: { at: number; bytes: number; lagMs: number }[] = [];
+  let buffer = new Uint8Array(0);
+  const reading = (async () => {
+    for await (const chunk of proc.stdout as unknown as AsyncIterable<Uint8Array>) {
+      const joined = new Uint8Array(buffer.length + chunk.length);
+      joined.set(buffer);
+      joined.set(chunk, buffer.length);
+      buffer = joined;
+      while (buffer.length >= 4) {
+        const length = new DataView(buffer.buffer, buffer.byteOffset).getUint32(0);
+        if (buffer.length < 4 + length) break;
+        const captured = Number(new DataView(buffer.buffer, buffer.byteOffset + 5, 8).getBigUint64(0));
+        frames.push({ at: performance.now() - t0, bytes: 4 + length, lagMs: Date.now() - captured });
+        buffer = buffer.slice(4 + length);
+      }
+    }
+  })();
+  await Bun.sleep(1500);
+  const encoder = await pidOf(vm, ["-n", "-x", "desktop-stream"]);
+  const [e0, d0, w0] = [await ticks(vm, encoder), await ticks(vm, deskd), performance.now() - t0];
+  await Bun.sleep(Math.max(1, seconds - 3) * 1000);
+  const [e1, d1, w1] = [await ticks(vm, encoder), await ticks(vm, deskd), performance.now() - t0];
+  proc.stdin.end();
+  const code = await proc.exited;
+  await reading;
+  if (code !== 0 || !frames.length) throw new Error(`desktop stream ended ${code} with ${frames.length} frames: ${(await new Response(proc.stderr).text()).trim().slice(-300)}`);
+  const inWindow = frames.filter((f) => f.at >= w0 && f.at <= w1);
+  const span = (w1 - w0) / 1000;
+  const cadence = inWindow.length > 1 ? (inWindow.length - 1) / ((inWindow.at(-1)!.at - inWindow[0]!.at) / 1000) : 0;
+  return {
+    fps: cadence,
+    kbit: (inWindow.reduce((sum, f) => sum + f.bytes, 0) * 8) / 1000 / span,
+    encoderPct: ((e1 - e0) / hz / span) * 100,
+    deskdPct: ((d1 - d0) / hz / span) * 100,
+    firstFrameMs: frames[0]!.at,
+    lagMs: inWindow.length ? median(inWindow.map((f) => f.lagMs)) : median(frames.map((f) => f.lagMs)),
+  };
+}
+
+/**
+ * The stream you watch (C1 step 9), as the node runs it, `seconds` on each of C0's scenes (§2.7): a still page,
+ * scrolling text, an animation. On a VM of its own, removed after.
+ */
+export async function live(b: Bench, seed: number, seconds: number): Promise<Record<"still" | "scroll" | "anim", LiveCost>> {
+  const { vm } = await BenchVm.make(b, { desktop: true, seed: seed + 300 });
+  try {
+    await vm.ready(seed);
+    must(await vm.raw(["desktop", "start"]), "desktop start");
+    const long = must(await vm.raw(["cat", `${IN_VM}/pages/long.html`]), "read long.html").stdout;
+    must(await vm.raw(["sh", "-c", `cat > ${IN_VM}/pages/scroll.html`], { stdin: long.replace("</title>", `</title>${SCROLLING}`) }), "write scroll.html");
+    const deskd = await pidOf(vm, ["-f", "deskd.py"]);
+    const hz = Number((await vm.raw(["getconf", "CLK_TCK"])).stdout.trim()) || 100;
+    const out = {} as Record<"still" | "scroll" | "anim", LiveCost>;
+    for (const [scene, page] of [["still", "color.html"], ["scroll", "scroll.html"], ["anim", "anim.html"]] as const) {
+      must(await vm.raw(["desktop", "open", PAGE(page)]), `open ${page}`);
+      await Bun.sleep(2000);
+      out[scene] = await liveFor(vm, deskd, hz, seconds);
+    }
+    return out;
+  } finally {
+    await vm.remove();
+  }
+}

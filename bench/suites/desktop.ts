@@ -1,6 +1,6 @@
 import { DEFAULT_IMAGE, DESKTOP_IMAGE } from "../../packages/sandbox/src/spec.ts";
 import { buildImages } from "../desktop/images.ts";
-import { a11y, boot, core, costs, fragile, lookActLook, paths, type Samples, typing } from "../desktop/measure.ts";
+import { a11y, boot, core, costs, fragile, live, lookActLook, paths, type Samples, typing } from "../desktop/measure.ts";
 import { POLICIES, runTask, TASKS, type TaskRun } from "../desktop/tasks.ts";
 import { bench, BenchVm, cannotRunHere, clearLeftovers } from "../desktop/vm.ts";
 import { sig, type Suite, type SuiteContext } from "../lib.ts";
@@ -122,6 +122,13 @@ export const suite: Suite = {
     "desktop.f.double-clicks": 5,
     "desktop.f.browser-back": 1,
     "desktop.f.after-last-tab": 1,
+    // C1 step 9: the stream you watch, at least 10 frames a second while it moves, on at most 6 % of a core (the encoder
+    // and deskd), and next to nothing while the screen is still.
+    "desktop.live.scroll.fps": 10,
+    "desktop.live.anim.fps": 10,
+    "desktop.live.scroll.cpu-pct": 6,
+    "desktop.live.anim.cpu-pct": 6,
+    "desktop.live.still.kbit": 100,
   },
   async run(ctx) {
     const prefix = process.env.INVINCIBLE_BENCH_SCRATCH ?? "bench";
@@ -220,6 +227,23 @@ export const suite: Suite = {
       cpu("desktop.cost.watched.cpu-pct", w.watched.cpuPct, "watched alone: the app's look every 2 s on a still text page");
       mb("desktop.cost.after-busy.mem-mb", w.afterBusy.pssMb, "idle again after being busy");
       ctx.quality("desktop.stream.still-kbit", Math.round(w.stillKbit), "kbit/s", "lower", { resolution: Math.max(20, w.stillKbit * 0.1), note: "what watching moves while the screen is still: the app's look every 2 s (apps/web/src/views/desktop.ts), base64" });
+
+      // C1 step 9: the stream you watch (H.264 by OpenH264, only while someone watches), read as the node reads it, on
+      // C0's scenes (§2.7). On a VM of its own.
+      const liveFrom = performance.now();
+      const l = await live(b, ctx.seed, 20);
+      const liveSpan: [number, number] = [liveFrom, performance.now()];
+      ctx.quality("desktop.live.still.kbit", Math.round(l.still.kbit), "kbit/s", "lower", { resolution: 20, note: "the stream while the screen is still (a page that doesn't change): only what changes is sent" });
+      ctx.quality("desktop.live.still.cpu-pct", sig(l.still.encoderPct + l.still.deskdPct, 2), "% of a core", "lower", { resolution: 0.3, note: "the stream while the screen is still: the encoder's CPU and deskd's, in the VM" });
+      for (const scene of ["scroll", "anim"] as const) {
+        const what = scene === "scroll" ? "scrolling text" : "an animation";
+        const pct = l[scene].encoderPct + l[scene].deskdPct;
+        ctx.quality(`desktop.live.${scene}.fps`, sig(l[scene].fps, 3), "frames a second", "higher", { resolution: 0.5, note: `the stream on ${what}: frames a second, the cadence from the first to the last of 17 s` });
+        ctx.quality(`desktop.live.${scene}.cpu-pct`, sig(pct, 2), "% of a core", "lower", { resolution: Math.max(0.3, pct * 0.15), note: `the stream on ${what}: the encoder's CPU and deskd's, in the VM` });
+        ctx.quality(`desktop.live.${scene}.kbit`, Math.round(l[scene].kbit), "kbit/s", "lower", { resolution: Math.max(50, l[scene].kbit * 0.15), note: `the stream on ${what}, its framing included` });
+      }
+      ctx.speed("desktop.live.first-frame-ms", [l.still.firstFrameMs, l.scroll.firstFrameMs, l.anim.firstFrameMs], "ms", "lower", liveSpan, "from the stream's start (its exec, the desktop already up) to its first frame, a keyframe");
+      ctx.speed("desktop.live.lag-ms", [l.still.lagMs, l.scroll.lagMs, l.anim.lagMs], "ms", "lower", liveSpan, "from a frame's capture (the VM's clock) to its arrival here, through the exec: the median of each scene's");
     } finally {
       for (const vm of made) await vm.remove().catch((error) => ctx.log(`couldn't remove ${vm.container}: ${(error as Error).message}`));
       const still = await clearLeftovers(b);

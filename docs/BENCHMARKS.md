@@ -94,10 +94,19 @@ everything but the model.
     a typical front page's and the browser's own settings' trees in tokens (characters / 4);
   - what each state costs the host (CPU and memory of the VM's QEMU, virtiofsd and shim): a VM without the desktop
     image, one whose desktop isn't started, idle, busy, watched;
-  - what watching moves while the screen is still.
+  - what watching moves while the screen is still;
+  - the stream you watch (C1 step 9), `desktop stream` read as the node reads it, through a held exec, on C0's scenes
+    (a still page, scrolling text, an animation; 20 s each, a VM of its own):
+    - its frames a second, as the cadence from the first to the last;
+    - its kbit/s;
+    - the encoder's CPU and deskd's, in the VM;
+    - its first frame;
+    - each frame's time from its capture to its arrival.
 - **Strict:** a desktop number worse than its baseline fails the run. Speed beyond a ±20 % band (or the samples' own
   spread), not only past 2×; memory and CPU past their stated resolution; a count of passes, or a check that held,
   going down.
 - **Held:** what C1's steps reached is held to bars whatever the baseline says: every task's passes, each way (the
   editor the naive way included: step 3 broke it and C0's 0/5 hid that), the toolset way at no more than a model call
-  an action, the test string exact in each app, and the F tests' checks.
+  an action, the test string exact in each app, and the F tests' checks. The stream is held to at least 10 frames a
+  second while it moves, at most 6 % of a core on the encoder and deskd together, and at most 100 kbit/s while the
+  screen is still.
