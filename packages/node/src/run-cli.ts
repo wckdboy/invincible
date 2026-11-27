@@ -1058,7 +1058,7 @@ export async function runFromCli(node: NodeClient, options: DoOptions): Promise<
     const kb = Math.max(1, Math.round(artifact.bytes / 1024));
     console.log(dim(`\nKept ${artifact.count} file(s), ${kb} KB, from /work/out: invincible artifact ${artifact.id}`));
   }
-  if (shipped?.action) console.log(`\n${bold("◇ Pull request filed for your approval")} ${dim(`· invincible action approve ${shipped.action} · or the Inbox`)}`);
+  if (shipped?.action) console.log(`\n${bold("◇ Pull request filed for your approval")} ${dim(`· invincible action approve ${shipped.action} · or Needs you`)}`);
   if (shipped?.receipt) console.log(`\n${bold("◇ Shipped under your standing order:")} ${shipped.receipt}`);
   if (shipped?.problem) console.log(dim(`\n${shipped.problem}`));
   // Its skills: said only as the node said it (what's in the mind), and why nothing was learned from a passed run.

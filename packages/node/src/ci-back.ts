@@ -179,7 +179,7 @@ export async function offerFix(deps: OfferDeps, task: TeamTask): Promise<void> {
       args: { owner: fix.owner, repo: fix.repo, artifact: task.changes.artifact, branch: fix.branch, title: task.title.slice(0, 120), body: `Made by @${task.assignee} in task ${task.id}: its gates passed, and an independent reviewer passed it.` },
       why: `@${task.assignee} ${fix.conflict ? "merged the base branch in and resolved the conflicts" : "fixed the failing checks"} on ${where} (task ${task.id}), and the independent reviewer passed it: one commit on top of ${fix.branch}, where the fix began. The pull request updates and its checks run again. Its patch: ${task.changes.artifact}, changes.patch.`.slice(0, 500),
     });
-    if (sent.status === "asked") deps.note(task.id, `Push · onto ${fix.branch}: it waits for your approval (Inbox)`);
+    if (sent.status === "asked") deps.note(task.id, `Push · onto ${fix.branch}: it waits for your approval (Needs you)`);
     else deps.note(task.id, `Push · onto ${fix.branch}, ${sent.own ? "approved by your agent itself" : "under your standing order"}: ${sent.result.body}`.slice(0, 500));
   } catch (error) {
     const message = (error as Error).message;

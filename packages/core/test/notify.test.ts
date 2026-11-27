@@ -69,16 +69,16 @@ const plan = (items: NotifyItem[], over: Partial<Parameters<typeof planNotificat
 /** News: a chat you left it working in, ended. */
 const news = (key: string, over: Partial<NotifyItem> = {}): NotifyItem => item(key, { kind: "finished", tier: "soon", open: "chat", ...over });
 /** Every word a notification may say is one of these, or a number in them: no name, title or goal of anyone's. */
-const FIXED = /^(Your agent[: a-z']*|Something in your Inbox needs you\.|There's a note in your Inbox\.|What you asked to be told about has happened\. The Inbox says what\.|A command it matches has run\. The Inbox says which, where and how it ended\.|There's news of it: its words are in its room and your Inbox\.|It proposes a task from your backlog that may spend more than is left of your budget\. It starts when you approve it\.|An action is waiting for your answer in the Inbox\.|A delete is waiting for your answer in the Inbox\.|A service asks you something in the Inbox; its call waits for your answer\.|To use a Mac itself for \d+ minutes: your answer is in the Inbox\.|It needs a (key|connector) to go on\. The Inbox says which(; it learns only that it's there)?\.|A chat (you left it working in|it looked in again)( has its answer| ends by asking you something| ended with an error\. Nothing is retried|: it waits on your answer in the Inbox)\.|A run you started has ended\.|Run (done|ended unverified|gave up|failed))$/;
+const FIXED = /^(Your agent[: a-z']*|It waits in Needs you\.|There's a note in Needs you\.|What you asked to be told about has happened\. Needs you says what\.|A command it matches has run\. Needs you says which, where and how it ended\.|There's news of it: its words are in its room and in Needs you\.|It proposes a task from your backlog that may spend more than is left of your budget\. It starts when you approve it\.|An action is waiting for your answer in Needs you\.|A delete is waiting for your answer in Needs you\.|A service asks you something in Needs you; its call waits for your answer\.|To use a Mac itself for \d+ minutes: you answer it in Needs you\.|It needs a (key|connector) to go on\. Needs you says which(; it learns only that it's there)?\.|A chat (you left it working in|it looked in again)( has its answer| ends by asking you something| ended with an error\. Nothing is retried|: it waits on your answer in Needs you)\.|A run you started has ended\.|Run (done|ended unverified|gave up|failed))$/;
 
 describe("what a notification may say: fixed words only", () => {
   test("a finding: only warn, alert and notes; never a dismissed one; never its title (the node's words around names you gave)", () => {
     const disk = noticeItem({ key: "disk:n_1", severity: "warn", title: "ultra is low on disk", source: "heartbeat", dismissed: false })!;
-    expect(disk).toMatchObject({ key: "notice:disk:n_1", kind: "needs-you", alert: false, title: "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox", needs: ["mind:read"], tier: "now" });
-    expect(noticeItem({ key: "vault-locked:n_1", severity: "alert", title: "ultra can't open the vault", source: "heartbeat", dismissed: false })).toMatchObject({ alert: true, title: "Your agent: alert", body: "Something in your Inbox needs you.", tier: "now" });
-    expect(noticeItem({ key: "loop:ci", severity: "warn", title: "Loop ci failed", source: "loop:ci", dismissed: false })!.body).toBe("Something in your Inbox needs you.");
+    expect(disk).toMatchObject({ key: "notice:disk:n_1", kind: "needs-you", alert: false, title: "Your agent: this needs you", body: "It waits in Needs you.", open: "inbox", needs: ["mind:read"], tier: "now" });
+    expect(noticeItem({ key: "vault-locked:n_1", severity: "alert", title: "ultra can't open the vault", source: "heartbeat", dismissed: false })).toMatchObject({ alert: true, title: "Your agent: alert", body: "It waits in Needs you.", tier: "now" });
+    expect(noticeItem({ key: "loop:ci", severity: "warn", title: "Loop ci failed", source: "loop:ci", dismissed: false })!.body).toBe("It waits in Needs you.");
     // A note is counted in the day's digest, never told on its own.
-    expect(noticeItem({ key: "x", severity: "info", title: "a suggestion", source: "heartbeat", dismissed: false })).toMatchObject({ kind: "told", tier: "digest", topic: "note", body: "There's a note in your Inbox." });
+    expect(noticeItem({ key: "x", severity: "info", title: "a suggestion", source: "heartbeat", dismissed: false })).toMatchObject({ kind: "told", tier: "digest", topic: "note", body: "There's a note in Needs you." });
     expect(noticeItem({ key: "disk:n_1", severity: "warn", title: "ultra is low on disk", source: "heartbeat", dismissed: true })).toBeNull();
     expect(noticeItem({ key: "odd", severity: "debug", title: "x", source: "heartbeat", dismissed: false })).toBeNull();
   });
@@ -93,7 +93,7 @@ describe("what a notification may say: fixed words only", () => {
       { key: "doctor:notify.devices:n_1", severity: "warn", title: "Notifications aren't reaching Grandma's iPad", source: "heartbeat" },
     ]) {
       const told = noticeItem({ ...n, dismissed: false })!;
-      expect(told.body).toBe("Something in your Inbox needs you.");
+      expect(told.body).toBe("It waits in Needs you.");
       expect(told.title).toMatch(FIXED);
     }
     expect(notifyLine("password=hunter2hunter2")).toBeNull();
@@ -103,8 +103,8 @@ describe("what a notification may say: fixed words only", () => {
   test("an approval: never the tool, its arguments or the reason given; only while it waits, and once it has settled; it says when it lapses", () => {
     const now = at("2026-11-12T12:00:00Z");
     const waiting = { id: "a_1234567890123456789012", connector: "github", tool: "issue.create", state: "waiting", requestedMs: now - 60_000, expires: now + 3_600_000 };
-    expect(actionItem(waiting, now)).toMatchObject({ key: "action:a_1234567890123456789012", kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in the Inbox.", open: "inbox", tier: "now", expires: now + 3_600_000 });
-    expect(actionItem({ ...waiting, class: "delete" }, now)!.body).toBe("A delete is waiting for your answer in the Inbox.");
+    expect(actionItem(waiting, now)).toMatchObject({ key: "action:a_1234567890123456789012", kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in Needs you.", open: "inbox", tier: "now", expires: now + 3_600_000 });
+    expect(actionItem({ ...waiting, class: "delete" }, now)!.body).toBe("A delete is waiting for your answer in Needs you.");
     // One that a standing order answers in the same moment is never told.
     expect(actionItem({ ...waiting, requestedMs: now - 1000 }, now)).toBeNull();
     expect(actionItem({ ...waiting, state: "approved" }, now)).toBeNull();
@@ -138,31 +138,31 @@ describe("what a notification may say: fixed words only", () => {
   test("it asks to use a Mac itself: for how long, never which Mac (its name is yours) or what for (its words); only while it waits, once settled", () => {
     const now = at("2026-11-17T14:00:00Z");
     const ask = { id: "sc_1234567890123456789012", nodeName: "mini", minutes: 30, state: "waiting", askedAt: now - 60_000 };
-    expect(screenItem(ask, now)).toEqual({ key: "screen:sc_1234567890123456789012", kind: "approval", alert: false, title: "Your agent asks your approval", body: "To use a Mac itself for 30 minutes: your answer is in the Inbox.", open: "inbox", needs: ["mind:read"], tier: "now", topic: "note" });
+    expect(screenItem(ask, now)).toEqual({ key: "screen:sc_1234567890123456789012", kind: "approval", alert: false, title: "Your agent asks your approval", body: "To use a Mac itself for 30 minutes: you answer it in Needs you.", open: "inbox", needs: ["mind:read"], tier: "now", topic: "note" });
     expect(screenItem({ ...ask, askedAt: now - 1_000 }, now)).toBeNull();
     for (const state of ["allowed", "denied", "lapsed", "over", "ended"]) expect(screenItem({ ...ask, state }, now)).toBeNull();
-    expect(screenItem({ ...ask, nodeName: "Call +1 555 0100 now!" }, now)!.body).toBe("To use a Mac itself for 30 minutes: your answer is in the Inbox.");
+    expect(screenItem({ ...ask, nodeName: "Call +1 555 0100 now!" }, now)!.body).toBe("To use a Mac itself for 30 minutes: you answer it in Needs you.");
     // When it lapses unanswered, if the node says: a reminder comes before.
     expect(screenItem({ ...ask, answerBy: now + 900_000 }, now)!.expires).toBe(now + 900_000);
   });
 
   test("a service's question: never which service, or what it asks", () => {
     const now = at("2026-11-17T14:00:00Z");
-    expect(questionItem({ id: "q_1", connector: "call-0045-now", askedAt: now - 60_000, expires: now + 240_000 }, now)).toMatchObject({ kind: "question", title: "Your agent: a service asks you", body: "A service asks you something in the Inbox; its call waits for your answer.", tier: "now", expires: now + 240_000 });
+    expect(questionItem({ id: "q_1", connector: "call-0045-now", askedAt: now - 60_000, expires: now + 240_000 }, now)).toMatchObject({ kind: "question", title: "Your agent: a service asks you", body: "A service asks you something in Needs you; its call waits for your answer.", tier: "now", expires: now + 240_000 });
   });
 
   test("a key it asks for: neither its name nor what it's for (whoever asked chose both, and an agent may ask)", () => {
     expect(secretItem("github")).toMatchObject({ key: "secret:github", kind: "question", title: "Your agent asks for a key", needs: ["vault:read"], tier: "now" });
     // A name is words enough to say something: it never reaches a lock screen.
     const planted = secretItem("call-0045-5550-1999-now.your-bank-is-locked")!;
-    expect(planted.body).toBe("It needs a key to go on. The Inbox says which; it learns only that it's there.");
+    expect(planted.body).toBe("It needs a key to go on. Needs you says which; it learns only that it's there.");
     expect(planted.body).toBe(secretItem("github")!.body);
     expect(secretItem("bad name with spaces")).toBeNull();
   });
 
   test("a connector an agent asked for: that one is wanted, never which or why (an agent chose both), for devices that can add one", () => {
     const item = connectorItem("cr_AAAAAAAAAAAAAAAAAAAAAA")!;
-    expect(item).toMatchObject({ key: "connector:cr_AAAAAAAAAAAAAAAAAAAAAA", kind: "question", title: "Your agent asks for a connector", body: "It needs a connector to go on. The Inbox says which.", open: "inbox", needs: ["brain:write"], tier: "now" });
+    expect(item).toMatchObject({ key: "connector:cr_AAAAAAAAAAAAAAAAAAAAAA", kind: "question", title: "Your agent asks for a connector", body: "It needs a connector to go on. Needs you says which.", open: "inbox", needs: ["brain:write"], tier: "now" });
     // Every request reads the same: nothing of which, or why.
     expect(connectorItem("cr_BBBBBBBBBBBBBBBBBBBBBB")).toMatchObject({ title: item.title, body: item.body });
     expect(connectorItem("call-0045-your-bank-is-locked")).toBeNull();
@@ -172,7 +172,7 @@ describe("what a notification may say: fixed words only", () => {
     const base = { id: "t_1", conversation: "cv_1234567890123456789012", state: "done" as const, question: false, waiting: false };
     expect(turnItem(base)).toMatchObject({ key: "turn:t_1", kind: "finished", title: "Your agent has finished", body: "A chat you left it working in has its answer.", open: "chat", conversation: "cv_1234567890123456789012", needs: ["chat"], tier: "soon" });
     expect(turnItem({ ...base, question: true })).toMatchObject({ kind: "question", title: "Your agent has a question for you", body: "A chat you left it working in ends by asking you something.", tier: "soon", model: true });
-    expect(turnItem({ ...base, waiting: true })).toMatchObject({ body: "A chat you left it working in: it waits on your answer in the Inbox.", model: true });
+    expect(turnItem({ ...base, waiting: true })).toMatchObject({ body: "A chat you left it working in: it waits on your answer in Needs you.", model: true });
     const failed = turnItem({ ...base, state: "error", question: true })!;
     expect(failed).toMatchObject({ kind: "finished", title: "Your agent couldn't finish", body: "A chat you left it working in ended with an error. Nothing is retried." });
     expect(turnItem({ ...base, conversation: "not-a-chat" })).toBeNull();
@@ -280,7 +280,7 @@ describe("when it speaks, and when it stays silent", () => {
 
   test("a loop of yours that tells you: fixed words, never its name or what woke it (often others' words); news, told quietly", () => {
     const boss = { key: "tell:boss-mail:w1", severity: "info", title: "boss-mail: a mail from your boss", source: "tell:boss-mail", dismissed: false };
-    expect(noticeItem(boss)).toEqual({ key: "notice:tell:boss-mail:w1", kind: "told", alert: false, title: "Your agent: a loop of yours", body: "What you asked to be told about has happened. The Inbox says what.", open: "inbox", needs: ["mind:read"], tier: "soon", topic: "tell" });
+    expect(noticeItem(boss)).toEqual({ key: "notice:tell:boss-mail:w1", kind: "told", alert: false, title: "Your agent: a loop of yours", body: "What you asked to be told about has happened. Needs you says what.", open: "inbox", needs: ["mind:read"], tier: "soon", topic: "tell" });
     expect(noticeItem({ ...boss, dismissed: true })).toBeNull();
     // A loop's name that isn't one is no loop's tell: a note, for the digest.
     expect(noticeItem({ ...boss, source: "tell:Not A Name" })).toMatchObject({ tier: "digest", topic: "note" });
@@ -288,7 +288,7 @@ describe("when it speaks, and when it stays silent", () => {
 
   test("a rule of yours told of a command: its own kind, fixed words, never the rule's name or the command (a model's words)", () => {
     const pushes = { key: "rule:pushes:q-1", severity: "info", title: "Your rule pushes: a command it matches has run", source: "rule:pushes", dismissed: false };
-    expect(noticeItem(pushes)).toEqual({ key: "notice:rule:pushes:q-1", kind: "told", alert: false, title: "Your agent: a rule of yours", body: "A command it matches has run. The Inbox says which, where and how it ended.", open: "inbox", needs: ["mind:read"], tier: "soon", topic: "tell" });
+    expect(noticeItem(pushes)).toEqual({ key: "notice:rule:pushes:q-1", kind: "told", alert: false, title: "Your agent: a rule of yours", body: "A command it matches has run. Needs you says which, where and how it ended.", open: "inbox", needs: ["mind:read"], tier: "soon", topic: "tell" });
     // Off, it says nothing (the notice stays in the Inbox).
     const prefs: NotifyPrefs = { ...NOTIFY_DEFAULTS, kinds: { ...NOTIFY_DEFAULTS.kinds, told: false } };
     const told = noticeItem(pushes)!;
@@ -351,7 +351,7 @@ describe("when it speaks, and when it stays silent", () => {
     // The tenth is told, and reaches it: one message says so.
     expect(plan([item("a")], { prefs, sentToday: 9 })).toEqual({ send: [item("a")], waiting: null });
     expect(limitReached(prefs, 10)).toBe(true);
-    expect(limitMessage(12)).toMatchObject({ kind: "limit", title: "Your agent: quiet until tomorrow", body: "That's 10 notifications today. Until tomorrow only an alert reaches you; the rest waits in your Inbox." });
+    expect(limitMessage(12)).toMatchObject({ kind: "limit", title: "Your agent: quiet until tomorrow", body: "That's 10 notifications today. Until tomorrow only an alert reaches you; the rest waits in Needs you." });
     // After that, ordinary news waits, however much of it there is: noise can't spend what's kept for an alert.
     expect(plan([item("a"), item("b")], { prefs, sentToday: 10 })).toEqual({ send: [], waiting: "limit" });
     const alert = item("vault", { alert: true });
@@ -362,8 +362,8 @@ describe("when it speaks, and when it stays silent", () => {
     // A limit too small to keep anything back: the message that reaches it says so.
     const two: NotifyPrefs = { ...NOTIFY_DEFAULTS, perDay: 2 };
     expect([limitReached(two, 1), limitReached(two, 2)]).toEqual([false, true]);
-    expect(limitMessage(2).body).toBe("That's 2 notifications today. The rest waits in your Inbox.");
-    expect(limitMessage(1).body).toBe("That's 1 notification today. The rest waits in your Inbox.");
+    expect(limitMessage(2).body).toBe("That's 2 notifications today. The rest waits in Needs you.");
+    expect(limitMessage(1).body).toBe("That's 1 notification today. The rest waits in Needs you.");
   });
 
   test("a burst is one buzz: everything new goes together, and the next waits a minute unless it's an alert", () => {
@@ -515,7 +515,7 @@ describe("reminders before an ask lapses", () => {
       open: "inbox",
       tag: tagOf("action:a_1", "salt"),
     });
-    expect(reminderMessage({ key: "secret:x", kind: "question" }, now, "Europe/Copenhagen").body).toBe("It still needs a key to go on. The Inbox says which.");
+    expect(reminderMessage({ key: "secret:x", kind: "question" }, now, "Europe/Copenhagen").body).toBe("It still needs a key to go on. Needs you says which.");
     expect(lapseTime(at("2026-11-26T08:05:00Z"), now, "Europe/Copenhagen")).toBe("Thu 09:05");
     expect(lapseTime(at("2026-11-25T22:59:00Z"), now, "Europe/Copenhagen")).toBe("23:59");
   });
@@ -585,10 +585,10 @@ describe("what waited while nobody could be reached", () => {
   const alert = item("notice:vault", { alert: true });
 
   test("one message counts what stands that needs you, never its words: asks, warnings and alerts, opening the Inbox", () => {
-    expect(catchUpMessage([approval], "salt")).toEqual({ v: 1, kind: "summary", title: "Your agent: 1 thing waits for you", body: "While it couldn't reach you: 1 approval. The Inbox has it.", open: "inbox", tag: tagOf("catch-up", "salt") });
-    expect(catchUpMessage([approval, key])!.body).toBe("While it couldn't reach you: 1 approval and 1 question. The Inbox has them.");
+    expect(catchUpMessage([approval], "salt")).toEqual({ v: 1, kind: "summary", title: "Your agent: 1 thing waits for you", body: "While it couldn't reach you: 1 approval. Needs you has it.", open: "inbox", tag: tagOf("catch-up", "salt") });
+    expect(catchUpMessage([approval, key])!.body).toBe("While it couldn't reach you: 1 approval and 1 question. Needs you has them.");
     const many = [alert, approval, { ...approval, key: "screen:s" }, key, warning, { ...warning, key: "notice:loop:ci" }];
-    expect(catchUpMessage(many)).toMatchObject({ title: "Your agent: 6 things wait for you", body: "While it couldn't reach you: 1 alert, 2 approvals, 1 question and 2 warnings. The Inbox has them." });
+    expect(catchUpMessage(many)).toMatchObject({ title: "Your agent: 6 things wait for you", body: "While it couldn't reach you: 1 alert, 2 approvals, 1 question and 2 warnings. Needs you has them." });
     // No buttons on it (a catch-up only counts), and a tag of its own: the next summary of news doesn't replace it.
     expect(catchUpMessage([approval, key], "salt")!.tag).not.toBe(notifyMessage([approval, key], "salt")!.tag);
     expect(Object.keys(catchUpMessage([{ ...approval, action: { id: "a_1234567890123456789012", approvable: true } }])!)).not.toContain("action");

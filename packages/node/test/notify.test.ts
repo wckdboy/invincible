@@ -336,7 +336,7 @@ describe("what waited while nobody could be reached", () => {
     await h.look();
     h.advance(3 * 3600_000);
     await h.look();
-    expect(h.sent.map((s) => s.payload)).toEqual([caughtUp(h, "Your agent: 1 thing waits for you", "While it couldn't reach you: 1 approval. The Inbox has it.")]);
+    expect(h.sent.map((s) => s.payload)).toEqual([caughtUp(h, "Your agent: 1 thing waits for you", "While it couldn't reach you: 1 approval. Needs you has it.")]);
     // Counted against the day, and in the ledger as its own act: the kind and the device, never what it said.
     expect(h.db.countOn(notifyDay(h.now(), h.db.prefs().quiet.tz))).toBe(1);
     expect(h.ledger.at(-1)).toMatchObject({ resource: "notify", target: "summary", detail: "to phone" });
@@ -390,7 +390,7 @@ describe("what waited while nobody could be reached", () => {
     keys = ["while-away"];
     h.db.setPrefs({ ...h.db.prefs(), quiet: { ...h.db.prefs().quiet, on: false } });
     await h.look();
-    expect(h.sent.map((s) => s.payload)).toEqual([caughtUp(h, "Your agent: 1 thing waits for you", "While it couldn't reach you: 1 approval. The Inbox has it.")]);
+    expect(h.sent.map((s) => s.payload)).toEqual([caughtUp(h, "Your agent: 1 thing waits for you", "While it couldn't reach you: 1 approval. Needs you has it.")]);
     await h.look();
     expect(h.sent.map((s) => s.payload.title)).toEqual(["Your agent: 1 thing waits for you", "Your agent asks for a key"]);
   });
@@ -421,7 +421,7 @@ describe("its own words about reaching you", () => {
     notices.push(notice("doctor:notify.devices:n_ultra", "Notifications aren't reaching iPad"));
     await h.look();
     // In fixed words (the device's name is yours): the Inbox names it.
-    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you." }]);
+    expect(h.sent.map((s) => s.payload)).toMatchObject([{ kind: "needs-you", title: "Your agent: this needs you", body: "It waits in Needs you." }]);
   });
 });
 
@@ -567,7 +567,7 @@ describe("the Android app: kept on the node, collected by the app", () => {
     { id: "c_android", name: "Pixel", kind: "client" as const, scopes },
     { id: "n_ultra", name: "ultra", kind: "node" as const, scopes: [] },
   ];
-  const told = (tag: string, title = "Your agent: this needs you"): NotifyPayload => ({ v: 1, kind: "needs-you", title, body: "Open the Inbox.", open: "inbox", tag });
+  const told = (tag: string, title = "Your agent: this needs you"): NotifyPayload => ({ v: 1, kind: "needs-you", title, body: "Open Needs you.", open: "inbox", tag });
 
   test("turns notifications on for itself, and collects what was kept for it once: never a node, never another's", async () => {
     const h = harness({ devices });

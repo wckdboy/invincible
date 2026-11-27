@@ -253,7 +253,7 @@ struct MacCommands: Commands {
             place("Home", .home, "0")
             place(Primary.name, .primary, "1")
             place("Agents", .agents, "2")
-            place("Inbox", .inbox, "3")
+            place("Needs you", .inbox, "3")
             place("More", .more, "4")
             Divider()
         }

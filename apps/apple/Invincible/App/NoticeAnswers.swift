@@ -61,7 +61,7 @@ enum NoticeAnswers {
             _ = try await NodeClient(origin: node.origin, signer: key).post("/api/actions/decide", Decision(id: action, approve: false), as: JSONValue.self)
             said = ("Declined", "Nothing was sent.")
         } catch {
-            said = ("Not answered", "\(error.localizedDescription) It still waits in your Inbox.")
+            said = ("Not answered", "\(error.localizedDescription) It still waits in Needs you.")
         }
         let content = UNMutableNotificationContent()
         content.title = said.title

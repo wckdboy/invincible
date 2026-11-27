@@ -41,7 +41,7 @@ export function primaryAsks(ctx: Ctx, scope: Scope, settled: () => boolean = () 
       cards.length || reaching ? h("h3", { class: "small strong" }, "Your agent asks you") : null,
       reaching ? reach.el : null,
       ...cards.slice(0, SHOWN),
-      more > 0 ? h("a", { class: "small", href: "#/inbox" }, `${plural(more, "more", "more")} in the Inbox`) : null,
+      more > 0 ? h("a", { class: "small", href: "#/inbox" }, `${plural(more, "more", "more")} in Needs you`) : null,
     );
   };
   for (const watched of [ctx.live.actions, ctx.live.secretRequests, ctx.live.connectorRequests, ctx.live.questions]) scope.add(watched.subscribe(render));

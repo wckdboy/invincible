@@ -863,7 +863,7 @@ describe("connectors an agent asks you for", () => {
     script = [callTool("connector_request", { connector: "cloudflare", why: "To check the DNS records you asked about." }), say("I've asked you for the Cloudflare connector.")];
     const events = await ask(admin, "Are my DNS records right?");
     expect(events.find((e) => e.type === "tool_result")).toMatchObject({ name: "connector_request", ok: true });
-    expect(bodies[1].messages.at(-1).content).toContain("Asked for Cloudflare: it waits in the user's Inbox");
+    expect(bodies[1].messages.at(-1).content).toContain("Asked for Cloudflare: it waits for the user in Needs you");
     const { requests } = await json(await call("connectorRequests", null, admin));
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ connector: "cloudflare", label: "Cloudflare", why: "To check the DNS records you asked about.", by: "Your agent" });

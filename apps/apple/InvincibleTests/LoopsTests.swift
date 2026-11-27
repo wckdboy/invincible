@@ -25,7 +25,7 @@ struct LoopsTests {
         let draft = try JSONDecoder().decode(LoopDraftView.self, from: Data("""
         {"id":"ld_1","name":"standup","schedule":"0 9 * * 1-5","tz":"Europe/Copenhagen","on":null,"task":{"kind":"tell","text":"Stand up"},"wakes":[{"kind":"webhook"}],"cooldownMs":null,"label":"Stand-up","why":"You asked for it.","by":"primary","at":1,"expires":2,"replaces":false}
         """.utf8))
-        #expect(Loops.describeTask(draft.task) == "Tells you: Stand up: a notice in your Inbox, and your loop's name on your phone.")
+        #expect(Loops.describeTask(draft.task) == "Tells you: Stand up: a notice in Needs you, and your loop's name on your phone.")
         #expect(Loops.describeWakes(draft.wakes, cooldownMs: draft.cooldownMs) == "Also wakes on a webhook; a burst within 10 min is one run.")
         // Its task goes back as it came.
         let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.task)) as? [String: String]

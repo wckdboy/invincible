@@ -21,7 +21,7 @@ export function describeTask(task: LoopTask | null): string {
     // (Its network's name in lower case, as its label says it: isolated, gateway, online.)
     return `Run, ${task.network}: ${clip(task.goal, 160)}${gates}`;
   }
-  if (task.kind === "tell") return `Tells you${task.text ? `: ${clip(task.text, 160)}` : ", with what woke it"}: a notice in your Inbox, and your loop's name on your phone.`;
+  if (task.kind === "tell") return `Tells you${task.text ? `: ${clip(task.text, 160)}` : ", with what woke it"}: a notice in Needs you, and your loop's name on your phone.`;
   const args = Object.entries(task.args ?? {})
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([k, v]) => `${k}=${String(v)}`)

@@ -284,7 +284,7 @@ class NoticeAnswer : BroadcastReceiver() {
                 client.post("/api/actions/decide", Json.obj("id" to action, "approve" to approve))
                 Notices.said(context, tag, if (approve) "Approved" else "Declined", "${Primary.name} goes on from there.", passes = true)
             } catch (e: NodeError) {
-                Notices.said(context, tag, "Still in your Inbox", e.message ?: "The answer didn't reach your node.", passes = false)
+                Notices.said(context, tag, "Still in Needs you", e.message ?: "The answer didn't reach your node.", passes = false)
             } finally {
                 done.finish()
             }

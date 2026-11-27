@@ -2909,7 +2909,7 @@ export function createApp(ctx: AppContext) {
       const task = ctx.team!.store.task(input.task);
       if (!task) throw new HttpError(404, `no task ${input.task}`);
       if (task.status !== "done" || !task.verified || !task.changes) throw new HttpError(409, "only work that was verified, and kept, is shipped");
-      if (task.fix) throw new HttpError(409, "a fix goes onto its pull request's branch: its push waits in your Inbox");
+      if (task.fix) throw new HttpError(409, "a fix goes onto its pull request's branch: its push waits in Needs you");
       if (task.shipped) throw new HttpError(409, `it was shipped already: ${task.shipped.url}`);
       const artifact = task.changes.artifact;
       let shipment: ShipManifest;

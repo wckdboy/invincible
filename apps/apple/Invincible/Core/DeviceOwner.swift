@@ -10,7 +10,7 @@ enum DeviceOwner {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            return "This device has no passcode, so a yes from a notification can't be checked here: approve it from the Inbox's list instead."
+            return "This device has no passcode, so a yes from a notification can't be checked here: approve it from Needs you instead."
         }
         do {
             return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) ? nil : "Not confirmed, so nothing was approved."

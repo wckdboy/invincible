@@ -181,7 +181,7 @@ Keys & models (keys are typed into a hidden prompt — never into chat, never on
                                   the provider is auto-detected when the key's form says whose it is
   secret set <name> | secret list | secret rm <name> | vault rotate
   secret request <name> --reason "…"   ask for a credential; fill it later from any device
-  secret dismiss <name>           dismiss a request: out of the Inbox until it asks for it again
+  secret dismiss <name>           dismiss a request: out of Needs you until it asks for it again
   run [--providers a,b] -- <cmd>  run a tool (opencode, claude, codex…) on a scoped gateway token
   provider add <id> [--preset p] [--base-url url] [--kind openai|anthropic] [--secret name]
   provider list | provider models <id> | provider presets
@@ -280,7 +280,7 @@ Work
                                   (models through the gateway; --repo clones first and keeps a patch:
                                   GitHub repositories, private ones too, through the read-only git gateway)
      … --repo https://github.com/o/r --ship [--title …] [--base main] [--draft]
-                                  once the reviewer passes it, ask you to open a pull request (Inbox)
+                                  once the reviewer passes it, ask you to open a pull request (Needs you)
   ship <artifact> --title "…" [--body …] [--base main] [--branch invincible/…] [--draft] [--ask] [-y]
                                   open a pull request from a run's kept changes (the node commits them on
                                   a new branch with the connector's key; the sandbox never holds it)
@@ -396,8 +396,8 @@ Tripwires and checks (your rules on the commands its work runs: data, never a mo
                                   after a command that matches has run and exited 0, your command runs where its work
                                   runs, and it is told at once if it fails (rule add types --check "bunx tsc --noEmit" '*.ts')
   rule add <name> --tell <glob>… [--contains text]
-                                  after a command that matches has run, however it ended, you are told: a notice in your
-                                  Inbox and a notification, once for each task (rule add pushes --tell git --contains push)
+                                  after a command that matches has run, however it ended, you are told: a notice in
+                                  Needs you and a notification, once for each task (rule add pushes --tell git --contains push)
 
 Agents (MCP, ACP)
   mcp install claude|opencode|codex|hermes [--label name] [--apply]
@@ -1172,7 +1172,7 @@ Next:
       } else if (sub === "dismiss") {
         if (!rest[0]) fail("usage: invincible secret dismiss <name>");
         await admin.call("dismissSecretRequest", { name: rest[0] });
-        console.log("Dismissed: it's back in your Inbox only if it asks for it again.");
+        console.log("Dismissed: it's back in Needs you only if it asks for it again.");
       } else {
         const [{ secrets, unlocked }, { requests }] = await Promise.all([admin.call("secrets"), admin.call("secretRequests")]);
         if (!unlocked) console.log(dim("(this node cannot decrypt the vault)"));
@@ -1725,7 +1725,7 @@ Evidence: invincible artifact ${i!.artifact}`));
         },
         ...(flags.ask ? { ask: {}, why: `Ship ${shipment!.files.length} file(s) from ${id} to ${where!.owner}/${where!.repo}.` } : {}),
       })) as { status: "asked" | "done"; action?: string; result?: { ok: boolean; body: string } };
-      if (result.status === "asked") console.log(`Filed for your approval: invincible action approve ${result.action} (or the Inbox)`);
+      if (result.status === "asked") console.log(`Filed for your approval: invincible action approve ${result.action} (or Needs you)`);
       else if (result.result?.ok) console.log(`✓ ${result.result.body}`);
       else fail(result.result?.body ?? "not shipped");
       return;

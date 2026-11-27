@@ -233,16 +233,16 @@ export function noticeItem(n: { key: string; severity: string; title: string; so
   const where = placed({ from: "notice", key: n.key, severity: n.severity, source: n.source });
   if (n.severity !== "info") {
     const alert = n.severity === "alert";
-    return { key, kind: "needs-you", alert, title: alert ? "Your agent: alert" : "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox", needs: ["mind:read"], ...where };
+    return { key, kind: "needs-you", alert, title: alert ? "Your agent: alert" : "Your agent: this needs you", body: "It waits in Needs you.", open: "inbox", needs: ["mind:read"], ...where };
   }
   // A loop that tells you, a command a rule of yours matches (once for each rule and task), an outcome's news, its
-  // proposal from your backlog: what woke it and what was said (often others' words, or a model's) stay in the Inbox.
+  // proposal from your backlog: what woke it and what was said (often others' words, or a model's) stay in Needs you.
   const told = (title: string, body: string): NotifyItem => ({ key, kind: "told", alert: false, title, body, open: "inbox", needs: ["mind:read"], ...where });
-  if (TELL_SOURCE.test(n.source)) return told("Your agent: a loop of yours", "What you asked to be told about has happened. The Inbox says what.");
-  if (RULE_SOURCE.test(n.source)) return told("Your agent: a rule of yours", "A command it matches has run. The Inbox says which, where and how it ended.");
-  if (OUTCOME_SOURCE.test(n.source)) return told("Your agent: an outcome of yours", "There's news of it: its words are in its room and your Inbox.");
+  if (TELL_SOURCE.test(n.source)) return told("Your agent: a loop of yours", "What you asked to be told about has happened. Needs you says what.");
+  if (RULE_SOURCE.test(n.source)) return told("Your agent: a rule of yours", "A command it matches has run. Needs you says which, where and how it ended.");
+  if (OUTCOME_SOURCE.test(n.source)) return told("Your agent: an outcome of yours", "There's news of it: its words are in its room and in Needs you.");
   if (n.source === "backlog") return told("Your agent: work for an agent", "It proposes a task from your backlog that may spend more than is left of your budget. It starts when you approve it.");
-  return told("Your agent: a note", "There's a note in your Inbox.");
+  return told("Your agent: a note", "There's a note in Needs you.");
 }
 
 /** How long an action must have waited before it's told: one that a standing order answers at once never is. */
@@ -256,7 +256,7 @@ export function actionItem(a: { id: string; connector: string; tool: string; sta
     kind: "approval",
     alert: false,
     title: "Your agent asks your approval",
-    body: a.class === "delete" ? "A delete is waiting for your answer in the Inbox." : "An action is waiting for your answer in the Inbox.",
+    body: a.class === "delete" ? "A delete is waiting for your answer in Needs you." : "An action is waiting for your answer in Needs you.",
     open: "inbox",
     needs: ["mind:read"],
     expires: a.expires,
@@ -279,7 +279,7 @@ export function questionItem(q: { id: string; connector: string; askedAt: number
     alert: false,
     // Every notification is its (your word, 23 November 2026: it is the one you hear from), a service's question too.
     title: "Your agent: a service asks you",
-    body: "A service asks you something in the Inbox; its call waits for your answer.",
+    body: "A service asks you something in Needs you; its call waits for your answer.",
     open: "inbox",
     needs: ["mind:read"],
     expires: q.expires,
@@ -299,7 +299,7 @@ export function screenItem(s: { id: string; nodeName: string; minutes: number; s
     kind: "approval",
     alert: false,
     title: "Your agent asks your approval",
-    body: minutes ? `To use a Mac itself for ${minutes} minutes: your answer is in the Inbox.` : "To use a Mac itself: your answer is in the Inbox.",
+    body: minutes ? `To use a Mac itself for ${minutes} minutes: you answer it in Needs you.` : "To use a Mac itself: you answer it in Needs you.",
     open: "inbox",
     needs: ["mind:read"],
     ...(s.answerBy ? { expires: s.answerBy } : {}),
@@ -309,20 +309,20 @@ export function screenItem(s: { id: string; nodeName: string; minutes: number; s
 
 /**
  * A key it asked for. Neither its name nor what it's for is shown: whoever asked (an agent may) chose both, and a
- * name is words enough to say something ("call-this-number-now"). The Inbox says which.
+ * name is words enough to say something ("call-this-number-now"). Needs you says which.
  */
 export function secretItem(name: string): NotifyItem | null {
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(name)) return null;
-  return { key: `secret:${name}`, kind: "question", alert: false, title: "Your agent asks for a key", body: "It needs a key to go on. The Inbox says which; it learns only that it's there.", open: "inbox", needs: ["vault:read"], ...placed({ from: "secret" }) };
+  return { key: `secret:${name}`, kind: "question", alert: false, title: "Your agent asks for a key", body: "It needs a key to go on. Needs you says which; it learns only that it's there.", open: "inbox", needs: ["vault:read"], ...placed({ from: "secret" }) };
 }
 
 /**
  * A connector an agent asked for (requestConnector). Like a key's request it says neither which nor why: an agent chose
- * both, and a connector's name is words enough to say something. The Inbox says which.
+ * both, and a connector's name is words enough to say something. Needs you says which.
  */
 export function connectorItem(id: string): NotifyItem | null {
   if (!/^cr_[A-Za-z0-9_-]{22}$/.test(id)) return null;
-  return { key: `connector:${id}`, kind: "question", alert: false, title: "Your agent asks for a connector", body: "It needs a connector to go on. The Inbox says which.", open: "inbox", needs: ["brain:write"], ...placed({ from: "connector" }) };
+  return { key: `connector:${id}`, kind: "question", alert: false, title: "Your agent asks for a connector", body: "It needs a connector to go on. Needs you says which.", open: "inbox", needs: ["brain:write"], ...placed({ from: "connector" }) };
 }
 
 /**
@@ -339,7 +339,7 @@ export function turnItem(t: { id: string; conversation: string; state: "done" | 
     kind: asks ? "question" : "finished",
     alert: false,
     title: t.state === "error" ? "Your agent couldn't finish" : asks ? "Your agent has a question for you" : "Your agent has finished",
-    body: notifyClean(t.state === "error" ? `${where} ended with an error. Nothing is retried.` : t.waiting ? `${where}: it waits on your answer in the Inbox.` : asks ? `${where} ends by asking you something.` : `${where} has its answer.`, NOTIFY_BODY_MAX),
+    body: notifyClean(t.state === "error" ? `${where} ended with an error. Nothing is retried.` : t.waiting ? `${where}: it waits on your answer in Needs you.` : asks ? `${where} ends by asking you something.` : `${where} has its answer.`, NOTIFY_BODY_MAX),
     open: "chat",
     conversation: t.conversation,
     needs: ["chat"],
@@ -594,8 +594,8 @@ const WAITS: Record<string, string> = {
   action: "An approval still waits for your answer.",
   screen: "Its ask to use a Mac still waits for your answer.",
   question: "A service's question still waits for your answer.",
-  secret: "It still needs a key to go on. The Inbox says which.",
-  connector: "It still needs a connector to go on. The Inbox says which.",
+  secret: "It still needs a key to go on. Needs you says which.",
+  connector: "It still needs a connector to go on. Needs you says which.",
 };
 
 /** A time of day as a reminder says it: "14:05" today in your zone, "Thu 09:05" on another day. */
@@ -626,7 +626,7 @@ export function remindersMessage(items: readonly Pick<NotifyItem, "key" | "kind"
   if (!items.length) return null;
   if (items.length === 1) return reminderMessage(items[0]!, now, tz, salt);
   const lapses = items.map((item) => item.expires).filter((at): at is number => typeof at === "number" && at > now);
-  const first = lapses.length ? ` The first lapses at ${lapseTime(Math.min(...lapses), now, tz)}; no answer is no.` : " The Inbox has them.";
+  const first = lapses.length ? ` The first lapses at ${lapseTime(Math.min(...lapses), now, tz)}; no answer is no.` : " Needs you has them.";
   return { v: 1, kind: "summary", title: "Your agent: still waiting", body: notifyClean(`${items.length} asks still wait for your answer.${first}`, NOTIFY_BODY_MAX), open: "inbox", tag: tagOf(`reminders:${items[0]!.key}`, salt) };
 }
 
@@ -727,7 +727,7 @@ export function catchUpMessage(items: readonly NotifyItem[], salt = ""): NotifyP
     v: 1,
     kind: "summary",
     title: notifyClean(`Your agent: ${counted(n, "1 thing waits", "% things wait")} for you`, NOTIFY_TITLE_MAX),
-    body: notifyClean(`While it couldn't reach you: ${list}. The Inbox has ${n === 1 ? "it" : "them"}.`, NOTIFY_BODY_MAX),
+    body: notifyClean(`While it couldn't reach you: ${list}. Needs you has ${n === 1 ? "it" : "them"}.`, NOTIFY_BODY_MAX),
     open: "inbox",
     tag: tagOf("catch-up", salt),
   };
@@ -737,7 +737,7 @@ export function catchUpMessage(items: readonly NotifyItem[], salt = ""): NotifyP
 export function limitMessage(perDay: number): NotifyPayload {
   const reserve = alertReserve(perDay);
   const sent = perDay - reserve;
-  const rest = reserve ? "Until tomorrow only an alert reaches you; the rest waits in your Inbox." : "The rest waits in your Inbox.";
+  const rest = reserve ? "Until tomorrow only an alert reaches you; the rest waits in Needs you." : "The rest waits in Needs you.";
   return { v: 1, kind: "limit", title: "Your agent: quiet until tomorrow", body: `That's ${sent} ${sent === 1 ? "notification" : "notifications"} today. ${rest}`, open: "inbox", tag: "limit" };
 }
 

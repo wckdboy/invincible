@@ -18,7 +18,7 @@ const USAGE = `usage: invincible rule ls | rule add <name> --halt|--refuse|--che
 
 /** What they cover, and what they can't see. */
 const COVERS = [
-  "Tripwires are checked before every command of your agent's runs (invincible do, its loops', an eval's) and of an agent's task on its own runner, and before every gate; checks run after those commands, never after a gate; a rule that tells you does so once for each task, in your Inbox and as a notification (invincible notify kinds told off: the Inbox alone).",
+  "Tripwires are checked before every command of your agent's runs (invincible do, its loops', an eval's) and of an agent's task on its own runner, and before every gate; checks run after those commands, never after a gate; a rule that tells you does so once for each task, in Needs you and as a notification (invincible notify kinds told off: Needs you alone).",
   "A coding tool (OpenCode, Claude Code, Codex, Hermes) runs its own commands in its VM, where they aren't seen: only its gates are checked.",
 ];
 

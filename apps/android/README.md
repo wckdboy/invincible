@@ -39,7 +39,7 @@ push server can't read them; with none, the phone collects them from the node ov
 fifteen minutes or so as Android allows and each time the app comes to the front. Collecting goes on beside a
 distributor too: what its server refuses (Android may not let a distributor connect from the background, and ntfy's
 then answers 507) is kept on the node for this phone, and Settings says why. A tap opens the very place: a task's own
-thread, the chat, the Inbox. An approval carries Approve… (its own card, the whole request in front of you) and
+thread, the chat, Needs you. An approval carries Approve… (its own card, the whole request in front of you) and
 Decline, a task whose work can be shipped carries Ship it…, and each works only behind the phone's unlock. One about
 what the app shows that moment comes without a sound or a pop-up. On an emulator against the dev node, through
 ntfy.sh: 98–346 ms from the node to the phone (median 176 ms, five tests).

@@ -160,7 +160,7 @@ describe("it comes to you: a push becomes a notification", () => {
     // No picture: its words are the message, and a picture would only decorate it.
     expect(shown[0]!.options.image).toBeUndefined();
     // What needs you lets you know, every time, even replacing its own.
-    await push({ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox", tag: "t-0123456789abcdefghijkl" });
+    await push({ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "It waits in Needs you.", open: "inbox", tag: "t-0123456789abcdefghijkl" });
     expect(shown[1]!.options).toMatchObject({ silent: false, renotify: true, data: { open: "inbox" } });
     for (const kind of ["told", "limit"]) {
       await push({ v: 1, kind, title: "Your agent", body: "x", open: "inbox", tag: "t-0123456789abcdefghijkl" });
@@ -279,7 +279,7 @@ describe("a tap opens the app at the right place", () => {
   });
 
   test("an approval's notification opens that very approval: its card first in the Inbox, in the window that's open or one of its own", async () => {
-    const approval = { v: 1, kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in the Inbox.", open: "inbox", tag: "t-approval0123456789abcd", action: "a_0123456789abcdefghijkl", approvable: true };
+    const approval = { v: 1, kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in Needs you.", open: "inbox", tag: "t-approval0123456789abcd", action: "a_0123456789abcdefghijkl", approvable: true };
     windows = [];
     shown.length = 0;
     opened.length = 0;
@@ -339,7 +339,7 @@ describe("a tap opens the app at the right place", () => {
 
 describe("quiet while you're looking at that very thing", () => {
   const task = { v: 1, kind: "finished", title: "Your agent's task: Failed · gate 2", body: "Failed · gate 2 · $0.12. Its proof is in the app.", open: "task", task: "task-abc123def456", tag: "t-task0123456789abcdefgh" };
-  const approval = { v: 1, kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in the Inbox.", open: "inbox", tag: "t-approval0123456789abcd", action: "a_0123456789abcdefghijkl", approvable: true };
+  const approval = { v: 1, kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in Needs you.", open: "inbox", tag: "t-approval0123456789abcd", action: "a_0123456789abcdefghijkl", approvable: true };
   const reset = () => {
     shown.length = 0;
     badges.length = 0;

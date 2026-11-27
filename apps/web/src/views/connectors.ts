@@ -198,12 +198,12 @@ export function classNote(cls: string, who: "you" | "loop"): HTMLElement | null 
   if (cls === "outward") {
     return who === "you"
       ? callout("warn", "It's outward: others may see it, or it acts in the world. You're the one asking, so it goes as soon as you confirm.", { title: "Sent when you confirm" })
-      : callout("warn", "It's outward, so each run files a request in your Inbox instead of sending. Nothing goes until you approve it.", { title: "Each run asks you" });
+      : callout("warn", "It's outward, so each run files a request in Needs you instead of sending. Nothing goes until you approve it.", { title: "Each run asks you" });
   }
   if (cls === "delete") {
     return who === "you"
       ? callout("danger", "It deletes something, and that can't be undone. You're the one asking, so it goes as soon as you confirm.", { title: "Deletes for good" })
-      : callout("warn", "It deletes, so each run files a request in your Inbox instead. Nothing is deleted until you approve it.", { title: "Each run asks you" });
+      : callout("warn", "It deletes, so each run files a request in Needs you instead. Nothing is deleted until you approve it.", { title: "Each run asks you" });
   }
   if (cls === "create" || cls === "modify") return callout("quiet", "It creates or changes something. That's your agent's to do, and the ledger records it.");
   return null;
@@ -221,7 +221,7 @@ type CallOutcome =
   | { status: "asked"; action: string; class: string; target: string; expires: number };
 
 function outcomeView(outcome: CallOutcome): HTMLElement {
-  if (outcome.status === "asked") return callout("info", `Filed for approval: it waits in your Inbox as ${outcome.action}.`);
+  if (outcome.status === "asked") return callout("info", `Filed for approval: it waits in Needs you as ${outcome.action}.`);
   const r = outcome.result;
   let body = r.body;
   try {
@@ -658,7 +658,7 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
     "Standing orders",
     {
       actions: admin ? addOrder : null,
-      note: "Your answers given in advance. A call an order covers goes out at once instead of waiting for you, and still shows up in your Inbox. Each names one tool, narrows its arguments and expires.",
+      note: "Your answers given in advance. A call an order covers goes out at once instead of waiting for you, and still shows up in Needs you. Each names one tool, narrows its arguments and expires.",
     },
     ordersBox,
   );

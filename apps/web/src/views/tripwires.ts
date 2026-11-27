@@ -152,7 +152,7 @@ export function tripwiresSection(ctx: Ctx, scope: Scope): { el: HTMLElement; ref
         { class: "stack tight" },
         h("div", { class: "label" }, "What it does"),
         doesControl.el,
-        note("Refuse: that command isn't run, it is told which rule and why, and the work goes on. Halt: the run or task stops, saying which rule. Check after: once the command has succeeded, yours runs, and it is told if it fails. Tell me: once it has run, however it ended, a notice in your Inbox and a notification, once for each task."),
+        note("Refuse: that command isn't run, it is told which rule and why, and the work goes on. Halt: the run or task stops, saying which rule. Check after: once the command has succeeded, yours runs, and it is told if it fails. Tell me: once it has run, however it ended, a notice in Needs you and a notification, once for each task."),
       ),
       runField,
       status,

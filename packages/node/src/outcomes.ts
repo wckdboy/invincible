@@ -391,7 +391,7 @@ export class OutcomeRunner {
         { name: "keep_notes", description: "Replace your plan for this outcome: what's done, what's next, what's in the way. Short.", inputSchema: { type: "object", properties: { notes: { type: "string" } }, required: ["notes"] } },
         {
           name: "tell_owner",
-          description: "Write to the owner in this outcome's room. kind report: your daily report; question: a decision that's theirs (it waits in their Inbox too); note: anything else they should know.",
+          description: "Write to the owner in this outcome's room. kind report: your daily report; question: a decision that's theirs (it waits for them in Needs you too); note: anything else they should know.",
           inputSchema: { type: "object", properties: { text: { type: "string" }, kind: { type: "string", enum: ["report", "question", "note"] } }, required: ["text", "kind"] },
         },
         { name: "finish_outcome", description: "Say it's done, with what shows it (verified tasks, what changed). It stops here.", inputSchema: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] } },
@@ -445,7 +445,7 @@ export class OutcomeRunner {
           this.o.store.putOutcome({ ...outcome, lastReportAt: at });
           this.notice(outcome, "report", "info", `${outcome.title}: its daily report`, said);
         } else if (kind === "question") this.notice(outcome, `ask:${at.toString(36)}`, "warn", `${outcome.title}: a decision for you`, said);
-        return kind === "question" ? "Asked: it's in the room and in their Inbox." : "Said, in the room.";
+        return kind === "question" ? "Asked: it's in the room and in Needs you." : "Said, in the room.";
       }
       case "finish_outcome": {
         const summary = text("summary", 4000);

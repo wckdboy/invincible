@@ -126,7 +126,7 @@ export function inHandSection(ctx: Ctx, scope: Scope, options: { always?: boolea
           ...going.map((q) => runCard(q, opened)),
           !count ? h("p", { class: "small muted" }, "Nothing in hand right now.") : null,
           running.length
-            ? h("p", { class: "tiny subtle" }, `A turn goes on whether or not anyone is watching, and still spends model tokens: at most ${turns!.limits.maxTurns} at once on this node, ${turns!.limits.maxMinutes} minutes each. What needs you waits in your Inbox; nothing is approved for you.`)
+            ? h("p", { class: "tiny subtle" }, `A turn goes on whether or not anyone is watching, and still spends model tokens: at most ${turns!.limits.maxTurns} at once on this node, ${turns!.limits.maxMinutes} minutes each. Anything it needs from you waits in Needs you; nothing is approved for you.`)
             : null,
           ended.length ? h("div", { class: "stack tight" }, h("div", { class: "tiny subtle" }, "Ended lately"), ...ended.map((q) => runCard(q, opened))) : null,
         ),
@@ -155,7 +155,7 @@ export function openInHand(ctx: Ctx): void {
       replace(
         needs,
         n
-          ? callout("warn", "It waits in your Inbox: nothing is approved for you.", { title: needsYou(n), actions: button("Open the Inbox", { size: "sm", icon: "inbox", onClick: () => ctx.navigate("inbox") }) })
+          ? callout("warn", "It waits in Needs you: nothing is approved for you.", { title: needsYou(n), actions: button("Open Needs you", { size: "sm", icon: "inbox", onClick: () => ctx.navigate("inbox") }) })
           : null,
       ),
     ),

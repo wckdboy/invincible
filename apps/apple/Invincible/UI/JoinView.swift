@@ -106,7 +106,7 @@ struct JoinView: View {
                         .font(.system(size: 46, weight: .semibold, design: .monospaced))
                         .accessibilityLabel(code.map(String.init).joined(separator: " "))
                         .accessibilityIdentifier("pairing-code")
-                    Text("On your node, approve \(Text(model.name).bold()) only if it shows this exact code: in Invincible's Inbox on another device, or in the terminal running `invincible invite`.")
+                    Text("On your node, approve \(Text(model.name).bold()) only if it shows this exact code: in Needs you on another device, or in the terminal running `invincible invite`.")
                         .font(.footnote)
                         .multilineTextAlignment(.center)
                     HStack(spacing: Space.s2) {

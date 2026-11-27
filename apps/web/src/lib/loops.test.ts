@@ -21,8 +21,8 @@ describe("a loop's task in words", () => {
   });
 
   test("a tell: its words, or what woke it; a task this node can't read", () => {
-    expect(describeTask({ kind: "tell", text: "Stand up" })).toBe("Tells you: Stand up: a notice in your Inbox, and your loop's name on your phone.");
-    expect(describeTask({ kind: "tell" })).toBe("Tells you, with what woke it: a notice in your Inbox, and your loop's name on your phone.");
+    expect(describeTask({ kind: "tell", text: "Stand up" })).toBe("Tells you: Stand up: a notice in Needs you, and your loop's name on your phone.");
+    expect(describeTask({ kind: "tell" })).toBe("Tells you, with what woke it: a notice in Needs you, and your loop's name on your phone.");
     expect(describeTask(null)).toBe("A task this node can't read.");
   });
 });

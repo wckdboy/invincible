@@ -183,7 +183,7 @@ describe("a trip", () => {
 describe("a rule that tells you", () => {
   const notice = (key: string) => daemon.store.lww<{ severity: string; title: string; body: string; source: string; dismissed: boolean } | null>(`notice:${key}`)?.value ?? null;
 
-  test("set with --tell (no command of its own); a command it matches has run: a notice in your Inbox, once for each task", async () => {
+  test("set with --tell (no command of its own); a command it matches has run: a notice in Needs you, once for each task", async () => {
     expect((await admin("setRule", { name: "pushes", does: "tell", words: ["git"], contains: "push" })).status).toBe(200);
     expect((await rulesNow()).find((r) => r.name === "pushes")?.rule).toEqual({ on: "after", does: "tell", words: ["git"], contains: "push" });
     expect((await admin("setRule", { name: "bad-tell", does: "tell", words: ["git"], run: "echo hi" })).status).toBe(400);

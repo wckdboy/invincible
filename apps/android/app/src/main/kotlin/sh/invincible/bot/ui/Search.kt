@@ -55,6 +55,13 @@ import sh.invincible.bot.core.get
  * the places, so it is a way round as well.
  */
 
+/** What else a place goes by: Needs you was the Inbox until 27 November 2026, and "inbox" still finds it. */
+private val AKA = mapOf("p:inbox" to "inbox")
+
+/** Whether a place (its key, its title) is found by what was typed, lowercased: nothing typed finds every place. */
+internal fun placeFound(key: String, title: String, low: String): Boolean =
+    low.isEmpty() || title.lowercase().contains(low) || AKA[key]?.contains(low) == true
+
 /** One thing found: what leads it, its words, what it is, and what a tap opens. */
 private class Found(val key: String, val icon: ImageVector?, val agent: Pair<String, sh.invincible.bot.core.Json?>?, val title: String, val about: String?, val open: () -> Unit)
 
@@ -83,7 +90,7 @@ fun SearchScreen(app: AppModel, nav: Nav, back: () -> Unit) {
         Found("p:keys", KeyIcon, null, "Keys", "Your providers' and services' keys") { nav.replace("keys") },
         Found("p:connectors", PlugIcon, null, "Connectors", "Mail, calendars, GitHub and MCP servers") { nav.replace("connectors") },
         Found("p:settings", GearIcon, null, "Settings", "Notifications, this phone, your node") { nav.replace("settings") },
-    ).filter { low.isEmpty() || it.title.lowercase().contains(low) }
+    ).filter { placeFound(it.key, it.title, low) }
     val agents = if (low.isEmpty()) emptyList() else (table.snapshot?.agents ?: emptyList())
         .filter { it.name.lowercase().contains(low) || it.role.lowercase().contains(low) }
         .map { a -> Found("a:${a.id}", null, a.id to a.avatar, a.name, a.role) { nav.replace(Nav.agent(a.id)) } }

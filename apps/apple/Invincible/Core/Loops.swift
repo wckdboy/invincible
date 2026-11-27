@@ -53,7 +53,7 @@ enum Loops {
             return "Run, \(task["network"]?.string ?? ""): \(clip(task["goal"]?.string ?? "", 160))\(proves)"
         case "tell":
             let text = task["text"]?.string ?? ""
-            return "Tells you\(text.isEmpty ? ", with what woke it" : ": \(clip(text, 160))"): a notice in your Inbox, and your loop's name on your phone."
+            return "Tells you\(text.isEmpty ? ", with what woke it" : ": \(clip(text, 160))"): a notice in Needs you, and your loop's name on your phone."
         default:
             let args = (task["args"]?.object ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\(jsString($0.value))" }.joined(separator: " ")
             return "Calls \(task["connector"]?.string ?? "").\(task["tool"]?.string ?? "")\(args.isEmpty ? "" : " \(clip(args, 120))")"

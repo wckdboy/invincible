@@ -46,7 +46,7 @@ export function quietWords(prefs: NotifyPrefs, zone?: string): string {
 }
 
 export function digestWords(prefs: NotifyPrefs, zone?: string): string {
-  return prefs.digest.on ? `at ${prefs.digest.at}, ${zone ?? prefs.quiet.tz} time: what happened that it didn't buzz you for, once a day, quietly` : "off: what it doesn't buzz you for waits in your Inbox";
+  return prefs.digest.on ? `at ${prefs.digest.at}, ${zone ?? prefs.quiet.tz} time: what happened that it didn't buzz you for, once a day, quietly` : "off: what it doesn't buzz you for waits in Needs you";
 }
 
 /** Everything `invincible notify` prints: who, what, when, and today. Never an endpoint (the node gives none). */

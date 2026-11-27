@@ -52,7 +52,7 @@ object Loops {
             }
             "tell" -> {
                 val text = task["text"].string ?: ""
-                "Tells you${if (text.isEmpty()) ", with what woke it" else ": ${clip(text, 160)}"}: a notice in your Inbox, and your loop's name on your phone."
+                "Tells you${if (text.isEmpty()) ", with what woke it" else ": ${clip(text, 160)}"}: a notice in Needs you, and your loop's name on your phone."
             }
             else -> {
                 val args = task["args"].fields.entries.sortedBy { it.key }.joinToString(" ") { "${it.key}=${jsString(it.value)}" }

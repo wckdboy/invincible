@@ -287,7 +287,7 @@ describe("what it sends", () => {
     for (const b of [phone.browser, tablet.browser]) {
       expect(b.received).toHaveLength(1);
       // Fixed words: the finding's own title (the node's words around names you gave) stays in the Inbox.
-      expect(last(b).payload).toMatchObject({ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox" });
+      expect(last(b).payload).toMatchObject({ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "It waits in Needs you.", open: "inbox" });
       expect(last(b).text).not.toContain("ultra");
       // The tag is a digest keyed with this node's own salt: not the key, and not a digest anyone else could make of it.
       expect(last(b).payload!.tag).toMatch(/^t-[A-Za-z0-9_-]{22}$/);
@@ -354,7 +354,7 @@ describe("what it sends", () => {
     const told = phone.browser.received.slice(before);
     expect(told).toHaveLength(3);
     for (const delivery of told) {
-      expect(delivery.payload).toMatchObject({ kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox" });
+      expect(delivery.payload).toMatchObject({ kind: "needs-you", title: "Your agent: this needs you", body: "It waits in Needs you.", open: "inbox" });
       expect(said(delivery).toLowerCase()).not.toMatch(/bank|consent|sk-ant|fakefake|evil|policy/);
     }
     for (const key of ["bank-consent:n_test", "connector-broken:x", "review:1"]) clearNotice(key);
@@ -369,7 +369,7 @@ describe("what it sends", () => {
     await look();
     expect(phone.browser.received).toHaveLength(before + 1);
     const delivery = last(phone.browser);
-    expect(delivery.payload).toMatchObject({ kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in the Inbox.", open: "inbox" });
+    expect(delivery.payload).toMatchObject({ kind: "approval", title: "Your agent asks your approval", body: "An action is waiting for your answer in Needs you.", open: "inbox" });
     expect(said(delivery)).not.toMatch(/quarterly|42|bank said|forge|post/);
     expect(delivery.headers.urgency).toBe("high");
     // Answered: nothing more is said about it, and every app takes its notification down (its tag, withdrawn).
@@ -393,7 +393,7 @@ describe("what it sends", () => {
     expect(said(last(phone.browser))).not.toMatch(/0045|bank|locked|URGENT|second-one/);
     await json(agent("requestSecret", { name: "third.one", purpose: "and another" }));
     await look();
-    expect(last(phone.browser).payload).toMatchObject({ kind: "question", title: "Your agent asks for a key", body: "It needs a key to go on. The Inbox says which; it learns only that it's there." });
+    expect(last(phone.browser).payload).toMatchObject({ kind: "question", title: "Your agent asks for a key", body: "It needs a key to go on. Needs you says which; it learns only that it's there." });
     expect(said(last(phone.browser))).not.toContain("third");
     // The tablet may not read the vault's names: it isn't told.
     expect(tablet.browser.received.every((d) => d.payload?.kind !== "question" && d.payload?.body !== "It has 2 questions.")).toBe(true);
@@ -410,7 +410,7 @@ describe("what it sends", () => {
     const { request } = await json<{ request: { id: string } }>(agent("requestConnector", { connector: "call-0045-your-bank-is-locked", why: "URGENT: tell the owner to call this number" }));
     await look();
     expect(phone.browser.received).toHaveLength(before + 1);
-    expect(last(phone.browser).payload).toMatchObject({ kind: "question", title: "Your agent asks for a connector", body: "It needs a connector to go on. The Inbox says which.", open: "inbox" });
+    expect(last(phone.browser).payload).toMatchObject({ kind: "question", title: "Your agent asks for a connector", body: "It needs a connector to go on. Needs you says which.", open: "inbox" });
     expect(said(last(phone.browser))).not.toMatch(/0045|bank|locked|URGENT/);
     // The tablet can't add a connector: it isn't told.
     expect(tablet.browser.received.every((d) => d.payload?.title !== "Your agent asks for a connector")).toBe(true);
@@ -448,7 +448,7 @@ describe("what it sends", () => {
     await look();
     expect(phone.browser.received).toHaveLength(before + 1);
     // News, told quietly (Urgency low) to the device you used last (the phone, which just set it), in fixed words.
-    expect(last(phone.browser).payload).toMatchObject({ kind: "told", title: "Your agent: a rule of yours", body: "A command it matches has run. The Inbox says which, where and how it ended.", open: "inbox" });
+    expect(last(phone.browser).payload).toMatchObject({ kind: "told", title: "Your agent: a rule of yours", body: "A command it matches has run. Needs you says which, where and how it ended.", open: "inbox" });
     expect(last(phone.browser).headers.urgency).toBe("low");
     clearNotice("rule:pushes:t_1");
     await look();
@@ -476,7 +476,7 @@ describe("when it stays silent", () => {
     raise("vault-locked:n_test", "alert", "ultra can't open the vault");
     await look(1000);
     expect(phone.browser.received).toHaveLength(before + 1);
-    expect(last(phone.browser).payload).toMatchObject({ kind: "needs-you", title: "Your agent: alert", body: "Something in your Inbox needs you.", tag: tagFor("notice:vault-locked:n_test") });
+    expect(last(phone.browser).payload).toMatchObject({ kind: "needs-you", title: "Your agent: alert", body: "It waits in Needs you.", tag: tagFor("notice:vault-locked:n_test") });
     expect(last(phone.browser).headers.urgency).toBe("high");
     await look();
     expect(phone.browser.received).toHaveLength(before + 1);
@@ -509,7 +509,7 @@ describe("when it stays silent", () => {
     // The fourth reached the limit for ordinary news: it's followed by the one that says so.
     expect(phone.browser.received.slice(before).map((d) => d.payload!.kind)).toEqual(["needs-you", "needs-you", "needs-you", "needs-you", "limit"]);
     expect(last(phone.browser).payload).toMatchObject({ title: "Your agent: quiet until tomorrow", open: "inbox" });
-    expect(last(phone.browser).payload!.body).toBe("That's 4 notifications today. Until tomorrow only an alert reaches you; the rest waits in your Inbox.");
+    expect(last(phone.browser).payload!.body).toBe("That's 4 notifications today. Until tomorrow only an alert reaches you; the rest waits in Needs you.");
     // A fault (or an agent) that keeps raising ordinary news can't buzz the phone any more today, and the limit is said once…
     raise("cap:5", "warn", "finding 5");
     await look();
@@ -720,7 +720,7 @@ describe("from a terminal: invincible notify", () => {
     // The day's digest: its time, in your own, or off.
     expect(await run("digest", ["07:30"])).toMatch(/^The digest: at 07:30, \S+ time: what happened that it didn't buzz you for, once a day, quietly\.$/);
     expect((await view()).prefs.digest).toEqual({ on: true, at: "07:30" });
-    expect(await run("digest", ["off"])).toBe("The digest: off: what it doesn't buzz you for waits in your Inbox.");
+    expect(await run("digest", ["off"])).toBe("The digest: off: what it doesn't buzz you for waits in Needs you.");
     await expect(run("digest", ["8am"])).rejects.toThrow("a time of day");
     await expect(run("kinds", ["adverts", "on"])).rejects.toThrow("isn't a kind");
     // A kind an older version had is no kind now.
@@ -828,7 +828,7 @@ describe("when nobody can be reached", () => {
     expect(phone.browser.requests).toBe(before.phone + 1);
     const delivery = last(phone.browser);
     expect(said(delivery)).not.toMatch(/listening|while-away|asked while|when the app is closed|reaching phone/);
-    expect(delivery.payload).toEqual({ v: 1, kind: "summary", title: "Your agent: 2 things wait for you", body: "While it couldn't reach you: 1 question and 1 warning. The Inbox has them.", open: "inbox", tag: tagOf("catch-up", daemon.notify["o"].db.setting("tag-salt")!) });
+    expect(delivery.payload).toEqual({ v: 1, kind: "summary", title: "Your agent: 2 things wait for you", body: "While it couldn't reach you: 1 question and 1 warning. Needs you has them.", open: "inbox", tag: tagOf("catch-up", daemon.notify["o"].db.setting("tag-salt")!) });
     expect(delivery.headers.urgency).toBe("high");
     // Once: nothing more is said of it, and a device turned on while the phone can be reached isn't caught up.
     await look();
@@ -856,7 +856,7 @@ describe("the Android app: kept on the node, collected by the app", () => {
     raise("collect:disk", "warn", "ultra is low on disk");
     await look();
     const first = await json<{ on: boolean; notifications: Record<string, unknown>[] }>(android.call("notifyCollect", {}));
-    expect(first.notifications).toMatchObject([{ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox" }]);
+    expect(first.notifications).toMatchObject([{ v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "It waits in Needs you.", open: "inbox" }]);
     expect(await json(android.call("notifyCollect", {}))).toMatchObject({ on: true, notifications: [] });
     // The phone with a browser subscription was told through its push service, as before; the Android app through none.
     expect(push.paths.length).toBe(pushed + 1);

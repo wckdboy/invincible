@@ -489,7 +489,7 @@ export const sandboxesView: View = (root, ctx, { scope, opts }) => {
             ? h(
                 "div",
                 { class: "stack" },
-                list.some((s) => !s.disk) ? callout("warn", `${NO_DISK_LIMIT} Your Inbox has a notice that says how to fix it.`, { title: "No disk limit here" }) : null,
+                list.some((s) => !s.disk) ? callout("warn", `${NO_DISK_LIMIT} Needs you has a notice that says how to fix it.`, { title: "No disk limit here" }) : null,
                 h("div", { class: "grid wide" }, ...list.map((s) => sandboxCard(ctx, s, on))),
               )
             : h("div", { class: "card" }, empty({ icon: "sandbox", title: "None running", compact: true }))

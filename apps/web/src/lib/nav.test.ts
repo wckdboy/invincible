@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AnyScope } from "../types.ts";
+import { rank } from "./fuzzy.ts";
 import { ALIASES, goToOf, hashOf, homeOf, keyedOf, landingOf, moreIndex, PLACES, placesFor, placesIndex, primaryOf, routeOf, taskOf } from "./nav.ts";
 
 /* Every address the app had before it was a roster and More, with the scope each asked for (and Sandboxes'
@@ -138,5 +139,15 @@ describe("the app's places", () => {
     // The keys people already know still go where they went (Work's, J, to Home, where the work is now).
     const key = (id: string) => PLACES.find((place) => place.id === id)!.key;
     expect([key("overview"), key("inbox"), key("chat"), key("team"), key("fleet"), key("settings"), key("home")]).toEqual(["o", "i", "c", "h", "f", ",", "j"]);
+  });
+
+  test("Needs you was the Inbox until 27 November 2026: the palette's “inbox” still finds it first, by any device", () => {
+    // (As the shell's palette offers the places: each by its label and its keywords.)
+    const found = (query: string, ...scopes: AnyScope[]) => rank(query, goToOf(device(...scopes)).map((place) => ({ id: place.id, label: place.label, keywords: [...place.keywords] })))[0]?.item.id;
+    expect(PLACES.find((place) => place.id === "inbox")!.label).toBe("Needs you");
+    for (const query of ["inbox", "Inbox", "needs you"]) {
+      expect(found(query, ...OWNER)).toBe("inbox");
+      expect(found(query)).toBe("inbox");
+    }
   });
 });

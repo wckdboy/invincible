@@ -121,14 +121,14 @@ fun Sidebar(app: AppModel, nav: Nav, give: () -> Unit, places: () -> Unit, colla
                             .fillMaxWidth()
                             .then(if (top == "inbox") Modifier.background(brand.raised) else Modifier)
                             .clickable { nav.open("inbox") }
-                            .clearAndSetSemantics { role = Role.Button; contentDescription = "Inbox, $beyond waiting" }
+                            .clearAndSetSemantics { role = Role.Button; contentDescription = "Needs you, $beyond waiting" }
                             .heightIn(min = Space.touch)
                             .padding(horizontal = Space.s4),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(Space.s2),
                     ) {
                         Icon(TrayIcon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Inbox", style = Type.rowTitle, modifier = Modifier.weight(1f))
+                        Text("Needs you", style = Type.rowTitle, modifier = Modifier.weight(1f))
                         Text("$beyond waiting", style = Type.word, color = brand.needs)
                     }
                 }

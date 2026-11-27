@@ -117,7 +117,7 @@ fun KeysScreen(app: AppModel, back: () -> Unit) {
             } else if (sealed != null && sealed.isEmpty()) {
                 Panel {
                     Text("No keys yet", style = MaterialTheme.typography.titleMediumEmphasized)
-                    Text("Add a provider's key, a coding plan's or a service's, and it's sealed for every full node. ${Primary.name} asks for one it needs in your Inbox.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Add a provider's key, a coding plan's or a service's, and it's sealed for every full node. ${Primary.name} asks for one it needs in Needs you.", style = MaterialTheme.typography.bodyMedium)
                     OutlinedButton(onClick = { adding = true }) { Text("Add a key") }
                 }
             } else if (sealed != null) {

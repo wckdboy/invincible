@@ -158,7 +158,7 @@ export function quietLine(prefs: NotifyPrefs, zone?: string): string {
 
 /** The day's digest in a line. */
 export function digestLine(prefs: NotifyPrefs, zone?: string): string {
-  if (!prefs.digest?.on) return "No digest: what it doesn't buzz you for waits in your Inbox.";
+  if (!prefs.digest?.on) return "No digest: what it doesn't buzz you for waits in Needs you.";
   return `At ${prefs.digest.at}, ${(zone ?? prefs.quiet.tz).replace(/_/g, " ")} time, one quiet message says what happened that it didn't buzz you for, and what still waits.`;
 }
 

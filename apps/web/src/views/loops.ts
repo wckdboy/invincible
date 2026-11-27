@@ -275,7 +275,7 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
     h(
       "p",
       { class: "small muted" },
-      "Checks the fleet and the machine it runs on: silent servers, a locked vault, roles without a usable model, overdue sandboxes, failing loops, connector keys, disk. What it finds becomes a notice in your Inbox, and clears itself when it's fixed.",
+      "Checks the fleet and the machine it runs on: silent servers, a locked vault, roles without a usable model, overdue sandboxes, failing loops, connector keys, disk. What it finds becomes a notice in Needs you, and clears itself when it's fixed.",
     ),
     field("Your checklist (optional)", checklist, { hint: "Plain words, read each run by the swift role. It answers all clear, or with a short note." }),
   );
@@ -344,7 +344,7 @@ export function openLoopSheet(ctx: Ctx, existing?: LoopView): void {
   const tellPanel = h(
     "div",
     { class: "stack" },
-    h("p", { class: "small muted" }, "No model, no sandbox: each run is a notice in your Inbox with what woke it, and your phone says this loop's name. Put it with something to wake it (\"tell me when my boss emails\"), or a schedule: Once for a reminder."),
+    h("p", { class: "small muted" }, "No model, no sandbox: each run is a notice in Needs you with what woke it, and your phone says this loop's name. Put it with something to wake it (\"tell me when my boss emails\"), or a schedule: Once for a reminder."),
     field("What to say (optional)", tellText),
   );
   const panels: Record<LoopTask["kind"], HTMLElement> = { heartbeat: heartbeatPanel, run: runPanel, call: callPanel, tell: tellPanel };
@@ -754,7 +754,7 @@ export const loopsView: View = (root, ctx, { scope, opts }) => {
             "Checked just now",
             {
               actions: button("Close the check", { size: "sm", variant: "ghost", iconOnly: true, icon: "x", onClick: () => replace(checkBox) }),
-              note: `The heartbeat's checks, run on ${node} just now. This check writes nothing; the heartbeat loop is what turns findings into notices in your Inbox.`,
+              note: `The heartbeat's checks, run on ${node} just now. This check writes nothing; the heartbeat loop is what turns findings into notices in Needs you.`,
             },
             findings.length ? list(findings.map((f) => findingRow(ctx, f))) : card({}, callout("ok", `All quiet, as seen from ${node}.`)),
           ),

@@ -1052,7 +1052,7 @@ const notifyQuiet = ["needs-you", "approval", "question", "finished", "told", "s
 const NOTE_CHAT = `cv_${"Ab3_-".repeat(4)}xy`;
 const NOTE_TASK = "task-abc123def456";
 const NOTE_ACTION = `a_${"0123456789".repeat(2)}kl`;
-const note = { v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox", tag: "t-0123456789abcdefghijkl" };
+const note = { v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "It waits in Needs you.", open: "inbox", tag: "t-0123456789abcdefghijkl" };
 const notePayloads: unknown[] = [
   // Read as they are.
   note,

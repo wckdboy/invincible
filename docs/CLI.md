@@ -18,7 +18,7 @@ From a checkout, `bun run inv`.
 - The node makes the invite: `invincible invite --client` there, or Settings → Devices in an app.
 - `inv` shows a code of six digits. The node shows the same code for this device. Compare them before you approve.
 - The owner approves it on the node, with `invincible approve <invite> <device>` (`invincible pairings` lists both), or
-  in the waiting `invincible invite`, or in an app's Inbox.
+  in the waiting `invincible invite`, or in an app, in Needs you.
 - Once approved, `inv` signs every request with its own P-256 key, over (method, path, time, nonce, the body's hash),
   as the apps do (`packages/core/src/request-auth.ts`). It holds the scopes the invite gave it: by default, everything a
   phone may do.

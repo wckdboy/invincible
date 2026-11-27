@@ -16,7 +16,7 @@ class NotifyPayloadTest {
     private val chat = "cv_1234567890123456789012"
     private val finished = Json.obj("v" to 1, "kind" to "finished", "title" to "Your agent has finished", "body" to "A chat you left it working in has its answer.", "open" to "chat", "conversation" to chat, "tag" to "t-AbCdEfGhIjKlMnOpQrStUv")
     private val task = Json.obj("v" to 1, "kind" to "finished", "title" to "Your agent's task: Proven", "body" to "Proven · \$0.31. Its changes are ready to ship.", "open" to "task", "task" to "task-abc123def456", "ship" to true, "tag" to "t-task0123456789abcdefgh")
-    private val approval = Json.obj("v" to 1, "kind" to "approval", "title" to "Your agent asks your approval", "body" to "An action is waiting for your answer in the Inbox.", "open" to "inbox", "tag" to "t-approval0123456789abcd", "action" to "a_0123456789abcdefghijkl", "approvable" to true)
+    private val approval = Json.obj("v" to 1, "kind" to "approval", "title" to "Your agent asks your approval", "body" to "An action is waiting for your answer in Needs you.", "open" to "inbox", "tag" to "t-approval0123456789abcd", "action" to "a_0123456789abcdefghijkl", "approvable" to true)
 
     private fun with(base: Json.Obj, vararg changes: Pair<String, Any?>): Json.Obj = Json.Obj(LinkedHashMap(base.fields).apply { for ((k, v) in changes) if (v == null) remove(k) else put(k, Json.of(v)) })
 
@@ -26,7 +26,7 @@ class NotifyPayloadTest {
         assertEquals("chat", read.open)
         assertEquals(chat, read.conversation)
         assertNull(read.task)
-        val needs = NotifyPayload.read(Json.obj("v" to 1, "kind" to "needs-you", "title" to "Your agent: this needs you", "body" to "Something in your Inbox needs you.", "open" to "inbox", "tag" to "t-0123456789abcdefghijkl"))!!
+        val needs = NotifyPayload.read(Json.obj("v" to 1, "kind" to "needs-you", "title" to "Your agent: this needs you", "body" to "It waits in Needs you.", "open" to "inbox", "tag" to "t-0123456789abcdefghijkl"))!!
         assertEquals("needs-you", needs.kind)
         for (kind in listOf("approval", "question", "told", "summary", "limit", "test")) assertNotNull(kind, NotifyPayload.read(with(finished, "kind" to kind, "open" to "inbox", "conversation" to null)))
     }

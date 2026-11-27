@@ -100,7 +100,7 @@ export function renderPairing(root: HTMLElement, identity: BrowserIdentity, invi
         { class: "small muted", style: "text-align:center" },
         "On your node, approve ",
         h("strong", {}, name),
-        " only if it shows this exact code: in your agent's Inbox on another device, or in the terminal running ",
+        " only if it shows this exact code: in Needs you on another device, or in the terminal running ",
         h("span", { class: "mono" }, "invincible invite"),
         ".",
       ),

@@ -147,7 +147,7 @@ describe("the settings' own checks, before anything is sent", () => {
     // Read in the zone your devices say, when the node says it is another than the setting's.
     expect(quietLine({ ...NOTIFY_DEFAULTS, quiet: { ...NOTIFY_DEFAULTS.quiet, tz: "Europe/London" } }, "Europe/Copenhagen")).toBe("From 22:00 to 07:00, Europe/Copenhagen time, everything but an alert waits; then one message says what waited.");
     expect(digestLine({ ...NOTIFY_DEFAULTS, quiet: { ...NOTIFY_DEFAULTS.quiet, tz: "America/New_York" } })).toBe("At 08:00, America/New York time, one quiet message says what happened that it didn't buzz you for, and what still waits.");
-    expect(digestLine({ ...NOTIFY_DEFAULTS, digest: { on: false, at: "08:00" } })).toBe("No digest: what it doesn't buzz you for waits in your Inbox.");
+    expect(digestLine({ ...NOTIFY_DEFAULTS, digest: { on: false, at: "08:00" } })).toBe("No digest: what it doesn't buzz you for waits in Needs you.");
     expect(todayLine({ today: { day: "2026-11-12", sent: [], count: 0, limit: 12 }, quiet: false, held: 0 })).toBe("Nothing sent today (a test doesn't count).");
     expect(todayLine({ today: { day: "2026-11-12", sent: [], count: 3, limit: 12 }, quiet: true, held: 2 })).toBe("3 of 12 sent today; 2 things wait for quiet hours to end.");
     expect(todayLine({ today: { day: "2026-11-12", sent: [], count: 3, limit: 12 }, quiet: true, held: 1 })).toBe("3 of 12 sent today; 1 thing waits for quiet hours to end.");

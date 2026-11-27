@@ -99,10 +99,10 @@ struct MenuBarAgents: View {
                     Text(PrimaryNow.needsYou(count)).foregroundStyle(Color.danger)
                 } else {
                     Image(systemName: "checkmark.circle").foregroundStyle(.secondary)
-                    Text(session.inboxLoaded ? "Nothing needs you" : "Looking at the Inbox…").foregroundStyle(.secondary)
+                    Text(session.inboxLoaded ? "Nothing needs you" : "Looking at what needs you…").foregroundStyle(.secondary)
                 }
                 Spacer(minLength: Space.s2)
-                Text("Inbox").foregroundStyle(.secondary)
+                Text("Needs you").foregroundStyle(.secondary)
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }

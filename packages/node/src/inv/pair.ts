@@ -84,7 +84,7 @@ export async function pairCommand(opts: PairOptions, io: PairIo): Promise<PairRe
     io.say(`Code: ${join.sas}`);
     io.say("Compare it with the code the node shows for this device. If they are the same, approve it there:");
     io.say(`  invincible approve ${invite.i} ${key.id}`);
-    io.say("  (or in the waiting invincible invite, or in an app's Inbox). Waiting…");
+    io.say("  (or in the waiting invincible invite, or in Needs you on another device). Waiting…");
     await waitForApproval(join, { timeoutMs: opts.timeoutMs ?? 10 * 60_000, ...(opts.intervalMs ? { intervalMs: opts.intervalMs } : {}), ...(fetchLike ? { fetch: fetchLike } : {}) }).catch((error: Error) => {
       if (/rejected/.test(error.message)) throw new CliError("the pairing was refused on the node", EXIT.refused);
       if (/timed out/.test(error.message)) throw new CliError("no approval came while the invite lived: make a new one (invincible invite --client) and pair again", EXIT.refused);

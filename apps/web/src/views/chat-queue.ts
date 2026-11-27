@@ -144,7 +144,7 @@ export function queuePanel(actions: QueueActions, opts: { compact?: boolean } = 
           "div",
           { class: "chat-queue-foot tiny" },
           icon("shield-check", { size: 13 }),
-          h("span", {}, `It keeps working if you leave this page${minute ? `, and ${minute}` : ""}. Anything that needs you (an approval, a key) waits in your Inbox: nothing is approved for you.`),
+          h("span", {}, `It keeps working if you leave this page${minute ? `, and ${minute}` : ""}. Anything that needs you (an approval, a key) waits in Needs you: nothing is approved for you.`),
         ),
       );
     }

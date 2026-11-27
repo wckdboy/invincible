@@ -312,7 +312,7 @@ describe("a fix that ended verified", () => {
         why: expect.stringContaining("one commit on top of invincible/units, where the fix began"),
       },
     ]);
-    expect(o.notes).toEqual(["Push · onto invincible/units: it waits for your approval (Inbox)"]);
+    expect(o.notes).toEqual(["Push · onto invincible/units: it waits for your approval (Needs you)"]);
   });
 
   test("a conflict fix that ends verified is offered as a push onto its branch through ship.update alone", async () => {
@@ -320,7 +320,7 @@ describe("a fix that ended verified", () => {
     await offerFix(o.deps, fixTask({ title: "Merge the base and resolve the conflicts on amiriteorg/shipyard#12", fix: { connector: "github-amiriteorg", owner: "amiriteorg", repo: "shipyard", branch: "invincible/units", pr: 12, head: head(2), conflict: head(2) } }));
     expect(o.calls).toHaveLength(1);
     expect(o.calls[0]).toMatchObject({ connector: "github-amiriteorg", tool: "ship.update", args: { branch: "invincible/units", artifact: FIX_ART }, why: expect.stringContaining("merged the base branch in and resolved the conflicts") });
-    expect(o.notes).toEqual(["Push · onto invincible/units: it waits for your approval (Inbox)"]);
+    expect(o.notes).toEqual(["Push · onto invincible/units: it waits for your approval (Needs you)"]);
   });
 
   test("a standing order of yours that answers it is said, with what GitHub answered", async () => {

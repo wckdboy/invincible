@@ -37,12 +37,12 @@ The phone in one hand, often in short glances; work runs for minutes to hours un
 - Your agent's chat: turns that run on the node to their end whether or not anyone is watching; any device attaches to a running turn; messages steer now or queue.
 - An agent's timeline: its messages and its task cards (plan, the command it is running, what printed, its gates, review, verified or failed, the changes it kept, shipping them as a pull request); a card's title opens the task's own thread.
 - Giving a task to an agent or to the agents (the best-suited agent takes it).
-- The Inbox: approvals and secret requests, and everything else that waits; what needs the owner shows on Home with its answers in place too.
+- Needs you: approvals and secret requests, and everything else that waits; what needs the owner shows on Home with its answers in place too.
 - An agent's Workspace: its desktop (watch, take over) and a terminal into its VM.
 - Beast mode: your agent engages it when a task demands it, raising its compute and model access and acting more without asking. Not built yet; its autonomy limits are an open decision for the owner.
 - Agents are fields (`lib/field.ts`, `lib/field-orb.ts`, `ui/orb.ts` `agentFace`): lines of force in colours of an agent's own, a colour you chose (`{ v: 2, color }`) or one of core's 24 `AGENT_TINTS` its handle picks; the primary's is the gold field with its beam. What an agent is doing comes from the node (`avatarExpression`, its state) and shows in how its field moves.
 - Technical: vanilla TypeScript with an `h()` DOM helper, no framework; served by the node with a strict CSP (self-hosted assets and fonts, no third-party requests); every request signed; offline-capable service worker; first load measured by `apps/web/measure/first-load.ts`.
-- Terminology: your agent, agents, the agents, rooms, tasks, the Inbox, beast mode.
+- Terminology: your agent, agents, the agents, rooms, tasks, Needs you, beast mode.
 
 ## Brand Commitments
 

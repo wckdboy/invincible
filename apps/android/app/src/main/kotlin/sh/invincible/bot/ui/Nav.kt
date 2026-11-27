@@ -102,7 +102,7 @@ fun PlacesSheet(app: AppModel, nav: Nav, give: () -> Unit, close: () -> Unit) {
     val places = listOf(
         Place(agentsIcon, "Agents", "Your agents, what each is doing, and their rooms") { go("agents") },
         // (Its badge is what needs you, the one count Home says too: what it noticed is news, counted nowhere.)
-        Place(TrayIcon, "Inbox", "Everything that waits for you, and what your node noticed", trail = if (needsYou > 0) AppModel.badge(needsYou) else null) { go("inbox") },
+        Place(TrayIcon, "Needs you", "Everything that waits for you, and what your node noticed", trail = if (needsYou > 0) AppModel.badge(needsYou) else null) { go("inbox") },
         Place(ChatsIcon, "Chats", "Your conversations with ${Primary.name}") { go("chats") },
         Place(KeyIcon, "Keys", "Your providers' and services' keys, sealed") { go("keys") },
         Place(PlugIcon, "Connectors", "Mail, calendars, GitHub and MCP servers") { go("connectors") },

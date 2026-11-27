@@ -565,7 +565,7 @@ export function renderOrders(box: HTMLElement, ctx: Ctx, orders: OrderView[], on
             empty({
               icon: "scroll",
               title: "No standing orders",
-              body: "Everything outward, and every delete, asks you. When you approve one in your Inbox, Approve and allow similar answers calls like it the same way next time.",
+              body: "Everything outward, and every delete, asks you. When you approve one in Needs you, Approve and allow similar answers calls like it the same way next time.",
               actions: onAdd ? button("Add a standing order", { icon: "plus", onClick: onAdd }) : null,
               compact: true,
             }),

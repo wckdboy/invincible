@@ -29,20 +29,30 @@ struct CommandPalette: View {
         let run: () -> Void
     }
 
-    private var items: [Item] {
-        let words = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        func matches(_ texts: String...) -> Bool {
-            words.isEmpty || texts.contains { $0.localizedCaseInsensitiveContains(words) }
-        }
-        var out: [Item] = []
-        let places: [(Place, String, String, String)] = [
+    /// Whether what was typed is in any of these texts, whatever its case (nothing typed: it is).
+    static func found(_ words: String, in texts: [String]) -> Bool {
+        words.isEmpty || texts.contains { $0.localizedCaseInsensitiveContains(words) }
+    }
+
+    /// The places, each with its title, a line and its symbol, that what was typed finds, by their titles and lines. Needs
+    /// you was the Inbox until 27 November 2026: "inbox" still finds it.
+    static func places(matching words: String, needsYou: Int) -> [(place: Place, title: String, detail: String, symbol: String)] {
+        let aka: [Place: String] = [.inbox: "Inbox"]
+        let places: [(place: Place, title: String, detail: String, symbol: String)] = [
             (.home, "Home", "What needs you, and the work", "house"),
             (.primary, Primary.name, "Its conversation", "bubble.left.and.text.bubble.right"),
             (.agents, "Agents", "Your agents and their rooms", "person.3"),
-            (.inbox, "Needs you", session.needsYou > 0 ? "\(session.needsYou) need\(session.needsYou == 1 ? "s" : "") you" : "Nothing needs you", "tray"),
+            (.inbox, "Needs you", needsYou > 0 ? "\(needsYou) need\(needsYou == 1 ? "s" : "") you" : "Nothing needs you", "tray"),
             (.more, "Settings", "This device, its node and fleet", "gearshape"),
         ]
-        for (place, title, detail, symbol) in places where matches(title, detail) {
+        return places.filter { found(words, in: [$0.title, $0.detail, aka[$0.place] ?? ""]) }
+    }
+
+    private var items: [Item] {
+        let words = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        func matches(_ texts: String...) -> Bool { Self.found(words, in: texts) }
+        var out: [Item] = []
+        for (place, title, detail, symbol) in Self.places(matching: words, needsYou: session.needsYou) {
             out.append(Item(id: "place:\(title)", title: title, detail: detail, symbol: symbol) { go(place) })
         }
         if let give, matches("Give a task", "New task") {
