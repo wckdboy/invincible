@@ -530,6 +530,93 @@ test("a coding tool on a task with a budget is offered only the models it can co
   expect(commands.some((c) => c.includes("setsid"))).toBe(false);
 });
 
+/* Another node's task is bounded by its budget (the fabric's second re-review, N7): it runs only on models its budget
+ * counts at more than $0, never on one it counts as nothing, nor on a coding tool's own sign-in (a seat), whose spend
+ * isn't counted at all. */
+const handedTask = { ...task, budgetUsd: 2, givenBy: `node:n_${"A".repeat(43)}` };
+
+test("another node's task runs only on a model its budget counts at more than $0, and with none nothing is called", async () => {
+  const script = () => [say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")];
+  // local/fake runs on this machine with no price: a budget counts it as nothing. paid/m is priced.
+  const priced = (f: ReturnType<typeof fixture>) => {
+    for (const role of ["planner", "engineer", "reviewer"]) f.setRoster(role, ["local/fake", "paid/m"]);
+    f.store.emit(f.identity, "price.set", { model: "paid/m", price: { input: 1, output: 2 } });
+    return f;
+  };
+  const f = priced(withPaid(fixture(script(), { prices: () => ({ "paid/m": { input: 1, output: 2 } }) })));
+  const lines: string[] = [];
+  expect((await f.runtime.executeTask(member, handedTask, { ...f.context, emit: (line) => lines.push(String(line)) })).verified).toBe(true);
+  expect(f.bodies.map((body) => body.model)).toEqual(["m", "m", "m", "m"]);
+  expect(lines.some((line) => line.startsWith("local/fake couldn't answer") && line.includes("counts at more than $0"))).toBe(true);
+  // Your own task with a budget still runs on the one on this machine first.
+  const yours = priced(withPaid(fixture(script(), { prices: () => ({ "paid/m": { input: 1, output: 2 } }) })));
+  await yours.runtime.executeTask(member, { ...task, budgetUsd: 2 }, yours.context);
+  expect(yours.bodies[0].model).toBe("fake");
+  // With nothing it counts above $0, none of its models is called: its call is asked again later, saying why (ended
+  // here at the first retry, which would otherwise wait).
+  const none = withPaid(fixture(script(), { prices: () => ({}) }));
+  const stop = new AbortController();
+  const said: string[] = [];
+  const emit = (line: unknown) => {
+    said.push(String(line));
+    if (String(line).startsWith("Retry")) setTimeout(() => stop.abort(), 0);
+  };
+  await none.runtime.executeTask(member, handedTask, { ...none.context, signal: stop.signal, emit }).catch(() => {});
+  expect(none.bodies).toHaveLength(0);
+  expect(said.some((line) => line.startsWith("Retry · the planner's call failed"))).toBe(true);
+});
+
+test("a coding tool on another node's task never runs on its own sign-in, and is offered only models counted above $0", async () => {
+  const commands: string[] = [];
+  const agent = { ...member, harness: "claude" as const };
+  const opus = { provider: "anthropic", model: "claude-opus-5-5" };
+  const roster = [{ provider: "plan", model: "coder" }, opus];
+  const signedIn = JSON.stringify({ type: "status", installed: true, signedIn: true, method: "claude.ai" });
+  const exec = async (_m: Agent, command: string) => {
+    commands.push(command);
+    if (command.includes("--status")) return result({ stdout: signedIn });
+    // (Its run ends at its first look, having said nothing: only its launch matters here.)
+    return result({ stdout: command.includes('"next": nxt') ? JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }) : "0" });
+  };
+  const f = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: (ref) => ref === "anthropic/claude-opus-5-5", exec });
+  // (Its planner and reviewer, on the fixture's local/fake, are held to the same: priced, a model on this machine counts.)
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await f.runtime.executeTask(agent, handedTask, f.context).catch(() => {});
+  const launch = commands.find((c) => c.includes("setsid")) ?? "";
+  expect(launch).toContain("claude-opus-5-5");
+  expect(launch).not.toContain("coder");
+  // With no model counted above $0 it doesn't start, though the tool is signed in.
+  commands.length = 0;
+  const none = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: () => false, exec });
+  await expect(none.runtime.executeTask(agent, handedTask, none.context)).rejects.toThrow("handed over by another node");
+  expect(commands.some((c) => c.includes("setsid"))).toBe(false);
+  // Nor on one of your seats: its vendor's seats are weighed for your own work, never for another node's.
+  let asked = 0;
+  const seat = async () => (asked++, { none: true as const });
+  const seats = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: (ref) => ref === "anthropic/claude-opus-5-5", exec, seat });
+  seats.store.emit(seats.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await seats.runtime.executeTask(agent, handedTask, seats.context).catch(() => {});
+  expect(asked).toBe(0);
+  const yours = fixture([], { agent: () => agent, models: () => roster, countable: () => true, exec, seat });
+  await yours.runtime.executeTask(agent, { ...task, budgetUsd: 2 }, yours.context).catch(() => {});
+  expect(asked).toBeGreaterThan(0);
+  // An ACP agent calls the models it was set up with, which its budget can't hold it to.
+  const acp = { ...member, harness: "acp" as const, acp: "goose acp" };
+  const goose = fixture([], { agent: () => acp, models: () => roster, countable: () => true, paid: () => true, exec });
+  await expect(goose.runtime.executeTask(acp, handedTask, goose.context)).rejects.toThrow("handed over by another node");
+});
+
+test("what a harness runs another node's task on: never the tool's own sign-in or setup, only models through the gateway", () => {
+  const claude = AGENTS.claude!;
+  const ok = (told: object) => ({ exitCode: 0, stdout: JSON.stringify({ type: "status", installed: true, ...told }) });
+  const opus = { provider: "anthropic", model: "claude-opus-5-5" };
+  expect(harnessReadiness(claude, ok({ signedIn: true, method: "claude.ai" }), [opus], [], "engineer", false, null, false, true)).toEqual({ ready: true, models: [opus], on: "anthropic/claude-opus-5-5 through the gateway" });
+  const refused = harnessReadiness(claude, ok({ signedIn: true, method: "claude.ai" }), [], [], "engineer", false, null, false, true);
+  expect(refused.ready).toBe(false);
+  expect(refused.reason).toContain("handed over by another node");
+  expect(refused.reason).toContain("never on Claude Code's own sign-in");
+});
+
 test("an agent's task keeps the code it read in view: its current reads stay whole when the conversation is cut short", async () => {
   // The first real outcome's agent read the same file in 26 of 82 commands once its reads were cut to excerpts.
   const page = "c".repeat(3000);
@@ -1708,6 +1795,8 @@ test("a task another node handed over has its gates bounded in all, every round 
   const script = () => [say("1. Build."), say("DONE\nWorks."), say("DONE\nWorks now."), say("DONE\nTrust me.")];
   const handedTimeouts: number[] = [];
   const handed = fixture(script(), { exec: slow(handedTimeouts) });
+  // (Another node's task runs only on a model its budget counts above $0: priced, the fixture's local/fake is one.)
+  handed.store.emit(handed.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   const outcome = await handed.runtime.executeTask(member, { ...task, givenBy: `node:n_${"A".repeat(43)}` }, handed.context);
   expect(outcome.verified).toBe(false);
   expect(handedTimeouts).toEqual([TEAM_COMMAND_SECONDS, HANDED_GATE_SECONDS - 600]);

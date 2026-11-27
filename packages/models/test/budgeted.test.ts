@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { chat, countable, originOf, preset } from "../src/index.ts";
+import { chat, countable, originOf, paidFor, preset } from "../src/index.ts";
 
 /*
  * Work with a budget of yours (an agent's task given one, an outcome's looks) is measured at your prices, and a model
@@ -82,5 +82,46 @@ describe("work with a budget runs only on a model whose spend it can count", () 
     expect(countable(store, vault, "own/anything")).toBe(true);
     expect(countable(store, vault, "ollama/qwen")).toBe(true);
     expect(countable(store, vault, "nowhere/m")).toBe(false);
+  });
+});
+
+/*
+ * Work another node handed over is bounded by its budget (the fabric's second re-review, N7). A budget counts some
+ * models' spend as nothing: one on this machine you've set no price for, a coding plan's (paid for already, priced or
+ * not: moneyPrices) and one you've priced at nothing. On one of those the work would go on unbounded by what it may
+ * spend, so it runs only on a model its budget counts at more than $0.
+ */
+describe("work another node handed over runs only on a model its budget counts at more than $0", () => {
+  const PRICES = { ...GO_PRICE, "own/*": { input: 1, output: 2 }, "own/free": { input: 0, output: 0 } };
+
+  test("one on this machine, a coding plan's and one priced at nothing are passed over, saying why; a priced one answers", async () => {
+    const events = await all(chat({ ...mind({ engineer: ["ollama/qwen", "opencode-go/glm-5.3", "own/free", "own/m"] }, PRICES), fetch: answering }, { role: "engineer", messages: ask, coding: true, budgeted: true, paidOnly: true }));
+    expect(events.map((e) => e.type)).toEqual(["fallback", "fallback", "fallback", "model", "text", "done"]);
+    expect(events.slice(0, 3).map((e) => (e as { from: string }).from)).toEqual(["ollama/qwen", "opencode-go/glm-5.3", "own/free"]);
+    for (const e of events.slice(0, 3)) expect((e as { error: string }).error).toContain("counts at more than $0");
+    expect((events[1] as { error: string }).error).toContain("coding plan");
+    expect(events[3]).toEqual({ type: "model", ref: "own/m" });
+  });
+
+  test("with none it ends in an error, and nothing is called; your own work with a budget may still take them", async () => {
+    let called = 0;
+    const counting = (async (...args: Parameters<typeof fetch>) => (called++, answering(...args))) as typeof fetch;
+    const handed = await all(chat({ ...mind({ engineer: ["ollama/qwen", "opencode-go/glm-5.3"] }, GO_PRICE), fetch: counting }, { role: "engineer", messages: ask, coding: true, budgeted: true, paidOnly: true }));
+    expect(handed.map((e) => e.type)).toEqual(["fallback", "fallback", "error"]);
+    expect(called).toBe(0);
+    const yours = await all(chat({ ...mind({ engineer: ["ollama/qwen"] }), fetch: answering }, { role: "engineer", messages: ask, coding: true, budgeted: true }));
+    expect(yours[0]).toEqual({ type: "model", ref: "ollama/qwen" });
+  });
+
+  test("paidFor says the same of a model as the choice does", () => {
+    const { store, vault } = mind({}, PRICES);
+    expect(paidFor(store, "own/m")).toBe(true);
+    expect(paidFor(store, "own/free")).toBe(false);
+    expect(paidFor(store, "opencode-go/glm-5.3")).toBe(false);
+    expect(paidFor(store, "ollama/qwen")).toBe(false);
+    expect(paidFor(store, "nowhere/m")).toBe(false);
+    // One on this machine you've priced is counted at that price.
+    const priced = mind({}, { "ollama/*": { input: 0.1, output: 0.2 } });
+    expect(paidFor(priced.store, "ollama/qwen")).toBe(true);
   });
 });

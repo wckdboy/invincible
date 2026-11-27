@@ -1,4 +1,4 @@
-import { canonical, type ChatMessage, type ChatStreamEvent, type Json, priceFor, type Prices, pricesOf, redact, type Usage } from "@invincible/core";
+import { canonical, type ChatMessage, type ChatStreamEvent, type Json, moneyPrices, type Price, priceFor, type Prices, pricesOf, redact, type Usage } from "@invincible/core";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { type ModelMessage, RefusalError, refusalWords, type ToolCall, type ToolImage, type ToolSpec, ToolsUnsupportedError, type TurnEnd } from "./adapters.ts";
 import { conversationFor } from "./responses.ts";
@@ -7,7 +7,7 @@ import { PRIMARY_SYSTEM, runtimeContext, SHOW_GUIDE, TOOL_GUIDE } from "./person
 import { windowScope, windowsOf } from "./windows.ts";
 import { refusedKeysOf } from "./refused-keys.ts";
 import { followsFormat, readModelCheck, readsScreens, type ModelCheck } from "@invincible/core";
-import { offeredModels, onPlan, planOf, providerRecords, QUIET_MS, quietly, resolveProvider, whyNoKey } from "./providers.ts";
+import { offeredModels, onPlan, PLAN_PROVIDERS, planOf, providerRecords, QUIET_MS, quietly, resolveProvider, whyNoKey } from "./providers.ts";
 import { apartMatches, effortFor, parseRef, pinnedEffort, roleModels, rotated } from "./roster.ts";
 
 export interface ModelsContext {
@@ -52,6 +52,12 @@ export interface ChatRequest {
    * (countable). Any other is passed over, saying why: counted as nothing, it would spend past the budget unseen.
    */
   budgeted?: boolean;
+  /**
+   * This answer is work another node handed over (fabric/handoff.ts), whose budget is what bounds it: only a model the
+   * budget counts at more than $0 may give it (paidFor). One it counts as nothing (on this machine with no price of
+   * yours, a coding plan's, or priced at nothing) is passed over, saying why.
+   */
+  paidOnly?: boolean;
   /**
    * A turn of a run's work loop (a command a reply), whichever role's models answer it: the engineer's, or the
    * planner's once a gate has failed twice in a row. Held to the loop's format checks as the engineer's turns are.
@@ -179,6 +185,17 @@ export function countable(store: LedgerStore, vault: Vault, ref: string, prices:
   return slash > 0 && resolveProvider(store, vault, ref.slice(0, slash))?.local === true;
 }
 
+const aboveNothing = (price: Price | null): boolean => price !== null && (price.input > 0 || price.output > 0 || (price.cached ?? 0) > 0);
+
+/**
+ * Whether a budget counts what this model spends at more than $0: you've priced it (or its provider) above nothing,
+ * and it is no coding plan's, whose calls are paid for already (moneyPrices). Work another node handed over runs on
+ * such a model alone (`paidOnly`), so that its budget bounds it. One on this machine counts only at a price of yours.
+ */
+export function paidFor(store: LedgerStore, ref: string, prices: Prices = pricesOf(store)): boolean {
+  return aboveNothing(priceFor(moneyPrices(prices, PLAN_PROVIDERS), ref));
+}
+
 /** Expand `<provider>/*` wildcards into the first model that provider serves on this node. */
 async function expand(ctx: ModelsContext, refs: string[]): Promise<string[]> {
   const out: string[] = [];
@@ -262,7 +279,9 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
   const offFormat = (ref: string) => (loopTurn ? checkOf(ctx.store, ref) : null);
   const someoneFits = candidates.some((ref) => followsFormat(offFormat(ref)) !== false);
   // Your prices, read once for an answer that spends a budget of yours (countable).
-  const prices = req.budgeted ? pricesOf(ctx.store) : null;
+  const prices = req.budgeted || req.paidOnly ? pricesOf(ctx.store) : null;
+  // And as money goes, for work another node handed over (paidFor).
+  const money = req.paidOnly && prices ? moneyPrices(prices, PLAN_PROVIDERS) : null;
   // How hard it thinks: the level you pinned its role to, whatever its messages say; else what they say, step by step
   // (a run's loop says each turn's: roster.ts STEP_EFFORT), and the role's own for one that says nothing.
   const pinned = pinnedEffort(ctx.store, req.role ?? "planner");
@@ -303,6 +322,12 @@ export async function* chat(ctx: ModelsContext, req: ChatRequest): AsyncGenerato
     }
     if (prices && !provider.local && !priceFor(prices, ref)) {
       yield passOver(ref, `you've set no price for it, so a budget can't count what it spends: work with a budget passes it over (invincible price set ${ref} <$ per million in> <$ per million out>)`);
+      continue;
+    }
+    if (prices && money && !aboveNothing(priceFor(money, ref))) {
+      const yours = priceFor(prices, ref);
+      const why = !yours ? (provider.local ? "it runs on this machine with no price of yours" : "you've set no price for it") : aboveNothing(yours) ? "it is a coding plan's, paid for already" : "you've priced it at nothing";
+      yield passOver(ref, `${why}, so a budget counts what it spends as nothing: work another node handed over runs only on a model its budget counts at more than $0`);
       continue;
     }
     // Whether it reads pictures, where a check has said: then that, not the rule of thumb (adapters.ts seesImages).

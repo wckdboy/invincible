@@ -101,6 +101,9 @@ export interface TeamRuntimeDeps {
   listPrices?(): Prices;
   /** Whether a task's budget can count what this model spends (brain's countable): priced by you, or on this machine. */
   countable?(ref: string): boolean;
+  /** Whether a task's budget counts what this model spends at more than $0 (brain's paidFor): another node's task runs
+   * on such models alone, never on a coding tool's own sign-in. None given: another node's task has no model. */
+  paid?(ref: string): boolean;
   /**
    * Its skills that bear on a task's goal (skills.ts: chosen once for the task, fenced as data), for its planner and
    * engineer, never its reviewer. Absent or null: none.
@@ -408,22 +411,24 @@ export function planTaken(on: TaskAccount, spent: readonly UsageLine[], sessionU
   return { seat: on.seat, kind: on.kind, windows, usd, ...(sessionUsd !== null ? { sessionUsd: micro(sessionUsd) } : {}) };
 }
 
-export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "exitCode" | "stdout">, roster: readonly AgentModel[], outside: readonly AgentModel[] = [], role = "engineer", held = false, ownSpent: { until: number } | null = null, bound = false): HarnessReadiness {
+export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "exitCode" | "stdout">, roster: readonly AgentModel[], outside: readonly AgentModel[] = [], role = "engineer", held = false, ownSpent: { until: number } | null = null, bound = false, handed = false): HarnessReadiness {
   const on = role === "engineer" ? "the engineer's roster" : `the ${role} role`;
   if (probe.exitCode !== 0) return { ready: false, models: [], reason: `Install ${driver.title} in this agent's VM (Your agent never installs or signs in a harness)` };
   const gateway = roster[0] ? `${agentModelName(roster[0])} through the gateway` : null;
   // (What the VM printed is data: the driver reads one flag and one known word from it.)
   const told = driver.signIn?.read(probe.stdout);
-  // (Work in sensitive mode runs on its own models alone, through the gateway: never the tool's own sign-in.)
+  // (Work in sensitive mode runs on its own models alone, through the gateway: never the tool's own sign-in. Nor does
+  // another node's task, whose budget counts nothing a sign-in of the tool's own (a seat) spends.)
   // Work that began on a seat of yours (`bound`) goes on on no other account of its vendor's: not this VM's own sign-in.
-  if (told?.signedIn && !held && bound && gateway) return { ready: true, models: [...roster], on: `${gateway}: its work began on a seat of yours, and this VM's own sign-in is another account` };
+  if (told?.signedIn && !held && !handed && bound && gateway) return { ready: true, models: [...roster], on: `${gateway}: its work began on a seat of yours, and this VM's own sign-in is another account` };
   // Its own sign-in spent (a window it refused, until its reset): the roster's models first, and it last, so a task
   // doesn't begin by asking a spent plan (it isn't moved to another account of the vendor's: there is none to move to).
-  if (told?.signedIn && !held && !bound && ownSpent && gateway) return { ready: true, models: [...roster, OWN_SIGN_IN], on: `${gateway}: its own sign-in in this VM${told.method ? ` (${told.method})` : ""} is spent until ${new Date(ownSpent.until).toISOString().slice(11, 16)} UTC, and goes last` };
-  if (told?.signedIn && !held && !bound) return { ready: true, models: [OWN_SIGN_IN, ...roster], on: `its own sign-in in this VM${told.method ? ` (${told.method})` : ""}${gateway ? `, then ${gateway}` : ""}` };
+  if (told?.signedIn && !held && !handed && !bound && ownSpent && gateway) return { ready: true, models: [...roster, OWN_SIGN_IN], on: `${gateway}: its own sign-in in this VM${told.method ? ` (${told.method})` : ""} is spent until ${new Date(ownSpent.until).toISOString().slice(11, 16)} UTC, and goes last` };
+  if (told?.signedIn && !held && !handed && !bound) return { ready: true, models: [OWN_SIGN_IN, ...roster], on: `its own sign-in in this VM${told.method ? ` (${told.method})` : ""}${gateway ? `, then ${gateway}` : ""}` };
   // An ACP agent you named runs as you set it up in its VM: the role's model through the gateway is offered to it.
-  if (driver.ownSetup && !held) return { ready: true, models: gateway ? [...roster] : [OWN_SIGN_IN], on: gateway ? `its own setup in this VM, with ${gateway} for an agent that reads OPENAI_BASE_URL` : "its own setup in this VM" };
+  if (driver.ownSetup && !held && !handed) return { ready: true, models: gateway ? [...roster] : [OWN_SIGN_IN], on: gateway ? `its own setup in this VM, with ${gateway} for an agent that reads OPENAI_BASE_URL` : "its own setup in this VM" };
   if (gateway) return { ready: true, models: [...roster], on: gateway };
+  if (handed) return { ready: false, models: [], reason: `This task was handed over by another node: it runs only on a model its budget counts at more than $0, through the gateway, never on ${driver.title}'s own sign-in in this VM, and none of those speaks its API (${driver.kind === "anthropic" ? "Anthropic's" : "OpenAI's"})` };
   if (held) return { ready: false, models: [], reason: `This work is in sensitive mode, and none of its models speaks ${driver.title}'s API (${driver.kind === "anthropic" ? "Anthropic's" : "OpenAI's"}): give it one that does, or your agent's own harness` };
   const uncovered = outside[0] ? `. ${agentModelName(outside[0])} is on the roster, but this VM's gateway token doesn't cover its provider: it covers the providers with a key when its task began` : "";
   if (bound && driver.signIn) return { ready: false, models: [], reason: `its work began on a seat of yours, which can't take it now, and it goes on on no other account of its vendor's: sign that seat in again, or put ${driver.signIn.roster} on ${on}${uncovered}` };
@@ -497,7 +502,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
    * of a budget of yours, which only a model whose spend it can count may do; `turn`: a turn of its work loop, with the
    * engineer's own tools when it works with them, whose calls it runs).
    */
-  const ask = async (agent: Agent, role: string, messages: ChatMessage[], signal: AbortSignal, context?: string, spent?: (model: string, usage: Usage | null) => void, turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }, own?: readonly string[], budgeted?: boolean) => {
+  const ask = async (agent: Agent, role: string, messages: ChatMessage[], signal: AbortSignal, context?: string, spent?: (model: string, usage: Usage | null) => void, turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] }, own?: readonly string[], budgeted?: boolean, paidOnly?: boolean) => {
     const leave = await deps.enter(signal);
     // A call that says nothing for so long is ended, and asked again as any failed call is: a task has no clock that would end it.
     const quietMs = deps.callQuietMs ?? TEAM_CALL_QUIET_MINUTES * 60_000;
@@ -512,7 +517,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       try {
         // (An agent's task is coding work: a coding plan on the role may do it. A turn of its work loop is held to its
         // format, or offered the engineer's tools, whose calls end the answer for the loop to run.)
-        for await (const event of chat(deps.brain(agent), { role, ...(own?.length ? { models: [...own] } : {}), messages, signal: AbortSignal.any([signal, quiet.signal]), context, coding: true, ...(turn?.loop ? { loop: true } : {}), ...(turn?.tools ? { clientTools: [...turn.tools] } : {}), ...(turn?.apart ? { apart: turn.apart } : {}), ...(budgeted ? { budgeted: true } : {}) })) {
+        for await (const event of chat(deps.brain(agent), { role, ...(own?.length ? { models: [...own] } : {}), messages, signal: AbortSignal.any([signal, quiet.signal]), context, coding: true, ...(turn?.loop ? { loop: true } : {}), ...(turn?.tools ? { clientTools: [...turn.tools] } : {}), ...(turn?.apart ? { apart: turn.apart } : {}), ...(budgeted ? { budgeted: true } : {}), ...(paidOnly ? { paidOnly: true } : {}) })) {
           clearTimeout(timer);
           timer = setTimeout(() => quiet.abort(), quietMs);
           if (event.type === "text") text += event.text;
@@ -680,6 +685,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Sensitive mode, the task's or its agent's (heldModels): every call of its work on those models alone. A task
       // held to models its agent in sensitive mode isn't is never begun.
       const held = heldModels(deps.agent(agent.id), task);
+      // Another node's task (fabric/handoff.ts) is bounded by its budget: it runs only on models that budget counts at
+      // more than $0 (paid), never on one it counts as nothing, nor on a coding tool's own sign-in (a seat).
+      const handed = task.givenBy?.startsWith("node:") === true;
       await deps.prepare(agent, ctx.signal, held ?? undefined);
       /** When its lease was last written or renewed, and whether one that couldn't be kept was said. */
       let leaseKept = Date.now();
@@ -785,13 +793,15 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       if (agent.harness !== "native") {
         try {
           // (An ACP agent calls whatever you set it up to: sensitive mode can't hold its calls to the models it names.)
+          if (handed && agent.harness === "acp") throw new Error(`${agent.name} works in an ACP agent of your own, which calls the models you set it up with: a task handed over by another node runs only on models its budget counts at more than $0, so it runs on your agent's own harness, OpenCode, Hermes, Claude Code or Codex`);
           if (held && agent.harness === "acp") throw new Error(`${agent.name} works in an ACP agent of your own, which calls the models you set it up with: work in sensitive mode runs on your agent's own harness, OpenCode, Hermes, Claude Code or Codex, whose calls go through its VM's gateway`);
           const driver = driverFor(agent.harness, agent.acp);
           if (!driver) throw new Error(agent.harness === "acp" ? "Name the command that starts its ACP agent in its VM (invincible agents add <id> --harness acp --acp \"goose acp\")" : `No ${agent.harness} driver is available`);
           // Its vendor's seats are weighed first (the node chooses: nothing asks you), but not for work in sensitive mode (a
           // seat's own sign-in is never one of its models). (A run on a seat has no desktop: its agent's is in its own VM.)
           const kind = seatKindOf(driver.name);
-          const seated = Boolean(deps.seat) && kind !== null && !held;
+          // (Nor for another node's task: its budget counts nothing a seat spends.)
+          const seated = Boolean(deps.seat) && kind !== null && !held && !handed;
           const account = ctx.account ?? null;
           // Work that began on a seat of yours goes on on no other account of its vendor's: not its own VM's sign-in (the rule).
           const bound = Boolean(kind && account?.seat && seatVendor({ kind: account.kind }) === seatVendor({ kind }));
@@ -825,10 +835,13 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           // (In sensitive mode, its models are the ones it is held to.)
           const worker = held ? { ...agent, models: [...held] } : agent;
           const roster = deps.models(worker);
-          const offered = task.budgetUsd !== undefined && deps.countable ? roster.filter((m) => m.own || deps.countable!(`${m.provider}/${m.model}`)) : roster;
+          const offered = handed
+            ? roster.filter((m) => !m.own && deps.paid?.(`${m.provider}/${m.model}`) === true)
+            : task.budgetUsd !== undefined && deps.countable ? roster.filter((m) => m.own || deps.countable!(`${m.provider}/${m.model}`)) : roster;
           // (On a seat its plan isn't spent: the seat wasn't chosen if it were.)
-          const readiness = (said: ExecResult, seat: boolean) => harnessReadiness(driver, said, offered, deps.modelsOutside?.(worker), workRole(agent.role), held !== null, seat ? null : (deps.ownSpent?.(agent, driver.name) ?? null), !seat && bound);
+          const readiness = (said: ExecResult, seat: boolean) => harnessReadiness(driver, said, offered, deps.modelsOutside?.(worker), workRole(agent.role), held !== null, seat ? null : (deps.ownSpent?.(agent, driver.name) ?? null), !seat && bound, handed);
           let ready = readiness(probe, onSeat !== null);
+          if (handed && !ready.ready) throw new Error(`${driver.title} can't take this task: it was handed over by another node, so it runs only on a model its budget counts at more than $0 (one you've priced above nothing, on no coding plan), through the gateway, never on the tool's own sign-in in this VM${roster.length && !offered.length ? `, and its budget counts ${roster.map(agentModelName).join(", ")} as nothing` : `: ${ready.reason ?? "it has none"}`}`);
           // (A tool signed in on its own in this VM still runs on that, as ever: only the gateway's models are held to it.)
           if (!ready.ready && roster.length && !offered.length) throw new Error(`${driver.title} has no model its budget can count: you've set no price for ${roster.map(agentModelName).join(", ")} (invincible price set <provider/model> <$ per million in> <$ per million out>), and a task with a budget never runs on what it would count as nothing`);
           if (!ready.ready && seated) {
@@ -890,7 +903,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           const apart = by?.length && !held ? by : undefined;
           const same = (model: string) => (by ?? []).some((from) => apartMatches(model, from));
           const own = held ? (by?.length ? [...held.filter((m) => !same(m)), ...held.filter(same)] : held) : role === "engineer" ? agent.models : undefined;
-          return ask(agent, role === "engineer" ? workRole(agent.role) : role, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined);
+          return ask(agent, role === "engineer" ? workRole(agent.role) : role, messages, ctx.signal, role === "reviewer" ? undefined : contextFor(role), (model, usage) => addUsage(spent, role, model, usage), { ...(turn?.loop ? { loop: turn.loop } : {}), ...(turn?.tools ? { tools: turn.tools } : {}), ...(apart ? { apart } : {}) }, own, task.budgetUsd !== undefined, handed);
         },
         exec, signal: ctx.signal,
         emit: (event) => {
