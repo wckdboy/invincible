@@ -357,12 +357,10 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
     // proposed it, muted; its latest step, or how it ended and what it kept; its answers each a tap under it. The row
     // opens its thread.
     val ended = status == "failed" || status == "stopped" || status == "interrupted"
-    val why = t["error"].string?.lineSequence()?.first()?.trim()?.let { mapOf("gave-up" to "gave up", "unverified" to "not verified")[it] ?: it }
+    val line = taskLine(status, word, t["error"].string, t["progress"].string, t["changes"]["files"].int)
     val task = remember(t) { sh.invincible.bot.core.TeamTask.of(t) }
     fun who(id: String): String = when (id) { "primary" -> Primary.name; "owner", "you" -> "you"; else -> id }
     val by = task.proposedBy?.let { "Proposed by ${who(it)}" } ?: task.givenBy?.let { "Given by ${who(it)}" }
-    val step = (if (ended) why ?: t["progress"].string else t["progress"].string)?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() }
-    val kept = t["changes"]["files"].int?.let { "$it file${if (it == 1) "" else "s"} kept" }
     val title = t["title"].string ?: ""
     var shipping by remember { mutableStateOf(false) }
     var again by remember { mutableStateOf(false) }
@@ -379,8 +377,8 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
             word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
         }
         by?.let { Text(it, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
-        listOfNotNull(step, kept).joinToString(" · ").takeIf { it.isNotEmpty() }?.let {
-            Text(it, style = Type.meta, color = if (ended && why != null) LocalBrand.current.failed else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        line?.let {
+            Text(it.text, style = Type.meta, color = if (it.failed) LocalBrand.current.failed else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         val context = androidx.compose.ui.platform.LocalContext.current
         // Its answers, each a tap.
@@ -409,6 +407,24 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
     }
     if (shipping) ShipDialog(app, t) { shipping = false }
     if (again) GiveAgainDialog(app, task, opened = openTask) { again = false }
+}
+
+/** A compact task's last line (TaskCard), and whether it is said in red. */
+internal data class TaskLine(val text: String, val failed: Boolean)
+
+/**
+ * A compact task's last line, under its title and [word] (how it stands): where it ended short, why, in red; otherwise its
+ * latest step; then what it kept. Why is said once: where it is only its word again ("gave-up" under "Gave up"), the line
+ * says what else there is, as where no error was given.
+ */
+internal fun taskLine(status: String, word: String?, error: String?, progress: String?, files: Int?): TaskLine? {
+    val ended = status == "failed" || status == "stopped" || status == "interrupted"
+    val why = error?.lineSequence()?.first()?.trim()?.let { mapOf("gave-up" to "gave up", "unverified" to "not verified")[it] ?: it }
+        ?.takeUnless { it.equals(word, ignoreCase = true) }
+    val step = (if (ended) why ?: progress else progress)?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() }
+    val kept = files?.let { "$it file${if (it == 1) "" else "s"} kept" }
+    val text = listOfNotNull(step, kept).joinToString(" · ").takeIf { it.isNotEmpty() } ?: return null
+    return TaskLine(text, ended && why != null)
 }
 
 /** An agent's verified work as a pull request: its title first (the task's, to change), on a new branch, as it was verified. */
