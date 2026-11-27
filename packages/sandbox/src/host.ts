@@ -405,6 +405,16 @@ export interface TaskVmInput {
   ttlMinutes: number;
 }
 
+/** What a pipe between two of a host's sandboxes did (SandboxHost.pipe): each side's end, and how much went through. */
+export interface Piped {
+  /** Its stdout went to the other side, and is not kept. */
+  from: ExecResult;
+  to: ExecResult;
+  bytes: number;
+  /** More than its `maxBytes` came: both were ended. */
+  cut: boolean;
+}
+
 /** One thing done on an agent's desktop from outside its VM (`look`: nothing, only the picture). */
 export type DesktopAction =
   | { do: "look" }
@@ -2141,6 +2151,74 @@ export class SandboxHost {
       const left = (this.busy.get(id) ?? 1) - 1;
       if (left > 0) this.busy.set(id, left);
       else this.busy.delete(id);
+    }
+  }
+
+  /**
+   * What one of this host's sandboxes prints, given as it is printed to a command in another as its input, never kept
+   * here: another node's task's clone, from its agent's VM into its own, and its changes back (the fifth fabric review's
+   * R5-3). At most `maxBytes` go through, past which both are ended and the pipe is said to be cut. Each side runs as an
+   * exec does (execArgs: its deadline, /work), and both VMs are busy for it. What the receiving side prints comes back,
+   * capped; what either side says on stderr too, redacted.
+   */
+  async pipe(from: { id: string; cmd: string[] }, to: { id: string; cmd: string[] }, opts: { timeoutSec: number; maxBytes: number }): Promise<Piped> {
+    if (this.apple) throw new SandboxError("a pipe between two VMs is made on a Linux host with Docker", 424);
+    for (const side of [from, to]) {
+      const view = await this.get(side.id);
+      if (!view) throw new SandboxError("no such sandbox on this node", 404);
+      if (view.status !== "running") throw new SandboxError(`sandbox is ${view.status}`, 409);
+    }
+    const ids = [from.id, to.id];
+    for (const id of ids) this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
+    const started = performance.now();
+    try {
+      const source = Bun.spawn([this.bin, ...execArgs(from.id, from.cmd, opts.timeoutSec)], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      const sink = Bun.spawn([this.bin, ...execArgs(to.id, to.cmd, opts.timeoutSec)], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const end = () => {
+        source.kill("SIGKILL");
+        sink.kill("SIGKILL");
+      };
+      // (Past both deadlines, as an exec's: neither side outlives it, whatever the other does.)
+      const timer = setTimeout(end, (opts.timeoutSec + 15) * 1000);
+      let bytes = 0;
+      let cut = false;
+      const carried = (async () => {
+        try {
+          for await (const chunk of source.stdout) {
+            bytes += chunk.byteLength;
+            if (bytes > opts.maxBytes) {
+              cut = true;
+              end();
+              break;
+            }
+            sink.stdin.write(chunk);
+            await sink.stdin.flush();
+          }
+        } catch {
+          // (The other side gone: what it exits with says so.)
+        } finally {
+          try {
+            await sink.stdin.end();
+          } catch {
+            // (Ended already.)
+          }
+        }
+      })();
+      const [fromErr, toOut, toErr, fromCode, toCode] = await Promise.all([readCapped(source.stderr, MAX_OUTPUT), readCapped(sink.stdout, MAX_OUTPUT), readCapped(sink.stderr, MAX_OUTPUT), source.exited, sink.exited, carried]);
+      clearTimeout(timer);
+      const durationMs = Math.round(performance.now() - started);
+      return {
+        from: { exitCode: fromCode, stdout: "", stderr: redact(fromErr.text), durationMs, truncated: fromErr.truncated },
+        to: { exitCode: toCode, stdout: toOut.text, stderr: redact(toErr.text), durationMs, truncated: toOut.truncated || toErr.truncated },
+        bytes,
+        cut,
+      };
+    } finally {
+      for (const id of ids) {
+        const left = (this.busy.get(id) ?? 1) - 1;
+        if (left > 0) this.busy.set(id, left);
+        else this.busy.delete(id);
+      }
     }
   }
 
