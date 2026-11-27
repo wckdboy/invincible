@@ -301,7 +301,11 @@ The run loop is carried and renamed (§10), the most proven part of it:
     agent's plain `desktop …` goes there too. It keeps the window manager and the browser running, says a page's
     dialog as it opens, and closes apps as a person does before it stops them. Beside the pixels, the accessibility
     tree (AT-SPI): `desktop tree` lists what can be acted on in the window with the focus, `desktop find` gives where
-    one is, and `desktop click ref=N` clicks it where it is at that moment. A Mac makes none yet: there an agent's VM is made without one, and the
+    one is, and `desktop click ref=N` clicks it where it is at that moment. An agent's model that takes Claude's computer
+    toolset is offered it in the engineer's tool loop: each action is one of its commands, the VM's `desktop` verb of the
+    same name; the actions after one that fails aren't run; and a turn that acted ends with what can be acted on, as
+    text, then a picture of the screen. Any other model works the desktop by the command: `desktop find`, then `desktop
+    tree`, then its eyes. A Mac makes none yet: there an agent's VM is made without one, and the
     ledger says why. What it costs and how fast it is: the scorecard's desktop suite ([BENCHMARKS.md](BENCHMARKS.md)).
 - **Shipping:** a run's verified changes become a pull request. Its CI and the review comments come back to the same
   task.

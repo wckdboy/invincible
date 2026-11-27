@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChatMessage, ClientCall, ExecResult, NamedRule } from "@invincible/core";
@@ -19,15 +19,19 @@ afterAll(() => {
 type Reply = string | { text?: string; calls: Omit<ClientCall, "id">[] } | { error: string };
 let ids = 0;
 
-function harness(engineer: Reply[], options: { gates?: string[]; maxSteps?: number; rules?: NamedRule[]; reviewer?: string[] } = {}) {
+function harness(engineer: Reply[], options: { gates?: string[]; maxSteps?: number; rules?: NamedRule[]; reviewer?: string[]; computer?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "invincible-run-tools-"));
   dirs.push(dir);
+  // The VM's desktop command, stood in for: each verb it is given kept, in order, and answered as deskd answers it.
+  mkdirSync(join(dir, "bin"));
+  writeFileSync(join(dir, "bin", "desktop"), DESKTOP);
+  chmodSync(join(dir, "bin", "desktop"), 0o755);
   const script = [...engineer];
   const reviews = [...(options.reviewer ?? ["PASS\nLooks right."])];
   const asked: { role: RunRole; messages: ChatMessage[]; tools: string[] }[] = [];
   const events: RunEvent[] = [];
   const run = runLoop(
-    { goal: "make it so", environment: "a test sandbox", plan: "", tools: true, ...(options.gates ? { gates: options.gates } : {}), ...(options.maxSteps ? { maxSteps: options.maxSteps } : {}) },
+    { goal: "make it so", environment: "a test sandbox", plan: "", tools: true, ...(options.gates ? { gates: options.gates } : {}), ...(options.maxSteps ? { maxSteps: options.maxSteps } : {}), ...(options.computer ? { computer: true } : {}) },
     {
       ask: async (role, messages, turn) => {
         asked.push({ role, messages: structuredClone(messages), tools: (turn?.tools ?? []).map((t) => t.name) });
@@ -39,7 +43,7 @@ function harness(engineer: Reply[], options: { gates?: string[]; maxSteps?: numb
         return { text: next.text ?? "", model: "test/engineer", calls: next.calls.map((c) => ({ ...c, id: `call_${++ids}` })), carry: '{"v":1}' };
       },
       exec: async (command) => {
-        const proc = Bun.spawn(["bash", "-c", command], { cwd: dir, stdout: "pipe", stderr: "pipe" });
+        const proc = Bun.spawn(["bash", "-c", command], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` } });
         const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
         return { exitCode, stdout, stderr, durationMs: 1, truncated: false } satisfies ExecResult;
       },
@@ -47,8 +51,20 @@ function harness(engineer: Reply[], options: { gates?: string[]; maxSteps?: numb
       ...(options.rules ? { rules: () => options.rules! } : {}),
     },
   );
-  return { dir, run, asked, events };
+  const desk = () => (existsSync(join(dir, "desk.log")) ? readFileSync(join(dir, "desk.log"), "utf8").trim().split("\n") : []);
+  return { dir, run, asked, events, desk };
 }
+
+/** The stand-in desktop: a typed FAIL has nothing to take it, as deskd says when nothing that takes text has the focus. */
+const DESKTOP = `#!/bin/bash
+printf '%s\\n' "$*" >> desk.log
+case "$1" in
+  screenshot|zoom) echo "data:image/png;base64,iVBORw0KGgo=" ;;
+  tree) printf 'Chromium "Form"\\n  ref=1 push button "Send" 640,450 80x30\\n' ;;
+  type) if [ "$2" = FAIL ]; then echo "desktop: nothing that takes text has the focus (click there first)" >&2; exit 1; fi; echo "typed \${#2} characters into the page · the screen changed (4 ms)" ;;
+  *) echo "$1 at $2,$3 · the screen changed (5 ms)" ;;
+esac
+`;
 
 const bash = (command: string) => ({ name: "bash", input: { command } });
 const engineerAsks = (h: ReturnType<typeof harness>) => h.asked.filter((a) => a.role === "engineer");
@@ -222,5 +238,74 @@ describe("the engineer with tools", () => {
     // The newest read stays whole.
     expect(last.at(-1)!.results![0]!.content.length).toBeGreaterThan(90_000);
     writeFileSync(join(h.dir, "done"), "");
+  });
+});
+
+describe("the engineer with Claude's computer toolset (C1 step 7)", () => {
+  const SCREEN = { mediaType: "image/png" as const, data: "iVBORw0KGgo=", alt: "The screen after this turn's actions: 1280 by 800, the pointer drawn in." };
+  const TREE = 'What can be acted on now, in the window with the focus (desktop tree):\nChromium "Form"\n  ref=1 push button "Send" 640,450 80x30';
+  const commands = (h: ReturnType<typeof harness>) => h.events.filter((e) => e.type === "command").map((e) => (e as { command: string }).command);
+
+  test("offered beside its tools, each action is one of its commands, said as the VM's desktop command; the turn ends with what can be acted on, then the screen", async () => {
+    const h = harness(
+      [
+        { calls: [{ name: "left_click", input: { coordinate: [640, 450] } }, { name: "type", input: { text: "Ada" } }, { name: "key", input: { text: "Return" } }] },
+        "DONE\nSent the form.",
+      ],
+      { computer: true },
+    );
+    const outcome = await h.run;
+    expect([outcome.status, outcome.steps]).toEqual(["done", 3]);
+    const asks = engineerAsks(h);
+    expect(asks[0]!.tools).toEqual(["bash", "read", "edit", "write", "computer"]);
+    expect(commands(h)).toEqual(["desktop left_click 640 450", "desktop type Ada", "desktop key Return"]);
+    // One look at the end of the turn, not one an action.
+    expect(h.desk()).toEqual(["left_click 640 450", "type Ada", "key Return", "tree", "screenshot --base64"]);
+    const results = asks[1]!.messages.at(-1)!.results!;
+    expect(results.map((r) => r.images)).toEqual([undefined, undefined, [SCREEN]]);
+    expect(results.map((r) => r.content)).toEqual(["left_click at 640,450 · the screen changed (5 ms)", "typed 3 characters into the page · the screen changed (4 ms)", `key at Return, · the screen changed (5 ms)\n\n${TREE}`]);
+  });
+
+  test("a turn that ends with a screenshot ends with no second; its picture is its result, and its bytes reach no trail and no event", async () => {
+    const h = harness([{ calls: [{ name: "left_click", input: { coordinate: [10, 20] } }, { name: "screenshot", input: {} }] }, "DONE\nLooked."], { computer: true });
+    await h.run;
+    expect(h.desk()).toEqual(["left_click 10 20", "screenshot --base64", "tree"]);
+    const [, shot] = engineerAsks(h)[1]!.messages.at(-1)!.results!;
+    expect(shot).toMatchObject({ content: `The screen as it is now: 1280 by 800, the pointer drawn in.\n\n${TREE}`, images: [{ ...SCREEN, alt: "The screen as it is now: 1280 by 800, the pointer drawn in." }] });
+    expect(JSON.stringify(h.events)).not.toContain("iVBORw0KGgo");
+  });
+
+  test("an action that fails stops the turn's others, each told it wasn't executed, as the toolset asks; its other tools still run", async () => {
+    const h = harness(
+      [
+        { calls: [{ name: "type", input: { text: "FAIL" } }, { name: "left_click", input: { coordinate: [1, 2] } }, bash("echo still"), { name: "left_click", input: { coordinate: [5000, 2] } }] },
+        { calls: [{ name: "left_click", input: { coordinate: [5000, 2] } }, { name: "key", input: { text: "Return" } }] },
+        "DONE\nTried.",
+      ],
+      { computer: true },
+    );
+    const outcome = await h.run;
+    // (What was never started is no command of the run's.)
+    expect(outcome.steps).toBe(3);
+    expect(commands(h)).toEqual(["desktop type FAIL", "echo still"]);
+    const [first, second] = engineerAsks(h).slice(1).map((a) => a.messages.at(-1)!.results!);
+    expect(first!.map((r) => [r.error ?? false, r.content.split("\n")[0]])).toEqual([
+      [true, "desktop: nothing that takes text has the focus (click there first)"],
+      [true, "Not executed: an earlier computer action in this turn failed."],
+      [false, "exit 0 · 1 ms"],
+      [true, "Not executed: an earlier computer action in this turn failed."],
+    ]);
+    expect(first!.at(-1)).toMatchObject({ images: [SCREEN] });
+    // A call that isn't one it can run stops the rest too, and acts on nothing: the turn ends without a look.
+    expect(second!.map((r) => r.content)).toEqual(["left_click's coordinate is [x, y] on the screen: x from 0 to 1279, y from 0 to 799.", "Not executed: an earlier computer action in this turn failed."]);
+    expect(h.desk()).toEqual(["type FAIL", "tree", "screenshot --base64"]);
+  });
+
+  test("without a desktop the toolset is neither offered nor run: its call is a tool there isn't", async () => {
+    const h = harness([{ calls: [{ name: "left_click", input: { coordinate: [1, 2] } }] }, "DONE\nNo screen."]);
+    await h.run;
+    expect(engineerAsks(h)[0]!.tools).toEqual(["bash", "read", "edit", "write"]);
+    expect(engineerAsks(h)[1]!.messages.at(-1)!.results).toEqual([{ id: expect.any(String), content: 'There is no tool "left_click": there is bash, read, edit, write.', error: true }]);
+    expect(h.desk()).toEqual([]);
   });
 });

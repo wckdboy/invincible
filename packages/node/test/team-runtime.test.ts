@@ -358,6 +358,30 @@ test("a task's plain desktop command goes to its VM as its words alone (the held
   expect(JSON.stringify(f.bodies[1].messages)).toContain("the screen changed (9 ms)");
 });
 
+test("an agent on the tool loop whose VM has a desktop works it by Claude's computer toolset too: each action its VM's desktop command, the turn ended by what can be acted on and the screen", async () => {
+  const argvs: string[][] = [];
+  const f = fixture([call("left_click", { coordinate: [640, 450] }), say("DONE\nSent."), say("PASS\nThe evidence supports it.")], {
+    toolsLoop: true,
+    exec: async (_m, command) => result(command === "command -v desktop" ? { stdout: "/usr/local/bin/desktop\n" } : {}),
+    execArgv: async (m, argv) => {
+      expect(m.id).toBe("ada");
+      argvs.push(argv);
+      return result({ stdout: argv[1] === "tree" ? 'Chromium "Form"\n  ref=1 push button "Send" 640,450 80x30\n' : argv[1] === "screenshot" ? "data:image/png;base64,iVBORw0KGgo=\n" : "clicked at 640,450 · the screen changed (9 ms)\n" });
+    },
+  });
+  expect((await f.runtime.executeTask(member, task, f.context)).verified).toBe(true);
+  // Each through the VM's held desktop session: the action, then one look at the end of the turn.
+  expect(argvs).toEqual([["desktop", "left_click", "640", "450"], ["desktop", "tree"], ["desktop", "screenshot", "--base64"]]);
+  // (This stand-in model takes no toolset: it is offered the engineer's own tools alone, as Claude's would not be.)
+  expect(f.bodies[0].tools.map((t: any) => t.function.name)).toEqual(["bash", "read", "edit", "write"]);
+  const next = JSON.stringify(f.bodies[1].messages);
+  expect(next).toContain("clicked at 640,450 · the screen changed (9 ms)");
+  expect(next).toContain("What can be acted on now, in the window with the focus (desktop tree)");
+  // The screen, in words to a model that can't see it: its picture never sent to one that can't.
+  expect(next).toContain("The screen after this turn's actions: 1280 by 800");
+  expect(next).not.toContain("iVBORw0KGgo");
+});
+
 test("an agent held to models of its own keeps the loop it had, with its plan", async () => {
   const own: Agent = { ...member, models: ["local/fake"] };
   const f = fixture([say("1. Make the change."), say("```sh\necho built\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], { toolsLoop: true, agent: () => own });
@@ -1432,7 +1456,11 @@ test("an agent whose VM has a desktop is told so, and how to operate it; one wit
     await f.runtime.executeTask(member, task, f.context);
     return String(f.bodies[1].messages.find((m: any) => m.role === "user").content);
   };
-  expect(await told(true)).toContain("This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it.");
+  const desk = await told(true);
+  expect(desk).toContain("This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it.");
+  // An app scripted first (C1 step 7); on the screen, the tree's words before its pixels.
+  expect(desk).toContain("Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do.");
+  expect(desk).toContain('To find something on the screen, ask `desktop find` first (`desktop find button "Send"` says where it is), then `desktop tree` (what can be acted on in the window with the focus).');
   expect(await told(false)).not.toContain("desktop");
 });
 

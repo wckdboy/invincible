@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type ClientCall, type ExecResult, redact } from "@invincible/core";
+import { type ClientCall, type ExecResult, redact, type ResultImage } from "@invincible/core";
 import type { ToolSpec } from "@invincible/models";
 
 /*
@@ -70,8 +70,10 @@ export const ENGINEER_TOOLS: ToolSpec[] = [
 /** A call as the run runs it: said as a command (for your rules and the trail), and run in the sandbox. */
 export interface EngineerStep {
   said: string;
-  /** Runs it: what the sandbox said (its exit code above all) and what the engineer is told of it, redacted. */
-  run(exec: Exec, timeoutSec: number): Promise<{ result: ExecResult; told: string }>;
+  /** The computer toolset's member it is (computerStep): its turn ends with the screen, and one that fails stops the turn's others. */
+  member?: string;
+  /** Runs it: what the sandbox said (its exit code above all) and what the engineer is told of it, redacted; a picture, for one that shows the screen. */
+  run(exec: Exec, timeoutSec: number): Promise<{ result: ExecResult; told: string; image?: ResultImage }>;
 }
 
 const quote = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
@@ -113,9 +115,13 @@ const failed = (durationMs: number, said: string): { result: ExecResult; told: s
 /** What the sandbox said went wrong, in a line. */
 const why = (result: ExecResult): string => (result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`).split("\n").slice(-3).join(" ").slice(0, 400);
 
-/** A call read: the step it is, or what is wrong with it (said to the engineer as its result). */
-export function engineerStep(call: ClientCall, shown: (result: ExecResult) => string): EngineerStep | { problem: string } {
+/**
+ * A call read: the step it is, or what is wrong with it (said to the engineer as its result). `computer`: the run's VM
+ * has a desktop, and a model that takes Claude's computer toolset was offered it, so its members are steps too.
+ */
+export function engineerStep(call: ClientCall, shown: (result: ExecResult) => string, computer = false): EngineerStep | { problem: string } {
   const input = call.input;
+  if (computer && COMPUTER_MEMBERS.has(call.name)) return computerStep(call.name, input);
   switch (call.name) {
     case "bash": {
       const command = typeof input.command === "string" ? input.command : "";
@@ -179,6 +185,167 @@ export function engineerStep(call: ClientCall, shown: (result: ExecResult) => st
     default:
       return { problem: `There is no tool "${call.name}": there is ${ENGINEER_TOOLS.map((t) => t.name).join(", ")}.` };
   }
+}
+
+/** Claude's computer toolset's members (computer_toolset_20260801), as its calls name them: each one the VM's `desktop` verb of the same name. */
+export const COMPUTER_MEMBERS: ReadonlySet<string> = new Set([
+  "screenshot", "zoom", "left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag",
+  "mouse_move", "left_mouse_down", "left_mouse_up", "cursor_position", "scroll", "type", "key", "hold_key", "wait",
+]);
+
+/** The desktop's screen, in the pixels its pictures are shown at: the toolset's coordinates are these, 1:1. */
+export const SCREEN = { width: 1280, height: 800 } as const;
+/** At most this much of what can be acted on (desktop tree) ends a turn: the rest is the window's own to scroll to. */
+const TREE_CHARS = 8_000;
+/** A picture's base64 at most, as the chat route takes one (ResultImage). */
+const PICTURE_CHARS = 4_000_000;
+/** What a computer action after one that failed is told, as Anthropic's toolset asks. */
+export const NOT_EXECUTED = "Not executed: an earlier computer action in this turn failed.";
+
+/** A word of a command as a shell reads it back: bare where it is plain, else quoted. */
+const shellWord = (word: string): string => (/^[A-Za-z0-9_+.,:=@%/-]+$/.test(word) ? word : quote(word));
+
+/** The place a call names under `key` ([x, y] on the screen, rounded to its pixels), none (null), or what is wrong with it. */
+function placeAt(input: Record<string, unknown>, key: string, what: string): [number, number] | null | { problem: string } {
+  const value = input[key];
+  if (value === undefined || value === null) return null;
+  const [x, y] = Array.isArray(value) && value.length === 2 && value.every((n) => typeof n === "number" && Number.isFinite(n)) ? value.map(Math.round) : [NaN, NaN];
+  if (!(x! >= 0 && x! < SCREEN.width && y! >= 0 && y! < SCREEN.height)) return { problem: `${what} is [x, y] on the screen: x from 0 to ${SCREEN.width - 1}, y from 0 to ${SCREEN.height - 1}.` };
+  return [x!, y!];
+}
+
+/** A number of seconds from `least` to `most`, or what is wrong with it. */
+function secondsOf(value: unknown, least: number, most: number, what: string): number | { problem: string } {
+  return typeof value === "number" && Number.isFinite(value) && value >= least && value <= most ? value : { problem: `${what} is a number of seconds, up to ${most}.` };
+}
+
+/**
+ * A call of the computer toolset's, as the step it is: said as the VM's own `desktop` command (what your tripwires,
+ * checks and the reviewer read, and what the VM's held desktop session runs in milliseconds), or what is wrong with it.
+ * A screenshot or a zoom comes back as its picture; an action, as what it did, whether the screen changed, and the focus.
+ */
+export function computerStep(name: string, input: Record<string, unknown>): EngineerStep | { problem: string } {
+  const hold = input.text === undefined || input.text === null || input.text === "" ? null : input.text;
+  const held = (): string[] | { problem: string } =>
+    hold === null ? [] : typeof hold === "string" && /^[A-Za-z]+(\+[A-Za-z]+)*$/.test(hold) ? ["--hold", hold] : { problem: `${name}'s text is the keys held while it acts: shift, ctrl, alt or super, joined by + (ctrl+shift).` };
+  const step = (words: (string | number)[]): EngineerStep => {
+    const said = `desktop ${words.map((w) => shellWord(String(w))).join(" ")}`;
+    return {
+      said,
+      member: name,
+      run: async (exec, timeoutSec) => {
+        const result = await safely(exec, said, timeoutSec);
+        return { result, told: redact(result.exitCode === 0 ? result.stdout.trim() || `${name}: done` : why(result)) };
+      },
+    };
+  };
+  const picture = (words: (string | number)[], alt: string): EngineerStep => {
+    const plain = step(words);
+    return { ...plain, run: async (exec, timeoutSec) => shown(await safely(exec, plain.said, timeoutSec), alt) };
+  };
+  switch (name) {
+    case "screenshot":
+      return picture(["screenshot", "--base64"], `The screen as it is now: ${SCREEN.width} by ${SCREEN.height}, the pointer drawn in.`);
+    case "zoom": {
+      const r = input.region;
+      const [x0, y0, x1, y1] = Array.isArray(r) && r.length === 4 && r.every((n) => typeof n === "number" && Number.isFinite(n)) ? r.map(Math.round) : [NaN, NaN, NaN, NaN];
+      if (!(x0! >= 0 && x0! < x1! && x1! <= SCREEN.width && y0! >= 0 && y0! < y1! && y1! <= SCREEN.height)) return { problem: `zoom's region is [x0, y0, x1, y1] on the screen (${SCREEN.width} by ${SCREEN.height}), the second corner below and right of the first.` };
+      return picture(["zoom", x0!, y0!, x1!, y1!, "--base64"], `The screen from ${x0},${y0} to ${x1},${y1}, enlarged. Places on it are still said in the whole screen's pixels.`);
+    }
+    case "left_click":
+    case "right_click":
+    case "middle_click":
+    case "double_click":
+    case "triple_click":
+    case "mouse_move": {
+      const at = placeAt(input, "coordinate", `${name}'s coordinate`);
+      if (at && "problem" in at) return at;
+      if (name === "mouse_move" && !at) return { problem: "mouse_move needs a coordinate: [x, y] on the screen." };
+      const keys = name === "mouse_move" ? [] : held();
+      if ("problem" in keys) return keys;
+      return step([name, ...(at ?? []), ...keys]);
+    }
+    case "left_click_drag": {
+      const from = placeAt(input, "start_coordinate", "left_click_drag's start_coordinate");
+      const to = placeAt(input, "coordinate", "left_click_drag's coordinate");
+      for (const p of [from, to]) if (p && "problem" in p) return p;
+      if (!from || !to) return { problem: "left_click_drag needs start_coordinate and coordinate: where it starts and where it ends, [x, y] on the screen." };
+      const keys = held();
+      if ("problem" in keys) return keys;
+      return step([name, ...(from as [number, number]), ...(to as [number, number]), ...keys]);
+    }
+    case "left_mouse_down":
+    case "left_mouse_up":
+    case "cursor_position":
+      return step([name]);
+    case "scroll": {
+      const direction = input.scroll_direction;
+      const amount = input.scroll_amount;
+      if (direction !== "up" && direction !== "down" && direction !== "left" && direction !== "right") return { problem: "scroll's scroll_direction is up, down, left or right." };
+      if (!(typeof amount === "number" && Number.isInteger(amount) && amount >= 1 && amount <= 50)) return { problem: "scroll's scroll_amount is a whole number of clicks of the wheel, from 1 to 50." };
+      const at = placeAt(input, "coordinate", "scroll's coordinate");
+      if (at && "problem" in at) return at;
+      const keys = held();
+      if ("problem" in keys) return keys;
+      return step([name, direction, amount, ...(at ?? []), ...keys]);
+    }
+    case "type": {
+      const text = input.text;
+      if (typeof text !== "string" || !text) return { problem: "type needs the text to type." };
+      if (text.length > 20_000 || text.includes("\0")) return { problem: "type takes at most 20,000 characters of text: write a longer one to a file and open it." };
+      return step([name, text]);
+    }
+    case "key":
+    case "hold_key": {
+      const keys = typeof input.text === "string" ? input.text.trim().split(/\s+/) : [];
+      if (!keys.length || keys.some((k) => !/^[A-Za-z0-9_+]{1,40}$/.test(k)) || (name === "hold_key" && keys.length > 1)) {
+        return { problem: `${name}'s text is ${name === "key" ? "a key or keys" : "a key"}, named like Return, Tab, Escape, ctrl+l, Page_Down (letters, digits, _ and + only).` };
+      }
+      if (name === "hold_key") {
+        const duration = secondsOf(input.duration, 0, 60, "hold_key's duration");
+        if (typeof duration !== "number") return duration;
+        return step([name, keys[0]!, duration]);
+      }
+      const repeat = input.repeat === undefined || input.repeat === null ? 1 : input.repeat;
+      if (!(typeof repeat === "number" && Number.isInteger(repeat) && repeat >= 1 && repeat <= 100)) return { problem: "key's repeat is a whole number of presses, from 1 to 100." };
+      return step([name, ...keys, ...(repeat > 1 ? ["--repeat", repeat] : [])]);
+    }
+    case "wait": {
+      const duration = secondsOf(input.duration, 0, 60, "wait's duration");
+      if (typeof duration !== "number") return duration;
+      return step([name, duration]);
+    }
+    default:
+      return { problem: `There is no computer action "${name}".` };
+  }
+}
+
+/** A picture the VM's desktop printed (desktop screenshot|zoom --base64), as a result carries one; else what went wrong. */
+function shown(result: ExecResult, alt: string): { result: ExecResult; told: string; image?: ResultImage } {
+  const printed = result.exitCode === 0 ? /^data:(image\/png|image\/jpeg);base64,([A-Za-z0-9+/]+={0,2})\s*$/.exec(result.stdout) : null;
+  // (Its bytes go to the model alone: never into the trail, the run's events or what is kept of the command.)
+  const quiet = { ...result, stdout: "" };
+  if (!printed || printed[2]!.length > PICTURE_CHARS) {
+    return { result: { ...quiet, exitCode: result.exitCode || 1 }, told: redact(`The screen could not be shown: ${printed ? "its picture is too large" : result.exitCode === 0 ? "the desktop printed no picture" : why(result)}.`) };
+  }
+  return { result: quiet, told: alt, image: { mediaType: printed[1] as ResultImage["mediaType"], data: printed[2]!, alt } };
+}
+
+/**
+ * What a turn that acted on the desktop ends with (C1 step 7): what can be acted on in the window with the focus, as
+ * text first (desktop tree: each with its ref, role, name and place), then, unless its last action showed the screen
+ * already, a picture of it once it has settled. Each said when it can't be had, never left out unsaid.
+ */
+export async function screenAfter(exec: Exec, timeoutSec: number, picture: boolean): Promise<{ text: string; image?: ResultImage }> {
+  const tree = await safely(exec, "desktop tree", Math.min(timeoutSec, 30));
+  const listed = tree.stdout.trim();
+  const text =
+    tree.exitCode === 0 && listed
+      ? `What can be acted on now, in the window with the focus (desktop tree):\n${listed.length > TREE_CHARS ? `${listed.slice(0, TREE_CHARS)}\n(… the rest isn't shown.)` : listed}`
+      : `(What can be acted on now couldn't be read: ${why(tree)}.)`;
+  if (!picture) return { text: redact(text) };
+  const seen = shown(await safely(exec, "desktop screenshot --base64", Math.min(timeoutSec, 30)), `The screen after this turn's actions: ${SCREEN.width} by ${SCREEN.height}, the pointer drawn in.`);
+  return seen.image ? { text: redact(text), image: seen.image } : { text: redact(`${text}\n${seen.told}`) };
 }
 
 /**

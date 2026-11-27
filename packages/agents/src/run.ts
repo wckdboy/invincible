@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { type ChatMessage, type ClientCall, type ClientResult, type ExecResult, type GateBy, MAX_PROPOSED_GATES, type NamedCheck, type NamedRule, redact, type RuleDoes } from "@invincible/core";
-import type { ToolSpec } from "@invincible/models";
+import { COMPUTER, type ToolSpec } from "@invincible/models";
 import { type AgentDriver, type AgentModel, type AgentRunDeps, agentModelName, runAgent } from "./harnesses.ts";
-import { ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput } from "./engineer-tools.ts";
+import { COMPUTER_MEMBERS, ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput, NOT_EXECUTED, screenAfter } from "./engineer-tools.ts";
 import { engramBriefing, engramProject } from "./engram.ts";
 import { changesOf, checkOf, contentsOf, readOf, readsOf, testFilesOf, writesOf } from "./shell-paths.ts";
 import { STEP_EFFORT } from "@invincible/models";
@@ -202,6 +202,13 @@ export interface RunOptions {
    * working, inside the primary's gates, reviewer and rules.
    */
   tools?: boolean;
+  /**
+   * With tools, its VM has a desktop (C1 step 7): the engineer is offered Claude's computer toolset as well, and a model
+   * that takes it works the desktop by its members (screenshot, left_click, type …), each one of its commands, said as
+   * the VM's `desktop` command; one that doesn't is offered nothing more, and works it by that command. A turn that acted
+   * on the desktop ends with what can be acted on there, as text, then a picture of the screen.
+   */
+  computer?: boolean;
   /**
    * Audited while it runs, in place of any limit (an agent's task): every AUDIT_EVERY, the reviewer's models, who don't
    * do the work, look at whether it is still on its task. When it has drifted, or goes round in circles, they say what
@@ -1180,6 +1187,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     contract: Boolean(options.contract),
     keepReads: Boolean(options.keepReads) || Boolean(options.tools),
     tools: Boolean(options.tools),
+    // (Its toolset is the tool loop's: without tools, the desktop is the fenced loop's commands, as ever.)
+    computer: Boolean(options.tools) && Boolean(options.computer),
     audit: Boolean(options.audit),
     unreviewed: Boolean(options.unreviewed),
     ...(options.plan !== undefined ? { plan: options.plan } : {}),
@@ -2072,7 +2081,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       let reply: Awaited<ReturnType<typeof ask>>;
       try {
         reply = o.tools
-          ? await ask(worker, compactCalls(messages, excerpted, told), { loop: true, tools: ENGINEER_TOOLS })
+          ? await ask(worker, compactCalls(messages, excerpted, told), { loop: true, tools: o.computer ? [...ENGINEER_TOOLS, COMPUTER] : ENGINEER_TOOLS })
           : await ask(worker, compact(messages, excerpted, o.keepReads), { loop: true });
       } catch (error) {
         if (!(error instanceof OutOfRoom)) throw error;
@@ -2205,7 +2214,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         steps = first + runs.length - 1;
         const thought = reply.text.trim();
         if (thought) emit({ type: "thought", step: first, text: thought, model: reply.model });
-        const read = runs.map((c) => engineerStep(c, (result) => observation(result, shownFor(typeof c.input.command === "string" ? c.input.command : ""))));
+        const read = runs.map((c) => engineerStep(c, (result) => observation(result, shownFor(typeof c.input.command === "string" ? c.input.command : "")), o.computer));
         // Your tripwires, before any of them runs: one that halts stops all of them; one refused is said in its place.
         const rules = await rulesNow();
         const found = read.map((r) => ("said" in r ? tripOf(rules, r.said) : null));
@@ -2225,6 +2234,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
         /** Words that came as its calls ran (RunDeps.steers): the calls not yet started aren't run, and the words go with their results. */
         let spoke: RunSteer[] = [];
         let unrun = 0;
+        // Its computer actions (C1 step 7): run in order, the rest not run once one fails, as the toolset asks; and
+        // whether the last that ran showed the screen (a picture of it then ends the turn, or is the end itself).
+        const member = (c: ClientCall) => o.computer === true && COMPUTER_MEMBERS.has(c.name);
+        let acted = false;
+        let failedAction = false;
+        let showed = false;
         for (const [i, c] of runs.entries()) {
           const at = first + i;
           const r = read[i]!;
@@ -2235,6 +2250,14 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
             results.push({ id: c.id, content: spokeFirst(spoke), error: true });
             continue;
           }
+          if (failedAction && member(c)) {
+            // (Never started: no command of the run's.)
+            unrun += 1;
+            told.push({ command: null, exit: null });
+            results.push({ id: c.id, content: NOT_EXECUTED, error: true });
+            continue;
+          }
+          if (member(c)) failedAction = "problem" in r || Boolean(found[i]);
           if ("problem" in r) {
             // (A call that couldn't be run ran nothing: like a reply with no command, it isn't one.)
             malformed += 1;
@@ -2256,7 +2279,12 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           }
           emit({ type: "command", step: at, command: r.said });
           check();
-          const { result, told: seen } = await r.run(deps.exec, o.commandTimeoutSec);
+          const { result, told: seen, image } = await r.run(deps.exec, o.commandTimeoutSec);
+          if (r.member) {
+            acted = true;
+            showed = Boolean(image);
+            failedAction = result.exitCode !== 0;
+          }
           emit({ type: "observation", step: at, exitCode: result.exitCode, durationMs: result.durationMs, output: seen });
           // (A command's output begins with its exit; a tool's says what it did in its first line, which the reviewer reads too.)
           trail.push({ command: trailCommand(r.said), exitCode: result.exitCode, excerpt: clip(c.name === "bash" ? seen.split("\n").slice(1).join("\n") : seen, 600, 300) });
@@ -2269,7 +2297,14 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
           told.push({ command: r.said, exit: result.exitCode });
           // (A command's exit is in what it printed: only a tool that couldn't do what it was asked is an error. A result is
           // at most RESULT_KEPT, as the chat route takes one: a command whose output and errors both ran long is cut again.)
-          results.push({ id: c.id, content: clip(`${seen}${same.note}`, RESULT_KEPT.head, RESULT_KEPT.tail), ...(c.name !== "bash" && result.exitCode !== 0 ? { error: true } : {}) });
+          results.push({ id: c.id, content: clip(`${seen}${same.note}`, RESULT_KEPT.head, RESULT_KEPT.tail), ...(c.name !== "bash" && result.exitCode !== 0 ? { error: true } : {}), ...(image ? { images: [image] } : {}) });
+        }
+        // A turn that acted on the desktop ends with it: what can be acted on, as text, then the screen, with its last result.
+        if (acted && results.length) {
+          check();
+          const end = await screenAfter(deps.exec, o.commandTimeoutSec, !showed);
+          const last = results.at(-1)!;
+          results[results.length - 1] = { ...last, content: `${last.content}\n\n${end.text}`.trim(), ...(end.image ? { images: [...(last.images ?? []), end.image] } : {}) };
         }
         // Calls past the commands left get their results too; those past MAX_CALLS were never kept, and are only said.
         const outOf = action.calls.length - runs.length;

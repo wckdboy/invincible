@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ClientCall, ExecResult } from "@invincible/core";
-import { applyEdit, ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput } from "../src/engineer-tools.ts";
+import { applyEdit, ENGINEER_TOOLS, type EngineerStep, engineerStep, keptInput, screenAfter } from "../src/engineer-tools.ts";
 import { changesOf, readOf, writesOf } from "../src/shell-paths.ts";
 import { tripOf } from "../src/tripwires.ts";
 
@@ -197,4 +197,87 @@ test("a long input is kept short in the conversation once it has run", () => {
   expect(kept?.path).toBe("a.txt");
   expect(String(kept?.content)).toHaveLength(12_000 + 4_000 + "\n… [34,000 characters cut here: the tool had them all] …\n".length);
   expect(keptInput({ path: "a.txt", content: "short" })).toBeNull();
+});
+
+describe("Claude's computer toolset, as the VM's desktop command (C1 step 7)", () => {
+  const member = (name: string, input: Record<string, unknown>) => engineerStep(call(name, input), shown, true);
+  const said = (name: string, input: Record<string, unknown>) => {
+    const read = member(name, input);
+    if ("problem" in read) throw new Error(read.problem);
+    return read.said;
+  };
+
+  test("each member is said as the desktop verb of its name, with its input as that verb's words, and marked as the toolset's", () => {
+    expect(said("left_click", { coordinate: [640, 450] })).toBe("desktop left_click 640 450");
+    expect(said("left_click", {})).toBe("desktop left_click");
+    expect(said("double_click", { coordinate: [10.4, 20.6], text: "shift" })).toBe("desktop double_click 10 21 --hold shift");
+    expect(said("right_click", { coordinate: [1, 2], text: "" })).toBe("desktop right_click 1 2");
+    expect(said("left_click_drag", { start_coordinate: [1, 2], coordinate: [30, 40], text: "ctrl+shift" })).toBe("desktop left_click_drag 1 2 30 40 --hold ctrl+shift");
+    expect(said("mouse_move", { coordinate: [1279, 799] })).toBe("desktop mouse_move 1279 799");
+    expect(said("scroll", { scroll_direction: "down", scroll_amount: 3, coordinate: [100, 200] })).toBe("desktop scroll down 3 100 200");
+    expect(said("type", { text: "Ada Lovelace" })).toBe("desktop type 'Ada Lovelace'");
+    expect(said("type", { text: "it's $HOME" })).toBe("desktop type 'it'\\''s $HOME'");
+    expect(said("key", { text: "ctrl+l" })).toBe("desktop key ctrl+l");
+    expect(said("key", { text: "Tab Tab Return", repeat: 2 })).toBe("desktop key Tab Tab Return --repeat 2");
+    expect(said("hold_key", { text: "shift", duration: 1.5 })).toBe("desktop hold_key shift 1.5");
+    expect(said("wait", { duration: 2 })).toBe("desktop wait 2");
+    expect(said("screenshot", {})).toBe("desktop screenshot --base64");
+    expect(said("zoom", { region: [0, 0, 640, 400] })).toBe("desktop zoom 0 0 640 400 --base64");
+    for (const name of ["left_mouse_down", "left_mouse_up", "cursor_position"]) expect(said(name, {})).toBe(`desktop ${name}`);
+    expect((member("left_click", { coordinate: [1, 2] }) as EngineerStep).member).toBe("left_click");
+    // (Your tripwires read it as the command it is.)
+    const rules = [{ name: "no-passwords", on: "command" as const, does: "refuse" as const, words: [], contains: "hunter2" }];
+    expect(tripOf(rules, said("type", { text: "hunter2" }))?.rule).toBe("no-passwords");
+  });
+
+  test("what isn't a member's input is said, and runs nothing; without a desktop, a member is no tool at all", () => {
+    const problems = [
+      member("left_click", { coordinate: [1280, 10] }),
+      member("left_click", { coordinate: [10] }),
+      member("left_click", { coordinate: [1, 2], text: "ctrl;reboot" }),
+      member("mouse_move", {}),
+      member("left_click_drag", { coordinate: [1, 2] }),
+      member("scroll", { scroll_direction: "sideways", scroll_amount: 1 }),
+      member("scroll", { scroll_direction: "up", scroll_amount: 0 }),
+      member("type", { text: "" }),
+      member("key", { text: "ctrl+l; reboot" }),
+      member("key", { text: "a", repeat: 1000 }),
+      member("hold_key", { text: "shift ctrl", duration: 1 }),
+      member("wait", { duration: 3600 }),
+      member("zoom", { region: [10, 10, 5, 5] }),
+    ];
+    expect(problems.filter((p) => !("problem" in p))).toEqual([]);
+    expect((problems[0] as { problem: string }).problem).toBe("left_click's coordinate is [x, y] on the screen: x from 0 to 1279, y from 0 to 799.");
+    expect(engineerStep(call("left_click", { coordinate: [1, 2] }), shown)).toEqual({ problem: 'There is no tool "left_click": there is bash, read, edit, write.' });
+  });
+
+  test("a picture printed by the desktop comes back as the call's picture, its bytes in no words; one that can't be had is said", async () => {
+    const exec = async (command: string): Promise<ExecResult> => ({ exitCode: 0, stdout: command.includes("zoom") ? "data:image/png;base64,iVBORw0KGgo=\n" : "nothing\n", stderr: "", durationMs: 1, truncated: false });
+    const zoom = await (member("zoom", { region: [0, 0, 640, 400] }) as EngineerStep).run(exec, 30);
+    expect(zoom.image).toEqual({ mediaType: "image/png", data: "iVBORw0KGgo=", alt: "The screen from 0,0 to 640,400, enlarged. Places on it are still said in the whole screen's pixels." });
+    expect([zoom.told, zoom.result.stdout]).toEqual([zoom.image!.alt, ""]);
+    const none = await (member("screenshot", {}) as EngineerStep).run(exec, 30);
+    expect([none.image, none.result.exitCode, none.told]).toEqual([undefined, 1, "The screen could not be shown: the desktop printed no picture."]);
+  });
+
+  test("a turn that acted ends with what can be acted on, as text first, then the screen; each said when it can't be had", async () => {
+    const asked: string[] = [];
+    const exec = (tree: ExecResult, shot: ExecResult) => async (command: string): Promise<ExecResult> => {
+      asked.push(command);
+      return command === "desktop tree" ? tree : shot;
+    };
+    const ok = (stdout: string): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
+    const end = await screenAfter(exec(ok('Chromium "Form"\n  ref=1 push button "Send" 640,450 80x30\n'), ok("data:image/png;base64,iVBORw0KGgo=\n")), 600, true);
+    expect(end).toEqual({
+      text: 'What can be acted on now, in the window with the focus (desktop tree):\nChromium "Form"\n  ref=1 push button "Send" 640,450 80x30',
+      image: { mediaType: "image/png", data: "iVBORw0KGgo=", alt: "The screen after this turn's actions: 1280 by 800, the pointer drawn in." },
+    });
+    expect(asked).toEqual(["desktop tree", "desktop screenshot --base64"]);
+    // Its last action showed the screen already: the tree alone.
+    asked.length = 0;
+    expect((await screenAfter(exec(ok("x\n"), ok("")), 600, false)).image).toBeUndefined();
+    expect(asked).toEqual(["desktop tree"]);
+    const failed: ExecResult = { exitCode: 1, stdout: "", stderr: "desktop: the display isn't up\n", durationMs: 1, truncated: false };
+    expect((await screenAfter(exec(failed, failed), 600, true)).text).toBe("(What can be acted on now couldn't be read: desktop: the display isn't up.)\nThe screen could not be shown: desktop: the display isn't up.");
+  });
 });
