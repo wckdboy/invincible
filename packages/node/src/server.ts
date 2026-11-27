@@ -2116,6 +2116,15 @@ export function createApp(ctx: AppContext) {
       ctx.log(`intervention not counted: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
+  /**
+   * Who a twin of your desktop routes answers (teamDesktopOn, teamDesktopHoldOn, teamDesktopStreamOn): you, or a full
+   * node passing your request on. Never an agent, nor a node you didn't trust with the vault (a limited one), nor a
+   * principal of any kind not named here: a twin does what your own route does.
+   */
+  const desktopTwin = (p: Principal): void => {
+    if (isOwner(p) || (p.kind === "node" && ctx.store.activeDevice(p.device)?.role === "full")) return;
+    throw new HttpError(403, "an agent's desktop is watched and taken over by you alone");
+  };
   /** An agent's desktop, asked of by you alone: its VM, or why it has none, and the run that VM is made for. */
   const desktopOf = (id: string, p: Principal): { bound: TeamWorkspace; run: string } => {
     ownerOnly(p);
@@ -2768,7 +2777,7 @@ export function createApp(ctx: AppContext) {
     },
     teamDesktopOn: (input, p) => {
       // Yours alone: an agent operates its own desktop from inside its VM, and never another's from outside.
-      if (p.kind === "arm") throw new HttpError(403, "an agent's desktop is watched and taken over by you alone");
+      desktopTwin(p);
       const { on, ...asked } = input;
       return onNode(p, on, routes.teamDesktopOn.path, asked, () => ctx.sandbox!.desktop(input.id, input.run, input.action, input.picture ?? true), { sandbox: input.id });
     },
@@ -2783,7 +2792,7 @@ export function createApp(ctx: AppContext) {
       return inProcess(p, req.signal).call("teamDesktopHoldOn", { on: bound.node, id: bound.id, run, take: false });
     },
     teamDesktopHoldOn: (input, p) => {
-      if (p.kind === "arm") throw new HttpError(403, "an agent's desktop is watched and taken over by you alone");
+      desktopTwin(p);
       const { on, ...asked } = input;
       return onNode(p, on, routes.teamDesktopHoldOn.path, asked, async () => ({ held: await ctx.sandbox!.desktopHold(input.id, input.run, input.take) }), { sandbox: input.id });
     },
@@ -2793,7 +2802,7 @@ export function createApp(ctx: AppContext) {
       return inProcess(p, req.signal).answer!("teamDesktopStreamOn", { on: bound.node, id: bound.id, run });
     },
     teamDesktopStreamOn: async (input, p, req) => {
-      if (p.kind === "arm") throw new HttpError(403, "an agent's desktop is watched and taken over by you alone");
+      desktopTwin(p);
       const { on, ...asked } = input;
       // Watched on the node its VM is on; a request another node forwarded is watched where it lands, and relayed back.
       const target = p.kind === "node" ? null : on ? resolveNode(on) : null;

@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { b64u, bodyFingerprint, type Calibration, ceilingThreads, DESKTOP_FRAME_KIND, DESKTOP_FRAMES_TYPE, DesktopFrames, KERNEL, REFERENCE_SINGLE, type RouteName, routes, type SyncPage, teamArmLabel } from "@invincible/core";
+import { b64u, bodyFingerprint, type Calibration, ceilingThreads, DESKTOP_FRAME_KIND, DESKTOP_FRAMES_TYPE, DesktopFrames, KERNEL, newNodeIdentity, REFERENCE_SINGLE, type RouteName, routes, type SyncPage, teamArmLabel } from "@invincible/core";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
-import { requestPairing, signedPost, waitForApproval } from "@invincible/link";
+import { requestPairing, signedFetch, signedPost, waitForApproval } from "@invincible/link";
 import type { FramesProcess, SessionProcess } from "@invincible/sandbox";
 import type { Capabilities } from "../src/capabilities.ts";
 import type { Measure } from "../src/compute/service.ts";
@@ -242,5 +242,26 @@ describe("an agent's desktop, from your node, on the node its VM is on", () => {
     expect(sessions.flatMap((s) => s.asked).filter((q) => q.name === "take")).toHaveLength(1);
     expect((await call("teamDesktopTake", { id: "vmless" })).status).toBe(424);
     expect((await call("teamDesktopStream", { id: "nobody" })).status).toBe(404);
+  });
+
+  test("a node you didn't trust with the vault (a limited one) is refused each twin, on the VM's node and on yours, though it holds `sandbox`; you, and the full node that passes your request on, get through as before", async () => {
+    // (Enrolled as the fleet's records allow, though pairing makes every node a full one.)
+    const lent = newNodeIdentity();
+    keep.store.emit(keep.identity, "device.enrolled", { device: lent.id, name: "lent", kind: "node", role: "limited", box: b64u(lent.boxPublic), scopes: ["sandbox"] });
+    await until(() => box.store.activeDevice(lent.id) !== null);
+    const vm = (await api<{ agents: { id: string; workspace: { id: string; node: string } | null }[] }>("team")).agents.find((a) => a.id === "una")!.workspace!;
+    const run = `arm.${teamArmLabel(keep.identity.id, "una")}`;
+    const before = { asked: sessions.flatMap((s) => s.asked).length, encoders: encoders.length };
+    const asLent = (port: number, name: RouteName, input: unknown) => signedFetch(lent, `http://127.0.0.1:${port}`, routes[name].path, input).then((r) => r.status);
+    for (const [port, on] of [[boxPort, {}], [keepPort, { on: vm.node }]] as const) {
+      expect(await asLent(port, "teamDesktopOn", { id: vm.id, ...on, run, action: { do: "click", x: 1, y: 1 } })).toBe(403);
+      expect(await asLent(port, "teamDesktopHoldOn", { id: vm.id, ...on, run, take: true })).toBe(403);
+      expect(await asLent(port, "teamDesktopStreamOn", { id: vm.id, ...on, run })).toBe(403);
+    }
+    // None of it reached the VM's desktop.
+    expect(sessions.flatMap((s) => s.asked)).toHaveLength(before.asked);
+    expect(encoders).toHaveLength(before.encoders);
+    // You, from your node, which passes it on to the VM's as a full node: as before.
+    expect(await api("teamDesktop", { id: "una", picture: false })).toMatchObject({ done: true, held: null });
   });
 });

@@ -356,8 +356,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
     - **Its routes, yours alone** (`sandbox`, and never an agent's): `teamDesktopStream` answers with the frames as they
       come; `teamDesktopTake` and `teamDesktopRelease` take the desktop over and give it back; `teamDesktop` with
       `picture: false` does a thing and brings back no picture, for while you watch. Each says whether you have it
-      (`held`). Your node asks the node the VM is on, signed as itself (`…On`), and relays the stream as it comes: a
-      signed fetch, as a sandbox's followed lines are relayed.
+      (`held`). Your node asks the node the VM is on, signed as itself (`…On`, which answer only you or a full node), and
+      relays the stream as it comes: a signed fetch, as a sandbox's followed lines are relayed.
     - **Take-over:** your looks and your input go to deskd through a held session of the node's own, an exec as a uid
       that is never the agent's, opened beside the agent's session (which starts deskd, as the agent). Your input
       takes the desktop over if no one has it, and is done under your hold. While you hold it, the agent's desktop

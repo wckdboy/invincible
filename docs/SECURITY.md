@@ -290,7 +290,9 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
     session ends. A second take starts a fresh window. Your looks don't count as input, so a page left open on the
     screen keeps no hold of yours alive.
   - **Watching is yours too:** the stream, the take and the give-back are refused to an agent, whether it asks your node
-    or asks it to pass the request to the node its VM is on (`packages/node/test/desktop-watch.e2e.test.ts`).
+    or asks it to pass the request to the node its VM is on (`packages/node/test/desktop-watch.e2e.test.ts`). The
+    routes a node passes your request on by (`teamDesktopOn`, `teamDesktopHoldOn`, `teamDesktopStreamOn`) answer you, or
+    a full node, alone: never a node you didn't trust with the vault, whatever scopes it holds, nor any other principal.
   - **What it can't promise:** the VM is the agent's. A program of its own there runs as deskd's own user. It can read
     the display and what you type into it, or stand in for deskd's sockets. Take-over keeps the agent's model from
     taking the screen while you hold it. It doesn't make the VM a place for a secret you wouldn't give the agent.
