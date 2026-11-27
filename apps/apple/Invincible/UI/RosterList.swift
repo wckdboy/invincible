@@ -70,7 +70,7 @@ struct RosterList<Foot: View>: View {
                     }
                 }
             }
-            Section { foot }
+            Section { foot.listRowBackground(Color.clear) }
         }
         .listStyle(.sidebar)
         // Its first row close under what heads it (a sidebar's list leaves a header's height above a section without one).
@@ -112,7 +112,9 @@ struct RosterList<Foot: View>: View {
             .buttonStyle(.plain)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: Space.line, leading: Space.s3, bottom: Space.line, trailing: Space.s3))
-            .listRowBackground(here ? RosterMark() : nil)
+            // (Every row on the roster's own ground, the marked one's on its mark: in a drawer's dark list the system's
+            // ground is a card a section long, which the mark, an inset round, cut in two.)
+            .listRowBackground(RosterMark().opacity(here ? 1 : 0))
             .accessibilityAddTraits(here ? .isSelected : [])
             .contextMenu {
                 if windows, let window = place.window(chat: session.chat.conversation) {
