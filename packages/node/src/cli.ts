@@ -359,6 +359,8 @@ Notifications (it comes to you: Web Push to your own paired devices, encrypted t
 
 Connectors (manifests, not code: keys stay in the vault; outward and delete ask you)
   connector ls | connector tools <id> [tool] | connector rm <id>
+  connector tools <id> --add <tool>              a tool the catalog has added since you installed it, added on your word
+                                    and only it: its other tools, and your standing orders over them, stay as they are
   connector add github|cloudflare|home-assistant [--origin url] | connector add --manifest file.json
   connector add github --owner <org>                    one more GitHub owner with its own token (github-<org>)
   connector add <id> --mcp <url> [--auth bearer|header:<name>|oauth] [--only a,b] [--class tool=read …]

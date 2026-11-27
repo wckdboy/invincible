@@ -111,3 +111,28 @@ test("a hosted MCP server from the library at a terminal: added by its id, its s
   expect(out).not.toContain("app you registered");
 });
 
+
+// Your word, 27 November 2026: a tool the catalog has added widens what a connector does, so only you add it.
+test("a connector's new tools at a terminal: listed as yours to add, and added one by one on your word, by the one route for it", async () => {
+  const tool = (name: string) => ({ name, description: `${name}.`, method: "POST", path: "/x", class: "outward", asks: true, params: {} });
+  let github = { id: "github", label: "GitHub", kind: "http", url: null, origin: "https://api.github.com", installed: true, key: "ready", secret: "github", keyHelp: null, needsOrigin: false, problem: null, tools: [tool("issue.create")], access: null, oauth: null, private: false, newTools: ["merge"] } as unknown as ConnectorView;
+  const asked: { name: RouteName; input: unknown }[] = [];
+  const api = {
+    async call<T>(name: RouteName, input?: unknown): Promise<T> {
+      asked.push({ name, input });
+      if (name === "connectors") return { connectors: [github] } as T;
+      if (name === "addConnectorTools") {
+        github = { ...github, tools: [...github.tools, tool("merge")], newTools: [] } as unknown as ConnectorView;
+        return { connector: github, added: (input as { tools: string[] }).tools } as T;
+      }
+      return { ok: true } as T;
+    },
+  };
+  const listed = (await printed(() => connectorCommand(api, "tools", ["github"], {}))).join("\n");
+  expect(listed).toContain("New in the catalog, yours to add (nothing adds one by itself): merge. Add one: invincible connector tools github --add merge");
+  const added = (await printed(() => connectorCommand(api, "tools", ["github"], { add: "merge" }))).join("\n");
+  expect(asked.at(-1)).toEqual({ name: "addConnectorTools", input: { id: "github", tools: ["merge"] } });
+  expect(added).toContain("Added to GitHub: merge. Its other tools are as they were, and your standing orders over them stand.");
+  expect((await printed(() => connectorCommand(api, "tools", ["github"], {}))).join("\n")).not.toContain("New in the catalog");
+  await expect(connectorCommand(api, "tools", [], { add: "merge" })).rejects.toThrow(/invincible connector tools <id> --add <tool>/);
+});

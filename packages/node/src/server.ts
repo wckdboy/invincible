@@ -1360,6 +1360,31 @@ export function createApp(ctx: AppContext) {
     return { ...request, access: Boolean(request.access), agent: request.by, label, by };
   }
 
+  /** The catalog entry an installed connector came from: its own id's, or GitHub's for one more owner (github-<owner>), and
+   * only at the catalog's own origin (or one of yours, where the catalog leaves it to you): a manifest of your own that
+   * takes a catalog's name elsewhere isn't the catalog's. */
+  const catalogFor = (id: string, manifest: ConnectorManifest) => {
+    const entry = Object.hasOwn(CATALOG, id) ? CATALOG[id] : /^github-[a-z0-9-]{1,39}$/.test(id) ? CATALOG.github : undefined;
+    return entry && !manifest.mcp && (entry.needsOrigin || manifest.origin === entry.manifest.origin) ? entry : undefined;
+  };
+  /** The tools the catalog has that an installed connector of it doesn't: yours to add (addConnectorTools), never added by itself. */
+  const newToolsOf = (id: string, manifest: ConnectorManifest): string[] => {
+    const catalog = catalogFor(id, manifest);
+    return catalog ? Object.keys(catalog.manifest.tools).filter((tool) => !Object.hasOwn(manifest.tools, tool)) : [];
+  };
+  /** Each such tool offered once in your Inbox, in words that say what it does and how you add it (a notice you may dismiss). */
+  function offerNewTools(only?: string): void {
+    for (const { id, manifest } of installedConnectors(ctx.store)) {
+      if (!manifest || (only && id !== only)) continue;
+      for (const tool of newToolsOf(id, manifest)) {
+        const key = `connector-tool:${id}:${tool}`;
+        if (ctx.store.lww(`notice:${key}`)) continue;
+        const what = catalogFor(id, manifest)!.manifest.tools[tool]!.description;
+        ctx.store.emit(ctx.identity, "notice.raised", { key, severity: "info", title: `${manifest.label} has a new tool: ${tool}`, body: `${what}\n\nIt widens what ${manifest.label} can do, so it is yours to add, and nothing adds it by itself. Add it, and only it: invincible connector tools ${id} --add ${tool} (its other tools stay as they are, and your standing orders over them stand).`.slice(0, 2000), source: "connectors", at: Date.now() });
+      }
+    }
+  }
+
   function connectorViews(): ConnectorView[] {
     const installed = new Map(installedConnectors(ctx.store).map((c) => [c.id, c]));
     // (The hosted MCP servers of the library too, not yet added: each one tap away.)
@@ -1429,6 +1454,7 @@ export function createApp(ctx: AppContext) {
         access: manifest?.access ? { only: manifest.access.only, allowed: [...manifest.access.allowed] } : null,
         oauth: manifest?.auth?.oauth ? { provider: manifest.auth.oauth.provider, account: (mine?.manifest && signIns.keep(mine.manifest)?.account) ?? null } : null,
         private: Boolean(manifest?.private),
+        ...(mine?.manifest && catalogFor(id, mine.manifest) ? { newTools: newToolsOf(id, mine.manifest) } : {}),
       };
     });
   }
@@ -4504,9 +4530,30 @@ export function createApp(ctx: AppContext) {
         auth?.secret ?? "",
       );
       ctx.store.emit(ctx.identity, "connector.set", { id: manifest.id, manifest: manifest as unknown as Record<string, unknown> });
-      // Whoever asked for it has it now.
+      // Whoever asked for it has it now; what the catalog has added that this manifest lacks is offered to you.
       ctx.connectorRequests.resolve(manifest.id);
+      offerNewTools(manifest.id);
       return { connector: connectorViews().find((c) => c.id === manifest.id) };
+    },
+    /* A tool the catalog has added, added on your word to a connector of it: only its definition, as the catalog has it
+     * now. Its other tools stay exactly as they were, so their digests, and the orders you signed over them, stand. */
+    addConnectorTools: (input) => {
+      const installed = installedConnector(ctx.store, input.id);
+      if (!installed) throw new HttpError(404, `${input.id} isn't installed`);
+      const catalog = catalogFor(input.id, installed);
+      if (!catalog) throw new HttpError(404, `${input.id} isn't a connector of the catalog: its tools are its own manifest's`);
+      const tools = { ...installed.tools };
+      for (const tool of input.tools) {
+        if (Object.hasOwn(installed.tools, tool)) throw new HttpError(409, `${input.id} has ${tool} already`);
+        if (!Object.hasOwn(catalog.manifest.tools, tool)) throw new HttpError(404, `the catalog's ${catalog.manifest.label} has no tool ${tool}`);
+        tools[tool] = catalog.manifest.tools[tool]!;
+      }
+      const parsed = ConnectorManifest.safeParse({ ...installed, tools });
+      if (!parsed.success) throw new HttpError(400, parsed.error.issues.map((i) => i.message).join("; "));
+      ctx.store.emit(ctx.identity, "connector.set", { id: installed.id, manifest: parsed.data as unknown as Record<string, unknown> });
+      for (const tool of input.tools) if (ctx.store.lww(`notice:connector-tool:${input.id}:${tool}`)?.value) ctx.store.emit(ctx.identity, "notice.cleared", { key: `connector-tool:${input.id}:${tool}` });
+      ctx.ledger?.({ class: "modify", resource: `connector.${input.id}`, target: input.tools.join(", "), verdict: "allow", reason: "you added the catalog's new tools to it", detail: "its other tools, their digests and your orders over them unchanged" });
+      return { connector: connectorViews().find((c) => c.id === input.id), added: input.tools };
     },
     removeConnector: (input) => {
       if (!installedConnector(ctx.store, input.id) && !ctx.store.lww(`connector:${input.id}`)?.value) throw new HttpError(404, `${input.id} isn't installed`);
@@ -5041,6 +5088,8 @@ export function createApp(ctx: AppContext) {
     throw new HttpError(404, "not found");
   }
 
+  // What the catalog has added to connectors you installed is offered to you as this node starts.
+  offerNewTools();
   return async (req: Request, listener: Listener): Promise<Response> => {
     try {
       return await handle(req, listener);

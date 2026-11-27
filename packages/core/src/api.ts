@@ -1123,6 +1123,13 @@ export const routes = {
   /** The owner's switch for self-action (on by default). It steers the primary, so it's brain:write: never an agent's. */
   setSelfAction: { method: "POST", path: "/api/self-action", scope: "brain:write", input: z.strictObject({ on: z.boolean() }) },
   connectors: { method: "GET", path: "/api/connectors", scope: "mind:read", input: null },
+  /**
+   * Tools the catalog has added since a connector of it was installed, added on your word (`invincible connector tools
+   * <id> --add <tool>`; your word, 27 November 2026): each widens what the connector does, so it is yours, per connector
+   * and per tool, and nothing adds one by itself. Only its definition is added, as the catalog has it now: the
+   * connector's other tools stay exactly as they were, so their digests, and the standing orders over them, stand.
+   */
+  addConnectorTools: { method: "POST", path: "/api/connectors/tools", scope: "brain:write", input: z.strictObject({ id: ConnectorId, tools: z.array(ToolName).min(1).max(16).refine((tools) => new Set(tools).size === tools.length, "each tool once") }) },
   setConnector: {
     method: "POST",
     path: "/api/connectors",
@@ -1969,6 +1976,8 @@ export interface ConnectorView {
   oauth: { provider: "google" | "microsoft" | "mcp"; account: string | null } | null;
   /** What it reads stays in the answer that read it: your mail, your Drive, your home, your books (the catalog's PRIVATE_CONNECTORS). */
   private: boolean;
+  /** Tools the catalog has added since it was installed, which only you add (addConnectorTools); absent: not of the catalog. */
+  newTools?: string[];
 }
 
 /**

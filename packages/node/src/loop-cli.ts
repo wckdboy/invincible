@@ -531,6 +531,15 @@ export async function connectorCommand(api: Api, sub: string | undefined, rest: 
       return;
     }
     case "tools": {
+      // A tool the catalog has added, added on your word: only it, so its other tools and your orders over them stand.
+      const adding = str(flags, "add");
+      if (adding !== undefined) {
+        const tools = adding.split(",").map((t) => t.trim()).filter(Boolean);
+        if (!rest[0] || !tools.length) throw new Error("usage: invincible connector tools <id> --add <tool>[,<tool>…]");
+        const { connector, added } = await api.call<{ connector: ConnectorView; added: string[] }>("addConnectorTools", { id: rest[0], tools });
+        console.log(`Added to ${connector.label}: ${added.join(", ")}. Its other tools are as they were, and your standing orders over them stand.`);
+        return;
+      }
       // One tool named: that one whole, as its server defines it now.
       const [id, named] = rest[1] ? [rest[0], rest[1]] : (rest[0] ?? "").split(/\.(.+)/);
       if (id && named) {
@@ -547,6 +556,7 @@ export async function connectorCommand(api: Api, sub: string | undefined, rest: 
         const params = Object.entries(t.params).map(([k, p]) => `${p.required ? k : `[${k}]`}${p.type !== "string" ? `:${p.type}` : ""}`).join(" ");
         console.log(`  ${bold(`${c.id}.${t.name}`)} ${params}  ${t.asks ? bold(`(${t.class}: asks you)`) : dim(`(${t.class})`)}\n      ${t.description}`);
       }
+      if (c.newTools?.length) console.log(`\nNew in the catalog, yours to add (nothing adds one by itself): ${c.newTools.join(", ")}. Add one: invincible connector tools ${c.id} --add ${c.newTools[0]}`);
       return;
     }
     case "call": {
