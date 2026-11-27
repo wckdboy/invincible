@@ -13,7 +13,7 @@ import { cloudflareNatives } from "./cloudflare.ts";
 import { gmailNatives, outlookNatives } from "./mail.ts";
 import { PairingHost, SyncEngine } from "@invincible/link";
 import { adoptChains, LedgerStore, Vault } from "@invincible/ledger";
-import { type DockerRunner, type LayoutEntry, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnFrames, type SpawnSession, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
+import { type DockerRunner, type LayoutEntry, type LayoutMove, type LayoutMoves, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnFrames, type SpawnSession, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
 import type { ArgValue, HostLoad, TeamTrailEntry } from "@invincible/core";
 import { calibrate, spawnBench } from "./compute/calibrate.ts";
 import { GovernedSandboxHost } from "./compute/governed-host.ts";
@@ -469,6 +469,17 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     },
     peek: (id: string) => local.query<{ hash: string }, [string]>("SELECT hash FROM sandbox_tokens WHERE id = ?").get(id)?.hash ?? null,
   };
+  // Node-local too: each move of an agent's store to layout 2 under way, its word among it (never in the store, which the
+  // agent's VM writes), so that a node that stops in the middle takes it up again.
+  local.exec("CREATE TABLE IF NOT EXISTS sandbox_layout_moves (id TEXT PRIMARY KEY, move TEXT NOT NULL)");
+  const layoutMoves: LayoutMoves = {
+    started: (id) => {
+      const row = local.query<{ move: string }, [string]>("SELECT move FROM sandbox_layout_moves WHERE id = ?").get(id);
+      return row ? (JSON.parse(row.move) as LayoutMove) : null;
+    },
+    start: (id, move) => void local.query("INSERT OR REPLACE INTO sandbox_layout_moves (id, move) VALUES (?, ?)").run(id, JSON.stringify(move)),
+    end: (id) => void local.query("DELETE FROM sandbox_layout_moves WHERE id = ?").run(id),
+  };
 
   // Every gated action lands in the signed, replicated ledger.
   // A run your private data woke is itself private (private-data.ts; the re-review of 27 November, B1): the lines it
@@ -549,6 +560,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       node: identity.id,
       tokens,
       tokenStore: sandboxTokens,
+      layoutMoves,
       ledger,
       ...(apple ? { engine: "container" as const, ...(opts.sandboxDisk ? { disk: opts.sandboxDisk } : {}) } : {}),
       ...(opts.docker ? { runner: opts.docker } : {}),

@@ -282,10 +282,10 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
 - **One store, three trees.** An agent's store (its Docker volume, or its size-limited workspace image) holds `work/`,
   mounted at `/work`; `home/`, mounted at `/home/agent` as its HOME; and `notes/`, its notes (Engram's), mounted where
   `ENGRAM_DATA_DIR` points in that HOME (`/home/agent/.memory/engram`). Each tree is an entry at the store's root, which
-  no VM mounts, and each is mounted on its own: a subpath of the volume, or a directory of the image, whose limit bounds
-  all three. No tree is mounted from a place inside another, which the agent writes and could swap for a link. Its HOME
-  holds its tools' own files and its lease; its environment and PATH follow HOME, with no directory of the workspace on
-  its PATH, so nothing put into the workspace runs in its place (`packages/sandbox/test/spec.test.ts`).
+  no VM in layout 2 mounts, and each is mounted on its own: a subpath of the volume, or a directory of the image, whose
+  limit bounds all three. No tree is mounted from a place inside another, which the agent writes and could swap for a
+  link. Its HOME holds its tools' own files and its lease; its environment and PATH follow HOME, with no directory of
+  the workspace on its PATH, so nothing put into the workspace runs in its place (`packages/sandbox/test/spec.test.ts`).
 - **A VM that shares a workspace never mounts its HOME.** Another node's task (to come) gets the workspace's tree
   alone. A run on a seat of yours, which is the agent's own work, gets it and the notes' tree. Each has a HOME of its
   own, empty and in memory, where its tools keep whatever they keep, never the agent's and never the workspace it
@@ -297,16 +297,30 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   prepares). Off, every agent's VM is made and kept in layout 1, nothing of any store is moved, and another node's task
   is refused there, since it would share a HOME. Turned off after it was on, no VM is moved from then on, and one already
   moved stays in layout 2 (`packages/node/test/layout-switch.test.ts`).
-- **Made new in it; moved to it once.** With it on, a new agent's VM is made in layout 2. One made before is moved at its next
-  prepare while nothing runs in it (no command, terminal or desktop session, and no VM sharing its workspace): its
-  store's top-level entries are renamed into the three trees inside the store's own filesystem, so nothing is copied.
-  Its notes go to their own tree by one rename, and only where every part of their place is a folder: a link there is
-  never followed. Every other dot-entry that isn't the workspace's own (`.agent`, `.tmp`, `.eval`, `.evidence`) goes to
-  its HOME, everything else stays its workspace, and the old lease is dropped (each prepare writes a fresh one). Which
-  files are a tool's is never named: the move goes by that one rule, and every `/work/.name` the code names is checked
-  against the workspace's own entries, so one the code comes to keep there isn't moved away (`layout.test.ts`). A move that can't be finished is put back by the reverse renames, and its
-  work goes on in layout 1 until the next prepare. Each move is a line in the ledger and a notice to you that names the
-  agent. Its list mode says what a move would do by entry name and size alone, reading no file.
+- **The trees are checked before every mount** (the fourth fabric review's R4-1). Before a VM is made, made again or
+  started on an agent's store in layout 2, and before a VM that shares it is made, the host checks each tree as it is
+  about to mount it, in a one-off container of the store's own (`MOVE_PY`'s check): a folder at the store's root, by
+  lstat, never a link nor anything that resolves out of the store, and the VMs' user's. Anything else and nothing of the
+  store is mounted: the VM isn't made or started, and a move is put back. So no link in a store is ever a bind's source
+  on the host, whoever left it there (`packages/sandbox/test/layout-planted.test.ts`, `team-layout.test.ts`).
+- **Made new in it; moved to it once.** With it on, a new agent's VM is made in layout 2. One made before is moved at
+  its next prepare while nothing runs in it (no command, terminal or desktop session, and no VM sharing its workspace):
+  its store's top-level entries are renamed into the three trees inside the store's own filesystem, so nothing is
+  copied. Its notes go to their own tree by one rename, and only where every part of their place is a folder. The move
+  follows no link, and takes nothing it finds for its own (R4-1, R4-2): in layout 1 the store's root is the agent's
+  `/work`, so a manifest, a folder named as one of the move's or a link named as a tree may be the agent's. Each move has
+  a word of its own, the node's, kept in the node's own database, which no VM reaches, and every name it makes in the
+  store carries it: its manifest, and the folders its trees are made in (each made with `mkdir`, never one already
+  there). So whatever else is at the root is an entry of the agent's like any other, moved by the rule, links as links
+  (`layout.test.ts`). Every other dot-entry that isn't the workspace's own (`.agent`, `.tmp`, `.eval`, `.evidence`) goes
+  to its HOME, everything else stays its workspace, and the old lease is dropped (each prepare writes a fresh one).
+  Which files are a tool's is never named: the move goes by that one rule, and every `/work/.name` the code names is
+  checked against the workspace's own entries, so one the code comes to keep there isn't moved away (`layout.test.ts`).
+  A move that can't be finished is put back by the reverse renames, and its work goes on in layout 1 until the next
+  prepare. One whose store couldn't be put back isn't started on it, since its `/work` would be that store's root as the
+  move left it: its next prepare takes the move up again, with its own word. Each move is a line in the ledger and a
+  notice to you that names the agent. Its list mode says what a move would do by entry name and size alone, reading no
+  file.
 - **Where it holds.** A Linux host with Docker: a store on a Docker volume needs Docker Engine 26 or later (its trees are
   the volume's subpaths), and stays in layout 1 on an older engine; a workspace image's store moves on any. **A Mac's VMs
   stay in layout 1**, their HOME their `/work`: a Mac's workspace is a disk image only one VM may mount, so no VM there

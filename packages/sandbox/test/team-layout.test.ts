@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { LEASE_FILE, NOTES_DIR } from "@invincible/core";
-import { containerName, type DockerRunner, LABEL, type LayoutEntry, memoryTokenStore, SandboxHost, seatVolumeName, TEAM_LEASE_MINUTES, volumeName } from "../src/index.ts";
+import { containerName, type DockerRunner, LABEL, type LayoutEntry, memoryLayoutMoves, memoryTokenStore, SandboxHost, seatVolumeName, TEAM_LEASE_MINUTES, volumeName } from "../src/index.ts";
 
 /*
  * Layout 2 on an agent's VM (layout.ts; the owner's decisions of 27 November 2026): made in it new, moved to it from layout
@@ -21,11 +21,12 @@ const LISTED: LayoutEntry[] = [
   { name: "repo", to: "work", kind: "dir", bytes: 4096 },
 ];
 
-function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean; listCut?: boolean } = {}) {
+function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean; listCut?: boolean; checkFails?: string; backFails?: boolean } = {}) {
   const containers = new Map<string, { labels: Record<string, string>; mounts: Mount[]; status: string; image: string }>();
   const calls: string[][] = [];
-  /** The modes MOVE_PY was run in, in order. */
+  /** The modes MOVE_PY was run in, in order, and the word each was given (the move's own), if any. */
   const modes: string[] = [];
+  const words: (string | null)[] = [];
   /** The lease written in each VM (writeLease's payload), by its container's name. */
   const leases = new Map<string, Record<string, string>>();
   const ok = (stdout = "") => ({ code: 0, stdout, stderr: "" });
@@ -77,6 +78,11 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
         if (rest.includes("--rm")) {
           const mode = rest[rest.indexOf("-c") + 2]!;
           modes.push(mode);
+          const after = rest.slice(rest.indexOf(NOTES_DIR) + 1);
+          words.push(after[0] ?? null);
+          // (Its check, as MOVE_PY says what it found: a tree that isn't a folder of the store's own.)
+          if (mode === "check" && opts.checkFails) return { code: 3, stdout: "", stderr: opts.checkFails };
+          if (mode === "back" && opts.backFails) return { code: 1, stdout: "", stderr: "back: input/output error" };
           // (Cut, as the node's read of it is past its cap: whole lines here, so that only its being cut can tell.)
           if (mode === "list" && opts.listCut) return { ...ok(LISTED.map((e) => JSON.stringify(e)).join("\n")), truncated: true };
           return mode === "list" ? ok(LISTED.map((e) => JSON.stringify(e)).join("\n")) : ok();
@@ -139,6 +145,7 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
     }
   };
   const ledger: { class: string; resource: string; target: string; detail?: string; reason?: string }[] = [];
+  const layoutMoves = memoryLayoutMoves();
   const moved: { run: string; entries: readonly LayoutEntry[] }[] = [];
   const workspaces = opts.disk
     ? { available: async () => true, create: async () => `/var/lib/invincible-workspaces/${ID}`, mount: async () => {}, retain: async () => {}, remove: async () => {}, stats: async () => ({ totalBytes: 10 ** 12, freeBytes: 10 ** 12, images: [] }) }
@@ -156,10 +163,11 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
       extend: (hash) => (tokens.extended.push(hash), !opts.extendFails),
     },
     tokenStore: memoryTokenStore(),
+    layoutMoves,
     ...(workspaces ? { workspaces } : {}),
   });
   const agent = () => containers.get(containerName(ID))!;
-  return { host, calls, containers, ledger, moved, modes, agent, leases, tokens };
+  return { host, calls, containers, ledger, moved, modes, words, agent, leases, tokens, layoutMoves };
 }
 
 describe("a store's list, whole or not at all (the review's F3, swept)", () => {
@@ -178,17 +186,24 @@ describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () 
   test("is moved to layout 2: its store's entries renamed into its three trees, and its VM made again on them", async () => {
     const f = fake();
     await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
-    expect(f.modes).toEqual(["list", "move"]);
-    // The one-off runs as the VM's user, with no network and no capability; the list sees its store read-only.
+    // Listed, moved, and its trees checked as they are about to be mounted.
+    expect(f.modes).toEqual(["list", "move", "check"]);
+    // The one-off runs as the VM's user, with no network and no capability; the list and the check see its store read-only.
     const oneOffs = f.calls.filter((a) => a[0] === "run" && a.includes("--rm"));
     for (const args of oneOffs) {
       expect(args.slice(args.indexOf("--user"), args.indexOf("--user") + 2)).toEqual(["--user", "1000:1000"]);
       expect(args).toEqual(expect.arrayContaining(["--network", "none", "--cap-drop", "ALL", "--read-only"]));
       // (Told the lease's name, to drop it, and its notes' place in a HOME, to take them to their own tree.)
-      expect(args.slice(-2)).toEqual([LEASE_FILE, NOTES_DIR]);
+      expect(args.slice(args.indexOf(LEASE_FILE), args.indexOf(LEASE_FILE) + 2)).toEqual([LEASE_FILE, NOTES_DIR]);
     }
     expect(oneOffs[0]).toContain(`type=volume,src=${volumeName(ID)},dst=/work,readonly`);
     expect(oneOffs[1]).toContain(`type=volume,src=${volumeName(ID)},dst=/work`);
+    expect(oneOffs[2]).toContain(`type=volume,src=${volumeName(ID)},dst=/work,readonly`);
+    // The move alone is given its word (the node's, 128 bits, kept here until it is done): never the list or the check.
+    expect(f.words[0]).toBeNull();
+    expect(f.words[1]).toMatch(/^[0-9a-f]{32}$/);
+    expect(f.words[2]).toBeNull();
+    expect(f.layoutMoves.started(ID)).toBeNull();
     // Made again on its three trees, its HOME and its notes apart, and running.
     expect(f.agent().labels[`${LABEL}.layout`]).toBe("2");
     expect(f.agent().mounts).toEqual([
@@ -212,7 +227,7 @@ describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () 
   test("a workspace image's store is moved too, on any Docker; one on a volume waits for Docker Engine 26", async () => {
     const image = fake({ disk: true, engine: "25.0.3" });
     await image.host.prepareTeam(ID, RUN, undefined, ["openai"]);
-    expect(image.modes).toEqual(["list", "move"]);
+    expect(image.modes).toEqual(["list", "move", "check"]);
     expect(image.agent().mounts).toEqual([
       { Type: "bind", Source: `/var/lib/invincible-workspaces/${ID}/work`, Destination: "/work" },
       { Type: "bind", Source: `/var/lib/invincible-workspaces/${ID}/home`, Destination: "/home/agent" },
@@ -250,7 +265,10 @@ describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () 
   test("one that can't be made again is put back as it was, its store's entries back where they were, and its work goes on", async () => {
     const f = fake({ runFails: true });
     const prepared = await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
-    expect(f.modes).toEqual(["list", "move", "back"]);
+    expect(f.modes).toEqual(["list", "move", "check", "back"]);
+    // Put back with the move's own word, and then there is no move under way.
+    expect(f.words[3]).toBe(f.words[1]);
+    expect(f.layoutMoves.started(ID)).toBeNull();
     expect(f.agent().labels[`${LABEL}.layout`]).toBeUndefined();
     expect(f.agent().mounts).toEqual([{ Type: "volume", Name: volumeName(ID), Destination: "/work" }]);
     expect(f.ledger.some((e) => e.detail?.startsWith("not moved to layout 2, so it stays as it was"))).toBe(true);
@@ -259,11 +277,71 @@ describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () 
   });
 });
 
+describe("its trees, checked before each mount (the fourth fabric review's R4-1)", () => {
+  const WRONG = "its trees aren't folders of the store's own (home is a link)";
+
+  test("a move whose trees aren't the store's own is put back: nothing of it mounted, its VM in layout 1, the ledger says why", async () => {
+    const f = fake({ checkFails: WRONG, disk: true });
+    const prepared = await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
+    expect(f.modes).toEqual(["list", "move", "check", "back"]);
+    expect(f.agent().labels[`${LABEL}.layout`]).toBeUndefined();
+    expect(f.agent().mounts).toEqual([{ Type: "bind", Source: `/var/lib/invincible-workspaces/${ID}`, Destination: "/work" }]);
+    // (No VM was made on its trees: the only docker run that isn't a one-off never came.)
+    expect(f.calls.filter((a) => a[0] === "run" && !a.includes("--rm"))).toEqual([]);
+    expect(f.ledger.some((e) => e.detail === `not moved to layout 2, so it stays as it was: could not make the agent's VM again, so it is as it was: nothing of the agent's store was mounted: ${WRONG}`)).toBe(true);
+    expect(f.moved).toEqual([]);
+    expect(prepared.status).toBe("running");
+  });
+
+  test("a VM in layout 2 isn't started on trees that aren't its store's own", async () => {
+    const f = fake({ layout: "2", disk: true, checkFails: WRONG });
+    await expect(f.host.prepareTeam(ID, RUN, undefined, ["openai"])).rejects.toThrow(`nothing of the agent's store was mounted: ${WRONG}`);
+    expect(f.modes).toEqual(["check"]);
+    expect(f.calls.some((a) => a[0] === "start")).toBe(false);
+    expect(f.agent().status).toBe("exited");
+  });
+
+  test("a store made new whose trees aren't its own is taken away, and no VM is made on it", async () => {
+    const f = fake({ checkFails: WRONG });
+    f.containers.clear();
+    await expect(f.host.create({ network: "gateway", cpus: 1, memoryGb: 2, ttlMinutes: 60, persistent: true, run: "arm.team.abcdef0124.noa" })).rejects.toThrow(`could not make the agent's store: nothing of the agent's store was mounted: ${WRONG}`);
+    expect(f.modes).toEqual(["make", "check"]);
+    expect(f.containers.size).toBe(0);
+    expect(f.calls.some((a) => a[0] === "volume" && a[1] === "rm")).toBe(true);
+  });
+
+  test("one whose store couldn't be put back isn't started on it; its next prepare takes the move up again, with its own word", async () => {
+    const opts = { runFails: true, backFails: true };
+    const f = fake(opts);
+    await expect(f.host.prepareTeam(ID, RUN, undefined, ["openai"])).rejects.toThrow("the agent's store is half moved to layout 2 and couldn't be put back, so its VM isn't started on it");
+    expect(f.modes).toEqual(["list", "move", "check", "back"]);
+    expect(f.agent().status).toBe("exited");
+    expect(f.calls.some((a) => a[0] === "start")).toBe(false);
+    const underway = f.layoutMoves.started(ID)!;
+    expect(underway.nonce).toBe(f.words[1]!);
+    expect(underway.entries).toEqual(LISTED);
+    // With Docker well again: moved on with the same word, and what it listed before it began, and you're told.
+    opts.runFails = false;
+    opts.backFails = false;
+    f.modes.length = 0;
+    f.words.length = 0;
+    const prepared = await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
+    expect(f.modes).toEqual(["move", "check"]);
+    expect(f.words[0]).toBe(underway.nonce);
+    expect(prepared.status).toBe("running");
+    expect(f.agent().labels[`${LABEL}.layout`]).toBe("2");
+    expect(f.layoutMoves.started(ID)).toBeNull();
+    expect(f.ledger.find((e) => e.detail?.startsWith("made again in layout 2"))!.detail).toStartWith("made again in layout 2, taking up a move that was under way · to its HOME: 1 entries, 2048 bytes");
+    expect(f.moved).toEqual([{ run: RUN, entries: LISTED }]);
+  });
+});
+
 describe("an agent's VM in layout 2", () => {
   test("made again by its owner, it stays in layout 2", async () => {
     const f = fake({ layout: "2" });
     await f.host.remakeTeam(ID, RUN, { providers: ["openai"], approvedBy: "test-owner" });
-    expect(f.modes).toEqual([]);
+    // (Its trees checked as they are about to be mounted again.)
+    expect(f.modes).toEqual(["check"]);
     expect(f.agent().labels[`${LABEL}.layout`]).toBe("2");
     expect(f.agent().mounts.map((m) => m.Destination)).toEqual(["/work", "/home/agent", "/home/agent/.memory/engram"]);
   });
@@ -358,7 +436,8 @@ describe("an agent's VM in layout 2", () => {
     const f = fake();
     f.containers.clear();
     await f.host.create({ network: "gateway", cpus: 1, memoryGb: 2, ttlMinutes: 60, persistent: true, run: "arm.team.abcdef0124.noa" });
-    expect(f.modes).toEqual(["make"]);
+    expect(f.modes).toEqual(["make", "check"]);
+    expect(f.words[0]).toMatch(/^[0-9a-f]{32}$/);
     const made = [...f.containers.values()].find((c) => c.labels[`${LABEL}.run`] === "arm.team.abcdef0124.noa")!;
     expect(made.labels[`${LABEL}.layout`]).toBe("2");
     expect(made.mounts.map((m) => [m.Destination, m.Subpath])).toEqual([["/work", "work"], ["/home/agent", "home"], ["/home/agent/.memory/engram", "notes"]]);

@@ -110,6 +110,32 @@ export function memoryTokenStore(): SandboxTokenStore {
 }
 
 /**
+ * A move of an agent's store to layout 2 under way, as the node keeps it (in its own database, which no VM reaches): the
+ * move's word, which every name it makes in the store carries (layout.ts MOVE_PY), and what the store listed before it
+ * began, which you're told once it is done. Kept from before the first rename until the move is done or put back, so a
+ * node that stops in the middle takes it up again from there.
+ */
+export interface LayoutMove {
+  nonce: string;
+  entries: LayoutEntry[];
+}
+export interface LayoutMoves {
+  /** The move of this agent's store under way, or null. */
+  started(id: string): LayoutMove | null;
+  start(id: string, move: LayoutMove): void;
+  end(id: string): void;
+}
+
+export function memoryLayoutMoves(): LayoutMoves {
+  const map = new Map<string, LayoutMove>();
+  return {
+    started: (id) => map.get(id) ?? null,
+    start: (id, move) => void map.set(id, move),
+    end: (id) => void map.delete(id),
+  };
+}
+
+/**
  * A top-level entry of an agent's store, as a move to layout 2 would take it (layout.ts MOVE_PY's list), or its notes
  * (`notes`: named by their place in its HOME): by name and size.
  */
@@ -149,6 +175,8 @@ export interface SandboxHostOptions {
   /** The resolv.conf online microVMs get (see vmResolvConf). */
   resolvConf?: string;
   tokenStore?: SandboxTokenStore;
+  /** The moves to layout 2 under way here (LayoutMove): in the node's own database. Absent: in this process's memory. */
+  layoutMoves?: LayoutMoves;
   /**
    * The command line that runs sandboxes here: Docker's (the default), or Apple's `container` on a Mac, where every
    * sandbox is a lightweight VM of its own (container.ts: each of Docker's flags there, and what a Mac can't make).
@@ -497,6 +525,7 @@ export class SandboxHost {
   private readonly apple: boolean;
   private readonly now: () => number;
   private readonly tokenStore: SandboxTokenStore;
+  private readonly moves: LayoutMoves;
   /** Workspaces made for a sandbox that hasn't started yet (so a cleanup never takes them). */
   private readonly creating = new Set<string>();
   /** A seat whose VM is being made: the next ask for that seat waits for it, so two never pass the count at once. */
@@ -532,6 +561,7 @@ export class SandboxHost {
     this.bin = opts.docker ?? (this.apple ? "container" : "docker");
     this.now = opts.now ?? Date.now;
     this.tokenStore = opts.tokenStore ?? memoryTokenStore();
+    this.moves = opts.layoutMoves ?? memoryLayoutMoves();
   }
 
   /** What a sandbox asked for runs as: on a Mac always its own VM (more than a container, never less); with Docker, chooseIsolation's. */
@@ -875,16 +905,30 @@ export class SandboxHost {
         const volume = await this.docker(["volume", "create", "--label", `${LABEL}=1`, "--label", `${LABEL}.id=${id}`, volumeName(id)]);
         if (volume.code !== 0) throw new SandboxError(`could not create workspace: ${volume.stderr.trim()}`, 500);
       }
-      // An agent's own persistent VM, made new: in layout 2, its store's two trees made first (layout.ts).
+      // An agent's own persistent VM, made new: in layout 2, its store's three trees made first (layout.ts), and checked
+      // as they are about to be mounted.
       if (input.persistent && run.startsWith("arm.team.") && !seated.shares && (await this.layout2Here(!spec.workspace))) {
-        const made = await this.layoutRun(spec.workspace ? { workspace: spec.workspace } : { volume: volumeName(id) }, image, "make");
-        if (made.code !== 0) {
+        const store = spec.workspace ? { workspace: spec.workspace } : { volume: volumeName(id) };
+        const made = await this.layoutRun(store, image, "make", hex(randomBytes(16)));
+        const wrong = made.code !== 0 ? redact(made.stderr.trim()).slice(0, 300) : await this.checkTrees(store, image).then(() => null, (error: Error) => error.message);
+        if (wrong !== null) {
           if (spec.workspace) await this.opts.workspaces!.remove(id).catch(() => {});
           else await this.docker(["volume", "rm", "-f", volumeName(id)]);
           if (tokenHash) this.opts.tokens.revoke(tokenHash);
-          throw new SandboxError(`could not make the agent's store: ${redact(made.stderr.trim()).slice(0, 300)}`, 500);
+          throw new SandboxError(`could not make the agent's store: ${wrong}`, 500);
         }
         spec.layout = { path: await this.imagePath(image) };
+      }
+      // One that shares an agent's store in layout 2 (another node's task, a run on a seat): its trees checked as they are
+      // about to be mounted, as the agent's VM's are.
+      if (seated.shares?.tree) {
+        const shared = "volume" in seated.shares ? { volume: seated.shares.volume } : { workspace: seated.shares.workspace };
+        try {
+          await this.checkTrees(shared, (await this.get(seated.shares.sandbox))?.image ?? image);
+        } catch (error) {
+          if (tokenHash) this.opts.tokens.revoke(tokenHash);
+          throw error;
+        }
       }
       const args = this.apple ? containerRunArgs(spec) : runArgs(spec);
       let ran = await this.docker(args, 10 * 60_000);
@@ -1012,21 +1056,31 @@ export class SandboxHost {
       await this.opts.workspaces.mount(id);
     }
     // Still in layout 1: moved to layout 2 now, while nothing runs in it. One that can't be is put back as it was, and its
-    // work goes on in layout 1 (it is tried again at its next prepare).
-    if ((await this.layout2Here(!sandbox.disk)) && (await this.layoutOf(id)) === 1 && (await this.idle(id))) {
-      try {
-        await this.moveToLayout2(sandbox, run);
-      } catch (error) {
-        this.opts.ledger({ class: "modify", resource: "docker.container", target: containerName(id), verdict: "allow", run, detail: `not moved to layout 2, so it stays as it was: ${redact(String((error as Error).message ?? error)).slice(0, 300)}` });
+    // work goes on in layout 1 (it is tried again at its next prepare). One whose store couldn't be put back (its move is
+    // still under way, as the node keeps it) isn't started on that store, whose root is its /work in layout 1: its next
+    // prepare takes the move up again.
+    // (Docker is asked which layout it is in only where it may be moved, or its move is under way.)
+    const here = await this.layout2Here(!sandbox.disk);
+    if ((here || this.moves.started(id) !== null) && (await this.layoutOf(id)) === 1) {
+      if (here && (await this.idle(id))) {
+        try {
+          await this.moveToLayout2(sandbox, run);
+        } catch (error) {
+          const why = redact(String((error as Error).message ?? error)).slice(0, 300);
+          const half = this.moves.started(id) !== null;
+          this.opts.ledger({ class: "modify", resource: "docker.container", target: containerName(id), verdict: "allow", run, detail: half ? `not moved to layout 2, and its store isn't as it was: its VM isn't started on it until a prepare takes the move up again: ${why}` : `not moved to layout 2, so it stays as it was: ${why}` });
+          if (half) throw new SandboxError("the agent's store is half moved to layout 2 and couldn't be put back, so its VM isn't started on it: its next prepare takes the move up again", 424);
+        }
+        sandbox = (await this.get(id)) ?? sandbox;
+      } else if (this.moves.started(id)) {
+        throw new SandboxError("the agent's store is half moved to layout 2, so its VM isn't started on it: its next prepare while nothing runs in it takes the move up again", 424);
       }
-      sandbox = (await this.get(id)) ?? sandbox;
     }
     if (sandbox.status !== "running") {
       if (!['exited', 'created'].includes(sandbox.status)) throw new SandboxError(`the agent's VM is ${sandbox.status}`, 409);
       // (On a Mac it rejoins its networks as it starts: they are held up, and its firewall on, first.)
       if (this.apple) await this.readyForVm();
-      const started = await this.docker(["start", containerName(id)], 120_000);
-      if (started.code !== 0) throw new SandboxError(`could not resume the agent's VM: ${redact(started.stderr).slice(0, 300)}`, 424);
+      await this.startTeamVm(sandbox);
     }
     // Fresh credentials are written directly inside the VM, never returned through an API or logged.
     // Revocation and request caps remain real: this is a new lease, not an indefinitely extended token.
@@ -1202,16 +1256,30 @@ export class SandboxHost {
 
   /**
    * MOVE_PY in a one-off container of the store's own, which holds nothing else of the host: its image, its user (uid
-   * 1000), no network, no capability, a read-only root, and the whole store at /work (read only for a list).
+   * 1000), no network, no capability, a read-only root, and the whole store at /work (read only for a list or a check).
+   * `nonce`: the move's own word (LayoutMove), which a move, its putting back and a store made new are given.
    */
-  private async layoutRun(store: { volume: string } | { workspace: string }, image: string, mode: "list" | "make" | "move" | "back"): Promise<Run> {
+  private async layoutRun(store: { volume: string } | { workspace: string }, image: string, mode: "list" | "check" | "make" | "move" | "back", nonce?: string): Promise<Run> {
     const mount = "volume" in store ? `type=volume,src=${store.volume},dst=/work` : `type=bind,src=${store.workspace},dst=/work`;
     return this.docker(
       ["run", "--rm", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only",
-        "--mount", mode === "list" ? `${mount},readonly` : mount, image, "python3", "-I", "-c", MOVE_PY, mode, "/work", JSON.stringify(WORKSPACE_OWN), LEASE_FILE, NOTES_DIR],
+        "--mount", mode === "list" || mode === "check" ? `${mount},readonly` : mount, image, "python3", "-I", "-c", MOVE_PY, mode, "/work", JSON.stringify(WORKSPACE_OWN), LEASE_FILE, NOTES_DIR, ...(nonce ? [nonce] : [])],
       10 * 60_000,
       mode === "list" ? LAYOUT_LIST_MAX : MAX_OUTPUT,
     );
+  }
+
+  /**
+   * An agent's store in layout 2, as the host is about to mount its trees (a VM made, made again or started; one that
+   * shares its workspace made): MOVE_PY's check, that each of work/, home/ and notes/ is a folder at the store's root, by
+   * lstat, never a link nor anything that resolves out of it, and the VMs' user's. Anything else and nothing of it is
+   * mounted, so no link the agent left there (its /work was that root in layout 1) is a bind's source on this host.
+   */
+  private async checkTrees(store: { volume: string } | { workspace: string }, image: string): Promise<void> {
+    const checked = await this.layoutRun(store, image, "check");
+    if (checked.code === 0) return;
+    const why = redact(checked.stderr).trim().split("\n").at(-1)?.slice(0, 300) || `its check exited ${checked.code}`;
+    throw new SandboxError(`nothing of the agent's store was mounted: ${why}`, 424);
   }
 
   /**
@@ -1229,6 +1297,16 @@ export class SandboxHost {
         throw new SandboxError("the agent's store's list says what isn't a list", 500);
       }
     });
+  }
+
+  /**
+   * An agent's VM started again under its own name, its mounts made again as it starts: in layout 2 its store's trees
+   * checked first (checkTrees), and it isn't started unless they are the store's own. Throws, saying why, if it isn't.
+   */
+  private async startTeamVm(sandbox: SandboxView): Promise<void> {
+    if (!this.apple && (await this.layoutOf(sandbox.id)) === 2) await this.checkTrees(await this.storeOf(sandbox), sandbox.image);
+    const started = await this.docker(["start", containerName(sandbox.id)], 120_000);
+    if (started.code !== 0) throw new SandboxError(`could not resume the agent's VM: ${redact(started.stderr).slice(0, 300)}`, 424);
   }
 
   /** What a move to layout 2 would do with an agent's store, by entry name and size: nothing of any file is read. */
@@ -1259,21 +1337,38 @@ export class SandboxHost {
    */
   private async moveToLayout2(sandbox: SandboxView, run: string): Promise<void> {
     const store = await this.storeOf(sandbox);
-    const entries = this.layoutEntries(await this.layoutRun(store, sandbox.image, "list"));
-    await this.remakeTeam(sandbox.id, run, {
-      providers: sandbox.providers.filter((p) => p !== SEARCH_SCOPE),
-      approvedBy: "",
-      layout: {
-        store,
-        move: async () => {
-          const moved = await this.layoutRun(store, sandbox.image, "move");
-          if (moved.code !== 0) throw new Error(`its store couldn't be moved: ${redact(moved.stderr).split("\n").at(-1)?.slice(0, 300) ?? ""}`);
+    // A move still under way (one whose store couldn't be put back) is taken up again with its own word, and what its
+    // store listed before it began. A new one is given its word here, kept before anything of the store is renamed: never
+    // in the store, which the agent's VM writes.
+    const underway = this.moves.started(sandbox.id);
+    const entries = underway?.entries ?? this.layoutEntries(await this.layoutRun(store, sandbox.image, "list"));
+    const nonce = underway?.nonce ?? hex(randomBytes(16));
+    if (!underway) this.moves.start(sandbox.id, { nonce, entries });
+    let touched = underway !== null;
+    try {
+      await this.remakeTeam(sandbox.id, run, {
+        providers: sandbox.providers.filter((p) => p !== SEARCH_SCOPE),
+        approvedBy: "",
+        layout: {
+          store,
+          move: async () => {
+            touched = true;
+            const moved = await this.layoutRun(store, sandbox.image, "move", nonce);
+            if (moved.code !== 0) throw new Error(`its store couldn't be moved: ${redact(moved.stderr).trim().split("\n").at(-1)?.slice(0, 300) ?? ""}`);
+          },
+          back: async () => {
+            const back = await this.layoutRun(store, sandbox.image, "back", nonce);
+            if (back.code === 0) this.moves.end(sandbox.id);
+            return back.code === 0;
+          },
         },
-        back: async () => {
-          await this.layoutRun(store, sandbox.image, "back");
-        },
-      },
-    });
+      });
+    } catch (error) {
+      // (Nothing of its store was renamed: there is no move to take up again.)
+      if (!touched) this.moves.end(sandbox.id);
+      throw error;
+    }
+    this.moves.end(sandbox.id);
     const sum = (to: LayoutEntry["to"]) => entries.filter((e) => e.to === to);
     const notes = sum("notes")[0];
     this.opts.ledger({
@@ -1283,7 +1378,7 @@ export class SandboxHost {
       verdict: "allow",
       reason: "layout 2: its HOME apart from its workspace, made again at a prepare while nothing ran in it",
       run,
-      detail: `made again in layout 2 · to its HOME: ${sum("home").length} entries, ${sum("home").reduce((n, e) => n + e.bytes, 0)} bytes · its notes: ${notes ? `${notes.bytes} bytes, to a tree of their own` : "none yet, a tree of their own made for them"} · kept in its workspace: ${sum("work").length} entries · its old lease dropped`,
+      detail: `made again in layout 2${underway ? ", taking up a move that was under way" : ""} · to its HOME: ${sum("home").length} entries, ${sum("home").reduce((n, e) => n + e.bytes, 0)} bytes · its notes: ${notes ? `${notes.bytes} bytes, to a tree of their own` : "none yet, a tree of their own made for them"} · kept in its workspace: ${sum("work").length} entries · its old lease dropped`,
     });
     this.opts.moved?.(run, entries);
   }
@@ -1297,8 +1392,11 @@ export class SandboxHost {
       desktop?: boolean;
       hardware?: boolean;
       approvedBy: string;
-      /** Its store moved to layout 2 as it is made again (moveToLayout2): `move` once it is set aside, `back` if it can't be made. */
-      layout?: { store: { volume: string } | { workspace: string }; move(): Promise<void>; back(): Promise<void> };
+      /**
+       * Its store moved to layout 2 as it is made again (moveToLayout2): `move` once it is set aside, `back` if it can't be
+       * made (whether its store is as it was again).
+       */
+      layout?: { store: { volume: string } | { workspace: string }; move(): Promise<void>; back(): Promise<boolean> };
     },
   ): Promise<SandboxView> {
     const sandbox = await this.get(id);
@@ -1367,16 +1465,26 @@ export class SandboxHost {
       moved = await this.docker(["rename", name, aside]);
     }
     if (moved.code !== 0) {
-      if (sandbox.status === "running") await this.docker(["start", name], 120_000);
-      throw new SandboxError(`could not set the agent's VM aside, so it is as it was: ${redact(moved.stderr).split("\n")[0]!.slice(0, 300)}`, 424);
+      const why = redact(moved.stderr).split("\n")[0]!.slice(0, 300);
+      const notStarted = sandbox.status === "running" ? await this.startTeamVm(sandbox).then(() => null, (error: Error) => error.message) : null;
+      throw new SandboxError(notStarted ? `could not set the agent's VM aside: ${why}; and it isn't started again: ${notStarted}` : `could not set the agent's VM aside, so it is as it was: ${why}`, 424);
     }
-    /** The old container under its own name again, running if it was (and its store as it was, when it was being moved). */
+    /**
+     * The old container under its own name again, running if it was, and its store as it was when it was being moved.
+     * One whose store couldn't be put back isn't started: in layout 1 its /work is that store's root, as the move left
+     * it, so it waits for its next prepare to take the move up again. Says why it isn't as it was, or null.
+     */
     let storeMoved = false;
-    const putBack = async (): Promise<void> => {
+    const putBack = async (): Promise<string | null> => {
       await this.docker(["rm", "--force", name]);
-      if (storeMoved) await opts.layout!.back();
+      const restored = !storeMoved || (await opts.layout!.back());
       await this.docker(["rename", aside, name]);
-      if (sandbox.status === "running") await this.docker(["start", name], 120_000);
+      if (!restored) return "its store couldn't be put back as it was, so its VM isn't started on it: its next prepare takes the move up again";
+      if (sandbox.status !== "running") return null;
+      return this.startTeamVm(sandbox).then(
+        () => null,
+        (error) => (error instanceof SandboxError ? error.message : String(error)),
+      );
     };
     let minted: { token: string; hash: string } | undefined;
     try {
@@ -1411,15 +1519,17 @@ export class SandboxHost {
         ...(workspace && sandbox.disk ? { workspace, diskGb: sandbox.disk.limitGb } : {}),
         ...(layout ? { layout } : {}),
       };
+      // (In layout 2, its trees as they are about to be mounted: folders of the store's own, never a link.)
+      if (layout) await this.checkTrees(opts.layout?.store ?? (workspace && sandbox.disk ? { workspace } : { volume: volumeName(id) }), image);
       const ran = await this.docker(runArgs(spec), 10 * 60_000);
       if (ran.code !== 0) throw new Error(ran.stderr.trim() || `docker run exited ${ran.code}`);
     } catch (error) {
-      await putBack();
+      const notAsItWas = await putBack();
       if (minted) this.opts.tokens.revoke(minted.hash);
       // (Docker may say the new container's arguments back, and its token is among them.)
       let why = redact(String((error as Error).message ?? error)).split("\n")[0]!.slice(0, 300);
       if (minted) why = why.replaceAll(minted.token, "[its token]");
-      throw new SandboxError(`could not make the agent's VM again, so it is as it was: ${why}`, 424);
+      throw new SandboxError(notAsItWas ? `could not make the agent's VM again: ${why}; and ${notAsItWas}` : `could not make the agent's VM again, so it is as it was: ${why}`, 424);
     }
     await this.docker(["rm", "--force", aside]);
     const previous = this.tokenStore.take(id);

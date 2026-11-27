@@ -50,45 +50,73 @@ export function layoutPath(imagePath: string): string {
 
 /**
  * The migration, run in a one-off container of the store's own (uid 1000, no network, no capability) with the whole
- * store at /store. `list`: what it would do, one JSON line per top-level entry and one for its notes, by name, kind and
+ * store at /work. `list`: what it would do, one JSON line per top-level entry and one for its notes, by name, kind and
  * size (lstat sizes of what it holds, never a byte of any file read, and nothing followed); `move`: do it; `back`: undo
- * a move, as its manifest says; `make`: a store new in layout 2. Names a tool's own files nowhere: what moves to HOME is
- * every top-level dot-entry that isn't the workspace's own (core's WORKSPACE_OWN, given as its third argument), and
- * everything else is the workspace's.
+ * a move, as its manifest says; `make`: a store new in layout 2; `check`: whether its three trees are folders of its own,
+ * as the host checks them before it mounts any (its exit says, and its stderr why not). Names a tool's own files
+ * nowhere: what moves to HOME is every top-level dot-entry that isn't the workspace's own (core's WORKSPACE_OWN, given as
+ * its third argument), and everything else is the workspace's.
  *
+ * - **Nothing it finds is its own** (the fourth fabric review's R4-1 and R4-2). In layout 1 the store's root is the
+ *   agent's /work, which whatever runs in its VM writes, so whatever is there from before a move is the agent's: a
+ *   manifest, a staging folder, a link named as a tree. Each move has a word of its own, the node's (its sixth argument,
+ *   kept in the node's own database, which no VM reaches), and every name it makes in the store carries it: the manifest
+ *   it keeps, and the folders its trees are made in. So it never takes anything found there for its own, and every entry
+ *   that was there goes where the rule says, links as links. Its folders are made with os.mkdir (never one already
+ *   there), and a tree is named only from one of them, never through a link.
  * - The agent's notes (its arguments name their place in a HOME: NOTES_DIR) go to a tree of their own by one rename, and
  *   only where every part of that place is a folder: a link there is never followed, and moves with its HOME as it is.
  *   Where their tree is mounted in HOME, an empty folder is made as the VMs' user, so the VM's runtime makes none of root's.
  * - The lease (a file of the gateway's, re-minted at every prepare) is dropped, never moved.
  * - lost+found (an ext4 image's, root's) stays where it is: it is the image's, not the agent's.
  * - Each entry goes into a tree being made beside it, and the trees take their names last, so a store cut off in the
- *   middle is moved on, or back, from where it was: the manifest (at the store's root, which no VM mounts) says what went
- *   where as it goes.
+ *   middle is moved on, or back, from where it was: the manifest (at the store's root, which no VM mounts in layout 2)
+ *   says what went where as it goes, and is read only by the move whose word its name carries.
  */
 export const MOVE_PY = String.raw`import json, os, stat, sys
 MODE, ROOT = sys.argv[1], sys.argv[2]
 OWN = set(json.loads(sys.argv[3]))
 LEASE = sys.argv[4]
 NOTES_AT = sys.argv[5]
+# This move's word, the node's: every name the move makes in the store carries it. None: a list, or a check.
+NONCE = sys.argv[6] if len(sys.argv) > 6 else ""
 WORK, HOME, NOTES = "work", "home", "notes"
 TREES = (WORK, HOME, NOTES)
 MODES = {WORK: 0o755, HOME: 0o700, NOTES: 0o700}
-MANIFEST = os.path.join(ROOT, ".invincible-layout.json")
-STAGED = {WORK: ".invincible-layout-work", HOME: ".invincible-layout-home", NOTES: ".invincible-layout-notes"}
-KEEP = {"lost+found", os.path.basename(MANIFEST), *STAGED.values()}
+OURS = ".invincible-layout-" + NONCE
+MANIFEST = os.path.join(ROOT, OURS + ".json")
+STAGED = {tree: OURS + "-" + tree for tree in TREES}
+KEEP = {"lost+found", *({os.path.basename(MANIFEST), os.path.basename(MANIFEST) + ".new", *STAGED.values()} if NONCE else set())}
+
+def refuse(why):
+    sys.stderr.write(why + "\n")
+    sys.exit(3)
 
 def staged(tree):
     return os.path.join(ROOT, STAGED[tree])
+
+def real_folder(path):
+    # A folder by lstat: never a link, whatever it points at.
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+def own_folder(path, mode):
+    # One of the move's own folders: made now, or (a move cut off and taken up again) the one it made before, a real
+    # folder. Its name carries the move's word, so nothing from before the move is ever one.
+    try:
+        os.mkdir(path, mode)
+    except FileExistsError:
+        if not real_folder(path):
+            refuse(os.path.basename(path) + " is there and isn't a folder the move made, so the move stops here")
 
 def folders(base, rel):
     # Whether every part of rel below base is a folder, by lstat: never a link.
     here = base
     for part in rel.split("/"):
         here = os.path.join(here, part)
-        try:
-            if not stat.S_ISDIR(os.lstat(here).st_mode):
-                return False
-        except OSError:
+        if not real_folder(here):
             return False
     return True
 
@@ -135,27 +163,37 @@ def notes_here():
 
 def save(manifest):
     tmp = MANIFEST + ".new"
-    with open(tmp, "w") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(manifest, f)
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, MANIFEST)
 
 def load():
+    # This move's manifest, or none yet: found by its own name alone, and holding its word.
     try:
-        with open(MANIFEST) as f:
-            return json.load(f)
+        fd = os.open(MANIFEST, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
         return None
+    with os.fdopen(fd) as f:
+        manifest = json.load(f)
+    if not isinstance(manifest, dict) or manifest.get("nonce") != NONCE:
+        refuse("the manifest under this move's name isn't this move's, so the move stops here")
+    return manifest
 
 def name_trees():
-    # (Each tree takes its name once: a tree already named, and its staging gone, was named before a cut.)
+    # (Each tree takes its name once, from the move's own folder: a tree already named, and its staging gone, was named
+    # before a cut. Whatever has a tree's name then must be a folder the move made: never a link, never chmod'ed through.)
     for tree in TREES:
         named = os.path.join(ROOT, tree)
-        if os.path.isdir(staged(tree)) and not os.path.lexists(named):
+        if real_folder(staged(tree)) and not os.path.lexists(named):
             os.rename(staged(tree), named)
     for tree in TREES:
-        os.chmod(os.path.join(ROOT, tree), MODES[tree])
+        named = os.path.join(ROOT, tree)
+        if not real_folder(named):
+            refuse("the store's " + tree + " isn't a folder the move made, so it is neither named nor mounted")
+        os.chmod(named, MODES[tree])
 
 def mountpoint(manifest):
     # Where the notes' tree is mounted in HOME, made as the VMs' user: only through folders, or where nothing is yet.
@@ -172,12 +210,17 @@ def mountpoint(manifest):
             save(manifest)
 
 def move():
-    manifest = load() or {"layout": 2, "state": "moving", "moved": []}
+    if not NONCE:
+        refuse("a move needs the node's word for it")
+    manifest = load()
+    if manifest is None:
+        manifest = {"layout": 2, "state": "moving", "moved": [], "nonce": NONCE}
+        save(manifest)
     if manifest["state"] == "moved":
         return 0
     if manifest["state"] == "moving":
         for tree in (WORK, HOME):
-            os.makedirs(staged(tree), mode=0o700, exist_ok=True)
+            own_folder(staged(tree), 0o700)
         moved = {m["name"] for m in manifest["moved"]}
         # Its notes first, out of the HOME they were in, into their own tree: the folder they are in, by one rename.
         if NOTES_AT not in moved:
@@ -185,11 +228,11 @@ def move():
             if notes is not None and not os.path.lexists(staged(NOTES)):
                 os.rename(notes, staged(NOTES))
                 entry = {"name": NOTES_AT, "to": NOTES}
-            elif os.path.isdir(staged(NOTES)) and not os.path.islink(staged(NOTES)) and os.listdir(staged(NOTES)):
+            elif real_folder(staged(NOTES)) and os.listdir(staged(NOTES)):
                 # (Renamed before a cut, and not written down.)
                 entry = {"name": NOTES_AT, "to": NOTES}
             else:
-                os.makedirs(staged(NOTES), mode=0o700, exist_ok=True)
+                own_folder(staged(NOTES), 0o700)
                 entry = {"name": NOTES_AT, "to": NOTES, "made": True}
             manifest["moved"].append(entry)
             save(manifest)
@@ -205,7 +248,8 @@ def move():
                 os.rename(src, os.path.join(staged(entry["to"]), entry["name"]))
             manifest["moved"].append(entry)
             save(manifest)
-        # From here on the names work, home and notes at the root are the trees', never an entry of the workspace's.
+        # From here on the names work, home and notes at the root are the trees', never an entry of the workspace's: every
+        # entry that had one (a folder of the agent's, a link) is in the workspace's tree now, as it was.
         manifest["state"] = "naming"
         save(manifest)
     name_trees()
@@ -216,13 +260,15 @@ def move():
 
 def back():
     # Undoes a move just made. What a VM made in the trees since stays in their staging, never lost.
+    if not NONCE:
+        refuse("putting a move back needs the node's word for it")
     manifest = load()
     if manifest is None:
         return 0
     if manifest["state"] in ("naming", "moved"):
         for tree in TREES:
             named = os.path.join(ROOT, tree)
-            if os.path.isdir(named) and not os.path.islink(named) and not os.path.lexists(staged(tree)):
+            if real_folder(named) and not os.path.lexists(staged(tree)):
                 os.rename(named, staged(tree))
     for entry in reversed(manifest["moved"]):
         if entry["to"] == "drop":
@@ -234,11 +280,11 @@ def back():
             place = os.path.join(ROOT, NOTES_AT)
             if folders(ROOT, NOTES_AT) and not os.listdir(place):
                 os.rmdir(place)
-            if folders(ROOT, os.path.dirname(NOTES_AT)) and os.path.isdir(staged(NOTES)) and not os.path.islink(staged(NOTES)) and not os.path.lexists(place):
+            if folders(ROOT, os.path.dirname(NOTES_AT)) and real_folder(staged(NOTES)) and not os.path.lexists(place):
                 os.rename(staged(NOTES), place)
             continue
         src, dst = os.path.join(staged(entry["to"]), entry["name"]), os.path.join(ROOT, entry["name"])
-        if os.path.lexists(src) and not os.path.lexists(dst):
+        if real_folder(staged(entry["to"])) and os.path.lexists(src) and not os.path.lexists(dst):
             os.rename(src, dst)
     # (What the move made as the notes' mountpoint is no entry of the store's: taken away, deepest first, where it is
     # still an empty folder, at the root if its HOME's entry went back there, else in HOME's staging.)
@@ -249,19 +295,45 @@ def back():
                 os.rmdir(here)
                 break
     for tree in TREES:
-        if os.path.isdir(staged(tree)) and not os.path.islink(staged(tree)) and not os.listdir(staged(tree)):
+        if real_folder(staged(tree)) and not os.listdir(staged(tree)):
             os.rmdir(staged(tree))
     os.unlink(MANIFEST)
     return 0
 
 def make():
     # A store made new, in layout 2 from the start: its three trees, its notes' mountpoint, and the manifest that says so.
-    manifest = load() or {"layout": 2, "state": "moved", "moved": []}
+    if not NONCE:
+        refuse("a store is made with the node's word for it")
+    manifest = load() or {"layout": 2, "state": "moved", "moved": [], "nonce": NONCE}
     for tree in TREES:
-        os.makedirs(os.path.join(ROOT, tree), mode=MODES[tree], exist_ok=True)
+        own_folder(os.path.join(ROOT, tree), MODES[tree])
     name_trees()
     mountpoint(manifest)
     save(manifest)
+    return 0
+
+def check():
+    # The trees as the host is about to mount them, each on its own: a folder at the store's root (by lstat, never a
+    # link, and nothing on its way out of the store), the VMs' user's. Anything else, and nothing of the store is mounted.
+    root = os.path.realpath(ROOT)
+    wrong = []
+    for tree in TREES:
+        path = os.path.join(ROOT, tree)
+        try:
+            seen = os.lstat(path)
+        except FileNotFoundError:
+            wrong.append(tree + " is missing")
+            continue
+        if stat.S_ISLNK(seen.st_mode):
+            wrong.append(tree + " is a link")
+        elif not stat.S_ISDIR(seen.st_mode):
+            wrong.append(tree + " isn't a folder")
+        elif os.path.realpath(path) != os.path.join(root, tree):
+            wrong.append(tree + " resolves out of the store")
+        elif seen.st_uid != os.getuid():
+            wrong.append(tree + " isn't the VMs' user's")
+    if wrong:
+        refuse("its trees aren't folders of the store's own (" + "; ".join(wrong) + ")")
     return 0
 
 if MODE == "list":
@@ -273,5 +345,5 @@ if MODE == "list":
         if notes is not None and entry["name"] == first:
             print(json.dumps({"name": NOTES_AT, "to": NOTES, "kind": "dir", "bytes": size(notes)}))
     sys.exit(0)
-sys.exit(move() if MODE == "move" else back() if MODE == "back" else make() if MODE == "make" else 2)
+sys.exit(move() if MODE == "move" else back() if MODE == "back" else make() if MODE == "make" else check() if MODE == "check" else 2)
 `;
