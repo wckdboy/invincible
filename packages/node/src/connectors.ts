@@ -526,7 +526,9 @@ export class ConnectorService {
         if (filed?.state === "approved") {
           const sent = await this.sendApproved(filed, `under your standing order "${order.label}"`);
           if (!sent.result) throw new ConnectorCallError(sent.status ?? 502, sent.receipt);
-          return { status: "done", class: request.class, target: request.target, result: sent.result, order: { id: order.id, label: order.label }, action: id };
+          // (Answered by your order or by your agent's own approval, a private connector's answer is still yours: the
+          // chat's gate and a loop's record hold it as they hold any of its answers. The re-review's B3.)
+          return { status: "done", class: request.class, target: request.target, result: sent.result, order: { id: order.id, label: order.label }, action: id, ...(this.isPrivate(manifest.id) ? { private: true as const } : {}) };
         }
       }
       if (own) {
@@ -535,7 +537,7 @@ export class ConnectorService {
         if (filed?.state === "approved") {
           const sent = await this.sendApproved(filed, `on your agent's own approval: ${own.why}`, { own: true, facts: own.facts, call: own.call });
           if (!sent.result) throw new ConnectorCallError(sent.status ?? 502, sent.receipt);
-          return { status: "done", class: request.class, target: request.target, result: sent.result, own: own.why, ...(own.facts.pullCommits ? { commits: [...own.facts.pullCommits] } : {}), action: id };
+          return { status: "done", class: request.class, target: request.target, result: sent.result, own: own.why, ...(own.facts.pullCommits ? { commits: [...own.facts.pullCommits] } : {}), action: id, ...(this.isPrivate(manifest.id) ? { private: true as const } : {}) };
         }
       }
       this.o.ledger({ class: request.class, resource, target: this.said(manifest.id, input.tool, request.target), verdict: "ask", reason: decision.reason, run, detail: `action ${id}, asked by ${caller.by}` });
@@ -545,7 +547,7 @@ export class ConnectorService {
     const approved = decision.verdict === "ask"; // the owner asked: that is the approval
     const result = await this.send(manifest, request);
     // What a private connector answered stays in the answer that read it: its line says only how it went, and its size.
-    const secret = privateConnector(manifest.id, manifest);
+    const secret = this.isPrivate(manifest.id);
     this.o.ledger({
       class: request.class,
       resource,
@@ -555,7 +557,7 @@ export class ConnectorService {
       run,
       detail: `${caller.kind === "owner" ? "by you" : `by ${caller.by}`} · ${secret ? sized(result) : excerpt(result, 300)}`.slice(0, 2000),
     });
-    return { status: "done", class: request.class, target: request.target, result, ...(manifest.private ? { private: true as const } : {}) };
+    return { status: "done", class: request.class, target: request.target, result, ...(this.isPrivate(manifest.id) ? { private: true as const } : {}) };
   }
 
   /**

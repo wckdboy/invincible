@@ -1,7 +1,7 @@
-// What private-answers left a gap in (the re-review of 27 November, B2; its PoC turned around): what was recorded
-// before it. Against a real daemon (startDaemon) and its routes, with a stand-in for Google: only loopback reaches the
-// network, and every other origin gets a stand-in's 404. Every name, address and message is made up; the keys are
-// obviously fake.
+// What private-answers left a gap in (the re-review of 27 November, B2, B3; its PoCs turned around): what was recorded
+// before it, and a private connector's call a standing order answers. Against a real daemon (startDaemon) and its
+// routes, with stand-ins for Google and for Home Assistant on its LAN address: only loopback reaches the network, and
+// every other origin gets a stand-in's 404. Every name, address and message is made up; the keys are obviously fake.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,10 +20,19 @@ const port = freePort();
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "private-2", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
 let daemon: Daemon;
 let agent: string;
+const HA = "http://homeassistant.local:8123";
+/** Home Assistant's REST answer to a service call: the states that changed while it ran (its documented answer). */
+const changed = [
+  { entity_id: "lock.front_door", state: "unlocked", attributes: { friendly_name: "Front door" }, last_changed: "2026-11-27T17:00:01+00:00" },
+  { entity_id: "alarm_control_panel.home", state: "disarmed", attributes: { friendly_name: "Home alarm" }, last_changed: "2026-11-27T17:00:01+00:00" },
+];
 const stand = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return fetch(input, init);
+  const method = init?.method ?? "GET";
   if (url.origin === "https://oauth2.googleapis.com" && url.pathname === "/token") return Response.json({ access_token: "test-access-FAKE", expires_in: 3600, token_type: "Bearer" });
+  if (url.origin === HA && method === "POST" && url.pathname === "/api/services/scene/turn_on") return Response.json(changed);
+  if (url.origin === HA && method === "GET" && url.pathname === "/api/states") return Response.json(changed);
   return Response.json({ message: "not here" }, { status: 404 });
 }) as unknown as typeof fetch;
 const send = (token: string, name: RouteName, input?: unknown) =>
@@ -42,6 +51,7 @@ async function bridge(): Promise<(name: RouteName, input?: unknown) => Promise<{
     return { status: res.status, body: (await res.json()) as any };
   };
 }
+const primary = { kind: "agent" as const, by: "primary" };
 
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
@@ -52,6 +62,8 @@ beforeAll(async () => {
   daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, fetch: stand });
   expect((await admin("setConnector", { id: "gmail" })).status).toBe(200);
   expect((await admin("setSecret", { name: "gmail", value: writeKeep({ client: "client-id.apps.example.test", secret: "test-secret-FAKE", refresh: "test-refresh-FAKE", account: "you@example.test" }), provider: "gmail" })).status).toBe(200);
+  expect((await admin("setConnector", { id: "home-assistant", origin: HA })).status).toBe(200);
+  expect((await admin("setSecret", { name: "home-assistant", value: "test-ha-token-FAKE", connector: "home-assistant" })).status).toBe(200);
   agent = (await admin("mintArm", { label: "coder" })).body.token;
 });
 afterAll(async () => {
@@ -59,8 +71,8 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** Which of the mail's words a text holds. */
-const WORDS = ["Ingrid", "Vestergaard", "ingrid@example.test", "rent arrears"];
+/** Which of the mail's and the home's words a text holds. */
+const WORDS = ["Ingrid", "Vestergaard", "ingrid@example.test", "rent arrears", "lock.front_door", "unlocked", "alarm_control_panel", "disarmed"];
 const held = (text: string) => WORDS.filter((word) => text.includes(word));
 
 test("B2: a loop's runs and its tell notice recorded before private-answers, with the mail's words, reach no agent and no chat bridge; you still read them", async () => {
@@ -88,4 +100,18 @@ test("B2: a loop's runs and its tell notice recorded before private-answers, wit
   for (const [name, input] of [["loopRuns", { name: "rent" }], ["notices"], ["away", { since: 0 }]] as [RouteName, unknown?][]) {
     expect([name, JSON.stringify((await admin(name, input)).body).includes("Quarterly rent arrears")]).toEqual([name, true]);
   }
+});
+
+test("B3: a private connector's call that a standing order answers keeps its mark: the chat's gate holds, and a loop records no word of it", async () => {
+  const scene = { domain: "scene", service: "turn_on", entity_id: "scene.evening" };
+  expect((await admin("setOrder", { connector: "home-assistant", tool: "service", args: scene, label: "The evening scene" })).status).toBe(200);
+  const ordered = await daemon.connectors.call({ connector: "home-assistant", tool: "service", args: scene }, primary);
+  expect(ordered.status === "done" && [ordered.order?.label, ordered.private]).toEqual(["The evening scene", true]);
+  // A loop that runs the scene every evening, under the order: its record says how it went, never what came back.
+  expect((await admin("setLoop", { name: "evening", schedule: "0 17 * * *", task: { kind: "call", connector: "home-assistant", tool: "service", args: scene } })).status).toBe(200);
+  expect((await admin("runLoop", { name: "evening" })).status).toBe(200);
+  for (let n = 0; n < 300 && daemon.store.loopRuns("evening").length === 0; n++) await Bun.sleep(10);
+  const summary = daemon.store.loopRuns("evening")[0]!.body.summary;
+  expect(summary).toMatch(/^home-assistant\.service → ok \(200\), \d+ bytes \(\d+ ms\)$/);
+  expect(held(JSON.stringify((await send(agent, "loopRuns", { name: "evening" })).body))).toEqual([]);
 });
