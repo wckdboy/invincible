@@ -2377,6 +2377,12 @@ export function createApp(ctx: AppContext) {
     const task = teamOf().createTask({ room: room.id, assignee: choice.id, title: input.title ?? input.goal.slice(0, 200), goal: input.goal, gates: input.gates ?? [], ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}) }, by);
     return { task, choice, considered };
   }
+  /** The stop's word to a coding agent's run in its VM (its tool's own interrupt): bound to its VM as every command is, and sent once its task has stopped. */
+  async function stopTellTeam(member: Agent, command: string, timeout: number) {
+    const bound = teamMember(member.id).workspace;
+    if (!bound) throw new HttpError(424, "this agent has no VM");
+    return inProcess(agentPrincipal(member.id), new AbortController().signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: bound.node, id: bound.id, cmd: ["bash", "-lc", command], timeoutSec: timeout });
+  }
   async function stopTeamWorker(member: Agent): Promise<void> {
     const bound = teamMember(member.id).workspace;
     if (!bound) return;
@@ -2440,7 +2446,7 @@ export function createApp(ctx: AppContext) {
     const runtime = teamRuntime({
       brain: (member) => ({ ...brainFor(agentPrincipal(member.id)), ...(ctx.fetch ? { fetch: overFleet(ctx.fetch) } : {}) }),
       enter: (signal) => ctx.governor.enterModel({ wait: true }, signal),
-      exec: execTeam, execArgv: execTeamArgv, follow: followTeam, prepare: prepareTeam, renew: renewTeam, agent: teamMember,
+      exec: execTeam, execArgv: execTeamArgv, follow: followTeam, stopTell: stopTellTeam, prepare: prepareTeam, renew: renewTeam, agent: teamMember,
       // A vendor's tool's own sign-in in an agent's VM whose plan its tool said is spent: remembered until its reset (kept
       // through a restart), so its next task begins on the roster's models and asks it last.
       ownSpent: (member, harness) => signInWindowsOf(ctx.store).spent(`${member.id}/${harness}`),

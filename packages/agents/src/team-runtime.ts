@@ -70,6 +70,11 @@ export interface TeamRuntimeDeps {
   execArgv?(agent: Agent, argv: string[], timeout: number, signal: AbortSignal): Promise<ExecResult>;
   /** A coding agent's run in its VM followed as it goes, from byte `offset` of its events (harnesses.ts FOLLOW). */
   follow?(agent: Agent, offset: number, signal: AbortSignal): Promise<FollowedRun>;
+  /**
+   * The stop's word to a coding agent's run in its VM (its tool's own interrupt), bound as exec is but not to the task's
+   * signal: it must reach the run once its task has stopped, as stopWorker's cleanup does. Absent: its exec.
+   */
+  stopTell?(agent: Agent, command: string, timeout: number): Promise<ExecResult>;
   /** The address a key of yours is pinned to (PLAN #17), for telling an agent where it may use it; null: none. */
   keyAddress?(secret: string): string | null;
   /** A step of a task's work, kept as a commit in its agent's VM as it ended (PLAN #15): told once each. */
@@ -700,7 +705,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         return deps.exec(agent, inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
       };
       const execOn = (seat: SeatRun) => (command: string, timeout = 120) => seat.exec(inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
-      const harnessOn = (seat: SeatRun) => ({ exec: execOn(seat), ...(seat.follow ? { follow: (offset: number) => seat.follow!(offset, ctx.signal) } : {}), stopAgent: () => seat.stop() });
+      // (Its stop's word goes on a signal of its own: the task's has ended by the time it is said.)
+      const harnessOn = (seat: SeatRun) => ({ exec: execOn(seat), ...(seat.follow ? { follow: (offset: number) => seat.follow!(offset, ctx.signal) } : {}), stopAgent: () => seat.stop(), tellStop: (command: string, timeout: number) => seat.exec(command, timeout, new AbortController().signal) });
       const inherited = data("Verified predecessor results (file paths belong to their original VM)", deps.dependencies(task));
       // Fenced once for the task: every turn of its planner and engineer is then sent the same beginning, which a
       // provider reads from its cache (a new fence on each call made each turn's beginning a new one).
@@ -889,6 +895,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           return { usd: cost.usd, complete: cost.complete };
         },
         stopAgent: () => deps.stopWorker(agent),
+        ...(deps.stopTell ? { tellStop: (command: string, timeout: number) => deps.stopTell!(agent, command, timeout) } : {}),
         // Its coding agent's run followed as it goes, where its VM's node can keep a command open: else looked at.
         ...(deps.follow ? { follow: (offset: number) => deps.follow!(agent, offset, ctx.signal) } : {}),
         // On a seat: its coding tool's own commands, its follow and its stop are in the seat's VM; everything else stays here.

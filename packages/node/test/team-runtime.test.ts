@@ -1020,6 +1020,38 @@ test("work in sensitive mode never takes a seat; an agent with a desktop does, i
   expect(asked).toBe(0);
 });
 
+test("stopped by you, a coding agent's live run is told its stop on the way that stays open, then cleaned up", async () => {
+  const stopper = new AbortController();
+  const agent = { ...member, harness: "claude" as const };
+  const tells: string[] = [];
+  let cleaned = 0;
+  let followed = false;
+  async function* open(): AsyncIterable<string> {
+    yield 'S{"alive": true, "exit": null, "next": 0}';
+    await new Promise(() => {});
+  }
+  const f = fixture([say("1. Build and verify.")], {
+    agent: () => agent,
+    models: () => [],
+    // (As the node's is: once the task has stopped, its own commands are refused.)
+    exec: async (_m, command) => {
+      if (stopper.signal.aborted) throw new Error("agent stopped");
+      if (command.includes("--status")) return result({ stdout: status({ installed: true, signedIn: true, method: "claude.ai" }) });
+      return result({ stdout: command.includes("cat ") ? "" : "0" });
+    },
+    follow: async () => ((followed = true), { lines: open(), close: () => {} }),
+    stopTell: async (_m, command) => (tells.push(command), result()),
+    stopWorker: async () => void (cleaned += 1),
+  });
+  const done = f.runtime.executeTask(agent, task, { ...f.context, signal: stopper.signal }).catch(() => null);
+  for (let n = 0; n < 500 && !followed; n++) await Bun.sleep(5);
+  expect(followed).toBe(true);
+  stopper.abort();
+  await done;
+  expect(tells.filter((command) => command.includes("os.O_NONBLOCK"))).toHaveLength(1);
+  expect(cleaned).toBeGreaterThan(0);
+});
+
 test("a seat is let go when the task ends before its run begins", async () => {
   // (Its session's record can't be read in its own VM, after the seat was given: the task ends, and the seat goes back.)
   const t = seatTask("claude", { own: { stdout: signedOut }, roster: [opus], fails: (command) => plain(command).includes("cat '/work/.agent/sessions/") });

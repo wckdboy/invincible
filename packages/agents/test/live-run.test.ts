@@ -281,6 +281,25 @@ describe("its stop, when it is followed", () => {
     expect(box.commands[asked]).toMatch(new RegExp(` '[A-Za-z0-9_-]{16}' ${STOP_GRACE_SECONDS}$`));
   });
 
+  test("stopped by you: its interrupt goes on the way that stays open once the work's own commands are refused, as its cleanup does", async () => {
+    const box = vm();
+    const stopper = new AbortController();
+    // (As a node's is: once the work has stopped, its own commands are refused.)
+    const refusing = async (command: string, timeout: number) => {
+      if (stopper.signal.aborted) throw new Error("agent stopped");
+      return box.exec(command);
+    };
+    const stops: string[] = [];
+    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work" }, { exec: refusing, tellStop: async (command) => (stops.push(command), box.exec(command)), stopAgent: async () => void stops.push("cleanup"), follow: box.follow, ...clock(), signal: stopper.signal }));
+    await box.until(() => box.follows.length === 1);
+    stopper.abort();
+    expect((await run).status).toBe("stopped");
+    expect(box.told).toEqual([{ stop: true }]);
+    expect(stops).toHaveLength(2);
+    expect(stops[0]).toContain("os.O_NONBLOCK");
+    expect(stops[1]).toBe("cleanup");
+  });
+
   test("a run that can't be told is stopped as before: the cleanup alone", async () => {
     const box = vm();
     const stopper = new AbortController();

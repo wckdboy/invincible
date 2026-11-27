@@ -224,6 +224,11 @@ export interface AgentRunDeps {
   follow?(offset: number): Promise<FollowedRun>;
   /** Trusted, workspace-bound cleanup that remains available after the request aborts. */
   stopAgent?(): Promise<void>;
+  /**
+   * The stop's word to a live run (its own interrupt, TELL), on a way that stays open once the work's own commands are
+   * refused (a stop of yours refuses them), as stopAgent's cleanup does. Absent: the run's own exec.
+   */
+  tellStop?(command: string, timeoutSec: number): Promise<ExecResult>;
   /** Persist a newly observed harness session before following more events. */
   session?(id: string): Promise<void>;
   /** Each event as it arrives. */
@@ -433,7 +438,7 @@ export async function runAgent(
     : deps.exec(agentCleanupCommand(runId), 30).then((result) => {
       if (result.exitCode !== 0) throw new Error("Could not safely stop the worker process");
     });
-  const stop = () => stopping ??= (live && followed ? deps.exec(tellCommand({ stop: true }, { run: runId, seconds: STOP_GRACE_SECONDS }), STOP_GRACE_SECONDS + 15).then(() => undefined, () => undefined) : Promise.resolve()).then(cleanup);
+  const stop = () => stopping ??= (live && followed ? (deps.tellStop ?? deps.exec)(tellCommand({ stop: true }, { run: runId, seconds: STOP_GRACE_SECONDS }), STOP_GRACE_SECONDS + 15).then(() => undefined, () => undefined) : Promise.resolve()).then(cleanup);
   /** A run as it ends, with whatever of yours it never took. */
   const ended = (result: AgentRun): AgentRun => {
     const left = [...told.values()].filter((t) => t.state !== "taken").map((t) => t.words);
