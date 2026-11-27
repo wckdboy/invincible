@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { DESKTOP_IMAGE, HARDWARE_IMAGE } from "../../packages/sandbox/src/spec.ts";
 import { OUT_DIR } from "../scorecard.ts";
 import type { Samples } from "./measure.ts";
@@ -59,6 +59,16 @@ export function plotted(listing: string): boolean {
 /** Whether a DRC's exit code says what its report says: none found and 0, or some found and not 0. */
 export function drcAgrees(exit: number, report: { violations: number; unconnected: number } | null): boolean {
   return report !== null && (report.violations + report.unconnected > 0) === (exit !== 0);
+}
+
+/**
+ * The states `desktop find` says its node is in (focused, checked, disabled…): the words after its place and size, never
+ * its name's.
+ */
+export function statesOf(said: string): string[] {
+  const line = said.trim().split("\n")[0] ?? "";
+  const after = /\(\d+x\d+\)((?: [a-z-]+)*)$/.exec(line);
+  return after ? after[1]!.trim().split(" ").filter(Boolean) : [];
 }
 
 /** Where `desktop find` says the node is, x,y; null when it found none. */
@@ -191,19 +201,27 @@ export function screen(vm: OnScreen, label: string, opts: { keep?: string; pause
     if (png) writeFileSync(`${base}.png`, Buffer.from(shot.stdout.trim(), "base64"));
     return `${focus.split("\n")[0]}; kept: ${base}.txt${png ? " and .png" : ""}`;
   };
-  /** The first of `roles` named like `name` on the screen, pressed where `desktop find` says it is. */
+  /**
+   * The first of `roles` named like `name` on the screen, pressed where `desktop find` says it is, once it takes a
+   * click: one deskd says is disabled (a menu, while its editor loads) is waited for, as a click on it does nothing.
+   */
   const press = async (roles: string[], name: string): Promise<void> => {
+    let disabled = false;
     for (let i = 0; i < 10; i++) {
       for (const role of roles) {
-        const at = foundAt((await sh(`desktop find '${role}' '${name}'`)).stdout);
-        if (at) {
-          must(await sh(`desktop click ${at[0]} ${at[1]}`), `the click on ${role} "${name}"`);
-          return;
+        const said = (await sh(`desktop find '${role}' '${name}'`)).stdout;
+        const at = foundAt(said);
+        if (!at) continue;
+        if (statesOf(said).includes("disabled")) {
+          disabled = true;
+          continue;
         }
+        must(await sh(`desktop click ${at[0]} ${at[1]}`), `the click on ${role} "${name}"`);
+        return;
       }
       await pause(300);
     }
-    const missed = `no ${roles.join(" or ")} named like "${name}" on the screen`;
+    const missed = disabled ? `the ${roles.join(" or ")} named like "${name}" stayed disabled` : `no ${roles.join(" or ")} named like "${name}" on the screen`;
     throw new Error(`${missed} (${await kept(missed)})`);
   };
   /**
@@ -231,18 +249,20 @@ export function screen(vm: OnScreen, label: string, opts: { keep?: string; pause
 }
 
 /**
- * KiCad's board editor open on `board`, ready for its menus: null when it is, otherwise why it isn't. Ready is its
- * window with the focus, the screen settled, and no "Loading PCB" up: that progress dialog comes and goes after the
- * editor first takes the focus, and while it is up the editor's menus take no click. A still screen alone doesn't say
- * it's gone, as its progress can stand still for longer than the settle waits.
+ * KiCad's board editor open on `board`, ready for its menus: null when it is, otherwise why it isn't. Ready is its board
+ * loaded, its title naming it ("board — PCB Editor"), the screen settled, and no "Loading PCB" up. The editor takes the
+ * focus before it loads its board, as "PCB Editor" alone: then its menus are disabled and "Loading PCB" isn't up yet, so
+ * neither that dialog nor a still screen says the board is in (a pcbnew's first start in a VM clicked File there, every
+ * time, and opened no menu: Ultra, 27 November 2026).
  */
 export async function openBoard(s: ReturnType<typeof screen>, board: string): Promise<string | null> {
+  const loaded = new RegExp(`"${basename(board, ".kicad_pcb").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} — PCB Editor"`);
   must(await s.sh(`desktop app pcbnew ${board}`), "pcbnew started");
   const first = await s.focusIs(/PCB Editor|File Open Warning|Configure Global/);
   if (!first) return "no KiCad window took the focus";
   if (/Configure Global/.test(first)) return "KiCad asked for its global library table: its seed didn't take";
   if (/File Open Warning/.test(first)) await s.press(["push button"], "Open Anyway");
-  if (!(await s.focusIs(/PCB Editor/))) return "the PCB editor never took the focus";
+  if (!(await s.focusIs(loaded))) return "the PCB editor never named its board: it never loaded it";
   await s.settle();
   await s.gone(/"Loading PCB"/);
   return null;

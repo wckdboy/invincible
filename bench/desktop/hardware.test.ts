@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { drcAgrees, foundAt, openBoard, plotted, screen } from "./hardware.ts";
+import { drcAgrees, foundAt, openBoard, plotted, screen, statesOf } from "./hardware.ts";
 import type { Ran } from "./vm.ts";
 
 /* What the hardware suite's gates read (C1 step 11): a plot's files, a DRC's exit and report, where `desktop find` says a node is. */
@@ -139,5 +139,66 @@ describe("KiCad's board editor, ready for its menus", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.message).toContain('"Loading PCB" still on the screen');
     expect(readdirSync(keep).sort()).toEqual(["failed-kicad-plot-2-1.png", "failed-kicad-plot-2-1.txt"]);
+  });
+});
+
+describe("what desktop find says of a node's states", () => {
+  test("the states after its place and size, never its name", () => {
+    expect(statesOf('19,31 · [1] menu "File" at 19,31 (39x25) disabled\n')).toEqual(["disabled"]);
+    expect(statesOf('1085,629 · [15] check box "All items" at 1085,629 (79x20) checked focused\n')).toEqual(["checked", "focused"]);
+    expect(statesOf('640,450 · [3] push button "Plot" at 640,450 (80x30)\n')).toEqual([]);
+    // (A name with a state's word in it is a name.)
+    expect(statesOf('300,200 · [4] push button "Show disabled (2x2) items" at 300,200 (90x30)\n')).toEqual([]);
+    expect(statesOf("")).toEqual([]);
+  });
+});
+
+describe("a press on what takes no click yet", () => {
+  test("waits for it to be enabled, as a menu is once its editor has loaded, and clicks it once: clicked disabled, it does nothing", async () => {
+    let looks = 0;
+    const { vm, asked } = answering((command) => {
+      if (command === "desktop find 'menu' 'File'") return looks++ < 2 ? '19,31 · [1] menu "File" at 19,31 (39x25) disabled' : '19,31 · [1] menu "File" at 19,31 (39x25)';
+      if (command.startsWith("desktop click ")) return "clicked";
+      return "";
+    });
+    await screen(vm, "kicad-plot-1", { keep: mkdtempSync(join(tmpdir(), "invincible-bench-kept-")), ...nowait }).press(["menu"], "File");
+    expect(asked.filter((c) => c.startsWith("desktop click "))).toEqual(["desktop click 19 31"]);
+    expect(asked.indexOf("desktop click 19 31")).toBe(3);
+  });
+
+  test("one that stays disabled is said so, with what was on the screen", async () => {
+    const keep = mkdtempSync(join(tmpdir(), "invincible-bench-kept-"));
+    const { vm, asked } = answering((command) => {
+      if (command === "desktop find 'menu' 'File'") return '19,31 · [1] menu "File" at 19,31 (39x25) disabled';
+      if (command.includes("desktop shot")) return PNG;
+      return "";
+    });
+    const error = (await screen(vm, "kicad-plot-2", { keep, ...nowait }).press(["menu"], "File").catch((e: Error) => e)) as Error;
+    expect(error.message).toContain('the menu named like "File" stayed disabled');
+    expect(asked.some((c) => c.startsWith("desktop click "))).toBe(false);
+    expect(readdirSync(keep).sort()).toEqual(["failed-kicad-plot-2-1.png", "failed-kicad-plot-2-1.txt"]);
+  });
+});
+
+describe("KiCad's board editor, its board loaded", () => {
+  test("ready only once its title names the board: before, it's \"PCB Editor\" alone, its menus disabled and \"Loading PCB\" not up yet", async () => {
+    let looks = 0;
+    const { vm, asked } = answering((command) => {
+      if (command.startsWith("desktop app pcbnew ")) return "started pcbnew";
+      if (command === "desktop focus") return looks++ < 3 ? 'focus: pcbnew "PCB Editor"' : 'focus: pcbnew "board — PCB Editor"';
+      if (command.includes("probe.py settle-full")) return '{"settled":true}';
+      if (command === "desktop windows") return '"PCB Editor" (pcbnew) · focused';
+      return "";
+    });
+    const s = screen(vm, "kicad-plot-1", { keep: mkdtempSync(join(tmpdir(), "invincible-bench-kept-")), ...nowait });
+    expect(await openBoard(s, "/work/bench/hw/board.kicad_pcb")).toBeNull();
+    const focus = asked.filter((c) => c === "desktop focus");
+    expect(focus.length).toBeGreaterThanOrEqual(4);
+    expect(asked.findIndex((c) => c.includes("probe.py settle-full"))).toBeGreaterThan(asked.lastIndexOf("desktop focus"));
+  });
+
+  test("one that never names its board isn't ready, and says why", async () => {
+    const { vm } = answering((command) => (command.startsWith("desktop app pcbnew ") ? "started pcbnew" : command === "desktop focus" ? 'focus: pcbnew "PCB Editor"' : ""));
+    expect(await openBoard(screen(vm, "kicad-plot-2", { keep: mkdtempSync(join(tmpdir(), "invincible-bench-kept-")), ...nowait }), "/work/bench/hw/board.kicad_pcb")).toBe("the PCB editor never named its board: it never loaded it");
   });
 });
