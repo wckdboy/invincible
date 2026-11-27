@@ -108,9 +108,10 @@ fun HomeScreen(app: AppModel, nav: Nav, back: () -> Unit) {
         PageBar("Work", back)
         val shown = work?.let { Work.inProject(it, filtered?.takeIf { key -> it.projects.any { p -> p.key == key } }) }
         // A refusal shows from its first line as it arrives: the list goes to its top, once. (Held on the row it showed, the
-        // list put the refusal above that row, its headline out of sight.) Keyed on the refusal, so nothing moves at rest.
+        // list put the refusal above that row, its headline out of sight.) Keyed on what the refusal says, so the same one
+        // said again (a 401 judged at each refresh) moves nothing: nothing moves at rest.
         val list = androidx.compose.foundation.lazy.rememberLazyListState()
-        val refusal = problem?.takeIf { it.notYourNode != null }
+        val refusal = sh.invincible.bot.core.refusalShown(problem)?.let { "${it.status} ${it.notYourNode} ${it.outdated} ${it.message}" }
         LaunchedEffect(refusal) { if (refusal != null) list.scrollToItem(0) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s6)) {
             problem?.let { p -> item(key = "problem") { Refused(app, p) } }

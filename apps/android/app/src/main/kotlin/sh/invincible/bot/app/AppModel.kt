@@ -342,6 +342,8 @@ class AppModel(context: Context) {
             },
             named = { Primary.named(it) },
             refused = { _problem.value = it },
+            // (The node refused this phone's whoami: removed there, or its clock out. Said, though all stays held.)
+            trouble = { _problem.value = it },
             // (Its stream, refused or waiting, opened again once Try again's proof holds.)
             reopen = { reconnect() },
             isCurrent = { same(_paired.value) && client === c },
@@ -610,7 +612,8 @@ class AppModel(context: Context) {
         if (!proven(c)) return false
         val got = attempt { c.get(path) }
         got.onSuccess { answers[path] = it }
-        if (path == TEAM) _problem.value = got.exceptionOrNull() as? NodeError
+        // (A 401 is judged: this build outdated, if its whoami still holds, else this phone removed: NodeSession.refusal.)
+        if (path == TEAM) _problem.value = (got.exceptionOrNull() as? NodeError)?.let { e -> session?.takeIf { it.pin === c.pin }?.refusal(e) ?: e }
         rebuild()
         if (path == "/api/turns") chat.follow(_table.value.chats)
         // (Once a batch, with the agents' read: never after each route's, which asked a node that wouldn't give its prices

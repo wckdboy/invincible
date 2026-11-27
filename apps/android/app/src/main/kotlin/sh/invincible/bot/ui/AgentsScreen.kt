@@ -149,7 +149,8 @@ fun AgentsScreen(app: AppModel, back: () -> Unit, openChat: () -> Unit, openAgen
 /**
  * What the node said, as what it means for you: a phone whose clock is a minute or more off is refused (set it to
  * automatic); a refusal with the clocks agreeing means the node no longer knows this phone (removed there), so the way
- * out is offered; anything else in the node's own words.
+ * out is offered, unless its whoami still holds: then it is this build the node no longer takes, and the way out is an
+ * update; anything else in the node's own words.
  */
 @Composable
 internal fun Refused(app: AppModel, p: NodeError) {
@@ -161,6 +162,11 @@ internal fun Refused(app: AppModel, p: NodeError) {
             TextButton(onClick = app::tryAgain, modifier = Modifier.padding(horizontal = Space.margin)) { Text("Try again") }
             TextButton(onClick = app::forget, modifier = Modifier.padding(horizontal = Space.margin)) { Text("Forget this node", color = LocalBrand.current.failed) }
         }
+        // The node knows this phone (its whoami holds) but no longer takes how this build signs the rest (NodeSession.refusal).
+        p.outdated -> Column {
+            Problem("Your node no longer takes requests from this version of Invincible, though it still knows this phone. Update Invincible, and it answers again.")
+            UpdateInvincible(Modifier.padding(horizontal = Space.margin))
+        }
         p.status == 401 && skew != null && Math.abs(skew) > 60_000 ->
             Problem("This phone's clock is ${Math.abs(skew) / 60_000} min ${if (skew > 0) "ahead of" else "behind"} your node's, and the node refuses requests that far out. Set the time to automatic in Settings.")
         p.status == 401 -> Column {
@@ -168,6 +174,17 @@ internal fun Refused(app: AppModel, p: NodeError) {
             TextButton(onClick = app::forget, modifier = Modifier.padding(horizontal = Space.margin)) { Text("Forget this node", color = LocalBrand.current.failed) }
         }
         else -> Problem(p.message ?: "The node isn't answering.")
+    }
+}
+
+/** Update Invincible: the newer build's download where the feed has one (Updates), else the page every build is published on. */
+@Composable
+private fun UpdateInvincible(modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var newer by remember { mutableStateOf<sh.invincible.bot.app.Updates.Newer?>(null) }
+    LaunchedEffect(Unit) { newer = sh.invincible.bot.app.Updates.newer(context) }
+    TextButton(onClick = { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(newer?.url ?: "https://github.com/wckdboy/invincible/releases"))) }, modifier = modifier) {
+        Text("Update Invincible")
     }
 }
 

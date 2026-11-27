@@ -392,9 +392,83 @@ class NodeSessionTest {
         val failed = NodeError.notYours(null)
         assertEquals(other, refusalShown(other))
         assertEquals("a proof that failed is a refusal too", failed, refusalShown(failed))
-        for (p in listOf(null, NodeError.unproven(), unreachable, NodeError(401, "Your node no longer knows this phone."))) {
+        // (A node that refuses this phone outright, 401, is said there too: removed, its clock out, or this build outdated.)
+        val removed = NodeError(401, "sign the request with an enrolled device key")
+        assertEquals(removed, refusalShown(removed))
+        for (p in listOf(null, NodeError.unproven(), unreachable, NodeError(500, "Whatever answers there."))) {
             assertNull("${p?.message}", refusalShown(p))
         }
+    }
+
+    // ---- the lead's word (27 November 2026): a refused whoami is said; a refused request after a whoami that holds says to update ----
+
+    private val refusedWords = "sign the request with an enrolled device key"
+
+    private fun sessionSaying(pin: NodePin, seen: Seen, troubles: MutableList<NodeError>, now: () -> Long, ask: suspend (String) -> Json) = NodeSession(
+        pin,
+        ask = { challenge -> seen.asked++; ask(challenge) },
+        keep = {},
+        named = {},
+        refused = { seen.refusals += it },
+        now = now,
+        judging = kotlinx.coroutines.Dispatchers.Default,
+        check = check,
+        trouble = { troubles += it },
+    )
+
+    @Test fun aWhoamiTheNodeRefusesIsSaidOnceAndEverythingStaysHeld() = runBlocking {
+        var clock = NodeProof.NAMED_FROM - 86_400_000L
+        val pin = NodePin(a, proofFirst = true)
+        val seen = Seen()
+        val troubles = mutableListOf<NodeError>()
+        val s = sessionSaying(pin, seen, troubles, now = { clock }) { throw NodeError(401, refusedWords, serverTime = clock) }
+        assertFalse(s.prove())
+        assertFalse(pin.isOpen)
+        assertEquals("said: the node doesn't know this phone", listOf(401), troubles.map { it.status })
+        // Asked again after its pause and refused the same way: nothing new to say.
+        clock += 3_000L
+        assertFalse(s.prove())
+        assertEquals(2, seen.asked)
+        assertEquals(1, troubles.size)
+    }
+
+    @Test fun aRequestRefusedWhileWhoamiHoldsIsThisBuildOutdated() = runBlocking {
+        val clock = NodeProof.NAMED_FROM - 86_400_000L
+        val pin = NodePin(a, proofFirst = true)
+        val seen = Seen()
+        val s = sessionSaying(pin, seen, mutableListOf(), now = { clock }) { challenge -> answer(a, challenge) }
+        assertTrue(s.prove())
+        val said = s.refusal(NodeError(401, refusedWords, serverTime = clock))
+        assertEquals("whoami asked again, at once", 2, seen.asked)
+        assertTrue("its whoami holds: this build is what the node refuses", said.outdated)
+        assertEquals(401, said.status)
+    }
+
+    @Test fun aRequestRefusedWhenWhoamiIsRefusedTooIsARemovedPhone() = runBlocking {
+        val clock = NodeProof.NAMED_FROM - 86_400_000L
+        val pin = NodePin(a, proofFirst = true)
+        val seen = Seen()
+        val troubles = mutableListOf<NodeError>()
+        var known = true
+        val s = sessionSaying(pin, seen, troubles, now = { clock }) { challenge -> if (known) answer(a, challenge) else throw NodeError(401, refusedWords, serverTime = clock) }
+        assertTrue(s.prove())
+        known = false
+        val refused = NodeError(401, refusedWords, serverTime = clock)
+        val said = s.refusal(refused)
+        assertFalse("removed, not outdated", said.outdated)
+        assertEquals(401, said.status)
+        assertEquals("said", listOf(401), troubles.map { it.status })
+    }
+
+    @Test fun aRequestRefusedWithThePhonesClockOutIsTheClock() = runBlocking {
+        val clock = NodeProof.NAMED_FROM - 86_400_000L
+        val pin = NodePin(a, proofFirst = true)
+        val seen = Seen()
+        val s = sessionSaying(pin, seen, mutableListOf(), now = { clock }) { challenge -> answer(a, challenge) }
+        assertTrue(s.prove())
+        val skewed = NodeError(401, refusedWords, serverTime = clock + 5 * 60_000L)
+        assertEquals("the clock card says it, unchanged", skewed, s.refusal(skewed))
+        assertEquals("no whoami asked for it", 1, seen.asked)
     }
 
     // ---- the lead's word of 27 November 2026: while refused, the line over what was kept doesn't say it's asking ----

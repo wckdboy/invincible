@@ -34,6 +34,8 @@ class NodeError(
     val notYourNode: String? = null,
     /** Sent before the session's proof held (NodeSession): nothing but whoami goes until it does. */
     val unproven: Boolean = false,
+    /** Refused (401) though the node knows this phone, its whoami holding: how this build signs requests is older than the node takes (NodeSession.refusal). */
+    val outdated: Boolean = false,
 ) : Exception(message) {
     companion object {
         /** Asked before the session's proof held (NodeSession): not sent, and it is asked again once the node has proved itself. */
