@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildRequest, ConnectorManifest, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { CATALOG, type DiscoveredTool, excerpt, keyState, MAX_RESPONSE_BYTES, mergeMcpTools, sendConnectorRequest } from "../src/index.ts";
+import { CATALOG, type DiscoveredTool, excerpt, installedConnector, installedConnectors, keyState, MAX_RESPONSE_BYTES, mergeMcpTools, PRIVATE_CONNECTORS, privateConnector, sendConnectorRequest, sized } from "../src/index.ts";
 
 function vault() {
   const identity = newNodeIdentity();
@@ -146,6 +146,36 @@ describe("sending a request", () => {
     const result = await sendConnectorRequest({ vault: vault(), fetch }, open, buildRequest(open, "me"));
     expect(result.truncated).toBe(true);
     expect(result.body.length).toBeLessThanOrEqual(60_000);
+  });
+});
+
+// The lead's word of 27 November 2026: your mail, your files, your books and your home are private however installed.
+describe("connectors whose answers are your private data", () => {
+  test("the catalog's mail, Drive and Home Assistant say so, and so do Dinero and every one of them by its id", () => {
+    expect([...PRIVATE_CONNECTORS].sort()).toEqual(["dinero", "gdrive", "gmail", "home-assistant", "outlook"]);
+    expect(Object.entries(CATALOG).filter(([, entry]) => entry.manifest.private).map(([id]) => id).sort()).toEqual(["gdrive", "gmail", "home-assistant", "outlook"]);
+    for (const id of PRIVATE_CONNECTORS) expect([id, privateConnector(id)]).toEqual([id, true]);
+    expect([privateConnector("github"), privateConnector("forge"), privateConnector("forge", { private: true })]).toEqual([false, false, true]);
+  });
+
+  test("an install is held private by its id, whatever its manifest says: one from before the catalog said so, or a server you added yourself", () => {
+    const identity = newNodeIdentity();
+    const store = new LedgerStore(":memory:");
+    foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
+    const { private: _private, ...older } = { ...CATALOG["home-assistant"]!.manifest, origin: "http://homeassistant.local:8123" };
+    store.emit(identity, "connector.set", { id: "home-assistant", manifest: older });
+    // Dinero, added from its own MCP server: no catalog entry says anything of it.
+    store.emit(identity, "connector.set", { id: "dinero", manifest: { id: "dinero", label: "Dinero", origin: "https://mcp.dinero.example.test", mcp: { path: "/mcp" }, tools: {} } });
+    store.emit(identity, "connector.set", { id: "forge", manifest: forge });
+    expect([installedConnector(store, "home-assistant")?.private, installedConnector(store, "dinero")?.private, installedConnector(store, "forge")?.private]).toEqual([true, true, undefined]);
+    expect(installedConnectors(store).map((c) => [c.id, c.manifest?.private ?? false])).toEqual([["dinero", true], ["forge", false], ["home-assistant", true]]);
+  });
+
+  test("what such an answer was, without a word of it: ok or failed and why, and its size", () => {
+    const answer = (over: object) => ({ ok: true, status: 200, contentType: "application/json", body: '{"from":"Ingrid <ingrid@example.test>"}', truncated: false, durationMs: 3, ...over });
+    expect(sized(answer({}))).toBe("ok (200), 39 bytes");
+    expect(sized(answer({ ok: false, status: 404, body: "{}" }))).toBe("failed (404), 2 bytes");
+    expect(sized(answer({ mcp: true, ok: false, truncated: true }))).toBe("failed (a tool error, truncated), 39 bytes");
   });
 });
 

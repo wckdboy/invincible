@@ -38,6 +38,7 @@ import {
   discoverMcpTools,
   excerpt,
   fitMcpTools,
+  privateConnector,
   publicIds,
   installedConnector,
   keyState,
@@ -45,6 +46,7 @@ import {
   mergeMcpTools,
   type OAuthEndpoints,
   sendConnectorRequest,
+  sized,
 } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
@@ -141,6 +143,16 @@ export class ConnectorService {
     return manifest;
   }
 
+  /** Whether a connector's answers are your private data (PRIVATE_CONNECTORS, or its manifest says so), installed or not. */
+  isPrivate(id: string): boolean {
+    return privateConnector(id, installedConnector(this.o.store, id));
+  }
+
+  /** What a call's line in the ledger names it by: its request, or a private connector's tool alone (no path, no word of its arguments). */
+  private said(connector: string, tool: string, target: string): string {
+    return this.isPrivate(connector) ? `${connector}.${tool}` : target;
+  }
+
   async call(input: { connector: string; tool: string; args?: Record<string, ArgValue>; why?: string }, caller: Caller): Promise<CallOutcome> {
     const manifest = this.manifest(input.connector);
     // One that's the primary's alone (mail): it, you, your loops and runs, and the agents you allowed; any other asks first.
@@ -207,20 +219,22 @@ export class ConnectorService {
           return { status: "done", class: request.class, target: request.target, result: sent.result, own, action: id };
         }
       }
-      this.o.ledger({ class: request.class, resource, target: request.target, verdict: "ask", reason: decision.reason, run, detail: `action ${id}, asked by ${caller.by}` });
+      this.o.ledger({ class: request.class, resource, target: this.said(manifest.id, input.tool, request.target), verdict: "ask", reason: decision.reason, run, detail: `action ${id}, asked by ${caller.by}` });
       return { status: "asked", action: id, class: request.class, target: request.target, expires };
     }
 
     const approved = decision.verdict === "ask"; // the owner asked: that is the approval
     const result = await this.send(manifest, request);
+    // What a private connector answered stays in the answer that read it: its line says only how it went, and its size.
+    const secret = privateConnector(manifest.id, manifest);
     this.o.ledger({
       class: request.class,
       resource,
-      target: request.target,
+      target: this.said(manifest.id, input.tool, request.target),
       verdict: approved ? "approved" : "allow",
       reason: approved ? "you asked for it" : decision.reason,
       run,
-      detail: `${caller.kind === "owner" ? "by you" : `by ${caller.by}`} · ${excerpt(result, 300)}`.slice(0, 2000),
+      detail: `${caller.kind === "owner" ? "by you" : `by ${caller.by}`} · ${secret ? sized(result) : excerpt(result, 300)}`.slice(0, 2000),
     });
     return { status: "done", class: request.class, target: request.target, result, ...(manifest.private ? { private: true as const } : {}) };
   }
@@ -374,7 +388,7 @@ export class ConnectorService {
     this.o.ledger({
       class: action.class as LedgerEntryInput["class"],
       resource: `connector.${action.connector}`,
-      target: action.target,
+      target: this.said(action.connector, action.tool, action.target),
       verdict: approve ? "approved" : "deny",
       reason: approve ? "you approved it" : "you declined",
       detail: `action ${id}`,
@@ -422,7 +436,7 @@ export class ConnectorService {
     this.o.ledger({
       class: request.class as LedgerEntryInput["class"],
       resource,
-      target: request.target,
+      target: this.said(action.connector, action.tool, request.target),
       verdict: "approved",
       reason: "you approved it as you edited it",
       detail: `action ${id}, edited from ${action.id}`,
@@ -462,7 +476,7 @@ export class ConnectorService {
       this.o.ledger({
         class: action.class as LedgerEntryInput["class"],
         resource: `connector.${action.connector}`,
-        target: action.target,
+        target: this.said(action.connector, action.tool, action.target),
         verdict: "deny",
         reason: "the approval expired before it could be sent",
         detail: `action ${action.id}, asked by ${action.by} · ${receipt}`.slice(0, 2000),
@@ -503,17 +517,22 @@ export class ConnectorService {
     let status: number | undefined;
     let receipt: string;
     let result: ConnectorResult | undefined;
+    // A private connector's receipt, and its line in the ledger, say how it went and nothing it said (PRIVATE_CONNECTORS).
+    const secret = this.isPrivate(action.connector);
+    let sending = false;
     try {
       const manifest = this.manifest(action.connector);
       const request = buildCall(manifest, action.tool, ConnectorArgs.parse(action.args));
       if (request.target !== action.target) throw new ConnectorCallError(409, "the connector changed since you approved this; not sent");
+      sending = true;
       result = await this.send(manifest, request);
       ok = result.ok;
       status = result.status;
-      receipt = excerpt(result, 1500);
+      receipt = secret ? sized(result) : excerpt(result, 1500);
     } catch (error) {
       if (error instanceof ConnectorCallError) status = error.status;
-      receipt = `not sent: ${(error as Error).message}`.slice(0, 2000);
+      // (Before it went, the words are this node's own; from the service, a private one's are kept out.)
+      receipt = (secret && sending ? `not sent: failed (${status ?? "an error"})` : `not sent: ${(error as Error).message}`).slice(0, 2000);
     }
     this.o.local.query("UPDATE outbox SET state = 'sent' WHERE id = ?").run(action.id);
     this.inFlight.delete(action.id);
@@ -521,7 +540,7 @@ export class ConnectorService {
     this.o.ledger({
       class: action.class as LedgerEntryInput["class"],
       resource: `connector.${action.connector}`,
-      target: action.target,
+      target: this.said(action.connector, action.tool, action.target),
       verdict: "approved",
       reason: ok ? `sent ${why}` : `failed ${why}`,
       detail: `action ${action.id}, asked by ${action.by} · ${receipt}`.slice(0, 2000),
@@ -718,7 +737,8 @@ export class ConnectorService {
       target: `${manifest.id}.${input.tool}`,
       verdict: "allow",
       reason: "you signed a standing order",
-      detail: `${id} · ${label} · until ${new Date(terms.until).toISOString().slice(0, 10)}`,
+      // (An order over a private connector is named in your words: its line says which order, not them.)
+      detail: `${id}${this.isPrivate(manifest.id) ? "" : ` · ${label}`} · until ${new Date(terms.until).toISOString().slice(0, 10)}`,
     });
     const order = this.orders().find((o) => o.id === id)!;
     if (!waiting) return { order };
@@ -736,7 +756,7 @@ export class ConnectorService {
       target: `${order.connector}.${order.tool}`,
       verdict: "allow",
       reason: "you revoked a standing order",
-      detail: `${id} · ${order.label}`,
+      detail: this.isPrivate(order.connector) ? id : `${id} · ${order.label}`,
     });
     return this.orders().find((o) => o.id === id)!;
   }

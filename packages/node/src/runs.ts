@@ -22,6 +22,8 @@ interface Entry {
   progress: RunProgressInput;
   startedAt: number;
   updatedAt: number;
+  /** What it says is your private data (a run that mail woke): only your devices see it (server.ts). Once so, always. */
+  secret?: true;
 }
 
 export class RunBoard {
@@ -36,8 +38,8 @@ export class RunBoard {
     return () => this.listeners.delete(fn);
   }
 
-  /** Where a run stands, as its runner says. `by`: who that is ("you", a loop, an agent). */
-  report(by: string, progress: RunProgressInput): void {
+  /** Where a run stands, as its runner says. `by`: who that is ("you", a loop, an agent). `secret`: its words are your private data. */
+  report(by: string, progress: RunProgressInput, secret = false): void {
     const key = `${by}\n${progress.run}`;
     const at = this.now();
     const clean: RunProgressInput = {
@@ -52,7 +54,7 @@ export class RunBoard {
     // An ended run stays ended: a late report from a step that was still in flight doesn't bring it back.
     if (known && !runInHand(known.progress.state) && runInHand(clean.state)) return;
     this.entries.delete(key);
-    this.entries.set(key, { by, progress: clean, startedAt: known?.startedAt ?? at, updatedAt: at });
+    this.entries.set(key, { by, progress: clean, startedAt: known?.startedAt ?? at, updatedAt: at, ...(secret || known?.secret ? { secret: true as const } : {}) });
     this.trim(by);
     for (const fn of this.listeners) {
       try {
@@ -61,6 +63,11 @@ export class RunBoard {
         /* a listener's problem */
       }
     }
+  }
+
+  /** Whether what a run says is your private data, as it was when it was reported. */
+  secret(by: string, run: string): boolean {
+    return this.entries.get(`${by}\n${run}`)?.secret === true;
   }
 
   /** In hand first (the latest word first), then the ones that ended, most recent first. */

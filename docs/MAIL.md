@@ -40,19 +40,36 @@ yes (`invincible action approve <id> --edit body="…"`). A standing order you s
 
 ## Private, in the primary's answers
 
-Gmail, Outlook and Drive are private connectors.
+Gmail, Outlook and Drive are private connectors, and so are Home Assistant and Dinero. Each is private by its id,
+however you installed it: from before the catalog said so, or from its own server's address, as Dinero is
+(`PRIVATE_CONNECTORS` in `packages/models/src/connector-catalog.ts`).
 - **The rule.** Once a call to one of them comes back in one of the primary's answers, nothing that could carry what it
   read out of Invincible runs for the rest of that answer: not the web, another connector, a sandbox or another model.
   Nothing that writes into the shared memory or the archive runs either. Only that connector's own tools still run: a
   reply drafted there stays there, and sending it still asks (`chatTools` in `packages/node/src/tools.ts`).
+- **Nothing of it in what replicates.** The ledger and the loops' runs replicate to every node of yours.
+  - A call's line in the ledger names the tool, the verdict, whether it went or failed and why (a status), and the
+    answer's size. It holds no word of the answer and none of the call's arguments.
+  - A receipt, and a loop's run that called one, say the same and no more. An order's line names the order, not its words.
+  - New mail that wakes a loop is recorded as "new Gmail mail" (or Outlook mail), never who wrote or what about.
+  - The run it wakes is told who wrote and the first lines, on its own node. What that run says it did isn't recorded.
+- **Your words, only on your devices.** An agent with `mind:read` reads none of a private connector's lines in the
+  ledger, not even one written before this. The ledger keeps every line it was given, so the view leaves them out.
+  - In a waiting call, the agent reads that it waits and where it stands, never its words: a send's recipients, subject
+    and words, why it was asked, what came back.
+  - Nor does it read an order's label or arguments, the search words of a loop that calls one, what mail a loop watches
+    for, the goal of a run that mail woke, or a question its server asks you.
+  - Only your devices, which hold `fleet:admin`, see them.
+  - The test is `packages/node/test/private-answers.e2e.test.ts`.
 - **Someone else's words.** The policy has the primary treat mail as data, never as instructions
   ([POLICY.md](POLICY.md), limit 5).
 - **What the rule doesn't cover.**
   - An agent you allowed. Its own tools aren't under the rule, so what it does with what it read is its choice.
-  - The shared mind, which replicates to every node and which agents with `mind:read` can read:
-    - the ledger's line for each call that ran, with the first 300 characters of what it answered;
-    - a send waiting for your yes, with its words;
-    - a loop's run, which says what its call answered, or who sent the new mail that woke it and its subject.
+  - The run new mail wakes. It is told who wrote and the first lines, and so is the model it runs with. It may write
+    memories, which replicate and which agents read: what it writes is its choice.
+  - A waiting send's words. They are in the log every node of yours keeps, since each of your devices must be able to
+    show it to you; only your devices read them.
+  - A connector you installed under another id. It is private only if its manifest says so (`"private": true`).
 
 ## Gmail: register your app with Google
 

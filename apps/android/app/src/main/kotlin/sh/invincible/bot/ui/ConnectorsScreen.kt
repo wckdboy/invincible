@@ -336,7 +336,7 @@ private fun ConnectorPage(app: AppModel, id: String, back: () -> Unit) {
                 SectionTitle("Who may use it")
                 Column(Modifier.padding(horizontal = Space.margin), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
                     c.allowed?.let { Text(if (it.isEmpty()) "${Primary.name}'s alone" else "${Primary.name}'s, and ${it.joinToString(", ")}'s", style = MaterialTheme.typography.bodyMedium) }
-                    if (c.private) Text("What it reads stays in the answer that read it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (c.private) Text("What it reads stays in the answer that read it: the ledger keeps no word of it, and no agent reads its calls' words.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (c.tools.isNotEmpty()) {

@@ -1961,7 +1961,7 @@ export interface ConnectorView {
   /** One that signs in as you: whose sign-in, and whose account it's signed in to (null until then). */
   /** A connector you sign in to: whose sign-in (an MCP server's own: `mcp`, no app of yours needed), and whose account, once said. */
   oauth: { provider: "google" | "microsoft" | "mcp"; account: string | null } | null;
-  /** What it reads stays in the answer that read it (mail). */
+  /** What it reads stays in the answer that read it: your mail, your Drive, your home, your books (the catalog's PRIVATE_CONNECTORS). */
   private: boolean;
 }
 

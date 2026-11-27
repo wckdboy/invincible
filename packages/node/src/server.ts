@@ -114,6 +114,7 @@ import {
   readRule,
   ruleOf,
   type RuleView,
+  type RunView,
   pictureType,
   textOf,
   screenSessionView,
@@ -889,6 +890,39 @@ export function createApp(ctx: AppContext) {
   function ownerOnly(p: Principal): void {
     if (!isOwner(p)) throw new HttpError(403, "chats are yours alone");
   }
+
+  /* ---------- your private data (PRIVATE_CONNECTORS): what an agent's read of the node leaves out ---------- */
+
+  /** Whether a line in the ledger is about a connector whose answers are your private data: each connector looked up once. */
+  const privateResources = () => {
+    const known = new Map<string, boolean>();
+    return (resource: unknown): boolean => {
+      if (typeof resource !== "string" || !resource.startsWith("connector.")) return false;
+      const id = resource.slice("connector.".length);
+      if (!known.has(id)) known.set(id, ctx.connectors.isPrivate(id));
+      return known.get(id)!;
+    };
+  };
+  /** A run reported by a loop that new mail wakes: its goal was told who wrote and what about (wakes.ts). */
+  const privateRun = (by: string): boolean => {
+    const name = /^loop\.(.+)$/.exec(by)?.[1];
+    return name !== undefined && loopRecords(ctx.store).some((loop) => loop.name === name && loop.wakes.some((wake) => wake.kind === "mail"));
+  };
+  const WITHHELD = "your private data: only your devices see its words";
+  /** A private connector's call as an agent reads it: that it is, and where it stands; none of its words. */
+  const withheldAction = (a: ActionView): ActionView => ({ ...a, args: {}, target: `${a.connector}.${a.tool}`, why: WITHHELD, receipt: a.receipt === null ? null : WITHHELD, note: a.note === null ? null : WITHHELD, order: a.order ? { id: a.order.id, label: WITHHELD } : null });
+  const withheldLoop = (loop: LoopView): LoopView => {
+    const task = loop.task;
+    return {
+      ...loop,
+      task: task?.kind === "call" && ctx.connectors.isPrivate(task.connector) ? { kind: "call", connector: task.connector, tool: task.tool } : task,
+      wakes: loop.wakes.map((wake) => (wake.kind === "mail" ? { kind: "mail", connector: wake.connector } : wake)),
+    };
+  };
+  const withheldRun = (run: RunView): RunView => {
+    const { plan: _plan, doing: _doing, summary: _summary, ...rest } = run;
+    return { ...rest, goal: WITHHELD, gates: run.gates.map(({ excerpt: _excerpt, ...gate }) => gate) };
+  };
 
   /* ---------- turns the node owns: who may see, steer and stop them; a chat's state at a glance ---------- */
 
@@ -3656,10 +3690,12 @@ export function createApp(ctx: AppContext) {
     askAside: (input, p, req) => askAside(input, p, req),
     bringBack: (input, p) => bringBack(input.aside, p),
     // ---------- runs in hand: where each stands, as whoever runs it says ----------
-    runs: () => ({ runs: ctx.runs.list() }),
+    // (A run of a loop that mail wakes was told who wrote and what about: only your devices see what it says.)
+    runs: (_input, p) => ({ runs: ctx.runs.list().map((run) => (p.scopes.includes("fleet:admin") || !(ctx.runs.secret(run.by, run.run) || privateRun(run.by)) ? run : withheldRun(run))) }),
     runProgress: (input, p) => {
       // Each reporter's runs are its own: an agent's or a loop's report never writes over yours.
-      ctx.runs.report(p.kind === "arm" ? p.label! : p.kind === "node" ? (ctx.store.device(p.device)?.name ?? "a node") : "you", input);
+      const by = p.kind === "arm" ? p.label! : p.kind === "node" ? (ctx.store.device(p.device)?.name ?? "a node") : "you";
+      ctx.runs.report(by, input, privateRun(by));
       return { ok: true };
     },
     projects: () => ({ projects: projectsView() }),
@@ -3765,20 +3801,30 @@ export function createApp(ctx: AppContext) {
       };
     },
     revokeToken: (input) => ({ revoked: ctx.tokens.revoke(input.hash) }),
-    ledger: () => ({
-      entries: ctx.store.ledger(200).map((e) => ({
-        id: e.id,
-        hlc: e.hlc,
-        device: e.device,
-        class: e.body.class,
-        resource: e.body.resource,
-        target: e.body.target,
-        verdict: e.body.verdict,
-        reason: e.body.reason ?? null,
-        run: e.body.run ?? null,
-        detail: e.body.detail ?? null,
-      })),
-    }),
+    ledger: (_input, p) => {
+      // A private connector's lines are yours alone (PRIVATE_CONNECTORS): an agent reads none of them, however old (the
+      // log keeps every line it ever had, so its view leaves them out).
+      const yours = p.scopes.includes("fleet:admin");
+      const secret = privateResources();
+      return {
+        entries: ctx.store
+          .ledger(yours ? 200 : 1000)
+          .filter((e) => yours || !secret(e.body.resource))
+          .slice(0, 200)
+          .map((e) => ({
+            id: e.id,
+            hlc: e.hlc,
+            device: e.device,
+            class: e.body.class,
+            resource: e.body.resource,
+            target: e.body.target,
+            verdict: e.body.verdict,
+            reason: e.body.reason ?? null,
+            run: e.body.run ?? null,
+            detail: e.body.detail ?? null,
+          })),
+      };
+    },
     sandboxes: (input, p) =>
       // `unknown`: Docker couldn't say just now. The list is then empty, and must not be read as "there are none".
       onNode(p, input.on, routes.sandboxes.path, {}, async () => { const listed = await ctx.sandbox!.listed(); return { node: ctx.nodeName, sandboxes: listed ?? [], ...(listed === null ? { unknown: true } : {}) }; }),
@@ -3879,7 +3925,8 @@ export function createApp(ctx: AppContext) {
       terminalsFor(p).close(input.terminal);
       return { closed: true };
     },
-    questions: () => ({ questions: ctx.questions?.list() ?? [] }),
+    // A private connector's server asking you mid-call may ask in your private data's words: only your devices see it.
+    questions: (_input, p) => ({ questions: (ctx.questions?.list() ?? []).filter((q) => p.scopes.includes("fleet:admin") || !ctx.connectors.isPrivate(q.connector)) }),
     answerQuestion: (input, p) => {
       if (!isOwner(p)) throw new HttpError(403, "only you answer a question a service asks you");
       const questions = ctx.questions;
@@ -4130,7 +4177,8 @@ export function createApp(ctx: AppContext) {
         return done;
       });
     },
-    loops: () => ({ loops: loopViews() }),
+    // (What a loop of yours asks of a private connector, and the mail it watches for, are your words: only your devices see them.)
+    loops: (_input, p) => ({ loops: loopViews().map((loop) => (p.scopes.includes("fleet:admin") ? loop : withheldLoop(loop))) }),
     connectorRequests: () => ({ requests: openConnectorRequests().map(connectorRequestView) }),
     requestConnector: (input, p) => {
       // What it wrote is shown to you: no keys in it.
@@ -4412,7 +4460,9 @@ export function createApp(ctx: AppContext) {
         ),
       ),
     connectorTool: (input, p) => connectorErrors(() => ctx.connectors.describe(input, connectorCaller(p))),
-    actions: (): { actions: ActionView[] } => ({ actions: ctx.connectors.actions() }),
+    // A private connector's call's words (a send's recipients, subject and words, why it was asked, what came back) reach
+    // only your devices (fleet:admin, as the screen's routes): an agent reads that it waits, never what it says.
+    actions: (_input, p): { actions: ActionView[] } => ({ actions: ctx.connectors.actions().map((a) => (p.scopes.includes("fleet:admin") || !ctx.connectors.isPrivate(a.connector) ? a : withheldAction(a))) }),
     away: (input, p): AwayView => {
       // Yours alone: its count of what waits for you reaches past what an agent may read (devices asking to join, say).
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you are told what happened while you were away");
@@ -4440,7 +4490,8 @@ export function createApp(ctx: AppContext) {
         return { action };
       });
     },
-    orders: () => ({ orders: ctx.connectors.orders() }),
+    // (An order over a private connector names whom and what it answers for in your words: only your devices see them.)
+    orders: (_input, p) => ({ orders: ctx.connectors.orders().map((order) => (p.scopes.includes("fleet:admin") || !ctx.connectors.isPrivate(order.connector) ? order : { ...order, label: WITHHELD, args: {} })) }),
     setOrder: (input, p) => {
       // A standing order is an answer given in advance: only you give it, like any answer.
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can sign a standing order");

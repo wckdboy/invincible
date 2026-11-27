@@ -344,3 +344,34 @@ describe("a loop's run carries its gates", () => {
     await call("removeLoop", { name: "hi" });
   }, 20_000);
 });
+
+// Your private data (PRIVATE_CONNECTORS): what woke a run of a loop from your mail stays on this node, and what the run
+// says it did isn't recorded where it would replicate. Every name and address here is made up.
+describe("a loop's run that your mail woke", () => {
+  test("is told who wrote and what about, here alone: what it says it did isn't recorded, and an agent reads none of it", async () => {
+    asked.length = 0;
+    docker.execs.length = 0;
+    scriptSandbox();
+    await call("setLoop", { name: "rent", schedule: "0 9 * * 1", task: { kind: "run", goal: "write hi to a file", network: "isolated", gates: [GATE] }, wakes: [{ kind: "mail", connector: "gmail", query: "from:ingrid" }] });
+    // New mail, as the watcher makes it (wakes.ts): its text says only that; who wrote and what about are its detail.
+    const mail = { id: "mail:gmail:a1b2c3d4", source: "mail" as const, at: Date.now(), text: "new Gmail mail", detail: "From: Ingrid Vestergaard <ingrid@example.test>\nSubject: Quarterly rent arrears", private: true as const };
+    expect(daemon.loops.wake("rent", [mail])).toBe(1);
+    await daemon.loops.settled("rent");
+    const run = daemon.store.loopRuns("rent", 1)[0]!.body;
+    expect(run.status).toBe("ok");
+    expect(run.summary).toMatch(/^Woken by new Gmail mail\. done after \d+ commands.*: what it did with what woke it, yours alone, isn't recorded\.$/);
+    // The run was told, on this node: you see its goal as it was given.
+    const yours = (await call<{ runs: RunView[] }>("runs")).runs.find((r) => r.by === "loop.rent")!;
+    expect(yours.goal).toContain("Ingrid Vestergaard");
+    // An agent reads the runs in hand, the loops and this one's runs, and your notices: none of it.
+    const { token } = await call<{ token: string }>("mintArm", { label: "rent-reader", scopes: ["mind:read"] });
+    for (const [name, input] of [["runs"], ["loops"], ["loopRuns", { name: "rent" }], ["notices"]] as [RouteName, unknown?][]) {
+      expect([name, JSON.stringify(await call(name, input, token)).match(/Ingrid|Vestergaard|rent arrears|from:ingrid/g)]).toEqual([name, null]);
+    }
+    expect((await call<{ runs: RunView[] }>("runs", undefined, token)).runs.find((r) => r.by === "loop.rent")).toMatchObject({ state: yours.state, goal: "your private data: only your devices see its words" });
+    // The loop no longer wakes on mail: the run mail woke is still yours alone.
+    await call("setLoop", { name: "rent", wakes: [] });
+    expect((await call<{ runs: RunView[] }>("runs", undefined, token)).runs.find((r) => r.by === "loop.rent")).toMatchObject({ goal: "your private data: only your devices see its words" });
+    await call("removeLoop", { name: "rent" });
+  }, 20_000);
+});

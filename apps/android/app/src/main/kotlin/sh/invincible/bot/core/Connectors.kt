@@ -28,7 +28,7 @@ data class Connector(
     /** Whose sign-in it uses (google, microsoft, mcp) and whose account it is signed in to; null for one with a key. */
     val signIn: String?,
     val account: String?,
-    /** What it reads stays in the answer that read it (mail), as the bank's data does. */
+    /** What it reads stays in the answer that read it: your mail, your Drive, your home, your books (the catalog's PRIVATE_CONNECTORS). */
     val private: Boolean,
 ) {
     /** A tool: its name, what it does, its class (read · create · modify · outward · delete), and whether it asks you first. */

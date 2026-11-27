@@ -105,7 +105,10 @@ describe("the mail and GitHub watcher", () => {
     await w.watcher.poll();
     expect(w.woken).toHaveLength(1);
     expect(w.woken[0]!.events.map((e) => e.id)).toEqual(["mail:gmail:m3"]);
-    expect(w.woken[0]!.events[0]).toMatchObject({ source: "mail", text: "new Gmail mail from Boss <boss@example.com>: About m3" });
+    // Who wrote and what about are yours alone (PRIVATE_CONNECTORS): its text says only that it is new mail, which is all a
+    // record that leaves this node says of it; the run it wakes is told the rest, here.
+    expect(w.woken[0]!.events[0]).toMatchObject({ source: "mail", text: "new Gmail mail", private: true });
+    expect(w.woken[0]!.events[0]!.detail).toContain("From: Boss <boss@example.com>\nSubject: About m3");
     expect(w.woken[0]!.events[0]!.detail).toContain("snippet m3");
     // Seen once, never again.
     await w.watcher.poll();

@@ -56,10 +56,15 @@ export interface WakeEvent {
   id: string;
   source: LoopWake["kind"];
   at: number;
-  /** One line: what happened. */
+  /** One line: what happened. Every record that leaves this node says no more of it than this. */
   text: string;
-  /** What came with it, bounded (a webhook's body, a mail's first lines). */
+  /** What came with it, bounded (a webhook's body, a mail's first lines): for the run it wakes, kept on this node. */
   detail?: string;
+  /**
+   * What came with it is your private data (new mail: PRIVATE_CONNECTORS): its text names only what happened and where,
+   * and what a run it woke says it did stays out of the record that replicates, as what woke it does.
+   */
+  private?: true;
 }
 
 export const hlcMs = (hlc: string): number => Number(hlc.split(".")[0]);

@@ -489,7 +489,7 @@ function accessBlock(ctx: Ctx, c: ConnectorView): HTMLElement | null {
           ),
         )
       : null,
-    c.private ? h("p", { class: "tiny subtle" }, "What it reads stays in the answer that read it: nothing else that could carry it out runs after it.") : null,
+    c.private ? h("p", { class: "tiny subtle" }, "What it reads stays in the answer that read it: nothing that could carry it out runs after it, the ledger and your loops' runs keep no word of it, and no agent reads its calls' words.") : null,
   );
 }
 

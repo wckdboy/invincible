@@ -289,7 +289,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
     manifest: {
       id: "home-assistant",
       label: "Home Assistant",
-      description: "Read your home's state. Anything that moves, heats, unlocks or opens asks you first, every time.",
+      description: "Read your home's state. Anything that moves, heats, unlocks or opens asks you first, every time. What it reads stays in the answer that read it.",
       auth: { secret: "home-assistant", scheme: "bearer" },
       tools: {
         status: { description: "Is Home Assistant up?", method: "GET", path: "/api/", class: "read" },
@@ -313,6 +313,8 @@ export const CATALOG: Record<string, CatalogEntry> = {
           class: "outward",
         },
       },
+      // What your home is doing is yours: who is in, when the door opened (PRIVATE_CONNECTORS).
+      private: true,
     },
   },
   gmail: {
@@ -406,3 +408,16 @@ export const CATALOG: Record<string, CatalogEntry> = {
     },
   },
 };
+
+/**
+ * The connectors whose answers are your private data (your mail, your files, your books, your home), by id: each is held
+ * private however it was installed, whatever its manifest says (from before the catalog said so, as a manifest of your
+ * own under its name, or as an MCP server you added by its address, as Dinero is). What a private connector answers
+ * stays in the answer that read it: its calls' lines in the ledger carry neither the answer nor its arguments' words, no
+ * agent reads its lines or the words of its waiting calls, and what woke a loop from it is recorded as only that.
+ * (27 November 2026: until then the ledger replicated each answer's first 300 characters.)
+ */
+export const PRIVATE_CONNECTORS: ReadonlySet<string> = new Set(["gmail", "outlook", "gdrive", "dinero", "home-assistant"]);
+
+/** Whether a connector's answers are your private data: its id is one of PRIVATE_CONNECTORS, or its manifest says so. */
+export const privateConnector = (id: string, manifest?: { private?: boolean | undefined } | null): boolean => PRIVATE_CONNECTORS.has(id) || manifest?.private === true;

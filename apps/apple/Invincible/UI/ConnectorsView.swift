@@ -160,7 +160,7 @@ struct ConnectorDetail: View {
                         if let access = connector.access {
                             Label(access.allowed.isEmpty ? "\(Primary.name)'s alone" : "\(Primary.name)'s, and \(ListFormatter.localizedString(byJoining: access.allowed))'s", systemImage: "shield.lefthalf.filled")
                         }
-                        if connector.private { Label("What it reads stays in the answer that read it.", systemImage: "eye.slash").font(.footnote) }
+                        if connector.private { Label("What it reads stays in the answer that read it: the ledger keeps no word of it, and no agent reads its calls' words.", systemImage: "eye.slash").font(.footnote) }
                     }
                 }
                 if !connector.tools.isEmpty {

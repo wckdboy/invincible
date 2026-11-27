@@ -1,5 +1,5 @@
 import { type ChatStreamEvent, type NodeIdentity, redact, retriedRuns, type RouteName, routes, SELF_ACTION_RESOURCE, spendLabel, type Usage } from "@invincible/core";
-import { chat, excerpt, installedConnector, installedConnectors, keyState, onPlan, parseRef, planOf, resolveProvider, roster, sseData } from "@invincible/models";
+import { chat, excerpt, installedConnector, installedConnectors, keyState, onPlan, parseRef, planOf, resolveProvider, roster, sized, sseData } from "@invincible/models";
 import { commandsRun } from "@invincible/agents";
 import type { SyncEngine } from "@invincible/link";
 import type { LedgerStore, Vault } from "@invincible/ledger";
@@ -370,7 +370,8 @@ export function loopExecutor(deps: LoopTaskDeps) {
           return { status: "attention", summary: `${task.connector}.${task.tool} needs your approval: action ${outcome.action} is in your inbox.` };
         }
         const took = `${outcome.result.durationMs} ms`;
-        return { status: outcome.result.ok ? "ok" : "attention", summary: `${task.connector}.${task.tool} → ${excerpt(outcome.result, 240)} (${took})` };
+        // What a private connector answered stays in the answer (PRIVATE_CONNECTORS): the run's record says how it went.
+        return { status: outcome.result.ok ? "ok" : "attention", summary: `${task.connector}.${task.tool} → ${outcome.private ? sized(outcome.result) : excerpt(outcome.result, 240)} (${took})` };
       }
       case "run": {
         // The loop works as an arm: least privilege, its own ephemeral sandboxes, untrusted memories.
@@ -384,6 +385,10 @@ export function loopExecutor(deps: LoopTaskDeps) {
           const { outcome, learned, usage } = await runOnNode(client, { goal, network: task.network, maxSteps: task.maxSteps, ...(task.gates?.length ? { gates: task.gates } : {}) }, { signal: ctx.signal });
           const gated = outcome.gates?.some((g) => g.exitCode !== 0) ?? false;
           const review = outcome.status !== "done" && outcome.review ? ` ${gated ? "Never reviewed:" : "Reviewer:"} ${outcome.review.trim()}` : "";
+          // Woken by your private data (new mail), what it says it did may say what it read: none of it is recorded.
+          if (ctx.woken.some((event) => event.private)) {
+            return { status: outcome.status === "done" ? "ok" : "attention", summary: `${outcome.status} after ${commandsRun(outcome)} commands${usage.length ? ` (${spendLabel(usage)})` : ""}: what it did with what woke it, yours alone, isn't recorded.` };
+          }
           return {
             status: outcome.status === "done" ? "ok" : "attention",
             // The skills it used, and one it learned, by title (skills.ts): only what the node said is in the mind.

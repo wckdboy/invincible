@@ -175,8 +175,10 @@ export class WakeWatcher {
                 id: `mail:${wake.connector}:${m.id}`,
                 source: "mail" as const,
                 at: now,
-                text: clip(`new ${wake.connector === "gmail" ? "Gmail" : "Outlook"} mail from ${from}: ${subject}`, 300),
+                // Who wrote and what about are yours alone: only the run it wakes is told them, here (detail).
+                text: `new ${wake.connector === "gmail" ? "Gmail" : "Outlook"} mail`,
                 detail: clip(`From: ${from}\nSubject: ${subject}${typeof m.date === "string" ? `\nDate: ${m.date}` : ""}\nId: ${m.id} (read it with ${wake.connector}.read)\n\n${typeof m.snippet === "string" ? m.snippet : ""}`),
+                private: true as const,
               },
             },
           ];

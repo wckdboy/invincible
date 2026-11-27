@@ -40,7 +40,7 @@ struct ConnectorView: Decodable, Sendable, Identifiable {
     let tools: [Tool]
     let access: Access?
     let oauth: OAuth?
-    /// What it reads stays in the answer that read it (mail), as the bank's data does.
+    /// What it reads stays in the answer that read it: your mail, your Drive, your home, your books (the catalog's PRIVATE_CONNECTORS).
     let `private`: Bool
 }
 

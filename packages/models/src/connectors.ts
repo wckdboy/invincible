@@ -1,6 +1,6 @@
 import { type BuiltRequest, ConnectorError, ConnectorManifest, redact } from "@invincible/core";
 import type { LedgerStore, Vault } from "@invincible/ledger";
-import { publicIds } from "./connector-catalog.ts";
+import { privateConnector, publicIds } from "./connector-catalog.ts";
 import { accessToken, type OAuthContext, readKeep } from "./oauth.ts";
 
 /*
@@ -24,7 +24,7 @@ export function installedConnectors(store: LedgerStore): InstalledConnector[] {
     const parsed = ConnectorManifest.safeParse(entry.value);
     return {
       id: entry.key.slice("connector:".length),
-      manifest: parsed.success ? parsed.data : null,
+      manifest: parsed.success ? held(entry.key.slice("connector:".length), parsed.data) : null,
       problem: parsed.success ? null : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ").slice(0, 300),
       installedAt: entry.hlc,
       installedBy: entry.device,
@@ -34,7 +34,12 @@ export function installedConnectors(store: LedgerStore): InstalledConnector[] {
 
 export function installedConnector(store: LedgerStore, id: string): ConnectorManifest | null {
   const parsed = ConnectorManifest.safeParse(store.lww(`connector:${id}`)?.value);
-  return parsed.success ? parsed.data : null;
+  return parsed.success ? held(id, parsed.data) : null;
+}
+
+/** An installed manifest as it is held: private where the catalog says its answers are your private data (by its id). */
+function held(id: string, manifest: ConnectorManifest): ConnectorManifest {
+  return manifest.private !== true && (privateConnector(id) || privateConnector(manifest.id)) ? { ...manifest, private: true } : manifest;
 }
 
 export type KeyState = "none-needed" | "ready" | "missing" | "optional-missing" | "wrong-origin" | "signed-out";
@@ -163,6 +168,12 @@ export async function sendConnectorRequest(ctx: SendContext, manifest: Connector
 }
 
 /** A short, human-sized excerpt of a result for ledgers, receipts and run summaries. */
+/** What an answer was without a word of it (a private connector's: PRIVATE_CONNECTORS): ok or failed and why, and its size. */
+export function sized(result: ConnectorResult): string {
+  const kind = result.mcp ? (result.ok ? "a tool's answer" : "a tool error") : String(result.status);
+  return `${result.ok ? "ok" : "failed"} (${kind}${result.truncated ? ", truncated" : ""}), ${new TextEncoder().encode(result.body).length} bytes`;
+}
+
 export function excerpt(result: ConnectorResult, max = 600): string {
   let body = result.body.trim();
   let json = false;
