@@ -36,6 +36,7 @@ import { openAddKey, secretRequestCard } from "./vault.ts";
 import { connectorRequestCard } from "./connectors.ts";
 import { primaryAsks } from "./primary-asks.ts";
 import { rosterBack } from "./sidebar.ts";
+import { awayShown } from "../lib/away.ts";
 
 /*
  * Chat. A turn runs on the node, not in this page: the page starts it and watches
@@ -753,6 +754,10 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   // Its own computer: watched and taken over from here, and given to it here while it has none.
   const computer = ctx.can("sandbox") ? h("button", { class: "btn ghost sm icon-only chat-computer", type: "button", "aria-label": "Its computer", title: "Its computer", onclick: () => openComputer(ctx) }, icon("monitor", { size: 16 })) : null;
   let shownTone = "";
+  // While you were away's answer (below), and whether its card was drawn with the head saying the count: drawn again
+  // when that changes. (Declared here: the head is drawn before the card is asked for.)
+  let away: AwayView | null = null;
+  let awayCounted = false;
   function renderNow(): void {
     const waiting = ctx.live.actions.value.filter((action) => isWaiting(action));
     const needs = ctx.live.inboxLoaded.value ? primaryNeeds(ctx.live.inboxCount.value, waiting, ctx.live.team.value?.agents.map((person) => person.id) ?? []) : null;
@@ -760,6 +765,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     if (nowLine.textContent !== now.text) {
       nowLine.textContent = now.text;
       nowLine.dataset.tone = now.tone;
+      if (away && awayCounted !== (now.tone === "warn")) showAway();
       who.setAttribute("aria-label", `Your agent: ${now.text}. See what it has in hand.`);
     }
     inboxCount.hidden = !needs;
@@ -890,10 +896,12 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
    * While you were away (PLAN #37): what happened since this device last showed you, from the node (no model), under
    * the welcome, where its arrival moves nothing above it. Asked once as the chat opens; "Got it" and it's read.
    */
-  let away: AwayView | null = null;
   const awayBox = h("div", { class: "away-host" });
   function showAway(): void {
-    if (!away?.lines.length) return replace(awayBox);
+    // (What needs your answer is counted once: the head says it, live, so the card leaves its own count out.)
+    const lines = away ? awayShown(away.lines, nowLine.dataset.tone === "warn") : [];
+    awayCounted = nowLine.dataset.tone === "warn";
+    if (!away || !lines.length) return replace(awayBox);
     const got = button("Got it", { size: "sm", variant: "ghost", icon: "check" });
     got.addEventListener("click", () => {
       markAwaySeen();
@@ -906,7 +914,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
         "section",
         { class: "card away", "aria-label": "While you were away" },
         h("div", { class: "row between" }, h("h3", { class: "small strong" }, "While you were away"), h("span", { class: "tiny subtle" }, relativeTime(away.since))),
-        h("ul", { class: "plain-list small" }, ...away.lines.map((line) => h("li", { class: "row tight" }, dot(line.tone === "neutral" ? null : line.tone), h("span", {}, line.text)))),
+        h("ul", { class: "plain-list small" }, ...lines.map((line) => h("li", { class: "row tight" }, dot(line.tone === "neutral" ? null : line.tone), h("span", {}, line.text)))),
         h("div", { class: "row end" }, got),
       ),
     );
