@@ -14,6 +14,9 @@
 
 export const DESKTOP_FRAME_KIND = { beat: 0, key: 1, delta: 2 } as const;
 
+/** The stream's media type, as the node answers teamDesktopStream. */
+export const DESKTOP_FRAMES_TYPE = "application/vnd.invincible.desktop-frames";
+
 /** The length, the kind and the time: what comes before a frame's payload. */
 export const DESKTOP_FRAME_HEADER = 13;
 

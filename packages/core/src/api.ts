@@ -501,12 +501,32 @@ export const routes = {
   },
   /**
    * An agent's desktop, for you to watch and to take over (to sign in for it, to get it past something): one
-   * thing done there, or nothing (`look`), and a picture of the screen back. Yours alone. What you type is carried
-   * to the VM and never written to the ledger.
+   * thing done there, or nothing (`look`), and a picture of the screen back; none with `picture` false (while you
+   * watch its stream: teamDesktopStream). Yours alone. What you type is carried to the VM and never written to the
+   * ledger. Your input takes the desktop over if no one has it (teamDesktopTake), and each answer says whether you
+   * have it (`held`).
    */
-  teamDesktop: { method: "POST", path: "/api/team/desktop", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32), action: DesktopAction.default({ do: "look" }) }) },
+  teamDesktop: { method: "POST", path: "/api/team/desktop", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32), action: DesktopAction.default({ do: "look" }), picture: z.boolean().optional() }) },
   /** The same, asked of the node that hosts the VM by the team's controller. */
-  teamDesktopOn: { method: "POST", path: "/api/team/desktop-workspace", scope: "sandbox", input: z.strictObject({ id: SandboxId, on: NodeRef.optional(), run: TeamWorkspaceRun, action: DesktopAction }) },
+  teamDesktopOn: { method: "POST", path: "/api/team/desktop-workspace", scope: "sandbox", input: z.strictObject({ id: SandboxId, on: NodeRef.optional(), run: TeamWorkspaceRun, action: DesktopAction, picture: z.boolean().optional() }) },
+  /**
+   * You take an agent's desktop over (C1 step 9): it is yours until you give it back, or 120 s pass with no input
+   * from you, or 15 min at most; a second take starts a fresh window. Meanwhile its own desktop commands and its
+   * looks wait, and are told so. Yours alone. Whether you have it after (`held`).
+   */
+  teamDesktopTake: { method: "POST", path: "/api/team/desktop/take", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32) }) },
+  /** You give an agent's desktop back: its desktop commands go on. Yours alone. */
+  teamDesktopRelease: { method: "POST", path: "/api/team/desktop/release", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32) }) },
+  /** Taking over or giving back, asked of the node that hosts the VM by the team's controller. */
+  teamDesktopHoldOn: { method: "POST", path: "/api/team/desktop-workspace/hold", scope: "sandbox", input: z.strictObject({ id: SandboxId, on: NodeRef.optional(), run: TeamWorkspaceRun, take: z.boolean() }) },
+  /**
+   * An agent's desktop as you watch it (C1 step 9): its frames as they come (desktop-frames.ts, DESKTOP_FRAMES_TYPE),
+   * H.264 from a keyframe, for as long as you read them. One encoder in its VM however many of your devices watch,
+   * and none while none does. Yours alone.
+   */
+  teamDesktopStream: { method: "POST", path: "/api/team/desktop/stream", scope: "sandbox", input: z.strictObject({ id: z.string().min(1).max(32) }) },
+  /** The same, asked of the node that hosts the VM by the team's controller, and relayed through it as it comes. */
+  teamDesktopStreamOn: { method: "POST", path: "/api/team/desktop-workspace/stream", scope: "sandbox", input: z.strictObject({ id: SandboxId, on: NodeRef.optional(), run: TeamWorkspaceRun }) },
   /** A Mac's own screen (`on`: another node's): its size, and what macOS lets the primary do with it. Yours alone. */
   screen: { method: "POST", path: "/api/screen", scope: "fleet:admin", input: z.strictObject({ on: NodeRef.optional() }) },
   /**

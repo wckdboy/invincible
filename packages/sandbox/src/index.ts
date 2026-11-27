@@ -1,4 +1,5 @@
 export * from "./host.ts";
+export * from "./desktop-session.ts";
 export * from "./desktop-stream.ts";
 export * from "./spec.ts";
 export * from "./container.ts";

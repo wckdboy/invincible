@@ -13,7 +13,7 @@ import { cloudflareNatives } from "./cloudflare.ts";
 import { gmailNatives, outlookNatives } from "./mail.ts";
 import { PairingHost, SyncEngine } from "@invincible/link";
 import { adoptChains, LedgerStore, Vault } from "@invincible/ledger";
-import { type DockerRunner, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
+import { type DockerRunner, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnFrames, type SpawnSession, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
 import type { ArgValue, HostLoad, TeamTrailEntry } from "@invincible/core";
 import { calibrate, spawnBench } from "./compute/calibrate.ts";
 import { GovernedSandboxHost } from "./compute/governed-host.ts";
@@ -146,6 +146,10 @@ export interface DaemonOptions {
   spawnTerminal?: SpawnTerminal;
   /** How a process that runs while it's wanted is started in a sandbox (tests: a stand-in, beside one for Docker). */
   spawnStream?: SpawnStream;
+  /** How a VM's held desktop sessions are started, the agent's and yours (tests: a stand-in for deskd, beside one for Docker). */
+  spawnSession?: SpawnSession;
+  /** How a VM's desktop stream is started while you watch it (tests: a stand-in for its encoder, beside one for Docker). */
+  spawnFrames?: SpawnFrames;
   /**
    * How this node measures itself. Default: the real benchmark, a few seconds at low priority (and never in
    * tests that pass their own capabilities, unless they give one here). false: it doesn't.
@@ -497,6 +501,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       ...(opts.macFirewall ? { firewall: opts.macFirewall } : {}),
       ...(opts.spawnTerminal ? { spawnTerminal: opts.spawnTerminal } : {}),
       ...(opts.spawnStream ? { spawnStream: opts.spawnStream } : {}),
+      ...(opts.spawnSession ? { spawnSession: opts.spawnSession } : {}),
+      ...(opts.spawnFrames ? { spawnFrames: opts.spawnFrames } : {}),
       maxCpus: caps.cores,
       maxMemoryGb: Math.max(1, Math.floor(caps.memoryGb * 0.75)),
       // Size-limited workspaces when the root helper is installed (scripts/remote-setup.sh); otherwise

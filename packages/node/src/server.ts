@@ -1,5 +1,7 @@
 import {
   ABOUT_YOU_TAG,
+  DESKTOP_FRAMES_TYPE,
+  type TeamWorkspace,
   ZONE_HEADER,
   type FabricSettingView,
   type HandoffGrantView,
@@ -782,7 +784,12 @@ export function createApp(ctx: AppContext) {
   }
 
   /** The same asked of the node a sandbox is on, signed as this node: its lines passed back as they come. */
-  async function linesFrom(target: Device, path: string, body: Record<string, unknown>, signal: AbortSignal): Promise<Response> {
+  function linesFrom(target: Device, path: string, body: Record<string, unknown>, signal: AbortSignal): Promise<Response> {
+    return streamFrom(target, path, body, signal, "application/x-ndjson");
+  }
+
+  /** What another node answers as it goes (a sandbox's lines, a desktop's frames), asked signed as this node and passed back as it comes. */
+  async function streamFrom(target: Device, path: string, body: Record<string, unknown>, signal: AbortSignal, type: string): Promise<Response> {
     if (!target.profile?.endpoint) throw new HttpError(424, `${target.name} has no reachable endpoint`);
     let upstream: Response;
     try {
@@ -800,7 +807,7 @@ export function createApp(ctx: AppContext) {
       }
       throw new HttpError(upstream.status, `${target.name}: ${message}`.slice(0, 500));
     }
-    return new Response(upstream.body, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store", ...SECURITY_HEADERS } });
+    return new Response(upstream.body, { headers: { "content-type": type, "cache-control": "no-store", ...SECURITY_HEADERS } });
   }
 
   /** Self-action as the owner sees it: on or off, the heartbeats it follows, the allowlist, its latest fixes. */
@@ -2109,6 +2116,13 @@ export function createApp(ctx: AppContext) {
       ctx.log(`intervention not counted: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
+  /** An agent's desktop, asked of by you alone: its VM, or why it has none, and the run that VM is made for. */
+  const desktopOf = (id: string, p: Principal): { bound: TeamWorkspace; run: string } => {
+    ownerOnly(p);
+    const bound = seatOf(id).workspace;
+    if (!bound) throw new HttpError(424, id === TEAM_PRIMARY ? noVm(id) : `this agent has no VM yet: invincible agents provision ${id} --desktop makes one with a desktop`);
+    return { bound, run: armRun(agentLabel(id)) };
+  };
   const agentPrincipal = (id: string): Principal => ({ kind: "arm", device: `arm:${agentLabel(id)}`, label: agentLabel(id), scopes: ["mind:read", "mind:write", "sandbox", "connect"] });
   const teamOf = () => {
     if (!ctx.team?.service) throw new HttpError(503, "the team controller is unavailable");
@@ -2746,10 +2760,8 @@ export function createApp(ctx: AppContext) {
     },
     seeTeam: (input, p) => { ownerOnly(p); teamOf().see(input); return { seen: true }; },
     teamDesktop: async (input, p, req) => {
-      ownerOnly(p);
-      const bound = seatOf(input.id).workspace;
-      if (!bound) throw new HttpError(424, input.id === TEAM_PRIMARY ? noVm(input.id) : `this agent has no VM yet: invincible agents provision ${input.id} --desktop makes one with a desktop`);
-      const done = await inProcess(p, req.signal).call("teamDesktopOn", { on: bound.node, id: bound.id, run: armRun(agentLabel(input.id)), action: input.action });
+      const { bound, run } = desktopOf(input.id, p);
+      const done = await inProcess(p, req.signal).call("teamDesktopOn", { on: bound.node, id: bound.id, run, action: input.action, ...(input.picture === false ? { picture: false } : {}) });
       // A click or a key of yours on its desktop while it works is taking it over (#28): once a task.
       if (input.action.do !== "look") steppedIn({ agent: input.id }, "takeover", "took over its desktop");
       return done;
@@ -2758,7 +2770,37 @@ export function createApp(ctx: AppContext) {
       // Yours alone: an agent operates its own desktop from inside its VM, and never another's from outside.
       if (p.kind === "arm") throw new HttpError(403, "an agent's desktop is watched and taken over by you alone");
       const { on, ...asked } = input;
-      return onNode(p, on, routes.teamDesktopOn.path, asked, () => ctx.sandbox!.desktop(input.id, input.run, input.action), { sandbox: input.id });
+      return onNode(p, on, routes.teamDesktopOn.path, asked, () => ctx.sandbox!.desktop(input.id, input.run, input.action, input.picture ?? true), { sandbox: input.id });
+    },
+    teamDesktopTake: async (input, p, req) => {
+      const { bound, run } = desktopOf(input.id, p);
+      const done = await inProcess(p, req.signal).call<{ held: unknown }>("teamDesktopHoldOn", { on: bound.node, id: bound.id, run, take: true });
+      steppedIn({ agent: input.id }, "takeover", "took over its desktop");
+      return done;
+    },
+    teamDesktopRelease: (input, p, req) => {
+      const { bound, run } = desktopOf(input.id, p);
+      return inProcess(p, req.signal).call("teamDesktopHoldOn", { on: bound.node, id: bound.id, run, take: false });
+    },
+    teamDesktopHoldOn: (input, p) => {
+      if (p.kind === "arm") throw new HttpError(403, "an agent's desktop is watched and taken over by you alone");
+      const { on, ...asked } = input;
+      return onNode(p, on, routes.teamDesktopHoldOn.path, asked, async () => ({ held: await ctx.sandbox!.desktopHold(input.id, input.run, input.take) }), { sandbox: input.id });
+    },
+    teamDesktopStream: (input, p, req) => {
+      const { bound, run } = desktopOf(input.id, p);
+      // (inProcess always answers as it goes: `answer` is optional only for the tools' other ways in.)
+      return inProcess(p, req.signal).answer!("teamDesktopStreamOn", { on: bound.node, id: bound.id, run });
+    },
+    teamDesktopStreamOn: async (input, p, req) => {
+      if (p.kind === "arm") throw new HttpError(403, "an agent's desktop is watched and taken over by you alone");
+      const { on, ...asked } = input;
+      // Watched on the node its VM is on; a request another node forwarded is watched where it lands, and relayed back.
+      const target = p.kind === "node" ? null : on ? resolveNode(on) : null;
+      if (target && target.id !== ctx.identity.id) return streamFrom(target, routes.teamDesktopStreamOn.path, asked, req.signal, DESKTOP_FRAMES_TYPE);
+      if (!ctx.sandbox) throw new HttpError(424, "this node is not a sandbox host");
+      const frames = await ctx.sandbox.desktopWatch(input.id, input.run, req.signal);
+      return new Response(frames, { headers: { "content-type": DESKTOP_FRAMES_TYPE, "cache-control": "no-store", ...SECURITY_HEADERS } });
     },
     screen: (input, p) => {
       screenOwner(p);
