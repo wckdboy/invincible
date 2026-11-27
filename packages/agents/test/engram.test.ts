@@ -14,7 +14,9 @@ import {
   engramProject,
   engramProjectFor,
   engramShell,
+  engramEnv,
 } from "../src/engram.ts";
+import { OPENCODE } from "../src/harnesses.ts";
 
 /*
  * Engram in an agent's VM, as far as the primary says anything to it: where the binary and its store are, the four
@@ -198,5 +200,20 @@ describe("what is never said to it", () => {
     const never = /ENGRAM_CLOUD|ENGRAM_URL|ENGRAM_HTTP_TOKEN|ENGRAM_AGENT_CLI|engram["',\s]+(serve|run|sync|cloud|setup|obsidian-export|migrate-copy|import|export)\b/;
     const root = new URL("../../../", import.meta.url).pathname;
     expect(all.filter((path) => never.test(readFileSync(path, "utf8"))).map((path) => path.slice(root.length))).toEqual([]);
+  });
+});
+
+/*
+ * Layout 2 (sandbox's layout.ts): the notes are in the VM's own HOME, never in the workspace a VM that shares it reaches.
+ * Each place that names the store names it in the HOME it is given (/work in layout 1, as before).
+ */
+describe("the notes store in a VM's own HOME", () => {
+  test("its store, every driver's config and the engineer's shell all name it in that HOME", () => {
+    expect(engramEnv("/home/agent")).toEqual({ ENGRAM_DATA_DIR: "/home/agent/.memory/engram", ENGRAM_NO_UPDATE_CHECK: "1" });
+    expect(engramShell("you-project", "/home/agent")).toContain("ENGRAM_DATA_DIR=/home/agent/.memory/engram ");
+    const files = OPENCODE.files([{ provider: "deepseek", model: "deepseek-v4-pro" }], "you-project", "/home/agent");
+    expect(Object.keys(files)).toEqual(["/home/agent/.config/opencode/opencode.json"]);
+    expect(files["/home/agent/.config/opencode/opencode.json"]).toContain("/home/agent/.memory/engram");
+    expect(JSON.stringify(files)).not.toContain("/work/.memory");
   });
 });

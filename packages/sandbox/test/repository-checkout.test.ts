@@ -64,7 +64,7 @@ describe("a repository checked out in an eval's sandbox", () => {
     // One lease, for the one repository: short, and good for a fetch's few requests.
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["git:github:example:widgets"], ttlMinutes: 15, maxRequests: 100 }]);
     expect(f.events).toEqual(["mint", "write", "fetch", "revoke:test-only-checkout-hash-1"]);
-    // Written inside the sandbox as the agents' lease is: JSON in /work/.invincible-gateway.json, never a shell's configuration.
+    // Written inside the sandbox as the agents' lease is: JSON in its HOME's .invincible-gateway.json, never a shell's configuration.
     const write = f.commands.find((args) => args[0] === "exec" && args.at(-1) !== BASE)!;
     expect(write.slice(0, 5)).toEqual(["exec", "--interactive", "--workdir", "/work", containerName(ID)]);
     const env = JSON.parse(Buffer.from(write.at(-1)!, "base64").toString());
@@ -73,7 +73,7 @@ describe("a repository checked out in an eval's sandbox", () => {
     const fetch = f.commands.find((args) => args[0] === "exec" && args.at(-1) === BASE)!;
     expect(fetch.slice(-2)).toEqual([ROOT, BASE]);
     expect(fetch.join(" ")).not.toContain(lease(1));
-    expect(fetch.join(" ")).toContain("/work/.invincible-gateway.json");
+    expect(fetch.join(" ")).toContain("os.path.expanduser('~'), '.invincible-gateway.json'");
     // The ledger says what was read, where; never the lease or its hash.
     expect(f.ledger).toEqual([expect.objectContaining({ class: "read", resource: "sandbox.checkout", target: containerName(ID), run: "g-mwk1abc", verdict: "allow" })]);
     expect(f.ledger[0]!.detail).toContain("example/widgets");
@@ -137,11 +137,10 @@ describe("the checkout, really run", () => {
       git("add", "-A");
       git("commit", "-qm", `commit ${n}`);
     }
-    const leasePath = join(dir, "lease.json");
+    // (In a sandbox the lease is in its HOME: here the test's own folder is the script's HOME.)
+    const leasePath = join(dir, ".invincible-gateway.json");
     writeFileSync(leasePath, JSON.stringify({ INVINCIBLE_TOKEN: "test-only-token", INVINCIBLE_REPO_URL: `file://${src}` }));
-    // (In a sandbox the lease is /work/.invincible-gateway.json: here it is a file of the test's own.)
-    const script = CHECKOUT_SCRIPT.replace("'/work/.invincible-gateway.json'", JSON.stringify(leasePath));
-    const run = (root: string, commit: string) => Bun.spawnSync(["python3", "-c", script, root, commit]);
+    const run = (root: string, commit: string) => Bun.spawnSync(["python3", "-c", CHECKOUT_SCRIPT, root, commit], { env: { ...process.env, HOME: dir } });
     return { dir, src, leasePath, run, base: git("rev-parse", "HEAD~1"), later: git("rev-parse", "HEAD") };
   }
 

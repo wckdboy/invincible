@@ -703,7 +703,8 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   const said = await reply.text();
   expect(said).toContain("It ran on my computer.");
   const onHis = docker.execs.slice(execsBefore).filter((exec) => exec.container === `invincible-sbx-${his.workspace.id}`).map((exec) => exec.cmd.join(" "));
-  expect(onHis.some((command) => command.includes("echo computer-ok") && command.includes("/work/.invincible-gateway.json"))).toBe(true);
+  // (With its lease, read from its VM's HOME: /work in layout 1, its own tree in layout 2.)
+  expect(onHis.some((command) => command.includes("echo computer-ok") && command.includes("expanduser") && command.includes(".invincible-gateway.json"))).toBe(true);
   // Your tripwires hold on its computer as on a Mac's run and its agents' tasks: a command one refuses, or halts, never
   // reaches its VM, and the ledger says which rule, under its computer's own run.
   for (const does of ["refuse", "halt"] as const) {

@@ -1,6 +1,6 @@
 import { SeatFingerprint, SeatPlan, SIGN_IN_METHODS, tokenShaped } from "@invincible/core";
 import type { AgentDriver, AgentEvent, AgentModel } from "./harnesses.ts";
-import { ENGRAM_ENV, engramArgv } from "./engram.ts";
+import { engramArgv, engramEnv } from "./engram.ts";
 import { readBridge } from "./hermes.ts";
 
 /*
@@ -341,7 +341,7 @@ def main():
     # Its last run in that session was cut off before it ended (its process stopped without an exit code).
     parser.add_argument("--cut-off", action="store_true")
     parser.add_argument("--prompt", default="/work/.agent/prompt.md")
-    parser.add_argument("--gateway-env", default="/work/.invincible-gateway.json")
+    parser.add_argument("--gateway-env", default=os.path.join(os.path.expanduser("~"), ".invincible-gateway.json"))
     parser.add_argument("--status", action="store_true")
     # For a seat's status: the salt its account's fingerprint is made with (url-safe base64).
     parser.add_argument("--salt", default="")
@@ -996,19 +996,19 @@ def arguments(args, extra):
 `;
 
 /** What a tool is given for the store under a project: its arguments, and any file of the primary's own they name. */
-type Notes = (project: string) => { argv: string[]; files?: Record<string, string> };
+type Notes = (project: string, home?: string) => { argv: string[]; files?: Record<string, string> };
 
 /** Claude Code: `--mcp-config <file>`, a file the primary writes beside its bridge, holding the one stdio server. */
 const CLAUDE_NOTES_FILE = "/work/.agent/engram-mcp.json";
-const claudeNotes: Notes = (project) => {
+const claudeNotes: Notes = (project, home) => {
   const [command, ...args] = engramArgv(project);
-  return { argv: ["--mcp-config", CLAUDE_NOTES_FILE], files: { [CLAUDE_NOTES_FILE]: JSON.stringify({ mcpServers: { engram: { type: "stdio", command, args, env: ENGRAM_ENV } } }, null, 2) } };
+  return { argv: ["--mcp-config", CLAUDE_NOTES_FILE], files: { [CLAUDE_NOTES_FILE]: JSON.stringify({ mcpServers: { engram: { type: "stdio", command, args, env: engramEnv(home) } } }, null, 2) } };
 };
 
 /** Codex: `-c mcp_servers.engram.*`, as its gateway provider is given it. (Each value is TOML: a string, an array of strings, an inline table.) */
-const codexNotes: Notes = (project) => {
+const codexNotes: Notes = (project, home) => {
   const [command, ...args] = engramArgv(project);
-  const env = Object.entries(ENGRAM_ENV).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(",");
+  const env = Object.entries(engramEnv(home)).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join(",");
   return { argv: ["-c", `mcp_servers.engram.command=${JSON.stringify(command)}`, "-c", `mcp_servers.engram.args=${JSON.stringify(args)}`, "-c", `mcp_servers.engram.env={${env}}`] };
 };
 
@@ -1065,9 +1065,9 @@ const driver = (name: string, title: string, kind: AgentDriver["kind"], script: 
   // (Passed whole: readiness is asked before any run has written the bridge into the sandbox.)
   check: `python3 -I -c ${quote(`${SHARED}${part}${MAIN}`)} --status`,
   signIn: { ...signIn, read: readStatus, seatCheck: (salt) => `python3 -I -c ${quote(`${SHARED}${part}${MAIN}`)} --status --salt ${quote(salt)}` },
-  files: (_models, engram) => {
+  files: (_models, engram, home) => {
     if (!engram) return { [script]: `${SHARED}${part}${MAIN}` };
-    const given = notes(engram);
+    const given = notes(engram, home);
     return { [script]: `${SHARED}${part}${withNotes(given.argv)}${MAIN}`, ...given.files };
   },
   command: (model: AgentModel, session, cutOff) => `python3 -I ${script} ${model.own ? "--own" : `--provider ${quote(model.provider)} --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}${cutOff ? " --cut-off" : ""}` : ""}`,

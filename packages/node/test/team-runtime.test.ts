@@ -58,7 +58,8 @@ test("workspace tool calls keep the assigned VM and share one bounded preparatio
   expect(await f.runtime.respond(member, room, [], f.context)).toBe("Checked the workspace.");
   expect(f.prepared).toEqual(["ada"]);
   expect(f.commands).toHaveLength(2);
-  expect(f.commands.every((command) => command.includes("/work/.invincible-gateway.json"))).toBe(true);
+  // (Each with its lease, read from the VM's HOME: /work in layout 1, its own tree in layout 2.)
+  expect(f.commands.every((command) => command.includes("expanduser") && command.includes(".invincible-gateway.json"))).toBe(true);
   expect(f.held()).toBe(0);
 });
 
@@ -1176,7 +1177,7 @@ test("a run on a seat of yours: its tool's check, launch and follow are in the s
     expect(t.inSeat.some((c) => c.includes("bun test required-check"))).toBe(false);
     expect(t.inAgent.some((c) => c.includes(`/work/.agent/sessions/task-abcdefghijkl.${harness}.${SEAT}`) && c.includes("00000000-0000-4000-8000-000000000001"))).toBe(true);
     // Every command in the seat's VM is the task's, in its workspace, with its gateway lease read from the shared /work.
-    expect(t.inSeat.every((c) => plain(c).includes("cd '/work/tasks/task-abcdefghijkl'") && c.includes("/work/.invincible-gateway.json"))).toBe(true);
+    expect(t.inSeat.every((c) => plain(c).includes("cd '/work/tasks/task-abcdefghijkl'") && c.includes('".invincible-gateway.json"'))).toBe(true);
     expect(t.released).toEqual(["let go"]);
     expect(t.kept).toEqual([{ seat: SEAT, kind: harness === "claude" ? "claude-subscription" : "chatgpt-codex" }]);
     expect(t.said).toContain(`Seat · ${harness === "claude" ? "Claude Code" : "Codex"} runs on your seat Work Max`);
@@ -1568,7 +1569,7 @@ test("an agent's task in a repository starts from the repository as it is now, i
   // the command), makes the task's worktree from what it fetched, and writes down the commit it started from.
   expect(start).toStartWith("python3 -I -c '");
   expect(start).toEndWith(` '/work/tasks/${task.id}' '/work/.agent/base/${task.id}'`);
-  for (const part of ["'fetch'", "INVINCIBLE_REPO_URL", "/work/.invincible-gateway.json", "'worktree','add','--detach'", "origin/HEAD"]) expect(start).toContain(part);
+  for (const part of ["'fetch'", "INVINCIBLE_REPO_URL", "os.path.expanduser('~'), '.invincible-gateway.json'", "'worktree','add','--detach'", "origin/HEAD"]) expect(start).toContain(part);
   expect(start).not.toMatch(/gw_[A-Za-z0-9]/);
   // Its commits carry its own name, at an address that can't be anyone's: with none, the first real task's agent copied
   // the repository's owner's from its history (19 November 2026).

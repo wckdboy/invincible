@@ -163,6 +163,9 @@ export function containerRunArgs(spec: SandboxSpec): string[] {
   if (cannot) throw new Error(cannot);
   // A Mac's workspace is an ext4 image of its own, which two VMs must never mount at once; a seat's home, the same.
   if (spec.seat || spec.shares) throw new Error("a seat's VM, and one that shares an agent's workspace, are made on a Linux host with Docker");
+  // So a Mac's VMs stay in layout 1, their HOME their /work: with no VM to share a workspace with, a HOME apart keeps
+  // nothing from anyone (layout.ts).
+  if (spec.layout) throw new Error("layout 2 (a HOME apart from the workspace) is a Linux host's with Docker: no VM on a Mac shares a workspace");
   const args = [
     "run",
     "--detach",

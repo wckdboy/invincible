@@ -1,6 +1,6 @@
-import { redact, TeamAcpCommand } from "@invincible/core";
+import { redact, TeamAcpCommand, VM_WORK } from "@invincible/core";
 import type { AgentDriver, AgentEvent } from "./harnesses.ts";
-import { ENGRAM_ENV, engramArgv } from "./engram.ts";
+import { engramArgv, engramEnv } from "./engram.ts";
 
 /*
  * The Agent Client Protocol (ACP, protocol 1), the primary's side of it: a client that runs INSIDE the agent's VM, on the
@@ -287,7 +287,7 @@ def main():
     parser.add_argument("--model", default="")
     parser.add_argument("--session")
     parser.add_argument("--prompt", default="/work/.agent/prompt.md")
-    parser.add_argument("--gateway-env", default="/work/.invincible-gateway.json")
+    parser.add_argument("--gateway-env", default=os.path.join(os.path.expanduser("~"), ".invincible-gateway.json"))
     parser.add_argument("--max-tools", type=int, default=0)
     parser.add_argument("--max-seconds", type=int, default=0)
     parser.add_argument("--check", action="store_true")
@@ -325,10 +325,10 @@ def request(self, method, params, timeout=45):
 Bridge.request = request
 `;
 
-/** The store's server as ACP names a stdio one. */
-export const notesServer = (project: string) => {
+/** The store's server as ACP names a stdio one, its notes in the VM's HOME (`home`). */
+export const notesServer = (project: string, home: string = VM_WORK) => {
   const [command, ...args] = engramArgv(project);
-  return { name: "engram", command, args, env: Object.entries(ENGRAM_ENV).map(([name, value]) => ({ name, value })) };
+  return { name: "engram", command, args, env: Object.entries(engramEnv(home)).map(([name, value]) => ({ name, value })) };
 };
 
 /** A tool call's id as a bridge passes it on (the agent's own: a string of its, kept short); never shown, only paired. */
@@ -428,7 +428,7 @@ export function acpDriver(command: string): AgentDriver {
     capabilities: { steer: "restart", streams: true, resumes: false, readsWindows: false },
     ownSetup: true,
     check: `python3 -I -c ${quote(ACP_PROBE)} ${quote(command)}`,
-    files: (_models, engram) => ({ [ACP_BRIDGE_PATH]: engram ? `${ACP_CLIENT}${GENERIC}${withNotes([notesServer(engram)])}${ACP_ENTRY}` : ACP_BRIDGE }),
+    files: (_models, engram, home) => ({ [ACP_BRIDGE_PATH]: engram ? `${ACP_CLIENT}${GENERIC}${withNotes([notesServer(engram, home)])}${ACP_ENTRY}` : ACP_BRIDGE }),
     command: (model, session) =>
       `python3 -I ${ACP_BRIDGE_PATH} --command ${quote(command)} --name ${quote(title)}${model.own ? "" : ` --provider ${quote(model.provider)} --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}` : ""}`,
     read: readBridge,

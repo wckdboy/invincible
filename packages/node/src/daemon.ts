@@ -13,7 +13,7 @@ import { cloudflareNatives } from "./cloudflare.ts";
 import { gmailNatives, outlookNatives } from "./mail.ts";
 import { PairingHost, SyncEngine } from "@invincible/link";
 import { adoptChains, LedgerStore, Vault } from "@invincible/ledger";
-import { type DockerRunner, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnFrames, type SpawnSession, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
+import { type DockerRunner, type LayoutEntry, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnFrames, type SpawnSession, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
 import type { ArgValue, HostLoad, TeamTrailEntry } from "@invincible/core";
 import { calibrate, spawnBench } from "./compute/calibrate.ts";
 import { GovernedSandboxHost } from "./compute/governed-host.ts";
@@ -494,6 +494,18 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   });
 
   // Sandbox host: only when Docker is reachable on this machine, or on a Mac Apple's container (docs/MAC.md).
+  /** An agent's VM moved to layout 2 (sandbox's layout.ts), said to you once: which agent, and what of its VM moved where. */
+  const tellMoved = (run: string, entries: readonly LayoutEntry[]): void => {
+    const handle = run.split(".").at(-1) ?? run;
+    const name = team.store.agent(handle)?.name ?? handle;
+    const home = entries.filter((e) => e.to === "home");
+    const size = (bytes: number) => (bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : bytes >= 2 ** 20 ? `${Math.round(bytes / 2 ** 20)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+    const body = [
+      `${name}'s VM was made again with a HOME of its own, apart from its workspace: what its tools keep for themselves (their sign-ins and config), its notes and its lease are no longer in /work, so no VM that shares its workspace (a run on a seat, another node's task) reaches them.`,
+      `Moved to its HOME: ${home.map((e) => `${e.name} (${size(e.bytes)})`).join(", ") || "nothing"}. Its workspace is as it was. Whatever was running in its VM ended as it was made again.`,
+    ].join("\n");
+    store.emit(identity, "notice.raised", { key: `layout:${handle}`.slice(0, 160), severity: "info", title: `${name}'s VM has a HOME of its own`.slice(0, 200), body: body.slice(0, 2000), source: "sandbox", at: Date.now() });
+  };
   let sandbox: GovernedSandboxHost | null = null;
   const sandboxContext = resolve(dirname(fileURLToPath(import.meta.url)), "../../../sandbox");
   if (caps.sandbox !== undefined && caps.sandbox !== null) {
@@ -530,6 +542,9 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       // Online sandboxes run in KVM microVMs where Kata is installed (scripts/remote-setup.sh).
       microVMs,
       ...(apple ? {} : { resolvConf }),
+      // Layout 2 (sandbox's layout.ts): an agent's HOME apart from its workspace, on a Linux host with Docker. A Mac's VMs
+      // stay in layout 1: no VM there shares a workspace. An agent's VM moved to it is said to you once, by name.
+      ...(apple ? {} : { layout2: true, moved: (run: string, entries: readonly LayoutEntry[]) => tellMoved(run, entries) }),
       },
       { governor, capacity: () => computeService!.selfCapacity() },
     );

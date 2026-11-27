@@ -169,6 +169,10 @@ transport keys carries all of it:
        - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
          ends, or, in the VM, fork successors faster than its helper's scan. What it started then outlives the gate,
          the task, your grant and its node's revocation.
+       Its fix (the owner's decision of 27 November 2026) is a VM of the task's own, made like a seat's and removed as
+       the task ends, which shares only the agent's workspace: on a Linux host with Docker, where an agent's HOME is
+       apart from its workspace (layout 2, SECURITY.md). A Mac's agents' VMs stay in layout 1, as no VM there shares a
+       workspace, so a Mac will take no hand-offs.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:

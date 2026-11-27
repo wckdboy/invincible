@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isReservedGatewayScope, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead } from "@invincible/core";
+import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
+import { layoutPath, MOVE_PY, WORK_TREE } from "./layout.ts";
 import {
   CONTAINER_MAJOR,
   containerBuildArgs,
@@ -108,7 +109,23 @@ export function memoryTokenStore(): SandboxTokenStore {
   };
 }
 
+/** A top-level entry of an agent's store, as a move to layout 2 would take it (layout.ts MOVE_PY's list): by name and size. */
+export interface LayoutEntry {
+  name: string;
+  to: "work" | "home" | "drop";
+  kind: "dir" | "file" | "link" | "other";
+  bytes: number;
+}
+
 export interface SandboxHostOptions {
+  /**
+   * Layout 2 (layout.ts): an agent's VM is made in it, and one in layout 1 is moved to it at its next prepare while nothing
+   * runs in it. A Linux host with Docker alone (a Mac's stay in layout 1); a store that is a Docker volume, only on Docker
+   * Engine 26 or later, whose volumes' subpaths its trees are mounted as. Absent: every VM stays as it is made.
+   */
+  layout2?: boolean;
+  /** An agent's VM moved to layout 2: its run, and what of its store went where, by name and size (its owner's notice). */
+  moved?: (run: string, entries: readonly LayoutEntry[]) => void;
   node: string;
   tokens: TokenMinter;
   ledger: (entry: LedgerEntryInput) => void;
@@ -398,7 +415,7 @@ const repositoryUrl = (gateway: string, git: { connector: string; owner: string;
  * repository's configuration). The commit and up to 50 commits of its history, checked out detached, with no remote.
  */
 export const CHECKOUT_SCRIPT = `import json,os,subprocess,sys
-root, commit, lease = sys.argv[1], sys.argv[2], '/work/.invincible-gateway.json'
+root, commit, lease = sys.argv[1], sys.argv[2], os.path.join(os.path.expanduser('~'), '${LEASE_FILE}')
 d = json.load(open(lease))
 os.remove(lease)
 def git(*a):
@@ -479,6 +496,9 @@ export class SandboxHost {
   private readonly streams = new Map<string, DesktopStream>();
   /** When a VM was last grown for its desktop, or tried and couldn't be (ms): desktopRoom tries again a minute on at the soonest. */
   private readonly desktopRoomTried = new Map<string, number>();
+  /** What runs in each sandbox now, by its id: commands and terminals (a store isn't moved under them). */
+  private readonly busy = new Map<string, number>();
+  private engineMajor: Promise<number | null> | null = null;
 
   constructor(opts: SandboxHostOptions) {
     this.apple = opts.engine === "container";
@@ -825,6 +845,17 @@ export class SandboxHost {
         const volume = await this.docker(["volume", "create", "--label", `${LABEL}=1`, "--label", `${LABEL}.id=${id}`, volumeName(id)]);
         if (volume.code !== 0) throw new SandboxError(`could not create workspace: ${volume.stderr.trim()}`, 500);
       }
+      // An agent's own persistent VM, made new: in layout 2, its store's two trees made first (layout.ts).
+      if (input.persistent && run.startsWith("arm.team.") && !seated.shares && (await this.layout2Here(!spec.workspace))) {
+        const made = await this.layoutRun(spec.workspace ? { workspace: spec.workspace } : { volume: volumeName(id) }, image, "make");
+        if (made.code !== 0) {
+          if (spec.workspace) await this.opts.workspaces!.remove(id).catch(() => {});
+          else await this.docker(["volume", "rm", "-f", volumeName(id)]);
+          if (tokenHash) this.opts.tokens.revoke(tokenHash);
+          throw new SandboxError(`could not make the agent's store: ${redact(made.stderr.trim()).slice(0, 300)}`, 500);
+        }
+        spec.layout = { path: await this.imagePath(image) };
+      }
       const args = this.apple ? containerRunArgs(spec) : runArgs(spec);
       let ran = await this.docker(args, 10 * 60_000);
       // A microVM that lost its files as it started (lostItsFiles) is started once more, once the teardown it raced is done.
@@ -940,7 +971,7 @@ export class SandboxHost {
    * on the models its budget counts).
    */
   async prepareTeam(id: string, run: string, git?: { connector: string; owner: string; repo: string }, providers?: readonly string[], models?: readonly string[], keys?: readonly string[]): Promise<SandboxView> {
-    const sandbox = await this.get(id);
+    let sandbox = await this.get(id);
     if (!sandbox) throw new SandboxError("the agent's VM is missing; its workspace must be recovered, not replaced", 404);
     if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") {
       throw new SandboxError("that is not this agent's persistent VM", 403);
@@ -949,6 +980,16 @@ export class SandboxHost {
       if (!this.opts.workspaces?.mount || !this.opts.workspaces.retain) throw new SandboxError("update the workspace helper before resuming this agent", 424);
       await this.opts.workspaces.retain(id);
       await this.opts.workspaces.mount(id);
+    }
+    // Still in layout 1: moved to layout 2 now, while nothing runs in it. One that can't be is put back as it was, and its
+    // work goes on in layout 1 (it is tried again at its next prepare).
+    if ((await this.layout2Here(!sandbox.disk)) && (await this.layoutOf(id)) === 1 && (await this.idle(id))) {
+      try {
+        await this.moveToLayout2(sandbox, run);
+      } catch (error) {
+        this.opts.ledger({ class: "modify", resource: "docker.container", target: containerName(id), verdict: "allow", run, detail: `not moved to layout 2, so it stays as it was: ${redact(String((error as Error).message ?? error)).slice(0, 300)}` });
+      }
+      sandbox = (await this.get(id)) ?? sandbox;
     }
     if (sandbox.status !== "running") {
       if (!['exited', 'created'].includes(sandbox.status)) throw new SandboxError(`the agent's VM is ${sandbox.status}`, 409);
@@ -994,7 +1035,8 @@ export class SandboxHost {
   /** A lease written inside a sandbox as /work/.invincible-gateway.json: JSON, never a shell's configuration. Whether it was. */
   private async writeLease(id: string, env: Record<string, string>): Promise<boolean> {
     const payload = Buffer.from(JSON.stringify(env)).toString("base64");
-    const write = "import os,sys,base64,tempfile; f,p=tempfile.mkstemp(prefix='.invincible-gateway-',dir='/work'); os.write(f,base64.b64decode(sys.argv[1])); os.fsync(f); os.close(f); os.replace(p,'/work/.invincible-gateway.json')";
+    // In its HOME: /work in layout 1, its own tree in layout 2, where no VM sharing its workspace reaches it.
+    const write = `import os,sys,base64,tempfile; h=os.path.expanduser('~'); f,p=tempfile.mkstemp(prefix='.invincible-gateway-',dir=h); os.write(f,base64.b64decode(sys.argv[1])); os.fsync(f); os.close(f); os.replace(p,os.path.join(h,'${LEASE_FILE}'))`;
     try {
       return (await this.docker(this.commandArgs(id, ["python3", "-I", "-c", write, payload], 30), 45_000)).code === 0;
     } catch {
@@ -1040,7 +1082,131 @@ export class SandboxHost {
    * is put back as it was. Its network may change with it (a microVM's can't be changed any other way), and its
    * gateway token covers `providers`, as for a VM made today. Everything outside `/work` is the image's again.
    */
-  async remakeTeam(id: string, run: string, opts: { providers: string[]; network?: "online" | "gateway"; desktop?: boolean; hardware?: boolean; approvedBy: string }): Promise<SandboxView> {
+  // ---- Layout 2 (layout.ts): an agent's HOME apart from its workspace ----
+
+  /** Which layout an agent's VM is in, as its container's label says (none: 1, as every VM was made before 2). */
+  private async layoutOf(id: string): Promise<1 | 2> {
+    const said = await this.docker(["inspect", "--format", `{{index .Config.Labels "${LABEL}.layout"}}`, containerName(id)]);
+    return said.code === 0 && said.stdout.trim() === "2" ? 2 : 1;
+  }
+
+  /** Docker Engine's major version here, asked once: a store on a volume is mounted as its subpaths from 26 on. */
+  private async engine(): Promise<number | null> {
+    this.engineMajor ??= this.docker(["version", "--format", "{{.Server.Version}}"]).then((said) => {
+      const major = said.code === 0 ? Number.parseInt(said.stdout.trim(), 10) : Number.NaN;
+      return Number.isFinite(major) ? major : null;
+    });
+    return this.engineMajor;
+  }
+
+  /** Whether an agent's store may be in layout 2 here: told so, on Docker, and on a volume only where subpaths are mounted. */
+  private async layout2Here(onVolume: boolean): Promise<boolean> {
+    if (!this.opts.layout2 || this.apple) return false;
+    return !onVolume || ((await this.engine()) ?? 0) >= 26;
+  }
+
+  /**
+   * An agent's store: its Docker volume, or its workspace image's directory on this host, as its container says (in
+   * layout 2 its /work is that directory's work tree). Never worked out from its id alone.
+   */
+  private async storeOf(sandbox: SandboxView): Promise<{ volume: string } | { workspace: string }> {
+    if (!sandbox.disk) return { volume: volumeName(sandbox.id) };
+    const mounts = await this.docker(["inspect", "--format", "{{json .Mounts}}", containerName(sandbox.id)]);
+    let found: { Type?: string; Source?: string; Destination?: string }[] = [];
+    try {
+      found = mounts.code === 0 ? (JSON.parse(mounts.stdout) as typeof found) : [];
+    } catch {
+      // (Not JSON: the same as not told.)
+    }
+    const work = found.find((m) => m.Destination === "/work" && m.Type === "bind")?.Source;
+    if (!work?.startsWith("/")) throw new SandboxError("could not tell where this agent's workspace disk is; nothing was changed", 424);
+    return { workspace: (await this.layoutOf(sandbox.id)) === 2 && work.endsWith(`/${WORK_TREE}`) ? work.slice(0, -WORK_TREE.length - 1) : work };
+  }
+
+  /**
+   * MOVE_PY in a one-off container of the store's own, which holds nothing else of the host: its image, its user (uid
+   * 1000), no network, no capability, a read-only root, and the whole store at /work (read only for a list).
+   */
+  private async layoutRun(store: { volume: string } | { workspace: string }, image: string, mode: "list" | "make" | "move" | "back"): Promise<Run> {
+    const mount = "volume" in store ? `type=volume,src=${store.volume},dst=/work` : `type=bind,src=${store.workspace},dst=/work`;
+    return this.docker(
+      ["run", "--rm", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only",
+        "--mount", mode === "list" ? `${mount},readonly` : mount, image, "python3", "-I", "-c", MOVE_PY, mode, "/work", JSON.stringify(WORKSPACE_OWN), LEASE_FILE],
+      10 * 60_000,
+    );
+  }
+
+  /** What a move to layout 2 would do with an agent's store, by entry name and size: nothing of any file is read. */
+  async layoutList(id: string): Promise<LayoutEntry[]> {
+    const sandbox = await this.get(id);
+    if (!sandbox || sandbox.ephemeral) throw new SandboxError("that is not an agent's persistent VM", 404);
+    const listed = await this.layoutRun(await this.storeOf(sandbox), sandbox.image, "list");
+    if (listed.code !== 0) throw new SandboxError(`could not list the agent's store: ${redact(listed.stderr).split("\n").at(-1)?.slice(0, 300) ?? ""}`, 424);
+    return listed.stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as LayoutEntry);
+  }
+
+  /** Whether nothing runs in an agent's VM: no command, no terminal, no desktop session, and no VM sharing its /work. */
+  private async idle(id: string): Promise<boolean> {
+    if (this.busy.has(id) || this.sessions.has(id)) return false;
+    const sharing = await this.docker(["ps", "-q", "--filter", `label=${LABEL}.shares=${id}`, "--filter", "status=running"]);
+    return sharing.code === 0 && sharing.stdout.trim() === "";
+  }
+
+  /** An image's own PATH, as it was built: a VM in layout 2 runs with it, followed by its HOME (layoutPath). */
+  private async imagePath(image: string): Promise<string> {
+    const said = await this.docker(["image", "inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", image]);
+    const path = said.code === 0 ? said.stdout.split("\n").find((line) => line.startsWith("PATH="))?.slice(5) : undefined;
+    return layoutPath(path ?? "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+  }
+
+  /**
+   * An agent's VM in layout 1 moved to layout 2, while nothing runs in it: its store's entries renamed into its two trees
+   * (MOVE_PY), and its VM made again on them as it was (remakeTeam, with the store moved between), or put back as it was,
+   * its store's entries back where they were. Said in the ledger, and to its owner (`moved`).
+   */
+  private async moveToLayout2(sandbox: SandboxView, run: string): Promise<void> {
+    const store = await this.storeOf(sandbox);
+    const entries = (await this.layoutRun(store, sandbox.image, "list")).stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as LayoutEntry);
+    await this.remakeTeam(sandbox.id, run, {
+      providers: sandbox.providers.filter((p) => p !== SEARCH_SCOPE),
+      approvedBy: "",
+      layout: {
+        store,
+        move: async () => {
+          const moved = await this.layoutRun(store, sandbox.image, "move");
+          if (moved.code !== 0) throw new Error(`its store couldn't be moved: ${redact(moved.stderr).split("\n").at(-1)?.slice(0, 300) ?? ""}`);
+        },
+        back: async () => {
+          await this.layoutRun(store, sandbox.image, "back");
+        },
+      },
+    });
+    const sum = (to: LayoutEntry["to"]) => entries.filter((e) => e.to === to);
+    this.opts.ledger({
+      class: "modify",
+      resource: "docker.container",
+      target: containerName(sandbox.id),
+      verdict: "allow",
+      reason: "layout 2: its HOME apart from its workspace, made again at a prepare while nothing ran in it",
+      run,
+      detail: `made again in layout 2 · to its HOME: ${sum("home").length} entries, ${sum("home").reduce((n, e) => n + e.bytes, 0)} bytes · kept in its workspace: ${sum("work").length} entries · its old lease dropped`,
+    });
+    this.opts.moved?.(run, entries);
+  }
+
+  async remakeTeam(
+    id: string,
+    run: string,
+    opts: {
+      providers: string[];
+      network?: "online" | "gateway";
+      desktop?: boolean;
+      hardware?: boolean;
+      approvedBy: string;
+      /** Its store moved to layout 2 as it is made again (moveToLayout2): `move` once it is set aside, `back` if it can't be made. */
+      layout?: { store: { volume: string } | { workspace: string }; move(): Promise<void>; back(): Promise<void> };
+    },
+  ): Promise<SandboxView> {
     const sandbox = await this.get(id);
     if (!sandbox) throw new SandboxError("the agent's VM is missing; its workspace must be recovered, not replaced", 404);
     if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") {
@@ -1092,6 +1258,10 @@ export class SandboxHost {
       // Kept, whatever becomes of its container.
       await ws!.retain!(id);
     }
+    // Made again in the layout it is in, or moved to layout 2 as it is (its PATH as the image it is made from has it).
+    const inLayout2 = opts.layout !== undefined || (await this.layoutOf(id)) === 2;
+    if (inLayout2 && workspace?.endsWith(`/${WORK_TREE}`) && !opts.layout) workspace = workspace.slice(0, -WORK_TREE.length - 1);
+    const layout = inLayout2 ? { path: await this.imagePath(image) } : undefined;
     await this.ensureNetworks();
 
     this.endSession(id);
@@ -1106,15 +1276,21 @@ export class SandboxHost {
       if (sandbox.status === "running") await this.docker(["start", name], 120_000);
       throw new SandboxError(`could not set the agent's VM aside, so it is as it was: ${redact(moved.stderr).split("\n")[0]!.slice(0, 300)}`, 424);
     }
-    /** The old container under its own name again, running if it was. */
+    /** The old container under its own name again, running if it was (and its store as it was, when it was being moved). */
+    let storeMoved = false;
     const putBack = async (): Promise<void> => {
       await this.docker(["rm", "--force", name]);
+      if (storeMoved) await opts.layout!.back();
       await this.docker(["rename", aside, name]);
       if (sandbox.status === "running") await this.docker(["start", name], 120_000);
     };
     let minted: { token: string; hash: string } | undefined;
     try {
       if (sandbox.disk) await ws!.mount!(id);
+      if (opts.layout) {
+        storeMoved = true;
+        await opts.layout.move();
+      }
       let env: Record<string, string> = {};
       if (providers.length) {
         const lease = this.opts.tokens.mint({ label: `sandbox:${id}`, providers, ttlMinutes: 7 * 24 * 60, maxRequests: 100_000 });
@@ -1139,6 +1315,7 @@ export class SandboxHost {
         ...(this.opts.resolvConf ? { resolvConf: this.opts.resolvConf } : {}),
         ...(minted ? { tokenHash: minted.hash } : {}),
         ...(workspace && sandbox.disk ? { workspace, diskGb: sandbox.disk.limitGb } : {}),
+        ...(layout ? { layout } : {}),
       };
       const ran = await this.docker(runArgs(spec), 10 * 60_000);
       if (ran.code !== 0) throw new Error(ran.stderr.trim() || `docker run exited ${ran.code}`);
@@ -1154,15 +1331,18 @@ export class SandboxHost {
     const previous = this.tokenStore.take(id);
     if (previous) this.opts.tokens.revoke(previous);
     if (minted) this.tokenStore.put(id, minted.hash);
-    this.opts.ledger({
-      class: "modify",
-      resource: "docker.container",
-      target: name,
-      verdict: "approved",
-      reason: `approved by ${opts.approvedBy.slice(0, 12)}`,
-      run,
-      detail: `made again from ${image} as it is now · /work kept · ${network} · ${sandbox.cpus} cpu · ${sandbox.memoryGb} GB`,
-    });
+    // (A move to layout 2 is said by moveToLayout2: it was nobody's word but the layout's.)
+    if (!opts.layout) {
+      this.opts.ledger({
+        class: "modify",
+        resource: "docker.container",
+        target: name,
+        verdict: "approved",
+        reason: `approved by ${opts.approvedBy.slice(0, 12)}`,
+        run,
+        detail: `made again from ${image} as it is now · /work kept · ${network} · ${sandbox.cpus} cpu · ${sandbox.memoryGb} GB${layout ? " · layout 2" : ""}`,
+      });
+    }
     return (await this.get(id))!;
   }
 
@@ -1515,6 +1695,17 @@ export class SandboxHost {
   }
 
   async exec(id: string, cmd: string[], timeoutSec = 600): Promise<ExecResult> {
+    this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
+    try {
+      return await this.execNow(id, cmd, timeoutSec);
+    } finally {
+      const left = (this.busy.get(id) ?? 1) - 1;
+      if (left > 0) this.busy.set(id, left);
+      else this.busy.delete(id);
+    }
+  }
+
+  private async execNow(id: string, cmd: string[], timeoutSec: number): Promise<ExecResult> {
     // The VM's own `desktop` command alone goes to its held session where it has one: the same command, its answer
     // the same, in milliseconds; while the session is open the VM is running, so no listing comes first.
     const held = cmd[0] === "desktop" && cmd.length > 1 ? this.sessions.get(id) : undefined;
@@ -1564,6 +1755,13 @@ export class SandboxHost {
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
     const tag = hex(randomBytes(8));
     const shell = (this.opts.spawnTerminal ?? spawnTerminal)([this.bin, ...(this.apple ? containerTerminalArgs(id, tag) : terminalArgs(id, tag))], size, onData);
+    // (Open, it counts as something running there: a store isn't moved under a terminal.)
+    this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
+    void shell.exited.finally(() => {
+      const left = (this.busy.get(id) ?? 1) - 1;
+      if (left > 0) this.busy.set(id, left);
+      else this.busy.delete(id);
+    });
     const hangUp = () => void this.docker(this.commandArgs(id, ["sh", "-c", TERMINAL_HANG_UP, "hang-up", tag], 30), 45_000).catch(() => {});
     return {
       name: sandbox.name,
@@ -1645,7 +1843,9 @@ export class SandboxHost {
       // (Not JSON: the same as not told.)
     }
     const work = found.find((m) => m.Destination === "/work");
-    if (work?.Type === "volume" && work.Name === volumeName(id)) return { sandbox: id, volume: work.Name };
+    // An agent's VM in layout 2: its workspace's tree alone, never its HOME (its /work is already that tree's directory).
+    const layout2 = (await this.layoutOf(id)) === 2;
+    if (work?.Type === "volume" && work.Name === volumeName(id)) return { sandbox: id, volume: work.Name, ...(layout2 ? { tree: WORK_TREE } : {}) };
     if (work?.Type === "bind" && work.Source?.startsWith("/")) return { sandbox: id, workspace: work.Source };
     throw new SandboxError("could not tell where that agent's /work is; nothing was made", 424);
   }

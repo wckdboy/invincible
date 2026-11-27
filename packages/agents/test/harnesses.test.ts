@@ -127,12 +127,16 @@ describe("a driver and the notes store", () => {
   // its pin from before (91daad81…, 1a94bf08…, ba84ed24…). OpenCode's starts no Python, and is as it was. Claude Code's
   // and Codex's again that day (I15 step 10), when each came to say the model it ran on with what it spent, and Claude
   // Code what its session has cost so far as it counts it (total_cost_usd): each one's text with exactly those lines put
-  // back as they were hashes to its pin from before (5f97b17a…, 63403aba…), so nothing else changed.
+  // back as they were hashes to its pin from before (5f97b17a…, 63403aba…), so nothing else changed. And Hermes', Claude
+  // Code's and Codex's again that day, when the lease each bridge reads by default (and Hermes' own home) came to be in
+  // the VM's HOME rather than /work (layout 2, the owner's decisions of 27 November 2026): each one's text with those
+  // defaults put back as they were hashes to its pin from before (4c07aaa4…, df2588eb…, 6c8cc4d2…), so nothing else
+  // changed. OpenCode's, whose config is written in the HOME it is given (/work in layout 1), is as it was.
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
-    hermes: "4c07aaa475159fa7d3d441d2a7a7ea4c39958625bae8ee249d9cba62f9f0e97b",
-    claude: "df2588eb31ee380ffe59cecca18c0e0a3eb300b96a1e5f02aeaf032de7f85d39",
-    codex: "6c8cc4d20b97fb8d2d8f562aca7b31e03000dd064617c058ba990f3fad784863",
+    hermes: "a2dcda40c48da625d32e5aa97c122a81bd1945095b369b605e8edf01b7bb4461",
+    claude: "da3d8d2b3a1e26f89f545b40d60d28ffbe78d5d0f23a8f2ca53c5927f9ddb96b",
+    codex: "e757f19dea735c3929bdbbecaf88ef9924455ec17d754ecab957cdf223e9c00f",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

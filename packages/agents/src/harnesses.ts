@@ -1,7 +1,7 @@
 import { planOf } from "@invincible/models";
-import { type ExecResult, randomId, redact } from "@invincible/core";
+import { type ExecResult, randomId, redact, VM_WORK } from "@invincible/core";
 import { agentCleanupCommand, agentProcessCommand, AGENT_PROCESS_PY } from "./agent-process.ts";
-import { ENGRAM_ENV, engramArgv } from "./engram.ts";
+import { engramArgv, engramEnv } from "./engram.ts";
 import { acpDriver } from "./acp.ts";
 import { HERMES } from "./hermes.ts";
 import { CLAUDE, CODEX } from "./vendor-cli.ts";
@@ -114,7 +114,8 @@ export interface AgentDriver {
    * the project of the VM's notes store (engram.ts) when the run is given it; the tool then starts the store's
    * server for itself, in its own way. Without one, a driver writes exactly what it did before there was a store.
    */
-  files(models: readonly AgentModel[], engram?: string): Record<string, string>;
+  /** What it writes into the VM before a run, by path: `home` is the VM's own HOME (/work in layout 1), where a tool's own config goes. */
+  files(models: readonly AgentModel[], engram?: string, home?: string): Record<string, string>;
   /**
    * The command for one run on one model, reading its message from AGENT_DIR/prompt.md (a session id continues one).
    * `cutOff`: its last run in that session was cut off before it ended (its process stopped without an exit code).
@@ -135,7 +136,7 @@ const brief = (value: unknown, max: number): string => {
 /**
  * OpenCode (v2, headless): `opencode run --standalone --auto --format json`, stdin closed
  * (with stdin open it waits for more input and never starts). Its state and config live
- * under the sandbox's HOME (/work). Every tool is allowed: the sandbox is the boundary,
+ * under the VM's HOME (its own tree in layout 2; /work in layout 1). Every tool is allowed: the sandbox is the boundary,
  * and its network decides what's reachable.
  */
 /** OpenCode's name for a gateway provider: g-<provider>. */
@@ -148,7 +149,7 @@ export const OPENCODE: AgentDriver = {
   // (Its run reads no input once started, so a steer ends it between calls and is said with --session.)
   capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false },
   check: "opencode --version",
-  files: (models, engram) => {
+  files: (models, engram, home = VM_WORK) => {
     // One provider per gateway provider, all on the sandbox's one token: each model the
     // roster offers is a fallback the next run can continue the session on.
     const providers: Record<string, unknown> = {};
@@ -164,7 +165,7 @@ export const OPENCODE: AgentDriver = {
       entry.models[m.model] = { name: m.model };
     }
     return {
-      "/work/.config/opencode/opencode.json": JSON.stringify(
+      [`${home}/.config/opencode/opencode.json`]: JSON.stringify(
         {
           $schema: "https://opencode.ai/config.json",
           update: "disable",
@@ -172,7 +173,7 @@ export const OPENCODE: AgentDriver = {
           providers,
           permissions: [{ action: "*", resource: "*", effect: "allow" }],
           // The notes store, as OpenCode's own `mcp add` writes a local server: OpenCode starts it, for the run.
-          ...(engram ? { mcp: { servers: { engram: { type: "local", command: engramArgv(engram), environment: ENGRAM_ENV } } } } : {}),
+          ...(engram ? { mcp: { servers: { engram: { type: "local", command: engramArgv(engram), environment: engramEnv(home) } } } } : {}),
         },
         null,
         2,

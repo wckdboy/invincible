@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SandboxRequest } from "@invincible/core";
-import { buildCommand, chooseIsolation, COLLECT_SCRIPT, collectArgs, DEFAULT_IMAGE, DESKTOP_IMAGE, execArgs, gatewayEnv, HARDWARE_IMAGE, KATA_RUNTIME, LAB_IMAGE, madeFrom, microVMsAvailable, NETWORKS, networkCreateArgs, remadeImage, remakeAsk, runArgs, SandboxError, type SandboxSpec, sandboxScopes, vmResolvConf } from "../src/index.ts";
+import { buildCommand, chooseIsolation, COLLECT_SCRIPT, collectArgs, DEFAULT_IMAGE, DESKTOP_IMAGE, execArgs, gatewayEnv, HARDWARE_IMAGE, KATA_RUNTIME, LAB_IMAGE, layoutPath, madeFrom, microVMsAvailable, NETWORKS, networkCreateArgs, remadeImage, remakeAsk, runArgs, SandboxError, type SandboxSpec, sandboxScopes, vmResolvConf } from "../src/index.ts";
 
 const base: SandboxSpec = {
   id: "0123456789",
@@ -224,5 +224,56 @@ describe("the hardware image (C1 step 11): the desktop with KiCad and FreeCAD, a
 
   test("a sandbox, an agent's VM and its making again can each ask for it", () => {
     expect(SandboxRequest.parse({ network: "gateway", hardware: true })).toMatchObject({ hardware: true });
+  });
+});
+
+/*
+ * Layout 2 (layout.ts; the owner's decisions of 27 November 2026, for the fabric's R3-1 and I-l): an agent's store holds
+ * its workspace and its HOME as two trees, each mounted on its own, so that a VM sharing its workspace (a run on a seat,
+ * another node's task) mounts the workspace's tree alone and nothing of its HOME, where its tools keep their sign-ins.
+ */
+describe("layout 2: an agent's HOME apart from its workspace", () => {
+  const mounts = (args: string[]) => args.filter((_, i) => args[i - 1] === "--mount");
+  const envs = (args: string[]) => args.filter((_, i) => args[i - 1] === "--env");
+  const layout = { path: "/opt/bun/bin:/usr/bin:/bin:/home/agent/.local/bin" };
+
+  test("its volume's two trees, the workspace's at /work and its HOME's at /home/agent, and its environment follows HOME", () => {
+    const args = runArgs({ ...base, ephemeral: false, layout });
+    expect(mounts(args)).toEqual([
+      "type=volume,src=invincible-sbx-0123456789-work,dst=/work,volume-subpath=work",
+      "type=volume,src=invincible-sbx-0123456789-work,dst=/home/agent,volume-subpath=home",
+    ]);
+    expect(envs(args)).toEqual(expect.arrayContaining(["HOME=/home/agent", "NPM_CONFIG_PREFIX=/home/agent/.local", "ENGRAM_DATA_DIR=/home/agent/.memory/engram", "XDG_CACHE_HOME=/home/agent/.cache", `PATH=${layout.path}`]));
+    expect(envs(args)).not.toContain("HOME=/work");
+    expect(args).toContain("dev.invincible.layout=2");
+    // A size-limited workspace image: its two directories, bound on their own; its limit bounds both.
+    const limited = runArgs({ ...base, ephemeral: false, layout, workspace: "/var/lib/invincible-workspaces/0123456789", diskGb: 20 });
+    expect(mounts(limited)).toEqual([
+      "type=bind,src=/var/lib/invincible-workspaces/0123456789/work,dst=/work",
+      "type=bind,src=/var/lib/invincible-workspaces/0123456789/home,dst=/home/agent",
+    ]);
+  });
+
+  test("a VM that shares an agent's workspace in layout 2 mounts its workspace's tree alone, never its HOME", () => {
+    const seat = { id: "st_0123456789abcdefghijkl", kind: "claude-subscription" as const };
+    const onVolume = runArgs({ ...base, seat, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work", tree: "work" } });
+    expect(mounts(onVolume)).toEqual(["type=volume,src=invincible-sbx-9876543210-work,dst=/work,volume-subpath=work", "type=volume,src=invincible-seat-st_0123456789abcdefghijkl,dst=/seats/st_0123456789abcdefghijkl"]);
+    const onImage = runArgs({ ...base, seat, shares: { sandbox: "9876543210", workspace: "/var/lib/invincible-workspaces/9876543210", tree: "work" } });
+    expect(mounts(onImage)[0]).toBe("type=bind,src=/var/lib/invincible-workspaces/9876543210/work,dst=/work");
+    expect([...mounts(onVolume), ...mounts(onImage)].some((m) => m.includes("subpath=home") || m.endsWith("/home,dst=/home/agent"))).toBe(false);
+    // One that shares an agent in layout 1 mounts its whole store, as before.
+    expect(mounts(runArgs({ ...base, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work" } }))).toEqual(["type=volume,src=invincible-sbx-9876543210-work,dst=/work"]);
+  });
+
+  test("its PATH is its image's without any directory of the workspace, and its HOME's own bin last", () => {
+    expect(layoutPath("/opt/bun/bin:/usr/local/bin:/usr/bin:/bin:/work/.local/bin")).toBe("/opt/bun/bin:/usr/local/bin:/usr/bin:/bin:/home/agent/.local/bin");
+    expect(layoutPath("/work:/work/bin:/usr/bin:/home/agent/.local/bin:/workshop/bin")).toBe("/usr/bin:/workshop/bin:/home/agent/.local/bin");
+  });
+
+  test("layout 1, as every VM was: /work is its HOME", () => {
+    const args = runArgs(base);
+    expect(envs(args)).toContain("HOME=/work");
+    expect(args.join(" ")).not.toContain("layout");
+    expect(mounts(args)).toEqual(["type=volume,src=invincible-sbx-0123456789-work,dst=/work"]);
   });
 });

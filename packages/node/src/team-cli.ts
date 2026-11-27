@@ -376,7 +376,7 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     const { engram } = await api.call<{ engram: boolean }>("teamEngram", { on: args[0] === "on" });
     print(engram
       ? "The notes store (Engram) is on. An agent's task is given it when the agent's VM has the pinned Engram, and says which it was. Notes stay in that VM: they are leads a task checks, never its memory."
-      : "The notes store (Engram) is off. What agents kept stays in each VM, unused, under /work/.memory/engram.");
+      : "The notes store (Engram) is off. What agents kept stays in each VM, unused, under .memory/engram in its HOME.");
     return;
   }
   // A pull request of an agent's work that fails its checks, or that a review asks changes of: given back to that agent, outside an outcome too (PLAN #29).

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
@@ -257,10 +257,11 @@ const after = (history: TeamMessage[], through: string | undefined): TeamMessage
  * command, without model access, and says so: on 22 November 2026 an agent deleted its own, and every command of its
  * task failed from then on, the polls of its coding tool's run among them, so the task never ended.
  */
-export const withGateway = (command: string, lease = "/work/.invincible-gateway.json"): string => {
+export const withGateway = (command: string, lease?: string): string => {
   const script = [
     "import json,os,sys",
-    `p=${JSON.stringify(lease)}`,
+    // (In the VM's HOME: /work in layout 1, its own tree in layout 2.)
+    lease ? `p=${JSON.stringify(lease)}` : `p=os.path.join(os.path.expanduser('~'),${JSON.stringify(LEASE_FILE)})`,
     "try: d=json.load(open(p))",
     "except (OSError, ValueError): d=None",
     "if not isinstance(d, dict): d={}; sys.stderr.write('(Your agent: '+p+' is missing or unreadable, so this command has no model access)\\n')",
@@ -298,7 +299,7 @@ if not os.path.isdir(root) and from_commit:
 elif not os.path.isdir(root):
     how = 'fetched'
     try:
-        d = json.load(open('/work/.invincible-gateway.json'))
+        d = json.load(open(os.path.join(os.path.expanduser('~'), '${LEASE_FILE}')))
         got = subprocess.run(['git','-C',repo,'-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'fetch','--quiet','--prune',d['INVINCIBLE_REPO_URL'],'+refs/heads/*:refs/remotes/origin/*'],capture_output=True,timeout=300)
         if got.returncode: how = 'stale'
     except Exception:
@@ -731,6 +732,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // The VM's notes store (Engram), when the node's switch is on: kept under the agent's repository, or with none
       // its own handle, so every task of its finds them. Whether this VM has the pinned binary is asked as the task
       // starts: one that doesn't does the task without the store, and the task says which it was, never nothing.
+      // The VM's own HOME, as the VM says it (its own tree in layout 2; /work in layout 1, and when it says nothing
+      // plain): where its tools' config and its notes are written, and its lease is.
+      const told = (await deps.exec(agent, 'printf %s "$HOME"', 30, ctx.signal).catch(() => null))?.stdout.trim() ?? "";
+      const home = /^\/[A-Za-z0-9._/-]{1,200}$/.test(told) ? told : VM_WORK;
       let engram: string | undefined;
       let notes = "";
       if (deps.engram?.()) {
@@ -780,7 +785,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         });
       };
       /** A command of the task's, in its workspace: in the agent's own VM (`exec`), or in the VM of the seat its coding tool runs on (`execOn`). */
-      const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}${space ? `export INVINCIBLE_EYES_SPACE=${quote(space)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`);
+      const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}${space ? `export INVINCIBLE_EYES_SPACE=${quote(space)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram, home) : ""}${command}`);
       const exec = async (command: string, timeout = 120, what?: "gate") => {
         await keeping;
         // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms. Not
@@ -925,7 +930,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const tools = Boolean(deps.toolsLoop) && !coding && !held && !agent.models?.length;
       // On a seat its tool's commands run in the seat's VM: told so, and not told of a desktop out of their reach.
       const where = onSeat ? ` Your commands run in a VM made for your plan, beside your own VM and sharing its /work${desktop ? ": your own VM's desktop is out of their reach" : ""}.` : screen;
-      const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. /work/.invincible-gateway.json is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? ["git status --short", `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`] : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, ...(task.givenBy?.startsWith("node:") ? { gateSeconds: HANDED_GATE_SECONDS } : {}), submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "", ...(desktop && !onSeat ? { computer: true } : {}) } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}) }, {
+      const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. ${home}/${LEASE_FILE} is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? ["git status --short", `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`] : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, ...(task.givenBy?.startsWith("node:") ? { gateSeconds: HANDED_GATE_SECONDS } : {}), submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "", ...(desktop && !onSeat ? { computer: true } : {}) } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}), home }, {
         // (keepReads: an agent sees whole what it reads, and it stays in view while it is current. The first real outcome's
         // agents, shown 8,000 characters of each, read one file in 26 then 34 commands, and three tasks ended with nothing
         // written: run.ts keepReads. Each command has TEAM_COMMAND_SECONDS: at 120 s, the repository's own tests were cut off.)

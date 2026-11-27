@@ -1,3 +1,4 @@
+import { NOTES_DIR, VM_WORK } from "@invincible/core";
 import type { ExecResult } from "@invincible/core";
 
 /*
@@ -22,12 +23,20 @@ import type { ExecResult } from "@invincible/core";
 /** The release in the agents' image. A newer one migrates a store when it first opens it: a bump says what becomes of the stores there are. */
 export const ENGRAM_VERSION = "3.7.2";
 export const ENGRAM_BIN = "/opt/engram/bin/engram";
-/** On the agent's persistent disk: it outlives tasks and restarts, and goes with the VM. Wiping it alone is removing this folder. */
-export const ENGRAM_DATA_DIR = "/work/.memory/engram";
+/**
+ * In the agent's HOME, on its persistent store: it outlives tasks and restarts, and goes with the VM; never in the
+ * workspace a VM that shares it reaches (layout 2). `home`: the VM's own (/work in layout 1). Wiping it alone is removing
+ * this folder.
+ */
+export const engramDataDir = (home: string = VM_WORK): string => `${home}/${NOTES_DIR}`;
+/** Layout 1's: /work its HOME. */
+export const ENGRAM_DATA_DIR = engramDataDir();
 /** Search and read (previews, then one note whole), write and revise. Nothing that deletes, merges, judges a conflict or keeps a prompt. */
 export const ENGRAM_TOOLS = ["mem_search", "mem_get_observation", "mem_save", "mem_update"] as const;
-/** What it is started with, by every driver: its store, and no update check. */
-export const ENGRAM_ENV = { ENGRAM_DATA_DIR, ENGRAM_NO_UPDATE_CHECK: "1" } as const;
+/** What it is started with, by every driver: its store in the VM's HOME (`home`), and no update check. */
+export const engramEnv = (home?: string) => ({ ENGRAM_DATA_DIR: engramDataDir(home), ENGRAM_NO_UPDATE_CHECK: "1" }) as const;
+/** Layout 1's. */
+export const ENGRAM_ENV = engramEnv();
 
 /** A project's name follows `--project` on a command line: lowercase letters, digits and hyphens, and never a flag. */
 const PROJECT = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -64,8 +73,8 @@ export function engramFound(probe: Pick<ExecResult, "exitCode" | "stdout">): { p
  * Put before a command of the engineer's own loop, whose only tool is a shell: the binary on its PATH
  * (a login shell resets the image's), the store, the project, and no update check.
  */
-export const engramShell = (project: string): string =>
-  `export PATH=${ENGRAM_BIN.slice(0, ENGRAM_BIN.lastIndexOf("/"))}:"$PATH" ${Object.entries(ENGRAM_ENV).map(([name, value]) => `${name}=${value}`).join(" ")} ENGRAM_PROJECT='${engramProject(project)}' && `;
+export const engramShell = (project: string, home?: string): string =>
+  `export PATH=${ENGRAM_BIN.slice(0, ENGRAM_BIN.lastIndexOf("/"))}:"$PATH" ${Object.entries(engramEnv(home)).map(([name, value]) => `${name}=${value}`).join(" ")} ENGRAM_PROJECT='${engramProject(project)}' && `;
 
 /**
  * What a task is told about its notes, whoever does the engineer's part: how far to trust them, when to

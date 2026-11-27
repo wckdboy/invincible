@@ -273,6 +273,38 @@ It reaches you by Web Push, to your own paired devices only. No messaging gatewa
 - **The host keeps a reserve.** A sandbox is created only if every workspace could fill up to its limit and 10 % of the disk (at least 20 GB) stays free.
 - Found by Invincible itself, in a live run run as a loop, in November 2026.
 
+## An agent's HOME apart from its workspace (tested)
+
+Layout 2 (`packages/sandbox/src/layout.ts`, the owner's decisions of 27 November 2026). Before it, an agent's `/work` was
+its HOME too, so whatever its tools keep for themselves (their sign-ins and config), its browser's profile, its notes and
+its lease were in the workspace, and a VM that shares the workspace (a run on a seat) reached all of them.
+
+- **One store, two trees.** An agent's store (its Docker volume, or its size-limited workspace image) holds `work/`,
+  mounted at `/work`, and `home/`, mounted at `/home/agent` as its HOME. Each tree is mounted on its own: a subpath of the
+  volume, or a directory of the image, whose limit bounds both. Its HOME holds its tools' own files, its notes (Engram)
+  and its lease; its environment and PATH follow HOME, with no directory of the workspace on its PATH, so nothing put
+  into the workspace runs in its place (`packages/sandbox/test/spec.test.ts`).
+- **A VM that shares a workspace mounts `work/` alone.** A run on a seat (and, to come, another node's task) gets the
+  workspace's tree and a HOME of its own, never the agent's. A link left in `work/` resolves in that VM's own view, where
+  the store's other tree isn't, so it reaches nothing of the agent's HOME (`team-layout.test.ts`).
+- **Made new in it; moved to it once.** A new agent's VM is made in layout 2. One made before is moved at its next
+  prepare while nothing runs in it (no command, terminal or desktop session, and no VM sharing its workspace): its
+  store's top-level entries are renamed into the two trees inside the store's own filesystem, so nothing is copied.
+  Every dot-entry that isn't the workspace's own (`.agent`, `.tmp`, `.eval`) goes to its HOME, everything else stays its
+  workspace, and the old lease is dropped (each prepare writes a fresh one). Which files are a tool's is never named: the
+  move goes by that one rule (`layout.test.ts`). A move that can't be finished is put back by the reverse renames, and its
+  work goes on in layout 1 until the next prepare. Each move is a line in the ledger and a notice to you that names the
+  agent. Its list mode says what a move would do by entry name and size alone, reading no file.
+- **Where it holds.** A Linux host with Docker: a store on a Docker volume needs Docker Engine 26 or later (its trees are
+  the volume's subpaths), and stays in layout 1 on an older engine; a workspace image's store moves on any. **A Mac's VMs
+  stay in layout 1**, their HOME their `/work`: a Mac's workspace is a disk image only one VM may mount, so no VM there
+  shares a workspace (no run on a seat, no other node's task), and a HOME apart would keep nothing from anyone. A Mac
+  refuses a VM that would share one, and layout 2 itself (`container-spec.test.ts`).
+- **Residual risk.** The workspace is shared by design: what the agent's own work later runs from it (its repository's
+  scripts and hooks, a toolchain it installed into it) is code a VM sharing it could have changed. A toolchain moved to
+  HOME that baked its old place into its own files (a virtualenv's scripts, for one) doesn't run from its new place, and
+  is made again. An rc file in its HOME that puts a directory of the workspace on its PATH still does.
+
 ## A Mac's sandboxes (tested on the Mac mini)
 
 On a Mac every sandbox is a VM of Apple's `container`, on two networks of Invincible's own. container alone let a sandbox reach the Mac's own services (its SSH among them) and the sandboxes beside it, by IPv4 and by IPv6 link-local addresses. What holds now:

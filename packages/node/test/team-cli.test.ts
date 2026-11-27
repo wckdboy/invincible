@@ -267,7 +267,7 @@ test("agents engram says whether the notes store is on, and turns it on or off b
   expect(lines.at(-1)).toBe("The notes store (Engram) is on: an agent's task is given it where its VM has the pinned Engram (Workspace, in the app, says which). Turn it off with: invincible agents engram off");
   await teamCommand(api, "engram", ["off"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamEngram", input: { on: false } });
-  expect(lines.at(-1)).toBe("The notes store (Engram) is off. What agents kept stays in each VM, unused, under /work/.memory/engram.");
+  expect(lines.at(-1)).toBe("The notes store (Engram) is off. What agents kept stays in each VM, unused, under .memory/engram in its HOME.");
   // Anything but on or off is not sent anywhere.
   const before = asked.length;
   await expect(teamCommand(api, "engram", ["maybe"], {}, say)).rejects.toThrow(/invincible agents engram \[on\|off\]/);

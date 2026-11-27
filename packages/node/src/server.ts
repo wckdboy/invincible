@@ -137,6 +137,7 @@ import {
   type LiveEvent,
   type LiveTopic,
   SEAT_HARNESS as SEAT_HARNESS_OF,
+  LEASE_FILE,
 } from "@invincible/core";
 import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, endLeftovers, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME } from "@invincible/models";
@@ -2441,7 +2442,7 @@ export function createApp(ctx: AppContext) {
     await inProcess(teamOwner, signal).call("prepareTeamWorkspace", { on: workspace.node, id: workspace.id, run: armRun(agentLabel(member.id)), ...(repository ? { repository } : {}), providers, ...(models?.length ? { models: [...models] } : {}), ...(keys.length ? { keys } : {}) });
     if (repository) {
       // No key in command text or git config. The leased token is read inside the VM; the remote is reset to its public URL.
-      const script = `import json,os,subprocess,sys\nd=json.load(open('/work/.invincible-gateway.json'))\np='/work/repo'\nif os.path.exists(p):\n sys.exit(0 if os.path.isdir(p+'/.git') else 1)\nr=subprocess.run(['git','-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'clone','--quiet',d['INVINCIBLE_REPO_URL'],p],capture_output=True)\nif r.returncode: print('Repository clone failed through the read-only gateway'); sys.exit(r.returncode)\nsubprocess.run(['git','-C',p,'remote','set-url','origin',sys.argv[1]],check=True)`;
+      const script = `import json,os,subprocess,sys\nd=json.load(open(os.path.join(os.path.expanduser('~'),'${LEASE_FILE}')))\np='/work/repo'\nif os.path.exists(p):\n sys.exit(0 if os.path.isdir(p+'/.git') else 1)\nr=subprocess.run(['git','-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'clone','--quiet',d['INVINCIBLE_REPO_URL'],p],capture_output=True)\nif r.returncode: print('Repository clone failed through the read-only gateway'); sys.exit(r.returncode)\nsubprocess.run(['git','-C',p,'remote','set-url','origin',sys.argv[1]],check=True)`;
       const encoded = Buffer.from(script).toString("base64");
       const cloned = await execTeam(member, `python3 -I -c "import base64; exec(base64.b64decode('${encoded}'))" '${repository}'`, 900, signal);
       if (cloned.exitCode !== 0) throw new HttpError(424, "could not clone the agent's repository through its GitHub connector");

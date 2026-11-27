@@ -67,9 +67,9 @@ def main():
     parser.add_argument("--provider", default="")
     parser.add_argument("--model", default="")
     parser.add_argument("--session")
-    parser.add_argument("--home", default="/work/.hermes")
+    parser.add_argument("--home", default=os.path.join(os.path.expanduser("~"), ".hermes"))
     parser.add_argument("--prompt", default="/work/.agent/prompt.md")
-    parser.add_argument("--gateway-env", default="/work/.invincible-gateway.json")
+    parser.add_argument("--gateway-env", default=os.path.join(os.path.expanduser("~"), ".invincible-gateway.json"))
     # An agent is audited, never capped (your ruling, 17 and 19 November 2026): no tool budget and no time limit of the
     # bridge's own unless one is asked for. The run's deadline, its audits and you stop it.
     parser.add_argument("--max-tools", type=int, default=0)
@@ -92,7 +92,7 @@ export const HERMES: AgentDriver = {
   // (It loads its session again or doesn't run: a steer ends its run between calls and is said there.)
   capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false },
   check: "hermes acp --check",
-  files: (_models, engram) => ({ "/work/.agent/hermes-acp.py": engram ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(engram)])}${ACP_ENTRY}` : HERMES_ACP_BRIDGE }),
+  files: (_models, engram, home) => ({ "/work/.agent/hermes-acp.py": engram ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(engram, home)])}${ACP_ENTRY}` : HERMES_ACP_BRIDGE }),
   command: (model, session) => `python3 -I /work/.agent/hermes-acp.py --provider ${quote(model.provider)} --model ${quote(model.model)}${session ? ` --session ${quote(session)}` : ""}`,
   read: readBridge,
 };

@@ -1,4 +1,5 @@
-import type { SandboxNetwork, SeatKind } from "@invincible/core";
+import { type SandboxNetwork, type SeatKind, VM_HOME, VM_WORK } from "@invincible/core";
+import { HOME_TREE, LAYOUT_ENV, WORK_TREE } from "./layout.ts";
 import { collectCommand } from "./walk.ts";
 
 /*
@@ -60,7 +61,15 @@ export interface SandboxSpec {
    * A VM made for an agent's run: that agent's own /work (its volume, or its workspace's path on this host), never one of
    * its own. Removing this VM leaves it as it was: it has no disk of its own to remove.
    */
-  shares?: { sandbox: string; volume: string } | { sandbox: string; workspace: string };
+  shares?: ({ sandbox: string; volume: string } | { sandbox: string; workspace: string }) & {
+    /** The agent's store is in layout 2 (layout.ts): its workspace's tree alone is mounted, never its HOME. */
+    tree?: typeof WORK_TREE;
+  };
+  /**
+   * Layout 2 (layout.ts): its store's two trees mounted on their own, work/ at /work and home/ at its HOME, which its
+   * environment names (LAYOUT_ENV), with `path` its PATH (layoutPath). Absent: layout 1, /work its HOME too.
+   */
+  layout?: { path: string };
 }
 
 /** A stopped container that keeps the sandbox image in use, so image pruning (Coolify's nightly cleanup) leaves it alone. */
@@ -180,9 +189,25 @@ export function labels(spec: SandboxSpec): Record<string, string> {
     [`${LABEL}.isolation`]: spec.isolation,
     ...(spec.seat ? { [`${LABEL}.seat`]: spec.seat.id } : {}),
     ...(spec.shares ? { [`${LABEL}.shares`]: spec.shares.sandbox } : {}),
+    ...(spec.layout ? { [`${LABEL}.layout`]: "2" } : {}),
     // The gateway token's hash is deliberately NOT a label: images can carry labels of
     // their own, so anything security-relevant lives in node-local state instead.
   };
+}
+
+/**
+ * Its /work, and in layout 2 its HOME, from its store (layout.ts): in layout 2 each tree on its own, as a subpath of its
+ * volume or a directory of its workspace image; a VM that shares an agent's workspace mounts that workspace's tree alone.
+ */
+function storeMounts(spec: SandboxSpec): string[] {
+  const mount = (source: { volume: string } | { workspace: string }, tree: string | null, target: string) =>
+    "volume" in source
+      ? `type=volume,src=${source.volume},dst=${target}${tree ? `,volume-subpath=${tree}` : ""}`
+      : `type=bind,src=${tree ? `${source.workspace}/${tree}` : source.workspace},dst=${target}`;
+  if (spec.shares) return ["--mount", mount(spec.shares, spec.shares.tree ?? null, VM_WORK)];
+  const store = spec.workspace ? { workspace: spec.workspace } : { volume: volumeName(spec.id) };
+  if (!spec.layout) return ["--mount", mount(store, null, VM_WORK)];
+  return ["--mount", mount(store, WORK_TREE, VM_WORK), "--mount", mount(store, HOME_TREE, VM_HOME)];
 }
 
 /** `docker run` arguments. Every hardening flag here is asserted by tests. */
@@ -207,19 +232,12 @@ export function runArgs(spec: SandboxSpec): string[] {
     "--read-only",
     "--tmpfs",
     "/tmp:rw,nosuid,nodev,size=2g,mode=1777",
-    "--mount",
-    spec.shares
-      ? "workspace" in spec.shares
-        ? `type=bind,src=${spec.shares.workspace},dst=/work`
-        : `type=volume,src=${spec.shares.volume},dst=/work`
-      : spec.workspace
-        ? `type=bind,src=${spec.workspace},dst=/work`
-        : `type=volume,src=${volumeName(spec.id)},dst=/work`,
+    ...storeMounts(spec),
     ...(spec.seat ? ["--mount", `type=volume,src=${seatVolumeName(spec.seat.id)},dst=${seatHome(spec.seat.id)}`] : []),
     "--workdir",
     "/work",
-    "--env",
-    "HOME=/work",
+    // Its HOME: /work in layout 1; in layout 2 its own tree, and with it where it installs for itself and its PATH.
+    ...(spec.layout ? Object.entries({ ...LAYOUT_ENV, PATH: spec.layout.path }).flatMap(([key, value]) => ["--env", `${key}=${value}`]) : ["--env", "HOME=/work"]),
     // Bounded resources: a runaway agent cannot starve the host.
     "--cpus",
     String(spec.cpus),

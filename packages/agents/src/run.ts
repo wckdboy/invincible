@@ -232,6 +232,8 @@ export interface RunOptions {
    * caller's `exec` says where the store is: engramShell). The reviewer is told nothing of it.
    */
   engram?: string;
+  /** The VM's own HOME, where a coding agent's config and notes are written (/work in layout 1, its own tree in layout 2). */
+  home?: string;
 }
 
 /** A gate, and who set it. */
@@ -668,7 +670,7 @@ const digestsOf = (stdout: string): Map<string, string> =>
 /* ---------- prompts ---------- */
 
 /** Options with their defaults applied (a fixed plan and a custom review stay optional). */
-type Resolved = Required<Omit<RunOptions, "plan" | "review" | "agent" | "engram" | "budgetUsd" | "gateSeconds">> & Pick<RunOptions, "plan" | "review" | "agent" | "engram" | "budgetUsd" | "gateSeconds">;
+type Resolved = Required<Omit<RunOptions, "plan" | "review" | "agent" | "engram" | "home" | "budgetUsd" | "gateSeconds">> & Pick<RunOptions, "plan" | "review" | "agent" | "engram" | "home" | "budgetUsd" | "gateSeconds">;
 
 /**
  * Contract first (RunOptions.contract): what the planner is asked for before the engineer begins, when no gate fails
@@ -1239,6 +1241,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     ...(options.gateSeconds !== undefined ? { gateSeconds: Math.max(0, options.gateSeconds) } : {}),
     // (Checked here, before a prompt or a file is made of it.)
     ...(options.engram !== undefined ? { engram: engramProject(options.engram) } : {}),
+    ...(options.home !== undefined ? { home: options.home } : {}),
   };
   const emit = (event: RunEvent): void => deps.emit?.(event);
   const clock = deps.now ?? (() => Date.now());
@@ -1785,7 +1788,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       }
       return finish({ ...otherwise, summary: `${otherwise.summary} What was there was put to ${verdict.by === "gates" ? "the gates, which did not pass" : "the reviewer, who did not accept it"}.`, review: verdict.notes });
     };
-    for (const [path, content] of Object.entries(agent.driver.files(agent.models, o.engram))) {
+    for (const [path, content] of Object.entries(agent.driver.files(agent.models, o.engram, o.home))) {
       const written = await deps.exec(`mkdir -p "$(dirname '${path}')" && printf %s '${Buffer.from(content, "utf8").toString("base64")}' | base64 -d > '${path}'`, 30);
       if (written.exitCode !== 0) return finish({ status: "gave-up", summary: `Couldn't set up ${agent.driver.name}: ${written.stderr || written.stdout}` });
     }

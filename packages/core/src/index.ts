@@ -60,3 +60,4 @@ export * from "./scorecard.ts";
 export * from "./spend.ts";
 export * from "./usage.ts";
 export * from "./eval-reports.ts";
+export * from "./vm-layout.ts";

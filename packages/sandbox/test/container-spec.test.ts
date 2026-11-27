@@ -307,3 +307,18 @@ describe("what container prints, read", () => {
     expect(parseContainerVolumes("oops")).toBeNull();
   });
 });
+
+/*
+ * A Mac's VMs stay in layout 1 (the owner's decision, 27 November 2026): a Mac's workspace is a disk image only one VM may
+ * mount, so no VM there shares a workspace (no run on a seat, no other node's task), and a HOME apart would keep nothing
+ * from anyone. A Mac refuses a VM that would share one, and layout 2 itself.
+ */
+test("a Mac makes no VM that shares a workspace (a seat's, another node's task's), and none in layout 2", () => {
+  const seat = { id: "st_0123456789abcdefghijkl", kind: "claude-subscription" as const };
+  expect(() => containerRunArgs({ ...base, seat })).toThrow("made on a Linux host with Docker");
+  expect(() => containerRunArgs({ ...base, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work" } })).toThrow("made on a Linux host with Docker");
+  expect(() => containerRunArgs({ ...base, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work", tree: "work" } })).toThrow("made on a Linux host with Docker");
+  expect(() => containerRunArgs({ ...base, layout: { path: "/usr/bin:/bin" } })).toThrow("no VM on a Mac shares a workspace");
+  // Its own VM, as ever: /work its HOME.
+  expect(containerRunArgs(base)).toContain("HOME=/work");
+});
