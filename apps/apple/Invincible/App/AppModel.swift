@@ -96,10 +96,10 @@ struct PairedNode: Codable, Equatable, Sendable {
         #endif
     }
 
-    /// Deletes this device's key. It can't be recovered: pairing again makes a new device, and the old one stays in
-    /// the fleet's list until it is revoked there.
-    func forget() throws {
-        try DeviceKey.delete()
+    /// Deletes this device's key (`tag`: the app's; a test's own, which touches nothing of the device it runs on). It can't
+    /// be recovered: pairing again makes a new device, and the old one stays in the fleet's list until it is revoked there.
+    func forget(tag: String = DeviceKey.appTag) throws {
+        try DeviceKey.delete(tag: tag)
         PairedNode.forget()
         // The agents this device kept goes with the node, after any write still under way, and none is kept after.
         if case .paired(let session) = phase { session.stopKeeping() }

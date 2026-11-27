@@ -76,6 +76,8 @@ struct InvincibleMacApp: App {
     var composerWanted = false
     /// An invite an `invincible:` link handed over, for the join screen.
     var handed: String?
+    /// What the menus offer (MacMenus): kept in step with the app, for the menus to follow.
+    @ObservationIgnored private(set) lazy var menus = MacMenus(mac: self)
     private var loop: Task<Void, Never>?
 
     private static let placeKey = "sh.invincible.bot.mac.place"
@@ -248,12 +250,19 @@ struct MacWindowRoot: View {
 /// The menus: a new chat, a task for the agents and Search or Ask (⌘K) in File, and Home and the four places in View.
 struct MacCommands: Commands {
     let mac: MacApp
+    /// What they offer, as it changes (MacMenus): a pairing made while the app runs turns them on at once.
+    @ObservedObject private var menus: MacMenus
     @Environment(\.openWindow) private var openWindow
+
+    init(mac: MacApp) {
+        self.mac = mac
+        _menus = ObservedObject(wrappedValue: mac.menus)
+    }
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") { Updates.shared.check() }
-                .disabled(!Updates.shared.canCheck)
+                .disabled(!menus.offer.mayCheckForUpdates)
         }
         CommandGroup(replacing: .newItem) {
             Button("New Chat") {
@@ -261,26 +270,26 @@ struct MacCommands: Commands {
                 front()
             }
             .keyboardShortcut("n")
-            .disabled(mac.session == nil || mac.session?.chat.answering == true)
+            .disabled(!menus.offer.paired || menus.offer.answering)
             Button("Give the agents a Task…") {
                 mac.giving = true
                 front()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
-            .disabled(!Self.mayGive(mac.session))
+            .disabled(!menus.offer.mayGive)
             Button("Search or Ask…") {
                 mac.searching = true
                 front()
             }
             .keyboardShortcut("k")
-            .disabled(!Self.maySearch(mac.session))
+            .disabled(!menus.offer.maySearch)
             Divider()
             Button("Build with \(Primary.name)") {
                 openWindow(id: MacApp.build)
                 NSApplication.shared.activate()
             }
             .keyboardShortcut("b", modifiers: [.command, .shift])
-            .disabled(mac.session == nil)
+            .disabled(!menus.offer.paired)
         }
         // View ▸ Show Sidebar and Hide Sidebar (⌃⌘S), as every Mac app with a sidebar has them.
         SidebarCommands()
@@ -300,7 +309,7 @@ struct MacCommands: Commands {
             front()
         }
         .keyboardShortcut(key)
-        .disabled(mac.session == nil)
+        .disabled(!menus.offer.paired)
     }
 
     /// Whether the agents may be given a task from the menu (⇧⌘N).
@@ -327,6 +336,65 @@ struct MacCommands: Commands {
     private func front() {
         openWindow(id: MacApp.main)
         NSApplication.shared.activate()
+    }
+}
+
+/// What the menus offer: a new chat, a task, Search or Ask, Build, the places, and a check for updates. SwiftUI fills the
+/// main menu's items as a menu opens (its delegate's menuNeedsUpdate), not as what they read changes: a Mac paired while
+/// the app ran (a first run's join) kept File's and View's items as they were last filled, off, and their keys with them,
+/// so ⌘N, ⇧⌘N, ⌘K, ⇧⌘B and ⌘0–⌘4 did nothing until File or View had been opened (27 November 2026, measured on the mini:
+/// a test-hosted app's File menu read off once paired, ⌘K did nothing, and its items came on once its delegate was asked
+/// to fill it). This follows what the menus read, by observation, and as it changes has the main menu's menus filled
+/// again, as opening them does. The menus read the offer as an ObservableObject's, so what is filled is what it says.
+@MainActor final class MacMenus: ObservableObject {
+    /// What they offer at a moment.
+    struct Offer: Equatable {
+        var paired = false
+        /// The primary is answering: no new chat until it has.
+        var answering = false
+        var mayGive = false
+        var maySearch = false
+        var mayCheckForUpdates = false
+    }
+
+    @Published private(set) var offer = Offer()
+    private let reading: @MainActor () -> Offer
+    private let changed: @MainActor (Offer) -> Void
+
+    /// `changed` is told each new offer once the menus have it (the app's has the main menu filled again).
+    init(reading: @escaping @MainActor () -> Offer, changed: @escaping @MainActor (Offer) -> Void = { _ in }) {
+        self.reading = reading
+        self.changed = changed
+        follow()
+    }
+
+    /// The app's: its pairing and session (MacApp), and its updater, the main menu filled again as they change.
+    convenience init(mac: MacApp) {
+        self.init(reading: { [weak mac] in
+            let session = mac?.session
+            return Offer(paired: session != nil, answering: session?.chat.answering == true, mayGive: MacCommands.mayGive(session),
+                         maySearch: MacCommands.maySearch(session), mayCheckForUpdates: Updates.shared.canCheck)
+        }, changed: { _ in
+            // (On the next turn: never in the middle of an update of the menus' own.)
+            Task { @MainActor in MacMenus.fill(NSApp.mainMenu) }
+        })
+    }
+
+    /// Has each of the main menu's menus filled again, as AppKit has one filled as it opens: SwiftUI's items, their state
+    /// and their keys as they are now.
+    static func fill(_ bar: NSMenu?) {
+        for menu in bar?.items.compactMap(\.submenu) ?? [] {
+            menu.delegate?.menuNeedsUpdate?(menu)
+        }
+    }
+
+    private func follow() {
+        let now = withObservationTracking { reading() } onChange: { [weak self] in
+            Task { @MainActor in self?.follow() }
+        }
+        guard offer != now else { return }
+        offer = now
+        changed(now)
     }
 }
 #endif
