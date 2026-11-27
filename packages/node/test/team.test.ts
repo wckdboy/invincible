@@ -559,6 +559,44 @@ describe("task orchestration", () => {
     expect(service.againOwn(failed, { why: "with a type check too", gates: ["bun test", "bun run lint", "bun run typecheck"] }).gates).toEqual(["bun test", "bun run lint", "bun run typecheck"]);
     expect(service.againOwn(ended("Gated again", null, { gates: ["bun test"] }), { why: "as it was" }).gates).toEqual(["bun test"]);
   });
+  // The review of 27 November, N8 (A5, A5b, A10, A12): each refusal of its own tools, tested.
+  test("your agent takes up again no work of an agent or a conversation you paused, stops no proposal, and gives again nothing still under way", () => {
+    const { store, service } = setup();
+    const give = (title: string) => service.createTask({ room: "workshop", assignee: "ada", title, goal: title, gates: ["bun test"], budgetUsd: 1 });
+    const failed = give("Its agent paused");
+    store.finish(failed.id, "failed", "Its gates failed.");
+    store.enable("ada", false);
+    expect(() => service.resumeOwn(failed.id, "try again")).toThrow("You paused its agent: taking its work up again is yours.");
+    store.enable("ada", true);
+    store.pauseRoom("workshop", true);
+    expect(() => service.resumeOwn(failed.id, "try again")).toThrow("Its conversation is paused: taking its work up again is yours.");
+    store.pauseRoom("workshop", false);
+    expect(store.task(failed.id)!.status).toBe("failed");
+    // Neither paused, it is its to take up again.
+    expect(service.resumeOwn(failed.id, "try again")).toMatchObject({ status: "queued", error: null });
+    // A proposal is approved or declined: never stopped.
+    const proposed = service.proposeTask({ room: "workshop", assignee: "ada", title: "Proposed", goal: "Proposed.", budgetUsd: 1 });
+    expect(() => service.stopOwn(proposed.id, "not now")).toThrow("A proposal is declined, not stopped: approve it or decline it.");
+    expect(store.task(proposed.id)!.status).toBe("proposed");
+    // What hasn't ended, waiting, running or proposed, is steered or stopped first: never given again.
+    const waiting = give("Waiting");
+    const running = give("Running");
+    expect(store.claim(running.id)).toBe(true);
+    expect([store.task(waiting.id)!.status, store.task(running.id)!.status]).toEqual(["queued", "running"]);
+    const before = store.tasks().length;
+    for (const task of [waiting, running, proposed]) expect(() => service.againOwn(task.id, { why: "twice" })).toThrow("It hasn't ended: steer it, or stop it first.");
+    expect(store.tasks().length).toBe(before);
+  });
+  // The review of 27 November, N8 (G28): a remote's name may be cased as GitHub has it; your switch holds for it still.
+  test("the merge switch is the repository's, whatever the case of its name", () => {
+    const { store, service } = setup();
+    expect(service.setMerge({ repository: "AmiriteOrg/Shipyard", on: false })).toEqual({ repository: "amiriteorg/shipyard", on: false });
+    for (const name of ["amiriteorg/shipyard", "AmiriteOrg/Shipyard", "AMIRITEORG/SHIPYARD"]) expect([name, store.mergeOn(name)]).toEqual([name, false]);
+    expect(store.mergeOff()).toEqual(["amiriteorg/shipyard"]);
+    expect(store.mergeOn("amiriteorg/harbor")).toBe(true);
+    service.setMerge({ repository: "amiriteorg/SHIPYARD", on: true });
+    expect([store.mergeOn("AmiriteOrg/Shipyard"), store.mergeOff()]).toEqual([true, []]);
+  });
 
   test("your agent stops its agents' work and takes it up again: within its money, never what you stopped or paused, nor what a crash cut off, nor an outcome's", async () => {
     // Its work runs until it is stopped.
