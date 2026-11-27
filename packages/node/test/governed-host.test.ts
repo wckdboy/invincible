@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { b64u, MAC_VM_OVERHEAD, type NodeCapacity, newNodeIdentity, SELF_ACTION_RUN, VM_OVERHEAD } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import type { CreateInput, LedgerEntryInput, SpawnTerminal } from "@invincible/sandbox";
+import type { CreateInput, LedgerEntryInput, SpawnFrames, SpawnTerminal } from "@invincible/sandbox";
 import type { Capabilities } from "../src/capabilities.ts";
 import { GovernedSandboxHost } from "../src/compute/governed-host.ts";
 import { Governor, KEPT_WORK_MS } from "../src/compute/governor.ts";
@@ -21,7 +21,7 @@ import { ContainerVolumes, KEEPERS } from "@invincible/sandbox";
 const capacity = (over: Partial<NodeCapacity> = {}): NodeCapacity => ({ cores: 8, memoryGb: 16, sandboxes: 2, modelCalls: 2, strength: 8, speed: 1, measured: true, reasons: [], ...over });
 const request = (over: Partial<CreateInput> = {}): CreateInput => ({ network: "isolated", cpus: 4, memoryGb: 8, ttlMinutes: 60, persistent: false, ...over });
 
-function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWaitMs?: number; now?: () => number; spawnTerminal?: SpawnTerminal } = {}) {
+function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWaitMs?: number; now?: () => number; spawnTerminal?: SpawnTerminal; spawnFrames?: SpawnFrames } = {}) {
   const docker = fakeDocker();
   const ledger: LedgerEntryInput[] = [];
   const cap = over.capacity ?? (() => capacity());
@@ -37,6 +37,7 @@ function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWait
       runner: docker.runner,
       microVMs: over.microVMs ?? false,
       ...(over.spawnTerminal ? { spawnTerminal: over.spawnTerminal } : {}),
+      ...(over.spawnFrames ? { spawnFrames: over.spawnFrames } : {}),
     },
     { governor, capacity: cap },
   );
@@ -118,6 +119,35 @@ describe("every sandbox takes a slot first", () => {
     docker.onExec = () => ((during = governor.usage().cores), { code: 0, stdout: "c2hvdA==" });
     await sandbox.desktop(vm.id, run, { do: "click", x: 10, y: 20 });
     expect(during).toBe(threads);
+    expect(governor.usage().cores).toBe(threads);
+    clock += KEPT_WORK_MS;
+    expect(governor.usage().cores).toBe(0);
+  });
+
+  test("watching an agent's desktop holds its VM's threads while its encoder runs, and a while after, as a terminal does", async () => {
+    let clock = 1_000_000;
+    let ended!: (code: number) => void;
+    // The encoder's stand-in: a keyframe, then nothing until its stdin is closed.
+    const keyframe = new Uint8Array([0, 0, 0, 10, 1, 0, 0, 1, 0x9a, 0x7e, 0x4c, 0x40, 0, 7]);
+    const exited = new Promise<number>((resolve) => (ended = resolve));
+    const spawnFrames: SpawnFrames = () => ({
+      chunks: (async function* () { yield keyframe; await exited; })(),
+      write() {},
+      close: () => ended(0),
+      kill: () => ended(137),
+      exited,
+    });
+    const { sandbox, governor } = host({ microVMs: true, capacity: () => capacity({ cores: 32, memoryGb: 64 }), now: () => clock, spawnFrames });
+    const run = "arm.team.abcdef0123.ada";
+    const vm = await sandbox.create(request({ run, persistent: true, cpus: 2, memoryGb: 2, isolation: "vm", desktop: true }));
+    const threads = 2 + VM_OVERHEAD.cpus;
+    expect(governor.usage().cores).toBe(0);
+    const watching = await sandbox.desktopWatch(vm.id, run);
+    expect(governor.usage().cores).toBe(threads);
+    clock += 60 * 60_000;
+    expect(governor.usage().cores).toBe(threads);
+    await watching.cancel();
+    await exited;
     expect(governor.usage().cores).toBe(threads);
     clock += KEPT_WORK_MS;
     expect(governor.usage().cores).toBe(0);

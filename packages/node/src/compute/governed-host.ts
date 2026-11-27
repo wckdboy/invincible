@@ -98,6 +98,11 @@ export class GovernedSandboxHost extends SandboxHost {
     }
   }
 
+  /** An agent's desktop's stream while you watch it: its encoder runs in the VM, work there as a command is, from its start to its end. */
+  protected override streaming(id: string): () => void {
+    return this.governed.governor.work(id);
+  }
+
   /** An agent's VM grown while it runs: what it adds is held of the ceiling first, and given back if the VM doesn't take it. */
   override async resizeTeam(id: string, run: string, opts: Parameters<SandboxHost["resizeTeam"]>[2]): Promise<SandboxView> {
     let held: { cpus: number; memoryGb: number } | null = null;

@@ -34,6 +34,7 @@ import {
 } from "./container.ts";
 import { ContainerVolumes } from "./container-volumes.ts";
 import { DesktopSession, SessionEnded, type SpawnSession, spawnSession } from "./desktop-session.ts";
+import { DesktopStream, type SpawnFrames, spawnFrames, StreamEnded } from "./desktop-stream.ts";
 import { macFirewall, type MacFirewallState } from "./mac-firewall.ts";
 import {
   chooseIsolation,
@@ -145,6 +146,8 @@ export interface SandboxHostOptions {
   firewall?: () => Promise<MacFirewallState>;
   /** How a VM's held desktop session is started (desktop-session.ts; tests pass a stand-in): an engine exec kept open. */
   spawnSession?: SpawnSession;
+  /** How a VM's desktop stream is started while you watch it (desktop-stream.ts; tests pass a stand-in): an engine exec, its stdout as bytes. */
+  spawnFrames?: SpawnFrames;
 }
 
 /**
@@ -460,6 +463,8 @@ export class SandboxHost {
    * (exit 127) is asked again only once it is made again.
    */
   private readonly sessions = new Map<string, { session: DesktopSession; view: SandboxView; owner?: DesktopSession | null }>();
+  /** Each desktop VM's stream while you watch it (desktop-stream.ts): one encoder in it however many devices watch; ended with the VM. */
+  private readonly streams = new Map<string, DesktopStream>();
 
   constructor(opts: SandboxHostOptions) {
     this.apple = opts.engine === "container";
@@ -1286,6 +1291,8 @@ export class SandboxHost {
       if (!shot.ok || !image) throw new SandboxError(`the desktop could not show its screen: ${String(shot.error ?? "no picture").slice(0, 300)}`, 424);
       return { shot: { mediaType: image.media_type === "image/png" ? "image/png" : "image/jpeg", data: image.data }, width: image.width, height: image.height, ...(yours ? { held: holdOf(shot) } : {}) } as DesktopView;
     };
+    // (What you watch shows your input at 25 frames a second for 2 s, from now.)
+    if (argv) this.streams.get(sandbox.id)?.fast();
     const owner = this.ownerSession(sandbox);
     if (owner) {
       try {
@@ -1346,6 +1353,40 @@ export class SandboxHost {
     if (take) ledger(`took over its desktop: ${holdSaid(hold)}`);
     else if (answer.released) ledger("gave its desktop back");
     return hold;
+  }
+
+  /**
+   * You watch an agent's desktop (C1 step 9): its frames (core's desktop-frames.ts), from one `desktop stream` in its VM
+   * however many of your devices watch, given once the first keyframe is in them (desktop-stream.ts). `signal`: whoever
+   * asked went away. Nothing is written down: watching is looking. Refused with how it ended where the encoder ends
+   * before it shows anything (an image older than the stream: exit 2).
+   */
+  async desktopWatch(id: string, run: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    const sandbox = await this.desktopVm(id, run);
+    if (this.apple || !sandbox.image.includes("desktop")) throw new SandboxError(NO_DESKTOP, 424);
+    // (An engine run by tests has a stream only where they give one.)
+    if (this.opts.runner && !this.opts.spawnFrames) throw new SandboxError("this node streams no desktop: its engine is a stand-in", 424);
+    let stream = this.streams.get(id);
+    if (!stream) {
+      const spawn = this.opts.spawnFrames ?? spawnFrames(this.bin);
+      stream = new DesktopStream(() => {
+        const proc = spawn(["exec", "--interactive", containerName(id), "desktop", "stream"]);
+        void proc.exited.finally(this.streaming(id));
+        return proc;
+      });
+      this.streams.set(id, stream);
+    }
+    try {
+      return await stream.watch(signal);
+    } catch (error) {
+      if (error instanceof StreamEnded) throw new SandboxError(`${error.message}${error.code === 2 ? ": a desktop older than its stream has none (have its VM made again: invincible agents provision <id> --remake --desktop), or its encoder couldn't start" : ""}`, 424);
+      throw new SandboxError((error as Error).message, 504);
+    }
+  }
+
+  /** A VM's encoder began (one, however many watch): how to say it ended. Nothing here; the governed host counts it as work in the VM. */
+  protected streaming(_id: string): () => void {
+    return () => {};
   }
 
   /** An agent's own running persistent VM, its desktop asked of from outside it (by you alone: the routes that ask are yours). */
@@ -1411,12 +1452,14 @@ export class SandboxHost {
     return session;
   }
 
-  /** A VM's held desktop sessions ended, the agent's and yours, as the VM did (removed, stopped, made again). */
+  /** A VM's held desktop sessions ended, the agent's and yours, and its stream, as the VM did (removed, stopped, made again). */
   private endSession(id: string): void {
     const held = this.sessions.get(id);
     held?.session.close();
     held?.owner?.close();
     this.sessions.delete(id);
+    this.streams.get(id)?.close();
+    this.streams.delete(id);
   }
 
   async exec(id: string, cmd: string[], timeoutSec = 600): Promise<ExecResult> {

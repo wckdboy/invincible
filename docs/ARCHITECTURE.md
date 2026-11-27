@@ -343,8 +343,16 @@ The run loop is carried and renamed (§10), the most proven part of it:
     - `desktop stream` is the screen as H.264 Constrained Baseline, encoded in the VM only while someone watches. The
       node runs it in a held exec of its own, so the encoder lives as long as its reader and nothing listens in the VM.
     - It sends 10 frames a second while the screen changes, and nothing while it is still. A `fast` on its stdin, which
-      your own input will send, makes it 25 for 2 s. Each frame is the whole screen with the pointer drawn in, its
-      capture time beside it.
+      your input sends, makes it 25 for 2 s. Each frame is the whole screen with the pointer drawn in, its capture time
+      beside it (core's `desktop-frames.ts`: the format, and its parser).
+    - **One exec a VM, however many of your devices watch** (the sandbox package's `desktop-stream.ts`):
+      - each device that joins after the first asks for a keyframe, and is sent from one on;
+      - one that falls 1 MB behind is let go, since what it hasn't read is screens gone by, and starts again from a
+        keyframe when it comes back;
+      - while the screen is still, each device gets a beat every 1.5 s, so whatever carries the stream knows it lives;
+      - when the last one goes, the encoder's stdin is closed, which ends it;
+      - an encoder that ends before it shows anything is an error that says how, never an empty stream;
+      - while it runs, its VM's threads count as work, as a terminal's do.
     - **Take-over:** your looks and your input go to deskd through a held session of the node's own, an exec as a uid
       that is never the agent's, opened beside the agent's session (which starts deskd, as the agent). Your input
       takes the desktop over if no one has it, and is done under your hold. While you hold it, the agent's desktop

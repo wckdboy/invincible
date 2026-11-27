@@ -11,14 +11,14 @@ const ID = "0123456789";
 const RUN = "arm.team.abcdef0123.builder";
 const PICTURE = "/9j/4AAQSkZJRgABAQ"; // (the beginning of a JPEG, in base64)
 
-function desk(options: { status?: string; labels?: Record<string, string>; missing?: boolean; fail?: string } = {}) {
+function desk(options: { status?: string; labels?: Record<string, string>; missing?: boolean; fail?: string; image?: string } = {}) {
   const ledger: LedgerEntryInput[] = [];
   const execs: string[][] = [];
   const labels = { [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.run`]: RUN, [`${LABEL}.network`]: "online", [`${LABEL}.ephemeral`]: "false", [`${LABEL}.isolation`]: "vm", ...options.labels };
   const runner: DockerRunner = async (args) => {
     if (args[0] === "info") return { code: 0, stdout: "29.0.0", stderr: "" };
     if (args[0] === "ps") return { code: 0, stdout: ID, stderr: "" };
-    if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: "invincible/desktop:1" }, State: { Status: options.status ?? "running" } }]), stderr: "" };
+    if (args[0] === "inspect") return { code: 0, stdout: JSON.stringify([{ Config: { Labels: labels, Image: options.image ?? "invincible/desktop:1" }, State: { Status: options.status ?? "running" } }]), stderr: "" };
     if (args[0] === "exec") {
       // After the container: timeout --signal=KILL <n>s <cmd…>
       const cmd = args.slice(args.indexOf(containerName(ID)) + 4);
@@ -282,5 +282,99 @@ describe("an agent's desktop through its held session (deskd)", () => {
     await d.host.destroy(ID, { approvedBy: "owner" });
     await d.host.desktop(ID, RUN, { do: "look" });
     expect(s.started).toEqual([AGENTS, YOURS, AGENTS, YOURS]);
+  });
+});
+
+/** The encoder's stand-in for the host: what it was started as and told, and the frames a test gives it. */
+function frames() {
+  const made: { args: string[]; said: string[]; closed: boolean; push(bytes: Uint8Array): void; end(code: number): void }[] = [];
+  const spawnFrames = (args: string[]) => {
+    const queue: Uint8Array[] = [];
+    let wake: (() => void) | null = null;
+    let done = false;
+    let exit!: (code: number) => void;
+    const exited = new Promise<number>((resolve) => (exit = resolve));
+    const one = { args, said: [] as string[], closed: false, push: (bytes: Uint8Array) => { queue.push(bytes); wake?.(); }, end: (code: number) => { done = true; wake?.(); exit(code); } };
+    made.push(one);
+    async function* chunks(): AsyncIterable<Uint8Array> {
+      for (;;) {
+        if (queue.length) yield queue.shift()!;
+        else if (done) return;
+        else await new Promise<void>((resolve) => (wake = resolve));
+      }
+    }
+    return { chunks: chunks(), write: (text: string) => void one.said.push(text), close: () => { one.closed = true; one.end(0); }, kill: () => one.end(137), exited };
+  };
+  return { spawnFrames, made };
+}
+
+/** A keyframe as the encoder writes one (its payload a byte), and another frame. */
+const KEYFRAME = new Uint8Array([0, 0, 0, 10, 1, 0, 0, 1, 0x9a, 0x7e, 0x4c, 0x40, 0x00, 7]);
+const DELTA = new Uint8Array([0, 0, 0, 10, 2, 0, 0, 1, 0x9a, 0x7e, 0x4c, 0x40, 0x64, 8]);
+
+describe("the stream of an agent's desktop you watch", () => {
+  const watched = (options: Parameters<typeof desk>[0] = {}) => {
+    const s = held();
+    const f = frames();
+    const d = desk(options);
+    const runner = (d.host as unknown as { opts: { runner: DockerRunner } }).opts.runner;
+    const host = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true }, ledger: (entry) => { d.ledger.push(entry); }, runner, spawnSession: s.spawnSession, spawnFrames: f.spawnFrames });
+    return { ...d, host, s, f };
+  };
+  const until = async (ready: () => boolean) => {
+    for (let i = 0; i < 500 && !ready(); i++) await Bun.sleep(2);
+    if (!ready()) throw new Error("never got there");
+  };
+
+  test("one `desktop stream` in its VM however many of your devices watch, each sent its frames from a keyframe; your input asks it for fast frames; watching writes nothing down", async () => {
+    const d = watched();
+    const first = d.host.desktopWatch(ID, RUN);
+    await until(() => d.f.made.length === 1);
+    expect(d.f.made[0]!.args).toEqual(["exec", "--interactive", containerName(ID), "desktop", "stream"]);
+    d.f.made[0]!.push(KEYFRAME);
+    const a = (await first).getReader();
+    expect((await a.read()).value).toEqual(KEYFRAME);
+    const second = d.host.desktopWatch(ID, RUN);
+    await until(() => d.f.made[0]!.said.length === 1);
+    expect(d.f.made[0]!.said).toEqual(["key\n"]);
+    d.f.made[0]!.push(KEYFRAME);
+    const b = (await second).getReader();
+    expect((await b.read()).value).toEqual(KEYFRAME);
+    expect((await a.read()).value).toEqual(KEYFRAME);
+    // Your click: the encoder is asked for fast frames as it is done.
+    await d.host.desktop(ID, RUN, { do: "click", x: 3, y: 4 }, false);
+    expect(d.f.made[0]!.said).toEqual(["key\n", "fast\n"]);
+    d.f.made[0]!.push(DELTA);
+    expect((await a.read()).value).toEqual(DELTA);
+    expect(d.f.made).toHaveLength(1);
+    expect(d.ledger.map((e) => e.detail)).toEqual([TOOK, "click 3 4 left"]);
+    await a.cancel();
+    await b.cancel();
+    expect(d.f.made[0]!.closed).toBe(true);
+  });
+
+  test("an encoder that ends before it shows anything is refused with how it ended, and an image older than the stream says so", async () => {
+    const d = watched();
+    const watching = d.host.desktopWatch(ID, RUN);
+    await until(() => d.f.made.length === 1);
+    d.f.made[0]!.end(2);
+    await expect(watching).rejects.toMatchObject({ status: 424, message: expect.stringContaining("older than its stream") });
+  });
+
+  test("only an agent's own running VM with a desktop is watched, and removing it ends its stream", async () => {
+    await expect(watched().host.desktopWatch(ID, "arm.team.abcdef0123.other")).rejects.toMatchObject({ status: 403 });
+    await expect(watched({ status: "exited" }).host.desktopWatch(ID, RUN)).rejects.toMatchObject({ status: 409 });
+    const plain = watched({ image: "invincible/sandbox:1" });
+    await expect(plain.host.desktopWatch(ID, RUN)).rejects.toMatchObject({ status: 424, message: expect.stringContaining("has no desktop") });
+    expect(plain.f.made).toEqual([]);
+    const d = watched();
+    const first = d.host.desktopWatch(ID, RUN);
+    await until(() => d.f.made.length === 1);
+    d.f.made[0]!.push(KEYFRAME);
+    const a = (await first).getReader();
+    await a.read();
+    await d.host.destroy(ID, { approvedBy: "owner" });
+    expect(await a.read()).toEqual({ done: true, value: undefined });
+    expect(d.f.made[0]!.closed).toBe(true);
   });
 });
