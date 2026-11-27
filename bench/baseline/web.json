@@ -9,10 +9,14 @@
     "cores": 12
   },
   "metrics": [
+    {"id":"web.home.laptop","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"home on a laptop's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
+    {"id":"web.home.phone","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"home on a phone's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
     {"id":"web.chat.laptop","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"chat on a laptop's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
     {"id":"web.chat.phone","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"chat on a phone's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
     {"id":"web.team.laptop","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"team on a laptop's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
     {"id":"web.team.phone","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"team on a phone's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
+    {"id":"web.task.laptop","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"task on a laptop's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
+    {"id":"web.task.phone","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"task on a phone's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
     {"id":"web.inbox.laptop","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"inbox on a laptop's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
     {"id":"web.inbox.phone","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"inbox on a phone's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
     {"id":"web.more.laptop","value":0,"unit":"","kind":"quality","better":"lower","spread":5,"note":"more on a laptop's screen: its cumulative layout shift ×10,000, from its first frame until 3 s after it is usable (0: nothing moved)"},
