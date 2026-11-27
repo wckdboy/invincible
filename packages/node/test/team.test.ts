@@ -586,6 +586,11 @@ describe("task orchestration", () => {
     const before = store.tasks().length;
     for (const task of [waiting, running, proposed]) expect(() => service.againOwn(task.id, { why: "twice" })).toThrow("It hasn't ended: steer it, or stop it first.");
     expect(store.tasks().length).toBe(before);
+    // A step of an outcome is its outcome's to give again, within the outcome's budget (the re-review's R45).
+    const outcome = store.createOutcome({ title: "Units", goal: "Parse SI units everywhere.", agents: ["ada"], budgetUsd: 10 });
+    const step = store.createTask({ room: outcome.room, assignee: "ada", title: "A step", goal: "Do it.", budgetUsd: 1, outcome: outcome.id }, { givenBy: "primary" });
+    store.finish(step.id, "failed", "Its gates failed.");
+    expect(() => service.againOwn(step.id, { why: "try again" })).toThrow("It is a step of an outcome, which gives its work again within its own budget.");
   });
   // The review of 27 November, N8 (G28): a remote's name may be cased as GitHub has it; your switch holds for it still.
   test("the merge switch is the repository's, whatever the case of its name", () => {
