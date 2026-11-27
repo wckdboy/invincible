@@ -12,11 +12,12 @@ beside the app it succeeds until the cutover.
 It's small on purpose: it carries no pictures of the agents, which it draws itself, and needs no Google services. Its
 look is monochrome (`ui/Theme.kt`, as the Apple app's Brand.swift): black, white and greys, red only for what went
 wrong, colour kept for the agents. The primary is the I-beam in one ink (`core/IBeam.kt`, drawn by `ui/Mark.kt`, held to
-`scripts/mark.ts` by the vectors' `mark`), as the launcher icon is (`scripts/brand.ts --png` writes its layers). Each
-agent's mark is the Grille, a disc in its own colour cut into slats at its own angle (`core/AgentMark.kt`, core's
-`agent-mark.ts`, drawn by `ui/AgentMarkView.kt`, held to the vectors' `marks`), its state in its shape: the top slat in
-ink while it asks you, the bottom one red and loose once it failed. Marks in rows are still; the one in focus moves only
-while something is going on, and never while the phone's animations are off.
+`scripts/mark.ts` by the vectors' `mark`), as the launcher icon is (`scripts/brand.ts --png` writes its layers), and on
+a tile of its own where the primary is shown, in ink or, as Settings has it, in pearl glass. Each agent is its glass:
+one of 22 shapes in one of eight colour ramps (`core/Glass.kt`, its numbers in `core/GlassData.kt`, core's `glass.ts`;
+drawn by `ui/GlassView.kt`, each shape, ramp, size and page drawn once and kept; held to the vectors' `glass` by
+`GlassTest`), its state a dot cut out of its corner beside its word. Only a working agent's light moves, breathing, 15
+frames a second while the app is in front, and never while the phone's animations are off.
 
 While it's on screen it keeps the node's live stream open (`core/LiveLink.kt`: the web's `lib/live-link.ts`, the
 iPhone's LiveLink.swift) and reads again only what the stream says changed, so at rest it asks the node nothing; a link

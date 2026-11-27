@@ -64,14 +64,15 @@ by the parity vectors. The app's words about itself (macOS's permissions, a devi
 
 **The look** is monochrome (the owner's word, 26 November 2026): black, white and greys, bold type, the system's own
 surfaces; colour is kept for the agents, so they are told apart at a glance, and red for what went wrong, nothing else.
-The primary is shown by the I-beam in one ink (`UI/Mark.swift`, a shape held to `scripts/mark.ts` by `MarkTests`), never
-a mark and never moving. Each agent is its mark, the Grille (O2, 26 November 2026): a disc in its own colour, one of
-eight, cut into slats by two or three slots at its own angle (`Core/AgentMark.swift`, drawn by `UI/AgentMarkView.swift`),
-as its node gave it, or, from a node before the marks, the colour chosen for its orb snapped to the eight; held to core's
-`agent-mark.ts` by the vectors' `marks` to the last bit (its sines and cosines too, from arithmetic alone). Its state is in
-its shape: its top slat in ink when it asks you, its bottom one red and knocked loose when its work failed, pale while
-queued, grey while paused. Rows are still; the one you are looking at moves only while its agent works or asks you, and
-once as it arrives at done or failed; none moves where the device asks for reduced motion, and nothing is drawn at rest. A state is a still dot beside its word; a task's verdict says what its
+The primary is shown by the I-beam (`UI/Mark.swift`, a shape held to `scripts/mark.ts` by `MarkTests`) on a tile of its
+own in one ink, or in pearl glass where the device is set so (More, Appearance: `UI/GlassView.swift`' `GuardianMark`),
+never an agent's glass and never moving. Each agent is its glass (27 November 2026): one of 22 shapes in one of eight
+colour ramps, as its node gave it, or, from a node before the glass, its mark's colour or the one chosen for its orb,
+snapped to the eight, with its handle's shape (`Core/Glass.swift`, its numbers in `Core/GlassData.swift`, drawn by
+`UI/GlassView.swift`: each shape, ramp, size and page drawn once and kept); held to core's `glass.ts` by the vectors'
+`glass` (`GlassTests`). Its state is a dot cut out of its corner: working, needs you, failed, and a grey ring for the
+rest, its word beside it. Only a working agent's light moves, breathing, while the app is in front and never where the
+device asks for reduced motion; nothing is drawn at rest. A state is a still dot beside its word; a task's verdict says what its
 proof allows (Proven, Reviewed, not proven, Failed · gate 2), never "Verified" above a warning that its gates proved nothing.
 
 Needs Xcode 27 (Swift 6, the iOS 27 and macOS 27 SDKs) and [XcodeGen](https://github.com/yonaskolb/XcodeGen). It runs on
