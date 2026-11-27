@@ -157,3 +157,10 @@ class NodeSession(
  * lead's word, 27 November 2026).
  */
 fun reachShown(online: Boolean?, refused: Boolean): Boolean? = if (refused) null else online
+
+/**
+ * The line over what this phone kept from its node ([ago]: how long since the node said it). While the node is refused
+ * ([refused]) it ends there: nothing is asked of a refused node (rule 1), and "Asking it again" said otherwise (the
+ * lead's word, 27 November 2026).
+ */
+fun keptLine(ago: CharSequence, refused: Boolean): String = "As your node last said it, $ago." + if (refused) "" else " Asking it again."

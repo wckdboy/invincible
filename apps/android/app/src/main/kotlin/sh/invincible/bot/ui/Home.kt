@@ -112,7 +112,7 @@ fun HomeScreen(app: AppModel, nav: Nav, back: () -> Unit) {
             table.asOf?.takeIf { waited }?.let { at ->
                 item(key = "kept") {
                     val ago = if (now - at < 60_000) "just now" else android.text.format.DateUtils.getRelativeTimeSpanString(at, now, android.text.format.DateUtils.MINUTE_IN_MILLIS)
-                    Text("As your node last said it, $ago. Asking it again.", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1))
+                    Text(sh.invincible.bot.core.keptLine(ago, refused = problem?.notYourNode != null), style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1))
                 }
             }
             if (work == null) {

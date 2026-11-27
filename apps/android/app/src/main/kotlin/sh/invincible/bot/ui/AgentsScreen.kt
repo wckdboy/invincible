@@ -100,7 +100,7 @@ fun AgentsScreen(app: AppModel, back: () -> Unit, openChat: () -> Unit, openAgen
         table.asOf?.takeIf { waited }?.let { at ->
             item {
                 val ago = if (now - at < 60_000) "just now" else android.text.format.DateUtils.getRelativeTimeSpanString(at, now, android.text.format.DateUtils.MINUTE_IN_MILLIS)
-                Text("As your node last said it, $ago. Asking it again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.margin))
+                Text(sh.invincible.bot.core.keptLine(ago, refused = problem?.notYourNode != null), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.margin))
             }
         }
         // What the model calls came to, against your budget (the iPhone's meter, at the head of its team).

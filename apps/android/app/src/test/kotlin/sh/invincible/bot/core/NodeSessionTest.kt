@@ -268,4 +268,12 @@ class NodeSessionTest {
         assertEquals(true, reachShown(online = true, refused = false))
         assertNull(reachShown(online = null, refused = false))
     }
+
+    // ---- the lead's word of 27 November 2026: while refused, the line over what was kept doesn't say it's asking ----
+
+    @Test fun theLineOverWhatWasKeptSaysNothingOfAskingWhileTheNodeIsRefused() {
+        // (Nothing is asked of a refused node, not even whoami, until Try again: "Asking it again" said otherwise.)
+        assertEquals("As your node last said it, 28 minutes ago.", keptLine("28 minutes ago", refused = true))
+        assertEquals("As your node last said it, just now. Asking it again.", keptLine("just now", refused = false))
+    }
 }
