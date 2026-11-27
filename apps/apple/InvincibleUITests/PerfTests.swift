@@ -250,8 +250,9 @@ final class PerfTests: XCTestCase {
         let page = app.descendants(matching: .any)["work.screen"]
         XCTAssertTrue(page.waitForExistence(timeout: 10), "The work never came")
         settle(5)
-        let list = page.collectionViews.firstMatch
-        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        // (The page is its list: the lazy list carries the screen's name itself, so no list stands inside it.)
+        let list = app.collectionViews["work.screen"]
+        XCTAssertTrue(list.waitForExistence(timeout: 10), "The work's list isn't a collection view by its name")
         // Three rounds of the same swipes, each measured on its own. Other work on the Mac only ever adds late frames
         // (26 November 2026: CI run 34 failed here while the runner's Mac also ran agents' builds at a load of 50 to
         // 100 on 18 cores; the same commit then passed there at 6.9 ms a second), so the limit holds the best round,
