@@ -518,7 +518,8 @@ test("it ships its agents' proven work itself where its rule allows: filed as th
   expect(task.shipped).toEqual({ url: "https://github.com/amiriteorg/shipyard/pull/7", pr: 7 });
   expect(task.interventions).toBeUndefined();
   const action = (await api<{ actions: ActionView[] }>("actions")).actions.find((a) => a.tool === "ship" && a.args.artifact === artifact)!;
-  expect([action.state, action.self, action.note]).toEqual(["done", true, expect.stringMatching(/^Your agent approved it itself: a pull request of the work on a new branch invincible\/parse-si-units-[a-z0-9-]+, built on main as it stands, in amiriteorg\/shipyard, a repository you gave an agent$/)]);
+  // (Its branch ends in its task's id, whose letters include _ and -: TeamTaskId.)
+  expect([action.state, action.self, action.note]).toEqual(["done", true, expect.stringMatching(/^Your agent approved it itself: a pull request of the work on a new branch invincible\/parse-si-units-[a-z0-9_-]+, built on main as it stands, in amiriteorg\/shipyard, a repository you gave an agent$/)]);
   expect(toGitHub.slice(before).filter((r) => r === "POST /repos/amiriteorg/shipyard/pulls")).toHaveLength(1);
   // Shipped once: a second ship of it is refused.
   script = [callTool("team_ship", { task: proven }), say("It was shipped already.")];

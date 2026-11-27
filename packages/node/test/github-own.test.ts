@@ -28,7 +28,9 @@ type Answers = {
 };
 
 function world(answers: Answers) {
-  let now = Date.UTC(2026, 10, 27, 9);
+  // The service's clock starts at the store's, which stamps each event by the real one: a fixed instant falls behind the
+  // events it holds once real time passes it, and then the outbox sends nothing (clockGoneBack).
+  let now = Date.now();
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "homelab", nodeName: "solo" });
