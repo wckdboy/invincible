@@ -40,8 +40,12 @@ export interface CiBackDeps {
   store: TeamStore;
   service: () => TeamService | undefined;
   outcomes: () => OutcomeRunner | undefined;
-  /** Whether you declined a fix's push onto this pull request's branch (its ship.update denied): its fixes are yours then. */
-  declined?: (pull: ShippedPull) => boolean;
+  /**
+   * Whether you declined a fix's push onto this pull request's branch (its ship.update denied): its fixes are yours then.
+   * Required, so a caller that leaves it out fails to compile (the daemon's is declinedPush over its actions; the re-check
+   * of 27 November, U4).
+   */
+  declined: (pull: ShippedPull) => boolean;
 }
 
 /**
@@ -110,7 +114,7 @@ function mayGive(deps: CiBackDeps, pull: ShippedPull, work: TeamTask): { why: st
   if (deps.store.room(work.room)?.paused) return { why: `You paused the conversation of ${at}'s work: the fix is yours.` };
   const ended = deps.store.fixesOf(pull.owner, pull.repo, pull.branch).find((task) => task.error !== null && YOURS_STOPPED.has(task.error));
   if (ended) return { why: `${YOURS_STOPPED.get(ended.error!)!.replace(/ it$/, "")} a fix of this pull request (task ${ended.id}): further fixes of it are yours.` };
-  if (deps.declined?.(pull)) return { why: `You declined a fix's push onto ${pull.branch}: further fixes of this pull request are yours.` };
+  if (deps.declined(pull)) return { why: `You declined a fix's push onto ${pull.branch}: further fixes of this pull request are yours.` };
   // Who says it goes back: the outcome it was a step of (within what is left of its budget), or your agent on its own
   // word, within its money (the work's budget, its own cap a task at most: TeamService.giveOwn), unless you turned it off.
   if (!work.outcome) return deps.store.ciBack() ? { budgetUsd: Math.min(work.budgetUsd ?? TEAM_LIMITS.ownTaskUsd, TEAM_LIMITS.ownTaskUsd), own: true } : { why: `${at} did this work. To give failing checks back to the agent whose work it was: invincible agents ci on` };

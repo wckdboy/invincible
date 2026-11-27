@@ -35,7 +35,7 @@ function world() {
   const service = new TeamService({ store, respond: async () => "", executeTask: async () => ({ verified: false, output: "" }) });
   const runner = new OutcomeRunner({ store, service: () => service, mind, identity, brain: () => ({ store: mind, vault: undefined as never }), prices: () => ({}), log: () => {} });
   fixtures.push({ store, service, runner });
-  const deps = { store, service: () => service, outcomes: () => runner };
+  const deps = { store, service: () => service, outcomes: () => runner, declined: () => false };
   /** A pull request of Noa's work ($1), shipped from its own branch. */
   const shipped = (n: number): ShippedPull => {
     const artifact = `art_${String(n).repeat(22)}`;

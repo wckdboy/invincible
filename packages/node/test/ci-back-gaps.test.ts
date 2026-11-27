@@ -33,7 +33,7 @@ function world() {
     store.finish(task.id, "done", null, { verified: true, output: "Done.", changes: { artifact: ART, files: 2, base: "0".repeat(40) } });
     return store.task(task.id)!;
   };
-  return { store, service, deps: { store, service: () => service, outcomes: () => runner }, shipped, fixes: () => store.fixesOf("amiriteorg", "shipyard", "invincible/units") };
+  return { store, service, deps: { store, service: () => service, outcomes: () => runner, declined: () => false }, shipped, fixes: () => store.fixesOf("amiriteorg", "shipyard", "invincible/units") };
 }
 
 describe("6a: what a fix on its own word carries", () => {

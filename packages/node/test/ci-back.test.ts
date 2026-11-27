@@ -40,7 +40,7 @@ function world(clock = { now: Date.UTC(2026, 10, 18, 9, 0) }) {
   const service = new TeamService({ store, respond: async () => "", executeTask: async () => ({ verified: false, output: "" }) });
   const runner = new OutcomeRunner({ store, service: () => service, mind, identity, brain: () => ({ store: mind, vault: undefined as never }), prices: () => ({}), log: () => {} });
   fixtures.push({ store, service, runner });
-  const deps = { store, service: () => service, outcomes: () => runner };
+  const deps = { store, service: () => service, outcomes: () => runner, declined: () => false };
   /** An agent's task that ended verified, its work kept as ART: what was shipped. */
   const shipped = (room = store.direct("noa").id, extra: object = {}) => {
     const task = store.createTask({ room, assignee: "noa", title: "Parse SI units", goal: "Parse them.", gates: ["bun test"], budgetUsd: 4, ...extra });
