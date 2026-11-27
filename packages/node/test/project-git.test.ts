@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,8 +13,17 @@ import { LookError } from "../src/workspace-look.ts";
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const folder = () => { const dir = mkdtempSync(join(tmpdir(), "invincible-git-")); dirs.push(dir); return dir; };
-const home = folder();
-const env = { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+// The scripts' home, for the whole file: made when its tests begin and removed when they end. (Made as the file loaded,
+// among each test's folders, it was removed after the first test, and left behind when none of them ran.)
+let home = "";
+let env: Record<string, string | undefined> = {};
+beforeAll(() => {
+  home = mkdtempSync(join(tmpdir(), "invincible-git-"));
+  env = { ...process.env, HOME: home, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+});
+afterAll(() => {
+  if (home) rmSync(home, { recursive: true, force: true });
+});
 const run = (script: string, ...args: string[]) => {
   const ran = Bun.spawnSync(["python3", "-c", script, ...args], { stdout: "pipe", stderr: "pipe", env });
   expect(ran.exitCode).toBe(0);

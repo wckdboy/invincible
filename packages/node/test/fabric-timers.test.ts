@@ -61,10 +61,11 @@ describe("the fabric's waits end with what they waited for", () => {
     const ms = await lifetime(`
       import { Sidecar } from ${JSON.stringify(join(SRC, "sidecar.ts"))};
       import { transportKeyOf } from ${JSON.stringify(join(SRC, "..", "home.ts"))};
-      import { mkdtempSync } from "node:fs";
-      import { tmpdir } from "node:os";
+      import { mkdirSync } from "node:fs";
       import { join } from "node:path";
-      const home = mkdtempSync(join(tmpdir(), "q5t-home-"));
+      // (Its home is in the test's own folder, which the test removes: one of its own was left on every run.)
+      const home = join(import.meta.dir, "home");
+      mkdirSync(home, { mode: 0o700 });
       const sidecar = new Sidecar({ home, key: async () => transportKeyOf(new Uint8Array(32).fill(4), "n_test"), binary: () => process.execPath, listen: () => null, name: "n", log: () => {},
         probe: () => ({ sidecar: true, version: "0.2.0" }),
         spawn: () => ({ ready: Promise.resolve(null), exited: Promise.resolve(1), kill() {} }) });
