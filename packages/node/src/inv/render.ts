@@ -183,9 +183,10 @@ export function proofHead(proof: ProofJson): { text: string; tone: Tone } {
   const word: Record<ProofJson["state"], [string, Tone]> = {
     // (Proven, as the apps say it and as its `word` does: it said "Verified" until 27 November 2026.)
     verified: ["Proven", "ok"],
-    unproven: ["Finished without proof", "needs"],
+    // (The apps' words for these too: "Finished without proof" and "Not verified" until 27 November 2026.)
+    unproven: ["Reviewed, not proven", "needs"],
     failed: [`Failed · gate ${failing + 1}${proof.gates.length > 1 ? ` of ${proof.gates.length}` : ""}`, "failed"],
-    rejected: ["Not verified", "failed"],
+    rejected: ["Sent back", "failed"],
     stopped: ["Stopped", "neutral"],
     "needs-you": [proof.word, "needs"],
     working: [proof.word, "work"],

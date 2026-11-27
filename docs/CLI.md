@@ -156,8 +156,8 @@ A promise: a code keeps its meaning, and a new one is added only with a new mean
 | 1 | **An error:** the command couldn't be done (the node refused it, or no such task). Or a task ended in a way none of the codes below names: its agent gave up before any gate or review, or its run broke. |
 | 2 | **Bad usage:** an unknown command or flag, or a missing or malformed argument. |
 | 10 | **A gate failed:** the task ended with a gate that didn't pass. |
-| 11 | **The reviewer rejected it:** every gate passed, and the reviewer sent it back until its revisions ran out. |
-| 12 | **Finished without proof:** the reviewer passed it, but no gate shows the work (it had no gate, or only gates that already passed before the work), or the only review was by the model that did the work. |
+| 11 | **Sent back:** every gate passed, and the reviewer sent it back until its revisions ran out. |
+| 12 | **Reviewed, not proven:** the reviewer passed it, but no gate shows the work (it had no gate, or only gates that already passed before the work), or the only review was by the model that did the work. |
 | 13 | **Stopped:** by you, by its budget, or by a rule of yours. For `inv "…"`, you stopped the answer with Ctrl-C. |
 | 20 | **Needs you:** with `--no-ask`, it came to need you, and `inv` stopped it. For `inv proof`, it waits on you now. |
 | 21 | **Still running:** `--timeout` ran out, or you left with Ctrl-C, and the task goes on. For `inv proof`, it has no verdict yet. |
@@ -205,9 +205,11 @@ with 1.
   (20), `working` or `queued` (21), and `error` (1). `exit` is its code, and always the code `inv` exits with: when it
   leaves before the task ends, `exit` is 21 (or 20 for `--no-ask`), whatever the state.
 - **`word`** is the apps' word for the task, as its row says it.
-- **Its text** heads the proof with its verdict and why. Exit 0's says **Proven · by its gates and a reviewer that
-  didn't do the work**, the apps' word for it; until 27 November 2026 it said "Verified · by its gates and a reviewer
-  that didn't do the work". Its `state` (`verified`) and its code (0) are unchanged.
+- **Its text** heads the proof with its verdict and why, in the apps' word for it (27 November 2026: one verdict, one
+  word). Its `state` and its code are unchanged:
+  - exit 0 says **Proven · by its gates and a reviewer that didn't do the work**; it said "Verified · …";
+  - exit 11 says **Sent back · …**; it said "Not verified · …";
+  - exit 12 says **Reviewed, not proven · …**; it said "Finished without proof · …".
 - **`gates`** are as the latest round left them, from the runner's own lines on the task's trail, never the agent's
   account.
   - `exit` is null when a gate didn't run in that round.

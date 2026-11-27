@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { boardJson } from "../../src/inv/board.ts";
 import { proofFor } from "../../src/inv/proof.ts";
-import { askLines, type AskView, boardLines, PLAIN, proofLines, styleFor } from "../../src/inv/render.ts";
+import { askLines, type AskView, boardLines, PLAIN, proofHead, proofLines, styleFor } from "../../src/inv/render.ts";
 import { askView } from "../../src/inv/asks.ts";
 import { boardView, type BoardData } from "../../src/inv/view.ts";
 import { action, agent, gated, judged, reviewed, snapshot, T0, task, trail, worked } from "./fixtures.ts";
@@ -100,6 +100,17 @@ describe("the board", () => {
 
 describe("the proof's frame", () => {
   const verified = proofFor(task({ status: "done", verified: true, budgetUsd: 2, output: "Fixed the race in retry(); all tests pass." }), trail([...worked([1]), ...gated([0]), ...reviewed("pass")]), { word: "Verified", node: "ultra", project: "invincible", prices: {}, asking: false });
+
+  // Each verdict in the apps' word (27 November 2026: one verdict, one word): exit 0 said "Verified · …", exit 11 "Not
+  // verified · …" and exit 12 "Finished without proof · …". Their states and codes keep their meaning.
+  test("its head says each verdict as the apps say it: Proven, Reviewed, not proven, Sent back", () => {
+    const facts = { node: "ultra", project: "invincible", prices: {}, asking: false };
+    const unproven = proofFor(task({ status: "done", verified: true }), trail([...worked([0]), ...gated([0]), ...reviewed("pass")]), { ...facts, word: "Reviewed, not proven" });
+    const sentBack = proofFor(task({ status: "failed", verified: false, error: "unverified" }), trail([...worked([1]), ...gated([0]), ...reviewed("revise", "It skips the retry.")]), { ...facts, word: "Sent back" });
+    const heads = [verified, unproven, sentBack].map((proof) => [proof.state, proofHead(proof).text.split(" · ")[0]]);
+    expect(heads).toEqual([["verified", "Proven"], ["unproven", "Reviewed, not proven"], ["rejected", "Sent back"]]);
+    for (const proof of [verified, unproven, sentBack]) expect(proofHead(proof).text).not.toMatch(/Verified|Not verified|Finished without proof/);
+  });
 
   test("in a terminal, framed apart from the agent's own words, which follow it and say they are not proof", () => {
     const lines = proofLines(verified, TTY);
