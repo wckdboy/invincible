@@ -7,7 +7,7 @@ import { z } from "zod";
 import {
   TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, AgentId, AgentInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,
   type Agent, type TeamRoom, type TeamMessage, type TeamTask, type TeamDelivery, type TeamSnapshot, type TeamRoomView, type TeamWorkStatus, type TeamOverview,
-  TeamMergeInput, TeamOutcomeInput, TeamOwnDailyInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, type TeamSteer, heldModels, SENSITIVE_WORK,
+  mergingOf, TeamMergeInput, TeamOutcomeInput, TeamOwnDailyInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, type TeamSteer, heldModels, SENSITIVE_WORK,
 } from "../../core/src/team.ts";
 import { type InterventionKind, type NorthStar, northStar } from "../../core/src/interventions.ts";
 import { TaskAccount } from "../../core/src/seats.ts";
@@ -863,7 +863,9 @@ export class TeamStore {
     const direct = this.rooms().filter((room) => room.direct).sort((a, b) => a.members.length - b.members.length);
     const removed = this.removed().map(({ id, name, removedAt }) => { const conversations = direct.filter((room) => room.members.includes(id)).map((room) => room.id); return { id, name, removedAt, ...(conversations.length ? { conversations } : {}) }; });
     const computer = this.computer();
-    return { northStar: this.northStar(this.now() - 30 * 86_400_000), agents: this.agents(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.primaryAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ownDailyUsd: this.ownDaily(), ...(this.mergeOff().length ? { mergeOff: this.mergeOff() } : {}), ...(computer ? { computer } : {}), seen: this.seen() };
+    // Where its own merging stands: each repository you gave an agent, and each where you turned it off.
+    const merging = mergingOf(this.agents(), this.mergeOff());
+    return { northStar: this.northStar(this.now() - 30 * 86_400_000), agents: this.agents(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.primaryAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ownDailyUsd: this.ownDaily(), ...(this.mergeOff().length ? { mergeOff: this.mergeOff() } : {}), ...(merging.length ? { merging } : {}), ...(computer ? { computer } : {}), seen: this.seen() };
   }
   /**
    * Which writing of the team this is, for the live stream: the rows this store has written, and the database's

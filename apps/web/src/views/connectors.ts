@@ -1,4 +1,4 @@
-import type { ArgValue, ConnectorRequestView, ConnectorToolView, ConnectorView, OrderView } from "@invincible/core";
+import type { ArgValue, ConnectorRequestView, ConnectorToolView, ConnectorView, OrderView, TeamMergeView } from "@invincible/core";
 import { findSecrets } from "@invincible/core/secret-scan";
 import { chatAppsSection } from "./chat-apps.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
@@ -493,6 +493,51 @@ function accessBlock(ctx: Ctx, c: ConnectorView): HTMLElement | null {
   );
 }
 
+/** The repositories a GitHub connector of yours ships to: one more owner's (github-<owner>) its own, and GitHub's the rest. */
+const shipsTo = (c: ConnectorView, installed: readonly ConnectorView[], repository: string): boolean => {
+  const owner = repository.split("/")[0]!;
+  return c.id === "github" ? !installed.some((other) => other.installed && other.id === `github-${owner}`) : c.id === `github-${owner}`;
+};
+
+/**
+ * Where your agent merges its agents' proven work itself, on GitHub's card: each repository you gave an agent that this
+ * connector ships to, and your switch for it there (the review of 27 November, N9; `invincible agents merge` at a terminal).
+ */
+function mergeBlock(ctx: Ctx, repositories: readonly TeamMergeView[]): HTMLElement | null {
+  if (!repositories.length) return null;
+  const turn = (repository: string, on: boolean) =>
+    void ctx.api
+      .post("/api/team/merge", { repository, on })
+      .then(() => {
+        void ctx.live.refreshTeam();
+        toast(on ? `Your agent merges in ${repository} again` : `Merging in ${repository} is yours now`, { tone: "ok", description: on ? "Its agents' proven work, once GitHub says the pull request is clean and its checks pass." : "It ships its agents' work there and leaves the merge to you." });
+      })
+      .catch((error: unknown) => toast("Couldn't change it", { tone: "error", description: errorMessage(error) }));
+  return h(
+    "div",
+    { class: "stack tight" },
+    h(
+      "p",
+      { class: "small row top tight" },
+      h("span", { class: "line-icon" }, icon("check-circle", { size: 13 })),
+      h("span", {}, "Your agent merges its agents' proven work itself where you leave it on: only its own pushes of that work, into your default branch, once GitHub says the pull request is clean and its checks pass."),
+    ),
+    h(
+      "div",
+      { class: "rows" },
+      ...repositories.map((r) =>
+        h(
+          "div",
+          { class: "row wrap", "data-merge": r.repository },
+          h("span", { class: "mono grow" }, r.repository),
+          h("span", { class: "tiny subtle" }, r.on ? "merges itself" : "off: the merge is yours"),
+          ctx.can("fleet:admin") ? button(r.on ? "Turn off" : "Turn on", { size: "sm", variant: "ghost", onClick: () => turn(r.repository, !r.on) }) : null,
+        ),
+      ),
+    ),
+  );
+}
+
 /** An agent as you know it: an agent by its id (team.<tag>.noa is Noa), anything else by its label. */
 const agentName = (label: string): string => {
   const agent = /^team\.[0-9a-f]+\.(.+)$/.exec(label)?.[1];
@@ -515,7 +560,7 @@ async function remove(ctx: Ctx, c: ConnectorView): Promise<void> {
   }
 }
 
-function connectorCard(ctx: Ctx, c: ConnectorView, orders: OrderCounts, deps: McpDeps): HTMLElement {
+function connectorCard(ctx: Ctx, c: ConnectorView, orders: OrderCounts, deps: McpDeps, merging: HTMLElement | null = null): HTMLElement {
   const state = connectorStateOf(c);
   const asking = c.tools.filter((t) => t.asks).length;
   const mcp = c.kind === "mcp" && c.installed;
@@ -588,6 +633,7 @@ function connectorCard(ctx: Ctx, c: ConnectorView, orders: OrderCounts, deps: Mc
       c.description ? h("p", { class: "small muted" }, c.description) : null,
       c.problem ? callout("warn", c.problem) : null,
       accessBlock(ctx, c),
+      merging,
       // One that signs in as you (mail) has an app and a sign-in where another has its key.
       c.oauth ? signInBlock(ctx, c) : keyBlock(ctx, c, mcp && !c.tools.length ? () => void refreshMcp(ctx, c, deps) : undefined),
       installBlock(ctx, c),
@@ -651,6 +697,8 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
   let connectors: ConnectorView[] = [];
   let orders: OrderView[] = [];
   let shownOrders = "";
+  /** Where its own merging stood when the cards were last drawn (the team's `merging`). */
+  let shownMerging = "";
   const canAdd = () => admin && connectors.some((c) => c.installed && c.tools.some((t) => t.asks));
   const addOrder = button("Add a standing order", { size: "sm", variant: "ghost", icon: "plus", onClick: () => openNewOrder(ctx, connectors) });
   addOrder.hidden = true;
@@ -675,6 +723,7 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
   }
 
   function render(list: ConnectorView[]): void {
+    shownMerging = JSON.stringify(ctx.live.team.value?.merging ?? []);
     const installed = list.filter((c) => c.installed);
     const available = list.filter((c) => !c.installed);
     const active = counts();
@@ -687,7 +736,9 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
     replace(
       installedBox,
       ...(installed.length
-        ? installed.map((c) => connectorCard(ctx, c, active, deps))
+        ? installed.map((c) =>
+            connectorCard(ctx, c, active, deps, c.id === "github" || c.id.startsWith("github-") ? mergeBlock(ctx, (ctx.live.team.value?.merging ?? []).filter((r) => shipsTo(c, installed, r.repository))) : null),
+          )
         : [
             h(
               "div",
@@ -757,7 +808,7 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
     h(
       "div",
       { class: "page" },
-      pageHead("Connectors", "How your agent reaches the services you use. Reading, creating and changing are its to do, and logged. Anything outward, and every delete, asks you first, but its own work on GitHub, which it approves itself: its and its agents' work in the repositories you gave them (a push built where GitHub says your default branch stands, or where it last pushed, changing none of their CI; a branch alone asks), and its words on its own threads there and in a private repository of yours."),
+      pageHead("Connectors", "How your agent reaches the services you use. Reading, creating and changing are its to do, and logged. Anything outward, and every delete, asks you first, but its own work on GitHub, which it approves itself: its and its agents' work in the repositories you gave them (a push built where GitHub says your default branch stands, or where it last pushed, changing none of their CI; a branch alone asks), its words on its own threads there and in a private repository of yours, and its merge of that proven work once GitHub says the pull request is clean and its checks pass, where you leave merging on (GitHub's card says where)."),
       ctx.can("brain:write") ? null : callout("quiet", "This device can see connectors but not install or remove them (no brain:write scope)."),
       note,
       // Shown whole once the connectors and the orders have answered: each part came in on its own, pushing the next.
@@ -771,6 +822,14 @@ export const connectorsView: View = (root, ctx, { scope, opts }) => {
     ),
   );
 
+  // Where its own merging stands comes with the team: the cards are drawn again only when it changes, so a half-typed
+  // key stays put while the team is read again.
+  scope.add(
+    ctx.live.team.subscribe(() => {
+      if (connectors.length && JSON.stringify(ctx.live.team.value?.merging ?? []) !== shownMerging) keepPlace(root, () => render(connectors));
+    }),
+  );
+  if (ctx.can("chat") && !ctx.live.team.value) void ctx.live.refreshTeam();
   // A connector installed answers whoever asked for it: their request leaves the Inbox at once.
   scope.add(connectorsChanged.subscribe(() => (void refresh(), void ctx.live.refreshConnectorRequests())));
   scope.add(vaultChanged.subscribe(() => void refresh()));

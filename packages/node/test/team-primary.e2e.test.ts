@@ -574,6 +574,8 @@ test("it merges its agents' proven work itself where it may: once GitHub says it
   // Off for that repository, it is yours there: it ships, and the merge is refused, naming how you turn it on again.
   expect(await api("teamMerge", { repository: "amiriteorg/shipyard", on: false })).toEqual({ repository: "amiriteorg/shipyard", on: false });
   expect((await api<TeamSnapshot>("team")).mergeOff).toEqual(["amiriteorg/shipyard"]);
+  // Every surface reads where it stands from one list: the repositories you gave your agents, each on or off.
+  expect((await api<TeamSnapshot>("team")).merging).toEqual([{ repository: "amiriteorg/shipyard", on: false }]);
   const docs = await proven("Document SI units");
   script = [callTool("team_ship", { task: docs }), callTool("team_merge", { task: docs }), say("Shipped; the merge is yours.")];
   const off = results(await ask("Ship and merge Noa's docs."));
@@ -581,6 +583,7 @@ test("it merges its agents' proven work itself where it may: once GitHub says it
   expect(off[1]!.summary).toContain("You turned merging off for amiriteorg/shipyard: merging there is yours (invincible agents merge amiriteorg/shipyard on)");
   expect(await api("teamMerge", { repository: "amiriteorg/shipyard", on: true })).toEqual({ repository: "amiriteorg/shipyard", on: true });
   expect((await api<TeamSnapshot>("team")).mergeOff).toBeUndefined();
+  expect((await api<TeamSnapshot>("team")).merging).toEqual([{ repository: "amiriteorg/shipyard", on: true }]);
   // Its route is its alone, and the switch is yours alone.
   expect((await request("primaryMerge", { task: docs })).status).toBe(403);
 }, 20_000);

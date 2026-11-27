@@ -34,7 +34,7 @@ struct ConnectorsView: View {
                 } header: {
                     SectionHead("Add")
                 } footer: {
-                    PageNote("Each reaches its service as you allow: reading, making and changing run freely, and anything sent out, pushed or deleted asks you first, but your agent's own work on GitHub, which it approves itself and says so: its pushes in the repositories you gave its agents, built where GitHub says your default branch stands, and its words on its own threads.")
+                    PageNote("Each reaches its service as you allow: reading, making and changing run freely, and anything sent out, pushed or deleted asks you first, but your agent's own work on GitHub, which it approves itself and says so: its pushes in the repositories you gave its agents, built where GitHub says your default branch stands, its words on its own threads, and its merge of that proven work once GitHub says the pull request is clean and its checks pass, where you leave merging on (GitHub's own page says where).")
                 }
             }
         }
@@ -126,8 +126,12 @@ struct ConnectorDetail: View {
     /// A started sign-in: Microsoft's code to type at its page, or Google's page opened; the node says when it's done.
     @State private var started: Started?
     @State private var removing = false
+    /// Where its own merging stands, on GitHub's: each repository you gave an agent that this connector ships to (the team's `merging`).
+    @State private var merging: [Merging]?
 
     enum Started: Equatable { case page, code(String, URL) }
+    /// A repository you gave an agent, and whether the primary merges its agents' proven work there itself (core's TeamMergeView).
+    struct Merging: Decodable, Identifiable, Equatable { let repository: String; let on: Bool; var id: String { repository } }
 
     private var google: Bool { connector?.oauth?.provider == "google" }
     /// A hosted MCP server's own sign-in: no app of yours, its page back to your node as Google's is.
@@ -161,6 +165,22 @@ struct ConnectorDetail: View {
                             Label(access.allowed.isEmpty ? "\(Primary.name)'s alone" : "\(Primary.name)'s, and \(ListFormatter.localizedString(byJoining: access.allowed))'s", systemImage: "shield.lefthalf.filled")
                         }
                         if connector.private { Label("What it reads stays in the answer that read it: the ledger keeps no word of it, and no agent reads its calls' words.", systemImage: "eye.slash").font(.footnote) }
+                    }
+                }
+                if let merging, !merging.isEmpty {
+                    Section {
+                        ForEach(merging) { entry in
+                            if session.can("fleet:admin") {
+                                Toggle(isOn: Binding(get: { entry.on }, set: { on in Task { await setMerging(entry.repository, on) } })) { mergingLine(entry) }
+                                    .disabled(working)
+                            } else {
+                                mergingLine(entry)
+                            }
+                        }
+                    } header: {
+                        SectionHead("Merging")
+                    } footer: {
+                        PageNote("\(Primary.name) merges its agents' proven work itself where you leave it on: only its own pushes of that work, into your default branch, once GitHub says the pull request is clean and its checks pass. Off, the merge is yours.")
                     }
                 }
                 if !connector.tools.isEmpty {
@@ -315,10 +335,34 @@ struct ConnectorDetail: View {
     private func load() async {
         struct Listed: Decodable { let connectors: [ConnectorView] }
         do {
-            connector = try await session.client.get("/api/connectors", as: Listed.self).connectors.first { $0.id == id }
+            let all = try await session.client.get("/api/connectors", as: Listed.self).connectors
+            connector = all.first { $0.id == id }
+            // GitHub's: where its own merging stands, for the repositories this connector ships to (one more owner's
+            // own connector, github-<owner>, ships to that owner's; GitHub's to the rest).
+            if id == "github" || id.hasPrefix("github-"), session.can("chat") {
+                struct Team: Decodable { var merging: [Merging]? }
+                let owners = Set(all.filter { $0.installed && $0.id.hasPrefix("github-") }.map { String($0.id.dropFirst("github-".count)) })
+                merging = (try? await session.client.get("/api/team", as: Team.self))?.merging?.filter { entry in
+                    let owner = String(entry.repository.prefix { $0 != "/" })
+                    return id == "github" ? !owners.contains(owner) : id == "github-\(owner)"
+                }
+            }
         } catch {
             problem = error.localizedDescription
         }
+    }
+
+    @ViewBuilder private func mergingLine(_ entry: Merging) -> some View {
+        VStack(alignment: .leading, spacing: Space.line) {
+            Text(entry.repository).font(.callout.monospaced())
+            Text(entry.on ? "Merges itself" : "Off: the merge is yours").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Your switch for its own merging in a repository (`POST /api/team/merge`, yours alone: fleet:admin).
+    private func setMerging(_ repository: String, _ on: Bool) async {
+        struct Merge: Encodable { let repository: String; let on: Bool }
+        await run { _ = try await session.client.post("/api/team/merge", Merge(repository: repository, on: on), as: JSONValue.self) }
     }
 
     /// One request, its failure said, then the connector as the node has it now.

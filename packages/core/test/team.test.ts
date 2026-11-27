@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AgentInput, TeamEngramInput, TeamRecruitInput, TeamRemoveInput, TeamRoomInput, TeamControlInput, TeamPostInput, TeamSayInput, TeamTaskInput, TeamWorkspaceRun, teamArmLabel, AvatarProfileSchema, heldModels } from "../src/team.ts";
+import { AgentInput, TeamEngramInput, TeamRecruitInput, TeamRemoveInput, TeamRoomInput, TeamControlInput, TeamPostInput, TeamSayInput, TeamTaskInput, TeamWorkspaceRun, teamArmLabel, AvatarProfileSchema, heldModels, mergingOf } from "../src/team.ts";
 import { routes } from "../src/api.ts";
 
 describe("team contracts", () => {
@@ -167,5 +167,26 @@ describe("a steer of a running task", () => {
     expect(routes.primarySteer).toMatchObject({ method: "POST", path: "/api/team/primary-steer", scope: "mind:write" });
     // One schema for both: whoever steers, it is the same words to the same work.
     expect(routes.primarySteer.input).toBe(routes.steerTeamTask.input);
+  });
+});
+
+// The review of 27 November, N9: where its own merging stands, as every surface shows it and lets you turn it off or on.
+describe("where its own merging stands", () => {
+  test("each repository you gave an agent, as the switch names it, and each where you turned it off: once each, in order", () => {
+    const agents = [
+      { repository: "https://github.com/AmiriteOrg/Shipyard" },
+      { repository: "https://github.com/amiriteorg/shipyard.git" },
+      { repository: "https://github.com/amiriteorg/harbor/" },
+      { repository: null },
+      {},
+    ];
+    expect(mergingOf(agents, [])).toEqual([{ repository: "amiriteorg/harbor", on: true }, { repository: "amiriteorg/shipyard", on: true }]);
+    // Off where you turned it off, and said though no agent has the repository now.
+    expect(mergingOf(agents, ["amiriteorg/shipyard", "amiriteorg/dock"])).toEqual([
+      { repository: "amiriteorg/dock", on: false },
+      { repository: "amiriteorg/harbor", on: true },
+      { repository: "amiriteorg/shipyard", on: false },
+    ]);
+    expect(mergingOf([], [])).toEqual([]);
   });
 });

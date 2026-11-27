@@ -23,6 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,6 +51,7 @@ import sh.invincible.bot.core.Connector
 import sh.invincible.bot.core.Connectors
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeError
+import sh.invincible.bot.core.bool
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.list
 import sh.invincible.bot.core.string
@@ -99,7 +101,7 @@ fun ConnectorsScreen(app: AppModel, back: () -> Unit) {
                 SectionTitle("Add")
                 for (c in catalog) ConnectorRow(c) { open = c.id }
                 Text(
-                    "Each reaches its service as you allow: reading, making and changing run freely, and anything sent out, pushed or deleted asks you first, but your agent's own work on GitHub, which it approves itself and says so: its pushes in the repositories you gave its agents, built where GitHub says your default branch stands, and its words on its own threads.",
+                    "Each reaches its service as you allow: reading, making and changing run freely, and anything sent out, pushed or deleted asks you first, but your agent's own work on GitHub, which it approves itself and says so: its pushes in the repositories you gave its agents, built where GitHub says your default branch stands, its words on its own threads, and its merge of that proven work once GitHub says the pull request is clean and its checks pass, where you leave merging on (GitHub's own page says where).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2),
@@ -164,6 +166,8 @@ private fun ConnectorPage(app: AppModel, id: String, back: () -> Unit) {
     var key by remember { mutableStateOf("") }
     var client by remember { mutableStateOf("") }
     var clientSecret by remember { mutableStateOf("") }
+    /** Where its own merging stands, on GitHub's: each repository you gave an agent that this connector ships to (the team's `merging`). */
+    var merging by remember { mutableStateOf<List<Merging>>(emptyList()) }
     val scope = rememberCoroutineScope()
     val c = connector
     val google = c?.signIn == "google"
@@ -172,7 +176,19 @@ private fun ConnectorPage(app: AppModel, id: String, back: () -> Unit) {
 
     suspend fun load() {
         try {
-            connector = app.client?.get("/api/connectors")?.get("connectors").list.map(Connector::of).firstOrNull { it.id == id }
+            val all = app.client?.get("/api/connectors")?.get("connectors").list.map(Connector::of)
+            connector = all?.firstOrNull { it.id == id }
+            // GitHub's: where its own merging stands, for the repositories this connector ships to (one more owner's own
+            // connector, github-<owner>, ships to that owner's; GitHub's to the rest).
+            if (id == "github" || id.startsWith("github-")) {
+                val owners = all.orEmpty().filter { it.installed && it.id.startsWith("github-") }.map { it.id.removePrefix("github-") }.toSet()
+                merging = app.client?.get("/api/team")?.get("merging").list.mapNotNull { m ->
+                    val repository = m["repository"].string ?: return@mapNotNull null
+                    val owner = repository.substringBefore("/")
+                    val here = if (id == "github") owner !in owners else id == "github-$owner"
+                    if (here) Merging(repository, m["on"].bool ?: true) else null
+                }
+            }
         } catch (e: NodeError) {
             problem = e.message
         }
@@ -339,6 +355,20 @@ private fun ConnectorPage(app: AppModel, id: String, back: () -> Unit) {
                     if (c.private) Text("What it reads stays in the answer that read it: the ledger keeps no word of it, and no agent reads its calls' words.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            if (merging.isNotEmpty()) {
+                SectionTitle("Merging")
+                for (m in merging) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s1), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
+                            Text(m.repository, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                            Text(if (m.on) "Merges itself" else "Off: the merge is yours", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        // Your switch for its own merging there (POST /api/team/merge, yours alone: fleet:admin).
+                        Switch(checked = m.on, enabled = !working, onCheckedChange = { on -> run({ app.client!!.post("/api/team/merge", Json.obj("repository" to m.repository, "on" to on)) }) })
+                    }
+                }
+                Text("${Primary.name} merges its agents' proven work itself where you leave it on: only its own pushes of that work, into your default branch, once GitHub says the pull request is clean and its checks pass. Off, the merge is yours.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.margin))
+            }
             if (c.tools.isNotEmpty()) {
                 SectionTitle("What it can do")
                 for (tool in c.tools) {
@@ -385,3 +415,6 @@ private fun SignInButton(title: String, working: Boolean, started: Started?, con
         null -> {}
     }
 }
+
+/** A repository you gave an agent, and whether the primary merges its agents' proven work there itself (core's TeamMergeView). */
+private data class Merging(val repository: String, val on: Boolean)

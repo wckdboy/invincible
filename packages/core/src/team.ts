@@ -337,8 +337,6 @@ export const TeamBacklogInput = z.strictObject({ on: z.boolean() });
  * and of the proposals it approves itself (TEAM_LIMITS.ownDailyUsd until you set another; 0: none, all of them yours). */
 export const TeamOwnDailyInput = z.strictObject({ usd: z.number().min(0).max(1000) });
 export type TeamOwnDailyInput = z.infer<typeof TeamOwnDailyInput>;
-/** Your switch for the primary's own merging of its agents' proven work in a repository you gave an agent (`owner/repo`):
- * on until you turn it off there (your word, 27 November 2026). */
 /**
  * The repository a merge switch names, as GitHub names it, whatever its case and with no .git: the switch is keyed by it,
  * so one that can never match a repository is refused (null) rather than kept (the review of 27 November, N10).
@@ -347,11 +345,32 @@ export function mergeRepository(raw: string): string | null {
   const named = raw.trim().replace(/\/+$/, "").replace(/\.git$/i, "").toLowerCase();
   return /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9._-]{1,100}$/.test(named) && !/\/\.{1,2}$/.test(named) ? named : null;
 }
+/** Your switch for the primary's own merging of its agents' proven work in a repository you gave an agent (`owner/repo`):
+ * on until you turn it off there (your word, 27 November 2026). */
 export const TeamMergeInput = z.strictObject({
   repository: z.string().max(200).transform((raw, ctx) => mergeRepository(raw) ?? (ctx.addIssue({ code: "custom", message: "a repository as owner/repo" }), z.NEVER)),
   on: z.boolean(),
 });
 export type TeamMergeInput = z.infer<typeof TeamMergeInput>;
+
+/** A repository you gave an agent, or one where you turned merging off, and whether the primary merges its agents' proven work there itself. */
+export interface TeamMergeView {
+  repository: string;
+  on: boolean;
+}
+/**
+ * Where the primary's own merging stands (TeamSnapshot.merging): each repository you gave an agent, by its clone URL's
+ * owner/repo as the switch names it, and each where you turned merging off, once each, in order (the review of 27
+ * November, N9: every surface shows it and lets you turn it off or on).
+ */
+export function mergingOf(agents: readonly { repository?: string | null }[], off: readonly string[]): TeamMergeView[] {
+  const given = agents.flatMap((agent) => {
+    const path = /^https:\/\/github\.com\/([^/]+\/[^/]+?)\/?$/.exec(agent.repository ?? "")?.[1];
+    const named = path ? mergeRepository(path) : null;
+    return named ? [named] : [];
+  });
+  return [...new Set([...given, ...off])].sort().map((repository) => ({ repository, on: !off.includes(repository) }));
+}
 
 /** What an agent's Workspace is told of the notes store: the node's switch, and whether this VM has the pinned binary. */
 export interface TeamEngramStatus {
@@ -715,6 +734,8 @@ export interface TeamSnapshot {
   ownDailyUsd?: number;
   /** The repositories where you turned the primary's own merging off (TeamMergeInput; absent: none). */
   mergeOff?: string[];
+  /** Each repository you gave an agent, and each where you turned merging off, with whether it merges there itself (mergingOf; absent: none, or an older node). */
+  merging?: TeamMergeView[];
   /** The primary's own computer, when it has one: its persistent VM, made and watched as an agent's is (under its handle). */
   computer?: TeamWorkspace;
   /** When you last looked, on any device, at each agent's page (`agent:<id>`) and each room (`room:<id>`): what ended
