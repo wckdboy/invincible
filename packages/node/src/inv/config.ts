@@ -33,6 +33,12 @@ const Pairing = z.strictObject({
   name: z.string().min(1).max(64),
   keystore: z.enum(["keychain", "file"]),
   pairedAt: z.number().int().min(0),
+  /**
+   * The node it speaks to, as that node proved (client.ts provenWhoami): what this device signs names it (the slice 8
+   * note's item 11). Absent from a pairing made before it, or with a node from before it: proved, and kept, at the next
+   * connection.
+   */
+  nodeId: z.string().regex(/^n_[A-Za-z0-9_-]{43}$/).optional(),
 });
 export type Pairing = z.infer<typeof Pairing>;
 

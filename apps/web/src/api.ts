@@ -1,12 +1,15 @@
 import type { ChatStreamEvent } from "@invincible/core";
 import { utf8 } from "@invincible/core/bytes";
 import { type DesktopFrame, DesktopFrames } from "@invincible/core/desktop-frames";
-import { signRequest, ZONE_HEADER } from "@invincible/core/request-auth";
-import { type BrowserIdentity, signerFor } from "./identity.ts";
+import { judgeNodeProof, nodeChallenge, type NodeProven, signRequest, ZONE_HEADER } from "@invincible/core/request-auth";
+import type { DeviceId } from "@invincible/core/identity";
+import { type BrowserIdentity, saveIdentity, signerFor } from "./identity.ts";
+import type { WhoAmI } from "./types.ts";
 
 /*
  * Every /api request is signed with this browser's device key over
- * (method, path, time, nonce, body hash) and sent with exactly those bytes.
+ * (method, path, time, nonce, body hash) and the node it is for, the one that proved
+ * it is (provenWhoami), and sent with exactly those bytes.
  * Requests always go to this page's own origin (HTTPS via tailscale serve).
  */
 
@@ -52,9 +55,10 @@ function zoneHeader(): Record<string, string> {
   }
 }
 
-async function signedFetch(identity: BrowserIdentity, method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
+/** `named`: signed for the node this browser pinned (when it pinned one); false, as before, for none (whoami's proof). */
+async function signedFetch(identity: BrowserIdentity, method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal, named = true): Promise<Response> {
   const bytes = body === undefined ? new Uint8Array() : utf8(JSON.stringify(body));
-  const headers = await signRequest(identity.device, signerFor(identity), method, path, bytes);
+  const headers = await signRequest(identity.device, signerFor(identity), method, path, bytes, Date.now(), named ? (identity.node as DeviceId | undefined) : undefined);
   let response: Response;
   try {
     response = await fetch(`${location.origin}${path}`, {
@@ -161,6 +165,27 @@ function lateError(payload: unknown): ApiError | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as { error?: unknown; status?: unknown };
   return Object.keys(p).length === 2 && typeof p.error === "string" && typeof p.status === "number" ? new ApiError(p.status, p.error) : null;
+}
+
+/**
+ * Whoami, proven: asked with a fresh challenge, which the node answers by signing it with the key its id is (the slice
+ * 8 note's item 11). Signed for no node (whoami's is always taken), so another node at this address still says which
+ * it is. The first proof pins the node, and what this browser signs names it from then on; a proof of another node, or
+ * one that fails, is said (`proven`), and the caller goes no further. A node from before, which proves nothing, is
+ * spoken to as before.
+ */
+export async function provenWhoami(identity: BrowserIdentity, signal?: AbortSignal): Promise<{ whoami: WhoAmI; proven: NodeProven }> {
+  const challenge = nodeChallenge();
+  const response = await signedFetch(identity, "GET", `/api/whoami?challenge=${challenge}`, undefined, signal, false);
+  const whoami = (await response.json()) as WhoAmI;
+  const proven = judgeNodeProof(identity.node, whoami, challenge);
+  if (proven.kind === "pin") {
+    identity.node = proven.node;
+    // Kept for this visit even where the store can't be written just now: the next start pins it again, from its first
+    // proven whoami, as a browser paired before this does.
+    await saveIdentity(identity).catch(() => {});
+  }
+  return { whoami, proven };
 }
 
 export function apiFor(identity: BrowserIdentity): Api {

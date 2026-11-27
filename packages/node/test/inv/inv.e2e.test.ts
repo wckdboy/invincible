@@ -153,6 +153,8 @@ describe("inv against a node of its own", () => {
     expect(statSync(join(me.INVINCIBLE_CLI_HOME, "key.json")).mode & 0o777).toBe(0o600);
     // The pairing holds no secret: the key is apart from it.
     expect(readFileSync(join(me.INVINCIBLE_CLI_HOME, "cli.json"), "utf8")).not.toContain('"d"');
+    // And the node it paired with, as that node proved it is: what inv signs names it (the slice 8 note's item 11).
+    expect(JSON.parse(readFileSync(join(me.INVINCIBLE_CLI_HOME, "cli.json"), "utf8")).nodeId).toBe(daemon.identity.id);
     const device = daemon.store.activeDevice(paired.pending.device);
     expect(device).toMatchObject({ kind: "client", name: "e2e laptop" });
     // Asked again, it says what it is paired with.
@@ -271,6 +273,19 @@ describe("inv against a node of its own", () => {
     expect(json(result.out)).toEqual({ error: "the pairing was refused on the node", exit: 30 });
     expect(() => statSync(join(refused.INVINCIBLE_CLI_HOME, "key.json"))).toThrow();
     expect((await run(refused, "tasks")).code).toBe(31);
+  }, 30_000);
+
+  test("a pairing from before inv named its node is proven and pinned at its next command; pinned to another node, it is refused", async () => {
+    const older = cli("older");
+    mkdirSync(older.INVINCIBLE_CLI_HOME, { recursive: true });
+    copyFileSync(join(me.INVINCIBLE_CLI_HOME, "key.json"), join(older.INVINCIBLE_CLI_HOME, "key.json"));
+    const { nodeId: _, ...before } = JSON.parse(readFileSync(join(me.INVINCIBLE_CLI_HOME, "cli.json"), "utf8")) as { nodeId?: string };
+    writeFileSync(join(older.INVINCIBLE_CLI_HOME, "cli.json"), JSON.stringify(before));
+    expect((await run(older, "tasks", "--json")).code).toBe(0);
+    expect(JSON.parse(readFileSync(join(older.INVINCIBLE_CLI_HOME, "cli.json"), "utf8")).nodeId).toBe(daemon.identity.id);
+    // Pinned to another node: what it signs is for that node, and this one refuses it.
+    writeFileSync(join(older.INVINCIBLE_CLI_HOME, "cli.json"), JSON.stringify({ ...before, nodeId: `n_${"A".repeat(43)}` }));
+    expect((await run(older, "tasks")).code).toBe(30);
   }, 30_000);
 
   test("a node that doesn't answer exits 31; a device the node no longer knows exits 30", async () => {

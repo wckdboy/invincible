@@ -138,6 +138,40 @@ export function renderRevoked(root: HTMLElement): void {
   );
 }
 
+/**
+ * The node at this address proved to be another than the one this browser paired with, or its proof failed (api.ts
+ * provenWhoami): nothing more is asked of it, and nothing of this browser's is sent to it.
+ */
+export function renderNotYourNode(root: HTMLElement, proven: { kind: "other"; node: string } | { kind: "false" }): void {
+  document.title = "Not your node · Invincible";
+  const said = proven.kind === "other" ? `It proved to be another node (${shortId(proven.node, 8)}), not the one this browser paired with.` : "Its proof of which node it is didn't hold.";
+  const forget = button("Forget this browser's key", {
+    onClick: async () => {
+      const ok = await confirmAction({
+        title: "Forget this browser's key?",
+        body: "The key is deleted from this browser and can't be recovered. You can pair again with a fresh invite from the node now at this address.",
+        confirmLabel: "Forget key",
+      });
+      if (!ok) return;
+      await forgetIdentity();
+      location.reload();
+    },
+  });
+  replace(
+    root,
+    solo(
+      hero("This isn't the node this browser paired with.", said),
+      h(
+        "section",
+        { class: "card" },
+        h("p", { class: "small muted" }, "Nothing more is sent to it. If you set your node up anew at this address, forget this browser's key, then open a fresh invite from ", h("span", { class: "mono" }, "invincible invite --client"), "."),
+        h("div", { class: "row wrap centered" }, button("Try again", { variant: "primary", icon: "retry", onClick: () => location.reload() }), forget),
+      ),
+      footer(),
+    ),
+  );
+}
+
 export function renderInsecure(root: HTMLElement): void {
   document.title = "Secure connection needed · Invincible";
   replace(

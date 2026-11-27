@@ -27,6 +27,9 @@ import {
   utf8,
   verifyRequestSignature,
   NonceCache,
+  judgeNodeProof,
+  nodeChallenge,
+  NODE_CHALLENGE,
   nodeProofInput,
   REQUESTS_NAME_THEIR_NODE_FROM,
   verifyNodeProof,
@@ -195,6 +198,21 @@ describe("request signing", () => {
     // A challenge as a device poses one, and a client's id never proves to be a node.
     expect(verifyNodeProof(node.id, "short", b64u(node.sign(nodeProofInput("short"))))).toBe(false);
     expect(verifyNodeProof(`c_${"A".repeat(87)}`, challenge, proof)).toBe(false);
+  });
+
+  test("a device judges whoami's proof against the node it pinned: the first it pins, the same it keeps, another and a failed one it refuses", () => {
+    const [node, other] = [newNodeIdentity(), newNodeIdentity()];
+    const challenge = nodeChallenge();
+    expect(NODE_CHALLENGE.test(challenge)).toBe(true);
+    const said = (who: typeof node) => ({ node: who.id, proof: b64u(who.sign(nodeProofInput(challenge))) });
+    expect(judgeNodeProof(undefined, said(node), challenge)).toEqual({ kind: "pin", node: node.id });
+    expect(judgeNodeProof(node.id, said(node), challenge)).toEqual({ kind: "same", node: node.id });
+    expect(judgeNodeProof(node.id, said(other), challenge)).toEqual({ kind: "other", node: other.id });
+    // One that names a node its proof isn't by, or answers another challenge: never taken.
+    expect(judgeNodeProof(node.id, { node: other.id, proof: said(node).proof }, challenge)).toEqual({ kind: "false" });
+    expect(judgeNodeProof(undefined, said(node), nodeChallenge())).toEqual({ kind: "false" });
+    // A node from before, which offers no proof: spoken to as before.
+    expect(judgeNodeProof(undefined, { node: node.id }, challenge)).toEqual({ kind: "older" });
   });
 
   // The slice 8 note's item 11 (the lead's word of 27 November): a node that restarts forgets the nonces it saw, so a

@@ -1,4 +1,4 @@
-import { b64u, type Bytes, fromB64u, randomId } from "./bytes.ts";
+import { b64u, type Bytes, fromB64u, randomBytes, randomId } from "./bytes.ts";
 import { sha256B64u } from "./crypto.ts";
 import { type DeviceId, domain, isNodeId, verifyDeviceSignature } from "./identity.ts";
 
@@ -134,6 +134,26 @@ export function verifyNodeProof(node: string, challenge: string, proof: string):
     return false;
   }
   return b64u(signature) === proof && verifyDeviceSignature(node as DeviceId, signature, nodeProofInput(challenge));
+}
+
+/** A fresh challenge, as a device poses one to whoami (NODE_CHALLENGE). */
+export const nodeChallenge = (): string => b64u(randomBytes(24));
+
+/**
+ * What a whoami's answer to `challenge` says of the node a device speaks to, against the one it pinned (`pinned`):
+ * - `pin`: proven, and none pinned yet: the device pins it, and names it in what it signs from then on;
+ * - `same`: proven, and the one it pinned;
+ * - `older`: no proof, a node from before: spoken to as before (v1), until the cutoff;
+ * - `other`: proven, but another node than the one it pinned: not this device's node, and nothing more is asked of it;
+ * - `false`: a proof that fails: never taken.
+ */
+export type NodeProven = { kind: "pin"; node: string } | { kind: "same"; node: string } | { kind: "other"; node: string } | { kind: "older" } | { kind: "false" };
+
+export function judgeNodeProof(pinned: string | undefined, said: { node?: unknown; proof?: unknown }, challenge: string): NodeProven {
+  if (said.proof === undefined) return { kind: "older" };
+  if (typeof said.node !== "string" || typeof said.proof !== "string" || !verifyNodeProof(said.node, challenge, said.proof)) return { kind: "false" };
+  if (pinned === undefined) return { kind: "pin", node: said.node };
+  return said.node === pinned ? { kind: "same", node: said.node } : { kind: "other", node: said.node };
 }
 
 /**

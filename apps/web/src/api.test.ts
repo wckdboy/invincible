@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { routes } from "@invincible/core";
+import { b64u } from "@invincible/core/bytes";
 import { desktopBeat } from "@invincible/core/desktop-frames";
-import { ApiError, apiFor, READING_POSTS, READS_UNDER_OTHER_SCOPES, setNetworkHandler } from "./api.ts";
+import { clientIdFromKey, nodeIdentity } from "@invincible/core/identity";
+import { nodeProofInput, verifyRequestSignature } from "@invincible/core/request-auth";
+import { ApiError, apiFor, provenWhoami, READING_POSTS, READS_UNDER_OTHER_SCOPES, setNetworkHandler } from "./api.ts";
 import type { BrowserIdentity } from "./identity.ts";
 
 /*
@@ -115,6 +118,111 @@ test("the POSTs that leave what places showed are every reading route, and a nam
   expect([...READING_POSTS].sort()).toEqual([...reading, ...READS_UNDER_OTHER_SCOPES].sort());
   // Each of those few is a POST route that exists.
   for (const path of READS_UNDER_OTHER_SCOPES) expect([path, Object.values(routes).some((route) => route.path === path && route.method === "POST")]).toEqual([path, true]);
+});
+
+describe("the node this browser speaks to, proven (the slice 8 note's item 11)", () => {
+  // Obviously fake node keys: seeds of sevens and eights, as the parity vectors' nodes.
+  const theNode = nodeIdentity(new Uint8Array(32).fill(7), new Uint8Array(32).fill(9));
+  const anotherNode = nodeIdentity(new Uint8Array(32).fill(8), new Uint8Array(32).fill(10));
+  /**
+   * Who answers at this address: `theNode` or `anotherNode` as a node does from the cutoff (it takes a request that
+   * names it, and whoami's, which names none); one that lies (says it is `theNode`, signs as `anotherNode`); or a node
+   * from before, which proves nothing and reads a request that names no node alone.
+   */
+  let speaking: "theNode" | "anotherNode" | "liar" | "older" = "theNode";
+  const node = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: async (request) => {
+      const url = new URL(request.url);
+      const whoami = url.pathname === "/api/whoami";
+      const body = new Uint8Array(await request.arrayBuffer());
+      const self = speaking === "anotherNode" ? anotherNode : theNode;
+      const proof = speaking === "older" ? verifyRequestSignature(request.headers, request.method, `${url.pathname}${url.search}`, body) : verifyRequestSignature(request.headers, request.method, `${url.pathname}${url.search}`, body, Date.now(), self.id, whoami);
+      if (!proof) return Response.json({ error: "unauthorized" }, { status: 401 });
+      if (!whoami) return Response.json({ named: proof.named });
+      const said = { device: proof.device, kind: "client", scopes: ["mind:read"], node: self.id, nodeName: "test node", fleet: "f_test", fleetName: null };
+      if (speaking === "older") return Response.json(said);
+      const challenge = url.searchParams.get("challenge") ?? "";
+      return Response.json({ ...said, proof: b64u((speaking === "liar" ? anotherNode : self).sign(nodeProofInput(challenge))) });
+    },
+  });
+  // The pin is saved with the key, in IndexedDB: a stand-in that keeps what was put (read through `saved`, as the
+  // stand-in writes it where the compiler doesn't look).
+  let stored: { node?: string } | undefined;
+  const saved = (): { node?: string } | undefined => stored;
+  const indexedDb = (globalThis as { indexedDB?: unknown }).indexedDB;
+  /** A browser's key, as the app makes one: its id is its public key, which the node checks the signature by. */
+  let browserKey: BrowserIdentity;
+  beforeAll(async () => {
+    const pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])) as CryptoKeyPair;
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    browserKey = { device: clientIdFromKey(raw), privateKey: pair.privateKey, publicKey: pair.publicKey, enrolled: true, name: "Test browser" };
+    const done = (put: () => void) => {
+      const r: { onsuccess?: () => void } = {};
+      queueMicrotask(() => {
+        put();
+        r.onsuccess?.();
+      });
+      return r;
+    };
+    const db = { transaction: () => ({ objectStore: () => ({ put: (value: object) => done(() => (stored = { ...value })) }) }), close: () => {} };
+    (globalThis as { indexedDB?: unknown }).indexedDB = {
+      open: () => {
+        const r: { result?: unknown; onsuccess?: () => void } = {};
+        setTimeout(() => {
+          r.result = db;
+          r.onsuccess?.();
+        }, 0);
+        return r;
+      },
+    };
+  });
+  afterAll(() => {
+    (globalThis as { indexedDB?: unknown }).indexedDB = indexedDb;
+    node.stop(true);
+  });
+
+  test("a browser paired before this pins its node at its first proven whoami, keeps it, and names it in all it signs from then on", async () => {
+    at(node.port!);
+    speaking = "theNode";
+    stored = undefined;
+    const browser: BrowserIdentity = { ...browserKey };
+    // Unpinned, what it signs names no node: a node that takes only what names it refuses it.
+    expect(await apiFor(browser).get("/api/fleet").catch((e: unknown) => (e as ApiError).status)).toBe(401);
+    const { whoami, proven } = await provenWhoami(browser);
+    expect(proven).toEqual({ kind: "pin", node: theNode.id });
+    expect([whoami.node, browser.node, saved()?.node]).toEqual([theNode.id, theNode.id, theNode.id]);
+    expect(await apiFor(browser).get("/api/fleet")).toEqual({ named: true });
+    // The same node again is the same, and nothing is saved over the pin.
+    stored = undefined;
+    expect((await provenWhoami(browser)).proven).toEqual({ kind: "same", node: theNode.id });
+    expect(saved()).toBeUndefined();
+  });
+
+  test("another node at this address, or one whose proof fails, is said so, and the pin stays the browser's own", async () => {
+    at(node.port!);
+    const browser: BrowserIdentity = { ...browserKey, node: theNode.id };
+    speaking = "anotherNode";
+    expect((await provenWhoami(browser)).proven).toEqual({ kind: "other", node: anotherNode.id });
+    // What it signs names its own node, so the other refuses it.
+    expect(await apiFor(browser).get("/api/fleet").catch((e: unknown) => (e as ApiError).status)).toBe(401);
+    speaking = "liar";
+    expect((await provenWhoami(browser)).proven).toEqual({ kind: "false" });
+    // Unpinned, a lie pins nothing either.
+    const fresh: BrowserIdentity = { ...browserKey };
+    expect((await provenWhoami(fresh)).proven).toEqual({ kind: "false" });
+    expect([browser.node, fresh.node]).toEqual([theNode.id, undefined]);
+  });
+
+  test("a node from before, which proves nothing, is spoken to as before, and nothing is pinned", async () => {
+    at(node.port!);
+    speaking = "older";
+    const browser: BrowserIdentity = { ...browserKey };
+    expect((await provenWhoami(browser)).proven).toEqual({ kind: "older" });
+    expect(browser.node).toBeUndefined();
+    expect(await apiFor(browser).get("/api/fleet")).toEqual({ named: false });
+  });
 });
 
 describe("an agent's desktop as a stream of frames", () => {

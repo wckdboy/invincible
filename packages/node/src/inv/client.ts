@@ -1,4 +1,4 @@
-import { type RouteName, routes, signRequest, type Signer, utf8, ZONE_HEADER } from "@invincible/core";
+import { type DeviceId, judgeNodeProof, nodeChallenge, type NodeProven, type RouteName, routes, signRequest, type Signer, utf8, ZONE_HEADER } from "@invincible/core";
 import { CliError, EXIT } from "./exit.ts";
 
 /*
@@ -154,16 +154,47 @@ function client(way: Way): NodeClient {
   };
 }
 
-/** A paired device's client: every request signed with its key. */
-export function signedClient(base: string, device: string, sign: Signer, opts: { label?: string; fetch?: FetchLike } = {}): NodeClient {
+/** A paired device's client: every request signed with its key, for its node (`node`, as it proved: none, as before). */
+export function signedClient(base: string, device: string, sign: Signer, opts: { label?: string; fetch?: FetchLike; node?: string } = {}): NodeClient {
   const label = opts.label ?? base;
   return client({
     base,
     label,
     unknown: `${label} doesn't know this device now (revoked, or never approved): pair it again with inv pair <invite>`,
-    headers: (method, path, body) => signRequest(device, sign, method, path, body),
+    headers: (method, path, body) => signRequest(device, sign, method, path, body, Date.now(), opts.node as DeviceId | undefined),
     fetch: opts.fetch ?? fetch,
   });
+}
+
+/**
+ * Whoami, proven: asked with a fresh challenge, which the node answers by signing it with the key its id is (the slice
+ * 8 note's item 11), and judged against the node this device pinned (core's judgeNodeProof). Signed for no node, as
+ * whoami's always is taken, so another node at this address still says which it is.
+ */
+export async function provenWhoami<T extends object>(base: string, device: string, sign: Signer, pinned: string | undefined, opts: { label?: string; fetch?: FetchLike } = {}): Promise<{ whoami: T & { proof?: string }; proven: NodeProven }> {
+  const label = opts.label ?? base;
+  const root = base.replace(/\/+$/, "");
+  const challenge = nodeChallenge();
+  const path = `${routes.whoami.path}?challenge=${challenge}`;
+  let response: Response;
+  try {
+    response = await (opts.fetch ?? fetch)(`${root}${path}`, { method: "GET", headers: { ...(await signRequest(device, sign, "GET", path, new Uint8Array())), ...zone() }, redirect: "error", signal: AbortSignal.timeout(CALL_TIMEOUT_MS) });
+  } catch (error) {
+    throw new CliError(`${label} isn't answering at ${root} (${(error as Error).message})`, EXIT.unreachable);
+  }
+  if (!response.ok) {
+    const said = (await response.json().catch(() => ({}))) as { error?: string };
+    throw refusal(response.status, said.error, label, `${label} doesn't know this device now (revoked, or never approved): pair it again with inv pair <invite>`);
+  }
+  const whoami = (await response.json()) as T & { node?: unknown; proof?: string };
+  return { whoami, proven: judgeNodeProof(pinned, whoami, challenge) };
+}
+
+/** The words for a node that proved to be another than the one this device paired with, or whose proof failed. */
+export function notTheNode(label: string, proven: NodeProven): CliError | null {
+  if (proven.kind === "other") return new CliError(`${label} proved to be another node (${proven.node.slice(2, 10)}) than the one inv paired with: nothing more is sent to it. If your node moved, pair again: inv pair <invite>`, EXIT.refused);
+  if (proven.kind === "false") return new CliError(`${label}'s proof of which node it is didn't hold: nothing more is sent to it`, EXIT.refused);
+  return null;
 }
 
 /** The local node's client: its admin token, over loopback (the node refuses it anywhere else). */

@@ -1,8 +1,8 @@
-import { ApiError, apiFor, setUnauthorizedHandler } from "./api.ts";
+import { ApiError, apiFor, provenWhoami, setUnauthorizedHandler } from "./api.ts";
 import { errorMessage } from "./context.ts";
 import { type BrowserIdentity, createIdentity, KeyStoreUnavailable, loadIdentity } from "./identity.ts";
 import { syncThemeColor } from "./prefs.ts";
-import { renderClockSkew, renderInsecure, renderKeyStoreUnavailable, renderPairFailed, renderRevoked, renderUnreachable, renderWelcome } from "./screens.ts";
+import { renderClockSkew, renderInsecure, renderKeyStoreUnavailable, renderNotYourNode, renderPairFailed, renderRevoked, renderUnreachable, renderWelcome } from "./screens.ts";
 import { openLink } from "./live.ts";
 import { renderShell } from "./shell.ts";
 import type { WhoAmI } from "./types.ts";
@@ -104,7 +104,15 @@ async function boot(): Promise<void> {
   const link = openLink(api);
   let whoami: WhoAmI;
   try {
-    whoami = await api.get<WhoAmI>("/api/whoami", AbortSignal.timeout(WHOAMI_TIMEOUT_MS));
+    // Proven: the node at this address signs this browser's challenge, so it is the one this browser paired with (it
+    // pins the first; the slice 8 note's item 11). Another, or a proof that fails: nothing more is asked of it.
+    const answered = await provenWhoami(identity, AbortSignal.timeout(WHOAMI_TIMEOUT_MS));
+    if (answered.proven.kind === "other" || answered.proven.kind === "false") {
+      link.stop();
+      renderNotYourNode(root, answered.proven);
+      return;
+    }
+    whoami = answered.whoami;
     unreachable = 0;
   } catch (error) {
     link.stop();

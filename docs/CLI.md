@@ -28,6 +28,10 @@ From a checkout, `bun run inv`.
   - `INVINCIBLE_KEYSTORE=file` keeps it in the file on a Mac too, which the tests use.
 - The pairing is kept in `cli.json` under `$INVINCIBLE_CLI_HOME`, else `$XDG_CONFIG_HOME/invincible`, else
   `~/.config/invincible`. It holds the node's address, the fleet, this device's id and its name. It holds no secret.
+- It holds the node's id too, as the node proved it when `inv` paired: the node signs a challenge of `inv`'s with the
+  key its id is. Every request `inv` signs names that node, so another node at that address refuses it (exit 30). A
+  pairing made before this is proven, and the id kept, at its next command. A proof that fails gets nothing more
+  (exit 30).
 - `inv pair` with no invite says what `inv` is paired with. `inv pair --forget` forgets the pairing and the key here.
   The node still lists the device until you revoke it there (`invincible revoke <device>`).
 

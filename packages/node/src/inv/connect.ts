@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { loadEnv } from "../env.ts";
 import { Home } from "../home.ts";
-import { adminClient, type FetchLike, type NodeClient, signedClient } from "./client.ts";
+import { adminClient, type FetchLike, type NodeClient, notTheNode, provenWhoami, signedClient } from "./client.ts";
 import { type CliEnv, CliHome, type Pairing } from "./config.ts";
 import { CliError, EXIT } from "./exit.ts";
 
@@ -32,7 +32,20 @@ export async function connect(opts: ConnectOptions): Promise<Connection> {
   if (pairing) {
     const key = await cli.key(pairing);
     const label = pairing.nodeName ?? new URL(pairing.node).host;
-    return { client: signedClient(pairing.node, key.id, key.sign, { label, ...(opts.fetch ? { fetch: opts.fetch } : {}) }), how: "paired", pairing };
+    const fetching = opts.fetch ? { fetch: opts.fetch } : {};
+    // A pairing made before this device named its node: which node it is, proven, kept from now on (the slice 8 note's
+    // item 11). A node from before, which proves nothing, is spoken to as before.
+    let pinned = pairing;
+    if (pairing.nodeId === undefined) {
+      const { proven } = await provenWhoami(pairing.node, key.id, key.sign, undefined, { label, ...fetching });
+      const not = notTheNode(label, proven);
+      if (not) throw not;
+      if (proven.kind === "pin") {
+        pinned = { ...pairing, nodeId: proven.node };
+        cli.savePairing(pinned);
+      }
+    }
+    return { client: signedClient(pairing.node, key.id, key.sign, { label, ...fetching, ...(pinned.nodeId ? { node: pinned.nodeId } : {}) }), how: "paired", pairing: pinned };
   }
   const home = Home.resolve(opts.home ?? opts.env.INVINCIBLE_HOME);
   if (!home.exists()) {

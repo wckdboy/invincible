@@ -19,6 +19,8 @@ export interface WhoAmI {
   fleetName: string | null;
   /** Your agent's name, the node's to say (absent from a node from before it said one). */
   primaryName?: string | null;
+  /** Asked with a challenge: the node's proof that it is the node `node` names (absent from a node from before it). */
+  proof?: string;
 }
 
 export interface PresetView {

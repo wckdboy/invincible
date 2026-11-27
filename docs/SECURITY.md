@@ -100,6 +100,17 @@ The review also confirmed what held up:
 - **Which node it speaks to, proven.** Asked with a challenge (`/api/whoami?challenge=…`), whoami answers with the
   node's signature of it under its own domain (`invincible-node/v1`), by the key its id is. A device checks that against
   the id it says (`verifyNodeProof`), so a node can't say it is another, and pins it.
+  - **The web app and `inv`** pin it from their first proven whoami: at pairing, or for a pairing made before this, at
+    the next start (core's `judgeNodeProof`). They sign every request for it from then on, so another node at the same
+    address refuses them (`inv` exits 30).
+  - **The web app asks again at every start.** A node that proves to be another, or whose proof fails, is asked
+    nothing more, and the page says so. `inv`, not yet pinned, exits 30 on a proof that fails.
+  - **A node from before, which proves nothing,** is spoken to as before, until the cutoff.
+  - **What the proof doesn't do:** it doesn't bind the connection. Something in the middle that passed whoami, and the
+    requests after it, on to your node is kept out by the tailnet's encryption and `tailscale serve`'s HTTPS, not by
+    this.
+  - **The tests:** `packages/core/test/core.test.ts`, `apps/web/src/api.test.ts` and
+    `packages/node/test/inv/inv.e2e.test.ts`.
 - **Once, across a restart too.** A node that restarts forgets the nonces it saw, so it refuses a request signed before
   it began: that one may have been taken already. A device's next request is signed after, and is taken. The same holds
   for a node's link calls over Q-AMP (`packages/node/test/request-auth.e2e.test.ts`,

@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { decodeInvite, DeviceName, type Invite } from "@invincible/core";
 import { type FetchLike as LinkFetch, requestPairing, waitForApproval } from "@invincible/link";
-import { type FetchLike, signedClient } from "./client.ts";
+import { type FetchLike, notTheNode, provenWhoami } from "./client.ts";
 import { type CliEnv, CliHome, keystoreFor, type Pairing } from "./config.ts";
 import { CliError, EXIT, usageError } from "./exit.ts";
 import type { Whoami } from "./view.ts";
@@ -92,11 +92,13 @@ export async function pairCommand(opts: PairOptions, io: PairIo): Promise<PairRe
       if (/fetch failed|Unable to connect|ECONNREFUSED/i.test(error.message)) throw new CliError(`the node stopped answering at ${invite.e} (${error.message})`, EXIT.unreachable);
       throw new CliError(error.message, EXIT.refused);
     });
-    // Approved: what the node says this device is, asked as this device, signed.
-    const client = signedClient(invite.e, key.id, key.sign, { ...(opts.fetch ? { fetch: opts.fetch } : {}) });
-    const me = await client.call<Whoami>("whoami");
+    // Approved: what the node says this device is, asked as this device, signed; and which node it is, proven, which
+    // this device pins and names in what it signs from then on (the slice 8 note's item 11).
+    const { whoami: me, proven } = await provenWhoami<Whoami>(invite.e, key.id, key.sign, undefined, { ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+    const not = notTheNode(invite.e, proven);
+    if (not) throw not;
     if (me.device !== key.id || me.kind !== "client") throw new CliError("the node answered as if this device were another: not paired", EXIT.refused);
-    const pairing: Pairing = { v: 1, node: invite.e, nodeName: me.nodeName ?? null, fleet: invite.f, device: key.id, name, keystore, pairedAt: Date.now() };
+    const pairing: Pairing = { v: 1, node: invite.e, nodeName: me.nodeName ?? null, fleet: invite.f, device: key.id, name, keystore, pairedAt: Date.now(), ...(proven.kind === "pin" ? { nodeId: proven.node } : {}) };
     cli.savePairing(pairing);
     io.say(`Paired with ${me.nodeName}${me.fleetName ? ` in ${me.fleetName}` : ""}. It may: ${me.scopes.join(", ")}. inv shows the board.`);
     return asResult(pairing);

@@ -12,6 +12,8 @@ export interface BrowserIdentity {
   publicKey: CryptoKey;
   enrolled: boolean;
   name: string;
+  /** The node it speaks to, as that node proved (api.ts provenWhoami): what it signs names it. Absent: none proved yet. */
+  node?: string;
 }
 
 const DB = "invincible";
