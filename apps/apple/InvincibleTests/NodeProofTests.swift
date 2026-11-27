@@ -43,10 +43,27 @@ struct NodeProofTests {
         #expect(judge(proof.node, proof.node, nil) == .older)
     }
 
-    @Test func untilThisBuildCanCheckAProofEveryNodeIsSpokenToAsBefore() throws {
-        let proof = try #require(vectors.nodeProofs.first)
-        #expect(NodeProof.judge(pinned: nil, node: proof.node, proof: proof.proof, challenge: proof.challenge, check: .none) == .older)
-        #expect(NodeProof.judge(pinned: proof.anotherNode, node: proof.node, proof: proof.proof, challenge: proof.challenge, check: .none) == .older)
+    // The lead's word of 27 November 2026: whoami's proof is checked under Ed25519's strict rule, as core checks it.
+    @Test func theAppsCheckerTakesCoresProofsUnderTheStrictRuleAndNothingElse() throws {
+        for proof in vectors.nodeProofs {
+            #expect(NodeProof.Checker.app.verify(proof.node, proof.challenge, proof.proof))
+            #expect(NodeProof.judge(pinned: nil, node: proof.node, proof: proof.proof, challenge: proof.challenge, check: .app) == .pin(proof.node))
+            #expect(!NodeProof.Checker.app.verify(proof.anotherNode, proof.challenge, proof.proof))
+            #expect(!NodeProof.Checker.app.verify(proof.node, NodeProof.challenge(), proof.proof))
+        }
+        // A node id that is the identity's point, and its "proof" (R the identity, S zero), which verifies anything under
+        // ZIP-215: refused, as core refuses it.
+        var identity = Data(count: 32)
+        identity[0] = 1
+        let weak = "n_" + identity.base64URLEncodedString()
+        let forgery = (identity + Data(count: 32)).base64URLEncodedString()
+        #expect(NodeProof.judge(pinned: nil, node: weak, proof: forgery, challenge: vectors.nodeProofs[0].challenge, check: .app) == .failed)
+        // A proof written another way in base64url (its last character's unused bits set) is never taken, as core's isn't.
+        let proof = vectors.nodeProofs[0]
+        let last = proof.proof.last!
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+        let other = alphabet.first { $0 != last && Data(base64URLEncoded: String(proof.proof.dropLast()) + String($0)) == Data(base64URLEncoded: proof.proof) }
+        if let other { #expect(!NodeProof.Checker.app.verify(proof.node, proof.challenge, String(proof.proof.dropLast()) + String(other))) }
     }
 
     @Test func aPairingFromBeforeHasNoNodePinnedAndOneSavedSinceKeepsIt() throws {

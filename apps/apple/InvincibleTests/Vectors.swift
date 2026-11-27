@@ -54,6 +54,18 @@ struct Vectors: Decodable {
         let headers: [String: String]
     }
 
+    /// An Ed25519 signature, from RFC 8032 or Wycheproof, with core's answer under the strict rule (verifyEd25519Strict),
+    /// and whether its key and its R are points the rule takes (strictEd25519Point).
+    struct Ed25519Vector: Decodable {
+        let source: String
+        let key: String
+        let msg: String
+        let sig: String
+        let valid: Bool
+        let keyStrict: Bool
+        let rStrict: Bool
+    }
+
     /// A node's proof of its id: its Ed25519 signature of a device's challenge, which another node's id doesn't verify.
     struct NodeProofCase: Decodable {
         let node: String
@@ -415,6 +427,7 @@ struct Vectors: Decodable {
     let requests: [Request]
     let requestsForNode: [NodeRequest]
     let nodeProofs: [NodeProofCase]
+    let ed25519: [Ed25519Vector]
     let canonical: [Canonical]
     let pairing: Pairing
     let agents: AgentsSection
