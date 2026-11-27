@@ -41,8 +41,8 @@ describe("what your agent approves itself in a repository you gave an agent", ()
   const ship = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}) => github({ native: "github.ship", changes: CODE, base: MAIN, ...over }, { branch: "invincible/units", title: "Units", ...args });
   // A fix onto a branch it shipped: the commit it last pushed there (its receipt's, 12 hex), and where the fix began.
   const PUSHED = "c".repeat(40);
-  const fix = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}) => github({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", changes: CODE, base: PUSHED, pushed: PUSHED.slice(0, 12), ...over }, { branch: "invincible/units", title: "Fix", ...args });
-  const pull = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}) => github({ pushed: PUSHED.slice(0, 12), ...over }, { head: "invincible/units", base: "main", title: "Units", ...args });
+  const fix = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}) => github({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", changes: CODE, base: PUSHED, pushed: PUSHED, ...over }, { branch: "invincible/units", title: "Fix", ...args });
+  const pull = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}) => github({ pushed: PUSHED, ...over }, { head: "invincible/units", base: "main", title: "Units", ...args });
   const words = (path: string, args: Record<string, unknown>, over: Partial<OwnCall> = {}) => github({ path, ...over }, args);
   const ITS_THREAD: GitHubFacts = { user: { id: 501 }, thread: { number: 4, authorId: 501 } };
 
@@ -86,7 +86,9 @@ describe("what your agent approves itself in a repository you gave an agent", ()
     // Where another branch stands says nothing of this one; nor does nothing said; nor a receipt with no commit.
     expect(ownApproval(fix(), AGENTS, at("invincible/other", PUSHED))).toBeNull();
     expect(ownApproval(fix(), AGENTS, {})).toBeNull();
-    for (const pushed of ["", "c", "cccc", "not-a-commit"]) expect([pushed, ownApproval(fix({ pushed }), AGENTS, at("invincible/units", PUSHED))]).toEqual([pushed, null]);
+    // Named whole, and the very commit (the review of 27 November, N3: 48 bits of a commit can be found by force).
+    for (const pushed of ["", "c", "cccc", "not-a-commit", PUSHED.slice(0, 12), PUSHED.slice(0, 39)]) expect([pushed, ownApproval(fix({ pushed }), AGENTS, at("invincible/units", PUSHED))]).toEqual([pushed, null]);
+    expect(ownApproval(fix({ base: `${PUSHED.slice(0, 12)}${"7".repeat(28)}` }), AGENTS, at("invincible/units", `${PUSHED.slice(0, 12)}${"7".repeat(28)}`))).toBeNull();
   });
 
   test("a pull request is its own only from a branch it shipped, as it last pushed it, into your default branch", () => {
@@ -97,8 +99,10 @@ describe("what your agent approves itself in a repository you gave an agent", ()
     // Into a branch that isn't your default one: its CI would run from a merge with whatever is there.
     expect(ownApproval(pull({}, { base: "invincible/pr-7" }), AGENTS, at("invincible/units", PUSHED))).toBeNull();
     expect(ownApproval(pull(), AGENTS, { head: { branch: "invincible/units", sha: PUSHED } })).toBeNull();
-    // Where another branch stands says nothing of this one.
+    // Where another branch stands says nothing of this one; a branch at a commit that only begins as it pushed is moved.
     expect(ownApproval(pull(), AGENTS, at("invincible/other", PUSHED))).toBeNull();
+    expect(ownApproval(pull(), AGENTS, at("invincible/units", `${PUSHED.slice(0, 12)}${"7".repeat(28)}`))).toBeNull();
+    expect(ownApproval(pull({ pushed: PUSHED.slice(0, 12) }), AGENTS, at("invincible/units", PUSHED))).toBeNull();
     // A branch that isn't its (yours, another fork's), or none, is yours whatever GitHub says (Ivo's review).
     for (const head of ["feat/orders", "main", "someone:invincible/units", "invincible/", undefined]) {
       const call = pull({}, { head });
@@ -269,9 +273,9 @@ describe("words a repository's bots read as a command", () => {
       [call({}, { title: "Units" }), facts],
       [call({ path: "/repos/{owner}/{repo}/issues/{number}/comments" }, { number: 4 }), facts],
       [call({ path: "/repos/{owner}/{repo}/pulls/{number}/reviews" }, { number: 4, event: "COMMENT" }), facts],
-      [call({ path: "/repos/{owner}/{repo}/pulls", pushed: SHA.slice(0, 12) }, { head: "invincible/units", base: "main", title: "Units" }), { ...facts, head: { branch: "invincible/units", sha: SHA } }],
+      [call({ path: "/repos/{owner}/{repo}/pulls", pushed: SHA }, { head: "invincible/units", base: "main", title: "Units" }), { ...facts, head: { branch: "invincible/units", sha: SHA } }],
       [call({ native: "github.ship", path: "/repos/{owner}/{repo}/pulls", changes: ["src/units.ts"], base: SHA }, { branch: "invincible/units", title: "Units" }), { ...facts, head: { branch: "main", sha: SHA } }],
-      [call({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", changes: ["src/units.ts"], base: SHA, pushed: SHA.slice(0, 12) }, { branch: "invincible/units", title: "Fix" }), { ...facts, head: { branch: "invincible/units", sha: SHA } }],
+      [call({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", changes: ["src/units.ts"], base: SHA, pushed: SHA }, { branch: "invincible/units", title: "Fix" }), { ...facts, head: { branch: "invincible/units", sha: SHA } }],
     ];
     for (const [one, said] of cases) {
       // Its own, as it is: where it may speak (a repository you gave an agent, and for issues and threads a private one of yours).
@@ -328,9 +332,9 @@ describe("what your agent approves itself in a private repository of your own", 
   test("there it pushes nothing and opens no pull request: those run the repository's CI with its secrets, so they ask outside the repositories you gave an agent", () => {
     const SHA = "c".repeat(40);
     const all: GitHubFacts = { ...OWN_THREAD, head: { branch: "invincible/units", sha: SHA } };
-    expect(ownApproval(call({ path: "/repos/{owner}/{repo}/pulls", pushed: SHA.slice(0, 12) }, { head: "invincible/units", base: "main" }), [], all)).toBeNull();
+    expect(ownApproval(call({ path: "/repos/{owner}/{repo}/pulls", pushed: SHA }, { head: "invincible/units", base: "main" }), [], all)).toBeNull();
     expect(ownApproval(call({ native: "github.ship", path: "/repos/{owner}/{repo}/pulls", changes: ["src/units.ts"], base: SHA }, { branch: "invincible/units" }), [], { ...all, head: { branch: "main", sha: SHA } })).toBeNull();
-    expect(ownApproval(call({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", changes: ["src/units.ts"], base: SHA, pushed: SHA.slice(0, 12) }, { branch: "invincible/units" }), [], all)).toBeNull();
+    expect(ownApproval(call({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", changes: ["src/units.ts"], base: SHA, pushed: SHA }, { branch: "invincible/units" }), [], all)).toBeNull();
     expect(ownApproval(call({ method: "PUT", path: "/repos/{owner}/{repo}/pulls/{number}/merge" }, { number: 4 }), [], OWN_THREAD)).toBeNull();
   });
 
@@ -375,7 +379,7 @@ describe("what every replica holds your agent's own approval to", () => {
 
   test("what would make a call its own, were GitHub to say it, keeps what the node itself knows of it", () => {
     const SHA = "c".repeat(40);
-    const fix: OwnCall = { class: "outward", origin: "https://api.github.com", native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", args: { owner: "amiriteorg", repo: "invincible", branch: "invincible/units" }, by: "primary", changes: ["src/units.ts"], base: SHA, pushed: SHA.slice(0, 12) };
+    const fix: OwnCall = { class: "outward", origin: "https://api.github.com", native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", args: { owner: "amiriteorg", repo: "invincible", branch: "invincible/units" }, by: "primary", changes: ["src/units.ts"], base: SHA, pushed: SHA };
     expect(ownApproval(fix, ["https://github.com/amiriteorg/invincible"], supposedFacts(fix))).toStartWith("a fix pushed onto invincible/units");
     // A fix that began elsewhere than where it last pushed can't be its own, whatever GitHub says.
     expect(ownApproval({ ...fix, base: "d".repeat(40) }, ["https://github.com/amiriteorg/invincible"], supposedFacts({ ...fix, base: "d".repeat(40) }))).toBeNull();

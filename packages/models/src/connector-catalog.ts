@@ -241,7 +241,7 @@ export const CATALOG: Record<string, CatalogEntry> = {
             owner,
             repo,
             number,
-            sha: { type: "string", pattern: "[0-9a-f]{7,40}", required: true, description: "The head commit that was proven (at least its first seven hex digits)" },
+            sha: { type: "string", pattern: "[0-9a-f]{40}|[0-9a-f]{64}", required: true, description: "The head commit that was proven, whole" },
             method: { type: "string", enum: ["merge", "squash", "rebase"], description: "How it merges (by default one the repository allows: a merge commit, squash, then rebase)" },
           },
           class: "outward",

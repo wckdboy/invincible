@@ -140,8 +140,8 @@ export interface OwnCall {
   changes?: readonly string[];
   /** The commit a push is built on (a shipment's kept manifest says): absent, not known. */
   base?: string;
-  /** The commit your agent last pushed onto the branch the call names (its done shipment's or fix's receipt says it, at
-   * least 12 hex): absent, it pushed none there, and the branch isn't one it shipped. */
+  /** The commit your agent last pushed onto the branch the call names (its done shipment's or fix's receipt says it,
+   * whole): absent, it pushed none there, and the branch isn't one it shipped. */
   pushed?: string;
 }
 
@@ -328,9 +328,10 @@ function onItsThread(call: OwnCall, what: "a comment" | "a review", where: strin
 
 /** A review that comments or asks for changes, never one that approves. */
 const reviewsOnly = (call: OwnCall) => ["COMMENT", "REQUEST_CHANGES"].includes(String(call.args.event ?? "").toUpperCase());
-const isCommit = (sha: unknown): sha is string => typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha);
-/** Whether a branch standing at `sha` stands where your agent last pushed it (`pushed`: that commit's first 12 hex or more). */
-const lastPushedAt = (pushed: unknown, sha: string): boolean => typeof pushed === "string" && /^[0-9a-f]{12,40}$/.test(pushed) && sha.startsWith(pushed);
+/** A whole commit id: 40 hex (SHA-1), or 64 should GitHub give SHA-256. */
+const isCommit = (sha: unknown): sha is string => typeof sha === "string" && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(sha);
+/** Whether a branch standing at `sha` stands where your agent last pushed it: the very commit, whole, never a prefix. */
+const lastPushedAt = (pushed: unknown, sha: string): boolean => isCommit(pushed) && sha === pushed;
 /** The repository's default branch, as GitHub said it of this repository. */
 const defaultBranchOf = (named: string, { repo }: GitHubFacts): string | undefined => (repo && repo.name.toLowerCase() === named.toLowerCase() ? repo.defaultBranch : undefined);
 
@@ -356,7 +357,7 @@ export function supposedFacts(call: OwnCall): GitHubFacts {
   const { owner, repo, number, base } = call.args;
   const defaultBranch = typeof base === "string" ? base : "main";
   const branch = judgedBranch(call, defaultBranch);
-  const sha = isCommit(call.base) ? call.base : typeof call.pushed === "string" ? call.pushed.padEnd(40, "0") : "";
+  const sha = isCommit(call.base) ? call.base : isCommit(call.pushed) ? call.pushed : "";
   return {
     user: { id: 1 },
     repo: { name: `${String(owner)}/${String(repo)}`, private: true, fork: false, ownerId: 1, ownerType: "User", defaultBranch },
@@ -390,7 +391,7 @@ export function ownApprovalInLog(call: OwnCall & { by: string }): string | null 
   const { owner, repo } = call.args;
   if (typeof owner !== "string" || typeof repo !== "string") return null;
   const sha = isCommit(call.base) ? call.base : "0".repeat(40);
-  const told: OwnCall = { ...call, changes: call.changes ?? [], base: sha, pushed: call.pushed ?? sha.slice(0, 12) };
+  const told: OwnCall = { ...call, changes: call.changes ?? [], base: sha, pushed: call.pushed ?? sha };
   return whereIts(told, [`https://github.com/${owner}/${repo}`], supposedFacts(told));
 }
 

@@ -44,7 +44,7 @@ const asCall = (t: (typeof tools)[number], args: Record<string, unknown> = ARGS)
   by: "primary",
   changes: ["src/units.ts"],
   base: SHA,
-  pushed: SHA.slice(0, 12),
+  pushed: SHA,
 });
 const said = (call: OwnCall) => supposedFacts(call);
 

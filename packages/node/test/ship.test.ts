@@ -164,7 +164,7 @@ describe("shipping to GitHub", () => {
     const gh = fakeGitHub({ heads: { "invincible/units": BASE } });
     const result = await shipToGitHub({ github: gh.github, artifact: kept(SHIPMENT) }, UPDATE, true);
     expect(result).toMatchObject({ ok: true, status: 200, url: "https://github.com/amiriteorg/shipyard/pull/7" });
-    expect(result.receipt).toBe(`3 files pushed onto invincible/units, commit ${"c".repeat(12)}: pull request #7 updated, https://github.com/amiriteorg/shipyard/pull/7`);
+    expect(result.receipt).toBe(`3 files pushed onto invincible/units, commit ${"c".repeat(40)}: pull request #7 updated, https://github.com/amiriteorg/shipyard/pull/7`);
     expect(gh.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
       "GET /repos/amiriteorg/shipyard/git/ref/heads/invincible/units",
       `GET /repos/amiriteorg/shipyard/git/commits/${BASE}`,
@@ -458,7 +458,7 @@ describe("the gate, end to end", () => {
     expect((await send(home.adminToken(), "decideAction", { id: asked.body.action, approve: true })).status).toBe(200);
     const action = ((await send(home.adminToken(), "actions")).body.actions as ActionView[]).find((a) => a.id === asked.body.action)!;
     expect(action.state).toBe("done");
-    expect(action.receipt).toBe(`200 3 files pushed onto invincible/fixing, commit ${"c".repeat(12)}: pull request #7 updated, https://github.com/amiriteorg/shipyard/pull/7`);
+    expect(action.receipt).toBe(`200 3 files pushed onto invincible/fixing, commit ${"c".repeat(40)}: pull request #7 updated, https://github.com/amiriteorg/shipyard/pull/7`);
     const sent = seen.slice(before);
     expect(sent.filter((s) => s.method === "PATCH").map((s) => s.url)).toEqual(["https://api.github.com/repos/amiriteorg/shipyard/git/refs/heads/invincible/fixing"]);
     expect(sent.some((s) => s.method === "POST" && (s.url.endsWith("/pulls") || s.url.endsWith("/git/refs")))).toBe(false);

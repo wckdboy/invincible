@@ -149,7 +149,7 @@ async function ship(deps: ShipDeps, args: Record<string, ArgValue>, update: bool
     if (moved.status !== 200) return fail(moved.status, `committed ${changed} (${sha.slice(0, 12)}), but ${branch} wasn't moved onto it: ${String(moved.json?.message ?? moved.status).slice(0, 300)}`);
     const open = await deps.github("GET", `${at}/pulls?head=${seg(owner)}:${seg(branch)}&state=open&per_page=1`);
     const pr = open.status === 200 && Array.isArray(open.json) ? open.json[0] : undefined;
-    return { ok: true, status: 200, ...(pr?.html_url ? { url: String(pr.html_url) } : {}), receipt: `${changed} pushed onto ${branch}, commit ${sha.slice(0, 12)}${pr ? `: pull request #${pr.number} updated, ${pr.html_url}` : ""}` };
+    return { ok: true, status: 200, ...(pr?.html_url ? { url: String(pr.html_url) } : {}), receipt: `${changed} pushed onto ${branch}, commit ${sha}${pr ? `: pull request #${pr.number} updated, ${pr.html_url}` : ""}` };
   }
   const ref = await deps.github("POST", `${at}/git/refs`, { ref: `refs/heads/${branch}`, sha });
   if (ref.status !== 201) return fail(ref.status, `couldn't create the branch ${branch}: ${ref.status}`);
@@ -159,7 +159,7 @@ async function ship(deps: ShipDeps, args: Record<string, ArgValue>, update: bool
     return fail(pr.status, `committed ${changed} on ${branch} (${String(commit.json.sha).slice(0, 12)}), but the pull request wasn't opened: ${String(why).slice(0, 300)}`);
   }
   const url = String(pr.json.html_url);
-  return { ok: true, status: 201, url, receipt: `pull request #${pr.json.number}: ${url} (${changed} on ${branch} into ${base}, commit ${String(commit.json.sha).slice(0, 12)})` };
+  return { ok: true, status: 201, url, receipt: `pull request #${pr.json.number}: ${url} (${changed} on ${branch} into ${base}, commit ${String(commit.json.sha)})` };
 }
 
 /**

@@ -228,7 +228,7 @@ describe("its pushes and its words in a repository you gave an agent", () => {
     const tool = fix ? "ship.update" : "ship";
     w.store.emit(w.identity, "action.requested", { id, connector: "github", tool, args: { owner: "lin-example", repo, artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", branch, title: "Units" }, class: "outward", target: `POST /repos/lin-example/${repo}/pulls (${tool})`, by: "team.0123456789.ada", expires: Date.UTC(2026, 10, 28) });
     w.store.emit(w.identity, "action.decided", { id, verdict: "approved" }, { trust: "owner" });
-    const receipt = fix ? `200 1 file pushed onto ${branch}, commit ${sha.slice(0, 12)}: pull request #9 updated, https://github.com/lin-example/${repo}/pull/9` : `201 pull request #9: https://github.com/lin-example/${repo}/pull/9 (1 file on ${branch} into main, commit ${sha.slice(0, 12)})`;
+    const receipt = fix ? `200 1 file pushed onto ${branch}, commit ${sha}: pull request #9 updated, https://github.com/lin-example/${repo}/pull/9` : `201 pull request #9: https://github.com/lin-example/${repo}/pull/9 (1 file on ${branch} into main, commit ${sha})`;
     w.store.emit(w.identity, "action.done", { id, ok: true, status: fix ? 200 : 201, receipt });
   }
 
@@ -310,9 +310,11 @@ describe("its pushes and its words in a repository you gave an agent", () => {
       w.store.emit(w.identity, "action.decided", { id, verdict: "approved" }, { trust: "owner" });
       w.store.emit(w.identity, "action.done", { id, ok, status: ok ? 201 : 502, receipt });
     };
-    // A shipment that failed, its receipt quoting a commit; an issue whose answer happens to name one.
-    file(`a_${"F".repeat(22)}`, "ship", false, `502 GitHub said: commit ${PUSHED.slice(0, 12)} is unknown`);
-    file(`a_${"I".repeat(22)}`, "issue.create", true, `201 {"title":"Units","body":"commit ${PUSHED.slice(0, 12)}"}`);
+    // A shipment that failed, its receipt quoting a commit; an issue whose answer happens to name one; and a shipment's
+    // receipt from before receipts named the commit whole (12 hex: a prefix names no commit, the review of 27 November).
+    file(`a_${"O".repeat(22)}`, "ship", true, `201 pull request #9: https://github.com/lin-example/site/pull/9 (1 file on invincible/units into main, commit ${PUSHED.slice(0, 12)})`);
+    file(`a_${"F".repeat(22)}`, "ship", false, `502 GitHub said: commit ${PUSHED} is unknown`);
+    file(`a_${"I".repeat(22)}`, "issue.create", true, `201 {"title":"Units","body":"commit ${PUSHED}"}`);
     expect((await w.service.call(pull, vm)).status).toBe("asked");
     // (Once it has shipped there, it is.)
     shipped(w, "invincible/units");

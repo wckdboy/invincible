@@ -24,7 +24,7 @@ function github(answers: { pull?: object; repo?: object; merged?: { status: numb
   };
   return { sent, send };
 }
-const ARGS = { owner: "amiriteorg", repo: "shipyard", number: 7, sha: HEAD.slice(0, 12) };
+const ARGS = { owner: "amiriteorg", repo: "shipyard", number: 7, sha: HEAD };
 const merge = (args: Record<string, string | number> = ARGS, answers: Parameters<typeof github>[0] = {}) => {
   const gh = github(answers);
   return mergeNative()({ ...CATALOG.github!.manifest, origin: "https://api.github.com" }, args, gh.send).then((result) => ({ result, sent: gh.sent }));
@@ -33,7 +33,7 @@ const merge = (args: Record<string, string | number> = ARGS, answers: Parameters
 describe("a merge of its agents' proven work", () => {
   test("clean, its head what was proven: merged by GitHub's own merge, by a method the repository allows, the head it saw named so nothing else lands", async () => {
     const { result, sent } = await merge();
-    expect(result).toMatchObject({ ok: true, status: 200, body: `merged #7 into main (merge) at ${"d".repeat(12)}: https://github.com/amiriteorg/shipyard/pull/7` });
+    expect(result).toMatchObject({ ok: true, status: 200, body: `merged #7 into main (merge) at ${"d".repeat(40)}: https://github.com/amiriteorg/shipyard/pull/7` });
     expect(sent).toEqual([
       { method: "GET", path: "/repos/amiriteorg/shipyard/pulls/7" },
       { method: "GET", path: "/repos/amiriteorg/shipyard" },
@@ -56,7 +56,9 @@ describe("a merge of its agents' proven work", () => {
       [{ pull: pull({ mergeable_state: "unstable" }) }, "not merged: GitHub says #7 is unstable, and it merges only once every check and review its rules require has passed (clean)"],
       [{ pull: pull({ mergeable_state: "behind" }) }, "not merged: GitHub says #7 is behind, and it merges only once every check and review its rules require has passed (clean)"],
       [{ pull: pull({ mergeable: null, mergeable_state: "unknown" }) }, "not merged: GitHub says #7 is unknown, and it merges only once every check and review its rules require has passed (clean)"],
-      [{ pull: pull({ head: { sha: "e".repeat(40) } }) }, `not merged: #7's head is ${"e".repeat(12)}, not the ${"c".repeat(12)} that was proven: something was pushed onto it since`],
+      [{ pull: pull({ head: { sha: "e".repeat(40) } }) }, `not merged: #7's head is ${"e".repeat(40)}, not ${"c".repeat(40)}, which was proven: something was pushed onto it since`],
+      // The review of 27 November (N3): a commit that only begins as the proven one does (48 bits can be found) is another.
+      [{ pull: pull({ head: { sha: `${"c".repeat(12)}${"7".repeat(28)}` } }) }, `not merged: #7's head is ${"c".repeat(12)}${"7".repeat(28)}, not ${"c".repeat(40)}, which was proven: something was pushed onto it since`],
       [{ pull: pull({ merged: true }) }, "not merged: #7 is merged already"],
       [{ pull: pull({ state: "closed" }) }, "not merged: #7 is closed"],
     ] as const) {
@@ -64,6 +66,14 @@ describe("a merge of its agents' proven work", () => {
       expect([said, result.ok]).toEqual([said, false]);
       expect(result.body).toBe(said);
       expect([said, sent.map((s) => s.method)]).toEqual([said, sent.length === 2 ? ["GET", "GET"] : ["GET"]]);
+    }
+  });
+
+  test("the commit that was proven is named whole: a prefix of it merges nothing, and GitHub isn't asked to", async () => {
+    for (const sha of ["c".repeat(12), "c".repeat(39), "c".repeat(41)]) {
+      const { result, sent } = await merge({ ...ARGS, sha }, {});
+      expect([sha.length, result.ok, result.body]).toEqual([sha.length, false, "not merged: the commit that was proven isn't named whole"]);
+      expect(sent.filter((s) => s.method === "PUT")).toEqual([]);
     }
   });
 

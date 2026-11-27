@@ -42,7 +42,9 @@ export function mergeNative(): NativeTool {
     if (p.merged === true) return said(false, 409, `not merged: #${number} is merged already`);
     if (p.state !== "open") return said(false, 409, `not merged: #${number} is ${String(p.state)}`);
     const head = typeof p.head?.sha === "string" ? p.head.sha.toLowerCase() : "";
-    if (!/^[0-9a-f]{40}$/.test(head) || !head.startsWith(proven)) return said(false, 409, `not merged: #${number}'s head is ${head.slice(0, 12) || "unknown"}, not the ${proven.slice(0, 12)} that was proven: something was pushed onto it since`);
+    // The very commit that was proven, whole: never one that only begins as it does.
+    if (!/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(proven)) return said(false, 400, "not merged: the commit that was proven isn't named whole");
+    if (head !== proven) return said(false, 409, `not merged: #${number}'s head is ${head || "unknown"}, not ${proven}, which was proven: something was pushed onto it since`);
     if (p.mergeable !== true || p.mergeable_state !== "clean") return said(false, 409, `not merged: GitHub says #${number} is ${String(p.mergeable_state ?? "unknown")}, and it merges only once every check and review its rules require has passed (clean)`);
 
     // A method the repository allows: the one asked for, else the only one, else in GitHub's own order.
@@ -54,7 +56,7 @@ export function mergeNative(): NativeTool {
 
     const merged = await ask("PUT", `${at}/pulls/${number}/merge`, { sha: head, merge_method: method });
     if (merged.status !== 200 || merged.json?.merged !== true) return said(false, merged.status, `not merged: GitHub said ${merged.status}${typeof merged.json?.message === "string" ? `: ${merged.json.message}` : ""}`);
-    const sha = typeof merged.json.sha === "string" ? merged.json.sha.slice(0, 12) : "?";
+    const sha = typeof merged.json.sha === "string" ? merged.json.sha : "?";
     return said(true, 200, `merged #${number} into ${String(p.base?.ref ?? "its base")} (${method}) at ${sha}: ${String(p.html_url ?? "")}`.trim());
   };
 }

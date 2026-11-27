@@ -2600,7 +2600,7 @@ export function createApp(ctx: AppContext) {
     const { owner, repo, branch } = ship.args as { owner: string; repo: string; branch: string };
     const doneAt = (id: string) => { const hlc = ctx.store.lww(`action-done:${id}`)?.hlc; return hlc ? decodeHlc(hlc).ms : 0; };
     const last = pushed.filter((a) => String(a.args.owner).toLowerCase() === owner.toLowerCase() && String(a.args.repo).toLowerCase() === repo.toLowerCase() && a.args.branch === branch).sort((x, y) => doneAt(x.id) - doneAt(y.id)).at(-1);
-    return { connector: ship.connector, owner, repo, branch, head: /commit ([0-9a-f]{12})/.exec(last?.receipt ?? "")?.[1] ?? null };
+    return { connector: ship.connector, owner, repo, branch, head: /\bcommit ([0-9a-f]{64}|[0-9a-f]{40})\b/.exec(last?.receipt ?? "")?.[1] ?? null };
   }
   /* Its agents' proven work that it shipped, merged (team_merge; your word, 27 November 2026: merging is its, on by
    * default, in the repositories you gave your agents): filed as the node's own merge ("primary"), its own approval only

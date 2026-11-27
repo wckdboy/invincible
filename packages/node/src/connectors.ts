@@ -148,11 +148,12 @@ const readThread = (b: any): GitHubFacts["thread"] | null => (Number.isSafeInteg
 const readHead =
   (branch: string) =>
   (b: any): GitHubFacts["head"] | null =>
-    b?.ref === `refs/heads/${branch}` && b.object?.type === "commit" && typeof b.object.sha === "string" && /^[0-9a-f]{40}$/.test(b.object.sha) ? { branch, sha: b.object.sha } : null;
+    b?.ref === `refs/heads/${branch}` && b.object?.type === "commit" && typeof b.object.sha === "string" && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(b.object.sha) ? { branch, sha: b.object.sha } : null;
 /** A ref's path segment by segment, as GitHub's git/ref route takes a branch with slashes. */
 const refPath = (branch: string) => branch.split("/").map(encodeURIComponent).join("/");
-/** The commit a done shipment's or fix's receipt says it pushed ("… commit 9f2c1d0e4b7a …"). */
-const PUSHED_COMMIT = /\bcommit ([0-9a-f]{12})\b/;
+/** The commit a done shipment's or fix's receipt says it pushed, whole ("… commit <40 hex, or 64> …"): a receipt that
+ * names fewer digits names no commit of its (one written before receipts named them whole). */
+const PUSHED_COMMIT = /\bcommit ([0-9a-f]{64}|[0-9a-f]{40})\b/;
 
 /** The primary's own callers, whose calls it may approve itself (core's policy.ts primaryCaller, the rule every replica holds it to). */
 const isHis = primaryCaller;
@@ -237,7 +238,7 @@ export class ConnectorService {
 
   /**
    * The commit your agent last pushed onto a branch: the latest of its done shipments and fixes there, as each one's
-   * receipt says it (12 hex). Undefined: it never pushed there, so the branch isn't one it shipped.
+   * receipt says it, whole. Undefined: it never pushed there, so the branch isn't one it shipped.
    */
   private lastPushed(owner: string, repo: string, branch: string): string | undefined {
     const pushes = new Map<string, boolean>();

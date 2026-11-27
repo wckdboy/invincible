@@ -557,9 +557,9 @@ test("it merges its agents' proven work itself where it may: once GitHub says it
   expect(results(events).map((r) => [r.name, r.ok])).toEqual([["team_merge", false], ["team_ship", true], ["team_merge", true]]);
   expect(results(events)[0]!.summary).toContain("only work your agent shipped as a pull request is merged");
   const shipped = (await api<TeamSnapshot>("team")).tasks.find((t) => t.id === units)!.shipped!;
-  expect(told("team_merge")).toContain(`merged #${shipped.pr} into main (squash) at ${"d".repeat(12)}`);
+  expect(told("team_merge")).toContain(`merged #${shipped.pr} into main (squash) at ${"d".repeat(40)}`);
   expect(toGitHub.slice(before).filter((r) => r.startsWith("PUT "))).toEqual([`PUT /repos/amiriteorg/shipyard/pulls/${shipped.pr}/merge`]);
-  expect(await trail(units)).toContain(`Merged by your agent itself · merged #${shipped.pr} into main (squash) at ${"d".repeat(12)}: ${shipped.url}, its gates, its independent reviewer and the pull request's required checks having passed`);
+  expect(await trail(units)).toContain(`Merged by your agent itself · merged #${shipped.pr} into main (squash) at ${"d".repeat(40)}: ${shipped.url}, its gates, its independent reviewer and the pull request's required checks having passed`);
   const merge = (await api<{ actions: ActionView[] }>("actions")).actions.find((a) => a.tool === "merge" && a.args.number === shipped.pr)!;
   expect([merge.state, merge.self, merge.note]).toEqual(["done", true, "Your agent approved it itself: a merge of its agents' proven work, through GitHub's own merge once every check its rules require passed, in amiriteorg/shipyard, a repository you gave an agent"]);
   expect((await api<TeamSnapshot>("team")).tasks.find((t) => t.id === units)!.interventions).toBeUndefined();

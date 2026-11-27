@@ -46,9 +46,9 @@ function world() {
   const merged: unknown[] = [];
   const answer = (status: number, body: string): ReturnType<NativeTool> => Promise.resolve({ ok: status < 300, status, contentType: "text/plain", body, truncated: false, durationMs: 1 });
   const natives: Record<string, NativeTool> = {
-    "github.ship": () => answer(201, `pull request #7: ${URL7} (2 files on invincible/units into main, commit ${"c".repeat(12)})`),
-    "github.ship.update": () => answer(200, `1 file pushed onto invincible/units, commit ${"e".repeat(12)}: pull request #7 updated, ${URL7}`),
-    "github.merge": (_m, args) => (merged.push(args), answer(200, `merged #7 into main (squash) at ${"d".repeat(12)}: ${URL7}`)),
+    "github.ship": () => answer(201, `pull request #7: ${URL7} (2 files on invincible/units into main, commit ${"c".repeat(40)})`),
+    "github.ship.update": () => answer(200, `1 file pushed onto invincible/units, commit ${"e".repeat(40)}: pull request #7 updated, ${URL7}`),
+    "github.merge": (_m, args) => (merged.push(args), answer(200, `merged #7 into main (squash) at ${"d".repeat(40)}: ${URL7}`)),
   };
   const service = new ConnectorService({ store, vault, identity, local: new Database(":memory:"), ledger: () => {}, log: () => {}, natives, fetch: github, repositories: () => ["https://github.com/amiriteorg/shipyard"], shipment: (artifact) => KEPT[artifact] ?? null });
   return { service, merged };
@@ -64,7 +64,7 @@ describe("what a merge of its agents' work lands", () => {
     const w = world();
     expect((await w.service.call(ship("art_AAAAAAAAAAAAAAAAAAAAAA"), noa)).status).toBe("done");
     expect((await w.service.call(fix("art_BBBBBBBBBBBBBBBBBBBBBB"), noa)).status).toBe("done");
-    const merged = await w.service.call(merge("e".repeat(12)), { kind: "agent", by: "primary" });
+    const merged = await w.service.call(merge("e".repeat(40)), { kind: "agent", by: "primary" });
     expect(merged.status === "done" && merged.own).toBe("a merge of its agents' proven work, through GitHub's own merge once every check its rules require passed, in amiriteorg/shipyard, a repository you gave an agent");
   });
 
@@ -75,13 +75,13 @@ describe("what a merge of its agents' work lands", () => {
     expect(pushed.status).toBe("asked");
     w.service.decide(pushed.status === "asked" ? pushed.action : "", true, null);
     await w.service.drain();
-    expect((await w.service.call(merge("e".repeat(12)), { kind: "agent", by: "primary" })).status).toBe("asked");
+    expect((await w.service.call(merge("e".repeat(40)), { kind: "agent", by: "primary" })).status).toBe("asked");
     expect(w.merged).toEqual([]);
   });
 
   test("a pull request this node didn't ship, or one whose kept work it can't read: the merge is yours", async () => {
     const w = world();
-    expect((await w.service.call(merge("c".repeat(12)), { kind: "agent", by: "primary" })).status).toBe("asked");
+    expect((await w.service.call(merge("c".repeat(40)), { kind: "agent", by: "primary" })).status).toBe("asked");
     expect((await w.service.call(ship("art_DDDDDDDDDDDDDDDDDDDDDD"), noa)).status).toBe("asked");
     expect(w.merged).toEqual([]);
   });
