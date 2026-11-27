@@ -171,6 +171,60 @@ describe("a task's Live Activity, kept up from here while the app isn't in front
     expect(h.activities).toHaveLength(2);
   });
 
+  test("one that couldn't be told is told again by itself, after a pause that grows, though the team doesn't move", async () => {
+    // Its end above all: a task that ended while Apple's service failed once was left showing it running until the team
+    // next moved, which a quiet team may not do for hours (27 November 2026). Not every second either: after 5 s, longer
+    // each time it fails again.
+    let version = 1;
+    let state: ActivityState | null = working(["passed"]);
+    const answers: PushOutcome[] = [];
+    const h = harness({ sources: { tasks: { version: () => String(version), list: () => [] }, activity: () => state }, activityAnswer: () => answers.shift() });
+    h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "production" });
+    await h.service.lookAtActivities();
+    state = { phase: "ended", gates: ["passed"], review: "passed", verdict: "proven", gate: null, at: 0 };
+    version = 2;
+    const failed: PushOutcome = { ok: false, gone: false, status: 503, error: "Apple: 503", attempts: 1 };
+    answers.push(failed);
+    await h.service.lookAtActivities();
+    expect(h.activities.map((a) => a.event)).toEqual(["update", "end"]);
+    h.advance(1_000);
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(2);
+    h.advance(5_000);
+    answers.push(failed);
+    await h.service.lookAtActivities();
+    expect(h.activities.map((a) => a.event)).toEqual(["update", "end", "end"]);
+    // Failed again: the pause grows (not 5 s this time).
+    h.advance(5_000);
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(3);
+    h.advance(15_000);
+    await h.service.lookAtActivities();
+    expect(h.activities.map((a) => a.event)).toEqual(["update", "end", "end", "end"]);
+    expect(h.db.activities()).toEqual([]);
+  });
+
+  test("one whose sender threw is tried again as one that failed is", async () => {
+    const state: ActivityState = working(["waiting"]);
+    let threw = false;
+    const h = harness({
+      sources: { tasks: { version: () => "1", list: () => [] }, activity: () => state },
+      activityAnswer: () => {
+        if (threw) return undefined;
+        threw = true;
+        throw new Error("the stand-in's socket closed");
+      },
+    });
+    h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "development" });
+    await expect(h.service.lookAtActivities()).rejects.toThrow("the stand-in's socket closed");
+    h.advance(5_000);
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(2);
+    h.advance(60_000);
+    await h.service.lookAtActivities();
+    expect(h.activities).toHaveLength(2);
+  });
+
   test("forgotten when the app says so, when Apple no longer knows it, when its task is gone, or its device is", async () => {
     let state: ActivityState | null = working(["waiting"]);
     let version = 1;

@@ -185,6 +185,10 @@ const standsFor = (key: string): boolean => /^(notice|action|secret|connector|qu
 /** The asks that are reminded before they lapse. */
 const isAsk = (item: NotifyItem): boolean => itemTier(item) === "now" && (item.kind === "approval" || item.kind === "question");
 
+/** How long a Live Activity that couldn't be told waits before it is tried again, by failures in a row: 5 s, 15 s, a
+ * minute, then every 5 minutes, until it is told or is forgotten with the rest (ACTIVITY_KEEP_MS). */
+const ACTIVITY_RETRY_MS = [5_000, 15_000, 60_000, 5 * 60_000] as const;
+
 export class NotifyService {
   private readonly now: () => number;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -205,6 +209,9 @@ export class NotifyService {
   private tasksSeen: string | null = null;
   /** The team's version when the Live Activities were last told (null: tell them at the next look), and a look under way. */
   private activitiesSeen: string | null = null;
+  /** One couldn't be told: when they are looked at again whatever the team does, and how many looks in a row failed one. */
+  private activitiesRetryAt: number | null = null;
+  private activitiesFailed = 0;
   private telling = false;
   private keyProblem: string | null = null;
   private tagSalt: string | null = null;
@@ -339,7 +346,9 @@ export class NotifyService {
    * Called every second: once the team has moved (or an activity was just kept), each Live Activity is told how its task
    * stands now, where that changed since it was last told; an ended task's once more, with its verdict, and then it is
    * forgotten. Forgotten too: one Apple no longer knows, one whose task or device is gone, one older than Apple keeps
-   * any (ACTIVITY_KEEP_MS). One that couldn't be told is tried again when the team next moves.
+   * any (ACTIVITY_KEEP_MS). One that couldn't be told is tried again by itself after a pause that grows with each failure
+   * (ACTIVITY_RETRY_MS), or sooner if the team moves: a task that ended while Apple's service failed once was left showing
+   * it running until the team next moved (27 November 2026).
    */
   async lookAtActivities(): Promise<void> {
     const tasks = this.o.sources.tasks;
@@ -349,11 +358,14 @@ export class NotifyService {
     const kept = this.o.db.activities();
     if (!kept.length) return;
     const version = tasks.version();
-    if (version === this.activitiesSeen) return;
+    const now = this.now();
+    if (version === this.activitiesSeen && (this.activitiesRetryAt === null || now < this.activitiesRetryAt)) return;
     this.telling = true;
+    // (A send that throws, as one that fails, leaves them to be tried again.)
+    let failed = false;
+    let finished = false;
     try {
       this.activitiesSeen = version;
-      const now = this.now();
       for (const kept1 of kept) {
         const { device, task } = kept1;
         const state = now - kept1.at > ACTIVITY_KEEP_MS || !this.o.mind.activeDevice(device) ? null : activityOf(task);
@@ -367,9 +379,14 @@ export class NotifyService {
         const outcome = await send({ token: kept1.token, environment: kept1.environment }, { ...state, at: now }, ended ? "end" : "update", this.abort.signal);
         if (outcome.gone || (ended && outcome.ok)) this.o.db.dropActivity(device, task);
         else if (outcome.ok) this.o.db.saidActivity(device, task, said);
+        else failed = true;
       }
+      finished = true;
     } finally {
       this.telling = false;
+      const again = failed || !finished;
+      this.activitiesFailed = again ? this.activitiesFailed + 1 : 0;
+      this.activitiesRetryAt = again ? now + ACTIVITY_RETRY_MS[Math.min(this.activitiesFailed, ACTIVITY_RETRY_MS.length) - 1]! : null;
     }
   }
 
