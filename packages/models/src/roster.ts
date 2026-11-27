@@ -94,8 +94,8 @@ export const ROLES: Record<string, RoleSpec> = {
     effort: "low",
   },
   // An agent's eyes (Computer Use): the model its desktop's `look` puts a screenshot and a question to, through the
-  // gateway, from the agent's own VM. None until you name one: it must take images, and to be clicked on it must
-  // answer a place in the screenshot's own pixels (measured, not assumed: EVALS.md).
+  // gateway, from the agent's own VM. None until you name one: it must take images. The places it answers are taken
+  // from the coordinate space its check measured it answering in to the screen's pixels (checks.ts; EVALS.md).
   eyes: {
     description: "looks at an agent's screen: says what is on it, and where, in pixels (Computer Use)",
     defaults: [],
