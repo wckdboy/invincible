@@ -119,3 +119,81 @@ with tempfile.TemporaryDirectory(prefix="invincible-real-worker-") as root:
   const result = Bun.spawnSync(["python3", "-B", "-c", script], { timeout: 15000 });
   expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
 });
+
+test("a group whose leader has gone is ended as the run's own in its own boot and pid namespace; in another it names nothing here; an older marker still refuses", () => {
+  // (Linux never gives a group's number to another while the group has members: in the same boot and pid namespace,
+  // members of the marker's group are the run's. A marker another VM sharing /work wrote names nothing here.)
+  const scenario = String.raw`
+import tempfile
+with tempfile.TemporaryDirectory(prefix="invincible-process-ns-") as root:
+    D, PROC = Path(root) / "agent", Path(root) / "proc"
+    D.mkdir(); PROC.mkdir()
+    boot = PROC / "sys/kernel/random/boot_id"
+    boot.parent.mkdir(parents=True); boot.write_text("boot-A")
+    (PROC / "self/ns").mkdir(parents=True)
+    os.symlink("pid:[4026531836]", PROC / "self/ns/pid")
+    def process(pid, start, group=321):
+        path = PROC / str(pid)
+        path.mkdir(exist_ok=True)
+        fields = ["S", "1", str(group)] + ["0"] * 16 + [str(start)]
+        (path / "stat").write_text(str(pid) + " (worker) " + " ".join(fields))
+    def gone(pid):
+        (PROC / str(pid) / "stat").unlink(missing_ok=True)
+    def saved(run, ns):
+        value = {"pid": 321, "group": 321, "start": "100", "boot": "boot-A", "run": run, **({"ns": ns} if ns else {})}
+        (D / "process.json").write_text(json.dumps(value))
+        return value
+    signals = []
+    def kill(group, sig):
+        signals.append((group, sig))
+        gone(322)
+    os.killpg = kill
+    time.sleep = lambda _: None
+    # Its leader gone (its shell has exited), a child of its group left running (a server it started): ended with it,
+    # and its marker cleared.
+    saved("run-A", "pid:[4026531836]"); process(322, 101)
+    cleanup("run-A")
+    assert signals == [(321, signal.SIGTERM)], signals
+    assert marker() is None
+    # The same at its end: what it left running is ended, and its end is no failure.
+    signals.clear(); saved("run-B", "pid:[4026531836]"); process(322, 102)
+    finish("run-B")
+    assert signals == [(321, signal.SIGTERM)] and marker() is None
+    # Another namespace's marker (a seat's VM sharing this /work): the group of that number here is not the run's.
+    signals.clear(); saved("run-C", "pid:[4026532999]"); process(322, 103)
+    cleanup("run-C")
+    assert signals == [] and marker() is None
+    # Another boot's: the same.
+    signals.clear(); item = saved("run-D", "pid:[4026531836]"); item["boot"] = "boot-B"; (D / "process.json").write_text(json.dumps(item)); process(322, 104)
+    cleanup("run-D")
+    assert signals == [] and marker() is None
+    # An older marker, with no namespace said, is never enough to signal a group whose leader has gone.
+    signals.clear(); saved("run-E", None); process(322, 105)
+    try: cleanup("run-E")
+    except RuntimeError as error: assert "remains" in str(error)
+    else: raise AssertionError("an older marker must refuse")
+    assert signals == []
+`;
+  const result = Bun.spawnSync(["python3", "-B", "-c", `${AGENT_PROCESS_PY}\n${scenario}`]);
+  expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
+});
+
+test("a new marker says the pid namespace its run is in", () => {
+  const scenario = String.raw`
+import tempfile, subprocess
+with tempfile.TemporaryDirectory(prefix="invincible-process-record-") as root:
+    D = Path(root)
+    # (Recorded by a process in its own group, as a run's wrapper is.)
+    child = subprocess.run(["python3", "-I", "-c", SOURCE + "\nD = Path(" + repr(root) + ")\nrecord('run-N')"], start_new_session=True, capture_output=True)
+    if child.returncode == 0:
+        item = json.loads((D / "process.json").read_text())
+        assert item["ns"] == namespace(), item
+        assert item["ns"] == "" or item["ns"].startswith("pid:[")
+    else:
+        # (A machine with no /proc, as a Mac is, can't record one at all: there is nothing to say.)
+        assert b"own process group" in child.stderr or b"No such file" in child.stderr or b"proc" in child.stderr, child.stderr
+`;
+  const script = `SOURCE = ${JSON.stringify(AGENT_PROCESS_PY)}\nexec(SOURCE)\n${scenario}`;
+  const result = Bun.spawnSync(["python3", "-B", "-c", script], { timeout: 15000 });
+  expect({ exit: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exit: 0, stderr: "" });
+});

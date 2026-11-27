@@ -32,6 +32,46 @@ def marker():
 def matches(item, seen):
     return seen is not None and all(seen[k] == item[k] for k in ("start", "group", "boot"))
 
+def namespace():
+    # Which pid namespace this is: a VM's own, or another's that shares its /work (a seat's VM).
+    try:
+        return os.readlink(PROC / "self" / "ns" / "pid")
+    except OSError:
+        return ""
+
+def ours(item):
+    # Whether the marker's group, while any member of it lives, is still its run's: in the same boot and pid namespace a
+    # group's number is never another's while it has members. One with no namespace said (an older marker) never is.
+    ns = item.get("ns")
+    try:
+        same_boot = (PROC / "sys/kernel/random/boot_id").read_text().strip() == item["boot"]
+    except OSError:
+        same_boot = False
+    return isinstance(ns, str) and bool(ns) and ns == namespace() and same_boot
+
+def end(group, owned):
+    # TERM, a second's grace, then KILL: only while one of its first members still says it is that group.
+    try:
+        os.killpg(group, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    time.sleep(1)
+    remaining = members(group)
+    if remaining:
+        # The shell may exit on TERM before an ignoring child does. At least one
+        # original member must still identify this group before the final signal.
+        if not any(owned.get(pid) == state for pid, state in remaining.items()):
+            raise RuntimeError("Worker process group identity changed during cleanup")
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        until = time.monotonic() + 2
+        while members(group):
+            if time.monotonic() >= until:
+                raise RuntimeError("Worker process group did not stop")
+            time.sleep(0.02)
+
 def clear(item):
     current = marker()
     if current != item:
@@ -48,7 +88,7 @@ def record(run):
     seen = identity(pid)
     if seen is None or seen["group"] != pid:
         raise RuntimeError("Worker did not start in its own process group")
-    item = dict(seen, pid=pid, run=run)
+    item = dict(seen, pid=pid, run=run, ns=namespace())
     temp = D / ("process." + run + ".tmp")
     temp.write_text(json.dumps(item))
     os.replace(temp, D / "process.json")
@@ -88,40 +128,30 @@ def cleanup(run=None):
         clear(item)
         return
     if seen is None:
-        # The recorded leader is gone. Never signal an unidentified surviving group.
-        if members(item["pid"]):
+        # The recorded leader is gone. What is left of its group (a server it started, say) is ended as its run's in its
+        # own boot and namespace; another's (a marker from a VM sharing /work) names nothing here. An unidentified
+        # surviving group is never signalled: with no namespace said, its marker refuses.
+        left = members(item["pid"])
+        if left and ours(item):
+            end(item["pid"], left)
+        elif left and not item.get("ns"):
             raise RuntimeError("Worker leader is gone but its process group remains; stop the VM before resuming")
         clear(item)
         return
-    owned = members(item["pid"])
-    try:
-        os.killpg(item["pid"], signal.SIGTERM)
-    except ProcessLookupError:
-        clear(item)
-        return
-    time.sleep(1)
-    remaining = members(item["pid"])
-    if remaining:
-        # The shell may exit on TERM before an ignoring child does. At least one
-        # original member must still identify this group before the final signal.
-        if not any(owned.get(pid) == state for pid, state in remaining.items()):
-            raise RuntimeError("Worker process group identity changed during cleanup")
-        try:
-            os.killpg(item["pid"], signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        until = time.monotonic() + 2
-        while members(item["pid"]):
-            if time.monotonic() >= until:
-                raise RuntimeError("Worker process group did not stop")
-            time.sleep(0.02)
+    end(item["pid"], members(item["pid"]))
     clear(item)
 
 def finish(run):
     item = marker()
     if item and item["run"] == run:
         seen = identity(item["pid"])
-        if matches(item, seen) or (seen is None and members(item["pid"])):
+        if matches(item, seen):
+            raise RuntimeError("Worker process group remains after completion")
+        # What it left running once its leader ended (a server it started) is ended with it, as its own.
+        left = members(item["pid"]) if seen is None else {}
+        if left and ours(item):
+            end(item["pid"], left)
+        elif left and not item.get("ns"):
             raise RuntimeError("Worker process group remains after completion")
         clear(item)
 `;
