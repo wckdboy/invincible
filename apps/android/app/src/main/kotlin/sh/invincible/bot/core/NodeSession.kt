@@ -1,12 +1,30 @@
 package sh.invincible.bot.core
 
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
 /**
  * A session with the node this phone is paired with, and its proof of which node it is (NodeProof): whoami, asked with a
- * fresh challenge, judged against the node pinned ([pin]); the first proof pins the node, kept with the pairing
- * ([keep]); a node that proves to be another, or whose proof fails, is asked nothing more (NodePin) and said so
- * ([refused]). The primary's name comes with whoami's answer ([named]).
+ * fresh challenge, judged against the node pinned ([pin]). Held to the rules the review of apps-name-node set (27
+ * November 2026), which core and the Apple app hold too:
+ * 1. A new session proves first: nothing but whoami is signed (NodePin's gate) until its proof holds for the pinned node,
+ *    not its reads, its stream, its posts nor a notification's answer. A proof that fails, or names another node, is
+ *    "not your node" ([refused]), and nothing more is sent, not even whoami, until Try again. A whoami that gets no
+ *    answer proves nothing: everything else is held, and it is asked again after a pause.
+ * 2. Try again keeps the refusal while it asks, and lifts it only on a proof that holds; then the stream opens again
+ *    ([reopen]).
+ * 3. Once a node is pinned, no proof is a failed one (NodeProof.judge): a node that leaves it out is refused.
+ * 4. With no node pinned yet, after the cutoff (NodeProof.NAMED_FROM) it proves first, pins, then signs for the node; before
+ *    the cutoff, as before: it asks whoami first, and what it can't prove holds nothing back.
+ * 5. A late proof never writes over a newer pairing: the node it pins is kept with the pairing ([keep]) only while that
+ *    pairing is still this phone's ([isCurrent]).
+ * 6. The proof is judged off the caller's thread ([judging]: AppModel's is the main one), and nothing is taken from the
+ *    node, not even its primary's name ([named]), before it holds.
  *
- * Kept apart from AppModel, which needs an Android Context, so that the JVM tests hold it to its rules.
+ * Kept apart from AppModel, which needs an Android Context, so that the JVM tests hold it to these rules.
  */
 class NodeSession(
     val pin: NodePin,
@@ -14,49 +32,120 @@ class NodeSession(
     private val keep: (node: String) -> Unit,
     private val named: (String?) -> Unit,
     private val refused: (NodeError) -> Unit,
+    private val now: () -> Long = System::currentTimeMillis,
+    private val judging: CoroutineContext = Dispatchers.Default,
+    private val reopen: () -> Unit = {},
+    private val isCurrent: () -> Boolean = { true },
+    private val check: NodeProof.Checker = NodeProof.strict,
 ) {
-    /** Whoami has been asked, and its proof judged, this session. */
-    private var proven = false
+    /** One whoami at a time: whoever asks meanwhile waits for its judgement. */
+    private val asking = Mutex()
 
-    /** Whoami, proven, once a session and before anything else is asked. False: this phone's node isn't the one answering. */
-    suspend fun prove(): Boolean {
-        pin.refused?.let {
-            refused(it)
-            return false
-        }
-        if (proven) return true
-        val challenge = NodeProof.challenge()
-        // (Not answered: the reads after say why, and it is asked again at the next refresh.)
-        val who = try {
-            ask(challenge)
-        } catch (e: NodeError) {
-            return true
-        }
-        proven = true
-        named(who["primaryName"].string)
-        when (val said = NodeProof.judge(pin.node, who["node"].string, who["proof"].string, challenge)) {
-            is NodeProof.Proven.Pin -> {
-                pin.pin(said.node)
-                keep(said.node)
+    /** Its proof held (or, none pinned, a node from before answered) this session. */
+    @Volatile private var proven = false
+
+    /** When whoami, unanswered, may be asked again, and the pause after the next that goes unanswered. */
+    private var retryAt = 0L
+    private var pause = FIRST_PAUSE_MS
+
+    /**
+     * Whoami, proven, before anything else is sent; [fresh]: asked again though it held (the stream opening anew), so a
+     * node that changed at the address since is found. False: nothing but whoami may be sent (refused, or not proven yet).
+     */
+    suspend fun prove(fresh: Boolean = false): Boolean {
+        pin.refused?.let { return refusedNow(it) }
+        if (proven && !fresh) return true
+        return asking.withLock {
+            pin.refused?.let { return@withLock refusedNow(it) }
+            if (proven && !fresh) return@withLock true
+            // (Asked a moment ago and unanswered: the next whoami waits; nothing else goes meanwhile.)
+            if (now() < retryAt) return@withLock pin.isOpen
+            val challenge = NodeProof.challenge()
+            val who = try {
+                ask(challenge)
+            } catch (e: NodeError) {
+                retryAt = now() + pause
+                pause = minOf(pause * 2, LONGEST_PAUSE_MS)
+                // Before the cutoff, a pairing with no node pinned reads as it did: what it can't prove holds nothing back.
+                if (pin.node == null && now() < NodeProof.NAMED_FROM) pin.open()
+                return@withLock pin.isOpen
             }
-            is NodeProof.Proven.Other -> return notYours(NodeError.notYours(said.node))
-            NodeProof.Proven.Failed -> return notYours(NodeError.notYours(null))
-            else -> {}
+            retryAt = 0L
+            pause = FIRST_PAUSE_MS
+            when (val said = judged(who, challenge)) {
+                is NodeProof.Proven.Pin -> {
+                    pinned(said.node)
+                    held(who)
+                }
+                is NodeProof.Proven.Same, NodeProof.Proven.Older -> held(who)
+                is NodeProof.Proven.Other -> notYours(NodeError.notYours(said.node))
+                NodeProof.Proven.Failed -> notYours(NodeError.notYours(null))
+            }
         }
+    }
+
+    /**
+     * Try again, at a node refused: whoami asked past the refusal, which stands while it is out and after any answer but a
+     * proof that holds; one that holds lifts it, and the stream opens again ([reopen]).
+     */
+    suspend fun tryAgain(): Boolean {
+        if (pin.refused == null) return prove(fresh = true)
+        return asking.withLock {
+            val challenge = NodeProof.challenge()
+            val who = try {
+                ask(challenge)
+            } catch (e: NodeError) {
+                return@withLock false
+            }
+            when (val said = judged(who, challenge)) {
+                is NodeProof.Proven.Pin, is NodeProof.Proven.Same -> {
+                    if (said is NodeProof.Proven.Pin) pinned(said.node)
+                    pin.clear()
+                    held(who)
+                    reopen()
+                    true
+                }
+                is NodeProof.Proven.Other -> notYours(NodeError.notYours(said.node))
+                // (No proof at all is no proof that holds: the refusal stands as it was.)
+                NodeProof.Proven.Older -> refusedNow(pin.refused ?: NodeError.notYours(null))
+                NodeProof.Proven.Failed -> notYours(NodeError.notYours(null))
+            }
+        }
+    }
+
+    /** Whoami's answer judged where [judging] says: never on the thread that asked (AppModel's is the main one). */
+    private suspend fun judged(who: Json, challenge: String): NodeProof.Proven = withContext(judging) { NodeProof.judge(pin.node, who, challenge, check) }
+
+    /** A first proof: this session's client names the node from now on; its pairing keeps it, if still this phone's. */
+    private fun pinned(node: String) {
+        pin.pin(node)
+        if (isCurrent()) keep(node)
+    }
+
+    /** Its proof held: what the node said may be taken, and what isn't whoami may be sent. */
+    private fun held(who: Json): Boolean {
+        proven = true
+        pin.open()
+        named(who["primaryName"].string)
         return true
     }
 
     /** The node at this address isn't this phone's: said, and nothing more is sent there. */
     private fun notYours(why: NodeError): Boolean {
+        proven = false
         pin.refuse(why)
         refused(why)
         return false
     }
 
-    /** Try again, at a node that proved to be another: its proof is asked for afresh. */
-    suspend fun tryAgain(): Boolean {
-        pin.clear()
-        proven = false
-        return prove()
+    private fun refusedNow(why: NodeError): Boolean {
+        refused(why)
+        return false
+    }
+
+    private companion object {
+        /** The pause before an unanswered whoami is asked again, doubled each time it goes unanswered, to a minute. */
+        const val FIRST_PAUSE_MS = 2_000L
+        const val LONGEST_PAUSE_MS = 60_000L
     }
 }

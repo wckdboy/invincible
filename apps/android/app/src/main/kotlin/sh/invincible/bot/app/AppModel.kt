@@ -316,31 +316,42 @@ class AppModel(context: Context) {
     private fun connect() {
         val node = _paired.value
         // (Every request it signs names the node it proved to be, where it proved one: the slice 8 note's item 11.)
-        client = if (node != null) (key ?: runCatching { DeviceKey.load() }.getOrNull())?.let { NodeClient(node.origin, it, NodePin(node.nodeId)) } else null
-        session = client?.let(::sessionFor)
+        // (Nothing but whoami is sent until its proof holds: NodeSession opens the pin's gate.)
+        client = if (node != null) (key ?: runCatching { DeviceKey.load() }.getOrNull())?.let { NodeClient(node.origin, it, NodePin(node.nodeId, proofFirst = true)) } else null
+        session = client?.let { sessionFor(it, node!!) }
     }
 
     /** This session's proof of which node it speaks to (NodeSession), with the client it was made for. */
-    private var session: NodeSession? = null
+    @Volatile private var session: NodeSession? = null
 
-    private fun sessionFor(c: NodeClient): NodeSession = NodeSession(
-        c.pin,
-        ask = { challenge -> c.provenWhoami(challenge) },
-        keep = { id ->
-            _paired.value?.let { node ->
-                val pinned = node.copy(nodeId = id)
-                prefs.edit().putString("paired-node", pinned.json().text()).apply()
-                _paired.value = pinned
-            }
-        },
-        named = { Primary.named(it) },
-        refused = { _problem.value = it },
-    )
+    /** A session for [c], made for the pairing [made]: what its proof pins is kept with that pairing, and no other. */
+    private fun sessionFor(c: NodeClient, made: PairedNode): NodeSession {
+        val same = { node: PairedNode? -> node != null && node.origin == made.origin && node.device == made.device }
+        return NodeSession(
+            c.pin,
+            ask = { challenge -> c.provenWhoami(challenge) },
+            keep = { id ->
+                _paired.value?.takeIf(same)?.let { node ->
+                    val pinned = node.copy(nodeId = id)
+                    prefs.edit().putString("paired-node", pinned.json().text()).apply()
+                    _paired.value = pinned
+                }
+            },
+            named = { Primary.named(it) },
+            refused = { _problem.value = it },
+            // (Its stream, refused or waiting, opened again once Try again's proof holds.)
+            reopen = { reconnect() },
+            isCurrent = { same(_paired.value) && client === c },
+        )
+    }
 
-    /** Whoami, proven (NodeSession). False: this phone's node isn't the one answering there. */
+    /** Whoami, proven (NodeSession). False: nothing but whoami may be sent to the node at this address yet. */
     private suspend fun proven(c: NodeClient): Boolean = session?.takeIf { it.pin === c.pin }?.prove() ?: false
 
-    /** Try again, at a node that proved to be another: its proof is asked for afresh. */
+    /** The client, once its node has proved itself this session: what a notification's answer or its collector sends goes only then. */
+    suspend fun provenClient(): NodeClient? = client?.takeIf { proven(it) }
+
+    /** Try again, at a node refused: its proof asked for past the refusal, which stands until a proof holds (NodeSession). */
     fun tryAgain() {
         scope.launch {
             if (session?.tryAgain() == true) refresh()
@@ -501,6 +512,10 @@ class AppModel(context: Context) {
     private fun linkFor(c: NodeClient): LiveLink = LiveLink(
         // (Opened again from where the last left off: its hello then says what changed since, and only that is read.)
         open = liveOpen(scope, Dispatchers.IO, post = { run -> main.post { run() } }) { since, opened, alive, event ->
+            // (Proven first, and again each time it opens: a node that changed at the address since is found. Refused,
+            // it stays closed until Try again's proof holds; not proven yet, it is tried again later.)
+            val s = session?.takeIf { it.pin === c.pin }
+            if (s == null || !s.prove(fresh = true)) throw c.pin.refused ?: NodeError.unproven()
             c.stream(Live.path(since), opened, alive, event)
         },
         // (No stream on an older node, a device that may not read it, a revoked one: tried again only when told.)

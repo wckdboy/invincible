@@ -7,10 +7,13 @@ import java.security.SecureRandom
  * with a fresh challenge, whoami answers with the node's Ed25519 signature of it under `invincible-node/v1`, by the key
  * its id is. The first proof pins the node, and what this phone signs names it from then on (RequestAuth's v2). A node
  * that proves to be another, or whose proof fails, is asked nothing more (NodePin). A node from before, which proves
- * nothing, is spoken to as before.
+ * nothing, is spoken to as before while none is pinned; once one is, no proof is a failed one (NodeSession).
  */
 object NodeProof {
     const val DOMAIN = "invincible-node/v1"
+
+    /** From 14 December 2026 a request names the node it is for, or a node refuses it (core's REQUESTS_NAME_THEIR_NODE_FROM). */
+    const val NAMED_FROM: Long = 1_797_206_400_000L
 
     private val random = SecureRandom()
 
@@ -34,7 +37,7 @@ object NodeProof {
         data class Same(val node: String) : Proven
         /** Proven, but another node than the one pinned: not this phone's node. */
         data class Other(val node: String) : Proven
-        /** No proof: a node from before, spoken to as before (v1), until the cutoff. */
+        /** No proof, and none pinned: a node from before, spoken to as before (v1). Once pinned, no proof is Failed. */
         data object Older : Proven
         /** A proof that fails: never taken. */
         data object Failed : Proven
@@ -56,9 +59,18 @@ object NodeProof {
             Ed25519Strict.verify(signature, signingInput(challenge), key)
     }
 
-    fun judge(pinned: String?, node: String?, proof: String?, challenge: String, check: Checker = strict): Proven {
-        if (proof == null) return Proven.Older
-        if (node == null || !isNode(node) || !isChallenge(challenge) || !check.verify(node, challenge, proof)) return Proven.Failed
+    /**
+     * Whoami's answer [said], as it came, judged against the node pinned (core's judgeNodeProof, and the rules the review
+     * of apps-name-node set, 27 November 2026, which core and the Apple app hold too): no proof at all is a node from
+     * before, spoken to as before only while none is pinned; once a node is pinned, no proof is a failed one; a proof or a
+     * node that isn't a string (`"proof": null`, `"proof": 5`, no `node`), or a proof that doesn't hold, is never taken.
+     */
+    fun judge(pinned: String?, said: Json, challenge: String, check: Checker = strict): Proven {
+        val fields = (said as? Json.Obj)?.fields ?: return Proven.Failed
+        val proof = fields["proof"] ?: return if (pinned == null) Proven.Older else Proven.Failed
+        val node = (fields["node"] as? Json.Str)?.value
+        val text = (proof as? Json.Str)?.value
+        if (node == null || text == null || !isNode(node) || !isChallenge(challenge) || !check.verify(node, challenge, text)) return Proven.Failed
         if (pinned == null) return Proven.Pin(node)
         return if (node == pinned) Proven.Same(node) else Proven.Other(node)
     }

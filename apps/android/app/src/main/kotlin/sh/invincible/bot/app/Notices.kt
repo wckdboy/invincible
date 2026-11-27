@@ -251,13 +251,17 @@ class CollectJob : JobService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onStartJob(params: JobParameters): Boolean {
-        val client = AppModel.of(this).client ?: run {
+        val app = AppModel.of(this)
+        if (app.client == null) {
             Notices.stop(this)
             return false
         }
         scope.launch {
-            // Turned off elsewhere (the web app, the terminal): this phone stops asking. A node out of reach is asked again next time.
-            if (runCatching { Notices.collect(this@CollectJob, client) }.getOrNull() == false) Notices.stop(this@CollectJob)
+            // Only once its node has proved itself this session (NodeSession): not yet, or not this phone's, nothing is
+            // asked, and it is tried again next time. Turned off elsewhere (the web app, the terminal): this phone stops
+            // asking. A node out of reach is asked again next time.
+            val client = app.provenClient()
+            if (client != null && runCatching { Notices.collect(this@CollectJob, client) }.getOrNull() == false) Notices.stop(this@CollectJob)
             jobFinished(params, false)
         }
         return true
@@ -277,10 +281,13 @@ class NoticeAnswer : BroadcastReceiver() {
             Notices.said(context, tag, "Open Invincible to approve it", "A yes is given in the app, with the request in front of you.", passes = false)
             return
         }
-        val client = AppModel.of(context).client ?: return
+        val app = AppModel.of(context)
+        if (app.client == null) return
         val done = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // (Sent only once its node has proved itself this session: refused, or not proven yet, the answer stays.)
+                val client = app.provenClient() ?: throw (app.client?.pin?.refused ?: NodeError.unproven())
                 client.post("/api/actions/decide", Json.obj("id" to action, "approve" to approve))
                 Notices.said(context, tag, if (approve) "Approved" else "Declined", "${Primary.name} goes on from there.", passes = true)
             } catch (e: NodeError) {

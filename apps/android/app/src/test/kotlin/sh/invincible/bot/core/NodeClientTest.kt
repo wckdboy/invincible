@@ -190,7 +190,8 @@ class NodeClientTest {
         assertTrue(inputs.last().startsWith("${RequestAuth.DOMAIN_NAMED}\n") && inputs.last().endsWith("\n$node"))
         client.headers("GET", "/api/whoami?challenge=c2xpY2UtOC1jaGFsbGVuZ2U", ByteArray(0), named = false)
         assertTrue(inputs.last().startsWith("${RequestAuth.DOMAIN}\n"))
-        // Proved to be another: nothing is made, whoami's ask included, until it is asked again.
+        // Proved to be another: nothing is made but whoami's own ask (Try again's, whoami = true, past the refusal:
+        // refusedWhoamiIsStillAskedAndNothingElseIs), not even a whoami made as any other request is.
         val other = Fixture.vectors["nodeProofs"].list.first()["anotherNode"].string!!
         pin.refuse(NodeError.notYours(other))
         val refused = runCatching { client.headers("POST", "/api/chat", "{}".toByteArray()) }.exceptionOrNull() as NodeError
@@ -201,5 +202,28 @@ class NodeClientTest {
         pin.clear()
         client.headers("GET", "/api/team", ByteArray(0))
         assertTrue(inputs.last().endsWith("\n$node"))
+    }
+
+    /** The shared rule 1 (27 November 2026): until the session's proof holds, nothing but whoami is signed at all. */
+    @Test
+    fun nothingButWhoamiIsSignedUntilTheSessionsProofHolds() {
+        val pin = NodePin("n_" + "A".repeat(43), proofFirst = true)
+        val client = NodeClient("http://127.0.0.1:9", signer, pin)
+        val before = runCatching { client.headers("GET", "/api/team", ByteArray(0)) }.exceptionOrNull() as? NodeError
+        assertTrue("a read before the proof isn't signed", before?.unproven == true)
+        assertTrue(runCatching { client.headers("POST", "/api/actions/decide", ByteArray(0)) }.isFailure)
+        assertTrue(runCatching { client.headers("GET", "/api/whoami?challenge=x", ByteArray(0), named = false, whoami = true) }.isSuccess)
+        pin.open()
+        assertTrue(runCatching { client.headers("GET", "/api/team", ByteArray(0)) }.isSuccess)
+    }
+
+    /** The shared rule 2: refused, whoami is still asked (Try again's), and nothing else. */
+    @Test
+    fun refusedWhoamiIsStillAskedAndNothingElseIs() {
+        val pin = NodePin("n_" + "A".repeat(43), proofFirst = true).also { it.open() }
+        val client = NodeClient("http://127.0.0.1:9", signer, pin)
+        pin.refuse(NodeError.notYours("n_" + "B".repeat(43)))
+        assertTrue(runCatching { client.headers("GET", "/api/whoami?challenge=x", ByteArray(0), named = false, whoami = true) }.isSuccess)
+        assertTrue(runCatching { client.headers("GET", "/api/team", ByteArray(0)) }.isFailure)
     }
 }

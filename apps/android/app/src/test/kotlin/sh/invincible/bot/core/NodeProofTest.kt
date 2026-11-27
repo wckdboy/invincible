@@ -30,24 +30,59 @@ class NodeProofTest {
         val other = p["anotherNode"].string!!
         val challenge = p["challenge"].string!!
         val proof = p["proof"].string!!
-        assertEquals(NodeProof.Proven.Pin(node), NodeProof.judge(null, node, proof, challenge))
-        assertEquals(NodeProof.Proven.Same(node), NodeProof.judge(node, node, proof, challenge))
-        assertEquals(NodeProof.Proven.Other(node), NodeProof.judge(other, node, proof, challenge))
+        assertEquals(NodeProof.Proven.Pin(node), NodeProof.judge(null, said(Json.Str(node), Json.Str(proof)), challenge))
+        assertEquals(NodeProof.Proven.Same(node), NodeProof.judge(node, said(Json.Str(node), Json.Str(proof)), challenge))
+        assertEquals(NodeProof.Proven.Other(node), NodeProof.judge(other, said(Json.Str(node), Json.Str(proof)), challenge))
         // A node that names another than its proof is by, or a proof of another challenge: never taken.
-        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, other, proof, challenge))
-        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, node, proof, NodeProof.challenge()))
-        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, null, proof, challenge))
-        // A node from before offers no proof: spoken to as before.
-        assertEquals(NodeProof.Proven.Older, NodeProof.judge(node, node, null, challenge))
+        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, said(Json.Str(other), Json.Str(proof)), challenge))
+        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, said(Json.Str(node), Json.Str(proof)), NodeProof.challenge()))
+        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, said(null, Json.Str(proof)), challenge))
+        // A node from before offers no proof: spoken to as before while none is pinned (once one is, no proof is a failed
+        // one: oncePinnedNoProofIsAFailedOneAndUnpinnedItIsANodeFromBefore).
+        assertEquals(NodeProof.Proven.Older, NodeProof.judge(null, said(Json.Str(node), null), challenge))
         // Every one of core's proofs holds under the strict rule, and only by its own node.
-        for (q in proofs) assertEquals(NodeProof.Proven.Pin(q["node"].string!!), NodeProof.judge(null, q["node"].string, q["proof"].string, q["challenge"].string!!))
+        for (q in proofs) assertEquals(NodeProof.Proven.Pin(q["node"].string!!), NodeProof.judge(null, said(Json.Str(q["node"].string!!), Json.Str(q["proof"].string!!)), q["challenge"].string!!))
+    }
+
+    /** Whoami's answer as it came (core's judgeNodeProof reads it so): absent, null, a number and a string are four answers. */
+    private fun said(node: Json?, proof: Json?): Json = Json.Obj(linkedMapOf<String, Json>().also { m ->
+        if (node != null) m["node"] = node
+        if (proof != null) m["proof"] = proof
+    })
+
+    @Test fun oncePinnedNoProofIsAFailedOneAndUnpinnedItIsANodeFromBefore() {
+        val p = proofs.first()
+        val node = p["node"].string!!
+        val challenge = p["challenge"].string!!
+        // (The review's L7, and the shared rule 3 of 27 November 2026.)
+        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(node, said(Json.Str(node), null), challenge))
+        assertEquals(NodeProof.Proven.Older, NodeProof.judge(null, said(Json.Str(node), null), challenge))
+        assertEquals(NodeProof.Proven.Same(node), NodeProof.judge(node, said(Json.Str(node), Json.Str(p["proof"].string!!)), challenge))
+    }
+
+    @Test fun aMalformedAnswerIsAFailedProofAsCoreJudgesIt() {
+        val p = proofs.first()
+        val node = p["node"].string!!
+        val challenge = p["challenge"].string!!
+        // (The review's I1: core refuses each of these; Kotlin took the first two as a node from before.)
+        for (pinned in listOf(null, node)) {
+            assertEquals("proof null, pinned $pinned", NodeProof.Proven.Failed, NodeProof.judge(pinned, said(Json.Str(node), Json.Null), challenge))
+            assertEquals("proof 5, pinned $pinned", NodeProof.Proven.Failed, NodeProof.judge(pinned, said(Json.Str(node), Json.Num(5.0)), challenge))
+            assertEquals("no node, pinned $pinned", NodeProof.Proven.Failed, NodeProof.judge(pinned, said(null, Json.Str(p["proof"].string!!)), challenge))
+            assertEquals("a node that isn't a string, pinned $pinned", NodeProof.Proven.Failed, NodeProof.judge(pinned, said(Json.Num(1.0), Json.Str(p["proof"].string!!)), challenge))
+        }
+    }
+
+    @Test fun theCutoffIsCores() {
+        // core's REQUESTS_NAME_THEIR_NODE_FROM, Date.UTC(2026, 11, 14).
+        assertEquals(java.time.Instant.parse("2026-12-14T00:00:00Z").toEpochMilli(), NodeProof.NAMED_FROM)
     }
 
     @Test fun aNodeIdThatIsTheIdentitysPointProvesNothingThoughItsForgeryVerifiesAnythingUnderZip215() {
         val identity = ByteArray(32).also { it[0] = 1 }
         val weak = "n_" + Base64Url.encode(identity)
         val forgery = Base64Url.encode(identity + ByteArray(32))
-        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, weak, forgery, proofs.first()["challenge"].string!!))
+        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, said(Json.Str(weak), Json.Str(forgery)), proofs.first()["challenge"].string!!))
     }
 
     @Test fun aPairingFromBeforeHasNoNodePinnedAndOneSavedSinceKeepsIt() {

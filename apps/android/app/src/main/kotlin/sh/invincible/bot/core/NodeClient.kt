@@ -32,8 +32,13 @@ class NodeError(
     val unreachable: Boolean = false,
     /** The node at this address proved to be another than the one this phone paired with (its id), or its proof failed (""): nothing more is sent there (NodePin). */
     val notYourNode: String? = null,
+    /** Sent before the session's proof held (NodeSession): nothing but whoami goes until it does. */
+    val unproven: Boolean = false,
 ) : Exception(message) {
     companion object {
+        /** Asked before the session's proof held (NodeSession): not sent, and it is asked again once the node has proved itself. */
+        fun unproven(): NodeError = NodeError(0, "Waiting for the node to prove which node it is.", unproven = true)
+
         /** The node at this address isn't this phone's: it proved to be [other], or its proof failed (null). */
         fun notYours(other: String?): NodeError = NodeError(
             0,
@@ -68,7 +73,15 @@ class NodeError(
  * signs names (RequestAuth's v2), and, once the node at its address proved to be another or its proof failed, why nothing
  * more is sent there (the slice 8 note's item 11).
  */
-class NodePin(node: String? = null) {
+class NodePin(node: String? = null, proofFirst: Boolean = false) {
+    /**
+     * Whether what isn't whoami may be sent this session: once its proof holds (NodeSession opens it), or always where no
+     * proof is asked first ([proofFirst] false: a client made to pair, which asks only whoami and its join). Nothing but
+     * whoami is signed while it is shut (the rules of 27 November 2026).
+     */
+    private val gate = java.util.concurrent.atomic.AtomicBoolean(!proofFirst)
+    val isOpen: Boolean get() = gate.get()
+    fun open() = gate.set(true)
     private val pinned = java.util.concurrent.atomic.AtomicReference(node)
     private val refusal = java.util.concurrent.atomic.AtomicReference<NodeError?>(null)
 
@@ -76,7 +89,7 @@ class NodePin(node: String? = null) {
     val refused: NodeError? get() = refusal.get()
     fun pin(node: String) = pinned.set(node)
     fun refuse(why: NodeError) = refusal.set(why)
-    /** Asked again (Try again): its proof is judged afresh, and nothing else is sent until it holds. */
+    /** Its refusal lifted: only by a proof that holds (NodeSession's Try again), never before whoami has answered. */
     fun clear() = refusal.set(null)
 }
 
@@ -89,15 +102,21 @@ class NodePin(node: String? = null) {
 class NodeClient(val origin: String, private val signer: Signer, val pin: NodePin = NodePin()) {
     private val host: String = runCatching { URL(origin).host }.getOrNull() ?: "the node"
 
-    /** The request, signed for the pinned node ([named]; never for whoami's proof), and never made once a node at this address proved to be another. */
-    internal fun headers(method: String, path: String, body: ByteArray, named: Boolean = true): Map<String, String> {
-        pin.refused?.let { throw it }
+    /**
+     * The request, signed for the pinned node ([named]; never for whoami's proof). Nothing but whoami is signed before the
+     * session's proof holds, nor once the node at this address proved to be another; whoami is, so Try again can ask.
+     */
+    internal fun headers(method: String, path: String, body: ByteArray, named: Boolean = true, whoami: Boolean = false): Map<String, String> {
+        if (!whoami) {
+            pin.refused?.let { throw it }
+            if (!pin.isOpen) throw NodeError.unproven()
+        }
         return RequestAuth.headers(signer, method, path, body, node = if (named) pin.node else null)
     }
 
-    private fun open(method: String, path: String, body: ByteArray?, readTimeoutMs: Int, named: Boolean = true): HttpURLConnection {
+    private fun open(method: String, path: String, body: ByteArray?, readTimeoutMs: Int, named: Boolean = true, whoami: Boolean = false): HttpURLConnection {
         require(path.startsWith("/")) { "$path isn't a path on the node" }
-        val signed = headers(method, path, body ?: ByteArray(0), named)
+        val signed = headers(method, path, body ?: ByteArray(0), named, whoami)
         val c = URL(origin.trimEnd('/') + path).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.instanceFollowRedirects = false
@@ -128,10 +147,10 @@ class NodeClient(val origin: String, private val signer: Signer, val pin: NodePi
         unreachable = true,
     )
 
-    private suspend fun send(method: String, path: String, body: Json?, named: Boolean = true): Json = withContext(Dispatchers.IO) {
+    private suspend fun send(method: String, path: String, body: Json?, named: Boolean = true, whoami: Boolean = false): Json = withContext(Dispatchers.IO) {
         val bytes = body?.text()?.toByteArray(Charsets.UTF_8)
         val c = try {
-            open(method, path, bytes, 60_000, named)
+            open(method, path, bytes, 60_000, named, whoami)
         } catch (e: IOException) {
             throw unreachable(e)
         }
@@ -157,7 +176,7 @@ class NodeClient(val origin: String, private val signer: Signer, val pin: NodePi
     suspend fun get(path: String): Json = send("GET", path, null)
 
     /** Whoami, asked with [challenge], which the node answers with its proof of which node it is (NodeProof): signed for no node, as whoami's always is taken, so another node at this address still says which it is. */
-    suspend fun provenWhoami(challenge: String): Json = send("GET", "/api/whoami?challenge=$challenge", null, named = false)
+    suspend fun provenWhoami(challenge: String): Json = send("GET", "/api/whoami?challenge=$challenge", null, named = false, whoami = true)
 
     suspend fun post(path: String, body: Json): Json = send("POST", path, body)
 

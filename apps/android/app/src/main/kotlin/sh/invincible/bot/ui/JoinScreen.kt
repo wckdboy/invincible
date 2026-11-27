@@ -215,7 +215,8 @@ private suspend fun joined(link: String, name: String, stage: (Stage) -> Unit): 
     // proof it gives.
     val challenge = NodeProof.challenge()
     val who = NodeClient(origin, key).provenWhoami(challenge)
-    val proven = NodeProof.judge(null, who["node"].string, who["proof"].string, challenge)
+    // (Judged off the main thread, as a session's proof is: NodeSession.)
+    val proven = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { NodeProof.judge(null, who, challenge) }
     if (proven == NodeProof.Proven.Failed) throw Joining.Stop.Ended("The node's proof of which node it is didn't hold: this phone isn't paired with it.")
     return PairedNode(origin, key.device, name, invite.f, who["nodeName"].string, who["fleetName"].string, (proven as? NodeProof.Proven.Pin)?.node)
 }
