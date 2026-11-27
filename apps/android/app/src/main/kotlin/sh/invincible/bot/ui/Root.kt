@@ -165,7 +165,7 @@ fun Root(app: AppModel) {
                 // A tap that nothing on the page takes puts the keyboard away, as Back does (your word, 23 November 2026:
                 // it can always be closed, so you never get stuck under it).
                 Column(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focus.clearFocus() }) }) {
-                    Page(app, nav, address, wide, roomy, drawer = if (sidebar || wide) null else ({ scope.launch { drawer.open() } }))
+                    Page(app, nav, address, wide, roomy, drawer = if (sidebar || wide) null else ({ scope.launch { drawer.open() } }), give = { giving = true })
                 }
             }
         }
@@ -200,14 +200,14 @@ private val DIGITS = listOf(Key.One, Key.Two, Key.Three, Key.Four, Key.Five, Key
 
 /** The page at an address. [drawer] opens the roster (a phone's; null where the roster is a sidebar). */
 @Composable
-private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy: Boolean, drawer: (() -> Unit)?) {
+private fun Page(app: AppModel, nav: Nav, address: String, wide: Boolean, roomy: Boolean, drawer: (() -> Unit)?, give: () -> Unit) {
     val back = { nav.back(); Unit }
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
     val (kind, rest) = address.substringBefore(':') to address.substringAfter(':', "")
     when (kind) {
         // (At the root its top-left opens the roster, a phone's drawer; over another page it goes back.)
-        "chat" -> ChatScreen(app, back = back, roster = if (nav.depth == 1) drawer else null, root = nav.depth == 1, openTask = { nav.go(Nav.task(it)) })
+        "chat" -> ChatScreen(app, back = back, roster = if (nav.depth == 1) drawer else null, root = nav.depth == 1, openTask = { nav.go(Nav.task(it)) }, give = give)
         "chats" -> Chats(app, close = back, opened = { if (nav.under == Nav.ROOT) nav.back() else nav.replace("chat") })
         "task" -> TaskScreen(app, rest, nav, wide, roomy)
         "agent" -> AgentScreen(app, rest, back = back, openTask = { nav.go(Nav.task(it)) })

@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -64,10 +65,13 @@ import androidx.compose.ui.text.withStyle
  * A fresh chat opens with what happened while you were away, from the node's own record (no model writes it).
  */
 @Composable
-fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, root: Boolean = false, openTask: (String) -> Unit = {}) {
+fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, root: Boolean = false, openTask: (String) -> Unit = {}, give: (() -> Unit)? = null) {
     val chat = app.chat
     val bubbles by chat.bubbles.collectAsState()
     val live by chat.live.collectAsState()
+    val opening by chat.opening.collectAsState()
+    // The app opens on your latest kept chat (ChatModel.openLatest), saying it is reading it, never its welcome first.
+    LaunchedEffect(root) { if (root) chat.openLatest() }
     val title by chat.title.collectAsState()
     val problem by chat.problem.collectAsState()
     val table by app.table.collectAsState()
@@ -97,9 +101,11 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
     Column(Modifier.fillMaxSize().imePadding()) {
         // Almost no chrome (the owner's word, 27 November 2026): at the root its top-left opens the roster (a phone's drawer;
         // a wide screen has it beside), elsewhere it goes back; its name; and one menu, a new chat and your chats.
+        // (A phone's way to the roster: a back arrow that counts what needs you, as Messages' counts what is unread.)
+        val needs by app.needsYou.collectAsState()
         val lead: (@Composable () -> Unit)? = when {
             !root -> null
-            roster != null -> ({ androidx.compose.material3.IconButton(onClick = roster) { Icon(PanelIcon, contentDescription = "Your agents") } })
+            roster != null -> ({ RosterBack(needs, roster) })
             else -> ({})
         }
         PageBar(title ?: Primary.name, back, navigation = lead) {
@@ -107,8 +113,11 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
             androidx.compose.foundation.layout.Box {
                 androidx.compose.material3.IconButton(onClick = { options = true }) { Icon(MoreIcon, contentDescription = "Chat options") }
                 androidx.compose.material3.DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                    // (One menu: a new chat, a task to give, every chat, a side question.)
                     androidx.compose.material3.DropdownMenuItem(text = { Text("New chat") }, enabled = !live, onClick = { options = false; chat.fresh() })
+                    give?.let { g -> androidx.compose.material3.DropdownMenuItem(text = { Text("Give a task") }, onClick = { options = false; g() }) }
                     androidx.compose.material3.DropdownMenuItem(text = { Text("Chats") }, onClick = { options = false; listing = true })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Ask on the side") }, onClick = { options = false; chat.askAside("") })
                 }
             }
         }
@@ -125,7 +134,9 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
                 }
             }
             // A new conversation: what you might ask it first (the PWA's welcome's), a press puts it in the message box.
-            if (bubbles.isEmpty() && !live) {
+            // (Its latest kept chat being read: said so, in place of the welcome, which would only be replaced.)
+            if (opening && bubbles.isEmpty()) item { Text("Reading your latest chat…", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.margin, vertical = Space.s2)) }
+            if (bubbles.isEmpty() && !live && !opening) {
                 item {
                     androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s2), horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s2)) {
                         for ((label, words) in SUGGESTIONS) {
@@ -140,7 +151,7 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
             }
             // (What needs your answer is counted once: the head above says it, live, so the card leaves its own count out.)
             val awayShown = sh.invincible.bot.core.Away.shown(away, countShown = table.primary.tone == "warn")
-            if (bubbles.isEmpty() && awayShown.isNotEmpty()) {
+            if (bubbles.isEmpty() && awayShown.isNotEmpty() && !opening) {
                 item {
                     Panel {
                         Text("While you were away", style = MaterialTheme.typography.titleSmallEmphasized)
@@ -172,6 +183,31 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
  * of the node every few seconds while a task is under way or it is answering, just after a look of its comes due (so it
  * goes from here as it takes it), else every half minute.
  */
+/**
+ * A phone's way to the roster from the chat it opens on (the iPhone's, as Messages' back counts what is unread): a back
+ * arrow, with how many things need you beside it. A swipe from the left edge opens the roster too.
+ */
+@Composable
+private fun RosterBack(needs: Int, open: () -> Unit) {
+    Row(
+        Modifier
+            .padding(start = Space.s1)
+            .heightIn(min = Space.touch)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .clickable(onClick = open)
+            .semantics(mergeDescendants = true) {
+                role = androidx.compose.ui.semantics.Role.Button
+                contentDescription = if (needs > 0) "Your agents: $needs need you" else "Your agents"
+            }
+            .padding(horizontal = Space.s2),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Icon(BackIcon, contentDescription = null)
+        if (needs > 0) Text("$needs", style = Type.word)
+    }
+}
+
 @Composable
 private fun UnderwayBar(app: AppModel, live: Boolean, openTask: (String) -> Unit) {
     val conversation by app.chat.conversation.collectAsState()

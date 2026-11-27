@@ -37,6 +37,9 @@ data class Bubble(
  * and when it is still answering in it, the app attaches to its turn, which the node replays from its start and then
  * streams live. Leaving a chat ends the watching, never the turn; Stop asks the node to stop it.
  */
+/** The chat the app opens on, of your kept chats (the latest first, as the node lists them): the latest; none, the welcome. */
+internal fun latestKept(chats: List<Json>): String? = chats.firstNotNullOfOrNull { it["id"].string }
+
 class ChatModel(private val app: AppModel) {
     private val _conversation = MutableStateFlow<String?>(null)
     /** The kept chat on screen (null: a new one, until the node keeps it). */
@@ -144,6 +147,36 @@ class ChatModel(private val app: AppModel) {
     suspend fun loadChats() {
         val c = app.client ?: return
         runCatching { c.get("/api/conversations")["conversations"].list }.onSuccess { _chats.value = it }
+    }
+
+    private val _opening = MutableStateFlow(false)
+    /** The latest kept chat being read as the app opens on it: the chat says so meanwhile, never its welcome first. */
+    val opening: StateFlow<Boolean> = _opening.asStateFlow()
+    private var openedOnce = false
+
+    /**
+     * As the app opens on the chat (once a session): your latest kept chat, asked for once the node has proved itself;
+     * a chat already on screen (a notification's, one shared to the app) stays. None kept, the welcome.
+     */
+    fun openLatest() {
+        if (openedOnce) return
+        openedOnce = true
+        if (_conversation.value != null || _bubbles.value.isNotEmpty()) return
+        _opening.value = true
+        app.launch {
+            try {
+                val c = app.provenClient() ?: return@launch
+                val kept = runCatching { c.get("/api/conversations")["conversations"].list }.getOrNull() ?: return@launch
+                _chats.value = kept
+                val id = latestKept(kept) ?: return@launch
+                if (_conversation.value != null || _bubbles.value.isNotEmpty()) return@launch
+                _conversation.value = id
+                _problem.value = null
+                read(id, attach = true)
+            } finally {
+                _opening.value = false
+            }
+        }
     }
 
     /** A new chat: nothing on screen until you write. */
