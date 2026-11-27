@@ -60,6 +60,7 @@ import {
   DEFAULT_WAKE_COOLDOWN_MS,
   type LoopDraftView,
   LoopName,
+  type LoopRunView,
   type LoopView,
   type LoopWake,
   nextRun,
@@ -937,13 +938,29 @@ export function createApp(ctx: AppContext) {
   const WITHHELD = "your private data: only your devices see its words";
   /** A private connector's call as an agent reads it: that it is, and where it stands; none of its words. */
   const withheldAction = (a: ActionView): ActionView => ({ ...a, args: {}, target: `${a.connector}.${a.tool}`, why: WITHHELD, receipt: a.receipt === null ? null : WITHHELD, note: a.note === null ? null : WITHHELD, order: a.order ? { id: a.order.id, label: WITHHELD } : null });
-  const withheldLoop = (loop: LoopView): LoopView => {
+  const withheldLoop = (loop: LoopView, secret: boolean): LoopView => {
     const task = loop.task;
     return {
       ...loop,
+      ...(secret && loop.last ? { last: { ...loop.last, summary: WITHHELD } } : {}),
       task: task?.kind === "call" && ctx.connectors.isPrivate(task.connector) ? { kind: "call", connector: task.connector, tool: task.tool } : task,
       wakes: loop.wakes.map((wake) => (wake.kind === "mail" ? { kind: "mail", connector: wake.connector } : wake)),
     };
+  };
+  /*
+   * What a loop that your private data wakes or feeds said of its runs, and the notices it raised, as a reader without
+   * fleet:admin reads them: how each went, none of its words. Whatever their age: one recorded before private-answers
+   * said who wrote and what about (the re-review of 27 November, B2).
+   */
+  const runsAsRead = (runs: LoopRunView[], p: Principal): LoopRunView[] => {
+    if (p.scopes.includes("fleet:admin")) return runs;
+    const loops = privateLoops(ctx.store);
+    return runs.map((run) => (loops.has(run.loop) ? { ...run, summary: WITHHELD } : run));
+  };
+  const noticesAsRead = (notices: NoticeView[], p: Principal): NoticeView[] => {
+    if (p.scopes.includes("fleet:admin")) return notices;
+    const loops = privateLoops(ctx.store);
+    return notices.map((notice) => (loops.has(/^(?:tell|loop):(.+)$/.exec(notice.source)?.[1] ?? "") ? { ...notice, body: WITHHELD } : notice));
   };
   const withheldRun = (run: RunView): RunView => {
     const { plan: _plan, doing: _doing, summary: _summary, ...rest } = run;
@@ -4332,7 +4349,11 @@ export function createApp(ctx: AppContext) {
       });
     },
     // (What a loop of yours asks of a private connector, and the mail it watches for, are your words: only your devices see them.)
-    loops: (_input, p) => ({ loops: loopViews().map((loop) => (p.scopes.includes("fleet:admin") ? loop : withheldLoop(loop))) }),
+    loops: (_input, p) => {
+      if (p.scopes.includes("fleet:admin")) return { loops: loopViews() };
+      const loops = privateLoops(ctx.store);
+      return { loops: loopViews().map((loop) => withheldLoop(loop, loops.has(loop.name))) };
+    },
     connectorRequests: () => ({ requests: openConnectorRequests().map(connectorRequestView) }),
     requestConnector: (input, p) => {
       // What it wrote is shown to you: no keys in it.
@@ -4512,8 +4533,8 @@ export function createApp(ctx: AppContext) {
       if (!runner) throw new HttpError(409, `loop ${input.name} has no runner (its node was revoked)`);
       return forward(runner, routes.runLoop.path, { name: input.name });
     },
-    loopRuns: (input) => ({ runs: ctx.store.loopRuns(input.name, input.limit ?? 20).map(runView) }),
-    notices: () => ({ notices: noticeViews() }),
+    loopRuns: (input, p) => ({ runs: runsAsRead(ctx.store.loopRuns(input.name, input.limit ?? 20).map(runView), p) }),
+    notices: (_input, p) => ({ notices: noticesAsRead(noticeViews(), p) }),
     dismissNotice: (input) => {
       if (!ctx.store.lww(`notice:${input.key}`)?.value) throw new HttpError(404, "no such notice");
       ctx.store.emit(ctx.identity, "notice.dismissed", { key: input.key });
@@ -4652,7 +4673,8 @@ export function createApp(ctx: AppContext) {
         ctx.loopDrafts.list().length +
         openConnectorRequests().length +
         screenSessionViews().filter((v) => v.state === "waiting").length;
-      return { since: input.since, lines: awayLines({ since: input.since, tasks: store?.tasks() ?? [], name: (id) => agents.get(id) ?? id, notices: noticeViews(), runs: ctx.store.loopRuns(undefined, 200).map(runView), waiting }) };
+      // (A client of yours without fleet:admin, a chat bridge's, is told how a private loop's runs went, not what they said.)
+      return { since: input.since, lines: awayLines({ since: input.since, tasks: store?.tasks() ?? [], name: (id) => agents.get(id) ?? id, notices: noticesAsRead(noticeViews(), p), runs: runsAsRead(ctx.store.loopRuns(undefined, 200).map(runView), p), waiting }) };
     },
     decideAction: (input, p) => {
       // Only you decide: never another node, never an agent (arms can't hold fleet:admin anyway).

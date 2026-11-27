@@ -4,8 +4,8 @@ import { loopRecords } from "./loops.ts";
 
 /*
  * Your private data where it isn't a private connector's own call (PRIVATE_CONNECTORS; the re-review of 27 November,
- * B1): a loop is private when what it runs on is: one that new mail wakes, or one that calls a private connector. The
- * lines its runs' commands write are yours alone.
+ * B1, B2): a loop is private when what it runs on is: one that new mail wakes, or one that calls a private connector.
+ * What such a loop's runs record, and the lines its runs' commands write, are yours alone.
  */
 
 /** Whether a run's id is a loop's run's at all (so its loops are read only for one that may be). */

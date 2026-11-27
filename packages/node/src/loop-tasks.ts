@@ -16,6 +16,7 @@ import { type NodeClient, runOnNode } from "./run-cli.ts";
 import { learnedLines } from "@invincible/agents";
 import { streamedError } from "./server.ts";
 import { wokenData } from "./wakes.ts";
+import { privateLoops } from "./private-data.ts";
 
 /** A run's goal is at most this long (core's LoopTask), what woke its run included. */
 const RUN_GOAL_CHARS = 4000;
@@ -236,11 +237,13 @@ function computeOf(deps: LoopTaskDeps, now: number): HeartbeatSnapshot["compute"
 /** Recent activity for the checklist model: what the primary did, as data. */
 function recentActivity(store: LedgerStore): string {
   const ledger = store.ledger(8).map((e) => `- ${e.body.class} ${e.body.resource} ${e.body.target}: ${e.body.verdict}`);
+  // (A loop that your private data wakes or feeds is said to have run, never what it said: its words are yours. B2.)
+  const secret = privateLoops(store);
   const runs = store
     .loopRuns(undefined, 12)
     .filter((r) => r.body.loop !== "heartbeat")
     .slice(0, 5)
-    .map((r) => `- loop ${r.body.loop}: ${r.body.status}, ${r.body.summary.replace(/\s+/g, " ").slice(0, 160)}`);
+    .map((r) => `- loop ${r.body.loop}: ${r.body.status}, ${secret.has(r.body.loop) ? "what it said is yours alone" : r.body.summary.replace(/\s+/g, " ").slice(0, 160)}`);
   return redact([...ledger, ...runs].join("\n"));
 }
 
