@@ -378,6 +378,11 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   if (planOf(providerId)?.allows.tools === "interactive" && !(ctx.tokens.labelOf(token) ?? "").startsWith("run:")) {
     return json(403, `${providerId} is a coding plan for interactive use only (its vendor's terms): it is lent to a tool you run yourself (invincible run), never to an agent's or a run's unattended work`);
   }
+  // A look (deskd's `desktop look`, by its own user agent) is our own code calling the model, however its model was
+  // named: a plan's only where its terms let the primary call it itself (providers.ts mayBeEyes).
+  if (/^invincible-desktop\//.test(request.headers.get("user-agent") ?? "") && planOf(providerId) && !planOf(providerId)!.allows.native) {
+    return json(403, `${providerId}'s terms keep the primary's own calls off it, and a look is one: it can't be a VM's eyes (it is lent to a coding tool calling as itself alone)`);
+  }
   // The one place a coding plan's key is handed over: to a tool, calling as itself.
   const provider = resolveProvider(ctx.store, ctx.vault, providerId, "tool");
   if (!provider) return json(404, `provider ${providerId} is not configured`);

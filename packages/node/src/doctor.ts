@@ -184,12 +184,13 @@ const CORE_ROLES = new Set(["planner", "engineer", "reviewer"]);
 /** The roles whose own work is all coding (a run's engineering and its review): a coding plan alone can play them. */
 export const CODING_ROLES = new Set(["engineer", "reviewer"]);
 /**
- * The roles a VM's own tools play, through the gateway, and never it itself (a VM's eyes): a coding plan its tools may
- * use (one whose terms allow unattended tools) plays them alone.
+ * The roles a VM's own tools play, through the gateway, and never it itself (a VM's eyes, asked by deskd's look). A look
+ * is our own code calling the model, so a coding plan plays them only where its terms let the primary call it itself
+ * (providers.ts mayBeEyes: OpenCode Go's), and then alone.
  */
 export const TOOL_ROLES = new Set(["eyes"]);
-/** Why a plan can't play a role a VM's tools play: its terms keep it to a tool you run yourself. */
-export const VM_TOOLS_CANT = "its plan is for a tool you run yourself, and a VM's tools are not that";
+/** Why a plan can't play a role a VM's tools play: a look is our own call, which its terms keep off it. */
+export const EYES_CANT = "its plan's terms keep the primary's own calls off it, and a look is one";
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -439,14 +440,36 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     const own = models.filter((m) => !m.plan);
     const lent = plans.filter((m) => m.problem === null);
     const unlent = plans.filter((m) => m.problem !== null && !m.spent && !m.refused);
+    // A VM's eyes follow the look (the node's eyesFor): the first model in the chain a look may call and can use here (a
+    // key, its allowance not spent) is the one a look asks, so it is the one named, and asked a word only where it isn't
+    // a plan's. One a look may not call is said as refused beside it, and one skipped before it, as skipped. Needs you
+    // only when the look's model doesn't answer, or no model a look can use is left (below, as for any role).
+    const looks = TOOL_ROLES.has(role.role) ? models.find((m) => m.problem === null && !m.spent && !m.refused) : undefined;
+    if (looks) {
+      const said = [
+        ...models.filter((m) => m.problem === EYES_CANT).map((m) => `${m.ref} is refused (${m.problem})`),
+        ...models.slice(0, models.indexOf(looks)).filter((m) => m.problem !== EYES_CANT).map((m) => `${m.ref} is skipped (${m.problem ?? (m.spent ? "its allowance is spent" : "its provider refused its key")})`),
+      ];
+      const beside = said.length ? `; ${said.join("; ")}` : "";
+      const probe = role.probe;
+      if (looks.plan) add("models", id, "ok", `${role.role}: ${looks.ref} looks at the VMs' screens, asked by their tools through the gateway (a coding plan: it is asked nothing else, so not a word)${beside}`);
+      else if (!probe) add("models", id, "ok", `${role.role}: ${looks.ref} has what it needs (not asked${f.offline ? ": offline" : f.quick ? ": a full check asks it one word" : ""})${beside}`);
+      else if (probe.ok) add("models", id, "ok", `${role.role}: ${probe.ref} answered${beside}`, undefined, { ms: probe.ms });
+      else {
+        const error = refusalWords(redact(probe.error ?? "no answer"));
+        const next = models.slice(models.indexOf(looks) + 1).find((m) => m.problem === null && !m.spent && !m.refused);
+        add("models", id, "needs-you", `${role.role}: ${probe.ref} didn't answer: ${error}${next ? ` (${next.ref} is next in line)` : ""}${beside}`, probeAdvice(error), { ms: probe.ms });
+      }
+      continue;
+    }
     if (unlent.length) {
       add(
         "models",
         `${id}.plan`,
         "needs-you",
         `${unlent.map((m) => `${m.ref} (${m.problem})`).join("; ")}: on ${role.role}${TOOL_ROLES.has(role.role) ? "" : " for coding"}, which can't use ${unlent.length === 1 ? "it" : "them"}`,
-        unlent.every((m) => m.problem === VM_TOOLS_CANT)
-          ? `Hire a model a VM's tools may use: invincible roster set ${role.role} <provider/model>.`
+        unlent.every((m) => m.problem === EYES_CANT)
+          ? `Hire eyes a look may call, a provider of yours or OpenCode Go's: invincible roster set ${role.role} <provider/model>.`
           : `Add the plan's key: invincible key add --provider ${unlent[0]!.ref.slice(0, unlent[0]!.ref.indexOf("/"))}.`,
       );
     }

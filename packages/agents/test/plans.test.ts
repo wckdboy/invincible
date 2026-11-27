@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { chat, decide, detectProvider, embed, GatewayTokens, handleGateway, offersModel, originOf, planOf, preset, PRESETS, resolveProvider, signIn } from "@invincible/models";
+import { chat, decide, detectProvider, embed, GatewayTokens, handleGateway, mayBeEyes, offersModel, originOf, planOf, preset, PRESETS, resolveProvider, signIn } from "@invincible/models";
 import { chooseAgentModels, eyesOf } from "../src/index.ts";
 
 /*
@@ -32,6 +32,9 @@ function mind(roster: Record<string, string[]>) {
   const kimi = preset("kimi-coding")!;
   vault.set("kimi-coding", PLAN_KEY, { provider: "kimi-coding", origin: originOf(kimi.baseUrl)! });
   store.emit(identity, "provider.set", { id: "kimi-coding", kind: kimi.kind, baseUrl: kimi.baseUrl, secret: "kimi-coding" });
+  const mimo = preset("mimo-token")!;
+  vault.set("mimo-token", PLAN_KEY, { provider: "mimo-token", origin: originOf(mimo.baseUrl)! });
+  store.emit(identity, "provider.set", { id: "mimo-token", kind: mimo.kind, baseUrl: mimo.baseUrl, secret: "mimo-token" });
   vault.set("own", OWN_KEY, { provider: "own", origin: "https://models.example.test" });
   store.emit(identity, "provider.set", { id: "own", kind: "openai", baseUrl: "https://models.example.test/v1", secret: "own" });
   for (const [role, models] of Object.entries(roster)) store.emit(identity, "roster.set", { role, models });
@@ -383,5 +386,36 @@ describe("a plan's key is recognised where its form says whose it is", () => {
     // A key of the ordinary kind is not taken for a plan's.
     expect(detectProvider("sk-FAKE-platform-key-0000")).toBeNull();
     expect(detectProvider("sk-or-FAKE")).toBe("openrouter");
+  });
+});
+
+describe("a look is our own call: an agent's eyes are a coding plan's only where its terms let the primary call it itself", () => {
+  const sees = (meanErrorPx: number) => ({ at: 1, reads: { ok: true, said: "x" }, places: { targets: 8, landed: 8, meanErrorPx } });
+
+  test("Z.ai's and MiMo's models are skipped for the eyes, named or chosen by how well they see; OpenCode Go's still are the eyes", () => {
+    expect(["zai-coding/glm-5.3-flash", "mimo-token/mimo-v2.6-pro", "opencode-go/kimi-k3.1-pro", "own/m"].map(mayBeEyes)).toEqual([false, false, true, true]);
+    expect(eyesOf(["zai-coding/glm-5.3-flash", "mimo-token/mimo-v2.6-pro", "opencode-go/kimi-k3.1-pro", "opencode-go/qwen4-max"], [], () => true)).toBe("opencode-go/kimi-k3.1-pro");
+    expect(eyesOf(["zai-coding/glm-5.3-flash", "mimo-token/mimo-v2.6-pro"], [], () => true)).toBeNull();
+    const checks = [{ ref: "zai-coding/glm-5.3-flash", check: sees(1) }, { ref: "mimo-token/mimo-v2.6-pro", check: sees(2) }, { ref: "opencode-go/kimi-k3.1-pro", check: sees(12) }];
+    expect(eyesOf([], checks, () => true)).toBe("opencode-go/kimi-k3.1-pro");
+    expect(eyesOf([], checks.slice(0, 2), () => true)).toBeNull();
+  });
+
+  test("the gateway refuses a look (deskd's, by its user agent) on Z.ai's or MiMo's plan, whatever model it names; lends them to a coding tool calling as itself, as ever; and passes a look on OpenCode Go's", async () => {
+    const { store, vault } = mind({});
+    const tokens = new GatewayTokens(new Database(":memory:"));
+    const { seen, fetch } = recorded();
+    const vm = tokens.mint({ label: "sandbox:0123456789", providers: ["zai-coding", "mimo-token", "opencode-go"], ttlMinutes: 10, maxRequests: 20 }).token;
+    const call = (provider: string, agent: string) =>
+      handleGateway(new Request(`http://gw/gw/${provider}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${vm}`, "content-type": "application/json", "user-agent": agent }, body: JSON.stringify({ model: "m", messages: [] }) }), { store, vault, tokens, fetch });
+    for (const provider of ["zai-coding", "mimo-token"]) {
+      const refused = await call(provider, "invincible-desktop/2");
+      expect(refused.status).toBe(403);
+      expect(await refused.text()).toContain(`${provider}'s terms keep the primary's own calls off it, and a look is one`);
+      // A coding tool in the VM, calling as itself, is lent it as its terms allow.
+      expect((await call(provider, "opencode/1.4.0")).status).toBe(200);
+    }
+    expect((await call("opencode-go", "invincible-desktop/2")).status).toBe(200);
+    expect(seen.map((s) => [new URL(s.url).host, s.headers.get("user-agent")])).toEqual([["api.z.ai", "opencode/1.4.0"], ["token-plan-sgp.xiaomimimo.com", "opencode/1.4.0"], ["opencode.ai", "invincible-desktop/2"]]);
   });
 });

@@ -1,5 +1,5 @@
 import { type ChatStreamEvent, type NodeIdentity, redact, retriedRuns, type RouteName, routes, SELF_ACTION_RESOURCE, spendLabel, type Usage } from "@invincible/core";
-import { chat, excerpt, installedConnector, installedConnectors, keyState, onPlan, parseRef, planOf, resolveProvider, roster, sized, sseData } from "@invincible/models";
+import { chat, excerpt, installedConnector, installedConnectors, keyState, mayBeEyes, onPlan, parseRef, resolveProvider, roster, sized, sseData } from "@invincible/models";
 import { commandsRun } from "@invincible/agents";
 import type { SyncEngine } from "@invincible/link";
 import type { LedgerStore, Vault } from "@invincible/ledger";
@@ -125,12 +125,12 @@ function rolePlayable(deps: LoopTaskDeps, role: string, models: string[], custom
 /**
  * Whether a coding plan's terms let it play a role at all, keyed here or not: one that is all coding (a role you made
  * among them: only agents work on it, and their conversations and tasks are coding work, as the doctor reads it), or a
- * VM's eyes when its tools may use it unattended.
+ * VM's eyes when its terms let the primary call it itself (a look is our own call: providers.ts mayBeEyes).
  */
 function planMayPlay(role: string, ref: string, custom = false): boolean {
   if (!onPlan(ref)) return false;
   if (CODING_ROLES.has(role) || custom) return true;
-  return TOOL_ROLES.has(role) && planOf(ref.slice(0, ref.indexOf("/")))?.allows.tools === "unattended";
+  return TOOL_ROLES.has(role) && mayBeEyes(ref);
 }
 
 /** The roles its background writing tries, cheapest first. */

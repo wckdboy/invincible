@@ -329,6 +329,18 @@ export function onPlan(ref: string): boolean {
 }
 
 /**
+ * Whether a model may be an agent's eyes. A look is our own code calling it (deskd's, through the node's gateway), not
+ * a vendor's coding tool, so a coding plan's model is eyes only where its terms let the primary call it itself
+ * (allows.native: OpenCode Go's); Z.ai's and MiMo's, lent to a coding tool in a VM, never are (the lead's ruling, 27
+ * November 2026). Any other provider's may.
+ */
+export function mayBeEyes(ref: string): boolean {
+  const slash = ref.indexOf("/");
+  const plan = slash > 0 ? planOf(ref.slice(0, slash)) : null;
+  return !plan || plan.allows.native;
+}
+
+/**
  * A preset whose note names the plan's other regions, each with its own --base-url (mimo-token's Token Plan page, or a
  * plan "in mainland China" with another address). Its key must be for the address its plan's page shows: a key for
  * another region is refused here, so the doctor says so when it is.

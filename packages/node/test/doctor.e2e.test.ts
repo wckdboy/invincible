@@ -332,8 +332,8 @@ describe("faults the owner's server has had, each with its own line and advice",
   });
 
   test("a VM's eyes on a coding plan its tools may use are well, not a model it lacks; on one for a tool you run yourself, they can't see", async () => {
-    // Two plans with their keys in the vault (fakes, made here), as `invincible key add` leaves them.
-    for (const id of ["opencode-go", "kimi-coding"]) {
+    // Four plans with their keys in the vault (fakes, made here), as `invincible key add` leaves them.
+    for (const id of ["opencode-go", "kimi-coding", "zai-coding", "mimo-token"]) {
       await json(admin("setSecret", { name: id, value: `FAKE-${id}-${"0".repeat(24)}`, provider: id }));
       await json(admin("setProvider", { id, secret: id }));
     }
@@ -341,14 +341,27 @@ describe("faults the owner's server has had, each with its own line and advice",
       await json(admin("setRoster", { role: "eyes", models: ["opencode-go/gpt-6-luna"] }));
       const report = await doctor({ offline: true });
       expect(check(report, "role.eyes")).toMatchObject({ state: "ok", line: "eyes: opencode-go/gpt-6-luna looks at the VMs' screens, asked by their tools through the gateway (a coding plan: it is asked nothing else, so not a word)" });
-      // Kimi Code is for interactive use only: a tool you run yourself, which a VM's tools are not.
-      await json(admin("setRoster", { role: "eyes", models: ["kimi-coding/k3"] }));
-      const blind = check(await doctor({ offline: true }), "role.eyes.plan");
-      expect(blind.state).toBe("needs-you");
-      expect(blind.fix).toBe("Hire a model a VM's tools may use: invincible roster set eyes <provider/model>.");
+      // Kimi Code is for interactive use only: a tool you run yourself, which a VM's tools are not. Z.ai's and MiMo's plans
+      // are lent to a coding tool in a VM, but a look is our own call, which their terms keep off them.
+      for (const ref of ["zai-coding/glm-5.3-flash", "mimo-token/mimo-v2.6-pro", "kimi-coding/k3"]) {
+        await json(admin("setRoster", { role: "eyes", models: [ref] }));
+        const blind = check(await doctor({ offline: true }), "role.eyes.plan");
+        expect([ref, blind.state]).toEqual([ref, "needs-you"]);
+        expect(blind.line).toContain(`${ref} (its plan's terms keep the primary's own calls off it, and a look is one)`);
+        expect(blind.fix).toBe("Hire eyes a look may call, a provider of yours or OpenCode Go's: invincible roster set eyes <provider/model>.");
+      }
+      // The doctor follows the look (the node's eyesFor): the first model a look may call and can use is the one it names,
+      // a refused one before it said as refused, and a model of its own after it not asked a word, though a full check
+      // asks each role's first model of its own.
+      await json(admin("setRoster", { role: "eyes", models: ["zai-coding/glm-5.3-flash", "opencode-go/kimi-k3.1-pro", "stand-in/eyes-after"] }));
+      asked.length = 0;
+      const full = await doctor();
+      expect(check(full, "role.eyes")).toMatchObject({ state: "ok", line: "eyes: opencode-go/kimi-k3.1-pro looks at the VMs' screens, asked by their tools through the gateway (a coding plan: it is asked nothing else, so not a word); zai-coding/glm-5.3-flash is refused (its plan's terms keep the primary's own calls off it, and a look is one)" });
+      expect(full.checks.filter((c) => c.id === "role.eyes.plan")).toEqual([]);
+      expect(asked).not.toContain("eyes-after");
     } finally {
       await json(admin("setRoster", { role: "eyes", models: [] }));
-      for (const id of ["opencode-go", "kimi-coding"]) {
+      for (const id of ["opencode-go", "kimi-coding", "zai-coding", "mimo-token"]) {
         await json(admin("removeProvider", { id }));
         await json(admin("deleteSecret", { name: id }));
       }

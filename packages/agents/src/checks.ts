@@ -3,7 +3,7 @@ import { type ChatMessage, chooseEyes, type ModelCheck } from "@invincible/core"
 import type { ToolImage } from "@invincible/models";
 import { conversationFor } from "@invincible/models";
 import { type ModelsContext, chat } from "@invincible/models";
-import { offersModel, onPlan, resolveProvider, whyNoKey } from "@invincible/models";
+import { mayBeEyes, offersModel, onPlan, resolveProvider, whyNoKey } from "@invincible/models";
 import { parseRef } from "@invincible/models";
 import { parseAction, runLoop } from "./run.ts";
 
@@ -42,10 +42,11 @@ export type CheckPart = "format" | "reads" | "places";
 /**
  * A VM's eyes (core's chooseEyes): the first model named for the role that can be used there, yours to name; with none
  * named, the checked model that sees best among the ones it offers (providers.ts offersModel), so a check of a model
- * it doesn't offer never puts it on the role.
+ * it doesn't offer never puts it on the role. Either way only a model a look may call (providers.ts mayBeEyes): a look
+ * is our own call, which Z.ai's and MiMo's plans keep off them, however well they see.
  */
 export const eyesOf = (named: readonly string[], checks: readonly { ref: string; check: ModelCheck }[], usable: (ref: string) => boolean): string | null =>
-  chooseEyes(named, checks.filter(({ ref }) => offersModel(ref)), usable);
+  chooseEyes(named, checks.filter(({ ref }) => offersModel(ref) && mayBeEyes(ref)), (ref) => mayBeEyes(ref) && usable(ref));
 
 /** Check a model (`provider/model`): every part, or those named. Throws only when the model can't be asked at all. */
 export async function checkModel(ctx: ModelsContext, ref: string, options: { version?: string; parts?: readonly CheckPart[]; signal?: AbortSignal } = {}): Promise<ModelCheck> {

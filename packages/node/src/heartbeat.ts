@@ -88,7 +88,7 @@ export function assess(s: HeartbeatSnapshot): Finding[] {
       severity: CORE_ROLES.has(role.role) ? "warn" : "info",
       title: `No model can play ${role.role}`,
       body: role.plans
-        ? `${role.models.join(", ")} ${role.models.length === 1 ? "is" : "are"} on a coding plan, which can't play ${role.role}: its terms keep it to coding, or to a tool you run yourself. Hire a model that can: invincible roster set ${role.role} <provider/model>.`
+        ? `${role.models.join(", ")} ${role.models.length === 1 ? "is" : "are"} on a coding plan, which can't play ${role.role}: its terms keep it to coding, to the coding tools they name, or to a tool you run yourself. Hire a model that can: invincible roster set ${role.role} <provider/model>.`
         : `None of ${role.models.join(", ") || "(no models)"} has a key here or a running local runtime. Add a key (invincible key add) or change the roster.`,
     });
   }

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync, statfsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type DoctorReport, freeSlots, isNodeId, isStrictNodeId, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, qampEndpointOf, redact, type Agent } from "@invincible/core";
-import { type ModelsContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, onPlan, parseRef, planOf, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@invincible/models";
+import { type ModelsContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, mayBeEyes, onPlan, parseRef, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { containerKernel, macFirewallInstalled, readImagesRecord, type SandboxHost } from "@invincible/sandbox";
 import type { ArchiveService } from "./archive/service.ts";
@@ -11,7 +11,7 @@ import type { Assets } from "./assets.ts";
 import { type Capabilities, isAlwaysOn, servedOriginFrom } from "./capabilities.ts";
 import type { Governor } from "./compute/governor.ts";
 import type { ComputeService } from "./compute/service.ts";
-import { type Diagnosis, diagnose, type DoctorFacts, type DoctorFinding, doctorFindings, type FileFact, reportOf, type RoleFact, TOOL_ROLES, VM_TOOLS_CANT } from "./doctor.ts";
+import { type Diagnosis, diagnose, type DoctorFacts, type DoctorFinding, doctorFindings, type FileFact, reportOf, type RoleFact, TOOL_ROLES, EYES_CANT } from "./doctor.ts";
 import { hlcMs, loopRecords } from "./loops.ts";
 import { primaryRevision } from "./revision.ts";
 
@@ -303,12 +303,12 @@ async function rolesOf(deps: DoctorDeps, ask: boolean, signal?: AbortSignal): Pr
     ...(spec.custom ? { custom: true } : {}),
     chats: !SILENT_ROLES.has(role),
     models: spec.models.slice(0, 16).map((ref) => {
-      // A role a VM's tools play can't have a plan its terms keep to a tool you run yourself (the gateway refuses a VM it).
-      const kept = TOOL_ROLES.has(role) && onPlan(ref) && planOf(ref.slice(0, ref.indexOf("/")))?.allows.tools !== "unattended";
+      // A role a VM's tools play (its eyes) can't have a plan whose terms keep our own calls off it: a look is one (the gateway refuses it).
+      const kept = TOOL_ROLES.has(role) && !mayBeEyes(ref);
       // A provider whose allowance is spent now: marked so the doctor can leave it out of a role's plan and first lines
       // (the window ends by itself, so it is no fault) while its problem still says what the provider said.
       const spent = !kept && windowsOf(deps.store).spentFor(ref) !== null;
-      return { ref, problem: kept ? VM_TOOLS_CANT : modelProblem(deps, ref), ...(spent ? { spent: true } : {}), ...(onPlan(ref) ? { plan: true } : {}) };
+      return { ref, problem: kept ? EYES_CANT : modelProblem(deps, ref), ...(spent ? { spent: true } : {}), ...(onPlan(ref) ? { plan: true } : {}) };
     }),
     ...(!spec.configured && spec.models.every((ref) => providerRecord(deps.store, ref.slice(0, ref.indexOf("/"))) === null) ? { unset: true } : {}),
     probe: null,
@@ -318,9 +318,11 @@ async function rolesOf(deps: DoctorDeps, ask: boolean, signal?: AbortSignal): Pr
   const wanted = new Map<string, RoleFact[]>();
   for (const role of roles) {
     if (!role.chats) continue;
-    // (Its own: a coding plan's model is never asked a word by it.)
-    const first = role.models.find((m) => m.problem === null && !m.plan);
-    const ref = first ? concrete(deps, first.ref) : null;
+    // (Its own: a coding plan's model is never asked a word by it. A VM's eyes: the model a look asks, the first in the
+    // chain a look may call and can use, as the node's eyesFor picks it; so none when that one is a plan's, and never a
+    // model of its own after it.)
+    const first = TOOL_ROLES.has(role.role) ? role.models.find((m) => m.problem === null && !m.spent) : role.models.find((m) => m.problem === null && !m.plan);
+    const ref = first && !first.plan ? concrete(deps, first.ref) : null;
     if (!ref) continue;
     if (!wanted.has(ref) && wanted.size >= MAX_MODEL_PROBES) continue;
     wanted.set(ref, [...(wanted.get(ref) ?? []), role]);

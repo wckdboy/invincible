@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { doctorExit, doctorLines, doctorTally, doctorVerdict, didKeyOfEd25519, signingPublicKey } from "@invincible/core";
-import { type Diagnosis, type DoctorFacts, diagnose, doctorFindings, reportOf, span, VM_TOOLS_CANT } from "../src/doctor.ts";
+import { type Diagnosis, type DoctorFacts, diagnose, doctorFindings, reportOf, span, EYES_CANT } from "../src/doctor.ts";
 
 /*
  * The doctor's rules, exactly: a healthy node answers ok on every line, and each kind
@@ -333,11 +333,33 @@ describe("each fault gives its own line and advice", () => {
       line: "eyes: opencode-go/gpt-6-luna looks at the VMs' screens, asked by their tools through the gateway (a coding plan: it is asked nothing else, so not a word)",
     });
     const blind = healthy();
-    blind.roles.push({ role: "eyes", chats: true, models: [{ ref: "kimi-coding/k3", problem: VM_TOOLS_CANT, plan: true }], probe: null });
+    blind.roles.push({ role: "eyes", chats: true, models: [{ ref: "kimi-coding/k3", problem: EYES_CANT, plan: true }], probe: null });
     const said = diagnose(blind).filter((c) => c.id.startsWith("role.eyes"));
     expect(said.map((c) => [c.id, c.state])).toEqual([["role.eyes.plan", "needs-you"]]);
-    expect(said[0]!.line).toBe(`kimi-coding/k3 (${VM_TOOLS_CANT}): on eyes, which can't use it`);
-    expect(said[0]!.fix).toBe("Hire a model a VM's tools may use: invincible roster set eyes <provider/model>.");
+    expect(said[0]!.line).toBe(`kimi-coding/k3 (${EYES_CANT}): on eyes, which can't use it`);
+    expect(said[0]!.fix).toBe("Hire eyes a look may call, a provider of yours or OpenCode Go's: invincible roster set eyes <provider/model>.");
+  });
+
+  test("models: a VM's eyes follow the look: the first model in the chain a look may call and can use is the one named; a refused one is said as refused; needs you only when none is left", () => {
+    const eyes = (models: DoctorFacts["roles"][number]["models"], probe: DoctorFacts["roles"][number]["probe"] = null) => {
+      const f = healthy();
+      f.roles.push({ role: "eyes", chats: true, models, probe });
+      return diagnose(f).filter((c) => c.id.startsWith("role.eyes")).map((c) => [c.id, c.state, c.line]);
+    };
+    const kimi = { ref: "opencode-go/kimi-k3.1-pro", problem: null, plan: true };
+    const qwen = { ref: "opencode-go/qwen4-max", problem: null, plan: true };
+    const claude = { ref: "anthropic/claude-opus-5-5", problem: null };
+    const zai = { ref: "zai-coding/glm-5.3-flash", problem: EYES_CANT, plan: true };
+    const LOOKS = "looks at the VMs' screens, asked by their tools through the gateway (a coding plan: it is asked nothing else, so not a word)";
+    // OpenCode Go's Kimi first: a look asks it, so it is the one named, and Claude after it (out of credit) isn't the doctor's word on the eyes.
+    const noCredit = { ref: "anthropic/claude-opus-5-5", ok: false, ms: 900, error: "400 Your credit balance is too low to access the Anthropic API" };
+    expect(eyes([kimi, qwen, claude], noCredit)).toEqual([["role.eyes", "ok", `eyes: opencode-go/kimi-k3.1-pro ${LOOKS}`]]);
+    // A model a look may not call, before it: said as refused beside the one a look asks, not a fault while that one is there.
+    expect(eyes([zai, kimi])).toEqual([["role.eyes", "ok", `eyes: opencode-go/kimi-k3.1-pro ${LOOKS}; zai-coding/glm-5.3-flash is refused (${EYES_CANT})`]]);
+    // Before a model of its own: that one is asked, as any role's first model is, and the refused one said beside it.
+    expect(eyes([zai, claude], { ref: "anthropic/claude-opus-5-5", ok: true, ms: 700, error: null })).toEqual([["role.eyes", "ok", `eyes: anthropic/claude-opus-5-5 answered; zai-coding/glm-5.3-flash is refused (${EYES_CANT})`]]);
+    // None a look can use: needs you, each said with why.
+    expect(eyes([zai])).toEqual([["role.eyes.plan", "needs-you", `zai-coding/glm-5.3-flash (${EYES_CANT}): on eyes, which can't use it`]]);
   });
 
   test("models: the first model skipped on every answer, none usable, a refusal, a filter, a refused key, a timeout", () => {
