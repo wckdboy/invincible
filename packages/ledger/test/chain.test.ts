@@ -235,4 +235,26 @@ describe("hash chains", () => {
     storeA.ingest([poison]);
     expect(() => storeA.remember(a, "still writing")).not.toThrow();
   });
+
+  test("a node whose clock went back still writes: its own clock's stamp isn't held to the bound against that clock, another's is", () => {
+    // (Found by a test that moves the clock, 27 November 2026: after it, every write of the node's answered 500.)
+    let now = Date.UTC(2026, 10, 27, 10, 0);
+    const a = newNodeIdentity();
+    const store = new LedgerStore(":memory:", new HlcClock(() => now));
+    foundFleet(store, a, { fleetName: "home", nodeName: "a" });
+    // Its clock an hour ahead while it writes (set wrong, a restored snapshot), then set right.
+    now += 63 * 60_000;
+    store.remember(a, "written ahead");
+    now -= 63 * 60_000;
+    // Its next write is stamped after its last, as its own clock goes, and taken: the node isn't wedged till the clock catches up.
+    expect(() => store.remember(a, "written after")).not.toThrow();
+    // Both held, and a rebuild gives the same state.
+    const live = store.digest();
+    store.rebuild();
+    expect(store.digest()).toBe(live);
+    // Another's stamp an hour ahead of this clock is refused as ever.
+    const stranger = newNodeIdentity();
+    const ahead = signEvent({ v: 2, fleet: store.fleet!, hlc: `${String(now + 63 * 60_000).padStart(15, "0")}.000000`, device: stranger.id, prev: null, kind: "memory.added", body: { text: "from ahead" } }, stranger);
+    expect(store.ingest([ahead]).invalid).toEqual([{ id: ahead.id, error: "timestamp too far in the future" }]);
+  });
 });

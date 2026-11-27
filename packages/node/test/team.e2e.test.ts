@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -271,4 +271,18 @@ test("real API: a project's git is yours alone; an unknown project, a name git w
   expect(none.status).toBe(424);
   expect(((await none.json()) as { error: string }).error).toContain("Your agent has no computer yet");
   await api("removeProject", { id: "site" });
+});
+
+test("real API: a node whose clock went back keeps writing, never a 500: its own events are stamped by its own clock", async () => {
+  // (Found by a test that moves the clock, 27 November 2026: after it, setProject answered 500, as every write did.)
+  try {
+    setSystemTime(new Date(Date.now() + 63 * 60_000));
+    await api("setProject", { id: "ahead", name: "Written ahead" });
+  } finally {
+    setSystemTime();
+  }
+  const after = await request("setProject", { id: "after", name: "Written after" });
+  expect([after.status, ((await after.json()) as { error?: string }).error ?? null]).toEqual([200, null]);
+  await api("removeProject", { id: "ahead" });
+  await api("removeProject", { id: "after" });
 });

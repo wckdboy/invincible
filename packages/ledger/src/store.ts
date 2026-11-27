@@ -416,7 +416,7 @@ export class LedgerStore {
     let rebuilt = false;
     this.db.transaction(() => {
       if (kind === "fleet.genesis") this.expectFleet(event.id);
-      const result = this.ingest([event]);
+      const result = this.admit([event], event.id);
       if (result.invalid.length) throw new Error(`emit rejected: ${result.invalid[0]!.error}`);
       const rejected = this.rejection(event.id);
       if (rejected) throw new Error(`emit not authorized: ${rejected}`);
@@ -441,6 +441,16 @@ export class LedgerStore {
    * duplicates are ignored, out-of-order arrivals trigger a deterministic replay.
    */
   ingest(raws: unknown[]): IngestResult {
+    return this.admit(raws, null);
+  }
+
+  /**
+   * Ingest's own work. `stampedHere`: the event this node has just stamped (emit), whose time is this node's own clock's
+   * (strictly after everything it issued or took in), so never held to the bound against that same clock. A clock that
+   * went back (set wrong, then right; a restored snapshot) would otherwise refuse every write of the node's own until it
+   * caught up with its last stamp. Every other event, another device's above all, is held to it as ever.
+   */
+  private admit(raws: unknown[], stampedHere: string | null): IngestResult {
     const fleet = this.fleet;
     const invalid: IngestResult["invalid"] = [];
     const fresh: GEvent[] = [];
@@ -468,7 +478,7 @@ export class LedgerStore {
         invalid.push({ id: event.id, error: "event belongs to another fleet" });
         continue;
       }
-      if (!this.clock.acceptable(event.hlc)) {
+      if (event.id !== stampedHere && !this.clock.acceptable(event.hlc)) {
         invalid.push({ id: event.id, error: "timestamp too far in the future" });
         continue;
       }

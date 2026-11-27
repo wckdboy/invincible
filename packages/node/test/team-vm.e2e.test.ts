@@ -758,7 +758,6 @@ test("a project's first clone is answered as it goes: its head comes while the c
   }
 });
 
-// (Before the test that moves the clock: after it, setProject itself answered 500.)
 test("what a VM says that a look can't take comes back as its own error, never as an internal one", async () => {
   // (I10's finding, 27 November 2026: the converter caught only what its look threw at once, not what it threw later.)
   if (!(await snapshot()).computer) await api("provisionAgent", { id: "primary" });

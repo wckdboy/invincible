@@ -91,6 +91,16 @@ Every replica must reach the same state from the same events, whatever the order
 Since then, a device whose chain holds a refused event, and a revoked device, have every later event judged by a replay. A refused unchained (v1) event is in no chain (nothing chained can follow it), so it doesn't mark its node: the review of this work found that one would have made every later event of that node replay the whole log (`packages/ledger/test/log.test.ts`; the property tests in `packages/ledger/test/misbehaving.test.ts` cover unchained events, in a fleet chained from its founding and in one that adopted chains). **Residual cost:** a stolen key that keeps writing makes each of its events cost a replay, as backdated ones already did.
 
 
+- **A clock that went back doesn't wedge a node's own writes.** An event arriving dated more than 5 minutes ahead of the
+  clock that takes it in is refused (`MAX_CLOCK_DRIFT_MS`), so a device with a broken or hostile clock can't win every
+  last-writer-wins race. A node's own event used to be held to that bound too, against its own clock. Once that clock had
+  been ahead (set wrong and then right, a restored snapshot, a boot before the time is set), every write of the node's own
+  was refused until the clock caught up with its last stamp, and each route that writes answered 500. A test that moved
+  the clock an hour ahead and back found it (27 November 2026). Now the event a node has just stamped (`emit`) is taken:
+  its time is its own clock's, strictly after everything it issued or took in. Every other event is held to the bound as
+  before, so a peer takes this node's events once its own clock has caught up. A rebuild replays the log with no bound at
+  all, so it gives the same state (`chain.test.ts`, `team.e2e.test.ts`).
+
 ## Loops, connectors and approvals (tested)
 
 - **Connector keys go where you said, only.** A key is injected only if it was pinned to the connector's origin and entered for that connector; redirects are never followed; answers are capped and redacted; arguments that look like keys are refused; hostile arguments can't leave their path segment or the origin (`packages/core/test/connectors.test.ts`, `packages/models/test/connectors.test.ts`).
