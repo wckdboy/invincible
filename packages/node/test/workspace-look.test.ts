@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkPath } from "@invincible/core";
@@ -307,10 +307,10 @@ describe("a VM whose HOME is its /work", () => {
 
 /*
  * What a task changed, as git in the VM says it, held to /work as a file's look is (27 November 2026): git runs in the
- * worktree the walk opened, its gitdir within /work too, and with the repository's own configuration held off: no
- * system or global configuration, no textconv, no filter, and a repository whose configuration names another worktree,
- * a hooks path or an include is refused. Otherwise a link as the worktree, or the repository's own configuration, could
- * have git read elsewhere in the VM, a tool's sign-in among what it could read, or run something there.
+ * worktree the walk opened, its gitdir within /work too, and as the node's held git (one held git everywhere): no system
+ * or global configuration, no textconv, no filter, no hook, and a repository whose configuration names another worktree
+ * or includes one from anywhere is refused. Otherwise a link as the worktree, or the repository's own configuration,
+ * could have git read elsewhere in the VM, a tool's sign-in among what it could read, or run something there.
  */
 describe("what a task changed, held to /work", () => {
   const SECRET = "not-a-real-secret-sentinel";
@@ -362,8 +362,8 @@ describe("what a task changed, held to /work", () => {
     expect(changes(join(work, "tasks", "t1"), work).diff).toContain("+on its own");
   });
 
-  test("a core.worktree outside /work is refused, and so are a hooks path and an include", () => {
-    for (const [key, value] of [["core.worktree", "OUTSIDE"], ["core.hooksPath", "OUTSIDE"], ["include.path", "OUTSIDE/x.config"], ["includeIf.gitdir:/.path", "OUTSIDE/x.config"]] as const) {
+  test("a core.worktree outside /work is refused, and so is a configuration it includes from anywhere", () => {
+    for (const [key, value] of [["core.worktree", "OUTSIDE"], ["include.path", "OUTSIDE/x.config"], ["includeIf.gitdir:/.path", "OUTSIDE/x.config"]] as const) {
       const { work, outside, repo } = setup();
       writeFileSync(join(outside, "notes.txt"), `${SECRET}\n`);
       git(repo, "config", key, value.replace("OUTSIDE", outside));
@@ -377,7 +377,25 @@ describe("what a task changed, held to /work", () => {
     }
   });
 
-  test("a textconv never runs, and a repository with a filter is refused: neither can show what is outside", () => {
+  test("a hooks path, outside /work or husky's, is held off: what changed is shown, and nothing outside is read or run", () => {
+    for (const where of ["OUTSIDE", ".husky/_"]) {
+      const { work, outside, repo } = setup();
+      const said = join(outside, "said");
+      const hooks = where === "OUTSIDE" ? join(outside, "hooks") : join(repo, ".husky", "_");
+      mkdirSync(hooks, { recursive: true });
+      for (const hook of ["post-index-change", "reference-transaction", "post-checkout"]) {
+        writeFileSync(join(hooks, hook), `#!/bin/sh\necho ${hook} >> '${said}'\n`);
+        chmodSync(join(hooks, hook), 0o755);
+      }
+      git(repo, "config", "core.hooksPath", where === "OUTSIDE" ? hooks : where);
+      const shown = changes(repo, work);
+      expect([where, shown.files]).toEqual([where, [{ path: "notes.txt", status: "M", added: 1, removed: 1 }]]);
+      expect(shown.diff).toContain("+after");
+      expect(existsSync(said)).toBe(false);
+    }
+  });
+
+  test("a textconv never runs, nor a filter (its own, or Git LFS's): neither can show what is outside, and what changed is shown", () => {
     const { work, outside, repo } = setup();
     writeFileSync(join(repo, ".gitattributes"), "*.txt diff=reveal\n");
     // (git hands it the file as its last word: it says what is outside, then the file, so the two sides differ.)
@@ -385,10 +403,31 @@ describe("what a task changed, held to /work", () => {
     const shown = changes(repo, work);
     expect(shown.diff).not.toContain(SECRET);
     expect(shown.diff).toContain("+after");
-    // A clean filter, which git diff would run on the worktree's files.
+    // A clean filter, which git diff would run on the worktree's files: held off, so the file is compared as it is.
     const filtered = setup();
     writeFileSync(join(filtered.repo, ".gitattributes"), "*.txt filter=reveal\n");
     git(filtered.repo, "config", "filter.reveal.clean", `cat ${join(filtered.outside, "secret")}`);
-    expect(() => changes(filtered.repo, filtered.work)).toThrow(config);
+    const kept = changes(filtered.repo, filtered.work);
+    expect(kept.diff).not.toContain(SECRET);
+    expect(kept.diff).toContain("+after");
+    // Git LFS installed in it (as `git lfs install --local` writes it), git-lfs a stand-in that says when it runs: a
+    // model's pointer committed, and the task's change of it is shown as a change, its bytes as they are.
+    const lfs = setup();
+    const said = join(lfs.outside, "said");
+    const bin = folder();
+    writeFileSync(join(bin, "git-lfs"), `#!/bin/sh\necho "git-lfs $*" >> '${said}'\ncat\n`);
+    chmodSync(join(bin, "git-lfs"), 0o755);
+    writeFileSync(join(lfs.repo, ".gitattributes"), "*.bin filter=lfs diff=lfs merge=lfs -text\n");
+    writeFileSync(join(lfs.repo, "model.bin"), "version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 12345\n");
+    git(lfs.repo, "add", ".");
+    git(lfs.repo, "commit", "-q", "-m", "a model, in LFS");
+    for (const [key, value] of [["filter.lfs.clean", "git-lfs clean -- %f"], ["filter.lfs.smudge", "git-lfs smudge -- %f"], ["filter.lfs.process", "git-lfs filter-process"], ["filter.lfs.required", "true"]] as const) git(lfs.repo, "config", key, value);
+    writeFileSync(join(lfs.repo, "model.bin"), "the model's own bytes\n");
+    const looked = Bun.spawnSync(["python3", "-I", "-c", CHANGES_SCRIPT, lfs.repo, "", lfs.work], { stdout: "pipe", stderr: "pipe", env: { PATH: `${bin}:${process.env.PATH}` } });
+    expect(looked.exitCode).toBe(0);
+    const modelShown = changesView(looked.stdout.toString(), "ada", null, "/work/repo");
+    // (Compared as they are, with no LFS clean: the pointer's three lines out, the model's one in.)
+    expect(modelShown.files).toEqual([{ path: "model.bin", status: "M", added: 1, removed: 3 }]);
+    expect(existsSync(said)).toBe(false);
   });
 });

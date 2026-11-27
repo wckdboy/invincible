@@ -171,19 +171,74 @@ describe("a checkout's own git settings, held off", () => {
     expect(ran(said)).toBe("");
   });
 
-  test("a repository whose configuration names a filter, an include, another worktree or a hooks path is refused, saying why", () => {
+  test("a husky checkout (its hooks path): status, a switch and a commit work, and no hook of its runs", () => {
+    const repo = repository();
     const said = join(folder(), "said");
-    for (const [key, value] of [["filter.x.clean", program(said)], ["include.path", join(folder(), "elsewhere")], ["core.worktree", folder()], ["core.hooksPath", folder()]] as const) {
+    // What husky's install leaves at every npm install: core.hooksPath at .husky/_, and a hook there for each of git's.
+    git(repo, "config", "core.hooksPath", ".husky/_");
+    mkdirSync(join(repo, ".husky", "_"), { recursive: true });
+    writeFileSync(join(repo, ".husky", "_", ".gitignore"), "*\n");
+    for (const hook of ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "post-checkout", "reference-transaction"]) {
+      writeFileSync(join(repo, ".husky", "_", hook), `#!/bin/sh\necho ${hook} >> '${said}'\n`);
+      chmodSync(join(repo, ".husky", "_", hook), 0o755);
+    }
+    writeFileSync(join(repo, "a.ts"), "export const a = 6;\n");
+    expect(gitView(inVm(vmHome(), GIT_SCRIPT, repo), "/work/projects/site")).toMatchObject({ state: "ready", branch: "main", changed: 1 });
+    actionDone(inVm(vmHome(), COMMIT_SCRIPT, repo, "Six"));
+    expect(git(repo, "log", "-1", "--format=%s")).toBe("Six");
+    actionDone(inVm(vmHome(), BRANCH_SCRIPT, repo, "feature", "0"));
+    expect(git(repo, "branch", "--show-current")).toBe("feature");
+    expect(ran(said)).toBe("");
+  });
+
+  test("a filter, Git LFS's, its own or one it includes: status runs none and counts what changed; a switch or a commit is refused, naming it", () => {
+    const said = join(folder(), "said");
+    // (git-lfs a stand-in on the VM's PATH, which says when it runs.)
+    const bin = folder();
+    writeFileSync(join(bin, "git-lfs"), `#!/bin/sh\necho "git-lfs $*" >> '${said}'\ncat\n`);
+    chmodSync(join(bin, "git-lfs"), 0o755);
+    const lfs = (repo: string) => {
+      // What `git lfs install --local` writes (git-lfs 3).
+      for (const [key, value] of [["filter.lfs.clean", "git-lfs clean -- %f"], ["filter.lfs.smudge", "git-lfs smudge -- %f"], ["filter.lfs.process", "git-lfs filter-process"], ["filter.lfs.required", "true"]] as const) git(repo, "config", key, value);
+      writeFileSync(join(repo, ".gitattributes"), "*.ts filter=lfs diff=lfs merge=lfs -text\n");
+      return "lfs";
+    };
+    const own = (repo: string) => (git(repo, "config", "filter.x.clean", program(said)), writeFileSync(join(repo, ".gitattributes"), "* filter=x\n"), "x");
+    const included = (repo: string) => {
+      const cfg = join(folder(), "more.config");
+      writeFileSync(cfg, `[filter "Kept"]\n\tclean = ${program(said)}\n\tprocess = ${program(said)}\n`);
+      git(repo, "config", "include.path", cfg);
+      writeFileSync(join(repo, ".gitattributes"), "* filter=Kept\n");
+      return "Kept";
+    };
+    for (const configure of [lfs, own, included]) {
       const repo = repository();
-      git(repo, "config", key, value);
-      if (key.startsWith("filter.")) writeFileSync(join(repo, ".gitattributes"), "* filter=x\n");
-      writeFileSync(join(repo, "a.ts"), "export const a = 5;\n");
-      const why = `its configuration names ${key.toLowerCase()}`;
-      expect(() => gitView(inVm(vmHome(), GIT_SCRIPT, repo), "/work/projects/site"), key).toThrow(why);
-      expect(() => actionDone(inVm(vmHome(), COMMIT_SCRIPT, repo, "Five")), key).toThrow(why);
-      expect(() => actionDone(inVm(vmHome(), BRANCH_SCRIPT, repo, "feature", "0")), key).toThrow(why);
+      const name = configure(repo);
+      writeFileSync(join(repo, "a.ts"), "export const a = 7;\n");
+      const home_ = vmHome();
+      const vm = (script: string, ...args: string[]) => {
+        const out = Bun.spawnSync(["python3", "-I", "-c", script, ...args], { stdout: "pipe", stderr: "pipe", env: { PATH: `${bin}:${process.env.PATH}`, HOME: home_ } });
+        expect(out.exitCode).toBe(0);
+        return out.stdout.toString();
+      };
+      // (.gitattributes is new, and a.ts changed.)
+      expect([name, gitView(vm(GIT_SCRIPT, repo), "/work/projects/site")]).toMatchObject([name, { state: "ready", changed: 2 }]);
+      const why = `this checkout's configuration names a filter (${name}), and what you ask here runs none: a switch would check its files out, and a commit keep them, without it`;
+      expect(() => actionDone(vm(COMMIT_SCRIPT, repo, "Seven")), name).toThrow(why);
+      expect(() => actionDone(vm(BRANCH_SCRIPT, repo, "feature", "0")), name).toThrow(why);
+      expect(git(repo, "log", "-1", "--format=%s")).toBe("A in a.ts");
     }
     expect(ran(said)).toBe("");
+  });
+
+  test("a repository whose configuration names another worktree is refused, saying why", () => {
+    const repo = repository();
+    git(repo, "config", "core.worktree", folder());
+    writeFileSync(join(repo, "a.ts"), "export const a = 5;\n");
+    const why = "its configuration names core.worktree";
+    expect(() => gitView(inVm(vmHome(), GIT_SCRIPT, repo), "/work/projects/site")).toThrow(why);
+    expect(() => actionDone(inVm(vmHome(), COMMIT_SCRIPT, repo, "Five"))).toThrow(why);
+    expect(() => actionDone(inVm(vmHome(), BRANCH_SCRIPT, repo, "feature", "0"))).toThrow(why);
   });
 
   test("a clone runs no hook of a template a global configuration names", () => {

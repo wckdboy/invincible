@@ -510,7 +510,7 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
 
 - **Yours alone, and only read.** `teamFiles`, `teamFile` and `teamChanges` (the apps' Files and Changes, `invincible agents files|read|changes`) need `sandbox` and an owner's device or the admin token; an agent is refused (403, tested). Each runs one of three fixed Python scripts in the agent's VM as its own unprivileged user (`packages/node/src/workspace-look.ts`), handed over as the argv of `execSandbox` with no shell between: the only input is the path or the task's worktree, as an argument, never in a script's text. Nothing they run writes.
 - **Under /work, and only there.** A path is absolute, under `/work`, with no `.` or `..` in it (`WorkPath`, tested). A folder or a file is reached from `/work` itself, each folder on the way and the last opened from the one before it with `O_NOFOLLOW`, never by a path the VM's kernel walks. A link on the way is read and its target walked in its place: within `/work` it works as ever, and one that leads out (an absolute path elsewhere, or `..` above `/work`) is refused, as is a chain of more than 40. What is read is the file that was opened, so a link swapped in as it reads can't take it outside either. A listing names a link as a link, and reads nothing through it. All of this is tested, with a swapper racing the reads. The file that holds the VM's gateway token (`/work/.invincible-gateway.json`) is refused by name before the VM is asked, and again in the VM whatever leads to it, a link to it or the same file under another name (tested). In a VM whose HOME is its `/work` (every agent's VM before it has a HOME of its own), what its tools keep for themselves, their sign-ins among them, is there too: a look refuses every top-level dot-entry of `/work` that isn't the workspace's own (`WORKSPACE_OWN`: `.agent`, `.tmp`, `.eval`, `.evidence`), however it is reached, by its path or a link. That is the same rule a move to a HOME of its own goes by, and it names no tool's files. A listing of `/work` names each such entry, and reads nothing in it (tested).
-- **A task's changes, held the same way.** `teamChanges` runs git in the worktree the walk opened (it `fchdir`s there), with the worktree's git dir, and a linked worktree's common git dir, within `/work` too. A link as the worktree, or a `.git` that names a git dir elsewhere, is refused. Git runs with the repository's own configuration held off: no system or global configuration, no textconv, no filter, no fsmonitor, no hooks, and no excludes or attributes file of the repository's naming. A repository whose configuration names another worktree, a hooks path, an include or a filter is refused. The commit a task started at is read as a commit's name, or not at all. Tested with a link as the worktree, a `.git` naming a git dir outside, `core.worktree`, `core.hooksPath` and includes, a textconv that would show a file outside, and a clean filter.
+- **A task's changes, held the same way.** `teamChanges` runs git in the worktree the walk opened (it `fchdir`s there), with the worktree's git dir, and a linked worktree's common git dir, within `/work` too. A link as the worktree, or a `.git` that names a git dir elsewhere, is refused. Git runs as the node's held git does everywhere (`packages/agents/src/held-git.ts`): no system or global configuration, no textconv, no fsmonitor, no hooks (a hooks path, husky's or one outside, is held off, not refused), no filter run (Git LFS's among them: its files are compared as they are), and no excludes or attributes file of the repository's naming. A repository whose configuration names another worktree, or includes a configuration from anywhere, is refused: either would have git read outside `/work`. The commit a task started at is read as a commit's name, or not at all. Tested with a link as the worktree, a `.git` naming a git dir outside, `core.worktree` and includes, a hooks path outside and husky's, a textconv and a clean filter that would show a file outside, and Git LFS installed in the repository.
 - **Bounded, and redacted.** A folder's first 2,000 entries; a file's first 700 KB (a picture shown up to 5 MB, as an attachment); a diff's first 600,000 characters. What comes back is checked for its shape before it is shown, and a text or a diff has anything that looks like a key redacted (`redact`, the secret scanner's) before it leaves the node (tested with a key-shaped fake).
 - **Residual risk:** what an agent keeps in its workspace in a form the scanner doesn't know is shown as it is, to you. Reading runs beside the agent's own work in its VM, so a very large folder or repository costs that VM a moment of its time.
 
@@ -524,14 +524,18 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
   checked by git too), a commit's message, or the project's repository for its first clone. What comes back is checked
   (`gitView`, `actionDone`): never more than a checkout's state, with any credentials in its remote's address taken out,
   and everything git says redacted.
-- **The repository's own configuration, held off**, as a task's changes are (above; the apps thread's finding, 27 November
-  2026). The checkout is the agent's to change, and so is the computer's HOME, where a global configuration would be (in
-  layout 1 its HOME is its `/work`), so what you ask here runs nothing of either:
+- **The repository's own configuration, held off**, by the node's one held git, as a task's setup, checkpoints and
+  changes are (above; `packages/agents/src/held-git.ts`; the apps thread's finding, 27 November 2026, and one held git
+  everywhere since). The checkout is the agent's to change, and so is the computer's HOME, where a global configuration
+  would be (in layout 1 its HOME is its `/work`), so what you ask here runs nothing of either:
   - no system or global configuration, and no attributes or excludes from outside the repository;
-  - no fsmonitor, no hook (a commit's, a switch's, a clone's template's), and no signing, so no `gpg.program` of its;
+  - no fsmonitor, no hook (a commit's, a switch's, a clone's template's), whatever hooks path it names (husky's
+    checkouts are used as they are), no signing, so no `gpg.program` of its, and no askpass program;
   - no submodule's own git: a switch doesn't recurse, and status asks nothing of a submodule's uncommitted changes;
-  - a repository whose own configuration names a filter, an include, another worktree or a hooks path is refused, and
-    says so by name.
+  - no filter its configuration names (Git LFS's, its own, or one it includes). Status reads its files as they are. A
+    switch or a commit is refused, naming the filter: either would write its files without it, so a commit would keep a
+    file git-crypt encrypts unencrypted in your history, or one LFS keeps as a pointer whole;
+  - a repository whose configuration names another worktree is refused, and says so by name.
   Before, `git -C` read all of it: a commit ran the repository's hooks and its signing program, `add -A` and status its
   filters, status its fsmonitor, a switch its post-checkout hook, and a clone a hook of the template a global
   configuration named.
@@ -539,7 +543,9 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
   the primary. What the checkout holds (its scripts, its build) still runs whenever the primary runs it, and a commit takes
   everything changed or new as it is left (`add -A`). The routes neither push nor open a pull request.
 - Tests: `packages/node/test/project-git.test.ts` (a planted hook, filter, fsmonitor, gpg program and template hook ran
-  before, and none runs now; a repository naming a filter, an include, another worktree or a hooks path is refused).
+  before, and none runs now; a husky checkout's status, switch and commit work with none of its hooks run; a checkout
+  with Git LFS in it, a filter of its own or one it includes has its status read, and its switch and commit refused,
+  naming the filter; one naming another worktree is refused).
 
 ## Coding agents (tested)
 

@@ -11,6 +11,7 @@ export * from "./harnesses.ts";
 export * from "./seat-sign-in.ts";
 export * from "./handed-process.ts";
 export * from "./engram.ts";
+export * from "./held-git.ts";
 export * from "./ship.ts";
 export * from "./skills-run.ts";
 export * from "./team-runtime.ts";

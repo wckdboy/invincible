@@ -1,3 +1,4 @@
+import { HELD_GIT } from "@invincible/agents";
 import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type TeamChangesView, type TeamFileEntry, type TeamFilesView, type TeamFileView, textOf } from "@invincible/core";
 import { WALK } from "@invincible/sandbox";
 
@@ -74,11 +75,13 @@ out(size=s.st_size,modified=int(s.st_mtime*1000),cut=len(b)>${READ_LIMIT},data=b
  * or the repository itself): from the commit it started at (the first word of <kept>, written as it started) or, with
  * none, from HEAD; the files and the diff (bounded), and the files git doesn't track yet. Held to /work as a file's look
  * is (27 November 2026): the worktree is the folder the walk opened, and git runs in it (fchdir), its git dir (and a
- * worktree's common one) within /work too; and with the repository's own configuration held off: no system or global
- * configuration, no textconv, no filter, no fsmonitor, no hooks, and a repository whose configuration names another
- * worktree, a hooks path, an include or a filter is refused. The commit it started at is a commit's name, or none.
+ * worktree's common one) within /work too; and as the node's held git (agents' held-git.ts, one held git everywhere): no
+ * system or global configuration, no textconv, no fsmonitor, no hooks (husky's hooks path held off, not refused), and
+ * no filter run (Git LFS's among them: its files are compared as they are). A repository whose configuration names
+ * another worktree or includes a configuration from anywhere is refused, as either would have git read outside /work.
+ * The commit it started at is a commit's name, or none.
  */
-export const CHANGES_SCRIPT = `${LOOK}work,kept=sys.argv[1],sys.argv[2]
+export const CHANGES_SCRIPT = `${LOOK}${HELD_GIT}work,kept=sys.argv[1],sys.argv[2]
 root=sys.argv[3] if len(sys.argv)>3 else '/work'
 def held_to_work(path,want):
     try:
@@ -104,9 +107,9 @@ elif stat.S_ISREG(gs.st_mode):
     line=os.read(g[-1],4096).decode(errors='replace').strip()
     if not line.startswith('gitdir: '):
         out(error='NotARepository')
-    named=line[8:].strip()
+    pointed=line[8:].strip()
     try:
-        _,dnames=held_to_work(named if named.startswith('/') else here+'/'+named,'dir')
+        _,dnames=held_to_work(pointed if pointed.startswith('/') else here+'/'+pointed,'dir')
     except OSError:
         out(error='NotARepository')
     gitdir=at(dnames)
@@ -123,16 +126,16 @@ if common:
     except OSError:
         out(error='NotARepository')
 os.fchdir(held[-1])
-env={'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':os.devnull,'GIT_ATTR_NOSYSTEM':'1','GIT_OPTIONAL_LOCKS':'0','GIT_TERMINAL_PROMPT':'0','GIT_DIR':gitdir,'GIT_WORK_TREE':'.','LC_ALL':'C'}
-# Its own configuration, as written (no include followed): one that names another worktree, a hooks path, an include
-# or a filter is refused.
-named=subprocess.run(['git','config','--list','--no-includes','--name-only'],capture_output=True,timeout=60,env=env)
-if named.returncode!=0:
+# The node's held git (HELD_GIT), in the git dir and worktree the walk held, writing nothing (no optional lock), with no
+# HOME of the VM's for a path in its configuration to start from.
+look={'GIT_DIR':gitdir,'GIT_WORK_TREE':'.','GIT_OPTIONAL_LOCKS':'0','HOME':'/nonexistent'}
+if subprocess.run(['git','config','--list','-z','--name-only'],capture_output=True,timeout=60,env={**GIT_ENV,**look}).returncode!=0:
     out(error='NotARepository')
-if any(re.match(r'(core\\.worktree|core\\.hookspath|include\\.|includeif\\.|filter\\.)',key.lower()) for key in named.stdout.decode(errors='replace').splitlines()):
+# Another worktree, or a configuration it includes from anywhere, would have git read outside /work: refused. A hooks path,
+# a filter (Git LFS's among them) and the rest are held off.
+if refused('.',look) or named('.',r'(include\\.|includeif\\.)',look):
     out(error='RepositoryConfig')
-held_off=['-c','core.fsmonitor=false','-c','core.hooksPath='+os.devnull,'-c','core.excludesFile='+os.devnull,'-c','core.attributesFile='+os.devnull]
-git=lambda *a: subprocess.run(['git',*held_off,*a],capture_output=True,timeout=60,env=env)
+look_git=lambda *a: git('.',*a,env=look)
 base=None
 if kept:
     try:
@@ -142,11 +145,11 @@ if kept:
     except (Refused,OSError):
         base=None
 since=base or 'HEAD'
-head=git('rev-parse','HEAD').stdout.decode().strip() or None
-numstat=git('diff','--no-textconv','--no-ext-diff','--numstat','--no-renames',since).stdout.decode(errors='replace')
-names=git('diff','--no-textconv','--no-ext-diff','--name-status','--no-renames',since).stdout.decode(errors='replace')
-untracked=git('ls-files','--others','--exclude-standard').stdout.decode(errors='replace').splitlines()
-diff=git('diff','--no-color','--no-textconv','--no-ext-diff','--no-renames',since).stdout
+head=look_git('rev-parse','HEAD').stdout.decode().strip() or None
+numstat=look_git('diff','--no-textconv','--no-ext-diff','--numstat','--no-renames',since).stdout.decode(errors='replace')
+names=look_git('diff','--no-textconv','--no-ext-diff','--name-status','--no-renames',since).stdout.decode(errors='replace')
+untracked=look_git('ls-files','--others','--exclude-standard').stdout.decode(errors='replace').splitlines()
+diff=look_git('diff','--no-color','--no-textconv','--no-ext-diff','--no-renames',since).stdout
 out(base=base,head=head,numstat=numstat,names=names,untracked=untracked[:500],diff=diff[:${DIFF_LIMIT}].decode(errors='replace'),cut=len(diff)>${DIFF_LIMIT})`;
 
 export class LookError extends Error {

@@ -30,17 +30,23 @@
  */
 export const HELD_GIT = `import json,os,re,shutil,subprocess,sys
 GIT_ENV={'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),'HOME':os.environ.get('HOME','/nonexistent'),'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':os.devnull,'GIT_ATTR_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0','GIT_ASKPASS':'','GIT_LFS_SKIP_SMUDGE':'1','LC_ALL':'C'}
-HELD_OFF=['-c','core.fsmonitor=false','-c','core.hooksPath='+os.devnull,'-c','core.excludesFile='+os.devnull,'-c','core.attributesFile='+os.devnull,'-c','core.askPass=','-c','commit.gpgSign=false','-c','tag.gpgSign=false','-c','log.showSignature=false','-c','submodule.recurse=false','-c','credential.helper=','-c','http.proxy=','-c','protocol.allow=never','-c','protocol.http.allow=always','-c','protocol.https.allow=always']
-def keys(root):
+# What a repository's configuration would have run, held off for every git of the node's.
+RUN_OFF=['-c','core.fsmonitor=false','-c','core.hooksPath='+os.devnull,'-c','core.excludesFile='+os.devnull,'-c','core.attributesFile='+os.devnull,'-c','core.askPass=','-c','commit.gpgSign=false','-c','tag.gpgSign=false','-c','log.showSignature=false','-c','submodule.recurse=false']
+# Where a fetch with the lease may go: no credential helper or proxy, and no transport but HTTP and HTTPS.
+LEASE_OFF=['-c','credential.helper=','-c','http.proxy=','-c','protocol.allow=never','-c','protocol.http.allow=always','-c','protocol.https.allow=always']
+HELD_OFF=RUN_OFF+LEASE_OFF
+def keys(root,env=None):
     # Its configuration's keys as git reads them there: its own, its worktree's and what they include (none of the system's
     # or a global one). A subsection keeps its case, and may hold any character but a newline.
-    r=subprocess.run(['git','-C',root,'config','--list','-z','--name-only'],capture_output=True,timeout=60,env=GIT_ENV)
+    r=subprocess.run(['git','-C',root,'config','--list','-z','--name-only'],capture_output=True,timeout=60,env={**GIT_ENV,**(env or {})})
     return [k for k in r.stdout.decode(errors='surrogateescape').split('\\0') if k]
+def filters(root,env=None):
+    # The filters its configuration names, by name.
+    return sorted({k[7:k.rindex('.')] for k in keys(root,env) if k[:7].lower()=='filter.' and k.count('.')>1})
 def held_env(root,env=None):
     # GIT_ENV, and each filter its configuration names held off by the environment (a filter's name may hold '=', which
     # a -c would take for the end of the key).
-    names=sorted({k[7:k.rindex('.')] for k in keys(root) if k[:7].lower()=='filter.' and k.count('.')>1})
-    pairs=[('filter.'+n+'.'+v,'false' if v=='required' else '') for n in names for v in ('clean','smudge','process','required')]
+    pairs=[('filter.'+n+'.'+v,'false' if v=='required' else '') for n in filters(root,env) for v in ('clean','smudge','process','required')]
     held={'GIT_CONFIG_COUNT':str(len(pairs))}
     for i,(k,v) in enumerate(pairs):
         held['GIT_CONFIG_KEY_%d'%i]=k
@@ -48,14 +54,14 @@ def held_env(root,env=None):
     return {**GIT_ENV,**held,**(env or {})}
 def git(root,*a,timeout=60,env=None):
     return subprocess.run(['git','-C',root,*HELD_OFF,*a],capture_output=True,timeout=timeout,env=held_env(root,env))
-def named(root,pattern):
+def named(root,pattern,env=None):
     # The first key of its configuration that matches, or None.
-    for key in keys(root):
+    for key in keys(root,env):
         if re.match(pattern,key.lower()):
             return key.lower()[:200]
     return None
-def refused(root):
-    key=named(root,r'core\\.worktree$')
+def refused(root,env=None):
+    key=named(root,r'core\\.worktree$',env)
     return "this repository isn't used here: its configuration names "+key+", which would have git work on files outside it, and nothing the node sets holds that off" if key else None
 def unfetched(root):
     key=named(root,r'(url\\.|http\\.(.+\\.)?(proxy[a-z]*|curloptresolve)$|credential\\.(.+\\.)?helper$|remote\\.[^.]*://)')

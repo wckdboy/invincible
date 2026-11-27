@@ -1,3 +1,4 @@
+import { HELD_GIT } from "@invincible/agents";
 import { type ProjectGitView, redact } from "@invincible/core";
 import { LookError } from "./workspace-look.ts";
 
@@ -11,26 +12,19 @@ import { LookError } from "./workspace-look.ts";
  */
 
 /**
- * How each script runs git: with the repository's own configuration held off, as a task's changes are (workspace-look.ts
- * CHANGES_SCRIPT; the apps thread's finding, 27 November 2026). The checkout is the agent's to change, and so is the VM's
- * HOME, where a global configuration would be (in layout 1 its HOME is its /work): what you ask here runs nothing of
- * either. No system or global configuration, no fsmonitor, no hooks, no signing (so no gpg.program of its), no
- * submodule's own git run, and no attributes or excludes from outside the repository. A repository whose own configuration
- * names a filter, an include, another worktree or a hooks path is refused (`refused`), and says so.
+ * How each script runs git: the node's own held git (agents' held-git.ts), the one a task's setup, checkpoints, evidence
+ * and changes run, so that its repository's own configuration is held off here as there (the apps thread's finding, 27
+ * November 2026; one held git everywhere, the fifth fabric review's R5-6). The checkout is the agent's to change, and so
+ * is the VM's HOME, where a global configuration would be (in layout 1 its HOME is its /work): what you ask here runs
+ * nothing of either. No system or global configuration, no fsmonitor, no hooks (husky's hooks path is held off, not
+ * refused), no signing (so no gpg.program of its), no submodule's own git run, no askpass program, and no attributes
+ * or excludes from outside the repository. A filter its configuration names is never run: status reads its files as
+ * they are, and a switch or a commit is refused (`unwritten`), as either would write its files without it (an LFS
+ * pointer, a file git-crypt encrypts). A repository whose configuration names another worktree is refused (`refused`).
  */
-const HELD = `import json,os,re,subprocess,sys
-ENV={'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),'HOME':os.environ.get('HOME','/nonexistent'),'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':os.devnull,'GIT_ATTR_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0','LC_ALL':'C'}
-HELD_OFF=['-c','core.fsmonitor=false','-c','core.hooksPath='+os.devnull,'-c','core.excludesFile='+os.devnull,'-c','core.attributesFile='+os.devnull,'-c','commit.gpgSign=false','-c','log.showSignature=false','-c','submodule.recurse=false']
-def git(root,*a,timeout=60):
-    return subprocess.run(['git','-C',root,*HELD_OFF,*a],capture_output=True,timeout=timeout,env=ENV)
-def refused(root):
-    # Its own configuration, as written (no include followed): one that names a filter, an include, another worktree or a
-    # hooks path is refused, by its name.
-    named=subprocess.run(['git','-C',root,'config','--list','--no-includes','--name-only'],capture_output=True,timeout=60,env=ENV)
-    for key in named.stdout.decode(errors='replace').splitlines():
-        if re.match(r'(core\\.worktree$|core\\.hookspath$|include\\.|includeif\\.|filter\\.)',key.lower()):
-            return "this repository isn't used here: its configuration names "+key.lower()[:200]+", and what you ask here holds a repository's own configuration off"
-    return None
+const HELD = `${HELD_GIT}def unwritten(root):
+    f=filters(root)
+    return "this checkout's configuration names a filter ("+", ".join(f)[:200]+"), and what you ask here runs none: a switch would check its files out, and a commit keep them, without it" if f else None
 `;
 
 /** `python3 -I -c GIT <checkout>`: its branch and branches, what isn't committed, how it stands with its upstream, its latest commits. */
@@ -66,7 +60,7 @@ print(json.dumps({"state":"ready","branch":branch,"head":head,"branches":branche
 
 /** `python3 -I -c BRANCH <checkout> <name> <1|0>`: switch to the branch, or start it (1) from where it stands; git checks the name too. */
 export const BRANCH_SCRIPT = `${HELD}root,name,create=sys.argv[1],sys.argv[2],sys.argv[3]=='1'
-bad=refused(root)
+bad=refused(root) or unwritten(root)
 if bad:
     print(json.dumps({"ok":False,"said":bad}));sys.exit(0)
 g=lambda *a: git(root,*a)
@@ -77,7 +71,7 @@ print(json.dumps({"ok":r.returncode==0,"said":(r.stderr or r.stdout).decode(erro
 
 /** `python3 -I -c COMMIT <checkout> <message>`: everything changed or new, committed; as the primary where the checkout has no author set. */
 export const COMMIT_SCRIPT = `${HELD}root,message=sys.argv[1],sys.argv[2]
-bad=refused(root)
+bad=refused(root) or unwritten(root)
 if bad:
     print(json.dumps({"ok":False,"said":bad}));sys.exit(0)
 g=lambda *a: git(root,*a,timeout=120)
@@ -91,7 +85,8 @@ export const CLONE_SCRIPT = `${HELD}dest,repo=sys.argv[1],sys.argv[2]
 if os.path.isdir(dest) and os.listdir(dest):
     print(json.dumps({"ok":False,"said":"the checkout is there already"}));sys.exit(0)
 os.makedirs(os.path.dirname(dest),exist_ok=True)
-r=subprocess.run(['git',*HELD_OFF,'clone','--',repo,dest],capture_output=True,timeout=840,env=ENV)
+# (Not a fetch with a lease: its transport is the repository's address, as git takes it.)
+r=subprocess.run(['git',*RUN_OFF,'clone','--',repo,dest],capture_output=True,timeout=840,env=GIT_ENV)
 print(json.dumps({"ok":r.returncode==0,"said":(r.stderr or r.stdout).decode(errors='replace')[-600:]}))`;
 
 /** How long each may run in the VM, in seconds: a look and a commit are quick; a clone may be large. */
