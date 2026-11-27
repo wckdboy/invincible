@@ -2,6 +2,7 @@ import { z } from "zod";
 import { desktopArgv, desktopBriefing } from "./desktop-command.ts";
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
+import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
 import { apartMatches, chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
 import { commandsRun, DESKTOP_EVIDENCE, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
@@ -757,12 +758,21 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       };
       /** A command of the task's, in its workspace: in the agent's own VM (`exec`), or in the VM of the seat its coding tool runs on (`execOn`). */
       const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}${space ? `export INVINCIBLE_EYES_SPACE=${quote(space)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`);
-      const exec = async (command: string, timeout = 120) => {
+      const exec = async (command: string, timeout = 120, what?: "gate") => {
         await keeping;
         // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms.
         const direct = deps.execArgv ? desktopArgv(command, sees, space) : null;
         if (direct) return deps.execArgv!(agent, ["desktop", ...direct], Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
-        return deps.exec(agent, inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
+        const limit = Math.min(timeout, TEAM_COMMAND_SECONDS);
+        // Another node's task runs each command under the handed helper: in a process group of its own, under its own
+        // deadline, what a gate started ended with it and what any other leaves running kept for the task's end.
+        if (handed) return deps.exec(agent, inTask(handedCommand(command, { task: task.id, limitSec: limit, ends: what === "gate" ? "gate" : "task" })), limit + HANDED_MARGIN_SECONDS, ctx.signal);
+        return deps.exec(agent, inTask(command), limit, ctx.signal);
+      };
+      /** What another node's task left running in its VM ends with the task, however it ended; said when it can't be. */
+      const endHanded = async () => {
+        const ended = await deps.exec(agent, handedEndCommand(task.id), 60, AbortSignal.timeout(90_000)).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+        if (ended.exitCode !== 0) ctx.emit(`Processes · what this task left running in its VM couldn't all be ended: ${redact(ended.stderr || ended.stdout).slice(0, 300)}`);
       };
       const execOn = (seat: SeatRun) => (command: string, timeout = 120) => seat.exec(inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
       // (Its stop's word goes on a signal of its own: the task's has ended by the time it is said.)
@@ -984,7 +994,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           const saved = await exec(`mkdir -p /work/.agent/sessions && printf %s ${quote(id)} > ${quote(`${sessionAt}.new`)} && mv ${quote(`${sessionAt}.new`)} ${quote(sessionAt)}`, 10);
           if (saved.exitCode !== 0) throw new Error("Could not retain the harness session");
         },
-      }).finally(letGo);
+      }).finally(async () => {
+        await letGo();
+        if (handed) await endHanded();
+      });
       // (A reply with no command to run spent a turn and ran nothing: it is not one of the commands.)
       // (Its coding tool's calls are in what it spent, under the role "tool".)
       const proven = proof.before.length || proof.after.length || proof.review ? { proof: { before: proof.before, after: proof.after, review: proof.review, sameModel: proof.review !== null && saidSameReview } } : {};

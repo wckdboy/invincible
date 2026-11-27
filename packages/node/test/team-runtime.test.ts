@@ -6,7 +6,7 @@ import { costOf, moneyPrices, newNodeIdentity, type ExecResult, type Prices, typ
 import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { acpDriver, AGENTS, OWN_SIGN_IN, planTaken, type RunEvent } from "@invincible/agents";
-import { HANDED_GATE_SECONDS, harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
+import { HANDED_GATE_SECONDS, HANDED_MARGIN_SECONDS, harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
 import type { SeatAnswer, SeatRun, TeamRunContext } from "@invincible/agents";
 import type { TaskAccount } from "@invincible/core";
 
@@ -604,6 +604,27 @@ test("a coding tool on another node's task never runs on its own sign-in, and is
   const acp = { ...member, harness: "acp" as const, acp: "goose acp" };
   const goose = fixture([], { agent: () => acp, models: () => roster, countable: () => true, paid: () => true, exec });
   await expect(goose.runtime.executeTask(acp, handedTask, goose.context)).rejects.toThrow("handed over by another node");
+});
+
+test("another node's task runs each command under the handed helper: its gates' processes end with them, the rest with the task", async () => {
+  const script = () => [say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")];
+  const f = fixture(script());
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  expect((await f.runtime.executeTask(member, handedTask, f.context)).verified).toBe(true);
+  // (As the gateway's wrapper quotes it: the helper's mode, then the task.)
+  const as = (mode: string) => (command: string) => command.includes(`sys.argv[4]))'\\'' ${mode} '\\''${handedTask.id}`);
+  const gates = f.commands.filter((c) => c.includes("bun test required-check"));
+  expect(gates.length).toBeGreaterThan(0);
+  expect(gates.every(as("gate"))).toBe(true);
+  const work = f.commands.filter((c) => c.includes("echo one"));
+  expect(work.length).toBe(1);
+  expect(work.every(as("task"))).toBe(true);
+  const end = f.commands.findIndex((c) => c.includes("end_task(sys.argv[1])"));
+  expect(end).toBeGreaterThan(Math.max(...[...gates, ...work].map((c) => f.commands.lastIndexOf(c))));
+  // Your own task runs as before.
+  const g = fixture(script());
+  await g.runtime.executeTask(member, task, g.context);
+  expect(g.commands.some((c) => c.includes("PR_SET_CHILD_SUBREAPER"))).toBe(false);
 });
 
 test("what a harness runs another node's task on: never the tool's own sign-in or setup, only models through the gateway", () => {
@@ -1787,19 +1808,24 @@ test("a steer's line on the trail: yours as You, your agent's as Your agent, its
 
 test("a task another node handed over has its gates bounded in all, every round counted (its gates are that node's commands); yours as before", async () => {
   // Its gate takes 600 s each time it runs and fails: 600 s before the work, what is left after it, then none.
-  const slow = (timeouts: number[]): TeamRuntimeDeps["exec"] => async (_m, command, timeoutSec) => {
+  const slow = (timeouts: number[], limits: number[] = []): TeamRuntimeDeps["exec"] => async (_m, command, timeoutSec) => {
     if (!command.includes("bun test required-check")) return result();
     timeouts.push(timeoutSec);
+    // (Another node's gate runs under the handed helper, which holds it to its limit, given after its mode and task.)
+    const limit = command.match(/ gate '\\''[^']*'\\'' (\d+) /);
+    if (limit) limits.push(Number(limit[1]));
     return result({ exitCode: 1, stdout: "required behavior failed", durationMs: 600_000 });
   };
   const script = () => [say("1. Build."), say("DONE\nWorks."), say("DONE\nWorks now."), say("DONE\nTrust me.")];
-  const handedTimeouts: number[] = [];
-  const handed = fixture(script(), { exec: slow(handedTimeouts) });
+  const handedTimeouts: number[] = [], handedLimits: number[] = [];
+  const handed = fixture(script(), { exec: slow(handedTimeouts, handedLimits) });
   // (Another node's task runs only on a model its budget counts above $0: priced, the fixture's local/fake is one.)
   handed.store.emit(handed.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   const outcome = await handed.runtime.executeTask(member, { ...task, givenBy: `node:n_${"A".repeat(43)}` }, handed.context);
   expect(outcome.verified).toBe(false);
-  expect(handedTimeouts).toEqual([TEAM_COMMAND_SECONDS, HANDED_GATE_SECONDS - 600]);
+  expect(handedLimits).toEqual([TEAM_COMMAND_SECONDS, HANDED_GATE_SECONDS - 600]);
+  // (The VM's own deadline on each is the helper's margin later: the helper ends it first.)
+  expect(handedTimeouts).toEqual([TEAM_COMMAND_SECONDS + HANDED_MARGIN_SECONDS, HANDED_GATE_SECONDS - 600 + HANDED_MARGIN_SECONDS]);
   const yoursTimeouts: number[] = [];
   const yours = fixture(script(), { exec: slow(yoursTimeouts) });
   await yours.runtime.executeTask(member, task, yours.context);

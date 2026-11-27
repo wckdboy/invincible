@@ -37,8 +37,8 @@ export interface RunDeps {
     messages: ModelMessage[],
     turn?: { loop?: boolean; tools?: readonly ToolSpec[]; apart?: readonly string[] },
   ): Promise<{ text: string; model: string; skipped?: { model: string; error: string }[]; calls?: ClientCall[]; carry?: string }>;
-  /** Run one shell command in the run's workspace. */
-  exec(command: string, timeoutSec: number): Promise<ExecResult>;
+  /** Run one shell command in the run's workspace. `what`: a gate's (its processes may be ended with it). */
+  exec(command: string, timeoutSec: number, what?: "gate"): Promise<ExecResult>;
   /** Fixed cleanup for this worker, available even after ordinary execution is cancelled. */
   stopAgent?(): Promise<void>;
   /** The stop's word to a live coding agent's run, on a way that stays open once ordinary execution is cancelled (harnesses.ts AgentRunDeps.tellStop). */
@@ -1272,7 +1272,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
   deps = {
     ...given,
     ask: (role, messages, turn) => timed(true, role === "reviewer", () => given.ask(role, messages, turn)),
-    exec: (command, timeoutSec) => timed(false, false, () => given.exec(command, timeoutSec)),
+    exec: (command, timeoutSec, what) => timed(false, false, () => given.exec(command, timeoutSec, what)),
   };
   const check = (): void => {
     if (deps.signal?.aborted) throw new Stopped();
@@ -1503,7 +1503,7 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       ran = { ...NOT_RUN, stdout: `Not run: this task's gates have had the ${o.gateSeconds} s they may take in all.` };
     } else {
       try {
-        ran = await deps.exec(gate.command, limit);
+        ran = await deps.exec(gate.command, limit, "gate");
       } catch (error) {
         ran = { exitCode: -1, stdout: "", stderr: `The sandbox could not run this: ${(error as Error).message}`, durationMs: 0, truncated: false };
       }

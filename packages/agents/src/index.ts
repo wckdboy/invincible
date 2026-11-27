@@ -9,6 +9,7 @@ export * from "./reviewer-cases.ts";
 export * from "./harnesses.ts";
 // A seat's sign-in, by the vendor's own tool in the seat's VM (core's seats.ts).
 export * from "./seat-sign-in.ts";
+export * from "./handed-process.ts";
 export * from "./engram.ts";
 export * from "./ship.ts";
 export * from "./skills-run.ts";
