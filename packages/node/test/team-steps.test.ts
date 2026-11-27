@@ -15,7 +15,9 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 function scratch() {
   const dir = mkdtempSync(join(tmpdir(), "invincible-steps-"));
   dirs.push(dir);
-  // (Git as the VM's is: its agent's name, and nothing of this machine's own configuration.)
+  // (Git as the VM's is: its agent's name, and nothing of this machine's own configuration. Each repository holds
+  // user.useConfigOnly, so git never guesses an address from the host's name, as on Linux, where it can't: the
+  // fifth fabric review's landing, whose Linux CI found the checkpoint's commit with no name to make it by.)
   const env = { PATH: process.env.PATH!, HOME: dir, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "Ada", GIT_AUTHOR_EMAIL: "ada@agents.invalid", GIT_COMMITTER_NAME: "Ada", GIT_COMMITTER_EMAIL: "ada@agents.invalid" };
   const sh = (command: string, cwd = dir): string => {
     const ran = Bun.spawnSync(["bash", "-c", command], { cwd, env });
@@ -28,13 +30,15 @@ function scratch() {
 
 test("a step is kept as a commit under its own ref, its files as they stood (not what is ignored), and the task's own index is never touched", () => {
   const { dir, sh, here } = scratch();
-  sh("git init -q repo && cd repo && echo one > a.txt && git add a.txt && git commit -qm base");
+  sh("git init -q repo && cd repo && git config user.useConfigOnly true && echo one > a.txt && git add a.txt && git commit -qm base");
   const base = sh("git -C repo rev-parse HEAD");
   sh("git -C repo worktree add -q --detach ../t1 HEAD");
   sh("echo two > a.txt && echo new > b.txt && printf 'out/\\n' > .gitignore && mkdir -p out && echo built > out/x", join(dir, "t1"));
   const [commit, tree, parent] = sh(here(checkpointCommand(join(dir, "t1"), "task-aaaaaaaaaaaa", 1, ""))).split(" ");
   expect(parent).toBe(base);
   expect(sh("git -C repo rev-parse refs/invincible/checkpoints/task-aaaaaaaaaaaa/1")).toBe(commit!);
+  // By the node's own name for it, never one git guessed (nor the repository's, which an agent may change).
+  expect(sh(`git -C repo log -1 --format='%an <%ae>|%cn <%ce>' ${commit}`)).toBe("Your agent <agent@invincible.invalid>|Your agent <agent@invincible.invalid>");
   expect(sh(`git -C repo show ${commit}:a.txt`)).toBe("two");
   expect(sh(`git -C repo show ${commit}:b.txt`)).toBe("new");
   expect(Bun.spawnSync(["git", "-C", join(dir, "repo"), "cat-file", "-e", `${commit}:out/x`]).exitCode).not.toBe(0);
@@ -54,7 +58,7 @@ test("a change made in the same tick as the task's index was written is kept: th
   // index made with a new time hid that, and a step was once kept with "one" for "two" (1 run in 60 on Ultra, 19
   // November 2026). Here the clock is made coarse on purpose: whole seconds, no ctime, the times set by hand.
   const { dir, sh, here } = scratch();
-  sh("git init -q repo && cd repo && git config core.checkStat minimal && git config core.trustctime false && echo one > a.txt && git add a.txt && git commit -qm base");
+  sh("git init -q repo && cd repo && git config user.useConfigOnly true && git config core.checkStat minimal && git config core.trustctime false && echo one > a.txt && git add a.txt && git commit -qm base");
   sh("git -C repo worktree add -q --detach ../t1 HEAD");
   const t1 = join(dir, "t1");
   const cached = Number(/mtime: (\d+):/.exec(sh("git ls-files --debug a.txt", t1))![1]);
@@ -69,7 +73,7 @@ test("a change made in the same tick as the task's index was written is kept: th
 
 test("a task started from a step has its files as they stood after it, its HEAD where the step's was, and the first task's base for its changes; the first task's later work stays its own", () => {
   const { dir, sh, here } = scratch();
-  sh("git init -q repo && cd repo && echo one > a.txt && git add a.txt && git commit -qm base");
+  sh("git init -q repo && cd repo && git config user.useConfigOnly true && echo one > a.txt && git add a.txt && git commit -qm base");
   const base = sh("git -C repo rev-parse HEAD");
   sh("git -C repo worktree add -q --detach ../t1 HEAD");
   mkdirSync(join(dir, "base"));

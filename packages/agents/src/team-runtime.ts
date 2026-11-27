@@ -361,7 +361,8 @@ export function keysLine(keys: readonly TeamKeyGrant[] | undefined, address: (se
  * A task's workspace as it stands after a step, kept as a commit under a ref of its own in the agent's repository
  * (PLAN #15), through an index of its own (the task's is never touched). It prints the commit, its tree and its parent,
  * or "same" when neither changed since `last` ("<tree> <parent>" of the step before). Its git holds the repository's own
- * configuration off (held-git.ts, R4-4): no filter cleans what it adds, no hook runs as it commits.
+ * configuration off (held-git.ts, R4-4): no filter cleans what it adds, no hook runs as it commits. Its commit is by a
+ * fixed name, "Your agent <agent@invincible.invalid>", never one git would guess.
  */
 export function checkpointCommand(root: string, task: string, step: number, last: string): string {
   return heldGit(CHECKPOINT_SCRIPT, root, task, String(step), last);
@@ -437,7 +438,10 @@ if not tree or not parent: sys.exit('could not read the workspace')
 if tree+' '+parent == last:
     print('same')
     sys.exit(0)
-made = git(root,'commit-tree','--no-gpg-sign',tree,'-p',parent,'-m','Your agent: task '+task+', after step '+step)
+# By a name of its own, never one git guesses from the host: on Linux it can't, and the step would go unkept. (A
+# checkpoint is a private ref, never shipped: what ships is the work's files, by its own pull request.)
+by = {'GIT_AUTHOR_NAME':'Your agent','GIT_AUTHOR_EMAIL':'agent@invincible.invalid','GIT_COMMITTER_NAME':'Your agent','GIT_COMMITTER_EMAIL':'agent@invincible.invalid'}
+made = git(root,'commit-tree','--no-gpg-sign',tree,'-p',parent,'-m','Your agent: task '+task+', after step '+step,env=by)
 commit = made.stdout.decode().strip()
 if made.returncode or not commit: sys.exit('could not keep the step: '+made.stderr.decode(errors='replace')[-200:])
 if git(root,'update-ref','refs/invincible/checkpoints/'+task+'/'+step,commit).returncode: sys.exit('could not keep the step')
