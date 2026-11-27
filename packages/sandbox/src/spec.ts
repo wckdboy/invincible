@@ -1,4 +1,5 @@
 import type { SandboxNetwork, SeatKind } from "@invincible/core";
+import { collectCommand } from "./walk.ts";
 
 /*
  * A sandbox is where an agent works: an unprivileged, resource-capped container
@@ -226,6 +227,13 @@ export function gatewayEnv(token: string, providers: string[], keys = false): Re
 }
 
 /** Commands run under a hard deadline inside the container (killing `docker exec` alone would not stop them). */
+/**
+ * A folder under /work copied out as a tar from inside the VM, by the walk (walk.ts COLLECT_SCRIPT), under a deadline: never
+ * `docker cp`, which follows the links on its path and takes every entry of a folder, its HOME's among them where the
+ * VM's HOME is its /work.
+ */
+export const collectArgs = (id: string, path: string): string[] => execArgs(id, collectCommand(path), 900);
+
 export const execArgs = (id: string, cmd: string[], timeoutSec: number): string[] => [
   "exec",
   "--interactive",

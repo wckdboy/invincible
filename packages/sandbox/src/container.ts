@@ -1,5 +1,6 @@
 import type { SandboxNetwork } from "@invincible/core";
 import { containerName, DEFAULT_IMAGE, LABEL, labels, NETWORKS, type SandboxSpec, volumeName } from "./spec.ts";
+import { collectCommand } from "./walk.ts";
 
 /*
  * Apple's `container` (github.com/apple/container, 1.x): Linux containers on a Mac, each in a lightweight VM of its
@@ -246,11 +247,13 @@ export const containerTerminalArgs = (id: string, tag: string): string[] => [
   "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l",
 ];
 
-/** A directory under /work copied out as a tar from inside the VM (its entries start with the directory's own name). */
+/**
+ * A folder under /work copied out as a tar from inside the VM, by the walk (walk.ts COLLECT_SCRIPT): as uid 1000, under a
+ * deadline, its entries under the folder's own name, never through a link out of /work nor, in a VM whose HOME is its
+ * /work, any of that HOME.
+ */
 export function containerCollectArgs(id: string, path: string): string[] {
-  const parts = path.split("/").filter(Boolean);
-  const base = parts.pop()!;
-  return ["exec", "--user", "1000:1000", containerName(id), "timeout", "--signal=KILL", "900s", "tar", "-C", `/${parts.join("/")}`, "-cf", "-", base];
+  return containerExecArgs(id, collectCommand(path), 900);
 }
 
 export const containerVersionArgs = (): string[] => ["system", "version", "--format", "json"];

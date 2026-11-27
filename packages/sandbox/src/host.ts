@@ -40,6 +40,7 @@ import {
   chooseIsolation,
   containerName,
   DEFAULT_IMAGE,
+  collectArgs,
   execArgs,
   gatewayEnv,
   DESKTOP_IMAGE,
@@ -57,6 +58,7 @@ import {
   terminalArgs,
   volumeName,
 } from "./spec.ts";
+import { COLLECT_MISSING, COLLECT_REFUSED } from "./walk.ts";
 import { type ExtractLimits, type ExtractResult, extractTar } from "./tar.ts";
 import { budgetProblem, DEFAULT_DISK_GB, type Workspaces, type WorkspaceStats } from "./workspaces.ts";
 
@@ -850,8 +852,10 @@ export class SandboxHost {
     }
     // A stand-in for Docker has no files to copy out.
     if (this.opts.runner) return null;
-    // (container's cp names no tar stream, so on a Mac the VM's own tar writes one: as hostile as Docker's, to the same parser.)
-    const proc = Bun.spawn([this.bin, ...(this.apple ? containerCollectArgs(id, path) : ["cp", `${containerName(id)}:${path}`, "-"])], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    // The VM writes it, by the walk (walk.ts COLLECT_SCRIPT): as hostile as any tar, to the same parser, and never through a
+    // link out of /work nor, in a VM whose HOME is its /work, of that HOME (27 November 2026: docker cp followed the links on
+    // its path, and took every entry of the folder).
+    const proc = Bun.spawn([this.bin, ...(this.apple ? containerCollectArgs(id, path) : collectArgs(id, path))], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => proc.kill(), 15 * 60_000);
     try {
       const [result, err, code] = await Promise.all([
@@ -863,7 +867,8 @@ export class SandboxHost {
         proc.exited,
       ]);
       if (code !== 0) {
-        if (/could not find|no such file/i.test(err)) return null;
+        if (code === COLLECT_MISSING) return null;
+        if (code === COLLECT_REFUSED) throw new SandboxError(`${path} isn't kept: it is outside the workspace, or what the agent's tools keep for themselves`, 403);
         throw new SandboxError(`could not copy ${path}: ${redact(err.trim()).slice(0, 300)}`, 500);
       }
       return result;

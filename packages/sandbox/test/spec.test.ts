@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SandboxRequest } from "@invincible/core";
-import { chooseIsolation, execArgs, gatewayEnv, KATA_RUNTIME, microVMsAvailable, NETWORKS, networkCreateArgs, runArgs, SandboxError, type SandboxSpec, sandboxScopes, vmResolvConf } from "../src/index.ts";
+import { chooseIsolation, COLLECT_SCRIPT, collectArgs, execArgs, gatewayEnv, KATA_RUNTIME, microVMsAvailable, NETWORKS, networkCreateArgs, runArgs, SandboxError, type SandboxSpec, sandboxScopes, vmResolvConf } from "../src/index.ts";
 
 const base: SandboxSpec = {
   id: "0123456789",
@@ -162,5 +162,13 @@ describe("sandbox hardening", () => {
     for (const name of ["search", "git:github:someone:private-repo"]) {
       expect(() => sandboxScopes({ network: "gateway", providers: [name] })).toThrow(SandboxError);
     }
+  });
+});
+
+describe("a folder kept as an artifact", () => {
+  test("is copied out by the walk in the VM (COLLECT_SCRIPT), under a deadline: never docker cp, which follows the links on its path", () => {
+    expect(collectArgs("0123456789", "/work/out")).toEqual(execArgs("0123456789", ["python3", "-I", "-c", COLLECT_SCRIPT, "/work/out"], 900));
+    expect(collectArgs("0123456789", "/work/out")[0]).toBe("exec");
+    expect(collectArgs("0123456789", "/work/out")).not.toContain("cp");
   });
 });

@@ -1,4 +1,5 @@
-import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type TeamChangesView, type TeamFileEntry, type TeamFilesView, type TeamFileView, textOf, WORKSPACE_OWN } from "@invincible/core";
+import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type TeamChangesView, type TeamFileEntry, type TeamFilesView, type TeamFileView, textOf } from "@invincible/core";
+import { WALK } from "@invincible/sandbox";
 
 /*
  * Looking into an agent's workspace (its VM's /work, or the primary's computer's) from your devices: a folder's entries, one
@@ -18,80 +19,12 @@ export const LIST_LIMIT = 2_000;
 /** Kept from view, whatever is asked: the file that holds the VM's gateway token. */
 export const KEPT_FROM_VIEW = ["/work/.invincible-gateway.json"] as const;
 
-/**
- * The way to what a look names, within /work alone (its second argument names another, for tests): each folder on the
- * way and the last one opened from the one before it, never by its path, with O_NOFOLLOW. A link on the way is read, not
- * followed, and its target walked in its place: within /work it works as ever; one that leads out (an absolute target
- * elsewhere, or `..` above /work) is refused, and so is a chain of more than 40. What is read is what was opened, so a
- * link swapped in as it reads can change which name is walked, never take it outside (27 November 2026: a link an agent
- * left in /work could make the node read a file outside it, a tool's sign-in among them). In a VM whose HOME is its /work,
- * what it reaches may not be in a top-level dot-entry of /work that isn't the workspace's own (WORKSPACE_OWN): that is its
- * HOME's, what its tools keep for themselves, which no look reads (the same rule a move to layout 2 goes by).
- */
-const WALK = `import base64,errno,json,os,re,stat,subprocess,sys
-KEPT=${JSON.stringify(KEPT_FROM_VIEW.map((path) => path.slice("/work/".length)))}
-OWN=${JSON.stringify(WORKSPACE_OWN)}
-class Refused(Exception):
-    pass
-def out(**said):
-    print(json.dumps(said));sys.exit(0)
-def walk(p,want):
-    if p!=root and not p.startswith(root+'/'):
-        raise Refused('OutsideWorkspace')
-    rest=[c for c in p[len(root):].split('/') if c]
-    held=[os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)]
-    names=[];links=0
-    while rest:
-        c=rest.pop(0)
-        if c=='.':
-            continue
-        if c=='..':
-            if len(held)==1:
-                raise Refused('OutsideWorkspace')
-            os.close(held.pop());names.pop();continue
-        last=not rest
-        flags=os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|(os.O_NONBLOCK if last and want=='file' else os.O_DIRECTORY)
-        try:
-            fd=os.open(c,flags,dir_fd=held[-1])
-        except OSError as e:
-            # A link (by lstat: a link opened as a folder is ELOOP on Linux, ENOTDIR on a Mac) is read. Not a link, its
-            # own error, unless it was one as it was opened (ELOOP) and changed since; and one that changed as it was
-            # read: either walked again, within the links' bound.
-            try:
-                seen=os.stat(c,dir_fd=held[-1],follow_symlinks=False)
-            except OSError:
-                seen=None
-            to=None
-            if seen is not None and stat.S_ISLNK(seen.st_mode):
-                try:
-                    to=os.readlink(c,dir_fd=held[-1])
-                except OSError:
-                    pass
-            elif e.errno!=errno.ELOOP:
-                raise e
-            links+=1
-            if links>40:
-                raise Refused('TooManyLinks')
-            if to is None:
-                rest.insert(0,c);continue
-            if to.startswith('/'):
-                if to!=root and not to.startswith(root+'/'):
-                    raise Refused('OutsideWorkspace')
-                for d in held[1:]:
-                    os.close(d)
-                held=held[:1];names=[];to=to[len(root):]
-            rest=[x for x in to.split('/') if x]+rest
-            continue
-        held.append(fd);names.append(c)
-    if names and names[0].startswith('.') and names[0] not in OWN and os.path.normpath(os.environ.get('HOME','')) == root:
-        raise Refused('KeptHome')
-    return held,names
-def at(names):
-    return root+''.join('/'+n for n in names)
+/** The sandbox's walk (sandbox's walk.ts), with what the view keeps from view whatever leads to it (KEPT_FROM_VIEW). */
+const LOOK = `${WALK}KEPT=${JSON.stringify(KEPT_FROM_VIEW.map((path) => path.slice("/work/".length)))}
 `;
 
 /** `python3 -I -c LIST <path>`: a folder's entries, folders and files each with its size and when it changed, a link as a link. */
-export const LIST_SCRIPT = `${WALK}p=sys.argv[1]
+export const LIST_SCRIPT = `${LOOK}p=sys.argv[1]
 root=sys.argv[2] if len(sys.argv)>2 else '/work'
 try:
     held,_=walk(p,'dir')
@@ -114,7 +47,7 @@ out(entries=entries,more=len(names)>${LIST_LIMIT})`;
  * `python3 -I -c READ <path>`: one regular file's first READ_LIMIT bytes, base64, with its size and when it changed. Not
  * the VM's lease (KEPT_FROM_VIEW), whatever leads to it: its name, a link to it, or the same file under another name.
  */
-export const READ_SCRIPT = `${WALK}p=sys.argv[1]
+export const READ_SCRIPT = `${LOOK}p=sys.argv[1]
 root=sys.argv[2] if len(sys.argv)>2 else '/work'
 try:
     held,names=walk(p,'file')
@@ -145,7 +78,7 @@ out(size=s.st_size,modified=int(s.st_mtime*1000),cut=len(b)>${READ_LIMIT},data=b
  * configuration, no textconv, no filter, no fsmonitor, no hooks, and a repository whose configuration names another
  * worktree, a hooks path, an include or a filter is refused. The commit it started at is a commit's name, or none.
  */
-export const CHANGES_SCRIPT = `${WALK}work,kept=sys.argv[1],sys.argv[2]
+export const CHANGES_SCRIPT = `${LOOK}work,kept=sys.argv[1],sys.argv[2]
 root=sys.argv[3] if len(sys.argv)>3 else '/work'
 def held_to_work(path,want):
     try:

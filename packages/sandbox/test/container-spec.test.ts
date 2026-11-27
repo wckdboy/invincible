@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  COLLECT_SCRIPT,
   CONTAINER_CANNOT,
   containerBuildArgs,
   containerCannot,
@@ -193,9 +194,10 @@ describe("the other commands", () => {
     expect(containerVolumeCreateArgs("0123456789", 40, true)).toContain("dev.invincible.retained=1");
   });
 
-  test("what is kept is copied out as a tar from inside the VM, as uid 1000, under a deadline", () => {
-    expect(containerCollectArgs("0123456789", "/work/out")).toEqual(["exec", "--user", "1000:1000", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "900s", "tar", "-C", "/work", "-cf", "-", "out"]);
-    expect(containerCollectArgs("0123456789", "/work")).toEqual(["exec", "--user", "1000:1000", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "900s", "tar", "-C", "/", "-cf", "-", "work"]);
+  test("what is kept is copied out as a tar from inside the VM, by the walk (COLLECT_SCRIPT), as uid 1000, under a deadline", () => {
+    expect(containerCollectArgs("0123456789", "/work/out")).toEqual(containerExecArgs("0123456789", ["python3", "-I", "-c", COLLECT_SCRIPT, "/work/out"], 900));
+    expect(containerCollectArgs("0123456789", "/work")).toEqual(containerExecArgs("0123456789", ["python3", "-I", "-c", COLLECT_SCRIPT, "/work"], 900));
+    expect(containerExecArgs("0123456789", ["x"], 900).slice(0, 4)).toEqual(["exec", "--interactive", "--user", "1000:1000"]);
   });
 });
 
