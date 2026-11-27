@@ -1,15 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The agents mark at the status bar's size, for a notification (Android draws it in one colour). -->
+<!-- A notification's small icon (Notices.kt), which Android draws in one colour: the bare I-beam, IBeam's three parts
+     (core/IBeam.kt, as IBeamMark draws them) in their own 100-unit box, which spans the 24 dp icon, so the mark stands
+     17 dp tall, inside the 20 dp a status bar icon keeps off its edges. NotifyIconTest holds it to IBeam. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-        <path android:strokeColor="#000000" android:strokeWidth="2" android:pathData="M6.75,12a5.25,5.25 0,1 0,10.5 0a5.25,5.25 0,1 0,-10.5 0" />
-        <group android:pivotX="12" android:pivotY="12" android:rotation="240"><path android:fillColor="#000000" android:pathData="M11,20H13A1,1 0,0 1,13 22H11A1,1 0,0 1,11 20Z" /></group>
-        <group android:pivotX="12" android:pivotY="12" android:rotation="300"><path android:fillColor="#000000" android:pathData="M11,20H13A1,1 0,0 1,13 22H11A1,1 0,0 1,11 20Z" /></group>
-        <path android:fillColor="#000000" android:pathData="M11,20H13A1,1 0,0 1,13 22H11A1,1 0,0 1,11 20Z" />
-        <group android:pivotX="12" android:pivotY="12" android:rotation="60"><path android:fillColor="#000000" android:pathData="M11,20H13A1,1 0,0 1,13 22H11A1,1 0,0 1,11 20Z" /></group>
-        <group android:pivotX="12" android:pivotY="12" android:rotation="120"><path android:fillColor="#000000" android:pathData="M11,20H13A1,1 0,0 1,13 22H11A1,1 0,0 1,11 20Z" /></group>
-        <path android:fillColor="#000000" android:pathData="M11,1H13A1,1 0,0 1,14 2V3A1,1 0,0 1,13 4H11A1,1 0,0 1,10 3V2A1,1 0,0 1,11 1Z" />
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M22,14H78V30H22Z M41,30H59V70H41Z M22,70H78V86H22Z" />
 </vector>
