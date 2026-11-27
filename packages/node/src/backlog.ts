@@ -1,4 +1,5 @@
 import { capLabel, type ExecResult, heldModels, type NodeIdentity, redact, TEAM_PRIMARY, TEAM_LIMITS, type Agent, type TeamTask } from "@invincible/core";
+import { HELD_GIT, quote } from "@invincible/agents";
 import { chat, STEP_EFFORT } from "@invincible/models";
 import type { LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
@@ -29,8 +30,24 @@ export const BACKLOG = { everyMs: 60 * 60_000, firstMs: 5 * 60_000, perAgentMs: 
 export { WITHDRAWN };
 const PLANS = ["docs/PLAN.md", "PLAN.md", "ROADMAP.md", "docs/ROADMAP.md", "TODO.md"];
 
-/** What a look reads in the agent's VM: the first plan its repository has, as last fetched, and its newest commits. */
-export const BACKLOG_READ = `cd /work/repo && ref=$(git rev-parse --verify -q origin/HEAD >/dev/null && echo origin/HEAD || echo HEAD) && for f in ${PLANS.join(" ")}; do if git cat-file -e "$ref:$f" 2>/dev/null; then echo "=== $f"; git show "$ref:$f" | head -c ${BACKLOG.planChars}; echo; break; fi; done; echo "=== its newest commits"; git log --oneline -15 "$ref" 2>/dev/null`;
+/**
+ * What the look reads of an agent's repository, in its VM: its plan, the first of PLANS it has (up to planChars), and its
+ * newest commits, from origin/HEAD where it was fetched. With the node's held git (held-git.ts), so that nothing of the
+ * repository's own configuration runs as it reads (the fifth fabric review's R5-3 C: `git log` ran a gpg.program the
+ * repository named, for a commit that carries a signature, as log.showSignature asked): the plan read as stored
+ * (cat-file, never a textconv or filter), its commits with no signature checked.
+ */
+const BACKLOG_SCRIPT = `${HELD_GIT}repo='/work/repo'
+ok=lambda *a: git(repo,*a).returncode==0
+ref='origin/HEAD' if ok('rev-parse','--verify','-q','origin/HEAD') else 'HEAD'
+out=[]
+for f in ${JSON.stringify(PLANS)}:
+    if ok('cat-file','-e',ref+':'+f):
+        out+=['=== '+f,git(repo,'cat-file','blob',ref+':'+f).stdout[:${BACKLOG.planChars}].decode(errors='replace').rstrip('\\n')]
+        break
+out+=['=== its newest commits',git(repo,'log','--oneline','--no-show-signature','-15',ref).stdout.decode(errors='replace').rstrip('\\n')]
+print('\\n'.join(out))`;
+export const BACKLOG_READ = `python3 -I -c ${quote(BACKLOG_SCRIPT)}`;
 
 /**
  * A repository's open issues as GitHub lists them (its `issues` read), in lines: number, title, labels and the start of

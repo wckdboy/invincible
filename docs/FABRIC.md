@@ -198,8 +198,8 @@ transport keys carries all of it:
        next task's setup, its steps' checkpoints, its evidence, what it keeps to ship) holds the repository's
        configuration off (the fourth re-review's R4-4, and the fifth's R5-6): no hook, fsmonitor or signing program
        written there runs, nor a filter its configuration names when the command starts, and a fetch with the agent's
-       lease goes to the gateway alone, nor to a submodule's own remote, nor does an alternate's refs command run. Two
-       paths still run what a task writes there (a nested repository's filter, the backlog look's `git log`: the
+       lease goes to the gateway alone, nor to a submodule's own remote, nor does an alternate's refs command run; the
+       backlog look's git is held too. One path still runs what a task writes there (a nested repository's filter: the
        fifth re-review's R5-3), to be closed before the fabric is switched on.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.

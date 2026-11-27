@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { type ChatStreamEvent, type ExecResult, newNodeIdentity, noticeItem, type Agent } from "@invincible/core";
 import type { chat as Chat } from "@invincible/models";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
@@ -294,5 +298,48 @@ describe("work for idle agents, from your backlog", () => {
       expect(w.store.tasks()).toEqual([]);
     }
     expect(readProposal("```json\n" + PROPOSAL + "\n```")).toMatchObject({ title: "A template of outcomes", budgetUsd: 2 });
+  });
+});
+
+/*
+ * The look reads the agent's repository with the node's held git (held-git.ts), so nothing of the repository's own
+ * configuration runs as it reads: the fifth fabric review's R5-3 C, its PoC turned around. With log.showSignature and a
+ * gpg.program of the repository's, `git log` ran that program for a commit that carries a signature, at the agent's
+ * next idle look, as the agent, with its lease beside it.
+ */
+describe("the look at an agent's repository", () => {
+  test("runs no program of the repository's configuration: no signature is checked, and the plan and commits are read", () => {
+    const work = realpathSync(mkdtempSync(join(tmpdir(), "backlog-held-")));
+    try {
+      const repo = join(work, "repo");
+      const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: work, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.invalid" };
+      const git = (...a: string[]) => spawnSync("git", ["-C", repo, ...a], { env, encoding: "utf8" });
+      spawnSync("git", ["init", "-q", repo], { env });
+      spawnSync("mkdir", ["-p", join(repo, "docs")]);
+      writeFileSync(join(repo, "docs/PLAN.md"), "| 1 | the next step | 🔨 |\n");
+      git("add", ".");
+      git("commit", "-q", "-m", "the plan");
+      // A commit that carries a signature, its repository's newest, as origin/HEAD names it.
+      const tree = git("rev-parse", "HEAD^{tree}").stdout.trim();
+      const parent = git("rev-parse", "HEAD").stdout.trim();
+      const signed = `tree ${tree}\nparent ${parent}\nauthor t <t@t.invalid> 1800000000 +0000\ncommitter t <t@t.invalid> 1800000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n not-a-real-signature\n -----END PGP SIGNATURE-----\n\nsigned\n`;
+      const made = spawnSync("git", ["-C", repo, "hash-object", "-t", "commit", "-w", "--stdin"], { env, input: signed, encoding: "utf8" }).stdout.trim();
+      git("update-ref", "refs/remotes/origin/main", made);
+      git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+      // What its configuration would run to check that signature.
+      const marker = join(work, "what-it-ran");
+      writeFileSync(join(work, "gpg"), `#!/bin/sh\necho "ran as HOME=$HOME" >> "${marker}"\nexit 1\n`);
+      chmodSync(join(work, "gpg"), 0o755);
+      git("config", "log.showSignature", "true");
+      git("config", "gpg.program", join(work, "gpg"));
+      const read = spawnSync("bash", ["-c", BACKLOG_READ.replaceAll("/work/repo", repo)], { env: { PATH: env.PATH, HOME: work }, encoding: "utf8" });
+      expect(existsSync(marker) ? readFileSync(marker, "utf8") : "").toBe("");
+      expect(read.status).toBe(0);
+      expect(read.stdout).toContain("=== docs/PLAN.md\n| 1 | the next step | 🔨 |");
+      expect(read.stdout).toContain("=== its newest commits\n");
+      expect(read.stdout).toContain(`${made.slice(0, 7)} signed`);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 });

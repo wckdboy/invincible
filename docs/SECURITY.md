@@ -467,9 +467,11 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   it, elsewhere isn't fetched with the lease: the task starts on the clone as it was, and says so. That is a URL rewrite,
   an HTTP proxy, an address of its own for the gateway's host, a credential helper, or a remote named by the gateway's
   own address.
+- **The backlog look** (`backlog.ts`, an idle agent's plan and newest commits) reads the repository with the same held
+  git: its plan as stored, its commits with no signature checked (the fifth review's R5-3: `git log` ran a `gpg.program`
+  the repository named, for a signed commit).
 - **Not yet held off** (the fifth review's R5-3, to be fixed before the fabric is switched on):
-  - a nested repository's own filter, which `git add -A` and `git status` run;
-  - the backlog look's `git log`, which isn't held at all.
+  - a nested repository's own filter, which `git add -A` and `git status` run.
 
   The filters are also listed just before each git command, so one written between that list and the command runs. Only
   the agent and another node's task write in an agent's repository, and what the agent writes there runs as itself
