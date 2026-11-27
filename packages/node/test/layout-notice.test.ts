@@ -26,6 +26,29 @@ describe("the notice of a VM moved to layout 2", () => {
     expect(said.body).not.toContain(".agent");
   });
 
+  /** Whether text holds a lone UTF-16 surrogate: what a reader that wants well-formed text (Swift's JSONDecoder) refuses. */
+  const lone = (text: string) => /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text);
+
+  test("is well-formed text whatever the names hold (R4-5): a lone surrogate, from a name or from its cut, said as U+FFFD", () => {
+    // A name as a list before R4-5 gave it on Linux for one that wasn't UTF-8 (Python's surrogateescape): a lone surrogate.
+    const old = JSON.parse('{"name": ".x\\udcff", "to": "home", "kind": "dir", "bytes": 1024}') as LayoutEntry;
+    expect(lone(old.name)).toBe(true);
+    const said = layoutNotice("Ada", [old]);
+    expect(lone(said.body)).toBe(false);
+    expect(said.body).toContain("Moved to its HOME: .x\uFFFD (1 KB).");
+    // As the list says such a name now (\xNN for each byte that isn't UTF-8): as it is.
+    expect(layoutNotice("Ada", [{ ...old, name: ".x\\xff" }]).body).toContain("Moved to its HOME: .x\\xff (1 KB).");
+    // A body past a notice's limit is cut there, and a pair the cut falls in is not left half.
+    const long = Array.from({ length: 400 }, (_, i) => ({ name: `.\u{1F6E1}${i}`, to: "home" as const, kind: "dir" as const, bytes: 1 }));
+    const cut = layoutNotice("Ada", long);
+    expect(cut.body.length).toBe(2000);
+    expect(lone(cut.body)).toBe(false);
+    // (Its cut falls in a pair, here: the half of it left is said as U+FFFD.)
+    expect(cut.body.endsWith("\uFFFD")).toBe(true);
+    // And well-formed text is as it was: a pair is kept.
+    expect(layoutNotice("Ada", [{ ...old, name: ".\u{1F6E1}" }]).body).toContain("Moved to its HOME: .\u{1F6E1} (1 KB).");
+  });
+
   test("one with no notes yet is told where they'll be kept", () => {
     const said = layoutNotice("Ada", entries.filter((e) => e.to !== "notes"));
     expect(said.body).toContain("It had no notes yet: they'll be kept in a place of their own.");

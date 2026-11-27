@@ -179,11 +179,57 @@ struct NodeClient: Sendable {
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        try Self.decoded(T.self, from: data)
+    }
+
+    /// The node's answer as `T`. One whose JSON holds a lone UTF-16 surrogate (a name that wasn't UTF-8, as a node before
+    /// the fourth fabric review's R4-5 may have kept it in a notice) is read with each one said as U+FFFD, the replacement
+    /// character, as the node now keeps them: JSONDecoder would refuse the whole answer for that one character.
+    static func decoded<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
+            let mended = wellFormed(data)
+            if mended != data, let value = try? JSONDecoder().decode(T.self, from: mended) { return value }
             throw NodeError(status: 200, message: "The node's answer wasn't what this app reads (\(error.localizedDescription)).")
         }
+    }
+
+    /// JSON with each `\uD800`–`\uDFFF` escape that isn't half of a pair (a high one followed by a low one) written as
+    /// `\uFFFD`. Every other byte is as it was: an escaped backslash stays one, so `\\udcff` (a backslash, then text) is
+    /// never taken for an escape.
+    static func wellFormed(_ data: Data) -> Data {
+        let bytes = [UInt8](data)
+        let slash = UInt8(ascii: "\\"), u = UInt8(ascii: "u")
+        func unit(at index: Int) -> UInt16? {
+            guard index + 4 <= bytes.count else { return nil }
+            return UInt16(String(decoding: bytes[index..<index + 4], as: UTF8.self), radix: 16)
+        }
+        var out = [UInt8]()
+        out.reserveCapacity(bytes.count)
+        var index = 0
+        while index < bytes.count {
+            guard bytes[index] == slash, index + 1 < bytes.count else {
+                out.append(bytes[index])
+                index += 1
+                continue
+            }
+            if bytes[index + 1] == u, let high = unit(at: index + 2), (0xD800...0xDFFF).contains(high) {
+                if (0xD800...0xDBFF).contains(high), index + 12 <= bytes.count, bytes[index + 6] == slash, bytes[index + 7] == u,
+                   let low = unit(at: index + 8), (0xDC00...0xDFFF).contains(low) {
+                    out.append(contentsOf: bytes[index..<index + 12])
+                    index += 12
+                } else {
+                    out.append(contentsOf: Array("\\ufffd".utf8))
+                    index += 6
+                }
+                continue
+            }
+            // Any other escape: the backslash and what it escapes, as they were.
+            out.append(contentsOf: bytes[index...index + 1])
+            index += 2
+        }
+        return Data(out)
     }
 
     /// A failure in words: no answer at all becomes a NodeError the app can say; a cancellation stays one.

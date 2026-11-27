@@ -233,9 +233,22 @@ function publishProfile(store: LedgerStore, identity: NodeIdentity, endpoint: st
 
 /**
  * What you are told once when an agent's VM is moved to layout 2 (the owner's decision of 27 November 2026): the agent by
- * name, and what of its store went where, by names and sizes alone (layout.ts's list: never a byte of a file).
+ * name, and what of its store went where, by names and sizes alone (layout.ts's list: never a byte of a file). Within a
+ * notice's limits, and well-formed text whatever the names hold, so that no reader refuses the answers that carry it
+ * (R4-5: a lone surrogate there made the Apple apps' JSONDecoder refuse every notice): each one, from a name or from
+ * a cut, is said as U+FFFD.
  */
 export function layoutNotice(name: string, entries: readonly LayoutEntry[]): { title: string; body: string } {
+  const said = layoutWords(name, entries);
+  return { title: wellFormed(said.title.slice(0, 200)), body: wellFormed(said.body.slice(0, 2000)) };
+}
+
+/** Text with each lone UTF-16 surrogate (one that isn't half of a pair) said as U+FFFD, as String#toWellFormed does. */
+function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+}
+
+function layoutWords(name: string, entries: readonly LayoutEntry[]): { title: string; body: string } {
   const size = (bytes: number) => (bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : bytes >= 2 ** 20 ? `${Math.round(bytes / 2 ** 20)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
   const home = entries.filter((e) => e.to === "home");
   const notes = entries.find((e) => e.to === "notes");
@@ -527,7 +540,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const tellMoved = (run: string, entries: readonly LayoutEntry[]): void => {
     const handle = run.split(".").at(-1) ?? run;
     const said = layoutNotice(team.store.agent(handle)?.name ?? handle, entries);
-    store.emit(identity, "notice.raised", { key: `layout:${handle}`.slice(0, 160), severity: "info", title: said.title.slice(0, 200), body: said.body.slice(0, 2000), source: "sandbox", at: Date.now() });
+    store.emit(identity, "notice.raised", { key: `layout:${handle}`.slice(0, 160), severity: "info", title: said.title, body: said.body, source: "sandbox", at: Date.now() });
   };
   let sandbox: GovernedSandboxHost | null = null;
   /**

@@ -329,7 +329,10 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
 - **Said as it is.** Each move is a line in the ledger and a notice to you that names the agent and what moved, by
   names and sizes from the store's list before the move began: a move taken up says so, one put back says so, and one
   that couldn't be made says why. Its list mode says what a move would do by entry name and size alone, reading no
-  file.
+  file. A name is always said as well-formed text (R4-5): one that isn't UTF-8 (Linux allows any byte) has each byte
+  that isn't as `\xNN`, and the notice holds no lone surrogate, even where its length cuts it. The Apple apps read an
+  answer that holds one anyway (from a node before this) with it said as U+FFFD, rather than refusing every notice
+  (`layout.test.ts`, `layout-notice.test.ts`, `NoticesTests.swift`).
 - **Where it holds.** A Linux host with Docker: a store on a Docker volume needs Docker Engine 26 or later (its trees are
   the volume's subpaths), and stays in layout 1 on an older engine; a workspace image's store moves on any. **A Mac's VMs
   stay in layout 1**, their HOME their `/work`: a Mac's workspace is a disk image only one VM may mount, so no VM there

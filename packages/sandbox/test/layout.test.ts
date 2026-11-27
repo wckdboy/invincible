@@ -322,6 +322,19 @@ describe("what was at a store's root before its move (the fourth fabric review's
   });
 });
 
+describe("a name that isn't UTF-8, as the list says it (R4-5)", () => {
+  test("is well-formed text: its bytes as UTF-8, each byte that isn't one as \\xNN, never a lone surrogate", () => {
+    // (APFS refuses such a name, so the list's own words for one are run on what Python lists on Linux for its bytes:
+    // os.fsdecode, which gives a byte that isn't UTF-8 as a lone surrogate.)
+    const show = /def show\(name\):\n(?: {4}.*\n)+/.exec(MOVE_PY)![0];
+    const ran = spawnSync("python3", ["-I", "-c", `import json, os\n${show}\nprint(json.dumps([show(os.fsdecode(b".x\\xff")), show("caf\\u00e9"), show("\\U0001F6E1")]))`], { encoding: "utf8" });
+    expect(ran.status).toBe(0);
+    const said = JSON.parse(ran.stdout) as string[];
+    expect(said).toEqual([".x\\xff", "café", "\u{1F6E1}"]);
+    expect(said.some((name) => /[\uD800-\uDFFF]/.test(name.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "")))).toBe(false);
+  });
+});
+
 describe("what the code keeps in a workspace", () => {
   /*
    * A move puts every top-level dot-entry that isn't the workspace's own in HOME. So an entry the code writes in /work

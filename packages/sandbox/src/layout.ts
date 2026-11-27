@@ -139,6 +139,12 @@ def size(path, skip=None):
                 pass
     return total
 
+def show(name):
+    # A name as the list says it: its bytes as UTF-8, and each byte that isn't one as \xNN, so that what it prints is
+    # always well-formed text (a name may hold any byte on Linux, and Python lists one that isn't UTF-8 as a lone
+    # surrogate, which a reader that wants well-formed text, Swift's JSONDecoder, refuses whole: R4-5).
+    return os.fsencode(name).decode("utf-8", "backslashreplace")
+
 def kind(path):
     mode = os.lstat(path).st_mode
     return "link" if stat.S_ISLNK(mode) else "dir" if stat.S_ISDIR(mode) else "file" if stat.S_ISREG(mode) else "other"
@@ -346,7 +352,7 @@ if MODE == "list":
     first = NOTES_AT.split("/")[0]
     for entry in plan():
         path = os.path.join(ROOT, entry["name"])
-        print(json.dumps({"name": entry["name"], "to": entry["to"], "kind": kind(path), "bytes": size(path, skip=notes)}))
+        print(json.dumps({"name": show(entry["name"]), "to": entry["to"], "kind": kind(path), "bytes": size(path, skip=notes)}))
         if notes is not None and entry["name"] == first:
             print(json.dumps({"name": NOTES_AT, "to": NOTES, "kind": "dir", "bytes": size(notes)}))
     sys.exit(0)
