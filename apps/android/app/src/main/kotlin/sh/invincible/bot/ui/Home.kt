@@ -107,7 +107,12 @@ fun HomeScreen(app: AppModel, nav: Nav, back: () -> Unit) {
     Column(Modifier.fillMaxSize().imePadding()) {
         PageBar("Work", back)
         val shown = work?.let { Work.inProject(it, filtered?.takeIf { key -> it.projects.any { p -> p.key == key } }) }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s6)) {
+        // A refusal shows from its first line as it arrives: the list goes to its top, once. (Held on the row it showed, the
+        // list put the refusal above that row, its headline out of sight.) Keyed on the refusal, so nothing moves at rest.
+        val list = androidx.compose.foundation.lazy.rememberLazyListState()
+        val refusal = problem?.takeIf { it.notYourNode != null }
+        LaunchedEffect(refusal) { if (refusal != null) list.scrollToItem(0) }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s6)) {
             problem?.let { p -> item(key = "problem") { Refused(app, p) } }
             table.asOf?.takeIf { waited }?.let { at ->
                 item(key = "kept") {
