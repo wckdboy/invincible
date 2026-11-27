@@ -165,6 +165,7 @@ export class BenchVm {
   async owner(action: DesktopAction): Promise<{ view: DesktopView; ms: number }> {
     const t0 = performance.now();
     const view = await this.bench.host.desktop(this.id, this.run, action);
+    if (!("shot" in view)) throw new Error("the desktop brought back no picture");
     return { view, ms: performance.now() - t0 };
   }
 

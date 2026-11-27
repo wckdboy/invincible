@@ -307,12 +307,50 @@ export type DesktopAction =
   | { do: "key"; keys: string[] }
   | { do: "open"; address: string };
 
+/** Your take-over of an agent's desktop (deskd's hold, C1 step 9), as the node says it. */
+export interface DesktopHold {
+  /** When you took it, in milliseconds since the epoch. */
+  since: number;
+  /** It ends after this many seconds with no input from you, */
+  idleSec: number;
+  /** or this many in all, or when you give it back. */
+  mostSec: number;
+  /** How long it has left at most, as it is now: your next input starts its idle time again. */
+  endsInSec: number;
+}
+
 /** The screen as it is now: a JPEG, and the display's size in the pixels a click is given in. */
 export interface DesktopView {
   shot: { mediaType: "image/jpeg"; data: string };
   width: number;
   height: number;
+  /** Whether you have its desktop (null: you don't), where its image has take-over; absent where it is older. */
+  held?: DesktopHold | null;
 }
+
+/** A thing done with no picture asked back (what you watch shows it), or a look that asks only whether you have it. */
+export interface DesktopDone {
+  done: true;
+  held?: DesktopHold | null;
+}
+
+/** What the owner is told of a VM made without a desktop. */
+const NO_DESKTOP = "this agent's VM has no desktop: have it made again with one (invincible agents provision <id> --remake --desktop)";
+
+/** The uid your own session with an agent's desktop runs as, never the agent's (deskd.py's OWNER_UID). */
+export const DESKTOP_OWNER_UID = 1001;
+
+/** A hold as deskd says it to your session (seconds; null: you don't have it). */
+function holdOf(answer: Record<string, unknown>): DesktopHold | null {
+  const h = answer.hold as Record<string, unknown> | null | undefined;
+  if (!h || typeof h !== "object") return null;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+  return { since: Math.round(n(h.since) * 1000), idleSec: n(h.idle), mostSec: n(h.most), endsInSec: n(h.ends_in) };
+}
+
+/** A hold's window, as the ledger says it. */
+const holdSaid = (h: DesktopHold | null): string =>
+  h ? `yours until you give it back, or ${Math.round(h.idleSec)} s pass with no input from you (${Math.round(h.mostSec / 60)} min at most)` : "it ended at once";
 
 export class SandboxError extends Error {
   constructor(
@@ -421,7 +459,7 @@ export class SandboxHost {
    * running, so an action through it isn't preceded by a listing. Ended with the VM; a VM whose image has no deskd
    * (exit 127) is asked again only once it is made again.
    */
-  private readonly sessions = new Map<string, { session: DesktopSession; view: SandboxView }>();
+  private readonly sessions = new Map<string, { session: DesktopSession; view: SandboxView; owner?: DesktopSession | null }>();
 
   constructor(opts: SandboxHostOptions) {
     this.apple = opts.engine === "container";
@@ -1181,15 +1219,18 @@ export class SandboxHost {
   }
 
   /**
-   * An agent's desktop, from outside its VM (the owner watching, or taking over to sign in): do one thing there, then
-   * bring back a picture of the screen. Through the VM's held desktop session (deskd) where its image has one: the
-   * action and the picture in one exchange, the picture taken once the screen has settled after an action (and the
-   * page a click opened has loaded), never before; a look takes the screen as it is. Where the image is older, with
-   * the VM's own `desktop` command, an exec each. No port is opened into the VM.
-   * Each thing done is a line in the ledger; looking is not (whoever watches asks again every second or two);
-   * what is typed is carried to the VM as one argument no shell reads, and the ledger says only how much.
+   * An agent's desktop, from outside its VM, for you (watching it, or taking it over to sign in for it): do one thing
+   * there, then bring back a picture of the screen, or none with `picture` false (what you watch shows it). Through your
+   * own held session with deskd where the VM's image has take-over (ownerSession): your looks never wait, and your input
+   * takes the desktop over if no one has it, so the agent's commands and its looks wait meanwhile; each answer says
+   * whether you have it (`held`). Where the image is older, through the agent's held session (deskd); older still, with
+   * the VM's own `desktop` command, an exec each. The picture is taken once the screen has settled after an action (and
+   * the page a click opened has loaded), never before; a look takes the screen as it is. No port is opened into the VM.
+   * Each thing done is a line in the ledger, and so is your taking the desktop over; looking is not (whoever watches asks
+   * again every second or two); what is typed is carried to the VM as one argument no shell reads, and the ledger says
+   * only how much.
    */
-  async desktop(id: string, run: string, action: DesktopAction): Promise<DesktopView> {
+  async desktop(id: string, run: string, action: DesktopAction, picture = true): Promise<DesktopView | DesktopDone> {
     const whole = (n: number, max: number) => Number.isInteger(n) && n >= 0 && n <= max;
     const refuse = (why: string): never => { throw new SandboxError(why, 400); };
     let argv: string[] | null = null;
@@ -1222,24 +1263,41 @@ export class SandboxHost {
         did = `type (${action.text.length} characters, not recorded)`;
         break;
     }
-    const held = this.sessions.get(id);
-    const sandbox = held?.session.open ? held.view : await this.get(id);
-    if (!sandbox) throw new SandboxError("the agent's VM is missing", 404);
-    if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") throw new SandboxError("that is not this agent's persistent VM", 403);
-    if (sandbox.status !== "running") throw new SandboxError(`the agent's VM is ${sandbox.status}`, 409);
-    const ledger = () => this.opts.ledger({ class: "modify", resource: "sandbox.desktop", target: sandbox.name, verdict: "allow", run, detail: did || redact(argv!.slice(1).join(" ")).slice(0, 300) });
+    const sandbox = await this.desktopVm(id, run);
+    const ledger = (detail: string) => this.opts.ledger({ class: "modify", resource: "sandbox.desktop", target: sandbox.name, verdict: "allow", run, detail });
+    const what = did || redact(argv?.slice(1).join(" ") ?? "").slice(0, 300);
+    /** The action and the picture on a held session, in one exchange: yours, with whether you have the desktop. */
+    const through = async (session: DesktopSession, yours: boolean): Promise<DesktopView | DesktopDone> => {
+      let said: Record<string, unknown> | null = null;
+      if (argv) {
+        const done = await session.call({ argv: argv.slice(1) }, 75_000);
+        // (Taken before it acted: said whether or not the action then did what it was asked.)
+        if (yours && done.took) ledger(`took over its desktop by your input: ${holdSaid(holdOf(done))}`);
+        if (done.code !== 0) throw new SandboxError(`the desktop could not do that: ${redact(String(done.stderr ?? "").trim().split("\n").at(-1) ?? "").replace(/^desktop: /, "").slice(0, 300) || `exit ${done.code}`}`, done.code === 2 ? 400 : 424);
+        ledger(what);
+        said = done;
+      }
+      if (!picture) {
+        if (yours) said ??= await session.call({ name: "hold" }, 75_000);
+        return { done: true, ...(yours ? { held: holdOf(said!) } : {}) };
+      }
+      const shot = await session.call({ name: "screenshot", input: { format: "jpeg", settle: argv !== null } }, 75_000);
+      const image = shot.image as { media_type: string; data: string; width: number; height: number } | undefined;
+      if (!shot.ok || !image) throw new SandboxError(`the desktop could not show its screen: ${String(shot.error ?? "no picture").slice(0, 300)}`, 424);
+      return { shot: { mediaType: image.media_type === "image/png" ? "image/png" : "image/jpeg", data: image.data }, width: image.width, height: image.height, ...(yours ? { held: holdOf(shot) } : {}) } as DesktopView;
+    };
+    const owner = this.ownerSession(sandbox);
+    if (owner) {
+      try {
+        return await through(owner, true);
+      } catch (error) {
+        if (!this.olderThanTakeOver(sandbox.id, owner, error)) throw error;
+      }
+    }
     const session = this.desktopSession(sandbox);
     if (session) {
       try {
-        if (argv) {
-          const done = await session.call({ argv: argv.slice(1) }, 75_000);
-          if (done.code !== 0) throw new SandboxError(`the desktop could not do that: ${redact(String(done.stderr ?? "").trim().split("\n").at(-1) ?? "").replace(/^desktop: /, "").slice(0, 300) || `exit ${done.code}`}`, done.code === 2 ? 400 : 424);
-          ledger();
-        }
-        const shot = await session.call({ name: "screenshot", input: { format: "jpeg", settle: argv !== null } }, 75_000);
-        const image = shot.image as { media_type: string; data: string; width: number; height: number } | undefined;
-        if (!shot.ok || !image) throw new SandboxError(`the desktop could not show its screen: ${String(shot.error ?? "no picture").slice(0, 300)}`, 424);
-        return { shot: { mediaType: image.media_type === "image/png" ? "image/png" : "image/jpeg", data: image.data }, width: image.width, height: image.height } as DesktopView;
+        return await through(session, false);
       } catch (error) {
         // A session that ended before it ever answered was none (an image older than deskd): asked the old way.
         if (!(error instanceof SessionEnded) || session.answered) throw error;
@@ -1247,7 +1305,7 @@ export class SandboxHost {
     }
     /** Why the VM's command failed, as the owner should read it. */
     const failed = (ran: Run): never => {
-      if (ran.code === 127 || /desktop: (command )?not found/.test(ran.stderr)) throw new SandboxError("this agent's VM has no desktop: have it made again with one (invincible agents provision <id> --remake --desktop)", 424);
+      if (ran.code === 127 || /desktop: (command )?not found/.test(ran.stderr)) throw new SandboxError(NO_DESKTOP, 424);
       throw new SandboxError(`the desktop could not do that: ${redact(ran.stderr.trim().split("\n").at(-1) ?? "").slice(0, 300) || `exit ${ran.code}`}`, 424);
     };
     if (argv) {
@@ -1255,11 +1313,82 @@ export class SandboxHost {
       const asRun = action.do === "type" ? ["python3", "-I", "-c", "import base64,subprocess,sys; sys.exit(subprocess.run(['desktop','type',base64.b64decode(sys.argv[1]).decode()]).returncode)", Buffer.from(action.text, "utf8").toString("base64")] : argv;
       const ran = await this.docker(this.commandArgs(id, asRun, 60), 75_000);
       if (ran.code !== 0) failed(ran);
-      ledger();
+      ledger(what);
     }
+    if (!picture) return { done: true };
     const shot = await this.docker(this.commandArgs(id, ["sh", "-c", 'f="${TMPDIR:-/tmp}/watch-$$.jpg"; desktop shot "$f" >/dev/null && base64 -w0 "$f"; code=$?; rm -f "$f"; exit $code'], 60), 75_000);
     if (shot.code !== 0 || !shot.stdout.trim()) failed(shot);
     return { shot: { mediaType: "image/jpeg", data: shot.stdout.trim() }, width: 1280, height: 800 };
+  }
+
+  /**
+   * You take an agent's desktop over (`take`), or give it back, through your own session with deskd (C1 step 9): while
+   * you have it, the agent's desktop commands and its looks wait, and are told so (deskd.py's hold). It ends when you give
+   * it back, after 120 s with no input from you, or after 15 min at most; a second take starts a fresh window. Whether
+   * you have it after; the ledger says each. Refused where the VM's image is older than take-over.
+   */
+  async desktopHold(id: string, run: string, take: boolean): Promise<DesktopHold | null> {
+    const sandbox = await this.desktopVm(id, run);
+    const desk = sandbox.image.includes("desktop");
+    const older = new SandboxError(desk ? "this agent's desktop is older than take-over: have its VM made again (invincible agents provision <id> --remake --desktop)" : NO_DESKTOP, 424);
+    const owner = desk ? this.ownerSession(sandbox) : null;
+    if (!owner) throw older;
+    let answer: Record<string, unknown>;
+    try {
+      answer = await owner.call({ name: take ? "take" : "release" }, 75_000);
+    } catch (error) {
+      if (this.olderThanTakeOver(sandbox.id, owner, error)) throw older;
+      throw error;
+    }
+    if (!answer.ok) throw new SandboxError(`the desktop could not do that: ${redact(String(answer.error ?? "")).slice(0, 300)}`, 424);
+    const hold = holdOf(answer);
+    const ledger = (detail: string) => this.opts.ledger({ class: "modify", resource: "sandbox.desktop", target: sandbox.name, verdict: "allow", run, detail });
+    if (take) ledger(`took over its desktop: ${holdSaid(hold)}`);
+    else if (answer.released) ledger("gave its desktop back");
+    return hold;
+  }
+
+  /** An agent's own running persistent VM, its desktop asked of from outside it (by you alone: the routes that ask are yours). */
+  private async desktopVm(id: string, run: string): Promise<SandboxView> {
+    const held = this.sessions.get(id);
+    const sandbox = held?.session.open ? held.view : await this.get(id);
+    if (!sandbox) throw new SandboxError("the agent's VM is missing", 404);
+    if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") throw new SandboxError("that is not this agent's persistent VM", 403);
+    if (sandbox.status !== "running") throw new SandboxError(`the agent's VM is ${sandbox.status}`, 409);
+    return sandbox;
+  }
+
+  /**
+   * Your own held session with a VM's desktop (C1 step 9): an exec of its own as DESKTOP_OWNER_UID, never the agent's
+   * uid, on deskd's owner socket, where deskd counts it as yours: your looks never wait, your input takes the desktop
+   * over, and only it takes the desktop over or gives it back. deskd runs as the agent, started by the agent's own
+   * session: that one is opened beside yours if it isn't open, with a word that never waits, and yours waits for deskd.
+   * Null where the VM has no agent's session (a Mac, an image older than deskd), or its image was found older than
+   * take-over.
+   */
+  private ownerSession(sandbox: SandboxView): DesktopSession | null {
+    const agent = this.desktopSession(sandbox);
+    const held = agent ? this.sessions.get(sandbox.id) : undefined;
+    if (!agent || !held || held.owner === null) return null;
+    if (!agent.open) void agent.call({ argv: ["status"] }, 75_000).catch(() => {});
+    const spawn = this.opts.spawnSession ?? spawnSession(this.bin);
+    held.owner ??= new DesktopSession(() => spawn(["exec", "--interactive", "--user", `${DESKTOP_OWNER_UID}:${DESKTOP_OWNER_UID}`, "--workdir", "/", containerName(sandbox.id), "desktop", "--owner-session"]));
+    return held.owner;
+  }
+
+  /**
+   * Whether your session's failing says the VM's image is older than take-over (its `desktop` takes no --owner-session,
+   * exit 2, or there is none, 127), noted so: yours go the agent's way until it is made again. One that ended before it
+   * answered, on an image that has take-over, is an error, never the agent's way: what you do is never done unheld.
+   */
+  private olderThanTakeOver(id: string, owner: DesktopSession, error: unknown): boolean {
+    if (!(error instanceof SessionEnded) || owner.answered) return false;
+    if (error.code === 2 || error.code === 127) {
+      const held = this.sessions.get(id);
+      if (held?.owner === owner) held.owner = null;
+      return true;
+    }
+    throw new SandboxError(`your session with this desktop ended before it answered (exit ${error.code}): try again`, 503);
   }
 
   /**
@@ -1282,9 +1411,11 @@ export class SandboxHost {
     return session;
   }
 
-  /** A VM's held desktop session ended, as the VM did (removed, stopped, made again). */
+  /** A VM's held desktop sessions ended, the agent's and yours, as the VM did (removed, stopped, made again). */
   private endSession(id: string): void {
-    this.sessions.get(id)?.session.close();
+    const held = this.sessions.get(id);
+    held?.session.close();
+    held?.owner?.close();
     this.sessions.delete(id);
   }
 

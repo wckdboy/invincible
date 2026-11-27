@@ -101,24 +101,49 @@ describe("an agent's desktop, from outside its VM", () => {
   });
 });
 
-/** A held session's stand-in: answers each JSON line as deskd would, and writes down what it was asked. */
-function held(options: { neverAnswers?: number } = {}) {
+/**
+ * The held sessions' stand-in: answers each JSON line as deskd would, and writes down what it was asked. The agent's
+ * session (`desktop --session`) and yours (`desktop --owner-session`, as the owner's uid) are told apart as deskd tells
+ * them apart, and yours keep deskd's hold: your input takes it if it is free, and each answer of yours says it.
+ */
+function held(options: { neverAnswers?: number; ownerEnds?: number } = {}) {
   const asked: Record<string, unknown>[] = [];
+  const owned: Record<string, unknown>[] = [];
   const started: string[][] = [];
-  let ended: ((code: number) => void) | null = null;
+  let hold: { since: number; idle: number; most: number; ends_in: number } | null = null;
+  const looks = new Set(["status", "screenshot", "hold"]);
   const spawnSession = (args: string[]) => {
     started.push(args);
+    const owner = args.includes("--owner-session");
     let take: ((line: string) => void) | null = null;
+    let ended: ((code: number) => void) | null = null;
     const exited = new Promise<number>((resolve) => (ended = resolve));
-    // (An image older than deskd: its `desktop` takes no --session and ends at once.)
-    if (options.neverAnswers !== undefined) queueMicrotask(() => ended!(options.neverAnswers!));
+    // (An image older than deskd: its `desktop` takes no --session and ends at once; one older than take-over, no --owner-session.)
+    const endsAt = owner && options.ownerEnds !== undefined ? options.ownerEnds : options.neverAnswers;
+    if (endsAt !== undefined) queueMicrotask(() => ended!(endsAt));
     return {
       write: (text: string) => {
-        if (options.neverAnswers !== undefined) return;
+        if (endsAt !== undefined) return;
         for (const line of text.trim().split("\n")) {
           const q = JSON.parse(line) as Record<string, unknown>;
-          asked.push(q);
-          const answer = q.argv ? { id: q.id, ok: true, code: 0, stdout: `did ${(q.argv as string[]).join(" ")}\n`, stderr: "" } : { id: q.id, ok: true, action: q.name, image: { media_type: "image/jpeg", data: PICTURE, width: 1280, height: 800, settled: null } };
+          (owner ? owned : asked).push(q);
+          const verb = q.argv ? (q.argv as string[])[0]! : String(q.name);
+          let took = false;
+          let answer: Record<string, unknown>;
+          if (owner && (q.name === "take" || q.name === "release")) {
+            const had = hold !== null;
+            hold = q.name === "take" ? { since: 1_764_000_000.25, idle: 120, most: 900, ends_in: 120 } : null;
+            answer = q.name === "take" ? { id: q.id, ok: true, took: true } : { id: q.id, ok: true, released: had };
+          } else {
+            if (owner && !looks.has(verb) && !hold) {
+              hold = { since: 1_764_000_000.25, idle: 120, most: 900, ends_in: 120 };
+              took = true;
+            }
+            answer = q.argv
+              ? { id: q.id, ok: true, code: 0, stdout: `did ${(q.argv as string[]).join(" ")}\n`, stderr: "" }
+              : q.name === "hold" ? { id: q.id, ok: true } : { id: q.id, ok: true, action: q.name, image: { media_type: "image/jpeg", data: PICTURE, width: 1280, height: 800, settled: null } };
+          }
+          if (owner) Object.assign(answer, took ? { took: true } : {}, { hold });
           queueMicrotask(() => take?.(JSON.stringify(answer)));
         }
       },
@@ -127,8 +152,12 @@ function held(options: { neverAnswers?: number } = {}) {
       exited,
     };
   };
-  return { spawnSession, asked, started };
+  return { spawnSession, asked, owned, started };
 }
+
+const AGENTS = ["exec", "--interactive", "--workdir", "/work", containerName(ID), "desktop", "--session"];
+const YOURS = ["exec", "--interactive", "--user", "1001:1001", "--workdir", "/", containerName(ID), "desktop", "--owner-session"];
+const TOOK = "took over its desktop by your input: yours until you give it back, or 120 s pass with no input from you (15 min at most)";
 
 describe("an agent's desktop through its held session (deskd)", () => {
   const sessioned = (s: ReturnType<typeof held>, options: Parameters<typeof desk>[0] = {}) => {
@@ -140,60 +169,118 @@ describe("an agent's desktop through its held session (deskd)", () => {
     return { ...d, host, docker };
   };
 
-  test("a look is one request on the held session, the picture as it is now; while the session is open, no listing comes first", async () => {
+  test("your look is one request on your own held session, the picture as it is now; while it is open, no listing comes first", async () => {
     const s = held();
     const d = sessioned(s);
-    expect(await d.host.desktop(ID, RUN, { do: "look" })).toEqual({ shot: { mediaType: "image/jpeg", data: PICTURE }, width: 1280, height: 800 });
-    expect(s.started).toEqual([["exec", "--interactive", "--workdir", "/work", containerName(ID), "desktop", "--session"]]);
-    expect(s.asked).toEqual([{ id: 1, name: "screenshot", input: { format: "jpeg", settle: false } }]);
+    expect(await d.host.desktop(ID, RUN, { do: "look" })).toEqual({ shot: { mediaType: "image/jpeg", data: PICTURE }, width: 1280, height: 800, held: null });
+    // Yours is an exec of its own as the owner's uid, never the agent's; the agent's own is opened beside it, with a
+    // word that never waits (`status`), since it is the agent's that starts deskd.
+    expect(s.started).toEqual([AGENTS, YOURS]);
+    expect(s.asked).toEqual([{ id: 1, argv: ["status"] }]);
+    expect(s.owned).toEqual([{ id: 1, name: "screenshot", input: { format: "jpeg", settle: false } }]);
     const listed = d.docker.length;
     await d.host.desktop(ID, RUN, { do: "look" });
     expect(d.docker.length).toBe(listed);
-    expect(s.started).toHaveLength(1);
+    expect(s.started).toHaveLength(2);
+    expect(s.asked).toHaveLength(1);
+    expect(s.owned).toHaveLength(2);
     expect(d.ledger).toEqual([]);
   });
 
-  test("a thing done is the command's own words on the session, then a picture of the settled screen, and a line in the ledger; typed text is never written down", async () => {
+  test("a thing you do is the command's own words on your session, then a picture of the settled screen, and a line in the ledger; your first input takes the desktop over, and typed text is never written down", async () => {
     const s = held();
     const d = sessioned(s);
-    await d.host.desktop(ID, RUN, { do: "click", x: 640, y: 330, button: "double" });
+    const clicked = await d.host.desktop(ID, RUN, { do: "click", x: 640, y: 330, button: "double" });
+    expect(clicked).toMatchObject({ held: { since: 1_764_000_000_250, idleSec: 120, mostSec: 900, endsInSec: 120 } });
     await d.host.desktop(ID, RUN, { do: "type", text: "a secret you typed" });
-    expect(s.asked).toEqual([
+    expect(s.owned).toEqual([
       { id: 1, argv: ["click", "640", "330", "double"] },
       { id: 2, name: "screenshot", input: { format: "jpeg", settle: true } },
       { id: 3, argv: ["type", "a secret you typed"] },
       { id: 4, name: "screenshot", input: { format: "jpeg", settle: true } },
     ]);
-    expect(d.ledger.map((e) => e.detail)).toEqual(["click 640 330 double", "type (18 characters, not recorded)"]);
+    // Nothing of yours on the agent's session.
+    expect(s.asked).toEqual([{ id: 1, argv: ["status"] }]);
+    expect(d.ledger.map((e) => e.detail)).toEqual([TOOK, "click 640 330 double", "type (18 characters, not recorded)"]);
     expect(JSON.stringify(d.ledger)).not.toContain("secret");
   });
 
-  test("the VM's own desktop command alone goes to the session, its answer as an exec's; anything else is an exec as ever", async () => {
+  test("with no picture asked back, a thing done answers as soon as it is done, and a look only says whether you have the desktop", async () => {
+    const s = held();
+    const d = sessioned(s);
+    expect(await d.host.desktop(ID, RUN, { do: "look" }, false)).toEqual({ done: true, held: null });
+    expect(await d.host.desktop(ID, RUN, { do: "key", keys: ["Return"] }, false)).toEqual({ done: true, held: { since: 1_764_000_000_250, idleSec: 120, mostSec: 900, endsInSec: 120 } });
+    expect(s.owned).toEqual([{ id: 1, name: "hold" }, { id: 2, argv: ["key", "Return"] }]);
+    expect(d.ledger.map((e) => e.detail)).toEqual([TOOK, "key Return"]);
+  });
+
+  test("you take its desktop over and give it back through your session, and the ledger says each", async () => {
+    const s = held();
+    const d = sessioned(s);
+    expect(await d.host.desktopHold(ID, RUN, true)).toEqual({ since: 1_764_000_000_250, idleSec: 120, mostSec: 900, endsInSec: 120 });
+    // Your input while you have it is done under that hold: no second take.
+    await d.host.desktop(ID, RUN, { do: "click", x: 1, y: 2 }, false);
+    expect(await d.host.desktopHold(ID, RUN, false)).toBeNull();
+    // Giving back what you don't have is nothing, and says nothing.
+    expect(await d.host.desktopHold(ID, RUN, false)).toBeNull();
+    expect(s.owned.map((q) => q.name ?? (q.argv as string[])[0])).toEqual(["take", "click", "release", "release"]);
+    expect(d.ledger.map((e) => e.detail)).toEqual([
+      "took over its desktop: yours until you give it back, or 120 s pass with no input from you (15 min at most)",
+      "click 1 2 left",
+      "gave its desktop back",
+    ]);
+    expect(d.ledger.every((e) => e.resource === "sandbox.desktop" && e.target === containerName(ID) && e.run === RUN)).toBe(true);
+    // Only the agent's own running VM with a desktop.
+    await expect(d.host.desktopHold(ID, "arm.team.abcdef0123.other", true)).rejects.toMatchObject({ status: 403 });
+    await expect(d.host.desktopHold("9876543210", RUN, true)).rejects.toMatchObject({ status: 404 });
+  });
+
+  test("a VM whose image is older than take-over: your looks and input go the agent's way, as before, and taking over is refused, saying why", async () => {
+    const s = held({ ownerEnds: 2 });
+    const d = sessioned(s);
+    expect(await d.host.desktop(ID, RUN, { do: "look" })).toEqual({ shot: { mediaType: "image/jpeg", data: PICTURE }, width: 1280, height: 800 });
+    expect(s.asked).toEqual([{ id: 1, argv: ["status"] }, { id: 2, name: "screenshot", input: { format: "jpeg", settle: false } }]);
+    await expect(d.host.desktopHold(ID, RUN, true)).rejects.toMatchObject({ status: 424, message: expect.stringContaining("older than take-over") });
+    // Yours isn't asked again until the VM is made again.
+    expect(s.started).toEqual([AGENTS, YOURS]);
+  });
+
+  test("your session ending before it answers, on an image that has take-over, is an error: what you do never goes the agent's way unheld", async () => {
+    const s = held({ ownerEnds: 1 });
+    const d = sessioned(s);
+    await expect(d.host.desktop(ID, RUN, { do: "type", text: "hunter2" })).rejects.toMatchObject({ status: 503 });
+    expect(s.asked).toEqual([{ id: 1, argv: ["status"] }]);
+    expect(d.execs).toEqual([]);
+    expect(d.ledger).toEqual([]);
+  });
+
+  test("the VM's own desktop command alone goes to the agent's session, its answer as an exec's; anything else is an exec as ever", async () => {
     const s = held();
     const d = sessioned(s);
     expect(await d.host.exec(ID, ["desktop", "click", "1", "2"], 30)).toMatchObject({ exitCode: 0, stdout: "did click 1 2\n", stderr: "" });
     expect(s.asked).toEqual([{ id: 1, argv: ["click", "1", "2"] }]);
+    expect(s.owned).toEqual([]);
     expect(d.execs).toEqual([]);
     await d.host.exec(ID, ["bash", "-lc", "desktop click 1 2"], 30);
     expect(d.execs).toEqual([["bash", "-lc", "desktop click 1 2"]]);
     expect(d.ledger.filter((e) => e.resource === "sandbox.exec").map((e) => e.detail)).toEqual(["desktop click 1 2 → exit 0", "bash -lc desktop click 1 2 → exit 0"]);
   });
 
-  test("a VM whose image is older than deskd ends the session before it answers: it is asked the old way, and not asked again", async () => {
+  test("a VM whose image is older than deskd ends the sessions before they answer: it is asked the old way, and not asked again", async () => {
     const s = held({ neverAnswers: 2 });
     const d = sessioned(s);
     expect(await d.host.desktop(ID, RUN, { do: "look" })).toEqual({ shot: { mediaType: "image/jpeg", data: PICTURE }, width: 1280, height: 800 });
     expect(d.execs.at(-1)!.join(" ")).toContain("desktop shot");
     await d.host.desktop(ID, RUN, { do: "look" });
-    expect(s.started).toHaveLength(1);
+    expect(s.started).toEqual([AGENTS, YOURS]);
   });
 
-  test("removing the VM ends its session", async () => {
+  test("removing the VM ends its sessions, yours too", async () => {
     const s = held();
     const d = sessioned(s);
     await d.host.desktop(ID, RUN, { do: "look" });
     await d.host.destroy(ID, { approvedBy: "owner" });
     await d.host.desktop(ID, RUN, { do: "look" });
-    expect(s.started).toHaveLength(2);
+    expect(s.started).toEqual([AGENTS, YOURS, AGENTS, YOURS]);
   });
 });

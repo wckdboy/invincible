@@ -1,5 +1,5 @@
 import { clampNeed, type Decision, type ExecResult, type NodeCapacity, type SandboxView } from "@invincible/core";
-import { type CreateInput, type CreateOptions, type DesktopAction, type DesktopView, SandboxError, SandboxHost, type SandboxHostOptions } from "@invincible/sandbox";
+import { type CreateInput, type CreateOptions, type DesktopAction, type DesktopDone, type DesktopView, SandboxError, SandboxHost, type SandboxHostOptions } from "@invincible/sandbox";
 import { CapacityError, type Governor } from "./governor.ts";
 
 /*
@@ -89,10 +89,10 @@ export class GovernedSandboxHost extends SandboxHost {
   }
 
   /** What is done on an agent's desktop (yours, or the primary's on its computer) is work in its VM too: a click opens a page, and the page runs. */
-  override async desktop(id: string, run: string, action: DesktopAction): Promise<DesktopView> {
+  override async desktop(id: string, run: string, action: DesktopAction, picture = true): Promise<DesktopView | DesktopDone> {
     const ended = this.governed.governor.work(id);
     try {
-      return await super.desktop(id, run, action);
+      return await super.desktop(id, run, action, picture);
     } finally {
       ended();
     }
