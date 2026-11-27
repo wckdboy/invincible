@@ -34,6 +34,8 @@ import { noticeFrom } from "../../web/src/lib/notices.ts";
 import { PRESETS, SIGN_INS } from "../../../packages/models/src/providers.ts";
 import { againGoal, timeline, timelineTasks } from "../../web/src/lib/timeline.ts";
 import { activityLine, activityOf, activityShort } from "../../web/src/lib/live-activity.ts";
+import { describeTask } from "../../web/src/lib/loops.ts";
+import { describeWakes } from "../../web/src/lib/wakes.ts";
 import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, taskActions, taskBadge, taskEnd } from "../../web/src/lib/task-card.ts";
 import { agentModelChoices, agentModelsLine, agentRoleLine, agentRoles, agentWorksOn, removalPlan, teamSpeaker, agentId, toggleAgentModel } from "../../web/src/lib/team.ts";
 import { budgetFrom } from "../../web/src/lib/give.ts";
@@ -1475,6 +1477,31 @@ const marks = {
   trig: [0, 1, -2.5, 100, Math.PI / 4, Math.PI / 2, Math.PI, -Math.PI, 3 * Math.PI / 2, 2.1, 6.283185307179586, 98_700.1, -98_700.1, 1e-9, -0.785398, ...core.MARK_ANGLES.map((a) => (a * Math.PI) / 180)].map((x) => ({ x, sin: core.markSin(x), cos: core.markCos(x) })),
 };
 
+// ---- a loop's task and what wakes it, in words (lib/loops.ts, lib/wakes.ts): a loop it drafted, in Needs you --------
+const loops = {
+  tasks: [
+    { kind: "heartbeat" },
+    { kind: "heartbeat", checklist: "Disk under 90 %", selfAction: false },
+    { kind: "heartbeat", selfAction: true },
+    { kind: "run", network: "isolated", goal: "Tidy the logs" },
+    { kind: "run", network: "online", goal: "Check the release notes", gates: ["bun test"] },
+    { kind: "run", network: "gateway", goal: `Read every line of the importer ${"and its tests ".repeat(14)}`, gates: ["bun test packages/link", "bun run typecheck", "bun run lint"] },
+    { kind: "call", connector: "gmail", tool: "send", args: { to: "ada@example.test", subject: "The week", count: 2, urgent: false, cc: null, labels: ["a", "b"], extra: { x: 1 } } },
+    { kind: "call", connector: "github", tool: "comment", args: {} },
+    { kind: "call", connector: "github", tool: "comment" },
+    { kind: "call", connector: "notes", tool: "append", args: { text: "x".repeat(130) } },
+    { kind: "tell", text: "Stand up" },
+    { kind: "tell" },
+    null,
+  ].map((task) => ({ task, words: describeTask(task as Parameters<typeof describeTask>[0]) })),
+  wakes: [
+    { wakes: [], cooldownMs: null },
+    { wakes: [{ kind: "webhook" }], cooldownMs: null },
+    { wakes: [{ kind: "mail", connector: "gmail", query: "from:boss@example.test" }, { kind: "mail", connector: "outlook" }], cooldownMs: 300_000 },
+    { wakes: [{ kind: "github", owner: "example", repo: "app", on: ["ci.failed", "pr.opened"], branch: "main" }, { kind: "github", owner: "example", repo: "app", on: ["pushed", "issue.opened"] }], cooldownMs: 90_000 },
+  ].map((c) => ({ ...c, words: describeWakes(c.wakes as Parameters<typeof describeWakes>[0], c.cooldownMs) })),
+};
+
 const vectors = {
   about: "Made by apps/apple/scripts/vectors.ts from packages/core (and the PWA's roster). Every key here is a fake made for these tests.",
   auth: { domain: "invincible-req/v1", headers: core.AUTH, maxSkewMs: core.MAX_REQUEST_SKEW_MS },
@@ -1512,6 +1539,7 @@ const vectors = {
   verdicts,
   liveActivities,
   marks,
+  loops,
 };
 const text = `${JSON.stringify(vectors, null, 2)}\n`;
 if (Bun.argv.includes("--check")) {

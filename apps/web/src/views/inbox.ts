@@ -10,7 +10,8 @@ import { icon } from "../ui/icons.ts";
 import { toast } from "../ui/toast.ts";
 import { CLASS_INFO, deviceName } from "./activity.ts";
 import { describeWakes } from "../lib/wakes.ts";
-import { describeTask, loopsChanged, showHookSecret } from "./loops.ts";
+import { describeTask } from "../lib/loops.ts";
+import { loopsChanged, showHookSecret } from "./loops.ts";
 import { openOrderFromAction } from "./orders.ts";
 
 /*

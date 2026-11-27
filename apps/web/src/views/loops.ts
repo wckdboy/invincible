@@ -3,6 +3,7 @@ import { findSecrets } from "@invincible/core/secret-scan";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { gatesFromText } from "../lib/runs.ts";
 import { describeSchedule, onceSoon, scheduleProblem } from "../lib/schedule.ts";
+import { describeTask } from "../lib/loops.ts";
 import { describeWake, describeWakes } from "../lib/wakes.ts";
 import { shortId } from "../lib/text.ts";
 import { absoluteTime, duration, relativeTime } from "../lib/time.ts";
@@ -85,20 +86,6 @@ export function showHookSecret(loop: { name: string; hook: string | null; onName
   });
 }
 
-export function describeTask(task: LoopTask | null): string {
-  if (!task) return "A task this node can't read.";
-  if (task.kind === "heartbeat") {
-    const what = task.checklist ? "Heartbeat: checks the fleet, then reads your checklist." : "Heartbeat: checks the fleet and the machine it runs on.";
-    return `${what}${task.selfAction === false ? " Only reports: self-action is off." : " Then fixes what's safe itself."}`;
-  }
-  if (task.kind === "run") {
-    const gates = task.gates?.length ? ` Done means ${task.gates.length === 1 ? "this passes" : `these ${task.gates.length} pass`}: ${clip(task.gates.join(" · "), 160)}` : "";
-    return `Run, ${NETWORK[task.network]?.label.toLowerCase() ?? task.network}: ${clip(task.goal, 160)}${gates}`;
-  }
-  if (task.kind === "tell") return `Tells you${task.text ? `: ${clip(task.text, 160)}` : ", with what woke it"}: a notice in your Inbox, and your loop's name on your phone.`;
-  const args = Object.entries(task.args ?? {}).map(([k, v]) => `${k}=${String(v)}`).join(" ");
-  return `Calls ${task.connector}.${task.tool}${args ? ` ${clip(args, 120)}` : ""}`;
-}
 
 /** A heartbeat finding or a notice: what, how serious, about which machine. */
 /** A finding or a notice in a row. `icon`: one of its own in place of its severity's (a rule's notice, a bell). */

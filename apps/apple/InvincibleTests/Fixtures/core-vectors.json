@@ -41183,5 +41183,185 @@
         "cos": 0.7660444431189779
       }
     ]
+  },
+  "loops": {
+    "tasks": [
+      {
+        "task": {
+          "kind": "heartbeat"
+        },
+        "words": "Heartbeat: checks the fleet and the machine it runs on. Then fixes what's safe itself."
+      },
+      {
+        "task": {
+          "kind": "heartbeat",
+          "checklist": "Disk under 90 %",
+          "selfAction": false
+        },
+        "words": "Heartbeat: checks the fleet, then reads your checklist. Only reports: self-action is off."
+      },
+      {
+        "task": {
+          "kind": "heartbeat",
+          "selfAction": true
+        },
+        "words": "Heartbeat: checks the fleet and the machine it runs on. Then fixes what's safe itself."
+      },
+      {
+        "task": {
+          "kind": "run",
+          "network": "isolated",
+          "goal": "Tidy the logs"
+        },
+        "words": "Run, isolated: Tidy the logs"
+      },
+      {
+        "task": {
+          "kind": "run",
+          "network": "online",
+          "goal": "Check the release notes",
+          "gates": [
+            "bun test"
+          ]
+        },
+        "words": "Run, online: Check the release notes Done means this passes: bun test"
+      },
+      {
+        "task": {
+          "kind": "run",
+          "network": "gateway",
+          "goal": "Read every line of the importer and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests ",
+          "gates": [
+            "bun test packages/link",
+            "bun run typecheck",
+            "bun run lint"
+          ]
+        },
+        "words": "Run, gateway: Read every line of the importer and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests and its tests a… Done means these 3 pass: bun test packages/link · bun run typecheck · bun run lint"
+      },
+      {
+        "task": {
+          "kind": "call",
+          "connector": "gmail",
+          "tool": "send",
+          "args": {
+            "to": "ada@example.test",
+            "subject": "The week",
+            "count": 2,
+            "urgent": false,
+            "cc": null,
+            "labels": [
+              "a",
+              "b"
+            ],
+            "extra": {
+              "x": 1
+            }
+          }
+        },
+        "words": "Calls gmail.send cc=null count=2 extra=[object Object] labels=a,b subject=The week to=ada@example.test urgent=false"
+      },
+      {
+        "task": {
+          "kind": "call",
+          "connector": "github",
+          "tool": "comment",
+          "args": {}
+        },
+        "words": "Calls github.comment"
+      },
+      {
+        "task": {
+          "kind": "call",
+          "connector": "github",
+          "tool": "comment"
+        },
+        "words": "Calls github.comment"
+      },
+      {
+        "task": {
+          "kind": "call",
+          "connector": "notes",
+          "tool": "append",
+          "args": {
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        },
+        "words": "Calls notes.append text=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+      },
+      {
+        "task": {
+          "kind": "tell",
+          "text": "Stand up"
+        },
+        "words": "Tells you: Stand up: a notice in your Inbox, and your loop's name on your phone."
+      },
+      {
+        "task": {
+          "kind": "tell"
+        },
+        "words": "Tells you, with what woke it: a notice in your Inbox, and your loop's name on your phone."
+      },
+      {
+        "task": null,
+        "words": "A task this node can't read."
+      }
+    ],
+    "wakes": [
+      {
+        "wakes": [],
+        "cooldownMs": null,
+        "words": ""
+      },
+      {
+        "wakes": [
+          {
+            "kind": "webhook"
+          }
+        ],
+        "cooldownMs": null,
+        "words": "Also wakes on a webhook; a burst within 10 min is one run."
+      },
+      {
+        "wakes": [
+          {
+            "kind": "mail",
+            "connector": "gmail",
+            "query": "from:boss@example.test"
+          },
+          {
+            "kind": "mail",
+            "connector": "outlook"
+          }
+        ],
+        "cooldownMs": 300000,
+        "words": "Also wakes on new Gmail mail matching \"from:boss@example.test\" · new Outlook mail; a burst within 5 min is one run."
+      },
+      {
+        "wakes": [
+          {
+            "kind": "github",
+            "owner": "example",
+            "repo": "app",
+            "on": [
+              "ci.failed",
+              "pr.opened"
+            ],
+            "branch": "main"
+          },
+          {
+            "kind": "github",
+            "owner": "example",
+            "repo": "app",
+            "on": [
+              "pushed",
+              "issue.opened"
+            ]
+          }
+        ],
+        "cooldownMs": 90000,
+        "words": "Also wakes on a failed CI run on main or a new pull request in example/app · a push or a new issue in example/app; a burst within 2 min is one run."
+      }
+    ]
   }
 }
