@@ -189,6 +189,32 @@ const heldMay = (method: string, kind: "openai" | "anthropic", rest: string): bo
   method === "GET" || method === "HEAD" ? MODEL_LISTING.test(rest) : method === "POST" && MODEL_CALLS[kind].test(rest);
 
 /*
+ * On a lease held to models, a call's usage is never left unsaid (the fourth fabric review's I-l): its budget, a handed
+ * task's, is what bounds another node's spending of yours. A streamed OpenAI-style completion says its usage only when
+ * asked, so the gateway asks (`stream_options.include_usage`); Anthropic's messages and OpenAI's Responses always say
+ * it. One whose answer says none all the same is counted at the most it could have been (heldUsage).
+ */
+function askedForUsage(body: ArrayBuffer | undefined, kind: "openai" | "anthropic", rest: string): ArrayBuffer | undefined {
+  if (!body || kind !== "openai" || !/^(?:v1\/)?(?:chat\/)?completions$/.test(rest) || body.byteLength > 4 << 20) return body;
+  try {
+    const call = JSON.parse(new TextDecoder().decode(body)) as unknown;
+    if (!call || typeof call !== "object" || Array.isArray(call) || (call as { stream?: unknown }).stream !== true) return body;
+    const given = (call as { stream_options?: unknown }).stream_options;
+    const options = given && typeof given === "object" && !Array.isArray(given) ? (given as Record<string, unknown>) : {};
+    if (options.include_usage === true) return body;
+    return new TextEncoder().encode(JSON.stringify({ ...call, stream_options: { ...options, include_usage: true } })).buffer as ArrayBuffer;
+  } catch {
+    return body;
+  }
+}
+
+/**
+ * A held call's usage when its answer said none: every byte it sent an input token, every byte it was answered with an
+ * output token. More than any tokenizer makes of them, so its budget never counts it as less than it was.
+ */
+const heldUsage = (sent: number, answered: number): Usage => ({ input: sent, output: answered });
+
+/*
  * A plan's allowance spent, as a tool hears it. Told by its provider to try again in a day and a half, OpenCode 2.3.0
  * waits fifteen minutes and asks again, for as long as that lasts, and Codex 0.169.0 waits all of it; told 402, each ends
  * within seconds, as Claude Code does either way, and the next model on an agent's list takes over (measured 21 Nov
@@ -249,10 +275,12 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   const ref = `${providerId}/${modelOf(body)}`;
   const open = request.method === "POST" ? windows.spentFor(ref) : null;
   if (open && open.until - windows.now() > WAIT_OUT_MS) return spent(open.provider, open, windows);
+  // (Asked to say its usage, on a held lease.)
+  const sent = held ? askedForUsage(body, provider.kind, rest) : body;
   const upstream = await (ctx.fetch ?? fetch)(target, {
     method: request.method,
     headers,
-    body,
+    body: sent,
     // The key is pinned to this provider's origin: it never chases a Location header to another host.
     redirect: "manual",
     signal: request.signal,
@@ -285,10 +313,12 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   if (!report || request.method !== "POST" || !upstream.body) return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   const reader = usageReader(provider.kind);
   const call = { label: ctx.tokens.labelOf(token) ?? "unknown", provider: providerId, model: modelOf(body) };
+  let answered = 0;
   const counted = upstream.body.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
       transform(chunk, controller) {
         controller.enqueue(chunk);
+        answered += chunk.byteLength;
         try {
           reader.feed(chunk);
         } catch {
@@ -297,7 +327,8 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
       },
       flush() {
         try {
-          report({ ...call, usage: reader.end() });
+          const said = reader.end();
+          report({ ...call, usage: said ?? (held ? heldUsage(sent?.byteLength ?? 0, answered) : null) });
         } catch {
           /* nor does the one told of it */
         }

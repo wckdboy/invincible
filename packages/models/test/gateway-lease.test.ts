@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, expect, test } from "bun:test";
-import { newNodeIdentity, sha256B64u } from "@invincible/core";
+import { addUsage, costOf, newNodeIdentity, sha256B64u, type Usage, type UsageLine } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { GatewayTokens, handleGateway } from "../src/index.ts";
 
@@ -181,4 +181,75 @@ test("a lease held to models: its models' calls and their listing through, nothi
   expect(reached).toEqual(["POST /v1/chat/completions", "POST /v1/responses", "POST /v1/completions", "GET /v1/models", "GET /v1/models/gpt-paid", "POST /v1/messages", "POST /v1/messages/count_tokens", "GET /v1/models"]);
   // And a model call on another model is still refused, as before.
   expect((await ask("POST", "openai/chat/completions", "gpt-free")).status).toBe(403);
+});
+
+/*
+ * A held call's usage is never left unsaid (the fourth fabric review's I-l, its PoC turned around): a streamed
+ * OpenAI-style call is asked to say it, and one whose answer says none all the same is counted at the most it could have
+ * been, so `stream: true` no longer spends a handed task's budget for nothing. A lease not held to models is as before.
+ */
+const streamed: { stream_options?: unknown }[] = [];
+let tells = true;
+const streaming = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: async (req) => {
+    const asked = (await req.json()) as { stream_options?: { include_usage?: boolean } };
+    streamed.push({ ...(asked.stream_options ? { stream_options: asked.stream_options } : {}) });
+    // As OpenAI streams: a usage chunk last, only when asked for it (and a provider that never says one).
+    const usage = asked.stream_options?.include_usage && tells ? ['data: {"choices":[],"usage":{"prompt_tokens":1200,"completion_tokens":300,"total_tokens":1500}}'] : [];
+    const sse = ['data: {"choices":[{"delta":{"content":"a long answer"}}]}', ...usage, "data: [DONE]", ""].join("\n\n");
+    return new Response(sse, { headers: { "content-type": "text/event-stream" } });
+  },
+});
+afterAll(async () => await streaming.stop(true));
+
+function counted(models?: string[]) {
+  const identity = newNodeIdentity();
+  const store = new LedgerStore(":memory:");
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
+  const vault = new Vault(store, identity);
+  vault.set("openai", HELD_KEY, { provider: "openai", origin: `http://127.0.0.1:${streaming.port}` });
+  store.emit(identity, "provider.set", { id: "openai", kind: "openai", baseUrl: `http://127.0.0.1:${streaming.port}/v1`, secret: "openai" });
+  const tokens = new GatewayTokens(new Database(":memory:"));
+  const { token } = tokens.mint({ label: "sandbox:0123456789", providers: ["openai"], ...(models ? { models } : {}), ttlMinutes: 30, maxRequests: 500 });
+  const usage: (Usage | null)[] = [];
+  const call = async (body: Record<string, unknown>) => {
+    const answer = await handleGateway(new Request("http://127.0.0.1:7400/gw/openai/chat/completions", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) }), { store, vault, tokens, onUsage: (c) => void usage.push(c.usage) });
+    const text = await answer.text();
+    await Bun.sleep(5);
+    return { status: answer.status, text };
+  };
+  return { call, usage };
+}
+
+test("a held lease's streamed call is asked to say its usage; one that says none all the same counts at its most, never $0 (I-l)", async () => {
+  streamed.length = 0;
+  tells = true;
+  const held = counted(["openai/gpt-paid"]);
+  const ask = { model: "gpt-paid", stream: true, messages: [{ role: "user", content: "x".repeat(1000) }], max_tokens: 100000 };
+  expect((await held.call(ask)).status).toBe(200);
+  // Asked for its usage, the provider says it: counted as it said.
+  expect(streamed.at(-1)).toEqual({ stream_options: { include_usage: true } });
+  expect(held.usage.at(-1)).toEqual({ input: 1200, output: 300 });
+  // A stream_options of its own is kept, with the ask beside it; one that already asks is sent as it is.
+  await held.call({ ...ask, stream_options: { other: 1 } });
+  expect(streamed.at(-1)).toEqual({ stream_options: { other: 1, include_usage: true } });
+  // A provider that says none all the same: every byte sent and answered counted, so the call is priced above $0.
+  tells = false;
+  const said = await held.call(ask);
+  const counted0 = held.usage.at(-1)!;
+  expect(counted0.input).toBeGreaterThanOrEqual(JSON.stringify(ask).length);
+  expect(counted0.output).toBe(Buffer.byteLength(said.text));
+  const lines: UsageLine[] = [];
+  addUsage(lines, "engineer", "openai/gpt-paid", counted0);
+  const cost = costOf(lines, { "openai/gpt-paid": { input: 10, output: 40 } });
+  expect(cost.usd).toBeGreaterThan(0);
+  expect(cost.complete).toBe(true);
+  // A lease not held to models is as before: its call is sent as it was, and a usage unsaid is unknown.
+  streamed.length = 0;
+  const plain = counted();
+  await plain.call(ask);
+  expect(streamed).toEqual([{}]);
+  expect(plain.usage).toEqual([null]);
 });

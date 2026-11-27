@@ -123,10 +123,13 @@ transport keys carries all of it:
      (a POST) and their listing (a GET), so nothing else of yours with that provider (its files, stored responses,
      batches, vector stores) is read with your key, nor a batch made (the fourth re-review's R4-3). That lease carries
      nothing else: not the keys of yours its agent may use, nor its agent's repository, which are its agent's own
-     work's. Never on one it counts as nothing, nor on a coding
-     tool's own sign-in in the VM (a seat), nor in an ACP agent of yours. Two things it doesn't bound (I-l): a paid
-     model's call that reports no usage counts nothing, whatever the budget, and a command can start a coding tool
-     itself on that tool's own sign-in in the VM, if it has one, which no lease reaches.
+     work's. Never on one it counts as nothing, nor on a coding tool's own sign-in in the VM (a seat), nor in an ACP
+     agent of yours. Every call on that lease is counted, whether or not its answer says its usage (the fourth
+     re-review's I-l): a streamed OpenAI-style call is asked to say it (`stream_options.include_usage`), and one whose
+     answer says none all the same is counted at the most it could have been, every byte it sent an input token and
+     every byte it was answered with an output token. One thing it doesn't bound: a command can start a coding tool
+     itself on that tool's own sign-in in the VM, if it has one, which no lease reaches (a task's own VM starts with an
+     empty HOME, so it has none).
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node
