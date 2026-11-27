@@ -1,12 +1,13 @@
 // What its words at GitHub may do on their own word, and what the node says of what GitHub said (the re-review of
-// 27 November, A3 and A4; their PoCs turned around). Where a repository's workflows run on issues, an issue's words drive
+// 27 November, A3, A4 and A5; their PoCs turned around). Where a repository's workflows run on issues, an issue's words drive
 // them (IssueOps: a job with the repository's secrets runs on what the issue says), so an issue its word would make asks,
 // as a comment does where they run on comments (N5). Each read for its own approval is a ledger line of what was read,
 // its size and its digest, never what GitHub said: a private repository's workflows aren't every agent's to read, and a
-// line within the log's limits is always recorded. Against the connector service, on github-world.ts's stand-in
-// GitHub. No real service is called; the key is obviously fake.
+// line within the log's limits is always recorded. And a command is one however a bot reads its spaces and line breaks:
+// Go's (U+0085 a space) and Python's (U+001C to U+001E and U+0085 a line break). Against the connector service, on
+// github-world.ts's stand-in GitHub. No real service is called; the key is obviously fake.
 import { expect, test } from "bun:test";
-import { Bodies } from "@invincible/core";
+import { Bodies, commandsABot, skipsChecks } from "@invincible/core";
 import { gh, world } from "./github-world.ts";
 
 const at = { owner: "lin-example", repo: "site" };
@@ -40,4 +41,19 @@ test("each read for its own approval is a line of its size and digest, never wha
     // Every read it made says so, within the log's limits: none of them goes unrecorded.
     for (const read of w.lines.filter((l) => l.target.startsWith("GET "))) expect([read.target, Bodies["ledger.recorded"].safeParse(read).success]).toEqual([read.target, true]);
   }
+});
+
+test("a command is one however a Go or Python bot reads its spaces and line breaks, and on its own thread it asks", async () => {
+  // Go's strings.Fields takes U+0085 as a space (an Atlantis-style bot trims a comment and splits it into words), and
+  // Python's splitlines breaks a line at U+001C to U+001E and U+0085; Unicode's White_Space is a space to either.
+  for (const body of ["atlantis apply", "atlantis\u0085apply", "\u0085atlantis apply", "digger\u0085apply -p production", "Thanks.\u001c@mergifyio queue", "Thanks.\u001d/deploy production", "Thanks.\u001e/deploy production", "Thanks.\u0085/deploy production", "Thanks.\u000b/deploy production", "Thanks.\u000c/deploy production", "Thanks.\u2028/deploy production", "Thanks.\u2029/deploy production", "atlantis\u001fapply", "atlantis\u1680apply", "atlantis\u205fapply"]) {
+    expect([JSON.stringify(body), commandsABot({ body })]).toEqual([JSON.stringify(body), true]);
+  }
+  expect(skipsChecks({ body: "Done.\u0085skip-checks: true" })).toBe(true);
+  // Words that aren't a command stay words.
+  for (const body of ["Thanks.\u0085Fixed in the last push.", "atlantis\u0085", "A note\u001cabout units."]) expect([JSON.stringify(body), commandsABot({ body })]).toEqual([JSON.stringify(body), false]);
+  // On its own thread, in a repository whose workflows don't run on comments (Atlantis is a server, not a workflow).
+  const g = gh({ workflows: { "ci.yml": CI } });
+  const out = await world({}, g).service.call({ connector: "github", tool: "issue.comment", args: { ...at, number: 3, body: "atlantis\u0085apply" } }, primary);
+  expect([out.status, g.issues]).toEqual(["asked", []]);
 });

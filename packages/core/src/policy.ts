@@ -263,14 +263,28 @@ const NAMED_BOTS = [MERGE_BOT, "atlantis", "digger", "terrateam"];
 const BOT_COMMAND = new RegExp(`^[^\\S\\n]*([/.!][a-z]|(${NAMED_BOTS.join("|")}):?[^\\S\\n]+\\S|@[a-z0-9][a-z0-9-]*(\\[bot\\])?[,:]?[^\\S\\n]+[a-z])`, "im");
 /** Characters a reader doesn't see: zero-width ones and bidi controls, stripped before a line is read. */
 const UNSEEN = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
-/** Words as a bot would read them: NFKC (a full-width ／ or ＠ is / or @), with what no one sees taken out. */
-const asRead = (text: string): string => text.normalize("NFKC").replace(UNSEEN, "");
+/**
+ * What one bot reads as a line break and another as a space (the re-review of 27 November, A5): a vertical tab, a form
+ * feed, U+001C to U+001F, U+0085, U+2028 and U+2029. Go's strings.Fields takes U+0085 as a space; Python's splitlines
+ * breaks a line at U+001C to U+001E and U+0085, and its split takes U+001C to U+001F as spaces.
+ */
+const EITHER = /[\u000B\u000C\u001C-\u001F\u0085\u2028\u2029]/g;
+/** Any other of Unicode's White_Space within a line (Go's unicode.IsSpace): a space to every bot. */
+const SPACES = /(?![\n\r])\p{White_Space}/gu;
+/**
+ * Words as bots would read them: NFKC (a full-width ／ or ＠ is / or @), with what no one sees taken out, every space a
+ * plain one, and where bots differ, both ways: each of EITHER as a line break, and each as a space.
+ */
+const asRead = (text: string): string[] => {
+  const seen = text.normalize("NFKC").replace(UNSEEN, "");
+  return [seen.replace(EITHER, "\n"), seen.replace(EITHER, " ")].map((read) => read.replace(SPACES, " "));
+};
 /** Whether the words a call writes (its title, its body) have a line a repository's bots read as a command. */
-export const commandsABot = (args: Record<string, unknown>): boolean => [args.title, args.body].some((text) => typeof text === "string" && BOT_COMMAND.test(asRead(text)));
+export const commandsABot = (args: Record<string, unknown>): boolean => [args.title, args.body].some((text) => typeof text === "string" && asRead(text).some((read) => BOT_COMMAND.test(read)));
 /** Words in a push that tell its CI not to run: [skip ci] and its kin in a commit message, or a skip-checks: trailer. */
 const SKIPS_CHECKS = /\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|^[^\S\n]*skip-checks:/im;
 /** Whether a push's words (its commit's message, its pull request's title and body) tell its CI not to run. */
-export const skipsChecks = (args: Record<string, unknown>): boolean => [args.title, args.body].some((text) => typeof text === "string" && SKIPS_CHECKS.test(asRead(text)));
+export const skipsChecks = (args: Record<string, unknown>): boolean => [args.title, args.body].some((text) => typeof text === "string" && asRead(text).some((read) => SKIPS_CHECKS.test(read)));
 
 /**
  * Why the primary may approve this call itself, or null when it waits for you. `repositories` are the ones you gave your
