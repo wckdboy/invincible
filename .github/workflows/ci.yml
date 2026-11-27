@@ -189,11 +189,14 @@ jobs:
   # macos-xcode, on its host: Xcode 27 and xcodegen), on a simulator made for the run and deleted after, the Mac app built
   # and never launched (it would load that Mac's own device key), and unregistered from Launch Services after. Only the
   # owner and their agents push to sovware.io, and GitHub's macOS runners have no macOS 27 SDK, so it is skipped there.
+  # What it runs on screen holds that Mac's one lock for on-screen Apple runs (apps/apple/scripts/ui-lock.sh), which
+  # agents' runs there take too; its builds don't.
   apple:
     name: iPhone tests and Mac build
     if: github.server_url != 'https://github.com'
     runs-on: macos-xcode
-    timeout-minutes: 60
+    # Its work, and up to 30 minutes waiting for the on-screen lock.
+    timeout-minutes: 90
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
@@ -218,22 +221,35 @@ jobs:
       - run: bun install --frozen-lockfile
       # Swift packages (Sparkle) are fetched anonymously (-packageAuthorizationProvider netrc, and no .netrc): by default
       # Xcode looks for a github.com password in the login keychain, and a Mac that holds one asks whether xcodebuild may
-      # use it, a prompt no one answers. The UI tests (InvincibleUITests: getting around in taps, and the performance
-      # budgets of Budgets.json) run against a dev node with a busy fleet, on loopback, stopped with the simulator.
-      - name: iPhone tests, on a simulator of their own
+      # use it, a prompt no one answers.
+      - name: iPhone build, for a simulator of its own
         working-directory: apps/apple
         run: |
           set -euo pipefail
           xcodegen generate --quiet
           # An XcodeGen that can't find its setting presets makes a project with no SDK, whose iPhone app is a Mac one.
           grep -q 'SDKROOT = iphoneos' Invincible.xcodeproj/project.pbxproj || { echo "::error::XcodeGen made the project without its setting presets (share/xcodegen beside its bin)"; exit 1; }
-          # A cancelled job is killed, so its trap never deletes its simulator: delete any an earlier job left (this runner
-          # runs one job at a time).
+          # A job cancelled, or one that never reached its tests' trap, leaves its simulator: delete any an earlier job left
+          # (this runner runs one job at a time).
           xcrun simctl list devices -j | python3 -c 'import json,sys; [print(d["udid"]) for r in json.load(sys.stdin)["devices"].values() for d in r if d["name"].startswith("Invincible CI ")]' |
             while read -r left; do xcrun simctl shutdown "$left" 2>/dev/null || true; xcrun simctl delete "$left"; done
           # The newest iOS runtime the Mac has.
           runtime=$(xcrun simctl list runtimes iOS -j | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin)["runtimes"] if x.get("isAvailable")]; print(max(r, key=lambda x: [int(n) for n in x["version"].split(".")])["identifier"])')
           udid=$(xcrun simctl create "Invincible CI ${GITHUB_RUN_NUMBER:-0}" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$runtime")
+          echo "IPHONE_SIMULATOR=$udid" >> "$GITHUB_ENV"
+          # Built for it (its architecture alone, as a test run there builds), before it boots.
+          xcodebuild -project Invincible.xcodeproj -scheme Invincible -destination "platform=iOS Simulator,id=$udid" \
+            -derivedDataPath build -packageAuthorizationProvider netrc build-for-testing -quiet
+      # The UI tests (InvincibleUITests: getting around in taps, and the performance budgets of Budgets.json) run against a
+      # dev node with a busy fleet, on loopback, stopped with the simulator. From the dev node's start to the simulator's
+      # deletion the step holds the Mac's one lock for on-screen Apple runs (its shell runs under scripts/ui-lock.sh), so
+      # no two runs, a job's or an agent's, measure beside each other. It waits up to 30 minutes for it.
+      - name: iPhone tests, on that simulator
+        working-directory: apps/apple
+        shell: bash scripts/ui-lock.sh bash --noprofile --norc -e -o pipefail {0}
+        run: |
+          set -euo pipefail
+          udid="$IPHONE_SIMULATOR"
           dev="$RUNNER_TEMP/dev-node"
           # -quiet names a failing test and nothing of why: its messages are read from the result bundle (a budget's say
           # what it measured), and the step still fails as the tests did.
@@ -248,7 +264,7 @@ jobs:
           [ -s "$dev/front.txt" ] || { echo "::error::the dev node never came up"; cat "$dev/log"; exit 1; }
           TEST_RUNNER_INVINCIBLE_DEV_NODE=$(cat "$dev/front.txt") xcodebuild -project Invincible.xcodeproj -scheme Invincible \
             -destination "platform=iOS Simulator,id=$udid" -derivedDataPath build -packageAuthorizationProvider netrc \
-            -resultBundlePath "$results" test -skip-testing:InvincibleTests/MacShotsTests -quiet || {
+            -resultBundlePath "$results" test-without-building -skip-testing:InvincibleTests/MacShotsTests -quiet || {
               status=$?
               bun scripts/test-failures.ts "$results" || true
               exit "$status"
