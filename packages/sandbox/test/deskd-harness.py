@@ -318,4 +318,16 @@ class FakeTree:
 
 desk = deskd.Desk(pieces=FakePieces(), display=FakeDisplay(screen), watch=screen, browser=FakeBrowser(), tree=FakeTree() if "DESKD_LANDED" in os.environ else None)
 trace(call="serving", pid=os.getpid())
+
+
+def ends_with_its_test():
+    """Ended once its test is over, its trace gone with the test's folder: a deskd the `desktop` client started on its
+    own, after an idle stop, is apart from the test (its own session, as in a VM), so no test can stop it, and one that
+    never brings its desktop up never stops for being unused either. Every run of deskd.test.ts left one running."""
+    while os.path.exists(TRACE):
+        time.sleep(0.2)
+    os._exit(0)
+
+
+threading.Thread(target=ends_with_its_test, daemon=True).start()
 sys.exit(deskd.serve(desk, run=os.environ["INVINCIBLE_DESKTOP_RUN"]))

@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
 
@@ -1066,6 +1066,40 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     expect(next.err).toMatch(/^desktop: this desktop was stopped after 0\.3 s with nothing done on it and no one watching, its windows closed as a person closes them; this command started it again, a fresh screen \(the browser's profile, and what is signed in there, are kept in \/work\)\.\n/);
     expect(desktop(r, ["click", "10", "20"]).err).not.toContain("was stopped");
     expect(existsSync(join(r.run, "idle-stopped"))).toBe(false);
+  });
+
+  test("a deskd the client started on its own, after an idle stop, ends with its test as the one the test started does", async () => {
+    if (!built) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: "0.3" });
+    expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
+    expect(await stopped(r, 3000)).toBe(true);
+    // (The next one the client starts itself, apart from it, as in a VM: asked only whether the desktop is up, it never
+    // brings it up, so it never stops for being unused either. Every run of this file left one running, for hours.)
+    expect(desktop(r, ["status"], { INVINCIBLE_DESKTOP_IDLE: "60" }).code).toBe(0);
+    const trace = join(dirname(r.run), "trace");
+    const served = readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((t) => t.call === "serving").map((t) => t.pid as number);
+    expect(served).toHaveLength(2);
+    const started = served.at(-1)!;
+    // (Ended: gone, or a zombie, ended and not yet reaped: its parent is then the first process of wherever it runs, which
+    // in a container may never reap it, as in CI's. Where there is a /proc, its state says which.)
+    const ended = (): boolean => {
+      try {
+        process.kill(started, 0);
+      } catch {
+        return true;
+      }
+      try {
+        const stat = readFileSync(`/proc/${started}/stat`, "utf8");
+        return stat.slice(stat.lastIndexOf(") ") + 2).startsWith("Z");
+      } catch {
+        return false;
+      }
+    };
+    expect(ended()).toBe(false);
+    // Its test over (its folder gone), it ends, within 4 s at the most.
+    rmSync(trace);
+    for (let i = 0; i < 40 && !ended(); i++) await Bun.sleep(100);
+    expect(ended()).toBe(true);
   });
 
   test("used, held or watched, it stays up; watched no more, it stops", async () => {
