@@ -761,8 +761,16 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       all the same counts at the most it could have been, every byte sent and answered a token. A call cut before its
       answer ends, by its client or the network, is counted as it ends (the fifth re-review's R5-2): each byte sent an
       input token, and the most output it allowed itself (its `max_tokens`, for each answer it asked for: chat's `n`),
-      or what was said or answered if more. What a call runs outside its answer (a background response, a provider's
-      per-use tool fees, a dearer service tier) isn't bounded yet (R5-4). But not: a command can start a coding tool
+      or what was said or answered if more. What its budget can't count is taken out of a call where the call means
+      the same without it (the fifth re-review's R5-4, `heldToCount`): the providers' own tools, billed per use or run
+      by another model (OpenAI's built-ins; Anthropic's server tools, with code execution's container, the MCP
+      connector's servers, and an advisor), a fallback to another model (Anthropic's `fallbacks`), and a dearer speed
+      or tier (OpenAI's priority and scale tiers, Anthropic's fast mode). Codex declares OpenAI's web search in every
+      call (0.172.0, captured on 27 November 2026) and goes on without it; Claude Code (2.1.326) declares its own
+      tools alone. Refused: a background response, which runs on after its answer; chat's web search, which its
+      search models run whether asked or not; a tool_choice for a tool taken out; and US-only inference, at 1.1 times
+      the price. A held call is read once, up to the 8 MiB the node takes of any request, and sent as it was parsed
+      (I-f), so a provider's own parser sees what the gateway checked. But not: a command can start a coding tool
       itself on that tool's own sign-in in the VM, if it has one, which no lease reaches (a task's own VM starts with
       an empty HOME).
     - **In a VM of its own** (the owner's decision of 27 November 2026, the third re-review's R3-1;

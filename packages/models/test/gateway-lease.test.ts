@@ -111,11 +111,14 @@ test("a token kept from before leases could be held to models is still good, for
  */
 const HELD_KEY = ["FAKE", "owner", "provider", "key"].join("-");
 const reached: string[] = [];
+/** The body of each call it was sent, as it was sent. */
+const sent: string[] = [];
 const provider = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
   fetch: async (req) => {
     reached.push(`${req.method} ${new URL(req.url).pathname}`);
+    if (req.method === "POST") sent.push(await req.text());
     return Response.json({ ok: true });
   },
 });
@@ -399,4 +402,146 @@ test("a held call whose client goes before any answer comes is counted at its mo
   } finally {
     await silent.stop(true);
   }
+});
+
+/*
+ * What a held lease's budget can't count (the fifth fabric review's R5-4) is taken out of its call where the call means
+ * the same without it, and refused where it doesn't. Taken out: a provider's own tools, billed per use or run on another
+ * model, and a dearer speed or tier. Refused: a background response, chat's web search, a tool_choice for a tool taken
+ * out, and US-only inference. The two coding tools as they call (Claude Code 2.1.326 and Codex 0.172.0, captured on
+ * 27 November 2026 against a stand-in, here their fields, tool types and names alone): Claude Code's call goes as it
+ * was, and Codex's, which declares OpenAI's web search in every call, goes without it. A held call is sent as it was
+ * parsed (the review's I-f). A lease not held is as before.
+ */
+const schema = { type: "object", properties: {} };
+const fns = (...names: string[]) => names.map((name) => ({ type: "function", name, description: "…", strict: false, parameters: schema }));
+const codexCall = {
+  model: "gpt-paid",
+  input: [
+    { type: "message", role: "developer", content: [{ type: "input_text", text: "…" }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "…" }] },
+  ],
+  tools: [
+    ...fns("exec_command", "write_stdin", "request_user_input", "view_image"),
+    { type: "namespace", name: "multi_agent_v1", description: "…", tools: fns("close_agent", "resume_agent", "send_input", "spawn_agent", "wait_agent") },
+    ...fns("get_goal", "create_goal", "update_goal"),
+    { type: "web_search", external_web_access: true },
+  ],
+  tool_choice: "auto",
+  parallel_tool_calls: true,
+  reasoning: { summary: "auto" },
+  store: false,
+  stream: true,
+  include: ["reasoning.encrypted_content"],
+  prompt_cache_key: "fake-session",
+  client_metadata: { session_id: "fake-session", turn_id: "fake-turn" },
+};
+const claudeCodeCall = {
+  model: "claude-paid",
+  max_tokens: 32000,
+  stream: true,
+  thinking: { type: "adaptive", display: "updates" },
+  context_management: { edits: [{ type: "clear_thinking_20251015", keep: "all" }] },
+  output_config: { effort: "high" },
+  metadata: { user_id: "fake-user" },
+  system: [{ type: "text", text: "…" }],
+  messages: [
+    { role: "user", content: [{ type: "text", text: "…" }] },
+    { role: "system", content: [{ type: "text", text: "…" }] },
+  ],
+  tools: ["Agent", "Bash", "Edit", "ListAgents", "Read", "ReportFindings", "ScheduleWakeup", "Skill", "ToolSearch", "Workflow", "DeferredToolPlaceholder", "Write"].map((name) => ({
+    name,
+    description: "…",
+    input_schema: schema,
+    ...(name === "DeferredToolPlaceholder" ? { defer_loading: true } : {}),
+  })),
+};
+
+test("a held lease's call goes without what its budget can't count, or is refused: Claude Code's and Codex's go (R5-4)", async () => {
+  reached.length = 0;
+  sent.length = 0;
+  const identity = newNodeIdentity();
+  const store = new LedgerStore(":memory:");
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
+  const vault = new Vault(store, identity);
+  vault.set("openai", HELD_KEY, { provider: "openai", origin: `http://127.0.0.1:${provider.port}` });
+  store.emit(identity, "provider.set", { id: "openai", kind: "openai", baseUrl: `http://127.0.0.1:${provider.port}/v1`, secret: "openai" });
+  vault.set("anthropic", HELD_KEY, { provider: "anthropic", origin: `http://127.0.0.1:${provider.port}` });
+  store.emit(identity, "provider.set", { id: "anthropic", kind: "anthropic", baseUrl: `http://127.0.0.1:${provider.port}`, secret: "anthropic" });
+  const tokens = new GatewayTokens(new Database(":memory:"));
+  const lease = (models?: string[]) => tokens.mint({ label: "sandbox:0123456789", providers: ["openai", "anthropic"], ...(models ? { models } : {}), ttlMinutes: 30, maxRequests: 500 }).token;
+  const heldToken = lease(["openai/gpt-paid", "anthropic/claude-paid"]);
+  const plainToken = lease();
+  const ask = (token: string, path: string, body: string | Record<string, unknown>) =>
+    handleGateway(new Request(`http://127.0.0.1:7400/gw/${path}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) }), { store, vault, tokens });
+  /** What the provider was sent for this call on the held lease, parsed (and its status). */
+  const through = async (path: string, body: Record<string, unknown>) => {
+    const answer = await ask(heldToken, path, body);
+    expect([path, answer.status]).toEqual([path, 200]);
+    return JSON.parse(sent.at(-1)!) as Record<string, unknown>;
+  };
+
+  // Claude Code's call, as it was; Codex's, without OpenAI's web search, the rest of it as it was.
+  expect(await through("anthropic/v1/messages", claudeCodeCall)).toEqual(claudeCodeCall);
+  expect(await through("openai/responses", codexCall)).toEqual({ ...codexCall, tools: codexCall.tools.slice(0, -1) });
+
+  // A provider's own tools go, wherever they are declared, and its own functions stay.
+  const fn = fns("lookup")[0]!;
+  for (const tool of [{ type: "web_search_preview" }, { type: "file_search", vector_store_ids: ["vs_fake"] }, { type: "code_interpreter", container: { type: "auto" } }, { type: "image_generation" }, { type: "mcp", server_label: "fake", server_url: "https://example.test/mcp" }]) {
+    expect(await through("openai/responses", { model: "gpt-paid", input: "x", tools: [fn, tool] })).toEqual({ model: "gpt-paid", input: "x", tools: [fn] });
+  }
+  expect(await through("openai/responses", { model: "gpt-paid", input: "x", tools: [{ type: "namespace", name: "ns", tools: [fn, { type: "web_search" }] }] })).toEqual({ model: "gpt-paid", input: "x", tools: [{ type: "namespace", name: "ns", tools: [fn] }] });
+  const own = [fn, { type: "local_shell" }, { type: "custom", name: "apply_patch" }, { type: "computer_use_preview", display_width: 1024, display_height: 768, environment: "linux" }];
+  expect(await through("openai/responses", { model: "gpt-paid", input: "x", tools: own })).toEqual({ model: "gpt-paid", input: "x", tools: own });
+  const chatFn = { type: "function", function: { name: "lookup", parameters: schema } };
+  expect(await through("openai/chat/completions", { model: "gpt-paid", messages: [], tools: [chatFn] })).toEqual({ model: "gpt-paid", messages: [], tools: [chatFn] });
+  const client = [{ name: "lookup", input_schema: schema }, { type: "bash_20250124", name: "bash" }, { type: "text_editor_20250728", name: "str_replace_based_edit_tool" }, { type: "computer_toolset_20260801" }, { type: "memory_20250818", name: "memory" }];
+  // (The earlier computer tool is the client's too: one request takes it or the toolset, never both.)
+  const computer = { type: "computer_20251124", name: "computer", display_width_px: 1024, display_height_px: 768 };
+  expect(await through("anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], tools: [computer] })).toEqual({ model: "claude-paid", max_tokens: 10, messages: [], tools: [computer] });
+  for (const tool of [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }, { type: "web_fetch_20260209", name: "web_fetch" }, { type: "code_execution_20260521", name: "code_execution" }, { type: "tool_search_tool_regex_20251119", name: "tool_search_tool_regex" }, { type: "advisor_20260301", name: "advisor", model: "claude-dearer" }]) {
+    expect(await through("anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], tools: [...client, tool] })).toEqual({ model: "claude-paid", max_tokens: 10, messages: [], tools: client });
+  }
+  // With code execution go its container and its skills; with the MCP connector's toolset, its servers.
+  expect(await through("anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], container: { skills: [{ type: "anthropic", skill_id: "pptx" }] }, tools: [{ type: "code_execution_20260521", name: "code_execution" }] })).toEqual({ model: "claude-paid", max_tokens: 10, messages: [], tools: [] });
+  expect(await through("anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], mcp_servers: [{ type: "url", url: "https://example.test/mcp", name: "fake" }], tools: [{ type: "mcp_toolset", mcp_server_name: "fake" }] })).toEqual({ model: "claude-paid", max_tokens: 10, messages: [], tools: [] });
+
+  // A dearer speed or tier goes: the call is answered at the standard one. A cheaper or the standard tier stays.
+  expect(await through("openai/chat/completions", { model: "gpt-paid", messages: [], service_tier: "priority" })).toEqual({ model: "gpt-paid", messages: [] });
+  expect(await through("openai/responses", { model: "gpt-paid", input: "x", service_tier: "scale" })).toEqual({ model: "gpt-paid", input: "x" });
+  for (const tier of ["auto", "default", "flex"]) expect(await through("openai/responses", { model: "gpt-paid", input: "x", service_tier: tier })).toEqual({ model: "gpt-paid", input: "x", service_tier: tier });
+  expect(await through("anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], speed: "fast" })).toEqual({ model: "claude-paid", max_tokens: 10, messages: [] });
+  // So does a fallback, which would run another model, dearer perhaps and not the lease's.
+  for (const fallbacks of ["default", [{ model: "claude-dearer" }]]) {
+    expect(await through("anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], fallbacks })).toEqual({ model: "claude-paid", max_tokens: 10, messages: [] });
+  }
+  // A long call (a long conversation, its screenshots) is read as far as the node takes any request, 8 MiB.
+  const long = { model: "claude-paid", max_tokens: 10, messages: [{ role: "user", content: "z".repeat(5 << 20) }] };
+  expect(await through("anthropic/v1/messages", long)).toEqual(long);
+
+  // Refused, before a byte of it leaves: what can't be taken out without the call being another.
+  const before = reached.length;
+  for (const [path, body] of [
+    ["openai/responses", { model: "gpt-paid", input: "x", background: true }],
+    ["openai/chat/completions", { model: "gpt-paid", messages: [], web_search_options: {} }],
+    ["openai/responses", { model: "gpt-paid", input: "x", tools: [fn, { type: "web_search" }], tool_choice: { type: "web_search" } }],
+    ["openai/responses", { model: "gpt-paid", input: "x", tools: [fn, { type: "web_search" }], tool_choice: { type: "allowed_tools", mode: "auto", tools: [{ type: "web_search" }] } }],
+    ["anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], tools: [{ type: "web_search_20260209", name: "web_search" }], tool_choice: { type: "tool", name: "web_search" } }],
+    ["anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], inference_geo: "us" }],
+  ] as const) {
+    const refused = await ask(heldToken, path, body);
+    expect([path, JSON.stringify(body).slice(0, 90), refused.status]).toEqual([path, JSON.stringify(body).slice(0, 90), 403]);
+    expect(((await refused.json()) as { error: { message: string } }).error.message).toStartWith("this lease's budget can't count");
+  }
+  expect(reached.length).toBe(before);
+  // (Inference wherever the provider runs it, as by default, is no other call.)
+  expect(await through("anthropic/v1/messages", { model: "claude-paid", max_tokens: 10, messages: [], inference_geo: "global" })).toEqual({ model: "claude-paid", max_tokens: 10, messages: [], inference_geo: "global" });
+
+  // Sent as it was parsed: a duplicate key's first value, which another parser may keep, never leaves.
+  expect((await ask(heldToken, "openai/responses", '{"model":"gpt-dearer","model":"gpt-paid", "input" : "x"}')).status).toBe(200);
+  expect(sent.at(-1)).toBe('{"model":"gpt-paid","input":"x"}');
+  // A lease not held to models is as before: its call sent byte for byte, whatever it asks.
+  const plain = JSON.stringify({ ...codexCall, background: true, service_tier: "priority" }, null, 1);
+  expect((await ask(plainToken, "openai/responses", plain)).status).toBe(200);
+  expect(sent.at(-1)).toBe(plain);
 });

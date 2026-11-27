@@ -129,10 +129,13 @@ transport keys carries all of it:
      say it (`stream_options.include_usage`), and one whose answer says none all the same is counted at the most it
      could have been, every byte it sent an input token and every byte it was answered with an output token. A call
      cut before its answer ends is counted as it ends (the fifth re-review's R5-2): each byte sent an input token, and
-     the most output it allowed itself, for each answer it asked for, or what was answered if more. What a call runs
-     outside its answer (a background response, per-use tool fees, a dearer service tier) isn't bounded yet (R5-4).
-     Nor is this: a command can start a coding tool itself on that tool's own sign-in in the VM, if it has one, which
-     no lease reaches (a task's own VM starts with an empty HOME, so it has none).
+     the most output it allowed itself, for each answer it asked for, or what was answered if more. What its budget
+     can't count is taken out of a call where the call means the same without it (R5-4): the providers' own tools,
+     billed per use or run by another model, a fallback to another model, and a dearer speed or tier. Codex, which
+     declares OpenAI's web search in every call, goes on without it. A background response, chat's web search, a
+     tool_choice for a tool taken out and US-only inference are refused. Every held call is sent as it was read. Nor
+     is this: a command can start a coding tool itself on that tool's own sign-in in the VM, if it has one, which no
+     lease reaches (a task's own VM starts with an empty HOME, so it has none).
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node

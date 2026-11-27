@@ -160,12 +160,14 @@ export interface GatewayContext {
   onUsage?(call: { label: string; provider: string; model: string; usage: Usage | null }): void;
 }
 
+/** A call's `model`, when it is one a model's name may be, or "unknown". */
+const modelNamed = (model: unknown): string => (typeof model === "string" && /^[\x21-\x7e]{1,200}$/.test(model) ? model : "unknown");
+
 /** The model a call asks for, from its body (JSON with a `model`), or "unknown". */
 function modelOf(body: ArrayBuffer | undefined): string {
   if (!body || body.byteLength > 4 << 20) return "unknown";
   try {
-    const model = (JSON.parse(new TextDecoder().decode(body)) as { model?: unknown }).model;
-    return typeof model === "string" && /^[\x21-\x7e]{1,200}$/.test(model) ? model : "unknown";
+    return modelNamed((JSON.parse(new TextDecoder().decode(body)) as { model?: unknown }).model);
   } catch {
     return "unknown";
   }
@@ -191,23 +193,108 @@ const heldMay = (method: string, kind: "openai" | "anthropic", rest: string): bo
   method === "GET" || method === "HEAD" ? MODEL_LISTING.test(rest) : method === "POST" && MODEL_CALLS[kind].test(rest);
 
 /*
- * On a lease held to models, a call's usage is never left unsaid (the fourth fabric review's I-l): its budget, a handed
- * task's, is what bounds another node's spending of yours. A streamed OpenAI-style completion says its usage only when
- * asked, so the gateway asks (`stream_options.include_usage`); Anthropic's messages and OpenAI's Responses always say
- * it. One whose answer says none all the same is counted at the most it could have been (heldUsage).
+ * What a held lease's budget can't count (the fifth fabric review's R5-4): its bound, every byte a token, holds only for
+ * what is in the answer, at the price table's prices. So a held call goes without what is billed past its tokens where
+ * the call means the same without it, and is refused where it doesn't.
+ * - Taken out: the providers' own tools, billed per use or run by another model (OpenAI's built-ins: web search, file
+ *   search, code interpreter, image generation, remote MCP; Anthropic's server tools: web search and fetch, code
+ *   execution with its container and skills, tool search, the MCP connector with its servers, an advisor), a fallback
+ *   to another model (Anthropic's `fallbacks`), and a dearer speed or tier (OpenAI's priority and scale tiers,
+ *   Anthropic's fast mode, at twice the price). The model works on without them: Codex declares OpenAI's web search in
+ *   every call (0.172.0, captured on 27 November 2026), and goes on with its own tools.
+ * - Refused: a background response, which runs on after its answer; chat's web search (`web_search_options`), which
+ *   its search models run whether asked or not; a tool_choice for a tool taken out; and US-only inference (Anthropic's
+ *   `inference_geo`, at 1.1 times the price), which can't be taken out without the call being run elsewhere than it
+ *   asked.
+ * A call's own tools, which it runs itself and pays for in tokens alone, stay: OpenAI's functions (in a namespace too),
+ * custom tools, local shell and computer use; Anthropic's tools without a type or of a type its client runs (a shell, an
+ * editor, a computer, its memory). Claude Code (2.1.326, captured the same day) declares those alone.
  */
-function askedForUsage(body: ArrayBuffer | undefined, kind: "openai" | "anthropic", rest: string): ArrayBuffer | undefined {
-  if (!body || kind !== "openai" || !/^(?:v1\/)?(?:chat\/)?completions$/.test(rest) || body.byteLength > 4 << 20) return body;
-  try {
-    const call = JSON.parse(new TextDecoder().decode(body)) as unknown;
-    if (!call || typeof call !== "object" || Array.isArray(call) || (call as { stream?: unknown }).stream !== true) return body;
-    const given = (call as { stream_options?: unknown }).stream_options;
-    const options = given && typeof given === "object" && !Array.isArray(given) ? (given as Record<string, unknown>) : {};
-    if (options.include_usage === true) return body;
-    return new TextEncoder().encode(JSON.stringify({ ...call, stream_options: { ...options, include_usage: true } })).buffer as ArrayBuffer;
-  } catch {
-    return body;
+const OPENAI_OWN_TOOLS = new Set(["function", "custom", "local_shell", "computer_use_preview"]);
+const ANTHROPIC_CLIENT_TOOLS = /^(?:custom|bash_\d+|text_editor_\d+|computer_\d+|computer_toolset_\d+|memory_\d+)$/;
+
+/** Why a held call is refused, or null, its uncountable parts taken out of it (R5-4). */
+function heldToCount(call: Record<string, unknown>, kind: "openai" | "anthropic"): string | null {
+  const field = (value: unknown, key: string): unknown => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>)[key] : undefined);
+  if (kind === "openai" && call.background === true) return "a background response, which runs on after its answer";
+  if (kind === "openai" && call.web_search_options !== undefined) return "chat's web search, which its search models run whether asked or not";
+  if (kind === "anthropic" && call.inference_geo !== undefined && call.inference_geo !== "global") return "inference held to one geography, priced past the price table";
+  if (call.tools !== undefined && !Array.isArray(call.tools)) return "tools that aren't a list";
+  // The provider's own tools go, wherever they are declared (in an OpenAI namespace too); Anthropic's by their names.
+  const named = new Set<string>();
+  const own = (tool: unknown): boolean => {
+    const type = field(tool, "type");
+    return kind === "openai" ? typeof type === "string" && OPENAI_OWN_TOOLS.has(type) : type === undefined || (typeof type === "string" && ANTHROPIC_CLIENT_TOOLS.test(type));
+  };
+  const kept = (tools: unknown[], top: boolean): unknown[] =>
+    tools.filter((tool) => {
+      const inner = field(tool, "tools");
+      if (kind === "openai" && top && field(tool, "type") === "namespace" && Array.isArray(inner)) {
+        (tool as { tools: unknown[] }).tools = kept(inner, false);
+        return true;
+      }
+      if (own(tool)) return true;
+      if (typeof field(tool, "name") === "string") named.add(field(tool, "name") as string);
+      return false;
+    });
+  if (Array.isArray(call.tools)) call.tools = kept(call.tools, true);
+  // (A tool_choice for one of them would be another call without it: OpenAI's names a tool by its type, Anthropic's by its name.)
+  const choice = call.tool_choice;
+  const asked = field(choice, "type") === "allowed_tools" && Array.isArray(field(choice, "tools")) ? (field(choice, "tools") as unknown[]) : [choice];
+  const takenOut = (tool: unknown): boolean => {
+    const type = field(tool, "type");
+    if (kind === "openai") return typeof type === "string" && type !== "allowed_tools" && !OPENAI_OWN_TOOLS.has(type);
+    return type === "tool" && typeof field(tool, "name") === "string" && named.has(field(tool, "name") as string);
+  };
+  if (asked.some(takenOut)) return "a tool_choice for a tool of the provider's own, which this lease's calls go without";
+  // A dearer speed or tier goes, so the call is answered at the standard one; and what would run another model.
+  if (kind === "openai" && (call.service_tier === "priority" || call.service_tier === "scale")) delete call.service_tier;
+  if (kind === "anthropic") {
+    if (call.speed !== undefined && call.speed !== "standard") delete call.speed;
+    // (A container and MCP servers serve the tools taken out alone.)
+    for (const key of ["container", "mcp_servers", "fallbacks"]) delete call[key];
   }
+  return null;
+}
+
+/** The most of a held call that is read: as much as the node takes of any request (daemon.ts, MAX_REQUEST_BODY). */
+const HELD_READ = 8 << 20;
+
+/** A held call as it is sent: its model, why it is refused (or null), and its body. */
+interface HeldCall {
+  model: string;
+  refused: string | null;
+  call: Record<string, unknown> | null;
+  body: ArrayBuffer;
+}
+
+/*
+ * A held call, read once (heldCall): its model, then what its budget can't count taken out of it, or the call refused
+ * (R5-4, heldToCount). Its usage is never left unsaid (the fourth fabric review's I-l): its budget, a handed task's, is
+ * what bounds another node's spending of yours. A streamed OpenAI-style completion says its usage only when asked, so
+ * the gateway asks (`stream_options.include_usage`); Anthropic's messages and OpenAI's Responses always say it. One whose
+ * answer says none all the same is counted at the most it could have been (heldUsage). And it is sent as it was parsed,
+ * serialized again (the fifth review's I-f): what leaves is what was checked, so a provider whose JSON parser keeps a
+ * duplicate key's first value sees the model, the tools and the fields the gateway saw.
+ */
+function heldCall(body: ArrayBuffer, kind: "openai" | "anthropic", rest: string): HeldCall {
+  let call: Record<string, unknown> | null = null;
+  try {
+    const parsed = body.byteLength <= HELD_READ ? (JSON.parse(new TextDecoder().decode(body)) as unknown) : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) call = parsed as Record<string, unknown>;
+  } catch {
+    // (Not JSON: it names no model of the lease's.)
+  }
+  const model = modelNamed(call?.model);
+  if (!call) return { model, refused: "a call that isn't a JSON object", call, body };
+  const refused = heldToCount(call, kind);
+  if (refused) return { model, refused, call, body };
+  if (kind === "openai" && /^(?:v1\/)?(?:chat\/)?completions$/.test(rest) && call.stream === true) {
+    const given = call.stream_options;
+    const options = given && typeof given === "object" && !Array.isArray(given) ? (given as Record<string, unknown>) : {};
+    if (options.include_usage !== true) call.stream_options = { ...options, include_usage: true };
+  }
+  return { model, refused: null, call, body: new TextEncoder().encode(JSON.stringify(call)).buffer as ArrayBuffer };
 }
 
 /**
@@ -231,16 +318,10 @@ const cutUsage = (said: Usage | null, sent: number, answered: number, allowed: n
  * The most output a call allows itself, by any of the protocols' words for it, or 0 where it names none: as many times
  * over as it asks for answers (chat's `n`, at most 128), each up to its cap.
  */
-function allowedOutput(body: ArrayBuffer | undefined): number {
-  if (!body || body.byteLength > 4 << 20) return 0;
-  try {
-    const call = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown> | null;
-    const caps = [call?.max_tokens, call?.max_completion_tokens, call?.max_output_tokens].filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n > 0);
-    const answers = typeof call?.n === "number" && Number.isInteger(call.n) && call.n > 1 ? Math.min(call.n, 128) : 1;
-    return caps.length ? Math.floor(Math.max(...caps)) * answers : 0;
-  } catch {
-    return 0;
-  }
+function allowedOutput(call: Record<string, unknown> | null): number {
+  const caps = [call?.max_tokens, call?.max_completion_tokens, call?.max_output_tokens].filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n > 0);
+  const answers = typeof call?.n === "number" && Number.isInteger(call.n) && call.n > 1 ? Math.min(call.n, 128) : 1;
+  return caps.length ? Math.floor(Math.max(...caps)) * answers : 0;
 }
 
 /*
@@ -297,17 +378,20 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   // serves others' models too, as NEAR AI's does, serves only those).
   const held = ctx.tokens.modelsOf(token);
   if (held && !heldMay(request.method, provider.kind, rest)) return json(403, `this lease is for model calls alone (${held.join(", ")}): ${request.method} ${rest.slice(0, 80)} isn't one`);
-  if (held && body && !held.includes(`${providerId}/${modelOf(body)}`)) return json(403, `this lease is for ${held.join(", ")} alone`);
+  // (A held call is read once, heldCall: its model, then what its budget can't count, R5-4; it is sent as it was read.)
+  const shaped = held && body ? heldCall(body, provider.kind, rest) : null;
+  if (held && shaped && !held.includes(`${providerId}/${shaped.model}`)) return json(403, `this lease is for ${held.join(", ")} alone`);
+  if (shaped?.refused) return json(403, `this lease's budget can't count ${shaped.refused}: it isn't asked on this lease`);
+  const model = shaped?.model ?? modelOf(body);
   // A plan whose allowance is spent past the next minute (windows.ts) isn't asked a model call again until it resets;
   // nor is a model of any other provider's that was told to wait that long (its others are asked as ever).
   const windows = windowsOf(ctx.store);
-  const ref = `${providerId}/${modelOf(body)}`;
+  const ref = `${providerId}/${model}`;
   const open = request.method === "POST" ? windows.spentFor(ref) : null;
   if (open && open.until - windows.now() > WAIT_OUT_MS) return spent(open.provider, open, windows);
-  // (Asked to say its usage, on a held lease.)
-  const sent = held ? askedForUsage(body, provider.kind, rest) : body;
+  const sent = shaped ? shaped.body : body;
   const report = ctx.onUsage;
-  const call = { label: ctx.tokens.labelOf(token) ?? "unknown", provider: providerId, model: modelOf(body) };
+  const call = { label: ctx.tokens.labelOf(token) ?? "unknown", provider: providerId, model };
   let upstream: Response;
   try {
     upstream = await (ctx.fetch ?? fetch)(target, {
@@ -320,7 +404,7 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
     });
   } catch (error) {
     // (A held call cut before any answer came, by its client or the network: counted at its most all the same. R5-2.)
-    if (report && held && request.method === "POST") report({ ...call, usage: cutUsage(null, sent?.byteLength ?? 0, 0, allowedOutput(body)) });
+    if (report && held && request.method === "POST") report({ ...call, usage: cutUsage(null, sent?.byteLength ?? 0, 0, allowedOutput(shaped?.call ?? null)) });
     throw error;
   }
   const responseHeaders = new Headers();
@@ -349,7 +433,7 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   // A model call (a POST) is counted as its answer goes by; a listing or a lookup isn't one.
   if (!report || request.method !== "POST" || !upstream.body) return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   const reader = usageReader(provider.kind, EMBEDDINGS.test(rest));
-  const allowed = held ? allowedOutput(body) : 0;
+  const allowed = held ? allowedOutput(shaped?.call ?? null) : 0;
   let answered = 0;
   let told = false;
   // Counted once, however its answer ends: read to its end, cut by its client, or broken (R5-2). A held call cut is
