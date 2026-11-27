@@ -1,5 +1,5 @@
 import { type SandboxNetwork, type SeatKind, VM_HOME, VM_WORK } from "@invincible/core";
-import { HOME_TREE, LAYOUT_ENV, WORK_TREE } from "./layout.ts";
+import { HOME_TREE, LAYOUT_ENV, NOTES_TREE, VM_NOTES, WORK_TREE } from "./layout.ts";
 import { collectCommand } from "./walk.ts";
 
 /*
@@ -66,8 +66,9 @@ export interface SandboxSpec {
     tree?: typeof WORK_TREE;
   };
   /**
-   * Layout 2 (layout.ts): its store's two trees mounted on their own, work/ at /work and home/ at its HOME, which its
-   * environment names (LAYOUT_ENV), with `path` its PATH (layoutPath). Absent: layout 1, /work its HOME too.
+   * Layout 2 (layout.ts): its store's three trees mounted on their own, work/ at /work, home/ at its HOME and notes/
+   * where its notes are kept in it (VM_NOTES), which its environment names (LAYOUT_ENV), with `path` its PATH
+   * (layoutPath). Absent: layout 1, /work its HOME too.
    */
   layout?: { path: string };
 }
@@ -196,8 +197,9 @@ export function labels(spec: SandboxSpec): Record<string, string> {
 }
 
 /**
- * Its /work, and in layout 2 its HOME, from its store (layout.ts): in layout 2 each tree on its own, as a subpath of its
- * volume or a directory of its workspace image; a VM that shares an agent's workspace mounts that workspace's tree alone.
+ * Its /work, and in layout 2 its HOME and its notes, from its store (layout.ts): in layout 2 each tree on its own, as a
+ * subpath of its volume or a directory of its workspace image; a VM that shares an agent's workspace mounts that
+ * workspace's tree alone.
  */
 function storeMounts(spec: SandboxSpec): string[] {
   const mount = (source: { volume: string } | { workspace: string }, tree: string | null, target: string) =>
@@ -207,7 +209,7 @@ function storeMounts(spec: SandboxSpec): string[] {
   if (spec.shares) return ["--mount", mount(spec.shares, spec.shares.tree ?? null, VM_WORK)];
   const store = spec.workspace ? { workspace: spec.workspace } : { volume: volumeName(spec.id) };
   if (!spec.layout) return ["--mount", mount(store, null, VM_WORK)];
-  return ["--mount", mount(store, WORK_TREE, VM_WORK), "--mount", mount(store, HOME_TREE, VM_HOME)];
+  return ["--mount", mount(store, WORK_TREE, VM_WORK), "--mount", mount(store, HOME_TREE, VM_HOME), "--mount", mount(store, NOTES_TREE, VM_NOTES)];
 }
 
 /** `docker run` arguments. Every hardening flag here is asserted by tests. */

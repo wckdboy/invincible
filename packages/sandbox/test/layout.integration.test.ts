@@ -7,9 +7,9 @@ import { randomBytes } from "node:crypto";
 import { runArgs, type SandboxSpec } from "../src/index.ts";
 
 /*
- * Layout 2 on real Docker (layout.ts): a VM that shares an agent's workspace (a run on a seat, another node's task)
- * mounts the store's work/ tree alone, as runArgs mounts it, and no link the agent leaves in work/ reaches the store's
- * home/: not a relative ../home/…, not an absolute /home/agent/…, and not one swapped in after the VM mounted it. Each
+ * Layout 2 on real Docker (layout.ts): a VM that shares an agent's workspace alone (another node's task) mounts the
+ * store's work/ tree alone, as runArgs mounts it, and no link the agent leaves in work/ reaches the store's home/ or its
+ * notes/: not a relative ../home/…, not an absolute /home/agent/…, and not one swapped in after the VM mounted it. Each
  * through a Docker volume's subpaths and through a workspace image's directories (here a host folder, bound as the
  * helper's image is). A Linux host with Docker Engine 26 or later; skipped, and so unverified, anywhere else.
  */
@@ -25,12 +25,13 @@ afterAll(() => {
   for (const name of made.volumes) docker("volume", "rm", "-f", name);
   // (What the VMs' user made in a folder is that user's to remove: a one-off removes it first.)
   for (const dir of made.dirs) {
-    asAgent([`type=bind,src=${dir},dst=/work`], "rm -rf /work/work /work/home");
+    asAgent([`type=bind,src=${dir},dst=/work`], "rm -rf /work/work /work/home /work/notes");
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 const SECRET = "not-a-real-secret-sentinel";
+const NOTE = "not-a-real-note-sentinel";
 /** A one-off as the VMs' user, with nothing else of the host. */
 const asAgent = (mounts: string[], script: string) =>
   docker("run", "--rm", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only", ...mounts.flatMap((m) => ["--mount", m]), "invincible/sandbox:1", "sh", "-c", script);
@@ -43,8 +44,8 @@ const mountsOf = (args: string[]) => args.filter((_, i) => args[i - 1] === "--mo
 
 for (const kind of ["volume", "bind"] as const) {
   describe.skipIf(!available)(`a VM sharing an agent's workspace, through a ${kind === "volume" ? "volume's subpaths" : "workspace image's directories"}`, () => {
-    test("reaches nothing of its HOME: not by a path, a relative link, an absolute link, or a link swapped in after it mounted", () => {
-      // The agent's store, in layout 2: its workspace, and its HOME with something in it.
+    test("reaches nothing of its HOME or its notes: not by a path, a relative link, an absolute link, or a link swapped in after it mounted", () => {
+      // The agent's store, in layout 2: its workspace, its HOME with something in it (and its notes' mountpoint), its notes.
       const volume = `q5-escape-${randomBytes(4).toString("hex")}`;
       const dir = kind === "bind" ? mkdtempSync(join(tmpdir(), "q5-escape-")) : null;
       if (dir) {
@@ -56,7 +57,7 @@ for (const kind of ["volume", "bind"] as const) {
         expect(docker("volume", "create", volume).status).toBe(0);
       }
       const store = dir ? `type=bind,src=${dir},dst=/work` : `type=volume,src=${volume},dst=/work`;
-      expect(asAgent([store], `mkdir -p /work/work /work/home && chmod 700 /work/home && printf ${SECRET} > /work/home/secret && ln -s ../home/secret /work/work/rel && ln -s /home/agent/secret /work/work/abs && ln -s .. /work/work/up`).status).toBe(0);
+      expect(asAgent([store], `mkdir -p /work/work /work/home/.memory/engram /work/notes && chmod 700 /work/home /work/notes && printf ${SECRET} > /work/home/secret && printf ${NOTE} > /work/notes/note && ln -s ../home/secret /work/work/rel && ln -s /home/agent/secret /work/work/abs && ln -s .. /work/work/up && ln -s ../notes/note /work/work/relnote && ln -s /home/agent/.memory/engram/note /work/work/absnote`).status).toBe(0);
       // The VM that shares it, mounted as the host mounts one (runArgs), its own HOME empty.
       const shares = dir ? { sandbox: "agent", workspace: dir, tree: "work" as const } : { sandbox: "agent", volume, tree: "work" as const };
       const mounts = mountsOf(runArgs(spec({ shares })));
@@ -66,13 +67,15 @@ for (const kind of ["volume", "bind"] as const) {
       expect(docker("run", "--detach", "--name", name, "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only",
         "--tmpfs", "/home/agent:rw,uid=1000,gid=1000,mode=0700", ...mounts.flatMap((m) => ["--mount", m]), "invincible/sandbox:1", "sleep", "300").status).toBe(0);
       const read = (path: string) => docker("exec", name, "sh", "-c", `cat ${path} 2>/dev/null || true`).stdout;
-      for (const path of ["/work/home/secret", "/work/rel", "/work/abs", "/work/up/home/secret", "/work/../home/secret"]) expect([path, read(path)]).toEqual([path, ""]);
+      for (const path of ["/work/home/secret", "/work/rel", "/work/abs", "/work/up/home/secret", "/work/../home/secret", "/work/relnote", "/work/absnote", "/work/up/notes/note", "/work/../notes/note"]) expect([path, read(path)]).toEqual([path, ""]);
       // Swapped in after it mounted, by the agent's own VM, which has both trees.
-      const agentMounts = dir ? [`type=bind,src=${dir}/work,dst=/work`, `type=bind,src=${dir}/home,dst=/home/agent`] : [`type=volume,src=${volume},dst=/work,volume-subpath=work`, `type=volume,src=${volume},dst=/home/agent,volume-subpath=home`];
-      expect(asAgent(agentMounts, "rm -f /work/rel && ln -s ../home/secret /work/rel && ln -s /home/agent/secret /work/late && ln -s ../../home /work/upper").status).toBe(0);
-      for (const path of ["/work/rel", "/work/late", "/work/upper/secret", "/work/upper/agent/secret"]) expect([path, read(path)]).toEqual([path, ""]);
-      // (The agent's own VM reads its HOME, as it should: the store is as made.)
+      const agentMounts = mountsOf(runArgs(spec({ ephemeral: false, layout: { path: "/usr/bin:/bin" }, ...(dir ? { workspace: dir } : {}) }))).map((m) => (dir ? m : m.replace(/src=invincible-sbx-[^,]+-work/, `src=${volume}`)));
+      expect(agentMounts).toHaveLength(3);
+      expect(asAgent(agentMounts, "rm -f /work/rel && ln -s ../home/secret /work/rel && ln -s /home/agent/secret /work/late && ln -s ../../home /work/upper && ln -s /home/agent/.memory/engram/note /work/latenote").status).toBe(0);
+      for (const path of ["/work/rel", "/work/late", "/work/upper/secret", "/work/upper/agent/secret", "/work/latenote"]) expect([path, read(path)]).toEqual([path, ""]);
+      // (The agent's own VM reads its HOME, and its notes where ENGRAM_DATA_DIR points, as it should: the store is as made.)
       expect(asAgent(agentMounts, "cat /home/agent/secret").stdout).toBe(SECRET);
+      expect(asAgent(agentMounts, "cat /home/agent/.memory/engram/note").stdout).toBe(NOTE);
     });
   });
 }

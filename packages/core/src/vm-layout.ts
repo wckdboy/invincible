@@ -8,5 +8,5 @@ export const VM_WORK = "/work";
 export const VM_HOME = "/home/agent";
 /** The lease's file in a VM's HOME: its gateway token and where its gateway is (JSON, never a shell's configuration). */
 export const LEASE_FILE = ".invincible-gateway.json";
-/** Where the agent's notes (Engram) are kept, in its HOME. */
+/** Where the agent's notes (Engram) are kept, in its HOME: in layout 2 a tree of their own in its store, mounted there. */
 export const NOTES_DIR = ".memory/engram";

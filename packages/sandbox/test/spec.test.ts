@@ -237,20 +237,23 @@ describe("layout 2: an agent's HOME apart from its workspace", () => {
   const envs = (args: string[]) => args.filter((_, i) => args[i - 1] === "--env");
   const layout = { path: "/opt/bun/bin:/usr/bin:/bin:/home/agent/.local/bin" };
 
-  test("its volume's two trees, the workspace's at /work and its HOME's at /home/agent, and its environment follows HOME", () => {
+  test("its volume's three trees, the workspace's at /work, its HOME's at /home/agent and its notes' where ENGRAM_DATA_DIR points, and its environment follows HOME", () => {
     const args = runArgs({ ...base, ephemeral: false, layout });
     expect(mounts(args)).toEqual([
       "type=volume,src=invincible-sbx-0123456789-work,dst=/work,volume-subpath=work",
       "type=volume,src=invincible-sbx-0123456789-work,dst=/home/agent,volume-subpath=home",
+      "type=volume,src=invincible-sbx-0123456789-work,dst=/home/agent/.memory/engram,volume-subpath=notes",
     ]);
+    expect(envs(args)).toContain(`ENGRAM_DATA_DIR=${mounts(args)[2]!.split(",").find((part) => part.startsWith("dst="))!.slice(4)}`);
     expect(envs(args)).toEqual(expect.arrayContaining(["HOME=/home/agent", "NPM_CONFIG_PREFIX=/home/agent/.local", "ENGRAM_DATA_DIR=/home/agent/.memory/engram", "XDG_CACHE_HOME=/home/agent/.cache", `PATH=${layout.path}`]));
     expect(envs(args)).not.toContain("HOME=/work");
     expect(args).toContain("dev.invincible.layout=2");
-    // A size-limited workspace image: its two directories, bound on their own; its limit bounds both.
+    // A size-limited workspace image: its three directories, bound on their own; its limit bounds all three.
     const limited = runArgs({ ...base, ephemeral: false, layout, workspace: "/var/lib/invincible-workspaces/0123456789", diskGb: 20 });
     expect(mounts(limited)).toEqual([
       "type=bind,src=/var/lib/invincible-workspaces/0123456789/work,dst=/work",
       "type=bind,src=/var/lib/invincible-workspaces/0123456789/home,dst=/home/agent",
+      "type=bind,src=/var/lib/invincible-workspaces/0123456789/notes,dst=/home/agent/.memory/engram",
     ]);
   });
 
@@ -261,6 +264,8 @@ describe("layout 2: an agent's HOME apart from its workspace", () => {
     const onImage = runArgs({ ...base, seat, shares: { sandbox: "9876543210", workspace: "/var/lib/invincible-workspaces/9876543210", tree: "work" } });
     expect(mounts(onImage)[0]).toBe("type=bind,src=/var/lib/invincible-workspaces/9876543210/work,dst=/work");
     expect([...mounts(onVolume), ...mounts(onImage)].some((m) => m.includes("subpath=home") || m.endsWith("/home,dst=/home/agent"))).toBe(false);
+    // Nor its notes.
+    expect([...mounts(onVolume), ...mounts(onImage)].some((m) => m.includes("subpath=notes") || m.includes("/notes,dst="))).toBe(false);
     // One that shares an agent in layout 1 mounts its whole store, as before.
     expect(mounts(runArgs({ ...base, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work" } }))).toEqual(["type=volume,src=invincible-sbx-9876543210-work,dst=/work"]);
   });

@@ -232,6 +232,23 @@ function publishProfile(store: LedgerStore, identity: NodeIdentity, endpoint: st
 }
 
 /**
+ * What you are told once when an agent's VM is moved to layout 2 (the owner's decision of 27 November 2026): the agent by
+ * name, and what of its store went where, by names and sizes alone (layout.ts's list: never a byte of a file).
+ */
+export function layoutNotice(name: string, entries: readonly LayoutEntry[]): { title: string; body: string } {
+  const size = (bytes: number) => (bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : bytes >= 2 ** 20 ? `${Math.round(bytes / 2 ** 20)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+  const home = entries.filter((e) => e.to === "home");
+  const notes = entries.find((e) => e.to === "notes");
+  return {
+    title: `${name}'s VM has a HOME of its own`,
+    body: [
+      `${name}'s VM was made again with a HOME of its own, apart from its workspace: what its tools keep for themselves (their sign-ins and config), its notes and its lease are no longer in /work, so no VM that shares its workspace (a run on a seat, another node's task) reaches them.`,
+      `Moved to its HOME: ${home.map((e) => `${e.name} (${size(e.bytes)})`).join(", ") || "nothing"}. ${notes ? `Its notes (${size(notes.bytes)}) were moved to a place of their own.` : "It had no notes yet: they'll be kept in a place of their own."} Its workspace is as it was. Whatever was running in its VM ended as it was made again.`,
+    ].join("\n"),
+  };
+}
+
+/**
  * One look at this node's own body: probe, then publish. It runs on a timer, and Bun ends
  * the process on an unhandled rejection, so a failure here is a line in the log (the last
  * capabilities stand), never the end of the node. Returns what the probe found, or null.
@@ -497,14 +514,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   /** An agent's VM moved to layout 2 (sandbox's layout.ts), said to you once: which agent, and what of its VM moved where. */
   const tellMoved = (run: string, entries: readonly LayoutEntry[]): void => {
     const handle = run.split(".").at(-1) ?? run;
-    const name = team.store.agent(handle)?.name ?? handle;
-    const home = entries.filter((e) => e.to === "home");
-    const size = (bytes: number) => (bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : bytes >= 2 ** 20 ? `${Math.round(bytes / 2 ** 20)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
-    const body = [
-      `${name}'s VM was made again with a HOME of its own, apart from its workspace: what its tools keep for themselves (their sign-ins and config), its notes and its lease are no longer in /work, so no VM that shares its workspace (a run on a seat, another node's task) reaches them.`,
-      `Moved to its HOME: ${home.map((e) => `${e.name} (${size(e.bytes)})`).join(", ") || "nothing"}. Its workspace is as it was. Whatever was running in its VM ended as it was made again.`,
-    ].join("\n");
-    store.emit(identity, "notice.raised", { key: `layout:${handle}`.slice(0, 160), severity: "info", title: `${name}'s VM has a HOME of its own`.slice(0, 200), body: body.slice(0, 2000), source: "sandbox", at: Date.now() });
+    const said = layoutNotice(team.store.agent(handle)?.name ?? handle, entries);
+    store.emit(identity, "notice.raised", { key: `layout:${handle}`.slice(0, 160), severity: "info", title: said.title.slice(0, 200), body: said.body.slice(0, 2000), source: "sandbox", at: Date.now() });
   };
   let sandbox: GovernedSandboxHost | null = null;
   const sandboxContext = resolve(dirname(fileURLToPath(import.meta.url)), "../../../sandbox");

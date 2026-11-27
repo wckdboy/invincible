@@ -279,20 +279,25 @@ Layout 2 (`packages/sandbox/src/layout.ts`, the owner's decisions of 27 November
 its HOME too, so whatever its tools keep for themselves (their sign-ins and config), its browser's profile, its notes and
 its lease were in the workspace, and a VM that shares the workspace (a run on a seat) reached all of them.
 
-- **One store, two trees.** An agent's store (its Docker volume, or its size-limited workspace image) holds `work/`,
-  mounted at `/work`, and `home/`, mounted at `/home/agent` as its HOME. Each tree is mounted on its own: a subpath of the
-  volume, or a directory of the image, whose limit bounds both. Its HOME holds its tools' own files, its notes (Engram)
-  and its lease; its environment and PATH follow HOME, with no directory of the workspace on its PATH, so nothing put
-  into the workspace runs in its place (`packages/sandbox/test/spec.test.ts`).
+- **One store, three trees.** An agent's store (its Docker volume, or its size-limited workspace image) holds `work/`,
+  mounted at `/work`; `home/`, mounted at `/home/agent` as its HOME; and `notes/`, its notes (Engram's), mounted where
+  `ENGRAM_DATA_DIR` points in that HOME (`/home/agent/.memory/engram`). Each tree is an entry at the store's root, which
+  no VM mounts, and each is mounted on its own: a subpath of the volume, or a directory of the image, whose limit bounds
+  all three. No tree is mounted from a place inside another, which the agent writes and could swap for a link. Its HOME
+  holds its tools' own files and its lease; its environment and PATH follow HOME, with no directory of the workspace on
+  its PATH, so nothing put into the workspace runs in its place (`packages/sandbox/test/spec.test.ts`).
 - **A VM that shares a workspace mounts `work/` alone.** A run on a seat (and, to come, another node's task) gets the
-  workspace's tree and a HOME of its own, never the agent's. A link left in `work/` resolves in that VM's own view, where
-  the store's other tree isn't, so it reaches nothing of the agent's HOME (`team-layout.test.ts`).
+  workspace's tree, never the agent's HOME or its notes. A link left in `work/` resolves in that VM's own view, where the
+  store's other trees aren't, so it reaches nothing of them (`team-layout.test.ts`; on real Docker,
+  `layout.integration.test.ts`, which runs on a Linux host with Docker Engine 26 or later and is skipped elsewhere).
 - **Made new in it; moved to it once.** A new agent's VM is made in layout 2. One made before is moved at its next
   prepare while nothing runs in it (no command, terminal or desktop session, and no VM sharing its workspace): its
-  store's top-level entries are renamed into the two trees inside the store's own filesystem, so nothing is copied.
-  Every dot-entry that isn't the workspace's own (`.agent`, `.tmp`, `.eval`) goes to its HOME, everything else stays its
-  workspace, and the old lease is dropped (each prepare writes a fresh one). Which files are a tool's is never named: the
-  move goes by that one rule (`layout.test.ts`). A move that can't be finished is put back by the reverse renames, and its
+  store's top-level entries are renamed into the three trees inside the store's own filesystem, so nothing is copied.
+  Its notes go to their own tree by one rename, and only where every part of their place is a folder: a link there is
+  never followed. Every other dot-entry that isn't the workspace's own (`.agent`, `.tmp`, `.eval`, `.evidence`) goes to
+  its HOME, everything else stays its workspace, and the old lease is dropped (each prepare writes a fresh one). Which
+  files are a tool's is never named: the move goes by that one rule, and every `/work/.name` the code names is checked
+  against the workspace's own entries, so one the code comes to keep there isn't moved away (`layout.test.ts`). A move that can't be finished is put back by the reverse renames, and its
   work goes on in layout 1 until the next prepare. Each move is a line in the ledger and a notice to you that names the
   agent. Its list mode says what a move would do by entry name and size alone, reading no file.
 - **Where it holds.** A Linux host with Docker: a store on a Docker volume needs Docker Engine 26 or later (its trees are

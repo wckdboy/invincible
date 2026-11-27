@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { LEASE_FILE, NOTES_DIR } from "@invincible/core";
 import { containerName, type DockerRunner, LABEL, type LayoutEntry, SandboxHost, volumeName } from "../src/index.ts";
 
 /*
@@ -15,6 +16,7 @@ type Mount = { Type: string; Name?: string; Source?: string; Destination: string
 const LISTED: LayoutEntry[] = [
   { name: ".agent", to: "work", kind: "dir", bytes: 10 },
   { name: ".config", to: "home", kind: "dir", bytes: 2048 },
+  { name: ".memory/engram", to: "notes", kind: "dir", bytes: 512 },
   { name: ".invincible-gateway.json", to: "drop", kind: "file", bytes: 300 },
   { name: "repo", to: "work", kind: "dir", bytes: 4096 },
 ];
@@ -137,7 +139,7 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
 }
 
 describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () => {
-  test("is moved to layout 2: its store's entries renamed into its two trees, and its VM made again on them", async () => {
+  test("is moved to layout 2: its store's entries renamed into its three trees, and its VM made again on them", async () => {
     const f = fake();
     await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
     expect(f.modes).toEqual(["list", "move"]);
@@ -146,21 +148,24 @@ describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () 
     for (const args of oneOffs) {
       expect(args.slice(args.indexOf("--user"), args.indexOf("--user") + 2)).toEqual(["--user", "1000:1000"]);
       expect(args).toEqual(expect.arrayContaining(["--network", "none", "--cap-drop", "ALL", "--read-only"]));
+      // (Told the lease's name, to drop it, and its notes' place in a HOME, to take them to their own tree.)
+      expect(args.slice(-2)).toEqual([LEASE_FILE, NOTES_DIR]);
     }
     expect(oneOffs[0]).toContain(`type=volume,src=${volumeName(ID)},dst=/work,readonly`);
     expect(oneOffs[1]).toContain(`type=volume,src=${volumeName(ID)},dst=/work`);
-    // Made again on its two trees, its HOME apart, and running.
+    // Made again on its three trees, its HOME and its notes apart, and running.
     expect(f.agent().labels[`${LABEL}.layout`]).toBe("2");
     expect(f.agent().mounts).toEqual([
       { Type: "volume", Name: volumeName(ID), Destination: "/work", Subpath: "work" },
       { Type: "volume", Name: volumeName(ID), Destination: "/home/agent", Subpath: "home" },
+      { Type: "volume", Name: volumeName(ID), Destination: "/home/agent/.memory/engram", Subpath: "notes" },
     ]);
     const made = f.calls.find((a) => a[0] === "run" && !a.includes("--rm"))!;
     expect(made).toEqual(expect.arrayContaining(["HOME=/home/agent", "PATH=/opt/bun/bin:/usr/bin:/bin:/home/agent/.local/bin"]));
     expect(f.containers.has(`${containerName(ID)}-replaced`)).toBe(false);
     // Said once in the ledger, by names and sizes alone, and to its owner.
     const said = f.ledger.find((e) => e.detail?.startsWith("made again in layout 2"))!;
-    expect(said.detail).toBe("made again in layout 2 · to its HOME: 1 entries, 2048 bytes · kept in its workspace: 2 entries · its old lease dropped");
+    expect(said.detail).toBe("made again in layout 2 · to its HOME: 1 entries, 2048 bytes · its notes: 512 bytes, to a tree of their own · kept in its workspace: 2 entries · its old lease dropped");
     expect(f.moved).toEqual([{ run: RUN, entries: LISTED }]);
     // Its next prepare finds it in layout 2: nothing is moved again.
     f.modes.length = 0;
@@ -175,6 +180,7 @@ describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () 
     expect(image.agent().mounts).toEqual([
       { Type: "bind", Source: `/var/lib/invincible-workspaces/${ID}/work`, Destination: "/work" },
       { Type: "bind", Source: `/var/lib/invincible-workspaces/${ID}/home`, Destination: "/home/agent" },
+      { Type: "bind", Source: `/var/lib/invincible-workspaces/${ID}/notes`, Destination: "/home/agent/.memory/engram" },
     ]);
     const volume = fake({ engine: "25.0.3" });
     await volume.host.prepareTeam(ID, RUN, undefined, ["openai"]);
@@ -223,7 +229,7 @@ describe("an agent's VM in layout 2", () => {
     await f.host.remakeTeam(ID, RUN, { providers: ["openai"], approvedBy: "test-owner" });
     expect(f.modes).toEqual([]);
     expect(f.agent().labels[`${LABEL}.layout`]).toBe("2");
-    expect(f.agent().mounts.map((m) => m.Destination)).toEqual(["/work", "/home/agent"]);
+    expect(f.agent().mounts.map((m) => m.Destination)).toEqual(["/work", "/home/agent", "/home/agent/.memory/engram"]);
   });
 
   test("a seat's VM that shares its workspace mounts the workspace's tree alone, never its HOME", async () => {
@@ -232,17 +238,17 @@ describe("an agent's VM in layout 2", () => {
     await f.host.createSeatVm({ seat: { id: `st_${"a".repeat(22)}`, kind: "claude-subscription", runs: 1 }, network: "online", cpus: 1, memoryGb: 2, ttlMinutes: 30, run: RUN, shares: ID });
     const seat = [...f.containers.entries()].find(([, c]) => c.labels[`${LABEL}.shares`] === ID && c.labels[`${LABEL}.seat`])![1];
     expect(seat.mounts.filter((m) => m.Destination === "/work")).toEqual([{ Type: "volume", Name: volumeName(ID), Destination: "/work", Subpath: "work" }]);
-    expect(seat.mounts.some((m) => m.Destination === "/home/agent" || m.Subpath === "home")).toBe(false);
+    expect(seat.mounts.some((m) => m.Destination === "/home/agent" || m.Subpath === "home" || m.Subpath === "notes")).toBe(false);
   });
 
-  test("made new, it is in layout 2 from the start: its store's two trees made before it is", async () => {
+  test("made new, it is in layout 2 from the start: its store's three trees made before it is", async () => {
     const f = fake();
     f.containers.clear();
     await f.host.create({ network: "gateway", cpus: 1, memoryGb: 2, ttlMinutes: 60, persistent: true, run: "arm.team.abcdef0124.noa" });
     expect(f.modes).toEqual(["make"]);
     const made = [...f.containers.values()].find((c) => c.labels[`${LABEL}.run`] === "arm.team.abcdef0124.noa")!;
     expect(made.labels[`${LABEL}.layout`]).toBe("2");
-    expect(made.mounts.map((m) => [m.Destination, m.Subpath])).toEqual([["/work", "work"], ["/home/agent", "home"]]);
+    expect(made.mounts.map((m) => [m.Destination, m.Subpath])).toEqual([["/work", "work"], ["/home/agent", "home"], ["/home/agent/.memory/engram", "notes"]]);
     // Anything else it makes stays as it was made: a sandbox for a run is in layout 1.
     f.modes.length = 0;
     await f.host.create({ network: "gateway", cpus: 1, memoryGb: 2, ttlMinutes: 60, persistent: false, run: "adhoc-test" });

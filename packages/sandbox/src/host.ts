@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
+import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, NOTES_DIR, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
 import { layoutPath, MOVE_PY, WORK_TREE } from "./layout.ts";
 import {
   CONTAINER_MAJOR,
@@ -109,10 +109,13 @@ export function memoryTokenStore(): SandboxTokenStore {
   };
 }
 
-/** A top-level entry of an agent's store, as a move to layout 2 would take it (layout.ts MOVE_PY's list): by name and size. */
+/**
+ * A top-level entry of an agent's store, as a move to layout 2 would take it (layout.ts MOVE_PY's list), or its notes
+ * (`notes`: named by their place in its HOME): by name and size.
+ */
 export interface LayoutEntry {
   name: string;
-  to: "work" | "home" | "drop";
+  to: "work" | "home" | "notes" | "drop";
   kind: "dir" | "file" | "link" | "other";
   bytes: number;
 }
@@ -1131,7 +1134,7 @@ export class SandboxHost {
     const mount = "volume" in store ? `type=volume,src=${store.volume},dst=/work` : `type=bind,src=${store.workspace},dst=/work`;
     return this.docker(
       ["run", "--rm", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only",
-        "--mount", mode === "list" ? `${mount},readonly` : mount, image, "python3", "-I", "-c", MOVE_PY, mode, "/work", JSON.stringify(WORKSPACE_OWN), LEASE_FILE],
+        "--mount", mode === "list" ? `${mount},readonly` : mount, image, "python3", "-I", "-c", MOVE_PY, mode, "/work", JSON.stringify(WORKSPACE_OWN), LEASE_FILE, NOTES_DIR],
       10 * 60_000,
     );
   }
@@ -1182,6 +1185,7 @@ export class SandboxHost {
       },
     });
     const sum = (to: LayoutEntry["to"]) => entries.filter((e) => e.to === to);
+    const notes = sum("notes")[0];
     this.opts.ledger({
       class: "modify",
       resource: "docker.container",
@@ -1189,7 +1193,7 @@ export class SandboxHost {
       verdict: "allow",
       reason: "layout 2: its HOME apart from its workspace, made again at a prepare while nothing ran in it",
       run,
-      detail: `made again in layout 2 · to its HOME: ${sum("home").length} entries, ${sum("home").reduce((n, e) => n + e.bytes, 0)} bytes · kept in its workspace: ${sum("work").length} entries · its old lease dropped`,
+      detail: `made again in layout 2 · to its HOME: ${sum("home").length} entries, ${sum("home").reduce((n, e) => n + e.bytes, 0)} bytes · its notes: ${notes ? `${notes.bytes} bytes, to a tree of their own` : "none yet, a tree of their own made for them"} · kept in its workspace: ${sum("work").length} entries · its old lease dropped`,
     });
     this.opts.moved?.(run, entries);
   }
