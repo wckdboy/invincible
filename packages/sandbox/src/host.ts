@@ -340,7 +340,7 @@ const repositoryUrl = (gateway: string, git: { connector: string; owner: string;
   `${gateway.replace(/\/gw$/, "")}/git/${git.connector}/${git.owner}/${git.repo}.git`;
 
 /**
- * A commit fetched into a sandbox, run there as `python3 -c CHECKOUT_SCRIPT <path> <commit>`: the lease is read and
+ * A commit fetched into a sandbox, run there as `python3 -I -c CHECKOUT_SCRIPT <path> <commit>`: the lease is read and
  * removed before anything else, and its token goes to git only as a header of that one fetch (never into the
  * repository's configuration). The commit and up to 50 commits of its history, checked out detached, with no remote.
  */
@@ -943,7 +943,7 @@ export class SandboxHost {
     const payload = Buffer.from(JSON.stringify(env)).toString("base64");
     const write = "import os,sys,base64,tempfile; f,p=tempfile.mkstemp(prefix='.invincible-gateway-',dir='/work'); os.write(f,base64.b64decode(sys.argv[1])); os.fsync(f); os.close(f); os.replace(p,'/work/.invincible-gateway.json')";
     try {
-      return (await this.docker(this.commandArgs(id, ["python3", "-c", write, payload], 30), 45_000)).code === 0;
+      return (await this.docker(this.commandArgs(id, ["python3", "-I", "-c", write, payload], 30), 45_000)).code === 0;
     } catch {
       return false;
     }
@@ -967,7 +967,7 @@ export class SandboxHost {
       if (!(await this.writeLease(id, { INVINCIBLE_GATEWAY: INVINCIBLE_GATEWAY!, INVINCIBLE_TOKEN: minted.token, INVINCIBLE_REPO_URL: repositoryUrl(INVINCIBLE_GATEWAY!, git) }))) {
         throw new SandboxError("could not give the sandbox its lease on the repository", 424);
       }
-      const fetched = await this.docker(this.commandArgs(id, ["python3", "-c", CHECKOUT_SCRIPT, path, commit], 600), 615_000);
+      const fetched = await this.docker(this.commandArgs(id, ["python3", "-I", "-c", CHECKOUT_SCRIPT, path, commit], 600), 615_000);
       if (fetched.code !== 0) {
         const said = redact((fetched.stderr || fetched.stdout).replaceAll(minted.token, "…")).trim().split("\n").at(-1) ?? "";
         throw new SandboxError(`couldn't fetch ${commit.slice(0, 12)} of ${git.owner}/${git.repo}: ${said.slice(0, 300) || `exit ${fetched.code}`}`, 424);
@@ -1252,7 +1252,7 @@ export class SandboxHost {
     };
     if (argv) {
       // (Typed text as base64 to a line of Python there, which hands it to the command as one argument.)
-      const asRun = action.do === "type" ? ["python3", "-c", "import base64,subprocess,sys; sys.exit(subprocess.run(['desktop','type',base64.b64decode(sys.argv[1]).decode()]).returncode)", Buffer.from(action.text, "utf8").toString("base64")] : argv;
+      const asRun = action.do === "type" ? ["python3", "-I", "-c", "import base64,subprocess,sys; sys.exit(subprocess.run(['desktop','type',base64.b64decode(sys.argv[1]).decode()]).returncode)", Buffer.from(action.text, "utf8").toString("base64")] : argv;
       const ran = await this.docker(this.commandArgs(id, asRun, 60), 75_000);
       if (ran.code !== 0) failed(ran);
       ledger();

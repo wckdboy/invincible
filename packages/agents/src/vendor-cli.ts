@@ -1047,14 +1047,14 @@ const driver = (name: string, title: string, kind: AgentDriver["kind"], script: 
   // Claude Code's rate_limit_event on a claude.ai sign-in, Codex's account/rateLimits/updated.
   capabilities: { steer: "live", streams: true, resumes: true, readsWindows: true },
   // (Passed whole: readiness is asked before any run has written the bridge into the sandbox.)
-  check: `python3 -c ${quote(`${SHARED}${part}${MAIN}`)} --status`,
-  signIn: { ...signIn, read: readStatus, seatCheck: (salt) => `python3 -c ${quote(`${SHARED}${part}${MAIN}`)} --status --salt ${quote(salt)}` },
+  check: `python3 -I -c ${quote(`${SHARED}${part}${MAIN}`)} --status`,
+  signIn: { ...signIn, read: readStatus, seatCheck: (salt) => `python3 -I -c ${quote(`${SHARED}${part}${MAIN}`)} --status --salt ${quote(salt)}` },
   files: (_models, engram) => {
     if (!engram) return { [script]: `${SHARED}${part}${MAIN}` };
     const given = notes(engram);
     return { [script]: `${SHARED}${part}${withNotes(given.argv)}${MAIN}`, ...given.files };
   },
-  command: (model: AgentModel, session, cutOff) => `python3 ${script} ${model.own ? "--own" : `--provider ${quote(model.provider)} --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}${cutOff ? " --cut-off" : ""}` : ""}`,
+  command: (model: AgentModel, session, cutOff) => `python3 -I ${script} ${model.own ? "--own" : `--provider ${quote(model.provider)} --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}${cutOff ? " --cut-off" : ""}` : ""}`,
   read,
 });
 

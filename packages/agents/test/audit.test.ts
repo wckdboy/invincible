@@ -202,7 +202,7 @@ function agentAtWork(reviewer: string[], options: Partial<RunOptions> = {}, poll
           return ok("");
         }
         if (command.startsWith("stat -c")) return ok("0\n");
-        if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+        if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
           looked += 1;
           now += 6 * 60_000;
           const lines = [JSON.stringify([...(looked === 1 ? [{ type: "session", id: "ses_1" }] : []), { type: "tool", tool: "bash", input: `step ${looked}`, output: "ok", ok: true }])];

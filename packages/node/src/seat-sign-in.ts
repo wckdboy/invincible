@@ -89,7 +89,7 @@ export class SeatSignIns {
     const gone = () => host.destroy(vm, { run }).then(() => undefined, () => undefined);
     let stream: SandboxStream;
     try {
-      stream = await host.stream(vm, ["python3", "-c", bridge], SEAT_LIMITS.attemptMinutes * 60 + 60);
+      stream = await host.stream(vm, ["python3", "-I", "-c", bridge], SEAT_LIMITS.attemptMinutes * 60 + 60);
     } catch (error) {
       await gone();
       throw new SeatError(`Its sign-in couldn't start: ${(error as Error).message}`, 503);

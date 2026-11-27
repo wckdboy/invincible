@@ -104,7 +104,7 @@ describe("the seat a run takes", () => {
     // Its commands, its follow and its stop are in its VM.
     await first.run.exec("echo hi", 30, live());
     await (await first.run.follow!(0, live())).close();
-    expect(h.calls.slice(-2)).toEqual(["exec vm-1 echo hi", "stream vm-1 python3 -c"]);
+    expect(h.calls.slice(-2)).toEqual(["exec vm-1 echo hi", "stream vm-1 python3 -I"]);
     // Let go: its run stopped there, its VM removed under the seat's own run, and the seat free again.
     await first.run.release();
     expect(h.calls.slice(-2)).toEqual(["exec vm-1 cleanup", `destroy vm-1 seat.${B}`]);

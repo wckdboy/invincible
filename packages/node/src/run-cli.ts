@@ -689,7 +689,7 @@ async function workIn(
   // shipment (ship/: the files themselves) that github.ship can turn into a pull request.
   if (options.agent?.repo) {
     await exec("mkdir -p /work/out && cd /work/repo && git add -A && git diff --cached --binary > /work/out/changes.patch && git reset -q", 120).catch(() => {});
-    await exec(`python3 -c ${shq(SHIPMENT_SCRIPT)} /work/repo /work/out/ship`, 120).catch(() => {});
+    await exec(`python3 -I -c ${shq(SHIPMENT_SCRIPT)} /work/repo /work/out/ship`, 120).catch(() => {});
   }
   return outcome;
 }

@@ -1210,7 +1210,7 @@ describe("the vendors' tools and the notes store", () => {
       const calls: string[][] = box.trace().filter((item) => item.called).map((item) => item.called);
       expect(calls.filter((call) => call.some((word) => /^(login|logout|update|upgrade|install|setup-token|mcp|plugin)$/.test(word)) && call.join(" ") !== "login status")).toEqual([]);
       const { driver, bridge, script } = TOOLS[tool];
-      expect(driver.check).toBe(`python3 -c '${bridge.replace(/'/g, `'\\''`)}' --status`);
+      expect(driver.check).toBe(`python3 -I -c '${bridge.replace(/'/g, `'\\''`)}' --status`);
       const written = driver.files([], "you-project")[script]!;
       expect(written).not.toBe(bridge);
       expect(written).not.toMatch(/user.agent|urllib\.request|http\.client|\bsocket\b|\bcurl\b|\bwget\b/i);
@@ -1231,7 +1231,7 @@ function sandbox(script: { lines: object[]; exit: number }[]) {
       launches.push(command);
       return ok();
     }
-    if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+    if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
       const played = script[launches.length - 1]!;
       return ok(JSON.stringify({ alive: false, exit: played.exit, next: launches.length * 100, lines: played.lines.map((line) => JSON.stringify(line)) }));
     }

@@ -1223,7 +1223,7 @@ test("an agent's task in a repository starts from the repository as it is now, i
   const start = plain(t.commands[0]!);
   // One script, in the VM: it fetches through the read-only gateway with the lease that is there (never a token in
   // the command), makes the task's worktree from what it fetched, and writes down the commit it started from.
-  expect(start).toStartWith("python3 -c '");
+  expect(start).toStartWith("python3 -I -c '");
   expect(start).toEndWith(` '/work/tasks/${task.id}' '/work/.agent/base/${task.id}'`);
   for (const part of ["'fetch'", "INVINCIBLE_REPO_URL", "/work/.invincible-gateway.json", "'worktree','add','--detach'", "origin/HEAD"]) expect(start).toContain(part);
   expect(start).not.toMatch(/gw_[A-Za-z0-9]/);

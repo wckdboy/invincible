@@ -121,12 +121,15 @@ describe("a driver and the notes store", () => {
   // setting for the turn it was in) and Codex's session came to be named once its first call began: each one's text
   // with exactly those lines taken out is its text at 518cc3c, whose pins were 7ceaaf3f… and 7d7ef05d…. And again
   // that day (I15 step 8), when each came to say its plan's windows as its tool says them (window()): each one's text
-  // with exactly those lines taken out is its text at b6d7835, whose pins were 0a59dcd5… and 37a28b03….
+  // with exactly those lines taken out is its text at b6d7835, whose pins were 0a59dcd5… and 37a28b03…. Hermes', Claude
+  // Code's and Codex's again on 27 November 2026, when every Python they start came to be started isolated (`python3 -I`,
+  // so a repository's own select.py or json.py is never imported): each one's text with each `-I ` taken out hashes to
+  // its pin from before (91daad81…, 1a94bf08…, ba84ed24…). OpenCode's starts no Python, and is as it was.
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
-    hermes: "91daad81e7e298606abf3e1974f9b26adfa3cb50841073baed40aa037e32c5ec",
-    claude: "1a94bf08a0d1e12109d281c03f8fc350d00d63152ab77965eb917df6923dd96d",
-    codex: "ba84ed24006f06b74520b4d09cba1e31ea82d73b29d594ed039fd6954b9177af",
+    hermes: "4c07aaa475159fa7d3d441d2a7a7ea4c39958625bae8ee249d9cba62f9f0e97b",
+    claude: "5f97b17a1e274816d165b4ce2dc9d1b7da581e5f41341f233d8d44969727e290",
+    codex: "63403abaaeef989ba8c646c37f3b376ca86035d016e591698905b34c908f7c18",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {
@@ -187,7 +190,7 @@ function sandbox(batches: string[][], exit: number | null = 0, options: { stderr
   const exec = async (command: string): Promise<ExecResult> => {
     commands.push(command);
     const ok = (stdout = "") => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
-    if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+    if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
       const batch = batches[polls] ?? [];
       polls += 1;
       const alive = options.forever || polls < batches.length;
@@ -213,7 +216,7 @@ describe("running an agent", () => {
       let stdout = "";
       if (command.startsWith("mkdir -p")) launched = true;
       if (command.startsWith("stat -c")) stdout = String(launched ? bytes : 0);
-      if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+      if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
         const offset = Number(command.split(" ").at(-1));
         stdout = JSON.stringify({ alive: false, exit: 0, next: bytes, lines: offset < bytes ? early : [] });
       }
@@ -278,7 +281,7 @@ describe("running an agent", () => {
     let t = 0;
     const exec = async (command: string): Promise<ExecResult> => {
       commands.push(command);
-      if (command.startsWith("python3 -c") && command.includes("d, off =")) return { exitCode: 1, stdout: "", stderr: "Traceback (most recent call last):\nFileNotFoundError: [Errno 2] No such file or directory: '/work/.invincible-gateway.json'", durationMs: 1, truncated: false };
+      if (command.startsWith("python3 -I -c") && command.includes("d, off =")) return { exitCode: 1, stdout: "", stderr: "Traceback (most recent call last):\nFileNotFoundError: [Errno 2] No such file or directory: '/work/.invincible-gateway.json'", durationMs: 1, truncated: false };
       return { exitCode: 0, stdout: command.startsWith("stat -c") ? "0\n" : "", stderr: "", durationMs: 1, truncated: false };
     };
     // (Time moves as it waits between looks, ten seconds each.)
@@ -288,7 +291,7 @@ describe("running an agent", () => {
     // About five minutes of looks, ten seconds apart, and its whole process group stopped.
     expect(commands.filter((c) => c.includes("d, off =")).length).toBeGreaterThan(25);
     expect(commands.filter((c) => c.includes("d, off =")).length).toBeLessThan(35);
-    expect(commands.some((c) => c.startsWith("python3 -c") && c.includes("cleanup(sys.argv[1])"))).toBe(true);
+    expect(commands.some((c) => c.startsWith("python3 -I -c") && c.includes("cleanup(sys.argv[1])"))).toBe(true);
   });
 
   test("a look that fails now and then is no news: the run goes on, and ends as it ends", async () => {
@@ -307,7 +310,7 @@ describe("running an agent", () => {
     let t = 0;
     const run = await runAgent(OPENCODE, { model, prompt: "x", session: null, deadline: 25_000, workdir: "/work" }, { exec: box.exec, sleep: noSleep, now: () => (t += 10_000) });
     expect(run.status).toBe("timeout");
-    expect(box.commands.some((c) => c.startsWith("python3 -c") && c.includes("cleanup(sys.argv[1])"))).toBe(true);
+    expect(box.commands.some((c) => c.startsWith("python3 -I -c") && c.includes("cleanup(sys.argv[1])"))).toBe(true);
   });
 
   test("stopped by you: it's stopped", async () => {
@@ -361,7 +364,7 @@ describe("a run with a coding agent", () => {
     const exec = async (command: string) => {
       commands.push(command);
       if (command.startsWith("mkdir -p /work/.agent")) runs += 1;
-      if (runs === 2 && command.startsWith("python3 -c") && command.includes("d, off =")) {
+      if (runs === 2 && command.startsWith("python3 -I -c") && command.includes("d, off =")) {
         return { exitCode: 0, stdout: JSON.stringify({ alive: false, exit: 0, next: 9999, lines: [LINES.edit, LINES.text] }), stderr: "", durationMs: 1, truncated: false };
       }
       return box.exec(command);
@@ -493,7 +496,7 @@ describe("an agent's model fails", () => {
         launches.push(command);
         return ok();
       }
-      if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+      if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
         return ok(JSON.stringify(runs === 1 ? { alive: false, exit: 1, next: 10, lines: [LINES.start, RETRY, LINES.shell, QUOTA] } : { alive: false, exit: 0, next: 20, lines: [LINES.edit, LINES.text] }));
       }
       return ok(command.startsWith("stat") ? "0" : "");
@@ -525,7 +528,7 @@ describe("an agent's model fails", () => {
         launches.push(command);
         return ok();
       }
-      if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+      if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
         return ok(JSON.stringify(runs === 1 ? { alive: false, exit: 1, next: 10, lines: [LINES.start, LINES.shell, filtered] } : { alive: false, exit: 0, next: 20, lines: [LINES.edit, LINES.text] }));
       }
       return ok(command.startsWith("stat") ? "0" : "");
@@ -549,5 +552,42 @@ describe("an agent's model fails", () => {
     expect(second).toContain("Continue the run from where you left off");
     expect(second).toContain("Provider blocked the response");
     expect(events.find((e) => e.type === "retry")).toMatchObject({ role: "engineer", attempt: 1 });
+  });
+});
+
+/*
+ * Every Python the node starts in a VM is started isolated (`python3 -I`): a task's own checkout is where many of them
+ * run, and a repository's own select.py, json.py or signal.py would otherwise be imported in place of the standard
+ * library's, breaking (or speaking for) a status check, a launch, a follow, a look, a tell or a cleanup.
+ */
+describe("Python started isolated", () => {
+  test("a bridge's status check in a folder whose select.py and json.py would be imported says how its tool stands all the same", async () => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "invincible-isolated-"));
+    try {
+      for (const name of ["select", "json", "signal", "selectors"]) writeFileSync(join(dir, `${name}.py`), `raise SystemExit("the repository's own ${name}.py was imported")\n`);
+      for (const name of ["claude", "codex"] as const) {
+        const ran = Bun.spawnSync(["bash", "-c", AGENTS[name]!.check], { cwd: dir, env: { PATH: "/usr/bin:/bin", HOME: dir } });
+        expect([name, ran.stdout.toString()]).toEqual([name, expect.stringContaining('"type": "status"')]);
+        expect([name, ran.stderr.toString()]).toEqual([name, expect.not.stringContaining("was imported")]);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("every Python a run starts in its VM, and every driver's, is isolated: no `python3 -c` and no `python3 <script>` without -I", async () => {
+    const commands: string[] = [];
+    const exec = async (command: string): Promise<ExecResult> => {
+      commands.push(command);
+      if (command.startsWith("stat -c")) return { exitCode: 0, stdout: "0\n", stderr: "", durationMs: 1, truncated: false };
+      return { exitCode: 0, stdout: JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }), stderr: "", durationMs: 1, truncated: false };
+    };
+    for (const driver of Object.values(AGENTS)) await runAgent(driver, { model: OWN_SIGN_IN, prompt: "Write the parser.", session: null, deadline: Date.now() + 60_000, workdir: "/work/repo" }, { exec, sleep: async () => {} });
+    const made = Object.values(AGENTS).flatMap((driver) => [driver.command(OWN_SIGN_IN, "ses_x"), driver.command({ provider: "p", model: "m" }, null), driver.check, ...(driver.signIn ? [driver.signIn.seatCheck("salt")] : [])]);
+    const bare = [...commands, ...made].filter((command) => /(^|[\s;&|({'"])python3 (?!-I )/.test(command.replaceAll("'\\''", "'")));
+    expect(bare).toEqual([]);
   });
 });

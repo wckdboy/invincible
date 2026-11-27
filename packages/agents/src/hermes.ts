@@ -93,6 +93,6 @@ export const HERMES: AgentDriver = {
   capabilities: { steer: "restart", streams: true, resumes: true, readsWindows: false },
   check: "hermes acp --check",
   files: (_models, engram) => ({ "/work/.agent/hermes-acp.py": engram ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(engram)])}${ACP_ENTRY}` : HERMES_ACP_BRIDGE }),
-  command: (model, session) => `python3 /work/.agent/hermes-acp.py --provider ${quote(model.provider)} --model ${quote(model.model)}${session ? ` --session ${quote(session)}` : ""}`,
+  command: (model, session) => `python3 -I /work/.agent/hermes-acp.py --provider ${quote(model.provider)} --model ${quote(model.model)}${session ? ` --session ${quote(session)}` : ""}`,
   read: readBridge,
 };

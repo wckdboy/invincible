@@ -2097,7 +2097,7 @@ export function createApp(ctx: AppContext) {
   async function lookInWorkspace(id: string, script: string, args: string[], signal: AbortSignal, timeoutSec = 30): Promise<string> {
     const seat = seatOf(id);
     if (!seat.workspace) throw new HttpError(424, noVm(id));
-    const ran = await inProcess(agentPrincipal(seat.id), signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: seat.workspace.node, id: seat.workspace.id, cmd: ["python3", "-c", script, ...args], timeoutSec });
+    const ran = await inProcess(agentPrincipal(seat.id), signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: seat.workspace.node, id: seat.workspace.id, cmd: ["python3", "-I", "-c", script, ...args], timeoutSec });
     if (ran.exitCode !== 0) throw new HttpError(502, `the workspace couldn't be read: ${redact(ran.stderr || ran.stdout).trim().slice(0, 300) || `it ended with ${ran.exitCode}`}`);
     return ran.stdout;
   }
@@ -2257,7 +2257,7 @@ export function createApp(ctx: AppContext) {
       // No key in command text or git config. The leased token is read inside the VM; the remote is reset to its public URL.
       const script = `import json,os,subprocess,sys\nd=json.load(open('/work/.invincible-gateway.json'))\np='/work/repo'\nif os.path.exists(p):\n sys.exit(0 if os.path.isdir(p+'/.git') else 1)\nr=subprocess.run(['git','-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'clone','--quiet',d['INVINCIBLE_REPO_URL'],p],capture_output=True)\nif r.returncode: print('Repository clone failed through the read-only gateway'); sys.exit(r.returncode)\nsubprocess.run(['git','-C',p,'remote','set-url','origin',sys.argv[1]],check=True)`;
       const encoded = Buffer.from(script).toString("base64");
-      const cloned = await execTeam(member, `python3 -c "import base64; exec(base64.b64decode('${encoded}'))" '${member.repository}'`, 900, signal);
+      const cloned = await execTeam(member, `python3 -I -c "import base64; exec(base64.b64decode('${encoded}'))" '${member.repository}'`, 900, signal);
       if (cloned.exitCode !== 0) throw new HttpError(424, "could not clone the agent's repository through its GitHub connector");
     }
   }

@@ -620,7 +620,7 @@ test("what became of its VM is asked of the host and said as it was: Docker that
     const asked = docker.execs.length;
     await api("teamDesktop", { id: "una", action: { do: "type", text: "a secret you typed" } });
     await api("teamDesktop", { id: "una", action: { do: "click", x: 10, y: 20 } });
-    expect(docker.execs.slice(asked).map((e) => e.cmd.slice(0, 2).join(" "))).toEqual(["python3 -c", "sh -c", "desktop click", "sh -c"]);
+    expect(docker.execs.slice(asked).map((e) => e.cmd.slice(0, 2).join(" "))).toEqual(["python3 -I", "sh -c", "desktop click", "sh -c"]);
     const lines = (await api<{ entries: LedgerEntry[] }>("ledger")).entries.filter((e) => e.resource === "sandbox.desktop").map((e) => e.detail);
     expect(lines).toContain("click 10 20 left");
     expect(lines).toContain("type (18 characters, not recorded)");

@@ -245,11 +245,11 @@ export const withGateway = (command: string, lease = "/work/.invincible-gateway.
     "os.environ.update({k:v for k,v in d.items() if k in allowed and isinstance(v,str)})",
     "os.execvp('bash',['bash','-lc',sys.argv[1]])",
   ].join("\n");
-  return `python3 -c ${quote(script)} ${quote(command)}`;
+  return `python3 -I -c ${quote(script)} ${quote(command)}`;
 };
 
 /**
- * Where a task in a repository starts, run in the agent's VM as `python3 -c SCRIPT <worktree> <kept>`: the
+ * Where a task in a repository starts, run in the agent's VM as `python3 -I -c SCRIPT <worktree> <kept>`: the
  * repository as it is now, fetched through the read-only gateway with the lease that is in the VM (never a token
  * in a command), in a worktree of the task's own. The commit it started from is written down, with whether the
  * fetch came through (`fetched`) or the clone had to do as it was (`stale`), and printed. A task taken up again
@@ -635,7 +635,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const root = `/work/tasks/${task.id}`;
       const sessionFile = `/work/.agent/sessions/${task.id}.${agent.harness}`;
       const setup = agent.repository
-        ? `python3 -c ${quote(REPO_TASK_START)} ${quote(root)} ${quote(`/work/.agent/base/${task.id}`)}${task.fix || task.from ? ` ${quote(task.fix?.branch ?? "")}` : ""}${task.from ? ` ${quote(task.from.task)} ${quote(task.from.commit)}` : ""}`
+        ? `python3 -I -c ${quote(REPO_TASK_START)} ${quote(root)} ${quote(`/work/.agent/base/${task.id}`)}${task.fix || task.from ? ` ${quote(task.fix?.branch ?? "")}` : ""}${task.from ? ` ${quote(task.from.task)} ${quote(task.from.commit)}` : ""}`
         : `mkdir -p ${quote(root)}`;
       const ready = await deps.exec(agent, setup, agent.repository ? 420 : 120, ctx.signal);
       if (ready.exitCode !== 0) throw new Error(`Workspace not ready: ${redact(ready.stderr || ready.stdout)}`);
@@ -915,7 +915,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let changed = "";
       if (agent.repository) {
         const out = `/work/out/tasks/${task.id}`;
-        const made = await exec(`rm -rf ${quote(out)} && mkdir -p ${quote(out)} && git add -A && git diff --cached --binary ${base} > ${quote(out)}/changes.patch; git reset -q; python3 -c ${quote(SHIPMENT_SCRIPT)} . ${quote(out)}/ship ${base}`, 300).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }));
+        const made = await exec(`rm -rf ${quote(out)} && mkdir -p ${quote(out)} && git add -A && git diff --cached --binary ${base} > ${quote(out)}/changes.patch; git reset -q; python3 -I -c ${quote(SHIPMENT_SCRIPT)} . ${quote(out)}/ship ${base}`, 300).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }));
         const files = made.exitCode === 0 ? Number(made.stdout.trim().split("\n").at(-1)) : NaN;
         const count = `${files} file${files === 1 ? "" : "s"}`;
         if (!Number.isInteger(files)) changed = `Changes: could not be read (${redact(made.stderr || made.stdout).trim().split("\n").at(-1)?.slice(0, 200) ?? "no reason given"})`;

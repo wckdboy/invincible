@@ -440,7 +440,7 @@ describe("gates with a coding agent", () => {
           }
           if (command.startsWith("stat -c")) return ok("0\n");
           // Each poll: it has ended, having said what it did.
-          if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+          if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
             sessions.push(true);
             return ok(JSON.stringify({ alive: false, exit: 0, next: 10, lines: [JSON.stringify([{ type: "session", id: "ses_1" }, { type: "text", text: "did it" }])] }));
           }

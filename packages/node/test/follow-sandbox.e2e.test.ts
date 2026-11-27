@@ -98,7 +98,7 @@ describe("a run followed in its sandbox", () => {
     await until(() => opened.length === 1);
     const [followed] = opened;
     // The command in the sandbox: the agents' own script and its two numbers, and nothing the caller chose.
-    expect(followed!.argv.slice(-5)).toEqual(["python3", "-c", FOLLOW, "7", String(FOLLOW_SECONDS)]);
+    expect(followed!.argv.slice(-6)).toEqual(["python3", "-I", "-c", FOLLOW, "7", String(FOLLOW_SECONDS)]);
     expect(followed!.argv).toContain(`invincible-sbx-${sandbox.id}`);
     const reader = answer.body!.getReader();
     const decoder = new TextDecoder();

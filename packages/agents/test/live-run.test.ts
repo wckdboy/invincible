@@ -53,7 +53,7 @@ function vm(options: { tell?: number; follow?: "never" | ((opened: number) => bo
       told.push(JSON.parse(Buffer.from(payload, "base64").toString("utf8")));
       return ok("", options.tell ?? 0);
     }
-    if (command.startsWith("python3 -c") && command.includes("d, off =")) return ok(JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }));
+    if (command.startsWith("python3 -I -c") && command.includes("d, off =")) return ok(JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }));
     return ok();
   };
   const follow = async (offset: number): Promise<FollowedRun> => {
@@ -296,10 +296,10 @@ describe("its stop, when it is followed", () => {
 describe("the follow itself", () => {
   test("its command: the run's events from where it stood, for as long as it is given, and nothing a model chose", () => {
     const argv = followArgv(1234.9, 60);
-    expect(argv.slice(0, 2)).toEqual(["python3", "-c"]);
-    expect(argv[2]).toBe(FOLLOW);
-    expect(argv.slice(3)).toEqual(["1234", "60"]);
-    expect(followArgv(-5)[3]).toBe("0");
+    expect(argv.slice(0, 3)).toEqual(["python3", "-I", "-c"]);
+    expect(argv[3]).toBe(FOLLOW);
+    expect(argv.slice(4)).toEqual(["1234", "60"]);
+    expect(followArgv(-5)[4]).toBe("0");
     expect(FOLLOW_TICK_MS).toBeLessThanOrEqual(250);
   });
 

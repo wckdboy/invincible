@@ -222,7 +222,7 @@ function harness(looks: object[][], reviewer: string[], during: (look: number, h
           return ok("");
         }
         if (command.startsWith("stat -c")) return ok("0\n");
-        if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+        if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
           const lines = looks[looked] ?? [];
           during(looked, held);
           looked += 1;

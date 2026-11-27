@@ -68,9 +68,9 @@ describe("an agent's desktop, from outside its VM", () => {
     await d.host.desktop(ID, RUN, { do: "type", text: password });
     const typed = d.execs[0]!;
     // Carried as base64 to a line of Python in the VM that hands it to `desktop type` as one argument: no shell reads it.
-    expect(typed.slice(0, 2)).toEqual(["python3", "-c"]);
-    expect(typed[2]).toContain("'desktop','type'");
-    expect(Buffer.from(typed[3]!, "base64").toString()).toBe(password);
+    expect(typed.slice(0, 3)).toEqual(["python3", "-I", "-c"]);
+    expect(typed[3]).toContain("'desktop','type'");
+    expect(Buffer.from(typed[4]!, "base64").toString()).toBe(password);
     expect(typed.join(" ")).not.toContain("horse");
     expect(d.ledger).toEqual([expect.objectContaining({ resource: "sandbox.desktop", detail: `type (${password.length} characters, not recorded)` })]);
     expect(JSON.stringify(d.ledger)).not.toContain("horse");

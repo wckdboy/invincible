@@ -20,7 +20,7 @@ function sandbox(batches: string[][], exit: number | null = 0) {
   let offset = 0;
   const exec = async (command: string): Promise<ExecResult> => {
     const ok = (stdout = "") => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
-    if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+    if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
       const batch = batches[polls] ?? [];
       polls += 1;
       const alive = polls < batches.length;

@@ -107,7 +107,7 @@ function agentAtWork(options: Partial<RunOptions>, { perPoll, polls = 6, perAsk 
           return ok();
         }
         if (command.startsWith("stat -c")) return ok("0\n");
-        if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+        if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
           // (A look takes a moment, as it does: a deadline can pass between two.)
           await Bun.sleep(2);
           looked += 1;
@@ -221,7 +221,7 @@ function agentThatFails({ worked = true, firstExit = 1, then = "cant-start", min
           return { exitCode: 1, stdout: "", stderr: "Traceback (most recent call last):\n  File \"<string>\", line 1\nFileNotFoundError: [Errno 2] No such file or directory: '/work/.invincible-gateway.json'", durationMs: 1, truncated: false };
         }
         if (command.startsWith("stat -c")) return ok("0\n");
-        if (command.startsWith("python3 -c") && command.includes("d, off =")) {
+        if (command.startsWith("python3 -I -c") && command.includes("d, off =")) {
           if (launches > 1) return ok(JSON.stringify({ alive: true, exit: null, next: 10, lines: [] }));
           const lines = worked ? [JSON.stringify([{ type: "session", id: "ses_1" }, { type: "tool", tool: "bash", input: "bun test > report.txt", output: "ok", ok: true }, { type: "text", text: "Wrote report.txt." }])] : [];
           return ok(JSON.stringify({ alive: false, exit: firstExit, next: 10, lines }));

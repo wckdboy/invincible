@@ -1,7 +1,7 @@
 /*
  * A seat's sign-in, made by the vendor's own tool in the seat's VM (I15 step 4; core's seats.ts), on the owner's word and
  * page: Invincible never signs in for anyone, and never holds what a sign-in makes. Like the run bridges this is Python's
- * standard library, run there as `python3 -c <bridge>`, its standard input and output the node's, a JSON line each.
+ * standard library, run there as `python3 -I -c <bridge>`, its standard input and output the node's, a JSON line each.
  *
  * It reads: first its start ({"email": …} for Claude Code, which starts on that account; {} otherwise), then at most
  * once {"code": …} (Claude Code: what its page showed you) or {"cancel": true}. An end of input cancels it too.

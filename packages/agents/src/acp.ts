@@ -422,10 +422,10 @@ export function acpDriver(command: string): AgentDriver {
     // calls as OpenCode is; whether it can is its own to say as it runs, so it isn't declared.)
     capabilities: { steer: "restart", streams: true, resumes: false, readsWindows: false },
     ownSetup: true,
-    check: `python3 -c ${quote(ACP_PROBE)} ${quote(command)}`,
+    check: `python3 -I -c ${quote(ACP_PROBE)} ${quote(command)}`,
     files: (_models, engram) => ({ [ACP_BRIDGE_PATH]: engram ? `${ACP_CLIENT}${GENERIC}${withNotes([notesServer(engram)])}${ACP_ENTRY}` : ACP_BRIDGE }),
     command: (model, session) =>
-      `python3 ${ACP_BRIDGE_PATH} --command ${quote(command)} --name ${quote(title)}${model.own ? "" : ` --provider ${quote(model.provider)} --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}` : ""}`,
+      `python3 -I ${ACP_BRIDGE_PATH} --command ${quote(command)} --name ${quote(title)}${model.own ? "" : ` --provider ${quote(model.provider)} --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}` : ""}`,
     read: readBridge,
   };
 }

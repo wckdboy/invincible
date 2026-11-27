@@ -130,9 +130,9 @@ const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** Fixed, trusted VM cleanup. No shell command or process id comes from a model. */
 export function agentCleanupCommand(run?: string): string {
-  return `python3 -c ${quote(`${AGENT_PROCESS_PY}\ncleanup(${run ? "sys.argv[1]" : ""})`)}${run ? ` ${quote(run)}` : ""}`;
+  return `python3 -I -c ${quote(`${AGENT_PROCESS_PY}\ncleanup(${run ? "sys.argv[1]" : ""})`)}${run ? ` ${quote(run)}` : ""}`;
 }
 
 export function agentProcessCommand(action: "record" | "wait_record" | "finish", run: string): string {
-  return `python3 -c ${quote(`${AGENT_PROCESS_PY}\n${action}(sys.argv[1])`)} ${quote(run)}`;
+  return `python3 -I -c ${quote(`${AGENT_PROCESS_PY}\n${action}(sys.argv[1])`)} ${quote(run)}`;
 }

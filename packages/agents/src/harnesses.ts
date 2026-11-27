@@ -367,7 +367,7 @@ while True:
         time.sleep(0.02)`;
 
 /** The command that follows a run from byte `offset` (FOLLOW), for a host's stream. */
-export const followArgv = (offset: number, seconds = FOLLOW_SECONDS): string[] => ["python3", "-c", FOLLOW, String(Math.max(0, Math.trunc(offset))), String(seconds)];
+export const followArgv = (offset: number, seconds = FOLLOW_SECONDS): string[] => ["python3", "-I", "-c", FOLLOW, String(Math.max(0, Math.trunc(offset))), String(seconds)];
 
 /**
  * Tells a live run one line on its input channel (base64, argv[1]); exits 3 when no run is reading it. With a run and
@@ -400,7 +400,7 @@ if len(sys.argv) > 3:
         time.sleep(0.05)`;
 
 const tellCommand = (line: object, wait?: { run: string; seconds: number }): string =>
-  `python3 -c ${quote(TELL)} ${quote(Buffer.from(JSON.stringify(line), "utf8").toString("base64"))}${wait ? ` ${quote(wait.run)} ${wait.seconds}` : ""}`;
+  `python3 -I -c ${quote(TELL)} ${quote(Buffer.from(JSON.stringify(line), "utf8").toString("base64"))}${wait ? ` ${quote(wait.run)} ${wait.seconds}` : ""}`;
 
 /**
  * One run of a coding agent: write its message, start it in the background (its own process group, so it outlives the
@@ -633,7 +633,7 @@ export async function runAgent(
       let poll: { alive: boolean; exit: number | null; next: number; lines: string[] };
       let looked: ExecResult | null = null;
       try {
-        looked = await deps.exec(`python3 -c ${quote(POLL)} ${offset}`, 60);
+        looked = await deps.exec(`python3 -I -c ${quote(POLL)} ${offset}`, 60);
         poll = JSON.parse(looked.stdout.trim().split("\n").at(-1) ?? "");
         unreadSince = null;
       } catch (error) {

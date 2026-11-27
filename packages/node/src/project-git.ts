@@ -10,7 +10,7 @@ import { LookError } from "./workspace-look.ts";
  * checked here, and anything git says is redacted before it leaves the node.
  */
 
-/** `python3 -c GIT <checkout>`: its branch and branches, what isn't committed, how it stands with its upstream, its latest commits. */
+/** `python3 -I -c GIT <checkout>`: its branch and branches, what isn't committed, how it stands with its upstream, its latest commits. */
 export const GIT_SCRIPT = `import json,os,re,subprocess,sys
 root=sys.argv[1]
 if not os.path.isdir(root):
@@ -38,7 +38,7 @@ for l in out('log','-n','10','--format=%h%x1f%s%x1f%ct').splitlines():
         log.append({"sha":p[0],"subject":p[1][:200],"at":int(p[2])*1000})
 print(json.dumps({"state":"ready","branch":branch,"head":head,"branches":branches,"changed":changed,"upstream":upstream,"ahead":ahead,"behind":behind,"remote":remote,"log":log}))`;
 
-/** `python3 -c BRANCH <checkout> <name> <1|0>`: switch to the branch, or start it (1) from where it stands; git checks the name too. */
+/** `python3 -I -c BRANCH <checkout> <name> <1|0>`: switch to the branch, or start it (1) from where it stands; git checks the name too. */
 export const BRANCH_SCRIPT = `import json,subprocess,sys
 root,name,create=sys.argv[1],sys.argv[2],sys.argv[3]=='1'
 g=lambda *a: subprocess.run(['git','-C',root,*a],capture_output=True,timeout=60)
@@ -47,7 +47,7 @@ if g('check-ref-format','--branch',name).returncode!=0:
 r=g('switch',*(['-c',name] if create else [name]))
 print(json.dumps({"ok":r.returncode==0,"said":(r.stderr or r.stdout).decode(errors='replace')[-600:]}))`;
 
-/** `python3 -c COMMIT <checkout> <message>`: everything changed or new, committed; as the primary where the checkout has no author set. */
+/** `python3 -I -c COMMIT <checkout> <message>`: everything changed or new, committed; as the primary where the checkout has no author set. */
 export const COMMIT_SCRIPT = `import json,subprocess,sys
 root,message=sys.argv[1],sys.argv[2]
 g=lambda *a: subprocess.run(['git','-C',root,*a],capture_output=True,timeout=120)
@@ -56,7 +56,7 @@ g('add','-A')
 r=g(*who,'commit','-m',message)
 print(json.dumps({"ok":r.returncode==0,"said":(r.stdout if r.returncode==0 else (r.stdout+r.stderr)).decode(errors='replace')[-600:]}))`;
 
-/** `python3 -c CLONE <checkout> <repository>`: its first clone, into a folder that isn't there yet (or is empty). */
+/** `python3 -I -c CLONE <checkout> <repository>`: its first clone, into a folder that isn't there yet (or is empty). */
 export const CLONE_SCRIPT = `import json,os,subprocess,sys
 dest,repo=sys.argv[1],sys.argv[2]
 if os.path.isdir(dest) and os.listdir(dest):

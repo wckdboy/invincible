@@ -17,7 +17,7 @@ export const LIST_LIMIT = 2_000;
 /** Kept from view, whatever is asked: the file that holds the VM's gateway token. */
 export const KEPT_FROM_VIEW = ["/work/.invincible-gateway.json"] as const;
 
-/** `python3 -c LIST <path>`: a folder's entries, folders and files each with its size and when it changed. */
+/** `python3 -I -c LIST <path>`: a folder's entries, folders and files each with its size and when it changed. */
 export const LIST_SCRIPT = `import json,os,stat,sys
 p=sys.argv[1]
 try:
@@ -34,7 +34,7 @@ for n in names[:${LIST_LIMIT}]:
     out.append({"name":n,"kind":k,"size":s.st_size,"modified":int(s.st_mtime*1000)})
 print(json.dumps({"entries":out,"more":len(names)>${LIST_LIMIT}}))`;
 
-/** `python3 -c READ <path>`: one regular file's first READ_LIMIT bytes, base64, with its size and when it changed. */
+/** `python3 -I -c READ <path>`: one regular file's first READ_LIMIT bytes, base64, with its size and when it changed. */
 export const READ_SCRIPT = `import base64,json,os,stat,sys
 p=sys.argv[1]
 try:
@@ -48,7 +48,7 @@ with open(p,'rb') as f:
 print(json.dumps({"size":s.st_size,"modified":int(s.st_mtime*1000),"cut":len(b)>${READ_LIMIT},"data":base64.b64encode(b[:${READ_LIMIT}]).decode()}))`;
 
 /**
- * `python3 -c CHANGES <worktree> <kept>`: what a task changed in its worktree (a task's own git worktree, /work/tasks/<id>,
+ * `python3 -I -c CHANGES <worktree> <kept>`: what a task changed in its worktree (a task's own git worktree, /work/tasks/<id>,
  * or the repository itself): from the commit it started at (the first word of <kept>, written as it started) or, with
  * none, from HEAD; the files and the diff (bounded), and the files git doesn't track yet.
  */
