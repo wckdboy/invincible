@@ -127,6 +127,27 @@ struct InvincibleMacApp: App {
         if !session.linkUp { await session.refresh() }
     }
 
+    /// An `invincible:` link (a task, an agent, an approval, a chat), as the iPad follows one: its place in the main window,
+    /// and what then opens there. (Until 27 November 2026 the Mac took only an invite from a link, and the rest did nothing.)
+    func follow(_ destination: Push.Destination) async {
+        switch destination {
+        case .inbox: place = .inbox
+        case .settings: place = .more
+        case .overview: place = .agents
+        case .chat(let id):
+            place = .primary
+            if let id, let session { await session.chat.open(id, with: session.client) }
+        case .approval(let id):
+            place = .inbox
+            session?.approvalToOpen = id
+        case .task(let id): place = .task(id)
+        case .agent(let id): place = .agent(id)
+        case .ship(let id):
+            place = .task(id)
+            session?.shipToOpen = id
+        }
+    }
+
     /// A new chat with the primary, in the main window.
     func newChat() {
         guard let session, !session.chat.answering else { return }
@@ -196,7 +217,11 @@ struct MacRoot: View {
         .tint(.ink)
         .formStyle(.grouped)
         .onOpenURL { url in
-            if let link = Joining.handed(url) { mac.handed = link }
+            if let link = Joining.handed(url) {
+                mac.handed = link
+            } else if let destination = Push.link(url) {
+                Task { await mac.follow(destination) }
+            }
         }
     }
 }
@@ -242,13 +267,13 @@ struct MacCommands: Commands {
                 front()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
+            .disabled(!Self.mayGive(mac.session))
             Button("Search or Ask…") {
                 mac.searching = true
                 front()
             }
             .keyboardShortcut("k")
-            .disabled(mac.session == nil)
-            .disabled(mac.session?.can("fleet:admin") != true || mac.session?.rows.isEmpty != false)
+            .disabled(!Self.maySearch(mac.session))
             Divider()
             Button("Build with \(Primary.name)") {
                 openWindow(id: MacApp.build)
@@ -257,6 +282,8 @@ struct MacCommands: Commands {
             .keyboardShortcut("b", modifiers: [.command, .shift])
             .disabled(mac.session == nil)
         }
+        // View ▸ Show Sidebar and Hide Sidebar (⌃⌘S), as every Mac app with a sidebar has them.
+        SidebarCommands()
         CommandGroup(before: .sidebar) {
             place("Home", .home, "0")
             place(Primary.name, .primary, "1")
@@ -274,6 +301,26 @@ struct MacCommands: Commands {
         }
         .keyboardShortcut(key)
         .disabled(mac.session == nil)
+    }
+
+    /// Whether the agents may be given a task from the menu (⇧⌘N).
+    @MainActor static func mayGive(_ session: Session?) -> Bool {
+        mayGive(paired: session != nil, admin: session?.can("fleet:admin") == true, chat: session?.can("chat") == true, read: session?.team != nil, agents: session?.rows.count ?? 0)
+    }
+
+    /// (As Home's and the sidebar's Give: a paired Mac that may, with agents to take it, once the node has said who there is.)
+    static func mayGive(paired: Bool, admin: Bool, chat: Bool, read: Bool, agents: Int) -> Bool {
+        paired && admin && chat && read && agents > 0
+    }
+
+    /// Whether Search or Ask (⌘K) is there.
+    @MainActor static func maySearch(_ session: Session?) -> Bool {
+        maySearch(paired: session != nil, admin: session?.can("fleet:admin") == true, agents: session?.rows.count ?? 0)
+    }
+
+    /// (It finds places as well as asking: on any paired Mac, with agents or without.)
+    static func maySearch(paired: Bool, admin: Bool, agents: Int) -> Bool {
+        paired
     }
 
     /// The main window, in front.
