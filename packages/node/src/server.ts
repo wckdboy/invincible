@@ -341,6 +341,9 @@ const statusOf = (error: unknown): number =>
  * (valid leading JSON whitespace) and ends with the JSON result. A failure after
  * streaming began arrives as `{ "error", "status" }`, which every Invincible client checks.
  */
+/** longRunning's streamed answers: their requests outlast their listener's idle timer (listening). */
+const lasting = new WeakSet<Response>();
+
 export async function longRunning<T>(work: Promise<T>, graceMs = 300, heartbeatMs = 10_000): Promise<Response> {
   const outcome = work.then(
     (value) => ({ ok: true as const, value }),
@@ -364,6 +367,8 @@ export async function longRunning<T>(work: Promise<T>, graceMs = 300, heartbeatM
           open = false; // the caller went away; the work itself still finishes and is recorded
         }
       };
+      // (Its first at once: Bun sends an answer's head with its first byte, and the caller then knows it was taken.)
+      send(" ");
       beat = setInterval(() => send(" "), heartbeatMs);
       void outcome.then((result) => {
         clearInterval(beat);
@@ -386,8 +391,24 @@ export async function longRunning<T>(work: Promise<T>, graceMs = 300, heartbeatM
       clearInterval(beat);
     },
   });
-  return new Response(stream, { headers: { "content-type": "application/json", ...SECURITY_HEADERS } });
+  const answer = new Response(stream, { headers: { "content-type": "application/json", ...SECURITY_HEADERS } });
+  lasting.add(answer);
+  return answer;
 }
+
+/**
+ * A listener's fetch (daemon.ts): what the app answers, a long one (longRunning's) let outlast the listener's idle timer.
+ * Its heartbeats alone don't: Bun closes a request at its listener's idleTimeout however many bytes it has streamed
+ * (1.4.4, measured 27 November 2026: a byte a second, closed at the timer as a silent answer is), so making a computer or
+ * a clone past the node's 255 s was cut, and the work with it. Every other answer keeps the timer.
+ */
+export const listening =
+  (app: (req: Request, listener: Listener) => Promise<Response>, listener: Listener) =>
+  async (req: Request, server: { timeout(req: Request, seconds: number): void }): Promise<Response> => {
+    const answer = await app(req, listener);
+    if (lasting.has(answer)) server.timeout(req, 0);
+    return answer;
+  };
 
 /** Unwrap a `{ error, status }` body produced by a streamed long-running response. */
 export function streamedError(body: unknown): { error: string; status: number } | null {

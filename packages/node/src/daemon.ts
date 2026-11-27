@@ -58,7 +58,7 @@ import type { OutcomeRunner } from "./outcomes.ts";
 import type { BacklogRunner } from "./backlog.ts";
 import { loadEnv } from "./env.ts";
 import type { Home } from "./home.ts";
-import { createApp } from "./server.ts";
+import { createApp, listening } from "./server.ts";
 import { shipNative } from "./ship.ts";
 import { type DoctorDeps, type DoctorOptions, type DoctorRun, type DoctorSystem, heartbeatFromDoctor, noSystem, realSystem, runDoctor, TroubleLog } from "./doctor-facts.ts";
 import { NotifyService } from "./notify.ts";
@@ -871,11 +871,11 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   //   admin token and no gateway, even though it arrives from 127.0.0.1.
   // Tailnet: node-to-node link traffic. Never 0.0.0.0.
   const servers = [
-    Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: (req) => app(req, "loopback") }),
-    Bun.serve({ hostname: "127.0.0.1", port: proxyPort, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: (req) => app(req, "proxied") }),
+    Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: listening(app, "loopback") }),
+    Bun.serve({ hostname: "127.0.0.1", port: proxyPort, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: listening(app, "proxied") }),
   ];
   if (advertise !== "127.0.0.1") {
-    servers.push(Bun.serve({ hostname: advertise, port, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: (req) => app(req, "tailnet") }));
+    servers.push(Bun.serve({ hostname: advertise, port, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: listening(app, "tailnet") }));
   }
   // Sandboxes reach this listener (and only this one) on the gateway network's bridge IP. On a Mac that address is the
   // host's only while a VM is attached to the network (the host's keeper holds it once the image is built), so until
@@ -889,7 +889,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     const bindGateway = (): boolean => {
       try {
         servers.push(
-          Bun.serve({ hostname: NETWORKS.gateway.gateway, port: SANDBOX_GATEWAY_PORT, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: (req) => app(req, "sandbox") }),
+          Bun.serve({ hostname: NETWORKS.gateway.gateway, port: SANDBOX_GATEWAY_PORT, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: listening(app, "sandbox") }),
         );
         if (said) log("sandbox gateway listening");
         return true;
