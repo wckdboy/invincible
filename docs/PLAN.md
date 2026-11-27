@@ -51,8 +51,7 @@ What the owner uses every day, built on the carried engine around the new model.
 ## Phase 2: the fabric 🔨
 
 Q-AMP between the nodes and the agents ([FABRIC.md](FABRIC.md)). On main and dormant, and off on every node until its
-own setting says so (`invincible fabric on`): the pin moves to a Q-AMP release with the sidecar once the fixes of the
-fabric's independent security review are reviewed again.
+own setting says so (`invincible fabric on`), and pinned to Q-AMP 0.2.0, the first release with the sidecar.
 
 - 🔨 Q-AMP: the sidecar socket API ✅ (Q-AMP main); grants that renew themselves: the giver renews a run's grant and sends
   it in on the hand-off's call, and Q-AMP's own, holder-driven renewal, spec first, is next.
@@ -70,7 +69,8 @@ fabric's independent security review are reviewed again.
     Within its minute it could replay it to a third node as the full node, and read the answer.
   - Over Q-AMP the door already holds the signer to the transport key's node.
   - The target's id goes into the signing input. It is a contract change, with fixtures for the old form and the new.
-- 🔜 The pin: a Q-AMP release with the sidecar, and the owner's pair switched on (FABRIC.md, the runbook).
+- ✅ The pin: Q-AMP 0.2.0, the first release with the sidecar (`scripts/qamp-pin.sh`).
+- 🔜 The owner's pair switched on (FABRIC.md, the runbook).
 
 **Exit:** the first answer on a fresh connection, and sync's lag, are measured before and after (the carried grants measured 96 vs
 504 ms first answer). Revocation cuts a key off within one round trip. The fuzz targets run clean.

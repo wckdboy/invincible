@@ -4,11 +4,11 @@
 # it against the pin for this machine. Sourced by remote-setup.sh, which puts it where the node looks for it, in the
 # service user's Invincible home (<home>/bin/qamp; INVINCIBLE_QAMP_BIN names another). The binary is put in place by a rename,
 # so a bridge still running the old one keeps running.
-QAMP_VERSION=0.1.0
-# qamp-0.1.0-x86_64-unknown-linux-gnu (built in rust:1.100-bookworm, glibc 2.36)
-QAMP_SHA256_LINUX_X86_64=81d6f7107b616054fd7f7afb5017e86cd01e7c8f0e7b08620f92d8136d2bb0db
-# qamp-0.1.0-aarch64-apple-darwin (ad-hoc signed only)
-QAMP_SHA256_DARWIN_ARM64=c316bed93f411c8c580d08b242e6b862ea5b9abd3739d04bed3d344360462914
+QAMP_VERSION=0.2.0
+# qamp-0.2.0-x86_64-unknown-linux-gnu (built in rust:1.100-bookworm, glibc 2.36, its paths remapped; it needs glibc 2.34)
+QAMP_SHA256_LINUX_X86_64=fe6bf7f5bf72dd2d79be9a39b5e3aa15127df86faa9305f31c518c8c5074ee0d
+# qamp-0.2.0-aarch64-apple-darwin (Rust 1.100.0, its paths remapped, ad-hoc signed only)
+QAMP_SHA256_DARWIN_ARM64=f2a3702c7b16299469211aab262d034ad337c35251b5a1e7d1e864547710c9f8
 
 # install_qamp <file> <dir>: <dir>/qamp becomes <file>, which must be Q-AMP $QAMP_VERSION's binary for this machine
 # (its pinned SHA-256), or the function fails and leaves <dir> as it was. The copy is what's checked, then renamed.

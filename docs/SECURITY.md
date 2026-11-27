@@ -753,7 +753,7 @@ Your rules on the commands its work runs ([ARCHITECTURE](ARCHITECTURE.md) §6). 
 
 Its first phase (`packages/node/src/qamp-grants.ts`; how it works: [ARCHITECTURE](ARCHITECTURE.md) §3). This is a new door: a UDP port on the tailnet, through which an agent on a machine that runs no node calls a few of Invincible's tools. (Nodes and their agents over Q-AMP, the fabric, have a section of their own below; a grant's bridge runs whatever `qamp` the node has, and works with the fabric on or off.)
 
-- **What it admits.** Each grant you make runs one bridge (`qamp serve --mcp-stdio`, Q-AMP 0.1.0, pinned by SHA-256 in `scripts/qamp-pin.sh`).
+- **What it admits.** Each grant you make runs one bridge (`qamp serve --mcp-stdio`, Q-AMP 0.2.0, pinned by SHA-256 in `scripts/qamp-pin.sh`).
   - It listens on the node's tailnet address and one port of 7411–7419 (7410 is the node's sidecar's), never `0.0.0.0`.
   - It lets one key finish the handshake: the agent's own Ed25519 key, by its `did:key`. A stranger's key fails the TLS handshake.
   - A call needs a delegation chain from the node's bridge key, bound to the agent's key and ending with the grant. An expired chain, one from another key, one for another command, or none at all is refused (`UNAUTHORIZED`).

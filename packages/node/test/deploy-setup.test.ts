@@ -48,7 +48,7 @@ function server(name: string, tests: "pass" | "fail", qamp?: string) {
 test("Q-AMP's binary shipped with a deploy that isn't the pinned one refuses the deploy: nothing installed, nothing tested, app as it was", () => {
   const deploy = server("impostor", "pass", "#!/bin/sh\necho not qamp\n");
   expect(deploy.code).toBe(1);
-  expect(deploy.said).toContain("failed its checksum (it isn't Q-AMP 0.1.0 for this machine): not installed");
+  expect(deploy.said).toContain("failed its checksum (it isn't Q-AMP 0.2.0 for this machine): not installed");
   expect(deploy.said).toContain("Q-AMP's binary wasn't installed: not deploying");
   expect(existsSync(join(deploy.home, ".invincible/bin/qamp"))).toBe(false);
   expect(deploy.testedIn).toBeNull();

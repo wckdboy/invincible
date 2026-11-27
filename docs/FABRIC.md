@@ -4,10 +4,9 @@ Phase 2 of [PLAN.md](PLAN.md), as built (26 November 2026). [ARCHITECTURE](ARCHI
 [SECURITY](SECURITY.md) says what it defends against and how each claim is tested. This page says what runs where, the
 protocol for proof across nodes, the numbers, and how to switch it on.
 
-**State:** on main, dormant. It is off on every node until that node's own setting says so (`invincible fabric on`), and
-today's pin is Q-AMP 0.1.0, which has no sidecar, so every node stays on HTTP with signed requests and its Doctor says
-why. The pin moves to a Q-AMP release with the sidecar only after the independent security review of the fabric is
-answered and its fixes reviewed again.
+**State:** on main, dormant. It is off on every node until that node's own setting says so (`invincible fabric on`). The
+pin is Q-AMP 0.2.0, its first release with the sidecar (`scripts/qamp-pin.sh`): a node with that binary and its setting
+on runs its sidecar, and one without either stays on HTTP with signed requests, its Doctor saying why.
 
 ## The sidecar under every node
 
