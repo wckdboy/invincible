@@ -118,6 +118,7 @@ import {
   LiveCursor,
   type LiveEvent,
   type LiveTopic,
+  SEAT_HARNESS as SEAT_HARNESS_OF,
 } from "@invincible/core";
 import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, nowLine } from "@invincible/models";
@@ -154,7 +155,7 @@ import { handleSandboxSearch, SearchError, searchWeb } from "./search.ts";
 import { type Caller, ConnectorCallError, type ConnectorService } from "./connectors.ts";
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
 import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.ts";
-import { addSeat, removeSeat, SeatError, seatViews, setSeatPolicy } from "./seats.ts";
+import { addSeat, askSeat, recordSeatStatus, removeSeat, SeatError, seatSalt, seatViews, setSeatPolicy } from "./seats.ts";
 import { SeatSignIns } from "./seat-sign-in.ts";
 import { SeatRuns } from "./seat-runs.ts";
 import { QuestionError, type Questions } from "./questions.ts";
@@ -1069,8 +1070,28 @@ export function createApp(ctx: AppContext) {
   const scanOptions = { isPublic: (token: string) => ctx.store.event(token) !== null };
   /** Seats' sign-ins on this node, each in a VM of the seat's own on this node's sandbox host (seat-sign-in.ts). */
   const seatSignIns = new SeatSignIns({ store: ctx.store, vault: ctx.vault, node: ctx.identity, host: () => ctx.sandbox ?? null });
+  /**
+   * A seat's VM is the node's own (seat-runs.ts, seat-sign-in.ts): no route reaches into one, whoever asks, you included.
+   * Its home holds the vendor's sign-in, which only its own tool reads (docs/SECURITY.md). Removing it is still yours.
+   */
+  const outOfReach = (sandbox: SandboxView | null | undefined): void => {
+    if (sandbox?.seat) throw new HttpError(403, "that is a seat's VM, the node's own: no route reaches into it");
+  };
   /** Coding agents' runs on this node's seats (seat-runs.ts): the node chooses, and nothing asks you. */
-  const seatRuns = new SeatRuns({ store: ctx.store, node: ctx.identity, host: () => ctx.sandbox ?? null, log: ctx.log });
+  const seatRuns = new SeatRuns({
+    store: ctx.store,
+    node: ctx.identity,
+    host: () => ctx.sandbox ?? null,
+    log: ctx.log,
+    // A seat a run's VM said isn't signed in: its tool asked again in a VM of the seat's own, and the log told what it says.
+    confirm: async (seat) => {
+      const host = ctx.sandbox;
+      const tool = SEAT_HARNESS_OF[seat.kind];
+      const driver = tool ? AGENTS[tool] : undefined;
+      if (!host || !driver?.signIn) return;
+      recordSeatStatus(ctx.store, ctx.identity, seat, await askSeat(host, seat, driver, seatSalt(ctx.vault)));
+    },
+  });
   /** A seat's refusal, in its words and with its status. */
   async function seatErrorsAsync<T>(work: () => Promise<T>): Promise<T> {
     try {
@@ -3044,7 +3065,10 @@ export function createApp(ctx: AppContext) {
       const own = `github-${repo.owner.toLowerCase()}`;
       const connector = installedConnector(ctx.store, own) ? own : "github";
       if (!installedConnector(ctx.store, connector)) throw new HttpError(424, "add the GitHub connector before a repository can be read (invincible connector add github)");
-      return longRunning(onNode(p, input.on, routes.checkoutRepository.path, input, () => ctx.sandbox!.checkoutRepository(input.id, { connector, ...repo }, input.commit, input.path), { sandbox: input.id }));
+      return longRunning(onNode(p, input.on, routes.checkoutRepository.path, input, async () => {
+        outOfReach(await ctx.sandbox!.get(input.id));
+        return ctx.sandbox!.checkoutRepository(input.id, { connector, ...repo }, input.commit, input.path);
+      }, { sandbox: input.id }));
     },
     whoami: (_input, p) => ({
       device: p.device,
@@ -3684,8 +3708,9 @@ export function createApp(ctx: AppContext) {
           routes.execSandbox.path,
           { ...rest, ...(run ? { run } : {}) },
           async () => {
+            const sandbox = await ctx.sandbox!.get(rest.id);
+            outOfReach(sandbox);
             if (run) {
-              const sandbox = await ctx.sandbox!.get(rest.id);
               if (!sandbox) throw new HttpError(404, "no such sandbox on this node");
               if (sandbox.run !== run) throw new HttpError(403, "that sandbox belongs to another run");
             }
@@ -3702,10 +3727,11 @@ export function createApp(ctx: AppContext) {
       const target = p.kind === "node" ? null : on ? resolveNode(on) : null;
       if (target && target.id !== ctx.identity.id) return linesFrom(target, routes.followSandbox.path, { ...rest, ...(run ? { run } : {}) }, req.signal);
       if (!ctx.sandbox) throw new HttpError(424, "this node is not a sandbox host");
+      const followed = await ctx.sandbox.get(rest.id);
+      outOfReach(followed);
       if (run) {
-        const sandbox = await ctx.sandbox.get(rest.id);
-        if (!sandbox) throw new HttpError(404, "no such sandbox on this node");
-        if (sandbox.run !== run) throw new HttpError(403, "that sandbox belongs to another run");
+        if (!followed) throw new HttpError(404, "no such sandbox on this node");
+        if (followed.run !== run) throw new HttpError(403, "that sandbox belongs to another run");
       }
       // (Only the fixed script, from where it is asked to start: never a command of the caller's.)
       const stream = await ctx.sandbox.stream(rest.id, followArgv(rest.offset), FOLLOW_SECONDS + 30);
@@ -3731,7 +3757,10 @@ export function createApp(ctx: AppContext) {
       );
     },
     terminals: (_input, p) => ({ terminals: terminalsFor(p).list() }),
-    openTerminal: async (input, p) => ({ terminal: await terminalsFor(p).open(input.sandbox, input.size) }),
+    openTerminal: async (input, p) => {
+      outOfReach(await ctx.sandbox?.get(input.sandbox));
+      return { terminal: await terminalsFor(p).open(input.sandbox, input.size) };
+    },
     watchTerminal: (input, p, req) => watchTerminal(terminalsFor(p), input.terminal, req),
     terminalInput: (input, p) => {
       terminalsFor(p).input(input.terminal, input);
@@ -3915,6 +3944,7 @@ export function createApp(ctx: AppContext) {
         onNode(p, on, routes.saveArtifact.path, { ...rest, ...(run ? { run } : {}) }, async () => {
           const sandbox = await ctx.sandbox!.get(rest.sandbox);
           if (!sandbox) throw new HttpError(404, "no such sandbox on this node");
+          outOfReach(sandbox);
           // An arm (or a loop's run) keeps only its own sandboxes' work.
           if (run && sandbox.run !== run) throw new HttpError(403, "that sandbox belongs to another run");
           try {

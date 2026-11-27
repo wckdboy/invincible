@@ -30,17 +30,21 @@ const runs: string[][] = [];
 const removed: string[] = [];
 let daemon: Daemon;
 const SEAT = `st_${"w".repeat(22)}`;
-const RESET = Date.UTC(2099, 0, 1, 14, 0);
+/** When the plan's five hours reset, as its tool says it (an hour on the minute, three hours from now). */
+const RESET = Math.ceil((Date.now() + 3 * 3_600_000) / 60_000) * 60_000;
 
-/** The seat's VM's container, once one is made: the run that had the seat's label. */
+/** The seat's VM's container, once one is made: the latest run that had the seat's label. */
 const seatContainer = (): string | undefined => {
-  const made = runs.find((args) => args.includes(`dev.invincible.seat=${SEAT}`));
+  const made = runs.filter((args) => args.includes(`dev.invincible.seat=${SEAT}`)).at(-1);
   return made ? made[made.indexOf("--name") + 1] : undefined;
 };
+/** While set, a follow in the seat's VM says its run is alive and holds there until it is let go. */
+let hold: Promise<void> | null = null;
 /** What a follow in the seat's VM says: the tool's session, a window of its plan, its answer, and its end. */
 const opened: string[][] = [];
 const spawnStream: SpawnStream = (argv): SandboxStream => {
   opened.push(argv);
+  const held = hold;
   const said = argv.includes(seatContainer() ?? "\0")
     ? [
         'S{"alive": true, "exit": null, "next": 0}',
@@ -51,6 +55,12 @@ const spawnStream: SpawnStream = (argv): SandboxStream => {
       ]
     : ['S{"alive": false, "exit": 1, "next": 0}'];
   async function* lines(): AsyncIterable<string> {
+    if (held && said.length > 1) {
+      yield said[0]!;
+      await held;
+      yield* said.slice(1);
+      return;
+    }
     yield* said;
   }
   return { lines: lines(), write: () => {}, close: () => {}, kill: () => {}, exited: Promise.resolve(0) };
@@ -71,6 +81,11 @@ async function api<T = any>(name: RouteName, input?: unknown): Promise<T> {
   const body = (await response.json()) as { error?: string };
   if (!response.ok || body.error) throw new Error(`${name}: ${response.status} ${body.error ?? "request failed"}`);
   return body as T;
+}
+/** A route's answer as it comes, refusal and all. */
+async function raw(name: RouteName, input: unknown): Promise<Response> {
+  const route = routes[name];
+  return fetch(`http://127.0.0.1:${port}${route.path}`, { method: route.method, headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify(input) });
 }
 async function until(condition: () => boolean | Promise<boolean>, ms = 15_000) {
   const end = Date.now() + ms;
@@ -158,4 +173,29 @@ test("a Claude Code task runs on your seat: its VM has the seat's home and the a
   const created = ledger.find((entry) => entry.class === "create" && entry.target === seatVm);
   expect(created?.detail).toContain(`the /work of invincible-sbx-${agentVm}`);
   expect(created?.detail).toContain(`seat ${SEAT}'s home`);
+}, 30_000);
+
+test("no route reaches into a seat's VM, yours included: not a command, a follow, a terminal or an artifact; it goes as its run ends", async () => {
+  let release!: () => void;
+  hold = new Promise<void>((resolve) => (release = resolve));
+  const before = seatContainer();
+  const { task } = await api<{ task: { id: string } }>("createTeamTask", { room: "seat-forge", assignee: "ada", title: "Held on a seat", goal: "Build and verify this bounded change.", gates: ["test -f result.txt # gate-seat"] });
+  await until(() => seatContainer() !== before && opened.some((argv) => argv.includes(seatContainer()!)));
+  const id = seatContainer()!.slice("invincible-sbx-".length);
+  const refused = { error: "that is a seat's VM, the node's own: no route reaches into it" };
+  for (const [route, input] of [
+    ["execSandbox", { id, cmd: ["cat", `/seats/${SEAT}/claude/.credentials.json`] }],
+    ["followSandbox", { id, offset: 0 }],
+    ["openTerminal", { sandbox: id, size: { cols: 80, rows: 24 } }],
+    ["saveArtifact", { sandbox: id, path: "/work" }],
+  ] as const) {
+    const answer = await raw(route, input);
+    expect([route, answer.status, await answer.json()]).toEqual([route, 403, refused]);
+  }
+  // (Nothing ran in it for those: only the run's own commands.)
+  expect(docker.execs.filter((e) => e.container === seatContainer() && e.cmd.join(" ").includes(".credentials.json"))).toEqual([]);
+  hold = null;
+  release();
+  await until(async () => (await api<TeamSnapshot>("team")).tasks.find((t) => t.id === task.id)?.status === "done");
+  expect(removed).toContain(seatContainer()!);
 }, 30_000);

@@ -28,6 +28,11 @@ describe("seats in words", () => {
     expect(seatStateWords({ is: "signed-out", why: "expired" }, null, NOW)).toEqual({ word: "Sign-in lapsed", tone: "quiet" });
   });
 
+  test("a time no date can be (a reset its VM said lies past every date) is said as later, never thrown", () => {
+    expect(seatStateWords({ is: "resting", until: Number.MAX_SAFE_INTEGER, window: "five_hour" }, null, NOW)).toEqual({ word: "Spent: back later", tone: "quiet" });
+    expect(seatStateWords({ is: "ready", renewBy: Number.MAX_SAFE_INTEGER }, "max", NOW).word).toBe("Signed in · Max");
+  });
+
   test("its button: Sign in when it's out, Sign in again within a week of its end, nothing while signing in, resting or a key's", () => {
     expect(signInAction({ kind: "claude-subscription", state: { is: "signed-out", why: "never" } }, NOW)).toBe("Sign in");
     expect(signInAction({ kind: "chatgpt-codex", state: { is: "ready", renewBy: NOW + (RENEW_DAYS - 1) * DAY } }, NOW)).toBe("Sign in again");

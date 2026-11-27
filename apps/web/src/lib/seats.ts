@@ -33,9 +33,10 @@ export function quickLabel(kind: SeatKind, seats: readonly Pick<SeatView, "label
 export const RENEW_DAYS = 7;
 const DAY = 86_400_000;
 
-/** A time as the seats page says it: HH:MM in UTC, with the day when it isn't today's. */
-function when(at: number, now: number): string {
+/** A time as the seats page says it: HH:MM in UTC, with the day when it isn't today's; one no date can be, "later". */
+function when(at: number, now: number): string | null {
   const date = new Date(at);
+  if (!Number.isFinite(date.getTime())) return null;
   const clock = `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")} UTC`;
   return new Date(now).toISOString().slice(0, 10) === date.toISOString().slice(0, 10) ? clock : `${date.getUTCDate()} ${date.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}, ${clock}`;
 }
@@ -47,12 +48,15 @@ const tier = (plan: string): string => plan.charAt(0).toUpperCase() + plan.slice
 export function seatStateWords(state: SeatState, plan: string | null, now: number): { word: string; tone: "ok" | "work" | "warn" | "quiet" } {
   switch (state.is) {
     case "ready":
-      if (state.renewBy !== null && state.renewBy - now <= RENEW_DAYS * DAY) return { word: `Sign in again before ${when(state.renewBy, now)}`, tone: "warn" };
+      if (state.renewBy !== null && state.renewBy - now <= RENEW_DAYS * DAY) return { word: `Sign in again before ${when(state.renewBy, now) ?? "it ends"}`, tone: "warn" };
       return { word: plan ? `Signed in · ${tier(plan)}` : "Signed in", tone: "ok" };
     case "signing-in":
       return { word: "Signing in", tone: "work" };
     case "resting":
-      return { word: `Spent: back at ${when(state.until, now)}`, tone: "quiet" };
+      {
+        const back = when(state.until, now);
+        return { word: back ? `Spent: back at ${back}` : "Spent: back later", tone: "quiet" };
+      }
     case "signed-out":
       return {
         never: { word: "Not signed in", tone: "warn" as const },

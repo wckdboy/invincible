@@ -1,8 +1,8 @@
-import { accountSeat, chooseSeat, mayCarryOn, type NodeIdentity, redact, SEAT_HARNESS, SEAT_LIMITS, seatOpensAt, type SeatView, type TaskAccount } from "@invincible/core";
+import { accountSeat, chooseSeat, mayCarryOn, type NodeIdentity, redact, SEAT_HARNESS, SEAT_LIMITS, type SeatFacts, seatOpensAt, type SeatView, type TaskAccount } from "@invincible/core";
 import { agentCleanupCommand, FOLLOW_SECONDS, followArgv, type FollowedRun, type SeatAnswer, type SeatRun } from "@invincible/agents";
 import type { LedgerStore } from "@invincible/ledger";
 import type { SandboxHost } from "@invincible/sandbox";
-import { recordSeatStatus, seatViews } from "./seats.ts";
+import { seatViews } from "./seats.ts";
 
 /*
  * Runs on seats on this node (I15 step 9, core's seats.ts): which seat a coding agent's run takes (chooseSeat: Invincible
@@ -22,6 +22,12 @@ export const SEAT_VM_MINUTES = 7 * 24 * 60;
 /** How far a window's used share moves before it is said again (a tool says it after every reply). */
 export const WINDOW_STEP = 5;
 
+/**
+ * The furthest a window's reset, and a seat's rest, may be said to be: a week and a day from now (a plan's longest window
+ * is a week). What a run says of its windows is what its VM printed, and nothing printed rests a seat for longer.
+ */
+export const SEAT_REST_MAX_MS = 8 * 86_400_000;
+
 export interface SeatRunsOptions {
   store: LedgerStore;
   node: NodeIdentity;
@@ -29,6 +35,11 @@ export interface SeatRunsOptions {
   now?(): number;
   /** How often a run that waits for a seat looks again besides when one is let go here (a sign-in's VM frees one unseen). */
   pollMs?: number;
+  /**
+   * A seat a run's VM said isn't signed in, asked again in a VM of its own (seats.ts askSeat: no agent's /work beside it)
+   * and the log told what that says. A run's VM never signs a seat out: what it prints is the agent's VM's to say.
+   */
+  confirm?(seat: SeatFacts): Promise<void>;
   log?(line: string): void;
 }
 
@@ -50,8 +61,12 @@ export class SeatRuns {
   private readonly lingering = new Map<string, string>();
   /** Every seat's VM left on this node by an earlier process of it: removed before the first run takes a seat. */
   private swept: Promise<void> | null = null;
+  /** When this process began: a seat's VM made before it was an earlier process's. */
+  private readonly started: number;
 
-  constructor(private readonly opts: SeatRunsOptions) {}
+  constructor(private readonly opts: SeatRunsOptions) {
+    this.started = opts.now?.() ?? Date.now();
+  }
 
   private now(): number {
     return this.opts.now?.() ?? Date.now();
@@ -72,15 +87,31 @@ export class SeatRuns {
       const host = this.opts.host();
       if (!host) return;
       for (const seat of this.opts.store.seats().filter((s) => s.node === this.opts.node.id)) {
-        for (const id of (await host.seatVms(seat.id).catch(() => null)) ?? []) await this.remove(host, id, `seat.${seat.id}`);
+        const vms = await host.seatVms(seat.id).catch(() => null);
+        if (vms === null) throw new Error("docker couldn't say which VMs have a seat's home");
+        // (Only an earlier process's: one this process made, a sign-in's or a status's, is its own to remove.)
+        for (const id of vms) {
+          const view = await host.get(id).catch(() => null);
+          if (view && view.createdAt < this.started) await this.remove(host, id, `seat.${seat.id}`);
+        }
       }
-    })();
+    })().catch((error: Error) => {
+      // (Asked again by the next run: a listing that failed is no sweep.)
+      this.swept = null;
+      throw error;
+    });
     return this.swept;
   }
 
   /** A seat for a run (SeatAnswer): this node's, of its harness, chosen by headroom; or none; or, waiting, a rest until one resets. */
   async take(ask: SeatAsk, signal: AbortSignal): Promise<SeatAnswer> {
-    await this.sweep();
+    // (Nothing is taken past a VM it couldn't see: a seat's home in one is in use.)
+    try {
+      await this.sweep();
+    } catch (error) {
+      this.opts.log?.(`seats: ${redact(String((error as Error)?.message ?? error)).slice(0, 200)}: no seat is taken until they can be seen`);
+      return { none: true };
+    }
     for (;;) {
       if (signal.aborted) throw new Error("its work has stopped");
       const host = this.opts.host();
@@ -203,10 +234,11 @@ export class SeatRuns {
     });
   }
 
-  /** Its tool said, in a run's VM, that it isn't signed in: the log says so (only when it was), and it isn't chosen again until it is. */
+  /** Its tool said, in a run's VM, that it isn't signed in: asked again in a VM of its own (`confirm`), whose word the log is told. */
   private signedOut(id: string): void {
     const seat = this.opts.store.seats().find((s) => s.id === id);
-    if (seat && seat.node === this.opts.node.id) recordSeatStatus(this.opts.store, this.opts.node, seat, { signedIn: false });
+    if (!seat || seat.node !== this.opts.node.id || !this.opts.confirm) return;
+    void this.opts.confirm(seat).catch((error: Error) => this.opts.log?.(`seats: ${seat.label} couldn't be asked again how its sign-in stands: ${redact(String(error?.message ?? error)).slice(0, 200)}`));
   }
 
   /**
@@ -219,7 +251,7 @@ export class SeatRuns {
     if (!seat || seat.node !== this.opts.node.id) return;
     const now = this.now();
     const usedPercent = window.usedPercent === undefined ? undefined : Math.max(0, Math.min(100, Math.round(window.usedPercent)));
-    const resetsAt = window.resetsAt === undefined || !(window.resetsAt > 0) ? undefined : Math.round(window.resetsAt);
+    const resetsAt = window.resetsAt === undefined || !(window.resetsAt > 0) ? undefined : Math.min(Math.round(window.resetsAt), now + SEAT_REST_MAX_MS);
     const before = seat.windows.find((w) => w.window === window.name);
     const was = before?.usedPercent ?? null;
     const is = usedPercent ?? null;
@@ -227,7 +259,7 @@ export class SeatRuns {
     const fresh = !before || before.status !== window.status || before.resetsAt !== (resetsAt ?? null) || shareMoved || (before.resetsAt ?? before.at + SEAT_LIMITS.restMinutes * 60_000) <= now;
     if (fresh) this.opts.store.emit(this.opts.node, "seat.window", { id, window: window.name, status: window.status, ...(usedPercent !== undefined ? { usedPercent } : {}), ...(resetsAt !== undefined ? { resetsAt } : {}) });
     if (window.status === "rejected") {
-      const until = resetsAt ?? now + SEAT_LIMITS.restMinutes * 60_000;
+      const until = Math.min(resetsAt ?? now + SEAT_LIMITS.restMinutes * 60_000, now + SEAT_REST_MAX_MS);
       if (until > now && (!seat.rest || seat.rest.until < until)) this.opts.store.emit(this.opts.node, "seat.rested", { id, until, window: window.name });
     } else if (seat.rest && seat.rest.until > now && seat.rest.window === window.name) {
       this.opts.store.emit(this.opts.node, "seat.back", { id });

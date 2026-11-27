@@ -1648,6 +1648,8 @@ export interface SandboxView {
   disk: { limitGb: number; usedGb: number | null } | null;
   /** container (the host's kernel) or vm (its own KVM microVM and kernel). */
   isolation: "container" | "vm";
+  /** A seat's VM (core's seats.ts: a run on it, its sign-in or its status): the seat whose home it has. No route reaches into one. */
+  seat?: string;
 }
 
 export interface ExecResult {

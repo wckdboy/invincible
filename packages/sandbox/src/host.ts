@@ -1739,5 +1739,7 @@ function toView(labels: Record<string, string>, image: string, status: string, u
     providers: (labels[`${LABEL}.providers`] ?? "").split(",").filter((p) => p),
     disk: limit > 0 ? { limitGb: limit, usedGb: used === undefined ? null : Math.round((used / 2 ** 30) * 10) / 10 } : null,
     isolation: labels[`${LABEL}.isolation`] === "vm" ? "vm" : "container",
+    // (Its seat's label is set by createSeatVm alone: never by a route.)
+    ...(labels[`${LABEL}.seat`] ? { seat: labels[`${LABEL}.seat`] } : {}),
   };
 }

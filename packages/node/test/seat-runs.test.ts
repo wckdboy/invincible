@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { newNodeIdentity, seatState, type SeatKind } from "@invincible/core";
 import { enrollDevice, foundFleet, LedgerStore } from "@invincible/ledger";
 import { recordSeatStatus, yourWord } from "../src/seats.ts";
-import { SEAT_VM_MINUTES, SeatRuns } from "../src/seat-runs.ts";
+import { SEAT_REST_MAX_MS, SEAT_VM_MINUTES, SeatRuns } from "../src/seat-runs.ts";
 
 /*
  * Runs on this node's seats (seat-runs.ts): the seat a coding agent's run takes, its VM beside the agent's (sharing its
@@ -193,23 +193,77 @@ describe("the seat a run takes", () => {
     expect("run" in codex && codex.run.seat.id).toBe(X);
   });
 
-  test("a seat its tool says isn't signed in is marked so as it is let go, and taken no more", async () => {
+  test("a run's VM saying its tool isn't signed in signs no seat out: the seat is asked again in a VM of its own, and the log is told what that says", async () => {
     const m = mind();
     m.add(A);
     const h = host();
-    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => h.fake, now: () => NOW });
+    const asked: string[] = [];
+    let says = true;
+    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => h.fake, now: () => NOW, confirm: async (seat) => {
+      asked.push(seat.id);
+      recordSeatStatus(m.store, m.node, seat, says ? { signedIn: true, method: "claude.ai", fingerprint: "A".repeat(22) } : { signedIn: false });
+    } });
     const taken = await runs.take(ask(), live());
     if (!("run" in taken)) throw new Error("no seat");
     await taken.run.release(true);
+    await Bun.sleep(5);
+    expect(asked).toEqual([A]);
+    // Signed in after all (the run's VM was slow, or what it printed wasn't its tool's): it stands, and is taken again.
+    expect(seatState(m.seat(A), NOW).is).toBe("ready");
+    const again = await runs.take(ask(), live());
+    if (!("run" in again)) throw new Error("no seat");
+    says = false;
+    await again.run.release(true);
+    await Bun.sleep(5);
     expect(seatState(m.seat(A), NOW)).toEqual({ is: "signed-out", why: "signed-out" });
     expect(await runs.take(ask(), live())).toEqual({ none: true });
+    // Let go as any is, it isn't asked.
+    m.add(B);
+    const plain = await runs.take(ask(), live());
+    if (!("run" in plain)) throw new Error("no seat");
+    await plain.run.release();
+    await Bun.sleep(5);
+    expect(asked).toEqual([A, A]);
+  });
+
+  test("seats' VMs an earlier process of this node made are removed before the first run takes a seat; one this process made (a sign-in's) is not, and a listing that failed is asked again", async () => {
+    const m = mind();
+    m.add(A);
+    const h = host({ leftover: A });
+    let failing = true;
+    const made: Record<string, number> = { "vm-left-over": NOW - 60_000 };
+    const fake = {
+      ...h.fake,
+      seatVms: async (seat: string) => (failing ? null : h.fake.seatVms(seat)),
+      get: async (vm: string) => {
+        const view = (await h.fake.get(vm)) as { id: string } | null;
+        return view ? ({ ...view, createdAt: made[vm] ?? NOW + 1 } as never) : null;
+      },
+    };
+    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => fake as never, now: () => NOW });
+    // (Its listing fails at first: nothing is taken past a VM it couldn't see, and it is asked again.)
+    expect(await runs.take(ask(), live())).toEqual({ none: true });
+    failing = false;
+    h.vms.set("vm-sign-in", { seat: A, run: `seat.${A}` });
+    made["vm-sign-in"] = NOW + 5;
+    const taken = await runs.take(ask(), live());
+    expect(h.calls.filter((c) => c.startsWith("destroy"))).toEqual([`destroy vm-left-over seat.${A}`]);
+    // (The sign-in's VM holds the seat's home: no run is made beside it.)
+    expect(taken).toEqual({ none: true });
   });
 
   test("seats' VMs an earlier process of this node left are removed before the first run takes a seat", async () => {
     const m = mind();
     m.add(A);
     const h = host({ leftover: A });
-    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => h.fake, now: () => NOW });
+    const fake = {
+      ...h.fake,
+      get: async (vm: string) => {
+        const view = (await h.fake.get(vm)) as unknown as { id: string } | null;
+        return view ? ({ ...view, createdAt: vm === "vm-left-over" ? NOW - 60_000 : NOW + 1 } as never) : null;
+      },
+    };
+    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => fake as never, now: () => NOW });
     const taken = await runs.take(ask(), live());
     expect("run" in taken && taken.run.seat.id).toBe(A);
     expect(h.calls[0]).toBe(`destroy vm-left-over seat.${A}`);
@@ -248,6 +302,17 @@ describe("what a run says of its seat's windows", () => {
     expect(m.events("seat.rested").at(-1)).toEqual({ id: A, until: now + 300 * 60_000, window: "five_hour" });
     runs.window(A, { name: "seven_day", status: "warning", usedPercent: 140, resetsAt: NOW + 50 * HOUR });
     expect(m.events("seat.window").at(-1)).toEqual({ id: A, window: "seven_day", status: "warning", usedPercent: 100, resetsAt: NOW + 50 * HOUR });
+  });
+
+  test("a reset or a rest further off than a week and a day is held to a week and a day from now: no window rests a seat for longer", () => {
+    const m = mind();
+    m.add(A);
+    const runs = new SeatRuns({ store: m.store, node: m.node, host: () => null, now: () => NOW });
+    runs.window(A, { name: "five_hour", status: "rejected", usedPercent: 100, resetsAt: Number.MAX_SAFE_INTEGER });
+    const most = NOW + SEAT_REST_MAX_MS;
+    expect(m.events("seat.window").at(-1)).toEqual({ id: A, window: "five_hour", status: "rejected", usedPercent: 100, resetsAt: most });
+    expect(m.events("seat.rested").at(-1)).toEqual({ id: A, until: most, window: "five_hour" });
+    expect(seatState(m.seat(A), NOW)).toEqual({ is: "resting", until: most, window: "five_hour" });
   });
 
   test("another node's seat is that node's to say: nothing is kept here", () => {

@@ -248,14 +248,17 @@ The run loop is carried and renamed (§10), the most proven part of it:
     `/work`, as big as the agent's VM. The tool's check, launch, follow and stop are there; the work's gates, its
     evidence and its review stay in the agent's own VM, on the same files. It has no desktop: the agent's stays in its
     own VM, and its tool is told its commands are out of its reach. The seat is let go as the run ends (its VM
-    removed); one whose tool says it isn't signed in there is let go, marked signed out, and the work goes on without
-    it. A node removes every seat's VM an earlier process of it left before its first run takes a seat;
+    removed); one whose tool says it isn't signed in there is let go, asked again in a VM of its own (no agent's `/work`
+    beside it, so nothing of the agent's speaks for it) and marked as that says, and the work goes on without it. A node
+    removes every seat's VM an earlier process of it left before its first run takes a seat (one it made itself, a
+    sign-in's, it leaves). No route reaches into a seat's VM;
   - the account a task's work began on (its seat, or its own VM's sign-in) is kept with the task: taken up again (a rest,
     a restart, your resume), it goes on on that account alone among its vendor's, and not on its own VM's sign-in of
     that vendor's either. Its tool's session is kept per account (a seat's sessions are in that seat's home);
   - what a run on a seat says of its plan's windows is the seat's (`seat.window`, when its state, its reset or its share
     by five points or more is new); a window used whole rests the seat until it resets (`seat.rested`; with no reset
-    said, five hours), and one said open again before then ends the rest (`seat.back`);
+    said, five hours; never longer than a week and a day), and one said open again before then ends the rest
+    (`seat.back`);
   - measured (`bun run bench seats`: a seeded week in virtual time, the real choice, three seats): 13 tasks proven a day
     when the week asks about what the seats hold, 22.6 with a backlog of three times that; each week's window 62.7 %
     and 88.7 % used by its reset; 26 and 61 runs cut off by a spent window; 0.42 and 0 seat-minutes idle while work
