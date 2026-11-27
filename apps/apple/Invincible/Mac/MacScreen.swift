@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 
 /**
  * This Mac's own screen, for the primary's computer when that is this Mac (docs/AGENTS.md): a picture of it, and its
- * pointer and keys. The node runs it as `the primary --desktop <op>` (MacMain.swift), so what it does is the app's to be
+ * pointer and keys. The node runs it as `Invincible --desktop <op>` (MacMain.swift), so what it does is the app's to be
  * allowed: macOS lets an app record the screen and control the Mac only once you turn it on in System Settings →
  * Privacy & Security (Screen & System Audio Recording, and Accessibility), and `--desktop allow` asks for both.
  *
@@ -216,7 +216,7 @@ enum MacScreen {
     static let usage = "usage: Invincible --desktop status | allow | shot | click <x> <y> [left|right|middle|double] | move <x> <y> | scroll <up|down> [times] | type <base64> | key <key>… | open <address|app> | front"
 
     /**
-     * `the primary --desktop <op> …`, as the node runs it, in the words and places of an agent's `desktop` command (its
+     * `Invincible --desktop <op> …`, as the node runs it, in the words and places of an agent's `desktop` command (its
      * xdotool key names, a click's buttons, scrolling by the wheel's turns), so one way of working fits both: `status`
      * and `allow` print the status line, `shot` a JPEG in base64, `front` what is in front, the rest nothing. Typed text
      * comes as base64, so no shell or argument list reads it. Exit 0, 1 when it failed, 2 when it was refused or asked

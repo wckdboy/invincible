@@ -2,7 +2,7 @@
 import Foundation
 import Observation
 
-/// Making this Mac a node, as the first run's buttons do it and `the primary --first-run` does it with no window: the node
+/// Making this Mac a node, as the first run's buttons do it and `Invincible --first-run` does it with no window: the node
 /// founded or joined by the bundled CLI, run as this app; its agent registered; the node answering; this app paired with
 /// it; and, on a Mac with no battery, the Mac kept awake while its node runs. Each stage is said as it begins.
 @MainActor struct NodeSetup {
