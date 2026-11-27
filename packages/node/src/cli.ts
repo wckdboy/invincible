@@ -588,6 +588,8 @@ async function main(): Promise<void> {
       https: { type: "string" },
       keystore: { type: "string" },
       advertise: { type: "string" },
+      // (`connector tools <id> --add <tool>`: a tool the catalog has added, added on your word.)
+      add: { type: "string" },
       client: { type: "boolean" },
       "client-id": { type: "string" },
       redirect: { type: "string" },

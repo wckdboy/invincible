@@ -23,8 +23,10 @@ function read(): Map<string, string[]> {
   const found = new Map<string, string[]>();
   for (const file of files) {
     const text = readFileSync(join(SRC, file), "utf8");
-    for (const m of text.matchAll(/\b(?:str|string)\("([a-z][a-z0-9-]*)"\)|flags\["([a-z][a-z0-9-]*)"\]|flags\.([a-z][a-zA-Z0-9]*)\b/g)) {
-      const key = m[1] ?? m[2] ?? m[3]!;
+    // (Also a helper handed the flags themselves, `str(flags, "add")`: `connector tools <id> --add <tool>`, read that way
+    // and never declared, took its tool for a word and failed on Ultra, 27 November 2026.)
+    for (const m of text.matchAll(/\b(?:str|string)\("([a-z][a-z0-9-]*)"\)|flags\["([a-z][a-z0-9-]*)"\]|flags\.([a-z][a-zA-Z0-9]*)\b|\b[a-zA-Z]+\(flags, "([a-z][a-z0-9-]*)"/g)) {
+      const key = m[1] ?? m[2] ?? m[3] ?? m[4]!;
       found.set(key, [...(found.get(key) ?? []), file]);
     }
   }
