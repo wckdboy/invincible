@@ -151,6 +151,13 @@ export interface DaemonOptions {
   /** How a VM's desktop stream is started while you watch it (tests: a stand-in for its encoder, beside one for Docker). */
   spawnFrames?: SpawnFrames;
   /**
+   * Whether this node's sandboxes have networks of their own (default: they do). False is a scratch node beside a live
+   * one on the same host (the desktop bench's glass harness): the sandbox networks, their image keepers and the sandbox
+   * gateway's address are the live node's there, so it makes none of them and listens on no gateway. Its sandboxes are
+   * made isolated.
+   */
+  sandboxNetworks?: boolean;
+  /**
    * How this node measures itself. Default: the real benchmark, a few seconds at low priority (and never in
    * tests that pass their own capabilities, unless they give one here). false: it doesn't.
    */
@@ -518,11 +525,11 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       { governor, capacity: () => computeService!.selfCapacity() },
     );
     try {
-      await sandbox.ensureNetworks();
+      if (opts.sandboxNetworks !== false) await sandbox.ensureNetworks();
       // Sandboxes from before this start hold their slots before anything new is admitted.
       await sandbox.reconcile();
       // Keep the image in use, so pruning (Coolify's nightly cleanup) doesn't take it.
-      void sandbox.keepImages().catch((error) => log(`sandbox image keepers: ${(error as Error).message}`));
+      if (opts.sandboxNetworks !== false) void sandbox.keepImages().catch((error) => log(`sandbox image keepers: ${(error as Error).message}`));
     } catch (error) {
       log(`sandbox networks unavailable: ${(error as Error).message}`);
       sandbox = null;
@@ -896,7 +903,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
         return false;
       }
     };
-    if (!bindGateway() && apple) {
+    // (A node whose sandboxes have no networks binds no gateway: its address is a live node's on a shared host.)
+    if (opts.sandboxNetworks !== false && !bindGateway() && apple) {
       gatewayRetry = setInterval(() => {
         if (bindGateway() && gatewayRetry) {
           clearInterval(gatewayRetry);
