@@ -47,6 +47,18 @@ class GlassTest {
         }
     }
 
+    // The owner's word (27 November 2026): the logo is just the I-beam, so no tile anywhere, pearl's light-page tile too.
+    @Test fun yourAgentsPearlOnALightPageIsADarkGlassOfItsOwnAndOnADarkPageThePearl() {
+        fun luminance(hex: String): Double {
+            val c = hex.removePrefix("#").chunked(2).map { it.toInt(16) / 255.0 }
+            return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+        }
+        val light = Glass.pearlOn(dark = false)
+        assertTrue("its body reads on paper, with no tile: ${light.light.a}", luminance(light.light.a) < 0.3 && luminance(light.light.b) < 0.3)
+        assertTrue("its light still catches it", luminance(light.light.highlight) > luminance(light.light.a))
+        assertEquals(Glass.PEARL, Glass.pearlOn(dark = true))
+    }
+
     @Test fun itsRampsAreCores() {
         assertEquals(g["ramps"].list.map(::ramp), Glass.RAMPS)
         assertEquals(AgentMark.PALETTE.size, Glass.RAMPS.size)

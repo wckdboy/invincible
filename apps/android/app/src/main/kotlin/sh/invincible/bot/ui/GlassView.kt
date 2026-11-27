@@ -84,14 +84,14 @@ fun GuardianMark(size: Dp, description: String? = null) {
     val dark = brand.paper.luminance() < 0.5f
     val pearl = GuardianSetting.pearl(LocalContext.current).value
     val box = with(LocalDensity.current) { size.roundToPx() }
-    val picture = if (pearl) remember(size, box, dark) { GlassPictures.picture(-1, -1, size.value, box, dark) } else null
+    // (Pearl: on a dark page the pearl, glowing; on a light one the pearl inked, -2, on nothing: Glass.pearlOn.)
+    val picture = if (pearl) remember(size, box, dark) { GlassPictures.picture(-1, if (dark) -1 else -2, size.value, box, dark) } else null
     val named = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier.clearAndSetSemantics { }
     Canvas(Modifier.size(size).then(named)) {
-        val side = this.size.minDimension
-        val corner = androidx.compose.ui.geometry.CornerRadius(side * 0.28f)
         if (picture != null) {
-            // Lit as an agent's glass is: on a light page its graphite tile (so no shadow under it), on a dark one its pool.
-            if (!dark) drawRoundRect(Color(hex(Glass.PEARL_TILE)), cornerRadius = corner) else glow(Glass.PEARL, size.value, dark = true, breath = -1f)
+            // Lit as an agent's glass is: on a dark page its pool; on a light one the inked glass on nothing, no tile behind it
+            // (the owner's word, 27 November 2026: the logo is just the I-beam).
+            if (dark) glow(Glass.PEARL, size.value, dark = true, breath = -1f)
             drawImage(picture.image, Offset(-picture.origin.toFloat(), -picture.origin.toFloat()))
         } else {
             // The bare I-beam in the page's ink: the squircle round it is the launcher icon's alone (the owner's word, 27
@@ -201,11 +201,11 @@ internal object GlassPictures {
         override fun sizeOf(key: Key, value: Picture) = value.image.width * value.image.height * 4
     }
 
-    /** [shape] and [ramp] -1: the Guardian's I-beam in pearl. [box]: the avatar's side in pixels. */
+    /** [shape] and [ramp] -1: the Guardian's I-beam in pearl ([ramp] -2: in pearl inked, for a light page). [box]: the avatar's side in pixels. */
     fun picture(shape: Int, ramp: Int, sizeDp: Float, box: Int, dark: Boolean): Picture {
         val key = Key(shape, ramp, box, dark)
         kept.get(key)?.let { return it }
-        val made = draw(if (shape < 0) Glass.IBEAM else Glass.SHAPES[shape], if (ramp < 0) Glass.PEARL else Glass.RAMPS[ramp], sizeDp, max(1, box), dark)
+        val made = draw(if (shape < 0) Glass.IBEAM else Glass.SHAPES[shape], when (ramp) { -1 -> Glass.PEARL; -2 -> Glass.PEARL_INK; else -> Glass.RAMPS[ramp] }, sizeDp, max(1, box), dark)
         kept.put(key, made)
         return made
     }

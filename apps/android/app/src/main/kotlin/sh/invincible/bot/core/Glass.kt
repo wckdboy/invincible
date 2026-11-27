@@ -101,8 +101,18 @@ data class Glass(val color: Int, val shape: Int) {
         val RAMPS: List<Ramp> get() = GLASS_RAMPS
         val PEARL: Ramp get() = GLASS_PEARL
 
-        /** The Guardian's pearl, on a light page, sits on a graphite tile; on a dark one it glows on its own. */
+        /** The pearl tile core's vectors name (glass.ts' pearlTile), which this app no longer draws: see [pearlOn]. */
         const val PEARL_TILE = "#171717"
+
+        /**
+         * Your agent's pearl glass on a light page: the pearl darkened toward the page's ink, its cool light and warm accent
+         * kept, so the bare I-beam reads on paper with no tile behind it (the owner's word, 27 November 2026: the logo is
+         * just the I-beam). Android's own until core's glass.ts names one.
+         */
+        val PEARL_INK: Ramp = Ramp("pearl-ink", "Pearl, inked", light = Stops("#9aa0aa", "#454b55", "#22272f", "#6e6250", "#0b0d11"), dark = Stops("#9aa0aa", "#454b55", "#22272f", "#6e6250", "#0b0d11"))
+
+        /** The ramp your agent's pearl mark is drawn with on a page ([dark]): inked on a light one, pearl, glowing, on a dark one. */
+        fun pearlOn(dark: Boolean): Ramp = if (dark) PEARL else PEARL_INK
 
         fun state(mark: AgentMark.State): State = when (mark) {
             AgentMark.State.WORKING -> State.WORKING
