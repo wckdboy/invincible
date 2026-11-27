@@ -21,6 +21,8 @@ import { highlight } from "../../web/src/lib/highlight.ts";
 import { parseMarkdown } from "../../web/src/lib/markdown.ts";
 import { detectProvider, detectSignIn, planLine, providerSetup } from "../../web/src/lib/text.ts";
 import { desktopAddress, screenPoint, shotSource } from "../../web/src/lib/desktop.ts";
+import { againIn, chunkOf, codecOf, holdEnds, LIVE_TRIES } from "../../web/src/lib/desktop-stream.ts";
+import { bitsOf, readStrip, STRIP } from "../../../bench/desktop/glass-clock.ts";
 import { cardWords, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, seatUseWords, seatWindowWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "../../web/src/lib/seats.ts";
 import { DATA_GLYPHS, dataGlyph, GLYPH_LADDER, AGENT_SPHERE, agentArcs, orbSphere, paperShades, SPHERE_FLASH, SPHERE_TURN, sphereFrame, sphereGlyph, spherePoints, sphereShades } from "../../web/src/lib/orb-sphere.ts";
 import { ORB_TONES, orbLevel, orbPalette, orbParts, orbToneOfState } from "../../web/src/lib/orb.ts";
@@ -481,6 +483,63 @@ const desktop = {
     { shot: { mediaType: "image/jpeg", data: "/9j/4AAQ" }, width: 0, height: 800 },
   ].map((view) => ({ view, shown: shotSource(view) !== null })),
 };
+
+// ---- an agent's desktop, live (core's desktop-frames.ts, the PWA's lib/desktop-stream.ts) ------------------------------
+const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
+/** A frame as the VM's encoder writes it: a 4-byte length of what follows, a kind, an 8-byte time (ms), the payload. */
+const framed = (kind: number, time: number, payload: number[]) => {
+  const out = new Uint8Array(core.DESKTOP_FRAME_HEADER + payload.length);
+  new DataView(out.buffer).setUint32(0, 9 + payload.length);
+  out[4] = kind;
+  new DataView(out.buffer).setBigUint64(5, BigInt(time));
+  out.set(payload, core.DESKTOP_FRAME_HEADER);
+  return out;
+};
+const joined = (...parts: Uint8Array[]) => new Uint8Array(parts.flatMap((part) => [...part]));
+// A keyframe's NAL units (an access unit delimiter, the SPS, the PPS, the IDR slice), another frame's, a beat, a kind
+// no app knows: each as the stream carries it.
+const KEY_UNITS = [0, 0, 0, 1, 0x09, 0xf0, 0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x01, 0x40, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80, 0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x33];
+const DELTA_UNITS = [0, 0, 1, 0x41, 0x9a, 0x02];
+const T0 = 1_764_216_000_123;
+const streamBytes = joined(framed(1, T0, KEY_UNITS), framed(2, T0 + 100, DELTA_UNITS), core.desktopBeat(T0 + 1600), framed(7, T0 + 1700, [1, 2, 3]));
+/** The glass page's recording the apps' decoders are tested on: 30 frames, a keyframe first, each strip as drawn. */
+const GLASS = "desktop-glass.frames";
+const glassFrames = new core.DesktopFrames().push(new Uint8Array(readFileSync(join(import.meta.dir, "../InvincibleTests/Fixtures", GLASS))));
+const desktopStream = {
+  header: core.DESKTOP_FRAME_HEADER,
+  most: core.DESKTOP_FRAME_MAX,
+  type: core.DESKTOP_FRAMES_TYPE,
+  // The same bytes cut in any of these places come out as the same frames.
+  bytes: b64(streamBytes),
+  cuts: [[], [1], [3, 4, 5], [12, 13, 14], [44], [45, 46], [60, 70, 80]],
+  frames: new core.DesktopFrames().push(streamBytes).map((f) => ({ kind: f.kind, time: f.time, payload: b64(f.payload), chunk: chunkOf(f) && { type: chunkOf(f)!.type, timestamp: chunkOf(f)!.timestamp } })),
+  // What is no stream of frames: a length under the kind and the time, one past the most, text where frames should be.
+  refused: [new Uint8Array([0, 0, 0, 8, 1, 0, 0, 0, 0, 0, 0, 0]), (() => { const long = new Uint8Array(4); new DataView(long.buffer).setUint32(0, core.DESKTOP_FRAME_MAX + 1); return long; })(), new TextEncoder().encode("desktop: unknown command\n")].map((bytes) => {
+    let refused = false;
+    try {
+      new core.DesktopFrames().push(bytes);
+    } catch {
+      refused = true;
+    }
+    if (!refused) throw new Error("a refused vector was taken");
+    return b64(bytes);
+  }),
+  codecs: [KEY_UNITS, [0, 0, 1, 0x67, 0x64, 0x00, 0x28, 0xac], [0, 0, 1, 0x65, 0x88, 0x84], [0, 0, 1, 0x67, 0x42]].map((units) => ({ payload: b64(new Uint8Array(units)), codec: codecOf(new Uint8Array(units)) })),
+  holds: [{ held: { since: T0 - 30_000, idleSec: 120, mostSec: 900, endsInSec: 119.5 }, at: T0 }, { held: { since: T0, idleSec: 120, mostSec: 900, endsInSec: 0 }, at: T0 + 5 }].map((h) => ({ ...h, ends: holdEnds(h.held, h.at) })),
+  again: [1, 2, 3, 4, 5, 9].map((n) => ({ n, ms: againIn(n) })),
+  liveTries: LIVE_TRIES,
+  // The glass clock (bench/desktop/glass-clock.ts): its strip, and what each frame of the fixture shows, read back here
+  // from the bits it was drawn with (its 30 frames drew BASE + 37 ms a frame, and clicks 0 to 4 over and over).
+  glass: {
+    fixture: GLASS,
+    strip: STRIP,
+    frames: glassFrames.map((f, i) => ({ kind: f.kind, time: 1_764_216_000_000 + i * 37, clicks: i % 5 })),
+    // Each strip's blocks for one time and count, as the page draws them (1 white): the readers' own test.
+    bits: { time: T0, clicks: 3, bits: bitsOf(T0, 3) },
+  },
+};
+// (The glass reader agrees with what was drawn: the vectors' strip is the one the page draws.)
+if (readStrip((x, y) => { const i = Math.floor((x - STRIP.x) / STRIP.block); return y >= STRIP.y && y < STRIP.y + STRIP.block && i >= 0 && i < STRIP.bits ? (desktopStream.glass.bits.bits[i] ? 255 : 0) : 128; })?.time !== T0) throw new Error("the glass strip doesn't read back");
 
 // ---- an agent's face (core's taskStep, and the mood its orb takes from what it is doing) ------------------------------
 const faces = {
@@ -1793,6 +1852,7 @@ const vectors = {
   agentForms,
   keys,
   desktop,
+  desktopStream,
   faces,
   orb,
   field,

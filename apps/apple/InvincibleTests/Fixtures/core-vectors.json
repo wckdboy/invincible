@@ -4683,6 +4683,375 @@
       }
     ]
   },
+  "desktopStream": {
+    "header": 13,
+    "most": 8388608,
+    "type": "application/vnd.invincible.desktop-frames",
+    "bytes": "AAAAKQEAAAGaw3fOewAAAAEJ8AAAAAFnQsAf2gFAAAABaM48gAAAAWWIhAAzAAAADwIAAAGaw3fO3wAAAUGaAgAAAAkAAAABmsN31LsAAAAMBwAAAZrDd9UfAQID",
+    "cuts": [
+      [],
+      [
+        1
+      ],
+      [
+        3,
+        4,
+        5
+      ],
+      [
+        12,
+        13,
+        14
+      ],
+      [
+        44
+      ],
+      [
+        45,
+        46
+      ],
+      [
+        60,
+        70,
+        80
+      ]
+    ],
+    "frames": [
+      {
+        "kind": 1,
+        "time": 1764216000123,
+        "payload": "AAAAAQnwAAAAAWdCwB/aAUAAAAFozjyAAAABZYiEADM=",
+        "chunk": {
+          "type": "key",
+          "timestamp": 1764216000123000
+        }
+      },
+      {
+        "kind": 2,
+        "time": 1764216000223,
+        "payload": "AAABQZoC",
+        "chunk": {
+          "type": "delta",
+          "timestamp": 1764216000223000
+        }
+      },
+      {
+        "kind": 0,
+        "time": 1764216001723,
+        "payload": "",
+        "chunk": null
+      },
+      {
+        "kind": 7,
+        "time": 1764216001823,
+        "payload": "AQID",
+        "chunk": null
+      }
+    ],
+    "refused": [
+      "AAAACAEAAAAAAAAA",
+      "AIAAAQ==",
+      "ZGVza3RvcDogdW5rbm93biBjb21tYW5kCg=="
+    ],
+    "codecs": [
+      {
+        "payload": "AAAAAQnwAAAAAWdCwB/aAUAAAAFozjyAAAABZYiEADM=",
+        "codec": "avc1.42C01F"
+      },
+      {
+        "payload": "AAABZ2QAKKw=",
+        "codec": "avc1.640028"
+      },
+      {
+        "payload": "AAABZYiE",
+        "codec": null
+      },
+      {
+        "payload": "AAABZ0I=",
+        "codec": null
+      }
+    ],
+    "holds": [
+      {
+        "held": {
+          "since": 1764215970123,
+          "idleSec": 120,
+          "mostSec": 900,
+          "endsInSec": 119.5
+        },
+        "at": 1764216000123,
+        "ends": 1764216119623
+      },
+      {
+        "held": {
+          "since": 1764216000123,
+          "idleSec": 120,
+          "mostSec": 900,
+          "endsInSec": 0
+        },
+        "at": 1764216000128,
+        "ends": 1764216000128
+      }
+    ],
+    "again": [
+      {
+        "n": 1,
+        "ms": 500
+      },
+      {
+        "n": 2,
+        "ms": 1000
+      },
+      {
+        "n": 3,
+        "ms": 2000
+      },
+      {
+        "n": 4,
+        "ms": 4000
+      },
+      {
+        "n": 5,
+        "ms": 5000
+      },
+      {
+        "n": 9,
+        "ms": 5000
+      }
+    ],
+    "liveTries": 4,
+    "glass": {
+      "fixture": "desktop-glass.frames",
+      "strip": {
+        "x": 32,
+        "y": 24,
+        "block": 18,
+        "bits": 64
+      },
+      "frames": [
+        {
+          "kind": 1,
+          "time": 1764216000000,
+          "clicks": 0
+        },
+        {
+          "kind": 2,
+          "time": 1764216000037,
+          "clicks": 1
+        },
+        {
+          "kind": 2,
+          "time": 1764216000074,
+          "clicks": 2
+        },
+        {
+          "kind": 2,
+          "time": 1764216000111,
+          "clicks": 3
+        },
+        {
+          "kind": 2,
+          "time": 1764216000148,
+          "clicks": 4
+        },
+        {
+          "kind": 2,
+          "time": 1764216000185,
+          "clicks": 0
+        },
+        {
+          "kind": 2,
+          "time": 1764216000222,
+          "clicks": 1
+        },
+        {
+          "kind": 2,
+          "time": 1764216000259,
+          "clicks": 2
+        },
+        {
+          "kind": 2,
+          "time": 1764216000296,
+          "clicks": 3
+        },
+        {
+          "kind": 2,
+          "time": 1764216000333,
+          "clicks": 4
+        },
+        {
+          "kind": 2,
+          "time": 1764216000370,
+          "clicks": 0
+        },
+        {
+          "kind": 2,
+          "time": 1764216000407,
+          "clicks": 1
+        },
+        {
+          "kind": 2,
+          "time": 1764216000444,
+          "clicks": 2
+        },
+        {
+          "kind": 2,
+          "time": 1764216000481,
+          "clicks": 3
+        },
+        {
+          "kind": 2,
+          "time": 1764216000518,
+          "clicks": 4
+        },
+        {
+          "kind": 2,
+          "time": 1764216000555,
+          "clicks": 0
+        },
+        {
+          "kind": 2,
+          "time": 1764216000592,
+          "clicks": 1
+        },
+        {
+          "kind": 2,
+          "time": 1764216000629,
+          "clicks": 2
+        },
+        {
+          "kind": 2,
+          "time": 1764216000666,
+          "clicks": 3
+        },
+        {
+          "kind": 2,
+          "time": 1764216000703,
+          "clicks": 4
+        },
+        {
+          "kind": 2,
+          "time": 1764216000740,
+          "clicks": 0
+        },
+        {
+          "kind": 2,
+          "time": 1764216000777,
+          "clicks": 1
+        },
+        {
+          "kind": 2,
+          "time": 1764216000814,
+          "clicks": 2
+        },
+        {
+          "kind": 2,
+          "time": 1764216000851,
+          "clicks": 3
+        },
+        {
+          "kind": 2,
+          "time": 1764216000888,
+          "clicks": 4
+        },
+        {
+          "kind": 2,
+          "time": 1764216000925,
+          "clicks": 0
+        },
+        {
+          "kind": 2,
+          "time": 1764216000962,
+          "clicks": 1
+        },
+        {
+          "kind": 2,
+          "time": 1764216000999,
+          "clicks": 2
+        },
+        {
+          "kind": 2,
+          "time": 1764216001036,
+          "clicks": 3
+        },
+        {
+          "kind": 2,
+          "time": 1764216001073,
+          "clicks": 4
+        }
+      ],
+      "bits": {
+        "time": 1764216000123,
+        "clicks": 3,
+        "bits": [
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    }
+  },
   "faces": {
     "steps": [
       {
