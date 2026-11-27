@@ -100,7 +100,11 @@ C1 step 10. An agent whose desktop isn't used costs what an agent without one do
   stop, nothing of it left running and the guest's memory back, within 50 MB; started again to its first page within
   2 s, the agent told; started and idle at most +600 MB. What the host gets back of the memory the guest frees is
   measured beside them, and not held: QEMU keeps the pages a guest frees unless the guest reports them to it
-  (free-page reporting, a setting of Kata's).
+  (free-page reporting, a setting of Kata's). The +602 MB the host still held after an idle stop (Ultra, 27 November
+  2026) is as measured. Free-page reporting is untested: Kata (4.3.1) takes a configuration only by its shipped names,
+  so no scratch one could turn it on beside the node's. The way to it, where a smaller host makes those megabytes
+  matter: `reclaim_guest_freed_memory = true` in the node's own config, by a reviewed change to what the deploy writes
+  (`scripts/remote-setup.sh`), measured after that deploy, with the deploy as the rollback.
 
 ## The hardware tools
 

@@ -13,9 +13,9 @@ COPY backports.sources /etc/apt/sources.list.d/backports.sources
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad=9.0.8+dfsg-1~bpo13+1 freecad \
  && rm -rf /var/lib/apt/lists/* \
- && kicad-cli version | grep -qx '9\.0\.8' \
+ && HOME=/tmp/kicad-check kicad-cli version | grep -qx '9\.0\.8' \
  && HOME=/tmp/freecad-check freecadcmd --version | grep -q 'FreeCAD 1\.0\.0' \
- && rm -rf /tmp/freecad-check
+ && rm -rf /tmp/kicad-check /tmp/freecad-check
 
 # KiCad's API client (kipy, kicad-python on PyPI), pinned (requirements.txt says why 0.6.0), for board edits on a running
 # pcbnew: in a venv of its own that sees Debian's packages, pcbnew's own Python module among them (the SWIG one, in the
@@ -23,7 +23,8 @@ RUN apt-get update \
 COPY requirements.txt /opt/hardware/requirements.txt
 RUN python3 -m venv --system-site-packages /opt/hardware \
  && /opt/hardware/bin/pip install --no-cache-dir --disable-pip-version-check -r /opt/hardware/requirements.txt \
- && /opt/hardware/bin/python -c "import kipy, pcbnew" \
+ && HOME=/tmp/kipy-check /opt/hardware/bin/python -c "import kipy, pcbnew" \
+ && rm -rf /tmp/kipy-check \
  && chmod -R a+rX /opt/hardware
 # On the PATH of an agent's commands, which run in login shells, first: their python3 is the venv's. deskd, and what it
 # starts, keep Debian's own (hardware-path.sh says why).
@@ -31,14 +32,19 @@ COPY hardware-path.sh /etc/profile.d/invincible-hardware.sh
 RUN chmod 0644 /etc/profile.d/invincible-hardware.sh
 
 # What stopped their windows in C0, seeded into the agent's own settings as its VM starts, where they aren't there yet
-# (hardware-seed): its home is /work, a volume of its own, which no image can fill. KiCad's global footprint and symbol
-# library tables (empty: no library is installed), no first-run question, and its API server on, for kipy; FreeCAD
-# with no first-start question. What the agent changes after is its own.
+# (hardware-seed): its home is /work, a volume of its own, kept for good, which an image fills only as it is made.
+# KiCad's global footprint and symbol library tables (empty: no library is installed), no first-run question, and its
+# API server on, for kipy; FreeCAD with no first-start question. What the agent changes after is its own.
 COPY seed/ /usr/share/invincible/hardware/
 COPY hardware-seed /usr/local/bin/hardware-seed
 RUN chmod 0755 /usr/local/bin/hardware-seed && chmod -R a+rX /usr/share/invincible/hardware \
  && HOME=/tmp/seed-check /usr/local/bin/hardware-seed true \
  && test -s /tmp/seed-check/.config/kicad/9.0/fp-lib-table && rm -rf /tmp/seed-check
+
+# Nothing in /work: Docker fills each agent's new home from what the image has there, so whatever a step above left in
+# it, in root's name, would be in every agent's home, where it can't write. (KiCad's check once left its settings'
+# folders there: FreeCAD couldn't make its own and never started.) hardware.test.ts holds this.
+RUN test -z "$(ls -A /work)"
 
 USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/hardware-seed"]

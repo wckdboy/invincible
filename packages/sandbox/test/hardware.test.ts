@@ -46,6 +46,16 @@ describe("the hardware image", () => {
     expect(dockerfile).toContain("HOME=/tmp/seed-check /usr/local/bin/hardware-seed true");
   });
 
+  test("leaves /work empty, as Docker fills each agent's new home from it: what its checks start writes in a home of its own, and the build checks nothing is left", () => {
+    // (KiCad's check, run as root in /work, once left its settings' folders, root's, in every agent's new home: FreeCAD
+    // couldn't make its own there and never started, and the seed couldn't put KiCad's.)
+    const runs = dockerfile.replace(/\\\n/g, " ").split("\n").filter((line) => line.startsWith("RUN ")).map((line) => line.slice(4));
+    const started = runs.flatMap((r) => r.split("&&").map((step) => step.trim())).filter((step) => /\b(kicad-cli|freecadcmd|pcbnew|hardware-seed true)\b/.test(step));
+    expect(started).toHaveLength(4);
+    for (const step of started) expect(step).toMatch(/^HOME=\/tmp\/[a-z-]+ /);
+    expect(runs.at(-1)).toBe('test -z "$(ls -A /work)"');
+  });
+
   test("seeds KiCad with its library tables (none installed, so empty), its first run done, and its API server on, for kipy", () => {
     expect(readFileSync(join(seeds, "fp-lib-table"), "utf8")).toBe("(fp_lib_table\n  (version 7)\n)\n");
     expect(readFileSync(join(seeds, "sym-lib-table"), "utf8")).toBe("(sym_lib_table\n  (version 7)\n)\n");
