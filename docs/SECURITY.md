@@ -129,10 +129,12 @@ The review also confirmed what held up:
     canonical points of the prime-order subgroup, neither the identity, S < L, and the equation holds. noble's default
     (ZIP-215) took a small-order key, among them the identity, with which a signature verifies for any message: a node
     id that is such a point "proved" itself for any challenge. Under the rule it proves nothing.
-  - **No such key is enrolled, from today:** pairing, enrollment and a fleet's founding refuse any node key that fails
-    the rule (`isStrictNodeId`: `pairing-host.ts`, `enrollDevice`, `foundFleet`), so the forgery has no way in. The
-    tests: `packages/core/test/core.test.ts` ("Ed25519's strict rule"), `packages/ledger/test/strict-keys.test.ts` and
-    `packages/link/test/pairing-host.test.ts`.
+  - **No such key is enrolled by an upgraded node, from today:** its pairing, enrollment and a fleet's founding refuse
+    any node key that fails the rule (`isStrictNodeId`: `pairing-host.ts`, `enrollDevice`, `foundFleet`). A node of the
+    fleet not yet upgraded still may, and its enrollment reaches the others by sync: from the cutoff the log refuses that
+    enrollment at apply, by its own HLC, on every replica alike (`store.ts`, "its key fails Ed25519's strict rule"); one
+    stamped before still counts (below). The tests: `packages/core/test/core.test.ts` ("Ed25519's strict rule"),
+    `packages/ledger/test/strict-keys.test.ts` and `packages/link/test/pairing-host.test.ts`.
   - **The log and link calls, from 14 December 2026** (`SIGNATURES_STRICT_FROM`): a log event stamped at or after it
     (its own HLC), and a link call made at or after it (its own time), are held to the rule (`verifyDeviceSignature`'s
     `at`: `parseEvent`, `verifyRequestSignature`). Before it, as they always were, so what a log holds from before is
@@ -140,9 +142,10 @@ The review also confirmed what held up:
     replica keeps the same log in any order and a rebuild gives the same state: a weak key's forgery stamped before the
     cutoff is kept as it always was, one stamped after is refused (`strict-keys.test.ts`, "the log, from the cutoff").
     What an honest node signs always holds the rule. **Residual:** an event may claim an HLC before the cutoff, so the
-    rule binds a forgery only by when it says it was made; no key that fails the rule is enrolled from today, so none
-    can sign an event that counts, but a log that enrolled such a key before today (or an older node that enrolls one
-    after) keeps taking its events stamped before the cutoff. Fabric's transport claims and statements and Q-AMP's
+    rule binds a forgery only by when it says it was made. A key that fails the rule and was enrolled before the cutoff
+    (by any node before today, or by an older node since) stays enrolled, and its events stamped before the cutoff still
+    count: anyone can forge those for it. Only a node of the fleet can enroll a key, and only with your approval of its
+    pairing. Fabric's transport claims and statements and Q-AMP's
     envelopes (`fabric.ts`, `qdt.ts`) are held as they always were.
   - **The apps check the proof under the same rule, and answer alike:** the parity vectors hold RFC 8032's test vectors
     and all 210 of Wycheproof's, each with core's answer (`apps/apple/scripts/vectors.ts`), and core, Swift and Kotlin

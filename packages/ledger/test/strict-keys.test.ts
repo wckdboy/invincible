@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { b64u, encodeHlc, eventId, type GEvent, HlcClock, newNodeIdentity, type NodeIdentity, OWNER_SCOPES, SIGNATURES_STRICT_FROM, type UnsignedEvent } from "@invincible/core";
+import { b64u, encodeHlc, eventId, type GEvent, HlcClock, newNodeIdentity, type NodeIdentity, OWNER_SCOPES, signEvent, SIGNATURES_STRICT_FROM, type UnsignedEvent } from "@invincible/core";
 import { enrollDevice, foundFleet, LedgerStore } from "../src/index.ts";
 
 /*
@@ -90,4 +90,43 @@ describe("the log, from the cutoff", () => {
       expect(store.digest()).toBe([...digests][0]!);
     }
   });
+
+  // The review of apps-name-node, M1: an older node of the fleet still enrolls a weak key (only an upgraded node's
+  // enrollDevice refuses it), and every upgraded node took that enrollment by sync. From the cutoff, by the enrollment's
+  // own HLC, the log refuses it at apply as enrollDevice does; one stamped before is kept as ever.
+  test("an older node's enrollment of a weak key stamped from the cutoff is refused on every replica in any order, one stamped before kept; a rebuild keeps the state", () => {
+    const before = SIGNATURES_STRICT_FROM - 3_600_000;
+    const founder = newNodeIdentity();
+    const origin = new LedgerStore(":memory:", new HlcClock(() => before));
+    const fleet = foundFleet(origin, founder, { fleetName: "homelab", nodeName: "older" });
+    // The point of order 2: as weak a key as the identity, written another way.
+    const order2 = Uint8Array.from("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f".match(/../g)!, (b) => parseInt(b, 16));
+    const weakAfter = `n_${b64u(order2)}`;
+    const box = b64u(new Uint8Array(32).fill(9));
+    // What the older node signs, as its enrollDevice wrote it: once before the cutoff, once after.
+    const enroll = (ms: number, device: string, prev: string): GEvent =>
+      signEvent({ v: 2, fleet, hlc: encodeHlc({ ms, counter: 0 }), device: founder.id, prev, kind: "device.enrolled", body: { device, name: device.slice(2, 8), kind: "node", role: "full", box, scopes: OWNER_SCOPES } }, founder);
+    const early = enroll(before + 60_000, WEAK, origin.head(founder.id)!);
+    const late = enroll(SIGNATURES_STRICT_FROM, weakAfter, early.id); // (the cutoff itself is after it)
+    const all = [...origin.eventsSince({}, 1000).events, early, late];
+    const replica = (events: GEvent[]) => {
+      const store = new LedgerStore(":memory:", new HlcClock(() => SIGNATURES_STRICT_FROM + 86_400_000));
+      store.expectFleet(fleet);
+      for (const event of events) store.ingest([event]);
+      return store;
+    };
+    const replicas = [all, [...all].reverse(), [late, early, ...all.slice(0, -2)], [early, ...all.slice(0, -2).reverse(), late]].map(replica);
+    for (const store of replicas) {
+      expect(store.activeDevice(WEAK)?.kind).toBe("node");
+      expect(store.activeDevice(weakAfter)).toBeFalsy();
+      expect(store.rejection(late.id)).toBe("its key fails Ed25519's strict rule");
+    }
+    const digests = new Set(replicas.map((store) => store.digest()));
+    expect(digests.size).toBe(1);
+    for (const store of replicas) {
+      store.rebuild();
+      expect(store.digest()).toBe([...digests][0]!);
+    }
+  });
 });
+

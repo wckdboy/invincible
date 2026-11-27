@@ -30,8 +30,9 @@ export interface EnrollInput {
 
 /** Enroll a paired device; full nodes also receive every vault key in use. */
 export function enrollDevice(store: LedgerStore, approver: NodeIdentity, input: EnrollInput): void {
-  // No node, nor any device with a node's id, whose key fails the strict rule is enrolled (the lead's word of 27
-  // November 2026): from today, as what is enrolled; from the cutoff, the log holds every signature to it as well.
+  // No node, nor any device with a node's id, whose key fails the strict rule is enrolled here (the lead's word of 27
+  // November 2026), from today. From the cutoff the log holds it too, by each event's own HLC: an enrollment of such a
+  // key, an older node's, is refused at apply (store.ts), and a signature by one is refused (events.ts parseEvent).
   if ((input.kind === "node" || isNodeId(input.device)) && !isStrictNodeId(input.device)) throw new Error(`${input.device.slice(0, 10)}… isn't enrolled: its key fails Ed25519's strict rule`);
   store.emit(approver, "device.enrolled", {
     device: input.device,

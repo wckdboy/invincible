@@ -15,6 +15,7 @@ import {
   isKnownKind,
   isMcpTool,
   isNodeId,
+  isStrictNodeId,
   type Json,
   orderCovers,
   ownApprovalInLog,
@@ -29,6 +30,7 @@ import {
   SetHash,
   sha256B64u,
   signEvent,
+  SIGNATURES_STRICT_FROM,
   toolDigest,
   evalProblem,
   type NodeIdentity,
@@ -799,6 +801,10 @@ export class LedgerStore {
       if (!bootstrap && !isFullNode(signer)) return "only an active full node may enroll devices";
       if (this.device(body.device)) return "device already enrolled";
       if (body.kind === "node" && (!isNodeId(body.device) || !body.box)) return "nodes need an ed25519 id and a box key";
+      // From the cutoff, by the enrollment's own HLC, no node key that fails Ed25519's strict rule is enrolled through the
+      // log either, as enrollDevice enrolls none: an older node's enrollment of one is refused here alike on every replica
+      // (the review of apps-name-node, M1). One stamped before is applied as it always was.
+      if (isNodeId(body.device) && !isStrictNodeId(body.device) && decodeHlc(event.hlc).ms >= SIGNATURES_STRICT_FROM) return "its key fails Ed25519's strict rule";
       if (body.kind === "client" && body.role !== "client") return "clients must have the client role";
       this.db
         .query(
