@@ -51,6 +51,7 @@ and exits non-zero when something got worse.
 | notify | a seeded week of asks and news on two devices: are asks answered in time, and how often does it buzz? |
 | web | the PWA's places on a laptop and a phone: how far what's on screen moves once it is there |
 | desktop | an agent's desktop in a Kata microVM, as the node makes one (below) |
+| hardware | the hardware image: KiCad and FreeCAD in an agent's Kata microVM, by script and through the screen (below) |
 
 ### desktop: an agent's desktop, fast and stable
 
@@ -120,3 +121,25 @@ everything but the model.
   screen is still. Light by default is held to: a desktop never started at most 50 MB over none; grown within a second,
   its work as it was; started and idle at most 600 MB over; once stopped, nothing of it still running and at most
   50 MB of the guest's memory kept; and started again within 2 s, its page read and the agent told, every time.
+
+### hardware: KiCad and FreeCAD on an agent's desktop
+
+The hardware image (C1 step 11, `sandbox/hardware`): the desktop image with Debian trixie's KiCad 9.0.2 and FreeCAD
+1.0.0, and kipy, made as the node makes an agent's VM given the hardware tools, on a sandbox host alone, as the desktop
+suite is (Docker with Kata, the bench's own names, its VM removed whatever happens; elsewhere skipped, and said to be).
+It builds the image from this checkout on the bench's desktop image, and works C0's two examples on it
+(`bench/desktop/hardware.ts`, its scripts in `bench/desktop/kit/hw`), five runs each, every step one command through the
+agent's own path, each to a gate that reads what was made, never the screen:
+
+- **By script, as the agent's briefing tells it:**
+  - the board's Gerbers by `kicad-cli pcb export gerbers`, both copper layers and the outline there after;
+  - its DRC by `kicad-cli pcb drc --format json --exit-code-violations`, its report read and its exit code agreeing;
+  - an edit through KiCad's API (kipy) on the board open in its editor: every track to a width of its own, saved, read
+    back from the file by KiCad's own Python module;
+  - the part by `freecadcmd` (a block with a hole), exported as STEP and read back, its volume right.
+- **Through the screen, where a person would** (the careful policy; the apps started with `desktop app`, their targets
+  from the accessibility tree with `desktop find`): KiCad's Plot (File, Plot..., Plot), its Gerbers there after; and
+  FreeCAD's STEP export (Model, Block, Export, the STEP filter, a name), read back. Each run's commands are counted.
+- **Held:** by script, each within a second and through its gate every time; through the screen, every time, KiCad's
+  Plot within 10 s and FreeCAD's STEP export within 20 s (C0 measured 6.3 to 6.8 s and 13.8 to 17.7 s); the image at
+  most 6 GB (C0's: 5.53).

@@ -107,11 +107,11 @@ export class BenchVm {
     return this.bench.names.container(this.view.id);
   }
 
-  /** A VM as the node makes an agent's: kept (persistent), a microVM, no network; the desktop image or the workshop. */
-  static async make(b: Bench, opts: { desktop: boolean; cpus?: number; memoryGb?: number; seed: number }): Promise<{ vm: BenchVm; ms: number }> {
+  /** A VM as the node makes an agent's: kept (persistent), a microVM, no network; the desktop image (with the hardware tools, where asked) or the workshop. */
+  static async make(b: Bench, opts: { desktop: boolean; hardware?: boolean; cpus?: number; memoryGb?: number; seed: number }): Promise<{ vm: BenchVm; ms: number }> {
     const run = `arm.team.${hex(rng(subSeed(opts.seed, `${Date.now()}`)), 10)}.bench`;
     const t0 = performance.now();
-    const view = await b.host.create({ network: "isolated", isolation: "vm", desktop: opts.desktop, cpus: opts.cpus ?? 1, memoryGb: opts.memoryGb ?? 4, ttlMinutes: 240, persistent: true, run });
+    const view = await b.host.create({ network: "isolated", isolation: "vm", desktop: opts.desktop, ...(opts.hardware ? { hardware: true } : {}), cpus: opts.cpus ?? 1, memoryGb: opts.memoryGb ?? 4, ttlMinutes: 240, persistent: true, run });
     return { vm: new BenchVm(b, view, run), ms: performance.now() - t0 };
   }
 

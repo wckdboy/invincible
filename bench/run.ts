@@ -22,8 +22,9 @@ const SUITES: Record<string, () => Promise<{ suite: Suite }>> = {
   notify: () => import("./suites/notify.ts"),
   seats: () => import("./suites/seats.ts"),
   web: () => import("./suites/web.ts"),
-  // Needs Docker with Kata microVMs (a sandbox host): skipped, and said to be, anywhere else.
+  // Need Docker with Kata microVMs (a sandbox host): skipped, and said to be, anywhere else.
   desktop: () => import("./suites/desktop.ts"),
+  hardware: () => import("./suites/hardware.ts"),
 };
 
 const USAGE = `bun run bench [suite…] [--full] [--json] [--all] [--ci] [--seed n] [--update-baseline]
