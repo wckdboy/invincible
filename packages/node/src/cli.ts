@@ -7,7 +7,7 @@ import { type ArtifactView, type AwayView, b64u, type LookView, type ChatStreamE
 import { onPlan, planOf, sseData } from "@invincible/models";
 import { requestPairing, signedPost, type SyncPage, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
-import { artifactTarget } from "./artifacts.ts";
+import { artifactTarget, leftOutNames } from "./artifacts.ts";
 import { servedOrigin, tailscaleInfo } from "./capabilities.ts";
 import { startDaemon } from "./daemon.ts";
 import { activeDevicesMatching } from "./devices.ts";
@@ -1814,7 +1814,7 @@ Evidence: invincible artifact ${i!.artifact}`));
       }
       if (sub === "save") {
         if (!rest[0]) fail("usage: invincible sandbox save <id> [/work/dir] [--label text]");
-        const { artifact } = await admin.call("saveArtifact", {
+        const { artifact, skipped } = await admin.call("saveArtifact", {
           sandbox: rest[0],
           ...(rest[1] ? { path: rest[1] } : {}),
           ...(str("label") ? { label: str("label") } : {}),
@@ -1822,6 +1822,8 @@ Evidence: invincible artifact ${i!.artifact}`));
         });
         if (!artifact) console.log(`Nothing to keep in ${rest[1] ?? "/work/out"}.`);
         else console.log(`Kept ${artifact.count} file(s), ${Math.max(1, Math.round(artifact.bytes / 1024))} KB: invincible artifact ${artifact.id}`);
+        // What the folder left out, named as its ledger line names it: never in silence, kept or not.
+        if (skipped) console.log(`Left out ${skipped.count}: ${leftOutNames(skipped)}`);
         return;
       }
       if (sub === "rm") {

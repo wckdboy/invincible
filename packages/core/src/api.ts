@@ -2063,6 +2063,15 @@ export interface ArtifactView {
   here: boolean;
 }
 
+/**
+ * What a folder kept left out (saveArtifact's answer, never stored): how many, and as many of them named, each with why,
+ * as the ledger's line for it names. The walk names what it couldn't read; the extractor, what it refused.
+ */
+export interface ArtifactSkipped {
+  count: number;
+  named: { path: string; reason: string }[];
+}
+
 export interface OrderView {
   id: string;
   label: string;

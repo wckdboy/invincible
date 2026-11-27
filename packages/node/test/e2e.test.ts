@@ -487,7 +487,7 @@ describe("M0: one mind, two bodies", () => {
         };
       },
       { sandbox: "0123456789", label: "server work" },
-    ))!;
+    )).artifact!;
     await until(() => laptop.store.lww(`artifact:${kept.id}`) !== null);
     const fetchFile = (token: string, path: string) =>
       fetch(`http://127.0.0.1:${portA}${routes.artifactFile.path}`, {

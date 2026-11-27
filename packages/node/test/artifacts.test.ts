@@ -58,7 +58,7 @@ describe("keeping a sandbox's work", () => {
   const artifacts = new ArtifactStore({ store, identity, dir: temp(), ledger: (e) => ledger.push(e) });
 
   test("files are kept with their hashes, and the mind records what they are", async () => {
-    const kept = await artifacts.save(collector({ "report.md": "# Beam\nδ = 1.67 mm\n", "plots/mode1.png": "PNG…", "data/u.csv": "x,u\n0,0\n" }), {
+    const { artifact: kept } = await artifacts.save(collector({ "report.md": "# Beam\nδ = 1.67 mm\n", "plots/mode1.png": "PNG…", "data/u.csv": "x,u\n0,0\n" }), {
       sandbox: "0123456789",
       label: "Cantilever check",
       run: "q-1",
@@ -92,12 +92,12 @@ describe("keeping a sandbox's work", () => {
 
   test("nothing in /work/out: nothing kept, nothing recorded", async () => {
     const before = artifacts.list().length;
-    expect(await artifacts.save(collector({}), { sandbox: "0123456789" })).toBeNull();
+    expect(await artifacts.save(collector({}), { sandbox: "0123456789" })).toEqual({ artifact: null });
     expect(artifacts.list()).toHaveLength(before);
   });
 
   test("only files the manifest lists are ever served: no other path is opened", async () => {
-    const kept = (await artifacts.save(collector({ "a.txt": "a" }), { sandbox: "0123456789" }))!;
+    const kept = (await artifacts.save(collector({ "a.txt": "a" }), { sandbox: "0123456789" })).artifact!;
     for (const path of ["../manifest.json", "../../a.txt", "/etc/passwd", "a.txt/..", "b.txt"]) {
       expect(() => artifacts.read(kept.id, path)).toThrow(/no such file/);
     }
@@ -113,7 +113,7 @@ describe("keeping a sandbox's work", () => {
   });
 
   test("removing deletes the files and records it; only the node holding them may record that", async () => {
-    const kept = (await artifacts.save(collector({ "x.txt": "x" }), { sandbox: "0123456789" }))!;
+    const kept = (await artifacts.save(collector({ "x.txt": "x" }), { sandbox: "0123456789" })).artifact!;
     const other = newNodeIdentity();
     enrollDevice(store, identity, { device: other.id, name: "laptop", kind: "node", box: b64u(other.boxPublic) });
     expect(() => store.emit(other, "artifact.removed", { id: kept.id })).toThrow(/only the node holding/);
@@ -164,7 +164,7 @@ describe("artifacts over the API", () => {
     kept = (await daemon.artifacts.save(collector({ "report.md": "# Result\n", "page.html": "<script>alert(1)</script>", "part.stl": "solid x" }), {
       sandbox: "0123456789",
       label: "API test",
-    }))!;
+    })).artifact!;
   });
   afterAll(async () => {
     await daemon?.stop();

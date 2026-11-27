@@ -711,7 +711,7 @@ try {
   // Noa's task kept what it changed: a real artifact on this node (its patch), named on the task as the runner names it
   // when a repository's changes are kept. (The stand-in Docker has no repository to diff.)
   const patch = "diff --git a/src/importer.ts b/src/importer.ts\n--- a/src/importer.ts\n+++ b/src/importer.ts\n@@ -12,3 +12,6 @@\n-  const [d, m, y] = text.split(\"/\");\n+  if (/^\\d{4}-\\d{2}-\\d{2}/.test(text)) return new Date(text);\n+  const [d, m, y] = text.split(\"/\");\n";
-  const artifact = await started.artifacts.save(async (_sandbox: string, _from: string, dest: string) => {
+  const { artifact } = await started.artifacts.save(async (_sandbox: string, _from: string, dest: string) => {
     writeFileSync(join(dest, "changes.patch"), patch);
     return { files: [{ path: "changes.patch", size: patch.length, sha256: new Bun.CryptoHasher("sha256").update(patch).digest("hex") }], bytes: patch.length, skipped: [] };
   }, { sandbox: (await admin("team")).agents.find((agent: { id: string }) => agent.id === "noa").workspace.id, path: `/work/out/tasks/${kept.id}`, label: `${kept.title} · noa · verified` });

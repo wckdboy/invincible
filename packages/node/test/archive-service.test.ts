@@ -122,7 +122,7 @@ async function keepArtifact(w: World, files: Record<string, string | Uint8Array>
       return out;
     },
     { sandbox: "0123456789", label: opts.label, ...(opts.run ? { run: opts.run } : {}) },
-  ))!;
+  )).artifact!;
 }
 
 function keptChat(w: World, title: string, exchanges: [string, string][], opts: { tools?: string[] } = {}) {

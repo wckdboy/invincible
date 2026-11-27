@@ -4056,13 +4056,13 @@ export function createApp(ctx: AppContext) {
           // An arm (or a loop's run) keeps only its own sandboxes' work.
           if (run && sandbox.run !== run) throw new HttpError(403, "that sandbox belongs to another run");
           try {
-            const artifact = await ctx.artifacts.save((id, from, dest, limits) => ctx.sandbox!.collect(id, from, dest, limits), {
+            // The artifact, and what the folder left out when it left anything out (named as its ledger line names them).
+            return await ctx.artifacts.save((id, from, dest, limits) => ctx.sandbox!.collect(id, from, dest, limits), {
               sandbox: rest.sandbox,
               ...(rest.path ? { path: rest.path } : {}),
               ...(rest.label ? { label: rest.label } : {}),
               run: sandbox.run,
             });
-            return { artifact };
           } catch (error) {
             if (error instanceof ArtifactError) throw new HttpError(error.status, error.message);
             throw error;

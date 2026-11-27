@@ -9,6 +9,7 @@ import {
   type ArchiveSearchView,
   ArchiveSource,
   ArchiveTag,
+  type ArtifactSkipped,
   type ArtifactView,
   type ComputeView,
   type ConnectorRequestView,
@@ -51,6 +52,7 @@ import {
   type Agent,
 } from "@invincible/core";
 import { z } from "zod";
+import { leftOutNames } from "./artifacts.ts";
 import { describeOrder, describeTask } from "./loop-cli.ts";
 
 /*
@@ -613,9 +615,11 @@ export const TOOLS: PrimaryTool[] = [
     routes: ["saveArtifact"],
     flow: "record",
     async run(api, { id, path, label, on }) {
-      const { artifact } = await api.call<{ artifact: ArtifactView | null }>("saveArtifact", { sandbox: id, ...(path ? { path } : {}), ...(label ? { label } : {}), ...(on ? { on } : {}) });
-      if (!artifact) return `Nothing to keep in ${path ?? "/work/out"}.`;
-      return `Kept as ${artifact.id}: ${artifact.count} file(s), ${artifact.bytes} bytes.\n${artifact.files.slice(0, 20).map((f) => `  - ${f.path}`).join("\n")}`;
+      const { artifact, skipped } = await api.call<{ artifact: ArtifactView | null; skipped?: ArtifactSkipped }>("saveArtifact", { sandbox: id, ...(path ? { path } : {}), ...(label ? { label } : {}), ...(on ? { on } : {}) });
+      // What the folder left out, named as its ledger line names it: never in silence, kept or not.
+      const left = skipped ? `\nLeft out ${skipped.count}: ${leftOutNames(skipped)}` : "";
+      if (!artifact) return `Nothing to keep in ${path ?? "/work/out"}.${left}`;
+      return `Kept as ${artifact.id}: ${artifact.count} file(s), ${artifact.bytes} bytes.\n${artifact.files.slice(0, 20).map((f) => `  - ${f.path}`).join("\n")}${left}`;
     },
   }),
 

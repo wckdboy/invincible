@@ -339,7 +339,7 @@ describe("the gate, end to end", () => {
       }
       return out;
     };
-    artifact = (await daemon.artifacts.save(collector, { sandbox: "0123456789", label: "units" }))!.id;
+    artifact = (await daemon.artifacts.save(collector, { sandbox: "0123456789", label: "units" })).artifact!.id;
   });
   afterAll(async () => {
     await daemon?.stop();
