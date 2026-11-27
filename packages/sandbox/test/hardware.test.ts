@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,11 @@ import { DESKTOP_IMAGE, HARDWARE_IMAGE, OWN_IMAGES } from "../src/index.ts";
  * is made of, and its seed (hardware-seed), run as the VM runs it as it starts: KiCad's and FreeCAD's settings put in
  * the agent's own home where they aren't there yet. The image itself is built on a sandbox host, not here.
  */
+
+// The seed's tests run it as the VM does, a shell script of some twenty processes, so its time is the machine's to give:
+// three of them ran past bun's default 5 s in a full run at a load of 136 on 12 cores (27 November 2026), and pass alone.
+// The limit is how long a busy machine may take, never what a test checks.
+setDefaultTimeout(20_000);
 
 const context = new URL("../../../sandbox/hardware/", import.meta.url);
 const dockerfile = readFileSync(new URL("Dockerfile", context), "utf8");
