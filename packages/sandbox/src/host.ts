@@ -58,7 +58,7 @@ import {
   terminalArgs,
   volumeName,
 } from "./spec.ts";
-import { COLLECT_MISSING, COLLECT_REFUSED } from "./walk.ts";
+import { COLLECT_MISSING, COLLECT_REFUSED, collectSkipped } from "./walk.ts";
 import { type ExtractLimits, type ExtractResult, extractTar } from "./tar.ts";
 import { budgetProblem, DEFAULT_DISK_GB, type Workspaces, type WorkspaceStats } from "./workspaces.ts";
 
@@ -871,7 +871,8 @@ export class SandboxHost {
         if (code === COLLECT_REFUSED) throw new SandboxError(`${path} isn't kept: it is outside the workspace, or what the agent's tools keep for themselves`, 403);
         throw new SandboxError(`could not copy ${path}: ${redact(err.trim()).slice(0, 300)}`, 500);
       }
-      return result;
+      // What the VM couldn't read, named with why (collectSkipped): in the artifact's skipped list, never left out in silence.
+      return { ...result, skipped: [...result.skipped, ...collectSkipped(err)] };
     } finally {
       clearTimeout(timer);
     }

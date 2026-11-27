@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectCommand, COLLECT_MISSING, COLLECT_REFUSED, extractTar } from "../src/index.ts";
+import { collectCommand, collectSkipped, COLLECT_MISSING, COLLECT_REFUSED, extractTar } from "../src/index.ts";
 
 /*
  * A folder of a VM's /work kept as an artifact (SandboxHost.collect, 27 November 2026): the VM writes its tar by the walk
@@ -44,14 +44,19 @@ function workspace() {
   return { work, outside };
 }
 
-/** A folder collected as the VM collects it, with its HOME as given, into the extractor: its exit, and what was kept. */
-async function collect(path: string, work: string, home: string) {
-  const proc = Bun.spawn(collectCommand(path, work), { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
+/**
+ * A folder collected as the VM collects it, with its HOME as given (and, as a VM's limit may be, `fds` open files at
+ * most), into the extractor: its exit, what was kept, and what was skipped, the extractor's and the script's own.
+ */
+async function collect(path: string, work: string, home: string, opts: { fds?: number; maxFiles?: number } = {}) {
+  const command = collectCommand(path, work);
+  const argv = opts.fds ? ["sh", "-c", `ulimit -n ${opts.fds} && exec "$@"`, "sh", ...command] : command;
+  const proc = Bun.spawn(argv, { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
   const dest = folder();
-  const [result, code] = await Promise.all([extractTar(proc.stdout, dest, { maxBytes: 1 << 20, maxFiles: 100 }, 1).catch(() => null), proc.exited]);
+  const [result, stderr, code] = await Promise.all([extractTar(proc.stdout, dest, { maxBytes: 1 << 22, maxFiles: opts.maxFiles ?? 1000 }, 1).catch(() => null), new Response(proc.stderr).text(), proc.exited]);
   const files = (result?.files ?? []).map((f) => f.path).sort();
   const read = files.map((f) => readFileSync(join(dest, f), "utf8")).join("\n");
-  return { code, files, read, skipped: result?.skipped ?? [] };
+  return { code, files, read, skipped: [...(result?.skipped ?? []), ...collectSkipped(stderr)], stderr };
 }
 
 describe("a folder of a VM's workspace, kept as an artifact", () => {
@@ -97,3 +102,46 @@ describe("a folder of a VM's workspace, kept as an artifact", () => {
     expect((await collect(join(work, "nothing-here"), work, work)).code).toBe(COLLECT_MISSING);
   });
 });
+
+/*
+ * Every entry kept, or named with why it wasn't (27 November 2026, the review of the walk's collecting): it opened every
+ * folder of a folder as it listed it, before walking any, so past the VM's limit of open files (often 1024: a /work with
+ * a node_modules) a folder it couldn't open was left out, and the collect "succeeded", partly, saying nothing. Now it
+ * holds the folders of the one path it walks, no more, and an entry it can't read is named, with why.
+ */
+describe("a folder kept whole, or said where it isn't", () => {
+  test("past the VM's limit of open files, every entry is kept: 200 folders under a limit of 64", async () => {
+    const work = folder();
+    for (let i = 0; i < 200; i++) {
+      mkdirSync(join(work, "many", `d${i}`), { recursive: true });
+      writeFileSync(join(work, "many", `d${i}`, "f"), `${i}`);
+    }
+    const kept = await collect(join(work, "many"), work, folder(), { fds: 64 });
+    expect([kept.code, kept.files.length, kept.skipped]).toEqual([0, 200, []]);
+  });
+
+  test("an entry it can't read is named, with why: never left out in silence", async () => {
+    const work = folder();
+    mkdirSync(join(work, "out", "closed"), { recursive: true });
+    writeFileSync(join(work, "out", "report.md"), "# report\n");
+    writeFileSync(join(work, "out", "secret.md"), "unreadable");
+    writeFileSync(join(work, "out", "closed", "x"), "in a folder it can't open");
+    chmodSync(join(work, "out", "secret.md"), 0o000);
+    chmodSync(join(work, "out", "closed"), 0o000);
+    Bun.spawnSync(["mkfifo", join(work, "out", "pipe")]);
+    try {
+      const kept = await collect(join(work, "out"), work, folder());
+      expect(kept.code).toBe(0);
+      expect(kept.files).toEqual(["report.md"]);
+      expect(kept.skipped.map((s) => [s.path, s.reason]).sort()).toEqual([
+        ["out/closed", "it can't be read here (PermissionError)"],
+        ["out/pipe", "neither a file, a folder nor a link"],
+        ["out/secret.md", "it can't be read here (PermissionError)"],
+      ]);
+    } finally {
+      chmodSync(join(work, "out", "secret.md"), 0o644);
+      chmodSync(join(work, "out", "closed"), 0o755);
+    }
+  });
+});
+

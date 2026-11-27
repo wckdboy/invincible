@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, resolve, sep } from "node:path";
-import { type ArtifactView, type NodeIdentity, randomId } from "@invincible/core";
+import { type ArtifactView, type NodeIdentity, randomId, redact } from "@invincible/core";
 import type { LedgerStore } from "@invincible/ledger";
 import type { ExtractLimits, ExtractResult, LedgerEntryInput } from "@invincible/sandbox";
 
@@ -17,6 +17,29 @@ export const ARTIFACT_LIMITS: ExtractLimits = { maxBytes: 512 * 2 ** 20, maxFile
 export const ARTIFACT_BUDGET_BYTES = 20 * 2 ** 30;
 /** The log entry lists files up to this many bytes of JSON (the event cap is 64 KB); the rest are in the manifest. */
 const LISTED_BYTES = 40 * 1024;
+/** The ledger's line for a folder kept is at most this long: what it left out is named as far as it fits, the rest counted. */
+const LINE_CHARS = 400;
+
+/**
+ * What a folder kept left out (the walk's and the extractor's skipped list), named in the ledger's line, each with why, as
+ * many as fit after `line`, then how many more: none is left out in silence. A name is the VM's to choose, so no control
+ * character of it, nor anything that looks like a secret, reaches the line.
+ */
+function leftOut(line: string, skipped: ExtractResult["skipped"]): string {
+  if (!skipped.length) return line;
+  const shown = (text: string, max: number) => redact(text.slice(0, max * 2).replace(/[\u0000-\u001f\u007f]/g, "?")).slice(0, max);
+  const more = (n: number) => (n ? `… and ${n} more` : "");
+  let out = `${line} · left out ${skipped.length}: `;
+  let named = 0;
+  for (const s of skipped) {
+    const one = `${named ? "; " : ""}${shown(s.path, 120)} (${shown(s.reason, 80)})`;
+    const after = skipped.length - named - 1;
+    if (out.length + one.length + (after ? 2 + more(after).length : 0) > LINE_CHARS) break;
+    out += one;
+    named++;
+  }
+  return named < skipped.length ? `${out}${named ? "; " : ""}${more(skipped.length - named)}` : out;
+}
 
 export class ArtifactError extends Error {
   constructor(
@@ -151,7 +174,7 @@ export class ArtifactStore {
       target: id,
       verdict: "allow",
       ...(input.run ? { run: input.run } : {}),
-      detail: `${result.files.length} file(s), ${result.bytes} bytes from sandbox ${input.sandbox}${result.skipped.length ? ` · refused ${result.skipped.length} (links, devices or unsafe paths)` : ""}`,
+      detail: leftOut(`${result.files.length} file(s), ${result.bytes} bytes from sandbox ${input.sandbox}`, result.skipped),
     });
     return this.get(id)!;
   }

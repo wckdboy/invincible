@@ -20,13 +20,13 @@ import { freePort } from "./ports.ts";
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-/** A collector that "finds" these files in the sandbox. */
-function collector(files: Record<string, string>) {
+/** A collector that "finds" these files in the sandbox, and leaves out what it is told was left out there. */
+function collector(files: Record<string, string>, skipped: ExtractResult["skipped"] = []) {
   return async (_sandbox: string, _from: string, dest: string, limits: ExtractLimits): Promise<ExtractResult | null> => {
     const entries = Object.entries(files);
     if (!entries.length) return null;
     let bytes = 0;
-    const out: ExtractResult = { files: [], bytes: 0, skipped: [] };
+    const out: ExtractResult = { files: [], bytes: 0, skipped: [...skipped] };
     for (const [path, text] of entries) {
       bytes += text.length;
       if (bytes > limits.maxBytes) throw new Error("too big");
@@ -54,7 +54,7 @@ describe("keeping a sandbox's work", () => {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
-  const ledger: { resource: string; class: string }[] = [];
+  const ledger: { resource: string; class: string; detail?: string }[] = [];
   const artifacts = new ArtifactStore({ store, identity, dir: temp(), ledger: (e) => ledger.push(e) });
 
   test("files are kept with their hashes, and the mind records what they are", async () => {
@@ -68,6 +68,26 @@ describe("keeping a sandbox's work", () => {
     expect(store.lww<{ count: number }>(`artifact:${kept!.id}`)?.value?.count).toBe(3);
     expect(ledger.at(-1)).toMatchObject({ resource: "artifact", class: "create" });
     expect(new TextDecoder().decode(artifacts.read(kept!.id, "data/u.csv").bytes)).toBe("x,u\n0,0\n");
+  });
+
+  test("what a folder kept left out is named in its line of the ledger, each with why: as many as fit, the rest counted", async () => {
+    const skipped = [
+      { path: "out/closed", reason: "it can't be read here (PermissionError)" },
+      { path: "out/pipe", reason: "neither a file, a folder nor a link" },
+      { path: "out/peek", reason: "link" },
+    ];
+    await artifacts.save(collector({ "report.md": "# r\n" }, skipped), { sandbox: "0123456789" });
+    expect(ledger.at(-1)!.detail).toBe("1 file(s), 4 bytes from sandbox 0123456789 · left out 3: out/closed (it can't be read here (PermissionError)); out/pipe (neither a file, a folder nor a link); out/peek (link)");
+    // Many: as many as fit in the line, then how many more; no control character of a name reaches it.
+    const many = Array.from({ length: 5000 }, (_, i) => ({ path: `out/n${i}\u001b[31m\n`, reason: "link" }));
+    await artifacts.save(collector({ "report.md": "# r\n" }, many), { sandbox: "0123456789" });
+    const line = ledger.at(-1)!.detail!;
+    expect(line.length).toBeLessThanOrEqual(400);
+    expect(line).toStartWith("1 file(s), 4 bytes from sandbox 0123456789 · left out 5000: out/n0?[31m? (link); out/n1?[31m? (link); ");
+    expect(line).toMatch(/; … and \d+ more$/);
+    expect(line).not.toMatch(/[\u0000-\u001f\u007f]/);
+    const named = line.split("; ").length - 1;
+    expect(line).toEndWith(`… and ${5000 - named} more`);
   });
 
   test("nothing in /work/out: nothing kept, nothing recorded", async () => {

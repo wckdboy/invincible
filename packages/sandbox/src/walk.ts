@@ -98,48 +98,95 @@ def entry(name,seen,kind):
     e=tarfile.TarInfo(name);e.mtime=int(seen.st_mtime);e.mode=stat.S_IMODE(seen.st_mode);e.type=kind
     return e
 top=names[-1] if names else (os.path.basename(root) or 'work')
+def skip(path,why):
+    # (Named with why, never left out in silence: the node adds it to the artifact's skipped list.)
+    sys.stderr.write(json.dumps({"skipped":path,"reason":why})+'\\n')
+def cannot(e):
+    return "it can't be read here ("+type(e).__name__+")"
 tar.addfile(entry(top,os.fstat(held[-1]),tarfile.DIRTYPE))
-todo=[(os.dup(held[-1]),top,not names)]
-while todo:
-    fd,name,isroot=todo.pop()
+# Depth first, holding the folders of the one path it walks and no other: each folder opened from its parent's as it
+# is walked, and closed once its entries are, so however many folders a folder has, its open files are as many as the
+# path is deep.
+stack=[]
+def enter(fd,name,isroot):
     try:
-        for n in sorted(os.listdir(fd)):
-            # (Its HOME's, in a VM whose HOME is its /work: left out, whatever it is.)
-            if isroot and home and n.startswith('.') and n not in OWN:
-                continue
-            try:
-                seen=os.stat(n,dir_fd=fd,follow_symlinks=False)
-            except OSError:
-                continue
-            path=name+'/'+n
-            if stat.S_ISDIR(seen.st_mode):
-                try:
-                    sub=os.open(n,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
-                except OSError:
-                    continue
-                tar.addfile(entry(path,seen,tarfile.DIRTYPE))
-                todo.append((sub,path,False))
-            elif stat.S_ISREG(seen.st_mode):
-                try:
-                    f=os.open(n,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,dir_fd=fd)
-                except OSError:
-                    continue
-                with os.fdopen(f,'rb') as file:
-                    now=os.fstat(file.fileno())
-                    if not stat.S_ISREG(now.st_mode):
-                        continue
-                    e=entry(path,now,tarfile.REGTYPE);e.size=now.st_size
-                    tar.addfile(e,file)
-            elif stat.S_ISLNK(seen.st_mode):
-                e=entry(path,seen,tarfile.SYMTYPE)
-                try:
-                    e.linkname=os.readlink(n,dir_fd=fd)
-                except OSError:
-                    continue
-                tar.addfile(e)
-    finally:
+        listed=sorted(os.listdir(fd))
+    except OSError as e:
         os.close(fd)
+        skip(name,cannot(e))
+        return
+    stack.append((fd,name,isroot,iter(listed)))
+enter(os.dup(held[-1]),top,not names)
+while stack:
+    fd,name,isroot,left=stack[-1]
+    n=next(left,None)
+    if n is None:
+        os.close(fd)
+        stack.pop()
+        continue
+    # (Its HOME's, in a VM whose HOME is its /work: left out by the rule, whatever it is.)
+    if isroot and home and n.startswith('.') and n not in OWN:
+        continue
+    path=name+'/'+n
+    try:
+        seen=os.stat(n,dir_fd=fd,follow_symlinks=False)
+    except OSError as e:
+        skip(path,cannot(e))
+        continue
+    if stat.S_ISDIR(seen.st_mode):
+        try:
+            sub=os.open(n,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
+        except OSError as e:
+            skip(path,cannot(e))
+            continue
+        tar.addfile(entry(path,seen,tarfile.DIRTYPE))
+        enter(sub,path,False)
+    elif stat.S_ISREG(seen.st_mode):
+        try:
+            f=os.open(n,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,dir_fd=fd)
+        except OSError as e:
+            skip(path,cannot(e))
+            continue
+        with os.fdopen(f,'rb') as file:
+            now=os.fstat(file.fileno())
+            if not stat.S_ISREG(now.st_mode):
+                skip(path,"it changed as it was read")
+                continue
+            e=entry(path,now,tarfile.REGTYPE);e.size=now.st_size
+            tar.addfile(e,file)
+    elif stat.S_ISLNK(seen.st_mode):
+        e=entry(path,seen,tarfile.SYMTYPE)
+        try:
+            e.linkname=os.readlink(n,dir_fd=fd)
+        except OSError as x:
+            skip(path,cannot(x))
+            continue
+        tar.addfile(e)
+    else:
+        skip(path,"neither a file, a folder nor a link")
 tar.close()`;
 
 /** The command that collects a VM's folder (COLLECT_SCRIPT), as the VM runs it; `root` names another /work, for tests. */
 export const collectCommand = (folder: string, root?: string): string[] => ["python3", "-I", "-c", COLLECT_SCRIPT, folder, ...(root ? [root] : [])];
+
+/** The most entries a collect names as left out (its own reasons), so that what it says is bounded as what it keeps. */
+export const COLLECT_SKIPPED_MAX = 1000;
+
+/**
+ * What a collect left out, each entry with why (COLLECT_SCRIPT says them on its stderr, one JSON line each): beside the
+ * extractor's skipped entries, so nothing is left out of an artifact in silence. Lines that aren't one are passed over.
+ */
+export function collectSkipped(stderr: string): { path: string; reason: string }[] {
+  const out: { path: string; reason: string }[] = [];
+  for (const line of stderr.split("\n")) {
+    if (out.length >= COLLECT_SKIPPED_MAX) break;
+    if (!line.startsWith('{"skipped":')) continue;
+    try {
+      const said = JSON.parse(line) as { skipped?: unknown; reason?: unknown };
+      if (typeof said.skipped === "string" && typeof said.reason === "string") out.push({ path: said.skipped.slice(0, 512), reason: said.reason.slice(0, 200) });
+    } catch {
+      // (Not a line of the script's: passed over.)
+    }
+  }
+  return out;
+}
