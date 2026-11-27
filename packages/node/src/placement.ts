@@ -1,5 +1,5 @@
 import type { ComputeNodeView, NodeCapacity, PeerStatus, PlacementNeeds, Presence } from "@invincible/core";
-import { cannotMake, CONTAINER_IMAGES, FIRST_IMAGES, OWN_IMAGES, type SandboxAsk } from "@invincible/sandbox";
+import { cannotMake, CONTAINER_IMAGES, FIRST_IMAGES, HARDWARE_IMAGE, OWN_IMAGES, type SandboxAsk } from "@invincible/sandbox";
 import { type Capabilities, isAlwaysOn } from "./capabilities.ts";
 
 /*
@@ -133,13 +133,15 @@ export function fleetCandidates(fleet: {
  * whose VMs grow while they run (a Mac's pause to), and its reasons say which. Null: none online can.
  */
 /**
- * Why a host doesn't make the image of the primary's own a sandbox names, or null: what it said it makes, or, its release
- * older than saying, what every release made (a Mac's, the workshop's). An image not its is pulled where it's made.
+ * Why a host doesn't make the image of the primary's own a sandbox names, or asks for by what it has (the hardware
+ * tools), or null: what it said it makes, or, its release older than saying, what every release made (a Mac's, the
+ * workshop's). An image not its is pulled where it's made.
  */
 function unmadeImage(needs: SandboxNeeds, sandbox: NonNullable<Capabilities["sandbox"]>): string | null {
-  if (!needs.image || !OWN_IMAGES[needs.image]) return null;
+  const image = needs.image ?? (needs.hardware ? HARDWARE_IMAGE : undefined);
+  if (!image || !OWN_IMAGES[image]) return null;
   const made = sandbox.images ?? (sandbox.engine === "container" ? CONTAINER_IMAGES : FIRST_IMAGES);
-  return made.includes(needs.image) ? null : `it doesn't make ${needs.image}${sandbox.images ? "" : ": its release is older than that image"}`;
+  return made.includes(image) ? null : `it doesn't make ${image}${sandbox.images ? "" : ": its release is older than that image"}`;
 }
 
 /** Why a host can't make this sandbox (what it can't give, or an image it doesn't make), or null. */

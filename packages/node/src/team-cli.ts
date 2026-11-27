@@ -63,6 +63,8 @@ const agentModels = (m: Agent): string =>
     : m.models?.length ? `${m.id} works on ${m.models.join(", ")}, in that order.` : `${m.id} works on its role's models (${m.role}).`;
 
 /** A size as a person says one. */
+/** What a VM made from `image` has, as the provision and remake lines say it: a desktop, and the hardware tools on it. */
+const withWhat = (image: string | undefined): string => (image?.includes("hardware") ? " · with a desktop and the hardware tools" : image?.includes("desktop") ? " · with a desktop" : "");
 const bytesWord = (bytes: number) => (bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`);
 
 export async function teamCommand(api: Api, sub: string | undefined, args: string[], flags: Flags, write: (s: string) => void = console.log, confirm: (question: string) => boolean = () => false, columns?: number): Promise<void> {
@@ -334,8 +336,10 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     // Its VM made again from the image as it is now: the same VM and /work, a new container. Its own route.
     const kept = ["on", "cpus", "mem", "disk"].filter((flag) => flags[flag] !== undefined);
     if (kept.length) throw new Error(`a VM is made again where and as large as it is: leave out --${kept.join(", --")} (only --network can be chosen again)`);
-    const result = await api.call<{ workspace: { id: string; node: string; network?: string; image?: string } }>("remakeAgent", { id: args[0], ...(string("network") ? { network: string("network") } : {}), ...(flags.desktop ? { desktop: true } : flags["no-desktop"] ? { desktop: false } : {}) });
-    print(`VM ${result.workspace.id} on ${result.workspace.node} made again from its image as it is now · /work kept${result.workspace.image?.includes("desktop") ? " · with a desktop" : ""}${result.workspace.network ? ` · ${result.workspace.network === "online" ? "it can reach the internet" : "it reaches the model gateway only"}` : ""}`); return;
+    if (flags.hardware && flags["no-hardware"]) throw new Error("--hardware or --no-hardware, not both");
+    if (flags.hardware && flags["no-desktop"]) throw new Error("the hardware tools come with a desktop: --hardware or --no-desktop, not both");
+    const result = await api.call<{ workspace: { id: string; node: string; network?: string; image?: string } }>("remakeAgent", { id: args[0], ...(string("network") ? { network: string("network") } : {}), ...(flags.desktop ? { desktop: true } : flags["no-desktop"] ? { desktop: false } : {}), ...(flags.hardware ? { hardware: true } : flags["no-hardware"] ? { hardware: false } : {}) });
+    print(`VM ${result.workspace.id} on ${result.workspace.node} made again from its image as it is now · /work kept${withWhat(result.workspace.image)}${result.workspace.network ? ` · ${result.workspace.network === "online" ? "it can reach the internet" : "it reaches the model gateway only"}` : ""}`); return;
   }
   if (sub === "resize") {
     // Bigger while it runs, nothing stopped: threads and memory hot-added, its disk grown where it is mounted. (On a Mac it pauses.)
@@ -347,10 +351,12 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
   if (sub === "provision") {
     // (Online unless you say `--network gateway`: what its VM can reach is set when it is made.)
     // (With a desktop unless --no-desktop: --desktop asks for one by name, and is refused where no host can make one.)
+    // (KiCad and FreeCAD with --hardware: the hardware image, whose desktop comes with it.)
     if (flags.desktop && flags["no-desktop"]) throw new Error("--desktop or --no-desktop, not both");
-    const result = await api.call<{ workspace: { id: string; node: string; network?: string; image?: string } }>("provisionAgent", { id: args[0], ...(string("on") ? { on: string("on") } : {}), ...(string("cpus") ? { cpus: Number(string("cpus")) } : {}), ...(string("mem") ? { memoryGb: Number(string("mem")) } : {}), ...(string("disk") ? { diskGb: Number(string("disk")) } : {}), ...(string("network") ? { network: string("network") } : {}), ...(flags.desktop ? { desktop: true } : flags["no-desktop"] ? { desktop: false } : {}) });
+    if (flags.hardware && flags["no-desktop"]) throw new Error("the hardware tools come with a desktop: --hardware or --no-desktop, not both");
+    const result = await api.call<{ workspace: { id: string; node: string; network?: string; image?: string } }>("provisionAgent", { id: args[0], ...(string("on") ? { on: string("on") } : {}), ...(string("cpus") ? { cpus: Number(string("cpus")) } : {}), ...(string("mem") ? { memoryGb: Number(string("mem")) } : {}), ...(string("disk") ? { diskGb: Number(string("disk")) } : {}), ...(string("network") ? { network: string("network") } : {}), ...(flags.desktop ? { desktop: true } : flags["no-desktop"] ? { desktop: false } : {}), ...(flags.hardware ? { hardware: true } : {}) });
     const hasDesktop = result.workspace.image?.includes("desktop");
-    print(`VM ${result.workspace.id} on ${result.workspace.node}${hasDesktop ? " · with a desktop" : flags["no-desktop"] ? " · no desktop" : " · no desktop: its host makes none (the ledger says why)"}${result.workspace.network ? ` · ${result.workspace.network === "online" ? "it can reach the internet" : "it reaches the model gateway only"}` : ""}`); return;
+    print(`VM ${result.workspace.id} on ${result.workspace.node}${hasDesktop ? withWhat(result.workspace.image) : flags["no-desktop"] ? " · no desktop" : " · no desktop: its host makes none (the ledger says why)"}${result.workspace.network ? ` · ${result.workspace.network === "online" ? "it can reach the internet" : "it reaches the model gateway only"}` : ""}`); return;
   }
   if (sub === "memory") {
     if (args.length > 1) await api.call("teamMemory", { id: args[0], text: args.slice(1).join(" ") });

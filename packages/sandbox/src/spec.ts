@@ -71,6 +71,13 @@ export const LAB_IMAGE = "invincible/lab:1";
 
 /** The agents' desktop: the workshop with a display, a window manager and a browser (sandbox/desktop/Dockerfile). Built after the workshop image, which it is made from. */
 export const DESKTOP_IMAGE = "invincible/desktop:1";
+/**
+ * The hardware tools (C1 step 11): the desktop with KiCad and FreeCAD (sandbox/hardware/Dockerfile), a choice per agent.
+ * Built after the desktop image, which it is made from. Its name says "desktop", as the desktop's does: whatever asks
+ * whether a VM has one reads the name (the node, its controller, the web app, a release older than this image), and
+ * this one has.
+ */
+export const HARDWARE_IMAGE = "invincible/desktop-hardware:1";
 /** Claude Code in the workshop image, for evals alone (sandbox/claude-code): tagged by its pinned release. */
 export const CLAUDE_CODE_IMAGE = "invincible/claude-code:2.1.319";
 /**
@@ -89,6 +96,7 @@ export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: stri
   [DEFAULT_IMAGE]: { context: ".", keeper: KEEPER },
   [LAB_IMAGE]: { context: "lab", keeper: "invincible-lab-image" },
   [DESKTOP_IMAGE]: { context: "desktop", keeper: "invincible-desktop-image", base: DEFAULT_IMAGE },
+  [HARDWARE_IMAGE]: { context: "hardware", keeper: "invincible-hardware-image", base: DESKTOP_IMAGE },
   [CLAUDE_CODE_IMAGE]: { context: "claude-code", keeper: "invincible-claude-code-image", base: DEFAULT_IMAGE },
   [HARNESS_IMAGE]: { context: "harnesses", keeper: "invincible-harnesses-image", base: DEFAULT_IMAGE },
 };
@@ -98,6 +106,40 @@ export const OWN_IMAGES: Readonly<Record<string, { context: string; keeper: stri
  * images (it is older than saying), so a sandbox in an image newer than that host goes where it is made.
  */
 export const FIRST_IMAGES: readonly string[] = [DEFAULT_IMAGE, LAB_IMAGE, DESKTOP_IMAGE];
+
+/** What an image of its own is made by, its bases first and the image last (the hardware's: the workshop, the desktop, itself). */
+export function madeFrom(image: string): string[] {
+  const chain: string[] = [];
+  for (let at: string | undefined = image; at && OWN_IMAGES[at] && !chain.includes(at); at = OWN_IMAGES[at]!.base) chain.unshift(at);
+  return chain;
+}
+
+/** How one of its own images is built on a node, when it isn't there: `invincible sandbox build` and its flag. */
+export const buildCommand = (image: string): string =>
+  `invincible sandbox build${image === LAB_IMAGE ? " --lab" : image === DESKTOP_IMAGE ? " --desktop" : image === HARDWARE_IMAGE ? " --hardware" : ""}`;
+
+/**
+ * The image an agent's VM is made again from: the hardware's when it is asked for, the desktop's or the workshop's when
+ * a desktop is asked for or taken away, else the one it has. The hardware tools come with a desktop, so a VM given them
+ * has one (they win over a desktop taken away in the same breath), and one whose desktop is taken away loses them too.
+ */
+export function remadeImage(current: string, ask: { desktop?: boolean; hardware?: boolean }): string {
+  if (ask.hardware === true) return HARDWARE_IMAGE;
+  if (ask.desktop === false) return DEFAULT_IMAGE;
+  if (ask.hardware === false && current === HARDWARE_IMAGE) return DESKTOP_IMAGE;
+  if (ask.desktop === true) return current === HARDWARE_IMAGE ? current : DESKTOP_IMAGE;
+  return current;
+}
+
+/**
+ * What of a remake's ask the VM's host is told: all of it, but the hardware tools taken away only from a VM that has
+ * them. Taking away what it hasn't changes nothing (remadeImage), and a host older than them knows no such word.
+ */
+export function remakeAsk(current: string, ask: { desktop?: boolean; hardware?: boolean }): { desktop?: boolean; hardware?: boolean } {
+  if (ask.hardware !== false || current === HARDWARE_IMAGE) return ask;
+  const { hardware: _, ...rest } = ask;
+  return rest;
+}
 
 export const containerName = (id: string) => `invincible-sbx-${id}`;
 export const volumeName = (id: string) => `invincible-sbx-${id}-work`;

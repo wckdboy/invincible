@@ -101,15 +101,17 @@ of its own; "agents" and "team" are the same command)
   agents changes <agent> [--task <id>] [--files]  what its latest task (or that one) changed: files, then the diff
   agents trail <task-id> [--follow]  what a task did, as it happened: its plan, each command and what it printed,
                                     the gates, the review; --follow keeps reading until the task has ended
-  agents provision <id> [--on node] [--cpus 1 --mem 2 --disk 20] [--network online|gateway] [--no-desktop]
+  agents provision <id> [--on node] [--cpus 1 --mem 2 --disk 20] [--network online|gateway] [--no-desktop|--hardware]
                                     its VM: online (the default) it can reach the internet, gateway only the models;
                                     with a desktop (a display, a browser, a terminal and an editor, at least 4 GB; in
                                     the VM, desktop help lists what operates it) unless --no-desktop; on a host that
-                                    makes none (a Mac), without one
-  agents provision <id> --remake [--network online|gateway] [--desktop|--no-desktop]
+                                    makes none (a Mac), without one. --hardware: KiCad and FreeCAD on its desktop
+  agents provision <id> --remake [--network online|gateway] [--desktop|--no-desktop] [--hardware|--no-hardware]
                                     its VM made again from the image as it is now (a fix to the image, a newer tool):
                                     the same VM and everything in /work, a new container; not while it is working.
-                                    --desktop gives a VM that has none a desktop; --no-desktop takes it away
+                                    --desktop gives a VM that has none a desktop; --no-desktop takes it away (and the
+                                    hardware tools with it); --hardware gives it KiCad and FreeCAD, --no-hardware
+                                    takes them away and keeps its desktop
   agents provision primary       its own computer: made, made again and given more as an agent's VM is
   agents resize <id> [--cpus 4] [--mem 8] [--disk 40]
                                     more threads, memory or disk for its VM while it runs, nothing stopped and
@@ -288,12 +290,12 @@ Work
                                   open a pull request from a run's kept changes (the node commits them on
                                   a new branch with the connector's key; the sandbox never holds it)
   place [--docker] [--vm] [--gpu] [--mem 16] [--tools git,opencode] [--long] [--untrusted] [--interactive]
-  sandbox run [--on ultra] [--net gateway|online|isolated] [--cpus 4] [--mem 8] [--disk 20] [--ttl 120] [--vm|--container] [--lab|--desktop]
+  sandbox run [--on ultra] [--net gateway|online|isolated] [--cpus 4] [--mem 8] [--disk 20] [--ttl 120] [--vm|--container] [--lab|--desktop|--hardware]
               [--providers deepseek,anthropic] [--image img] [--timeout 600] [--keep] -- <command…>
   sandbox ls [--on ultra] | sandbox exec <id> [--on ultra] -- <command…> | sandbox rm <id> [--on ultra]
   sandbox save <id> [/work/dir] [--label …]   keep a sandbox's work (default /work/out) after it's gone
-  sandbox build [--on ultra] [--lab|--desktop]
-                                  build the sandbox image (or the Lab, or the agents' desktop) on a host
+  sandbox build [--on ultra] [--lab|--desktop|--hardware]
+                                  build the sandbox image (or the Lab, the agents' desktop, or its hardware tools) on a host
   sandbox setup [status] [--json]
                                   a Mac given its agents' VMs: Apple's container (its signed installer, checked, when
                                   it has none), its service and kernel, the sandbox firewall, the node restarted to host
@@ -609,6 +611,8 @@ async function main(): Promise<void> {
       lab: { type: "boolean" },
       desktop: { type: "boolean" },
       "no-desktop": { type: "boolean" },
+      hardware: { type: "boolean" },
+      "no-hardware": { type: "boolean" },
       out: { type: "string" },
       workshop: { type: "boolean" },
       gpu: { type: "boolean" },
@@ -1796,9 +1800,9 @@ Evidence: invincible artifact ${i!.artifact}`));
         process.stderr.write(dim(`[exit ${r.exitCode} · ${r.durationMs} ms${r.truncated ? " · output truncated" : ""}]\n`));
       };
       if (sub === "build") {
-        console.log(dim(flags.lab ? "Building the Lab image (the first build takes 10 minutes or more)…" : flags.desktop ? "Building the desktop image (a minute or two the first time; the sandbox image must be built first)…" : "Building the sandbox image (first build takes a few minutes)…"));
-        await admin.call("buildSandboxImage", { ...(on ? { on } : {}), ...(flags.lab ? { lab: true } : flags.desktop ? { desktop: true } : {}) });
-        console.log(flags.lab ? "Lab image ready." : flags.desktop ? "Desktop image ready." : "Sandbox image ready.");
+        console.log(dim(flags.lab ? "Building the Lab image (the first build takes 10 minutes or more)…" : flags.hardware ? "Building the hardware image, KiCad and FreeCAD (several minutes the first time; the desktop image must be built first)…" : flags.desktop ? "Building the desktop image (a minute or two the first time; the sandbox image must be built first)…" : "Building the sandbox image (first build takes a few minutes)…"));
+        await admin.call("buildSandboxImage", { ...(on ? { on } : {}), ...(flags.lab ? { lab: true } : flags.hardware ? { hardware: true } : flags.desktop ? { desktop: true } : {}) });
+        console.log(flags.lab ? "Lab image ready." : flags.hardware ? "Hardware image ready." : flags.desktop ? "Desktop image ready." : "Sandbox image ready.");
         return;
       }
       const shape = (s: SandboxView) => (s.isolation === "vm" ? "microVM" : "container");
@@ -1850,7 +1854,7 @@ Evidence: invincible artifact ${i!.artifact}`));
           ...(str("mem") ? { memoryGb: Number(str("mem")) } : {}),
           ...(str("disk") ? { diskGb: Number(str("disk")) } : {}),
           ...(isolation() ? { isolation: isolation() } : {}),
-          ...(flags.lab ? { lab: true } : flags.desktop ? { desktop: true } : {}),
+          ...(flags.lab ? { lab: true } : flags.hardware ? { hardware: true } : flags.desktop ? { desktop: true } : {}),
           ...(str("ttl") ? { ttlMinutes: Number(str("ttl")) } : {}),
           ...(str("providers") ? { providers: str("providers")!.split(",").filter(Boolean) } : {}),
           ...(str("image") ? { image: str("image") } : {}),

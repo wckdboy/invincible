@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "filename": "kicad_common.json",
+    "version": 3
+  },
+  "api": {
+    "enable_server": true
+  },
+  "do_not_show_again": {
+    "update_check_prompt": true
+  }
+}

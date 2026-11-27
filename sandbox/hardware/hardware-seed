@@ -1,0 +1,23 @@
+#!/bin/sh
+# hardware-seed [command...]: the hardware image's settings for KiCad and FreeCAD, put in the agent's own home where
+# they aren't there yet, then the command (the VM's own: sleep infinity). Its home is /work, a volume of its own, where
+# both keep their settings, so no image can hold them. A file already there is never replaced, and nothing here stops
+# the VM from starting: a seed that can't be put is left out, and the apps ask as they would have.
+seed=${INVINCIBLE_HARDWARE_SEED:-/usr/share/invincible/hardware}
+home=${HOME:-/work}
+
+# put <seed> <its place in the home>
+put() {
+  [ -e "$home/$2" ] && return 0
+  mkdir -p "$(dirname "$home/$2")" 2>/dev/null && cp "$seed/$1" "$home/$2.part" 2>/dev/null && mv "$home/$2.part" "$home/$2" 2>/dev/null
+  rm -f "$home/$2.part" 2>/dev/null
+  return 0
+}
+
+put kicad_common.json .config/kicad/9.0/kicad_common.json
+put fp-lib-table .config/kicad/9.0/fp-lib-table
+put sym-lib-table .config/kicad/9.0/sym-lib-table
+put freecad-user.cfg .config/FreeCAD/user.cfg
+
+[ $# -gt 0 ] && exec "$@"
+exit 0

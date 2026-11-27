@@ -142,7 +142,7 @@ import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, c
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, peerOf, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, type HandoffGrantRecord, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
-import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, type SandboxStream, STREAM_LINE_LIMIT, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
+import { DESKTOP_IMAGE, HARDWARE_IMAGE, type LedgerEntryInput, remakeAsk, SandboxError, type SandboxStream, STREAM_LINE_LIMIT, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
 import type { GovernedSandboxHost } from "./compute/governed-host.ts";
 import type { Governor } from "./compute/governor.ts";
 import type { ComputeService } from "./compute/service.ts";
@@ -2311,7 +2311,7 @@ export function createApp(ctx: AppContext) {
     if (sandbox.run !== armRun(agentLabel(member.id)) || sandbox.ephemeral || sandbox.isolation !== "vm") throw new HttpError(403, "the workspace is not this agent's persistent VM");
     return sandbox;
   }
-  async function provisionTeam(id: string, input: { on?: string; cpus?: number; memoryGb?: number; diskGb?: number; network?: "online" | "gateway"; desktop?: boolean }, signal: AbortSignal): Promise<SandboxView> {
+  async function provisionTeam(id: string, input: { on?: string; cpus?: number; memoryGb?: number; diskGb?: number; network?: "online" | "gateway"; desktop?: boolean; hardware?: boolean }, signal: AbortSignal): Promise<SandboxView> {
     const pending = vmProvisioning.get(id);
     if (pending) return pending;
     const work = (async () => {
@@ -2321,9 +2321,10 @@ export function createApp(ctx: AppContext) {
       const chosen = member.workspaceNode ?? input.on;
       // An agent's own VM: kept, and maybe given more (a host whose VMs grow live is leaned to). With a desktop unless
       // you say otherwise (the owner's standard, 26 November 2026); a Mac makes none, so where no host can and you didn't
-      // ask for one by name, it is made without, and the ledger says why.
-      let desktop = input.desktop ?? true;
-      const needsOf = (withDesktop: boolean): SandboxNeeds => ({ network: input.network ?? "online", kept: true, ...(withDesktop ? { desktop: true } : {}) });
+      // ask for one by name, it is made without, and the ledger says why. The hardware tools (C1 step 11) come with a
+      // desktop, and asked for, they are made or refused, never left out: every host asked is asked for them.
+      let desktop = input.hardware ? true : (input.desktop ?? true);
+      const needsOf = (withDesktop: boolean): SandboxNeeds => ({ network: input.network ?? "online", kept: true, ...(withDesktop ? { desktop: true } : {}), ...(input.hardware ? { hardware: true } : {}) });
       const hosts = candidates().filter((c) => c.online && c.caps?.sandbox?.vm);
       const pinned = chosen ? hosts.find((c) => c.device === resolveNode(chosen).id) : undefined;
       let without: string | null = null;
@@ -2363,7 +2364,7 @@ export function createApp(ctx: AppContext) {
         // (Its size is core's computerSize, which the apps say before it is made: 2 GB with a desktop too, grown live to 4 GB
         // the first time its desktop is used, the sandbox host's desktopRoom.)
         const made = await api.call<{ sandbox: SandboxView }>("createSandbox", { on: best.device, persistent: true, isolation: "vm", network: input.network ?? "online", run: armRun(agentLabel(id)),
-          ...computerSize(desktop, input), ttlMinutes: 120, providers, ...(desktop ? { desktop: true } : {}) });
+          ...computerSize(desktop, input), ttlMinutes: 120, providers, ...(desktop ? { desktop: true } : {}), ...(input.hardware ? { hardware: true } : {}) });
         sandbox = made.sandbox;
         if (without) ctx.ledger?.({ class: "create", resource: "team.workspace", target: id, verdict: "allow", detail: `made without a desktop: no host that can make this VM makes one (${String(without).slice(0, 240)})` });
       }
@@ -2454,9 +2455,16 @@ export function createApp(ctx: AppContext) {
   /* An agent's VM made again from its image as it is now, on the owner's word (`p`: the device that asked, which the
    * VM's host records). Not while the agent is working: whatever runs in a VM ends with its container. A task that
    * starts meanwhile waits for it, as it would for a VM being made. Its token covers the providers with a key now. */
-  async function remakeTeamVm(member: Seat, network: "online" | "gateway" | undefined, desktop: boolean | undefined, p: Principal, signal: AbortSignal): Promise<SandboxView> {
+  async function remakeTeamVm(member: Seat, network: "online" | "gateway" | undefined, ask: { desktop?: boolean; hardware?: boolean }, p: Principal, signal: AbortSignal): Promise<SandboxView> {
     const existing = await teamWorkspace(member, signal);
     if (!existing) throw new HttpError(424, noVm(member.id));
+    // (Its host makes it again, there: one that doesn't make the hardware image, a Mac's or a release older than it, is
+    // said to, before anything is touched.)
+    const host = ask.hardware ? candidates().find((c) => c.device === member.workspace!.node) : undefined;
+    const unmade = host ? sandboxRefusals([host], { kept: true, desktop: true, hardware: true })[0] : undefined;
+    if (unmade) throw new HttpError(424, `this agent's VM host can't give it the hardware tools: ${unmade.reason}`);
+    // (Taking away tools it hasn't changes nothing: left out, so a host older than them is asked only what it knows.)
+    const { hardware } = remakeAsk(existing.image, ask);
     const state = teamOf().snapshot();
     if (state.tasks.some((t) => t.assignee === member.id && t.status === "running") || state.deliveries.some((d) => d.agent === member.id && d.status === "running")) {
       throw new HttpError(409, "this agent is working: stop its task or wait for it, then have its VM made again");
@@ -2464,7 +2472,7 @@ export function createApp(ctx: AppContext) {
     if (vmProvisioning.has(member.id)) throw new HttpError(409, "this agent's VM is being made; have it made again when that has finished");
     const work = (async () => {
       const providers = keyedProviders();
-      const { sandbox } = await inProcess(p, signal).call<{ sandbox: SandboxView }>("remakeTeamWorkspace", { on: member.workspace!.node, id: existing.id, run: armRun(agentLabel(member.id)), providers, ...(network ? { network } : {}), ...(desktop !== undefined ? { desktop } : {}) });
+      const { sandbox } = await inProcess(p, signal).call<{ sandbox: SandboxView }>("remakeTeamWorkspace", { on: member.workspace!.node, id: existing.id, run: armRun(agentLabel(member.id)), providers, ...(network ? { network } : {}), ...(ask.desktop !== undefined ? { desktop: ask.desktop } : {}), ...(hardware !== undefined ? { hardware } : {}) });
       leased.set(member.id, sandbox.providers);
       return sandbox;
     })();
@@ -3250,7 +3258,7 @@ export function createApp(ctx: AppContext) {
     remakeAgent: (input, p, req) => {
       ownerOnly(p);
       const member = seatOf(input.id);
-      return longRunning(remakeTeamVm(member, input.network, input.desktop, p, req.signal).then((workspace) => ({ agent: input.id === TEAM_PRIMARY ? null : teamMember(input.id), workspace })));
+      return longRunning(remakeTeamVm(member, input.network, { ...(input.desktop !== undefined ? { desktop: input.desktop } : {}), ...(input.hardware !== undefined ? { hardware: input.hardware } : {}) }, p, req.signal).then((workspace) => ({ agent: input.id === TEAM_PRIMARY ? null : teamMember(input.id), workspace })));
     },
     resizeAgent: (input, p, req) => {
       ownerOnly(p);
@@ -3301,7 +3309,7 @@ export function createApp(ctx: AppContext) {
       if (!approver) throw new HttpError(403, "an agent's VM is made again only on your word");
       const { on, ...asked } = input;
       return longRunning(onNode(p, on, routes.remakeTeamWorkspace.path, { ...asked, onBehalfOf: approver }, async () => ({
-        sandbox: await ctx.sandbox!.remakeTeam(input.id, input.run, { providers: input.providers, ...(input.network ? { network: input.network } : {}), ...(input.desktop !== undefined ? { desktop: input.desktop } : {}), approvedBy: approver }),
+        sandbox: await ctx.sandbox!.remakeTeam(input.id, input.run, { providers: input.providers, ...(input.network ? { network: input.network } : {}), ...(input.desktop !== undefined ? { desktop: input.desktop } : {}), ...(input.hardware !== undefined ? { hardware: input.hardware } : {}), approvedBy: approver }),
       }), { sandbox: input.id }));
     },
     teamFiles: async (input, p, req) => {
@@ -4892,12 +4900,14 @@ export function createApp(ctx: AppContext) {
     },
     buildSandboxImage: (input, p) =>
       longRunning(
-        onNode(p, input.on, routes.buildSandboxImage.path, input.lab ? { lab: true } : input.desktop ? { desktop: true } : {}, async () => {
+        onNode(p, input.on, routes.buildSandboxImage.path, input.lab ? { lab: true } : input.hardware ? { hardware: true } : input.desktop ? { desktop: true } : {}, async () => {
           const result = input.lab
             ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/lab`, undefined, "invincible/lab:1")
-            : input.desktop
-              ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/desktop`, undefined, DESKTOP_IMAGE)
-              : await ctx.sandbox!.build(ctx.sandboxContext!);
+            : input.hardware
+              ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/hardware`, undefined, HARDWARE_IMAGE)
+              : input.desktop
+                ? await ctx.sandbox!.build(`${ctx.sandboxContext!}/desktop`, undefined, DESKTOP_IMAGE)
+                : await ctx.sandbox!.build(ctx.sandboxContext!);
           if (!result.ok) throw new HttpError(500, `image build failed: ${result.output.slice(-400)}`);
           return { ok: true };
         }),

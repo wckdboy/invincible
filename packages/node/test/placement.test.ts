@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { type Calibration, bodyFingerprint, computeBody, type ComputeNodeView, deriveCapacity, KERNEL, type PeerStatus, REFERENCE_SINGLE } from "@invincible/core";
 import type { Capabilities } from "../src/capabilities.ts";
-import { CLAUDE_CODE_IMAGE, CONTAINER_CANNOT, CONTAINER_IMAGES, CONTAINER_UNMADE, DEFAULT_IMAGE, OWN_IMAGES } from "@invincible/sandbox";
+import { CLAUDE_CODE_IMAGE, CONTAINER_CANNOT, CONTAINER_IMAGES, CONTAINER_UNMADE, DEFAULT_IMAGE, HARDWARE_IMAGE, OWN_IMAGES } from "@invincible/sandbox";
 import { type Candidate, Dispatched, fleetCandidates, place, sandboxHost, sandboxRefusals, withDispatched } from "../src/placement.ts";
 
 /*
@@ -212,11 +212,16 @@ describe("a Mac with Apple's container", () => {
     expect(sandboxRefusals([mini, ultra], { network: "isolated" })).toEqual([{ name: "mini", reason: CONTAINER_CANNOT.isolated }]);
   });
 
-  test("the desktop and the Lab go past it too", () => {
+  test("the desktop, the Lab and the hardware tools go past it too", () => {
     const mini = node("mini", mac(), { delivered: 40 }, { free: 4 });
     const ultra = node("ultra", caps({ cores: 16, sandbox: { image: true, networks: true, vm: true } }), { delivered: 8 }, { free: 1 });
     for (const ask of [{ desktop: true }, { lab: true }]) expect(sandboxHost([mini, ultra], { network: "online", ...ask })?.name).toBe("ultra");
     expect(sandboxRefusals([mini], { network: "online", desktop: true })).toEqual([{ name: "mini", reason: CONTAINER_CANNOT.desktop }]);
+    // The hardware tools come with a desktop: a Mac refuses them for it, before it's asked whether it makes their image.
+    // (A host must say it makes their image: below.)
+    const says = node("ultra", caps({ cores: 16, sandbox: { image: true, networks: true, vm: true, images: Object.keys(OWN_IMAGES) } }), { delivered: 8 }, { free: 1 });
+    expect(sandboxHost([mini, says], { network: "online", hardware: true })?.name).toBe("ultra");
+    expect(sandboxRefusals([mini], { network: "online", hardware: true })).toEqual([{ name: "mini", reason: CONTAINER_CANNOT.desktop }]);
   });
 
   test("an agent's VM leans to a host whose VMs grow while they run; a Mac's line says its VMs pause to grow, and room still decides", () => {
@@ -247,6 +252,16 @@ describe("a sandbox in an image of your agent's own", () => {
     expect(sandboxRefusals([older, ultra], { network: "gateway", image: CLAUDE_CODE_IMAGE })).toEqual([
       { name: "older", reason: `it doesn't make ${CLAUDE_CODE_IMAGE}: its release is older than that image` },
     ]);
+  });
+
+  test("the hardware tools (C1 step 11) go to a host whose release makes their image, past one older than it, however it ranks; a desktop alone still goes where it ranks", () => {
+    const older = node("older", linux(), { delivered: 40 }, { free: 4 });
+    const ultra = node("ultra", linux(Object.keys(OWN_IMAGES)), { delivered: 8 }, { free: 1 });
+    const hardware = { network: "online", kept: true, desktop: true, hardware: true } as const;
+    expect(sandboxHost([older, ultra], hardware)?.name).toBe("ultra");
+    expect(sandboxHost([older], hardware)).toBeNull();
+    expect(sandboxRefusals([older, ultra], hardware)).toEqual([{ name: "older", reason: `it doesn't make ${HARDWARE_IMAGE}: its release is older than that image` }]);
+    expect(sandboxHost([older, ultra], { network: "online", kept: true, desktop: true })?.name).toBe("older");
   });
 
   test("an image every release has made, or one that isn't its (pulled where it is made, as ever), goes where it ranks", () => {

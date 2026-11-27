@@ -310,15 +310,17 @@ describe("persistent agent workspaces", () => {
     expect(run).toContain(`${LABEL}.network=online`);
   });
 
-  test("made again, a VM can be given a desktop or have it taken away; unasked it keeps the image it has", async () => {
-    const image = async (desktop?: boolean) => {
+  test("made again, a VM can be given a desktop or the hardware tools, or have them taken away; unasked it keeps the image it has", async () => {
+    const image = async (ask: { desktop?: boolean; hardware?: boolean } = {}) => {
       const f = agentHost({ status: "running" });
-      await f.host.remakeTeam(ID, RUN, { ...REMADE, ...(desktop === undefined ? {} : { desktop }) });
+      await f.host.remakeTeam(ID, RUN, { ...REMADE, ...ask });
       return { run: f.commands.find((args) => args[0] === "run")!.at(-3), ledger: f.ledger.at(-1)!.detail };
     };
     expect(await image()).toMatchObject({ run: "invincible/sandbox:1" });
-    expect(await image(true)).toEqual({ run: "invincible/desktop:1", ledger: expect.stringContaining("made again from invincible/desktop:1") });
-    expect((await image(false)).run).toBe("invincible/sandbox:1");
+    expect(await image({ desktop: true })).toEqual({ run: "invincible/desktop:1", ledger: expect.stringContaining("made again from invincible/desktop:1") });
+    expect((await image({ desktop: false })).run).toBe("invincible/sandbox:1");
+    // (C1 step 11: KiCad and FreeCAD, whose desktop comes with them; which image for which ask is spec.test.ts's.)
+    expect(await image({ hardware: true })).toEqual({ run: "invincible/desktop-hardware:1", ledger: expect.stringContaining("made again from invincible/desktop-hardware:1") });
   });
 
   test("a remake that was cut short is taken up again: the container that was set aside gets its name back first", async () => {

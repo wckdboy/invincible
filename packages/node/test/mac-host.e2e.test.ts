@@ -138,6 +138,8 @@ describe("a node on a Mac with Apple's container", () => {
     // Asked for by name, it is refused, saying why: never quietly made without.
     await api("saveAgent", { id: "bea", name: "BEA", role: "engineer" });
     await expect(api("provisionAgent", { id: "bea", desktop: true })).rejects.toThrow(CONTAINER_CANNOT.desktop);
+    // Nor the hardware tools, which come with a desktop.
+    await expect(api("provisionAgent", { id: "bea", hardware: true })).rejects.toThrow(CONTAINER_CANNOT.desktop);
     expect(fake.volumes.get(`${workspace.name}-work`)!.labels["dev.invincible.retained"]).toBe("1");
     const grown = await api<{ workspace: SandboxView; paused?: boolean }>("resizeAgent", { id: "ada", memoryGb: 4 });
     expect(grown).toMatchObject({ paused: true, workspace: { id: workspace.id, memoryGb: 4, status: "running" } });
@@ -148,6 +150,8 @@ describe("a node on a Mac with Apple's container", () => {
     await expect(api("resizeAgent", { id: "ada", diskGb: 40 })).rejects.toThrow(/409 a VM's disk on a Mac keeps the size it was made with/);
     // Nor is a desktop made there.
     await expect(api("remakeAgent", { id: "ada", desktop: true })).rejects.toThrow(CONTAINER_CANNOT.desktop);
+    // Nor the hardware tools: said before anything of its VM is touched.
+    await expect(api("remakeAgent", { id: "ada", hardware: true })).rejects.toThrow(`424 this agent's VM host can't give it the hardware tools: ${CONTAINER_CANNOT.desktop}`);
   });
 
   test("an isolated sandbox asked of it is refused with the reason, and nothing is made", async () => {

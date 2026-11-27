@@ -6,7 +6,7 @@ import { avatarExpression, bodyFingerprint, ceilingThreads, clientIdFromKey, KER
 import { signInWindowsOf, windowsOf } from "@invincible/models";
 import { requestPairing, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
-import { NETWORKS } from "@invincible/sandbox";
+import { NETWORKS, OWN_IMAGES } from "@invincible/sandbox";
 import { startDaemon, type Daemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
 import type { Capabilities } from "../src/capabilities.ts";
@@ -18,9 +18,11 @@ import { freePort } from "./ports.ts";
 const root = mkdtempSync(join(tmpdir(), "invincible-team-vm-"));
 const home = new Home(join(root, "node"));
 const port = freePort();
-const caps: Capabilities = { os: "linux", arch: "x64", hostname: "team-vm-test", cores: 16, cpu: "test", memoryGb: 32, hasBattery: false, gpu: [], docker: true, vm: { kvm: true, tools: ["kata"] }, tools: ["docker"], localModels: [], tailscale: null, sandbox: { image: true, networks: true, vm: true } };
+const caps: Capabilities = { os: "linux", arch: "x64", hostname: "team-vm-test", cores: 16, cpu: "test", memoryGb: 32, hasBattery: false, gpu: [], docker: true, vm: { kvm: true, tools: ["kata"] }, tools: ["docker"], localModels: [], tailscale: null, sandbox: { image: true, networks: true, vm: true, images: Object.keys(OWN_IMAGES) } };
 const docker = fakeDocker();
 const runs: string[][] = [];
+/** The images built, as Docker was asked to build them. */
+const builds: string[][] = [];
 /** Every `docker update`: a VM given more while it runs. */
 const updates: string[][] = [];
 const events: { kind: "cleanup" | "lease" | "exec" | "model"; target: string; text: string }[] = [];
@@ -131,6 +133,7 @@ const start = () => startDaemon(home, { capabilities: caps, proxyPort: freePort(
   docker: (args, timeout) => {
     if (args[0] === "run") runs.push(args);
     if (args[0] === "update") updates.push(args);
+    if (args[0] === "build") builds.push(args);
     // Docker that cannot say what is there (its daemon is busy or restarting): never the same as "nothing is there".
     if (dockerSilent && args[0] === "ps") return Promise.resolve({ code: 1, stdout: "", stderr: "Cannot connect to the Docker daemon" });
     return docker.runner(args, timeout);
@@ -670,6 +673,17 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   const dex = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "dex", desktop: true, memoryGb: 2 })).workspace;
   expect(dex).toMatchObject({ image: "invincible/desktop:1", memoryGb: 2, isolation: "vm" });
   expect(await api("removeAgent", { id: "dex", destroyWorkspace: true })).toMatchObject({ workspace: "destroyed" });
+  // Or the hardware tools (C1 step 11), a choice per agent: their image, with the desktop they come with, made as a
+  // desktop's VM is. Made again without them, it keeps its desktop.
+  await api("saveAgent", { id: "hal", name: "HAL", role: "engineer" });
+  const hal = (await api<{ workspace: SandboxView }>("provisionAgent", { id: "hal", hardware: true })).workspace;
+  expect(hal).toMatchObject({ image: "invincible/desktop-hardware:1", memoryGb: 2, isolation: "vm" });
+  expect((await api<{ workspace: SandboxView }>("remakeAgent", { id: "hal", hardware: false })).workspace).toMatchObject({ id: hal.id, image: "invincible/desktop:1" });
+  expect(await api("removeAgent", { id: "hal", destroyWorkspace: true })).toMatchObject({ workspace: "destroyed" });
+  // Their image is built on your word as the desktop's is (invincible sandbox build --hardware): from its own folder, on
+  // the desktop's, so never pulled.
+  await api("buildSandboxImage", { hardware: true });
+  expect(builds.at(-1)).toEqual(["build", "-t", "invincible/desktop-hardware:1", expect.stringMatching(/\/sandbox\/hardware$/)]);
   // The primary's own computer: made under its reserved handle, with a desktop unless you say otherwise, and in no list of agents.
   expect((await snapshot()).computer).toBeUndefined();
   await expect(api("teamDesktop", { id: "primary" })).rejects.toThrow(/424 Your agent has no computer yet/);
@@ -745,7 +759,7 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   expect(await api("removeAgent", { id: "tom" })).toEqual({ removed: { id: "tom", name: "TOM" }, workspace: "left" });
   expect(docker.running()).toBe(stillThere);
   expect(await ledgered("tom")).toMatchObject({ detail: "its VM was on a node that has left the fleet; nothing there was touched" });
-  expect((await snapshot()).removed?.map((member) => member.id).sort()).toEqual(["ada", "dex", "lin", "sam", "tom", "una"]);
+  expect((await snapshot()).removed?.map((member) => member.id).sort()).toEqual(["ada", "dex", "hal", "lin", "sam", "tom", "una"]);
 }, 20000);
 
 test("a project's first clone is answered as it goes: its head comes while the clone runs, and the listener lets it run on", async () => {

@@ -358,6 +358,14 @@ test("agents provision makes an agent's VM with a desktop unless --no-desktop, a
   await teamCommand(api, "provision", ["max"], { desktop: true }, say);
   expect(asked.at(-1)).toEqual({ name: "provisionAgent", input: { id: "max", desktop: true } });
   await expect(teamCommand(api, "provision", ["max"], { desktop: true, "no-desktop": true }, say)).rejects.toThrow(/not both/);
+  // The hardware tools (C1 step 11): asked for by name, with the desktop they come with, and said; never without one.
+  image = "invincible/desktop-hardware:1";
+  await teamCommand(api, "provision", ["max"], { hardware: true }, say);
+  expect(asked.at(-1)).toEqual({ name: "provisionAgent", input: { id: "max", hardware: true } });
+  expect(lines.at(-1)).toBe("VM 0123456789 on host-one · with a desktop and the hardware tools · it can reach the internet");
+  const before = asked.length;
+  await expect(teamCommand(api, "provision", ["max"], { hardware: true, "no-desktop": true }, say)).rejects.toThrow(/come with a desktop/);
+  expect(asked).toHaveLength(before);
 });
 
 test("agents provision --remake has an agent's VM made again from its image as it is now, by its own route, and says what was kept", async () => {
@@ -383,6 +391,14 @@ test("agents provision --remake has an agent's VM made again from its image as i
     await expect(teamCommand(api, "provision", ["max"], { remake: true, [flag]: "4" }, say)).rejects.toThrow(/made again where and as large as it is/);
   }
   expect(asked).toHaveLength(2);
+  // Given the hardware tools, or having them taken away (its desktop kept); asked both ways, or with no desktop, refused here.
+  await teamCommand(api, "provision", ["max"], { remake: true, hardware: true }, say);
+  expect(asked.at(-1)).toEqual({ name: "remakeAgent", input: { id: "max", hardware: true } });
+  await teamCommand(api, "provision", ["max"], { remake: true, "no-hardware": true }, say);
+  expect(asked.at(-1)).toEqual({ name: "remakeAgent", input: { id: "max", hardware: false } });
+  await expect(teamCommand(api, "provision", ["max"], { remake: true, hardware: true, "no-hardware": true }, say)).rejects.toThrow(/not both/);
+  await expect(teamCommand(api, "provision", ["max"], { remake: true, hardware: true, "no-desktop": true }, say)).rejects.toThrow(/come with a desktop/);
+  expect(asked).toHaveLength(4);
 });
 
 test("a task that changed its repository says how many files and where they are kept, on its line", async () => {

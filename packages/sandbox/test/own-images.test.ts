@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { DEFAULT_IMAGE, DESKTOP_IMAGE, OWN_IMAGES, SandboxHost, type DockerRunner } from "../src/index.ts";
+import { DEFAULT_IMAGE, DESKTOP_IMAGE, HARDWARE_IMAGE, OWN_IMAGES, SandboxHost, type DockerRunner } from "../src/index.ts";
 
 /*
  * The primary's own images. One made from another of its (the desktop from the workshop's) names a base that is in no
@@ -34,6 +34,7 @@ test("an image made from another of its names that one as its base, and only suc
     expect({ image, base: own.base ?? null }).toEqual({ image, base: from in OWN_IMAGES ? from : null });
   }
   expect(OWN_IMAGES[DESKTOP_IMAGE]!.base).toBe(DEFAULT_IMAGE);
+  expect(OWN_IMAGES[HARDWARE_IMAGE]!.base).toBe(DESKTOP_IMAGE);
 });
 
 test("an image from a registry's base is built with --pull; one from its own base, without", async () => {
@@ -59,4 +60,22 @@ test("whose base is there, only the image itself is made", async () => {
   const h = host(new Set([DEFAULT_IMAGE]));
   await h.sandboxes.create({ network: "isolated", cpus: 1, memoryGb: 1, ttlMinutes: 30, persistent: false, desktop: true });
   expect(h.builds()).toEqual([["build", "-t", DESKTOP_IMAGE, "/opt/invincible/sandbox/desktop"]]);
+});
+
+test("the hardware image is two of its own away from a registry: what of them is gone is made first, the deepest first, and a base that's there ends the walk", async () => {
+  const sandbox = { network: "isolated", cpus: 1, memoryGb: 1, ttlMinutes: 30, persistent: false, hardware: true } as const;
+  const workshop = ["build", "--pull", "-t", DEFAULT_IMAGE, "/opt/invincible/sandbox"];
+  const desktop = ["build", "-t", DESKTOP_IMAGE, "/opt/invincible/sandbox/desktop"];
+  const hardware = ["build", "-t", HARDWARE_IMAGE, "/opt/invincible/sandbox/hardware"];
+  const made = async (built: string[]) => {
+    const h = host(new Set(built));
+    await h.sandboxes.create(sandbox);
+    return h.builds();
+  };
+  expect(await made([])).toEqual([workshop, desktop, hardware]);
+  expect(await made([DEFAULT_IMAGE])).toEqual([desktop, hardware]);
+  expect(await made([DEFAULT_IMAGE, DESKTOP_IMAGE])).toEqual([hardware]);
+  // (The desktop there, it is built on: the workshop under it is the desktop's own past, needed by no build here.)
+  expect(await made([DESKTOP_IMAGE])).toEqual([hardware]);
+  expect(await made([DEFAULT_IMAGE, DESKTOP_IMAGE, HARDWARE_IMAGE])).toEqual([]);
 });

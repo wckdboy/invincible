@@ -73,6 +73,8 @@ export const CONTAINER_IMAGES: readonly string[] = [DEFAULT_IMAGE];
 export interface SandboxAsk {
   network?: SandboxNetwork;
   desktop?: boolean;
+  /** The hardware tools, which come with a desktop: refused where a desktop is. */
+  hardware?: boolean;
   lab?: boolean;
   image?: string;
 }
@@ -80,7 +82,7 @@ export interface SandboxAsk {
 /** Why a host that can't make `cannot` can't make this sandbox (its first reason), or null when it can. */
 export function cannotMake(ask: SandboxAsk, cannot: readonly string[]): string | null {
   const why = (what: Unmade) => (cannot.includes(what) ? CONTAINER_CANNOT[what] : null);
-  return (ask.network === "isolated" ? why("isolated") : null) ?? (ask.desktop ? why("desktop") : null) ?? (ask.lab ? why("lab") : null);
+  return (ask.network === "isolated" ? why("isolated") : null) ?? (ask.desktop || ask.hardware ? why("desktop") : null) ?? (ask.lab ? why("lab") : null);
 }
 
 /** Why a Mac can't make this sandbox, or null when it can. */

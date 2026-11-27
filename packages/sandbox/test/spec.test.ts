@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SandboxRequest } from "@invincible/core";
-import { chooseIsolation, COLLECT_SCRIPT, collectArgs, execArgs, gatewayEnv, KATA_RUNTIME, microVMsAvailable, NETWORKS, networkCreateArgs, runArgs, SandboxError, type SandboxSpec, sandboxScopes, vmResolvConf } from "../src/index.ts";
+import { buildCommand, chooseIsolation, COLLECT_SCRIPT, collectArgs, DEFAULT_IMAGE, DESKTOP_IMAGE, execArgs, gatewayEnv, HARDWARE_IMAGE, KATA_RUNTIME, LAB_IMAGE, madeFrom, microVMsAvailable, NETWORKS, networkCreateArgs, remadeImage, remakeAsk, runArgs, SandboxError, type SandboxSpec, sandboxScopes, vmResolvConf } from "../src/index.ts";
 
 const base: SandboxSpec = {
   id: "0123456789",
@@ -170,5 +170,59 @@ describe("a folder kept as an artifact", () => {
     expect(collectArgs("0123456789", "/work/out")).toEqual(execArgs("0123456789", ["python3", "-I", "-c", COLLECT_SCRIPT, "/work/out"], 900));
     expect(collectArgs("0123456789", "/work/out")[0]).toBe("exec");
     expect(collectArgs("0123456789", "/work/out")).not.toContain("cp");
+  });
+});
+
+describe("the hardware image (C1 step 11): the desktop with KiCad and FreeCAD, a choice per agent", () => {
+  test("its name says desktop, as whatever asks whether a VM has one reads it, and it is made from the desktop's, which is made from the workshop's", () => {
+    expect(HARDWARE_IMAGE.includes("desktop")).toBe(true);
+    expect(madeFrom(HARDWARE_IMAGE)).toEqual([DEFAULT_IMAGE, DESKTOP_IMAGE, HARDWARE_IMAGE]);
+    expect(madeFrom(DESKTOP_IMAGE)).toEqual([DEFAULT_IMAGE, DESKTOP_IMAGE]);
+    expect(madeFrom(DEFAULT_IMAGE)).toEqual([DEFAULT_IMAGE]);
+    // (An image that isn't one of its own is made by nothing of its own.)
+    expect(madeFrom("debian:trixie-slim")).toEqual([]);
+  });
+
+  test("each of its own images says how it is built when a node hasn't it", () => {
+    expect([DEFAULT_IMAGE, LAB_IMAGE, DESKTOP_IMAGE, HARDWARE_IMAGE].map(buildCommand)).toEqual([
+      "invincible sandbox build",
+      "invincible sandbox build --lab",
+      "invincible sandbox build --desktop",
+      "invincible sandbox build --hardware",
+    ]);
+  });
+
+  test("made again, a VM is given the hardware tools or has them taken away, and they come and go with its desktop", () => {
+    const remade = (current: string, ask: { desktop?: boolean; hardware?: boolean }) => remadeImage(current, ask);
+    // Given them, from any image: a desktop comes with them, even with one taken away in the same breath.
+    for (const current of [DEFAULT_IMAGE, DESKTOP_IMAGE, HARDWARE_IMAGE]) {
+      expect(remade(current, { hardware: true })).toBe(HARDWARE_IMAGE);
+      expect(remade(current, { hardware: true, desktop: false })).toBe(HARDWARE_IMAGE);
+    }
+    // Taken away, its desktop stays; its desktop taken away, they go with it.
+    expect(remade(HARDWARE_IMAGE, { hardware: false })).toBe(DESKTOP_IMAGE);
+    expect(remade(HARDWARE_IMAGE, { desktop: false })).toBe(DEFAULT_IMAGE);
+    expect(remade(HARDWARE_IMAGE, { desktop: false, hardware: false })).toBe(DEFAULT_IMAGE);
+    // A desktop asked of one that has them keeps them; of one that hasn't, the desktop's.
+    expect(remade(HARDWARE_IMAGE, { desktop: true })).toBe(HARDWARE_IMAGE);
+    expect(remade(DEFAULT_IMAGE, { desktop: true })).toBe(DESKTOP_IMAGE);
+    expect(remade(DEFAULT_IMAGE, { desktop: true, hardware: false })).toBe(DESKTOP_IMAGE);
+    // Taking away what it hasn't changes nothing; and unasked, every VM keeps the image it has.
+    expect(remade(DESKTOP_IMAGE, { hardware: false })).toBe(DESKTOP_IMAGE);
+    expect(remade(DEFAULT_IMAGE, { hardware: false })).toBe(DEFAULT_IMAGE);
+    for (const current of [DEFAULT_IMAGE, DESKTOP_IMAGE, HARDWARE_IMAGE, LAB_IMAGE]) expect(remade(current, {})).toBe(current);
+  });
+
+  test("a remake's host is told the hardware tools are taken away only from a VM that has them: leaving it out changes nothing", () => {
+    expect(remakeAsk(DESKTOP_IMAGE, { desktop: true, hardware: false })).toEqual({ desktop: true });
+    expect(remakeAsk(DEFAULT_IMAGE, { hardware: false })).toEqual({});
+    expect(remakeAsk(HARDWARE_IMAGE, { hardware: false })).toEqual({ hardware: false });
+    expect(remakeAsk(DEFAULT_IMAGE, { hardware: true })).toEqual({ hardware: true });
+    const asks = [undefined, true, false].flatMap((desktop) => [undefined, true, false].map((hardware) => ({ ...(desktop === undefined ? {} : { desktop }), ...(hardware === undefined ? {} : { hardware }) })));
+    for (const current of [DEFAULT_IMAGE, DESKTOP_IMAGE, HARDWARE_IMAGE, LAB_IMAGE]) for (const ask of asks) expect(remadeImage(current, remakeAsk(current, ask))).toBe(remadeImage(current, ask));
+  });
+
+  test("a sandbox, an agent's VM and its making again can each ask for it", () => {
+    expect(SandboxRequest.parse({ network: "gateway", hardware: true })).toMatchObject({ hardware: true });
   });
 });

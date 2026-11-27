@@ -44,12 +44,16 @@ import {
   execArgs,
   gatewayEnv,
   DESKTOP_IMAGE,
+  buildCommand,
+  HARDWARE_IMAGE,
   HARNESS_IMAGE,
   LAB_IMAGE,
   LABEL,
+  madeFrom,
   NETWORKS,
   networkCreateArgs,
   OWN_IMAGES,
+  remadeImage,
   runArgs,
   type SandboxSpec,
   SEARCH_SCOPE,
@@ -276,6 +280,8 @@ export interface CreateInput {
   lab?: boolean;
   /** The desktop image (a display, a window manager and a browser) instead of the workshop. */
   desktop?: boolean;
+  /** The hardware image (the desktop with KiCad and FreeCAD): a desktop comes with it. */
+  hardware?: boolean;
   /** Web search through the gateway (the node's own SearXNG): `websearch` in the images. */
   search?: boolean;
 }
@@ -736,14 +742,19 @@ export class SandboxHost {
     if (isolation === "vm" && !this.opts.microVMs) {
       throw new SandboxError("this host can't run microVMs: it needs KVM and Kata Containers, which a deploy with sudo installs", 424);
     }
-    const image = input.lab ? LAB_IMAGE : input.desktop ? DESKTOP_IMAGE : (input.image ?? DEFAULT_IMAGE);
+    const image = input.lab ? LAB_IMAGE : input.hardware ? HARDWARE_IMAGE : input.desktop ? DESKTOP_IMAGE : (input.image ?? DEFAULT_IMAGE);
     const own = OWN_IMAGES[image];
     if (own && !(await this.hasImage(image))) {
       // Gone (pruned) or never built: building it is the primary's to do (create), rather than failing the run.
-      if (!this.opts.imageContext) throw new SandboxError(`${image} is not built on this node yet: run \`invincible sandbox build${input.lab ? " --lab" : input.desktop ? " --desktop" : ""}\``, 424);
-      // Made from another of its own (the desktop from the workshop's): that one first, when it's gone too.
-      const base = own.base && !(await this.hasImage(own.base)) ? own.base : null;
-      for (const tag of base ? [base, image] : [image]) {
+      if (!this.opts.imageContext) throw new SandboxError(`${image} is not built on this node yet: run \`${buildCommand(image)}\``, 424);
+      // Made from others of its own (the desktop from the workshop's, the hardware's from the desktop's): each of those
+      // that is gone too, first, the deepest first.
+      const missing = [image];
+      for (const base of madeFrom(image).slice(0, -1).reverse()) {
+        if (await this.hasImage(base)) break;
+        missing.unshift(base);
+      }
+      for (const tag of missing) {
         const built = await this.build(join(this.opts.imageContext, OWN_IMAGES[tag]!.context), "rebuilt: the image was missing when a sandbox was needed", tag);
         if (!built.ok) throw new SandboxError(`${tag} was missing and rebuilding it failed: ${built.output.slice(-300)}`, 424);
       }
@@ -1028,7 +1039,7 @@ export class SandboxHost {
    * is put back as it was. Its network may change with it (a microVM's can't be changed any other way), and its
    * gateway token covers `providers`, as for a VM made today. Everything outside `/work` is the image's again.
    */
-  async remakeTeam(id: string, run: string, opts: { providers: string[]; network?: "online" | "gateway"; desktop?: boolean; approvedBy: string }): Promise<SandboxView> {
+  async remakeTeam(id: string, run: string, opts: { providers: string[]; network?: "online" | "gateway"; desktop?: boolean; hardware?: boolean; approvedBy: string }): Promise<SandboxView> {
     const sandbox = await this.get(id);
     if (!sandbox) throw new SandboxError("the agent's VM is missing; its workspace must be recovered, not replaced", 404);
     if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") {
@@ -1038,11 +1049,12 @@ export class SandboxHost {
     const aside = `${name}-replaced`;
     const network = opts.network ?? (sandbox.network === "isolated" ? "gateway" : sandbox.network);
     const providers = sandboxScopes({ network, providers: opts.providers, search: sandbox.providers.includes(SEARCH_SCOPE) });
-    // With a desktop from now on, or without one, when asked; else the image it has (by its name: as it is built now).
-    const image = opts.desktop === true ? DESKTOP_IMAGE : opts.desktop === false ? DEFAULT_IMAGE : sandbox.image;
-    const cannot = this.apple ? containerCannot({ desktop: image === DESKTOP_IMAGE }) : null;
+    // With a desktop or the hardware tools from now on, or without, when asked; else the image it has (by its name: as it
+    // is built now).
+    const image = remadeImage(sandbox.image, opts);
+    const cannot = this.apple ? containerCannot({ desktop: image === DESKTOP_IMAGE || image === HARDWARE_IMAGE }) : null;
     if (cannot) throw new SandboxError(cannot, 424);
-    if (!(await this.hasImage(image))) throw new SandboxError(`${image} is not built on this node: run \`invincible sandbox build${image === DESKTOP_IMAGE ? " --desktop" : ""}\` first`, 424);
+    if (!(await this.hasImage(image))) throw new SandboxError(`${image} is not built on this node: run \`${buildCommand(image)}\` first`, 424);
     if (this.apple) {
       // On a Mac: stopped, deleted and made again on the same volume (no rename there), or put back as it was.
       await this.replaceTeamVm(sandbox, run, { image, network, providers, cpus: sandbox.cpus, memoryGb: sandbox.memoryGb });
