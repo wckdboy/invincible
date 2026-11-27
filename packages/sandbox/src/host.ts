@@ -184,7 +184,7 @@ export interface SandboxHostOptions {
 const lostItsFiles = (stderr: string): boolean => /failed to create shim task/.test(stderr) && /no such file or directory/.test(stderr);
 
 /** One docker command: its arguments in, its exit code and output out. */
-export type DockerRunner = (args: string[], timeoutMs: number) => Promise<{ code: number; stdout: string; stderr: string }>;
+export type DockerRunner = (args: string[], timeoutMs: number) => Promise<{ code: number; stdout: string; stderr: string; truncated?: boolean }>;
 
 /** A process on a terminal: what it prints comes to the `onData` it was started with; keys and sizes go in. */
 export interface TerminalProcess {
@@ -461,6 +461,8 @@ interface Run {
 export const TEAM_LEASE_MINUTES = 30;
 
 const MAX_OUTPUT = 1024 * 1024;
+/** The most of a store's list (MOVE_PY's `list`) the node reads: a line for each of its top-level entries, some hundred thousand of them. */
+const LAYOUT_LIST_MAX = 16 * 1024 * 1024;
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 async function readCapped(stream: ReadableStream<Uint8Array>, max: number): Promise<{ text: string; truncated: boolean }> {
@@ -577,7 +579,8 @@ export class SandboxHost {
   }
 
   private async docker(args: string[], timeoutMs = 60_000, max = MAX_OUTPUT): Promise<Run> {
-    if (this.opts.runner) return { ...(await this.opts.runner(args, timeoutMs)), truncated: false };
+    // (A stand-in's answer is whole unless it says it was cut, as a read past its cap is.)
+    if (this.opts.runner) return { truncated: false, ...(await this.opts.runner(args, timeoutMs)) };
     const proc = Bun.spawn([this.bin, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => proc.kill(), timeoutMs);
     const [out, err, code] = await Promise.all([readCapped(proc.stdout, max), readCapped(proc.stderr, max), proc.exited]);
@@ -1201,16 +1204,32 @@ export class SandboxHost {
       ["run", "--rm", "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only",
         "--mount", mode === "list" ? `${mount},readonly` : mount, image, "python3", "-I", "-c", MOVE_PY, mode, "/work", JSON.stringify(WORKSPACE_OWN), LEASE_FILE, NOTES_DIR],
       10 * 60_000,
+      mode === "list" ? LAYOUT_LIST_MAX : MAX_OUTPUT,
     );
+  }
+
+  /**
+   * A store's list as MOVE_PY's `list` says it: read whole, or refused, never in part. Its lines are its top-level
+   * entries' names, which the agent chooses, so it is as long as they make it: past LAYOUT_LIST_MAX it is cut, and a list
+   * cut is no list. A move whose list is refused waits (it stays in layout 1, and the ledger says why).
+   */
+  private layoutEntries(listed: Run): LayoutEntry[] {
+    if (listed.code !== 0) throw new SandboxError(`could not list the agent's store: ${redact(listed.stderr).split("\n").at(-1)?.slice(0, 300) ?? ""}`, 424);
+    if (listed.truncated) throw new SandboxError(`the agent's store lists more than the node reads (${LAYOUT_LIST_MAX / 2 ** 20} MB of its entries' names): it is neither shown in part nor moved`, 424);
+    return listed.stdout.trim().split("\n").filter(Boolean).map((line) => {
+      try {
+        return JSON.parse(line) as LayoutEntry;
+      } catch {
+        throw new SandboxError("the agent's store's list says what isn't a list", 500);
+      }
+    });
   }
 
   /** What a move to layout 2 would do with an agent's store, by entry name and size: nothing of any file is read. */
   async layoutList(id: string): Promise<LayoutEntry[]> {
     const sandbox = await this.get(id);
     if (!sandbox || sandbox.ephemeral) throw new SandboxError("that is not an agent's persistent VM", 404);
-    const listed = await this.layoutRun(await this.storeOf(sandbox), sandbox.image, "list");
-    if (listed.code !== 0) throw new SandboxError(`could not list the agent's store: ${redact(listed.stderr).split("\n").at(-1)?.slice(0, 300) ?? ""}`, 424);
-    return listed.stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as LayoutEntry);
+    return this.layoutEntries(await this.layoutRun(await this.storeOf(sandbox), sandbox.image, "list"));
   }
 
   /** Whether nothing runs in an agent's VM: no command, no terminal, no desktop session, and no VM sharing its /work. */
@@ -1234,7 +1253,7 @@ export class SandboxHost {
    */
   private async moveToLayout2(sandbox: SandboxView, run: string): Promise<void> {
     const store = await this.storeOf(sandbox);
-    const entries = (await this.layoutRun(store, sandbox.image, "list")).stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as LayoutEntry);
+    const entries = this.layoutEntries(await this.layoutRun(store, sandbox.image, "list"));
     await this.remakeTeam(sandbox.id, run, {
       providers: sandbox.providers.filter((p) => p !== SEARCH_SCOPE),
       approvedBy: "",

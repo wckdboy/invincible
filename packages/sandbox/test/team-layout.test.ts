@@ -21,7 +21,7 @@ const LISTED: LayoutEntry[] = [
   { name: "repo", to: "work", kind: "dir", bytes: 4096 },
 ];
 
-function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean } = {}) {
+function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean; listCut?: boolean } = {}) {
   const containers = new Map<string, { labels: Record<string, string>; mounts: Mount[]; status: string; image: string }>();
   const calls: string[][] = [];
   /** The modes MOVE_PY was run in, in order. */
@@ -77,6 +77,8 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
         if (rest.includes("--rm")) {
           const mode = rest[rest.indexOf("-c") + 2]!;
           modes.push(mode);
+          // (Cut, as the node's read of it is past its cap: whole lines here, so that only its being cut can tell.)
+          if (mode === "list" && opts.listCut) return { ...ok(LISTED.map((e) => JSON.stringify(e)).join("\n")), truncated: true };
           return mode === "list" ? ok(LISTED.map((e) => JSON.stringify(e)).join("\n")) : ok();
         }
         if (opts.runFails) return { code: 125, stdout: "", stderr: "kata: could not start the VM" };
@@ -159,6 +161,18 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
   const agent = () => containers.get(containerName(ID))!;
   return { host, calls, containers, ledger, moved, modes, agent, leases, tokens };
 }
+
+describe("a store's list, whole or not at all (the review's F3, swept)", () => {
+  test("cut at the node's cap, it is never read in part: the dry run refuses it, and the move waits, saying why", async () => {
+    const f = fake({ listCut: true });
+    await expect(f.host.layoutList(ID)).rejects.toThrow("the agent's store lists more than the node reads");
+    await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
+    // (Listed, and not moved: it stays in layout 1, and the ledger says why.)
+    expect(f.modes).toEqual(["list", "list"]);
+    expect(f.moved).toEqual([]);
+    expect(f.ledger.some((e) => e.detail?.startsWith("not moved to layout 2, so it stays as it was: the agent's store lists more than the node reads"))).toBe(true);
+  });
+});
 
 describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () => {
   test("is moved to layout 2: its store's entries renamed into its three trees, and its VM made again on them", async () => {
