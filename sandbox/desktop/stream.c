@@ -6,8 +6,8 @@
  * The screen is captured (MIT-SHM) only when it changed: DAMAGE says the picture did, or the pointer moved or changed
  * shape. At most 10 frames a second, 25 for 2 s after a `fast` (your own input, as you take over). Nothing while it is
  * still. Each frame is the whole screen with the pointer drawn in, as deskd's pictures are, encoded by OpenH264
- * (BSD-2-Clause; H.264's patents: docs/ARCHITECTURE.md) as Constrained Baseline in its screen-content mode. Its first
- * frame is a keyframe, and so is the one after a `key` (a new watcher).
+ * (BSD-2-Clause; H.264's patents: docs/ARCHITECTURE.md) as Constrained Baseline, in its camera mode (its settings and
+ * why: below). Its first frame is a keyframe, and so is the one after a `key` (a new watcher).
  *
  * Its frames, on stdout: a 4-byte big-endian length of what follows it, a byte for the kind (1 a keyframe, with its SPS
  * and PPS; 2 any other), an 8-byte big-endian capture time (milliseconds since the epoch), then the frame's NAL units,
