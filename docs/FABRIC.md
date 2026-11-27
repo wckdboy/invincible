@@ -455,9 +455,10 @@ answered and a Q-AMP release with the sidecar is pinned.
 - **Not driven:** the hand-off from the web app or the native apps (the CLI and the API only); a VM's real harness
   calling its giver's tools (the gateway path is tested with a stand-in, `callGiver` end to end); Linux with real
   Docker, KVM or the workspace helper beside a sidecar.
-- **A handed task's clone of its own (R5-3) has run on real git, never in real VMs.** Its scripts give, clone, send,
-  receive and apply on real repositories (`handed-repo.test.ts`), and the pipe between two VMs is tested with a stand-in
-  for Docker that runs both sides here (`pipe.test.ts`). It has never gone through real Docker's `exec --interactive` on
-  Linux, nor run on the image's own git (Debian trixie's, not checked in a built image). Its apply relies on `git
-  apply`'s checks of links, which need a git with CVE-2023-23946's fix (2.39.2 or later).
+- **A handed task's clone of its own (R5-3) has run on real Docker, not yet on a node.** Its scripts give, clone,
+  send, receive and apply on real repositories (`handed-repo.test.ts`). On Ultra's Docker 29.10.0, in containers and
+  in Kata microVMs, `SandboxHost.pipe` carried a task's clone and its patch between two VMs made from the sandbox image,
+  the patch was applied and the step kept, a pipe past its cap was cut and a side past its deadline ended, in the VMs
+  too, and the image's git is 2.47.3, past CVE-2023-23946's fix to `git apply`'s checks of links
+  (`handed-docker.integration.test.ts`, 27 November 2026). No node has taken a handed task through it yet.
 - **Relays and NAT traversal** (Q-AMP's `feat/relays`) aren't used: nodes reach each other on the tailnet, directly.
