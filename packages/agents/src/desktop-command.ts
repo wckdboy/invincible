@@ -24,6 +24,9 @@ export function actsOnDesktop(command: string): boolean {
   return /(^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+(open|click|type|key|scroll|move|drag|app|dialog|left_click|right_click|middle_click|double_click|triple_click|left_click_drag|mouse_move|left_mouse_down|left_mouse_up|hold_key)\b/.test(command);
 }
 
+/** How an agent with eyes is told it may ask them, after the tree (desktopBriefing's `looking`). */
+export const LOOKING = ' Then `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).';
+
 /**
  * What an agent is told of the desktop its VM has, for its environment: what it is and how it is operated, an app
  * scripted first, and on the screen the tree's words before pixels (C1 step 7). `looking`: how it asks its eyes, where

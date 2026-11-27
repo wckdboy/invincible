@@ -1,7 +1,7 @@
 import { type ChatMessage, type ClientCall, type ExecResult, newNodeIdentity, redact, type Usage } from "../../packages/core/src/index.ts";
 import { foundFleet, LedgerStore, Vault } from "../../packages/ledger/src/index.ts";
 import { chat, type ModelsContext } from "../../packages/models/src/index.ts";
-import { desktopBriefing } from "../../packages/agents/src/desktop-command.ts";
+import { desktopBriefing, LOOKING } from "../../packages/agents/src/desktop-command.ts";
 import { COMPUTER_MEMBERS } from "../../packages/agents/src/engineer-tools.ts";
 import { type RunDeps, type RunEvent, type RunOutcome, runLoop } from "../../packages/agents/src/run.ts";
 
@@ -139,17 +139,35 @@ export function throughGateway(gateway: string, route: { versioned?: boolean } =
 }
 
 /**
- * A node's mind for the loop's model: one provider, Anthropic's, its key the one given (the stand-in's is obviously
- * none), on the roster as `model` (a router's name for it where the route is a router's).
+ * An OpenAI-compatible provider's calls, through the node's gateway: the adapter's base address is the gateway's for
+ * that provider, so each request goes there with the benchmark's token, and a request for anywhere else is refused
+ * before it is sent.
  */
-export function modelsContext(key: string, fetchVia: typeof fetch, model: string = MODEL): ModelsContext {
+export function gatewayAlone(base: string): typeof fetch {
+  const at = base.replace(/\/+$/, "");
+  return (async (url: string | URL | Request, init?: RequestInit) => {
+    const asked = url instanceof Request ? url.url : String(url);
+    if (!asked.startsWith(`${at}/`)) throw new Error(`the bench's model calls go to the gateway alone, not ${new URL(asked).origin}`);
+    return fetch(asked, { ...init, redirect: "manual" });
+  }) as typeof fetch;
+}
+
+/**
+ * A node's mind for the loop's model: one provider, its key the one given (the stand-in's is obviously none), on the
+ * roster as `model`. Anthropic's (a router's name for its model where the route is a router's), or `openai`: an
+ * OpenAI-compatible provider of the gateway's, by its own id (a coding plan's, so the plan's terms are the node's own
+ * reading of them), at the gateway's address for it.
+ */
+export function modelsContext(key: string, fetchVia: typeof fetch, model: string = MODEL, openai?: { id: string; baseUrl: string }): ModelsContext {
   const identity = newNodeIdentity();
   const store = new LedgerStore(":memory:");
   foundFleet(store, identity, { fleetName: "bench", nodeName: "bench" });
   const vault = new Vault(store, identity);
-  vault.set("claude", key, { provider: "claude", origin: "https://api.anthropic.com" });
-  store.emit(identity, "provider.set", { id: "claude", kind: "anthropic", baseUrl: "https://api.anthropic.com", secret: "claude" });
-  for (const role of ["planner", "engineer", "reviewer"]) store.emit(identity, "roster.set", { role, models: [`claude/${model}`] });
+  const id = openai?.id ?? "claude";
+  const baseUrl = openai?.baseUrl ?? "https://api.anthropic.com";
+  vault.set("bench", key, { provider: id, origin: new URL(baseUrl).origin });
+  store.emit(identity, "provider.set", { id, kind: openai ? "openai" : "anthropic", baseUrl, secret: "bench" });
+  for (const role of ["planner", "engineer", "reviewer"]) store.emit(identity, "roster.set", { role, models: [`${id}/${model}`] });
   return { store, vault, fetch: fetchVia };
 }
 
@@ -179,21 +197,22 @@ export function loopAsk(ctx: ModelsContext, counted: { calls: number; usage: Usa
   };
 }
 
-/** The environment an agent's task is told it works in, as team-runtime tells it, for a VM with a desktop. */
-export const ENVIRONMENT = `Your persistent Linux VM; your workspace is /work.${desktopBriefing()}`;
+/** The environment an agent's task is told it works in, as team-runtime tells it, for a VM with a desktop: with eyes, told how to ask them. */
+export const environmentFor = (eyes = false): string => `Your persistent Linux VM; your workspace is /work.${desktopBriefing(eyes ? LOOKING : "")}`;
+export const ENVIRONMENT = environmentFor();
 
 /** One task through the loop: its goal, the model's way (ask), the VM's commands (exec). Never throws: an error is said. */
 /** How many of the desktop's commands a command gives: each `desktop <verb>` where a command begins in it (as actsOnDesktop reads it). */
 export const desktopActions = (command: string): number => command.match(/(^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+[a-z_]+/g)?.length ?? 0;
 
-export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command: string, timeoutSec: number) => Promise<ExecResult>, counted: { calls: number; usage: Usage; unknown?: number }, maxSteps = 40, signal?: AbortSignal): Promise<LoopRun> {
+export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command: string, timeoutSec: number) => Promise<ExecResult>, counted: { calls: number; usage: Usage; unknown?: number }, maxSteps = 40, signal?: AbortSignal, environment = ENVIRONMENT): Promise<LoopRun> {
   const events: RunEvent[] = [];
   const t0 = performance.now();
   let outcome: RunOutcome | null = null;
   let error: string | null = null;
   try {
     outcome = await runLoop(
-      { goal, environment: ENVIRONMENT, plan: "", tools: true, computer: true, maxSteps, maxRevisions: 0, commandTimeoutSec: 120 },
+      { goal, environment, plan: "", tools: true, computer: true, maxSteps, maxRevisions: 0, commandTimeoutSec: 120 },
       { ask, exec, emit: (event) => events.push(event), sleep: async () => {}, ...(signal ? { signal } : {}) },
     );
   } catch (e) {

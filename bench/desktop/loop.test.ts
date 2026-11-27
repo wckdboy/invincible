@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ExecResult } from "../../packages/core/src/index.ts";
 import { UNPROVEN } from "../../packages/agents/src/run.ts";
-import { type Asked, desktopActions, dollarsOf, loopAsk, modelsContext, standIn, throughGateway, viaLoop } from "./loop.ts";
+import { type Asked, desktopActions, dollarsOf, gatewayAlone, loopAsk, modelsContext, standIn, throughGateway, viaLoop } from "./loop.ts";
 import { GOALS, shapeOf, standInTurns } from "./tasks.ts";
 
 /*
@@ -108,4 +108,20 @@ test("an action is each desktop command a run gave, the toolset's or inside a sh
   // (A run that worked the desktop through bash, as two form runs on Opus 5.5 did, counts its actions too: C1 step 7.)
   const said = ["desktop left_click 400 200", "desktop click 1 2 && desktop key Return", "cd /work && desktop type 'hi'", "echo \"$(desktop text)\"", "echo desktop click", "ls -la"];
   expect(said.map(desktopActions)).toEqual([1, 2, 1, 1, 0, 0]);
+});
+
+test("an OpenAI-compatible plan's model, the loop's engineer, is asked at the gateway's address for its provider with the benchmark's token, and nowhere else", async () => {
+  const base = "http://192.0.2.10:7811/gw/opencode-go";
+  const sent: { url: string; auth: string | null; body: any }[] = [];
+  const gateway = (async (url: string | URL | Request, init?: RequestInit) => {
+    sent.push({ url: String(url), auth: new Headers(init?.headers).get("authorization"), body: JSON.parse(String(init?.body)) });
+    return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: "DONE\nThe form was sent." } }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+  }) as typeof fetch;
+  const counted = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
+  const ctx = modelsContext("gw_FAKE_openai_00000000000000000000000000000", gateway, "kimi-k3.1-pro", { id: "opencode-go", baseUrl: base });
+  await loopAsk(ctx, counted)("engineer", [{ role: "user", content: "Send the form." }], { loop: true, tools: [] });
+  expect(sent.map((s) => [s.url, s.auth, s.body.model])).toEqual([[`${base}/chat/completions`, "Bearer gw_FAKE_openai_00000000000000000000000000000", "kimi-k3.1-pro"]]);
+  expect(counted.calls).toBe(1);
+  // (Its fetch goes to the gateway's address for it alone: anywhere else is refused before a byte is sent.)
+  await expect(gatewayAlone(base)("https://opencode.test/v1/chat/completions", { method: "POST" })).rejects.toThrow("the bench's model calls go to the gateway alone, not https://opencode.test");
 });

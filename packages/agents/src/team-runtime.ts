@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { desktopArgv, desktopBriefing, hardwareBriefing } from "./desktop-command.ts";
+import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_WORK } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
@@ -925,7 +925,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const named = typeof given === "string" ? given : (given?.ref ?? null);
       const sees = named && /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:\/-]+$/.test(named) && (!leaseModels || leaseModels.includes(named)) ? named : null;
       const space = sees && typeof given === "object" && given?.space && /^(per-mille|scaled:[0-9.]+)$/.test(given.space) ? given.space : null;
-      const looking = sees ? ' Then `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).' : "";
+      const looking = sees ? LOOKING : "";
       // (C1 step 7: an app scripted first; on the screen, the tree's words before pixels, and the eyes after them.)
       const screen = desktop ? desktopBriefing(looking) + (hardware ? hardwareBriefing() : "") : "";
       // A temporary directory of the task's own, on the workspace: a sandbox's /tmp is mounted noexec, so a test that

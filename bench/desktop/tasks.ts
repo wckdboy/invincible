@@ -4,7 +4,7 @@ import type { ExecResult, Usage } from "../../packages/core/src/index.ts";
 import type { ModelsContext } from "../../packages/models/src/index.ts";
 import { UNPROVEN } from "../../packages/agents/src/run.ts";
 import { OUT_DIR } from "../scorecard.ts";
-import { type Asked, type LoopRun, loopAsk, modelsContext, standIn, type Turn, viaLoop, type Where } from "./loop.ts";
+import { type Asked, environmentFor, type LoopRun, loopAsk, modelsContext, standIn, type Turn, viaLoop, type Where } from "./loop.ts";
 import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
 
 /*
@@ -44,6 +44,12 @@ export interface ModelWay {
   spent?(counted: { calls: number; usage: Usage; unknown?: number }): void;
   signal?: AbortSignal;
   maxSteps?: number;
+  /** Whether its model is offered Claude's computer toolset, so its turns are held to the toolset's shape (default: it is). */
+  toolset?: boolean;
+  /** Whether the agent is told it has eyes (`desktop look`), as team-runtime tells one whose VM has them. */
+  eyes?: boolean;
+  /** Each command the loop gives, run its own way where it has one (a look answered from the bench's side); `vm` runs it in the VM. */
+  exec?(command: string, timeoutSec: number, vm: (command: string, timeoutSec: number) => Promise<ExecResult>): Promise<ExecResult>;
 }
 
 export interface TaskRun {
@@ -177,10 +183,11 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     const asked: Asked[] = [];
     counted = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
     const ctx = way ? way.ctx(asked) : modelsContext("bench-stand-in-key-FAKE-0000", standIn(standInTurns(task, where, file), asked));
-    const exec = async (command: string, timeoutSec: number): Promise<ExecResult> => {
+    const inVm = async (command: string, timeoutSec: number): Promise<ExecResult> => {
       const r = await vm.agent(command, timeoutSec);
       return { exitCode: r.code, stdout: r.stdout, stderr: r.stderr, durationMs: Math.round(r.ms), truncated: false };
     };
+    const exec = way?.exec ? (command: string, timeoutSec: number) => way.exec!(command, timeoutSec, inVm) : inVm;
     const asking = loopAsk(ctx, counted);
     const ask: typeof asking = async (...args) => {
       try {
@@ -189,9 +196,10 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
         way?.spent?.(counted);
       }
     };
-    looped = await viaLoop(GOALS[task](file), ask, exec, counted, way?.maxSteps ?? 40, way?.signal);
+    looped = await viaLoop(GOALS[task](file), ask, exec, counted, way?.maxSteps ?? 40, way?.signal, environmentFor(way?.eyes ?? false));
     commands += looped.actions + looped.commands;
-    shape = shapeOf(asked, !way);
+    // (A model offered no toolset works the desktop by its shell's `desktop` command: no toolset's shape to hold it to.)
+    shape = way?.toolset === false ? null : shapeOf(asked, !way);
     if (looped.error) throw new Error(`the loop failed: ${looped.error}`);
     // (Given no gate of its own, desktop work ends unverified by the run (C1 step 8): the task's gate, below, decides.)
     const ended = looped.outcome;
