@@ -72,7 +72,8 @@ export class TaskVms {
     await this.sweep().catch((error: Error) => this.opts.log?.(`tasks' VMs: ${redact(String(error?.message ?? error)).slice(0, 200)}`));
     for (const [id, run] of [...this.lingering]) await this.remove(host, id, run);
     const run = `handed.${ask.task}`;
-    const vm = (await host.createTaskVm({ task: ask.task, shares: ask.vm, run, providers: ask.providers, models: ask.models, ttlMinutes: TASK_VM_MINUTES })).id;
+    // (Its work's own signal: a task that ends while its VM waits for room has none made.)
+    const vm = (await host.createTaskVm({ task: ask.task, shares: ask.vm, run, providers: ask.providers, models: ask.models, ttlMinutes: TASK_VM_MINUTES }, signal)).id;
     let released = false;
     const stopped = async () => {
       const ended = await host.exec(vm, ["bash", "-lc", agentCleanupCommand()], 15);

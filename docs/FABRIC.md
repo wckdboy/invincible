@@ -164,8 +164,9 @@ transport keys carries all of it:
      - It is made on a Linux host with Docker, beside an agent's VM whose HOME is apart from its workspace (layout 2,
        SECURITY.md); beside one still in layout 1 it is refused, since that VM's HOME is its workspace. Layout 2 is each
        node's own setting, off by default (`invincible sandbox layout on`): until it is on, every task handed to that
-       node is refused so. On a node with
-       no room beside its agent's VM for one as big, the task waits for room as any sandbox does, within its life.
+       node is refused so. On a node with no room beside its agent's VM for one as big, the task waits for room as any
+       sandbox does, within its life: a task that ends while it waits leaves the queue, and no VM is made for it (the
+       fourth re-review's I-2).
      - **A Mac takes no other node's task.** No VM on a Mac shares an agent's workspace: a Mac's workspace is a disk
        image only one VM may mount, and its VMs' HOME is their `/work` (layout 1). A task handed to a Mac would run in
        its agent's own VM, beside what that agent's tools keep for themselves, its sign-ins among them. So a Mac refuses

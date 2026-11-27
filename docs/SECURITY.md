@@ -722,7 +722,8 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       of yours, is never renewed with its agent's again, and is tried again on a timer until it goes. One an earlier
       process of the node left is removed as the node starts; no route reaches into it. It is made only beside an agent's VM in
       layout 2, on a Linux host with Docker; beside one whose HOME is its workspace it is refused. On a node with no
-      room beside the agent's VM for one as big, the task waits for room as any sandbox does, within its life.
+      room beside the agent's VM for one as big, the task waits for room as any sandbox does, within its life: a task
+      that ends while it waits leaves the queue, and no VM is made for it (I-2, `governed-host.test.ts`).
     - **A Mac takes no other node's task** (`fabric-handoff.test.ts`, `container-host.test.ts`). No VM on a Mac shares
       an agent's workspace (below: a Mac's VMs stay in layout 1), so there a task would run in its agent's own VM,
       beside its sign-ins. A Mac's node refuses every task handed to it at once, before it reads anything of it, and

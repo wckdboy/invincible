@@ -21,8 +21,8 @@ import { ContainerVolumes, KEEPERS } from "@invincible/sandbox";
 const capacity = (over: Partial<NodeCapacity> = {}): NodeCapacity => ({ cores: 8, memoryGb: 16, sandboxes: 2, modelCalls: 2, strength: 8, speed: 1, measured: true, reasons: [], ...over });
 const request = (over: Partial<CreateInput> = {}): CreateInput => ({ network: "isolated", cpus: 4, memoryGb: 8, ttlMinutes: 60, persistent: false, ...over });
 
-function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWaitMs?: number; now?: () => number; spawnTerminal?: SpawnTerminal; spawnFrames?: SpawnFrames } = {}) {
-  const docker = fakeDocker();
+function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWaitMs?: number; now?: () => number; spawnTerminal?: SpawnTerminal; spawnFrames?: SpawnFrames; layout2?: boolean } = {}) {
+  const docker = fakeDocker(over.layout2 ? { engine: "27.3.1" } : {});
   const ledger: LedgerEntryInput[] = [];
   const cap = over.capacity ?? (() => capacity());
   const governor = new Governor({ capacity: cap, host: () => null, retryMs: 5, maxWaitMs: over.maxWaitMs ?? 2_000, ...(over.now ? { now: over.now } : {}) });
@@ -36,6 +36,7 @@ function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWait
       maxMemoryGb: 512,
       runner: docker.runner,
       microVMs: over.microVMs ?? false,
+      ...(over.layout2 ? { layout2: true } : {}),
       ...(over.spawnTerminal ? { spawnTerminal: over.spawnTerminal } : {}),
       ...(over.spawnFrames ? { spawnFrames: over.spawnFrames } : {}),
     },
@@ -43,6 +44,29 @@ function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWait
   );
   return { sandbox, governor, docker, ledger };
 }
+
+describe("another node's task's VM, waiting for room (the fourth fabric review's I-2)", () => {
+  test("a task that ends while its VM waits for room leaves the queue: none is made for it, even once room comes", async () => {
+    const { sandbox, governor, docker } = host({ layout2: true });
+    // The agent's VM (in layout 2), and another sandbox in the node's second slot: no room for one more.
+    const agent = await sandbox.create(request({ network: "gateway", persistent: true, run: "arm.team.abcdef0123.ada" }));
+    const other = await sandbox.create(request({ run: "q-other" }));
+    const ended = new AbortController();
+    const waiting = sandbox.createTaskVm({ task: "task-abcdefghijkl", shares: agent.id, run: "handed.task-abcdefghijkl", providers: [], models: [], ttlMinutes: 60 }, ended.signal);
+    const outcome = waiting.then(() => "made", (error: Error) => `not made: ${error.message}`);
+    await Bun.sleep(20);
+    expect(governor.queue()).toMatchObject([{ run: "handed.task-abcdefghijkl" }]);
+    ended.abort();
+    await Bun.sleep(10);
+    // It left the queue as its task ended, so when room comes at once (well within the governor's longest wait),
+    // nothing was waiting for it, and no task's VM is made.
+    expect(governor.queue()).toEqual([]);
+    await sandbox.destroy(other.id, { run: "q-other" });
+    expect(await outcome).toBe("not made: the caller gave up waiting for a slot");
+    expect(await sandbox.taskVms()).toEqual([]);
+    expect(docker.running()).toBe(1);
+  });
+});
 
 describe("every sandbox takes a slot first", () => {
   test("within the ceiling it starts; past it, it waits, and starts when one ends", async () => {

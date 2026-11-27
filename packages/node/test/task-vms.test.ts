@@ -18,12 +18,15 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
   const asked: unknown[] = [], ran: { vm: string; cmd: string[] }[] = [], removed: string[] = [];
   /** Each step of a removal, in order: a lease ended, a VM removed. */
   const steps: string[] = [];
+  /** The signal each VM was asked for with: its task's work's. */
+  const signals: (AbortSignal | undefined)[] = [];
   let made = 0;
   const fake = {
     get: async (id: string) => (vms.has(id) ? ({ id, createdAt: vms.get(id)!.createdAt, run: vms.get(id)!.run } as unknown as SandboxView) : null),
     taskVms: async () => [...vms.keys()],
-    createTaskVm: async (input: unknown) => {
+    createTaskVm: async (input: unknown, signal?: AbortSignal) => {
       asked.push(input);
+      signals.push(signal);
       const id = `vm-${++made}`;
       vms.set(id, { createdAt: STARTED + made, run: (input as { run: string }).run });
       return { id } as SandboxView;
@@ -51,7 +54,7 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
     },
     endLease: (vm: string) => void steps.push(`lease ended ${vm}`),
   };
-  return { fake, vms, asked, ran, removed, steps };
+  return { fake, vms, asked, ran, removed, steps, signals };
 }
 
 const ask = { vm: "agent-vm", task: "task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"] };
@@ -60,8 +63,11 @@ describe("another node's task's VM, on this node", () => {
   test("made for it beside its agent's, its lease its models alone; its commands there; gone as it ends, its run stopped first", async () => {
     const h = host();
     const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
-    const vm = await vms.open(ask, new AbortController().signal);
+    const work = new AbortController();
+    const vm = await vms.open(ask, work.signal);
     expect(h.asked).toEqual([{ task: ask.task, shares: "agent-vm", run: `handed.${ask.task}`, providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: TASK_VM_MINUTES }]);
+    // (Asked for with its work's own signal: one that ends while it waits for room has none made. I-2.)
+    expect(h.signals).toEqual([work.signal]);
     await vm.exec("echo one", 30, new AbortController().signal);
     expect(h.ran).toEqual([{ vm: "vm-1", cmd: ["bash", "-lc", "echo one"] }]);
     await vm.release();

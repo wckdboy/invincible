@@ -2083,7 +2083,7 @@ export class SandboxHost {
    * with Docker, beside an agent's VM in layout 2: one whose HOME is its /work would share that HOME. A Mac refuses (no VM
    * there shares a workspace).
    */
-  async createTaskVm(input: TaskVmInput): Promise<SandboxView> {
+  async createTaskVm(input: TaskVmInput, signal?: AbortSignal): Promise<SandboxView> {
     if (this.apple) throw new SandboxError("another node's task is taken only on a Linux host with Docker: on a Mac no VM shares an agent's workspace", 424);
     const own = await this.get(input.shares);
     if (!own || own.ephemeral) throw new SandboxError("another node's task shares an agent's own VM on this host, and that one is not here", 404);
@@ -2096,9 +2096,10 @@ export class SandboxHost {
         409,
       );
     }
+    // (A task that ends while its VM waits for room leaves the queue: none is made for it then. The fourth review's I-2.)
     const vm = await this.create(
       { network: own.network, image: own.image, cpus: own.cpus, memoryGb: own.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run, isolation: own.isolation },
-      { shares, task: input.task },
+      { shares, task: input.task, ...(signal ? { signal } : {}) },
     );
     // (Under the agent's VM's label, which its task's spend and budget are counted by. Its token is its own.)
     const minted = this.opts.tokens.mint({ label: `sandbox:${input.shares}`, providers: [...input.providers], models: [...input.models], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
