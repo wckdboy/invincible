@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
+import { endLeftovers, HANDED_LISTS_COMMAND, HANDED_PROCESS_PY, handedCommand, handedEndCommand } from "../src/handed-process.ts";
 
 /*
  * The processes of another node's task (the fabric's second re-review, N7): a gate's own run was bounded, but what it
@@ -204,4 +204,19 @@ test("its commands are fixed: the command and the task are arguments, and a task
     expect(() => handedCommand("true", { task: bad, limitSec: 1, ends: "gate" })).toThrow("not a task id");
     expect(() => handedEndCommand(bad)).toThrow("not a task id");
   }
+});
+
+/* A node coming back after a crash, or after its own stop cut a task's end off, ends what that task left running in its
+ * agent's VM (the third re-review's R3-5): the lists of tasks that have ended, and no other. */
+test("what tasks that have ended left running is ended as the node comes back; an open task's list, and a name that isn't a task's, are left alone", async () => {
+  const ran: string[] = [];
+  const exec = async (command: string) => {
+    ran.push(command);
+    if (command === HANDED_LISTS_COMMAND) return { exitCode: 0, stdout: "task-ended1\ntask-open\n../../etc/passwd\ntask-ended2\n" };
+    // The second one's processes outlast its end.
+    return { exitCode: command.includes("task-ended2") ? 1 : 0, stdout: "" };
+  };
+  const swept = await endLeftovers(exec, (task) => task !== "task-open");
+  expect(swept).toEqual({ ended: ["task-ended1"], failed: ["task-ended2"] });
+  expect(ran).toEqual([HANDED_LISTS_COMMAND, handedEndCommand("task-ended1"), handedEndCommand("task-ended2")]);
 });

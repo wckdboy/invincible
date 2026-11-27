@@ -72,8 +72,9 @@ export interface TeamRuntimeDeps {
   /** A coding agent's run in its VM followed as it goes, from byte `offset` of its events (harnesses.ts FOLLOW). */
   follow?(agent: Agent, offset: number, signal: AbortSignal): Promise<FollowedRun>;
   /**
-   * The stop's word to a coding agent's run in its VM (its tool's own interrupt), bound as exec is but not to the task's
-   * signal: it must reach the run once its task has stopped, as stopWorker's cleanup does. Absent: its exec.
+   * The stop's word to a coding agent's run in its VM (its tool's own interrupt), and the end of what another node's task
+   * left running there: bound as exec is, but neither to the task's signal nor refused for an agent you paused, since
+   * each must reach the VM once its task has stopped, as stopWorker's cleanup does. Absent: its exec.
    */
   stopTell?(agent: Agent, command: string, timeout: number): Promise<ExecResult>;
   /** The address a key of yours is pinned to (PLAN #17), for telling an agent where it may use it; null: none. */
@@ -774,9 +775,14 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         if (handed) return deps.exec(agent, inTask(handedCommand(command, { task: task.id, limitSec: limit, ends: what === "gate" ? "gate" : "task" })), limit + HANDED_MARGIN_SECONDS, ctx.signal);
         return deps.exec(agent, inTask(command), limit, ctx.signal);
       };
-      /** What another node's task left running in its VM ends with the task, however it ended; said when it can't be. */
+      /**
+       * What another node's task left running in its VM ends with the task, however it ended; said when it can't be. It
+       * goes as the stop's word to a coding tool does: a pause of its agent, which is what ends its run then, doesn't
+       * refuse it (the third re-review's R3-5).
+       */
       const endHanded = async () => {
-        const ended = await deps.exec(agent, handedEndCommand(task.id), 60, AbortSignal.timeout(90_000)).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+        const end = handedEndCommand(task.id);
+        const ended = await (deps.stopTell ? deps.stopTell(agent, end, 60) : deps.exec(agent, end, 60, AbortSignal.timeout(90_000))).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
         if (ended.exitCode !== 0) ctx.emit(`Processes · what this task left running in its VM couldn't all be ended: ${redact(ended.stderr || ended.stdout).slice(0, 300)}`);
       };
       const execOn = (seat: SeatRun) => (command: string, timeout = 120) => seat.exec(inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);

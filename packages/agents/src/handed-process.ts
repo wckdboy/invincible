@@ -193,3 +193,21 @@ export function handedEndCommand(task: string): string {
   if (!TASK_ID.test(task)) throw new Error("not a task id");
   return `python3 -c ${quote(`${HANDED_PROCESS_PY}\nsys.exit(end_task(sys.argv[1]))`)} ${quote(task)}`;
 }
+
+/** The tasks whose lists a VM keeps (what they left running): their ids, one a line. */
+export const HANDED_LISTS_COMMAND = "ls -1 /work/.agent/handed 2>/dev/null | sed -n 's/\\.jsonl$//p'";
+
+/**
+ * Ends, in one agent's VM, what tasks other nodes handed over left running there that nothing ended since: a node that
+ * comes back after a crash, or after its own stop cut a task's end off, finds them (the third re-review's R3-5). Only
+ * the lists of tasks that have ended (`ended`) are read; one of a task still open is left alone. Every name the VM
+ * gives is checked as a task id first. `exec`: a command in that VM that a pause of its agent doesn't refuse.
+ */
+export async function endLeftovers(exec: (command: string, timeout: number) => Promise<{ exitCode: number; stdout: string }>, ended: (task: string) => boolean): Promise<{ ended: string[]; failed: string[] }> {
+  const listed = await exec(HANDED_LISTS_COMMAND, 30);
+  const tasks = listed.stdout.split("\n").map((line) => line.trim()).filter((id) => TASK_ID.test(id) && ended(id));
+  const done: string[] = [];
+  const failed: string[] = [];
+  for (const task of tasks) ((await exec(handedEndCommand(task), 60)).exitCode === 0 ? done : failed).push(task);
+  return { ended: done, failed };
+}

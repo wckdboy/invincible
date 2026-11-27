@@ -147,12 +147,12 @@ transport keys carries all of it:
      - What a gate starts ends with the gate: in the background, under nohup, and in the VM (Linux) having left its
        group with setsid, while the gate's helper lives. A command can end or stop its own helper (R3-1).
      - What its other commands leave running as they end (a server the next one uses, or a desktop it started, with
-       its apps), its coding tool's included, is listed then, and ended with the task when it is done, fails, or is
-       stopped or revoked. Not when its agent is paused or turned off, which refuses that cleanup, nor after a crash,
-       which leaves the list unread (R3-5). Nor a leftover that double-forks out with setsid after its command ended,
-       nor what a command that ended its helper started (R3-1). A desktop that was already running in the VM (yours, or
-       its agent's from before) isn't one it started: what it opens there is the residual's, below. The list is a file
-       in the VM, which its commands can rewrite (R3-1).
+       its apps), its coding tool's included, is listed then, and ended with the task however it ends: a pause of its
+       agent, or turning it off, included (its end goes as the stop's word to a coding tool does, which a pause doesn't
+       refuse), and after a crash as the node comes back (the third re-review's R3-5). Not a leftover that double-forks
+       out with setsid after its command ended, nor what a command that ended its helper started (R3-1). A desktop that
+       was already running in the VM (yours, or its agent's from before) isn't one it started: what it opens there is
+       the residual's, below. The list is a file in the VM, which its commands can rewrite (R3-1).
      - The runner stops it at its call's deadline or after 24 hours, whichever comes first, waiting for your approval
        included. A stop that can't be written (the node stopping, or a write that fails) ends its call all the same,
        answered as failed (the third re-review's R3-2). A task you take up again by its id has no life bound (R3-6).
@@ -166,8 +166,6 @@ transport keys carries all of it:
          the task, your grant and its node's revocation.
        - R3-4: its VM's gateway lease serves every provider you've keyed and any model, so its commands can work on
          models its budget counts at $0.
-       - R3-5: a pause of its agent, or turning it off, ends the task but refuses the cleanup of what it left
-         running. After a crash, that cleanup never runs.
        - R3-6: a task you take up again by its id is followed by nobody, isn't counted against the 8 at once, has no
          life bound, and runs even after its node or your grant was revoked.
 

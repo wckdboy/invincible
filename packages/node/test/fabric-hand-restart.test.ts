@@ -44,8 +44,9 @@ function node(store: TeamStore, runs: string[]) {
   return service;
 }
 
-/** The hand-offs attached to the team as the server attaches them when the node comes back. */
-function attach(store: TeamStore, service: TeamService) {
+/** The hand-offs attached to the team as the server attaches them when the node comes back. `swept`: what each sweep of
+ * the agents' VMs found ended then (the server's sweep ends what those tasks left running there). */
+function attach(store: TeamStore, service: TeamService, swept: string[][] = []) {
   const team: HandTeam = {
     give: async () => {
       throw new Error("not used");
@@ -56,6 +57,7 @@ function attach(store: TeamStore, service: TeamService) {
     runningIn: () => null,
     handed: (by, since) => store.handed(by, since),
     handedOpen: () => store.handedOpen(),
+    sweep: () => void swept.push(store.tasks().filter((t) => t.givenBy?.startsWith("node:") && ["done", "failed", "stopped"].includes(t.status)).map((t) => t.id)),
   };
   const ledger = { onApplied: () => () => {}, handoffGrant: () => null, activeDevice: () => null, device: () => null } as unknown as LedgerStore;
   const h = new Handoffs({ db: new Database(":memory:"), store: ledger, identity: newNodeIdentity(), fabric: { sidecar: { client: null, did: null } } as unknown as Fabric, log: () => {} });
@@ -109,8 +111,12 @@ describe("a task another node handed over, when this node restarts", () => {
     const after = node(store, runs);
     after.start();
     expect(store.task(handed.id)?.status).toBe("interrupted");
-    attach(store, after);
+    const swept: string[][] = [];
+    attach(store, after, swept);
     expect(store.task(handed.id)?.status).toBe("stopped");
     expect(store.task(handed.id)?.error).toContain("no longer follows it");
+    // And what it left running in its agent's VM is ended as the node comes back: nothing ran its end before (the third
+    // re-review's R3-5). The sweep comes once it has ended here, so its list is among those ended.
+    expect(swept).toEqual([[handed.id]]);
   });
 });

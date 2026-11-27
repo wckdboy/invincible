@@ -662,6 +662,35 @@ test("another node's task runs its `desktop` commands under the handed helper to
   expect(words.map((w) => w.join(" "))).toContain("desktop app xterm");
 });
 
+/* And its end runs whatever its agent's pause (the third re-review's R3-5): it ran through the same exec as its commands,
+ * which refuses a paused agent's VM, and a pause of its agent (or turning it off) is what ends its run, so what it left
+ * running in the VM ran on. It goes the way the stop's word to a coding tool goes, which a pause doesn't refuse. */
+test("the end of another node's task reaches its VM though its agent was paused as it ended", async () => {
+  const paused = { now: false };
+  const told: string[] = [];
+  const stop = new AbortController();
+  const f = fixture([say("1. Start the server, then use it."), say("```sh\nnohup python3 -m http.server 8080 >/dev/null 2>&1 &\n```"), HANG], {
+    // As the server binds them: a paused agent's VM takes none of its commands, and the stop's word goes all the same.
+    exec: async (_m, command) => {
+      if (paused.now) throw new Error("agent paused");
+      return result();
+    },
+    stopTell: async (_m, command) => (told.push(command), result()),
+  });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  const lines: string[] = [];
+  const run = f.runtime.executeTask(member, handedTask, { ...f.context, signal: stop.signal, emit: (line) => void lines.push(String(line)) }).catch((e: Error) => e);
+  // (The work under way: its command ran, and its next call waits.)
+  for (const end = Date.now() + 5_000; f.bodies.length < 3 && Date.now() < end; ) await Bun.sleep(10);
+  expect(f.bodies.length).toBeGreaterThanOrEqual(3);
+  // You pause Ada: her agent is paused, then her run cut off.
+  paused.now = true;
+  stop.abort(new Error("Paused by you."));
+  await run;
+  expect(told.some((c) => c.includes("end_task(sys.argv[1])") && c.includes(handedTask.id))).toBe(true);
+  expect(lines.some((l) => l.startsWith("Processes ·"))).toBe(false);
+});
+
 test("what a harness runs another node's task on: never the tool's own sign-in or setup, only models through the gateway", () => {
   const claude = AGENTS.claude!;
   const ok = (told: object) => ({ exitCode: 0, stdout: JSON.stringify({ type: "status", installed: true, ...told }) });

@@ -79,6 +79,12 @@ export interface HandTeam {
   /** The tasks other nodes handed here that haven't ended: who handed each (`node:<id>`), and whether it was taken under
    * your grant (not proposed to you and approved). */
   handedOpen(): { id: string; by: string; granted: boolean }[];
+  /**
+   * As the node comes back: ends, in each agent's VM, what tasks other nodes handed over left running there once they
+   * have ended, those this start ended among them (a crash, or the node's own stop, cut their own end off). It goes on
+   * after attachTeam returns, and says what it can't end.
+   */
+  sweep?(): void;
 }
 
 /** A tool of the primary's, run on this node for a run another node runs for it (the server binds it, as that run's principal). */
@@ -219,6 +225,8 @@ export class Handoffs implements FabricTools {
   attachTeam(team: HandTeam): void {
     this.team = team;
     for (const { id } of team.handedOpen()) team.stop(id, "The node that handed it over no longer follows it: its call ended when this node stopped.");
+    // What they left running in their VMs ends too: nothing ran their end after a crash (the third re-review's R3-5).
+    team.sweep?.();
   }
 
   /** The giver's side: how a run elsewhere calls this node's tools. */

@@ -138,7 +138,7 @@ import {
   type LiveTopic,
   SEAT_HARNESS as SEAT_HARNESS_OF,
 } from "@invincible/core";
-import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
+import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, endLeftovers, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, peerOf, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, type HandoffGrantRecord, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
@@ -2687,6 +2687,27 @@ export function createApp(ctx: AppContext) {
     if (!bound) throw new HttpError(424, "this agent has no VM");
     return inProcess(agentPrincipal(member.id), new AbortController().signal).call<import("@invincible/core").ExecResult>("execSandbox", { on: bound.node, id: bound.id, cmd: ["bash", "-lc", command], timeoutSec: timeout });
   }
+  /**
+   * What tasks other nodes handed over left running in each agent's VM once they have ended, ended as the node comes back:
+   * a crash, or the node's own stop, cut their own end off (fabric/handoff.ts attachTeam; the third re-review's R3-5). It
+   * goes as the stop's word to a coding tool does, which a pause of the agent doesn't refuse.
+   */
+  async function sweepHanded(): Promise<void> {
+    const store = ctx.team!.store;
+    const ended = (id: string) => {
+      const task = store.task(id);
+      return task?.givenBy?.startsWith("node:") === true && (task.status === "done" || task.status === "failed" || task.status === "stopped");
+    };
+    for (const member of store.agents()) {
+      if (!member.workspace) continue;
+      try {
+        const { failed } = await endLeftovers((command, timeout) => stopTellTeam(member, command, timeout), ended);
+        if (failed.length) ctx.log(`fabric: what ${failed.join(", ")} left running in ${member.name}'s VM couldn't all be ended`);
+      } catch (error) {
+        ctx.log(`fabric: ${member.name}'s VM couldn't be asked what handed tasks left running there: ${(error as Error).message}`);
+      }
+    }
+  }
   async function stopTeamWorker(member: Agent): Promise<void> {
     const bound = teamMember(member.id).workspace;
     if (!bound) return;
@@ -2915,6 +2936,7 @@ export function createApp(ctx: AppContext) {
         const agent = snapshot.agents.find((m) => m.workspace?.id === sandbox && m.workspace.node === ctx.identity.id);
         return agent ? (snapshot.tasks.find((t) => t.assignee === agent.id && t.status === "running")?.id ?? null) : null;
       },
+      sweep: () => void sweepHanded(),
     });
     outcomes.start();
     // Work for idle agents from your backlog (backlog.ts): one proposal a day at most for each, which your agent approves

@@ -626,10 +626,11 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       then on (R3-1). In the VM (Linux) the helper is the command's subreaper while it lives, so a process that left
       the group with setsid is still found. What a gate starts ends with the gate; what its other commands leave
       running as they end (a desktop it started among them, with its apps), its coding tool's included, is listed by
-      identity and ended with the task when it is done, fails, or is stopped or revoked. Not when a command ends or
-      stops its own helper, nor a leftover that double-forks out with setsid after its command ended (R3-1), nor when
-      the task's agent is paused or turned off, or after a crash (R3-5). A desktop already running in the VM isn't one
-      it started: what it opens there is the residual's.
+      identity and ended with the task however it ends, a pause of its agent and a crash included: its end goes the
+      way a pause doesn't refuse, and a node coming back ends what its handed tasks left in their VMs (the third
+      re-review's R3-5). Not when a command ends or stops its own helper, nor a leftover that double-forks out with
+      setsid after its command ended (R3-1). A desktop already running in the VM isn't one it started: what it opens
+      there is the residual's.
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id has no such bound (R3-6).
@@ -643,8 +644,6 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         the node's revocation.
       - R3-4: its VM's gateway lease serves every keyed provider and any model, so its commands can work on models its
         budget counts at $0.
-      - R3-5: a pause of its agent, or turning it off, ends the task but refuses the cleanup of what it left running,
-        and after a crash that cleanup never runs.
       - R3-6: a resume by id runs a handed task with nobody following it, not counted against the 8 at once, with no
         life bound, even after its node or its grant was revoked.
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
