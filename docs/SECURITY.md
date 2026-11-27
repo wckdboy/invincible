@@ -339,6 +339,12 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
   itself 0600, put in place only once it listens (`packages/sandbox/test/deskd.test.ts`). The host reaches it as it
   reaches any command there: an exec into the VM as its unprivileged user, kept open as a session (`desktop --session`),
   never a port.
+- **The hardware tools listen nowhere outside the VM either** (C1 step 11). KiCad's API server, through which kipy
+  edits a board, is a socket in the VM's own `/tmp` (`/tmp/kicad/api.sock`: deskd starts KiCad with TMPDIR there), so
+  only what runs in that VM reaches it. Their settings are put in the agent's home by the image's entrypoint, as the
+  agent, never over what is there (`packages/sandbox/test/hardware.test.ts`). KiCad and FreeCAD come from Debian's own
+  signed archive; kipy and its two compiled dependencies from PyPI, pinned by version, as the Lab's wheels are (not by
+  their hashes).
 - **The same reach as a command.** An agent's plain `desktop …` command is its words alone over that session: what a
   shell would read differently (an operator, an expansion, a redirect, a second command) stays a shell command
   (`packages/agents/test/desktop-command.test.ts`), and it goes through `execSandbox` with its scope and its run's

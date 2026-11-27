@@ -102,6 +102,33 @@ C1 step 10. An agent whose desktop isn't used costs what an agent without one do
   measured beside them, and not held: QEMU keeps the pages a guest frees unless the guest reports them to it
   (free-page reporting, a setting of Kata's).
 
+## The hardware tools
+
+C1 step 11. KiCad and FreeCAD on an agent's desktop, a choice per agent as its desktop is.
+- **The image** (`sandbox/hardware`, `invincible/desktop-hardware:1`, made from the desktop's): Debian trixie's KiCad
+  9.0.2 and FreeCAD 1.0.0, without recommends (no 3D models, no symbol or footprint library), each version checked as it
+  is built, and kipy (kicad-python 0.3.0) in a venv of its own beside pcbnew's own Python module: about 1.9 GB more than
+  the desktop's. Its name says desktop, as the desktop's does, so whatever asks whether a VM has one says it has.
+- **Chosen** with `invincible agents provision <id> --hardware` (and `--remake --hardware` or `--no-hardware`), the web
+  app's **KiCad and FreeCAD** beside **No desktop**, or `hardware` on the routes. A desktop comes with them: taking the
+  desktop away takes them too, and a Mac, which makes no desktop, makes none of them. A host whose release is older than
+  their image isn't asked. The image is built on its host the first time an agent needs it, or by `invincible sandbox
+  build --hardware`.
+- **Their first run, done:** as the VM starts, its entrypoint (`hardware-seed`) puts in the agent's own home what isn't
+  there yet: KiCad's settings at their schema, with its API server on and its update question answered; its global
+  footprint and symbol library tables, empty; and FreeCAD's welcome panel and start page, off. What the agent changes
+  after is its own.
+- **On the screen:** `desktop app kicad`, `pcbnew`, `eeschema` or `freecad`, with a file of /work, starts them as deskd
+  starts the terminal, their windows in its tree for `desktop find`, and with TMPDIR at /tmp, so that KiCad's API server
+  makes its socket where kipy looks for it (`/tmp/kicad/api.sock`).
+- **The agent is told** (agents' `hardwareBriefing`) to script them first: kicad-cli for every output, its DRC and ERC
+  as gates; kipy on the open board editor for an edit (asking with `ping()`, never `check_version()`, which refuses
+  9.0.2: kipy 0.3.0 was made for 9.0.1); freecadcmd for a part, read back; and their windows only for what only a
+  screen does.
+- **Held to** (the bench's hardware suite, [BENCHMARKS.md](BENCHMARKS.md), to be run on a sandbox host): by script, each
+  within a second and through its gate every time; through the screen, every time, KiCad's Plot within 10 s and
+  FreeCAD's STEP export within 20 s; the image at most 6 GB.
+
 ## Watching, on each device
 
 The three apps hold to one rule (`apps/web/src/lib/desktop-stream.ts`; the vectors' `desktopStream`; each app's
@@ -159,6 +186,8 @@ The three apps hold to one rule (`apps/web/src/lib/desktop-stream.ts`; the vecto
   host.
 - Light by default's numbers: the bench's cases are built, and its parts tried without a VM, not yet run on a sandbox
   host.
+- The hardware tools: their image isn't built yet (that needs a sandbox host's Docker), nor their suite run; whether
+  kipy 0.3.0 works against KiCad 9.0.2 is unconfirmed, and the screen's steps are C0's, through deskd's own find.
 - The apps on real devices: the decoding was run on simulators, an emulator and a Mac, and both phone apps were watched
   live against a dev node in a simulator and an emulator. No iPhone, iPad or Android phone, nor the Mac app's own live
   screen.
