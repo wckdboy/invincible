@@ -110,7 +110,9 @@ everything but the model.
     - started by the agent's first desktop command, and idle;
     - once deskd stopped it for being unused (its wait shortened for the bench; what stopping does is the same): what
       of it still runs, the guest's memory in use against before it first started, and what the host still holds;
-    - started again by the next command, to its page, five times, each after a stop, and whether the agent was told.
+    - started again by the next command, to its page, five times, each after a stop, and whether the agent was told;
+      each then stopped again, and what of it still runs, a zombie its VM never reaped included, against before it
+      first started, so that what cycles pile up shows.
 - **Strict:** a desktop number worse than its baseline fails the run. Speed beyond a ±20 % band (or the samples' own
   spread), not only past 2×; memory and CPU past their stated resolution; a count of passes, or a check that held,
   going down.
@@ -120,7 +122,8 @@ everything but the model.
   second while it moves, at most 6 % of a core on the encoder and deskd together, and at most 100 kbit/s while the
   screen is still. Light by default is held to: a desktop never started at most 50 MB over none; grown within a second,
   its work as it was; started and idle at most 600 MB over; once stopped, nothing of it still running and at most
-  50 MB of the guest's memory kept; and started again within 2 s, its page read and the agent told, every time.
+  50 MB of the guest's memory kept; and started again within 2 s, its page read and the agent told, and stopped again
+  with nothing of it left, every time.
 
 ### hardware: KiCad and FreeCAD on an agent's desktop
 

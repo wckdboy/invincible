@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { grownAt, guestMemory, leftOver, type MemoryLine } from "./measure.ts";
+import { grownAt, guestMemory, leftOver, type MemoryLine, restartCycles } from "./measure.ts";
+import type { Ran } from "./vm.ts";
 
 /* What C1 step 10's numbers are read from, in the VM: its memory, what a stopped desktop left running, and when it grew. */
 
@@ -36,6 +37,58 @@ describe("what a stopped desktop left running", () => {
 
   test("a second of a name that ran once before is left", () => {
     expect(leftOver(before, ["python3", "python3", "sleep"].join("\n"))).toEqual(["python3"]);
+  });
+});
+
+/** The VM's processes before its desktop first started: its init, its `sleep`, and the bench's page server. */
+const BEFORE = ["docker-init", "sleep", "python3"];
+
+/**
+ * A VM whose desktop each `desktop open` starts and the bench's next look finds stopped, as deskd's idle stop leaves it:
+ * from its `from`th stop on, each leaves its deskd (python3) a zombie, as a VM whose first process never reaps keeps it.
+ */
+function cycling(from = Infinity) {
+  let running = false;
+  let stops = 0;
+  let zombies = 0;
+  const ran = (stdout = "", stderr = ""): Ran => ({ code: 0, stdout, stderr, ms: 1 });
+  const vm = {
+    raw: async (argv: string[]): Promise<Ran> => {
+      const command = argv.join(" ");
+      if (command.startsWith("desktop open ")) {
+        running = true;
+        return ran("", "desktop: the desktop was stopped after 8 s unused; this screen is a fresh one\n");
+      }
+      if (command === "desktop text") return ran("Full name\n");
+      if (command.startsWith("test -e ")) {
+        if (running) {
+          running = false;
+          stops++;
+          if (stops >= from) zombies++;
+        }
+        return ran();
+      }
+      if (command === "ps -eo comm=") return ran([...BEFORE, ...(running ? ["python3", "Xvfb"] : []), ...Array<string>(zombies).fill("python3")].join("\n"));
+      if (command === "ps -eo args=") return ran(running ? "python3 /usr/local/lib/invincible/deskd.py\n" : "sleep infinity\n");
+      throw new Error(`the bench asked what no VM here answers: ${command}`);
+    },
+  };
+  return { vm, stops: () => stops };
+}
+
+describe("started again after each idle stop, and stopped again each time", () => {
+  test("every restart is stopped again, the last one too, and what each stop left is kept: a deskd never reaped is left from its stop on", async () => {
+    const { vm, stops } = cycling(3);
+    const rows = await restartCycles(vm, BEFORE.join("\n"), 5, () => {}, 0);
+    expect(stops()).toBe(5);
+    expect(rows.map((row) => row.left)).toEqual([[], [], ["python3"], ["python3", "python3"], ["python3", "python3", "python3"]]);
+  });
+
+  test("where the VM reaps what deskd leaves, no stop leaves anything, and every start was read and told", async () => {
+    const { vm, stops } = cycling();
+    const rows = await restartCycles(vm, BEFORE.join("\n"), 5, () => {}, 0);
+    expect(stops()).toBe(5);
+    expect(rows.map((row) => [row.usable, row.told, row.left])).toEqual(Array(5).fill([true, true, []]));
   });
 });
 

@@ -804,26 +804,58 @@ async function grow(b: Bench, vm: BenchVm, memoryGb: number): Promise<Grown> {
   }
 }
 
+/** What the light-by-default cases ask of a VM: its commands, run as the VM's own. */
+type Commands = Pick<BenchVm, "raw">;
+
 /** The VM's processes by name (`ps -eo comm=`), and whether deskd is among them. */
-async function processes(vm: BenchVm): Promise<{ names: string; deskd: boolean }> {
+async function processes(vm: Commands): Promise<{ names: string; deskd: boolean }> {
   const names = must(await vm.raw(["ps", "-eo", "comm="]), "ps").stdout;
   return { names, deskd: /deskd\.py/.test(must(await vm.raw(["ps", "-eo", "args="]), "ps").stdout) };
 }
 
 /**
  * Until deskd has stopped the desktop for being unused: its note left and deskd gone, within `ms`; then what it started
- * that still runs, by name, against the VM's processes before its desktop first started (given 5 s to be gone: deskd
- * ends as it signals the rest to).
+ * that still runs, by name, against the VM's processes before its desktop first started (given `settleMs`, 5 s, to be
+ * gone: deskd ends as it signals the rest to).
  */
-async function untilStopped(vm: BenchVm, before: string, ms: number): Promise<string[]> {
+async function untilStopped(vm: Commands, before: string, ms: number, settleMs = 5000): Promise<string[]> {
   const t0 = performance.now();
   while ((await vm.raw(["test", "-e", IDLE_NOTE])).code !== 0 || (await processes(vm)).deskd) {
     if (performance.now() - t0 > ms) throw new Error(`the desktop wasn't stopped within ${Math.round(ms / 1000)} s of being left unused`);
     await Bun.sleep(250);
   }
   let left = leftOver(before, (await processes(vm)).names);
-  for (const end = performance.now() + 5000; left.length && performance.now() < end; left = leftOver(before, (await processes(vm)).names)) await Bun.sleep(250);
+  for (const end = performance.now() + settleMs; left.length && performance.now() < end; left = leftOver(before, (await processes(vm)).names)) await Bun.sleep(250);
   return left;
+}
+
+/**
+ * A start again after an idle stop: what it took to its page, whether its page was read, and whether the agent was told;
+ * then its own idle stop, and what of it still runs after that.
+ */
+export interface Restarted {
+  ms: number;
+  usable: boolean;
+  told: boolean;
+  /** By name, against the VM before its desktop first started. A zombie keeps its name: one the VM never reaped is left. */
+  left: string[];
+}
+
+/**
+ * Started again `restarts` times by the VM's own `desktop open` (deskd's wait IDLE_AGAIN_S), to its page, the first
+ * after the caller's idle stop; each then left until deskd stops it again, the last one too, so that what every cycle
+ * leaves is seen, and what cycles pile up (each stop's against the same before).
+ */
+export async function restartCycles(vm: Commands, names: string, restarts: number, log: (line: string) => void, settleMs = 5000): Promise<Restarted[]> {
+  const rows: Restarted[] = [];
+  for (let i = 0; i < restarts; i++) {
+    const again = must(await vm.raw(["desktop", "open", PAGE("form.html")], { env: { INVINCIBLE_DESKTOP_IDLE: String(IDLE_AGAIN_S) } }), "desktop open after an idle stop");
+    const usable = (await vm.raw(["desktop", "text"])).stdout.includes("Full name");
+    log(`started again ${i + 1}/${restarts}: ${Math.round(again.ms)} ms`);
+    const left = await untilStopped(vm, names, (IDLE_AGAIN_S + 30) * 1000, settleMs);
+    rows.push({ ms: again.ms, usable, told: again.stderr.includes("was stopped after"), left });
+  }
+  return rows;
 }
 
 /** C1 step 10's numbers, on VMs made with 2 GB as the node makes an agent's now. */
@@ -844,6 +876,8 @@ export interface Light {
   restart: Samples;
   restartUsable: number;
   restartTold: number;
+  /** After each restart, its own idle stop: what of it still runs (Restarted.left), one list a restart. */
+  restartLeft: string[][];
   restarts: number;
 }
 
@@ -851,8 +885,8 @@ export interface Light {
  * Light by default (C1 step 10), each on VMs of its own made with 2 GB: a workshop VM idle; two desktop VMs, each only
  * grown; and one whose desktop is never started, then grown, its work checked, started by the agent's first desktop
  * command and left idle, stopped by deskd for being unused, then started again `restarts` times, each after an idle
- * stop. deskd is started by a question (which starts no desktop) to take the bench's wait (IDLE_FIRST_S), and each time
- * again by the VM's own `desktop open` (IDLE_AGAIN_S). Every VM is removed after.
+ * stop and each stopped again. deskd is started by a question (which starts no desktop) to take the bench's wait
+ * (IDLE_FIRST_S), and each time again by the VM's own `desktop open` (IDLE_AGAIN_S). Every VM is removed after.
  */
 export async function light(b: Bench, seed: number, seconds: number, restarts = 5): Promise<Light> {
   const { vm: workshop } = await BenchVm.make(b, { desktop: false, memoryGb: 2, seed: seed + 400 });
@@ -895,15 +929,8 @@ export async function light(b: Bench, seed: number, seconds: number, restarts = 
     await Bun.sleep(5000);
     const kept = guestMemory(must(await vm.raw(["cat", "/proc/meminfo"]), "read /proc/meminfo").stdout);
     const afterStop = await window(id, seconds);
-    const rows: { ms: number; usable: boolean; told: boolean }[] = [];
     const restartFrom = performance.now();
-    for (let i = 0; i < restarts; i++) {
-      if (i > 0) await untilStopped(vm, names, (IDLE_AGAIN_S + 30) * 1000);
-      const again = must(await vm.raw(["desktop", "open", PAGE("form.html")], { env: { INVINCIBLE_DESKTOP_IDLE: String(IDLE_AGAIN_S) } }), "desktop open after an idle stop");
-      const usable = (await vm.raw(["desktop", "text"])).stdout.includes("Full name");
-      rows.push({ ms: again.ms, usable, told: again.stderr.includes("was stopped after") });
-      b.log(`started again ${i + 1}/${restarts}: ${Math.round(again.ms)} ms`);
-    }
+    const rows = await restartCycles(vm, names, restarts, b.log);
     return {
       workshopIdle,
       unstarted,
@@ -915,6 +942,7 @@ export async function light(b: Bench, seed: number, seconds: number, restarts = 
       restart: { samples: rows.map((r) => r.ms), span: [restartFrom, performance.now()] },
       restartUsable: rows.filter((r) => r.usable).length,
       restartTold: rows.filter((r) => r.told).length,
+      restartLeft: rows.map((r) => r.left),
       restarts,
     };
   } finally {

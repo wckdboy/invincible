@@ -134,7 +134,8 @@ export const suite: Suite = {
     "desktop.live.still.kbit": 100,
     // C1 step 10, light by default: made with 2 GB, a desktop never started costs what no desktop does; grown to 4 GB
     // within a second, its work as it was; started and idle, at most 600 MB more; stopped for being unused, nothing of it
-    // left running and the guest's memory back; started again to its page within 2 s, the agent told.
+    // left running and the guest's memory back; started again to its page within 2 s, the agent told; and each time
+    // stopped again, nothing of it left (a zombie its VM never reaped counts), not the first cycle alone.
     "desktop.light.unstarted.extra-mb": 50,
     "desktop.light.grow-ms": 1000,
     "desktop.light.grow-kept-work": 1,
@@ -144,6 +145,7 @@ export const suite: Suite = {
     "desktop.light.restart-ms": 2000,
     "desktop.light.restart-usable": 5,
     "desktop.light.restart-told": 5,
+    "desktop.light.restart-left": 0,
   },
   async run(ctx) {
     const prefix = process.env.INVINCIBLE_BENCH_SCRATCH ?? "bench";
@@ -278,6 +280,9 @@ export const suite: Suite = {
       speed(ctx, "desktop.light.restart-ms", g.restart, `started again after an idle stop by the next desktop open, to its page: the VM's own command, deskd started anew by it (deskd's wait the bench's, ${g.restarts} times)`);
       ctx.quality("desktop.light.restart-usable", g.restartUsable, `of ${g.restarts}`, "higher", { n: g.restarts, note: "restarts whose page could be read" });
       ctx.quality("desktop.light.restart-told", g.restartTold, `of ${g.restarts}`, "higher", { n: g.restarts, note: "restarts whose command told the agent its desktop had been stopped, and why its screen is fresh" });
+      const leftEach = g.restartLeft.map((left) => left.length);
+      const worst = g.restartLeft.reduce((most, left) => (left.length > most.length ? left : most), [] as string[]);
+      ctx.quality("desktop.light.restart-left", Math.max(0, ...leftEach), "processes", "lower", { note: `after each restart its own idle stop: the most of it still running (a zombie its VM never reaped counts), each against before its desktop first started, so what cycles pile up shows: ${leftEach.join(", ")}${worst.length ? ` (${worst.join(", ")})` : ""}` });
     } finally {
       for (const vm of made) await vm.remove().catch((error) => ctx.log(`couldn't remove ${vm.container}: ${(error as Error).message}`));
       const still = await clearLeftovers(b);
