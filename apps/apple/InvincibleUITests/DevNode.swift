@@ -94,6 +94,11 @@ struct DevNode {
     /// Something that needs you, at once: a device asking to join, by the label it returns.
     func poke() throws -> Poked { try JSONDecoder().decode(Poked.self, from: fetch("poke", method: "POST")) }
 
+    struct Drafted: Decodable { let draft: String }
+
+    /// A loop drafted for you, woken by a webhook: adding it says the webhook's secret, this once.
+    func loop() throws -> Drafted { try JSONDecoder().decode(Drafted.self, from: fetch("loop", method: "POST")) }
+
     /// The fixture's tasks by what they show: one at work (it never ends), one that failed, one proven (--heavy's).
     struct Tasks: Decodable {
         let working: String

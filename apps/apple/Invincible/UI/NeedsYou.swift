@@ -259,6 +259,9 @@ struct NeedSheetView: View {
     @Environment(\.dismiss) private var dismiss
     /// A row holds its sheet open after what it answered has left its list (a loop's webhook secret, said once).
     @State private var holding = false
+    /// A loop's webhook secret once it was added, said this once: Done takes Close's place at the sheet's top, in view
+    /// however long the loop's description, and the secret is first in its row.
+    @State private var secret: String?
 
     var body: some View {
         switch sheet {
@@ -275,7 +278,7 @@ struct NeedSheetView: View {
                         case .question(let question): QuestionRow(session: session, question: question)
                         case .screen(let screen): ScreenSessionRow(session: session, screen: screen)
                         case .notice(let notice): NoticeRow(session: session, notice: notice)
-                        case .draft(let draft): LoopDraftRow(session: session, draft: draft, holding: $holding)
+                        case .draft(let draft): LoopDraftRow(session: session, draft: draft, holding: $holding, secret: $secret)
                         case .connector(let request): ConnectorRequestRow(session: session, request: request)
                         case .approval: EmptyView()
                         }
@@ -283,7 +286,19 @@ struct NeedSheetView: View {
                 }
                 .navigationTitle(title)
                 .inlineTitle()
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+                .toolbar {
+                    if secret != nil {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") {
+                                holding = false
+                                dismiss()
+                            }
+                            .accessibilityIdentifier("loop.secret.done")
+                        }
+                    } else {
+                        ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                    }
+                }
             }
             .presentationDetents([.medium, .large])
             .sheetSize(width: 520, height: 480)

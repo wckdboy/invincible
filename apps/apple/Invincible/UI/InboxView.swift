@@ -520,11 +520,10 @@ struct LoopDraftRow: View {
     let session: Session
     let draft: LoopDraftView
     @Binding var holding: Bool
+    /// Its webhook's secret, once it was added (said this once): its sheet's Done, at the top, closes it.
+    @Binding var secret: String?
     @State private var busy = false
     @State private var problem: String?
-    /// Its webhook's secret, once it was added (said this once).
-    @State private var secret: String?
-    @Environment(\.dismiss) private var dismiss
 
     private var when: String {
         draft.schedule == "never" ? "Only when woken" : "\(draft.schedule)\(draft.tz != "UTC" ? " (\(draft.tz))" : "")"
@@ -532,6 +531,13 @@ struct LoopDraftRow: View {
 
     var body: some View {
         InboxRow(symbol: "repeat") {
+            // Said this once, so first: in view as the sheet stands, under its Done.
+            if let secret {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    Text("Its webhook's secret, shown this once. Keep it where the sender keeps its keys; a new one, from the loop on a computer, retires it.").font(.footnote)
+                    Text(secret).font(.callout.monospaced()).textSelection(.enabled).accessibilityIdentifier("loop.secret")
+                }
+            }
             VStack(alignment: .leading, spacing: Space.s1) {
                 Text(draft.label ?? draft.name).font(.headline)
                 if draft.label != nil { Text(draft.name).font(.caption.monospaced()).foregroundStyle(.secondary) }
@@ -546,17 +552,8 @@ struct LoopDraftRow: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            if let secret {
-                VStack(alignment: .leading, spacing: Space.s1) {
-                    Text("Its webhook's secret, shown this once. Keep it where the sender keeps its keys; a new one, from the loop on a computer, retires it.").font(.footnote)
-                    Text(secret).font(.callout.monospaced()).textSelection(.enabled)
-                    Button("Done") {
-                        holding = false
-                        dismiss()
-                    }
-                    .buttonStyle(.glass)
-                }
-            } else if session.can("brain:write") {
+            // Once it's added, what's left is its secret, above, and the sheet's Done.
+            if secret == nil, session.can("brain:write") {
                 InboxButtons {
                     Button("Dismiss") { Task { await act { try await session.dismiss(draft) } } }
                         .buttonStyle(.glass)
@@ -575,7 +572,7 @@ struct LoopDraftRow: View {
                     .buttonStyle(.glassProminent)
                     .disabled(busy)
                 }
-            } else {
+            } else if secret == nil {
                 Text("This device can't add a loop (it has no brain:write scope).").font(.footnote).foregroundStyle(.secondary)
             }
             if let problem {

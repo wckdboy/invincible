@@ -27,6 +27,8 @@
  *                                  waiting: [{ at, method, path }] } (waiting: what a dead link holds at the front now)
  *   POST /__dev/blackhole?on=1|0   a dead link while on: nothing goes through either way, as a half-open connection
  *   POST /__dev/poke               something that needs you, at once (a device asking to join): { label, at }
+ *   POST /__dev/loop               a loop drafted for you, woken by a webhook (adding it says the webhook's secret, this
+ *                                  once): { draft }
  *   GET  /__dev/tasks              the fixture's tasks by what they show: { working, failed, proven } (proven: --heavy's)
  *   POST /__dev/demo               a task to step through, for the Live Activity's pictures: held at its start and at its
  *                                  review until /__dev/demo/until lets it go; it ends proven: { task }
@@ -538,6 +540,7 @@ let unblocked: (() => void)[] = [];
 const through = (): Promise<void> => (blackhole ? new Promise((go) => unblocked.push(go)) : Promise.resolve());
 const nodeOrigin = `http://127.0.0.1:${proxyPort}`;
 let pokes = 0;
+let loops = 0;
 const { p256 } = (await import(Bun.resolveSync("@noble/curves/nist.js", join(import.meta.dir, "../../../packages/core/src")))) as typeof import("../../../packages/core/node_modules/@noble/curves/nist.js");
 /** A device asks to join, by the name given: something that needs you, as soon as the node takes it. */
 const askToJoin = async (name: string): Promise<number> => {
@@ -610,6 +613,10 @@ const front = Bun.serve({
         const label = `Poke ${++pokes} iPad`;
         const status = await askToJoin(label);
         return Response.json({ label, at: Date.now(), status });
+      }
+      if (control === "loop" && req.method === "POST") {
+        const { draft } = (await admin("draftLoop", { name: `standup-${++loops}`, schedule: "0 9 * * 1-5", tz: "UTC", task: { kind: "tell", text: "Stand up: what moved yesterday, what's next" }, wakes: [{ kind: "webhook" }], label: "Morning stand-up", why: "You asked for a nudge each weekday morning." })) as { draft: { id: string } };
+        return Response.json({ draft: draft.id });
       }
       return new Response("not found", { status: 404 });
     }
