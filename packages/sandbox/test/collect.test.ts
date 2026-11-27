@@ -24,6 +24,8 @@ const folder = () => {
 };
 
 const SECRET = "not-a-real-secret-sentinel";
+/** Run as root: what a file's mode keeps from any other user, root still reads. */
+const AS_ROOT = process.getuid?.() === 0;
 
 /** Its /work, as an agent leaves it, and beside it (outside) a folder with something of no workspace's. */
 function workspace() {
@@ -156,7 +158,9 @@ describe("a folder kept whole, or said where it isn't", () => {
     expect([kept.code, kept.files.length, kept.skipped]).toEqual([0, 200, []]);
   });
 
-  test("an entry it can't read is named, with why: never left out in silence", async () => {
+  // (Root reads whatever a file's mode says, so as root nothing here is unreadable: it skips itself, and says so.)
+  if (AS_ROOT) console.log(`${import.meta.file}: "an entry it can't read is named" SKIPPED as root, unverified: root reads whatever a file's mode says.`);
+  test.skipIf(AS_ROOT)(`an entry it can't read is named, with why: never left out in silence${AS_ROOT ? " (skipped as root, unverified: root reads whatever a file's mode says)" : ""}`, async () => {
     const work = folder();
     mkdirSync(join(work, "out", "closed"), { recursive: true });
     writeFileSync(join(work, "out", "report.md"), "# report\n");

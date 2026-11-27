@@ -535,8 +535,10 @@ describe("what it refuses", () => {
     expect(snapshot(home.dir)).toEqual(before);
   });
 
-  // (Root reads whatever a file's mode says: there is nothing to see as root.)
-  test.skipIf(process.getuid?.() === 0)("a home this user can't read is said to be one, not taken for one that isn't there", async () => {
+  // (Root reads whatever a file's mode says: there is nothing to see as root, so it skips itself, and says so.)
+  const asRoot = process.getuid?.() === 0;
+  if (asRoot) console.log(`${import.meta.file}: "a home this user can't read" SKIPPED as root, unverified: root reads whatever a file's mode says.`);
+  test.skipIf(asRoot)(`a home this user can't read is said to be one, not taken for one that isn't there${asRoot ? " (skipped as root, unverified: root reads whatever a file's mode says)" : ""}`, async () => {
     const { old, home } = await setup();
     chmodSync(old, 0o000);
     try {
