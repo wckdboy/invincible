@@ -12,8 +12,9 @@ import { h, svg } from "./dom.ts";
  * on a dark page, a tinted shadow under it on a light one. Only working moves: its light breathes, by opacity alone,
  * on the compositor; still where motion is reduced, and paused while the page is hidden.
  *
- * Your agent wears the app icon's I-beam in one ink on a tile of its own; or, set so on this device, the I-beam in pearl
- * glass (guardianStyle: the owner chooses between them).
+ * Your agent wears the app's I-beam, bare, in the page's ink, as the app's own mark is (the squircle round it is the app
+ * icon's alone: the owner's word, 27 November 2026); or, set so on this device, the I-beam in pearl glass, on its tile
+ * on a light page (guardianStyle: the owner chooses between them).
  */
 
 const SPRITE = "glass-sprite";
@@ -42,7 +43,7 @@ function paintOf(id: string, ramp: GlassRamp): SVGElement[] {
   ];
 }
 
-/** Its styles: the glow, the dot and the breathing (GLASS_GLOW, GLASS_DOT), the Guardian's tiles. */
+/** Its styles: the glow, the dot and the breathing (GLASS_GLOW, GLASS_DOT), your agent's bare I-beam and pearl tile. */
 export const GLASS_CSS = `
 :root { --gl-dark: 0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gl-dark: 1; } }
@@ -73,8 +74,7 @@ export const GLASS_CSS = `
 [data-state="needs"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.needs.light}, ${GLASS_DOT.colors.needs.dark}); }
 [data-state="failed"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.failed.light}, ${GLASS_DOT.colors.failed.dark}); }
 [data-state="idle"] > .gl-dot { --gl-dot-c: var(--gl-surface, var(--bg)); box-shadow: inset 0 0 0 ${GLASS_DOT.idleRing}px light-dark(${GLASS_DOT.colors.idle.light}, ${GLASS_DOT.colors.idle.dark}), 0 0 0 var(--gl-dot-cut) var(--gl-surface, var(--bg)); }
-.guardian-mark.gm-mono { border-radius: 28%; background: var(--accent); }
-.guardian-mark.gm-mono polygon { fill: var(--bg); }
+.guardian-mark.gm-mono polygon { fill: var(--accent); }
 .guardian-mark.gm-pearl { border-radius: 28%; background: light-dark(${GLASS_PEARL_TILE.light}, transparent); }
 `;
 
@@ -158,8 +158,8 @@ export function glassAvatar(options: GlassAvatarOptions): HTMLElement {
 export type GuardianStyle = "mono" | "pearl";
 const GUARDIAN_KEY = "invincible.guardian-mark";
 
-/** How your agent's mark is drawn on this device: the I-beam in one ink on its tile (mono, until the owner chooses), or
- * in pearl glass. */
+/** How your agent's mark is drawn on this device: the bare I-beam in one ink (mono, until the owner chooses), or in
+ * pearl glass. */
 export function guardianStyle(): GuardianStyle {
   try {
     return globalThis.localStorage?.getItem(GUARDIAN_KEY) === "pearl" ? "pearl" : "mono";
@@ -176,7 +176,7 @@ export function setGuardianStyle(style: GuardianStyle): void {
   }
 }
 
-/** Your agent's mark, in the box an orb takes: the I-beam on its tile in one ink, or in pearl glass; still. `cls` and
+/** Your agent's mark, in the box an orb takes: the bare I-beam in one ink, or in pearl glass; still. `cls` and
  * `attrs` are its caller's own (an orb's class and where it stands). */
 export function guardianMark(options: { size: number; label?: string; style?: GuardianStyle; state?: GlassState; cls?: string; attrs?: Record<string, string> }): HTMLElement {
   // (An orb's bounds: 16 to 320.)

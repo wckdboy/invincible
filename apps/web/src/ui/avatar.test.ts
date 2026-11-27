@@ -156,7 +156,7 @@ describe("an agent in its seat", () => {
 });
 
 describe("your agent's mark", () => {
-  test("is the I-beam in one ink, still, wherever it is drawn (on its tile as your agent's, alone as the app's): never the gold field", () => {
+  test("is the I-beam in one ink, still and bare, wherever it is drawn (your agent's as the app's): never the gold field", () => {
     const drawn = withDocument(() => [
       workerAvatar({ id: "primary", name: "Your agent", size: 48, expression: "working" }),
       seat({ id: "primary", name: "Your agent", state: "working", size: 88 }),

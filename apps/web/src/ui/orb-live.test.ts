@@ -3,6 +3,7 @@ import { seat, workerAvatar } from "./avatar.ts";
 import { GLASS_PEARL, GLASS_SHAPES, glassOf } from "@invincible/core/glass";
 import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 import { appMark, agentFace, orb } from "./orb.ts";
+import { GLASS_CSS } from "./glass.ts";
 
 /*
  * Your agent's I-beam and each agent's glass (ui/glass.ts) on a page that records what is made, without a browser: no
@@ -122,7 +123,12 @@ afterEach(() => {
 
 
 describe("your agent's mark", () => {
-  test("the I-beam on its tile in one ink, still, wherever it is: no canvas, no frame asked for, whatever it is doing", () => {
+  test("is the bare I-beam in the page's ink, on no tile: the squircle round it is the app icon's alone (the owner's word, 27 November 2026)", () => {
+    const mono = GLASS_CSS.split("\n").filter((line) => line.startsWith(".guardian-mark.gm-mono"));
+    expect(mono).toEqual([".guardian-mark.gm-mono polygon { fill: var(--accent); }"]);
+  });
+
+  test("the bare I-beam in one ink, still, wherever it is: no canvas, no frame asked for, whatever it is doing", () => {
     const drawn = orb({ size: 168, mood: "working", label: "Your agent: at work", key: "test:sharp" }) as unknown as Node_;
     expect([drawn.attrs.class, drawn.attrs.role, drawn.attrs["aria-label"]]).toEqual(["guardian-mark gm-mono orb orb-mark", "img", "Your agent: at work"]);
     expect(drawn.children[0]!.children.map((child) => [child.tag, child.attrs.points])).toEqual([["polygon", MARK_POLYGON]]);
