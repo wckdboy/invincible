@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What Android 12 and later show while the app starts (values-v31/themes.xml): the bare I-beam in the page's ink, on
+     nothing. IBeam's three parts (core/IBeam.kt, as IBeamMark draws them) at 2 dp to a unit of its 100-unit box, the
+     largest whole dp at which its corners stay inside the 192 dp circle a 288 dp splash icon without a background is cut
+     to. SplashTest holds it to IBeam. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <path android:fillColor="@color/ink" android:pathData="M88,72H200V104H88Z M126,104H162V184H126Z M88,184H200V216H88Z" />
+</vector>

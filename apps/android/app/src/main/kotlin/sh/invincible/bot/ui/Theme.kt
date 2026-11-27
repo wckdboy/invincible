@@ -55,7 +55,7 @@ data class Brand(
 }
 
 // (The ink and the red are scripts/brand.ts' INK, as the Apple app's asset catalog has them; the greys the web's.)
-private val LightInk = Color(0xFF0A0A0B)
+internal val LightInk = Color(0xFF0A0A0B)
 private val LightQuiet = Color(0xFF52525A)
 private val LightDanger = Color(0xFFC4141B)
 private val Light = Brand(
@@ -63,7 +63,7 @@ private val Light = Brand(
     quiet = LightQuiet, danger = LightDanger, working = LightInk, needs = LightInk, failed = LightDanger, done = LightQuiet,
 )
 
-private val DarkInk = Color(0xFFFFFFFF)
+internal val DarkInk = Color(0xFFFFFFFF)
 private val DarkQuiet = Color(0xFFA1A1A9)
 private val DarkDanger = Color(0xFFEE2C36)
 private val Dark = Brand(

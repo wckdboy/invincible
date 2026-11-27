@@ -2,4 +2,6 @@
 <resources>
     <!-- What shows before the first frame: the app's own ground (Theme.kt's paper), so nothing changes when it's drawn. -->
     <color name="window">#FFFFFF</color>
+    <!-- The page's ink (Theme.kt's), which the splash's I-beam is drawn in (drawable/splash_ibeam.xml). -->
+    <color name="ink">#0A0A0B</color>
 </resources>

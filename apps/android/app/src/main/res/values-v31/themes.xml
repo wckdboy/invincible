@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- As values/themes.xml, and the splash screen in the app's own colours: its ground, and the app icon (its field on its night) in the circle a splash icon is cut to. -->
+    <!-- As values/themes.xml, and the splash screen in the app's own colours: its ground, and the bare I-beam in the page's ink on
+         nothing (drawable/splash_ibeam.xml), as the app's own marks are; the black field round it is the launcher icon's alone. -->
     <style name="Theme.Invincible" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowSplashScreenBackground">@color/window</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_ibeam</item>
     </style>
 </resources>
