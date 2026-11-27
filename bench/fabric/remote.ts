@@ -88,7 +88,8 @@ docker.onExec = async (_container, command) => {
 // The serving node alone hosts VMs: its agent's VM is then its own, as a handed run's must be for it to reach its giver's
 // tools (a VM on another node calls that node's gateway, which holds no run of this one: docs/FABRIC.md).
 const base = (name: string): DaemonOptions => ({
-  capabilities: name === "server" ? caps(name, { docker: true, tools: ["git", "docker"], vm: { kvm: true, tools: ["kata"] }, sandbox: { image: true, networks: true, vm: true } }) : caps(name),
+  // (The serving node stands in for a Linux host with Docker, whatever this machine is: a Mac takes no other node's task.)
+  capabilities: name === "server" ? caps(name, { os: "linux", docker: true, tools: ["git", "docker"], vm: { kvm: true, tools: ["kata"] }, sandbox: { image: true, networks: true, vm: true } }) : caps(name),
   docker: docker.runner,
   measure,
   // Pulls every 2 s: a push takes only what extends a device's chain as the receiver holds it, so the two converge fast

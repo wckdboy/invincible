@@ -31,7 +31,8 @@ if (!QAMP) throw new Error("usage: bun bench/fabric/measure.ts --qamp <qamp 0.2 
 const N = Number(values.samples ?? 30);
 
 const caps = (hostname: string, extra: Partial<Capabilities> = {}): Capabilities => ({ os: process.platform, arch: process.arch, hostname, cores: 8, cpu: "bench", memoryGb: 16, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: ["git"], localModels: [], tailscale: null, ...extra });
-const sandboxCaps = (hostname: string) => caps(hostname, { cores: 32, memoryGb: 128, docker: true, tools: ["git", "docker"], vm: { kvm: true, tools: ["kata"] }, sandbox: { image: true, networks: true, vm: true } });
+// (Beta stands in for a Linux host with Docker, whatever this machine is: a Mac takes no other node's task.)
+const sandboxCaps = (hostname: string) => caps(hostname, { os: "linux", cores: 32, memoryGb: 128, docker: true, tools: ["git", "docker"], vm: { kvm: true, tools: ["kata"] }, sandbox: { image: true, networks: true, vm: true } });
 
 async function until(check: () => boolean | Promise<boolean>, timeoutMs = 30_000, what = "condition"): Promise<void> {
   const deadline = Date.now() + timeoutMs;

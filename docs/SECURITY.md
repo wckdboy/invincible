@@ -306,7 +306,8 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   the volume's subpaths), and stays in layout 1 on an older engine; a workspace image's store moves on any. **A Mac's VMs
   stay in layout 1**, their HOME their `/work`: a Mac's workspace is a disk image only one VM may mount, so no VM there
   shares a workspace (no run on a seat, no other node's task), and a HOME apart would keep nothing from anyone. A Mac
-  refuses a VM that would share one, and layout 2 itself (`container-spec.test.ts`).
+  refuses a VM that would share one, and layout 2 itself (`container-spec.test.ts`, `container-host.test.ts`), and its
+  node takes no other node's task at all (`fabric-handoff.test.ts`).
 - **Residual risk.** The workspace is shared by design: what the agent's own work later runs from it (its repository's
   scripts and hooks, a toolchain it installed into it) is code a VM sharing it could have changed. A toolchain moved to
   HOME that baked its old place into its own files (a virtualenv's scripts, for one) doesn't run from its new place, and
@@ -672,6 +673,12 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       the node left is removed as the node starts; no route reaches into it. It is made only beside an agent's VM in
       layout 2, on a Linux host with Docker; beside one whose HOME is its workspace it is refused. On a node with no
       room beside the agent's VM for one as big, the task waits for room as any sandbox does, within its life.
+    - **A Mac takes no other node's task** (`fabric-handoff.test.ts`, `container-host.test.ts`). No VM on a Mac shares
+      an agent's workspace (below: a Mac's VMs stay in layout 1), so there a task would run in its agent's own VM,
+      beside its sign-ins. A Mac's node refuses every task handed to it at once, before it reads anything of it, and
+      says why in its own words (`MAC_TAKES_NO_TASK`), which the giver shows as that node's. Below it, a Mac's host
+      refuses a seat's VM and a task's VM before it makes anything, and its spec refuses any VM that would share a
+      workspace.
     - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
       in a process group of its own and under its own deadline, its `desktop` verbs too (the third re-review's R3-3).
       In the VM (Linux) the helper is the command's subreaper while it lives. What a gate starts ends with the gate;

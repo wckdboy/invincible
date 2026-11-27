@@ -103,7 +103,18 @@ export interface HandoffsDeps {
   stopWaitMs?: number;
   /** The longest a hand-off's call lasts (its deadline), and so its run's grant (tests: less; HAND_CALL_MS). */
   handCallMs?: number;
+  /** This node is a Mac: it takes no other node's task (MAC_TAKES_NO_TASK). */
+  mac?: boolean;
 }
+
+/**
+ * A Mac's word on another node's task (the owner's decisions of 27 November 2026): it takes none. Such a task runs in a VM
+ * of its own that shares its agent's workspace and nothing else, and no VM on a Mac shares one: a Mac's workspace is a
+ * disk image only one VM may mount, and its VMs' HOME is their /work (layout 1). There, the task would run in its agent's
+ * own VM, beside what that agent's tools keep for themselves, its sign-ins among them.
+ */
+export const MAC_TAKES_NO_TASK =
+  "This node is a Mac, and a Mac takes no other node's task: no VM on a Mac shares an agent's workspace, so the task would run in that agent's own VM, beside what its tools keep there, its sign-ins among them. Hand it to one of your Linux nodes with Docker.";
 
 const ENDED = new Set(["done", "failed", "stopped", "interrupted"]);
 /** The most trail lines a hand-off keeps here (its runner keeps all of them). */
@@ -419,7 +430,11 @@ export class Handoffs implements FabricTools {
       const e = error as SidecarError;
       const stopped = this.row(id)?.stop_asked_at != null || e.kind === "cancelled";
       // (Ending it here cancels its call: the work there stops, as it would for any end its result didn't bring.)
-      this.end(id, { status: stopped ? "stopped" : "interrupted", error: stopped ? null : `the link to ${node.name} failed: ${String(e.message ?? e).slice(0, 300)}` });
+      // (The node it was handed to, in its own words, when it was that node that ended it: its refusal is no failed link.
+      // The sidecar says a peer's error as `remote error <CODE>: <its words>`, and its words alone are that node's.)
+      const said = String(e.message ?? e);
+      const why = e.kind === "remote" ? `${node.name} said: ${said.replace(/^remote error [A-Za-z0-9_]+: /, "").slice(0, 300)}` : `the link to ${node.name} failed: ${said.slice(0, 300)}`;
+      this.end(id, { status: stopped ? "stopped" : "interrupted", error: stopped ? null : why });
     }
   }
 
@@ -635,6 +650,9 @@ export class Handoffs implements FabricTools {
         ? `Its call's deadline passed (${span(inv.deadlineMs)} from when it was handed over): it ends here with its call.`
         : `It reached the longest a hand-off may last here (${span(longest)}): it ends rather than run on, whatever its giver's call allows.`;
     if (!caller || caller.role !== "full") return inv.fail(3, "a task is handed over by an active full node of this fleet alone");
+    // A Mac takes none, before anything of it is read: no VM there could run it apart from its agent's own. (Refused,
+    // UNAUTHORIZED, as the node's other refusals of a task are: this node has the tool, and won't take the task.)
+    if (this.deps.mac) return inv.fail(3, MAC_TAKES_NO_TASK);
     const parsed = HandArgs.safeParse(inv.args);
     if (!parsed.success) return inv.fail(2, `that isn't a task handed over: ${parsed.error.issues.map((i) => i.message).join("; ").slice(0, 300)}`);
     const args = parsed.data;

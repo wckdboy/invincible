@@ -154,6 +154,14 @@ transport keys carries all of it:
      - It is made on a Linux host with Docker, beside an agent's VM whose HOME is apart from its workspace (layout 2,
        SECURITY.md); beside one still in layout 1 it is refused, since that VM's HOME is its workspace. On a node with
        no room beside its agent's VM for one as big, the task waits for room as any sandbox does, within its life.
+     - **A Mac takes no other node's task.** No VM on a Mac shares an agent's workspace: a Mac's workspace is a disk
+       image only one VM may mount, and its VMs' HOME is their `/work` (layout 1). A task handed to a Mac would run in
+       its agent's own VM, beside what that agent's tools keep for themselves, its sign-ins among them. So a Mac refuses
+       it at once, before it reads anything of it (`MAC_TAKES_NO_TASK`, `handoff.ts`). You see its words on the
+       hand-off, as that node's: "This node is a Mac, and a Mac takes no other node's task: no VM on a Mac shares an
+       agent's workspace, so the task would run in that agent's own VM, beside what its tools keep there, its sign-ins
+       among them. Hand it to one of your Linux nodes with Docker." A grant to a Mac gives nothing, since every task
+       handed to it is refused so.
      - Its gates are its giver's commands, run in its VM: all of them together get as long as one command may (15
        minutes), every round counted, and once that is spent they aren't run and the work isn't done.
      - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),

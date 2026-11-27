@@ -385,7 +385,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     },
   });
   // Tasks handed to other nodes' agents and handed here, each over one Q-AMP call, its proof signed by the node that ran it.
-  const handoffs = new Handoffs({ db: local, store, identity, fabric, log, ...(opts.fabricGrantTtlSecs ? { grantTtlSecs: opts.fabricGrantTtlSecs } : {}) });
+  // (A Mac takes no other node's task: MAC_TAKES_NO_TASK says why.)
+  const handoffs = new Handoffs({ db: local, store, identity, fabric, log, mac: caps.os === "darwin", ...(opts.fabricGrantTtlSecs ? { grantTtlSecs: opts.fabricGrantTtlSecs } : {}) });
   fabric.attach(handoffs);
   /** Its capabilities as its profile says them: with its Q-AMP endpoint, once its sidecar has said one. */
   const withQamp = (c: Capabilities): Capabilities => (qampEndpoint ? { ...c, qamp: qampEndpoint } : c);

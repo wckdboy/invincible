@@ -2,11 +2,12 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { bodyFingerprint, ceilingThreads, FABRIC, type HandedView, KERNEL, newNodeIdentity, REFERENCE_SINGLE, runGrantPolicy, signQdt, type TeamSnapshot } from "@invincible/core";
+import { MAC_TAKES_NO_TASK } from "../src/fabric/handoff.ts";
 import { Sidecar } from "../src/fabric/sidecar.ts";
 import { SidecarError } from "../src/fabric/socket.ts";
 import { transportKeyOf } from "../src/home.ts";
 import { fakeDocker } from "./fake-docker.ts";
-import { HAVE_QAMP, type Pair, QAMP, sandboxCaps, startPair, until } from "./fabric-pair.ts";
+import { fakeCaps, HAVE_QAMP, type Pair, QAMP, sandboxCaps, startPair, until } from "./fabric-pair.ts";
 
 /*
  * Agents working together across nodes (docs/ARCHITECTURE.md §3), end to end on one machine: two nodes with real Q-AMP
@@ -274,5 +275,25 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
     } finally {
       runner.identity = honest;
     }
+  });
+});
+
+describe.skipIf(!HAVE_QAMP)(`a task handed to a Mac${HAVE_QAMP ? "" : " (skipped: no Q-AMP binary; set INVINCIBLE_QAMP_TEST_BIN)"}`, () => {
+  let mac: Pair;
+
+  beforeAll(async () => {
+    // Beta is a Mac: its node takes no other node's task (MAC_TAKES_NO_TASK), whatever its grants or its agents.
+    mac = await startPair({ b: { capabilities: fakeCaps("beta", { os: "darwin" }) } });
+  });
+
+  afterAll(async () => {
+    await mac?.stop();
+  });
+
+  test("is refused there at once, over Q-AMP, and you see that node's own words", async () => {
+    const view = await mac.callA<HandedView>("handTask", { node: "beta", goal: "TASK_MAC: write it", gates: ["test -f result-mac.txt"] });
+    await until(async () => (await mac.callA<HandedView>("handedTask", { id: view.id, after: 0 })).phase === "ended", 30_000, "the Mac's refusal");
+    const ended = await mac.callA<HandedView>("handedTask", { id: view.id, after: 0 });
+    expect(ended).toMatchObject({ phase: "ended", status: "interrupted", agent: null, error: `beta said: ${MAC_TAKES_NO_TASK}` });
   });
 });
