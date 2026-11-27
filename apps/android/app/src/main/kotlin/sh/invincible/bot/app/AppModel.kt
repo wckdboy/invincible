@@ -330,11 +330,14 @@ class AppModel(context: Context) {
         return NodeSession(
             c.pin,
             ask = { challenge -> c.provenWhoami(challenge) },
+            // (On the main thread, where paired() and forget() write, so its check and its write are one step: N1.)
             keep = { id ->
-                _paired.value?.takeIf(same)?.let { node ->
-                    val pinned = node.copy(nodeId = id)
-                    prefs.edit().putString("paired-node", pinned.json().text()).apply()
-                    _paired.value = pinned
+                scope.launch {
+                    _paired.value?.takeIf(same)?.let { node ->
+                        val pinned = node.copy(nodeId = id)
+                        prefs.edit().putString("paired-node", pinned.json().text()).apply()
+                        _paired.value = pinned
+                    }
                 }
             },
             named = { Primary.named(it) },
