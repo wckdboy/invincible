@@ -11,16 +11,17 @@ final class ChatComposerTests: XCTestCase {
         let node = try DevNode.named()
         let app = XCUIApplication()
         app.terminate()
-        try app.openHome(node)
-        // A new chat from Home's bar, which it answers for as long as it likes.
-        let bar = app.descendants(matching: .any)["composer"]
-        XCTAssertTrue(bar.waitForExistence(timeout: 10), "Home has no message box")
+        try app.openApp(node)
+        // A new chat, where the app opens, which it answers for as long as it likes.
+        let chat = app.descendants(matching: .any)["chat.screen"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 10), "The chat never came")
+        app.newChat()
+        let bar = chat.descendants(matching: .any)["composer"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 10), "The chat has no message box")
         bar.tap()
         bar.typeText("Take your time: what's next for the importer?")
         app.buttons["send"].tap()
-        let chat = app.descendants(matching: .any)["chat.screen"]
-        XCTAssertTrue(chat.waitForExistence(timeout: 10), "The chat never came")
-        // While it answers, the box stays open: Queue, Steer and Stop beside it.
+        // While it answers, the box stays open: Queue, Steer and Stop under its words.
         let steer = chat.buttons["composer.steer"]
         let queue = chat.buttons["composer.queue"]
         XCTAssertTrue(steer.waitForExistence(timeout: 20), "No Steer while it answers")

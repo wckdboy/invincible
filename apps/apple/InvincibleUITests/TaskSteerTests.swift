@@ -13,7 +13,7 @@ final class TaskSteerTests: XCTestCase {
         let demo = try node.demo()
         let app = XCUIApplication()
         app.terminate()
-        try app.openHome(node)
+        try app.openApp(node)
         app.open(try XCTUnwrap(URL(string: "invincible://task/\(demo.task)")))
         let thread = app.descendants(matching: .any)["task.screen"]
         XCTAssertTrue(thread.waitForExistence(timeout: 15), "The task's thread never opened")

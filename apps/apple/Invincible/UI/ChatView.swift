@@ -1,11 +1,17 @@
 import SwiftUI
 
 /// The primary's chat: your messages and its answers as bubbles, its streaming in as it comes, and the message box on the
-/// keyboard. A new chat keeps the one before it on the node.
+/// keyboard. A new chat keeps the one before it on the node. On an iPhone it is where the app opens, the roster a drawer
+/// from its back arrow (which counts what needs you) or from the screen's left edge.
 struct ChatView: View {
     let session: Session
     /// The chat shown, when it isn't the session's (on a Mac, one of its chats in a window of its own).
     private let shown: ChatModel?
+    /// Opens the roster, where it is a drawer (an iPhone's: the chat is where the app opens); nil where it is a sidebar.
+    private let roster: (() -> Void)?
+    /// Gives the agents a task, from its menu where the roster is a drawer (nil: this device may not, or elsewhere, where
+    /// the work has its own button).
+    private let give: (() -> Void)?
     @FocusState private var composing: Bool
     @State private var listing = false
     /// Its own computer, watched from here: its screen, or its terminal.
@@ -21,15 +27,20 @@ struct ChatView: View {
     /// A side question asked apart (its menu's Ask on the side…, or "/btw …" typed into the box).
     @State private var aside: SideQuestion?
 
-    init(session: Session, chat: ChatModel? = nil) {
+    init(session: Session, chat: ChatModel? = nil, roster: (() -> Void)? = nil, give: (() -> Void)? = nil) {
         self.session = session
         shown = chat
+        self.roster = roster
+        self.give = give
     }
 
     private var chat: ChatModel { shown ?? session.chat }
     private var latestAnswer: Int? { chat.thread.turns.last { $0.role == .assistant }?.id }
 
     var body: some View {
+        #if os(iOS)
+        let _ = PerfProbe.shared.mark("chat body")
+        #endif
         ScrollView {
             // A plain stack: an answer's rows are tall and hold sideways-scrolling code and tables, and a lazy stack
             // pinned to the bottom kept placing them again and never settled (seen in the iOS 26.1 simulator).
@@ -70,6 +81,16 @@ struct ChatView: View {
         .defaultScrollAnchor(.bottom)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
         .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            // The link's trouble, where nothing else on the screen says it (an iPhone's: the roster is a drawer).
+            if roster != nil {
+                if session.reconnecting {
+                    ReconnectingLine(session: session).padding(.horizontal, Metrics.margin).background(.bar)
+                } else if let trouble = session.trouble {
+                    TroubleRow(trouble: trouble).font(.callout).padding(.horizontal, Metrics.margin).padding(.vertical, Space.s2).frame(maxWidth: .infinity, alignment: .leading).background(.bar)
+                }
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Space.s2) {
                 // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait.
@@ -91,10 +112,15 @@ struct ChatView: View {
         .toolbar {
             if build == nil {
             #if os(iOS)
+            if let roster {
+                ToolbarItem(placement: .topBarLeading) {
+                    RosterButton(needs: session.needsYou, open: roster)
+                }
+            }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: Space.s2) {
-                    PrimaryOrb(size: 30, tone: session.primaryTone, mood: session.primaryMood)
-                    TimelineTitle(title: Primary.name, line: chat.title ?? session.primary.line, needs: chat.title == nil && session.primary.tone == .warn, alignment: .leading, standing: chat.title == nil ? session.primaryStanding : nil)
+                    GuardianFace(size: 30, standing: session.primaryStanding)
+                    TimelineTitle(title: "Your agent", line: chat.title ?? session.primary.line, needs: chat.title == nil && session.primary.tone == .warn, alignment: .leading, standing: chat.title == nil ? session.primaryStanding : nil)
                 }
             }
             #else
@@ -103,16 +129,14 @@ struct ChatView: View {
             }
             #endif
             ToolbarItemGroup(placement: .barTrailing) {
-                Button {
-                    chat.startNew()
-                    composing = true
-                } label: {
-                    Label("New chat", systemImage: "square.and.pencil")
-                }
-                .disabled(chat.answering || chat.thread.isEmpty)
+                // Where the roster is a drawer, the least chrome (the owner's word, 27 November 2026): a new chat is the
+                // menu's first; elsewhere it has its own button.
+                if roster == nil { newChat }
                 // The rest in one menu (I10: one thing in full, the rest a tap further): its chats, and its own computer
                 // once it has one (made from the web app or a terminal, as an agent's VM is).
                 Menu {
+                    if roster != nil { newChat }
+                    if let give { Button(action: give) { Label("Give a task…", systemImage: "square.stack.3d.up") } }
                     Button { listing = true } label: { Label("All chats", systemImage: "clock.arrow.circlepath") }
                         .accessibilityIdentifier("chats")
                     // Something about the work in hand, without changing its course (the PWA's Ask on the side…).
@@ -158,8 +182,23 @@ struct ChatView: View {
                 composing = true
             }
         }
+        // From the left edge, the roster, where it is a drawer (the chat is where an iPhone's app opens: nothing is under
+        // it for that edge to go back to).
+        .overlay(alignment: .leading) {
+            if let roster {
+                Color.clear
+                    .frame(width: 18)
+                    .contentShape(.rect)
+                    .gesture(DragGesture(minimumDistance: 8).onEnded { if $0.translation.width > 36 { roster() } })
+                    .accessibilityHidden(true)
+            }
+        }
         .task {
             await chat.openLatest(with: session.client)
+            #if os(iOS)
+            // Its first frame with what it shows, its latest chat or its welcome: a launch is usable here.
+            PerfProbe.shared.usable()
+            #endif
             if build == nil && shown == nil { away = await session.away() }
         }
         // Shown, what it answered in it is read (and stops being new everywhere); gone from the screen, nothing more is.
@@ -182,6 +221,18 @@ struct ChatView: View {
     /// itself: made there, Swift warns that the weak hold inside it differs from that one (ImplicitStrongCapture).
     private static func noting(_ session: Session) -> (String) -> Void {
         { [weak session] id in session?.noteRead(id) }
+    }
+
+    /// A new chat, its message box taking the keys: none while it answers, nor over one with nothing in it yet.
+    private var newChat: some View {
+        Button {
+            chat.startNew()
+            composing = true
+        } label: {
+            Label("New chat", systemImage: "square.and.pencil")
+        }
+        .disabled(chat.answering || chat.thread.isEmpty)
+        .accessibilityIdentifier("chat.new")
     }
 
     /// A side question, asked apart: about this kept chat, or the turn under way in a new one; nothing yet, said so.

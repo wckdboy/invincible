@@ -34,13 +34,14 @@ struct CommandPalette: View {
         words.isEmpty || texts.contains { $0.localizedCaseInsensitiveContains(words) }
     }
 
-    /// The places, each with its title, a line and its symbol, that what was typed finds, by their titles and lines. Needs
-    /// you was the Inbox until 27 November 2026: "inbox" still finds it.
+    /// The places, each with its title, a line and its symbol, that what was typed finds, by their titles and lines, your
+    /// agent's chat first (where the app opens, since 27 November 2026). Needs you was the Inbox and the work was Home until
+    /// then: "inbox" and "home" still find them.
     static func places(matching words: String, needsYou: Int) -> [(place: Place, title: String, detail: String, symbol: String)] {
-        let aka: [Place: String] = [.inbox: "Inbox"]
+        let aka: [Place: String] = [.inbox: "Inbox", .home: "Home"]
         let places: [(place: Place, title: String, detail: String, symbol: String)] = [
-            (.home, "Home", "What needs you, and the work", "house"),
-            (.primary, Primary.name, "Its conversation", "bubble.left.and.text.bubble.right"),
+            (.primary, "Your agent", "Its conversation", "bubble.left.and.text.bubble.right"),
+            (.home, "Work", "What needs you, and every task", "square.stack.3d.up"),
             (.agents, "Agents", "Your agents and their rooms", "person.3"),
             (.inbox, "Needs you", needsYou > 0 ? "\(needsYou) need\(needsYou == 1 ? "s" : "") you" : "Nothing needs you", "tray"),
             (.more, "Settings", "This device, its node and fleet", "gearshape"),

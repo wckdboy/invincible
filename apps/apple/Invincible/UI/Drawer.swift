@@ -2,67 +2,42 @@
 import SwiftUI
 
 /*
- * The drawer (X2's navigation, 26 November 2026: "Home, a bar and a drawer", no tab bar, Home the primary): everything
- * beyond Home, from the left edge (a swipe from it on Home, or a tap on the I-beam), so every place is two taps from
- * Home: a new chat and your latest chats with the primary, what needs you and the agents with their counts, all your
- * chats, keys, connectors and Settings. Notifications are asked for here, once and compactly, never as a banner on Home.
+ * The drawer (the owner's word of 27 November 2026: "openmausbot/grokbot on mobile"; the web's phone): the roster from the
+ * left edge, under the app's mark and the node it talks to. Notifications are asked for at its foot, once and compactly.
  */
 struct Drawer: View {
     let session: Session
+    /// The place on screen: its row is marked.
+    let current: Place?
     /// Goes to a place, the drawer closed first.
     let go: (Place) -> Void
-    /// One of the primary's chats (nil: a new one), the drawer closed first.
-    let chat: (String?) -> Void
     let close: () -> Void
-    @State private var chats: [ConversationSummary]?
     @State private var push = PushCenter.shared
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.s6) {
-                head
-                VStack(alignment: .leading, spacing: 0) {
-                    if session.can("chat") {
-                        row("New chat", symbol: "square.and.pencil", id: "drawer.new-chat") { chat(nil) }
-                        ForEach((chats ?? []).prefix(5)) { one in
-                            row(one.title.isEmpty ? "A chat" : one.title, symbol: "bubble.left", id: "drawer.chat.\(one.id)", quiet: true) { chat(one.id) }
-                        }
-                        if chats == nil {
-                            Text("Your chats…").font(.subheadline).foregroundStyle(.tertiary).padding(.leading, Metrics.iconColumn + Space.s3).frame(minHeight: Metrics.touch)
-                        }
-                    }
-                }
-                Divider()
-                VStack(alignment: .leading, spacing: 0) {
-                    row("Needs you", symbol: "tray", id: "drawer.needs", count: session.needsYou) { go(.inbox) }
-                    row("Agents", symbol: "person.3", id: "drawer.agents", count: session.rows.count, quietCount: true) { go(.agents) }
-                    if session.can("chat") { row("All chats", symbol: "bubble.left.and.bubble.right", id: "drawer.chats") { go(.chats) } }
-                    if session.can("vault:read") { row("Keys", symbol: "key", id: "drawer.keys") { go(.keys) } }
-                    if session.can("mind:read") { row("Connectors", symbol: "point.3.connected.trianglepath.dotted", id: "drawer.connectors") { go(.connectors) } }
-                    row("Settings", symbol: "gearshape", id: "drawer.settings") { go(.more) }
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            head
+                .padding(.horizontal, Metrics.margin)
+                .padding(.top, Space.s4)
+                .padding(.bottom, Space.s2)
+            RosterList(session: session, current: current, go: go) {
                 if push.reach == .turnOn || push.reach == .settings {
-                    Divider()
-                    notifications
+                    notifications.listRowBackground(Color.clear).selectionDisabled()
                 }
             }
-            .padding(.horizontal, Metrics.margin)
-            .padding(.vertical, Space.s4)
+            .scrollContentBackground(.hidden)
         }
-        .scrollBounceBehavior(.basedOnSize)
         .background(.background)
-        .task { await load() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("drawer")
     }
 
     private var head: some View {
         HStack(spacing: Space.s3) {
-            AppMark(size: 36)
+            AppMark(size: 32)
             VStack(alignment: .leading, spacing: Space.line) {
                 // (A name, never broken across lines: smaller instead, at the largest sizes.)
-                Text(Primary.name).font(Typeset.title).lineLimit(1).minimumScaleFactor(0.6)
+                Text(verbatim: "Invincible").font(Typeset.title).lineLimit(1).minimumScaleFactor(0.6)
                 Text(session.whoami?.nodeName ?? session.node.nodeName ?? "Your node").font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -93,28 +68,33 @@ struct Drawer: View {
             .frame(minHeight: Metrics.touch)
         }
     }
+}
 
-    private func row(_ title: String, symbol: String, id: String, count: Int? = nil, quietCount: Bool = false, quiet: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: Space.s3) {
-                DrawerGlyph(symbol: symbol, quiet: quiet)
-                Text(title).font(quiet ? .subheadline : .body.weight(.semibold)).foregroundStyle(quiet ? .secondary : .primary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
-                Spacer(minLength: Space.s2)
-                if let count, count > 0 {
-                    Text("\(count)").font(.subheadline.weight(quietCount ? .regular : .bold)).monospacedDigit().foregroundStyle(quietCount ? .secondary : .primary)
+/// The chat's back arrow where the roster is a drawer: it opens the roster, and counts what needs you beside it, as
+/// Messages' back arrow counts what is unread.
+struct RosterButton: View {
+    let needs: Int
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: Space.s1) {
+                Image(systemName: "chevron.left").font(.body.weight(.semibold))
+                if needs > 0 {
+                    Text("\(needs)")
+                        .font(.footnote.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.onAccent)
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 20, minHeight: 20)
+                        .background(Color.ink, in: .capsule)
                 }
             }
-            .frame(minHeight: Metrics.touch)
-            .contentShape(.rect)
+            .frame(minHeight: 30)
         }
-        .buttonStyle(RowPress())
-        .accessibilityIdentifier(id)
-    }
-
-    private func load() async {
-        struct Listed: Decodable { let conversations: [ConversationSummary] }
-        let listed = try? await session.client.get("/api/conversations", as: Listed.self).conversations
-        chats = (listed ?? []).sorted { $0.updatedAt > $1.updatedAt }
+        .accessibilityLabel("Your agents")
+        .accessibilityValue(needs > 0 ? PrimaryNow.needsYou(needs) : "Nothing needs you")
+        .accessibilityIdentifier("roster.open")
     }
 }
 
@@ -143,8 +123,9 @@ private struct DrawerGlyph: View {
 struct DrawerHost<Content: View>: View {
     @Binding var open: Bool
     let session: Session
+    /// The place on screen under it: its row is marked.
+    let current: Place?
     let go: (Place) -> Void
-    let chat: (String?) -> Void
     @ViewBuilder let content: Content
     @GestureState private var dragging: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -160,10 +141,10 @@ struct DrawerHost<Content: View>: View {
                     .accessibilityLabel("Close the drawer")
                     .accessibilityAddTraits(.isButton)
                     .transition(.opacity)
-                // (Its width from the window's own, without a reader round what is under it: Home lays out once. At the
-                // accessibility sizes nearly all of it, where 340 points cut every place to a word: "New c…", "Age…".)
+                // (Its width from the window's own, without a reader round what is under it: the chat lays out once. At
+                // the accessibility sizes nearly all of it, where 340 points cut every name to a word.)
                 let large = typeSize.isAccessibilitySize
-                Drawer(session: session, go: { place in close(); go(place) }, chat: { id in close(); chat(id) }, close: close)
+                Drawer(session: session, current: current, go: { place in close(); go(place) }, close: close)
                     .containerRelativeFrame(.horizontal) { width, _ in large ? width * 0.94 : min(340, width * 0.86) }
                     .clipShape(.rect(bottomTrailingRadius: 24, topTrailingRadius: 24, style: .continuous))
                     .shadow(color: .black.opacity(0.18), radius: 24, x: 6)

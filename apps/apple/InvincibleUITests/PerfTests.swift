@@ -2,16 +2,17 @@ import XCTest
 
 /*
  * The app as you use it, measured against a dev node with a busy fleet (scripts/dev-node.ts --heavy --auto-approve) and
- * held to Budgets.json:
- *  - launch: from the process starting to Home's first frame with what it shows (the app's own probe, PerfProbe.swift:
- *    Apple's launch metric reports nothing on a simulator), the median of five;
- *  - at rest on Home: what it asks the node in a minute, and its CPU and memory while nothing changes; and what it asks
- *    in a minute with a stall in it (the node silent long enough that the app takes its stream for dead);
- *  - live: from something needing you on the node to Home's header counting it, the first event after opening held on
- *    its own (it takes the path cold) and the ten after it together, each said with where its time went;
+ * held to Budgets.json. The app opens on your agent's chat (since 27 November 2026; Home before), so:
+ *  - launch: from the process starting to the chat's first frame with what it shows, its latest chat or its welcome (the
+ *    app's own probe, PerfProbe.swift: Apple's launch metric reports nothing on a simulator), the median of five;
+ *  - at rest on the chat: what it asks the node in a minute, and its CPU and memory while nothing changes; and what it
+ *    asks in a minute with a stall in it (the node silent long enough that the app takes its stream for dead);
+ *  - live: from something needing you on the node to the chat's back arrow counting it, the first event after opening
+ *    held on its own (it takes the path cold) and the ten after it together, each said with where its time went;
  *  - a dead link: how soon the app says it's reconnecting once the node goes silent (as a half-open connection does),
  *    and how soon it's back once the node can be reached again;
- *  - scrolling Home's long list: the frames that came late, in ms a second (Apple's hitch time ratio).
+ *  - scrolling the work's long list (Home's, before): the frames that came late, in ms a second (Apple's hitch time
+ *    ratio).
  * Each prints a PERF line and attaches its numbers, so a run's log and its result bundle say what was measured.
  */
 final class PerfTests: XCTestCase {
@@ -59,7 +60,7 @@ final class PerfTests: XCTestCase {
     func testLaunchToUsable() throws {
         let node = try DevNode.named()
         let app = XCUIApplication()
-        try app.openHome(node)
+        try app.openApp(node)
         app.launchArguments = ["-InvincibleMeasure", "YES"]
         var took: [Double] = []
         var own: [Double] = []
@@ -75,13 +76,13 @@ final class PerfTests: XCTestCase {
                 launch = app.reading("launch")
                 if launch == nil { settle(0.1) }
             }
-            took.append(try XCTUnwrap(launch, "Home never showed what it holds"))
+            took.append(try XCTUnwrap(launch, "The chat never showed what it holds"))
             // (A build from before the probe kept its start says none: its whole launch is all there is.)
             own.append(launch! - (app.reading("start") ?? 0))
         }
         report("launch-to-usable", ["p50": percentile(took, 0.5), "max": took.max() ?? .nan, "appStartToUsableP50": percentile(own, 0.5)])
         print("PERF launch-to-usable each: \(took.map { Int($0) }), from the app's first line: \(own.map { Int($0) })")
-        XCTAssertLessThanOrEqual(percentile(own, 0.5), try budgets.appStartToUsableMs, "From the app's first line to a usable Home took \(own.map { Int($0) }) ms (\(took.map { Int($0) }) from the process's start)")
+        XCTAssertLessThanOrEqual(percentile(own, 0.5), try budgets.appStartToUsableMs, "From the app's first line to a usable chat took \(own.map { Int($0) }) ms (\(took.map { Int($0) }) from the process's start)")
         target(percentile(own, 0.5) <= (try budgets.appStartToUsableTargetMs), "launch to usable in \(Int(try! budgets.appStartToUsableTargetMs)) ms; the app's own part took \(own.map { Int($0) }) ms")
     }
 
@@ -90,7 +91,7 @@ final class PerfTests: XCTestCase {
         let node = try DevNode.named()
         let app = XCUIApplication()
         let launched = try node.now()
-        try app.openHome(node)
+        try app.openApp(node)
         // Whatever opening asked for has been answered, and the app has asked nothing more for a while (its stream aside).
         let since = try node.quiet(since: launched)
         settle(60)
@@ -112,7 +113,7 @@ final class PerfTests: XCTestCase {
         let node = try DevNode.named()
         let app = XCUIApplication()
         let launched = try node.now()
-        try app.openHome(node)
+        try app.openApp(node)
         let since = try node.quiet(since: launched)
         let start = Date()
         defer { _ = try? node.blackhole(false) }
@@ -141,7 +142,7 @@ final class PerfTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-InvincibleMeasure", "YES"]
         app.terminate()
-        try app.openHome(node)
+        try app.openApp(node)
         settle(10)
         // Reading the probe costs the app something itself (XCUITest takes a picture of its whole accessibility tree to
         // find it): what one reading costs, from two back to back, is taken off what the rest between two cost.
@@ -156,16 +157,16 @@ final class PerfTests: XCTestCase {
         let percent = max(0, cpu1 - cpu0 - perReading) / (seconds * 1000) * 100
         let memory = try XCTUnwrap(app.reading("mem"))
         report("at-rest", ["cpuPercent": percent, "memoryMB": memory, "readingCostMs": perReading])
-        XCTAssertLessThanOrEqual(percent, try budgets.cpuAtRestPercent, "At rest on Home the app used \(String(format: "%.1f", percent)) % of a core")
+        XCTAssertLessThanOrEqual(percent, try budgets.cpuAtRestPercent, "At rest on the chat the app used \(String(format: "%.1f", percent)) % of a core")
         target(percent <= (try budgets.cpuAtRestTargetPercent), "under \(try! budgets.cpuAtRestTargetPercent) % of a core at rest; it used \(String(format: "%.1f", percent)) %")
-        XCTAssertLessThanOrEqual(memory, try budgets.memoryAtRestMB, "At rest on Home the app held \(Int(memory)) MB")
+        XCTAssertLessThanOrEqual(memory, try budgets.memoryAtRestMB, "At rest on the chat the app held \(Int(memory)) MB")
     }
 
     @MainActor
     func testEventToScreen() throws {
         let node = try DevNode.named()
         let app = XCUIApplication()
-        try app.openHome(node)
+        try app.openApp(node)
         settle(5)
         // The first event after opening, on its own: it takes the path cold, and on CI's loaded Mac (27 November 2026, PR
         // #72) one such took 554 ms against 130-140 for the nine after it, which failed the steady limit, the 95th percentile
@@ -196,7 +197,7 @@ final class PerfTests: XCTestCase {
 
     @MainActor
     private func event(_ app: XCUIApplication, _ node: DevNode) throws -> Event {
-        let before = try XCTUnwrap(app.needsCount, "Home says no count")
+        let before = try XCTUnwrap(app.needsCount, "The chat's back arrow says no count")
         let poked = try node.poke()
         let start = Date()
         while (app.needsCount ?? before) <= before, Date().timeIntervalSince(start) < 20 { settle(0.02) }
@@ -213,7 +214,7 @@ final class PerfTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-InvincibleMeasure", "YES"]
         app.terminate()
-        try app.openHome(node)
+        try app.openApp(node)
         settle(5)
         defer { try? node.blackhole(false) }
         XCTAssertFalse(app.linkDown.exists, "The app said the link was down before it was")
@@ -235,21 +236,26 @@ final class PerfTests: XCTestCase {
     }
 
     @MainActor
-    func testScrollHome() throws {
+    func testScrollWork() throws {
         let node = try DevNode.named()
         let app = XCUIApplication()
         app.launchArguments = ["-InvincibleMeasure", "YES", "-InvincibleMeasureFrames", "YES"]
         app.terminate()
-        try app.openHome(node)
+        try app.openApp(node)
+        // The work, from the roster: Home's list as it was, a lazy one (a collection view).
+        app.openRoster()
+        let work = app.rosterRow("roster.work")
+        XCTAssertTrue(work.waitForExistence(timeout: 10), "No Work in the roster")
+        work.tap()
+        let page = app.descendants(matching: .any)["work.screen"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10), "The work never came")
         settle(5)
-        // Home's list (a lazy one: a collection view; a scroll view before 26 November 2026), never the agents' strip.
-        let lazy = app.collectionViews.firstMatch
-        let list = lazy.waitForExistence(timeout: 5) ? lazy : app.scrollViews.firstMatch
+        let list = page.collectionViews.firstMatch
         XCTAssertTrue(list.waitForExistence(timeout: 10))
         // Three rounds of the same swipes, each measured on its own. Other work on the Mac only ever adds late frames
         // (26 November 2026: CI run 34 failed here while the runner's Mac also ran agents' builds at a load of 50 to
         // 100 on 18 cores; the same commit then passed there at 6.9 ms a second), so the limit holds the best round,
-        // which is what Home itself costs, and X2's target the median. A Home that got slower is slower in every round.
+        // which is what the list itself costs, and X2's target the median. A list that got slower is slower in every round.
         var rounds: [(ratio: Double, seconds: Double)] = []
         for _ in 0..<3 {
             let late0 = try XCTUnwrap(app.reading("lateMs"))
@@ -266,8 +272,8 @@ final class PerfTests: XCTestCase {
         let best = ratios[0], median = ratios[1]
         let load = Self.hostLoad()
         let said = "rounds \(ratios.map { String(format: "%.1f", $0) }), the Mac's load \(String(format: "%.1f", load.average)) on \(load.cores) cores"
-        report("scroll-home", ["lateMsPerSecond": best, "medianLateMsPerSecond": median, "seconds": rounds.map(\.seconds).reduce(0, +), "hostLoad": load.average, "hostCores": Double(load.cores)])
-        XCTAssertLessThanOrEqual(best, try budgets.scrollLateMsPerSecond, "Scrolling Home, frames came \(String(format: "%.1f", best)) ms a second late at best (\(said))")
+        report("scroll-work", ["lateMsPerSecond": best, "medianLateMsPerSecond": median, "seconds": rounds.map(\.seconds).reduce(0, +), "hostLoad": load.average, "hostCores": Double(load.cores)])
+        XCTAssertLessThanOrEqual(best, try budgets.scrollLateMsPerSecond, "Scrolling the work, frames came \(String(format: "%.1f", best)) ms a second late at best (\(said))")
         target(median <= (try budgets.scrollLateTargetMsPerSecond), "under \(try! budgets.scrollLateTargetMsPerSecond) ms a second of late frames scrolling; the median round was \(String(format: "%.1f", median)) (\(said))")
     }
 

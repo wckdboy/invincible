@@ -1,17 +1,19 @@
 import XCTest
 
 /*
- * Getting around, counted in taps from Home (X2's targets, 26 November 2026): a running task, an agent and an approval in
- * one; Settings and a past chat in two (the drawer, then the place); a link in none. Against the dev node's busy fleet,
- * each from a fresh launch on Home.
+ * Getting around, counted in taps from your agent's chat, where the app opens (the owner's word of 27 November 2026:
+ * "something like t3code on desktop, and openmausbot/grokbot on mobile"): the roster is a tap away (the chat's back
+ * arrow, which counts what needs you), so an agent, Needs you, the work and Settings are two taps; a running task and an
+ * approval three (the work's row, Needs you's card); a past chat three (the chat's menu, All chats, the chat); a link
+ * none. Against the dev node's busy fleet, each from a fresh launch on the chat.
  */
 final class NavTests: XCTestCase {
     @MainActor
-    private func home() throws -> XCUIApplication {
+    private func opened() throws -> XCUIApplication {
         let node = try DevNode.named()
         let app = XCUIApplication()
         app.terminate()
-        try app.openHome(node)
+        try app.openApp(node)
         return app
     }
 
@@ -20,59 +22,78 @@ final class NavTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)[screen].waitForExistence(timeout: 10), "\(screen) never came", file: file, line: line)
     }
 
+    /// The roster opened, and one of its rows chosen.
     @MainActor
-    func testARunningTaskIsOneTap() throws {
-        let app = try home()
-        let running = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row.' AND label CONTAINS 'Working'")).firstMatch
-        XCTAssertTrue(running.waitForExistence(timeout: 10), "No running task on Home")
-        running.tap()
-        shown(app, "task.screen")
+    private func pick(_ app: XCUIApplication, _ row: String, file: StaticString = #filePath, line: UInt = #line) {
+        app.openRoster()
+        let chosen = app.rosterRow(row)
+        XCTAssertTrue(chosen.waitForExistence(timeout: 10), "No \(row) in the roster", file: file, line: line)
+        chosen.tap()
     }
 
     @MainActor
-    func testAnAgentIsOneTap() throws {
-        let app = try home()
-        let agent = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agent.'")).firstMatch
-        XCTAssertTrue(agent.waitForExistence(timeout: 10), "No agent on Home")
+    func testAnAgentIsTwoTaps() throws {
+        let app = try opened()
+        app.openRoster()
+        let agent = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'roster.agent.'")).firstMatch
+        XCTAssertTrue(agent.waitForExistence(timeout: 10), "No agent in the roster")
         agent.tap()
         shown(app, "agent.screen")
     }
 
     @MainActor
-    func testAnApprovalIsOneTap() throws {
-        let app = try home()
+    func testNeedsYouIsTwoTaps() throws {
+        let app = try opened()
+        pick(app, "roster.needs")
+        shown(app, "needs.screen")
+    }
+
+    @MainActor
+    func testARunningTaskIsThreeTaps() throws {
+        let app = try opened()
+        pick(app, "roster.work")
+        let running = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row.' AND label CONTAINS 'Working'")).firstMatch
+        XCTAssertTrue(running.waitForExistence(timeout: 10), "No running task in the work")
+        running.tap()
+        shown(app, "task.screen")
+    }
+
+    @MainActor
+    func testAnApprovalIsThreeTaps() throws {
+        let app = try opened()
+        pick(app, "roster.needs")
         let approval = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'decision.action:' AND NOT (identifier ENDSWITH '.answer')")).firstMatch
-        XCTAssertTrue(approval.waitForExistence(timeout: 10), "No approval on Home")
+        XCTAssertTrue(approval.waitForExistence(timeout: 10), "No approval in Needs you")
         approval.tap()
         shown(app, "approval.card")
     }
 
     @MainActor
     func testSettingsIsTwoTaps() throws {
-        let app = try home()
-        app.buttons["home.drawer"].tap()
-        let settings = app.buttons["drawer.settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        settings.tap()
+        let app = try opened()
+        pick(app, "roster.settings")
         shown(app, "settings.screen")
     }
 
     @MainActor
-    func testAPastChatIsTwoTaps() throws {
-        let app = try home()
-        app.buttons["home.drawer"].tap()
-        let chat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'drawer.chat.'")).firstMatch
-        XCTAssertTrue(chat.waitForExistence(timeout: 10), "No past chat in the drawer")
+    func testAPastChatIsThreeTaps() throws {
+        let app = try opened()
+        app.buttons["chat.more"].tap()
+        let all = app.buttons["chats"]
+        XCTAssertTrue(all.waitForExistence(timeout: 5), "No All chats in the chat's menu")
+        all.tap()
+        let chat = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chats.'")).firstMatch
+        XCTAssertTrue(chat.waitForExistence(timeout: 10), "No past chat among them")
         chat.tap()
         shown(app, "chat.screen")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chats.'")).firstMatch.exists, "The list stayed over the chat")
     }
 
     @MainActor
     func testALinkToATaskIsNoTap() throws {
-        let app = try home()
-        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row.task-'")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        let id = String(row.identifier.dropFirst("row.".count))
+        let node = try DevNode.named()
+        let app = try opened()
+        let id = try node.tasks().working
         app.open(try XCTUnwrap(URL(string: "invincible://task/\(id)")))
         shown(app, "task.screen")
     }

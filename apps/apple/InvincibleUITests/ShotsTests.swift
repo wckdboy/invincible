@@ -1,8 +1,10 @@
+import UIKit
 import XCTest
 
 /*
  * Every iPhone screen pictured, as the owner's bar asks before a screen ships (docs/ARCHITECTURE.md §8): in light and
- * dark, at the default text size and at the largest accessibility size, against the dev node's busy fleet. Each picture
+ * dark, at the default text size and at the largest accessibility size, against the dev node's busy fleet. On an iPad
+ * the same screens, the roster its sidebar. Each picture
  * is an attachment of the run's result bundle, named `shot-<n>-<screen>-<look>` (the Live Activity's `live-<state>-<where>`),
  * kept always:
  *   xcrun xcresulttool export attachments --path <bundle>.xcresult --output-path <folder>
@@ -53,21 +55,37 @@ final class ShotsTests: XCTestCase {
             }
         }
         for look in pictured {
+            // Where the app opens: your agent's chat (its latest, or its welcome).
             try home(app, look, node)
             settle(3)
-            shot("01-home", look)
-            // Home's work: swiped to its first row (one swipe at the largest size reaches only its decisions).
-            _ = reach(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row.'")).firstMatch, app)
-            settle(1.5)
-            shot("01-home-work", look)
+            shot("01-chat", look)
+            // The roster: an iPhone's drawer (an iPad's sidebar is in every picture).
+            app.openRoster()
+            settle(1)
+            shot("02-roster", look)
+            // The work (Home's, before), and its rows further down.
+            if tapIfThere(app.rosterRow("roster.work"), app) {
+                wait(app, "work.screen")
+                settle(2)
+                shot("03-work", look)
+                _ = reach(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'row.'")).firstMatch, app)
+                settle(1.5)
+                shot("03-work-rows", look)
+                // Search and ask, from its ⌕.
+                if tapIfThere(app.buttons["work.search"], app) {
+                    settle(1.5)
+                    shot("15-search", look)
+                    dismissSheet(app)
+                }
+            }
             // A task proven, one that failed, one at work: each its thread, by its link (the same ones in every look).
-            for (n, word, id) in [("02", "proven", tasks.proven), ("03", "failed", tasks.failed), ("04", "working", tasks.working)] {
+            for (n, word, id) in [("04", "proven", tasks.proven), ("05", "failed", tasks.failed), ("06", "working", tasks.working)] {
                 guard let id else { continue }
                 try home(app, look, node)
                 guard open(app, "invincible://task/\(id)", "task.screen") else { continue }
                 settle(2.5)
                 shot("\(n)-task-\(word)", look)
-                if n == "02", tapIfThere(app.buttons["task.details"], app) {
+                if n == "04", tapIfThere(app.buttons["task.details"], app) {
                     settle(1.5)
                     shot("\(n)-task-details", look)
                     dismissSheet(app)
@@ -77,43 +95,35 @@ final class ShotsTests: XCTestCase {
             try home(app, look, node)
             if open(app, "invincible://agent/builder", "agent.screen") {
                 settle(2)
-                shot("05-agent", look)
-            }
-            // The primary's chat, from Home's line.
-            try home(app, look, node)
-            if tapIfThere(app.glance, app) {
-                wait(app, "chat.screen")
-                settle(2)
-                shot("06-chat", look)
+                shot("07-agent", look)
             }
             // While it answers: a message queued behind it, a side question, and the queue held once it's stopped.
             try home(app, look, node)
             busyChat(app, look)
-            // The drawer, and each place in it.
-            for (n, place, screen) in [("08", "drawer.needs", "needs.screen"), ("09", "drawer.agents", "agents.screen"), ("10", "drawer.chats", "chats.screen"), ("11", "drawer.settings", "settings.screen"), ("13", "drawer.keys", "keys.screen"), ("14", "drawer.connectors", "connectors.screen")] {
+            // The roster's other places, and Everything else's.
+            for (n, row, screen) in [("09", "roster.needs", "needs.screen"), ("10", "roster.settings", "settings.screen"), ("11", "roster.everything", "everything.screen")] {
                 try home(app, look, node)
-                guard tapIfThere(app.buttons["home.drawer"], app) else { continue }
-                if n == "08" {
+                app.openRoster()
+                guard tapIfThere(reach(app.rosterRow(row), app), app) else { continue }
+                wait(app, screen)
+                settle(2)
+                shot("\(n)-\(row.dropFirst("roster.".count))", look)
+                // About, from Settings.
+                if row == "roster.settings", tapIfThere(reach(app.buttons["settings.about"], app), app) {
+                    wait(app, "about.screen")
                     settle(1)
-                    shot("07-drawer", look)
+                    shot("12-about", look)
                 }
-                if tapIfThere(reach(app.buttons[place], app), app) {
-                    wait(app, screen)
-                    settle(2)
-                    shot("\(n)-\(place.dropFirst("drawer.".count))", look)
-                    // About, from Settings.
-                    if place == "drawer.settings", tapIfThere(reach(app.buttons["settings.about"], app), app) {
-                        wait(app, "about.screen")
-                        settle(1)
-                        shot("12-about", look)
+                if row == "roster.everything" {
+                    for (m, place, there) in [("13", "agents", "agents.screen"), ("14", "chats", "chats.screen"), ("16", "keys", "keys.screen"), ("17", "connectors", "connectors.screen")] {
+                        guard tapIfThere(app.buttons["everything.\(place)"], app) else { continue }
+                        wait(app, there)
+                        settle(2)
+                        shot("\(m)-\(place)", look)
+                        if place == "chats" { dismissSheet(app) } else { back(app) }
+                        wait(app, "everything.screen")
                     }
                 }
-            }
-            // Search and ask, from the bar.
-            try home(app, look, node)
-            if tapIfThere(app.buttons["bar.search"], app) {
-                settle(1.5)
-                shot("15-search", look)
             }
         }
     }
@@ -172,11 +182,21 @@ final class ShotsTests: XCTestCase {
         }
     }
 
-    /// The app started afresh in a look and paired, on Home (openHome starts it).
+    /// The app started afresh in a look and paired, on your agent's chat (openApp starts it).
     @MainActor
     private func home(_ app: XCUIApplication, _ look: Look, _ node: DevNode) throws {
         dress(app, look)
-        try app.openHome(node)
+        // An iPad wide, its roster a sidebar beside the place (in portrait the system may fold the sidebar away).
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+        try app.openApp(node)
+    }
+
+    /// Back one page, by the bar's own back button.
+    @MainActor
+    private func back(_ app: XCUIApplication) {
+        let button = app.navigationBars.buttons.element(boundBy: 0)
+        if button.exists, button.isHittable { button.tap() }
+        settle(1)
     }
 
     /// One of the app's links opened, and the screen it lands on come; false when it didn't.
@@ -191,12 +211,14 @@ final class ShotsTests: XCTestCase {
     /// asked on the side, and once it's stopped, the queue held.
     @MainActor
     private func busyChat(_ app: XCUIApplication, _ look: Look) {
-        let bar = app.descendants(matching: .any)["composer"]
+        let chat = app.descendants(matching: .any)["chat.screen"]
+        guard chat.waitForExistence(timeout: 10) else { return }
+        app.newChat()
+        let bar = chat.descendants(matching: .any)["composer"]
         guard bar.waitForExistence(timeout: 10) else { return }
         bar.tap()
         bar.typeText("Take your time: what's next for the importer?")
         guard tapIfThere(app.buttons["send"], app) else { return }
-        let chat = app.descendants(matching: .any)["chat.screen"]
         let queue = app.buttons["composer.queue"]
         guard chat.waitForExistence(timeout: 10), queue.waitForExistence(timeout: 20) else { return }
         let box = chat.descendants(matching: .any)["composer"]
@@ -207,17 +229,17 @@ final class ShotsTests: XCTestCase {
         // The keyboard put away (a tap above the box closes it), so the picture is the chat's.
         chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
         settle(1.5)
-        shot("06-chat-busy", look)
+        shot("08-chat-busy", look)
         if tapIfThere(app.buttons["chat.more"], app), tapIfThere(app.buttons["chat.aside"], app) {
             wait(app, "aside.question")
             settle(1)
-            shot("06-chat-aside", look)
+            shot("08-chat-aside", look)
             dismissSheet(app)
         }
         if tapIfThere(app.buttons["composer.stop"], app) {
             _ = app.descendants(matching: .any)["queue.held"].waitForExistence(timeout: 20)
             settle(1)
-            shot("06-chat-held", look)
+            shot("08-chat-held", look)
         }
     }
 

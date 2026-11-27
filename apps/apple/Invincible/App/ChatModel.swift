@@ -81,18 +81,32 @@ struct ChatRequest: Encodable, Sendable {
     /// What its answer is at: its last step (nil when it has only just started).
     var step: String? { thread.turns.last { $0.role == .assistant }?.steps.last?.text }
 
-    /// Its row opens its latest chat, once; after that the chat on screen stays until you choose another.
+    /// Its row opens its latest chat, once; after that the chat on screen stays until you choose another. While its chats
+    /// are read it says it is reading, never its welcome: the welcome first and the latest chat over it a moment later moved
+    /// everything on the screen the app opens on (an iPhone's, since 27 November 2026). A chat chosen meanwhile (a new one,
+    /// a kept one, a message sent) is the one that stays.
     func openLatest(with client: NodeClient) async {
         guard !opened, conversation == nil, thread.isEmpty, live == nil else { return }
         opened = true
+        let asked = chosen
+        loading = true
         struct Listed: Decodable { let conversations: [ConversationSummary] }
-        guard let latest = try? await Chats.mostRecent(client.get("/api/conversations", as: Listed.self).conversations) else { return }
+        let latest = try? await Chats.mostRecent(client.get("/api/conversations", as: Listed.self).conversations)
+        guard chosen == asked else { return }
+        guard let latest, thread.isEmpty, live == nil else {
+            loading = false
+            return
+        }
         await open(latest.id, with: client)
     }
+
+    /// Each chat chosen (a new one, a kept one): the latest, read as the chat first opens, is shown only if none was since.
+    private var chosen = 0
 
     /// A kept chat, as the node holds it; if it is answering in it, its turn is watched from where it stands.
     func open(_ id: String, with client: NodeClient) async {
         leave()
+        chosen += 1
         opened = true
         loading = true
         defer { loading = false }
@@ -173,6 +187,8 @@ struct ChatRequest: Encodable, Sendable {
         (conversation, title, problem, role) = (nil, nil, nil, "planner")
         (queue, held, steering, notice) = ([], nil, [], nil)
         opened = true
+        chosen += 1
+        loading = false
     }
 
     /// The chat on screen was deleted: what's left is a new one.

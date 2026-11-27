@@ -62,6 +62,7 @@ struct MacPlaces: View {
         case .chats: AllChats(session: session) { mac.place = .primary }
         case .keys: KeysView(session: session)
         case .connectors: ConnectorsView(session: session)
+        case .everything: EverythingView(session: session) { mac.place = $0 }
         }
     }
 

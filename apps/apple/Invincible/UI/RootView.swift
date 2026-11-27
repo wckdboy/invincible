@@ -76,11 +76,11 @@ struct MainView: View {
     }
 }
 
-/// An iPhone's app (your words, 26 November 2026: "no tab bar, and Home is the primary"; X2's "Home, a bar and a drawer"):
-/// Home, and over it, as Messages shows a conversation, its conversation, a task's thread, an agent's or a room's page,
-/// the Inbox, Settings. Home's bar searches and asks and gives a task; the drawer (the I-beam, or a swipe from the left
-/// edge) holds every other place, each two taps from Home; a notification you tap, or a link, opens where it leads, over
-/// Home.
+/// An iPhone's app (the owner's word of 27 November 2026: "something like t3code on desktop, and openmausbot/grokbot on
+/// mobile"; the web's phone): your agent's chat, and over it, as Messages shows a conversation, a place you go to: the
+/// work, an agent's or a room's page, a task's thread, Needs you, Settings. The roster is a drawer from the left edge (the
+/// chat's back arrow, which counts what needs you, or a swipe): what needs you, your agent, each agent and room, then the
+/// work, Settings and everything else. A notification you tap, or a link, opens where it leads, over the chat.
 struct PhoneRoot: View {
     let app: AppModel
     let session: Session
@@ -95,16 +95,10 @@ struct PhoneRoot: View {
     private var mayGive: Bool { session.can("fleet:admin") && session.can("chat") && session.team != nil && !session.rows.isEmpty }
 
     var body: some View {
-        DrawerHost(open: $drawer, session: session, go: go, chat: openChat) {
+        DrawerHost(open: $drawer, session: session, current: path.last ?? .primary, go: pick) {
             NavigationStack(path: $path) {
-                HomeView(
-                    session: session,
-                    go: go,
-                    drawer: { withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { drawer = true } },
-                    search: { searching = true },
-                    give: mayGive ? { giving = true } : nil
-                )
-                .navigationDestination(for: Place.self) { place in destination(place) }
+                ChatView(session: session, roster: { withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) { drawer = true } }, give: mayGive ? { giving = true } : nil)
+                    .navigationDestination(for: Place.self) { place in destination(place) }
             }
         }
         .sheet(isPresented: $giving) { GiveSheet(session: session) }
@@ -113,13 +107,18 @@ struct PhoneRoot: View {
         }) {
             CommandPalette(session: session, go: { go($0) }, give: mayGive ? { givingNext = true } : nil)
         }
+        // Every chat with your agent, in a sheet of its own, as its menu's All chats lists them.
         .sheet(isPresented: $listingChats) {
             ChatsView(session: session) { id in
                 listingChats = false
-                openChat(id)
+                Task {
+                    await session.chat.open(id, with: session.client)
+                    path = []
+                }
             } startNew: {
                 listingChats = false
-                openChat(nil)
+                if !session.chat.answering { session.chat.startNew() }
+                path = []
             }
         }
         .environment(\.showInbox) { go(.inbox) }
@@ -130,31 +129,23 @@ struct PhoneRoot: View {
         .onChange(of: session.chat.conversation) { PushCenter.shared.showing = Self.showing(path, chat: session.chat.conversation) }
     }
 
-    /// A place, over Home (Home itself: back to it); all your chats in a sheet of their own.
+    /// A place, over your agent's chat (the chat itself: back to it); every chat in a sheet of its own.
     private func go(_ place: Place) {
         switch place {
-        case .home: path = []
+        case .primary: path = []
         case .chats: listingChats = true
         default: path.append(place)
         }
     }
 
-    /// One of the primary's chats (nil: a new one), over Home.
-    private func openChat(_ id: String?) {
-        if let id {
-            Task {
-                await session.chat.open(id, with: session.client)
-                path = [.primary]
-            }
-        } else {
-            if !session.chat.answering { session.chat.startNew() }
-            path = [.primary]
-        }
+    /// A place from the roster: over your agent's chat, alone (the chat itself: back to it).
+    private func pick(_ place: Place) {
+        path = place == .primary ? [] : [place]
     }
 
     @ViewBuilder private func destination(_ place: Place) -> some View {
         switch place {
-        case .home: HomeView(session: session, go: go)
+        case .home: HomeView(session: session, go: go, search: { searching = true }, give: mayGive ? { giving = true } : nil)
         case .primary: ChatView(session: session)
         case .task(let id): TaskView(session: session, id: id)
         case .agents: AgentsView(session: session) { path.append(Place($0)) }
@@ -162,13 +153,14 @@ struct PhoneRoot: View {
         case .room(let id): RoomView(session: session, id: id)
         case .inbox: InboxView(session: session)
         case .more, .thisMac: MoreView(app: app, session: session)
-        case .chats: AllChats(session: session) { path = [.primary] }
+        case .chats: AllChats(session: session) { path = [] }
         case .keys: KeysView(session: session)
         case .connectors: ConnectorsView(session: session)
+        case .everything: EverythingView(session: session) { go($0) }
         }
     }
 
-    /// A notification you tapped: where it leads, over Home.
+    /// A notification you tapped: where it leads, over your agent's chat.
     private func follow() async {
         guard let opened = PushCenter.shared.opened else { return }
         PushCenter.shared.opened = nil
@@ -179,7 +171,7 @@ struct PhoneRoot: View {
         case .overview: path = [.agents]
         case .chat(let id):
             if let id { await session.chat.open(id, with: session.client) }
-            path = [.primary]
+            path = []
         case .approval(let id):
             path = [.inbox]
             session.approvalToOpen = id
@@ -191,14 +183,15 @@ struct PhoneRoot: View {
         }
     }
 
-    /// What the screen shows, as a notification would name it (the last place over Home; Home itself names nothing).
+    /// What the screen shows, as a notification would name it: the last place over the chat, or the chat itself.
     static func showing(_ path: [Place], chat: String?) -> Push.Destination? {
-        path.last?.shown(chat: chat)
+        (path.last ?? .primary).shown(chat: chat)
     }
 }
 
-/// An iPad's window, as a Mac's: the places in a sidebar (Places.swift) and the place chosen beside them. Each window
-/// keeps its own place for the next launch, and the menus and their keys (PadCommands) act in the one in front.
+/// An iPad's window (the owner's word of 27 November 2026: "something like t3code on desktop"): the roster in a sidebar
+/// (RosterList.swift) and the place chosen beside it, your agent's chat first. Each window keeps its own place for the next
+/// launch, and the menus and their keys (PadCommands) act in the one in front.
 struct SplitPlaces: View {
     let app: AppModel
     let session: Session
@@ -211,14 +204,35 @@ struct SplitPlaces: View {
     @State private var givingNext = false
 
     private var place: Place {
-        get { (try? JSONDecoder().decode(Place.self, from: Data(kept.utf8))) ?? .home }
+        get { (try? JSONDecoder().decode(Place.self, from: Data(kept.utf8))) ?? .primary }
         nonmutating set { kept = (try? JSONEncoder().encode(newValue)).map { String(decoding: $0, as: UTF8.self) } ?? "" }
     }
 
     var body: some View {
         NavigationSplitView {
-            PlacesSidebar(place: Binding(get: { place }, set: { place = $0 }), session: session) { EmptyView() }
-                .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 400)
+            RosterList(session: session, current: place, go: { place = $0 })
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
+                .toolbar {
+                    // Its head, as the web's: the app's mark and name, and search (⌘K).
+                    ToolbarItem(placement: .topBarLeading) {
+                        HStack(spacing: 9) {
+                            AppMark(size: 20)
+                            Wordmark()
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { searching = true } label: { Label("Search, or ask", systemImage: "magnifyingglass") }
+                            .help("Search, or ask (⌘K)")
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if session.reconnecting {
+                        ReconnectingLine(session: session).padding(.horizontal, Space.s3).background(.bar)
+                    } else if let trouble = session.trouble {
+                        TroubleRow(trouble: trouble).font(.callout).padding(Space.s3).frame(maxWidth: .infinity, alignment: .leading).background(.bar)
+                    }
+                }
         } detail: {
             NavigationStack { detail }
                 // Each place starts at its own root.
@@ -242,7 +256,7 @@ struct SplitPlaces: View {
 
     @ViewBuilder private var detail: some View {
         switch place {
-        case .home: HomeView(session: session, go: { place = $0 }, give: mayGive ? { giving = true } : nil)
+        case .home: HomeView(session: session, go: { place = $0 }, search: { searching = true }, give: mayGive ? { giving = true } : nil)
         case .task(let id): TaskView(session: session, id: id, wide: true)
         case .primary: ChatView(session: session)
         case .agents: AgentsView(session: session, selection: board) { place = Place($0) }
@@ -253,6 +267,7 @@ struct SplitPlaces: View {
         case .chats: AllChats(session: session) { place = .primary }
         case .keys: KeysView(session: session)
         case .connectors: ConnectorsView(session: session)
+        case .everything: EverythingView(session: session) { place = $0 }
         }
     }
 
@@ -313,7 +328,7 @@ extension FocusedValues {
 }
 
 /// The menus an iPad shows (its menu bar, and what holding ⌘ lists), as a Mac's: a new chat, a new window and a task for
-/// the agents in File, Home and the four places in View, each acting in the window in front.
+/// the agents in File, Work and the four places in View, each acting in the window in front.
 struct PadCommands: Commands {
     @FocusedValue(\.placeActions) private var actions
     @Environment(\.openWindow) private var openWindow
@@ -333,7 +348,7 @@ struct PadCommands: Commands {
                 .disabled(actions?.search == nil)
         }
         CommandGroup(before: .sidebar) {
-            place("Home", .home, "0")
+            place("Work", .home, "0")
             place(Primary.name, .primary, "1")
             place("Agents", .agents, "2")
             place("Needs You", .inbox, "3")

@@ -143,43 +143,80 @@ extension XCUIApplication {
         descendants(matching: .any).matching(NSPredicate(format: "identifier == 'link.down' OR label == 'No connection to your node'")).firstMatch
     }
 
-    /// The header's line on Home: "Invincible: 4 need you · 3 at work" (its accessibility label), Home's own mark.
-    var glance: XCUIElement {
-        let marked = buttons["home.glance"]
-        return marked.exists ? marked : buttons.matching(NSPredicate(format: "label BEGINSWITH 'Invincible:'")).firstMatch
+    /// What says how many things need you where the app opens: your agent's chat's back arrow, which opens the roster
+    /// ("Your agents", its value "4 things need you"); on an iPad, the roster's own Needs you, in its sidebar.
+    var needsSaid: XCUIElement {
+        let arrow = buttons["roster.open"]
+        return arrow.exists ? arrow : descendants(matching: .any)["roster.needs"]
     }
 
-    /// How many things need you, as Home's header says (nil: it says no number).
+    /// The app is where it opens: your agent's chat, the roster beside it or a tap away.
+    var opened: Bool { buttons["roster.open"].exists || descendants(matching: .any)["roster.needs"].exists }
+
+    /// How many things need you, as the chat's back arrow says it (nil: not said yet).
     var needsCount: Int? {
-        guard glance.exists else { return nil }
-        let label = glance.label
-        guard let range = label.range(of: #"(\d+) (?:needs?|things? need) you"#, options: .regularExpression) else { return label.contains("need") ? nil : 0 }
-        return Int(label[range].prefix { $0.isNumber })
+        let said = needsSaid
+        guard said.exists else { return nil }
+        let words = [said.value as? String, said.label].compactMap { $0 }.joined(separator: " ")
+        if words.contains("Nothing needs you") || words.contains("Needs you: nothing") { return 0 }
+        guard let range = words.range(of: #"(\d+) (?:needs?|things? need) you|Needs you: (\d+)"#, options: .regularExpression) else { return nil }
+        return Int(words[range].filter(\.isNumber))
     }
 
-    /// Paired with the dev node, on Home, the app started afresh: joined through the app's own Join screen the first time
-    /// (the dev node lets the app's request in by itself), Home's header at once every time after.
-    func openHome(_ node: DevNode, timeout: TimeInterval = 60) throws {
+    /// The roster: an iPhone's drawer opened from the chat's back arrow (an iPad's is its sidebar, always there).
+    func openRoster() {
+        let arrow = buttons["roster.open"]
+        if arrow.exists { arrow.tap() }
+        _ = descendants(matching: .any)["roster"].waitForExistence(timeout: 5)
+    }
+
+    /// A new chat with your agent, where the one on screen isn't new already: its own button where the window has room for it
+    /// (an iPad's), else its menu's first (an iPhone's). A menu with nothing to choose in it is put away by a tap on the bar.
+    func newChat() {
+        let new = buttons["chat.new"]
+        if new.exists, new.isHittable {
+            if new.isEnabled { new.tap() }
+            return
+        }
+        let more = buttons["chat.more"]
+        guard more.waitForExistence(timeout: 5) else { return }
+        more.tap()
+        if new.waitForExistence(timeout: 3), new.isEnabled {
+            new.tap()
+        } else {
+            coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()
+        }
+    }
+
+    /// One of the roster's rows (`roster.needs`, `roster.work`, `roster.settings`, `roster.everything`, `roster.agent.<id>`).
+    func rosterRow(_ id: String) -> XCUIElement { descendants(matching: .any)[id].firstMatch }
+
+    /// Paired with the dev node, on your agent's chat (where the app opens), the app started afresh: joined through the
+    /// app's own Join screen the first time (the dev node lets the app's request in by itself), the chat at once every time
+    /// after.
+    func openApp(_ node: DevNode, timeout: TimeInterval = 60) throws {
         // Afresh whatever ran before (launch ends a running app first): one left on another screen by the test before is
-        // neither Home nor the Join screen, and was waited on for the whole timeout (26 November 2026: PerfTests, after
-        // the Settings NavTests left open). StartTests holds it.
+        // neither the chat nor the Join screen, and was waited on for the whole timeout (26 November 2026: PerfTests,
+        // after the Settings NavTests left open). StartTests holds it.
         launch()
         // (A field of several lines: a text view to the tests.)
         let field = descendants(matching: .any)["invite-link"]
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if glance.exists { return }
+            if opened { return }
             if field.exists {
                 field.tap()
                 field.typeText(try node.invite())
                 let ask = buttons["ask-to-join"]
                 if ask.waitForExistence(timeout: 5) { ask.tap() }
-                XCTAssertTrue(glance.waitForExistence(timeout: timeout), "Home never came after asking to join")
+                let joined = Date().addingTimeInterval(timeout)
+                while !opened, Date() < joined { RunLoop.current.run(until: Date().addingTimeInterval(0.2)) }
+                XCTAssertTrue(opened, "The chat never came after asking to join")
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        XCTFail("Neither Home nor the Join screen came")
+        XCTFail("Neither the chat nor the Join screen came")
     }
 }
 

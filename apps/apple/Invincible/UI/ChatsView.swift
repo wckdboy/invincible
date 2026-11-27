@@ -35,6 +35,7 @@ struct ChatsView: View {
                             }
                             .listRowButton()
                             .tint(.primary)
+                            .accessibilityIdentifier("chats.\(chat.id)")
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) { deleting = chat } label: { Label("Delete", systemImage: "trash") }
                             }

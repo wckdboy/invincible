@@ -14,8 +14,10 @@ import SwiftUI
 /// team, an agent's or a room's page, the Inbox, Settings (More), and on a Mac, This Mac (its node).
 enum Place: Hashable, Codable {
     case home, primary, agents, inbox, more, thisMac
-    /// Every one of the primary's chats, your keys, your connectors: the drawer's (an iPhone's), each a place of its own.
+    /// Every one of the primary's chats, your keys, your connectors: Everything else's, each a place of its own.
     case chats, keys, connectors
+    /// Everything else: the places beyond the roster's, as a list (the web's More index), from the roster's foot.
+    case everything
     case agent(String)
     case room(String)
     case task(String)
@@ -42,6 +44,19 @@ extension Place {
         case .primary: .chat(chat)
         case .inbox: .inbox
         default: nil
+        }
+    }
+}
+
+extension Place {
+    /// The window of its own it opens in: the primary's chat on screen (once it is kept), an agent's page, a room's; the
+    /// rest open in the window they are chosen in.
+    func window(chat: String?) -> PlaceWindow? {
+        switch self {
+        case .primary: chat.map(PlaceWindow.chat)
+        case .agent(let id): .agent(id)
+        case .room(let id): .room(id)
+        case .home, .agents, .inbox, .more, .thisMac, .task, .chats, .keys, .connectors, .everything: nil
         }
     }
 }
@@ -253,15 +268,8 @@ struct PlacesSidebar<Foot: View>: View {
         }
     }
 
-    /// The window of its own a place opens in: the primary's chat on screen (once it is kept), an agent's page, a room's.
-    private func window(for place: Place) -> PlaceWindow? {
-        switch place {
-        case .primary: session.chat.conversation.map(PlaceWindow.chat)
-        case .agent(let id): .agent(id)
-        case .room(let id): .room(id)
-        case .home, .agents, .inbox, .more, .thisMac, .task, .chats, .keys, .connectors: nil
-        }
-    }
+    /// The window of its own a place opens in.
+    private func window(for place: Place) -> PlaceWindow? { place.window(chat: session.chat.conversation) }
 }
 
 /// The primary's row, pinned: its orb, its name and what it is doing, in its state's colour. Its orb moves as it does, but is
