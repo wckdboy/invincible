@@ -445,10 +445,12 @@ class AppModel(context: Context) {
     private val followers = Followers(afterMain, clock).also { f ->
         for (route in routes) f.follow(route.topics, route.everyMs, route.gapMs) { _, done ->
             scope.launch {
+                // (A read that got no answer is owed: read again with its next, and when the stream is up again.)
+                var ok = false
                 try {
-                    read(route.path)
+                    ok = read(route.path)
                 } finally {
-                    done()
+                    done(ok)
                 }
             }
         }
@@ -456,8 +458,9 @@ class AppModel(context: Context) {
 
     /** The stream to the node this phone is paired with (null: none yet). */
     private fun linkFor(c: NodeClient): LiveLink = LiveLink(
-        open = liveOpen(scope, Dispatchers.IO, post = { run -> main.post { run() } }) { opened, alive, event ->
-            c.stream("/api/live", opened, alive, event)
+        // (Opened again from where the last left off: its hello then says what changed since, and only that is read.)
+        open = liveOpen(scope, Dispatchers.IO, post = { run -> main.post { run() } }) { since, opened, alive, event ->
+            c.stream(Live.path(since), opened, alive, event)
         },
         // (No stream on an older node, a device that may not read it, a revoked one: tried again only when told.)
         refused = { it is NodeError && it.status in listOf(401, 403, 404) },
@@ -465,11 +468,11 @@ class AppModel(context: Context) {
         now = clock,
     ).also { link ->
         link.attach(object : LinkHandlers {
-            override fun up(topics: List<String>, at: Long) {
+            override fun up(topics: List<String>, at: Long, changed: List<String>?) {
                 _online.value = true
                 // (The node's beat, as its hello said: the chat's watch is held to it too.)
                 chat.beat = link.beat
-                followers.up(at)
+                followers.up(at, changed)
             }
 
             override fun changed(topics: List<String>) = followers.changed(topics)
@@ -541,9 +544,9 @@ class AppModel(context: Context) {
         main.post { linkNow?.renew() }
     }
 
-    /** One route read again, and what it changes drawn. */
-    private suspend fun read(path: String) {
-        val c = client ?: return
+    /** One route read again, and what it changes drawn. False: it got no answer. */
+    private suspend fun read(path: String): Boolean {
+        val c = client ?: return false
         val got = attempt { c.get(path) }
         got.onSuccess { answers[path] = it }
         if (path == TEAM) _problem.value = got.exceptionOrNull() as? NodeError
@@ -552,6 +555,7 @@ class AppModel(context: Context) {
         // (Once a batch, with the agents' read: never after each route's, which asked a node that wouldn't give its prices
         // again after every read.)
         if (path == TEAM) lookAround(c)
+        return got.isSuccess
     }
 
     /** Everything the screens show, read at once (after an answer of yours), the asks in parallel. */

@@ -18,14 +18,22 @@ import kotlin.coroutines.CoroutineContext
  * nothing at all for three of the node's beats is taken for dead, said to be lost at once, and opened again; the node says
  * its beat in its hello (an older node, which doesn't, beats every 15 s). `renew` opens a fresh one at once, whatever
  * stands: the network changed under it, so the one open may be dead without a word (Wi-Fi to cellular), and a link that
- * comes back within HELLO_WAIT_MS is never said to have gone.
+ * comes back within HELLO_WAIT_MS is never said to have gone. Each is opened from where the last left off: the last
+ * cursor its node gave (a hello's or a change's `at`), and that hello says what changed since (core's live.ts). That is
+ * trusted only from a stream opened from a cursor whose hello tells of the same topics as the stream before it; otherwise
+ * the device's scopes changed, and it is read as a fresh hello.
  *
- * Followers are what the app reads, each for its topics. When the stream comes up, each whose last read began before the
- * stream said hello runs once (what it shows may be from before the node was telling of changes); one read since can't
- * have missed anything. Then each runs only when one of its topics changes. While the stream is down (no hello within
- * HELLO_WAIT_MS, or it can't be opened) each runs at once and then every so often, at its own interval, as the app did
- * before there was a stream. A follower runs one at a time: what comes meanwhile is merged into one more run after it,
- * and runs come no closer together than its gap.
+ * Followers are what the app reads, each for its topics. When a fresh stream comes up, each whose last read began before
+ * the stream said hello runs once (what it shows may be from before the node was telling of changes); one read since
+ * can't have missed anything. When a resumed one comes up, only those whose topics changed since run, with any that
+ * never read and any owed a run: one whose run failed, one the app's going off screen called off, or one told of a change
+ * meanwhile. Then each runs only when one of its topics changes. While the stream is down (no hello within HELLO_WAIT_MS,
+ * or it can't be opened) each runs at once and then every so often, at its own interval, as the app did before there was
+ * a stream. A follower runs one at a time: what comes meanwhile is merged into one more run after it, and runs come no
+ * closer together than its gap. A run that failed is owed, never tried again by itself (a node refusing it would be
+ * asked again and again): it runs with the follower's next, and when the stream is up again. One under way when the
+ * stream came up again (a read hung on a network that went) that then failed runs once more at once, as nothing else
+ * would read it.
  */
 
 /** Runs `run` after `ms`; returns how to call it off. */
@@ -47,20 +55,30 @@ object Live {
     const val GAP_MS = 500L
     /** The beat of an older node, whose hello doesn't say its own. */
     const val OLDER_BEAT_MS = 15_000L
+
+    /** What a cursor of the stream is (core's LIVE_CURSOR): short, and only what a URL carries as it is. */
+    val CURSOR = Regex("^[A-Za-z0-9_.-]{1,64}$")
+
+    /** The stream's path, opened again from where the last left off when there is a cursor (core's livePath). */
+    fun path(since: String?): String = if (since != null && CURSOR.matches(since)) "/api/live?since=$since" else "/api/live"
 }
 
-/** What the stream says: the topics it tells of (read each now), what changed (read again), and that it is ending. */
+/**
+ * What the stream says: the topics it tells of (read each now; or, with [Hello.changed], only those that changed since the
+ * cursor it was opened from), what changed (read again), and that it is ending. `at`: where things stand, to open it
+ * again from (absent from an older node).
+ */
 sealed class LiveEvent {
-    data class Hello(val topics: List<String>, val beat: Long?) : LiveEvent()
-    data class Changed(val topics: List<String>) : LiveEvent()
+    data class Hello(val topics: List<String>, val beat: Long?, val at: String? = null, val changed: List<String>? = null) : LiveEvent()
+    data class Changed(val topics: List<String>, val at: String? = null) : LiveEvent()
     data class Bye(val reason: String) : LiveEvent()
 
     companion object {
         /** An event as the node sends it (`data: <json>`), read strictly: anything else is no event. */
         fun read(j: Json): LiveEvent? = when (j["type"].string) {
             // (A beat no node would say is no beat: a stream isn't taken for dead after 15 ms, nor kept for an hour.)
-            "hello" -> Hello(j["topics"].list.mapNotNull { it.string }, j["beat"].long?.takeIf { it in 250L..60_000L })
-            "changed" -> Changed(j["topics"].list.mapNotNull { it.string })
+            "hello" -> Hello(j["topics"].list.mapNotNull { it.string }, j["beat"].long?.takeIf { it in 250L..60_000L }, j["at"].string, (j["changed"] as? Json.Arr)?.items?.mapNotNull { it.string })
+            "changed" -> Changed(j["topics"].list.mapNotNull { it.string }, j["at"].string)
             "bye" -> Bye(j["reason"].string ?: "")
             else -> null
         }
@@ -69,8 +87,9 @@ sealed class LiveEvent {
 
 /** Who hears where the stream stands. */
 interface LinkHandlers {
-    /** It is open since `at` (when it said hello), and tells of these topics: read now what was read before then. */
-    fun up(topics: List<String>, at: Long)
+    /** It is open since `at` (when it said hello), and tells of these topics: read now what was read before then; or,
+     * resumed ([changed]), only what changed since the last stream left off (and what was never read, or is owed). */
+    fun up(topics: List<String>, at: Long, changed: List<String>?)
     fun changed(topics: List<String>)
     /** It isn't open, and hasn't been for a while (or can't be): ask for what is shown on a timer until it is. */
     fun down()
@@ -79,10 +98,11 @@ interface LinkHandlers {
 }
 
 /**
- * Opens the stream: `alive` on everything that arrives (its beats too), `event` for each event, `ended` once when it
- * closes (null: it ended; else why it failed). Returns how to close it, after which `ended` may still come, and is let be.
+ * Opens the stream (from `since`, the last cursor its node gave, when there is one: Live.path): `alive` on everything that
+ * arrives (its beats too), `event` for each event, `ended` once when it closes (null: it ended; else why it failed).
+ * Returns how to close it, after which `ended` may still come, and is let be.
  */
-typealias LiveOpen = (alive: () -> Unit, event: (LiveEvent) -> Unit, ended: (Throwable?) -> Unit) -> () -> Unit
+typealias LiveOpen = (since: String?, alive: () -> Unit, event: (LiveEvent) -> Unit, ended: (Throwable?) -> Unit) -> () -> Unit
 
 class LiveLink(
     private val open: LiveOpen,
@@ -109,6 +129,10 @@ class LiveLink(
     private var quiet: Any? = null
     /** Up a moment ago: down only if it isn't up again within HELLO_WAIT_MS of then, whatever fresh ones do meanwhile. */
     private var grace = false
+    /** The last cursor the node gave (a hello's or a change's): the next stream is opened from it. */
+    private var cursor: String? = null
+
+    private fun keep(at: String?): String? = at?.takeIf { Live.CURSOR.matches(it) }
 
     /** The node's beat, as its last hello said (an older node's until one has): three of them silent and a stream is gone. */
     var beat = Live.OLDER_BEAT_MS
@@ -117,7 +141,7 @@ class LiveLink(
     /** Nothing at all on the stream for this long, its beats included: it is gone. */
     val silent: Long get() = 3 * beat
 
-    private fun goUp(told: List<String>, said: Long?) {
+    private fun goUp(told: List<String>, said: Long?, changed: List<String>?) {
         up = true
         upAt = now()
         saidDown = false
@@ -125,7 +149,7 @@ class LiveLink(
         grace = false
         topics = told
         beat = said ?: Live.OLDER_BEAT_MS
-        handlers?.up(told, upAt)
+        handlers?.up(told, upAt, changed)
     }
 
     private fun goDown() {
@@ -155,6 +179,7 @@ class LiveLink(
 
     private fun connect() {
         retrying = off(retrying)
+        val since = cursor
         val token = Any()
         current = token
         var helloAt: Long? = null
@@ -201,17 +226,26 @@ class LiveLink(
             retrying = after(wait) { connect() }
         }
         close = open(
+            since,
             { if (current === token) watch() },
             { event ->
                 if (current === token) {
                     when (event) {
                         is LiveEvent.Hello -> {
                             helloAt = now()
-                            goUp(event.topics, event.beat)
+                            val told = event.topics
+                            // What changed since, trusted from a stream opened from a cursor that tells of what the last told of.
+                            val same = told.size == topics.size && told.all { it in topics }
+                            val changed = if (since != null && same && event.changed != null) event.changed.filter { it in told } else null
+                            cursor = keep(event.at)
+                            goUp(told, event.beat, changed)
                             // (The node's beat, now known: three of them silent and it is gone.)
                             watch()
                         }
-                        is LiveEvent.Changed -> if (up) handlers?.changed(event.topics)
+                        is LiveEvent.Changed -> if (up) {
+                            cursor = keep(event.at) ?: cursor
+                            handlers?.changed(event.topics)
+                        }
                         is LiveEvent.Bye -> abort()
                     }
                 }
@@ -273,7 +307,8 @@ class LiveLink(
     /** Who is told from now on; they're told at once where it stands, if it is up or down. */
     fun attach(next: LinkHandlers) {
         handlers = next
-        if (up) next.up(topics, upAt) else if (saidDown) next.down()
+        // (Read as a fresh hello: what changed before it was told to whoever was attached then.)
+        if (up) next.up(topics, upAt, null) else if (saidDown) next.down()
     }
 
     /** How to close the stream being opened or open now. */
@@ -286,22 +321,37 @@ class LiveLink(
 }
 
 /** What a follower runs: `changed` names its topics that changed, or is null when everything is to be read; `done` once
- * it has finished (its read answered or failed). */
-typealias FollowerRun = (changed: List<String>?, done: () -> Unit) -> Unit
+ * it has finished, saying whether its read was answered (false: it failed, and what it read is owed). */
+typealias FollowerRun = (changed: List<String>?, done: (ok: Boolean) -> Unit) -> Unit
+
+/** What a follower is asked to read: everything ([all]), or these topics (none: only what it is owed). */
+private class Wanted(val all: Boolean, val topics: Set<String>) {
+    fun plus(other: Wanted?): Wanted = if (other == null) this else if (all || other.all) ALL else Wanted(false, topics + other.topics)
+
+    companion object {
+        val ALL = Wanted(true, emptySet())
+        fun of(topics: Collection<String>) = Wanted(false, LinkedHashSet(topics))
+    }
+}
+
+private fun merged(a: Wanted?, b: Wanted?): Wanted? = a?.plus(b) ?: b
 
 /**
  * `run`, one at a time: what is asked for meanwhile is merged into one more run after it, never closer than `gapMs` to
- * the last (`last`: when it last ran before this, if it did).
+ * the last (`last`: when it last ran before this, if it did). A run that failed, or was called off before it ran
+ * ([shelve]), is owed: run with the next, never by itself.
  */
 class Paced(private val run: FollowerRun, private val gapMs: Long, private val after: After, private val now: () -> Long, private var last: Long = Long.MIN_VALUE / 2) {
     private var running = false
-    /** null: nothing; ALL: everything; otherwise these. */
-    private var wanted: MutableSet<String>? = null
-    private var all = false
+    private var wanted: Wanted? = null
+    private var owing: Wanted? = null
     private var waiting: (() -> Unit)? = null
 
+    /** Something failed or was called off, and is to be read with the next run. */
+    val owed: Boolean get() = owing != null
+
     private fun go() {
-        if (running || (wanted == null && !all) || waiting != null) return
+        if (running || wanted == null || waiting != null) return
         val wait = last + gapMs - now()
         if (wait > 0) {
             waiting = after(wait) {
@@ -310,32 +360,44 @@ class Paced(private val run: FollowerRun, private val gapMs: Long, private val a
             }
             return
         }
-        val changed = if (all) null else wanted?.toList()
+        val taking = merged(wanted, owing)!!
+        val changed = if (taking.all) null else taking.topics.toList()
         wanted = null
-        all = false
+        owing = null
         running = true
         last = now()
         var finished = false
-        run(changed) {
+        run(changed) { ok ->
             if (!finished) {
                 finished = true
                 running = false
+                if (!ok) owing = merged(owing, taking)
                 go()
             }
         }
     }
 
     fun want(topics: List<String>?) {
-        if (topics == null || all) {
-            all = true
-            wanted = null
-        } else (wanted ?: mutableSetOf<String>().also { wanted = it }).addAll(topics)
+        wanted = merged(wanted, if (topics == null) Wanted.ALL else Wanted.of(topics))
         go()
+    }
+
+    /** What changed while nothing may run: read with the next run. */
+    fun owe(topics: List<String>) {
+        owing = merged(owing, Wanted.of(topics))
+    }
+
+    /** Nothing runs for now (the app off screen): what was asked for and hadn't run is owed. */
+    fun shelve() {
+        owing = merged(owing, wanted)
+        wanted = null
+        waiting?.invoke()
+        waiting = null
     }
 
     fun cancel() {
         wanted = null
-        all = false
+        owing = null
         waiting?.invoke()
         waiting = null
     }
@@ -347,11 +409,13 @@ class Followers(private val after: After, private val now: () -> Long) {
         lateinit var pace: Paced
         var timer: (() -> Unit)? = null
         /** When what it shows was last read (its owner's read, then each run's start). */
-        var since: Long = Long.MIN_VALUE / 2
+        var since: Long = NEVER
     }
 
     private val all = LinkedHashSet<Follower>()
     private var mode = "off"
+    /** How many times the stream has come up. */
+    private var ups = 0
 
     /**
      * `run` when one of these topics changes while the stream is up (and once when it comes up, if what it shows was read
@@ -361,11 +425,16 @@ class Followers(private val after: After, private val now: () -> Long) {
      */
     fun follow(topics: List<String>, everyMs: Long?, gapMs: Long = Live.GAP_MS, readNow: Boolean = false, run: FollowerRun): () -> Unit {
         val follower = Follower(topics.toSet(), everyMs)
-        val read = if (readNow) now() else Long.MIN_VALUE / 2
+        val read = if (readNow) now() else NEVER
         follower.since = read
         follower.pace = Paced({ changed, done ->
             follower.since = now()
-            run(changed, done)
+            val ups = this.ups
+            run(changed) { ok ->
+                // Up again while it read, so nothing else will read it: it reads once more (once: a second failure is owed).
+                if (!ok && mode == "up" && this.ups != ups) follower.pace.want(changed)
+                done(ok)
+            }
         }, gapMs, after, now, read)
         all += follower
         if (mode == "down") {
@@ -380,21 +449,35 @@ class Followers(private val after: After, private val now: () -> Long) {
         }
     }
 
-    /** The stream is up, since `at`: each that last read before then runs once now; then each runs when its topics change. */
-    fun up(at: Long) {
+    /**
+     * The stream is up, since `at`. Fresh ([changed] null): each that last read before then runs once now. Resumed: only
+     * those of whose topics something changed since, those that never read, and those owed a run. Then each runs when its
+     * topics change.
+     */
+    fun up(at: Long, changed: List<String>? = null) {
+        ups += 1
         mode = "up"
         for (follower in all.toList()) {
             follower.timer?.invoke()
             follower.timer = null
-            if (follower.since < at) follower.pace.want(null)
+            if (changed == null) {
+                if (follower.since < at) follower.pace.want(null)
+                else if (follower.pace.owed) follower.pace.want(emptyList())
+                continue
+            }
+            val mine = changed.filter { it in follower.topics }
+            if (follower.since == NEVER) follower.pace.want(null)
+            else if (mine.isNotEmpty() || follower.pace.owed) follower.pace.want(mine)
         }
     }
 
+    /** These changed: each that follows one of them runs (while the app is off screen, it is owed a run instead). */
     fun changed(topics: List<String>) {
-        if (mode != "up") return
+        if (mode == "down") return
         for (follower in all.toList()) {
             val mine = topics.filter { it in follower.topics }
-            if (mine.isNotEmpty()) follower.pace.want(mine)
+            if (mine.isEmpty()) continue
+            if (mode == "up") follower.pace.want(mine) else follower.pace.owe(mine)
         }
     }
 
@@ -407,14 +490,19 @@ class Followers(private val after: After, private val now: () -> Long) {
         }
     }
 
-    /** Nothing runs: the app is off screen. */
+    /** Nothing runs: the app is off screen. What was asked for and hadn't run is owed. */
     fun off() {
         mode = "off"
         for (follower in all.toList()) {
             follower.timer?.invoke()
             follower.timer = null
-            follower.pace.cancel()
+            follower.pace.shelve()
         }
+    }
+
+    private companion object {
+        /** A follower's last read, never. */
+        const val NEVER = Long.MIN_VALUE / 2
     }
 
     private fun poll(follower: Follower) {
@@ -441,8 +529,8 @@ fun liveOpen(
     scope: CoroutineScope,
     io: CoroutineContext,
     post: (() -> Unit) -> Unit,
-    read: suspend (opened: (close: () -> Unit) -> Unit, alive: () -> Unit, event: (Json) -> Unit) -> Unit,
-): LiveOpen = { alive, event, ended ->
+    read: suspend (since: String?, opened: (close: () -> Unit) -> Unit, alive: () -> Unit, event: (Json) -> Unit) -> Unit,
+): LiveOpen = { since, alive, event, ended ->
     val closeIt = AtomicReference<(() -> Unit)?>(null)
     val closed = AtomicBoolean(false)
     val told = AtomicBoolean(false)
@@ -450,6 +538,7 @@ fun liveOpen(
     val job = scope.launch(io) {
         try {
             read(
+                since,
                 { close ->
                     closeIt.set(close)
                     // (Closed while it was connecting: closed as soon as there is a connection to close.)

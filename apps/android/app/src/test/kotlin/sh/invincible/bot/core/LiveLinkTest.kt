@@ -36,7 +36,7 @@ class LiveLinkTest {
     }
 
     /** Streams the test opens and feeds: each `open` is one, with its events pushed and its end or failure said. */
-    private class Stream(val alive: () -> Unit, val event: (LiveEvent) -> Unit, val ended: (Throwable?) -> Unit) {
+    private class Stream(val since: String?, val alive: () -> Unit, val event: (LiveEvent) -> Unit, val ended: (Throwable?) -> Unit) {
         var closed = false
         private var over = false
         fun push(e: LiveEvent) { alive(); event(e) }
@@ -54,8 +54,8 @@ class LiveLinkTest {
         var refuseWith: Throwable? = null
         val told = ArrayList<String>()
         val link = LiveLink(
-            open = { alive, event, ended ->
-                val stream = Stream(alive, event, ended)
+            open = { since, alive, event, ended ->
+                val stream = Stream(since, alive, event, ended)
                 opened += stream
                 refuseWith?.let { stream.fail(it) }
                 ({ stream.close() })
@@ -66,7 +66,7 @@ class LiveLinkTest {
         )
         init {
             link.attach(object : LinkHandlers {
-                override fun up(topics: List<String>, at: Long) { told += "up ${topics.joinToString(",")}" }
+                override fun up(topics: List<String>, at: Long, changed: List<String>?) { told += "up ${topics.joinToString(",")}" + (changed?.let { " changed:${it.joinToString(",")}" } ?: "") }
                 override fun changed(topics: List<String>) { told += "changed ${topics.joinToString(",")}" }
                 override fun down() { told += "down" }
                 override fun lost() { told += "lost" }
@@ -306,7 +306,7 @@ class LiveLinkTest {
         s.last().push(hello("pairings"))
         val late = ArrayList<String>()
         s.link.attach(object : LinkHandlers {
-            override fun up(topics: List<String>, at: Long) { late += "up ${topics.joinToString(",")}" }
+            override fun up(topics: List<String>, at: Long, changed: List<String>?) { late += "up ${topics.joinToString(",")}" }
             override fun changed(topics: List<String>) {}
             override fun down() { late += "down" }
         })
@@ -322,7 +322,7 @@ class LiveLinkTest {
         fun follow(name: String, topics: List<String>, everyMs: Long?, owner: Boolean = true, gapMs: Long = Live.GAP_MS): () -> Unit =
             f.follow(topics, everyMs, gapMs, readNow = owner) { changed, done ->
                 runs += name + (changed?.let { " ${it.joinToString(",")}" } ?: "")
-                done()
+                done(true)
             }
     }
 
@@ -373,7 +373,7 @@ class LiveLinkTest {
         val clock = Clock()
         val f = Followers(clock.after) { clock.now }
         val runs = ArrayList<List<String>?>()
-        var finish: () -> Unit = {}
+        var finish: (Boolean) -> Unit = {}
         f.follow(listOf("actions", "notices", "questions"), null, 1_000, readNow = false) { changed, done ->
             runs += changed
             finish = done
@@ -384,7 +384,7 @@ class LiveLinkTest {
         f.changed(listOf("actions"))
         clock.advance(5_000)
         assertEquals(listOf<List<String>?>(null), runs)
-        finish()
+        finish(true)
         clock.advance(999)
         assertEquals(listOf(null, listOf("actions", "notices")), runs)
     }
@@ -411,6 +411,188 @@ class LiveLinkTest {
         assertEquals(emptyList<String>(), r.runs)
     }
 
+    // ---- the stream, opened again from where it left off (core's live.ts since 9c8d7fb; the web's 35832bc, case for case) ----
+
+    /** A node's of today: where things stand, and from a hello opened from a cursor, what changed since. */
+    private fun helloAt(at: String, topics: List<String>, since: List<String>? = null) = LiveEvent.Hello(topics, 1_500, at, since)
+    private fun changedAt(at: String, vararg topics: String) = LiveEvent.Changed(topics.toList(), at)
+
+    @Test fun itIsOpenedAgainFromTheLastCursorItsNodeGaveAndThatHelloSaysOnlyWhatChangedSince() {
+        val s = Setup()
+        s.link.start()
+        assertEquals(null, s.last().since)
+        s.last().push(helloAt("b00t.4", listOf("actions", "notices")))
+        s.last().push(changedAt("b00t.5", "actions"))
+        s.last().end()
+        s.clock.advance(Live.RETRY_FIRST_MS)
+        assertEquals("b00t.5", s.last().since)
+        s.last().push(helloAt("b00t.7", listOf("actions", "notices"), listOf("notices")))
+        // Nothing changed since: nothing to read but the stream.
+        s.last().end()
+        s.clock.advance(2 * Live.RETRY_FIRST_MS)
+        assertEquals("b00t.7", s.last().since)
+        s.last().push(helloAt("b00t.7", listOf("actions", "notices"), emptyList()))
+        assertEquals(listOf("up actions,notices", "changed actions", "up actions,notices changed:notices", "up actions,notices changed:"), s.told)
+    }
+
+    @Test fun stoppedAndStartedAgainItOpensFromWhereItLeftOffAndRenewedAsItWentSilentToo() {
+        val s = Setup()
+        s.link.start()
+        s.last().push(helloAt("b00t.3", listOf("fleet")))
+        s.link.stop()
+        s.link.start()
+        assertEquals("b00t.3", s.last().since)
+        s.last().push(helloAt("b00t.3", listOf("fleet"), emptyList()))
+        s.clock.advance(s.link.silent)
+        s.clock.advance(Live.RETRY_FIRST_MS)
+        assertEquals(3, s.opened.size)
+        assertEquals("b00t.3", s.last().since)
+    }
+
+    @Test fun withNoCursorFromItsNodeOrOneThatIsntOneItOpensAfreshAndOneOpenedAfreshIsReadAsFresh() {
+        val s = Setup()
+        s.link.start()
+        s.last().push(hello("fleet"))
+        // Each ends soon after it opened, and is opened again after its wait (a second, then twice as long each time).
+        var wait = Live.RETRY_FIRST_MS
+        fun again() {
+            s.last().end()
+            s.clock.advance(wait)
+            wait = minOf(wait * 2, Live.RETRY_MAX_MS)
+        }
+        again()
+        assertEquals(null, s.last().since)
+        for (notOne in listOf("a b", "", "b00t.1?x=1", "x".repeat(65))) {
+            s.last().push(helloAt(notOne, listOf("fleet")))
+            again()
+            assertEquals(notOne, null, s.last().since)
+        }
+        // (What a hello says changed means nothing from a stream not opened from a cursor.)
+        s.last().push(helloAt("b00t.2", listOf("fleet"), emptyList()))
+        assertEquals("up fleet", s.told.last())
+    }
+
+    @Test fun aHelloThatTellsOfOtherTopicsThanTheStreamBeforeItIsReadAsAFreshOne() {
+        val s = Setup()
+        s.link.start()
+        s.last().push(helloAt("b00t.1", listOf("actions", "secretRequests")))
+        s.last().end()
+        s.clock.advance(Live.RETRY_FIRST_MS)
+        assertEquals("b00t.1", s.last().since)
+        s.last().push(helloAt("b00t.2", listOf("actions"), emptyList()))
+        // And what one says changed is held to what it tells of.
+        s.last().end()
+        s.clock.advance(2 * Live.RETRY_FIRST_MS)
+        s.last().push(helloAt("b00t.3", listOf("actions"), listOf("actions", "pairings")))
+        assertEquals(listOf("up actions,secretRequests", "up actions", "up actions changed:actions"), s.told)
+    }
+
+    @Test fun theStreamsPathCarriesOnlyACursor() {
+        assertEquals("/api/live", Live.path(null))
+        assertEquals("/api/live?since=b00t.5", Live.path("b00t.5"))
+        for (notOne in listOf("a b", "", "b00t.1?x=1", "x".repeat(65), "b00t/5")) assertEquals(notOne, "/api/live", Live.path(notOne))
+    }
+
+    @Test fun resumedOnlyWhatChangedSinceRunsWithWhatNeverReadWhatNothingChangedOfRunsNotAtAll() {
+        val r = Reads()
+        r.follow("inbox", listOf("actions", "notices"), 15_000)
+        r.follow("fleet", listOf("fleet"), 15_000)
+        r.follow("team", listOf("team"), 2_000, owner = false)
+        r.clock.advance(1_000)
+        r.f.up(r.clock.now, listOf("notices", "pairings"))
+        r.clock.advance(Live.GAP_MS)
+        assertEquals(listOf("inbox notices", "team"), r.runs.sorted())
+        r.runs.clear()
+        r.f.up(r.clock.now, emptyList())
+        r.clock.advance(60_000)
+        assertEquals(emptyList<String>(), r.runs)
+    }
+
+    @Test fun whatGoingOffScreenCalledOffIsOwedAndRunsOnceTheStreamIsUpAgain() {
+        val r = Reads()
+        r.follow("inbox", listOf("actions"), 15_000, owner = true, gapMs = 2_000)
+        r.follow("fleet", listOf("fleet"), 15_000, owner = true, gapMs = 2_000)
+        r.f.up(r.clock.now)
+        r.clock.advance(100)
+        // Told of a change it waits its gap to read, and the app off screen before it did.
+        r.f.changed(listOf("actions"))
+        r.f.off()
+        r.clock.advance(10_000)
+        assertEquals(emptyList<String>(), r.runs)
+        r.f.up(r.clock.now, emptyList())
+        r.clock.advance(Live.GAP_MS)
+        assertEquals(listOf("inbox actions"), r.runs)
+    }
+
+    @Test fun toldOfAChangeWhileOffScreenItIsOwedAndRunsOnceTheStreamIsUpAgain() {
+        val r = Reads()
+        r.follow("notices", listOf("notices"), 15_000)
+        r.f.off()
+        r.f.changed(listOf("notices"))
+        r.clock.advance(60_000)
+        assertEquals(emptyList<String>(), r.runs)
+        r.f.up(r.clock.now, emptyList())
+        r.clock.advance(Live.GAP_MS)
+        assertEquals(listOf("notices notices"), r.runs)
+    }
+
+    @Test fun aRunThatFailedIsOwedNeverTriedAgainOnItsOwnRunOnceTheStreamIsUpAgainWithWhatChangesMeanwhile() {
+        val clock = Clock()
+        val f = Followers(clock.after) { clock.now }
+        val runs = ArrayList<List<String>?>()
+        var failing = true
+        f.follow(listOf("actions", "notices"), 15_000, Live.GAP_MS, readNow = true) { changed, done ->
+            runs += changed
+            done(!failing)
+        }
+        f.up(clock.now)
+        clock.advance(Live.GAP_MS)
+        f.changed(listOf("actions"))
+        clock.advance(60_000)
+        assertEquals(listOf<List<String>?>(listOf("actions")), runs)
+        failing = false
+        f.up(clock.now, emptyList())
+        clock.advance(Live.GAP_MS)
+        assertEquals(listOf<List<String>?>(listOf("actions"), listOf("actions")), runs)
+        // Paid: nothing owed now.
+        f.up(clock.now, emptyList())
+        clock.advance(60_000)
+        assertEquals(2, runs.size)
+        // Owed, and told of another change: both in the one run.
+        failing = true
+        f.changed(listOf("actions"))
+        clock.advance(Live.GAP_MS)
+        failing = false
+        f.changed(listOf("notices"))
+        clock.advance(Live.GAP_MS)
+        assertEquals(listOf("notices", "actions"), runs.last())
+    }
+
+    @Test fun aRunUnderWayWhenTheStreamComesUpAgainThatThenFailsRunsOnceMoreAtOnce() {
+        val clock = Clock()
+        val f = Followers(clock.after) { clock.now }
+        val runs = ArrayList<List<String>?>()
+        var finish: (Boolean) -> Unit = {}
+        f.follow(listOf("actions"), 15_000, Live.GAP_MS, readNow = true) { changed, done ->
+            runs += changed
+            finish = done
+        }
+        f.up(clock.now)
+        clock.advance(Live.GAP_MS)
+        f.changed(listOf("actions"))
+        // Its read hangs on the network that went; the stream renewed meanwhile says nothing changed since (it told this).
+        clock.advance(1_000)
+        f.up(clock.now, emptyList())
+        assertEquals(listOf<List<String>?>(listOf("actions")), runs)
+        finish(false)
+        clock.advance(Live.GAP_MS)
+        assertEquals(listOf<List<String>?>(listOf("actions"), listOf("actions")), runs)
+        // Once: one that fails again is owed, as any is.
+        finish(false)
+        clock.advance(60_000)
+        assertEquals(2, runs.size)
+    }
+
     // ---- the opener: the stream read in a coroutine ----
 
     private fun scope(escaped: java.util.concurrent.atomic.AtomicReference<Throwable?>) = kotlinx.coroutines.CoroutineScope(
@@ -425,12 +607,12 @@ class LiveLinkTest {
         val escaped = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
         val ended = java.util.concurrent.LinkedBlockingQueue<Any>()
         val events = java.util.Collections.synchronizedList(ArrayList<LiveEvent>())
-        val open = liveOpen(scope(escaped), kotlinx.coroutines.Dispatchers.IO, post = { it() }) { _, alive, event ->
+        val open = liveOpen(scope(escaped), kotlinx.coroutines.Dispatchers.IO, post = { it() }) { _, _, alive, event ->
             alive()
             event(Json.parse("""{"type":"hello","topics":["team"]}"""))
             throw lostConnection()
         }
-        open({}, { events += it }) { ended.put(it ?: "ended") }
+        open(null, {}, { events += it }) { ended.put(it ?: "ended") }
         val why = ended.poll(5, java.util.concurrent.TimeUnit.SECONDS)
         assertTrue(why is NodeError)
         assertEquals("Lost the connection to the node.", (why as NodeError).message)
@@ -444,7 +626,7 @@ class LiveLinkTest {
         val escaped = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
         val ended = java.util.concurrent.LinkedBlockingQueue<Any>()
         val reading = java.util.concurrent.CountDownLatch(1)
-        val open = liveOpen(scope(escaped), kotlinx.coroutines.Dispatchers.IO, post = { it() }) { opened, _, _ ->
+        val open = liveOpen(scope(escaped), kotlinx.coroutines.Dispatchers.IO, post = { it() }) { _, opened, _, _ ->
             // A read blocked until its connection is closed: cancelling its coroutine alone never ends it.
             val gate = java.util.concurrent.CountDownLatch(1)
             opened { gate.countDown() }
@@ -452,7 +634,7 @@ class LiveLinkTest {
             gate.await()
             throw lostConnection()
         }
-        val close = open({}, {}) { ended.put(it ?: "ended") }
+        val close = open(null, {}, {}) { ended.put(it ?: "ended") }
         assertTrue(reading.await(5, java.util.concurrent.TimeUnit.SECONDS))
         close()
         assertTrue(ended.poll(5, java.util.concurrent.TimeUnit.SECONDS) is NodeError)
@@ -464,7 +646,7 @@ class LiveLinkTest {
         val ended = java.util.concurrent.LinkedBlockingQueue<Any>()
         val connecting = java.util.concurrent.CountDownLatch(1)
         val asked = java.util.concurrent.CountDownLatch(1)
-        val open = liveOpen(scope(escaped), kotlinx.coroutines.Dispatchers.IO, post = { it() }) { opened, _, _ ->
+        val open = liveOpen(scope(escaped), kotlinx.coroutines.Dispatchers.IO, post = { it() }) { _, opened, _, _ ->
             connecting.countDown()
             // (Connecting while the close is asked: the connection is handed over only after.)
             asked.await()
@@ -473,7 +655,7 @@ class LiveLinkTest {
             gate.await()
             throw lostConnection()
         }
-        val close = open({}, {}) { ended.put(it ?: "ended") }
+        val close = open(null, {}, {}) { ended.put(it ?: "ended") }
         assertTrue(connecting.await(5, java.util.concurrent.TimeUnit.SECONDS))
         close()
         asked.countDown()
@@ -487,6 +669,8 @@ class LiveLinkTest {
         assertEquals(LiveEvent.Bye("revoked"), LiveEvent.read(Json.parse("""{"type":"bye","reason":"revoked"}""")))
         assertEquals(null, LiveEvent.read(Json.parse("""{"type":"other"}""")))
         assertEquals(LiveEvent.Hello(listOf("team"), null), LiveEvent.read(Json.parse("""{"type":"hello","topics":["team"]}""")))
+        assertEquals(LiveEvent.Hello(listOf("team"), 1_500, "b00t.7", listOf("team")), LiveEvent.read(Json.parse("""{"type":"hello","topics":["team"],"beat":1500,"at":"b00t.7","changed":["team"]}""")))
+        assertEquals(LiveEvent.Changed(listOf("actions"), "b00t.8"), LiveEvent.read(Json.parse("""{"type":"changed","topics":["actions"],"at":"b00t.8"}""")))
         // A beat no node would say is no beat (the iPhone's rule): a stream isn't taken for dead after 15 ms.
         assertEquals(LiveEvent.Hello(emptyList(), null), LiveEvent.read(Json.parse("""{"type":"hello","topics":[],"beat":5}""")))
         assertEquals(LiveEvent.Hello(emptyList(), null), LiveEvent.read(Json.parse("""{"type":"hello","topics":[],"beat":600000}""")))
