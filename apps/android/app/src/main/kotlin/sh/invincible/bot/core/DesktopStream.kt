@@ -1,5 +1,9 @@
 package sh.invincible.bot.core
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.channelFlow
+
 /**
  * An agent's desktop live (C1 step 9.4), as core's desktop-frames.ts, the PWA's lib/desktop-stream.ts and the Apple
  * app's DesktopStream.swift read it: the node's stream of its screen (POST /api/team/desktop/stream), frames read whole
@@ -67,6 +71,45 @@ class DesktopFrames {
 object DesktopStream {
     /** After this many ends in a row, the live screen gives way to a picture every two seconds, and says so. */
     const val LIVE_TRIES = 4
+
+    /**
+     * The most frames that may wait to be decoded (the web's BEHIND). Past that, this phone has fallen behind the screen:
+     * the stream ends with [Behind] and is watched again from a fresh keyframe, so what it holds, and how far behind what
+     * it shows is, stay bounded.
+     */
+    const val BEHIND = 20
+
+    /**
+     * Falling behind again and again (the web's BEHIND_TIMES and BEHIND_WITHIN_MS): this many times in a row, each within
+     * [BEHIND_WITHIN_MS] of the last, gives way to the picture every two seconds, said once. A phone too slow for the
+     * screen would otherwise go live, fall behind and go live again for ever. Counted apart from ends.
+     */
+    const val BEHIND_TIMES = 3
+    const val BEHIND_WITHIN_MS = 30_000L
+
+    /** A stream that fell behind: more than [BEHIND] of its frames waited to be decoded. No refusal: it is watched again. */
+    class Behind : Exception("this phone fell behind the screen")
+
+    /** Behinds in a row: how many, and when the last was (ms since the epoch). */
+    data class Behinds(val count: Int, val at: Long)
+
+    /** The row once the stream has fallen behind at [at]: one more, or a new row of one when the last was over [BEHIND_WITHIN_MS] before. */
+    fun behindAgain(row: Behinds?, at: Long): Behinds = Behinds(if (row != null && at - row.at <= BEHIND_WITHIN_MS) row.count + 1 else 1, at)
+
+    /** Whether falling behind that often gives way to the picture. */
+    fun behindTooOften(row: Behinds): Boolean = row.count >= BEHIND_TIMES
+
+    /**
+     * A stream's frames with at most [BEHIND] waiting to be decoded, the oldest first: past that it ends with [Behind],
+     * after the frames that wait (the Apple app's DesktopStream.queue). What else ends it ends it at once.
+     */
+    fun bounded(frames: Flow<DesktopFrame>): Flow<DesktopFrame> = channelFlow {
+        try {
+            frames.collect { frame -> if (trySend(frame).isFailure) throw Behind() }
+        } catch (e: Behind) {
+            close(e)
+        }
+    }.buffer(BEHIND)
 
     /** Each NAL unit of an Annex B stretch, without its start code (00 00 01, or 00 00 00 01). */
     fun nalUnits(annexB: ByteArray): List<ByteArray> {

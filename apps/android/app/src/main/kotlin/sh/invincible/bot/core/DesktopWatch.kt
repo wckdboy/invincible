@@ -15,15 +15,20 @@ import kotlinx.coroutines.withContext
  * stream watched while the screen is on screen and the app is in front. A stream that ends is watched again a little
  * later each time (0.5, 1, 2 and 4 s), its last frame kept on screen meanwhile. After [DesktopStream.LIVE_TRIES] ends in a
  * row it gives way to the picture every two seconds, saying why; at once, saying nothing, when the node refuses it (an
- * older node, a VM with no stream: a 4xx, or 501). A node that didn't answer isn't a refusal: it is asked again. A frame
- * drawn starts the count again.
+ * older node, a VM with no stream: a 4xx, or 501). A node that didn't answer isn't a refusal: it is asked again, as is a
+ * stream that fell behind ([DesktopStream.Behind]), from its keyframe. A frame drawn starts the count again. Behinds are
+ * counted apart: three in a row, each within 30 s of the last, give way to the picture too, saying this phone can't keep
+ * up ([DesktopStream.behindAgain]).
  *
  * The stream, the drawing and the waiting are handed in (DesktopScreen hands in the node's, its DesktopDecoder's and a
  * delay), so the tests run it on stand-ins.
  */
 class DesktopWatch {
-    /** Why it gave way to the picture: tried, and the stream didn't come through (said); or the node refused it. */
-    enum class GivenUp { TRIED, REFUSED }
+    /**
+     * Why it gave way to the picture: tried, and the stream didn't come through (said); the node refused it; or this phone
+     * kept falling behind the screen (said).
+     */
+    enum class GivenUp { TRIED, REFUSED, BEHIND }
 
     /**
      * How it stands: the stream drawing now (what is done there asks no picture back, and the picture loop rests); its
@@ -34,13 +39,15 @@ class DesktopWatch {
 
     private val now = MutableStateFlow(State())
     val state: StateFlow<State> = now.asStateFlow()
+    /** Behinds in a row, counted apart from the ends. */
+    private var behinds: DesktopStream.Behinds? = null
 
     /**
      * Watches until it gives way to the picture, or until it is cancelled (the screen left, the app behind: watched from
      * the start again when it is back, with nothing counted). [open]: the node's stream of the screen; [show]: one frame
      * drawn, and whether it reached the screen; [ended]: the stream is over (its decoder let go, even when it is left);
      * [wait]: the pause before watching again, in ms; [began], [stopped]: a stream's first frame drawn, and a stream that
-     * was drawing ended.
+     * was drawing ended; [clock]: this phone's clock, in ms since the epoch (the tests' own).
      */
     suspend fun run(
         open: () -> Flow<DesktopFrame>,
@@ -49,11 +56,13 @@ class DesktopWatch {
         wait: suspend (Long) -> Unit,
         began: () -> Unit = {},
         stopped: () -> Unit = {},
+        clock: () -> Long = System::currentTimeMillis,
     ) {
         var tries = 0
         while (now.value.givenUp == null) {
             currentCoroutineContext().ensureActive()
             var refused = false
+            var behind = false
             try {
                 open().collect { frame ->
                     if (show(frame) && !now.value.watching) {
@@ -66,11 +75,20 @@ class DesktopWatch {
                 throw e
             } catch (e: Exception) {
                 refused = refuses(e)
+                behind = e is DesktopStream.Behind
             } finally {
                 withContext(NonCancellable) { ended() }
                 if (now.value.watching) {
                     now.value = now.value.copy(watching = false)
                     stopped()
+                }
+            }
+            if (behind) {
+                val row = DesktopStream.behindAgain(behinds, clock())
+                behinds = row
+                if (DesktopStream.behindTooOften(row)) {
+                    now.value = now.value.copy(drawn = false, givenUp = GivenUp.BEHIND)
+                    return
                 }
             }
             tries += 1

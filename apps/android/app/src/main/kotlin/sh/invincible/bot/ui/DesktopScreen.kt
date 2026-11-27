@@ -264,9 +264,11 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                     OutlinedButton(onClick = { scope.launch { hold(held == null) } }) { Text(if (held == null) "Take over" else "Give back") }
                 }
             }
-            if (live.givenUp == DesktopWatch.GivenUp.TRIED) {
-                Text("The live picture of $name's screen isn't coming through, so it is shown every two seconds instead.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            when (live.givenUp) {
+                DesktopWatch.GivenUp.TRIED -> "The live picture of $name's screen isn't coming through, so it is shown every two seconds instead."
+                DesktopWatch.GivenUp.BEHIND -> "This phone can't keep up with $name's screen live, so it is shown every two seconds instead."
+                else -> null
+            }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             if (noDesktop) {
                 Text("$name's VM has no desktop just now. Make it again with a desktop from a terminal or the web app: its work in /work stays.", style = MaterialTheme.typography.bodyMedium, color = brand.failed)
             } else problem?.let { p ->

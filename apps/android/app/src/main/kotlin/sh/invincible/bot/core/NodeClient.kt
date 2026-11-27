@@ -144,10 +144,13 @@ class NodeClient(val origin: String, private val signer: Signer) {
 
     /**
      * An agent's desktop as you watch it (POST /api/team/desktop/stream): its frames, each whole as its last byte comes
-     * ([DesktopFrames]). Ending the collection ends the watching: the node ends the VM's encoder when its last watcher
-     * goes. The node's beats keep it within the read timeout while the screen is still.
+     * ([DesktopFrames]), at most [DesktopStream.BEHIND] of them waiting to be decoded (past that it ends with
+     * [DesktopStream.Behind]). Ending the collection ends the watching: the node ends the VM's encoder when its last
+     * watcher goes. The node's beats keep it within the read timeout while the screen is still.
      */
-    fun frames(path: String, body: Json): Flow<DesktopFrame> = flow {
+    fun frames(path: String, body: Json): Flow<DesktopFrame> = DesktopStream.bounded(framesAsTheyCome(path, body))
+
+    private fun framesAsTheyCome(path: String, body: Json): Flow<DesktopFrame> = flow {
         val c = try {
             open("POST", path, body.text().toByteArray(Charsets.UTF_8), 60_000)
         } catch (e: IOException) {

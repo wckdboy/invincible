@@ -1,10 +1,16 @@
 package sh.invincible.bot.core
 
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Base64
 
@@ -64,6 +70,36 @@ class DesktopStreamTest {
         assertNull(DesktopHold.of(Json.Null))
         for (each in v["again"].list) assertEquals("try ${each["n"].int}", each["ms"].int, DesktopStream.againIn(each["n"].int!!))
         assertEquals(v["liveTries"].int, DesktopStream.LIVE_TRIES)
+    }
+
+    @Test
+    fun fallingBehindAgainAndAgainIsTheWebsRule() {
+        assertEquals(v["behind"].int, DesktopStream.BEHIND)
+        assertEquals(v["behindTimes"].int, DesktopStream.BEHIND_TIMES)
+        assertEquals(v["behindWithinMs"].long, DesktopStream.BEHIND_WITHIN_MS)
+        for (each in v["behinds"].list) {
+            val row = each["row"]?.takeIf { it != Json.Null }?.let { DesktopStream.Behinds(it["count"].int!!, it["at"].long!!) }
+            val next = DesktopStream.behindAgain(row, each["at"].long!!)
+            assertEquals("$row at ${each["at"].long}", DesktopStream.Behinds(each["next"]["count"].int!!, each["next"]["at"].long!!), next)
+            assertEquals("$next", each["tooOften"].bool, DesktopStream.behindTooOften(next))
+        }
+    }
+
+    @Test
+    fun aStreamThatFallsBehindEndsAfterWhatWaits() {
+        runBlocking {
+            val frame = { n: Int -> DesktopFrame(if (n == 0) DesktopFrame.KEY else DesktopFrame.DELTA, n.toLong(), byteArrayOf(0, 0, 1, 0x41)) }
+            // A watcher that keeps up never falls behind: each frame is taken before the next comes.
+            val kept = DesktopStream.bounded(flow { for (n in 0 until 100) { emit(frame(n)); yield() } }).toList()
+            assertEquals((0L until 100L).toList(), kept.map { it.time })
+            // One that doesn't: it gets the frame it was waiting for and the twenty that waited, then Behind; nothing
+            // more is taken.
+            val got = ArrayList<Long>()
+            val ended = runCatching { DesktopStream.bounded(flow { for (n in 0 until 40) emit(frame(n)) }).collect { got += it.time } }.exceptionOrNull()
+            assertTrue("$ended", ended is DesktopStream.Behind)
+            assertEquals((0L..DesktopStream.BEHIND.toLong()).toList(), got)
+            assertFalse(DesktopWatch.refuses(ended!!))
+        }
     }
 
     @Test

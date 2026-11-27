@@ -30,12 +30,16 @@ class DesktopWatchTest {
         val waits = ArrayList<Long>()
         val during = ArrayList<Pair<Boolean, Boolean>>()
         val said = ArrayList<String>()
+        /** The clock the watch is handed (ms): each wait moves it on by its own length, and by any more it is told. */
+        var clock = 1_764_216_000_000L
+        val later = ArrayDeque<Long>()
     }
 
     /** The watch run on a script of streams, one for each time it opens one (a stream that ends at once after them). */
-    private fun run(vararg script: Flow<DesktopFrame>): Pair<DesktopWatch, Seen> = runBlocking {
+    private fun run(vararg script: Flow<DesktopFrame>, later: List<Long> = emptyList()): Pair<DesktopWatch, Seen> = runBlocking {
         val watch = DesktopWatch()
         val seen = Seen()
+        seen.later += later
         val left = ArrayDeque(script.toList())
         watch.run(
             open = {
@@ -47,11 +51,38 @@ class DesktopWatchTest {
             wait = { ms ->
                 seen.waits += ms
                 seen.during += watch.state.value.watching to watch.state.value.drawn
+                seen.clock += ms + (seen.later.removeFirstOrNull() ?: 0L)
             },
             began = { seen.said += "began" },
             stopped = { seen.said += "stopped" },
+            clock = { seen.clock },
         )
         watch to seen
+    }
+
+    /** A stream that draws, then falls behind. */
+    private fun behind() = stream(2, DesktopStream.Behind())
+
+    @Test
+    fun threeBehindsInARowEachWithin30sGiveWayToThePictureAndSaySo() {
+        val (watch, seen) = run(behind(), behind(), behind())
+        // Each drew frames, so the count of ends started again each time: the behinds give way, at the third.
+        assertEquals(DesktopWatch.GivenUp.BEHIND, watch.state.value.givenUp)
+        assertFalse(watch.state.value.drawn)
+        assertEquals(listOf(500L, 500L), seen.waits)
+        assertEquals(listOf("began", "stopped", "began", "stopped", "began", "stopped"), seen.said)
+    }
+
+    @Test
+    fun aBehindOver30sAfterTheLastStartsANewRowAndEndsBetweenThemDontBreakIt() {
+        // 30.5 s between the second and the third: a new row, so the three never give way (a refusal ends it here).
+        val (apart, seenApart) = run(behind(), behind(), behind(), stream(0, NodeError(404, "gone")), later = listOf(0L, 30_000L))
+        assertEquals(DesktopWatch.GivenUp.REFUSED, apart.state.value.givenUp)
+        assertEquals(listOf(500L, 500L, 500L), seenApart.waits)
+        // An end that isn't a behind, between them, is counted apart: the third behind still gives way.
+        val (between, seenBetween) = run(behind(), stream(0), behind(), behind())
+        assertEquals(DesktopWatch.GivenUp.BEHIND, between.state.value.givenUp)
+        assertEquals(listOf(500L, 1000L, 500L), seenBetween.waits)
     }
 
     @Test
