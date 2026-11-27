@@ -753,8 +753,9 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       turns,
       chats,
       runs,
-      // A task on an iPhone's Live Activity: from its record and its whole trail (as many pages as it keeps), as the app
-      // says it to itself while it's in front.
+      // A task on an iPhone's Live Activity: from its record and its whole trail (as many pages as it keeps), and how many
+      // of the team's other tasks are at work or queued (the app keeps one activity for the team), as the app says it to
+      // itself while it's in front.
       activity: (id) => {
         const task = team.store.task(id);
         if (!task) return null;
@@ -765,7 +766,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
           more = page.more && page.entries.length > 0;
           after = page.entries.at(-1)?.n ?? after;
         }
-        return activityOf(task, entries, Date.now());
+        const others = team.store.tasks().filter((t) => t.id !== id && (t.status === "running" || t.status === "queued")).length;
+        return activityOf(task, entries, Date.now(), others);
       },
       // Agents' tasks, each said once it ends by its verdict and cost (the apps' words), with whether it can be shipped.
       tasks: {

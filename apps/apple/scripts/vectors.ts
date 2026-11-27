@@ -38,7 +38,7 @@ import { PRESETS, SIGN_INS } from "../../../packages/models/src/providers.ts";
 import { applePayload } from "../../../packages/node/src/apns-send.ts";
 import { CLONE_TIMEOUT, GIT_TIMEOUT } from "../../../packages/node/src/project-git.ts";
 import { againGoal, timeline, timelineTasks } from "../../web/src/lib/timeline.ts";
-import { activityLine, activityOf, activityShort } from "../../web/src/lib/live-activity.ts";
+import { activityLine, activityOf, activityOthers, activityShort } from "../../web/src/lib/live-activity.ts";
 import { describeTask } from "../../web/src/lib/loops.ts";
 import { describeWakes } from "../../web/src/lib/wakes.ts";
 import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, taskActions, taskBadge, taskEnd } from "../../web/src/lib/task-card.ts";
@@ -1651,9 +1651,11 @@ const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELL
 const activityTrail = (...texts: string[]) => texts.map((text, i) => ({ n: i + 1, at: NOW - 600_000 + i * 10_000, text }));
 const ACTIVITY_GATES = ["bun test packages/link", "bun run typecheck"];
 const activityBefore = "Gates before the work · 1. exit 1 · bun test packages/link\n2. exit 0 · bun run typecheck";
-const activityCases: { name: string; task: { status: core.TeamTask["status"]; verified: boolean; error: string | null; gates: string[]; record?: core.TeamTask["record"] }; entries: ReturnType<typeof activityTrail> }[] = [
+const activityCases: { name: string; task: { status: core.TeamTask["status"]; verified: boolean; error: string | null; gates: string[]; record?: core.TeamTask["record"] }; entries: ReturnType<typeof activityTrail>; others?: number }[] = [
   { name: "queued", task: { status: "queued", verified: false, error: null, gates: ACTIVITY_GATES }, entries: [] },
   { name: "at work, before its gates", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go", activityBefore, "Running · bun test") },
+  { name: "at work, two more of the team's at work", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go"), others: 2 },
+  { name: "at work, one more of the team's at work", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go"), others: 1 },
   { name: "its first gate passed, the second running", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail(activityBefore, "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link\n14 pass") },
   { name: "under review", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail(activityBefore, "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link", "Gate 2/2 · exit 0 · bun run typecheck") },
   { name: "sent back, at work again", task: { status: "running", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail(activityBefore, "Submitted for review · done", "Gate 1/2 · exit 0 · bun test packages/link", "Gate 2/2 · exit 0 · bun run typecheck", "Review · revise\nNot wired.", "Running · bun test") },
@@ -1666,8 +1668,8 @@ const activityCases: { name: string; task: { status: core.TeamTask["status"]; ve
   { name: "proven, from its record alone", task: { status: "done", verified: true, error: null, gates: ACTIVITY_GATES, record: { startedAt: NOW - 600_000, endedAt: NOW, ended: "done", commands: 0, revisions: 0, spent: [], proof: { before: [1, 0], after: [0, 0], review: "pass", sameModel: false } } }, entries: [] },
 ];
 const liveActivities = activityCases.map((c) => {
-  const state = activityOf({ ...c.task, record: c.task.record }, c.entries, NOW);
-  return { ...c, at: NOW, state, line: activityLine(state), short: activityShort(state) };
+  const state = activityOf({ ...c.task, record: c.task.record }, c.entries, NOW, c.others ?? 0);
+  return { ...c, others: c.others ?? 0, at: NOW, state, line: activityLine(state), short: activityShort(state), othersLine: activityOthers(state) };
 });
 
 // ---- an agent's mark, the Grille (core's agent-mark.ts): the palette, the forms, the marks a node gives, the snap, the

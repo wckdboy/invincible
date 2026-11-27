@@ -143,4 +143,17 @@ describe("a task's Live Activity, from the iPhone to Apple through its node", ()
     await daemon.notify.lookAtActivities();
     expect(pushed).toHaveLength(1);
   });
+
+  test("it says how many of the team's other tasks are at work: a count, never which", async () => {
+    const before = pushed.length;
+    expect(await json(phone.call("notifyActivity", { task, token: TOKEN, environment: "development" }))).toEqual({ kept: true });
+    await daemon.notify.lookAtActivities();
+    expect(readActivityState(pushed.at(-1)!.body.aps["content-state"])).toMatchObject({ phase: "queued", others: 0 });
+    const room = (await json<{ room: { id: string } }>(admin("directAgent", { id: "builder" }))).room.id;
+    await json(admin("createTeamTask", { room, assignee: "builder", title: "Tidy the parser", goal: "Split the parser in two, with tests.", dependsOn: [], gates: ["bun test"] }));
+    await daemon.notify.lookAtActivities();
+    expect(pushed.length).toBe(before + 2);
+    expect(readActivityState(pushed.at(-1)!.body.aps["content-state"])).toMatchObject({ phase: "queued", others: 1 });
+    expect(JSON.stringify(pushed.at(-1)!.body)).not.toMatch(/parser|importer|Tidy|Fix the/);
+  });
 });

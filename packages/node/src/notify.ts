@@ -329,14 +329,17 @@ export class NotifyService {
   }
 
   /**
-   * One of a paired iPhone's Live Activities (core's live-activity.ts), for itself: kept for its task, so the node says
-   * how the task stands while the app isn't in front; a null token forgets it. Told at the next look.
+   * A paired iPhone's Live Activity (core's live-activity.ts), for itself: kept for its task, so the node says how the
+   * task stands while the app isn't in front; a null token forgets it. Told at the next look. One for each device: the
+   * app keeps one for the team, so another task's replaces the one before, even where its word that the one before
+   * ended never came.
    */
   activity(device: string, input: LiveActivityInput): { kept: boolean } {
     if (input.token === null) {
       this.o.db.dropActivity(device, input.task);
       return { kept: false };
     }
+    for (const kept of this.o.db.activities()) if (kept.device === device && kept.task !== input.task) this.o.db.dropActivity(device, kept.task);
     this.o.db.putActivity(device, input.task, input.token, input.environment);
     this.activitiesSeen = null;
     return { kept: true };

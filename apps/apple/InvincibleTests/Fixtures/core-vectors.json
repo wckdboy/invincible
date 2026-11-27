@@ -34545,6 +34545,7 @@
         ]
       },
       "entries": [],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "queued",
@@ -34555,10 +34556,12 @@
         "review": null,
         "verdict": null,
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Queued",
-      "short": "Queued"
+      "short": "Queued",
+      "othersLine": ""
     },
     {
       "name": "at work, before its gates",
@@ -34588,6 +34591,7 @@
           "text": "Running · bun test"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "running",
@@ -34598,10 +34602,84 @@
         "review": "waits",
         "verdict": null,
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Working",
-      "short": "0/2"
+      "short": "0/2",
+      "othersLine": ""
+    },
+    {
+      "name": "at work, two more of the team's at work",
+      "task": {
+        "status": "running",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Plan · go"
+        }
+      ],
+      "others": 2,
+      "at": 1763200000000,
+      "state": {
+        "phase": "running",
+        "gates": [
+          "waiting",
+          "waiting"
+        ],
+        "review": "waits",
+        "verdict": null,
+        "gate": null,
+        "others": 2,
+        "at": 1763200000000
+      },
+      "line": "Working",
+      "short": "0/2",
+      "othersLine": "2 more at work"
+    },
+    {
+      "name": "at work, one more of the team's at work",
+      "task": {
+        "status": "running",
+        "verified": false,
+        "error": null,
+        "gates": [
+          "bun test packages/link",
+          "bun run typecheck"
+        ]
+      },
+      "entries": [
+        {
+          "n": 1,
+          "at": 1763199400000,
+          "text": "Plan · go"
+        }
+      ],
+      "others": 1,
+      "at": 1763200000000,
+      "state": {
+        "phase": "running",
+        "gates": [
+          "waiting",
+          "waiting"
+        ],
+        "review": "waits",
+        "verdict": null,
+        "gate": null,
+        "others": 1,
+        "at": 1763200000000
+      },
+      "line": "Working",
+      "short": "0/2",
+      "othersLine": "1 more at work"
     },
     {
       "name": "its first gate passed, the second running",
@@ -34631,6 +34709,7 @@
           "text": "Gate 1/2 · exit 0 · bun test packages/link\n14 pass"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "running",
@@ -34641,10 +34720,12 @@
         "review": "waits",
         "verdict": null,
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Gate 2 of 2",
-      "short": "1/2"
+      "short": "1/2",
+      "othersLine": ""
     },
     {
       "name": "under review",
@@ -34679,6 +34760,7 @@
           "text": "Gate 2/2 · exit 0 · bun run typecheck"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "review",
@@ -34689,10 +34771,12 @@
         "review": "reading",
         "verdict": null,
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "The reviewer is reading it",
-      "short": "Review"
+      "short": "Review",
+      "othersLine": ""
     },
     {
       "name": "sent back, at work again",
@@ -34737,6 +34821,7 @@
           "text": "Running · bun test"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "running",
@@ -34747,10 +34832,12 @@
         "review": "sent-back",
         "verdict": null,
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Back to the work",
-      "short": "2/2"
+      "short": "2/2",
+      "othersLine": ""
     },
     {
       "name": "proven",
@@ -34790,6 +34877,7 @@
           "text": "Review · pass\nMatches the brief."
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "ended",
@@ -34800,10 +34888,12 @@
         "review": "passed",
         "verdict": "proven",
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Proven",
-      "short": "Proven"
+      "short": "Proven",
+      "othersLine": ""
     },
     {
       "name": "reviewed, not proven",
@@ -34843,6 +34933,7 @@
           "text": "Review · pass\nok"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "ended",
@@ -34853,10 +34944,12 @@
         "review": "passed",
         "verdict": "reviewed",
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Reviewed, not proven",
-      "short": "Reviewed"
+      "short": "Reviewed",
+      "othersLine": ""
     },
     {
       "name": "a gate failed",
@@ -34891,6 +34984,7 @@
           "text": "Gate 2/2 · exit 1 · bun run typecheck"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "ended",
@@ -34901,10 +34995,12 @@
         "review": null,
         "verdict": "failed",
         "gate": 2,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Failed · gate 2",
-      "short": "Failed"
+      "short": "Failed",
+      "othersLine": ""
     },
     {
       "name": "gave up",
@@ -34924,6 +35020,7 @@
           "text": "Plan · go"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "ended",
@@ -34934,10 +35031,12 @@
         "review": null,
         "verdict": "gave-up",
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Gave up",
-      "short": "Gave up"
+      "short": "Gave up",
+      "othersLine": ""
     },
     {
       "name": "stopped",
@@ -34957,6 +35056,7 @@
           "text": "Plan · go"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "ended",
@@ -34967,10 +35067,12 @@
         "review": null,
         "verdict": "stopped",
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Stopped",
-      "short": "Stopped"
+      "short": "Stopped",
+      "othersLine": ""
     },
     {
       "name": "interrupted",
@@ -34990,6 +35092,7 @@
           "text": "Plan · go"
         }
       ],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "interrupted",
@@ -35000,10 +35103,12 @@
         "review": null,
         "verdict": null,
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Interrupted: it needs you",
-      "short": "Needs you"
+      "short": "Needs you",
+      "othersLine": ""
     },
     {
       "name": "proven, from its record alone",
@@ -35037,6 +35142,7 @@
         }
       },
       "entries": [],
+      "others": 0,
       "at": 1763200000000,
       "state": {
         "phase": "ended",
@@ -35047,10 +35153,12 @@
         "review": "passed",
         "verdict": "proven",
         "gate": null,
+        "others": 0,
         "at": 1763200000000
       },
       "line": "Proven",
-      "short": "Proven"
+      "short": "Proven",
+      "othersLine": ""
     }
   ],
   "marks": {

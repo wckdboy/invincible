@@ -1,4 +1,4 @@
-import { ACTIVITY_GATES_MAX, type ActivityReview, type ActivityState } from "@invincible/core/live-activity";
+import { ACTIVITY_GATES_MAX, ACTIVITY_OTHERS_MAX, type ActivityReview, type ActivityState } from "@invincible/core/live-activity";
 import type { TeamTask, TeamTrailEntry } from "@invincible/core/team";
 import { factsOfProof, factsOfRecord, proofOf, verdictOf } from "./steps.ts";
 
@@ -6,11 +6,12 @@ import { factsOfProof, factsOfRecord, proofOf, verdictOf } from "./steps.ts";
  * A task on its Live Activity (core's live-activity.ts), from the task and its trail: what the node says to Apple while
  * the iPhone app isn't in front, and what the app says to its own activity while it is, held to each other by the
  * apps' vectors. Fixed words and counts only: the verdict as its proof allows (verdictOf), each gate as its latest round
- * left it (gateRows), the reviewer, and which gate failed. And the line and the word its Lock Screen and its Dynamic
- * Island say of it.
+ * left it (gateRows), the reviewer, which gate failed, and how many of the team's other tasks are at work (the app keeps
+ * one activity for the team). And the line and the word its Lock Screen and its Dynamic Island say of it.
  */
 
-export function activityOf(task: Pick<TeamTask, "status" | "verified" | "record" | "error" | "gates">, entries: readonly TeamTrailEntry[], at: number): ActivityState {
+export function activityOf(task: Pick<TeamTask, "status" | "verified" | "record" | "error" | "gates">, entries: readonly TeamTrailEntry[], at: number, others = 0): ActivityState {
+  const count = Math.min(Math.max(0, Math.floor(others)), ACTIVITY_OTHERS_MAX);
   const proof = proofOf(task, entries);
   const facts = entries.length ? factsOfProof(proof) : (factsOfRecord(task.record) ?? factsOfProof(proof));
   const said = verdictOf(task, facts);
@@ -21,10 +22,15 @@ export function activityOf(task: Pick<TeamTask, "status" | "verified" | "record"
   if (said) {
     const failing = facts.gates.findIndex((gate) => gate.exit !== null && gate.exit !== 0);
     const gate = said.verdict === "failed" && failing >= 0 && failing < gates.length ? failing + 1 : null;
-    return { phase: "ended", gates, review: review === "reading" || review === "waits" ? null : review, verdict: said.verdict, gate, at };
+    return { phase: "ended", gates, review: review === "reading" || review === "waits" ? null : review, verdict: said.verdict, gate, others: count, at };
   }
   const phase = task.status === "queued" ? "queued" : task.status === "interrupted" ? "interrupted" : proof.reviewer === "reading" ? "review" : "running";
-  return { phase, gates, review: phase === "queued" ? null : review, verdict: null, gate: null, at };
+  return { phase, gates, review: phase === "queued" ? null : review, verdict: null, gate: null, others: count, at };
+}
+
+/** How many others are at work besides the task it shows, as the roster says the work ("2 at work"): none, nothing. */
+export function activityOthers(state: ActivityState): string {
+  return state.others > 0 ? `${state.others} more at work` : "";
 }
 
 const VERDICT_WORDS: Record<NonNullable<ActivityState["verdict"]>, string> = {

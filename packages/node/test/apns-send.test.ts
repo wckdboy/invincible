@@ -189,8 +189,8 @@ describe("a notification to the iPhone app", () => {
 
 describe("a task's Live Activity, kept up by the node", () => {
   const ACTIVITY = "cd".repeat(80);
-  const running: ActivityState = { phase: "running", gates: ["passed", "running"], review: "waits", verdict: null, gate: null, at: 1_800_000_000_000 };
-  const ended: ActivityState = { phase: "ended", gates: ["passed", "failed"], review: null, verdict: "failed", gate: 2, at: 1_800_000_000_000 };
+  const running: ActivityState = { phase: "running", gates: ["passed", "running"], review: "waits", verdict: null, gate: null, others: 0, at: 1_800_000_000_000 };
+  const ended: ActivityState = { phase: "ended", gates: ["passed", "failed"], review: null, verdict: "failed", gate: 2, others: 0, at: 1_800_000_000_000 };
 
   test("an update goes to the activity's own token, as a liveactivity push on its own topic, quietly", async () => {
     const { sender: apple } = sender();

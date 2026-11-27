@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ACTIVITY_GATES_MAX, ACTIVITY_LINGER_MS, type ActivityState, readActivityState } from "../src/live-activity.ts";
+import { ACTIVITY_GATES_MAX, ACTIVITY_LINGER_MS, ACTIVITY_OTHERS_MAX, type ActivityState, readActivityState } from "../src/live-activity.ts";
 import { LiveActivityInput } from "../src/notify-input.ts";
 import { routes } from "../src/api.ts";
 
@@ -7,14 +7,14 @@ import { routes } from "../src/api.ts";
  * A task's proof on the iPhone's Lock Screen (I10): what the node may say to Apple of it is read strictly, fixed words
  * and counts only, and what the app hands the node for it is checked at the door.
  */
-const running: ActivityState = { phase: "running", gates: ["passed", "running", "waiting"], review: null, verdict: null, gate: null, at: 1_795_700_000_000 };
+const running: ActivityState = { phase: "running", gates: ["passed", "running", "waiting"], review: null, verdict: null, gate: null, others: 0, at: 1_795_700_000_000 };
 
 describe("what a Live Activity may say, read strictly", () => {
   test("a state as the node makes it reads back as itself", () => {
     expect(readActivityState(running)).toEqual(running);
-    const ended: ActivityState = { phase: "ended", gates: ["passed", "failed"], review: "passed", verdict: "failed", gate: 2, at: 1 };
+    const ended: ActivityState = { phase: "ended", gates: ["passed", "failed"], review: "passed", verdict: "failed", gate: 2, others: 0, at: 1 };
     expect(readActivityState(ended)).toEqual(ended);
-    const reviewing: ActivityState = { phase: "review", gates: ["passed"], review: "reading", verdict: null, gate: null, at: 1 };
+    const reviewing: ActivityState = { phase: "review", gates: ["passed"], review: "reading", verdict: null, gate: null, others: 0, at: 1 };
     expect(readActivityState(reviewing)).toEqual(reviewing);
   });
 
@@ -29,9 +29,9 @@ describe("what a Live Activity may say, read strictly", () => {
 
   test("counts are counts: a gate number within its gates, at most sixteen gates, a time", () => {
     expect(readActivityState({ ...running, gates: Array(ACTIVITY_GATES_MAX + 1).fill("waiting") })).toBeNull();
-    expect(readActivityState({ phase: "ended", gates: ["failed"], review: null, verdict: "failed", gate: 2, at: 1 })).toBeNull();
-    expect(readActivityState({ phase: "ended", gates: ["failed"], review: null, verdict: "failed", gate: 0, at: 1 })).toBeNull();
-    expect(readActivityState({ phase: "ended", gates: ["failed"], review: null, verdict: "failed", gate: 1.5, at: 1 })).toBeNull();
+    expect(readActivityState({ phase: "ended", gates: ["failed"], review: null, verdict: "failed", gate: 2, others: 0, at: 1 })).toBeNull();
+    expect(readActivityState({ phase: "ended", gates: ["failed"], review: null, verdict: "failed", gate: 0, others: 0, at: 1 })).toBeNull();
+    expect(readActivityState({ phase: "ended", gates: ["failed"], review: null, verdict: "failed", gate: 1.5, others: 0, at: 1 })).toBeNull();
     expect(readActivityState({ ...running, gate: 1 })).toBeNull();
     expect(readActivityState({ ...running, at: -1 })).toBeNull();
     expect(readActivityState({ ...running, at: "now" })).toBeNull();
@@ -39,9 +39,16 @@ describe("what a Live Activity may say, read strictly", () => {
     expect(readActivityState("running")).toBeNull();
   });
 
+  test("how many of the team's other tasks are at work: a count, never which", () => {
+    expect(readActivityState({ ...running, others: 3 })).toEqual({ ...running, others: 3 });
+    for (const others of [-1, 1.5, "2", null, ACTIVITY_OTHERS_MAX + 1]) expect(readActivityState({ ...running, others })).toBeNull();
+    const { others: _, ...without } = running;
+    expect(readActivityState(without)).toBeNull();
+  });
+
   test("an ended one has its verdict; one still in hand has none", () => {
     expect(readActivityState({ ...running, verdict: "proven" })).toBeNull();
-    expect(readActivityState({ phase: "ended", gates: [], review: null, verdict: null, gate: null, at: 1 })).toBeNull();
+    expect(readActivityState({ phase: "ended", gates: [], review: null, verdict: null, gate: null, others: 0, at: 1 })).toBeNull();
   });
 
   test("an ended task's activity stays a quarter of an hour", () => {

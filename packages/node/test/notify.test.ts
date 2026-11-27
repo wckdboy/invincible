@@ -133,7 +133,7 @@ describe("an agent's task", () => {
 describe("a task's Live Activity, kept up from here while the app isn't in front", () => {
   const TOKEN = "cd".repeat(80);
   const TASK = "task-abcdefghijkl";
-  const working = (gates: ActivityState["gates"]): ActivityState => ({ phase: "running", gates, review: "waits", verdict: null, gate: null, at: 0 });
+  const working = (gates: ActivityState["gates"]): ActivityState => ({ phase: "running", gates, review: "waits", verdict: null, gate: null, others: 0, at: 0 });
 
   test("told how its task stands each time that changes, and nothing while it doesn't", async () => {
     let version = 1;
@@ -161,7 +161,7 @@ describe("a task's Live Activity, kept up from here while the app isn't in front
     const h = harness({ sources: { tasks: { version: () => String(version), list: () => [] }, activity: () => state } });
     h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "production" });
     await h.service.lookAtActivities();
-    state = { phase: "ended", gates: ["passed"], review: "passed", verdict: "proven", gate: null, at: 0 };
+    state = { phase: "ended", gates: ["passed"], review: "passed", verdict: "proven", gate: null, others: 0, at: 0 };
     version = 2;
     await h.service.lookAtActivities();
     expect(h.activities.map((a) => a.event)).toEqual(["update", "end"]);
@@ -181,7 +181,7 @@ describe("a task's Live Activity, kept up from here while the app isn't in front
     const h = harness({ sources: { tasks: { version: () => String(version), list: () => [] }, activity: () => state }, activityAnswer: () => answers.shift() });
     h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "production" });
     await h.service.lookAtActivities();
-    state = { phase: "ended", gates: ["passed"], review: "passed", verdict: "proven", gate: null, at: 0 };
+    state = { phase: "ended", gates: ["passed"], review: "passed", verdict: "proven", gate: null, others: 0, at: 0 };
     version = 2;
     const failed: PushOutcome = { ok: false, gone: false, status: 503, error: "Apple: 503", attempts: 1 };
     answers.push(failed);
@@ -223,6 +223,22 @@ describe("a task's Live Activity, kept up from here while the app isn't in front
     h.advance(60_000);
     await h.service.lookAtActivities();
     expect(h.activities).toHaveLength(2);
+  });
+
+  test("a device keeps one: another task's replaces the one it had, which is told nothing more", async () => {
+    // One Live Activity for the team at a time (the lead's ruling, 27 November 2026): the app shows the task opened last
+    // and how many others are at work, and ends the one before; the node forgets the one before as the new one comes,
+    // even where the app's word that it ended never reached it.
+    const OTHER = "task-mnopqrstuvwx";
+    const h = harness({ sources: { tasks: { version: () => "1", list: () => [] }, activity: () => working(["waiting"]) } });
+    h.service.activity("c_phone", { task: TASK, token: TOKEN, environment: "development" });
+    h.service.activity("c_phone", { task: OTHER, token: "ef".repeat(80), environment: "development" });
+    expect(h.db.activities().map((a) => a.task)).toEqual([OTHER]);
+    await h.service.lookAtActivities();
+    expect(h.activities.map((a) => a.token)).toEqual(["ef".repeat(80)]);
+    // Another device's is its own.
+    h.service.activity("c_ipad", { task: TASK, token: TOKEN, environment: "development" });
+    expect(h.db.activities().map((a) => `${a.device} ${a.task}`).sort()).toEqual([`c_ipad ${TASK}`, `c_phone ${OTHER}`]);
   });
 
   test("forgotten when the app says so, when Apple no longer knows it, when its task is gone, or its device is", async () => {
