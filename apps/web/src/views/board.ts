@@ -25,7 +25,7 @@ const FACE = 36;
 
 export function agentsHome(ctx: Ctx, root: HTMLElement, scope: Scope): void {
   const canEdit = ctx.can("fleet:admin");
-  const narrow = matchMedia("(max-width: 959px)");
+  const narrow = matchMedia("(max-width: 767px)");
   let view: AgentsView = agentsView();
   /** Your prices, for what each agent's work cost this week (asked once; without them, nothing is said of money). */
   let prices: Prices | null = null;

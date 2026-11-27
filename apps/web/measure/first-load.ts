@@ -1129,6 +1129,8 @@ try {
       { name: "task-verified", hash: `#/task/${kept.id}`, wait: ".thread-page .proof" },
       // Its work opened: each step, and where a steer reached it (where the checkout steers), in whose words.
       { name: "task-verified-steps", hash: `#/task/${kept.id}`, wait: ".thread-page .proof", steps: [`document.querySelector(".thread-worked")?.setAttribute("open", "")`] },
+      // Its proof opened (since 27 November 2026 one line with its verdict, opened for its gates, its reviewer and its cost).
+      { name: "task-verified-proof", hash: `#/task/${kept.id}`, wait: ".thread-page .proof", steps: [`document.querySelector(".proof-fold")?.setAttribute("open", "")`] },
       { name: "task-failed", hash: `#/task/${failing.id}`, wait: ".thread-page .proof" },
       { name: "inbox", hash: "#/inbox" },
       { name: "memory", hash: "#/memory", wait: "#memory-results .item" },
@@ -1138,8 +1140,9 @@ try {
     ];
     const sheets: { name: string; hash: string; open: string[]; wait?: string }[] = [
       { name: "sheet-palette", hash: "#/overview", open: [key("k", true)], wait: "dialog.palette[open]" },
-      // Everything else, under "…" (since 26 November 2026, where the rail and the phone's tab bar were).
-      { name: "sheet-places", hash: "#/home", open: [press("Everything else")] },
+      // The roster as a phone's drawer (since 27 November 2026; it was "…", everything else): the arrow at your agent's
+      // chat opens it. (On a wide screen the roster is the sidebar, in every other picture.)
+      { name: "sheet-roster", hash: "#/chat", open: [press("Your agents")], wait: "dialog.sheet.drawer[open] .roster-row" },
       { name: "sheet-shortcuts", hash: "#/overview", open: [key("?")] },
       { name: "sheet-chat-menu", hash: "#/chat", open: [press("Chat options")], wait: "dialog.selector-pop[open], dialog.selector-sheet[open]" },
       { name: "sheet-all-chats", hash: "#/chat", open: [press("Chat options"), press("All chats…", "All chats")] },

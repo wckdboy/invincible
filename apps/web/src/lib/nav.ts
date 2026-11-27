@@ -5,12 +5,13 @@ import { teamHash, teamLocation, type TeamLocation } from "./team.ts";
 
 /*
  * The app's places, as one list (pure: no DOM; the shell gives each its view). The primary comes first everywhere (your
- * words, 26 November 2026: "agent first ([the primary])", the agents "project/tasks/coding t3code style"): on a phone the app
- * opens on Home (its I-beam, what needs you, the work, its message box), and so does a wide screen, beside the drawer's
- * places kept open as its sidebar. Each task has an address of its own (#/task/<id>), opened from its row. Every other
- * place is reached from the drawer (views/places.ts; More is the whole index as a page), and from the command palette. An address (`#/fleet`) is a
- * contract: a place is never renamed or dropped here (one that went keeps its address as a second name of another), and
- * what a device may see follows its scopes.
+ * words, 26 November 2026: "agent first ([the primary])"; 27 November 2026: "something like t3code on desktop, and
+ * openmausbot/grokbot on mobile"): the app opens on your agent's conversation, with the roster beside it on a wide screen
+ * and a swipe away on a phone (views/sidebar.ts: what needs you, your agent, the agents, the rooms, the projects). The work
+ * is Home's address, called Work. Each task has an address of its own (#/task/<id>), opened from its row. Every other place
+ * is reached from the roster's foot (More is the whole index as a page), and from the command palette. An address
+ * (`#/fleet`) is a contract: a place is never renamed or dropped here (one that went keeps its address as a second name of
+ * another), and what a device may see follows its scopes.
  */
 
 const HEADINGS = { work: "Work", knowledge: "Knowledge", machines: "Machines", keys: "Keys and models", device: "This device" } as const;
@@ -33,12 +34,13 @@ interface PlaceSpec {
 }
 
 const LIST = [
-  // Home: a phone's first screen, and the primary's place (your words, 26 November 2026: "agent first ([the primary])"): its orb,
-  // what needs you with its answers in place, the work by attention, and its message box. #/work (25 November 2026: "per
-  // task/per project like t3code") is its second address: the work is here now, and in a wide screen's sidebar.
-  { id: "home", label: "Home", icon: "layers", under: "primary", scope: "chat", key: "j", keywords: ["home", "work", "tasks", "projects", "threads", "repositories", "under way", "needs you", "jobs", "code", "today"], about: "Your agent, what needs you, and the work" },
-  // The primary itself, the one you talk to (your word, 23 November 2026): its address stays #/chat, and "chat" still finds it.
+  // The primary itself, the one you talk to (your word, 23 November 2026), where the app opens: its address stays #/chat, and
+  // "chat" still finds it.
   { id: "chat", label: "Your agent", icon: "chat", under: "primary", scope: "chat", key: "c", keywords: ["primary", "chat", "counsel", "ask", "talk", "history", "conversations", "orb"], about: "" },
+  // The work (Home's address, #/home, and #/work its second; the owner's word, 27 November 2026: the app opens on your
+  // agent's conversation, as T3 Code opens on a thread): what needs you with its answers in place, and every task by
+  // attention, a filter for each project. Its key stays J.
+  { id: "home", label: "Work", icon: "layers", under: "primary", scope: "chat", key: "j", keywords: ["home", "work", "tasks", "projects", "threads", "repositories", "under way", "needs you", "jobs", "code", "today"], about: "What needs you, and every task" },
   // (Its address stays #/team, and #/agents is the same page. Its older names still find it.)
   { id: "team", label: "Agents", icon: "agents", under: "primary", scope: "chat", key: "h", keywords: ["agents", "give", "rooms", "messages", "tasks", "coordination", "team", "hermes"], about: "The agents: who works on what, their rooms" },
   // A task's own thread (#/task/<id>): its brief, its work folded, what proves it, and its details. Opened from its row;
@@ -115,16 +117,17 @@ export function landingOf(route: Route, hash: string): string {
   return `#/${route}`;
 }
 
-/** The places at the top of the app: Home, the primary's own conversation, and the agents. */
+/** The places at the top of the app: the primary's own conversation, the work, and the agents. */
 export const primaryOf = (visible: Place[]): Place[] => visible.filter((place) => place.under === "primary");
 
 /**
- * The place the app opens on, and falls back to: Home, the primary's place, with what needs you and the work (your
- * words, 26 November 2026, "agent first"; on a wide screen beside the drawer's places, kept open as its sidebar: I11).
- * A device that may not chat opens on its Inbox. (The screen is asked still, so the rule can tell them apart again.)
+ * The place the app opens on, and falls back to: your agent's own conversation (the owner's word, 27 November 2026:
+ * "something like t3code on desktop, and openmausbot/grokbot on mobile"), with the roster beside it on a wide screen and a
+ * swipe away on a phone (views/sidebar.ts). A device that may not chat opens on its Inbox. (The screen is asked still, so
+ * the rule can tell them apart again.)
  */
 export function homeOf(visible: Place[], _screen: { narrow: boolean }): Route {
-  return visible.some((place) => place.id === "home") ? "home" : (primaryOf(visible)[0]?.id ?? "inbox");
+  return visible.some((place) => place.id === "chat") ? "chat" : visible.some((place) => place.id === "home") ? "home" : (primaryOf(visible)[0]?.id ?? "inbox");
 }
 
 /** More's index: every other place this device may see, under its heading. */

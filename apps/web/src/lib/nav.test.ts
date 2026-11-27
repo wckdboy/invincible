@@ -37,9 +37,9 @@ describe("the app's places", () => {
     }
   });
 
-  test("Home comes first, then your agent's own conversation, then the agents", () => {
-    expect(ids(primaryOf(device(...OWNER)))).toEqual(["home", "chat", "team"]);
-    expect(primaryOf(device(...OWNER)).map((place) => place.label)).toEqual(["Home", "Your agent", "Agents"]);
+  test("your agent's own conversation comes first, then the work (Home's address, called Work), then the agents", () => {
+    expect(ids(primaryOf(device(...OWNER)))).toEqual(["chat", "home", "team"]);
+    expect(primaryOf(device(...OWNER)).map((place) => place.label)).toEqual(["Your agent", "Work", "Agents"]);
   });
 
   test("#/agents is the agents' address as well as #/team; nothing else has a second name but #/work", () => {
@@ -100,9 +100,11 @@ describe("the app's places", () => {
     expect(routeOf(`#/inbox?a=${id}`, PLACES as never)).toBe("inbox");
   });
 
-  test("a phone and a wide screen both open on Home; a device that may not chat opens on its Inbox", () => {
-    expect(homeOf(device(...OWNER), { narrow: true })).toBe("home");
-    expect(homeOf(device(...OWNER), { narrow: false })).toBe("home");
+  // The owner's word, 27 November 2026: "something like t3code on desktop, and openmausbot/grokbot on mobile": the app opens
+  // on your agent's conversation, as T3 Code opens on a thread, with the roster beside it (or a swipe away on a phone).
+  test("a phone and a wide screen both open on your agent's conversation; a device that may not chat opens on its Inbox", () => {
+    expect(homeOf(device(...OWNER), { narrow: true })).toBe("chat");
+    expect(homeOf(device(...OWNER), { narrow: false })).toBe("chat");
     for (const narrow of [true, false]) {
       expect(homeOf(device("mind:read"), { narrow })).toBe("inbox");
       expect(homeOf(device(), { narrow })).toBe("inbox");

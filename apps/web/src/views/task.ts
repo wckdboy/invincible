@@ -32,6 +32,7 @@ import { controlTeam, giveTask, shipTask } from "./team-forms.ts";
 import { openTerminal } from "./terminal.ts";
 import { askProjects, projectNames, projectTile, workNow } from "./work-rows.ts";
 import { openWorkspace } from "./workspace.ts";
+import { rosterBack } from "./sidebar.ts";
 
 /*
  * A task as a thread of its own (#/task/<id>; your words, 26 November 2026: "project/tasks/coding t3code style for the
@@ -87,8 +88,7 @@ const clock = (ms: number): string => {
 export const taskView: View = (root, ctx, { scope, opts }) => {
   askProjects(ctx);
   const canAct = ctx.can("fleet:admin") && ctx.can("chat");
-  const wide = matchMedia("(min-width: 960px)");
-  const roomy = matchMedia("(min-width: 1200px)");
+  const wide = matchMedia("(min-width: 768px)");
   let id: string | null = opts.task ?? null;
   let trail: Trail = emptyTrail();
   /** The whole trail has been read once (until then, the work isn't drawn: it would arrive in pieces). */
@@ -104,7 +104,9 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   let changes: TeamChangesView | null = null;
   let changesAt = "";
   let marked = "";
-  let shownDetails = taskDetailsShown(roomy.matches);
+  let shownDetails = taskDetailsShown();
+  /** Whether its proof is open (its one line, opened: kept as the thread is drawn again). */
+  let proofOpen = false;
   let sending = false;
   let headVersion = "";
   let threadVersion = "";
@@ -115,7 +117,9 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   const thread = h("div", { class: "thread-items" });
   const scroller = h("div", { class: "thread-scroll", tabindex: 0 }, thread);
   const liveLine = h("div", { class: "thread-live", role: "status", hidden: true });
-  const details = h("aside", { class: "thread-details", "aria-label": "The task's details" });
+  // (Made as it will be drawn: shown only once opened. Made shown and hidden at its first drawing, the thread beside it
+  // moved back across as the page came.)
+  const details = h("aside", { class: "thread-details", "aria-label": "The task's details", hidden: !wide.matches || !shownDetails });
 
   // ---- the message box: words to the agent, in the task's conversation; while it runs, a steer of the task, or a
   // message queued for after it (lib/steer.ts) ----
@@ -146,7 +150,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
 
   replace(root, h("div", { class: "thread-page" }, head, h("div", { class: "thread-body" }, h("div", { class: "thread-column" }, scroller, liveLine, composerWrap), details)));
   // Until the team is known, the header and the thread hold their places.
-  replace(head, h("a", { class: "btn ghost sm icon-only pane-back", href: "#/home", "aria-label": "Home" }, icon("chevron-left", { size: 16 })), h("div", { class: "grow stack snug", "aria-hidden": "true" }, h("div", { class: "skeleton thread-head-name" }), h("div", { class: "skeleton sk-line thread-head-line" })));
+  replace(head, rosterBack(ctx), h("div", { class: "grow stack snug", "aria-hidden": "true" }, h("div", { class: "skeleton thread-head-name" }), h("div", { class: "skeleton sk-line thread-head-line" })));
   replace(thread, skeletonBlock(64), skeletonBlock(160));
 
   /** The task, its agent and its project, as the team has them now (null: not yet known, or no such task). */
@@ -286,7 +290,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     markRead(n);
   }
 
-  const backHome = (): HTMLElement => h("a", { class: "btn ghost sm icon-only pane-back", href: "#/home", "aria-label": "Home", title: "Home" }, icon("chevron-left", { size: 16 }));
+  const backHome = (): HTMLElement => rosterBack(ctx);
   const detailsToggle = (): HTMLButtonElement => {
     const toggle = button(shownDetails ? "Hide the details" : "Show the details", {
       variant: "ghost",
@@ -380,46 +384,66 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const review = proof.review;
     // Steered work was judged against its brief and its steers, in order: said beside the verdict.
     const judged = judgedLine(judgedWith(trail.entries), task.steers ?? []);
+    // One line with its verdict (the owner's word, 27 November 2026: "Proof is one line with its verdict, expandable"):
+    // what its gates came to and what it changed beside the word, a warning's mark where one is said inside; opened, the
+    // verdict's reason, its gates whole, the reviewer's words and what it cost. What to do with it stays out, under it.
+    const passed = proof.gates.filter((gate) => gate.state === "passed").length;
+    const summary = [
+      proof.gates.length ? `${passed} of ${proof.gates.length} ${proof.gates.length === 1 ? "gate" : "gates"} passed` : null,
+      files ? `${files} ${files === 1 ? "file" : "files"}${added !== null ? ` +${added} −${removed}` : ""}` : null,
+    ].filter((part): part is string => part !== null);
     return h(
       "section",
       { class: "proof", "data-verdict": verified ? "verified" : "failed", "aria-label": seal.by ? `${seal.word}: ${seal.by}` : seal.word },
       h(
-        "header",
-        { class: "proof-seal" },
-        h("span", { class: "proof-mark", "aria-hidden": "true" }, icon(seal.passed ? "check" : "x", { size: 14 })),
-        // The verdict that follows the proof (the iPhone's words): never "Verified" above a warning that its gates proved nothing.
-        h("div", {}, h("strong", {}, seal.word), seal.by ? h("span", { class: "proof-by" }, ` · ${seal.by}`) : null),
-      ),
-      ...caveats.map((line) => h("p", { class: "proof-caveat" }, icon("alert", { size: 13 }), h("span", {}, line))),
-      proof.gates.length
-        ? h(
-            "ol",
-            { class: "proof-gates", "aria-label": "Its gates" },
-            ...proof.gates.map((gate) =>
-              h(
-                "li",
-                { class: "proof-gate", "data-state": gate.state },
-                h("span", { class: "proof-gate-mark", "aria-label": gate.state }, icon(GATE_ICON[gate.state], { size: 12 })),
-                // The command whole and what it said under it, never cut (the iPhone's): a gate is the proof.
-                h("span", { class: "proof-gate-text" }, h("code", {}, gate.command), h("span", { class: "proof-gate-said tnum" }, gate.exit !== null ? [`exit ${gate.exit}`, gateTime(gate.ms), gate.said || null].filter(Boolean).join(" · ") : "not run")),
-              ),
-            ),
-          )
-        : null,
-      review ? h("p", { class: "proof-review" }, icon("review", { size: 13 }), h("span", {}, h("strong", {}, review.verdict === "pass" ? "The reviewer passed it" : "The reviewer sent it back"), review.notes ? `: “${review.notes.split("\n")[0]!.slice(0, 200)}”` : "")) : null,
-      review && judged ? h("p", { class: "proof-review proof-steered" }, icon("arrow-up", { size: 13 }), h("span", {}, judged)) : null,
-      h(
-        "div",
-        { class: "proof-facts" },
-        files
-          ? h(
-              "span",
-              { class: "proof-changes" },
-              n.agent && ctx.can("sandbox") ? h("button", { type: "button", class: "link-button", onclick: () => openWorkspace(ctx, { id: task.assignee, name: n.name }, "changes", task.id) }, `${files} file${files === 1 ? "" : "s"} · Review`, icon("chevron-right", { size: 12 })) : `${files} file${files === 1 ? "" : "s"} kept`,
-              added !== null ? h("span", { class: "tnum proof-diff" }, " ", h("span", { "data-tone": "ok", class: "toned" }, `+${added}`), " ", h("span", { "data-tone": "failed", class: "toned" }, `−${removed}`)) : null,
-            )
-          : h("span", { class: "subtle" }, "No changes kept"),
-        h("span", { class: "tnum subtle" }, prices || !task.record ? costWords(task, prices ?? {}) : ""),
+        "details",
+        { class: "proof-fold", open: proofOpen, ontoggle: (event: Event) => (proofOpen = (event.currentTarget as HTMLDetailsElement).open) },
+        h(
+          "summary",
+          { class: "proof-seal" },
+          h("span", { class: "proof-mark", "aria-hidden": "true" }, icon(seal.passed ? "check" : "x", { size: 12 })),
+          // The verdict that follows the proof (the iPhone's words): never "Verified" above a warning that its gates proved nothing.
+          h("strong", {}, seal.word),
+          summary.length ? h("span", { class: "proof-sum tnum ellipsis" }, ` · ${summary.join(" · ")}`) : null,
+          caveats.length ? h("span", { class: "proof-warned", title: caveats.join(" "), "aria-label": "A warning, inside" }, icon("alert", { size: 13 })) : null,
+          icon("chevron-right", { size: 14, class: "chev" }),
+        ),
+        h(
+          "div",
+          { class: "proof-body" },
+          seal.by ? h("p", { class: "proof-by" }, seal.by) : null,
+          ...caveats.map((line) => h("p", { class: "proof-caveat" }, icon("alert", { size: 13 }), h("span", {}, line))),
+          proof.gates.length
+            ? h(
+                "ol",
+                { class: "proof-gates", "aria-label": "Its gates" },
+                ...proof.gates.map((gate) =>
+                  h(
+                    "li",
+                    { class: "proof-gate", "data-state": gate.state },
+                    h("span", { class: "proof-gate-mark", "aria-label": gate.state }, icon(GATE_ICON[gate.state], { size: 12 })),
+                    // The command whole and what it said under it, never cut (the iPhone's): a gate is the proof.
+                    h("span", { class: "proof-gate-text" }, h("code", {}, gate.command), h("span", { class: "proof-gate-said tnum" }, gate.exit !== null ? [`exit ${gate.exit}`, gateTime(gate.ms), gate.said || null].filter(Boolean).join(" · ") : "not run")),
+                  ),
+                ),
+              )
+            : null,
+          review ? h("p", { class: "proof-review" }, icon("review", { size: 13 }), h("span", {}, h("strong", {}, review.verdict === "pass" ? "The reviewer passed it" : "The reviewer sent it back"), review.notes ? `: “${review.notes.split("\n")[0]!.slice(0, 200)}”` : "")) : null,
+          review && judged ? h("p", { class: "proof-review proof-steered" }, icon("arrow-up", { size: 13 }), h("span", {}, judged)) : null,
+          h(
+            "div",
+            { class: "proof-facts" },
+            files
+              ? h(
+                  "span",
+                  { class: "proof-changes" },
+                  n.agent && ctx.can("sandbox") ? h("button", { type: "button", class: "link-button", onclick: () => openWorkspace(ctx, { id: task.assignee, name: n.name }, "changes", task.id) }, `${files} file${files === 1 ? "" : "s"} · Review`, icon("chevron-right", { size: 12 })) : `${files} file${files === 1 ? "" : "s"} kept`,
+                  added !== null ? h("span", { class: "tnum proof-diff" }, " ", h("span", { "data-tone": "ok", class: "toned" }, `+${added}`), " ", h("span", { "data-tone": "failed", class: "toned" }, `−${removed}`)) : null,
+                )
+              : h("span", { class: "subtle" }, "No changes kept"),
+            h("span", { class: "tnum subtle" }, prices || !task.record ? costWords(task, prices ?? {}) : ""),
+          ),
+        ),
       ),
       actions.length || task.shipped
         ? h(

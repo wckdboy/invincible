@@ -35,6 +35,7 @@ import { openInHand } from "./in-hand.ts";
 import { openAddKey, secretRequestCard } from "./vault.ts";
 import { connectorRequestCard } from "./connectors.ts";
 import { primaryAsks } from "./primary-asks.ts";
+import { rosterBack } from "./sidebar.ts";
 
 /*
  * Chat. A turn runs on the node, not in this page: the page starts it and watches
@@ -744,8 +745,8 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   const nowLine = h("span", { class: "chat-now ellipsis" });
   const answers = h("span", { class: "chat-as ellipsis" });
   const who = h("button", { class: "chat-who", type: "button", onclick: () => openInHand(ctx) }, face, h("span", { class: "chat-who-text" }, h("span", { class: "chat-name" }, "Your agent", answers), nowLine));
-  // On a phone its conversation is the whole screen: the way back Home.
-  const back = h("a", { class: "btn ghost sm icon-only pane-back", href: "#/home", "aria-label": "Home", title: "Home" }, icon("chevron-left", { size: 16 }));
+  // On a phone its conversation is the whole screen: its arrow opens the roster.
+  const back = rosterBack(ctx);
   // Needs you, one tap from it, counting what waits for you that is no other agent's (theirs is on their own rows).
   const inboxCount = h("span", { class: "count", hidden: true });
   const inbox = h("a", { class: "btn ghost sm icon-only chat-inbox", href: "#/inbox", "aria-label": "Needs you", title: "Needs you" }, icon("inbox", { size: 16 }), inboxCount);

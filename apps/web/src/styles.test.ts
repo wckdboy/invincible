@@ -72,7 +72,8 @@ describe("the stylesheet", () => {
         const computed = px(size.trim(), vars);
         if (!(computed >= 16)) small.push(`${targets.join(", ")}: ${size.trim()} = ${computed}px`);
       }
-      expect({ screen, small }).toEqual({ screen, small: screen.touch || screen.width < 960 ? [] : small });
+      // (A phone is under 768 px, where the roster becomes a drawer; a touch screen of any width is one too.)
+      expect({ screen, small }).toEqual({ screen, small: screen.touch || screen.width < 768 ? [] : small });
     }
   });
 
@@ -80,7 +81,7 @@ describe("the stylesheet", () => {
     const declares = (selector: string, declaration: RegExp) => all.some((rule) => rule.media.length === 0 && rule.selectors.includes(selector) && declaration.test(rule.body));
     expect(declares("html", /touch-action:\s*manipulation/)).toBe(true);
     // Safari reads only the prefixed user-select.
-    for (const control of [".btn", ".sidebar a", ".work-row", ".home-filter", ".selector-trigger", ".place", ".home-strip-agent"]) {
+    for (const control of [".btn", ".work-row", ".home-filter", ".selector-trigger", ".roster-row", ".roster-needs", ".roster-place"]) {
       expect([control, declares(control, /-webkit-touch-callout:\s*none/), declares(control, /-webkit-user-select:\s*none/)]).toEqual([control, true, true]);
     }
   });
@@ -90,12 +91,12 @@ describe("the stylesheet", () => {
     expect(all.some((rule) => rule.media.length === 0 && rule.selectors.includes(':root[data-keyboard="open"]') && /--safe-bottom:\s*0px/.test(rule.body))).toBe(true);
   });
 
-  test("what a finger presses answers at once: a task's row, your agent's I-beam, an agent in Home's strip, \"N more\", a fold, the drawer's places and More's rows look pressed", () => {
+  test("what a finger presses answers at once: a task's row, the roster's rows (your agent, an agent, a room, what needs you, a place), \"N more\", a fold and More's rows look pressed", () => {
     const pressed = (selector: string) => all.some((rule) => rule.selectors.some((s) => s === `${selector}:active`));
-    for (const control of [".work-row", ".home-drawer", ".home-strip-agent", ".home-needs-more", ".home-fold", ".place", ".rows > a.item", ".suggestion"]) expect([control, pressed(control)]).toEqual([control, true]);
+    for (const control of [".work-row", ".roster-row", ".roster-needs", ".roster-place", ".home-needs-more", ".home-fold", ".rows > a.item", ".suggestion"]) expect([control, pressed(control)]).toEqual([control, true]);
   });
 
-  test("on a phone, the palette's field lies exactly over the search button at the top bar's end (which grows into it), and Home's header lines up with the top bar at either side", () => {
+  test("on a phone, the palette's field lies exactly over the search button at the top bar's end (which grows into it), and a page lines up with the top bar at either side", () => {
     const phone: Screen = { width: 390, touch: true };
     const seen = all.filter((rule) => rule.media.every((query) => holds(query, phone)));
     // A phone held upright: no inset at the sides; the status bar's is the same for the bar and the palette.
@@ -119,22 +120,13 @@ describe("the stylesheet", () => {
     expect(field).toEqual(button);
     // (Its "…" sits where the top bar's does, at the same distance from either edge.)
     const sides = (selector: string) => { const p = parts(declared(selector, "padding")); return [p[1], p[3]]; };
-    expect(sides(".home-head")).toEqual(sides(".topbar"));
-  });
-
-  test("Home's message box is docked at the foot, over the list (which fades out under it), and its fade takes no tap meant for a row", () => {
-    // (The floating button it replaced covered the row under it; the dock's clear part lets a tap through to the list.)
-    const dock = rules.find((r) => r.selectors.includes(".home-dock"));
-    expect(dock?.body).toMatch(/position:\s*sticky/);
-    expect(dock?.body).toMatch(/bottom:\s*0/);
-    expect(dock?.body).toMatch(/pointer-events:\s*none/);
-    expect(rules.some((r) => r.selectors.includes(".home-dock > *") && /pointer-events:\s*auto/.test(r.body))).toBe(true);
+    expect(sides("main.view")).toEqual(sides(".topbar"));
   });
 
   test("the bars at the top are solid, so the top of the app is one flat colour however the page under them scrolls", () => {
     // They were frosted glass: what scrolled under them showed through, blurred, as a grey haze just below the status
     // bar, which iOS paints solid in the page's colour (seen in the iOS 26.1 simulator, 15 Nov).
-    for (const bar of [".topbar", ".home-head", ".thread-head", ".chat-head::before", ".tl-day"]) {
+    for (const bar of [".topbar", ".thread-head", ".chat-head::before", ".tl-day"]) {
       const declared = all.filter((r) => r.selectors.includes(bar));
       const ground = declared.map((r) => r.body.match(/(?:^|;)\s*background\s*:\s*([^;]+)/)?.[1]?.trim()).filter(Boolean).at(-1);
       expect([bar, ground, declared.some((r) => /backdrop-filter/.test(r.body))]).toEqual([bar, "var(--bg)", false]);

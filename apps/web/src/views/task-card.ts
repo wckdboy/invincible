@@ -132,12 +132,12 @@ export function taskCard(ctx: Ctx, task: TeamTask, o: CardOptions): HTMLElement 
       ),
       o.canAct ? moreOf(ctx, task, answers.rest, again, o) : null,
     ),
-    meta ? h("p", { class: "task-meta" }, meta) : null,
-    stepped ? h("p", { class: "task-meta" }, stepped) : null,
+    // Where and who, and where you stepped in, in one muted line (the owner's word, 27 November 2026: compact rows).
+    meta || stepped ? h("p", { class: "task-meta" }, [meta, stepped].filter(Boolean).join(" · ")) : null,
     waiting.length ? h("p", { class: "task-meta" }, icon("clock", { size: 12 }), ` Waiting for ${waiting.map((dependency) => `“${dependency.title}”`).join(", ")} to be done and verified`) : null,
     task.status === "proposed" ? h("p", { class: "task-goal" }, task.goal) : null,
     gates ? h("p", { class: "task-gates" }, icon("shield-check", { size: 13 }), h("span", {}, gates)) : null,
-    // Two lines kept from the start, so the card doesn't grow as its latest line comes and lengthens (showLatest).
+    // One line kept from the start, so the card doesn't grow as its latest line comes and lengthens (showLatest).
     task.status === "running" ? h("p", { class: "task-latest" }, latestLine(task)) : null,
     why ? h("p", { class: "task-why" }, why) : null,
     said ? h("p", { class: "task-said" }, said) : null,

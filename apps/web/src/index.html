@@ -176,9 +176,9 @@
         :root:not([data-motion="full"]) { --d-1: 0.01ms; --d-2: 0.01ms; --d-3: 0.01ms; --d-sheet: 0.01ms; --d-enter: 0.01ms; --d-spring: 0.01ms; }
       }
       @media (pointer: coarse) { :root { --control-h: 44px; --control-h-sm: 36px; } }
-      @media (max-width: 959px) { :root { --fs-body: 15px; } }
+      @media (max-width: 767px) { :root { --fs-body: 15px; } }
       /* A field the keyboard opens for is at least 16px on a touch screen or at a phone's width: iOS zooms the page into a smaller one. */
-      @media (max-width: 959px), (pointer: coarse) { :root { --fs-input: 16px; --fs-input-mono: 16px; } }
+      @media (max-width: 767px), (pointer: coarse) { :root { --fs-input: 16px; --fs-input-mono: 16px; } }
 
       /* ---------- base ---------- */
       *, *::before, *::after { box-sizing: border-box; }
@@ -256,7 +256,8 @@
       :root[data-motion="reduce"] .boot img { animation: none; }
       @media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .boot img { animation: none; } }
 
-      /* ---------- shell ---------- */
+      /* ---------- shell: the roster beside one pane, as T3 Code's sidebar beside its thread (the owner's word, 27 November
+         2026); an icon rail on a screen between; on a phone the pane alone, the roster a drawer from the left ---------- */
       .shell { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: 1fr; }
       .sidebar { display: none; }
       .main-col { min-width: 0; display: flex; flex-direction: column; }
@@ -270,82 +271,107 @@
       /* (It gives way to the bar's buttons: at a phone's 200 % it pushed search and "…" off the screen.) */
       .topbar .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: var(--fs-15); letter-spacing: -0.01em; transition: opacity var(--d-2) var(--ease-out), transform var(--d-2) var(--ease-out); }
       .topbar .title.tucked { opacity: 0; transform: translateY(4px); }
-      .topbar .brand-mini { display: flex; align-items: center; gap: var(--sp-2); }
       main.view {
         flex: 1; width: 100%; outline: none;
         padding: var(--sp-5) calc(var(--sp-4) + var(--safe-right)) calc(var(--tabbar-h) + var(--safe-bottom) + var(--sp-8)) calc(var(--sp-4) + var(--safe-left));
       }
-      /* The way back to Home on a page (a phone's top bar): a chevron and the app's mark (ui/orb.ts appMark: the icon's
-         field on nothing, drawn for the page's theme, so no dark tile sits on a light page). */
       .btn.side-expand { display: none; }
 
-      @media (min-width: 960px) {
+      @media (min-width: 768px) {
         .shell { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
-        /* Folded away (the head's button, or [): the work's pane takes the width, and a button at its top brings it back. */
+        /* Folded away (the head's button, or [): the pane takes the width, and a button at its top brings it back. */
         :root[data-sidebar="collapsed"] .shell { grid-template-columns: minmax(0, 1fr); }
         :root[data-sidebar="collapsed"] .sidebar { display: none; }
         :root[data-sidebar="collapsed"] .btn.side-expand { display: inline-flex; position: fixed; z-index: 25; top: var(--sp-2); left: var(--sp-2); }
         main.view { padding: var(--sp-6) var(--sp-8) var(--sp-12); }
         .topbar { padding: 0 var(--sp-6) 0 var(--sp-8); }
-        /* The sidebar has the way home, search and everything else. */
-        .topbar .brand-mini, .topbar .topbar-search, .topbar .places-button, .topbar .fleet-pill { display: none; }
+        /* The roster is beside it, and search with it. */
+        .topbar :is(.roster-button, .topbar-search, .fleet-pill) { display: none; }
+        :root[data-sidebar="collapsed"] .topbar .roster-button { display: none; }
         .shell[data-sidebar-none] { grid-template-columns: minmax(0, 1fr); }
-        .shell[data-sidebar-none] .topbar :is(.brand-mini, .topbar-search, .places-button) { display: inline-flex; }
+        .shell[data-sidebar-none] .topbar .topbar-search { display: inline-flex; }
         .sidebar {
           display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; height: 100dvh; min-width: 0;
-          background: var(--sidebar); border-right: 1px solid var(--border); padding: var(--sp-3) var(--sp-2) var(--sp-2); overflow: hidden;
+          background: var(--sidebar); border-right: 1px solid var(--border); padding: var(--sp-2) var(--sp-2) var(--sp-2); overflow: hidden;
         }
       }
 
-      /* ---------- the sidebar (a wide screen): the drawer's places kept open (views/sidebar.ts): the mark, search, the list, the machine ---------- */
-      .side-head { display: flex; align-items: center; gap: 2px; min-height: 32px; padding: 0 2px 0 var(--sp-2); }
-      .side-mark { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; height: 32px; color: var(--text); text-decoration: none; }
+      /* ---------- the sidebar's head: the app's mark (your agent's chat), ⌘K, search and the fold ---------- */
+      .side-head { flex: none; display: flex; align-items: center; gap: 2px; min-height: 36px; padding: 0 0 0 var(--sp-2); }
+      .side-mark { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; height: 36px; color: var(--text); text-decoration: none; }
       .wordmark-text { font-size: var(--fs-12); font-weight: 650; letter-spacing: 0.2em; text-transform: uppercase; }
-      .search-trigger {
-        display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: 32px; padding: 0 var(--sp-2) 0 10px;
-        border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text-3); font-size: var(--fs-13);
-        box-shadow: var(--shadow-1); transition: border-color var(--d-1) var(--ease-out), color var(--d-1) var(--ease-out);
-      }
-      .search-trigger:hover { border-color: var(--border-strong); color: var(--text-2); }
-      .search-trigger .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .search-trigger .kbds { margin-left: auto; display: flex; gap: 2px; }
-      .side-search { flex: none; margin: var(--sp-2) 0 var(--sp-2); }
-      .side-places { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 calc(-1 * var(--sp-2)); padding: 0 var(--sp-2) var(--sp-3); scrollbar-width: thin; }
-      .home-fold .chev { transition: transform var(--d-1) var(--ease-out); }
-      .home-fold[aria-expanded="true"] .chev { transform: rotate(90deg); }
-      .side-foot { flex: none; display: flex; align-items: center; gap: 6px; padding: var(--sp-2) 2px 0; border-top: 1px solid var(--border); }
+      .side-keys { display: flex; gap: 2px; margin-right: 2px; color: var(--text-3); }
       .side-pill {
-        display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 128px; height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-full);
+        display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 26px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r-full);
         color: var(--text-2); font-size: var(--fs-12); font-weight: 500; text-decoration: none; transition: border-color var(--d-1) var(--ease-out), color var(--d-1) var(--ease-out);
       }
       .side-pill:hover { border-color: var(--border-strong); color: var(--text); }
       .side-pill > svg { flex: none; color: var(--text-3); }
+      .home-fold .chev { transition: transform var(--d-1) var(--ease-out); }
+      .home-fold[aria-expanded="true"] .chev { transform: rotate(90deg); }
 
-      /* ---------- everything else (views/places.ts): the drawer's list, and the sidebar's, one line a place ---------- */
-      .places-nav { display: flex; flex-direction: column; }
-      .places-group { display: flex; flex-direction: column; padding: var(--sp-1) 0; }
-      .places-group + .places-group { border-top: 1px solid var(--border); }
-      .places-chats:empty, .places-latest:has(> .places-chats:empty) { display: none; }
-      .place {
-        display: flex; align-items: center; gap: 14px; width: 100%; min-width: 0; min-height: 44px; padding: 0 var(--sp-2); border: 0; border-radius: var(--r-md);
-        background: none; color: var(--text); font: inherit; font-size: var(--fs-16); font-weight: 650; letter-spacing: -0.01em; text-align: left; text-decoration: none;
+      /* ---------- the roster (views/sidebar.ts): what needs you, your agent, the agents, the rooms, the projects; its
+         foot the work, Settings, everything else and the machine. One line a thing, its latest line under it, muted ---------- */
+      .roster { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+      .roster-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; display: flex; flex-direction: column; gap: 1px; padding: var(--sp-2) 0 var(--sp-3); }
+      .roster-group { display: flex; flex-direction: column; gap: 1px; }
+      .roster-group:empty, .roster-primary:empty { display: none; }
+      .roster-heading {
+        display: flex; align-items: center; min-height: 28px; margin-top: var(--sp-3); padding: 0 var(--sp-2); border-radius: var(--r-sm);
+        color: var(--text-3); font-size: var(--fs-12); font-weight: 550; text-decoration: none;
+      }
+      .roster-heading:hover { color: var(--text); }
+      .roster-row, .roster-needs, .roster-place {
+        display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 44px; padding: 4px var(--sp-2); border: 0; border-radius: var(--r-md);
+        background: none; color: var(--text); font: inherit; text-align: left; text-decoration: none; cursor: pointer;
         -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: background-color var(--d-1) var(--ease-out);
       }
-      .place > svg { flex: none; color: var(--text-2); }
-      .place:active, .place[aria-current="page"] { background: var(--surface-3); }
-      @media (hover: hover) { .place:hover { background: var(--surface-3); } }
-      /* Your latest chats: quieter than the places, as the iPhone's. */
-      .place.quiet { font-weight: 450; color: var(--text-2); }
-      .place.quiet > svg { color: var(--text-3); }
-      .place-count { flex: none; font-size: var(--fs-15); font-weight: 650; color: var(--text-3); }
-      .place-count[data-tone="needs"] { color: var(--text); }
-      .place-count:empty { display: none; }
-      /* (A pointer's sidebar is denser; a finger's keeps 44 px a row.) */
+      .roster-row:active, .roster-needs:active, .roster-place:active, .roster-row[aria-current="page"], .roster-needs[aria-current="page"], .roster-place[aria-current="page"] { background: var(--surface-3); }
+      @media (hover: hover) { .roster-row:hover, .roster-needs:hover, .roster-place:hover { background: var(--surface-3); } }
+      .roster-face { flex: none; display: grid; place-items: center; width: 24px; height: 24px; color: var(--text-3); }
+      .roster-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+      .roster-name, .roster-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .roster-name { font-size: var(--fs-14); font-weight: 550; line-height: 18px; letter-spacing: -0.005em; }
+      .roster-line { font-size: var(--fs-12); line-height: 16px; color: var(--text-3); }
+      .roster-line:empty { display: none; }
+      /* What waits on you is said in ink; a failure in the red, as everywhere. */
+      .roster-row[data-state="needs"] .roster-line { color: var(--text); font-weight: 550; }
+      .roster-row[data-state="failed"] .roster-line { color: var(--failed); }
+      .roster-needs > svg, .roster-place > svg { flex: none; width: 24px; color: var(--text-3); }
+      .roster-needs[data-count="none"] { color: var(--text-2); }
+      .roster-count { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--r-full); background: var(--accent-fill); color: var(--on-accent); font-size: var(--fs-12); font-weight: 650; line-height: 20px; text-align: center; }
+      .roster-count:empty { display: none; }
+      .roster-foot { flex: none; display: flex; flex-direction: column; gap: 1px; padding-top: var(--sp-2); border-top: 1px solid var(--border); }
+      .roster-place { min-height: 36px; color: var(--text-2); font-size: var(--fs-13); }
+      .roster-foot > .side-pill { align-self: flex-start; margin: var(--sp-2) 0 0 var(--sp-1); }
+      /* (A pointer's sidebar is denser, as T3 Code's; a finger's keeps 44 px a row.) */
       @media (pointer: fine) {
-        .sidebar .place { min-height: 34px; gap: 11px; font-size: var(--fs-14); }
-        .sidebar .place > svg { width: 16px; height: 16px; }
-        .sidebar .place-count { font-size: var(--fs-13); }
+        .sidebar :is(.roster-row, .roster-needs) { min-height: 40px; }
+        .sidebar .roster-needs { min-height: 32px; }
+        .sidebar .roster-place { min-height: 30px; }
       }
+      /* A phone's drawer: a finger's rows, and the roster's own head is the sheet's. */
+      dialog.sheet.drawer .roster-name { font-size: var(--fs-15); }
+      dialog.sheet.drawer .roster-line { font-size: var(--fs-13); line-height: 18px; }
+
+      /* Between a phone and a desk (768–1023 px): the roster as a rail of faces, each named by its tooltip and to a screen
+         reader (its words are kept, out of sight). */
+      @media (min-width: 768px) and (max-width: 1023px) {
+        :root { --sidebar-w: 64px; }
+        .sidebar { padding: var(--sp-2) var(--sp-1); }
+        .side-head { flex-direction: column; gap: var(--sp-1); padding: 0; }
+        .side-mark { flex: none; justify-content: center; width: 44px; }
+        .sidebar :is(.wordmark-text, .roster-text), .sidebar .side-pill > .ellipsis {
+          position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+        }
+        /* (What only a wide sidebar has: its headings, the keys' hint and its fold. Each place is in the palette.) */
+        .sidebar :is(.side-keys, .roster-heading), .sidebar .side-head > .btn:last-child { display: none; }
+        .sidebar .roster-group:not(:empty) { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--border); }
+        .sidebar :is(.roster-row, .roster-needs, .roster-place) { position: relative; justify-content: center; gap: 0; min-height: 44px; padding: 0; }
+        .sidebar .roster-count { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; font-size: var(--fs-11); line-height: 16px; }
+        .sidebar .roster-foot > .side-pill { align-self: center; margin: var(--sp-2) 0 0; padding: 0 8px; }
+      }
+      @media (min-width: 1024px) { :root { --sidebar-w: 268px; } }
 
       /* ---------- the work's rows (views/work-rows.ts): a task in three lines, as T3 Code's sidebar has it ---------- */
       .work-row {
@@ -381,63 +407,16 @@
       .work-row[data-attention="working"]:not([aria-current="page"]):not(:hover) .work-l2 { color: var(--text-2); font-weight: 500; }
       .work-row[data-attention="working"]:not([aria-current="page"]):not(:hover) .agent-orb { opacity: 0.62; }
 
-      /* ---------- Home (views/home.ts): your agent, what needs you, the work, its message box ---------- */
-      .shell[data-pane="home"] { --topbar-h: 0px; }
-      .shell[data-pane="home"] .topbar { display: none; }
-      .shell[data-pane="home"] main.view { padding: 0; }
-      .home { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; max-width: 760px; margin: 0 auto; }
-      .home-head {
-        position: sticky; top: 0; z-index: 20; flex-wrap: nowrap; align-items: center; gap: var(--sp-3); margin: 0;
-        padding: calc(var(--safe-top) + var(--sp-3)) calc(var(--sp-4) + var(--safe-right)) var(--sp-3) calc(var(--sp-4) + var(--safe-left));
-        background: var(--bg);
-      }
-      .home-wait { height: 240px; margin: var(--sp-2) calc(var(--sp-3) + var(--safe-right)) 0 calc(var(--sp-3) + var(--safe-left)); border-radius: var(--r-xl); }
+      /* ---------- the work (views/home.ts, Home's address): what needs you, then every task ---------- */
+      .home { display: flex; flex-direction: column; max-width: 760px; margin: 0 auto; }
+      .home > .page-head { margin-bottom: var(--sp-4); }
+      .home-wait { height: 240px; border-radius: var(--r-xl); }
       .home-body[hidden] { display: none; }
       .home-body { display: flex; flex-direction: column; flex: 1; }
-      .home-who { display: flex; align-items: center; gap: var(--sp-3); flex: 1; min-width: 0; }
-      .home-orb { flex: none; display: grid; place-items: center; width: 48px; height: 48px; }
-      /* The I-beam: your agent, and the drawer's button (a finger's 48 px). */
-      .home-drawer { padding: 0; border: 0; border-radius: var(--r-lg); background: none; color: inherit; cursor: pointer; -webkit-touch-callout: none; transition: background-color var(--d-1) var(--ease-out); }
-      .home-drawer:active { background: var(--surface-3); }
-      @media (hover: hover) { .home-drawer:hover { background: var(--surface-3); } }
-      .home-name { flex: 1; min-width: 0; color: inherit; text-decoration: none; }
-      .home-head h1 { font-size: var(--fs-20); letter-spacing: -0.02em; line-height: 1.15; }
-      .home-line { margin-top: 2px; font-size: var(--fs-13); color: var(--text-3); }
-      .home-line[data-tone="needs"] { color: var(--needs); }
-      .home-line[data-tone="accent"] { color: var(--work); }
-      .home-line[data-tone="ok"] { color: var(--ok); }
-      .home-chip {
-        flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 112px; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-full);
-        background: var(--surface); color: var(--text-2); font-size: var(--fs-12); font-weight: 500; text-decoration: none;
-      }
-      .home-chip:hover { border-color: var(--border-strong); color: var(--text); }
-      /* Very narrow (a phone at 200 %): the machine is its dot alone (its name is its label), and a choice's words go
-         before its icon, where both don't fit. */
+      /* Very narrow (a phone at 200 %): a choice's words go before its icon, where both don't fit. */
       @media (max-width: 359px) {
-        .home-chip { padding: 0 9px; }
-        .home-chip > .ellipsis { display: none; }
         .segmented button > svg { display: none; }
       }
-      .home-head > .btn { flex: none; }
-      /* With the sidebar beside it, the I-beam and the machine are its: Home doesn't say them twice. */
-      @media (min-width: 960px) {
-        :root:not([data-sidebar="collapsed"]) .shell:not([data-sidebar-none]) :is(.home-drawer, .home-chip) { display: none; }
-      }
-      /* The agents in a strip, across: each its mark, its name and its state's word, what needs you first. */
-      .home-strip { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; padding: var(--sp-2) calc(var(--sp-2) + var(--safe-right)) var(--sp-4) calc(var(--sp-2) + var(--safe-left)); }
-      .home-strip::-webkit-scrollbar { display: none; }
-      .home-strip[hidden] { display: none; }
-      .home-strip-agent {
-        flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 92px; min-height: 44px; padding: var(--sp-2) 4px; border-radius: var(--r-lg);
-        color: var(--text); text-decoration: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: background-color var(--d-1) var(--ease-out);
-      }
-      .home-strip-agent:active { background: var(--surface-3); }
-      @media (hover: hover) { .home-strip-agent:hover { background: var(--surface-3); } }
-      .home-strip-agent > .seat { margin-bottom: 4px; }
-      .home-strip-name { max-width: 100%; font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.01em; }
-      .home-strip-agent > .state-chip { padding: 0; border: 0; background: none; box-shadow: none; font-size: var(--fs-13); font-weight: 600; }
-      .home-strip-rest { font-size: var(--fs-13); }
-      .home-strip-agent .dot.live { box-shadow: none; }
       .home-needs-more { display: flex; align-items: center; gap: var(--sp-2); min-height: 48px; padding: 0 14px; border-top: 1px solid var(--border); color: var(--text); font-size: var(--fs-15); font-weight: 650; text-decoration: none; }
       .home-needs-more:active { background: var(--surface-3); }
       .home-needs-more > svg { color: var(--text-3); }
@@ -493,8 +472,8 @@
       .home-filters::-webkit-scrollbar { display: none; }
       /* Every target a finger takes is 44 px at least: what is drawn smaller keeps its look and reaches past its edge. */
       @media (pointer: coarse) {
-        .home-filter::after, .home-chip::after, .fold-failed::after { content: ""; position: absolute; inset: calc((100% - 44px) / 2) 0; min-height: 44px; }
-        .home-filter, .home-chip { position: relative; }
+        .home-filter::after, .fold-failed::after { content: ""; position: absolute; inset: calc((100% - 44px) / 2) 0; min-height: 44px; }
+        .home-filter { position: relative; }
         /* (The filters scroll sideways, which clips: their row keeps the room their targets reach into.) */
         .home-filters { padding-block: 9px; margin-block: -9px; }
       }
@@ -531,38 +510,13 @@
       .home-work-rows > .fold-line > .home-fold { padding: 0; }
       .home-empty, .home-note { padding: var(--sp-6) calc(var(--sp-4) + var(--safe-right)) var(--sp-6) calc(var(--sp-4) + var(--safe-left)); border-top: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-14); line-height: 1.5; }
       .home-empty p { max-width: 52ch; margin-bottom: var(--sp-3); }
-      /* Its message box, docked at the foot; the list fades out under it. */
-      .home-dock {
-        position: sticky; bottom: 0; z-index: 15; margin-top: auto; pointer-events: none;
-        padding: var(--sp-8) calc(var(--sp-3) + var(--safe-right)) calc(var(--safe-bottom) + var(--sp-3)) calc(var(--sp-3) + var(--safe-left));
-        background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 0%, transparent), var(--bg) 58%);
-      }
-      .home-dock > * { pointer-events: auto; }
-      .home-dock-problem:empty { display: none; }
-      .home-dock-problem { margin-bottom: var(--sp-2); }
-      .home-composer {
-        display: flex; align-items: flex-end; gap: 4px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 26px; background: var(--surface); box-shadow: var(--shadow-2);
-        transition: border-color var(--d-1) var(--ease-out);
-      }
-      .home-composer:focus-within { border-color: var(--focus); }
-      .home-composer textarea {
-        flex: 1; min-width: 0; min-height: 40px; max-height: 160px; padding: 9px 4px; border: 0; outline: none; background: none; resize: none;
-        color: var(--text); font: inherit; font-size: var(--fs-input); line-height: 22px; field-sizing: content;
-      }
-      .home-composer > .btn { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%; }
-      :root[data-keyboard="open"] .home-dock { padding-bottom: var(--sp-2); }
-      @media (min-width: 960px) {
-        .home-head { padding-top: var(--sp-6); }
-        .home-needs { margin-left: var(--sp-4); margin-right: var(--sp-4); }
-        .home-dock { padding-left: var(--sp-4); padding-right: var(--sp-4); }
-      }
-
-      /* A way back to the roster, where a timeline is the whole screen. (Two classes: .btn would show it.) */
+      /* The roster, on a phone: the arrow at a timeline's start opens it (a wide screen has it beside the pane). (Two
+         classes: .btn would show it.) */
       .btn.pane-back { display: none; }
       /* A timeline (its, an agent's, a room's) has no top bar and no bar under it: its header is whose it is. */
       .shell[data-pane="timeline"] { --topbar-h: 0px; --tabbar-h: 0px; }
       .shell[data-pane="timeline"] .topbar { display: none; }
-      @media (max-width: 959px) {
+      @media (max-width: 767px) {
         .btn.pane-back { display: inline-flex; }
       }
 
@@ -600,9 +554,6 @@
         transition: transform var(--d-spring) var(--ease-spring), opacity var(--d-enter) var(--ease-out), filter var(--d-enter) var(--ease-out), border-color var(--d-3) var(--ease-out);
       }
       @media (pointer: coarse) { .banner-pill { min-height: 44px; } }
-      /* Home has its own header in place of the top bar: the banner hangs under it. */
-      .shell[data-pane="home"] { --banner-top: calc(2 * var(--sp-3) + 48px); }
-      @media (min-width: 960px) { .shell[data-pane="home"] { --banner-top: calc(var(--sp-6) + var(--sp-3) + 48px); } }
       /* (One width while it is up, whatever it says: centred, a capsule that grew or shrank would move on the page.) */
       .banner-pill:not(:has(.btn)) { padding-right: 14px; }
       .banner-pill[data-said="reconnected"] { justify-content: center; }
@@ -695,7 +646,7 @@
       .rows > a.item:active, .rows > .item-button:active { background: var(--surface-3); }
       .suggestion { transition: background-color var(--d-1) var(--ease-out), transform var(--d-1) var(--ease-out); }
       .suggestion:active { transform: scale(0.97); }
-      @media (max-width: 959px) { .work-row:active { transform: scale(0.99); } }
+      @media (max-width: 767px) { .work-row:active { transform: scale(0.99); } }
       /* A whole row that goes to a place (More's index, a node on the Overview). */
       .rows > a.item { color: inherit; text-decoration: none; }
       .rows > a.item:hover { background: var(--surface-2); }
@@ -1192,7 +1143,7 @@
          coloured slab (ui/toast.ts). It comes into focus as it rises and leaves with a short fade and drop. On a phone
          the stack rises above what a page keeps docked at its foot (--dock-h: a composer's height, where there is one). */
       .toaster { position: fixed; z-index: 1000; right: calc(var(--sp-4) + var(--safe-right)); bottom: max(calc(var(--sp-4) + var(--safe-bottom)), calc(var(--dock-h, 0px) + var(--sp-2))); width: min(380px, calc(100vw - 32px)); pointer-events: none; }
-      @media (max-width: 959px) { .toaster { left: 50%; right: auto; transform: translateX(-50%); bottom: max(calc(var(--tabbar-h) + var(--safe-bottom) + var(--sp-3)), calc(var(--dock-h, 0px) + var(--sp-2))); } }
+      @media (max-width: 767px) { .toaster { left: 50%; right: auto; transform: translateX(-50%); bottom: max(calc(var(--tabbar-h) + var(--safe-bottom) + var(--sp-3)), calc(var(--dock-h, 0px) + var(--sp-2))); } }
       .toast {
         --i: 0; position: absolute; right: 0; bottom: 0; width: 100%; pointer-events: auto; overflow: hidden;
         display: flex; align-items: flex-start; gap: 10px; padding: 14px 10px 14px var(--sp-4);
@@ -1406,13 +1357,21 @@
       .thread-said-by > strong { color: var(--text); font-weight: 600; }
       .thread-said > .md { font-size: var(--fs-14); line-height: 1.6; }
       /* What proves it, apart from the agent's words: its own ground and edge in its verdict's colour. */
-      .proof { --verdict: var(--ok); display: flex; flex-direction: column; margin-top: var(--sp-1); border-radius: var(--r-xl); background: var(--surface-2); overflow: hidden; }
+      .proof { --verdict: var(--ok); display: flex; flex-direction: column; margin-top: var(--sp-1); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface); overflow: hidden; }
       .proof[data-verdict="failed"] { --verdict: var(--failed); }
-      .proof > * + * { border-top: 1px solid var(--border); }
-      .proof-seal { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; line-height: 1.4; }
-      .proof-seal strong { color: var(--verdict); font-size: var(--fs-16); font-weight: 750; letter-spacing: -0.01em; }
-      .proof-by { color: var(--text-2); font-size: var(--fs-15); }
-      .proof-mark { flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-top: -1px; border-radius: 50%; background: var(--verdict); color: var(--bg); }
+      .proof > * + *, .proof-body > * { border-top: 1px solid var(--border); }
+      /* Its one line (the owner's word, 27 November 2026): its verdict's mark and word, what its gates came to and what it
+         changed, a warning's mark where one is said inside, and the fold's chevron. */
+      .proof-seal { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; padding: 0 14px; list-style: none; cursor: pointer; font-size: var(--fs-14); line-height: 20px; -webkit-user-select: none; user-select: none; }
+      .proof-seal::-webkit-details-marker { display: none; }
+      .proof-seal strong { flex: none; color: var(--verdict); font-weight: 650; letter-spacing: -0.005em; }
+      .proof-sum { flex: 0 1 auto; min-width: 0; color: var(--text-2); }
+      .proof-warned { flex: none; display: grid; place-items: center; color: var(--warn); }
+      .proof-seal .chev { flex: none; margin-left: auto; color: var(--text-3); transition: transform var(--d-1) var(--ease-out); }
+      .proof-fold[open] > .proof-seal .chev { transform: rotate(90deg); }
+      @media (hover: hover) { .proof-seal:hover { background: var(--surface-2); } }
+      .proof-by { padding: 9px 14px; color: var(--text-2); font-size: var(--fs-13); line-height: 1.45; }
+      .proof-mark { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--verdict); color: var(--bg); }
       .proof-caveat { display: flex; align-items: flex-start; gap: var(--sp-2); padding: 8px 14px; color: var(--warn); font-size: var(--fs-12); line-height: 1.45; }
       .proof-caveat > svg { flex: none; margin-top: 1px; }
       .proof-gates { display: flex; flex-direction: column; margin: 0; padding: 4px 0; list-style: none; }
@@ -1474,7 +1433,7 @@
       .td-gate[data-state="running"] .td-icon { color: var(--work); }
       .td-gate[data-state="waiting"] code { color: var(--text-3); }
       .td-note { font-size: var(--fs-12); color: var(--text-3); line-height: 1.45; }
-      @media (min-width: 960px) {
+      @media (min-width: 768px) {
         .thread-head { padding: 0 var(--sp-3) 0 var(--sp-5); min-height: 48px; }
         .thread-head-face { order: -1; }
         .thread-details:not([hidden]) {
@@ -1484,7 +1443,7 @@
         /* The thread keeps clear of the card beside it, where there is room for both. */
         .thread-body:has(> .thread-details:not([hidden])) :is(.thread-items, .thread-live, .thread-composer-wrap) { max-width: min(760px, calc(100% - 368px)); margin-right: 368px; }
       }
-      @media (max-width: 959px) {
+      @media (max-width: 767px) {
         .thread-head { gap: var(--sp-2); padding-left: var(--sp-2); }
         .thread-crumb { flex-direction: column; align-items: flex-start; gap: 1px; }
         .thread-crumb-project, .thread-crumb-sep { display: none; }
@@ -1505,7 +1464,8 @@
       .team-body { display: flex; flex: 1; min-height: 0; }
       .team-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
       /* An agent's side panel, beside its timeline from 1200 px (views/team.ts renderSide): the agent in its seat and what
-         it is doing, its tasks, its workspace, its working notes. Shown unless hidden on this device; never on a phone. */
+         it is doing, its tasks, its workspace, its working notes. Toggled from its title bar, as T3 Code's diff panel is:
+         shown once you open it on this device; never on a phone. */
       .team-side, .btn.side-toggle { display: none; }
       @media (min-width: 1200px) {
         .team-side { display: flex; flex-direction: column; gap: var(--page-gap); flex: none; width: clamp(300px, 24vw, 380px); min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-5) var(--sp-5) var(--sp-8); border-left: 1px solid var(--border); }
@@ -1520,14 +1480,20 @@
       .team-side-notes { color: var(--text-2); font-size: var(--fs-13); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
       .team-head-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
       .team-head-title h2 { min-width: 0; }
-      .team-head { display: flex; align-items: center; gap: var(--sp-3); padding: calc(var(--safe-top) + var(--sp-4)) var(--sp-5) var(--sp-4); min-height: 78px; }
+      /* Its title bar: slim, as T3 Code's (the owner's word, 27 November 2026): its face, its name and state, what it works
+         on in a muted line after them, and two or three actions; a hairline under it. */
+      .team-head { display: flex; align-items: center; gap: var(--sp-2); padding: calc(var(--safe-top) + 8px) var(--sp-4) 8px var(--sp-5); min-height: 52px; border-bottom: 1px solid var(--border); }
+      /* (Its placeholder too, while the room is asked for: a stack of two lines there made it 3 px taller than the bar it
+         holds the place of, and the timeline rose as the room came.) */
+      .team-head > .grow { display: flex; flex-direction: row; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+      .team-head > .grow > .meta { flex: 1; min-width: 0; font-size: var(--fs-13); }
       .team-head:empty { display: none; }
       /* Its place held while the room is asked for (views/team.ts): a face, the name, the line under it. */
-      .team-head-face { flex: none; width: 40px; height: 40px; border-radius: 50%; }
+      .team-head-face { flex: none; width: 28px; height: 28px; border-radius: 50%; }
       .team-head > .seat { align-self: center; }
       .team-head-name { width: 120px; height: 18px; }
       .team-head-line { width: 200px; max-width: 100%; }
-      .team-head h2 { font-size: var(--fs-16); font-weight: 650; letter-spacing: -0.015em; }
+      .team-head h2 { font-size: var(--fs-15); font-weight: 600; letter-spacing: -0.01em; }
       .team-head > .btn { flex: none; }
       .team-content { min-height: 0; overflow: auto; overscroll-behavior: contain; flex: 1; }
       .team-panel { padding: var(--sp-6); max-width: 980px; margin: 0 auto; }
@@ -1609,8 +1575,9 @@
       .task-gates { display: flex; align-items: baseline; gap: 6px; color: var(--text-2); font: var(--fs-12)/1.5 var(--font-mono); overflow-wrap: anywhere; }
       .task-gates > svg { flex: none; align-self: center; }
       .task-gates > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-      /* Its latest line, two lines tall from the start: a line arriving or lengthening fills it, it doesn't grow the card. */
-      .task-latest { min-height: 3em; color: var(--text-2); font: var(--fs-12)/1.5 var(--font-mono); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+      /* Its latest line, one line tall from the start (compact, the owner's word of 27 November 2026): a line arriving or
+         lengthening fills it and ends in an ellipsis, it doesn't grow the card. */
+      .task-latest { height: 1.5em; color: var(--text-2); font: var(--fs-12)/1.5 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .task-why { color: var(--text-2); font-size: var(--fs-13); line-height: 1.5; overflow-wrap: anywhere; }
       .task-said { color: var(--text-2); font-size: var(--fs-13); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
       .task-kept { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-12); color: var(--text-2); }
@@ -1630,9 +1597,10 @@
       .give-choice h3 { font-size: var(--fs-18); font-weight: 650; letter-spacing: -0.015em; }
       .team-person-summary { display: flex; align-items: flex-start; gap: var(--sp-3); }
       .team-workspace-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-5); border: 1px dashed var(--border-strong); border-radius: var(--r-lg); }
-      @media (min-width: 960px) { .team-layout { height: calc(100dvh - var(--topbar-h)); } }
+      @media (min-width: 768px) { .team-layout { height: calc(100dvh - var(--topbar-h)); } }
       @media (max-width: 719px) {
-        .team-head { padding: calc(var(--safe-top) + var(--sp-3)) var(--sp-3) var(--sp-3); gap: var(--sp-2); min-height: 70px; }
+        .team-head { padding: calc(var(--safe-top) + 6px) var(--sp-3) 6px; gap: var(--sp-2); min-height: 56px; }
+        .team-head > .grow { flex-direction: column; align-items: stretch; gap: 0; }
         .team-head > .badge { display: none; }
         .team-head > .avatar { display: none; }
         .team-thread, .team-panel { padding: var(--sp-4); }
@@ -1677,7 +1645,7 @@
 
       /* ---------- chat ---------- */
       .chat { display: flex; flex-direction: column; max-width: 820px; margin: 0 auto; min-height: calc(100dvh - var(--tabbar-h) - var(--safe-bottom)); }
-      @media (min-width: 960px) { .chat { min-height: 100dvh; } }
+      @media (min-width: 768px) { .chat { min-height: 100dvh; } }
       /* The chat's header is your agent itself, and on this page it takes the top bar's place: its face and what it's
          doing now in a line (a tap shows what it has in hand), then your chats, a new one, and the chat's one menu. */
       .shell[data-route="chat"] main.view { padding-top: 0; }
@@ -1767,7 +1735,7 @@
          composer's resting place and its sticky place coincide (nothing hides behind it). */
       .composer-wrap { position: sticky; bottom: calc(var(--tabbar-h) + var(--safe-bottom)); padding: var(--sp-2) 0 var(--sp-3); background: linear-gradient(to top, var(--bg) 70%, transparent); z-index: 5; }
       .shell[data-route="chat"] main.view { padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom)); }
-      @media (min-width: 960px) {
+      @media (min-width: 768px) {
         .composer-wrap { bottom: 0; padding-bottom: var(--sp-5); }
         .shell[data-route="chat"] main.view { padding-bottom: 0; }
       }
@@ -1807,7 +1775,7 @@
       .composer-hint > .hint { min-width: 0; }
       .composer:focus-within:has(textarea:not(:placeholder-shown)) .composer-hint { display: flex; }
       /* Its placeholder on one line however narrow the box (a phone at 200 %): wrapped, it made the empty box three lines tall. */
-      .composer textarea::placeholder, .home-composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .composer .hint { font-size: var(--fs-12); color: var(--text-3); }
       /* Files with your next message, above its words; a box they're dropped on is outlined. */
       .composer.dropping { border-color: var(--focus); box-shadow: var(--shadow-2), 0 0 0 3px color-mix(in srgb, var(--focus) 24%, transparent); }

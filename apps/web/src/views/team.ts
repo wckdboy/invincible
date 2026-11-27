@@ -32,6 +32,7 @@ import { showLatest, taskCard } from "./task-card.ts";
 import { controlTeam, editAgent, editNotes, editRoom, exportAgent, giveTask, growVm, provisionVm, remakeVm, removeAgent, setCiBack, setEngram, shipTask, steerTask } from "./team-forms.ts";
 import { openTerminal } from "./terminal.ts";
 import { openWorkspace } from "./workspace.ts";
+import { rosterBack } from "./sidebar.ts";
 
 /*
  * An agent, or a room, as one timeline: what was said and the tasks given, in the order they happened, each task a
@@ -151,7 +152,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   };
 
   /** The way back to the roster (a phone's; a wide screen has the roster beside it). */
-  const backLink = () => h("a", { class: "btn ghost sm icon-only pane-back", href: "#/team", "aria-label": "The agents", title: "The agents" }, icon("chevron-left", { size: 16 }));
+  const backLink = () => rosterBack(ctx);
 
   function renderHead(): void {
     if (!room || !snapshot) {
@@ -180,7 +181,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
       replace(
         head,
         backLink(),
-        person ? (seated ? seatFace(seated, 32) : avatar(person)) : h("span", { class: "avatar" }, icon("hash")),
+        person ? (seated ? seatFace(seated, 28) : avatar(person)) : h("span", { class: "avatar" }, icon("hash")),
         h(
           "div",
           { class: "grow" },

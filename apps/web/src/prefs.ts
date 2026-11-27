@@ -150,14 +150,12 @@ export function setWorkOpen(section: WorkFold, opened: boolean): void {
   write("work", now.size ? [...now].sort().join(",") : null);
 }
 
-/** Whether an agent's page shows its side panel beside the timeline on a wide screen (it does unless you hid it). */
-export const agentPanelShown = (): boolean => read("panel") !== "hidden";
-export const setAgentPanelShown = (shown: boolean): void => write("panel", shown ? null : "hidden");
+/** Whether an agent's page shows its side panel beside the timeline on a wide screen: only once you open it (the owner's
+ * word, 27 November 2026: a right panel toggled as T3 Code's diff panel is), and then as you last left it. */
+export const agentPanelShown = (): boolean => read("panel") === "shown";
+export const setAgentPanelShown = (shown: boolean): void => write("panel", shown ? "shown" : null);
 
-/** Whether a task's details card shows beside its thread on a wide screen: as you last left it, else where there is room
- * for it (1200 px and wider). */
-export const taskDetailsShown = (wide: boolean): boolean => {
-  const said = read("details");
-  return said === "shown" ? true : said === "hidden" ? false : wide;
-};
+/** Whether a task's details panel shows beside its thread on a wide screen: only once you open it (the owner's word, 27
+ * November 2026: a right panel toggled as T3 Code's diff panel is), and then as you last left it. */
+export const taskDetailsShown = (): boolean => read("details") === "shown";
 export const setTaskDetailsShown = (shown: boolean): void => write("details", shown ? "shown" : "hidden");

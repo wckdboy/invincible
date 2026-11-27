@@ -47,10 +47,10 @@ import { forgetThisBrowser, settingsView } from "./views/settings.ts";
 import { evalsView } from "./views/evals.ts";
 import { teamView } from "./views/team.ts";
 import { homeView } from "./views/home.ts";
-import { openPlaces } from "./views/places.ts";
-import { sidebarNav } from "./views/sidebar.ts";
+import { openRoster, type Sidebar, sidebarNav } from "./views/sidebar.ts";
 import { taskView } from "./views/task.ts";
-import { giveToAgents } from "./views/team-forms.ts";
+import { giveToAgents, openDirect } from "./views/team-forms.ts";
+import { tableOf } from "./views/roster.ts";
 import { teamLocation } from "./lib/team.ts";
 import { openAddKey, vaultView } from "./views/vault.ts";
 import { seatsView } from "./views/seats.ts";
@@ -97,7 +97,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   const visible = placesFor(can);
   // (Whether this device sees the work at all: a device that may not chat has no sidebar of it, and opens on its Inbox.)
   const hasWork = visible.some((spec) => spec.id === "home");
-  const narrow = matchMedia("(max-width: 959px)");
+  const narrow = matchMedia("(max-width: 767px)");
   const home = (): Route => homeOf(visible, { narrow: narrow.matches });
 
   let current: Route | null = null;
@@ -164,38 +164,48 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   const main = h("main", { class: "view", id: "main", tabindex: -1 });
   const banner = h("div", { class: "banner", role: "status", hidden: true });
   const topTitle = h("span", { class: "title" });
-  // (Where the app opens depends on the screen: these follow it.)
-  const homeLinks: HTMLAnchorElement[] = [];
-  const homeLink = (className: string, label: string, ...content: (HTMLElement | SVGElement)[]): HTMLAnchorElement => {
-    const a = h("a", { class: className, href: `#/${home()}`, "aria-label": label, title: label }, ...content);
-    homeLinks.push(a);
-    return a;
-  };
 
-  // The sidebar, on a wide screen (views/sidebar.ts): the drawer's places, kept open, beside Home. A phone has none: Home's
-  // I-beam, "…" in a page's top bar or a swipe from the left edge opens the drawer (views/places.ts).
-  const sidebar = hasWork ? sidebarNav(ctx, { toggle: () => toggleSidebar() }) : null;
+  // The roster (views/sidebar.ts): a sidebar beside the pane on a wide screen, a rail of faces on one between. A phone has
+  // none: the arrow at a timeline's start, the top bar's button or a swipe from the left edge opens it as a drawer.
+  // Made only where it shows (from 768 px), and again as the screen grows to that: a phone's roster is its drawer, made as
+  // it opens, so a phone does none of the sidebar's work (its faces, its table kept true; it was made there and hidden, and
+  // a phone's first render paid for it).
+  let sidebar: Sidebar | null = null;
+  let sidebarAt: Parameters<Sidebar["at"]>[0] | null = null;
+  const syncSidebar = (): void => {
+    const shows = hasWork && !narrow.matches;
+    if (shows && !sidebar) {
+      sidebar = sidebarNav(ctx, { toggle: () => toggleSidebar() });
+      shell.prepend(sidebar.el);
+      if (sidebarAt) sidebar.at(sidebarAt);
+    } else if (!shows && sidebar) {
+      sidebar.dispose();
+      sidebar.el.remove();
+      sidebar = null;
+    }
+  };
   // A sidebar folded away comes back from the top of the page, as T3 Code's does.
   const expand = button("Show the sidebar", { variant: "ghost", size: "sm", iconOnly: true, icon: "sidebar", title: "Show the sidebar  ( [ )", onClick: () => toggleSidebar() });
   expand.classList.add("side-expand");
-  // Search on a phone: a button at the top bar's end, which the palette grows out of; everything else beside it ("…").
+  // Search on a phone: a button at the top bar's end, which the palette grows out of.
   const searchButton = (): HTMLButtonElement =>
     button("Search", { variant: "ghost", iconOnly: true, icon: "search", onClick: (event) => ctx.palette(undefined, event.currentTarget as Element), label: `Search and commands (${isMac() ? "⌘" : "Ctrl"}+K)` });
-  const placesButton = (): HTMLButtonElement => {
-    const el = button("Everything else", { variant: "ghost", iconOnly: true, icon: "more", onClick: () => openPlaces(ctx) });
-    el.classList.add("places-button");
+  // The roster, on a phone: its agents, what needs you, and everything else, from the top bar's start (or a swipe).
+  const rosterButton = (): HTMLButtonElement => {
+    const el = button("Your agents", { variant: "ghost", iconOnly: true, icon: "chevron-left", onClick: () => openRoster(ctx) });
+    el.classList.add("roster-button");
     return el;
   };
 
   const topSearch = searchButton();
   topSearch.classList.add("topbar-search");
-  // Top bar (a place's page; Home and a thread have their own header): the way home, the title once the page's own has
-  // scrolled away, and at its end what is going on, search and everything else.
+  // Top bar (a place's page; a thread has its own header): on a phone the roster's button, the title once the page's own
+  // has scrolled away, and at its end what is going on and search.
   const fleetPill = h("a", { class: "fleet-pill", href: "#/fleet", hidden: !can("mind:read") });
   const topbar = h(
     "header",
     { class: "topbar" },
-    homeLink("brand-mini", "Home", icon("chevron-left", { size: 18 }), appMark(22)),
+    rosterButton(),
     topTitle,
     h(
       "div",
@@ -203,12 +213,12 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       chatActivityPill(),
       fleetPill,
       topSearch,
-      placesButton(),
     ),
   );
 
   // (A device with no work to show has no sidebar: its top bar keeps the way home, search and "…" on any screen.)
-  const shell = h("div", { class: "shell", "data-sidebar-none": sidebar ? null : "" }, sidebar?.el ?? null, h("div", { class: "main-col" }, sidebar ? expand : null, topbar, banner, main));
+  const shell = h("div", { class: "shell", "data-sidebar-none": hasWork ? null : "" }, h("div", { class: "main-col" }, hasWork ? expand : null, topbar, banner, main));
+  syncSidebar();
   replace(root, shell);
 
   // ---------- the on-screen keyboard ----------
@@ -273,7 +283,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       const decided = swiped(edge, { x: touch.clientX, y: touch.clientY }, 1);
       if (decided === null) return;
       edge = null;
-      if (decided) openPlaces(ctx);
+      if (decided) openRoster(ctx);
     },
     { passive: true, signal: lifetime.signal },
   );
@@ -356,10 +366,7 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   /** How often the team is asked for (while the node's live stream is down): every two seconds where the work is the page
    * (Home, a task, the agents), slowly while it is only the sidebar, never when nothing shows it. */
   const watch = (): void => live.watchTeam(!hasWork ? null : current === "home" || current === "task" || current === "team" ? 2000 : narrow.matches ? null : 6000);
-  narrow.addEventListener("change", () => (watch(), syncHome()), { signal: lifetime.signal });
-  const syncHome = (): void => {
-    for (const a of homeLinks) a.href = `#/${home()}`;
-  };
+  narrow.addEventListener("change", () => (watch(), syncSidebar()), { signal: lifetime.signal });
 
   function render(): void {
     const route = routeFromHash() ?? home();
@@ -372,9 +379,10 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     current = route;
     shell.dataset.route = route;
     // A thread (its, an agent's, a room's, a task's) has no top bar: its header is whose it is. On a phone it is the whole
-    // screen, with its way back. Home has its own header too.
-    shell.dataset.pane = route === "home" ? "home" : route === "chat" || route === "task" || (route === "team" && opts.room) ? "timeline" : "page";
-    sidebar?.at({ route, task: route === "task" ? (opts.task ?? null) : null });
+    // screen, its arrow opening the roster.
+    shell.dataset.pane = route === "chat" || route === "task" || (route === "team" && opts.room) ? "timeline" : "page";
+    sidebarAt = { route, room: route === "team" ? (opts.room ?? null) : null, task: route === "task" ? (opts.task ?? null) : null };
+    sidebar?.at(sidebarAt);
     watch();
     topTitle.textContent = spec.label;
     titleLabel = spec.label;
@@ -457,11 +465,18 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
         { id: "sidebar", label: "Show or hide the sidebar", group: "Appearance", icon: "sidebar", hint: "[", run: toggleSidebar },
       ];
       const device: Command[] = [
-        { id: "places", label: "Everything else…", group: "Go to", icon: "more", keywords: ["places", "menu", "index", "more", "settings"], run: () => openPlaces(ctx) },
+        { id: "places", label: "Everything else…", group: "Go to", icon: "more", keywords: ["places", "menu", "index", "more", "settings"], run: () => ctx.navigate("more") },
         { id: "shortcuts", label: "Keyboard shortcuts", group: "Help", icon: "command", hint: "?", run: openShortcuts },
         { id: "forget", label: "Forget this browser…", group: "Help", icon: "logout", keywords: ["sign out", "unpair", "remove key"], run: () => void forgetThisBrowser() },
       ];
-      return [...go, ...actions, ...appearance, ...device];
+      // The roster's own (⌘K for everything else, the owner's word of 27 November 2026): each agent and each room, by name
+      // and by what it is doing.
+      const table = can("chat") ? tableOf(ctx) : null;
+      const agents: Command[] = (table?.seats ?? [])
+        .filter((seat) => seat.id !== "primary")
+        .map((seat) => ({ id: `agent:${seat.id}`, label: seat.name, group: "Agents", icon: "agents", keywords: [seat.line], run: () => (seat.room ? ctx.navigate("team", { room: seat.room }) : void openDirect(ctx, { id: seat.id })) }));
+      const rooms: Command[] = (table?.rooms ?? []).map((room) => ({ id: `room:${room.id}`, label: room.name, group: "Rooms", icon: "hash", keywords: [room.line], run: () => ctx.navigate("team", { room: room.id }) }));
+      return [...go, ...agents, ...rooms, ...actions, ...appearance, ...device];
     },
     dynamic(query: string): Command[] {
       const out: Command[] = [];
@@ -470,6 +485,12 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       const words = query.toLowerCase().split(/\s+/).filter(Boolean);
       for (const p of projects.filter((p) => words.every((w) => `${p.name} ${p.id}`.toLowerCase().includes(w))).slice(0, 3)) {
         out.push({ id: `project:${p.id}`, label: p.name, group: "Projects", icon: "folder", run: () => ctx.navigate("projects", { project: p.id }) });
+      }
+      // Tasks by their titles, theirs that need you first (as the work lists them), five at most.
+      const work = hasWork && can("chat") ? workNow(ctx) : null;
+      if (work) {
+        const tasks = [...work.needs, ...work.active, ...work.working, ...work.done].filter((row) => words.every((w) => `${row.title} ${row.agent.name} ${row.project.name}`.toLowerCase().includes(w)));
+        for (const row of tasks.slice(0, 5)) out.push({ id: `task:${row.id}`, label: row.title, group: "Tasks", icon: "layers", hint: `${row.agent.name} · ${row.word}`, run: () => ctx.navigate("task", { task: row.id }) });
       }
       for (const c of filterConversations(chats, query, projectName).slice(0, 5)) {
         out.push({ id: `chat:${c.id}`, label: c.title, group: "Chats", icon: c.pinned ? "pin" : "chat", hint: c.project ? projectName(c.project) : undefined, run: () => ctx.navigate("chat", { conversation: c.id }) });
