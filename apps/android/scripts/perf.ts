@@ -3,12 +3,14 @@
  * The Android app held to its performance budgets (apps/android/perf/Budgets.json), on an emulator against a dev node
  * with a busy fleet (apps/apple/scripts/dev-node.ts --heavy --auto-approve), its front reached with adb reverse:
  *   - cold start: am start -W's TotalTime, the median of five;
- *   - requests at rest: what the app asks the dev node's counting front in a minute with Home in front and nothing changing;
- *   - a change shown: a device asking to join (/__dev/poke) until Home's count of what needs you says it, by the app's own
+ *   - requests at rest: what the app asks the dev node's counting front in a minute with its first screen in front (the
+ *     primary's conversation, since 27 November 2026) and nothing changing;
+ *   - a change shown: a device asking to join (/__dev/poke) until the app's count of what needs you says it, by its own
  *     mark in the log (PerfProbe: debuggable builds only), three times;
  *   - a dead link: the front a black hole (/__dev/blackhole) until the app says it can't reach its node, then back, three
  *     times, each after the link has been up half a minute (one cut sooner backs off, by the shared rule);
- *   - Home scrolled: dumpsys gfxinfo's janky frames over eight swipes down and up.
+ *   - the work scrolled: dumpsys gfxinfo's janky frames over eight swipes down and up on Work (opened from the roster's
+ *     foot, as a person does: the app opens on the primary's conversation, whose fresh chat is too short to scroll).
  * A number over its limit fails the run (exit 1); a target missed is said in every run. The Mac's load is said beside
  * the numbers: timing on a shared Mac is only as good as its quiet.
  *
@@ -85,7 +87,7 @@ for (let i = 0; i < 5; i++) {
 }
 results.coldStartMs = { each: starts, median: median(starts) };
 
-// At rest: Home in front, a minute, nothing changing.
+// At rest: its first screen in front (the primary's conversation), a minute, nothing changing.
 await sleep(5000);
 const since = Date.now();
 await sleep(60_000);
@@ -120,9 +122,25 @@ log.stop();
 results.deadLinkNoticedMs = { each: noticed, worst: Math.max(...noticed) };
 results.deadLinkBackMs = { each: back, worst: Math.max(...back) };
 
-// Home scrolled.
+// The work scrolled: Work opened from the roster's foot (the roster's button, then its row), each found by its words in
+// the screen's accessibility tree, as a person finds them.
 await adb("shell", "am", "start", "-n", ACTIVITY);
 await sleep(3000);
+// (The tree is read again a few times while the screen settles; one other reader of it, such as a device panel's helper,
+// holds it from this one.)
+for (const label of ["Your agents", "Work"]) {
+  let bounds: RegExpExecArray | null = null;
+  for (let tries = 0; !bounds && tries < 5; tries++) {
+    if (tries) await sleep(1000);
+    const tree = await adb("exec-out", "uiautomator", "dump", "/dev/tty");
+    const node = [...tree.matchAll(/<node [^>]*>/g)].map((m) => m[0]).find((n) => n.includes(`content-desc="${label}"`) || n.includes(`text="${label}"`));
+    bounds = node ? /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(node) : null;
+  }
+  if (!bounds) throw new Error(`nothing to press on the screen: ${label} (is another reader of its accessibility tree open?)`);
+  const [x1, y1, x2, y2] = bounds.slice(1).map(Number);
+  await adb("shell", "input", "tap", String(Math.round((x1! + x2!) / 2)), String(Math.round((y1! + y2!) / 2)));
+  await sleep(1500);
+}
 await adb("shell", "dumpsys", "gfxinfo", PKG, "reset");
 for (let i = 0; i < 8; i++) {
   await adb("shell", "input", "swipe", "540", "1800", "540", "500", "250");

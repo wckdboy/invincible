@@ -64,7 +64,7 @@ import androidx.compose.ui.text.withStyle
  * A fresh chat opens with what happened while you were away, from the node's own record (no model writes it).
  */
 @Composable
-fun ChatScreen(app: AppModel, back: () -> Unit, openTask: (String) -> Unit = {}) {
+fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, root: Boolean = false, openTask: (String) -> Unit = {}) {
     val chat = app.chat
     val bubbles by chat.bubbles.collectAsState()
     val live by chat.live.collectAsState()
@@ -95,9 +95,22 @@ fun ChatScreen(app: AppModel, back: () -> Unit, openTask: (String) -> Unit = {})
         return
     }
     Column(Modifier.fillMaxSize().imePadding()) {
-        PageBar(title ?: Primary.name, back) {
-            TextButton(onClick = { listing = true }) { Text("Chats") }
-            TextButton(onClick = { chat.fresh() }, enabled = !live) { Text("New") }
+        // Almost no chrome (the owner's word, 27 November 2026): at the root its top-left opens the roster (a phone's drawer;
+        // a wide screen has it beside), elsewhere it goes back; its name; and one menu, a new chat and your chats.
+        val lead: (@Composable () -> Unit)? = when {
+            !root -> null
+            roster != null -> ({ androidx.compose.material3.IconButton(onClick = roster) { Icon(PanelIcon, contentDescription = "Your agents") } })
+            else -> ({})
+        }
+        PageBar(title ?: Primary.name, back, navigation = lead) {
+            var options by remember { mutableStateOf(false) }
+            androidx.compose.foundation.layout.Box {
+                androidx.compose.material3.IconButton(onClick = { options = true }) { Icon(MoreIcon, contentDescription = "Chat options") }
+                androidx.compose.material3.DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("New chat") }, enabled = !live, onClick = { options = false; chat.fresh() })
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("Chats") }, onClick = { options = false; listing = true })
+                }
+            }
         }
         LazyColumn(Modifier.weight(1f), state = list) {
             item {
@@ -121,12 +134,14 @@ fun ChatScreen(app: AppModel, back: () -> Unit, openTask: (String) -> Unit = {})
                     }
                 }
             }
-            if (bubbles.isEmpty() && away.isNotEmpty()) {
+            // (What needs your answer is counted once: the head above says it, live, so the card leaves its own count out.)
+            val awayShown = sh.invincible.bot.core.Away.shown(away, countShown = table.primary.tone == "warn")
+            if (bubbles.isEmpty() && awayShown.isNotEmpty()) {
                 item {
                     Panel {
                         Text("While you were away", style = MaterialTheme.typography.titleSmallEmphasized)
                         val brand = LocalBrand.current
-                        for (line in away) {
+                        for (line in awayShown) {
                             val color = when (line["tone"].string) { "ok" -> brand.done; "warn" -> brand.needs; "danger" -> brand.failed; else -> MaterialTheme.colorScheme.onSurfaceVariant }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
                                 Dot(color)

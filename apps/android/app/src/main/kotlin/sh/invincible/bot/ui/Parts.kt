@@ -85,10 +85,11 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun PageBar(title: String, back: () -> Unit, actions: @Composable RowScope.() -> Unit = {}) {
+fun PageBar(title: String, back: () -> Unit, navigation: (@Composable () -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
     TopAppBar(
         title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        navigationIcon = { IconButton(onClick = back) { Icon(BackIcon, contentDescription = "Back") } },
+        // (Back, unless the page says otherwise: the primary's conversation, at the root, opens the roster there instead.)
+        navigationIcon = navigation ?: { IconButton(onClick = back) { Icon(BackIcon, contentDescription = "Back") } },
         actions = actions,
         windowInsets = WindowInsets(0),
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),

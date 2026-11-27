@@ -37,10 +37,11 @@ import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.Primary
 
 /**
- * Where you are, as an address, and where you came from: Home (the primary) at the root, then each page you opened from it.
- * Every page the app has is one of these, so anything that opens one (a tap, a notification, a link) opens it the same
- * way: "home", "chat", "task:<id>", "agent:<handle>", "room:<id>", "agents", "inbox", "settings", "keys",
- * "connectors", "mac:<node>", "desktop:<handle>", "terminal:<sandbox>". Kept across a rotation.
+ * Where you are, as an address, and where you came from: the primary's conversation at the root (the owner's word, 27
+ * November 2026: the app opens on it, as Grok Bot's and OpenMausBot's do, the roster a drawer beside it), then each page you
+ * opened from it. Every page the app has is one of these, so anything that opens one (a tap, a notification, a link) opens
+ * it the same way: "chat", "home" (the work), "task:<id>", "agent:<handle>", "room:<id>", "agents", "inbox", "settings",
+ * "keys", "connectors", "mac:<node>", "desktop:<handle>", "terminal:<sandbox>". Kept across a rotation.
  */
 @Stable
 class Nav(private val stack: MutableState<List<String>>) {
@@ -55,12 +56,13 @@ class Nav(private val stack: MutableState<List<String>>) {
         if (top != address) stack.value = stack.value + address
     }
 
-    /** Opens a page straight from Home (a sidebar's row, a notification, the "…" sheet's places): Back returns Home. */
+    /** Opens a page straight from the root (the roster's row, a notification, the "…" sheet's places): Back returns to the
+     * primary's conversation. */
     fun open(address: String) {
-        stack.value = if (address == HOME) listOf(HOME) else listOf(HOME, address)
+        stack.value = if (address == ROOT) listOf(ROOT) else listOf(ROOT, address)
     }
 
-    /** Back: the page under this one. False at Home. */
+    /** Back: the page under this one. False at the root. */
     fun back(): Boolean {
         if (stack.value.size <= 1) return false
         stack.value = stack.value.dropLast(1)
@@ -73,6 +75,9 @@ class Nav(private val stack: MutableState<List<String>>) {
     }
 
     companion object {
+        /** Where the app opens, and Back ends: the primary's conversation. */
+        const val ROOT = "chat"
+        /** The work's address (it was Home): what needs you and every task, from the roster's foot. */
         const val HOME = "home"
         fun task(id: String) = "task:$id"
         fun agent(id: String) = "agent:$id"
@@ -100,6 +105,8 @@ fun PlacesSheet(app: AppModel, nav: Nav, give: () -> Unit, close: () -> Unit) {
         Place(ComposeIcon, "Ask ${Primary.name}", "A new conversation with ${Primary.name}") { app.chat.fresh(); go("chat") },
     )
     val places = listOf(
+        // (Search was Home's bar's: the app opens on the primary's conversation now.)
+        Place(SearchIcon, "Search", "Your tasks, chats, agents and places") { go("search") },
         Place(agentsIcon, "Agents", "Your agents, what each is doing, and their rooms") { go("agents") },
         // (Its badge is what needs you, the one count Home says too: what it noticed is news, counted nowhere.)
         Place(TrayIcon, "Needs you", "Everything that waits for you, and what your node noticed", trail = if (needsYou > 0) AppModel.badge(needsYou) else null) { go("inbox") },

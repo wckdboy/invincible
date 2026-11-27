@@ -35,15 +35,19 @@ stand-in streams). A tap clicks there and brings back no picture; Take over and 
 sit under it from its first frame, the row saying until when by the clock. On an emulator its decoder
 (`c2.goldfish.h264.decoder`) gives back each frame of the glass page's recording with the pixels it was drawn with.
 
-It opens on the primary, the one agent you talk to, named by the node ("Invincible" until you name it: `core/Primary.kt`),
-with no tab bar (the iPhone's Home): Home (`ui/Home.kt`) is the I-beam and the line at a glance, the agents in a strip,
-what needs you (three decisions, each with its one answer in place, counted once everywhere), the work by proof
-(Working, Proven, Failed, the rest folded), and at its foot a bar: search and ask, the message box, a task to give.
-Needs you (`ui/InboxScreen.kt`: Home's "N more", or the drawer) is every one of those decisions as the same rows under
-the one count, then what was noticed for you, news counted nowhere; a tap opens its card in a sheet.
-Every other place is in the drawer (`ui/Drawer.kt`), from the I-beam or the left edge. A task opens as a thread of its
-own (`ui/TaskScreen.kt`), its verdict as its proof allows (Proven, Reviewed, not proven, Failed · gate 2…). A tablet
-(600 dp and wider) has the panes: the sidebar (`ui/Sidebar.kt`) beside the page. `invincible://task/<id>`,
+It opens on the primary's conversation (the owner's word, 27 November 2026: "something like t3code on desktop, and
+openmausbot/grokbot on mobile"), the one agent you talk to, named by the node ("Invincible" until you name it:
+`core/Primary.kt`), with almost no chrome: the roster's button, its name and one menu, and a big message box at its foot.
+The roster (`ui/RosterList.kt`) is a drawer from that button or the left edge (`ui/Drawer.kt`): what needs you with its
+one count, your agent, each agent with its mark and its latest line, the rooms, and at its foot Work, Settings and
+everything else ("…"). An agent's timeline (`ui/AgentScreen.kt`) lists its tasks as quiet rows, a card only where one
+offers you an answer (Start it, Ship it, Resume), and has the same message box. Work (`ui/Home.kt`, the roster's foot) is
+what needs you (three decisions, each with its one answer in place, counted once everywhere) and the work by proof
+(Working, Proven, Failed, the rest folded). Needs you (`ui/InboxScreen.kt`: Work's "N more", or the roster) is every one
+of those decisions as the same rows under the one count, then what was noticed for you, news counted nowhere; a tap opens
+its card in a sheet. A task opens as a thread of its own (`ui/TaskScreen.kt`), its verdict as its proof allows (Proven,
+Reviewed, not proven, Failed · gate 2…). A tablet (600 dp and wider) has the roster as a sidebar (`ui/Sidebar.kt`)
+beside the page. `invincible://task/<id>`,
 `/agent/<handle>`, `/approval/<id>` and `/chat/<id>` open their place, and only navigate (`core/Links.kt`). While your
 agent answers, the chat's box stays open to steer it or queue what's next, and a running task can be steered.
 

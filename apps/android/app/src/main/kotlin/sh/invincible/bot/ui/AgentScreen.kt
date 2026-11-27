@@ -33,7 +33,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -213,7 +219,7 @@ private fun Timeline(
 
     val headerGone by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
     Column(Modifier.fillMaxSize().imePadding()) {
-        PageBar(if (headerGone) title else "", back, actions)
+        PageBar(if (headerGone) title else "", back, actions = actions)
         LazyColumn(Modifier.weight(1f), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s4)) {
             item { header() }
             problem?.let { item { Problem(it) } }
@@ -264,7 +270,11 @@ private fun Said(e: Entry) {
     }
 }
 
-/** A task as it stands: its title, its state in a word, its latest line; a proposal waits for your yes or no. */
+/**
+ * A task as it stands: its title, its state in a word, its latest line. Where it offers you something (a proposal's yes or
+ * no, verified work to ship, ended work to resume) it is a card with its answer in place, the timeline's action card
+ * (the owner's word, 27 November 2026); otherwise a quiet row that opens its thread, Stop under its "…".
+ */
 @Composable
 private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
     val scope = rememberCoroutineScope()
@@ -287,16 +297,65 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
         "interrupted" -> "Interrupted"
         else -> state?.words
     }
+    val shipped = t["shipped"]
+    var problem by remember { mutableStateOf<String?>(null) }
+    fun control(action: String) = scope.launch {
+        try {
+            app.client?.post("/api/team/control", Json.obj("task" to t["id"].string, "action" to action))
+            problem = null
+            app.refresh()
+        } catch (e: NodeError) {
+            problem = e.message
+        }
+    }
+    val ships = status == "done" && verified && t["changes"] != null && t["fix"] == null && shipped == null
+    val offers = status == "proposed" || ships || status == "failed" || status == "stopped" || status == "interrupted"
+    val brand = LocalBrand.current
+    val ink = when {
+        said == null -> state?.tone?.let(brand::of) ?: MaterialTheme.colorScheme.onSurfaceVariant
+        said.verdict == Steps.Verdict.PROVEN -> brand.ink
+        said.verdict.wrong -> brand.danger
+        else -> brand.quiet
+    }
+    if (!offers) {
+        var more by remember { mutableStateOf(false) }
+        val title = t["title"].string ?: ""
+        val progress = t["progress"].string?.takeIf { it.isNotBlank() }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .clickable { t["id"].string?.let(openTask) }
+                .semantics(mergeDescendants = true) { role = Role.Button }
+                .padding(start = Space.s2, top = Space.s2, bottom = Space.s2),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+                    Text(title, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
+                }
+                progress?.let {
+                    Text(it.lineSequence().first(), style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                }
+            }
+            if (status == "queued" || status == "running") {
+                // (Its "…" beside its title: where a line of its latest step is under the title, centred on the whole row
+                // it sat between the two, a line above the step once the title scrolled under the bar.)
+                androidx.compose.foundation.layout.Box(if (progress != null) Modifier.align(Alignment.Top).offset(y = (-12).dp) else Modifier) {
+                    androidx.compose.material3.IconButton(onClick = { more = true }) { Icon(MoreIcon, contentDescription = "More for $title") }
+                    androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("Stop", color = brand.failed) }, onClick = { more = false; control("stop") })
+                    }
+                }
+            }
+        }
+        problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed, modifier = Modifier.padding(horizontal = Space.s2)) }
+        return
+    }
     Panel {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
             Text("Task", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            val brand = LocalBrand.current
-            val ink = when {
-                said == null -> state?.tone?.let(brand::of) ?: MaterialTheme.colorScheme.onSurfaceVariant
-                said.verdict == Steps.Verdict.PROVEN -> brand.ink
-                said.verdict.wrong -> brand.danger
-                else -> brand.quiet
-            }
             word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
         }
         Text(t["title"].string ?: "", style = MaterialTheme.typography.titleMediumEmphasized)
@@ -307,32 +366,19 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
             Text(it.lineSequence().first(), style = MaterialTheme.typography.bodyMedium, color = if (ended && why != null) LocalBrand.current.failed else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         t["changes"]["files"].int?.let { Text("$it file${if (it == 1) "" else "s"} changed, kept", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        val shipped = t["shipped"]
         val context = androidx.compose.ui.platform.LocalContext.current
         shipped["url"].string?.let { url ->
             TextButton(onClick = { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }) {
                 Text(shipped["pr"].int?.let { "Pull request #$it" } ?: "Its pull request")
             }
         }
-        var problem by remember { mutableStateOf<String?>(null) }
         var shipping by remember { mutableStateOf(false) }
-        fun control(action: String) = scope.launch {
-            try {
-                app.client?.post("/api/team/control", Json.obj("task" to t["id"].string, "action" to action))
-                problem = null
-                app.refresh()
-            } catch (e: NodeError) {
-                problem = e.message
-            }
-        }
         // What a task offers, as the iPhone's card does: by where it stands; and its own thread, where all of it is.
         Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
             t["id"].string?.let { tid -> TextButton(onClick = { openTask(tid) }) { Text("Open") } }
             when {
                 status == "proposed" -> Decision(no = "Decline", yes = "Start it", onNo = { control("stop") }, onYes = { control("approve") })
-                status == "queued" || status == "running" -> OutlinedButton(onClick = { control("stop") }) { Text("Stop", color = LocalBrand.current.failed) }
-                status == "done" && verified && t["changes"] != null && t["fix"] == null && shipped == null ->
-                    AnswerPill("Ship it", { shipping = true })
+                ships -> AnswerPill("Ship it", { shipping = true })
                 status == "failed" || status == "stopped" || status == "interrupted" -> OutlinedButton(onClick = { control("resume") }) { Text("Resume") }
             }
         }
@@ -375,7 +421,11 @@ internal fun ShipDialog(app: AppModel, t: Json, done: () -> Unit) {
     )
 }
 
-/** A box to write in, with Send; [asTask] offers the same words as a task instead. */
+/**
+ * A box to write in, as the primary's conversation's (the owner's word, 27 November 2026: a big composer, the same
+ * everywhere): a rounded field that grows to six lines and a round send, or Stop; [asTask] offers the same words as a task
+ * instead, a chip above it.
+ */
 @Composable
 fun Composer(placeholder: String, asTask: String?, sending: Boolean, stop: (() -> Unit)? = null, onSend: (String, Boolean) -> Unit) {
     var text by remember { mutableStateOf("") }
@@ -383,31 +433,34 @@ fun Composer(placeholder: String, asTask: String?, sending: Boolean, stop: (() -
     val brand = LocalBrand.current
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = Space.s3, vertical = Space.s2)) {
         if (asTask != null) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = task, onCheckedChange = { task = it })
-                Text(asTask, style = MaterialTheme.typography.bodyMedium)
-            }
+            androidx.compose.material3.FilterChip(selected = task, onClick = { task = !task }, label = { Text(asTask) }, modifier = Modifier.padding(start = Space.s1))
         }
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-            androidx.compose.material3.OutlinedTextField(
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s1)) {
+            androidx.compose.material3.TextField(
                 value = text,
                 onValueChange = { text = it },
                 placeholder = { Text(placeholder) },
                 maxLines = 6,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+                colors = androidx.compose.material3.TextFieldDefaults.colors(
+                    focusedContainerColor = brand.raised, unfocusedContainerColor = brand.raised, disabledContainerColor = brand.raised,
+                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                ),
                 modifier = Modifier.weight(1f),
             )
             if (stop != null) {
-                OutlinedButton(onClick = stop, modifier = Modifier.padding(bottom = 4.dp)) { Text("Stop") }
+                androidx.compose.material3.FilledTonalIconButton(onClick = stop, modifier = Modifier.padding(bottom = 4.dp)) { Icon(StopIcon, contentDescription = "Stop") }
             } else {
-                androidx.compose.material3.Button(
+                androidx.compose.material3.FilledIconButton(
                     onClick = {
                         onSend(text.trim(), task)
                         text = ""
                     },
                     enabled = text.isNotBlank() && !sending,
                     modifier = Modifier.padding(bottom = 4.dp),
-                    shapes = androidx.compose.material3.ButtonDefaults.shapes(),
-                ) { Text("Send", color = if (text.isNotBlank()) brand.onInk else MaterialTheme.colorScheme.onSurfaceVariant) }
+                ) { Icon(SendIcon, contentDescription = if (task) "Give it as a task" else "Send") }
             }
         }
     }

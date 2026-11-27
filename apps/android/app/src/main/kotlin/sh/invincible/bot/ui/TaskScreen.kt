@@ -183,7 +183,7 @@ fun TaskScreen(app: AppModel, id: String, nav: Nav, wide: Boolean, roomy: Boolea
                 when {
                     snapshot == null && app.problem.collectAsState().value != null -> "The work can't be read just now."
                     snapshot == null -> "Asking your node…"
-                    else -> "It may have been given on another node, or its agent was removed. Home has the work, by what needs you."
+                    else -> "It may have been given on another node, or its agent was removed. Work, at the roster's foot, has every task, by what needs you."
                 },
             )
         }
