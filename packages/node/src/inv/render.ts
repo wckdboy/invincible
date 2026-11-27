@@ -181,7 +181,8 @@ const secs = (ms: number | null): string => (ms === null ? "" : ms < 10_000 ? `$
 export function proofHead(proof: ProofJson): { text: string; tone: Tone } {
   const failing = proof.gates.findIndex((gate) => gate.exit !== null && gate.exit !== 0);
   const word: Record<ProofJson["state"], [string, Tone]> = {
-    verified: ["Verified", "ok"],
+    // (Proven, as the apps say it and as its `word` does: it said "Verified" until 27 November 2026.)
+    verified: ["Proven", "ok"],
     unproven: ["Finished without proof", "needs"],
     failed: [`Failed · gate ${failing + 1}${proof.gates.length > 1 ? ` of ${proof.gates.length}` : ""}`, "failed"],
     rejected: ["Not verified", "failed"],

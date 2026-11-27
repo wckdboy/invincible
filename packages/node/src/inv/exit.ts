@@ -1,11 +1,11 @@
 /*
- * inv's exit codes (docs/CLI.md, "Exit codes"): a promise to scripts. The code is the verdict, so 0 means verified,
+ * inv's exit codes (docs/CLI.md, "Exit codes"): a promise to scripts. The code is the verdict, so 0 means proven,
  * never merely that nothing broke. A code keeps its meaning, and a new one comes only with a new meaning. The test
  * holds this table to the one in docs/CLI.md.
  */
 
 export const EXIT = {
-  /** Verified; or, for a command that gives no verdict, it did what it says. */
+  /** Proven; or, for a command that gives no verdict, it did what it says. */
   ok: 0,
   /** The command couldn't be done, or a task ended in a way no code below names. */
   error: 1,

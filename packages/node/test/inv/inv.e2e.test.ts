@@ -180,7 +180,7 @@ describe("inv against a node of its own", () => {
     // hold "-", so its last six alone began with one in about one run of 38: 26 November 2026, exit 2.)
     const text = await run(me, "proof", shortId(verifiedTask));
     expect(text.code).toBe(0);
-    expect(text.out).toContain("Verified · by its gates and a reviewer that didn't do the work");
+    expect(text.out).toContain("Proven · by its gates and a reviewer that didn't do the work");
     expect(text.out).toContain("failed before the work: it shows the work ✓");
   }, 60_000);
 

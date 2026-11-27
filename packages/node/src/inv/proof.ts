@@ -4,10 +4,10 @@ import { EXIT, type ExitCode } from "./exit.ts";
 
 /*
  * A task's proof, as docs/CLI.md ("The proof") promises it, and its verdict as an exit code. What proves it is what the
- * apps' Verified card reads (apps/web/src/lib/steps.ts, proofOf): each gate's command and how it ended, and the
+ * apps' proof card reads (apps/web/src/lib/steps.ts, proofOf): each gate's command and how it ended, and the
  * reviewer's verdict, as the runner wrote them on the task's trail, never the agent's own account.
  *
- * Verified (0) asks more than the node's own word "verified" does: a gate that failed before the work and passes now,
+ * Proven (0) asks more than the node's own word "verified" does: a gate that failed before the work and passes now,
  * so it shows the work was done, and a reviewer that didn't do the work. Passed without that, it is unproven (12).
  */
 

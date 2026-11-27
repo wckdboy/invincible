@@ -103,7 +103,9 @@ describe("the proof's frame", () => {
 
   test("in a terminal, framed apart from the agent's own words, which follow it and say they are not proof", () => {
     const lines = proofLines(verified, TTY);
-    expect(lines[0]).toMatch(/^ ┌─ .*Verified · by its gates and a reviewer that didn't do the work/);
+    // Exit 0's verdict in the apps' word (since 27 November 2026; it said "Verified · …"): one verdict, one word.
+    expect(lines[0]).toMatch(/^ ┌─ .*Proven · by its gates and a reviewer that didn't do the work/);
+    expect(lines[0]).not.toContain("Verified");
     expect(lines.at(-2)).toMatch(/^ └─+┘$/);
     expect(lines.at(-1)).toContain("ada said: “Fixed the race in retry(); all tests pass.”");
     expect(lines.at(-1)).toContain("its words, not proof");

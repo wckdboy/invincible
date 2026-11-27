@@ -107,7 +107,7 @@ text (`packages/core/src/plain.ts`). In `inv asks` and `inv peek`, a character t
 
 There are three layers:
 1. **Text, for people.**
-   - In a terminal: the state words in their colours (amber needs you, red failed, blue at work, green verified, grey
+   - In a terminal: the state words in their colours (amber needs you, red failed, blue at work, green proven, grey
      queued or stopped), and the board redrawn in place.
    - Piped, or with `NO_COLOR`: plain lines, no escape codes, printed once.
    - Nothing moves at rest, there is no bell, and nothing blinks.
@@ -151,7 +151,7 @@ A promise: a code keeps its meaning, and a new one is added only with a new mean
 
 | Code | Meaning |
 |---|---|
-| 0 | **Verified:** every gate passed, at least one of them failed before the work (so it shows the work was done), and a reviewer that didn't write it passed it. For a command that gives no verdict, it succeeded. |
+| 0 | **Proven:** every gate passed, at least one of them failed before the work (so it shows the work was done), and a reviewer that didn't write it passed it. For a command that gives no verdict, it succeeded. |
 | 1 | **An error:** the command couldn't be done (the node refused it, or no such task). Or a task ended in a way none of the codes below names: its agent gave up before any gate or review, or its run broke. |
 | 2 | **Bad usage:** an unknown command or flag, or a missing or malformed argument. |
 | 10 | **A gate failed:** the task ended with a gate that didn't pass. |
@@ -204,6 +204,9 @@ with 1.
   (20), `working` or `queued` (21), and `error` (1). `exit` is its code, and always the code `inv` exits with: when it
   leaves before the task ends, `exit` is 21 (or 20 for `--no-ask`), whatever the state.
 - **`word`** is the apps' word for the task, as its row says it.
+- **Its text** heads the proof with its verdict and why. Exit 0's says **Proven · by its gates and a reviewer that
+  didn't do the work**, the apps' word for it; until 27 November 2026 it said "Verified · by its gates and a reviewer
+  that didn't do the work". Its `state` (`verified`) and its code (0) are unchanged.
 - **`gates`** are as the latest round left them, from the runner's own lines on the task's trail, never the agent's
   account.
   - `exit` is null when a gate didn't run in that round.
