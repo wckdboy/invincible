@@ -160,7 +160,7 @@ internal fun Refused(app: AppModel, p: NodeError) {
         p.notYourNode != null -> Column {
             Problem("This isn't the node this phone paired with. ${p.message} Nothing more is sent to it. If you set your node up anew at this address, forget it here, then join with a fresh invite.")
             TextButton(onClick = app::tryAgain, modifier = Modifier.padding(horizontal = Space.margin)) { Text("Try again") }
-            TextButton(onClick = app::forget, modifier = Modifier.padding(horizontal = Space.margin)) { Text("Forget this node", color = LocalBrand.current.failed) }
+            ForgetThisDevice(app, Modifier.padding(horizontal = Space.margin))
         }
         // The node knows this phone (its whoami holds) but no longer takes how this build signs the rest (NodeSession.refusal).
         p.outdated -> Column {
@@ -171,7 +171,7 @@ internal fun Refused(app: AppModel, p: NodeError) {
             Problem("This phone's clock is ${Math.abs(skew) / 60_000} min ${if (skew > 0) "ahead of" else "behind"} your node's, and the node refuses requests that far out. Set the time to automatic in Settings.")
         p.status == 401 -> Column {
             Problem("Your node no longer knows this phone: it was removed there, or the node was set up again. Forget it here, then join with a fresh invite.")
-            TextButton(onClick = app::forget, modifier = Modifier.padding(horizontal = Space.margin)) { Text("Forget this node", color = LocalBrand.current.failed) }
+            ForgetThisDevice(app, Modifier.padding(horizontal = Space.margin))
         }
         else -> Problem(p.message ?: "The node isn't answering.")
     }
@@ -286,3 +286,23 @@ internal fun GiveDialog(app: AppModel, done: () -> Unit) {
     )
 }
 
+
+/**
+ * Forget this device…, confirmed first (the iPhone's words, I10's 81361e56): the pairing and this phone's key go, and a
+ * fresh invite joins it again. The way out of a refusal on the chat and Work, and Settings' own.
+ */
+@Composable
+internal fun ForgetThisDevice(app: AppModel, modifier: Modifier = Modifier, outlined: Boolean = false) {
+    var asking by remember { mutableStateOf(false) }
+    val label = @Composable { Text("Forget this device…", color = LocalBrand.current.failed) }
+    if (outlined) androidx.compose.material3.OutlinedButton(onClick = { asking = true }, modifier = modifier) { label() } else TextButton(onClick = { asking = true }, modifier = modifier) { label() }
+    if (asking) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { asking = false },
+            title = { Text("Forget this device?") },
+            text = { Text("This phone's key goes too. To use ${Primary.name} here again, join with a fresh invite. Your node keeps everything; remove this phone from its devices there.") },
+            confirmButton = { TextButton(onClick = { asking = false; app.forget() }) { Text("Forget it", color = LocalBrand.current.failed) } },
+            dismissButton = { TextButton(onClick = { asking = false }) { Text("Cancel") } },
+        )
+    }
+}

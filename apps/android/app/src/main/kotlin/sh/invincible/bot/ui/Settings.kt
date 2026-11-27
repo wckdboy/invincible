@@ -54,7 +54,6 @@ import sh.invincible.bot.core.Primary
 @Composable
 fun SettingsScreen(app: AppModel, openKeys: () -> Unit, openConnectors: () -> Unit, back: () -> Unit) {
     val paired by app.paired.collectAsState()
-    var forgetting by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
     var newer by remember { mutableStateOf<Updates.Newer?>(null) }
@@ -107,17 +106,8 @@ fun SettingsScreen(app: AppModel, openKeys: () -> Unit, openConnectors: () -> Un
             TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://invincible.sh"))) }) { Text("invincible.sh") }
         }
         Spacer(Modifier.height(Space.s4))
-        OutlinedButton(onClick = { forgetting = true }) { Text("Forget this node", color = LocalBrand.current.failed) }
+        ForgetThisDevice(app, outlined = true)
     }
-    }
-    if (forgetting) {
-        AlertDialog(
-            onDismissRequest = { forgetting = false },
-            title = { Text("Forget this node?") },
-            text = { Text("This phone's key goes too. To use ${Primary.name} here again, join with a fresh invite. Your node keeps everything; remove this phone from its devices there.") },
-            confirmButton = { TextButton(onClick = { forgetting = false; app.forget() }) { Text("Forget it", color = LocalBrand.current.failed) } },
-            dismissButton = { TextButton(onClick = { forgetting = false }) { Text("Cancel") } },
-        )
     }
 }
 
