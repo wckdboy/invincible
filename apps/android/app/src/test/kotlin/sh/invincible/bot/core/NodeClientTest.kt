@@ -66,14 +66,6 @@ class NodeClientTest {
         }
     }
 
-    /**
-     * The silent node's one event, waited for as long as a stream waits for anything (its read timeout, a minute): it comes
-     * in a millisecond or two, so this holds the test to nothing but its stream opening. What these tests hold to time is
-     * the close after it. A 5 s wait here failed once (27 November 2026) on a Mac deep in swap, as a stop of the test's own
-     * process for 6 s between the stream opening and its event fails it every time.
-     */
-    private fun opened(got: CountDownLatch) = assertTrue("the stream opened: its first event came", got.await(60, TimeUnit.SECONDS))
-
     // Seen on the emulator (26 November 2026): with the link dead, the stream taken for dead was cancelled but its read
     // went on blocking, and the app never said it couldn't reach its node. A cancelled read must end at once.
     @Test
@@ -89,7 +81,7 @@ class NodeClientTest {
                     done.countDown()
                 }
             }
-            opened(got)
+            assertTrue(got.await(5, TimeUnit.SECONDS))
             job.cancel()
             assertTrue("closed within two seconds of its reader going", done.await(2, TimeUnit.SECONDS))
         }
@@ -126,7 +118,7 @@ class NodeClientTest {
                     done.countDown()
                 }
             }
-            opened(got)
+            assertTrue(got.await(5, TimeUnit.SECONDS))
             // As LiveLink does when it hears nothing for three beats: from its own thread, not the reader's.
             close()
             assertTrue("closed within two seconds", done.await(2, TimeUnit.SECONDS))
