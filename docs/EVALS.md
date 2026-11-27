@@ -260,6 +260,10 @@ and 3.4 s to place; Qwen 4 Max took 2.6 s and 5.1 s; Kimi K3 took 2.0 s and 9.4 
 look is about 1,100 to 1,600 tokens in. So OpenCode Go's preset names these four as seeing (`sees` in
 `packages/models/src/providers.ts`), and an engineer on one of them is shown its screen as a picture, not in words.
 
+A look isn't a verifier. In the desktop bench's runs that day (BENCHMARKS.md), Kimi K3.1 Pro typed "Written on desktop"
+where it was asked for "Written on the desktop". It then asked its eyes what the document held, and didn't notice the
+missing word. Only the task's own gate caught it.
+
 So in Invincible the `eyes` role has no model until you name one, and where its clicks land is measured, not assumed.
 `invincible roster check <provider/model> --only places` asks for the centres of eight things on one page, and judges
 each in the picture's pixels, the model's own 0 to 1000, or a frame of its own, whichever lands more. An agent's desktop

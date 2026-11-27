@@ -125,6 +125,34 @@ everything but the model.
   50 MB of the guest's memory kept; and started again within 2 s, its page read and the agent told, and stopped again
   with nothing of it left, every time.
 
+- **With a real model** (`bench/desktop/model-runs.ts`, by hand on a sandbox host: it spends money or a plan's
+  allowance, so the scorecard never runs it), the four tasks through the same loop as the toolset way, its engineer:
+  - Claude Opus 5.5, offered the computer toolset, through a node's gateway on a token minted for the benchmark, as
+    Anthropic's own API (direct, or orcarouter's Anthropic endpoint). Spend-capped: a run past its share is ended, and
+    none starts without its share left. Each run's cost is read from the node's meter;
+  - or a coding plan's model whose terms let the primary call it itself (OpenCode Go's), at the gateway's
+    OpenAI-compatible address. Offered no toolset, it works the desktop by its shell's `desktop` command, shown the
+    screen where its preset says it sees. It is capped in model calls, its own and its eyes' together, and every run
+    stops at the first answer that says the allowance is spent. Its eyes, when named, answer a `desktop look` as deskd
+    would, from the bench's side (the bench's VMs reach no network);
+  - the record, by task: passes, the model calls and actions a run took, the calls per action (the median beside the
+    worst; an action is every `desktop` command, the toolset's or inside a shell's own), the looks, tokens, dollars and
+    minutes. Once five runs of each task are recorded, it is the suite's model baseline
+    (`bench/baseline/desktop-model.json`), its bar 18 of 20 passes.
+  - **27 November 2026, on OpenCode Go.** On Ultra, in Kata VMs from images built from bf67db17. The token was scoped
+    to opencode-go alone, with at most 150 model calls a model; no answer said the allowance was spent. The load was
+    0.5 to 16 on 32 cores. Two passes, three runs of each task (two for GLM-5.3):
+
+    | Engineer, and its eyes | Passed | Calls per action, median (worst) | Looks a run, median (most) | Minutes a task, median (most) |
+    |---|---|---|---|---|
+    | qwen4-max, which sees; itself | 12 of 12 | 0.56 (1.00) | 1 (3) | 0.89 (1.09) |
+    | kimi-k3.1-pro, which sees; itself | 11 of 12 | 0.50 (1.25) | 0.5 (2) | 0.72 (1.56) |
+    | glm-5.3, the tree alone; kimi-k3.1-pro, then kimi-k3 | 8 of 8 | 0.65 (1.06) | 2 (5) | 0.69 (1.18) |
+
+    C0 had the form task at 20 agent turns and 6 looks; here it took 6 to 19 turns and 0 to 4 looks. Kimi's one miss
+    was its own: it typed "Written on desktop" for "Written on the desktop", and the look it asked for afterwards didn't
+    catch it. The calls: qwen4-max 149, kimi-k3.1-pro 110, glm-5.3 110, kimi-k3 14.
+
 ### hardware: KiCad and FreeCAD on an agent's desktop
 
 The hardware image (C1 step 11, `sandbox/hardware`): the desktop image with KiCad 9.0.8 (trixie-backports) and FreeCAD
