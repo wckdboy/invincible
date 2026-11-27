@@ -697,7 +697,18 @@ export const routes = {
        * carries what they came to. Only with the primary's own tools off, and never in a kept chat.
        */
       clientTools: z
-        .array(z.strictObject({ name: ClientToolName, description: z.string().min(1).max(4000), inputSchema: z.record(z.string(), z.unknown()) }))
+        .array(
+          z.strictObject({
+            name: ClientToolName,
+            description: z.string().min(1).max(4000),
+            inputSchema: z.record(z.string(), z.unknown()),
+            /**
+             * The provider's own tool it stands for (C1 step 8): Claude's computer toolset, offered to a model that takes
+             * it and to no other (models' COMPUTER, nativeComputer). Its calls come back named by the toolset's members.
+             */
+            native: z.literal("computer").optional(),
+          }),
+        )
         .min(1)
         .max(16)
         .optional(),

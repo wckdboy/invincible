@@ -178,6 +178,18 @@ describe("an eval of a case", () => {
     expect(JSON.stringify(plain.chats)).not.toContain("This VM has a desktop");
   });
 
+  test("a desktop case's engineer with its own tools is offered Claude's computer toolset too, through the chat route, which takes it", async () => {
+    const harness = { gates: false, plannerGates: false, effort: 1 as const, skills: false, archive: true, revisions: 2, engram: false, diff: false, escalate: false, remind: false, keepReads: false, tools: true, contract: false, agent: null, planner: true, review: true };
+    const node = standIn(FIX);
+    await attemptCase(node, widgetsCase(repo.base, { desktop: true }), job({ harness }));
+    const engineer = node.chats.find((c) => c.role === "engineer")!;
+    expect(engineer.clientTools.map((t: { name: string; native?: string }) => t.native ?? t.name)).toEqual(["bash", "read", "edit", "write", "computer"]);
+    // On the workshop, its tools alone.
+    const plain = standIn(FIX);
+    await attemptCase(plain, widgetsCase(repo.base), job({ harness }));
+    expect(plain.chats.find((c) => c.role === "engineer")!.clientTools.map((t: { name: string }) => t.name)).toEqual(["bash", "read", "edit", "write"]);
+  });
+
   test("an eval has the commands a real task needs: three times what its agent's run used, never fewer than 150", async () => {
     expect(commandsFor({ record: runOf({ commands: 13 }) })).toBe(150);
     expect(commandsFor({ record: runOf({ commands: 52 }) })).toBe(156);

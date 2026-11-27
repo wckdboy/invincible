@@ -256,6 +256,8 @@ export class YoursStandIn {
   }
 
   async *stream(_name: RouteName, input: any): AsyncGenerator<ChatStreamEvent> {
+    // (As the node's chat route does: a request it can't take is refused, never answered.)
+    routes.chat.input.parse(input);
     this.chats.push(input);
     const first: string = input.messages[0].content;
     yield { type: "model", ref: `fake/${input.role}` };

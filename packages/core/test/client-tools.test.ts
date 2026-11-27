@@ -60,3 +60,13 @@ describe("what an answer is asked apart from", () => {
     expect(chat.safeParse({ messages, apart: ["a"] }).success).toBe(false);
   });
 });
+
+describe("a provider's own tool among the caller's (C1 step 8)", () => {
+  test("a caller's tool may stand for Claude's computer toolset (native: computer), and for nothing else", () => {
+    const chat = routes.chat.input;
+    const computer = { name: "computer", description: "The desktop of your VM.", inputSchema: { type: "object" }, native: "computer" };
+    // (A node's run on a desktop offers it beside its engineer's tools, through this route.)
+    expect(chat.safeParse({ messages: asked, tools: false, clientTools: [tool, computer] }).success).toBe(true);
+    for (const native of ["browser", "", 1, true]) expect([native, chat.safeParse({ messages: asked, tools: false, clientTools: [{ ...computer, native }] }).success]).toEqual([native, false]);
+  });
+});
