@@ -123,7 +123,7 @@ describe("work for idle agents, from your backlog", () => {
     expect(paused).toMatchObject({ assignee: "ada", room, proposedBy: "primary", status: "proposed", budgetUsd: 2 });
     expect(w.trail(paused!.id).filter((t) => t.startsWith("Approved by your agent itself"))).toEqual([]);
     expect(w.service.ownLeft()).toEqual({ usd: 10, of: "day" });
-    expect(w.notices().map((n) => n.body)).toEqual([`A template of outcomes\nIts conversation is paused: approving work in it is yours, so it waits in your conversation with Ada for you to approve or decline (invincible agents approve ${paused!.id}).`]);
+    expect(w.notices().map((n) => n.body)).toEqual([`A template of outcomes\nIts conversation is paused: approving work in it is yours, so it waits in your conversation with Ada: approve or decline it there (or invincible agents approve ${paused!.id}). Once you resume the conversation, your agent may approve it itself when it looks again, a day after proposing it, if it is still the next step.`]);
     // Half a day on you resume it and decline the proposal: at its next look, the same goal proposed again waits for you
     // too, said why.
     w.clock.add(BACKLOG.perAgentMs / 2);
@@ -134,7 +134,7 @@ describe("work for idle agents, from your backlog", () => {
     const again = await w.runner.tick();
     expect(again).toMatchObject({ title: "A template of outcomes", status: "proposed" });
     expect(w.service.ownLeft()).toEqual({ usd: 10, of: "day" });
-    expect(w.notices().find((n) => n.body.includes(again!.id))?.body).toBe(`A template of outcomes\nYou declined that work in the last day (“A template of outcomes”, ${paused!.id}): approving it again is yours, so it waits in your conversation with Ada for you to approve or decline (invincible agents approve ${again!.id}).`);
+    expect(w.notices().find((n) => n.body.includes(again!.id))?.body).toBe(`A template of outcomes\nYou declined that work in the last day (“A template of outcomes”, ${paused!.id}): approving it again is yours, so it waits in your conversation with Ada: approve or decline it there (or invincible agents approve ${again!.id}). Once your word is a day old, your agent may approve it itself when it looks again, a day after proposing it, if it is still the next step.`);
   });
 
   test("a proposal that names no budget is given the backlog's cap: money nobody capped is never its to spend", async () => {

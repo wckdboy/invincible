@@ -250,8 +250,11 @@ export class BacklogRunner {
     const yours = this.o.service().whyYours(task, "approve");
     const left = this.o.service().ownLeft();
     const past = left.of === "budget" ? "more than is left of your budget" : `more than is left of the ${capLabel(this.o.service().ownDaily())} a day your agent may commit on its own ($${left.usd.toFixed(2)}; yours to set: invincible agents daily)`;
+    // Held by your word, it waits for your answer while that word holds; once it lapses, its next look may approve it
+    // itself, as it does its own proposals (the re-check of 27 November, U3): the notice says which.
+    const lapse = this.o.store.agent(agent.id)?.enabled === false ? `you resume ${agent.name}` : this.o.store.room(task.room)?.paused ? "you resume the conversation" : "your word is a day old";
     const why = yours
-      ? `${yours.replace(/\.$/, "")}, so it waits in your conversation with ${agent.name} for you to approve or decline (invincible agents approve ${task.id}).`
+      ? `${yours.replace(/\.$/, "")}, so it waits in your conversation with ${agent.name}: approve or decline it there (or invincible agents approve ${task.id}). Once ${lapse}, your agent may approve it itself when it looks again, a day after proposing it, if it is still the next step.`
       : `It may spend $${task.budgetUsd}, ${past}, so it waits in your conversation with ${agent.name}, and starts when you approve it there (or invincible agents approve ${task.id}).`;
     this.o.mind.emit(this.o.identity, "notice.raised", { key: `backlog:${task.id}`, severity: "info", title: `Work proposed for ${agent.name}`, body: `${found.title}\n${why}`.slice(0, 600), source: "backlog", at: this.now() });
     return task;
