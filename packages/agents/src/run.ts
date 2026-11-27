@@ -1566,7 +1566,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       if (!auditDue()) return;
       const found = await audit(trail.slice(auditedAt), false, trail);
       auditedAt = trail.length;
-      if (found.verdict === "steer") auditSays.push(steered(found.note));
+      // (Held to a steer's length, as yours are: what it is told is one message, and a message is one line.)
+      if (found.verdict === "steer") auditSays.push(steered(found.note.slice(0, 4000)));
     };
     /** Steers taken at a look (RunDeps.steers), said to its own session once its run has ended there. */
     let heard: RunSteer[] = [];
@@ -1587,10 +1588,10 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
      * said on its trail, kept for its reviewer) and its audits', put as its next message would put them. Its own session
      * isn't needed: they follow its message on its input. What it never takes comes back as `untold`, for its next run.
      */
-    const steersLive = async (): Promise<string | null> => {
+    const steersLive = async (): Promise<readonly string[]> => {
       const got = await takeSteers(steps);
-      const said = toldAs(got, auditSays.splice(0));
-      return said || null;
+      // (Each its own message: no line its bridge can't take whole.)
+      return [...got.map((steer) => steersSaid([steer], o.unreviewed)), ...auditSays.splice(0)];
     };
     /** The steers the next run's message carries: said again if that run fails on its model before it could take them up. */
     let carried = "";

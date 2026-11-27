@@ -266,6 +266,8 @@ export interface FollowedRun {
 
 /** How long one follow of a run lasts before it is opened again where it stopped: one command in its VM, ledgered once. */
 export const FOLLOW_SECONDS = 600;
+/** The longest line told on a live run's input, in bytes: under the 64 KiB its bridge reads whole (vendor-cli.ts SAID_LIMIT). */
+export const TELL_LIMIT = 60 * 1024;
 /** How often a followed run is looked at for what's cheap to ask (stopped? steered? out of time?). Its events don't wait. */
 export const FOLLOW_TICK_MS = 250;
 /** How long a live run that is stopped has to end its turn by its own interrupt before it is ended anyway. */
@@ -417,7 +419,7 @@ const tellCommand = (line: object, wait?: { run: string; seconds: number }): str
  */
 export async function runAgent(
   driver: AgentDriver,
-  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<void>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<string | null>; cutOff?: boolean },
+  input: { model: AgentModel; prompt: string; session: string | null; deadline: number; workdir: string; pollMs?: number; spent?: () => boolean | Promise<boolean>; audit?: () => Promise<void>; steer?: () => boolean | Promise<boolean>; steers?: () => Promise<readonly string[]>; cutOff?: boolean },
   deps: AgentRunDeps,
 ): Promise<AgentRun> {
   const now = deps.now ?? Date.now;
@@ -519,6 +521,11 @@ export async function runAgent(
     /** Your words, told it now on its channel: late if no run of it was there to read them. */
     const tell = async (words: string): Promise<void> => {
       const id = randomId(12);
+      // A message longer than a line its bridge takes whole is never sent cut: it is said late, for its next run to say.
+      if (Buffer.byteLength(JSON.stringify({ say: words, id }), "utf8") > TELL_LIMIT) {
+        told.set(id, { words, state: "late" });
+        return;
+      }
       told.set(id, { words, state: "sent" });
       const sent = await deps.exec(tellCommand({ say: words, id }), 15).catch(() => null);
       if (!sent || sent.exitCode !== 0) told.get(id)!.state = "late";
@@ -612,8 +619,8 @@ export async function runAgent(
           }
           // Your words: told it as it works, where it can be; otherwise they end this run between its tool calls.
           if (live && input.steers) {
-            const words = await input.steers();
-            if (words) await tell(words);
+            // (One message a steer: no line its bridge can't take whole.)
+            for (const words of await input.steers()) await tell(words);
           } else if (between() && (await input.steer?.())) {
             await stop();
             return { ...run, status: "steered", error: "it was steered" };

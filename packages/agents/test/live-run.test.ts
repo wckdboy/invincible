@@ -260,7 +260,7 @@ describe("your words, told as it works", () => {
     const time = clock();
     let waiting = [STEER];
     const seen: unknown[] = [];
-    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => waiting.splice(0)[0] ?? null, steer: () => { throw new Error("a live run is never ended for a steer"); } }, { exec: box.exec, follow: box.follow, ...time, event: (event) => event.type === "steer" && seen.push(event) }));
+    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => waiting.splice(0), steer: () => { throw new Error("a live run is never ended for a steer"); } }, { exec: box.exec, follow: box.follow, ...time, event: (event) => event.type === "steer" && seen.push(event) }));
     await box.until(() => box.told.length === 1);
     const [said] = box.told as { say: string; id: string }[];
     expect(said!.say).toBe(STEER);
@@ -276,7 +276,7 @@ describe("your words, told as it works", () => {
   test("words it never took come back untold, for its next run to say: said back late, or with no run reading its input", async () => {
     const late = vm();
     let once = [STEER];
-    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => once.splice(0)[0] ?? null }, { exec: late.exec, follow: late.follow, ...clock() }));
+    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => once.splice(0) }, { exec: late.exec, follow: late.follow, ...clock() }));
     await late.until(() => late.told.length === 1);
     const id = (late.told[0] as { id: string }).id;
     late.current().push(E(20, { type: "steer", id, state: "late" }), S(false, 0, 20));
@@ -284,16 +284,29 @@ describe("your words, told as it works", () => {
     // (A run whose input no one reads: its bridge has ended. Told nothing, the words come back all the same.)
     const gone = vm({ tell: 3 });
     once = [STEER];
-    const ended = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => once.splice(0)[0] ?? null }, { exec: gone.exec, follow: gone.follow, ...clock() }));
+    const ended = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => once.splice(0) }, { exec: gone.exec, follow: gone.follow, ...clock() }));
     await gone.until(() => gone.told.length === 1);
     gone.current().push(S(false, 0, 0));
     expect((await ended).untold).toEqual([STEER]);
   });
 
+  test("a message longer than a line its bridge takes whole is never sent cut: said late, it comes back untold", async () => {
+    const box = vm();
+    const long = `The owner says, while you work: ${"x".repeat(70_000)}`;
+    let once = [long];
+    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => once.splice(0) }, { exec: box.exec, follow: box.follow, ...clock() }));
+    await box.until(() => box.follows.length === 1);
+    await Bun.sleep(20);
+    box.current().push(S(false, 0, 0));
+    expect((await run).untold).toEqual([long]);
+    expect(box.told).toEqual([]);
+    once = [];
+  });
+
   test("said back taken, then late (a second word of its bridge's): taken stays; only words of the node's are kept", async () => {
     const box = vm();
     let once = [STEER];
-    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => once.splice(0)[0] ?? null }, { exec: box.exec, follow: box.follow, ...clock() }));
+    const run = at(runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work", steers: async () => once.splice(0) }, { exec: box.exec, follow: box.follow, ...clock() }));
     await box.until(() => box.told.length === 1);
     const id = (box.told[0] as { id: string }).id;
     box.current().push(E(20, { type: "steer", id, state: "taken" }), E(40, { type: "steer", id, state: "late" }), E(60, { type: "steer", id: "not_ours", state: "late" }), S(false, 0, 60));
@@ -445,6 +458,23 @@ describe("steering a coding agent's task", () => {
       expect(run.reviewed.some((asked) => asked.includes("Keep the old reader."))).toBe(true);
     });
   }
+
+  test("many long words at once are told one steer at a time: no line its bridge can't take whole", async () => {
+    const box = vm();
+    const waiting: RunSteer[] = [];
+    const run = task(CLAUDE, box, waiting);
+    await box.until(() => box.follows.length === 1);
+    box.current().push(E(20, { type: "session", id: "ses_live" }), E(40, { type: "call", id: "call_1" }));
+    // Twenty steers of 4,000 characters each, every one of two bytes: more than one line of 64 KiB can carry.
+    for (let n = 0; n < 20; n++) waiting.push({ by: "owner", text: `${n} ${"é".repeat(3995)}` });
+    await box.until(() => box.told.length === 20);
+    const lines = box.commands.filter((command) => command.includes("os.O_NONBLOCK")).map((command) => Buffer.from(command.match(/ '([A-Za-z0-9+/=]+)'/)![1]!, "base64").length);
+    expect(lines).toHaveLength(20);
+    expect(Math.max(...lines)).toBeLessThan(64 * 1024);
+    expect((box.told as { say: string }[]).map((said) => said.say.match(/^The owner says, while you work: (\d+) /)?.[1])).toEqual(Array.from({ length: 20 }, (_, n) => String(n)));
+    box.current().push(E(60, { type: "tool", tool: "shell", input: "pytest", output: "ok", ok: true, id: "call_1" }), ...(box.told as { id: string }[]).map((said, n) => E(80 + n, { type: "steer", id: said.id, state: "taken" })), E(200, { type: "text", text: "Done." }), S(false, 0, 200));
+    expect((await run.done).status).toBe("done");
+  });
 
   test("OpenCode: its run ended between its calls, and its own session told your words in the run that follows", async () => {
     const box = vm();
