@@ -1,3 +1,6 @@
 [test]
 # An Apple build copies the node's sources, tests and all, into apps/apple/build (ignored by git); those are stale copies, not tests.
 pathIgnorePatterns = ["apps/apple/build/**"]
+# A test's git never reaches the repository the tests run in: git's location, which a rebase's exec or a hook exports, is
+# cleared before any test runs (bench/test-preload.ts).
+preload = ["./bench/test-preload.ts"]
