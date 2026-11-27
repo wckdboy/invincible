@@ -253,6 +253,7 @@ class AppModel(context: Context) {
     private val keeper = Dispatchers.IO.limitedParallelism(1)
 
     init {
+        PerfProbe.on = (appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         connect()
         restore()
     }
@@ -591,7 +592,10 @@ class AppModel(context: Context) {
         val drawn = team ?: _table.value.snapshot
         val work = drawn?.let { Work.attended(it.agents, tasks ?: _table.value.tasks, it.seen, _projects.value, asks, now) }
         val needs = Work.needsCount(inbox.actions.size, work?.needs ?: emptyList(), inbox.pairings.size, inbox.keys.size, inbox.questions.map { it["expires"].long }, inbox.screens.size, now)
-        if (needs != _needsYou.value) _needsYou.value = needs
+        if (needs != _needsYou.value) {
+            _needsYou.value = needs
+            PerfProbe.mark("needs $needs")
+        }
         val table = _table.value.after(team, turnsJson, asks, needs, now, tasks)
         if (table != _table.value) _table.value = table
         // (What the node said of the team just now is kept for the next time the app opens: KeptTable.)

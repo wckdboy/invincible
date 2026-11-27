@@ -42,9 +42,13 @@ fun ReachBanner(app: AppModel, modifier: Modifier = Modifier) {
     var said by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(online) {
         when (online) {
-            false -> said = UNREACHABLE
+            false -> {
+                said = UNREACHABLE
+                sh.invincible.bot.app.PerfProbe.mark("link lost")
+            }
             true -> if (said == UNREACHABLE) {
                 said = RECONNECTED
+                sh.invincible.bot.app.PerfProbe.mark("link back")
                 delay(1_800)
                 said = null
             }

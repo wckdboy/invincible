@@ -113,6 +113,8 @@ fun HomeScreen(app: AppModel, nav: Nav, drawer: (() -> Unit)?, search: () -> Uni
     // What the node's model calls cost today, after what needs you and what is at work (the iPhone's line).
     val spent = usage?.takeIf { it.spentUsd > 0 && said.text != table.primary.line }?.let { "${if (it.complete) "" else "at least "}${sh.invincible.bot.core.Usage.usd(it.spentUsd)} ${if (it.per == "day") "today" else "this month"}" }
     val glance = if (spent != null) Work.Glance("${said.text} · $spent", said.needs) else said
+    // (For the performance runner: Home has its work to show.)
+    LaunchedEffect(work != null) { if (work != null) sh.invincible.bot.app.PerfProbe.mark("home usable") }
     Column(Modifier.fillMaxSize().imePadding()) {
         HomeHead(glance, drawer = drawer, open = { app.chat.fresh(); nav.go("chat") }, places = places)
         val shown = work?.let { Work.inProject(it, filtered?.takeIf { key -> it.projects.any { p -> p.key == key } }) }
