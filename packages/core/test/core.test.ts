@@ -35,6 +35,7 @@ import {
   NODE_CHALLENGE,
   nodeProofInput,
   REQUESTS_NAME_THEIR_NODE_FROM,
+  MAX_REQUEST_SKEW_MS,
   SIGNATURES_STRICT_FROM,
   encodeHlc,
   eventId,
@@ -500,6 +501,13 @@ describe("Ed25519's strict rule", () => {
       expect(verifyRequestSignature(forged(after), "POST", "/link/sync", body, after, node)).toBeNull();
       // Nor as one that names no node, whoami's (taken after the cutoff when its caller says so).
       expect(verifyRequestSignature(forged(after), "POST", "/link/sync", body, after, node, true)).toBeNull();
+    }
+    // The review of log-strict, F5: a request may say it was made up to a minute before the node's clock, so one stamped a
+    // moment before the cutoff and checked in the minute after it is judged by the node's clock, the later of the two.
+    for (const at of [SIGNATURES_STRICT_FROM, SIGNATURES_STRICT_FROM + MAX_REQUEST_SKEW_MS - 1]) {
+      expect(verifyRequestSignature(forged(SIGNATURES_STRICT_FROM - 1), "POST", "/link/sync", body, at, node)).toBeNull();
+      expect(verifyRequestSignature(forged(SIGNATURES_STRICT_FROM - 1), "POST", "/link/sync", body, at, node, true)).toBeNull();
+      expect(verifyRequestSignature(forged(SIGNATURES_STRICT_FROM - 1), "POST", "/link/sync", body, at)).toBeNull();
     }
     // A real node's link calls verify on either side.
     const real = newNodeIdentity();

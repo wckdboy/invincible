@@ -112,9 +112,13 @@ export function verifyRequestSignature(
   // since WebCrypto's signatures aren't low-S (verifyP256): harmless, as the nonce cache keys on the device and the
   // nonce, and refuses the second form of a request once the first is seen.
   if (b64u(signature) !== sig) return null;
-  // A link call's node signature is held to Ed25519's strict rule from the cutoff, by the request's own time (identity.ts).
-  if (node !== undefined && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body, node), time)) return { device, nonce, ts: time, named: true };
-  if ((node === undefined || legacy) && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body), time)) return { device, nonce, ts: time, named: false };
+  // A link call's node signature is held to Ed25519's strict rule from the cutoff (identity.ts), by the later of the
+  // request's own time and this node's clock: a request may say it was made a minute back, and none says it was made
+  // before the cutoff once this node is past it (the review of log-strict, F5). Requests aren't replicated, so this
+  // node's clock may decide.
+  const at = Math.max(time, now);
+  if (node !== undefined && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body, node), at)) return { device, nonce, ts: time, named: true };
+  if ((node === undefined || legacy) && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body), at)) return { device, nonce, ts: time, named: false };
   return null;
 }
 
