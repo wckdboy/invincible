@@ -59,6 +59,8 @@ CREATE INDEX IF NOT EXISTS events_order ON events (hlc, id);
 CREATE INDEX IF NOT EXISTS events_device_order ON events (device, hlc, id);
 CREATE INDEX IF NOT EXISTS events_kind ON events (kind, hlc, id);
 CREATE INDEX IF NOT EXISTS events_loop ON events (json_extract(raw, '$.body.loop'), hlc, id) WHERE kind = 'loop.ran';
+-- The device each enrollment in the log names, applied or refused: what makes a signer known (knownSigner).
+CREATE INDEX IF NOT EXISTS events_enrolled ON events (json_extract(raw, '$.body.device')) WHERE kind = 'device.enrolled';
 -- Per device: how many events the log holds, the newest one's hlc and the set hash of their ids.
 -- Kept with every insert, in the same transaction, so sync never re-reads the log to compare it.
 CREATE TABLE IF NOT EXISTS log_devices (device TEXT PRIMARY KEY, n INTEGER NOT NULL, top TEXT NOT NULL, ids BLOB NOT NULL);
@@ -554,10 +556,21 @@ export class LedgerStore {
   }
 
   /** Genesis, the founder's own events, and anything from an enrolled (even since revoked) device. */
+  /**
+   * Whether an event's signer is known here, so the event enters the log (to be applied or refused there), not parked:
+   * the founder, or a device an enrollment in this log names, whether apply took that enrollment or refused it. So an
+   * enrollment refused only after the fact (its enroller revoked late, or forked below it) leaves its device's events
+   * in every replica's log alike, refused alike: which events a replica logs turns only on which it has, never on the
+   * order they came in (the review of log-strict, F1). Known is never undone, as nothing leaves the log.
+   */
   private knownSigner(event: GEvent): boolean {
     if (event.kind === "fleet.genesis") return true;
     const genesis = this.genesis;
-    return !!genesis && (genesis.device === event.device || !!this.device(event.device));
+    if (!genesis) return false;
+    if (genesis.device === event.device || this.device(event.device)) return true;
+    return !!this.db
+      .query<{ one: number }, [string]>("SELECT 1 AS one FROM events WHERE kind = 'device.enrolled' AND json_extract(raw, '$.body.device') = ? LIMIT 1")
+      .get(event.device);
   }
 
   /**
