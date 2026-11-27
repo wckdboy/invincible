@@ -24,9 +24,15 @@ const measure: Measure = async (reason, body, limit): Promise<Calibration> => {
   const threads = ceilingThreads(body, limit);
   return { at: Date.now(), tookMs: 1, reason, body: bodyFingerprint(body, limit), cpu: { single: REFERENCE_SINGLE, multi: REFERENCE_SINGLE * threads * 0.75, threads, kernel: KERNEL }, memoryGbps: 9.5 };
 };
+/**
+ * Where each node is told to bind its sandbox gateway: a port this test holds, so the bind fails on any machine, as it
+ * does where the gateway's address isn't the machine's (a node's own machine has 172.31.248.1, so that can't be counted on).
+ */
+const held = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null, { status: 404 }) });
 const started: Daemon[] = [];
 afterAll(async () => {
   for (const daemon of started) await daemon.stop();
+  held.stop(true);
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -52,6 +58,7 @@ async function node(name: string, networks: boolean) {
       asked.push(args);
       return docker.runner(args, timeoutMs);
     },
+    sandboxGateway: { hostname: "127.0.0.1", port: held.port! },
     ...(networks ? {} : { sandboxNetworks: false }),
   });
   started.push(daemon);
@@ -66,7 +73,8 @@ async function node(name: string, networks: boolean) {
 }
 
 test("a node whose sandboxes have no networks makes no network, keeps no image and listens on no gateway, and still hosts an isolated sandbox", async () => {
-  // As a node is (the control): its networks are asked for, its images kept, and its gateway bound (here it can't be).
+  // As a node is (the control): its networks are asked for, its images kept, and its gateway bound (here it can't be: its
+  // port is the test's own).
   const usual = await node("usual", true);
   expect(usual.asked.some((args) => args[0] === "network")).toBe(true);
   expect(usual.said.some((line) => line.startsWith("sandbox gateway listener unavailable"))).toBe(true);

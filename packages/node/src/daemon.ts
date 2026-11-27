@@ -161,6 +161,12 @@ export interface DaemonOptions {
    */
   sandboxNetworks?: boolean;
   /**
+   * Where the sandbox gateway listens (default: the gateway network's address, NETWORKS.gateway, on SANDBOX_GATEWAY_PORT,
+   * where sandboxes reach it). Tests give their own, so what they see never depends on whether this machine has that
+   * address, as a node's own machine does once its sandbox networks are made.
+   */
+  sandboxGateway?: { hostname: string; port: number };
+  /**
    * How this node measures itself. Default: the real benchmark, a few seconds at low priority (and never in
    * tests that pass their own capabilities, unless they give one here). false: it doesn't.
    */
@@ -983,10 +989,11 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     const apple = caps.sandbox?.engine === "container";
     let said = false;
     let tries = 0;
+    const gatewayAt = opts.sandboxGateway ?? { hostname: NETWORKS.gateway.gateway, port: SANDBOX_GATEWAY_PORT };
     const bindGateway = (): boolean => {
       try {
         servers.push(
-          Bun.serve({ hostname: NETWORKS.gateway.gateway, port: SANDBOX_GATEWAY_PORT, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: listening(app, "sandbox") }),
+          Bun.serve({ hostname: gatewayAt.hostname, port: gatewayAt.port, idleTimeout: 255, maxRequestBodySize: MAX_REQUEST_BODY, fetch: listening(app, "sandbox") }),
         );
         if (said) log("sandbox gateway listening");
         return true;
