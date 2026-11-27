@@ -59,11 +59,19 @@ however you installed it: from before the catalog said so, or from its own serve
   - The run it wakes is told who wrote and the first lines, on its own node. What that run says it did isn't recorded.
   - Nor is what it ran. Each command it runs writes a line that says only that it ran one and how it ended. So does a
     tripwire's line that stopped one, and a rule's notice that one ran.
+  - Nor what it searched. Its web search's line carries its run and says only that it searched.
+  - The node writes no memory of that run and learns no skill from it. What it keeps is labeled as its loop is, not by
+    what woke it.
+  - Its calls, to any connector, are written as a private connector's are: the tool, how it went, the answer's size.
+  - A loop that mail ever woke stays private, as the log says: set again without its mail, or removed, its runs are
+    still yours.
 - **Your words, only on your devices.** An agent with `mind:read` reads none of a private connector's lines in the
   ledger, not even one written before this. The ledger keeps every line it was given, so the view leaves them out.
   - Nor does it read a line of a loop's run that new mail wakes, or that calls one of them.
   - Nor does it read what such a loop said of its runs, however old: in its runs, its last run, and the lines of while
     you were away. Of a notice it raised, it reads only the title (the loop's label).
+  - Nor does it read such a loop's waiting call's words, whichever connector it goes to, nor what its runs kept: that is
+    listed on your devices alone.
   - In a waiting call, the agent reads that it waits and where it stands, never its words: a send's recipients, subject
     and words, why it was asked, what came back.
   - Nor does it read an order's label or arguments, the search words of a loop that calls one, what mail a loop watches
@@ -78,11 +86,11 @@ however you installed it: from before the catalog said so, or from its own serve
   ([POLICY.md](POLICY.md), limit 5).
 - **What the rule doesn't cover.**
   - An agent you allowed. Its own tools aren't under the rule, so what it does with what it read is its choice.
-  - The run new mail wakes. It is told who wrote and the first lines, and so is the model it runs with. It may write
-    memories, which replicate and which agents read: what it writes is its choice.
-  - What that run does other than run commands. What it searches the web for is a line every agent reads. Its calls to
-    connectors that aren't private, and what it saves, are written as any run's.
+  - The run new mail wakes. It is told who wrote and the first lines, and so is the model it runs with.
+  - What that run keeps. Its files hold what it wrote there, on the node that keeps them, and their names are in the
+    record every node replicates; only your devices list them.
   - Your own words for a loop: its label, what it tells you, the goal you set it. Agents read them as you wrote them.
+  - A loop's name. A new loop with the name of one that was private is private too.
   - A waiting send's words. They are in the log every node of yours keeps, since each of your devices must be able to
     show it to you; only your devices read them.
   - A connector you installed under another id. It is private only if its manifest says so (`"private": true`).
