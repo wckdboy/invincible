@@ -49,6 +49,12 @@ HELD_EXIT = 75  # what an agent's command exits with when the owner has the desk
 # The owner's connections: the node's own exec runs its held session as this uid (never the agent's, 1000), on a socket
 # of its own, so an agent can't say it is the owner.
 OWNER_UID = int(os.environ.get("INVINCIBLE_DESKTOP_OWNER_UID", "1001"))
+# Light by default (C1 step 10): a desktop nothing has been asked of (but whether it is up, or how to use it) for
+# IDLE_STOP s, that no one holds and no one watches, is stopped as `desktop stop` stops it. The next command starts it
+# again, and the agent's next command is told why its screen is fresh. 0 keeps it up.
+IDLE_STOP = float(os.environ.get("INVINCIBLE_DESKTOP_IDLE", "600"))
+ENCODER_COMM = "desktop-stream"  # the stream's encoder: it runs only while someone watches (desktop.c, stream.c)
+IDLE_NOTE = "idle-stopped"  # left in the run directory by a deskd that stopped an unused desktop, for the next to say
 SETTLE_CAP = 3.0  # and is never waited for longer than this
 GRACE = 0.060  # an action's answer waits this long at most for the screen to show it
 CDP_BOUND = 2.0  # every call to the browser answers within this, or says it didn't
@@ -1303,6 +1309,10 @@ class Pieces:
                 except OSError:
                     pass
 
+    def watched(self):
+        """Whether someone watches the screen: the stream's encoder runs only while someone does (and 2 s after)."""
+        return bool(_own(ENCODER_COMM))
+
 
 # ---------------------------------------------------------------- the desk: every action, and its answer
 
@@ -1326,6 +1336,12 @@ class Desk:
         # The owner's take-over: the connection that took it (the node's held session), since and until when.
         self.hold = None
         self.hold_changed = threading.Condition()
+        # Light by default: when it was last asked something but whether it is up, how many such requests are being
+        # answered now, and how long it had sat unused when the deskd before this one stopped it (said once, below).
+        self.use_lock = threading.Lock()
+        self.last_used = self.now()
+        self.answering = 0
+        self.restarted = None
 
     # -- the owner's take-over (C1 step 9): while they hold the desktop, an agent's requests wait, and are told
     def holding(self):
@@ -1383,6 +1399,62 @@ class Desk:
     def held_said(self, h):
         return "the owner took this desktop over %d s ago, and has it for up to %d s more: until they give it back, or %d s pass with no input from them" % (
             round(time.time() - h["since"]), round(self.hold_ends(h)), round(h["idle"]))
+
+    # -- light by default (C1 step 10): an unused desktop stops, and the next command starts it again
+    def asked(self, verb):
+        """A request being answered (`with desk.asked(verb):`). One that does more than ask whether the desktop is up, or
+        how to use it, keeps it from stopping: from its start until IDLE_STOP s after its end."""
+        return Asked(self, verb not in ASKING)
+
+    def idle(self):
+        """Whether the desktop has sat unused long enough to stop: it is up; nothing has been asked of it but whether it is
+        up for IDLE_STOP s, and nothing is being answered now; no one holds it; and no one watches it."""
+        if IDLE_STOP <= 0 or self._display is None or self.stopping:
+            return False
+        with self.use_lock:
+            if self.answering or self.now() - self.last_used < IDLE_STOP:
+                return False
+        return not self.holding() and not self.pieces.watched()
+
+    def idle_stop(self, run):
+        """The desktop stopped, if it has sat unused long enough (idle): claimed first, so a request that comes as it is
+        decided is answered by this deskd before it goes, never cut off."""
+        if not self.idle():
+            return False
+        with self.use_lock:
+            if self.answering or self.stopping:
+                return False
+            self.stopping = True
+        self.stop_all(run=run, idle=True)
+        return True
+
+    def stop_all(self, run=None, idle=False):
+        """The desktop stopped as a person leaves it: each window asked to close, then the pieces stopped, and this
+        process ended with them (the next command starts both). Stopped for being unused, it leaves the next deskd a note
+        to say so to the agent (in `run`)."""
+        self.stopping = True
+        try:
+            if idle and run:
+                with open(os.path.join(run, IDLE_NOTE), "w") as f:
+                    json.dump({"after": IDLE_STOP}, f)
+            self.close_all()
+        finally:
+            self.pieces.stop()
+            os._exit(0)
+
+    def told_restarted(self, verb):
+        """The agent's word, once, after the deskd before this one stopped the desktop for being unused: said on its next
+        command that does something (not one that asks only whether it is up, as the node's own `status` does before it
+        opens the owner's session, nor `start`, which the owner's stream runs too). Its screen is fresh: its windows were
+        closed."""
+        if self.restarted is None or verb in ASKING or verb == "start":
+            return None
+        after, self.restarted = self.restarted, None
+        unused = "%d minutes" % round(after / 60) if after >= 60 else "%.1f s" % after
+        again = "this command started it again" if self._display is not None else "the next command that needs the screen starts it again"
+        return ("desktop: this desktop was stopped after %s with nothing done on it and no one watching, its windows closed as "
+                "a person closes them; %s, a fresh screen (the browser's profile, and what is signed in there, are kept in "
+                "/work).\n" % (unused, again))
 
     # -- what it holds, brought up on first use (once: the first commands may come together)
     def ready(self):
@@ -1886,7 +1958,7 @@ class Desk:
 
 HELP = """desktop start                      bring up the display, the window manager and the browser
 desktop stream                     the screen as H.264 on stdout while it runs (the node's watching: desktop-stream)
-desktop status | desktop stop
+desktop status | desktop stop       (an unused desktop stops by itself after 10 minutes; the next command starts it)
 desktop open <address>             open an address in the browser (http, https, file or about)
 desktop text                       the page in front, as text: its title, its address, what it says
 desktop dialog accept [text] | dismiss   answer a JavaScript dialog on the page (alert, confirm, prompt)
@@ -1975,14 +2047,7 @@ def cli(desk, argv, cwd="/work", env=None):
             # Answered first; then each window closed as a person would, the pieces stopped, and this process ended with
             # them (the next command starts both).
             desk.stopping = True
-
-            def stop():
-                try:
-                    desk.close_all()
-                finally:
-                    desk.pieces.stop()
-                    os._exit(0)
-            threading.Timer(0.2, stop).start()
+            threading.Timer(0.2, desk.stop_all).start()
             return 0, "The desktop is stopped.\n", ""
         if verb == "dialog":
             if not args or args[0] not in ("accept", "dismiss"):
@@ -2244,6 +2309,8 @@ ENV_KEYS = ("INVINCIBLE_EYES", "INVINCIBLE_EYES_SPACE", "INVINCIBLE_GATEWAY", "I
 # What an agent may ask while the owner holds the desktop, without waiting: its help, whether it is up, and `start`
 # (which the owner's own stream runs first: `desktop stream`).
 UNHELD = {"help", "--help", "-h", "status", "start"}
+# What asks only whether the desktop is up, or how to use it: it neither starts the desktop nor keeps an unused one up.
+ASKING = {"help", "--help", "-h", "status"}
 # What the owner may ask that is not their input: looking, and asking how it is. Their input (anything else) takes the
 # desktop over if it is free, and starts a hold's idle time again; looking does neither, so a page that shows them the
 # screen every few seconds keeps no hold of theirs alive.
@@ -2259,6 +2326,28 @@ def agent_waits(desk, verb):
     if still is not None:
         raise Held("nothing was done: %s. Work on something else meanwhile, and try again after." % desk.held_said(still))
     return "desktop: the owner had this desktop; they gave it back after %d s, and this ran then.\n" % round(waited) if waited >= 0.05 else None
+
+
+class Asked:
+    """A request being answered (Desk.asked): counted while it is, its end the desktop's last use."""
+    __slots__ = ("desk", "counts")
+
+    def __init__(self, desk, counts):
+        self.desk, self.counts = desk, counts
+
+    def __enter__(self):
+        if self.counts:
+            with self.desk.use_lock:
+                self.desk.answering += 1
+                self.desk.last_used = self.desk.now()
+        return self
+
+    def __exit__(self, *_):
+        if self.counts:
+            with self.desk.use_lock:
+                self.desk.answering -= 1
+                self.desk.last_used = self.desk.now()
+        return False
 
 
 class Who:
@@ -2286,7 +2375,9 @@ def session(desk, request, who=None):
     The owner's are the requests of an owner's connection (Who), whatever a request says: only they take the desktop
     over and give it back, theirs never wait, and each answer of theirs says whether they have it (`hold`)."""
     owner = who is not None and who.owner
-    answer = _session(desk, request, who, owner)
+    verb = str(request["argv"][0]) if isinstance(request.get("argv"), list) and request["argv"] else str(request.get("name", ""))
+    with desk.asked(ALIASES.get(verb, verb)):
+        answer = _session(desk, request, who, owner)
     if owner:
         answer["hold"] = desk.hold_view(desk.holding())
     return answer
@@ -2317,8 +2408,11 @@ def _session(desk, request, who, owner):
             note = agent_waits(desk, verb)
         if "argv" in request:
             code, out, err = cli(desk, [str(a) for a in request["argv"]], request.get("cwd", "/work"), {k: str(v) for k, v in (request.get("env") or {}).items() if k in ENV_KEYS})
-            return {"id": rid, "ok": code == 0, "code": code, "stdout": out, "stderr": (note or "") + err, **({"took": True} if took else {})}
+            restarted = None if owner else desk.told_restarted(ALIASES.get(verb, verb))
+            return {"id": rid, "ok": code == 0, "code": code, "stdout": out, "stderr": (note or "") + (restarted or "") + err, **({"took": True} if took else {})}
         answer = desk.tool(name, request.get("input") or {})
+        if not owner:
+            note = (note or "") + (desk.told_restarted(name) or "") or None
         if request.get("screenshot") and "image" not in answer:
             answer["image"] = desk.picture(request.get("format", "png"), settle=request.get("settle", True))
         if "image" in answer:
@@ -2347,10 +2441,12 @@ def handle(desk, conn, owners=False):
             # A command line is always the agent's (the owner's go through the node's held session).
             request = json.loads(f.readline().decode("utf-8", "replace"))
             argv = [str(a) for a in request.get("argv", [])]
+            verb = ALIASES.get(argv[0], argv[0]) if argv else "help"
             try:
-                note = agent_waits(desk, ALIASES.get(argv[0], argv[0]) if argv else "help")
-                code, out, err = cli(desk, argv, request.get("cwd", "/work"), {k: str(v) for k, v in (request.get("env") or {}).items() if k in ENV_KEYS})
-                err = (note or "") + err
+                with desk.asked(verb):
+                    note = agent_waits(desk, verb)
+                    code, out, err = cli(desk, argv, request.get("cwd", "/work"), {k: str(v) for k, v in (request.get("env") or {}).items() if k in ENV_KEYS})
+                err = (note or "") + (desk.told_restarted(verb) or "") + err
             except Held as error:
                 code, out, err = HELD_EXIT, "", "desktop: %s\n" % error
             out_b, err_b = out.encode(), err.encode()
@@ -2392,6 +2488,14 @@ def listening(path, mode):
     return s
 
 
+def idle_watch(desk, run):
+    """Light by default: the desktop looked at every so often, and stopped once it has sat unused for IDLE_STOP s."""
+    every = min(15.0, max(IDLE_STOP / 4, 0.05))
+    while True:
+        time.sleep(every)
+        desk.idle_stop(run)
+
+
 def owners_socket(run=RUN):
     """The owner's socket: beside the run directory (in the VM's /tmp), so the directory stays the agent's alone."""
     return run.rstrip("/") + ".owner.sock"
@@ -2408,6 +2512,16 @@ def serve(desk=None, run=RUN):
     except OSError:
         return 0
     desk = desk or Desk()
+    # (The deskd before this one stopped the desktop for being unused: the agent's next command is told.)
+    left = os.path.join(run, IDLE_NOTE)
+    try:
+        with open(left) as f:
+            desk.restarted = float(json.load(f).get("after", IDLE_STOP))
+        os.remove(left)
+    except (OSError, ValueError, AttributeError):
+        pass
+    if IDLE_STOP > 0:
+        threading.Thread(target=idle_watch, args=(desk, run), daemon=True).start()
     # (The owner's first: once the agent's is there, deskd answers on both, as what waits for the agent's takes it to.)
     owners = listening(owners_socket(run), 0o666)
     agents = listening(os.path.join(run, "deskd.sock"), 0o600)

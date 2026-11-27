@@ -1013,6 +1013,83 @@ print(json.dumps(spawned))`)).toEqual(["chromium"]);
   });
 });
 
+describe("light by default (C1 step 10): an unused desktop stops, and the next command starts it again", () => {
+  const me = String(process.getuid!());
+  /** Until the trace says the desktop was stopped, `ms` at most: whether it was. */
+  const stopped = async (r: Running, ms: number) => {
+    for (let waited = 0; waited < ms; waited += 20) {
+      if (calls(r.trace(), "stop").length) return true;
+      await Bun.sleep(20);
+    }
+    return false;
+  };
+
+  test("left unused, it stops as `desktop stop` does, each window closed first; the agent's next command starts it again and is told, once", async () => {
+    if (!built) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: "0.3" });
+    expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
+    expect(await stopped(r, 3000)).toBe(true);
+    const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? "close" : "stop"));
+    expect(order.at(-1)).toBe("stop");
+    expect(order.filter((o) => o === "close").length).toBeGreaterThan(0);
+    // (The next deskd keeps it up this time: its own word is the one asked of.)
+    const next = desktop(r, ["click", "10", "20"], { INVINCIBLE_DESKTOP_IDLE: "60" });
+    expect(next.code).toBe(0);
+    expect(next.err).toMatch(/^desktop: this desktop was stopped after 0\.3 s with nothing done on it and no one watching, its windows closed as a person closes them; this command started it again, a fresh screen \(the browser's profile, and what is signed in there, are kept in \/work\)\.\n/);
+    expect(desktop(r, ["click", "10", "20"]).err).not.toContain("was stopped");
+    expect(existsSync(join(r.run, "idle-stopped"))).toBe(false);
+  });
+
+  test("used, held or watched, it stays up; watched no more, it stops", async () => {
+    if (!built) return;
+    const watched = join(mkdtempSync(join(root, "watch-")), "watched");
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: "0.3", INVINCIBLE_DESKTOP_OWNER_UID: me, DESKD_WATCHED: watched });
+    // Used: a command every 0.1 s for 0.8 s.
+    for (let i = 0; i < 8; i++) {
+      expect(desktop(r, ["windows"]).code).toBe(0);
+      await Bun.sleep(100);
+    }
+    expect(calls(r.trace(), "stop")).toHaveLength(0);
+    // Held: the owner has it, with nothing asked, for 0.8 s.
+    const node = await opened(r, true);
+    expect(await node.ask({ id: 1, name: "take", input: { idle: 30 } })).toMatchObject({ ok: true, took: true });
+    await Bun.sleep(800);
+    expect(calls(r.trace(), "stop")).toHaveLength(0);
+    expect(await node.ask({ id: 2, name: "release" })).toMatchObject({ ok: true, released: true });
+    await node.close();
+    // Watched: the stream's encoder runs, with nothing asked, for 0.8 s; then no one watches, and it stops.
+    writeFileSync(watched, "");
+    await Bun.sleep(800);
+    expect(calls(r.trace(), "stop")).toHaveLength(0);
+    rmSync(watched);
+    expect(await stopped(r, 3000)).toBe(true);
+  });
+
+  test("asking only whether it is up keeps it from nothing; and the owner's look that starts it again leaves the agent's word for the agent", async () => {
+    if (!built) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: "0.3", INVINCIBLE_DESKTOP_OWNER_UID: me });
+    expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
+    let stoppedWhileAsked = false;
+    for (let i = 0; i < 30 && !stoppedWhileAsked; i++) {
+      desktop(r, ["status"]);
+      stoppedWhileAsked = calls(r.trace(), "stop").length > 0;
+      await Bun.sleep(100);
+    }
+    expect(stoppedWhileAsked).toBe(true);
+    // The owner looks first (their app, after it): the node asks `status` on the agent's session, which starts deskd, and
+    // their look starts the desktop again. The word waits for the agent's own command.
+    await Bun.sleep(100);
+    const status = desktop(r, ["status"], { INVINCIBLE_DESKTOP_IDLE: "60" });
+    expect(status.code).toBe(0);
+    expect(status.err).not.toContain("was stopped");
+    const node = await opened(r, true);
+    const look = await node.ask({ id: 1, name: "screenshot", input: {} });
+    expect(JSON.stringify(look)).not.toContain("was stopped");
+    await node.close();
+    expect(desktop(r, ["click", "10", "20"]).err).toContain("this desktop was stopped after 0.3 s");
+  });
+});
+
 describe("the accessibility tree beside the pixels (step 6)", () => {
   /**
    * An accessibility bus as AT-SPI's registry and its apps answer it: Chromium (its page's form, in the window with the

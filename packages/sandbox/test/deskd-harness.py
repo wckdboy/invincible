@@ -297,6 +297,10 @@ class FakePieces:
     def window_manager_running(self):
         return True
 
+    def watched(self):
+        """Someone watches while the test's file is there (the stream's encoder running, in a VM)."""
+        return os.path.exists(os.environ.get("DESKD_WATCHED", "/nonexistent/deskd-watched"))
+
     def _spawn(self, argv, log, keep=None):
         trace(call="spawn", argv=argv)
 
