@@ -142,6 +142,47 @@ const nodeProofs = ["c2xpY2UtOC1jaGFsbGVuZ2U", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
   if (!core.verifyNodeProof(theNode.id, challenge, proof) || core.verifyNodeProof(anotherNode.id, challenge, proof)) fail(`core's node proof for ${challenge} isn't the node's alone`);
   return { node: theNode.id, anotherNode: anotherNode.id, challenge, signingInput: fromUtf8(core.nodeProofInput(challenge)), proof };
 });
+// What a whoami's answer says of the node, against the one pinned, as core judges it (judgeNodeProof): the answers as a
+// node sends them, the malformed ones too (the review of apps-name-node, I1), with no pin and with one, a moment before
+// the cutoff and at it. Each app reads the same bytes and gives the same verdict.
+const judgedNodeProofs = (() => {
+  const challenge = "c2xpY2UtOC1jaGFsbGVuZ2U";
+  const proofBy = (who: typeof theNode, asked = challenge) => b64u(who.sign(core.nodeProofInput(asked)));
+  const proof = proofBy(theNode);
+  // The same signature with its last character's unused bits set: base64url written another way.
+  const respelled = proof.slice(0, -1) + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".indexOf(proof.at(-1)!) | 1)];
+  const identity = new Uint8Array(32);
+  identity[0] = 1;
+  const universal = new Uint8Array(64);
+  universal.set(identity, 0);
+  const whoami = (fields: Record<string, unknown>) => JSON.stringify({ device, kind: "client", scopes: ["mind:read"], nodeName: "test node", fleet: "f_test", fleetName: null, ...fields });
+  const answers: [string, string][] = [
+    ["proven", whoami({ node: theNode.id, proof })],
+    ["proven to be another", whoami({ node: anotherNode.id, proof: proofBy(anotherNode) })],
+    ["no proof", whoami({ node: theNode.id })],
+    ["no proof, nor any node", whoami({})],
+    ["a proof by another key", whoami({ node: theNode.id, proof: proofBy(anotherNode) })],
+    ["a proof of another challenge", whoami({ node: theNode.id, proof: proofBy(theNode, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA") })],
+    ["a proof written another way", whoami({ node: theNode.id, proof: respelled })],
+    ["the proof null", whoami({ node: theNode.id, proof: null })],
+    ["the proof a number", whoami({ node: theNode.id, proof: 5 })],
+    ["a proof and no node", whoami({ proof })],
+    ["a node that isn't a string", whoami({ node: 7, proof })],
+    ["the identity's universal forgery", whoami({ node: `n_${b64u(identity)}`, proof: b64u(universal) })],
+  ];
+  const cases = [];
+  for (const [what, answer] of answers) {
+    for (const pinned of [null, theNode.id]) {
+      for (const now of [core.REQUESTS_NAME_THEIR_NODE_FROM - 1, core.REQUESTS_NAME_THEIR_NODE_FROM]) {
+        const judged = core.judgeNodeProof(pinned ?? undefined, JSON.parse(answer), challenge, now);
+        cases.push({ what, answer, pinned, challenge, now, judged });
+      }
+    }
+  }
+  const kinds = new Set(cases.map((c) => c.judged.kind));
+  for (const kind of ["pin", "same", "other", "older", "false"]) if (!kinds.has(kind as never)) fail(`the judged proofs hold no "${kind}"`);
+  return cases;
+})();
 
 // ---- Ed25519's strict rule (the lead's word of 27 November 2026): RFC 8032's test vectors and all of Wycheproof's -------
 // Each with the rule's answer as core gives it (verifyEd25519Strict), and whether its key and its R are points the rule
@@ -1916,6 +1957,7 @@ const vectors = {
   requests,
   requestsForNode,
   nodeProofs,
+  judgedNodeProofs,
   ed25519,
   canonical,
   pairing,

@@ -257,6 +257,496 @@
       "proof": "x9t79sg6bKtE5TR9T0MK6tc8lILQXnlaGbu9LS1st84U7dsLAiOFyMr39ivovpsMsTwp2I62dweLbjBvGsLfDw"
     }
   ],
+  "judgedNodeProofs": [
+    {
+      "what": "proven",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "pin",
+        "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+      }
+    },
+    {
+      "what": "proven",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "pin",
+        "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+      }
+    },
+    {
+      "what": "proven",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "same",
+        "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+      }
+    },
+    {
+      "what": "proven",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "same",
+        "node": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw"
+      }
+    },
+    {
+      "what": "proven to be another",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o\",\"proof\":\"-xZJw4AkATPsqjYmo0cTwDeU3A1FlyJyK6gn4W9F1Uh-z5JrTRPAfgxLI_jDn1Rzx095A1y-eg2iRYlOlUt6Cw\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "pin",
+        "node": "n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o"
+      }
+    },
+    {
+      "what": "proven to be another",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o\",\"proof\":\"-xZJw4AkATPsqjYmo0cTwDeU3A1FlyJyK6gn4W9F1Uh-z5JrTRPAfgxLI_jDn1Rzx095A1y-eg2iRYlOlUt6Cw\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "pin",
+        "node": "n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o"
+      }
+    },
+    {
+      "what": "proven to be another",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o\",\"proof\":\"-xZJw4AkATPsqjYmo0cTwDeU3A1FlyJyK6gn4W9F1Uh-z5JrTRPAfgxLI_jDn1Rzx095A1y-eg2iRYlOlUt6Cw\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "other",
+        "node": "n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o"
+      }
+    },
+    {
+      "what": "proven to be another",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o\",\"proof\":\"-xZJw4AkATPsqjYmo0cTwDeU3A1FlyJyK6gn4W9F1Uh-z5JrTRPAfgxLI_jDn1Rzx095A1y-eg2iRYlOlUt6Cw\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "other",
+        "node": "n_E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o"
+      }
+    },
+    {
+      "what": "no proof",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "older"
+      }
+    },
+    {
+      "what": "no proof",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "no proof",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "no proof",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "no proof, nor any node",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "older"
+      }
+    },
+    {
+      "what": "no proof, nor any node",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "no proof, nor any node",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "no proof, nor any node",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof by another key",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"-xZJw4AkATPsqjYmo0cTwDeU3A1FlyJyK6gn4W9F1Uh-z5JrTRPAfgxLI_jDn1Rzx095A1y-eg2iRYlOlUt6Cw\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof by another key",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"-xZJw4AkATPsqjYmo0cTwDeU3A1FlyJyK6gn4W9F1Uh-z5JrTRPAfgxLI_jDn1Rzx095A1y-eg2iRYlOlUt6Cw\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof by another key",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"-xZJw4AkATPsqjYmo0cTwDeU3A1FlyJyK6gn4W9F1Uh-z5JrTRPAfgxLI_jDn1Rzx095A1y-eg2iRYlOlUt6Cw\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof by another key",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"-xZJw4AkATPsqjYmo0cTwDeU3A1FlyJyK6gn4W9F1Uh-z5JrTRPAfgxLI_jDn1Rzx095A1y-eg2iRYlOlUt6Cw\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof of another challenge",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"x9t79sg6bKtE5TR9T0MK6tc8lILQXnlaGbu9LS1st84U7dsLAiOFyMr39ivovpsMsTwp2I62dweLbjBvGsLfDw\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof of another challenge",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"x9t79sg6bKtE5TR9T0MK6tc8lILQXnlaGbu9LS1st84U7dsLAiOFyMr39ivovpsMsTwp2I62dweLbjBvGsLfDw\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof of another challenge",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"x9t79sg6bKtE5TR9T0MK6tc8lILQXnlaGbu9LS1st84U7dsLAiOFyMr39ivovpsMsTwp2I62dweLbjBvGsLfDw\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof of another challenge",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"x9t79sg6bKtE5TR9T0MK6tc8lILQXnlaGbu9LS1st84U7dsLAiOFyMr39ivovpsMsTwp2I62dweLbjBvGsLfDw\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof written another way",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACB\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof written another way",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACB\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof written another way",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACB\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof written another way",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACB\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the proof null",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":null}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the proof null",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":null}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the proof null",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":null}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the proof null",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":null}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the proof a number",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":5}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the proof a number",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":5}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the proof a number",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":5}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the proof a number",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw\",\"proof\":5}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof and no node",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof and no node",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof and no node",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a proof and no node",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a node that isn't a string",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":7,\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a node that isn't a string",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":7,\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a node that isn't a string",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":7,\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "a node that isn't a string",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":7,\"proof\":\"jmuCcV_93NxXV1tyNzG6TZZRFZgxinD468su3F_qgYEE6p6SYwJJIsl-y9Qm2ttUQxDIFl8pPyKP9IODoyTACA\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the identity's universal forgery",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"proof\":\"AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the identity's universal forgery",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"proof\":\"AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+      "pinned": null,
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the identity's universal forgery",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"proof\":\"AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206399999,
+      "judged": {
+        "kind": "false"
+      }
+    },
+    {
+      "what": "the identity's universal forgery",
+      "answer": "{\"device\":\"c_BAIX5hfwtkQ5KCePlpmeaaI6TywVK99tbN9m5bgCgtTtGUp968uXcS0t2jyoWqh2Wlb0X8dYWZZS8ol8ZTBuV5Q\",\"kind\":\"client\",\"scopes\":[\"mind:read\"],\"nodeName\":\"test node\",\"fleet\":\"f_test\",\"fleetName\":null,\"node\":\"n_AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\",\"proof\":\"AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}",
+      "pinned": "n_6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+      "challenge": "c2xpY2UtOC1jaGFsbGVuZ2U",
+      "now": 1797206400000,
+      "judged": {
+        "kind": "false"
+      }
+    }
+  ],
   "ed25519": [
     {
       "source": "RFC 8032 TEST 1",
