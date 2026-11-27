@@ -1,8 +1,9 @@
 // What private-answers left a gap in (the re-review of 27 November, B2, B3, B4; its PoCs turned around): what was
 // recorded before it, a private connector's call a standing order answers, and one removed. And the side doors a
-// private run's words took after it: a loop once private. Against a real daemon (startDaemon) and its routes, with
-// stand-ins for Google and for Home Assistant on its LAN address: only loopback reaches the network, and every other
-// origin gets a stand-in's 404. Every name, address and message is made up; the keys are obviously fake.
+// private run's words took after it: a loop once private, and a run's web searches. Against a real daemon (startDaemon)
+// and its routes, with stand-ins for Google, for Home Assistant on its LAN address and for the search engine: only
+// loopback reaches the network, and every other origin gets a stand-in's 404. Every name, address and message is made
+// up; the keys are obviously fake.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +30,8 @@ const changed = [
 ];
 const stand = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
+  // The search engine (search.ts SEARXNG) is answered here, never reached: no search leaves the test.
+  if (url.origin === "http://127.0.0.1:8889") return Response.json({ results: [{ title: "A result", url: "https://example.test/a", content: "A page." }], suggestions: [] });
   if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return fetch(input, init);
   const method = init?.method ?? "GET";
   if (url.origin === "https://oauth2.googleapis.com" && url.pathname === "/token") return Response.json({ access_token: "test-access-FAKE", expires_in: 3600, token_type: "Bearer" });
@@ -141,4 +144,11 @@ test("a loop once private stays private: set again without its mail, or removed,
   expect((await admin("removeLoop", { name: "lease" })).status).toBe(200);
   expect(held(JSON.stringify((await send(agent, "loopRuns", { name: "lease" })).body))).toEqual([]);
   expect(JSON.stringify((await admin("loopRuns", { name: "lease" })).body)).toContain("Quarterly rent arrears");
+});
+
+test("a web search carries the run that made it, as every line of a run does", async () => {
+  const scout = (await admin("mintArm", { label: "scout", scopes: ["connect", "mind:read"] })).body.token;
+  expect((await send(scout, "webSearch", { q: "quarterly reports" })).status).toBe(200);
+  const line = ((await admin("ledger")).body.entries as { resource: string; run: string | null; target: string }[]).find((e) => e.resource === "search")!;
+  expect([line.run, line.target]).toEqual(["arm.scout", "quarterly reports"]);
 });

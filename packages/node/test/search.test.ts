@@ -70,6 +70,17 @@ describe("searching from a sandbox", () => {
     expect(ledger).toEqual([expect.objectContaining({ class: "read", resource: "search", target: "finite element method" })]);
   });
 
+  test("its line carries the run that holds the sandbox (its token names only the sandbox), so a private run's is left out of agents' reads", async () => {
+    const { tokens, ledger, s } = setup();
+    const runOf = async (sandbox: string) => (sandbox === "0123456789" ? "arm.loop.rent" : undefined);
+    const call = (token: string) => handleSandboxSearch(new Request("http://172.31.248.1:7402/search?q=quarterly+rent+arrears", { headers: { authorization: `Bearer ${token}` } }), { tokens, ledger: (e) => ledger.push(e), fetch: s.fetch, runOf });
+    for (const sandbox of ["0123456789", "abcdef0123"]) {
+      const { token } = tokens.mint({ label: `sandbox:${sandbox}`, providers: ["search"], ttlMinutes: 60, maxRequests: 10 });
+      expect((await call(token)).status).toBe(200);
+    }
+    expect(ledger.map((e) => [e.target, e.run])).toEqual([["quarterly rent arrears", "arm.loop.rent"], ["quarterly rent arrears", undefined]]);
+  });
+
   test("a model-only token, a git token or no query: refused, nothing searched", async () => {
     const { tokens, call, s } = setup();
     const models = tokens.mint({ label: "sandbox:y", providers: ["orcarouter"], ttlMinutes: 60, maxRequests: 10 }).token;

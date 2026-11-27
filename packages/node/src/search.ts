@@ -70,7 +70,10 @@ export async function searchWeb(query: SearchQuery, fetcher: typeof fetch = fetc
 const json = (status: number, body: unknown) => Response.json(body, { status });
 
 /** GET /search?q=… on the sandbox gateway, for tokens with the search scope. */
-export async function handleSandboxSearch(req: Request, ctx: { tokens: GatewayTokens; ledger?: (entry: LedgerEntryInput) => void; fetch?: typeof fetch }): Promise<Response> {
+export async function handleSandboxSearch(
+  req: Request,
+  ctx: { tokens: GatewayTokens; ledger?: (entry: LedgerEntryInput) => void; fetch?: typeof fetch; runOf?: (sandbox: string) => Promise<string | undefined> },
+): Promise<Response> {
   if (req.method !== "GET") return json(405, { error: "GET" });
   const token = req.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1] ?? "";
   const verdict = ctx.tokens.consume(token, SEARCH_SCOPE);
@@ -90,7 +93,10 @@ export async function handleSandboxSearch(req: Request, ctx: { tokens: GatewayTo
       },
       ctx.fetch,
     );
-    ctx.ledger?.({ class: "read", resource: "search", target: q.slice(0, 200), verdict: "allow", reason: "a sandbox searched the web through its gateway" });
+    // (Its line carries the run that holds the sandbox, as every line of a run does: its token names only the sandbox.)
+    const sandbox = /^sandbox:([0-9a-f]{10})$/.exec(ctx.tokens.labelOf(token) ?? "")?.[1];
+    const run = sandbox && ctx.runOf ? await ctx.runOf(sandbox).catch(() => undefined) : undefined;
+    ctx.ledger?.({ class: "read", resource: "search", target: q.slice(0, 200), verdict: "allow", reason: "a sandbox searched the web through its gateway", ...(run ? { run: run.slice(0, 64) } : {}) });
     return json(200, found);
   } catch (error) {
     return json(error instanceof SearchError ? error.status : 500, { error: (error as Error).message });

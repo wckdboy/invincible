@@ -1,11 +1,13 @@
 import { installedConnector, privateConnector } from "@invincible/models";
 import type { LedgerStore } from "@invincible/ledger";
+import type { LedgerEntryInput } from "@invincible/sandbox";
 
 /*
  * Your private data where it isn't a private connector's own call (PRIVATE_CONNECTORS; the re-review of 27 November,
  * B1, B2, B4, and the side doors after it): a connector is private if it ever was, as the log says it was installed,
  * not only as it stands now; and so is a loop, when what it runs on is or was: one that new mail wakes, or one whose task
- * calls a private connector. What such a loop's runs record, and the lines its runs' commands write, are yours alone.
+ * calls a private connector. What such a loop's runs record, and the lines they write in their own words, are yours
+ * alone.
  */
 
 /** Whether a connector's answers are your private data: its id, its manifest now, or any manifest it was ever installed with. */
@@ -37,8 +39,23 @@ export function privateLoops(store: LedgerStore): Set<string> {
   return loops;
 }
 
-/** What a run your private data woke writes in place of its command's words: that it ran one, and how that ended. */
-export function withheldRunDetail(resource: string, detail: string | undefined): string {
-  const exit = /→ exit (-?\d+)$/.exec(detail ?? "")?.[1];
-  return resource === "sandbox.exec" ? `a command of a run your private data woke${exit === undefined ? "" : ` → exit ${exit}`}` : "a line of a run your private data woke";
+/**
+ * A line a run writes in its own words, as a private run writes it: a command, and a tripwire's line on one, say that it
+ * ran one and how that ended; a web search, that it searched. Null for a line of any other kind: written as it is.
+ */
+export function withheldRunLine(entry: LedgerEntryInput): LedgerEntryInput | null {
+  switch (entry.resource) {
+    case "sandbox.exec": {
+      const exit = /→ exit (-?\d+)$/.exec(entry.detail ?? "")?.[1];
+      return { ...entry, detail: `a command of a run your private data woke${exit === undefined ? "" : ` → exit ${exit}`}` };
+    }
+    case "sandbox.stream":
+    case "sandbox.terminal":
+    case "rule":
+      return { ...entry, detail: "a line of a run your private data woke" };
+    case "search":
+      return { ...entry, target: "a search of a run your private data woke" };
+    default:
+      return null;
+  }
 }

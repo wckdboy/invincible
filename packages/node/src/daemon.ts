@@ -46,7 +46,7 @@ import { ConnectorService } from "./connectors.ts";
 import { loopNotice, tellNotice } from "./heartbeat.ts";
 import { cheapestRole, computeUpkeep, type LoopTaskDeps, lookAround, loopExecutor } from "./loop-tasks.ts";
 import { LoopRunner, loopRecords } from "./loops.ts";
-import { loopRun, privateLoops, runOfLoops, withheldRunDetail } from "./private-data.ts";
+import { loopRun, privateLoops, runOfLoops, withheldRunLine } from "./private-data.ts";
 import { LoopDrafts } from "./loop-drafts.ts";
 import { ConnectorRequests } from "./connector-requests.ts";
 import { giveBack, reviewBack, wantsReviews } from "./ci-back.ts";
@@ -452,14 +452,13 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   };
 
   // Every gated action lands in the signed, replicated ledger.
-  // A run your private data woke is itself private (private-data.ts; the re-review of 27 November, B1): the lines its
-  // commands write, and a tripwire's that stopped one, say that it ran one and how that ended, never what it ran, since
-  // the run was told who wrote and what about.
-  const COMMAND_LINES = new Set(["sandbox.exec", "sandbox.stream", "sandbox.terminal", "rule"]);
+  // A run your private data woke is itself private (private-data.ts; the re-review of 27 November, B1): the lines it
+  // writes in its own words (its commands, a tripwire's that stopped one, its web searches) say that it did so and how
+  // that ended, never what it ran or searched, since the run was told who wrote and what about.
   const ledger = (entry: LedgerEntryInput) => {
     const plain = Object.fromEntries(Object.entries(entry).filter(([, v]) => v !== undefined)) as LedgerEntryInput;
-    const secret = COMMAND_LINES.has(plain.resource) && loopRun(plain.run) && runOfLoops(plain.run, privateLoops(store));
-    const body = secret ? { ...plain, detail: withheldRunDetail(plain.resource, plain.detail) } : plain;
+    const withheld = loopRun(plain.run) ? withheldRunLine(plain) : null;
+    const body = withheld && runOfLoops(plain.run, privateLoops(store)) ? withheld : plain;
     try {
       store.emit(identity, "ledger.recorded", body);
     } catch (error) {

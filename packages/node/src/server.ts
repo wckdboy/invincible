@@ -4256,8 +4256,9 @@ export function createApp(ctx: AppContext) {
     },
     webSearch: async (input, p) => {
       try {
-        const found = await searchWeb(input);
-        ctx.ledger?.({ class: "read", resource: "search", target: input.q.slice(0, 200), verdict: "allow", reason: `searched by ${p.kind === "arm" ? `arm:${p.label}` : p.kind}` });
+        const found = await searchWeb(input, ctx.fetch);
+        // (Its line carries the run, as every line of a run does: a private run's is yours alone.)
+        ctx.ledger?.({ class: "read", resource: "search", target: input.q.slice(0, 200), verdict: "allow", reason: `searched by ${p.kind === "arm" ? `arm:${p.label}` : p.kind}`, ...(p.kind === "arm" && p.label ? { run: armRun(p.label) } : {}) });
         return found;
       } catch (error) {
         if (error instanceof SearchError) throw new HttpError(error.status, error.message);
@@ -5102,6 +5103,8 @@ export function createApp(ctx: AppContext) {
   };
 
   const routeTable = new Map(Object.entries(routes).map(([name, r]) => [`${r.method} ${r.path}`, name as RouteName]));
+  /** The run that holds one of this node's sandboxes, as its host says (a gateway token names only its sandbox). */
+  const sandboxRun = async (id: string): Promise<string | undefined> => (await ctx.sandbox?.get(id))?.run || undefined;
 
   async function handle(req: Request, listener: Listener): Promise<Response> {
     const url = new URL(req.url);
@@ -5110,7 +5113,7 @@ export function createApp(ctx: AppContext) {
     // Sandboxes can reach exactly three things on the host, all token-gated: the model
     // gateway, the git gateway (read-only clones of one repository) and web search.
     if (listener === "sandbox") {
-      if (path === "/search") return handleSandboxSearch(req, { tokens: ctx.tokens, ...(ctx.ledger ? { ledger: ctx.ledger } : {}) });
+      if (path === "/search") return handleSandboxSearch(req, { tokens: ctx.tokens, ...(ctx.ledger ? { ledger: ctx.ledger } : {}), ...(ctx.fetch ? { fetch: ctx.fetch } : {}), runOf: sandboxRun });
       if (path.startsWith("/git/")) return handleGitGateway(req, { store: ctx.store, vault: ctx.vault, tokens: ctx.tokens, ...(ctx.ledger ? { ledger: ctx.ledger } : {}), ...(ctx.fetch ? { fetch: ctx.fetch } : {}) });
       // (And the key gateway: an API called with a key of yours an agent may use but never see, PLAN #17.)
       if (path.startsWith("/key/")) return handleKeyGateway(req, { vault: ctx.vault, tokens: ctx.tokens, ...(ctx.ledger ? { ledger: ctx.ledger } : {}), ...(ctx.fetch ? { fetch: ctx.fetch } : {}) });
