@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ExecResult, SandboxView } from "@invincible/core";
+import { HANDED_CHANGES_BYTES } from "@invincible/agents";
 import { TASK_VM_MINUTES, TaskVms } from "../src/task-vms.ts";
 
 /*
@@ -16,6 +17,8 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
   const vms = new Map<string, { createdAt: number; run: string }>();
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
   const asked: unknown[] = [], ran: { vm: string; cmd: string[] }[] = [], removed: string[] = [];
+  /** Each pipe between two VMs, as the host was asked for it: from which VM's command to which. */
+  const piped: { from: { id: string; cmd: string[] }; to: { id: string; cmd: string[] }; maxBytes: number }[] = [];
   /** Each step of a removal, in order: a lease ended, a VM removed. */
   const steps: string[] = [];
   /** The signal each VM was asked for with: its task's work's. */
@@ -58,8 +61,12 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       return { verdict: "allow" } as never;
     },
     endLease: (vm: string) => void steps.push(`lease ended ${vm}`),
+    pipe: async (from: { id: string; cmd: string[] }, to: { id: string; cmd: string[] }, opts: { timeoutSec: number; maxBytes: number }) => {
+      piped.push({ from, to, maxBytes: opts.maxBytes });
+      return { from: done(), to: done(), bytes: 0, cut: false };
+    },
   };
-  return { fake, vms, asked, ran, removed, steps, signals };
+  return { fake, vms, asked, ran, removed, steps, signals, piped };
 }
 
 const ask = { vm: "agent-vm", task: "task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"] };
@@ -70,7 +77,7 @@ describe("another node's task's VM, on this node", () => {
     const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
     const work = new AbortController();
     const vm = await vms.open(ask, work.signal);
-    expect(h.asked).toEqual([{ task: ask.task, shares: "agent-vm", run: `handed.${ask.task}`, providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: TASK_VM_MINUTES }]);
+    expect(h.asked).toEqual([{ task: ask.task, beside: "agent-vm", run: `handed.${ask.task}`, providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: TASK_VM_MINUTES }]);
     // (Asked for with its work's own signal: one that ends while it waits for room has none made. I-2.)
     expect(h.signals).toEqual([work.signal]);
     await vm.exec("echo one", 30, new AbortController().signal);
@@ -154,6 +161,24 @@ describe("another node's task's VM, on this node", () => {
     // Released after, nothing more is done.
     await vm.release();
     expect(h.removed).toEqual(["vm-1"]);
+  });
+
+  test("its clone comes from its agent's VM and its changes go back to it, each through the host alone, its changes alone held to a cap, and none once its work has stopped (R5-3)", async () => {
+    const h = host();
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
+    const work = new AbortController();
+    const vm = await vms.open(ask, work.signal);
+    await vm.receive("give", "take", 900, work.signal);
+    await vm.send("send", "receive", 900, work.signal);
+    expect(h.piped).toEqual([
+      { from: { id: "agent-vm", cmd: ["bash", "-lc", "give"] }, to: { id: "vm-1", cmd: ["bash", "-lc", "take"] }, maxBytes: Number.POSITIVE_INFINITY },
+      { from: { id: "vm-1", cmd: ["bash", "-lc", "send"] }, to: { id: "agent-vm", cmd: ["bash", "-lc", "receive"] }, maxBytes: HANDED_CHANGES_BYTES },
+    ]);
+    const stopped = new AbortController();
+    stopped.abort();
+    await expect(vm.send("send", "receive", 900, stopped.signal)).rejects.toThrow("its work has stopped");
+    expect(h.piped).toHaveLength(2);
+    await vm.release();
   });
 
   test("none is made for work that has stopped, nor where this node has no VMs", async () => {

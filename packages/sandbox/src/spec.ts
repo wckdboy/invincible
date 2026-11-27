@@ -60,6 +60,11 @@ export interface SandboxSpec {
   /** A VM made for another node's task (createTaskVm): its own, removed as the task ends, by the task it is for. */
   task?: string;
   /**
+   * The agent's VM another node's task's VM is made beside (createTaskVm), sharing nothing of it: its lease is renewed with
+   * that agent's, and that agent's VM isn't idle while it is there (no move to layout 2 begins under the task's work).
+   */
+  beside?: string;
+  /**
    * A VM made for an agent's run: that agent's own /work (its volume, or its workspace's path on this host), never one of
    * its own. Removing this VM leaves it as it was: it has no disk of its own to remove.
    */
@@ -79,9 +84,9 @@ export interface SandboxSpec {
    */
   layout?: { path: string };
   /**
-   * A HOME of its own, empty and in memory, at /home/agent (a VM that shares an agent's workspace: a run on a seat, another
-   * node's task): never the agent's, whose sign-ins and lease its tools would otherwise find there, nor the workspace it
-   * shares. Its environment and PATH (`path`, layoutPath) follow it, as layout 2's do.
+   * A HOME of its own, empty and in memory, at /home/agent (a VM that shares an agent's workspace, a run on a seat's, and
+   * another node's task's own VM): never the agent's, whose sign-ins and lease its tools would otherwise find there, nor a
+   * workspace. Its environment and PATH (`path`, layoutPath) follow it, as layout 2's do.
    */
   ownHome?: { path: string };
 }
@@ -212,6 +217,7 @@ export function labels(spec: SandboxSpec): Record<string, string> {
     [`${LABEL}.isolation`]: spec.isolation,
     ...(spec.seat ? { [`${LABEL}.seat`]: spec.seat.id } : {}),
     ...(spec.task ? { [`${LABEL}.task`]: spec.task } : {}),
+    ...(spec.beside ? { [`${LABEL}.beside`]: spec.beside } : {}),
     ...(spec.shares ? { [`${LABEL}.shares`]: spec.shares.sandbox } : {}),
     // (A tree of the store alone, in layout 2: one without holds the store's root, so no layout-2 mount is made beside it.)
     ...(spec.shares?.tree ? { [`${LABEL}.shares.tree`]: spec.shares.tree } : {}),

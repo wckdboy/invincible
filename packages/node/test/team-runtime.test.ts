@@ -57,7 +57,9 @@ function fixture(script: object[], overrides: Partial<TeamRuntimeDeps> = {}, usa
     deps.handedVm = async (m, given, models) => {
       const vm = { task: given.id, models: [...models], released: false };
       vms.push(vm);
-      return { exec: (command, timeout, signal) => deps.exec(m, command, timeout, signal), stop: () => deps.stopWorker(m), release: async () => void (vm.released = true) };
+      // (Its clone and its changes go between two commands as the fixture's commands go: each run, the first's words to the second.)
+      const pipe = async (from: string, to: string, timeout: number, signal: AbortSignal) => ({ from: await deps.exec(m, from, timeout, signal), to: await deps.exec(m, to, timeout, signal), bytes: 0, cut: false });
+      return { exec: (command, timeout, signal) => deps.exec(m, command, timeout, signal), receive: pipe, send: pipe, stop: () => deps.stopWorker(m), release: async () => void (vm.released = true) };
     };
   }
   const context: TeamRunContext = { signal: new AbortController().signal, chainId: task.chainId, send: () => { throw new Error("unexpected send"); }, remember: () => { throw new Error("unexpected local note"); }, delegate: () => { throw new Error("unexpected task"); }, recruit: () => { throw new Error("unexpected agent"); }, emit: () => {} };
@@ -689,7 +691,7 @@ test("the end of another node's task reaches its VM though its agent was paused 
       if (paused.now) throw new Error("agent paused");
       return result();
     },
-    handedVm: async () => ({ exec: async (command) => (told.push(command), result()), stop: async () => {}, release: async () => void (released = true) }),
+    handedVm: async () => ({ exec: async (command) => (told.push(command), result()), receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), send: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), stop: async () => {}, release: async () => void (released = true) }),
   });
   f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   const lines: string[] = [];
@@ -723,7 +725,7 @@ test("another node's task runs in a VM of its own: every command of it there, no
     handedVm: async (_m: Agent, _t: TeamTask, models: readonly string[]) => {
       const vm = { models: [...models], released: false };
       made.push(vm);
-      return { exec: async (command: string) => (inVm.push(command), result()), stop: async () => {}, release: async () => void (vm.released = true) };
+      return { exec: async (command: string) => (inVm.push(command), result()), receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), send: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), stop: async () => {}, release: async () => void (vm.released = true) };
     },
   });
   const made: { models: string[]; released: boolean }[] = [];
@@ -739,7 +741,7 @@ test("another node's task runs in a VM of its own: every command of it there, no
   const broken = fixture(script(), { ...ran([]), handedVm: async () => {
     const vm = { models: [], released: false };
     made.push(vm);
-    return { exec: async (command: string) => (command.includes("mkdir -p") ? result({ exitCode: 1, stderr: "no space left on device" }) : result()), stop: async () => {}, release: async () => void (vm.released = true) };
+    return { exec: async (command: string) => (command.includes("mkdir -p") ? result({ exitCode: 1, stderr: "no space left on device" }) : result()), receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), send: async () => ({ from: result(), to: result(), bytes: 0, cut: false }), stop: async () => {}, release: async () => void (vm.released = true) };
   } });
   broken.store.emit(broken.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   await expect(broken.runtime.executeTask(member, handedTask, broken.context)).rejects.toThrow("Workspace not ready");
@@ -759,6 +761,101 @@ test("another node's task runs in a VM of its own: every command of it there, no
   await yours.runtime.executeTask(member, task, yours.context);
   expect(yours.vms).toEqual([]);
   expect(yours.commands.some((c) => c.includes("echo one"))).toBe(true);
+});
+
+/* Another node's task in its agent's repository (the fifth fabric review's R5-3, by the reviewer's first option): its VM
+ * holds nothing of its agent's store, so its repository's setup, its steps' checkpoints and what it keeps to ship are its
+ * agent's side's, in the agent's VM, as an own task's are; it works on a clone of its own, given it through the node, and
+ * its changes come back the same way, as a patch its agent's side applies with the node's held git. */
+test("another node's task in a repository works on a clone of its own: set up, checkpointed and kept on its agent's side, its changes brought back", async () => {
+  const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const agent = { ...member, repository: "https://github.com/you/project" };
+  const inAgent: string[] = [], inTask: string[] = [], received: [string, string][] = [], sent: [string, string][] = [];
+  // (Its patch all came: as many bytes kept on its agent's side as the node carried.)
+  const piped = { from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false };
+  const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
+    agent: () => agent,
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    exec: async (_m: Agent, command: string) => {
+      inAgent.push(command);
+      return command.includes("from_commit") ? result({ stdout: `${HANDED_BASE} fetched` }) : result({ stdout: "0" });
+    },
+    handedVm: async () => ({
+      exec: async (command: string) => (inTask.push(command), result()),
+      receive: async (from: string, into: string) => (received.push([from, into]), piped),
+      send: async (from: string, into: string) => (sent.push([from, into]), piped),
+      stop: async () => {},
+      release: async () => {},
+    }),
+  });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  expect((await f.runtime.executeTask(agent, handedTask, f.context)).verified).toBe(true);
+  const root = `/work/tasks/${handedTask.id}`;
+  // Its setup, its identity, its steps' checkpoints and what it keeps to ship: in its agent's VM, never in its own.
+  expect(inAgent.some((c) => c.includes("from_commit"))).toBe(true);
+  expect(inAgent.some((c) => c.includes("git -C /work/repo config user.name"))).toBe(true);
+  expect(inAgent.some((c) => c.startsWith(`cd '${root}' && rm -rf '/work/out/tasks/${handedTask.id}'`))).toBe(true);
+  expect(inTask.some((c) => c.includes("from_commit") || c.includes("/work/repo"))).toBe(false);
+  // Its clone, given it once from its agent's side; its work in its VM; its changes back at each step kept and as it ends.
+  expect(received).toHaveLength(1);
+  expect(received[0]![0]).toContain("refs/invincible/give/");
+  expect(received[0]![1]).toContain("list-heads");
+  expect(received[0]![1]).toContain(HANDED_BASE);
+  expect(inTask.some((c) => plain(c).includes("echo one"))).toBe(true);
+  expect(sent.length).toBeGreaterThanOrEqual(1);
+  for (const [from, into] of sent) {
+    expect(from).toContain("--full-index");
+    expect(plain(into)).toContain("its changes come to more than %d bytes");
+  }
+  // Each patch that all came applied on its agent's side, with the node's held git, set back to its base first; and
+  // before its changes are read there.
+  const applied = inAgent.filter((c) => c.includes("--allow-empty"));
+  expect(applied).toHaveLength(sent.length);
+  for (const c of applied) expect(c).toContain(HANDED_BASE);
+  expect(inAgent.findLastIndex((c) => c.includes("--allow-empty"))).toBeLessThan(inAgent.findIndex((c) => c.includes(`'/work/out/tasks/${handedTask.id}'`)));
+});
+
+/* What another node's task sends back is applied on its agent's side only once all of it came (R5-3): a pipe cut at its
+ * cap, a sender ended by its deadline, or fewer bytes kept than the node carried each end the other side's input as if the
+ * patch ended there, and a patch cut short at a file's end reads as a smaller one. None is applied; each is dropped, and
+ * said. */
+test("another node's task's changes that didn't all come back are never applied on its agent's side: dropped, and said", async () => {
+  const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const agent = { ...member, repository: "https://github.com/you/project" };
+  const cases = [
+    ["cut at its cap", { from: result(), to: result({ stdout: "100" }), bytes: 100, cut: true }, "its changes come to more than 536870912 bytes"],
+    ["its sender ended by its deadline", { from: result({ exitCode: 137, stderr: "Killed" }), to: result({ stdout: "40" }), bytes: 40, cut: false }, "Killed"],
+    ["fewer bytes kept than carried", { from: result(), to: result({ stdout: "60" }), bytes: 100, cut: false }, "its changes came cut short: 60 bytes of 100 kept"],
+  ] as const;
+  for (const [what, piped, why] of cases) {
+    const inAgent: string[] = [];
+    const lines: string[] = [];
+    const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
+      agent: () => agent,
+      models: () => [{ provider: "paid", model: "m" }],
+      paid: (ref: string) => ref === "paid/m",
+      exec: async (_m: Agent, command: string) => {
+        inAgent.push(command);
+        return command.includes("from_commit") ? result({ stdout: `${HANDED_BASE} fetched` }) : result({ stdout: "0" });
+      },
+      handedVm: async () => ({
+        exec: async () => result(),
+        receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
+        send: async () => piped,
+        stop: async () => {},
+        release: async () => {},
+      }),
+    });
+    f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+    const done = await f.runtime.executeTask(agent, handedTask, { ...f.context, emit: (line: string) => void lines.push(line) });
+    expect([what, inAgent.some((c) => c.includes("--allow-empty"))]).toEqual([what, false]);
+    // (Dropped on its agent's side, each time.)
+    expect([what, inAgent.some((c) => c.includes("keep, task = sys.argv[1], sys.argv[2]"))]).toEqual([what, true]);
+    expect([what, done.output]).toEqual([what, expect.stringContaining(`Changes: could not be read (its changes couldn't be brought back from its VM: ${why})`)]);
+    expect([what, "changes" in done]).toEqual([what, false]);
+    expect([what, lines.some((line) => line.startsWith("Steps · this task's steps can't be kept") && line.includes(why))]).toEqual([what, true]);
+  }
 });
 
 test("a node that can't give another node's task a VM of its own doesn't take one; nor does such a task get your agent's notes", async () => {

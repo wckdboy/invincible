@@ -52,7 +52,7 @@ describe("another node's task's VM, waiting for room (the fourth fabric review's
     const agent = await sandbox.create(request({ network: "gateway", persistent: true, run: "arm.team.abcdef0123.ada" }));
     const other = await sandbox.create(request({ run: "q-other" }));
     const ended = new AbortController();
-    const waiting = sandbox.createTaskVm({ task: "task-abcdefghijkl", shares: agent.id, run: "handed.task-abcdefghijkl", providers: [], models: [], ttlMinutes: 60 }, ended.signal);
+    const waiting = sandbox.createTaskVm({ task: "task-abcdefghijkl", beside: agent.id, run: "handed.task-abcdefghijkl", providers: [], models: [], ttlMinutes: 60 }, ended.signal);
     const outcome = waiting.then(() => "made", (error: Error) => `not made: ${error.message}`);
     await Bun.sleep(20);
     expect(governor.queue()).toMatchObject([{ run: "handed.task-abcdefghijkl" }]);

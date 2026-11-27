@@ -9,6 +9,7 @@ import { commandsRun, DESKTOP_EVIDENCE, runLoop, stepsNamed, type RunEvent, type
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { HELD_GIT, heldGit } from "./held-git.ts";
+import { handedApply, handedDrop, handedGive, handedReceive, handedSend, handedTake } from "./handed-repo.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
 
 /** What one run of an agent is given by the team service (node/team.ts) that starts it. */
@@ -68,8 +69,26 @@ const releasing = (vm: HandedVm) => ({ vm, [Symbol.asyncDispose]: () => vm.relea
 export interface HandedVm {
   exec(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
   follow?(offset: number, signal: AbortSignal): Promise<FollowedRun>;
+  /**
+   * What `fromAgent` prints in its agent's VM, given to `intoTask` in this one as its input, and the other way round
+   * (`send`): the task's clone of its agent's repository, and its changes back as a patch (the fifth fabric review's
+   * R5-3). Nothing of its agent's store is in this VM.
+   */
+  receive(fromAgent: string, intoTask: string, timeoutSec: number, signal: AbortSignal): Promise<HandedPipe>;
+  send(fromTask: string, intoAgent: string, timeoutSec: number, signal: AbortSignal): Promise<HandedPipe>;
   stop(): Promise<void>;
   release(): Promise<void>;
+}
+
+/** The most another node's task's changes may come to, as a patch or as its binary parts inflate: 512 MiB. */
+export const HANDED_CHANGES_BYTES = 512 * 1024 * 1024;
+
+/** What a pipe between a handed task's VM and its agent's did: each side's end, how much went through, and whether it was cut at its cap. */
+export interface HandedPipe {
+  from: ExecResult;
+  to: ExecResult;
+  bytes: number;
+  cut: boolean;
 }
 
 /** What asking for a seat comes to: one to run on, none (the run is in the agent's own VM), or a rest until the soonest reset of the seats that could take it. */
@@ -301,7 +320,7 @@ export const withGateway = (command: string, lease?: string): string => {
  * finds its worktree and what was written; one from before this was written says `unknown`. A fix to a pull
  * request (`<branch>`, a third argument) starts on that branch as fetched, or not at all. Its git holds the
  * repository's own configuration off (held-git.ts: the fourth fabric review's R4-4, and the fifth's R5-6), so nothing
- * written in the repository (another node's task shares it) runs as the agent here: no hook, filter or fsmonitor of its
+ * written in the repository runs as the agent here: no hook, filter or fsmonitor of its
  * runs, a repository whose configuration names another worktree isn't started in, and one whose configuration would
  * take the fetch elsewhere isn't fetched (`stale`, and why on stderr).
  */
@@ -820,6 +839,12 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       await using own = handed ? releasing(await deps.handedVm!(agent, task, leaseModels ?? [], ctx.signal)) : null;
       /** A command in the task's VM: its own for another node's task, else its agent's. */
       const inVm = (command: string, timeout: number, signal: AbortSignal): Promise<ExecResult> => (own ? own.vm.exec(command, timeout, signal) : deps.exec(agent, command, timeout, signal));
+      /**
+       * A command of the node's own in the agent's VM, in its repository: another node's task's setup there, its steps'
+       * checkpoints and what it keeps to ship, as an own task's are (the fifth fabric review's R5-3: its own VM has a
+       * clone of its own, and nothing of the agent's store).
+       */
+      const inRepo = (command: string, timeout: number, signal: AbortSignal): Promise<ExecResult> => (own && agent.repository ? deps.exec(agent, command, timeout, signal) : inVm(command, timeout, signal));
       /** When its lease was last written or renewed, and whether one that couldn't be kept was said. */
       let leaseKept = Date.now();
       let leaseLost = false;
@@ -829,7 +854,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const setup = agent.repository
         ? `python3 -I -c ${quote(REPO_TASK_START)} ${quote(root)} ${quote(`/work/.agent/base/${task.id}`)}${task.fix || task.from ? ` ${quote(task.fix?.branch ?? "")}` : ""}${task.from ? ` ${quote(task.from.task)} ${quote(task.from.commit)}` : ""}`
         : `mkdir -p ${quote(root)}`;
-      const ready = await inVm(setup, agent.repository ? 420 : 120, ctx.signal);
+      const ready = await inRepo(setup, agent.repository ? 420 : 120, ctx.signal);
       if (ready.exitCode !== 0) throw new Error(`Workspace not ready: ${redact(ready.stderr || ready.stdout)}`);
       // In a repository: the commit the work starts from, and whether the repository could be fetched for it.
       const [base = "", fetched = ""] = agent.repository ? ready.stdout.trim().split(/\s+/) : [];
@@ -837,7 +862,39 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Its commits carry its own name, never yours: with none set, the first real task's agent copied the repository's
       // owner's from its history. An address under .invalid, which can't belong to anyone. (Set at each task: an agent's
       // VM is its own, and one set by hand there goes back to the agent's.)
-      if (agent.repository) await inVm(`git -C /work/repo config user.name ${quote(agent.name)} && git -C /work/repo config user.email ${quote(`${agent.id}@agents.invalid`)}`, 30, ctx.signal);
+      if (agent.repository) await inRepo(`git -C /work/repo config user.name ${quote(agent.name)} && git -C /work/repo config user.email ${quote(`${agent.id}@agents.invalid`)}`, 30, ctx.signal);
+      // Another node's task's own clone, of the task's worktree as it stands (R5-3): made in its VM at the same place,
+      // from what its agent's side gives it through the node, with its changes so far for a task taken up again.
+      if (own && agent.repository) {
+        const given = await own.vm.receive(handedGive(root, task.id), handedTake(root, base, agent.name, `${agent.id}@agents.invalid`), 900, ctx.signal);
+        if (given.cut || given.from.exitCode !== 0 || given.to.exitCode !== 0) {
+          throw new Error(`Workspace not ready: its clone of the repository couldn't be made in its VM: ${redact((given.cut ? "it came to more than its cap" : "") || given.from.stderr || given.to.stderr || given.to.stdout).trim().split("\n").at(-1)?.slice(0, 300) ?? "no reason given"}`);
+        }
+      }
+      /**
+       * Another node's task's changes since its base, from its own clone to the task's worktree in its agent's repository,
+       * as one patch the agent's side keeps and then applies with the node's held git (R5-3). Applied only once all of it
+       * came: its sender done, the pipe not cut, and as many bytes kept as were carried (a side ended by its deadline, or
+       * the pipe cut, ends the other's input as if the patch ended there). Null when they came, else why not.
+       */
+      const bringBack = async (): Promise<string | null> => {
+        if (!own || !agent.repository) return null;
+        const said = (r: { stdout: string; stderr: string }) => redact(r.stderr || r.stdout).trim().split("\n").at(-1)?.slice(0, 300) || "no reason given";
+        /** Whatever of it came, dropped, on a signal of its own (the task's may have ended); and why it isn't applied. */
+        const dropped = async (why: string) => {
+          await deps.exec(agent, handedDrop(task.id), 60, AbortSignal.timeout(90_000)).catch(() => {});
+          return why;
+        };
+        const back = await own.vm.send(handedSend(root, base), handedReceive(task.id, HANDED_CHANGES_BYTES), 900, ctx.signal).catch((error: Error) => error);
+        if (back instanceof Error) return dropped(redact(back.message).slice(0, 300));
+        const kept = back.to.stdout.trim();
+        if (back.cut) return dropped(`its changes come to more than ${HANDED_CHANGES_BYTES} bytes`);
+        if (back.to.exitCode !== 0) return dropped(said(back.to));
+        if (back.from.exitCode !== 0) return dropped(said(back.from));
+        if (!/^\d{1,15}$/.test(kept) || Number(kept) !== back.bytes) return dropped(`its changes came cut short: ${/^\d{1,15}$/.test(kept) ? kept : "no"} bytes of ${back.bytes} kept`);
+        const applied = await inRepo(handedApply(root, base, task.id, back.bytes, HANDED_CHANGES_BYTES), 600, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+        return applied.exitCode === 0 ? null : said(applied);
+      };
       // The VM's notes store (Engram), when the node's switch is on: kept under the agent's repository, or with none
       // its own handle, so every task of its finds them. Whether this VM has the pinned binary is asked as the task
       // starts: one that doesn't does the task without the store, and the task says which it was, never nothing.
@@ -882,7 +939,14 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const keepStep = (step: number) => {
         const command = steps.command;
         keeping = keeping.then(async () => {
-          const kept = await inVm(checkpointCommand(root, task.id, step, steps.last), 60, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: String(error?.message ?? error), durationMs: 0, truncated: false }));
+          // (Another node's task's changes brought back to its agent's worktree first, where the step is kept.)
+          const back = await bringBack();
+          if (back !== null) {
+            if (!steps.said) ctx.emit(`Steps · this task's steps can't be kept to start another from: its changes couldn't be brought back (${back})`);
+            steps.said = true;
+            return;
+          }
+          const kept = await inRepo(checkpointCommand(root, task.id, step, steps.last), 60, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: String(error?.message ?? error), durationMs: 0, truncated: false }));
           const line = kept.stdout.trim().split("\n").at(-1) ?? "";
           const made = /^([0-9a-f]{40}) ([0-9a-f]{40} [0-9a-f]{40})$/.exec(line);
           if (made) [steps.commit, steps.last] = [made[1]!, made[2]!];
@@ -1159,7 +1223,13 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let changed = "";
       if (agent.repository) {
         const out = `/work/out/tasks/${task.id}`;
-        const made = await exec(changesCommand(out, base), 300).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }));
+        // (Another node's task's: brought back from its clone to its agent's worktree, and read there, as an own task's.)
+        const back = await bringBack();
+        const made = back !== null
+          ? { exitCode: -1, stdout: "", stderr: `its changes couldn't be brought back from its VM: ${back}` }
+          : own
+            ? await inRepo(`cd ${quote(root)} && ${changesCommand(out, base)}`, 300, ctx.signal).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }))
+            : await exec(changesCommand(out, base), 300).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }));
         const files = made.exitCode === 0 ? Number(made.stdout.trim().split("\n").at(-1)) : NaN;
         const count = `${files} file${files === 1 ? "" : "s"}`;
         if (!Number.isInteger(files)) changed = `Changes: could not be read (${redact(made.stderr || made.stdout).trim().split("\n").at(-1)?.slice(0, 200) ?? "no reason given"})`;

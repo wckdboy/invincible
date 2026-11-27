@@ -1,4 +1,4 @@
-import { agentCleanupCommand, FOLLOW_SECONDS, followArgv, type FollowedRun, type HandedVm } from "@invincible/agents";
+import { agentCleanupCommand, FOLLOW_SECONDS, followArgv, HANDED_CHANGES_BYTES, type FollowedRun, type HandedVm } from "@invincible/agents";
 import { redact } from "@invincible/core";
 import type { SandboxHost } from "@invincible/sandbox";
 
@@ -16,7 +16,7 @@ import type { SandboxHost } from "@invincible/sandbox";
 const RETRY_MS = 60_000;
 const RETRY_MAX_MS = 15 * 60_000;
 
-type Host = Pick<SandboxHost, "createTaskVm" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease">;
+type Host = Pick<SandboxHost, "createTaskVm" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe">;
 
 /** How long a task's VM may live: longer than any task, which removes it as it ends (a backstop, never its end). */
 export const TASK_VM_MINUTES = 2 * 24 * 60;
@@ -73,7 +73,7 @@ export class TaskVms {
     for (const [id, run] of [...this.lingering]) await this.remove(host, id, run);
     const run = `handed.${ask.task}`;
     // (Its work's own signal: a task that ends while its VM waits for room has none made.)
-    const vm = (await host.createTaskVm({ task: ask.task, shares: ask.vm, run, providers: ask.providers, models: ask.models, ttlMinutes: TASK_VM_MINUTES }, signal)).id;
+    const vm = (await host.createTaskVm({ task: ask.task, beside: ask.vm, run, providers: ask.providers, models: ask.models, ttlMinutes: TASK_VM_MINUTES }, signal)).id;
     let released = false;
     // When its work's signal ends (its hand-off revoked: your brake), its lease ends and its VM goes at once, and the
     // command in flight with it: none keeps model access until it returns. The fifth fabric review's I-1.
@@ -101,6 +101,17 @@ export class TaskVms {
         const end = () => stream.kill();
         signal.addEventListener("abort", end, { once: true });
         return { lines: stream.lines, close: () => { signal.removeEventListener("abort", end); end(); } };
+      },
+      // Its clone, from its agent's VM, and its changes, back to it (the fifth fabric review's R5-3): what one side's command
+      // prints is the other's input, through this host alone, never kept here. Its clone is the node's own making, of its
+      // agent's repository, bounded by its time and its VM's disk; its changes are the task's, held to HANDED_CHANGES_BYTES.
+      receive: async (fromAgent, intoTask, timeoutSec, signal) => {
+        if (signal.aborted) throw new Error("its work has stopped");
+        return host.pipe({ id: ask.vm, cmd: ["bash", "-lc", fromAgent] }, { id: vm, cmd: ["bash", "-lc", intoTask] }, { timeoutSec, maxBytes: Number.POSITIVE_INFINITY });
+      },
+      send: async (fromTask, intoAgent, timeoutSec, signal) => {
+        if (signal.aborted) throw new Error("its work has stopped");
+        return host.pipe({ id: vm, cmd: ["bash", "-lc", fromTask] }, { id: ask.vm, cmd: ["bash", "-lc", intoAgent] }, { timeoutSec, maxBytes: HANDED_CHANGES_BYTES });
       },
       stop: stopped,
       release: async () => {

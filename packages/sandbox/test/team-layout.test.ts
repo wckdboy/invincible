@@ -455,8 +455,9 @@ describe("an agent's VM in layout 2", () => {
 
 /*
  * Another node's task's VM (createTaskVm; the owner's decision of 27 November 2026, the fabric's R3-1 (a)): one of its
- * own, made like a seat's, sharing the agent's workspace alone, never its HOME nor its notes; leased the task's models
- * alone, never your keys nor its repository; labelled with its task, and gone, with all it started, as the task ends.
+ * own, from the agent's VM's image, with a /work and a HOME of its own and nothing of the agent's store (the fifth fabric
+ * review's R5-3: the task works on a clone of its own); leased the task's models alone, never your keys nor its
+ * repository; labelled with its task, and gone, with all it started, as the task ends.
  */
 describe("a VM whose layout Docker can't say (the fifth fabric review's R5-8)", () => {
   const CANT = "could not tell which layout the agent's VM is in, so nothing of its store is mounted: Error response from daemon: context deadline exceeded";
@@ -532,8 +533,6 @@ describe("a VM that shares an agent's store, and its move to layout 2 (the fifth
     expect(f.calls.some((a) => a[0] === "start")).toBe(false);
     await expect(f.host.remakeTeam(ID, RUN, { providers: ["openai"], approvedBy: "test-owner" })).rejects.toThrow(held);
     expect(f.calls.some((a) => a[0] === "stop" || a[0] === "rename")).toBe(false);
-    f.agent().status = "running";
-    await expect(f.host.createTaskVm({ shares: ID, task: "task-held", run: "fabric.task-held", providers: ["openai"], models: ["openai/gpt-paid"], ttlMinutes: 30 })).rejects.toThrow(held);
     expect(sharers(f)).toEqual([]);
     expect(f.modes).toEqual([]);
   });
@@ -558,17 +557,17 @@ describe("a VM that shares an agent's store, and its move to layout 2 (the fifth
 });
 
 describe("another node's task's VM", () => {
-  const task = { task: "task-abcdefghijkl", shares: ID, run: "handed.task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: 60 };
+  const task = { task: "task-abcdefghijkl", beside: ID, run: "handed.task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: 60 };
 
-  test("shares the agent's workspace alone, with a HOME of its own; leased the task's models alone; labelled with its task", async () => {
+  test("has a /work and a HOME of its own, and nothing of the agent's store; leased the task's models alone; labelled with its task", async () => {
     const f = fake({ layout: "2" });
     await f.host.prepareTeam(ID, RUN, { connector: "github", owner: "example", repo: "app" }, ["anthropic"], undefined, ["key:test-only"]);
     const vm = await f.host.createTaskVm(task);
     const made = f.containers.get(containerName(vm.id))!;
     expect(made.labels[`${LABEL}.task`]).toBe(task.task);
-    expect(made.labels[`${LABEL}.shares`]).toBe(ID);
+    expect(made.labels[`${LABEL}.shares`]).toBeUndefined();
     expect(made.image).toBe(IMAGE);
-    expect(made.mounts).toEqual([{ Type: "volume", Name: volumeName(ID), Destination: "/work", Subpath: "work" }]);
+    expect(made.mounts).toEqual([{ Type: "volume", Name: volumeName(vm.id), Destination: "/work" }]);
     const run = f.calls.find((a) => a[0] === "run" && a.includes(`${LABEL}.task=${task.task}`))!;
     expect(run).toEqual(expect.arrayContaining(["--tmpfs", "/home/agent:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700", "HOME=/home/agent"]));
     // Its lease: its models alone, on their providers; none of the agent's keys or its repository, though the agent's has them.
@@ -612,12 +611,13 @@ describe("another node's task's VM", () => {
     expect((await f.host.get(vm.id))?.task).toBe(task.task);
   });
 
-  test("is refused beside an agent's VM whose HOME is its /work, beside one that isn't here, and on a Mac", async () => {
+  test("is made beside an agent's VM in layout 1 too, sharing nothing of it; refused beside one that isn't here, and on a Mac", async () => {
     const old = fake();
     old.agent().status = "running";
-    await expect(old.host.createTaskVm(task)).rejects.toMatchObject({ status: 409 });
-    expect([...old.containers.values()].some((c) => c.labels[`${LABEL}.task`])).toBe(false);
-    await expect(fake({ layout: "2" }).host.createTaskVm({ ...task, shares: "9876543210" })).rejects.toMatchObject({ status: 404 });
+    const vm = await old.host.createTaskVm(task);
+    expect(old.containers.get(containerName(vm.id))!.mounts).toEqual([{ Type: "volume", Name: volumeName(vm.id), Destination: "/work" }]);
+    expect(old.agent().labels[`${LABEL}.layout`]).toBeUndefined();
+    await expect(fake({ layout: "2" }).host.createTaskVm({ ...task, beside: "9876543210" })).rejects.toMatchObject({ status: 404 });
     const mac = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, runner: async () => ({ code: 1, stdout: "", stderr: "" }), ledger: () => {}, engine: "container", tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true } });
     await expect(mac.createTaskVm(task)).rejects.toMatchObject({ status: 424 });
   });

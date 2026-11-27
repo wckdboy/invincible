@@ -398,11 +398,11 @@ describe("a Mac makes no VM that shares an agent's workspace", () => {
   test("no seat's VM, and none for another node's task: each refused in its own words, before anything is made", async () => {
     const m = macHost();
     const seat = { seat: { id: "st_0123456789abcdefghijkl", kind: "claude-subscription" as const, runs: 1 }, shares: "0123456789", network: "gateway" as const, cpus: 2, memoryGb: 4, ttlMinutes: 30, run: "seat.st_0123456789abcdefghijkl" };
-    const task = { task: "task-abcdefghijkl", shares: "0123456789", run: "handed.task-abcdefghijkl", providers: [], models: [], ttlMinutes: 30 };
+    const task = { task: "task-abcdefghijkl", beside: "0123456789", run: "handed.task-abcdefghijkl", providers: [], models: [], ttlMinutes: 30 };
     const seatVm = await m.host.createSeatVm(seat).catch((error: SandboxError) => error);
     const taskVm = await m.host.createTaskVm(task).catch((error: SandboxError) => error);
     expect([seatVm instanceof SandboxError && seatVm.status, String((seatVm as Error).message)]).toEqual([424, "a seat's VM is made on a Linux host with Docker"]);
-    expect([taskVm instanceof SandboxError && taskVm.status, String((taskVm as Error).message)]).toEqual([424, "another node's task is taken only on a Linux host with Docker: on a Mac no VM shares an agent's workspace"]);
+    expect([taskVm instanceof SandboxError && taskVm.status, String((taskVm as Error).message)]).toEqual([424, "another node's task is taken only on a Linux host with Docker"]);
     // Nothing was asked of container for either: no volume, no VM, nothing looked up.
     expect(m.fake.calls).toEqual([]);
     expect(m.minted).toEqual([]);
