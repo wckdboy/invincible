@@ -421,6 +421,19 @@ struct Vectors: Decodable {
         let localOn: Bool
         let step: String
     }
+    /// A notification's payload read strictly (core's readNotifyPayload), with what the node sends the iPhone for each one
+    /// read (apns-send.ts applePayload), and its text cleaned (notifyClean): NotifyPayloadTests.swift.
+    let notifyPayload: NotifyPayloadCases
+
+    struct NotifyPayloadCases: Decodable {
+        struct ReadCase: Decodable { let raw: JSONValue?; let read: JSONValue?; let apple: JSONValue? }
+        struct CleanCase: Decodable { let text: String; let max: Int; let clean: String }
+        let titleMax: Int
+        let bodyMax: Int
+        let generic: JSONValue
+        let read: [ReadCase]
+        let clean: [CleanCase]
+    }
     /// Code, coloured by what each part is (the PWA's lib/highlight.ts).
     let highlights: [HighlightCase]
     /// The mark, the I-beam (scripts/mark.ts): MarkTests.swift.

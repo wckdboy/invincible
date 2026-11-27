@@ -117,4 +117,24 @@ class NotifyPayloadTest {
         assertEquals("abcd…", NotifyPayload.clean("abcdefgh", 5))
         assertEquals("ab…", NotifyPayload.clean("ab  cdefgh", 4))
     }
+
+    /** Held to core through the vectors (`notifyPayload`), as the Mac app's reader is: each payload read or refused as
+     * readNotifyPayload does, the general one, and words cleaned as notifyClean cleans them. */
+    @Test fun eachPayloadOfTheVectorsIsReadOrRefusedAsCoreReadsIt() {
+        val v = Fixture.vectors["notifyPayload"]
+        assertEquals(NotifyPayload.TITLE_MAX, v["titleMax"].int)
+        assertEquals(NotifyPayload.BODY_MAX, v["bodyMax"].int)
+        val cases = v["read"].list
+        assertTrue(cases.size > 40)
+        for (item in cases) {
+            val want = item["read"]
+            val read = NotifyPayload.read(item["raw"])
+            if (want == null || want == Json.Null) assertNull("core refuses ${item["raw"]?.text()}", read)
+            else assertEquals(item["raw"]?.text(), notice(want), read)
+        }
+        assertEquals(notice(v["generic"]!!), NotifyPayload.GENERIC)
+        for (item in v["clean"].list) assertEquals(item["text"].string, item["clean"].string, NotifyPayload.clean(item["text"].string!!, item["max"].int!!))
+    }
+
+    private fun notice(v: Json) = NotifyPayload.Notice(v["kind"].string!!, v["title"].string!!, v["body"].string!!, v["open"].string!!, v["conversation"].string, v["task"].string, v["ship"].bool == true, v["tag"].string!!, v["action"].string, v["approvable"].bool == true)
 }

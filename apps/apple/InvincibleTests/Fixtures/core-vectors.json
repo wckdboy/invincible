@@ -28761,6 +28761,1258 @@
       "quiet": false
     }
   ],
+  "notifyPayload": {
+    "titleMax": 60,
+    "bodyMax": 140,
+    "generic": {
+      "v": 1,
+      "kind": "needs-you",
+      "title": "Invincible",
+      "body": "Something needs you. Open the app to see it.",
+      "open": "inbox",
+      "tag": "primary"
+    },
+    "read": [
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "approval",
+          "title": "Your agent asks your approval",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_01234567890123456789kl",
+          "approvable": true
+        },
+        "read": {
+          "v": 1,
+          "kind": "approval",
+          "title": "Your agent asks your approval",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_01234567890123456789kl",
+          "approvable": true
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent asks your approval",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "approval",
+            "category": "approval"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "approval",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl",
+            "action": "a_01234567890123456789kl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "approval",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_01234567890123456789kl",
+          "approvable": false
+        },
+        "read": {
+          "v": 1,
+          "kind": "approval",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_01234567890123456789kl",
+          "approvable": false
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "approval",
+            "category": "approval-decline"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "approval",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl",
+            "action": "a_01234567890123456789kl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "approval",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_01234567890123456789kl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "approval",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_01234567890123456789kl",
+          "approvable": false
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "approval",
+            "category": "approval-decline"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "approval",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl",
+            "action": "a_01234567890123456789kl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "finished",
+          "title": "Your agent's task: Proven",
+          "body": "Proven · $0.31. Its changes are ready to ship.",
+          "open": "task",
+          "tag": "t-0123456789abcdefghijkl",
+          "task": "task-abc123def456",
+          "ship": true
+        },
+        "read": {
+          "v": 1,
+          "kind": "finished",
+          "title": "Your agent's task: Proven",
+          "body": "Proven · $0.31. Its changes are ready to ship.",
+          "open": "task",
+          "task": "task-abc123def456",
+          "ship": true,
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent's task: Proven",
+              "body": "Proven · $0.31. Its changes are ready to ship."
+            },
+            "interruption-level": "passive",
+            "thread-id": "finished",
+            "category": "ship"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "finished",
+            "open": "task",
+            "tag": "t-0123456789abcdefghijkl",
+            "task": "task-abc123def456",
+            "ship": true
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "finished",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "task",
+          "tag": "t-0123456789abcdefghijkl",
+          "task": "task-abc123def456",
+          "ship": false
+        },
+        "read": {
+          "v": 1,
+          "kind": "finished",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "task",
+          "task": "task-abc123def456",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "interruption-level": "passive",
+            "thread-id": "finished"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "finished",
+            "open": "task",
+            "tag": "t-0123456789abcdefghijkl",
+            "task": "task-abc123def456"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "finished",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "task",
+          "tag": "t-0123456789abcdefghijkl",
+          "task": "task-abc123def456"
+        },
+        "read": {
+          "v": 1,
+          "kind": "finished",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "task",
+          "task": "task-abc123def456",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "interruption-level": "passive",
+            "thread-id": "finished"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "finished",
+            "open": "task",
+            "tag": "t-0123456789abcdefghijkl",
+            "task": "task-abc123def456"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "told",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "chat",
+          "tag": "t-0123456789abcdefghijkl",
+          "conversation": "cv_Ab3_-Ab3_-Ab3_-Ab3_-xy"
+        },
+        "read": {
+          "v": 1,
+          "kind": "told",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "chat",
+          "conversation": "cv_Ab3_-Ab3_-Ab3_-Ab3_-xy",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "interruption-level": "passive",
+            "thread-id": "told"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "told",
+            "open": "chat",
+            "tag": "t-0123456789abcdefghijkl",
+            "conversation": "cv_Ab3_-Ab3_-Ab3_-Ab3_-xy"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "question",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "question",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "question"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "question",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "summary",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "summary",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "summary"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "summary",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "limit",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "limit",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "interruption-level": "passive",
+            "thread-id": "limit"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "limit",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "test",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "test",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "test"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "test",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "chat",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "chat",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "chat",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "overview",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "overview",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "overview",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "settings",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "settings",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "settings",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "task",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "task",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "task",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Your agent: this needs you",
+              "body": ""
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Café and café, as they came",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Café and café, as they came",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "Café and café, as they came",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "apple": {
+          "aps": {
+            "alert": {
+              "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+              "body": "Something in your Inbox needs you."
+            },
+            "sound": "default",
+            "interruption-level": "active",
+            "thread-id": "needs-you"
+          },
+          "invincible": {
+            "v": 1,
+            "kind": "needs-you",
+            "open": "inbox",
+            "tag": "t-0123456789abcdefghijkl"
+          }
+        }
+      },
+      {
+        "raw": null,
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": [],
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": "a line",
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": 1,
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {},
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 2,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": "1",
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "advert",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "extra": true
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": 1,
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": null,
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "has space"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "primary\n"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": ""
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "vault",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "conversation": "cv_Ab3_-Ab3_-Ab3_-Ab3_-xy"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "chat",
+          "tag": "t-0123456789abcdefghijkl",
+          "conversation": "cv_short"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "chat",
+          "tag": "t-0123456789abcdefghijkl",
+          "conversation": null
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "task": "task-abc123def456"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "task",
+          "tag": "t-0123456789abcdefghijkl",
+          "task": "task-ABC123DEF456"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "task",
+          "tag": "t-0123456789abcdefghijkl",
+          "task": "task-abc123def456",
+          "ship": "yes"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "ship": true
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_01234567890123456789kl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "approval",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_short"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "approvable": true
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "approval",
+          "title": "Your agent: this needs you",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl",
+          "action": "a_01234567890123456789kl",
+          "approvable": "yes"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": " Leading space",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Two  spaces",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "A\ttab",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Non breaking",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Zero​width",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Bidi‮override",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "A line\nbreak",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "A bell\u0007",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "Your agent: this needs you",
+          "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      },
+      {
+        "raw": {
+          "v": 1,
+          "kind": "needs-you",
+          "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀!",
+          "body": "Something in your Inbox needs you.",
+          "open": "inbox",
+          "tag": "t-0123456789abcdefghijkl"
+        },
+        "read": null,
+        "apple": null
+      }
+    ],
+    "clean": [
+      {
+        "text": "  Two  spaces\tand a tab  ",
+        "max": 60,
+        "clean": "Two spaces and a tab"
+      },
+      {
+        "text": "Zero​width⁠joiner﻿mark",
+        "max": 60,
+        "clean": "Zero width joiner mark"
+      },
+      {
+        "text": "Bidi‮override⁦isolate⁩",
+        "max": 60,
+        "clean": "Bidi override isolate"
+      },
+      {
+        "text": "A line\nbreak\r\nand a separator",
+        "max": 60,
+        "clean": "A line break and a separator"
+      },
+      {
+        "text": "A bell\u0007and C1controls",
+        "max": 60,
+        "clean": "A bell and C1 controls"
+      },
+      {
+        "text": "Non breaking　ideographic ogham",
+        "max": 60,
+        "clean": "Non breaking ideographic ogham"
+      },
+      {
+        "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "max": 60,
+        "clean": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…"
+      },
+      {
+        "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+        "max": 60,
+        "clean": "word word word word word word word word word word word word…"
+      },
+      {
+        "text": "a😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "max": 60,
+        "clean": "a😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀…"
+      },
+      {
+        "text": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "max": 60,
+        "clean": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+      },
+      {
+        "text": "",
+        "max": 60,
+        "clean": ""
+      },
+      {
+        "text": "   ",
+        "max": 60,
+        "clean": ""
+      }
+    ]
+  },
   "work": {
     "now": 1763200000000,
     "newForMs": 43200000,

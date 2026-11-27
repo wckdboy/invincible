@@ -33,6 +33,7 @@ import { ORB_ARRIVE, ORB_BURST, ORB_BURST_MOTES, ORB_EASE, ORB_LONGEST_STEP, ORB
 import { connectorState } from "../../web/src/lib/connector-state.ts";
 import { noticeFrom } from "../../web/src/lib/notices.ts";
 import { PRESETS, SIGN_INS } from "../../../packages/models/src/providers.ts";
+import { applePayload } from "../../../packages/node/src/apns-send.ts";
 import { againGoal, timeline, timelineTasks } from "../../web/src/lib/timeline.ts";
 import { activityLine, activityOf, activityShort } from "../../web/src/lib/live-activity.ts";
 import { describeTask } from "../../web/src/lib/loops.ts";
@@ -1045,6 +1046,97 @@ const notifyReach = (["granted", "denied", "undetermined"] as const).flatMap((pe
 );
 const notifyQuiet = ["needs-you", "approval", "question", "finished", "told", "summary", "limit", "test", "advert"].map((kind) => ({ kind, quiet: core.isQuietKind(kind) }));
 
+// ---- a notification's payload, read strictly (core's readNotifyPayload): as the web's service worker reads it, and the
+// Android and Mac apps what they collect; and, for each one read, what the node sends the iPhone for it (apns-send.ts
+// applePayload), whose buttons, thread, sound and own fields the Mac's notifications carry too --------------------------
+const NOTE_CHAT = `cv_${"Ab3_-".repeat(4)}xy`;
+const NOTE_TASK = "task-abc123def456";
+const NOTE_ACTION = `a_${"0123456789".repeat(2)}kl`;
+const note = { v: 1, kind: "needs-you", title: "Your agent: this needs you", body: "Something in your Inbox needs you.", open: "inbox", tag: "t-0123456789abcdefghijkl" };
+const notePayloads: unknown[] = [
+  // Read as they are.
+  note,
+  { ...note, kind: "approval", title: "Your agent asks your approval", action: NOTE_ACTION, approvable: true },
+  { ...note, kind: "approval", action: NOTE_ACTION, approvable: false },
+  { ...note, kind: "approval", action: NOTE_ACTION },
+  { ...note, kind: "finished", title: "Your agent's task: Proven", body: "Proven · $0.31. Its changes are ready to ship.", open: "task", task: NOTE_TASK, ship: true },
+  { ...note, kind: "finished", open: "task", task: NOTE_TASK, ship: false },
+  { ...note, kind: "finished", open: "task", task: NOTE_TASK },
+  { ...note, kind: "told", open: "chat", conversation: NOTE_CHAT },
+  ...["question", "summary", "limit", "test"].map((kind) => ({ ...note, kind })),
+  ...["chat", "overview", "settings", "task"].map((open) => ({ ...note, open })),
+  { ...note, body: "" },
+  { ...note, title: "Café and café, as they came" },
+  { ...note, title: "x".repeat(60), body: "y".repeat(140) },
+  { ...note, title: "😀".repeat(30) },
+  // Refused.
+  null,
+  [],
+  "a line",
+  1,
+  {},
+  { ...note, v: 2 },
+  { ...note, v: "1" },
+  { ...note, kind: "advert" },
+  { ...note, extra: true },
+  { ...note, title: 1 },
+  { ...note, body: null },
+  { ...note, tag: "has space" },
+  { ...note, tag: "primary\n" },
+  { ...note, tag: "x".repeat(65) },
+  { ...note, tag: "" },
+  { ...note, open: "vault" },
+  { ...note, conversation: NOTE_CHAT },
+  { ...note, open: "chat", conversation: "cv_short" },
+  { ...note, open: "chat", conversation: null },
+  { ...note, task: NOTE_TASK },
+  { ...note, open: "task", task: "task-ABC123DEF456" },
+  { ...note, open: "task", task: NOTE_TASK, ship: "yes" },
+  { ...note, ship: true },
+  { ...note, action: NOTE_ACTION },
+  { ...note, kind: "approval", action: "a_short" },
+  { ...note, approvable: true },
+  { ...note, kind: "approval", action: NOTE_ACTION, approvable: "yes" },
+  { ...note, title: "" },
+  { ...note, title: " Leading space" },
+  { ...note, title: "Two  spaces" },
+  { ...note, title: "A\ttab" },
+  { ...note, title: "Non breaking" },
+  { ...note, title: "Zero​width" },
+  { ...note, title: "Bidi‮override" },
+  { ...note, body: "A line\nbreak" },
+  { ...note, body: "A bell\u0007" },
+  { ...note, title: "x".repeat(61) },
+  { ...note, body: "y".repeat(141) },
+  { ...note, title: "😀".repeat(30) + "!" },
+];
+const notifyPayload = {
+  titleMax: core.NOTIFY_TITLE_MAX,
+  bodyMax: core.NOTIFY_BODY_MAX,
+  generic: core.GENERIC_NOTIFICATION,
+  read: notePayloads.map((raw) => {
+    const read = core.readNotifyPayload(raw);
+    return { raw, read, apple: read ? JSON.parse(applePayload(read)) : null };
+  }),
+  // notifyClean: one line, nothing hidden, cut to its length in UTF-16 units with an ellipsis.
+  clean: (
+    [
+      ["  Two  spaces\tand a tab  ", 60],
+      ["Zero​width⁠joiner﻿mark", 60],
+      ["Bidi‮override⁦isolate⁩", 60],
+      ["A line\nbreak\r\nand a separator", 60],
+      ["A bell\u0007and C1\u009fcontrols", 60],
+      ["Non breaking　ideographic ogham", 60],
+      ["x".repeat(61), 60],
+      ["word ".repeat(30), 60],
+      ["a" + "😀".repeat(30), 60],
+      ["😀".repeat(30), 60],
+      ["", 60],
+      ["   ", 60],
+    ] as [string, number][]
+  ).map(([text, max]) => ({ text, max, clean: core.notifyClean(text, max) })),
+};
+
 // ---- code, coloured by what each part is (the PWA's lib/highlight.ts) -------------------------------------------------
 const highlights = [
   ["swift", `let x = "hi \\" there" // say it\nif c == 'a' { return 0x1F }\nlet big = 1_000.5e-3, odd = 0b2, y1 = x`],
@@ -1591,6 +1683,7 @@ const vectors = {
   highlights,
   notifyReach,
   notifyQuiet,
+  notifyPayload,
   work,
   steps,
   mark,
