@@ -6,7 +6,7 @@ import type { ExecResult, ScreenAction, ScreenStatus, ScreenView } from "@invinc
 
 /*
  * A Mac's own screen, for the primary (docs/MAC.md, the Mac itself): the app's own binary takes its pictures and moves its
- * pointer and keys (`The primary --desktop`, apps/apple/the primary/Mac/MacScreen.swift), so it is the app macOS asks you to
+ * pointer and keys (`Invincible --desktop`, apps/apple/Invincible/Mac/MacScreen.swift), so it is the app macOS asks you to
  * allow, once, in System Settings (Screen & System Audio Recording, and Accessibility). Only a node the app runs (its
  * Bun inside the app's bundle) has one; any other has none.
  */
