@@ -635,3 +635,289 @@ export async function live(b: Bench, seed: number, seconds: number): Promise<Rec
     await vm.remove();
   }
 }
+
+/* ---------- C1 step 10: light by default ---------- */
+
+/** The note deskd leaves in its run directory when it stops a desktop for being unused, for the next deskd (deskd.py's RUN and IDLE_NOTE). */
+const IDLE_NOTE = "/tmp/invincible-desktop/idle-stopped";
+/**
+ * How long the bench's deskd waits before it stops an unused desktop, s (INVINCIBLE_DESKTOP_IDLE; the node's waits 600):
+ * the first long enough that the desktop's idle window ends well before it, and each started again after it short, so
+ * five stops take a minute and not fifty. What stopping does is the same whatever the wait.
+ */
+const IDLE_FIRST_S = 40;
+const IDLE_AGAIN_S = 8;
+
+/** The guest's memory, from its /proc/meminfo, MB: all of it, what it has available, and what is in use (the rest). */
+export function guestMemory(meminfo: string): { totalMb: number; availableMb: number; usedMb: number } {
+  const kb = (key: string): number => {
+    const found = new RegExp(`^${key}:\\s+(\\d+) kB$`, "m").exec(meminfo);
+    if (!found) throw new Error(`the guest's /proc/meminfo has no ${key}`);
+    return Number(found[1]);
+  };
+  const totalMb = kb("MemTotal") / 1024;
+  const availableMb = kb("MemAvailable") / 1024;
+  return { totalMb, availableMb, usedMb: totalMb - availableMb };
+}
+
+/**
+ * What runs in `after` that didn't in `before`, by name (each a `ps -eo comm=`), as often as it runs: what a stopped
+ * desktop left behind it. `ps` itself never counts.
+ */
+export function leftOver(before: string, after: string): string[] {
+  const count = (list: string): Map<string, number> => {
+    const n = new Map<string, number>();
+    for (const name of list.split("\n").map((line) => line.trim())) if (name && name !== "ps") n.set(name, (n.get(name) ?? 0) + 1);
+    return n;
+  };
+  const was = count(before);
+  const left: string[] = [];
+  for (const [name, n] of count(after)) for (let i = was.get(name) ?? 0; i < n; i++) left.push(name);
+  return left.sort();
+}
+
+/** One line of the guest's watcher: its memory (kB), its memory limit (bytes: 0 for none, -1 for none it can read), and when the line came (performance.now()). */
+export interface MemoryLine {
+  at: number;
+  totalKb: number;
+  limit: number;
+}
+
+/**
+ * The first of the guest's lines in which the VM has grown by `addedKb` (nine tenths of it at least: the kernel keeps a
+ * little of what is added for its own) and, where the guest could read a limit at first, its limit is `limit` or more.
+ */
+export function grownAt(lines: readonly MemoryLine[], addedKb: number, limit: number): MemoryLine | null {
+  const first = lines[0];
+  if (!first) return null;
+  return lines.find((line) => line.totalKb - first.totalKb >= addedKb * 0.9 && (first.limit <= 0 || line.limit >= limit)) ?? null;
+}
+
+/** The guest's memory and its limit (cgroup v2's, else v1's), a line each time they change, until its stdin closes or `argv[1]` s pass. */
+const WATCHER = `
+import os, sys, threading, time
+def total():
+    with open("/proc/meminfo") as f:
+        for line in f:
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1])
+    return 0
+def limit():
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            with open(path) as f:
+                v = f.read().strip()
+            n = 0 if v == "max" else int(v)
+            return 0 if n >= 1 << 62 else n
+        except (OSError, ValueError):
+            pass
+    return -1
+threading.Thread(target=lambda: (sys.stdin.read(), os._exit(0)), daemon=True).start()
+seen, end = None, time.monotonic() + float(sys.argv[1])
+while time.monotonic() < end:
+    now = (total(), limit())
+    if now != seen:
+        print(*now, flush=True)
+        seen = now
+    time.sleep(0.005)
+`;
+
+/** The watcher in an exec of its own: its lines as they come, its first (within 30 s), and its end (its stdin closed; the exec ended if it hasn't in 10 s). */
+function watchMemory(vm: BenchVm): { lines: MemoryLine[]; first: () => Promise<void>; end: () => Promise<void> } {
+  const proc = Bun.spawn(["docker", "exec", "-i", vm.container, "python3", "-I", "-c", WATCHER, "120"], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  const lines: MemoryLine[] = [];
+  let came = (): void => {};
+  const said = new Promise<void>((resolve) => (came = resolve));
+  const reading = (async () => {
+    const text = new TextDecoder();
+    let rest = "";
+    for await (const chunk of proc.stdout as unknown as AsyncIterable<Uint8Array>) {
+      const at = performance.now();
+      rest += text.decode(chunk, { stream: true });
+      for (let i = rest.indexOf("\n"); i >= 0; i = rest.indexOf("\n")) {
+        const [totalKb, limit] = rest.slice(0, i).trim().split(" ").map(Number);
+        rest = rest.slice(i + 1);
+        if (Number.isFinite(totalKb) && Number.isFinite(limit)) {
+          lines.push({ at, totalKb: totalKb!, limit: limit! });
+          came();
+        }
+      }
+    }
+  })();
+  const ended = proc.exited.then(async (code): Promise<never> => {
+    throw new Error(`the guest's watcher ended (${code}) before it said anything: ${(await new Response(proc.stderr).text()).trim().slice(-300)}`);
+  });
+  ended.catch(() => {});
+  return {
+    lines,
+    first: async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("the guest's watcher said nothing within 30 s")), 30_000)));
+      try {
+        await Promise.race([said, ended, late]);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    end: async () => {
+      try {
+        proc.stdin.end();
+      } catch {
+        // (It has ended already.)
+      }
+      if (!(await Promise.race([proc.exited.then(() => true), Bun.sleep(10_000).then(() => false)]))) proc.kill();
+      await proc.exited;
+      await reading;
+    },
+  };
+}
+
+/** A VM grown: until the agent's command could go on and the guest had it all (ms), the call alone, and what the guest saw before and after. */
+export interface Grown {
+  ms: number;
+  callMs: number;
+  from: MemoryLine;
+  to: MemoryLine;
+}
+
+/**
+ * A VM grown to `memoryGb` as the node grows one at its desktop's first use (SandboxHost.desktopRoom's call to
+ * resizeTeam: live, never made again), watched from inside: until both the call has returned (the agent's command waits
+ * for it) and the guest has the memory, and the limit where it can read one.
+ */
+async function grow(b: Bench, vm: BenchVm, memoryGb: number): Promise<Grown> {
+  const was = vm.view.memoryGb;
+  const watcher = watchMemory(vm);
+  try {
+    await watcher.first();
+    const t0 = performance.now();
+    await b.host.resizeTeam(vm.id, vm.run, { memoryGb, approvedBy: "node", reason: `its desktop's first use: grown from ${was} GB to ${memoryGb} GB (the bench)` });
+    const callMs = performance.now() - t0;
+    const addedKb = (memoryGb - was) * 1024 * 1024;
+    const limit = memoryGb * 1024 ** 3;
+    let to = grownAt(watcher.lines, addedKb, limit);
+    for (const end = t0 + 10_000; !to && performance.now() < end; to = grownAt(watcher.lines, addedKb, limit)) await Bun.sleep(10);
+    if (!to) throw new Error(`the VM wasn't grown to ${memoryGb} GB within 10 s, as its guest saw it: ${watcher.lines.map((l) => `${Math.round(l.totalKb / 1024)} MB, limit ${l.limit}`).join("; ")}`);
+    return { ms: Math.max(callMs, to.at - t0), callMs, from: watcher.lines[0]!, to };
+  } finally {
+    await watcher.end();
+  }
+}
+
+/** The VM's processes by name (`ps -eo comm=`), and whether deskd is among them. */
+async function processes(vm: BenchVm): Promise<{ names: string; deskd: boolean }> {
+  const names = must(await vm.raw(["ps", "-eo", "comm="]), "ps").stdout;
+  return { names, deskd: /deskd\.py/.test(must(await vm.raw(["ps", "-eo", "args="]), "ps").stdout) };
+}
+
+/**
+ * Until deskd has stopped the desktop for being unused: its note left and deskd gone, within `ms`; then what it started
+ * that still runs, by name, against the VM's processes before its desktop first started (given 5 s to be gone: deskd
+ * ends as it signals the rest to).
+ */
+async function untilStopped(vm: BenchVm, before: string, ms: number): Promise<string[]> {
+  const t0 = performance.now();
+  while ((await vm.raw(["test", "-e", IDLE_NOTE])).code !== 0 || (await processes(vm)).deskd) {
+    if (performance.now() - t0 > ms) throw new Error(`the desktop wasn't stopped within ${Math.round(ms / 1000)} s of being left unused`);
+    await Bun.sleep(250);
+  }
+  let left = leftOver(before, (await processes(vm)).names);
+  for (const end = performance.now() + 5000; left.length && performance.now() < end; left = leftOver(before, (await processes(vm)).names)) await Bun.sleep(250);
+  return left;
+}
+
+/** C1 step 10's numbers, on VMs made with 2 GB as the node makes an agent's now. */
+export interface Light {
+  /** A workshop VM idle, and a desktop VM whose desktop was never started. */
+  workshopIdle: Cost;
+  unstarted: Cost;
+  /** Grown to 4 GB as at its desktop's first use, on three VMs. */
+  grow: Samples;
+  grown: Grown[];
+  /** Its work as it was once grown: a process it ran before still running, and its /work there. */
+  keptWork: boolean;
+  /** Grown, started by the agent's first desktop command, and idle on a page. */
+  idle: Cost;
+  /** Once deskd stopped it for being unused: what the host holds, the guest's memory in use over before it first started (MB), and what of it still runs. */
+  afterStop: Cost & { guestKeptMb: number; left: string[] };
+  /** Started again after an idle stop by the next command, to its first page; whether its page was read, and whether the command told the agent why its screen is fresh. */
+  restart: Samples;
+  restartUsable: number;
+  restartTold: number;
+  restarts: number;
+}
+
+/**
+ * Light by default (C1 step 10), each on VMs of its own made with 2 GB: a workshop VM idle; two desktop VMs, each only
+ * grown; and one whose desktop is never started, then grown, its work checked, started by the agent's first desktop
+ * command and left idle, stopped by deskd for being unused, then started again `restarts` times, each after an idle
+ * stop. deskd is started by a question (which starts no desktop) to take the bench's wait (IDLE_FIRST_S), and each time
+ * again by the VM's own `desktop open` (IDLE_AGAIN_S). Every VM is removed after.
+ */
+export async function light(b: Bench, seed: number, seconds: number, restarts = 5): Promise<Light> {
+  const { vm: workshop } = await BenchVm.make(b, { desktop: false, memoryGb: 2, seed: seed + 400 });
+  let workshopIdle: Cost;
+  try {
+    await Bun.sleep(5000);
+    workshopIdle = await window(await workshop.containerId(), seconds);
+  } finally {
+    await workshop.remove();
+  }
+  const grown: Grown[] = [];
+  const growFrom = performance.now();
+  for (let i = 0; i < 2; i++) {
+    const { vm } = await BenchVm.make(b, { desktop: true, memoryGb: 2, seed: seed + 410 + i });
+    try {
+      await Bun.sleep(2000);
+      grown.push(await grow(b, vm, 4));
+    } finally {
+      await vm.remove();
+    }
+  }
+  const { vm } = await BenchVm.make(b, { desktop: true, memoryGb: 2, seed: seed + 420 });
+  try {
+    const id = await vm.containerId();
+    await Bun.sleep(5000);
+    const unstarted = await window(id, seconds);
+    await vm.ready(seed);
+    const server = await pidOf(vm, ["-f", "server.py"]);
+    grown.push(await grow(b, vm, 4));
+    const growSpan: [number, number] = [growFrom, performance.now()];
+    const keptWork = server !== "" && (await pidOf(vm, ["-f", "server.py"])) === server && (await vm.raw(["test", "-e", `${IN_VM}/server.py`])).code === 0;
+    const before = guestMemory(must(await vm.raw(["cat", "/proc/meminfo"]), "read /proc/meminfo").stdout);
+    const names = (await processes(vm)).names;
+    must(await vm.raw(["desktop", "status"], { env: { INVINCIBLE_DESKTOP_IDLE: String(IDLE_FIRST_S) } }), "desktop status");
+    must(await vm.agent(`desktop open ${PAGE("form.html")}`), "the agent's first desktop open");
+    await Bun.sleep(3000);
+    const idle = await window(id, seconds);
+    if ((await vm.raw(["test", "-e", IDLE_NOTE])).code === 0 || !(await processes(vm)).deskd) throw new Error(`the desktop stopped within its idle window: ${IDLE_FIRST_S} s is too short a wait for a ${seconds} s window`);
+    const left = await untilStopped(vm, names, (IDLE_FIRST_S + 30) * 1000);
+    await Bun.sleep(5000);
+    const kept = guestMemory(must(await vm.raw(["cat", "/proc/meminfo"]), "read /proc/meminfo").stdout);
+    const afterStop = await window(id, seconds);
+    const rows: { ms: number; usable: boolean; told: boolean }[] = [];
+    const restartFrom = performance.now();
+    for (let i = 0; i < restarts; i++) {
+      if (i > 0) await untilStopped(vm, names, (IDLE_AGAIN_S + 30) * 1000);
+      const again = must(await vm.raw(["desktop", "open", PAGE("form.html")], { env: { INVINCIBLE_DESKTOP_IDLE: String(IDLE_AGAIN_S) } }), "desktop open after an idle stop");
+      const usable = (await vm.raw(["desktop", "text"])).stdout.includes("Full name");
+      rows.push({ ms: again.ms, usable, told: again.stderr.includes("was stopped after") });
+      b.log(`started again ${i + 1}/${restarts}: ${Math.round(again.ms)} ms`);
+    }
+    return {
+      workshopIdle,
+      unstarted,
+      grow: { samples: grown.map((g) => g.ms), span: growSpan },
+      grown,
+      keptWork,
+      idle,
+      afterStop: { ...afterStop, guestKeptMb: kept.usedMb - before.usedMb, left },
+      restart: { samples: rows.map((r) => r.ms), span: [restartFrom, performance.now()] },
+      restartUsable: rows.filter((r) => r.usable).length,
+      restartTold: rows.filter((r) => r.told).length,
+      restarts,
+    };
+  } finally {
+    await vm.remove();
+  }
+}

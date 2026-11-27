@@ -102,6 +102,14 @@ everything but the model.
     - the encoder's CPU and deskd's, in the VM;
     - its first frame;
     - each frame's time from its capture to its arrival.
+  - light by default (C1 step 10), on VMs made with 2 GB, as the node makes an agent's now:
+    - a desktop never started, over a VM without the desktop image;
+    - grown to 4 GB as at its desktop's first use (live, never made again), on three VMs: until the call returned and
+      the guest had the memory, and its work as it was;
+    - started by the agent's first desktop command, and idle;
+    - once deskd stopped it for being unused (its wait shortened for the bench; what stopping does is the same): what
+      of it still runs, the guest's memory in use against before it first started, and what the host still holds;
+    - started again by the next command, to its page, five times, each after a stop, and whether the agent was told.
 - **Strict:** a desktop number worse than its baseline fails the run. Speed beyond a ±20 % band (or the samples' own
   spread), not only past 2×; memory and CPU past their stated resolution; a count of passes, or a check that held,
   going down.
@@ -109,4 +117,6 @@ everything but the model.
   editor the naive way included: step 3 broke it and C0's 0/5 hid that), the toolset way at no more than a model call
   an action, the test string exact in each app, and the F tests' checks. The stream is held to at least 10 frames a
   second while it moves, at most 6 % of a core on the encoder and deskd together, and at most 100 kbit/s while the
-  screen is still.
+  screen is still. Light by default is held to: a desktop never started at most 50 MB over none; grown within a second,
+  its work as it was; started and idle at most 600 MB over; once stopped, nothing of it still running and at most
+  50 MB of the guest's memory kept; and started again within 2 s, its page read and the agent told, every time.

@@ -95,9 +95,12 @@ C1 step 10. An agent whose desktop isn't used costs what an agent without one do
   that can't take more), its desktop runs with what it has, its work as it was, the ledger says why, and it is tried
   again a minute later at the soonest. A `desktop` command inside a shell command reaches deskd and starts the desktop,
   but not the node's growing: the VM grows at the next command that comes through the node.
-- **Held to** (to be measured on a sandbox host): a desktop never started at most +50 MB, with 2 GB given; growing to
-  4 GB within 1 s; after an idle stop, the browser gone and the guest's memory freed; started again to its first page
-  within 2 s; started and idle at most +600 MB.
+- **Held to** (the desktop suite's `desktop.light.*`, [BENCHMARKS.md](BENCHMARKS.md), to be run on a sandbox host): a
+  desktop never started at most +50 MB, with 2 GB given; growing to 4 GB within 1 s, its work as it was; after an idle
+  stop, nothing of it left running and the guest's memory back, within 50 MB; started again to its first page within
+  2 s, the agent told; started and idle at most +600 MB. What the host gets back of the memory the guest frees is
+  measured beside them, and not held: QEMU keeps the pages a guest frees unless the guest reports them to it
+  (free-page reporting, a setting of Kata's).
 
 ## Watching, on each device
 
@@ -153,6 +156,8 @@ The three apps hold to one rule (`apps/web/src/lib/desktop-stream.ts`; the vecto
 ## What isn't verified yet
 
 - Glass to glass, and your click to seeing it: the harness is built and tried on stand-ins, not yet run on a sandbox
+  host.
+- Light by default's numbers: the bench's cases are built, and its parts tried without a VM, not yet run on a sandbox
   host.
 - The apps on real devices: the decoding was run on simulators, an emulator and a Mac, and both phone apps were watched
   live against a dev node in a simulator and an emulator. No iPhone, iPad or Android phone, nor the Mac app's own live

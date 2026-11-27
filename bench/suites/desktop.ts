@@ -1,6 +1,6 @@
 import { DEFAULT_IMAGE, DESKTOP_IMAGE } from "../../packages/sandbox/src/spec.ts";
 import { buildImages } from "../desktop/images.ts";
-import { a11y, boot, core, costs, fragile, live, lookActLook, paths, type Samples, typing } from "../desktop/measure.ts";
+import { a11y, boot, core, costs, fragile, light, live, lookActLook, paths, type Samples, typing } from "../desktop/measure.ts";
 import { POLICIES, runTask, TASKS, type TaskRun } from "../desktop/tasks.ts";
 import { bench, BenchVm, cannotRunHere, clearLeftovers } from "../desktop/vm.ts";
 import { sig, type Suite, type SuiteContext } from "../lib.ts";
@@ -85,6 +85,9 @@ export const suite: Suite = {
     "desktop.f.blind-type-refused",
     "desktop.cost.idle.extra-mb",
     "desktop.cost.watched.cpu-pct",
+    "desktop.light.unstarted.extra-mb",
+    "desktop.light.grow-ms",
+    "desktop.light.restart-ms",
     "desktop.image.desktop-gb",
   ],
   cannot: cannotRunHere,
@@ -129,6 +132,18 @@ export const suite: Suite = {
     "desktop.live.scroll.cpu-pct": 6,
     "desktop.live.anim.cpu-pct": 6,
     "desktop.live.still.kbit": 100,
+    // C1 step 10, light by default: made with 2 GB, a desktop never started costs what no desktop does; grown to 4 GB
+    // within a second, its work as it was; started and idle, at most 600 MB more; stopped for being unused, nothing of it
+    // left running and the guest's memory back; started again to its page within 2 s, the agent told.
+    "desktop.light.unstarted.extra-mb": 50,
+    "desktop.light.grow-ms": 1000,
+    "desktop.light.grow-kept-work": 1,
+    "desktop.light.idle.extra-mb": 600,
+    "desktop.light.after-stop.left": 0,
+    "desktop.light.after-stop.guest-mb": 50,
+    "desktop.light.restart-ms": 2000,
+    "desktop.light.restart-usable": 5,
+    "desktop.light.restart-told": 5,
   },
   async run(ctx) {
     const prefix = process.env.INVINCIBLE_BENCH_SCRATCH ?? "bench";
@@ -151,7 +166,8 @@ export const suite: Suite = {
       speed(ctx, "desktop.boot.first-shot", booted.firstShot, "the first screenshot");
       ctx.quality("desktop.boot.usable", booted.usable, `of ${n}`, "higher", { n, note: "fresh VMs whose first page could be read" });
 
-      // One VM for the rest, 1 vCPU and 4 GB, as an agent's desktop VM is made.
+      // One VM for the rest, 1 vCPU and 4 GB, as an agent's VM is once its desktop is used (made with 2 GB, grown at its
+      // first use: light, below).
       const { vm } = await BenchVm.make(b, { desktop: true, seed: ctx.seed });
       made.push(vm);
       await vm.ready(ctx.seed);
@@ -244,6 +260,24 @@ export const suite: Suite = {
       }
       ctx.speed("desktop.live.first-frame-ms", [l.still.firstFrameMs, l.scroll.firstFrameMs, l.anim.firstFrameMs], "ms", "lower", liveSpan, "from the stream's start (its exec, the desktop already up) to its first frame, a keyframe");
       ctx.speed("desktop.live.lag-ms", [l.still.lagMs, l.scroll.lagMs, l.anim.lagMs], "ms", "lower", liveSpan, "from a frame's capture (the VM's clock) to its arrival here, through the exec: the median of each scene's");
+
+      // C1 step 10, light by default: VMs made with 2 GB, as the node makes an agent's now; one grown at its desktop's
+      // first use, left unused until deskd stops it, and started again. On VMs of their own.
+      const g = await light(b, ctx.seed, 20);
+      const over = (id: string, value: number, note: string) => ctx.quality(id, Math.round(value), "MB", "lower", { resolution: Math.max(15, value * 0.08), note: `${note}, over a workshop VM made with 2 GB, idle (host memory: the VM's processes, proportional set size)` });
+      const mbOf = (kb: number) => Math.round(kb / 1024);
+      const seen = g.grown.at(-1)!;
+      const limits = seen.from.limit > 0 ? `, its limit ${mbOf(seen.from.limit / 1024)} → ${mbOf(seen.to.limit / 1024)} MB` : ", no limit it could read";
+      ctx.quality("desktop.light.unstarted.extra-mb", Math.round(g.unstarted.qemuRssMb - g.workshopIdle.qemuRssMb), "MB", "lower", { resolution: 15, note: "made with 2 GB, its desktop never started, over a workshop VM made with 2 GB: QEMU's resident memory" });
+      speed(ctx, "desktop.light.grow-ms", g.grow, `grown from 2 GB to 4 GB as at its desktop's first use (resizeTeam, live), until the call returned and the guest had it, on three VMs: the guest saw ${mbOf(seen.from.totalKb)} → ${mbOf(seen.to.totalKb)} MB${limits}; the calls alone ${g.grown.map((one) => Math.round(one.callMs)).join(", ")} ms`);
+      ctx.quality("desktop.light.grow-kept-work", g.keptWork ? 1 : 0, "", "higher", { note: "grown, its work as it was (1): the process it ran before still running, its /work there; or not (0)" });
+      over("desktop.light.idle.extra-mb", g.idle.pssMb - g.workshopIdle.pssMb, "grown, started by the agent's first desktop command and idle on a form page");
+      ctx.quality("desktop.light.after-stop.left", g.afterStop.left.length, "processes", "lower", { note: `once deskd stopped it for being unused, what it started that still runs${g.afterStop.left.length ? `: ${g.afterStop.left.join(", ")}` : ""}` });
+      ctx.quality("desktop.light.after-stop.guest-mb", Math.round(g.afterStop.guestKeptMb), "MB", "lower", { resolution: 15, note: "once stopped, the guest's memory in use (all of it less what it has available) over before the desktop first started" });
+      over("desktop.light.after-stop.extra-mb", g.afterStop.pssMb - g.workshopIdle.pssMb, "once stopped, what the host still holds for it (QEMU keeps the pages a guest frees unless the guest reports them: free-page reporting, a setting of Kata's)");
+      speed(ctx, "desktop.light.restart-ms", g.restart, `started again after an idle stop by the next desktop open, to its page: the VM's own command, deskd started anew by it (deskd's wait the bench's, ${g.restarts} times)`);
+      ctx.quality("desktop.light.restart-usable", g.restartUsable, `of ${g.restarts}`, "higher", { n: g.restarts, note: "restarts whose page could be read" });
+      ctx.quality("desktop.light.restart-told", g.restartTold, `of ${g.restarts}`, "higher", { n: g.restarts, note: "restarts whose command told the agent its desktop had been stopped, and why its screen is fresh" });
     } finally {
       for (const vm of made) await vm.remove().catch((error) => ctx.log(`couldn't remove ${vm.container}: ${(error as Error).message}`));
       const still = await clearLeftovers(b);
