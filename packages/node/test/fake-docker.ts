@@ -5,6 +5,10 @@ import type { DockerRunner } from "@invincible/sandbox";
  * the sandbox host runs (info, inspect, run, ps, exec, stop, start, rename, rm, update, volumes, networks) from
  * memory, so the real host's own logic (labels, the ledger, approvals, reaping)
  * runs unchanged above it. Nothing is spawned.
+ *
+ * A lease a VM is given (the host's writeLease) is kept where that VM's mounts put it: in the volume and subpath, the
+ * host folder or the VM's own memory that holds its HOME. lease() reads it back where a command run in a VM would read
+ * one (its HOME, as the VM was told it), so a VM that shares another's files sees what those files hold, and nothing else.
  */
 
 interface Container {
@@ -16,6 +20,12 @@ interface Container {
   status: string;
   /** What Docker holds it to (--cpus and --memory as it was run, or as `docker update` changed them). */
   held: { NanoCpus: number; Memory: number };
+  /** Its environment as it was run (--env), its own memory's folders (--tmpfs), and each volume mount's subpath. */
+  env: Record<string, string>;
+  tmpfs: string[];
+  subpaths: Record<string, string>;
+  /** Its own, as it was run: what its memory and its own disk hold are no other's. */
+  key: number;
 }
 
 /** `--cpus 2` and `--memory 4096m`, as Docker keeps them. */
@@ -38,11 +48,31 @@ export interface FakeDocker {
   onExec?: (container: string, cmd: string[]) => Promise<{ code: number; stdout: string; stderr?: string }> | { code: number; stdout: string; stderr?: string };
   /** How long `docker run` takes (ms). */
   startMs: number;
+  /** The lease a VM's commands would read now, from its HOME (the JSON the host wrote), or null where there is none. */
+  lease(container: string): Record<string, string> | null;
 }
 
-export function fakeDocker(): FakeDocker {
+/** The lease's file in a VM's HOME, and the host's write of it (writeLease), by a word of its script. */
+const LEASE_FILE = ".invincible-gateway.json";
+const LEASE_WRITE = "prefix='.invincible-gateway-'";
+
+/** `engine`: the Docker Engine version it says it is (`docker version`); none, as by default, and it says nothing, so an agent's VM on a volume stays in layout 1. */
+export function fakeDocker(opts: { engine?: string } = {}): FakeDocker {
   const containers = new Map<string, Container>();
+  /** Files written in VMs, by where they are: a volume's (by its name and the path in it), a host folder's, or a VM's own. */
+  const files = new Map<string, string>();
+  let made = 0;
   let peak = 0;
+  /** Where a path in a VM is: under the deepest of its mounts that holds it, else on its own disk. */
+  const where = (c: Container, path: string): string => {
+    const mounts = [
+      ...c.mounts.map((m) => ({ at: m.Destination, base: m.Type === "volume" ? `volume:${m.Name}:/${c.subpaths[m.Destination] ?? ""}` : `bind::${m.Source}` })),
+      ...c.tmpfs.map((at) => ({ at, base: `tmpfs:${c.key}:${at}` })),
+    ].filter((m) => path === m.at || path.startsWith(`${m.at}/`)).sort((a, b) => b.at.length - a.at.length);
+    const holder = mounts[0];
+    return holder ? `${holder.base}/${path.slice(holder.at.length)}`.replace(/\/+/g, "/") : `own:${c.key}:${path}`;
+  };
+  const homeOf = (c: Container) => c.env.HOME ?? "/";
   const ok = (stdout = "") => ({ code: 0, stdout, stderr: "" });
   const no = (stderr = "No such object") => ({ code: 1, stdout: "", stderr });
   const fake: FakeDocker = {
@@ -50,11 +80,18 @@ export function fakeDocker(): FakeDocker {
     startMs: 0,
     running: () => [...containers.values()].filter((c) => c.status === "running").length,
     peak: () => peak,
+    lease: (name) => {
+      const container = containers.get(name);
+      const held = container ? files.get(where(container, `${homeOf(container)}/${LEASE_FILE}`)) : undefined;
+      return held === undefined ? null : (JSON.parse(held) as Record<string, string>);
+    },
     runner: async (args) => {
       const [command, ...rest] = args;
       switch (command) {
         case "info":
           return ok("27.0.0-fake");
+        case "version":
+          return opts.engine ? ok(opts.engine) : no("fake docker says no version");
         case "image":
           return rest[0] === "inspect" ? ok("sha256:fake") : no();
         case "network":
@@ -69,23 +106,35 @@ export function fakeDocker(): FakeDocker {
         case "build":
           return ok("built");
         case "run": {
+          // A one-off (a store's move, a seat home's hand-over) runs and leaves nothing behind.
+          if (rest.includes("--rm")) return ok();
           if (fake.startMs) await Bun.sleep(fake.startMs);
           const name = rest[rest.indexOf("--name") + 1]!;
           const labels: Record<string, string> = {};
+          const env: Record<string, string> = {};
+          const tmpfs: string[] = [];
+          const subpaths: Record<string, string> = {};
           for (let i = 0; i < rest.length; i++) {
-            if (rest[i] !== "--label") continue;
-            const [key, ...value] = rest[i + 1]!.split("=");
-            labels[key!] = value.join("=");
+            if (rest[i] === "--label") {
+              const [key, ...value] = rest[i + 1]!.split("=");
+              labels[key!] = value.join("=");
+            }
+            if (rest[i] === "--env") {
+              const [key, ...value] = rest[i + 1]!.split("=");
+              env[key!] = value.join("=");
+            }
+            if (rest[i] === "--tmpfs") tmpfs.push(rest[i + 1]!.split(":")[0]!);
           }
           const mounts: Container["mounts"] = [];
           for (let i = 0; i < rest.length; i++) {
             if (rest[i] !== "--mount") continue;
             const parts = Object.fromEntries(rest[i + 1]!.split(",").map((kv) => kv.split("=") as [string, string]));
             mounts.push({ Type: parts.type!, ...(parts.type === "volume" ? { Name: parts.src } : { Source: parts.src }), Destination: parts.dst! });
+            if (parts["volume-subpath"]) subpaths[parts.dst!] = parts["volume-subpath"];
           }
           // The image comes before the command (`sleep infinity`).
           const image = rest[rest.length - 3]!;
-          containers.set(name, { name, image, labels, mounts, status: "running", held: heldOf(rest) });
+          containers.set(name, { name, image, labels, mounts, status: "running", held: heldOf(rest), env, tmpfs, subpaths, key: ++made });
           peak = Math.max(peak, fake.running());
           return ok(name);
         }
@@ -116,6 +165,11 @@ export function fakeDocker(): FakeDocker {
           const cmd = rest.slice(at + 4);
           fake.execs.push({ container, cmd });
           const answer = (await fake.onExec?.(container, cmd)) ?? { code: 0, stdout: "" };
+          // A lease the host wrote is kept where the VM's HOME is (its payload: the JSON, base64, its last argument).
+          if (answer.code === 0 && cmd.some((part) => part.includes(LEASE_WRITE))) {
+            const c = containers.get(container)!;
+            files.set(where(c, `${homeOf(c)}/${LEASE_FILE}`), Buffer.from(cmd.at(-1)!, "base64").toString("utf8"));
+          }
           return { code: answer.code, stdout: answer.stdout, stderr: answer.stderr ?? "" };
         }
         case "stop":

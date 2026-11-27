@@ -257,16 +257,36 @@ describe("layout 2: an agent's HOME apart from its workspace", () => {
     ]);
   });
 
-  test("a VM that shares an agent's workspace in layout 2 mounts its workspace's tree alone, never its HOME", () => {
+  test("a VM that shares an agent's workspace in layout 2 mounts its workspace's tree, never its HOME, and has a HOME of its own in memory", () => {
     const seat = { id: "st_0123456789abcdefghijkl", kind: "claude-subscription" as const };
-    const onVolume = runArgs({ ...base, seat, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work", tree: "work" } });
-    expect(mounts(onVolume)).toEqual(["type=volume,src=invincible-sbx-9876543210-work,dst=/work,volume-subpath=work", "type=volume,src=invincible-seat-st_0123456789abcdefghijkl,dst=/seats/st_0123456789abcdefghijkl"]);
-    const onImage = runArgs({ ...base, seat, shares: { sandbox: "9876543210", workspace: "/var/lib/invincible-workspaces/9876543210", tree: "work" } });
-    expect(mounts(onImage)[0]).toBe("type=bind,src=/var/lib/invincible-workspaces/9876543210/work,dst=/work");
-    expect([...mounts(onVolume), ...mounts(onImage)].some((m) => m.includes("subpath=home") || m.endsWith("/home,dst=/home/agent"))).toBe(false);
-    // Nor its notes.
-    expect([...mounts(onVolume), ...mounts(onImage)].some((m) => m.includes("subpath=notes") || m.includes("/notes,dst="))).toBe(false);
-    // One that shares an agent in layout 1 mounts its whole store, as before.
+    const ownHome = { path: "/usr/bin:/bin:/home/agent/.local/bin" };
+    const tmpfs = (args: string[]) => args.filter((_, i) => args[i - 1] === "--tmpfs");
+    // Another node's task (the workspace alone): its workspace's tree, and nothing else of the store.
+    const onVolume = runArgs({ ...base, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work", tree: "work" }, ownHome });
+    expect(mounts(onVolume)).toEqual(["type=volume,src=invincible-sbx-9876543210-work,dst=/work,volume-subpath=work"]);
+    const onImage = runArgs({ ...base, shares: { sandbox: "9876543210", workspace: "/var/lib/invincible-workspaces/9876543210", tree: "work" }, ownHome });
+    expect(mounts(onImage)).toEqual(["type=bind,src=/var/lib/invincible-workspaces/9876543210/work,dst=/work"]);
+    // A run on a seat of yours, the agent's own work: its workspace's tree and its notes', where they are kept in its HOME.
+    const onSeat = runArgs({ ...base, seat, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work", tree: "work", notes: true }, ownHome });
+    expect(mounts(onSeat)).toEqual([
+      "type=volume,src=invincible-sbx-9876543210-work,dst=/work,volume-subpath=work",
+      "type=volume,src=invincible-sbx-9876543210-work,dst=/home/agent/.memory/engram,volume-subpath=notes",
+      "type=volume,src=invincible-seat-st_0123456789abcdefghijkl,dst=/seats/st_0123456789abcdefghijkl",
+    ]);
+    const onSeatImage = runArgs({ ...base, seat, shares: { sandbox: "9876543210", workspace: "/var/lib/invincible-workspaces/9876543210", tree: "work", notes: true }, ownHome });
+    expect(mounts(onSeatImage).slice(0, 2)).toEqual(["type=bind,src=/var/lib/invincible-workspaces/9876543210/work,dst=/work", "type=bind,src=/var/lib/invincible-workspaces/9876543210/notes,dst=/home/agent/.memory/engram"]);
+    // Never its HOME.
+    expect([onVolume, onImage, onSeat, onSeatImage].flatMap(mounts).some((m) => m.includes("subpath=home") || m.endsWith("/home,dst=/home/agent"))).toBe(false);
+    // Its own HOME: empty, in memory, the VMs' user's alone; its environment and PATH follow it, as layout 2's do.
+    for (const args of [onVolume, onImage, onSeat, onSeatImage]) {
+      expect(tmpfs(args)).toEqual(["/tmp:rw,nosuid,nodev,size=2g,mode=1777", "/home/agent:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700"]);
+      expect(envs(args)).toEqual(expect.arrayContaining(["HOME=/home/agent", "ENGRAM_DATA_DIR=/home/agent/.memory/engram", `PATH=${ownHome.path}`]));
+      expect(envs(args)).not.toContain("HOME=/work");
+    }
+    // Its notes come only with its workspace's tree: one that shares an agent in layout 1 mounts its whole store, as
+    // before, where its notes are.
+    const old = runArgs({ ...base, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work", notes: true }, ownHome });
+    expect(mounts(old)).toEqual(["type=volume,src=invincible-sbx-9876543210-work,dst=/work"]);
     expect(mounts(runArgs({ ...base, shares: { sandbox: "9876543210", volume: "invincible-sbx-9876543210-work" } }))).toEqual(["type=volume,src=invincible-sbx-9876543210-work,dst=/work"]);
   });
 

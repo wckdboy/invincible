@@ -502,6 +502,12 @@ export class SandboxHost {
   /** What runs in each sandbox now, by its id: commands and terminals (a store isn't moved under them). */
   private readonly busy = new Map<string, number>();
   private engineMajor: Promise<number | null> | null = null;
+  /**
+   * What each agent's VM was last leased (prepareTeam), by its id: the scopes of its lease, the providers its models are
+   * on, its models, whether it may use keys of yours, and its repository. A seat's VM that shares it is leased the same
+   * (leaseSeatVm). Never a token: each VM's is its own, minted for it.
+   */
+  private readonly leased = new Map<string, { scopes: readonly string[]; covered: readonly string[]; models?: readonly string[]; keys: boolean; git?: { connector: string; owner: string; repo: string } }>();
 
   constructor(opts: SandboxHostOptions) {
     this.apple = opts.engine === "container";
@@ -825,6 +831,8 @@ export class SandboxHost {
       ...(tokenHash ? { tokenHash } : {}),
       ...(seated.seat ? { seat: { id: seated.seat.id, kind: seated.seat.kind } } : {}),
       ...(seated.shares ? { shares: seated.shares } : {}),
+      // One that shares an agent's workspace has a HOME of its own, empty and in memory: never the agent's (a Linux host's alone).
+      ...(seated.shares && !this.apple ? { ownHome: { path: await this.imagePath(image) } } : {}),
     };
 
     this.creating.add(id);
@@ -1016,6 +1024,7 @@ export class SandboxHost {
       this.opts.tokens.revoke(minted.info.hash);
       throw new SandboxError("could not prepare the agent's model access", 424);
     }
+    this.leased.set(id, { scopes, covered, ...(models?.length ? { models: [...models] } : {}), keys: Boolean(keys?.length), ...(git ? { git } : {}) });
     this.opts.ledger({ class: "modify", resource: "sandbox.team-ready", target: sandbox.name, verdict: "allow", run, detail: `existing VM resumed; model access capped at ${TEAM_LEASE_MINUTES} minutes and 500 requests${models?.length ? `, for ${models.join(", ")} alone` : ""}` });
     return { ...sandbox, status: "running" };
   }
@@ -1032,10 +1041,49 @@ export class SandboxHost {
       throw new SandboxError("that is not this agent's persistent VM", 403);
     }
     const hash = this.tokenStore.peek?.(id) ?? null;
-    return hash !== null && (this.opts.tokens.extend?.(hash, { ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 }) ?? false);
+    const renewed = hash !== null && (this.opts.tokens.extend?.(hash, { ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 }) ?? false);
+    // (A seat's VM that shares it holds a lease as its own is, with a token of its own: renewed with it, and only then.)
+    if (renewed) {
+      for (const vm of await this.sharingVms(id)) {
+        const own = this.tokenStore.peek?.(vm) ?? null;
+        if (own !== null) this.opts.tokens.extend?.(own, { ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+      }
+    }
+    return renewed;
   }
 
-  /** A lease written inside a sandbox as /work/.invincible-gateway.json: JSON, never a shell's configuration. Whether it was. */
+  /** The VMs on this host that share an agent's VM's workspace, by their own ids (never that VM itself). */
+  private async sharingVms(id: string): Promise<string[]> {
+    const listed = await this.docker(["ps", "-a", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.shares=${id}`, "--format", `{{.Label "${LABEL}.id"}}`]);
+    return listed.code === 0 ? listed.stdout.split("\n").map((line) => line.trim()).filter((vm) => vm && vm !== id) : [];
+  }
+
+  /**
+   * A seat's VM that shares an agent's workspace, leased as that agent's VM is now (the owner's decision of 27 November
+   * 2026: a run on a seat is the agent's own, in its trust domain): the same scopes (its models, and its keys and its
+   * repository when it has them), a token of its own, as many minutes and requests, renewed with the agent's (renewTeam)
+   * and revoked as the VM goes (destroy). Written in its own HOME, where its commands read it. An agent's VM this
+   * process didn't prepare has no lease to share: none is made, and the ledger says so.
+   */
+  private async leaseSeatVm(vm: SandboxView, agent: string, run: string): Promise<void> {
+    const lease = this.leased.get(agent);
+    if (!lease) {
+      this.opts.ledger({ class: "modify", resource: "sandbox.seat-lease", target: vm.name, verdict: "allow", run, detail: `no lease: ${containerName(agent)} wasn't prepared by this process, so it has none to share` });
+      return;
+    }
+    const minted = this.opts.tokens.mint({ label: `sandbox:${vm.id}`, providers: [...lease.scopes], ...(lease.models ? { models: [...lease.models] } : {}), ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    this.tokenStore.put(vm.id, minted.info.hash);
+    const env = gatewayEnv(minted.token, [...lease.covered], lease.keys);
+    if (lease.git) env.INVINCIBLE_REPO_URL = repositoryUrl(env.INVINCIBLE_GATEWAY!, lease.git);
+    if (!(await this.writeLease(vm.id, env))) {
+      // (Removed, which revokes its token: a run on it would find no lease where its commands read one.)
+      await this.destroy(vm.id, { run }).catch(() => {});
+      throw new SandboxError("could not give the seat's VM its lease, so it was removed", 424);
+    }
+    this.opts.ledger({ class: "modify", resource: "sandbox.seat-lease", target: vm.name, verdict: "allow", run, detail: `a lease of its own, as ${containerName(agent)}'s is: model access capped at ${TEAM_LEASE_MINUTES} minutes and 500 requests${lease.models ? `, for ${lease.models.join(", ")} alone` : ""}` });
+  }
+
+  /** A lease written inside a sandbox, in its HOME (core's LEASE_FILE): JSON, never a shell's configuration. Whether it was. */
   private async writeLease(id: string, env: Record<string, string>): Promise<boolean> {
     const payload = Buffer.from(JSON.stringify(env)).toString("base64");
     // In its HOME: /work in layout 1, its own tree in layout 2, where no VM sharing its workspace reaches it.
@@ -1801,11 +1849,15 @@ export class SandboxHost {
       if (using === null) throw new SandboxError("docker couldn't say which VMs have this seat's home, so none was made", 503);
       if (using.length >= input.seat.runs) throw new SandboxError(`this seat's home is in use (${using.length} VM${using.length === 1 ? "" : "s"}, and it takes ${input.seat.runs} at once): it waits`, 409);
       await this.seatHome(input.seat.id);
-      const shares = input.shares ? await this.sharedWork(input.shares) : undefined;
-      return this.create(
+      // A run on a seat is the agent's own work: in layout 2 its notes' tree too, never its HOME.
+      const shared = input.shares ? await this.sharedWork(input.shares) : undefined;
+      const shares = shared?.tree ? { ...shared, notes: true as const } : shared;
+      const vm = await this.create(
         { network: input.network, image: HARNESS_IMAGE, cpus: input.cpus, memoryGb: input.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run },
         { seat: input.seat, ...(shares ? { shares } : {}) },
       );
+      if (input.shares) await this.leaseSeatVm(vm, input.shares, input.run);
+      return vm;
     })();
     this.seating.set(input.seat.id, work);
     try {
@@ -1850,7 +1902,8 @@ export class SandboxHost {
     // An agent's VM in layout 2: its workspace's tree alone, never its HOME (its /work is already that tree's directory).
     const layout2 = (await this.layoutOf(id)) === 2;
     if (work?.Type === "volume" && work.Name === volumeName(id)) return { sandbox: id, volume: work.Name, ...(layout2 ? { tree: WORK_TREE } : {}) };
-    if (work?.Type === "bind" && work.Source?.startsWith("/")) return { sandbox: id, workspace: work.Source };
+    // (A workspace image's in layout 2: its /work is its work tree's directory, and the store is the one it is in.)
+    if (work?.Type === "bind" && work.Source?.startsWith("/")) return layout2 && work.Source.endsWith(`/${WORK_TREE}`) ? { sandbox: id, workspace: work.Source.slice(0, -WORK_TREE.length - 1), tree: WORK_TREE } : { sandbox: id, workspace: work.Source };
     throw new SandboxError("could not tell where that agent's /work is; nothing was made", 424);
   }
 
@@ -1914,6 +1967,7 @@ export class SandboxHost {
     else await this.docker(this.apple ? containerVolumeDeleteArgs(id) : ["volume", "rm", "--force", volumeName(id)]);
     const tokenHash = this.tokenStore.take(id);
     if (tokenHash) this.opts.tokens.revoke(tokenHash);
+    this.leased.delete(id);
     this.opts.ledger({
       class: "delete",
       resource: "docker.container",

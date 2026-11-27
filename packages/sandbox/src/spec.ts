@@ -64,6 +64,11 @@ export interface SandboxSpec {
   shares?: ({ sandbox: string; volume: string } | { sandbox: string; workspace: string }) & {
     /** The agent's store is in layout 2 (layout.ts): its workspace's tree alone is mounted, never its HOME. */
     tree?: typeof WORK_TREE;
+    /**
+     * And its notes' tree, where they are kept in this VM's own HOME (VM_NOTES): a run on a seat of yours, which is the
+     * agent's own work. Never another node's task. With `tree` alone: in layout 1 its notes are in the /work it shares.
+     */
+    notes?: true;
   };
   /**
    * Layout 2 (layout.ts): its store's three trees mounted on their own, work/ at /work, home/ at its HOME and notes/
@@ -71,6 +76,12 @@ export interface SandboxSpec {
    * (layoutPath). Absent: layout 1, /work its HOME too.
    */
   layout?: { path: string };
+  /**
+   * A HOME of its own, empty and in memory, at /home/agent (a VM that shares an agent's workspace: a run on a seat, another
+   * node's task): never the agent's, whose sign-ins and lease its tools would otherwise find there, nor the workspace it
+   * shares. Its environment and PATH (`path`, layoutPath) follow it, as layout 2's do.
+   */
+  ownHome?: { path: string };
 }
 
 /** A stopped container that keeps the sandbox image in use, so image pruning (Coolify's nightly cleanup) leaves it alone. */
@@ -198,15 +209,15 @@ export function labels(spec: SandboxSpec): Record<string, string> {
 
 /**
  * Its /work, and in layout 2 its HOME and its notes, from its store (layout.ts): in layout 2 each tree on its own, as a
- * subpath of its volume or a directory of its workspace image; a VM that shares an agent's workspace mounts that
- * workspace's tree alone.
+ * subpath of its volume or a directory of its workspace image. A VM that shares an agent's workspace mounts that
+ * workspace's tree alone, and its notes' tree too when it is a run on a seat of yours (`notes`).
  */
 function storeMounts(spec: SandboxSpec): string[] {
   const mount = (source: { volume: string } | { workspace: string }, tree: string | null, target: string) =>
     "volume" in source
       ? `type=volume,src=${source.volume},dst=${target}${tree ? `,volume-subpath=${tree}` : ""}`
       : `type=bind,src=${tree ? `${source.workspace}/${tree}` : source.workspace},dst=${target}`;
-  if (spec.shares) return ["--mount", mount(spec.shares, spec.shares.tree ?? null, VM_WORK)];
+  if (spec.shares) return ["--mount", mount(spec.shares, spec.shares.tree ?? null, VM_WORK), ...(spec.shares.tree && spec.shares.notes ? ["--mount", mount(spec.shares, NOTES_TREE, VM_NOTES)] : [])];
   const store = spec.workspace ? { workspace: spec.workspace } : { volume: volumeName(spec.id) };
   if (!spec.layout) return ["--mount", mount(store, null, VM_WORK)];
   return ["--mount", mount(store, WORK_TREE, VM_WORK), "--mount", mount(store, HOME_TREE, VM_HOME), "--mount", mount(store, NOTES_TREE, VM_NOTES)];
@@ -238,8 +249,10 @@ export function runArgs(spec: SandboxSpec): string[] {
     ...(spec.seat ? ["--mount", `type=volume,src=${seatVolumeName(spec.seat.id)},dst=${seatHome(spec.seat.id)}`] : []),
     "--workdir",
     "/work",
-    // Its HOME: /work in layout 1; in layout 2 its own tree, and with it where it installs for itself and its PATH.
-    ...(spec.layout ? Object.entries({ ...LAYOUT_ENV, PATH: spec.layout.path }).flatMap(([key, value]) => ["--env", `${key}=${value}`]) : ["--env", "HOME=/work"]),
+    // Its HOME: /work in layout 1; in layout 2 its own tree, and with it where it installs for itself and its PATH. One
+    // that shares a workspace has one of its own, in memory (its notes' tree, when it has it, is mounted inside it).
+    ...(spec.ownHome ? ["--tmpfs", `${VM_HOME}:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700`] : []),
+    ...((spec.layout ?? spec.ownHome) ? Object.entries({ ...LAYOUT_ENV, PATH: (spec.layout ?? spec.ownHome)!.path }).flatMap(([key, value]) => ["--env", `${key}=${value}`]) : ["--env", "HOME=/work"]),
     // Bounded resources: a runaway agent cannot starve the host.
     "--cpus",
     String(spec.cpus),

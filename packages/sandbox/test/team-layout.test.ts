@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { LEASE_FILE, NOTES_DIR } from "@invincible/core";
-import { containerName, type DockerRunner, LABEL, type LayoutEntry, SandboxHost, volumeName } from "../src/index.ts";
+import { containerName, type DockerRunner, LABEL, type LayoutEntry, memoryTokenStore, SandboxHost, seatVolumeName, TEAM_LEASE_MINUTES, volumeName } from "../src/index.ts";
 
 /*
  * Layout 2 on an agent's VM (layout.ts; the owner's decisions of 27 November 2026): made in it new, moved to it from layout
@@ -21,11 +21,13 @@ const LISTED: LayoutEntry[] = [
   { name: "repo", to: "work", kind: "dir", bytes: 4096 },
 ];
 
-function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean } = {}) {
+function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean } = {}) {
   const containers = new Map<string, { labels: Record<string, string>; mounts: Mount[]; status: string; image: string }>();
   const calls: string[][] = [];
   /** The modes MOVE_PY was run in, in order. */
   const modes: string[] = [];
+  /** The lease written in each VM (writeLease's payload), by its container's name. */
+  const leases = new Map<string, Record<string, string>>();
   const ok = (stdout = "") => ({ code: 0, stdout, stderr: "" });
   const no = (stderr = "No such object") => ({ code: 1, stdout: "", stderr });
   const parse = (rest: string[]) => {
@@ -87,8 +89,9 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
         const matching = [...containers.entries()].filter(([, c]) =>
           wanted.every((w) => (w.startsWith("status=") ? c.status === w.slice(7) : (() => { const [k, ...v] = w.replace(/^label=/, "").split("="); return v.length ? c.labels[k!] === v.join("=") : k! in c.labels; })())),
         );
-        // (Docker's names for them, which the host inspects them by.)
-        return ok(matching.map(([name]) => name).join("\n"));
+        // (Asked for a label, the label; otherwise Docker's names for them, which the host inspects them by.)
+        const label = /^\{\{\.Label "([^"]+)"\}\}$/.exec(rest.includes("--format") ? rest[rest.indexOf("--format") + 1]! : "")?.[1];
+        return ok(matching.map(([name, c]) => (label ? (c.labels[label] ?? "") : name)).join("\n"));
       }
       case "inspect": {
         if (rest[0] === "--format") {
@@ -101,6 +104,16 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
         const found = rest.map((name) => containers.get(name)).filter((c) => !!c);
         if (!found.length) return no();
         return ok(JSON.stringify(found.map((c) => ({ Config: { Labels: c!.labels, Image: c!.image }, State: { Status: c!.status }, HostConfig: { NanoCpus: 2e9, Memory: 4 * 2 ** 30 } }))));
+      }
+      case "exec": {
+        // exec --interactive --workdir /work <container> timeout --signal=KILL <n>s <cmd…>: a lease written is kept.
+        const container = rest[3]!;
+        const cmd = rest.slice(7);
+        if (cmd.join(" ").includes("prefix='.invincible-gateway-'")) {
+          if (opts.leaseFails?.(container)) return { code: 1, stdout: "", stderr: "no space left on device" };
+          leases.set(container, JSON.parse(Buffer.from(cmd.at(-1)!, "base64").toString("utf8")));
+        }
+        return ok();
       }
       case "stop":
         return ok();
@@ -128,14 +141,23 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
   const workspaces = opts.disk
     ? { available: async () => true, create: async () => `/var/lib/invincible-workspaces/${ID}`, mount: async () => {}, retain: async () => {}, remove: async () => {}, stats: async () => ({ totalBytes: 10 ** 12, freeBytes: 10 ** 12, images: [] }) }
     : null;
+  // Each lease minted is a token of its own, by its number; what was asked of each is kept.
+  const tokens = { minted: [] as { label: string; providers?: string[]; models?: string[]; ttlMinutes: number; maxRequests: number }[], extended: [] as string[], revoked: [] as string[] };
   const host = new SandboxHost({
     node: "test", maxCpus: 8, maxMemoryGb: 16, runner, ledger: (e) => void ledger.push(e), layout2: true, moved: (run, entries) => void moved.push({ run, entries }),
-    tokens: { mint: () => ({ token: "test-only-token", info: { hash: "test-only-hash" } }), revoke: () => true },
-    tokenStore: { put: () => {}, take: () => null },
+    tokens: {
+      mint: (scope) => {
+        tokens.minted.push(scope);
+        return { token: `test-only-token-${tokens.minted.length}`, info: { hash: `test-only-hash-${tokens.minted.length}` } };
+      },
+      revoke: (hash) => (tokens.revoked.push(hash), true),
+      extend: (hash) => (tokens.extended.push(hash), !opts.extendFails),
+    },
+    tokenStore: memoryTokenStore(),
     ...(workspaces ? { workspaces } : {}),
   });
   const agent = () => containers.get(containerName(ID))!;
-  return { host, calls, containers, ledger, moved, modes, agent };
+  return { host, calls, containers, ledger, moved, modes, agent, leases, tokens };
 }
 
 describe("an agent's VM in layout 1, at a prepare while nothing runs in it", () => {
@@ -232,13 +254,87 @@ describe("an agent's VM in layout 2", () => {
     expect(f.agent().mounts.map((m) => m.Destination)).toEqual(["/work", "/home/agent", "/home/agent/.memory/engram"]);
   });
 
-  test("a seat's VM that shares its workspace mounts the workspace's tree alone, never its HOME", async () => {
+  const SEAT = { id: `st_${"a".repeat(22)}`, kind: "claude-subscription" as const, runs: 1 };
+  const onSeat = { seat: SEAT, network: "online" as const, cpus: 1, memoryGb: 2, ttlMinutes: 30, run: `seat.${SEAT.id}`, shares: ID };
+  const seatVm = (f: ReturnType<typeof fake>) => [...f.containers.entries()].find(([, c]) => c.labels[`${LABEL}.shares`] === ID && c.labels[`${LABEL}.seat`])!;
+
+  test("a seat's VM that shares its workspace mounts the workspace's tree and its notes', never its HOME, and has a HOME of its own", async () => {
+    for (const disk of [false, true]) {
+      const f = fake({ layout: "2", disk });
+      f.agent().status = "running";
+      await f.host.createSeatVm(onSeat);
+      const [, seat] = seatVm(f);
+      const work = disk ? { Type: "bind", Source: `/var/lib/invincible-workspaces/${ID}/work`, Destination: "/work" } : { Type: "volume", Name: volumeName(ID), Destination: "/work", Subpath: "work" };
+      const notes = disk ? { Type: "bind", Source: `/var/lib/invincible-workspaces/${ID}/notes`, Destination: "/home/agent/.memory/engram" } : { Type: "volume", Name: volumeName(ID), Destination: "/home/agent/.memory/engram", Subpath: "notes" };
+      expect(seat.mounts).toEqual([work, notes, { Type: "volume", Name: seatVolumeName(SEAT.id), Destination: `/seats/${SEAT.id}` }]);
+      expect(seat.mounts.some((m) => m.Destination === "/home/agent" || m.Subpath === "home" || m.Source?.endsWith("/home"))).toBe(false);
+      // Its HOME its own: in memory, the VMs' user's; its environment follows it.
+      const made = f.calls.find((a) => a[0] === "run" && a.includes(`${LABEL}.shares=${ID}`))!;
+      expect(made).toEqual(expect.arrayContaining(["--tmpfs", "/home/agent:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700", "HOME=/home/agent"]));
+      expect(made).not.toContain("HOME=/work");
+    }
+  });
+
+  test("a seat's VM has a lease of its own, as the agent's VM's is: its scopes, its models, its keys and its repository, written in its own HOME", async () => {
+    const f = fake({ layout: "2" });
+    const git = { connector: "github", owner: "example", repo: "app" };
+    await f.host.prepareTeam(ID, RUN, git, ["anthropic"], ["anthropic/claude-test"], ["key:test-only"]);
+    await f.host.createSeatVm(onSeat);
+    const [name] = seatVm(f);
+    const seatId = name.replace("invincible-sbx-", "");
+    // Minted for it as the agent's was, with a token of its own.
+    expect(f.tokens.minted).toHaveLength(2);
+    const mine = f.tokens.minted[0]!;
+    const its = f.tokens.minted[1]!;
+    expect(its).toEqual({ ...mine, label: `sandbox:${seatId}` });
+    expect(its).toMatchObject({ providers: ["anthropic", "git:github:example:app", "key:test-only"], models: ["anthropic/claude-test"], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    // Written in its own HOME (its write's HOME is the VM's), and nowhere else of the agent's.
+    const agentLease = f.leases.get(containerName(ID))!;
+    const seatLease = f.leases.get(name)!;
+    expect(seatLease.INVINCIBLE_TOKEN).toBe("test-only-token-2");
+    expect(agentLease.INVINCIBLE_TOKEN).toBe("test-only-token-1");
+    expect(Object.keys(seatLease).sort()).toEqual(Object.keys(agentLease).sort());
+    expect(seatLease.INVINCIBLE_REPO_URL).toContain("example/app");
+    expect(seatLease.INVINCIBLE_KEYS).toBeDefined();
+    expect(f.ledger.find((e) => e.resource === "sandbox.seat-lease")?.detail).toBe(`a lease of its own, as ${containerName(ID)}'s is: model access capped at ${TEAM_LEASE_MINUTES} minutes and 500 requests, for anthropic/claude-test alone`);
+    // Renewed with the agent's, and only then.
+    await f.host.renewTeam(ID, RUN);
+    expect(f.tokens.extended).toEqual(["test-only-hash-1", "test-only-hash-2"]);
+    // Revoked as it goes; the agent's is its own, and stays.
+    await f.host.destroy(seatId, { run: onSeat.run });
+    expect(f.tokens.revoked).toEqual(["test-only-hash-2"]);
+    f.tokens.extended.length = 0;
+    await f.host.renewTeam(ID, RUN);
+    expect(f.tokens.extended).toEqual(["test-only-hash-1"]);
+    // As the agent's lease is now, never as it was: prepared as another node's task's VM is (its paid models alone, and
+    // neither your keys nor its repository, as the server leases one), a seat's VM made then carries none of them.
+    await f.host.prepareTeam(ID, RUN, undefined, ["anthropic"], ["anthropic/claude-paid"], []);
+    await f.host.createSeatVm(onSeat);
+    expect(f.tokens.minted.at(-1)).toEqual({ label: `sandbox:${seatVm(f)[0].replace("invincible-sbx-", "")}`, providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    const narrow = f.leases.get(seatVm(f)[0])!;
+    expect([narrow.INVINCIBLE_REPO_URL, narrow.INVINCIBLE_KEYS]).toEqual([undefined, undefined]);
+  });
+
+  test("an agent's lease that couldn't be renewed renews none of its seats' VMs'", async () => {
+    const f = fake({ layout: "2", extendFails: true });
+    await f.host.prepareTeam(ID, RUN, undefined, ["anthropic"]);
+    await f.host.createSeatVm(onSeat);
+    expect(await f.host.renewTeam(ID, RUN)).toBe(false);
+    expect(f.tokens.extended).toEqual(["test-only-hash-1"]);
+  });
+
+  test("a seat's VM whose agent's VM this process didn't prepare gets no lease, and the ledger says so; one whose lease can't be written is removed", async () => {
     const f = fake({ layout: "2" });
     f.agent().status = "running";
-    await f.host.createSeatVm({ seat: { id: `st_${"a".repeat(22)}`, kind: "claude-subscription", runs: 1 }, network: "online", cpus: 1, memoryGb: 2, ttlMinutes: 30, run: RUN, shares: ID });
-    const seat = [...f.containers.entries()].find(([, c]) => c.labels[`${LABEL}.shares`] === ID && c.labels[`${LABEL}.seat`])![1];
-    expect(seat.mounts.filter((m) => m.Destination === "/work")).toEqual([{ Type: "volume", Name: volumeName(ID), Destination: "/work", Subpath: "work" }]);
-    expect(seat.mounts.some((m) => m.Destination === "/home/agent" || m.Subpath === "home" || m.Subpath === "notes")).toBe(false);
+    await f.host.createSeatVm(onSeat);
+    expect(f.tokens.minted).toHaveLength(0);
+    expect(f.ledger.find((e) => e.resource === "sandbox.seat-lease")?.detail).toBe(`no lease: ${containerName(ID)} wasn't prepared by this process, so it has none to share`);
+    // Its lease not written: the VM goes, and its token with it.
+    const broken = fake({ layout: "2", leaseFails: (container) => container !== containerName(ID) });
+    await broken.host.prepareTeam(ID, RUN, undefined, ["anthropic"]);
+    await expect(broken.host.createSeatVm(onSeat)).rejects.toThrow("could not give the seat's VM its lease, so it was removed");
+    expect([...broken.containers.values()].some((c) => c.labels[`${LABEL}.shares`] === ID)).toBe(false);
+    expect(broken.tokens.revoked).toEqual(["test-only-hash-2"]);
   });
 
   test("made new, it is in layout 2 from the start: its store's three trees made before it is", async () => {

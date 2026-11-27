@@ -9,6 +9,8 @@ import { acpDriver, AGENTS, OWN_SIGN_IN, planTaken, type RunEvent } from "@invin
 import { HANDED_GATE_SECONDS, HANDED_MARGIN_SECONDS, harnessReadiness, keysLine, progress, TEAM_COMMAND_SECONDS, teamRuntime, type TeamRuntimeDeps, withGateway } from "@invincible/agents";
 import type { SeatAnswer, SeatRun, TeamRunContext } from "@invincible/agents";
 import type { TaskAccount } from "@invincible/core";
+import { memoryTokenStore, SandboxHost } from "@invincible/sandbox";
+import { fakeDocker } from "./fake-docker.ts";
 
 /** What a task asks its VM as it starts: whether it has a desktop, and on it the hardware tools (KiCad's command). */
 const PROBE = "command -v desktop kicad-cli";
@@ -1176,7 +1178,7 @@ test("a run on a seat of yours: its tool's check, launch and follow are in the s
     expect(t.inAgent.some((c) => c.includes("bun test required-check"))).toBe(true);
     expect(t.inSeat.some((c) => c.includes("bun test required-check"))).toBe(false);
     expect(t.inAgent.some((c) => c.includes(`/work/.agent/sessions/task-abcdefghijkl.${harness}.${SEAT}`) && c.includes("00000000-0000-4000-8000-000000000001"))).toBe(true);
-    // Every command in the seat's VM is the task's, in its workspace, with its gateway lease read from the shared /work.
+    // Every command in the seat's VM is the task's, in its workspace, with its gateway lease read from that VM's HOME.
     expect(t.inSeat.every((c) => plain(c).includes("cd '/work/tasks/task-abcdefghijkl'") && c.includes('".invincible-gateway.json"'))).toBe(true);
     expect(t.released).toEqual(["let go"]);
     expect(t.kept).toEqual([{ seat: SEAT, kind: harness === "claude" ? "claude-subscription" : "chatgpt-codex" }]);
@@ -1362,6 +1364,51 @@ test("stopped by you, a coding agent's live run is told its stop on the way that
   await done;
   expect(tells.filter((command) => command.includes("os.O_NONBLOCK"))).toHaveLength(1);
   expect(cleaned).toBeGreaterThan(0);
+});
+
+/* A run on a seat whose own sign-in fails falls back to a roster model, whose calls go through the gateway from the
+ * seat's VM: on a lease that VM must find where its commands read one, its HOME (the owner's decision of 27 November
+ * 2026: a lease of its own, as the agent's VM's is). Here both VMs are the real host's, on a stand-in for Docker that
+ * keeps a lease where its VM's mounts put it, and the seat's VM answers as the tool's bridge does: on the gateway, with
+ * no lease where it reads one, it can't start. In layout 1 and in layout 2 alike. */
+test("a run on a seat that falls back to a roster model finds a lease in the seat's VM, its own, and works on", async () => {
+  for (const engine of ["27.3.1", null]) {
+    const docker = fakeDocker(engine ? { engine } : {});
+    const host = new SandboxHost({
+      node: "test", maxCpus: 8, maxMemoryGb: 16, microVMs: true, runner: docker.runner, ledger: () => {}, layout2: true, tokenStore: memoryTokenStore(),
+      tokens: { mint: (scope) => ({ token: `test-only-token-${scope.label}`, info: { hash: `test-only-hash-${scope.label}` } }), revoke: () => true, extend: () => true },
+    });
+    // The agent's VM, prepared, its lease in its own HOME (in layout 2 on an engine whose volumes' subpaths are mounted).
+    const run = "arm.team.abcdef0123.ada";
+    const own = await host.create({ network: "gateway", isolation: "vm", cpus: 2, memoryGb: 4, ttlMinutes: 60, persistent: true, run });
+    await host.prepareTeam(own.id, run, undefined, ["anthropic"]);
+    // The seat's VM, as seat-runs makes it, and a run on it as seat-runs gives one.
+    const vm = await host.createSeatVm({ seat: { id: SEAT, kind: "claude-subscription", runs: 1 }, shares: own.id, network: "online", cpus: 2, memoryGb: 4, ttlMinutes: 30, run: `seat.${SEAT}` });
+    const inSeat = `invincible-sbx-${vm.id}`;
+    let launched: { own: boolean; lease: boolean } | null = null;
+    const onGateway: boolean[] = [];
+    docker.onExec = (container, cmd) => {
+      const text = cmd.join(" ");
+      if (container !== inSeat) return { code: 0, stdout: "" };
+      if (text.includes("--status")) return { code: 0, stdout: signedIn() };
+      if (text.includes("setsid")) {
+        launched = { own: text.includes("--own"), lease: docker.lease(container) !== null };
+        if (!launched.own) onGateway.push(launched.lease);
+        return { code: 0, stdout: "" };
+      }
+      if (text.includes('"next": nxt')) {
+        const said = (exit: number, ...lines: object[]) => ({ code: 0, stdout: JSON.stringify({ alive: false, exit, next: 42, lines: lines.map((line) => JSON.stringify(line)) }) });
+        if (!launched) return said(0);
+        if (launched.own) return said(1, { type: "error", message: "Claude Code's run on its own sign-in failed: an outage at its vendor's" });
+        return launched.lease ? said(0, { type: "session", id: "00000000-0000-4000-8000-000000000002" }, { type: "text", text: "Built and checked." }) : said(1, { type: "error", message: "Claude Code needs this workspace's Invincible gateway endpoint and token" });
+      }
+      return { code: 0, stdout: text.includes("cat ") ? "" : "0" };
+    };
+    const seatRun: SeatRun = { seat: { id: SEAT, kind: "claude-subscription", label: "Work Max" }, exec: (command, timeout) => host.exec(vm.id, ["bash", "-lc", command], timeout), stop: async () => {}, release: async () => {} };
+    const done = await seatTask("claude", { own: { stdout: signedOut }, roster: [opus], answers: [{ run: seatRun }] }).go();
+    // Its roster model's run found the lease, and the task was done.
+    expect([engine, onGateway, done.verified]).toEqual([engine, [true], true]);
+  }
 });
 
 test("a seat is let go when the task ends before its run begins", async () => {

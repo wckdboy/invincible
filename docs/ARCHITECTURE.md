@@ -279,7 +279,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
     free it runs in its agent's own VM as before seats; with no other way to go on it waits for a busy seat (it has it
     the moment that one is let go) or rests until a spent one opens. Work in sensitive mode never takes one;
   - a run on a seat is in a VM made for it from the pinned tools' image, with the seat's home and the agent's own
-    `/work`, as big as the agent's VM. The tool's check, launch, follow and stop are there; the work's gates, its
+    `/work`, as big as the agent's VM. In layout 2 that is the workspace's tree and the notes' tree, with a HOME of its
+    own in memory and a lease of its own there, as the agent's VM's is (SECURITY.md). The tool's check, launch, follow and stop are there; the work's gates, its
     evidence and its review stay in the agent's own VM, on the same files. It has no desktop: the agent's stays in its
     own VM, and its tool is told its commands are out of its reach. The seat is let go as the run ends (its VM
     removed); one whose tool says it isn't signed in there is let go, asked again in a VM of its own (no agent's `/work`
