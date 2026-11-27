@@ -39,10 +39,14 @@ function runner(agents = 1, clock: { now?: () => number; handCallMs?: number } =
   for (const name of names) store.saveAgent({ id: name, name });
   const runs: string[] = [];
   const wake = { poke: () => {} };
+  // (As the server binds them: a resume by id of another node's task asks the hand-offs, which follow it from then.)
+  const late: { h?: Handoffs } = {};
   const service = new TeamService({
     store,
     respond: async () => "",
     onChange: () => wake.poke(),
+    mayResumeHanded: (task) => late.h!.resumable(task),
+    resumedHanded: (task) => late.h!.resumed(task),
     shutdownGraceMs: 1,
     tickMs: 5,
     concurrency: agents,
@@ -66,6 +70,7 @@ function runner(agents = 1, clock: { now?: () => number; handCallMs?: number } =
   } as unknown as LedgerStore;
   const h = new Handoffs({ db: new Database(":memory:"), store: held, identity: self, fabric: { sidecar: { client: null, did: null } } as unknown as Fabric, log, ...clock });
   fixtures.push({ service, h });
+  late.h = h;
   wake.poke = () => h.poke();
   const team: HandTeam = {
     give: async (args, _signal, how) => {
@@ -322,5 +327,68 @@ describe("a handed task whose life ends and whose stop doesn't take", () => {
     expect(k.failed()).toBeNull();
     expect(k.completed()!.task?.status).toBe("failed");
     expect(k.completed()!.task?.error).toContain("couldn't be stopped here");
+  });
+});
+
+/*
+ * Your resume by its id (the third re-review's R3-6): it took up a handed task that nobody followed, past a revocation
+ * of its node or your grant that had come before, with no life bound and not counted against the 8 at once. Now it is
+ * refused once its node or the grant it was taken under is revoked, or with its node at the 8 already; otherwise it runs
+ * followed by this node's hand-offs, held to the longest a hand-off may last from when you took it up again.
+ */
+describe("a handed task you take up again by its id", () => {
+  const MINUTE = 60_000;
+  /** One of alpha's tasks, taken under your grant by `agent`, and stopped: what a resume by its id takes up. */
+  async function stopped(r: ReturnType<typeof runner>, agent = "ada") {
+    const k = hand(r.h, r.alpha, agent);
+    await until(() => k.taken() && r.store.task(k.task()!)?.status === "running", 5_000, "running");
+    r.service.control({ task: k.task()!, action: "stop" });
+    await until(() => k.completed() !== null, 5_000, "its giver answered");
+    return k.task()!;
+  }
+
+  test("is refused once its node is revoked", async () => {
+    const r = runner();
+    const id = await stopped(r);
+    r.ledger.active.delete(r.alpha.id);
+    r.h.revoked(r.alpha.id);
+    expect(() => r.service.control({ task: id, action: "resume" })).toThrow("revoked");
+    expect(r.store.task(id)?.status).toBe("stopped");
+  });
+
+  test("is refused once the grant it was taken under is revoked", async () => {
+    const r = runner();
+    const id = await stopped(r);
+    r.ledger.granted.delete(r.alpha.id);
+    r.applied([{ kind: "handoff.revoked", body: { from: r.alpha.id, to: r.self.id } }]);
+    expect(() => r.service.control({ task: id, action: "resume" })).toThrow("grant");
+    expect(r.store.task(id)?.status).toBe("stopped");
+  });
+
+  test("is refused while its node has the 8 at once open here", async () => {
+    const r = runner(HANDED_AT_ONCE + 1);
+    const id = await stopped(r);
+    const open = r.names.slice(1).map((agent) => hand(r.h, r.alpha, agent));
+    await until(() => open.every((k) => k.taken()), 5_000, "the others taken");
+    expect(r.store.handed(handedBy(r.alpha.id), 0).atOnce).toBe(HANDED_AT_ONCE);
+    expect(() => r.service.control({ task: id, action: "resume" })).toThrow(`${HANDED_AT_ONCE} tasks`);
+    expect(r.store.task(id)?.status).toBe("stopped");
+  });
+
+  test("runs followed, and ends at the longest a hand-off may last from when you took it up again", async () => {
+    const clock = { now: 1_000_000 };
+    const r = runner(1, { now: () => clock.now, handCallMs: 60 * MINUTE });
+    const id = await stopped(r);
+    clock.now += 30 * MINUTE;
+    r.service.control({ task: id, action: "resume" });
+    await until(() => r.store.task(id)?.status === "running", 5_000, "running again");
+    clock.now += 59 * MINUTE;
+    r.h.poke();
+    await Bun.sleep(50);
+    expect(r.store.task(id)?.status).toBe("running");
+    clock.now += MINUTE;
+    r.h.poke();
+    await until(() => r.store.task(id)?.status === "stopped", 5_000, "stopped at the end of its life");
+    expect(r.store.task(id)?.error).toContain("the longest a hand-off may last");
   });
 });

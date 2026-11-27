@@ -633,22 +633,20 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       there is the residual's.
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
-      re-review's R3-2). A task you take up again by its id has no such bound (R3-6).
+      re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).
     - Residual: work it hands to a process that was already running in the VM isn't one it started, and isn't ended.
       Its VM time isn't counted itself. And the known gaps:
-    - **Known gaps, until they're fixed** (the third re-review: Lows, and R3-6 an Info; the fabric runs only when you
-      switch it on):
+    - **Known gaps, until they're fixed** (the third re-review's, both Low; the fabric runs only when you switch it
+      on):
       - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
         ends, or, in the VM, fork successors faster than its helper's scan; and the task's list of what to end is a
         file in the VM that its commands can rewrite. What it started then outlives the gate, the task, the grant and
         the node's revocation.
       - R3-4: its VM's gateway lease serves every keyed provider and any model, so its commands can work on models its
         budget counts at $0.
-      - R3-6: a resume by id runs a handed task with nobody following it, not counted against the 8 at once, with no
-        life bound, even after its node or its grant was revoked.
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
     these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1),
-    but for tasks you take up again by id (R3-6).
+    and those you take up again by id (R3-6).
   - Anything else waits on the node that would run it as a proposal that only you approve; its own agent never does,
     whatever it would spend.
   - Either way the task is recorded as the giving node's (`givenBy: node:<id>`), never yours.
@@ -657,9 +655,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     restart: a planned one ends a handed task as stopped and never takes it up again, and one a crash cut off ends as
     the node comes back (N2). A pause ends a handed task, and a resume of an agent or a room passes over it, so
     neither brings it back unfollowed or past the 8 at once (the second re-review's N6). Named by its id you can still
-    take one up again yourself (the web offers it in one tap): then nobody follows it, it isn't counted against the 8,
-    it has no life bound, and only a revocation that comes after ends it, so one taken up after its node's or your
-    grant's revocation runs on (R3-6).
+    take one up again yourself (the web offers it in one tap), only while its node and the grant it was taken under
+    hold and its node has fewer than 8 open there: the node follows it again, held to the longest a hand-off may last
+    from then, and a revocation ends it as any (the third re-review's R3-6).
   - Tests: `fabric-hand-grant.test.ts` (the review's proof of concept, which failed before the fix: a node's hand call
     made a task as yours, queued at once), `fabric-hand-burst.test.ts` and `fabric-hand-burst.e2e.test.ts` (a burst
     naming no agent: 12 taken against 8, and $36 against a $3 day, before the fix), `fabric-hand-day.test.ts`,

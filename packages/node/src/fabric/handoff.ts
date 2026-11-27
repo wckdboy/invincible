@@ -276,6 +276,51 @@ export class Handoffs implements FabricTools {
     for (const t of this.team?.handedOpen() ?? []) if (t.by === handedBy(device)) this.team?.stop(t.id, "The node that handed it over was revoked.");
   }
 
+  /**
+   * Why a task another node handed here may not be taken up again by its id (yours: the one resume that reaches it), or
+   * null when it may (the third re-review's R3-6). Its node must still be an active full node, a task taken under your
+   * grant must still have that grant (one you approved beyond it needn't), and its node must have fewer than the 8 open
+   * here, as for a task it handed now.
+   */
+  resumable(task: TeamTask): string | null {
+    if (this.closed || !this.team) return "this node isn't following tasks other nodes handed over just now";
+    const by = task.givenBy ?? "";
+    const giver = by.startsWith("node:") ? by.slice("node:".length) : "";
+    const node = this.deps.store.activeDevice(giver);
+    if (!node || node.role !== "full") return "The node that handed it over was revoked: it isn't taken up again here.";
+    if (task.proposedBy === undefined && !this.deps.store.handoffGrant(giver, this.deps.identity.id)) return `Your grant for ${node.name}'s hand-offs, which it was taken under, was revoked: it isn't taken up again here.`;
+    if (this.team.handed(by, this.now() - HANDOFF_DAY_MS).atOnce >= HANDED_AT_ONCE) return `${node.name} has ${HANDED_AT_ONCE} tasks handed here open at once already: let some end first.`;
+    return null;
+  }
+
+  /**
+   * A task another node handed here that you took up again by its id: followed from now as one handed over is, though no
+   * call follows it (none can stream it back), held to the longest a hand-off may last from now, and ended by a
+   * revocation of its node or your grant as any is (the third re-review's R3-6).
+   */
+  resumed(task: TeamTask): void {
+    void this.followResumed(task.id).catch((error) => this.deps.log(`fabric: ${task.id}, taken up again, wasn't followed: ${(error as Error).message}`));
+  }
+
+  private async followResumed(id: string): Promise<void> {
+    const began = this.now();
+    const lifeMs = this.deps.handCallMs ?? HAND_CALL_MS;
+    for (;;) {
+      if (this.closed || !this.team) return;
+      const task = this.team.task(id);
+      if (!task || (ENDED.has(task.status) && task.status !== "interrupted")) return;
+      // Paused again: it ends, as a handed task paused while its call followed it does (nobody would follow a resume).
+      if (task.status === "interrupted") return void this.team.stop(id, "This work was paused, and it was handed over by another node: nobody follows it, so it ends here rather than be resumed unseen.");
+      if (this.now() - began >= lifeMs) {
+        this.team.stop(id, `It reached the longest a hand-off may last here (${span(lifeMs)}) since you took it up again: it ends rather than run on.`);
+        // (A stop that didn't take ends the following all the same: R3-2.)
+        if (!ENDED.has(this.team.task(id)?.status ?? "stopped")) return;
+        continue;
+      }
+      await this.nap(250);
+    }
+  }
+
   // ---- the giver ----
 
   private rows(): Row[] {

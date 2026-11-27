@@ -37,6 +37,13 @@ export interface TeamServiceOptions {
   onTaskEnded?(task: TeamTask): void;
   /** What is left of your usage budget now, in US dollars (usage.ts meter; null: you set none): what it starts on its own yes must fit it. */
   budgetLeft?(): number | null;
+  /**
+   * Why a task another node handed over may not be taken up again by its id (yours, the one resume that reaches it), or
+   * null when it may (fabric/handoff.ts resumable). Absent: it may.
+   */
+  mayResumeHanded?(task: TeamTask): string | null;
+  /** A task another node handed over, taken up again by its id: the hand-offs follow it from now (handoff.ts resumed). */
+  resumedHanded?(task: TeamTask): void;
 }
 
 /** What the primary may still commit on its own word (TeamService.ownLeft), with what that is said against: what approved
@@ -502,9 +509,18 @@ export class TeamService {
     if (input.action === "resume") {
       // A callback may still be winding down its VM command. It cannot be overlapped by a retry.
       if ([...this.active.values()].some((a) => selected(a.job, select))) throw new TeamError(409, "This work is still stopping. Wait for its current command to finish.");
+      // Another node's task, named by its id: only while its node and what it was taken under hold, and followed from
+      // then, as one handed over now would be (the third re-review's R3-6).
+      const handed = input.task ? this.store.task(input.task) : null;
+      const given = handed?.givenBy?.startsWith("node:") === true ? handed : null;
+      if (given) {
+        const why = this.options.mayResumeHanded?.(given) ?? null;
+        if (why) throw new TeamError(409, why);
+      }
       if (input.room) this.store.pauseRoom(input.room, false);
       if (input.agent) this.store.enable(input.agent, true);
       this.store.resume(select);
+      if (given && this.store.task(given.id)?.status === "queued") this.options.resumedHanded?.(given);
     } else {
       if (input.room) this.store.pauseRoom(input.room, true);
       if (input.agent) this.store.enable(input.agent, false);

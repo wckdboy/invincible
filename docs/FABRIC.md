@@ -124,18 +124,20 @@ transport keys carries all of it:
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node
-     are open there at once (waiting for you, queued or running, and those still waiting their turn to be given), but
-     for those you take up again by their id (R3-6). One node's hand-offs are looked at one at a time: each is counted,
-     given and written before the next, so a burst keeps the day's budget and the 8 at once.
+     are open there at once (waiting for you, queued or running, those still waiting their turn to be given, and
+     those you take up again by their id). One node's hand-offs are looked at one at a time: each is counted, given and
+     written before the next, so a burst keeps the day's budget and the 8 at once.
    - **It ends with what it was taken under, and with its call.** Your grant revoked stops what was handed under it,
      and so does a grant whose recorder is revoked (below), whether a call still follows the task or not. A pause ends
      it too (its agent, its room or the task paused, or the agent turned off): its call ends then, and nobody follows
      it after, so it stops rather than wait for a resume, and its proof says so. A resume of an agent or a room passes
-     over another node's task. Named by its id (the web offers it in one tap) you can still take one up again, with
-     nobody following it: a revocation that comes after still ends it, but one that came before doesn't, and it is
-     neither counted against the 8 at once nor bounded in its life (R3-6). A node that restarts ends what was handed
-     to it before, as nobody follows it any more: a planned restart (a deploy, an update) ends it as stopped and never
-     takes it up again, and one a crash cut off ends as the node comes back.
+     over another node's task. Named by its id (the web offers it in one tap) you can still take one up again, while
+     its node is an active full node, the grant it was taken under holds (one you approved beyond it needs none), and
+     its node has fewer than the 8 open here. This node follows it again then: no call can stream it back, but it is
+     held to the longest a hand-off may last from when you took it up, and a revocation ends it as any (the third
+     re-review's R3-6). A node that restarts ends what was handed to it before, as nobody follows it any more: a planned
+     restart (a deploy, an update) ends it as stopped and never takes it up again, and one a crash cut off ends as the
+     node comes back.
    - **Its work is bounded, but for the known gaps below.**
      - Its gates are its giver's commands, run in your agent's VM: all of them together get as long as one command may
        (15 minutes), every round counted, and once that is spent they aren't run and the work isn't done.
@@ -155,19 +157,18 @@ transport keys carries all of it:
        the residual's, below. The list is a file in the VM, which its commands can rewrite (R3-1).
      - The runner stops it at its call's deadline or after 24 hours, whichever comes first, waiting for your approval
        included. A stop that can't be written (the node stopping, or a write that fails) ends its call all the same,
-       answered as failed (the third re-review's R3-2). A task you take up again by its id has no life bound (R3-6).
+       answered as failed (the third re-review's R3-2). A task you take up again by its id lives no longer than the
+       longest a hand-off may last, from then (R3-6).
      - Not bounded, besides the known gaps: work it hands to a process that was running in the VM before it began
        isn't one it started, so it isn't ended. The VM time its work takes isn't counted itself: its budget's dollars
        and its life bound it.
-     - **Known gaps, until they're fixed** (the third re-review: Lows, and R3-6 an Info). The fabric runs only when you
-       switch it on.
+     - **Known gaps, until they're fixed** (the third re-review's, both Low). The fabric runs only when you switch it
+       on.
        - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
          ends, or, in the VM, fork successors faster than its helper's scan. What it started then outlives the gate,
          the task, your grant and its node's revocation.
        - R3-4: its VM's gateway lease serves every provider you've keyed and any model, so its commands can work on
          models its budget counts at $0.
-       - R3-6: a task you take up again by its id is followed by nobody, isn't counted against the 8 at once, has no
-         life bound, and runs even after its node or your grant was revoked.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:

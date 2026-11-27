@@ -2888,7 +2888,12 @@ export function createApp(ctx: AppContext) {
     team.outcomes = outcomes;
     // What it gives or starts on its own word (TeamService.giveOwn, approveOwn) must fit what is left of your budget past
     // what approved work holds, when you set one, and else its own daily cap (TeamService.ownLeft).
-    ctx.team.service = new TeamService({ store: ctx.team.store, ...runtime, onChange: () => ctx.handoffs?.poke(), answer: answerInRoom, timeoutMs: 15 * 60_000, taskTimeoutMs: null, restartWaitMs: (TEAM_COMMAND_SECONDS + 60) * 1000, budgetLeft: () => ctx.usage.meter(ctx.nodeName, moneyOf(ctx.store)).leftUsd, onRecruit, onTaskEnded: (task) => {
+    ctx.team.service = new TeamService({ store: ctx.team.store, ...runtime, onChange: () => ctx.handoffs?.poke(), answer: answerInRoom, timeoutMs: 15 * 60_000, taskTimeoutMs: null, restartWaitMs: (TEAM_COMMAND_SECONDS + 60) * 1000, budgetLeft: () => ctx.usage.meter(ctx.nodeName, moneyOf(ctx.store)).leftUsd, onRecruit,
+      // Another node's task, named by its id: taken up again only while its node and your grant hold, and followed from
+      // then by the hand-offs (fabric/handoff.ts; the third re-review's R3-6). With no fabric here, nobody would follow it.
+      mayResumeHanded: (task) => (ctx.handoffs ? ctx.handoffs.resumable(task) : "This node's fabric is off: a task another node handed over isn't taken up again here."),
+      resumedHanded: (task) => ctx.handoffs?.resumed(task),
+      onTaskEnded: (task) => {
       if (task.outcome) outcomes.nudge();
       // A fix to a pull request that ended verified is offered to you as a push onto its branch, as its agent's (ci-back.ts).
       if (task.fix) void offerFix({ call: (input) => ctx.connectors.call(input, { kind: "agent", by: agentLabel(task.assignee) }), note: (id, text) => team.service?.noteTask(id, text), log: ctx.log }, task);
