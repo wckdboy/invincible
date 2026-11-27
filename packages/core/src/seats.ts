@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { findSecrets } from "./secret-scan.ts";
+import { HOMED_KINDS, SEAT_HARNESS, type SeatAgent, seatServes, servedBy } from "./seat-agents.ts";
+import { AgentId } from "./team.ts";
+
+// (Which agents a seat serves, and which tool runs on it, are plain rules of their own, re-exported here: seat-agents.ts.)
+export { HOMED_KINDS, SEAT_HARNESS, type SeatAgent, seatServes, servedBy };
 
 /*
  * Seats: one account you hold with a vendor, added once, that serves the agents you choose (docs/ARCHITECTURE.md §6):
@@ -37,8 +42,6 @@ export type SeatKind = z.infer<typeof SeatKind>;
 
 /** The kinds that are an account of a vendor's own, signed in through its own flow: the rest are keys in the vault. */
 export const SUBSCRIPTION_KINDS: readonly SeatKind[] = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe"];
-/** The kinds whose sign-in a vendor's tool keeps in the seat's home, on its node (chatgpt-siwc's is the node's own). */
-export const HOMED_KINDS: readonly SeatKind[] = ["claude-subscription", "chatgpt-codex", "mistral-vibe"];
 
 export const SEAT_LIMITS = {
   label: 60,
@@ -71,11 +74,6 @@ export type SeatId = z.infer<typeof SeatId>;
 /** One sign-in, from its start to its end: the node's own, never anything of the vendor's. */
 export const SeatAttemptId = z.string().regex(/^sa_[A-Za-z0-9_-]{22}$/, "a sign-in's id");
 
-/** An agent a seat serves, as that agent: its handle, and when its node's team made it (a later agent given the handle is another). */
-export interface SeatAgent {
-  id: string;
-  made: number;
-}
 
 /** How a tool says it is signed in: one of these words is all that is passed on of what its status command prints. */
 export const SIGN_IN_METHODS = ["claude.ai", "oauth_token", "api_key", "api_key_helper", "third_party", "chatgpt", "api-key", "signed in"] as const;
@@ -121,7 +119,10 @@ export const SeatLabel = untokened(
 const SeatEmail = untokened(z.string().trim().max(SEAT_LIMITS.email).email());
 const SeatRuns = z.number().int().min(1).max(SEAT_LIMITS.runs);
 
-/** Add a seat (fleet:admin). A plan or api seat names its provider; a subscription seat may name the email its sign-in starts with. */
+/**
+ * Add a seat (fleet:admin). A plan or api seat names its provider; a subscription seat may name the email its sign-in
+ * starts with, and the agent it serves (one of its node's, by handle): without one, it serves none until you choose.
+ */
 export const SeatAddInput = z
   .strictObject({
     kind: SeatKind,
@@ -130,12 +131,14 @@ export const SeatAddInput = z
     email: SeatEmail.optional(),
     provider: SeatProvider.optional(),
     runs: SeatRuns.optional(),
+    agent: AgentId.optional(),
   })
   .superRefine((input, ctx) => {
     const keyed = input.kind === "plan" || input.kind === "api";
     if (keyed && !input.provider) ctx.addIssue({ code: "custom", path: ["provider"], message: "a plan or api seat names the provider whose key it is" });
     if (!keyed && input.provider) ctx.addIssue({ code: "custom", path: ["provider"], message: "only a plan or api seat names a provider" });
     if (keyed && input.email) ctx.addIssue({ code: "custom", path: ["email"], message: "a plan or api seat has no sign-in to start with an email" });
+    if (input.agent && !HOMED_KINDS.includes(input.kind)) ctx.addIssue({ code: "custom", path: ["agent"], message: "only a seat with a home of its own serves an agent: a key reaches the agents you grant it" });
   });
 export type SeatAddInput = z.infer<typeof SeatAddInput>;
 
@@ -150,6 +153,17 @@ export const SeatSignInAnswerInput = z.strictObject({
 export const SeatSignInCancelInput = z.strictObject({ id: SeatId, attempt: SeatAttemptId });
 /** A seat's own setting: how many runs at once it takes, at most (D4; never above SHARED_RUNS_PROVEN for a subscription). */
 export const SeatPolicyInput = z.strictObject({ id: SeatId, runs: SeatRuns });
+/**
+ * The agents a seat serves (fleet:admin): its node's own, by handle, each once; one, or none. More than one is a share,
+ * and only with `shared: true`: the agents sharing a seat are one trust domain, and that is yours to say.
+ */
+export const SeatServesInput = z
+  .strictObject({ id: SeatId, agents: z.array(AgentId).max(SEAT_LIMITS.serves), shared: z.literal(true).optional() })
+  .superRefine((input, ctx) => {
+    if (new Set(input.agents).size !== input.agents.length) ctx.addIssue({ code: "custom", path: ["agents"], message: "each agent is named once" });
+    if (input.agents.length > 1 && !input.shared) ctx.addIssue({ code: "custom", path: ["shared"], message: "a seat serves one agent: to share it, say so (shared: true). The agents sharing a seat are one trust domain: what one's runs leave in its home, the next runs with" });
+    if (input.shared && input.agents.length < 2) ctx.addIssue({ code: "custom", path: ["shared"], message: "a seat is shared by two agents or more" });
+  });
 
 /* ---------- signing a seat in (never in the log: a card lives on the node, for the length of its sign-in) ---------- */
 
@@ -313,24 +327,6 @@ export function seatView(seat: SeatFacts, now: number): SeatView {
   };
 }
 
-/** Whether a seat serves this agent: one it names as this agent, its handle and when it was made. */
-export function seatServes(seat: Pick<SeatView, "serves">, agent: SeatAgent): boolean {
-  return seat.serves.some((one) => one.id === agent.id && one.made === agent.made);
-}
-
-/**
- * The agents a seat serves now, in the order it names them: each one it names that is on `roster` as itself (the same
- * handle, made when it says). One you removed isn't on a roster of your agents, and a later agent given its handle was
- * made later: neither is served. `roster`: the agents of the node that holds the seat, as its team lists them.
- */
-export function servedBy<A extends { id: string; createdAt: number }>(seat: Pick<SeatView, "serves">, roster: readonly A[]): A[] {
-  const served: A[] = [];
-  for (const one of seat.serves) {
-    const agent = roster.find((candidate) => candidate.id === one.id && candidate.createdAt === one.made);
-    if (agent && !served.includes(agent)) served.push(agent);
-  }
-  return served;
-}
 
 /** Whose account a seat is. */
 export function seatVendor(seat: { kind: SeatKind; provider?: string | null }): string {
@@ -353,8 +349,6 @@ export function seatRuns(seat: { kind: SeatKind; runs: number }): number {
   return Math.max(1, Math.min(seat.runs, limit));
 }
 
-/** The harness a seat's own plan runs: its vendor's tool. (A keyed seat runs any harness that speaks its API, through the gateway.) */
-export const SEAT_HARNESS: Readonly<Partial<Record<SeatKind, string>>> = { "claude-subscription": "claude", "chatgpt-codex": "codex" };
 
 /** When a window ends: its reset, or with none said, SEAT_LIMITS.restMinutes after it was said (the shortest plan window). */
 const windowEnds = (window: SeatFacts["windows"][number]): number => window.resetsAt ?? window.at + SEAT_LIMITS.restMinutes * 60_000;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cardWords, quickLabel, RENEW_DAYS, SEAT_KIND_WORDS, seatStateWords, signInAction } from "./seats.ts";
+import { cardWords, quickAgent, quickLabel, RENEW_DAYS, SEAT_KIND_WORDS, seatStateWords, servesChoiceWords, servesWords, signInAction } from "./seats.ts";
 
 /*
  * Seats, in words (lib/seats.ts): what each kind is, the one-tap names, where a seat stands, what its button offers and
@@ -51,5 +51,48 @@ describe("seats in words", () => {
     });
     expect(cardWords({ kind: "device-code", code: "FAKE-1234" }).first).toBeNull();
     expect(cardWords({ kind: "paste-code" })).toEqual({ title: "Sign in on Claude's page", open: "Open Claude's page", steps: ["Open the page and sign in to the account this seat is for.", "Paste the code it shows you here."], first: null });
+  });
+});
+
+describe("whom a seat serves, in words", () => {
+  const ADA = { id: "ada", name: "Ada", createdAt: 1_000 };
+  const BO = { id: "bo", name: "Bo", createdAt: 2_000 };
+  const CY = { id: "cy", name: "Cy", createdAt: 3_000 };
+  const serving = (...agents: { id: string; createdAt: number }[]) => ({ serves: agents.map((agent) => ({ id: agent.id, made: agent.createdAt })) });
+
+  test("one agent; a share, its trust domain said every time; or none: none chosen yet, or none now", () => {
+    expect(servesWords(serving(), [ADA, BO])).toEqual({ word: "Serves no agent yet", shared: false });
+    expect(servesWords(serving(ADA), [ADA, BO])).toEqual({ word: "Serves Ada", shared: false });
+    expect(servesWords(serving(ADA, BO), [ADA, BO])).toEqual({ word: "Shared by Ada and Bo: one trust domain", shared: true });
+    expect(servesWords(serving(ADA, BO, CY), [CY, BO, ADA]).word).toBe("Shared by Ada, Bo and Cy: one trust domain");
+    // Ada removed: she isn't on the roster, and a later agent given her handle was made later. Neither is served.
+    expect(servesWords(serving(ADA), [BO])).toEqual({ word: "Serves no agent now", shared: false });
+    expect(servesWords(serving(ADA), [{ ...ADA, createdAt: 9_000 }])).toEqual({ word: "Serves no agent now", shared: false });
+    expect(servesWords(serving(ADA, BO), [BO]).word).toBe("Serves Bo");
+    // Without its node's roster (a seat whose home is on another node): as you chose them there, by handle.
+    expect(servesWords(serving(ADA), null)).toEqual({ word: "Serves ada", shared: false });
+    expect(servesWords(serving(ADA, BO), null)).toEqual({ word: "Shared by ada and bo: one trust domain", shared: true });
+    expect(servesWords(serving(), null).word).toBe("Serves no agent yet");
+  });
+
+  test("what a choice means, said where you make it: a share is one trust domain, and so is a move; the same agents, fewer, or none says nothing new", () => {
+    expect(servesChoiceWords("Claude 1", ["Ada"], ["Ada", "Bo"])).toBe("Ada and Bo will share Claude 1's home, and what any of their runs leave there (its tool's settings, hooks and notes) the next one runs with: they are one trust domain.");
+    expect(servesChoiceWords("Claude 1", [], ["Ada", "Bo", "Cy"])).toContain("Ada, Bo and Cy will share Claude 1's home");
+    expect(servesChoiceWords("Claude 1", ["Ada"], ["Bo"])).toBe("Bo will run with what Ada's runs left in Claude 1's home (its tool's settings, hooks and notes): Ada and Bo are one trust domain.");
+    expect(servesChoiceWords("Claude 1", ["Ada", "Cy"], ["Bo"])).toBe("Bo will run with what the runs of Ada and Cy left in Claude 1's home (its tool's settings, hooks and notes): Ada, Cy and Bo are one trust domain.");
+    expect(servesChoiceWords("Claude 1", [], ["Ada"])).toBeNull();
+    expect(servesChoiceWords("Claude 1", ["Ada"], ["Ada"])).toBeNull();
+    expect(servesChoiceWords("Claude 1", ["Ada", "Bo"], ["Ada"])).toBeNull();
+    expect(servesChoiceWords("Claude 1", ["Ada"], [])).toBeNull();
+  });
+
+  test("a one-tap seat serves the first of your agents on its tool that no seat of its kind serves yet, else the first on it, else none", () => {
+    const agents = [{ ...BO, harness: "codex" }, { ...CY, harness: "claude" }, { ...ADA, harness: "claude" }];
+    expect(quickAgent("claude-subscription", [], agents)?.id).toBe("ada");
+    expect(quickAgent("claude-subscription", [{ kind: "claude-subscription", ...serving(ADA) }], agents)?.id).toBe("cy");
+    expect(quickAgent("claude-subscription", [{ kind: "claude-subscription", ...serving(ADA, CY) }], agents)?.id).toBe("ada");
+    expect(quickAgent("claude-subscription", [{ kind: "chatgpt-codex", ...serving(ADA) }], agents)?.id).toBe("ada");
+    expect(quickAgent("chatgpt-codex", [], agents)?.id).toBe("bo");
+    expect(quickAgent("chatgpt-codex", [], agents.filter((agent) => agent.harness !== "codex"))).toBeNull();
   });
 });

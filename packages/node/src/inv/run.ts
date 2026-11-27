@@ -37,9 +37,11 @@ export const HELP = `inv: your agent and its work, from a terminal (docs/CLI.md 
   inv allow <id> [--for-task]  ·  inv deny <id> ["why"]
   inv cost                     what it cost at your prices: --task <id> --agent <id> --project <p> --week
   inv pair <invite>            pairs with a node (invincible invite --client there) · inv pair · inv pair --forget
-  inv seats                    your accounts with Claude, ChatGPT and others, and where each stands
-  inv seat add <claude|chatgpt> ["label"] [--email <address>]
+  inv seats                    your accounts with Claude, ChatGPT and others, where each stands and whom it serves
+  inv seat add <claude|chatgpt> ["label"] [--email <address>] [--agent <agent>]
                                adds one and signs it in on its vendor's page · inv seat sign-in <seat> · inv seat remove <seat>
+  inv seat serve <seat> <agent> · inv seat share <seat> <agent> <agent>…
+                               the agent a seat serves, or the agents that share it: they are one trust domain
 
 Every list takes --json. --node local talks to this machine's node even when paired, and --home <dir> names its home.
 Exit codes: 0 verified · 1 error · 2 bad usage · 10 a gate failed · 11 the reviewer rejected it · 12 finished without

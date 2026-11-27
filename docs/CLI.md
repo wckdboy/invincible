@@ -58,8 +58,10 @@ Every command that prints a list or a result takes `--json`.
 | `inv deny <id> ["why"]` | Denies one, with your reason. A task an agent proposed is declined. |
 | `inv cost` | What the work cost, at your prices, against its budgets: today's and this node's model calls, and the tasks. `--task <id>`, `--agent <id>` or `--project <p>` narrows it. `--week` takes the last seven days. |
 | `inv pair [<invite>] [--name <name>] [--forget]` | Pairs with a node, says what it is paired with, or forgets the pairing. |
-| `inv seats` | Your seats: the accounts you hold with Claude, ChatGPT and others, that any agent may use, and where each stands. |
-| `inv seat add <claude\|chatgpt> ["label"] [--email <address>]` | Adds one, named as you say or after those you have ("Claude 2"), and signs it in on its vendor's own page. ChatGPT's: its page to open and the code to enter there. Claude's: its page to open, then the code that page shows, pasted here (in a terminal; never with `--no-ask`), which goes to its sign-in once. `--email` is the account Claude's sign-in starts on, sealed in the vault. It waits until the sign-in has ended. |
+| `inv seats` | Your seats: the accounts you hold with Claude, ChatGPT and others, where each stands, and whom it serves (after its id: "Serves ada", "Shared by ada and bo: one trust domain", "Serves no agent yet", or "Serves no agent now" once the one it served was removed). |
+| `inv seat add <claude\|chatgpt> ["label"] [--email <address>] [--agent <agent>]` | Adds one, named as you say or after those you have ("Claude 2"), and signs it in on its vendor's own page. ChatGPT's: its page to open and the code to enter there. Claude's: its page to open, then the code that page shows, pasted here (in a terminal; never with `--no-ask`), which goes to its sign-in once. `--email` is the account Claude's sign-in starts on, sealed in the vault. `--agent` is the agent of its node's it serves; without one, it serves none until you choose. It waits until the sign-in has ended. |
+| `inv seat serve <seat> <agent>` | The seat serves that agent, one of its node's (in place of another, what that means is said: it runs with what the last one's runs left in the seat's home). |
+| `inv seat share <seat> <agent> <agent>…` | Those agents share the seat, said as a share: what it means is said too (what one's runs leave in its home the next runs with: they are one trust domain). |
 | `inv seat sign-in <seat>` | Signs a seat in again (by its label or its id), as `add` does. |
 | `inv seat remove <seat>` | Removes a seat, and the sign-in its tool kept on its node. |
 | `inv help` | This list, briefly. |
@@ -135,9 +137,9 @@ Errors go to stderr as `inv: <what went wrong>`. With `--json` or `--stream`, st
 - **`inv stop`, `inv again`, `inv allow`, `inv deny`:** `{"task"}`, or `{"id", "state"}` for an approval.
 - **`inv steer`:** `{"task", "waiting"}`, `waiting` being how many of its steers its run hasn't taken yet, this one
   included; with `--chat`, `{"chat", "turn", "waiting"}`.
-- **`inv seats`:** `{"seats": [seat]}`, each seat as the node says it (core's SeatView). **`inv seat add`, `inv seat
-  sign-in`:** `{"card"}` (the sign-in's card), then `{"seat", "state"}` once it has ended. **`inv seat remove`:**
-  `{"removed"}`.
+- **`inv seats`:** `{"seats": [seat]}`, each seat as the node says it (core's SeatView, `serves` among it). **`inv
+  seat add`, `inv seat sign-in`:** `{"card"}` (the sign-in's card), then `{"seat", "state"}` once it has ended. **`inv
+  seat serve`, `inv seat share`:** `{"seat"}`. **`inv seat remove`:** `{"removed"}`.
 - **`inv cost`:** `{"since", "today": {"usd", "complete"}, "calls": {"usd", "complete"}, "tasks": [{"id", "title",
   "agent", "project", "usd", "complete", "budgetUsd"}], "total": {"usd", "complete"}}`.
 - **`inv "…"`:** `{"chat", "turn", "model", "text", "stopped"}`.

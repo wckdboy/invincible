@@ -578,6 +578,13 @@ try {
     { id: "rio", name: "Rio", role: "engineer", instructions: "Works the web through a browser: signs in, downloads, checks pages." },
   ];
   for (const agent of agents) await admin("saveAgent", agent);
+  // Seats of yours, for the seats page and its agents' sheet: one serving Ada, one Ada and Lin share, one serving none
+  // yet. (An older checkout without seats, or without agents for them, skips what it lacks.)
+  const addSeat = async (input: Record<string, unknown>) => ((await admin("addSeat", input).catch(() => null)) as { seat?: { id: string } } | null)?.seat;
+  await addSeat({ kind: "claude-subscription", label: "Claude 1", agent: "ada" });
+  const sharedSeat = await addSeat({ kind: "claude-subscription", label: "Claude 2", agent: "lin" });
+  if (sharedSeat) await admin("setSeatServes", { id: sharedSeat.id, agents: ["ada", "lin"], shared: true }).catch(() => null);
+  await addSeat({ kind: "chatgpt-codex", label: "ChatGPT 1" });
   // Room for every agent's VM at once: by default the stand-in machine's ceiling (half of it) allows two sandboxes.
   await admin("setComputeLimit", { node: started.identity.id, cores: 16, memoryGb: 32, sandboxes: 6 });
   const idle = async () => !(await admin("team")).deliveries.some((d: { status: string; agent: string }) => !["ivo", "ada"].includes(d.agent) && (d.status === "queued" || d.status === "running"));
@@ -1051,6 +1058,7 @@ try {
       { name: "sheet-add-key", hash: "#/vault", open: [press("Add a key", "Add key")] },
       { name: "sheet-add-provider", hash: "#/models", open: [press("Add provider")] },
       { name: "sheet-add-mcp", hash: "#/connectors", open: [press("Add an MCP server")] },
+      { name: "sheet-seat-agents", hash: "#/seats", open: [press("The agents Claude 2 serves")] },
       // Words for Ada's running task, from its card (a checkout that can't steer has no Steer…, and is said to have none).
       { name: "sheet-steer", hash: "#/team?room=forge&tab=work", open: [press("Steer…")] },
     ];

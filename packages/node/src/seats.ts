@@ -8,7 +8,8 @@ import type { SandboxHost } from "@invincible/sandbox";
  * Seats on this node (core's seats.ts): what the seats routes do with the mind. A seat is added, set and removed on your
  * word alone, and this node holds its home: the vendor's tool keeps its sign-in there, and how the seat stands is said
  * in the log by this node alone. The email a subscription seat's sign-in starts with is sealed in the vault under its
- * own name, never in the log, and goes with the seat.
+ * own name, never in the log, and goes with the seat. The agents a seat serves are this node's own, each named as the
+ * agent this node's team made (its handle and createdAt): only they run on its home.
  */
 
 /** More accounts than anyone holds: a list that long is a mistake, not a fleet. */
@@ -26,6 +27,18 @@ export class SeatError extends Error {
   }
 }
 
+/** This node's agents, by handle, each as its team made it: null for one it hasn't (or one you removed). */
+export type SeatRoster = (id: string) => { id: string; createdAt: number } | null;
+
+/** Each agent named, as this node's team made it: one it hasn't is said, and nothing is chosen. */
+function asMade(roster: SeatRoster, agents: readonly string[]): { id: string; made: number }[] {
+  return agents.map((id) => {
+    const agent = roster(id);
+    if (!agent) throw new SeatError(`there is no agent ${id} on this node`, 404);
+    return { id: agent.id, made: agent.createdAt };
+  });
+}
+
 /** Your word, from a terminal or a device of yours (as a rule's is). */
 export const yourWord = (via: string | null): Prov => ({ trust: "owner", ...(via ? { via } : {}) });
 
@@ -39,9 +52,13 @@ function seatOf(store: LedgerStore, id: string, now: number): SeatView {
   return found;
 }
 
-/** Add a seat whose home is on this node. A plan or api seat is its provider's key, which must be there to use. */
-export function addSeat(store: LedgerStore, vault: Vault, node: NodeIdentity, input: SeatAddInput, via: string | null, now = Date.now()): SeatView {
+/**
+ * Add a seat whose home is on this node. A plan or api seat is its provider's key, which must be there to use. One added
+ * for an agent serves it, as this node's team made it; one added without serves none until you choose.
+ */
+export function addSeat(store: LedgerStore, vault: Vault, node: NodeIdentity, input: SeatAddInput, via: string | null, roster: SeatRoster, now = Date.now()): SeatView {
   if (store.seats().length >= MAX_SEATS) throw new SeatError(`you may keep at most ${MAX_SEATS} seats: remove one first`, 400);
+  const serves = input.agent ? asMade(roster, [input.agent]) : [];
   if (input.provider) {
     const provider = providerRecords(store).find((p) => p.id === input.provider);
     if (!provider) throw new SeatError(`there is no provider ${input.provider}: add it first`, 404);
@@ -52,6 +69,7 @@ export function addSeat(store: LedgerStore, vault: Vault, node: NodeIdentity, in
   if (input.email) vault.set(seatEmailName(id), input.email, { label: `The email seat ${input.label} signs in with` });
   try {
     store.emit(node, "seat.added", { id, kind: input.kind, label: input.label, node: node.id, ...(input.provider ? { provider: input.provider } : {}), runs: input.runs ?? 1 }, yourWord(via));
+    if (serves.length) store.emit(node, "seat.serves", { id, agents: serves }, yourWord(via));
   } catch (error) {
     if (input.email) vault.delete(seatEmailName(id));
     throw error;
@@ -82,6 +100,19 @@ export async function removeSeat(store: LedgerStore, vault: Vault, node: NodeIde
 export function setSeatPolicy(store: LedgerStore, node: NodeIdentity, id: string, runs: number, via: string | null, now = Date.now()): SeatView {
   seatOf(store, id, now);
   store.emit(node, "seat.policy", { id, runs }, yourWord(via));
+  return seatOf(store, id, now);
+}
+
+/**
+ * The agents a seat serves, on your word: this node's own, each as its team made it, for a seat whose home is here (only
+ * this node's agents run on it). More than one is a share, only when you say so (`shared`): they are one trust domain.
+ */
+export function setSeatServes(store: LedgerStore, node: NodeIdentity, id: string, agents: readonly string[], shared: boolean, roster: SeatRoster, via: string | null, now = Date.now()): SeatView {
+  const seat = seatOf(store, id, now);
+  if (!HOMED_KINDS.includes(seat.kind)) throw new SeatError(`${seat.label} has no home of its own: a key reaches the agents you grant it`, 400);
+  if (seat.node !== node.id) throw new SeatError(`${seat.label}'s home is on another node: choose the agents it serves there`, 409);
+  if (agents.length > 1 && !shared) throw new SeatError("a seat serves one agent: to share it, say so. The agents sharing a seat are one trust domain", 400);
+  store.emit(node, "seat.serves", { id, agents: asMade(roster, agents) }, yourWord(via));
   return seatOf(store, id, now);
 }
 

@@ -155,7 +155,7 @@ import { handleSandboxSearch, SearchError, searchWeb } from "./search.ts";
 import { type Caller, ConnectorCallError, type ConnectorService } from "./connectors.ts";
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
 import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.ts";
-import { addSeat, askSeat, recordSeatStatus, removeSeat, SeatError, seatSalt, seatViews, setSeatPolicy } from "./seats.ts";
+import { addSeat, askSeat, recordSeatStatus, removeSeat, SeatError, seatSalt, seatViews, setSeatPolicy, setSeatServes } from "./seats.ts";
 import { SeatSignIns } from "./seat-sign-in.ts";
 import { SeatRuns } from "./seat-runs.ts";
 import { QuestionError, type Questions } from "./questions.ts";
@@ -1110,6 +1110,8 @@ export function createApp(ctx: AppContext) {
       throw error;
     }
   }
+  /** The agents a seat here may serve: this node's team's, each as it made them (none here when this node has no team). */
+  const seatRoster = (id: string) => ctx.team?.store.agent(id) ?? null;
 
   function guardAgainstSecrets(...texts: string[]): void {
     for (const text of texts) {
@@ -4374,13 +4376,18 @@ export function createApp(ctx: AppContext) {
       ledgerTrip(runRef(p, input.run), trip, input.command, input.gate === true);
       return { ok: true };
     },
-    // Seats (seats.ts): yours alone to add, set and remove, from a terminal or a device of yours; their homes on this node.
+    // Seats (seats.ts): yours alone to add, set and remove, from a terminal or a device of yours; their homes on this node,
+    // each serving the agents of this node's you chose, as its team made them (one you removed is no longer one of them).
     seats: () => ({ seats: seatViews(ctx.store) }),
     addSeat: (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can add a seat");
       // (Its name reaches the log, and its email the vault: neither may be a key.)
       guardAgainstSecrets(input.label, input.email ?? "");
-      return seatErrors(() => ({ seat: addSeat(ctx.store, ctx.vault, ctx.identity, input, p.kind === "client" ? p.device : null) }));
+      return seatErrors(() => ({ seat: addSeat(ctx.store, ctx.vault, ctx.identity, input, p.kind === "client" ? p.device : null, seatRoster) }));
+    },
+    setSeatServes: (input, p) => {
+      if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can choose the agents a seat serves");
+      return seatErrors(() => ({ seat: setSeatServes(ctx.store, ctx.identity, input.id, input.agents, input.shared === true, seatRoster, p.kind === "client" ? p.device : null) }));
     },
     removeSeat: async (input, p) => {
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can remove a seat");

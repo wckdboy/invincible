@@ -287,7 +287,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - seats live on a node: a run takes one of its node's, for an agent whose VM is on that node. A project's pin of a
     seat (`chooseSeat`'s `pinned`) has no setting yet;
   - routes: `GET /api/seats` (`mind:read`); `POST /api/seats`, `/api/seats/remove`, `/api/seats/policy`,
-    `/api/seats/sign-in`, `/api/seats/sign-in/answer` and `/api/seats/sign-in/cancel` (`fleet:admin`, yours alone).
+    `/api/seats/serves`, `/api/seats/sign-in`, `/api/seats/sign-in/answer` and `/api/seats/sign-in/cancel`
+    (`fleet:admin`, yours alone).
 - **Sandboxes:**
   - Kata microVMs on Linux and Apple containers on macOS;
   - one per run;

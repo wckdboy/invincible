@@ -2,19 +2,20 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clientIdFromKey, type RouteName, routes, type Scope, type SeatView, SHARED_RUNS_PROVEN, signRequest, utf8 } from "@invincible/core";
+import { b64u, clientIdFromKey, newNodeIdentity, type RouteName, routes, type Scope, type SeatView, SHARED_RUNS_PROVEN, signRequest, type TeamSnapshot, utf8 } from "@invincible/core";
 import { requestPairing, waitForApproval } from "@invincible/link";
-import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
+import { enrollDevice, foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
-import { MAX_SEATS, seatEmailName } from "../src/seats.ts";
+import { MAX_SEATS, seatEmailName, yourWord } from "../src/seats.ts";
 import { freePort } from "./ports.ts";
 
 /*
  * Seats over real HTTP (core's seats.ts): added, set and removed by you alone (a terminal, a paired device of yours
  * with fleet:admin), read by anyone who may read the mind, never by an agent; nothing shaped like a token taken; a
- * seat's email sealed in the vault, never in the log; a keyed seat only for a provider with a key of yours.
+ * seat's email sealed in the vault, never in the log; a keyed seat only for a provider with a key of yours; the agents
+ * a seat serves chosen by you alone, of its own node's, each as itself, and shared only when you say so.
  */
 
 const caps: Capabilities = { os: "linux", arch: "x64", hostname: "seats-test", cores: 4, cpu: "test", memoryGb: 8, hasBattery: false, gpu: [], docker: false, vm: { kvm: false, tools: [] }, tools: [], localModels: [], tailscale: null };
@@ -154,6 +155,54 @@ describe("seats", () => {
     expect((await admin("answerSeatSignIn", { id: seat.id, attempt, code: "FAKEcode0000#FAKE-state-0000" })).status).toBe(404);
     expect((await admin("cancelSeatSignIn", { id: seat.id, attempt })).status).toBe(404);
     expect((await admin("removeSeat", { id: seat.id })).status).toBe(200);
+  });
+
+  test("whom a seat serves is yours alone to choose, of this node's agents, each as itself; a share only when you say so; a seat homed on another node, there", async () => {
+    for (const id of ["ada", "bo"]) expect((await admin("saveAgent", { id, name: id === "ada" ? "Ada" : "Bo", role: "engineer", harness: "claude" })).status).toBe(200);
+    const team = (await admin<TeamSnapshot>("team")).body;
+    const as = (id: string) => ({ id, made: team.agents.find((agent) => agent.id === id)!.createdAt });
+    // Added for Ada: it serves her, as herself.
+    const added = await admin<{ seat: SeatView }>("addSeat", { kind: "claude-subscription", label: "Work Max", agent: "ada" });
+    expect(added.status).toBe(200);
+    const seat = added.body.seat;
+    expect(seat.serves).toEqual([as("ada")]);
+    expect((await seatsNow()).find((s) => s.id === seat.id)!.serves).toEqual([as("ada")]);
+    // Added without one, it serves none; for an agent this node hasn't, it isn't added at all.
+    const plain = (await admin<{ seat: SeatView }>("addSeat", { kind: "chatgpt-codex", label: "Personal Plus" })).body.seat;
+    expect(plain.serves).toEqual([]);
+    const count = (await seatsNow()).length;
+    const nobody = await admin<{ error: string }>("addSeat", { kind: "claude-subscription", label: "Nobody's", agent: "zed" });
+    expect(nobody.status).toBe(404);
+    expect(nobody.body.error).toContain("no agent zed");
+    expect((await seatsNow()).length).toBe(count);
+    // Moved to Bo; then shared, only when you say so, and what a share means is said with the refusal.
+    expect((await admin<{ seat: SeatView }>("setSeatServes", { id: seat.id, agents: ["bo"] })).body.seat.serves).toEqual([as("bo")]);
+    const unsaid = await admin<{ issues: { message: string }[] }>("setSeatServes", { id: seat.id, agents: ["ada", "bo"] });
+    expect(unsaid.status).toBe(400);
+    expect(unsaid.body.issues.map((issue) => issue.message).join(" ")).toContain("one trust domain");
+    const shared = await admin<{ seat: SeatView }>("setSeatServes", { id: seat.id, agents: ["ada", "bo"], shared: true });
+    expect(shared.status).toBe(200);
+    expect(shared.body.seat.serves).toEqual([as("ada"), as("bo")]);
+    expect((await admin("setSeatServes", { id: seat.id, agents: ["zed"] })).status).toBe(404);
+    // Yours alone: never an agent's, never a device you didn't give fleet:admin.
+    expect((await arm("setSeatServes", { id: seat.id, agents: ["ada"] })).status).toBe(403);
+    const reader = await pair("e-reader", ["mind:read"]);
+    expect((await reader.call("setSeatServes", { id: seat.id, agents: ["ada"] })).status).toBe(403);
+    // A seat homed on another node serves that node's agents, and is chosen for there.
+    const mini = newNodeIdentity();
+    enrollDevice(daemon.store, daemon.identity, { device: mini.id, name: "mini", kind: "node", box: b64u(mini.boxPublic) });
+    const there = `st_${"m".repeat(22)}`;
+    daemon.store.emit(daemon.identity, "seat.added", { id: there, kind: "claude-subscription", label: "Mini Max", node: mini.id, runs: 1 }, yourWord(null));
+    const elsewhere = await admin<{ error: string }>("setSeatServes", { id: there, agents: ["ada"] });
+    expect(elsewhere.status).toBe(409);
+    expect(elsewhere.body.error).toContain("another node");
+    // Ada removed: nothing is written for you (the view works out that no seat serves her), and she can't be chosen again.
+    const serves = () => daemon.store.eventsSince({}, 100_000).events.filter((e) => e.kind === "seat.serves").length;
+    const written = serves();
+    expect((await admin("removeAgent", { id: "ada" })).status).toBe(200);
+    expect(serves()).toBe(written);
+    expect((await admin("setSeatServes", { id: seat.id, agents: ["ada", "bo"], shared: true })).status).toBe(404);
+    for (const id of [seat.id, plain.id, there]) expect((await admin("removeSeat", { id })).status).toBe(200);
   });
 
   test(`at most ${MAX_SEATS}`, async () => {

@@ -1,9 +1,11 @@
+import { SEAT_HARNESS, seatServes, servedBy } from "@invincible/core/seat-agents";
 import type { SeatKind, SeatSignInCard, SeatState, SeatView } from "@invincible/core/seats";
 
 /*
- * Seats, in words (pure: no DOM): an account you hold with a vendor, that any agent may use (core's seats.ts). What each
- * kind is called, where a seat stands, what a sign-in's card asks of you, and when to sign one in again. The views draw
- * these; the iPhone and Android apps port them, held to the vectors.
+ * Seats, in words (pure: no DOM): an account you hold with a vendor, that serves the agents you chose (core's seats.ts).
+ * What each kind is called, where a seat stands, whom it serves (and what a share means, said wherever you choose one),
+ * what a sign-in's card asks of you, and when to sign one in again. The views and `inv` say these. (The iPhone and
+ * Android apps show no seats yet: when they do, they port these words, held to the vectors.)
  */
 
 /** What each kind of seat is, and how it is signed in. */
@@ -93,4 +95,51 @@ export function cardWords(card: Pick<SeatSignInCard, "kind" | "code" | "firstTim
     steps: ["Open the page and sign in to the account this seat is for.", "Paste the code it shows you here."],
     first: null,
   };
+}
+
+/** Names said as a list: "Ada", "Ada and Bo", "Ada, Bo and Cy". */
+export function listWords(names: readonly string[]): string {
+  if (names.length < 2) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+/** An agent as a seat's words name it: its name, or its handle when it has none. */
+type Named = { id: string; name?: string; createdAt: number };
+const nameOf = (agent: Named): string => agent.name || agent.id;
+
+/**
+ * Whom a seat serves, in words. With its node's roster (`roster`: that node's agents, as its team lists them), the
+ * agents it names that are on it as themselves (core's servedBy: one you removed, or a later one given its handle, is
+ * not served, so a seat that served only such serves "no agent now"); without it (a seat whose home is on another
+ * node), as you chose them there, by handle. A share says its trust domain every time.
+ */
+export function servesWords(seat: Pick<SeatView, "serves">, roster: readonly Named[] | null): { word: string; shared: boolean } {
+  const names = roster ? servedBy(seat, roster).map(nameOf) : [...new Set(seat.serves.map((one) => one.id))];
+  if (names.length > 1) return { word: `Shared by ${listWords(names)}: one trust domain`, shared: true };
+  if (names.length === 1) return { word: `Serves ${names[0]}`, shared: false };
+  return { word: seat.serves.length ? "Serves no agent now" : "Serves no agent yet", shared: false };
+}
+
+/**
+ * What choosing these agents for a seat means, said where you choose them (`before`: the agents it serves now; `after`:
+ * those you are choosing). More than one share its home, and what one's runs leave there the next runs with: they are
+ * one trust domain. One in place of others runs with what their runs left, so it is one trust domain with them too.
+ * Null: nothing new (the same agents, fewer of those it serves, or none).
+ */
+export function servesChoiceWords(label: string, before: readonly string[], after: readonly string[]): string | null {
+  if (after.length > 1) return `${listWords(after)} will share ${label}'s home, and what any of their runs leave there (its tool's settings, hooks and notes) the next one runs with: they are one trust domain.`;
+  const [only] = after;
+  if (!only || !before.length || before.includes(only)) return null;
+  const whose = before.length === 1 ? `${before[0]}'s runs` : `the runs of ${listWords(before)}`;
+  return `${only} will run with what ${whose} left in ${label}'s home (its tool's settings, hooks and notes): ${listWords([...before, only])} are one trust domain.`;
+}
+
+/**
+ * The agent a one-tap seat serves: the first of your agents (by handle) whose tool its plan runs that no seat of its
+ * kind serves yet, else the first on that tool; or none, and it serves none until you choose.
+ */
+export function quickAgent<A extends { id: string; createdAt: number; harness: string }>(kind: SeatKind, seats: readonly Pick<SeatView, "kind" | "serves">[], roster: readonly A[]): A | null {
+  const on = roster.filter((agent) => agent.harness === SEAT_HARNESS[kind]).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const free = on.find((agent) => !seats.some((seat) => seat.kind === kind && seatServes(seat, { id: agent.id, made: agent.createdAt })));
+  return free ?? on[0] ?? null;
 }

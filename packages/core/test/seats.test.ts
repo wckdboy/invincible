@@ -15,6 +15,7 @@ import {
   type SeatFacts,
   SeatIdInput,
   SeatPolicyInput,
+  SeatServesInput,
   seatRuns,
   seatServes,
   servedBy,
@@ -60,6 +61,25 @@ const facts = (over: Partial<SeatFacts> = {}): SeatFacts => ({
 });
 
 describe("the inputs", () => {
+  test("whom a seat serves: agents of its node's, by handle, each once; more than one only as a share you say, and none at all", () => {
+    expect(SeatServesInput.safeParse({ id: ID, agents: ["ada"] }).success).toBe(true);
+    expect(SeatServesInput.safeParse({ id: ID, agents: [] }).success).toBe(true);
+    // Two agents is a share: yours to say, and what it means is said with the refusal.
+    const unsaid = SeatServesInput.safeParse({ id: ID, agents: ["ada", "bo"] });
+    expect(unsaid.success).toBe(false);
+    expect(unsaid.error!.issues.map((issue) => issue.message).join(" ")).toContain("one trust domain");
+    expect(SeatServesInput.safeParse({ id: ID, agents: ["ada", "bo"], shared: true }).success).toBe(true);
+    const many = Array.from({ length: SEAT_LIMITS.serves + 1 }, (_, n) => `agent-${n}`);
+    for (const bad of [{ agents: ["ada"], shared: true }, { agents: ["ada", "ada"], shared: true }, { agents: ["Ada"] }, { agents: ["primary"] }, { agents: ["owner"] }, { agents: many, shared: true }, { agents: ["ada"], shared: false }, { agents: [{ id: "ada", made: 1 }] }, { agents: ["ada"], made: 1 }, {}]) {
+      expect(SeatServesInput.safeParse({ id: ID, ...bad }).success).toBe(false);
+    }
+    // Added for an agent: only a seat with a home of its own (a key reaches the agents you grant it).
+    expect(SeatAddInput.safeParse({ kind: "claude-subscription", label: "Claude 1", agent: "ada" }).success).toBe(true);
+    expect(SeatAddInput.safeParse({ kind: "chatgpt-codex", label: "ChatGPT 1", agent: "bo" }).success).toBe(true);
+    expect(SeatAddInput.safeParse({ kind: "api", label: "Key", provider: "anthropic", agent: "ada" }).success).toBe(false);
+    expect(SeatAddInput.safeParse({ kind: "claude-subscription", label: "Claude 1", agent: "Ada!" }).success).toBe(false);
+  });
+
   test("a seat of each kind: a subscription may start with its email, a plan or api seat names its provider", () => {
     for (const kind of SEAT_KINDS) {
       const keyed = kind === "plan" || kind === "api";
