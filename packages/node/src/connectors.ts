@@ -46,7 +46,6 @@ import {
   discoverMcpTools,
   excerpt,
   fitMcpTools,
-  privateConnector,
   publicIds,
   installedConnector,
   keyState,
@@ -58,6 +57,7 @@ import {
 } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
+import { connectorIsPrivate } from "./private-data.ts";
 
 /*
  * Connector calls, through approvals:
@@ -459,7 +459,8 @@ export class ConnectorService {
 
   /** Whether a connector's answers are your private data (PRIVATE_CONNECTORS, or its manifest says so), installed or not. */
   isPrivate(id: string): boolean {
-    return privateConnector(id, installedConnector(this.o.store, id));
+    // (Installed now or ever, as the log says: one removed keeps its waiting calls' words yours. The re-review's B4.)
+    return connectorIsPrivate(this.o.store, id);
   }
 
   /** What a call's line in the ledger names it by: its request, or a private connector's tool alone (no path, no word of its arguments). */

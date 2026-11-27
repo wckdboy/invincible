@@ -4,9 +4,15 @@ import { loopRecords } from "./loops.ts";
 
 /*
  * Your private data where it isn't a private connector's own call (PRIVATE_CONNECTORS; the re-review of 27 November,
- * B1, B2): a loop is private when what it runs on is: one that new mail wakes, or one that calls a private connector.
- * What such a loop's runs record, and the lines its runs' commands write, are yours alone.
+ * B1, B2, B4): a connector is private if it ever was, as the log says it was installed, not only as it stands now; and
+ * a loop is private when what it runs on is: one that new mail wakes, or one that calls a private connector. What such
+ * a loop's runs record, and the lines its runs' commands write, are yours alone.
  */
+
+/** Whether a connector's answers are your private data: its id, its manifest now, or any manifest it was ever installed with. */
+export function connectorIsPrivate(store: LedgerStore, id: string): boolean {
+  return privateConnector(id, installedConnector(store, id)) || store.connectorWasPrivate(id);
+}
 
 /** Whether a run's id is a loop's run's at all (so its loops are read only for one that may be). */
 export const loopRun = (run: unknown): run is string => typeof run === "string" && /^(?:arm\.)?loop\./.test(run);
@@ -23,7 +29,7 @@ export function runOfLoops(run: unknown, loops: ReadonlySet<string>): boolean {
 
 /** The loops whose runs hold your private data, by name: each one new mail wakes, and each one that calls a private connector. */
 export function privateLoops(store: LedgerStore): Set<string> {
-  const isPrivate = (id: string) => privateConnector(id, installedConnector(store, id));
+  const isPrivate = (id: string) => connectorIsPrivate(store, id);
   return new Set(loopRecords(store).filter((loop) => loop.wakes.some((wake) => wake.kind === "mail") || (loop.task?.kind === "call" && isPrivate(loop.task.connector))).map((loop) => loop.name));
 }
 

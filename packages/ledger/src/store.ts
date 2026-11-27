@@ -1789,6 +1789,18 @@ export class LedgerStore {
     return raw ? (JSON.parse(raw) as GEvent) : null;
   }
 
+  /**
+   * Whether a connector was ever installed with a manifest that says its answers are your private data: any of its
+   * connector.set events in the log, by its id. One removed since, or installed again without the mark, still was.
+   */
+  connectorWasPrivate(id: string): boolean {
+    return (
+      this.db
+        .query<{ one: number }, [string]>("SELECT 1 AS one FROM events WHERE kind = 'connector.set' AND json_extract(raw, '$.body.id') = ? AND json_extract(raw, '$.body.manifest.private') = 1 LIMIT 1")
+        .get(id) !== null
+    );
+  }
+
   eventCount(): number {
     return this.loggedCount();
   }

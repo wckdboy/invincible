@@ -1,12 +1,13 @@
-// What private-answers left a gap in (the re-review of 27 November, B2, B3; its PoCs turned around): what was recorded
-// before it, and a private connector's call a standing order answers. Against a real daemon (startDaemon) and its
-// routes, with stand-ins for Google and for Home Assistant on its LAN address: only loopback reaches the network, and
-// every other origin gets a stand-in's 404. Every name, address and message is made up; the keys are obviously fake.
+// What private-answers left a gap in (the re-review of 27 November, B2, B3, B4; its PoCs turned around): what was
+// recorded before it, a private connector's call a standing order answers, and one removed. Against a real daemon
+// (startDaemon) and its routes, with stand-ins for Google and for Home Assistant on its LAN address: only loopback reaches
+// the network, and every other origin gets a stand-in's 404. Every name, address and message is made up; the keys are
+// obviously fake.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clientIdFromKey, type RouteName, routes, signRequest, utf8 } from "@invincible/core";
+import { type ActionView, clientIdFromKey, type RouteName, routes, signRequest, utf8 } from "@invincible/core";
 import { enrollDevice, foundFleet, LedgerStore } from "@invincible/ledger";
 import { writeKeep } from "@invincible/models";
 import type { Capabilities } from "../src/capabilities.ts";
@@ -72,7 +73,7 @@ afterAll(async () => {
 });
 
 /** Which of the mail's and the home's words a text holds. */
-const WORDS = ["Ingrid", "Vestergaard", "ingrid@example.test", "rent arrears", "lock.front_door", "unlocked", "alarm_control_panel", "disarmed"];
+const WORDS = ["Ingrid", "Vestergaard", "ingrid@example.test", "rent arrears", "lock.front_door", "unlocked", "alarm_control_panel", "disarmed", "lars@example.test", "18,400", "pay the"];
 const held = (text: string) => WORDS.filter((word) => text.includes(word));
 
 test("B2: a loop's runs and its tell notice recorded before private-answers, with the mail's words, reach no agent and no chat bridge; you still read them", async () => {
@@ -114,4 +115,19 @@ test("B3: a private connector's call that a standing order answers keeps its mar
   const summary = daemon.store.loopRuns("evening")[0]!.body.summary;
   expect(summary).toMatch(/^home-assistant\.service → ok \(200\), \d+ bytes \(\d+ ms\)$/);
   expect(held(JSON.stringify((await send(agent, "loopRuns", { name: "evening" })).body))).toEqual([]);
+});
+
+test("B4: a private connector installed under its own id stays private once it is removed: its waiting call's words reach no agent", async () => {
+  const manifest = { id: "family-mail", label: "Family mail", origin: "https://mail.example.test", private: true, tools: { send: { description: "Send a mail", method: "POST", path: "/send", class: "outward", params: { to: { type: "string", required: true }, body: { type: "string", required: true } } } } };
+  expect((await admin("setConnector", { id: "family-mail", manifest })).status).toBe(200);
+  const asked = await daemon.connectors.call({ connector: "family-mail", tool: "send", args: { to: "lars@example.test", body: "I will pay the 18,400 on Thursday." }, why: "Ingrid asked about the rent arrears" }, primary);
+  expect(asked.status).toBe("asked");
+  for (const removed of [false, true]) {
+    if (removed) expect((await admin("removeConnector", { id: "family-mail" })).status).toBe(200);
+    const theirs = ((await send(agent, "actions")).body.actions as ActionView[]).find((a) => a.connector === "family-mail")!;
+    expect([removed, theirs.state, theirs.args, held(JSON.stringify(theirs))]).toEqual([removed, "waiting", {}, []]);
+  }
+  // Yours, on your devices, as it is.
+  const yours = ((await admin("actions")).body.actions as ActionView[]).find((a) => a.connector === "family-mail")!;
+  expect(yours.args).toEqual({ to: "lars@example.test", body: "I will pay the 18,400 on Thursday." });
 });
