@@ -5,6 +5,7 @@ import { boardCommand } from "./board.ts";
 import type { FetchLike } from "./client.ts";
 import { connect } from "./connect.ts";
 import { costCommand } from "./cost.ts";
+import { desktopCommand } from "./desktop.ts";
 import { CliError, EXIT, usageError } from "./exit.ts";
 import type { Command, Flags, Io } from "./io.ts";
 import { pairCommand } from "./pair.ts";
@@ -33,6 +34,8 @@ export const HELP = `inv: your agent and its work, from a terminal (docs/CLI.md 
                                (inv steer --chat <id> "…" tells your agent, as it answers in that chat)
   inv again <task> [--from <step>] ["…"]
                                gives it again (from a step: its workspace as it stood then)
+  inv desktop <agent>          an agent's screen, looked at and never touched: its size, whether you have it
+                               (--out <file> writes its picture; live, and taking it over, are the apps')
   inv asks                     what waits for your answer, shown exactly
   inv allow <id> [--for-task]  ·  inv deny <id> ["why"]
   inv cost                     what it cost at your prices: --task <id> --agent <id> --project <p> --week
@@ -70,6 +73,7 @@ const OPTIONS = {
   week: { type: "boolean" },
   name: { type: "string" },
   email: { type: "string" },
+  out: { type: "string" },
   forget: { type: "boolean" },
   home: { type: "string" },
   node: { type: "string" },
@@ -92,6 +96,7 @@ const COMMANDS: Readonly<Record<string, { run: Command | "pair"; takes: readonly
   allow: { run: allowCommand, takes: ["for-task", "json"] },
   deny: { run: denyCommand, takes: ["json"] },
   cost: { run: costCommand, takes: ["task", "agent", "project", "week", "json"] },
+  desktop: { run: desktopCommand, takes: ["out", "json"] },
   pair: { run: "pair", takes: ["name", "forget", "json"] },
   seats: { run: seatsCommand, takes: ["json"] },
   seat: { run: seatCommand, takes: ["email", "json", "no-ask"] },
@@ -148,7 +153,7 @@ export async function run(argv: readonly string[], io: Io, opts: RunOptions = {}
       week: values.week === true,
       forget: values.forget === true,
       help: values.help === true,
-      ...Object.fromEntries((["timeout", "project", "agent", "budget", "on", "title", "chat", "from", "task", "name", "email", "home", "node"] as const).filter((key) => typeof values[key] === "string").map((key) => [key, values[key]])),
+      ...Object.fromEntries((["timeout", "project", "agent", "budget", "on", "title", "chat", "from", "task", "name", "email", "out", "home", "node"] as const).filter((key) => typeof values[key] === "string").map((key) => [key, values[key]])),
     };
     const [first, ...rest] = parsed.positionals;
     if (flags.help || first === "help") {

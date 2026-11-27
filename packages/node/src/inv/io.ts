@@ -57,6 +57,8 @@ export interface Flags {
   name?: string;
   /** inv seat add: the account's email its sign-in starts with. */
   email?: string;
+  /** inv desktop: the file its picture is written to. */
+  out?: string;
   forget: boolean;
   home?: string;
   node?: string;

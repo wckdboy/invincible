@@ -53,6 +53,7 @@ Every command that prints a list or a result takes `--json`.
 | `inv steer <task> "…"` | Tells a task that is running something it must take up now. Its run takes your words at its next safe point (a command that's running finishes first; a coding tool takes them in its own session), its trail says them where it took them, and its reviewer judges the work against its goal and every steer, in order. It returns once the node has them. |
 | `inv steer --chat <id> "…"` | Tells your agent, as it answers in that chat: it reads your words at its next safe point, as Steer does in the apps. |
 | `inv again <task> [--from <step>] ["…"]` | Gives a task again, as a new task: from its start, or from one of its steps (`--from`), its workspace as it stood then. New words replace its goal. |
+| `inv desktop <agent> [--out <file>]` | An agent's screen, looked at and never touched: its size, and whether you have it (until when, by the node's word, in UTC). A look is no input, so it never takes the desktop over, and the ledger doesn't record it. `--out` writes its picture, as the node sends it (a JPEG), to the file, readable by you alone (0600), replacing whole a file there before. `--json` prints `{"agent", "width", "height", "mediaType", "held", "out"}`, `held` the node's own, null when no one has it. The agent is named by its id or its name. Watching it live, and taking it over, are the apps'. |
 | `inv asks` | What waits for your approval: each operation exactly, in mono, with any character you can't see made visible. |
 | `inv allow <id> [--for-task]` | Allows one. `--for-task` also answers that agent's same call, exactly, without asking again, for a day (below). A task that an agent proposed is allowed to start. |
 | `inv deny <id> ["why"]` | Denies one, with your reason. A task an agent proposed is declined. |
@@ -167,7 +168,8 @@ A promise: a code keeps its meaning, and a new one is added only with a new mean
 `inv watch`, `inv proof`, `inv give --wait` and `inv again --wait` exit with the task's verdict. Every other command
 exits 0 when it did what it says, or with 1, 2, 30 or 31. So `inv steer` exits 0 once the node has your words, and 1
 when it refuses them: a task that isn't running (its words say what to do instead), one that has taken all the steers
-it takes, or a chat with nothing running in it. `inv seat add` and `inv seat sign-in` exit 0 once the seat is signed
+it takes, or a chat with nothing running in it. `inv desktop` exits 1 when there is no such agent, or its VM has no desktop (the node's words say so).
+`inv seat add` and `inv seat sign-in` exit 0 once the seat is signed
 in, and 1 when its sign-in ended otherwise (in its words: cancelled, lapsed, failed, another account). Ctrl-C pressed twice leaves at once, whatever is under way,
 with 1.
 
