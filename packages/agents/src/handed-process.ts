@@ -115,17 +115,35 @@ def run(mode, task, limit, command):
             ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0)  # PR_SET_CHILD_SUBREAPER
         except Exception:
             pass
+    # Its command makes its process group itself, before it runs, as CPython's subprocess does; its parent makes no call
+    # of its own, which on macOS can meet the child's in the kernel and fail it (EPERM). The parent learns that it runs,
+    # or why it couldn't start, through a pipe that closes as it runs (os.pipe's ends are close-on-exec).
+    told, tell = os.pipe()
     child = os.fork()
     if child == 0:
         try:
+            os.close(told)
             os.setpgid(0, 0)
             os.execvp("bash", ["bash", "-c", command])
+        except BaseException as e:
+            try:
+                os.write(tell, (getattr(e, "strerror", None) or str(e) or type(e).__name__).encode(errors="replace")[:300])
+            except BaseException:
+                pass
         finally:
             os._exit(127)
-    try:
-        os.setpgid(child, child)
-    except OSError:
-        pass
+    os.close(tell)
+    why = b""
+    while True:
+        chunk = os.read(told, 512)
+        if not chunk:
+            break
+        why += chunk
+    os.close(told)
+    if why:
+        os.waitpid(child, 0)
+        sys.stderr.write("(Its command couldn't be started: %s.)\n" % why.decode(errors="replace"))
+        return 127
     deadline = time.monotonic() + limit
     code = None
     while True:

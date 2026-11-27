@@ -127,6 +127,42 @@ test("a gate whose time runs out is ended with what it started, even when its sh
   }
 });
 
+/**
+ * A gate as handedCommand runs it, its kernel's race made certain (this test's, never the node's): the child's own
+ * setpgid fails, EPERM, once its parent has set the child's group too. On macOS the two calls can meet in the kernel and
+ * fail the child's: 4 of 3,000 forks at a load of 82 on 12 cores, and none of 3,000 with the child's call alone. The
+ * helper's child then exited 127 without a word, in the time of one poll (I15's full check, 27 November 2026: a gate
+ * whose time runs out, 127 in 88 ms).
+ */
+function raced(said: string, gate: string): string {
+  const run = "\nsys.exit(run(";
+  const command = handedCommand(gate, { task: "task-test", limitSec: 20, ends: "gate" });
+  if (command.split(run).length !== 2) throw new Error("handedCommand no longer ends with run(): race it anew");
+  const race = `\nimport errno as _errno\n_setpgid = os.setpgid\ndef _raced(pid, pgid):\n    if pid != 0:\n        open(${JSON.stringify(said)}, "w").close()\n        return _setpgid(pid, pgid)\n    for _ in range(40):\n        if os.path.exists(${JSON.stringify(said)}):\n            raise PermissionError(_errno.EPERM, "Operation not permitted")\n        time.sleep(0.005)\n    return _setpgid(pid, pgid)\nos.setpgid = _raced`;
+  return command.replace(run, `${race}${run}`);
+}
+
+test("a gate's command makes its process group itself before it runs, so no call of its parent's can fail it (the 127)", () => {
+  const s = scratch();
+  try {
+    const ran = shell(raced(s.path("parent-set"), "echo started; exit 4"));
+    expect([ran.status, ran.stdout.trim(), ran.stderr.trim()]).toEqual([4, "started", ""]);
+    // (Its parent never set the child's group itself.)
+    expect(existsSync(s.path("parent-set"))).toBe(false);
+  } finally {
+    s.done();
+  }
+});
+
+test("a command it can't start is said, and is 127", () => {
+  // (No bash where its PATH looks, as an exec the kernel refuses would be: the helper's own python3 named by its path.)
+  const python = Bun.which("python3");
+  expect(python).not.toBeNull();
+  const command = handedCommand("exit 0", { task: "task-test", limitSec: 20, ends: "gate" }).replace(/^python3 /, `${python} `);
+  const ran = spawnSync("/bin/bash", ["-c", command], { encoding: "utf8", timeout: 30_000, env: { PATH: "/nonexistent" } });
+  expect([ran.status, ran.stderr.trim()]).toEqual([127, "(Its command couldn't be started: No such file or directory.)"]);
+});
+
 test.skipIf(process.platform !== "linux")("on Linux a gate's process that left its group (setsid) is ended too: the helper is its subreaper", async () => {
   const s = scratch();
   try {
