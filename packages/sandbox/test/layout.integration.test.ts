@@ -1,10 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { runArgs, type SandboxSpec } from "../src/index.ts";
+import { KATA_RUNTIME, runArgs, type SandboxSpec } from "../src/index.ts";
 
 /*
  * Layout 2 on real Docker (layout.ts): a VM that shares an agent's workspace alone (another node's task) mounts the
@@ -12,14 +12,19 @@ import { runArgs, type SandboxSpec } from "../src/index.ts";
  * notes/: not a relative ../home/…, not an absolute /home/agent/…, and not one swapped in after the VM mounted it. One
  * for a run on a seat of yours mounts the notes' tree too, inside a HOME of its own in memory, and no link the agent
  * leaves in its notes or its workspace reaches the rest of its HOME. Each through a Docker volume's subpaths and through
- * a workspace image's directories (here a host folder, bound as the helper's image is). A Linux host with Docker Engine
- * 26 or later; skipped, and so unverified, anywhere else.
+ * a workspace image's directories (here a host folder, bound as the helper's image is), and each in a container
+ * (runc) and, where the host has Kata's shim and KVM, in a microVM as an agent's and a task's VM are (Kata resolves a
+ * bind's source on the host itself, and shares it into its guest by virtiofs). A Linux host with Docker Engine 26 or
+ * later; skipped, and so unverified, anywhere else, and Kata's half wherever it isn't installed.
  */
 
 const docker = (...args: string[]) => spawnSync("docker", args, { encoding: "utf8", timeout: 120_000 });
 const engine = process.platform === "linux" ? Number.parseInt(docker("version", "--format", "{{.Server.Version}}").stdout ?? "", 10) : Number.NaN;
 const available = Number.isFinite(engine) && engine >= 26 && docker("image", "inspect", "invincible/sandbox:1").status === 0;
 if (!available) console.log(`${import.meta.file} SKIPPED, unverified: it needs Linux, Docker Engine 26 or later, and invincible/sandbox:1.`);
+/** Kata's shim on containerd's PATH (as host.ts looks for it) and KVM: the sharing VM a microVM then, as the host makes one. */
+const kata = process.platform === "linux" && existsSync("/dev/kvm") && ["/usr/local/bin/containerd-shim-kata-v2", "/usr/bin/containerd-shim-kata-v2"].some((path) => existsSync(path));
+if (available && !kata) console.log(`${import.meta.file}: its Kata half SKIPPED, unverified: no Kata shim or no /dev/kvm here.`);
 
 const made: { volumes: string[]; containers: string[]; dirs: string[] } = { volumes: [], containers: [], dirs: [] };
 afterAll(() => {
@@ -67,24 +72,24 @@ function layoutStore(kind: "volume" | "bind") {
 }
 
 /** A VM as the host makes one that shares the store (runArgs: its mounts and its own memory), running; and a read in it. */
-function sharingVm(args: string[]) {
+function sharingVm(args: string[], runtime: "runc" | "kata") {
   const name = `q5-escape-vm-${randomBytes(4).toString("hex")}`;
   made.containers.push(name);
-  expect(docker("run", "--detach", "--name", name, "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only",
+  expect(docker("run", "--detach", "--name", name, ...(runtime === "kata" ? ["--runtime", KATA_RUNTIME] : []), "--network", "none", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only",
     ...tmpfsOf(args).flatMap((t) => ["--tmpfs", t]), ...mountsOf(args).flatMap((m) => ["--mount", m]), "invincible/sandbox:1", "sleep", "300").status).toBe(0);
   return (path: string) => docker("exec", name, "sh", "-c", `cat ${path} 2>/dev/null || true`).stdout;
 }
 
 const ownHome = { path: "/usr/bin:/bin:/home/agent/.local/bin" };
 
-for (const kind of ["volume", "bind"] as const) {
-  describe.skipIf(!available)(`a VM sharing an agent's workspace, through a ${kind === "volume" ? "volume's subpaths" : "workspace image's directories"}`, () => {
+for (const runtime of ["runc", "kata"] as const) for (const kind of ["volume", "bind"] as const) {
+  describe.skipIf(!available || (runtime === "kata" && !kata))(`a VM sharing an agent's workspace, through a ${kind === "volume" ? "volume's subpaths" : "workspace image's directories"}, in ${runtime === "kata" ? "a Kata microVM" : "a container"}`, () => {
     test("another node's task's reaches nothing of its HOME or its notes: not by a path, a relative link, an absolute link, or a link swapped in after it mounted", () => {
       const { shares, agentMounts } = layoutStore(kind);
       // The VM that shares its workspace alone, mounted as the host mounts one, its own HOME empty.
       const args = runArgs(spec({ shares, ownHome }));
       expect(mountsOf(args)).toHaveLength(1);
-      const read = sharingVm(args);
+      const read = sharingVm(args, runtime);
       for (const path of ["/work/home/secret", "/work/rel", "/work/abs", "/work/up/home/secret", "/work/../home/secret", "/work/relnote", "/work/absnote", "/work/up/notes/note", "/work/../notes/note", "/home/agent/secret", "/home/agent/.memory/engram/note"]) expect([path, read(path)]).toEqual([path, ""]);
       // Swapped in after it mounted, by the agent's own VM, which has all three trees.
       expect(asAgent(agentMounts, "rm -f /work/rel && ln -s ../home/secret /work/rel && ln -s /home/agent/secret /work/late && ln -s ../../home /work/upper && ln -s /home/agent/.memory/engram/note /work/latenote").status).toBe(0);
@@ -100,7 +105,7 @@ for (const kind of ["volume", "bind"] as const) {
       expect(asAgent(agentMounts, "ln -s ../../secret /home/agent/.memory/engram/up && ln -s /home/agent/secret /home/agent/.memory/engram/abs && ln -s ../../../work/../home /home/agent/.memory/engram/far").status).toBe(0);
       const args = runArgs(spec({ shares: { ...shares, notes: true }, ownHome }));
       expect(mountsOf(args)).toHaveLength(2);
-      const read = sharingVm(args);
+      const read = sharingVm(args, runtime);
       // Its notes, where ENGRAM_DATA_DIR points in its own HOME.
       expect(read("/home/agent/.memory/engram/note")).toBe(NOTE);
       for (const path of ["/home/agent/secret", "/home/agent/.memory/engram/up", "/home/agent/.memory/engram/abs", "/home/agent/.memory/engram/far/secret", "/home/agent/.memory/engram/../../secret", "/work/rel", "/work/abs", "/work/up/home/secret", "/work/relnote"]) expect([path, read(path)]).toEqual([path, ""]);
