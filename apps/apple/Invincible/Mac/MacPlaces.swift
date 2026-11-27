@@ -39,27 +39,13 @@ struct MacPlaces: View {
         .onDisappear { MacNotices.shared.showing = nil }
     }
 
-    /// Where a tapped notification or one of its buttons asked to go, as an iPad's window goes there: an approval's card in
-    /// Needs you (its yes behind Touch ID or the Mac's password), a task (its ship asked for behind the same), a kept chat.
+    /// Where a tapped notification or one of its buttons asked to go, as an iPad's window goes there and as an `invincible:`
+    /// link goes (MacApp.follow): an approval's card in Needs you (its yes behind Touch ID or the Mac's password), a task
+    /// (its ship asked for behind the same), a kept chat.
     private func follow() async {
         guard let opened = MacNotices.shared.opened else { return }
         MacNotices.shared.opened = nil
-        switch opened {
-        case .inbox: mac.place = .inbox
-        case .settings: mac.place = .more
-        case .overview: mac.place = .agents
-        case .chat(let id):
-            mac.place = .primary
-            if let id { await session.chat.open(id, with: session.client) }
-        case .approval(let id):
-            mac.place = .inbox
-            session.approvalToOpen = id
-        case .task(let id): mac.place = .task(id)
-        case .agent(let id): mac.place = .agent(id)
-        case .ship(let id):
-            mac.place = .task(id)
-            session.shipToOpen = id
-        }
+        await mac.follow(opened)
     }
 
     @ViewBuilder private var detail: some View {
