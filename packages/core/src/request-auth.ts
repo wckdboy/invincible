@@ -80,6 +80,9 @@ export function verifyRequestSignature(
     return null;
   }
   // Only as its bytes encode: the last character's unused bits set would be the same signature written another way.
+  // So a link call (a node's Ed25519 signature) has one form. A client's P-256 signature still has a second, (r, n − s),
+  // since WebCrypto's signatures aren't low-S (verifyP256): harmless, as the nonce cache keys on the device and the
+  // nonce, and refuses the second form of a request once the first is seen.
   if (b64u(signature) !== sig) return null;
   if (!verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body))) return null;
   return { device, nonce, ts: time };
