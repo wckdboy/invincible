@@ -7,13 +7,13 @@ import Foundation
  * of the app, or a Mac with no screen to click (the VM it is tried in), runs here with no window, through the code the
  * app's buttons run. Anything else is the app.
  *
- *   The primary --serve-node                                          the node, its output in ~/.invincible/logs/node.log
- *   The primary --cli <arguments>                                     the bundled CLI: the primary --cli doctor
- *   The primary --agent [status | register | unregister | restart]    the node's agent
- *   The primary --this-mac                                            what This Mac shows: the node, and staying on
- *   The primary --first-run start [--name <name>] [--fleet <fleet>]   Start a fleet, then keep it on, as the first run does
- *   The primary --first-run join <invite> [--name <name>]             Join my fleet, then keep it on
- *   The primary --desktop <op> …                                      This Mac's screen, as the primary's computer (MacScreen.swift)
+ *   Invincible --serve-node                                          the node, its output in ~/.invincible/logs/node.log
+ *   Invincible --cli <arguments>                                     the bundled CLI: Invincible --cli doctor
+ *   Invincible --agent [status | register | unregister | restart]    the node's agent
+ *   Invincible --this-mac                                            what This Mac shows: the node, and staying on
+ *   Invincible --first-run start [--name <name>] [--fleet <fleet>]   Start a fleet, then keep it on, as the first run does
+ *   Invincible --first-run join <invite> [--name <name>]             Join my fleet, then keep it on
+ *   Invincible --desktop <op> …                                      This Mac's screen, as the primary's computer (MacScreen.swift)
  */
 @main
 enum MacMain {

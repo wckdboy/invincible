@@ -31,6 +31,20 @@ final class Scratch {
  * touches ~/.invincible or ~/.local/bin: each file is in a folder of the test's own.
  */
 struct MacNodeTests {
+    @Test func theNodesHomeIsWhereTheNodeKeepsIt() {
+        // (packages/node's home.ts: INVINCIBLE_HOME where it is set, else ~/.invincible. On 27 November 2026 the app looked
+        // in ~/.primary, a name carried over when the apps were brought here, and saw no node on a Mac that was one.)
+        let set = ProcessInfo.processInfo.environment["INVINCIBLE_HOME"].flatMap { $0.isEmpty ? nil : $0 }
+        #expect(NodeHome.standard.dir.path == (set ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: ".invincible").path))
+    }
+
+    @Test func theNodesHomeIsTheOneItsEnvironmentNames() {
+        let user = URL(fileURLWithPath: "/Users/someone")
+        #expect(NodeHome.dir(environment: [:], user: user).path == "/Users/someone/.invincible")
+        #expect(NodeHome.dir(environment: ["INVINCIBLE_HOME": "/Volumes/Work/node"], user: user).path == "/Volumes/Work/node")
+        #expect(NodeHome.dir(environment: ["INVINCIBLE_HOME": ""], user: user).path == "/Users/someone/.invincible")
+    }
+
     @Test func anAgentNotFoundIsAnAgentNotRegistered() {
         // Before its first registration an agent reads notFound (macOS 27.2): the same thing to the app.
         #expect(NodeAgent.state(.notFound) == .off)
@@ -45,7 +59,8 @@ struct MacNodeTests {
         #expect(plist["Label"] as? String == NodeAgent.label)
         #expect(NodeAgent.label == "sh.invincible.node", "install.sh's label, so a node it made isn't doubled")
         #expect(plist["BundleProgram"] as? String == "Contents/MacOS/Invincible")
-        #expect(plist["ProgramArguments"] as? [String] == [Primary.name, "--serve-node"])
+        // (The app's executable, never the primary's name, which a node may change and SeatsTests changes while it runs.)
+        #expect(plist["ProgramArguments"] as? [String] == ["Invincible", "--serve-node"])
         #expect(plist["KeepAlive"] as? Bool == true)
         #expect(plist["RunAtLoad"] as? Bool == true)
     }

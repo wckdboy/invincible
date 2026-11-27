@@ -106,7 +106,13 @@ struct NodeBundle: Sendable {
 struct NodeHome: Sendable {
     let dir: URL
 
-    static let standard = NodeHome(dir: FileManager.default.homeDirectoryForCurrentUser.appending(path: ".primary"))
+    /// Where this Mac's node lives, as the node finds its own home (home.ts): INVINCIBLE_HOME where it is set, else ~/.invincible.
+    static let standard = NodeHome(dir: dir(environment: ProcessInfo.processInfo.environment))
+
+    static func dir(environment: [String: String], user: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        if let set = environment["INVINCIBLE_HOME"], !set.isEmpty { return URL(fileURLWithPath: set) }
+        return user.appending(path: ".invincible")
+    }
 
     var configFile: URL { dir.appending(path: "config.json") }
     var adminTokenFile: URL { dir.appending(path: "admin.token") }
