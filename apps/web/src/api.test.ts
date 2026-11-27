@@ -1,9 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { routes } from "@invincible/core";
 import { b64u } from "@invincible/core/bytes";
 import { desktopBeat } from "@invincible/core/desktop-frames";
 import { clientIdFromKey, nodeIdentity } from "@invincible/core/identity";
-import { nodeProofInput, verifyRequestSignature } from "@invincible/core/request-auth";
+import { nodeProofInput, REQUESTS_NAME_THEIR_NODE_FROM, verifyRequestSignature } from "@invincible/core/request-auth";
 import { ApiError, apiFor, provenWhoami, READING_POSTS, READS_UNDER_OTHER_SCOPES, setNetworkHandler } from "./api.ts";
 import type { BrowserIdentity } from "./identity.ts";
 
@@ -215,13 +215,21 @@ describe("the node this browser speaks to, proven (the slice 8 note's item 11)",
     expect([browser.node, fresh.node]).toEqual([theNode.id, undefined]);
   });
 
-  test("a node from before, which proves nothing, is spoken to as before, and nothing is pinned", async () => {
+  test("a node from before, which proves nothing, is spoken to as before, and nothing is pinned; from the cutoff it is a proof that fails", async () => {
     at(node.port!);
     speaking = "older";
-    const browser: BrowserIdentity = { ...browserKey };
-    expect((await provenWhoami(browser)).proven).toEqual({ kind: "older" });
-    expect(browser.node).toBeUndefined();
-    expect(await apiFor(browser).get("/api/fleet")).toEqual({ named: false });
+    setSystemTime(new Date(REQUESTS_NAME_THEIR_NODE_FROM - 86_400_000));
+    try {
+      const browser: BrowserIdentity = { ...browserKey };
+      expect((await provenWhoami(browser)).proven).toEqual({ kind: "older" });
+      expect(browser.node).toBeUndefined();
+      expect(await apiFor(browser).get("/api/fleet")).toEqual({ named: false });
+      // From the cutoff every node proves which it is: one that proves nothing is a proof that fails, pinned or not.
+      setSystemTime(new Date(REQUESTS_NAME_THEIR_NODE_FROM));
+      expect((await provenWhoami({ ...browserKey })).proven).toEqual({ kind: "false" });
+    } finally {
+      setSystemTime();
+    }
   });
 
   // The review of apps-name-node, L7: once this browser pinned its node, one that proves nothing won't say which it is:

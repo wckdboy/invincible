@@ -242,8 +242,8 @@ describe("request signing", () => {
     // One that names a node its proof isn't by, or answers another challenge: never taken.
     expect(judgeNodeProof(node.id, { node: other.id, proof: said(node).proof }, challenge)).toEqual({ kind: "false" });
     expect(judgeNodeProof(undefined, said(node), nodeChallenge())).toEqual({ kind: "false" });
-    // A node from before, which offers no proof: spoken to as before.
-    expect(judgeNodeProof(undefined, { node: node.id }, challenge)).toEqual({ kind: "older" });
+    // A node from before, which offers no proof: spoken to as before, until the cutoff.
+    expect(judgeNodeProof(undefined, { node: node.id }, challenge, REQUESTS_NAME_THEIR_NODE_FROM - 1)).toEqual({ kind: "older" });
   });
 
   // The review of apps-name-node, L7 and I1: once a node is pinned, an answer that gives no proof is no node from before
@@ -260,9 +260,25 @@ describe("request signing", () => {
       expect(judgeNodeProof(pinned, { proof }, challenge)).toEqual({ kind: "false" });
       expect(judgeNodeProof(pinned, { node: 7, proof }, challenge)).toEqual({ kind: "false" });
     }
-    // Unpinned, no proof is a node from before still; and a proof that holds is taken either way.
-    expect(judgeNodeProof(undefined, {}, challenge)).toEqual({ kind: "older" });
+    // Unpinned, no proof is a node from before still, before the cutoff; and a proof that holds is taken either way.
+    expect(judgeNodeProof(undefined, {}, challenge, REQUESTS_NAME_THEIR_NODE_FROM - 1)).toEqual({ kind: "older" });
     expect(judgeNodeProof(node.id, { node: node.id, proof }, challenge)).toEqual({ kind: "same", node: node.id });
+  });
+
+  // The lead's word of 27 November 2026, for core, Swift and Android alike: from the cutoff every node proves which it is,
+  // so a whoami with no proof is a proof that fails, pinned or not. Before it, unpinned, a node from before, as today.
+  test("from the cutoff a whoami with no proof is a proof that fails, pinned or not; before it, unpinned, a node from before", () => {
+    const node = newNodeIdentity();
+    const challenge = nodeChallenge();
+    const before = REQUESTS_NAME_THEIR_NODE_FROM - 1;
+    expect(judgeNodeProof(undefined, { node: node.id }, challenge, before)).toEqual({ kind: "older" });
+    expect(judgeNodeProof(node.id, { node: node.id }, challenge, before)).toEqual({ kind: "false" });
+    for (const at of [REQUESTS_NAME_THEIR_NODE_FROM, REQUESTS_NAME_THEIR_NODE_FROM + 86_400_000]) {
+      expect(judgeNodeProof(undefined, { node: node.id }, challenge, at)).toEqual({ kind: "false" });
+      expect(judgeNodeProof(node.id, { node: node.id }, challenge, at)).toEqual({ kind: "false" });
+      // A proof that holds is taken on either side.
+      expect(judgeNodeProof(undefined, { node: node.id, proof: b64u(node.sign(nodeProofInput(challenge))) }, challenge, at)).toEqual({ kind: "pin", node: node.id });
+    }
   });
 
   // The slice 8 note's item 11 (the lead's word of 27 November): a node that restarts forgets the nonces it saw, so a
