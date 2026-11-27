@@ -222,6 +222,29 @@ class NodeSessionTest {
         }
     }
 
+    // ---- K2 (the re-check): Try again asks at once, past the pause that unanswered whoamis set ----
+
+    @Test fun tryAgainAsksAtOncePastThePauseThatUnansweredWhoamisSet() = runBlocking {
+        var clock = NodeProof.NAMED_FROM - 86_400_000L
+        val pin = NodePin(a, proofFirst = true)
+        val seen = Seen()
+        var reachable = false
+        val s = session(pin, seen, now = { clock }) { challenge -> if (reachable) answer(a, challenge) else throw unreachable }
+        // Five unanswered whoamis, each after its pause (2, 4, 8, 16 s): the next pause is 32 s.
+        repeat(5) {
+            assertFalse(s.prove())
+            clock += 20_000L
+        }
+        clock -= 20_000L
+        assertEquals(5, seen.asked)
+        // The node back, 5 s into that pause: Try again asks now, and its proof holds.
+        reachable = true
+        clock += 5_000L
+        assertTrue("Try again asks at once", s.tryAgain())
+        assertEquals(6, seen.asked)
+        assertTrue(pin.isOpen)
+    }
+
     // ---- K3 (the re-check): what the app asks as it comes to the front waits for the first proof, then goes ----
 
     @Test fun whatTheAppAsksAsItComesToTheFrontWaitsForTheFirstProofThenGoes() = runBlocking {

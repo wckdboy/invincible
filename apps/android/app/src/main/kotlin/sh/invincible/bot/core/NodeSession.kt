@@ -51,16 +51,17 @@ class NodeSession(
 
     /**
      * Whoami, proven, before anything else is sent; [fresh]: asked again though it held (the stream opening anew), so a
-     * node that changed at the address since is found. False: nothing but whoami may be sent (refused, or not proven yet).
+     * node that changed at the address since is found; [pastThePause]: asked now, though one went unanswered a moment ago
+     * (Try again). False: nothing but whoami may be sent (refused, or not proven yet).
      */
-    suspend fun prove(fresh: Boolean = false): Boolean {
+    suspend fun prove(fresh: Boolean = false, pastThePause: Boolean = false): Boolean {
         pin.refused?.let { return refusedNow(it) }
         if (proven && !fresh) return true
         return asking.withLock {
             pin.refused?.let { return@withLock refusedNow(it) }
             if (proven && !fresh) return@withLock true
             // (Asked a moment ago and unanswered: the next whoami waits; nothing else goes meanwhile.)
-            if (now() < retryAt) return@withLock pin.isOpen
+            if (!pastThePause && now() < retryAt) return@withLock pin.isOpen
             val challenge = NodeProof.challenge()
             val who = try {
                 ask(challenge)
@@ -85,11 +86,12 @@ class NodeSession(
     }
 
     /**
-     * Try again, at a node refused: whoami asked past the refusal, which stands while it is out and after any answer but a
-     * proof that holds; one that holds lifts it, and the stream opens again ([reopen]).
+     * Try again: whoami asked at once, past any pause an unanswered one set (K2 of the re-check). At a node refused, asked
+     * past the refusal, which stands while it is out and after any answer but a proof that holds; one that holds lifts it,
+     * and the stream opens again ([reopen]).
      */
     suspend fun tryAgain(): Boolean {
-        if (pin.refused == null) return prove(fresh = true)
+        if (pin.refused == null) return prove(fresh = true, pastThePause = true)
         return asking.withLock {
             val challenge = NodeProof.challenge()
             val who = try {
