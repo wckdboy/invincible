@@ -10,8 +10,8 @@
 #  bench       │ the scorecard's quality gates (bun run bench --ci)
 #  vectors     │ the parity vectors the Apple and Android apps test against are what this repository's code makes now
 #  android     │ the Android app's JVM tests (held to the same vectors)
-#  apple       │ the iPhone's tests (its UI and performance budgets against a dev node) and the Mac build, on the owner's
-#              │ Mac runner (label macos-xcode; sovware.io alone)
+#  apple       │ the iPhone's tests (its UI and performance budgets against a dev node), an iPad's navigation, and the Mac
+#              │ build, on the owner's Mac runner (label macos-xcode; sovware.io alone)
 #  site        │ invincible.sh (apps/site) built, and what it would serve checked (its own project and lockfile)
 #  secrets     │ gitleaks over what the push (or the pull request) adds
 #  sweep       ┘ the owner's private details, by the forge's secret list, in what it adds (sovware.io alone)
@@ -237,6 +237,9 @@ jobs:
           runtime=$(xcrun simctl list runtimes iOS -j | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin)["runtimes"] if x.get("isAvailable")]; print(max(r, key=lambda x: [int(n) for n in x["version"].split(".")])["identifier"])')
           udid=$(xcrun simctl create "Invincible CI ${GITHUB_RUN_NUMBER:-0}" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$runtime")
           echo "IPHONE_SIMULATOR=$udid" >> "$GITHUB_ENV"
+          # And an iPad, for its navigation after the iPhone's tests (booted only then).
+          ipad=$(xcrun simctl create "Invincible CI ${GITHUB_RUN_NUMBER:-0} iPad" com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB "$runtime")
+          echo "IPAD_SIMULATOR=$ipad" >> "$GITHUB_ENV"
           # Built for it (its architecture alone, as a test run there builds), before it boots.
           xcodebuild -project Invincible.xcodeproj -scheme Invincible -destination "platform=iOS Simulator,id=$udid" \
             -derivedDataPath build -packageAuthorizationProvider netrc build-for-testing -quiet
@@ -244,21 +247,26 @@ jobs:
       # dev node with a busy fleet, on loopback, stopped with the simulator. From the dev node's start to the simulator's
       # deletion the step holds the Mac's one lock for on-screen Apple runs (its shell runs under scripts/ui-lock.sh), so
       # no two runs, a job's or an agent's, measure beside each other. It waits up to 30 minutes for it.
-      - name: iPhone tests, on that simulator
+      # Then, in the same hold, an iPad's navigation (NavTests alone: the Mac runs CI at loads of 100 and more): an iPad's
+      # window is the roster beside the place chosen, never an iPhone's stack, and on 27 November 2026 a task opened from
+      # a link held an iPad's app at 100 % of a core and never showed, while every iPhone test passed.
+      - name: iPhone tests, then an iPad's navigation, on those simulators
         working-directory: apps/apple
         shell: bash scripts/ui-lock.sh bash --noprofile --norc -e -o pipefail {0}
         run: |
           set -euo pipefail
           udid="$IPHONE_SIMULATOR"
+          ipad="$IPAD_SIMULATOR"
           dev="$RUNNER_TEMP/dev-node"
           # -quiet names a failing test and nothing of why: its messages are read from the result bundle (a budget's say
           # what it measured), and the step still fails as the tests did.
           results="$RUNNER_TEMP/iphone-tests-${GITHUB_RUN_ID:-0}.xcresult"
-          rm -rf "$results"
+          ipad_results="$RUNNER_TEMP/ipad-tests-${GITHUB_RUN_ID:-0}.xcresult"
+          rm -rf "$results" "$ipad_results"
           mkdir -p "$dev"
           bun scripts/dev-node.ts --dir "$dev" --heavy --auto-approve > "$dev/log" 2>&1 &
           devnode=$!
-          trap 'kill -INT "$devnode" 2>/dev/null || true; xcrun simctl delete "$udid"; rm -rf "$results"' EXIT
+          trap 'kill -INT "$devnode" 2>/dev/null || true; xcrun simctl delete "$udid"; xcrun simctl delete "$ipad"; rm -rf "$results" "$ipad_results"' EXIT
           xcrun simctl bootstatus "$udid" -b > /dev/null
           for _ in $(seq 1 300); do [ -s "$dev/front.txt" ] && break; kill -0 "$devnode" 2>/dev/null || break; sleep 1; done
           [ -s "$dev/front.txt" ] || { echo "::error::the dev node never came up"; cat "$dev/log"; exit 1; }
@@ -267,6 +275,16 @@ jobs:
             -resultBundlePath "$results" test-without-building -skip-testing:InvincibleTests/MacShotsTests -quiet || {
               status=$?
               bun scripts/test-failures.ts "$results" || true
+              exit "$status"
+            }
+          # The iPad, against the same dev node, with the iPhone put away first.
+          xcrun simctl shutdown "$udid" || true
+          xcrun simctl bootstatus "$ipad" -b > /dev/null
+          TEST_RUNNER_INVINCIBLE_DEV_NODE=$(cat "$dev/front.txt") xcodebuild -project Invincible.xcodeproj -scheme Invincible \
+            -destination "platform=iOS Simulator,id=$ipad" -derivedDataPath build -packageAuthorizationProvider netrc \
+            -resultBundlePath "$ipad_results" test-without-building -only-testing:InvincibleUITests/NavTests -quiet || {
+              status=$?
+              bun scripts/test-failures.ts "$ipad_results" || true
               exit "$status"
             }
       - name: Mac build (never launched)
