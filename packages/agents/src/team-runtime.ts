@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { desktopArgv } from "./desktop-command.ts";
+import { desktopArgv, desktopBriefing } from "./desktop-command.ts";
 import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
@@ -679,9 +679,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const space = sees && typeof given === "object" && given?.space && /^(per-mille|scaled:[0-9.]+)$/.test(given.space) ? given.space : null;
       const looking = sees ? ' Then `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).' : "";
       // (C1 step 7: an app scripted first; on the screen, the tree's words before pixels, and the eyes after them.)
-      const screen = desktop
-        ? " This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it. Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do. To find something on the screen, ask `desktop find` first (`desktop find button \"Send\"` says where it is), then `desktop tree` (what can be acted on in the window with the focus)." + looking + " Computer tools of your own (screenshot, left_click, type and the rest), if you have them, work this same screen, in its pixels."
-        : "";
+      const screen = desktop ? desktopBriefing(looking) : "";
       // A temporary directory of the task's own, on the workspace: a sandbox's /tmp is mounted noexec, so a test that
       // writes a script there and runs it fails with exit 126 (and with it a gate that passes everywhere else).
       const temp = `/work/.tmp/${task.id}`;

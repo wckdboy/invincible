@@ -40,6 +40,7 @@ describe("your cases", () => {
         base: "0".repeat(40),
         artifact: AGENT_ARTIFACT,
         record: runOf(),
+        desktop: false,
       },
     ]);
     expect(left).toEqual([
@@ -52,7 +53,7 @@ describe("your cases", () => {
     ]);
   });
 
-  test("a task whose gate looks at a desktop isn't a case yet: an eval's sandbox has none, so its gate couldn't pass there", () => {
+  test("a task whose gate looks at a desktop is a case (C1 step 8): its eval is made where a desktop is, so its gate can pass there", () => {
     const team = teamOf([
       taskOf({ id: "task-desktopxxx", gates: ["test -s answer.txt && grep -qi policy answer.txt && desktop text | head -2 | grep -qi policy"] }),
       taskOf({ id: "task-desktop2xx", gates: ["desktop screenshot out.png"] }),
@@ -60,11 +61,8 @@ describe("your cases", () => {
       taskOf({ id: "task-wordonlyxx", gates: ["grep -q desktop README.md"] }),
     ]);
     const { cases, left } = yourCases(team);
-    expect(cases.map((c) => c.task)).toEqual(["task-wordonlyxx"]);
-    expect(left).toEqual([
-      { task: "task-desktopxxx", why: "needs a desktop" },
-      { task: "task-desktop2xx", why: "needs a desktop" },
-    ]);
+    expect(cases.map((c) => [c.task, c.desktop]).sort()).toEqual([["task-desktop2xx", true], ["task-desktopxxx", true], ["task-wordonlyxx", false]]);
+    expect(left).toEqual([]);
   });
 
   test("the hardest first, by what the original run took: revisions, then commands, then tokens, then the latest", () => {
@@ -164,6 +162,20 @@ describe("an eval of a case", () => {
     // What it left is kept with its work, as a patch against the commit it began from.
     const kept = node.artifacts.get(record.artifact!)!.get("changes.patch")!;
     expect(new TextDecoder().decode(kept)).toContain("-awk '{ s += $1 } END { print s + 1 }' \"$1\"\n+awk '{ s += $1 } END { print s }' \"$1\"");
+  });
+
+  test("a desktop case's eval is made where a desktop is: its run's sandbox and its gates' from the desktop image, its engineer told it has one", async () => {
+    const node = standIn(FIX);
+    await attemptCase(node, widgetsCase(repo.base, { desktop: true }), job());
+    expect(node.graders().length).toBeGreaterThan(0);
+    expect(node.workshops().length).toBe(1);
+    expect(node.boxes.map((b) => b.input.desktop)).toEqual(node.boxes.map(() => true));
+    expect(JSON.stringify(node.chats)).toContain("This VM has a desktop");
+    // Any other case's are the workshop's, as ever, and its engineer is told of no desktop.
+    const plain = standIn(FIX);
+    await attemptCase(plain, widgetsCase(repo.base), job());
+    expect(plain.boxes.map((b) => b.input.desktop)).toEqual(plain.boxes.map(() => undefined));
+    expect(JSON.stringify(plain.chats)).not.toContain("This VM has a desktop");
   });
 
   test("an eval has the commands a real task needs: three times what its agent's run used, never fewer than 150", async () => {

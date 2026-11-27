@@ -110,6 +110,7 @@ export const widgetsCase = (base: string, over: Partial<YourCase> = {}): YourCas
   base,
   artifact: AGENT_ARTIFACT,
   record: runOf(),
+  desktop: false,
   ...over,
 });
 
@@ -186,7 +187,8 @@ export class YoursStandIn {
         const dir = mkdtempSync(join(tmpdir(), "invincible-yours-box-"));
         mkdirSync(join(dir, "work"));
         this.boxes.push({ id, dir, input, commands: [] });
-        return { sandbox: { id, name: `primary-${id}`, node: "n_ultra", run: input.run, image: "invincible/workshop:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, status: "running", ephemeral: true, providers: [] } } as T;
+        // (As the node does: a sandbox asked for with a desktop is made from the desktop image.)
+        return { sandbox: { id, name: `primary-${id}`, node: "n_ultra", run: input.run, image: input.desktop ? "invincible/desktop:1" : "invincible/workshop:1", network: input.network, isolation: "vm", cpus: 4, memoryGb: 8, status: "running", ephemeral: true, providers: [] } } as T;
       }
       case "checkoutRepository": {
         routes.checkoutRepository.input.parse(input);

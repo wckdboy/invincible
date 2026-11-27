@@ -1,6 +1,7 @@
 import { type ChatMessage, type ClientCall, type ExecResult, newNodeIdentity, redact, type Usage } from "../../packages/core/src/index.ts";
 import { foundFleet, LedgerStore, Vault } from "../../packages/ledger/src/index.ts";
 import { chat, type ModelsContext } from "../../packages/models/src/index.ts";
+import { desktopBriefing } from "../../packages/agents/src/desktop-command.ts";
 import { COMPUTER_MEMBERS } from "../../packages/agents/src/engineer-tools.ts";
 import { type RunDeps, type RunEvent, type RunOutcome, runLoop } from "../../packages/agents/src/run.ts";
 
@@ -176,8 +177,7 @@ export function loopAsk(ctx: ModelsContext, counted: { calls: number; usage: Usa
 }
 
 /** The environment an agent's task is told it works in, as team-runtime tells it, for a VM with a desktop. */
-export const ENVIRONMENT =
-  "Your persistent Linux VM; your workspace is /work. This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it. Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do. To find something on the screen, ask `desktop find` first (`desktop find button \"Send\"` says where it is), then `desktop tree` (what can be acted on in the window with the focus). Computer tools of your own (screenshot, left_click, type and the rest), if you have them, work this same screen, in its pixels.";
+export const ENVIRONMENT = `Your persistent Linux VM; your workspace is /work.${desktopBriefing()}`;
 
 /** One task through the loop: its goal, the model's way (ask), the VM's commands (exec). Never throws: an error is said. */
 export async function viaLoop(goal: string, ask: RunDeps["ask"], exec: (command: string, timeoutSec: number) => Promise<ExecResult>, counted: { calls: number; usage: Usage; unknown?: number }, maxSteps = 40, signal?: AbortSignal): Promise<LoopRun> {

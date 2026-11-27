@@ -24,6 +24,15 @@ export function actsOnDesktop(command: string): boolean {
   return /(^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+(open|click|type|key|scroll|move|drag|app|dialog|left_click|right_click|middle_click|double_click|triple_click|left_click_drag|mouse_move|left_mouse_down|left_mouse_up|hold_key)\b/.test(command);
 }
 
+/**
+ * What an agent is told of the desktop its VM has, for its environment: what it is and how it is operated, an app
+ * scripted first, and on the screen the tree's words before pixels (C1 step 7). `looking`: how it asks its eyes, where
+ * it has them, said after the tree. One text for every run that has a desktop: an agent's task, an eval's, the bench's.
+ */
+export function desktopBriefing(looking = ""): string {
+  return " This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it. Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do. To find something on the screen, ask `desktop find` first (`desktop find button \"Send\"` says where it is), then `desktop tree` (what can be acted on in the window with the focus)." + looking + " Computer tools of your own (screenshot, left_click, type and the rest), if you have them, work this same screen, in its pixels.";
+}
+
 /** The words of a command as a POSIX shell would split them, or null where it would do anything but split them. */
 export function plainWords(command: string): string[] | null {
   const words: string[] = [];

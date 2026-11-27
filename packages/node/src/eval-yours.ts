@@ -53,12 +53,14 @@ export interface YourCase {
   artifact: string;
   /** What its run took, as its runner counted it. */
   record: TeamTaskRecord;
+  /** Its gates look at a desktop: its eval's sandboxes, its run's and its gates', are made from the desktop image. */
+  desktop: boolean;
 }
 
 /** Why one of your agents' tasks isn't a case. */
-export type NotACase = "not verified" | "no change kept" | "no record of its run" | "no gates" | "needs a desktop" | "agent removed" | "no repository";
+export type NotACase = "not verified" | "no change kept" | "no record of its run" | "no gates" | "agent removed" | "no repository";
 
-/** A gate that runs the desktop's own command (an agent's VM with a screen has it; an eval's sandbox doesn't, yet). */
+/** A gate that runs the desktop's own command (an agent's VM with a screen has it, and so does an eval's of the desktop image). */
 const looksAtADesktop = (gate: string): boolean => /(^|[;&|(]\s*|\$\(\s*)desktop\s/.test(gate);
 
 export interface YourCases {
@@ -73,8 +75,8 @@ export const caseId = (task: string): string => task.replace(/_/g, "-");
 
 /**
  * Your cases, from the tasks the team's controller keeps (its latest 512). A task's gates are its own: an agent's task
- * proposes none, so one given none isn't a case. Nor is one whose gate looks at a desktop: an eval's sandbox has none,
- * so that gate could only fail there. A removed agent's task isn't one either: the snapshot no longer says which
+ * proposes none, so one given none isn't a case. One whose gate looks at a desktop is one (C1 step 8): its eval is
+ * made where a desktop is, the desktop image. A removed agent's task isn't one: the snapshot no longer says which
  * repository it worked in. Its repository is its agent's as it is now.
  */
 export function yourCases(team: Pick<TeamSnapshot, "tasks" | "agents">): YourCases {
@@ -87,7 +89,6 @@ export function yourCases(team: Pick<TeamSnapshot, "tasks" | "agents">): YourCas
     else if (!task.changes) leave("no change kept");
     else if (!task.record) leave("no record of its run");
     else if (!task.gates.length) leave("no gates");
-    else if (task.gates.some(looksAtADesktop)) leave("needs a desktop");
     else if (!agent) leave("agent removed");
     else if (!agent.repository) leave("no repository");
     else {
@@ -102,6 +103,7 @@ export function yourCases(team: Pick<TeamSnapshot, "tasks" | "agents">): YourCas
         base: task.changes.base,
         artifact: task.changes.artifact,
         record: task.record,
+        desktop: task.gates.some(looksAtADesktop),
       });
     }
   }
@@ -304,6 +306,7 @@ async function gatesOn(node: CaseClient, c: YourCase, job: EvalJob, layers: Patc
   const { sandbox } = await node.call<{ sandbox: SandboxView }>("createSandbox", {
     network: job.network,
     run: runId("g"),
+    ...(c.desktop ? { desktop: true } : {}),
     ...(job.isolation ? { isolation: job.isolation } : {}),
     ...(job.on ? { on: job.on } : {}),
   });
@@ -457,6 +460,7 @@ export async function attemptCase(node: CaseClient, c: YourCase, job: EvalJob): 
       {
         goal: c.goal,
         network: job.network,
+        ...(c.desktop ? { desktop: true } : {}),
         ...(job.isolation ? { isolation: job.isolation } : {}),
         ...(job.on ? { on: job.on } : {}),
         maxSteps: commandsFor(c),
