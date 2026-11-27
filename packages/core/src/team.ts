@@ -325,7 +325,7 @@ export const TeamRemoveInput = z.strictObject({ id: z.string().min(1).max(32), d
 export type TeamRemoveInput = z.infer<typeof TeamRemoveInput>;
 
 /** The VMs' notes store (Engram: docs/AGENTS.md): one switch for all of a node's agents, yours alone to turn, and
- * off until you do. Nothing else of the store is anyone's to set: its version is the image's, its place and its
+ * on until you turn it off. Nothing else of the store is anyone's to set: its version is the image's, its place and its
  * tools are the code's, and an agent's project is its repository's name or its own handle. */
 export const TeamEngramInput = z.strictObject({ on: z.boolean() });
 export type TeamEngramInput = z.infer<typeof TeamEngramInput>;

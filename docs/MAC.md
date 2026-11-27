@@ -20,8 +20,8 @@ This page says what it is and does today. The code cites its sections by name (M
   - **Settings** (⌘,) has three tabs: This Mac, Keys and Connectors.
 - **The menu bar.** It shows the agents at a glance, each in the ring of where it stands, with what needs you and the
   node in a line. It keeps the app running with its windows closed.
-- **Build.** A window of its own: a workbench with the primary, with your projects and their threads, what changed in
-  a checkout, and a terminal there.
+- **Build** (docs/BUILD.md). A window of its own: a workbench with the primary, with your projects and their threads,
+  what changed in a checkout, and a terminal there.
 - **Notifications.** They are the Mac's own: no Apple push service and no entitlement (`Mac/MacNotices.swift`).
   - Turned on in Settings, the node keeps for this Mac what it would send it, by the rules every device is told by. The
     app collects it over its own signed connection when the live stream says `notify` changed.
