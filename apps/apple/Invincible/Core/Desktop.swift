@@ -7,12 +7,14 @@ import Foundation
  * sends, and the node's refusal that a VM has no desktop.
  */
 
-/// What comes back from every look and everything done: the screen as it then is, and its size in its own pixels.
+/// What comes back from every look and everything done: the screen as it then is, and its size in its own pixels; and
+/// whether you have the desktop (`held`: nil when you don't, or from a VM whose image is older than take-over).
 struct DesktopShot: Decodable, Sendable, Equatable {
     struct Shot: Decodable, Sendable, Equatable { let mediaType: String; let data: String }
     let shot: Shot
     let width: Int
     let height: Int
+    var held: DesktopHold? = nil
 }
 
 /// One thing done on an agent's desktop, as the node takes it (core's DesktopAction).

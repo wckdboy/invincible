@@ -141,6 +141,37 @@ struct Vectors: Decodable {
         let shots: [Shot]
     }
 
+    /// An agent's desktop live (core's desktop-frames.ts, the PWA's lib/desktop-stream.ts), and the glass page's recording
+    /// the decoder is tested on (bench/desktop/glass-clock.ts).
+    struct DesktopStreamCases: Decodable {
+        struct Frame: Decodable { let kind: UInt8; let time: UInt64; let payload: String; let chunk: Chunk? }
+        struct Chunk: Decodable { let type: String; let timestamp: Double }
+        struct Codec: Decodable { let payload: String; let codec: String? }
+        struct Hold: Decodable { let held: DesktopHold; let at: Double; let ends: Double }
+        struct Again: Decodable { let n: Int; let ms: Int }
+        struct Glass: Decodable {
+            struct Strip: Decodable { let x: Int; let y: Int; let block: Int; let bits: Int }
+            struct Shown: Decodable { let kind: UInt8; let time: UInt64; let clicks: Int }
+            struct Bits: Decodable { let time: UInt64; let clicks: Int; let bits: [Int] }
+            let fixture: String
+            let strip: Strip
+            let frames: [Shown]
+            let bits: Bits
+        }
+        let header: Int
+        let most: Int
+        let type: String
+        let bytes: String
+        let cuts: [[Int]]
+        let frames: [Frame]
+        let refused: [String]
+        let codecs: [Codec]
+        let holds: [Hold]
+        let again: [Again]
+        let liveTries: Int
+        let glass: Glass
+    }
+
     /// An agent's face (core's taskStep, and the mood it takes from what it is doing: lib/orb-motion.ts').
     struct Faces: Decodable {
         struct Step: Decodable { let line: String; let step: String }
@@ -392,6 +423,7 @@ struct Vectors: Decodable {
     let agentForms: AgentForms
     let keys: KeyCases
     let desktop: DesktopCases
+    let desktopStream: DesktopStreamCases
     let faces: Faces
     let orb: OrbCases
     /// An agent's mark, the Grille (core's agent-mark.ts): AgentMarkTests.swift.

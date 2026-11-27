@@ -42,6 +42,17 @@ meanwhile, and a read that got no answer is owed until it does: a stall costs th
 is down only if it isn't up again within three seconds of going, so a fresh one that fails at once between networks
 says nothing (the vectors' `live.links`, which the web app, this app and Android's play alike).
 
+**An agent's screen** (`UI/AgentScreenView.swift`; its menu's Its screen) is live where its VM's desktop streams (C1):
+the node's stream of it (`POST /api/team/desktop/stream`, read whole as its bytes come by `Core/DesktopStream.swift`),
+each frame decoded as it comes by VideoToolbox (`Core/DesktopVideo.swift`) and shown as its own IOSurface, with no copy
+(`UI/DesktopLive.swift`), while it is on screen and the app is in front. A stream that ends is watched again a little
+later each time (0.5, 1, 2 and 4 s), its last frame kept meanwhile; after four ends in a row, or a refusal (an older
+node, a VM with no stream), it is a picture every two seconds, as before. A tap clicks there at once and brings back no
+picture: the stream shows it. Take over and Give back sit under it from its first frame; your input takes it over too
+if no one has it, and the row says until when by the clock, never counting down. It reads the stream as the web app
+does (the vectors' `desktopStream`), and `DesktopVideoTests` decodes the glass page's recording
+(`InvincibleTests/Fixtures/desktop-glass.frames`) and reads its pixel clock back from each frame.
+
 **The primary's name** is the node's to say: "Invincible" until you name it (`Core/Primary.swift`, from `GET
 /api/whoami`'s `primaryName` when a node sends one). Its handle on the wire is `primary`. Where a line is the web app's
 own (a room's speaker, "Given to the agents by your agent", a coding plan's line), it says what the web says, held to it
