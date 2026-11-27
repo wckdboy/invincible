@@ -11,10 +11,12 @@ import Foundation
  * says nothing at all for three of the node's beats is taken for dead and opened again; the node says its beat in its
  * hello (an older node, which doesn't, beats every 15 s). `renew` opens a fresh one at once, whatever stands: the network
  * changed under it, so the one open may be dead without a word (Wi-Fi to cellular), and a link that comes back within
- * HELLO_WAIT is never said to have gone. Each is opened from where the last left off: the last cursor its node gave (a
- * hello's or a change's `at`), and that hello says what changed since (core's live.ts). It is trusted only from a stream
- * opened from a cursor whose hello tells of the same topics as the stream before it; otherwise the device's scopes
- * changed, and it is read as a fresh hello.
+ * HELLO_WAIT is never said to have gone. Any link up a moment ago is said down only if it isn't up again within HELLO_WAIT
+ * of then, whatever its fresh ones do meanwhile: between networks a fresh one fails at once, and that is no reason to say
+ * it sooner (the vectors' `live.links`, played as the web app plays them). Each is opened from where the last left off:
+ * the last cursor its node gave (a hello's or a change's `at`), and that hello says what changed since (core's live.ts).
+ * It is trusted only from a stream opened from a cursor whose hello tells of the same topics as the stream before it;
+ * otherwise the device's scopes changed, and it is read as a fresh hello.
  *
  * Followers are what the app reads, each for its topics. When a fresh stream comes up, each whose last read began before
  * the stream said hello runs once (what it shows may be from before the node was telling of changes); one read since
@@ -129,6 +131,8 @@ final class LiveLink {
     private(set) var beat = LiveLink.olderBeat
     /// Down has been said since it was last up.
     private var saidDown = false
+    /// Up a moment ago: down only if it isn't up again within HELLO_WAIT of then, whatever fresh ones do meanwhile.
+    private var grace = false
     private var delay = LiveLink.retryFirst
     private var retrying: (@MainActor () -> Void)?
     private var downing: (@MainActor () -> Void)?
@@ -164,6 +168,7 @@ final class LiveLink {
         silence = off(silence)
         up = false
         saidDown = false
+        grace = false
     }
 
     /// Opens it now if it isn't open, refused or not (the app in front again).
@@ -184,7 +189,7 @@ final class LiveLink {
         silence = off(silence)
         retrying = off(retrying)
         up = false
-        if was { waitForHello() }
+        if was { wasUp() }
         delay = Self.retryFirst
         connect()
     }
@@ -206,6 +211,7 @@ final class LiveLink {
         upAt = clock.now()
         saidDown = false
         downing = off(downing)
+        grace = false
         topics = told
         self.beat = beat ?? Self.olderBeat
         handlers?.up(told, upAt, changed)
@@ -213,14 +219,25 @@ final class LiveLink {
 
     private func goDown() {
         downing = off(downing)
+        grace = false
         guard !up, !saidDown, running else { return }
         saidDown = true
         handlers?.down()
     }
 
+    /// A stream opened: down if it says no hello in time; but up a moment ago, the time is still counted from then.
     private func waitForHello() {
+        if grace { return }
         downing = off(downing)
         if !saidDown { downing = clock.after(Self.helloWait) { [weak self] in self?.goDown() } }
+    }
+
+    /// It was up a moment ago (its stream ended, or was renewed): down only if it isn't up again within HELLO_WAIT. A fresh
+    /// one that fails at once meanwhile (a phone between networks) doesn't say it sooner, nor do its retries put it off.
+    private func wasUp() {
+        downing = off(downing)
+        grace = !saidDown
+        if grace { downing = clock.after(Self.helloWait) { [weak self] in self?.goDown() } }
     }
 
     private func watch(_ stream: Int) {
@@ -297,8 +314,8 @@ final class LiveLink {
         let steady = helloAt.map { clock.now() - $0 >= Self.steady } ?? false
         let wait = steady ? 0 : delay
         delay = steady ? Self.retryFirst : min(delay * 2, Self.retryMax)
-        // Up a moment ago: down only if it isn't up again soon. Never up: down now.
-        if was { waitForHello() } else { goDown() }
+        // Up a moment ago: down only if it isn't up again soon. Never up (and not up a moment before): down now.
+        if was { wasUp() } else if !grace { goDown() }
         retrying = clock.after(wait) { [weak self] in self?.connect() }
     }
 }

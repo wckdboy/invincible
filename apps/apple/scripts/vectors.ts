@@ -47,7 +47,7 @@ import { atAGlance, attended, byAttention, doingNow, failedGate, inboxBeyond, in
 import { commandKind, costWords, factsOfRecord, gateRows, judgedWith, liveStep, proofOf, reviewOf, sameModelReview, stepGroups, steersOf, summaryWords, verdictOf, workedFor, workSummary } from "../../web/src/lib/steps.ts";
 import { judgedLine, neverReached, STEER_WORDS, steerAction, steerHint, steersWaiting } from "../../web/src/lib/steer.ts";
 import { MARK_BOX, MARK_POLYGON, MARK_RECTS } from "../../../scripts/mark.ts";
-import { GAP_MS, HELLO_WAIT_MS, RETRY_FIRST_MS, RETRY_MAX_MS, SILENT_MS, STEADY_MS } from "../../web/src/lib/live-link.ts";
+import { GAP_MS, HELLO_WAIT_MS, liveLink, RETRY_FIRST_MS, RETRY_MAX_MS, SILENT_MS, STEADY_MS } from "../../web/src/lib/live-link.ts";
 
 // The chats list groups at midnight: UTC here, and in the Swift tests, whatever this machine's own zone is.
 process.env.TZ = "UTC";
@@ -1468,7 +1468,120 @@ const liveCursors = ["b00t.0", "AbC-_9.123456789012345", "x".repeat(64), "x".rep
   if (kept !== core.LiveCursor.safeParse(cursor).success) fail(`the node and a device disagree on whether ${JSON.stringify(cursor)} is a cursor`);
   return { cursor, kept, path: core.livePath(cursor) };
 });
-const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELLO_WAIT_MS, retryFirstMs: RETRY_FIRST_MS, retryMaxMs: RETRY_MAX_MS, steadyMs: STEADY_MS, gapMs: GAP_MS, topics: core.LIVE_TOPICS, cursors: liveCursors };
+
+// And the link itself, played on a clock in hand (lib/live-link.ts): above all, a link up a moment ago is said down only
+// if it isn't up again within HELLO_WAIT_MS of then, whatever its fresh streams do meanwhile. Each case is its steps, then
+// what the link told and when, and when it opened each stream; LiveLink.swift and LiveLink.kt play the same steps, and
+// must tell the same at the same times. The steps:
+//   start, stop: the app shown, hidden; hello: the newest stream says hello (a node of today's, beating every beatMs);
+//   end: it ends; offline, refusing, online: from now on a fresh stream fails at once, as with no network, or as the
+//   node refuses it, or opens; wait: the clock moves on; steady: it moves on, the newest stream beating all the while.
+type LinkStep = { act: "start" | "stop" | "end" | "offline" | "refusing" | "online" } | { act: "hello"; topics: core.LiveTopic[] } | { act: "wait" | "steady"; ms: number };
+class LinkRefused extends Error {}
+async function playLink(steps: LinkStep[]): Promise<{ told: string[]; opened: number[] }> {
+  let now = 0;
+  const timers: { at: number; run: () => void; off: boolean }[] = [];
+  const after = (ms: number, run: () => void) => {
+    const timer = { at: now + ms, run, off: false };
+    timers.push(timer);
+    return () => void (timer.off = true);
+  };
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+  // What comes due runs in order, and of two due at once, the one set first.
+  const advance = async (ms: number) => {
+    const end = now + ms;
+    for (;;) {
+      await flush();
+      const due = timers.filter((t) => !t.off && t.at <= end).sort((a, b) => a.at - b.at)[0];
+      if (!due) break;
+      due.off = true;
+      now = due.at;
+      due.run();
+    }
+    now = end;
+    await flush();
+  };
+  const streams: { at: number; put(item: core.LiveEvent | "end"): void; alive(): void }[] = [];
+  let failing: Error | null = null;
+  const open = (signal: AbortSignal, alive: () => void): AsyncIterable<core.LiveEvent> => {
+    const queue: (core.LiveEvent | "end" | Error)[] = [];
+    let wake: (() => void) | null = null;
+    const put = (item: (typeof queue)[number]) => {
+      queue.push(item);
+      wake?.();
+    };
+    signal.addEventListener("abort", () => put(new DOMException("aborted", "AbortError")));
+    const fails = failing;
+    streams.push({ at: now, put, alive });
+    return {
+      async *[Symbol.asyncIterator]() {
+        if (fails) throw fails;
+        for (;;) {
+          while (!queue.length) await new Promise<void>((resolve) => (wake = resolve));
+          const item = queue.shift()!;
+          if (item === "end") return;
+          if (item instanceof Error) throw item;
+          yield item;
+        }
+      },
+    };
+  };
+  const told: string[] = [];
+  const link = liveLink({ open, refused: (error) => error instanceof LinkRefused, after, now: () => now });
+  link.attach({ up: (topics) => told.push(`${now} up ${topics.join(",")}`), changed: (topics) => told.push(`${now} changed ${topics.join(",")}`), down: () => told.push(`${now} down`) });
+  const newest = () => streams.at(-1)!;
+  for (const step of steps) {
+    if (step.act === "start") link.start();
+    else if (step.act === "stop") link.stop();
+    else if (step.act === "hello") {
+      newest().alive();
+      newest().put({ type: "hello", topics: step.topics, beat: core.LIVE_BEAT_MS });
+    } else if (step.act === "end") newest().put("end");
+    else if (step.act === "offline") failing = new TypeError("fetch failed");
+    else if (step.act === "refusing") failing = new LinkRefused("refused");
+    else if (step.act === "online") failing = null;
+    else if (step.act === "wait") await advance(step.ms);
+    else
+      for (let moved = 0; moved < step.ms; moved += core.LIVE_BEAT_MS) {
+        await advance(core.LIVE_BEAT_MS);
+        newest().alive();
+      }
+    await flush();
+  }
+  link.stop();
+  return { told, opened: streams.map((stream) => stream.at) };
+}
+const helloFleet: LinkStep = { act: "hello", topics: ["fleet"] };
+const linkCases: { name: string; steps: LinkStep[] }[] = [
+  { name: "never up: down at once when it can't be opened, then tried again a second later, then twice as long", steps: [{ act: "offline" }, { act: "start" }, { act: "wait", ms: 3_000 }] },
+  {
+    name: "up a while, then gone with the network: a fresh one failing at once says nothing, and back within HELLO_WAIT_MS it never went",
+    steps: [{ act: "start" }, helloFleet, { act: "steady", ms: STEADY_MS }, { act: "offline" }, { act: "end" }, { act: "wait", ms: 500 }, { act: "online" }, { act: "wait", ms: 500 }, helloFleet, { act: "wait", ms: HELLO_WAIT_MS }],
+  },
+  {
+    name: "up a moment ago and failing since: down when HELLO_WAIT_MS ends after it went, not sooner",
+    steps: [{ act: "start" }, helloFleet, { act: "offline" }, { act: "end" }, { act: "wait", ms: HELLO_WAIT_MS - 1 }, { act: "wait", ms: 1 }, { act: "online" }, { act: "wait", ms: 4_000 }, helloFleet],
+  },
+  {
+    name: "up a moment ago, a fresh one that says nothing doesn't put it off: down when HELLO_WAIT_MS ends after it went",
+    steps: [{ act: "start" }, helloFleet, { act: "end" }, { act: "wait", ms: HELLO_WAIT_MS }, { act: "wait", ms: 500 }, helloFleet],
+  },
+  { name: "up again in time and gone again: counted from when it last went", steps: [{ act: "start" }, helloFleet, { act: "end" }, { act: "wait", ms: 1_500 }, helloFleet, { act: "wait", ms: 500 }, { act: "end" }, { act: "wait", ms: HELLO_WAIT_MS }] },
+  {
+    name: "the node's refusal is down at once, up a moment ago or not, and not tried again on a timer",
+    steps: [{ act: "start" }, helloFleet, { act: "refusing" }, { act: "end" }, { act: "wait", ms: RETRY_FIRST_MS }, { act: "wait", ms: 60_000 }],
+  },
+  {
+    name: "stopped while it waits to be said down, nothing is said; started again, it waits for a hello afresh",
+    steps: [{ act: "start" }, helloFleet, { act: "end" }, { act: "wait", ms: RETRY_FIRST_MS }, { act: "stop" }, { act: "wait", ms: 5_000 }, { act: "start" }, { act: "wait", ms: HELLO_WAIT_MS }],
+  },
+];
+const links = [];
+for (const c of linkCases) links.push({ ...c, ...(await playLink(c.steps)) });
+
+const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELLO_WAIT_MS, retryFirstMs: RETRY_FIRST_MS, retryMaxMs: RETRY_MAX_MS, steadyMs: STEADY_MS, gapMs: GAP_MS, topics: core.LIVE_TOPICS, cursors: liveCursors, links };
 
 // ---- a task on its Live Activity: its state, from the task and its trail, and its words (lib/live-activity.ts) ----------
 const activityTrail = (...texts: string[]) => texts.map((text, i) => ({ n: i + 1, at: NOW - 600_000 + i * 10_000, text }));

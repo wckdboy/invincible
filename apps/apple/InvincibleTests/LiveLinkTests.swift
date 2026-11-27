@@ -115,6 +115,51 @@ private func link() -> (clock: HeldClock, streams: HeldStreams, told: () -> [Str
     return (clock, streams, { told.lines }, link)
 }
 
+/// The vectors' steps (`live.links`, made by playing the web app's link), played on a clock in hand: what the link told,
+/// each with when, and when it opened each stream.
+@MainActor
+private func play(_ steps: [Vectors.Live.Step], beat: Double) async -> (told: [String], opened: [Double]) {
+    let clock = HeldClock()
+    let streams = HeldStreams()
+    final class Played: @unchecked Sendable {
+        var told: [String] = []
+        var opened: [Double] = []
+    }
+    let played = Played()
+    let link = LiveLink(open: { since, alive in
+        played.opened.append(clock.now)
+        return streams.open(since: since, alive: alive)
+    }, refused: { $0 is Refused }, clock: clock.clock)
+    link.attach(.init(
+        up: { topics, _, _ in played.told.append("\(Int(clock.now)) up \(topics.joined(separator: ","))") },
+        changed: { topics in played.told.append("\(Int(clock.now)) changed \(topics.joined(separator: ","))") },
+        down: { played.told.append("\(Int(clock.now)) down") }
+    ))
+    for step in steps {
+        switch step.act {
+        case "start": link.start()
+        case "stop": link.stop()
+        case "hello": streams.last.push(.hello(topics: step.topics ?? [], beat: beat))
+        case "end": streams.last.end()
+        case "offline": streams.refuseWith = Unreachable()
+        case "refusing": streams.refuseWith = Refused()
+        case "online": streams.refuseWith = nil
+        case "wait": await clock.advance(step.ms ?? 0)
+        case "steady":
+            var moved = 0.0
+            while moved < step.ms ?? 0 {
+                await clock.advance(beat)
+                streams.last.beat()
+                moved += beat
+            }
+        default: Issue.record("a step these tests don't know: \(step.act)")
+        }
+        await clock.flush()
+    }
+    link.stop()
+    return (played.told, played.opened)
+}
+
 private func hello(_ topics: String..., beat: Double? = 1_500) -> LiveEvent { .hello(topics: topics, beat: beat) }
 private func changed(_ topics: String...) -> LiveEvent { .changed(topics) }
 /// A node's of today: where things stand with each, and with a hello opened from a cursor, what changed since.
@@ -286,6 +331,44 @@ private func changedAt(_ at: String, _ topics: String...) -> LiveEvent { .change
         link.renew()
         await clock.advance(LiveLink.helloWait)
         #expect(told() == ["up fleet", "up fleet", "down"])
+    }
+
+    // Seen on Android's emulator (26 November 2026): Wi-Fi off, the network lost, cellular 0.2 s later. A fresh stream
+    // opened in that gap fails at once, and down was said at once: "can't reach" at every handover. Up a moment ago, it is
+    // down only if it isn't up again within HELLO_WAIT, whatever its fresh ones do meanwhile (Android's since e86072d).
+    @Test func renewedWhereTheFreshOneFailsAtOnceItIsntDownIfItsUpAgainWithinHelloWait() async {
+        let (clock, streams, told, link) = link()
+        link.start()
+        streams.last.push(hello("fleet"))
+        await clock.flush()
+        streams.refuseWith = Unreachable()
+        link.renew()
+        await clock.flush()
+        #expect(told() == ["up fleet"])
+        streams.refuseWith = nil
+        await clock.advance(LiveLink.retryFirst)
+        streams.last.push(hello("fleet"))
+        await clock.flush()
+        #expect(told() == ["up fleet", "up fleet"])
+        // One that isn't back in time is down when HELLO_WAIT ends after the renewal: not sooner, nor later for its retries.
+        streams.refuseWith = Unreachable()
+        link.renew()
+        await clock.advance(LiveLink.helloWait - 1)
+        #expect(told() == ["up fleet", "up fleet"])
+        await clock.advance(1)
+        #expect(told() == ["up fleet", "up fleet", "down"])
+    }
+
+    /// The web app's link, played on a clock in hand (the vectors' `live.links`): what it told, when, and when it opened
+    /// each stream, the same here, step for step.
+    @Test func playedTheWebAppsStepsItTellsWhatTheWebAppsTellsAtTheSameTimes() async {
+        let live = Vectors.shared.live
+        #expect(live.links.count >= 7)
+        for item in live.links {
+            let played = await play(item.steps, beat: live.beatMs)
+            #expect(played.told == item.told, "\(item.name)")
+            #expect(played.opened == item.opened, "\(item.name)")
+        }
     }
 
     @Test func itIsOpenedAgainFromTheLastCursorItsNodeGaveAHellosOrAChangesThatHelloSaysOnlyWhatChangedSince() async {

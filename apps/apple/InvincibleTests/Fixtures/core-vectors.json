@@ -33560,6 +33560,305 @@
         "kept": false,
         "path": "/api/live"
       }
+    ],
+    "links": [
+      {
+        "name": "never up: down at once when it can't be opened, then tried again a second later, then twice as long",
+        "steps": [
+          {
+            "act": "offline"
+          },
+          {
+            "act": "start"
+          },
+          {
+            "act": "wait",
+            "ms": 3000
+          }
+        ],
+        "told": [
+          "0 down"
+        ],
+        "opened": [
+          0,
+          1000,
+          3000
+        ]
+      },
+      {
+        "name": "up a while, then gone with the network: a fresh one failing at once says nothing, and back within HELLO_WAIT_MS it never went",
+        "steps": [
+          {
+            "act": "start"
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          },
+          {
+            "act": "steady",
+            "ms": 30000
+          },
+          {
+            "act": "offline"
+          },
+          {
+            "act": "end"
+          },
+          {
+            "act": "wait",
+            "ms": 500
+          },
+          {
+            "act": "online"
+          },
+          {
+            "act": "wait",
+            "ms": 500
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          },
+          {
+            "act": "wait",
+            "ms": 3000
+          }
+        ],
+        "told": [
+          "0 up fleet",
+          "31000 up fleet"
+        ],
+        "opened": [
+          0,
+          30000,
+          31000
+        ]
+      },
+      {
+        "name": "up a moment ago and failing since: down when HELLO_WAIT_MS ends after it went, not sooner",
+        "steps": [
+          {
+            "act": "start"
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          },
+          {
+            "act": "offline"
+          },
+          {
+            "act": "end"
+          },
+          {
+            "act": "wait",
+            "ms": 2999
+          },
+          {
+            "act": "wait",
+            "ms": 1
+          },
+          {
+            "act": "online"
+          },
+          {
+            "act": "wait",
+            "ms": 4000
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          }
+        ],
+        "told": [
+          "0 up fleet",
+          "3000 down",
+          "7000 up fleet"
+        ],
+        "opened": [
+          0,
+          1000,
+          3000,
+          7000
+        ]
+      },
+      {
+        "name": "up a moment ago, a fresh one that says nothing doesn't put it off: down when HELLO_WAIT_MS ends after it went",
+        "steps": [
+          {
+            "act": "start"
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          },
+          {
+            "act": "end"
+          },
+          {
+            "act": "wait",
+            "ms": 3000
+          },
+          {
+            "act": "wait",
+            "ms": 500
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          }
+        ],
+        "told": [
+          "0 up fleet",
+          "3000 down",
+          "3500 up fleet"
+        ],
+        "opened": [
+          0,
+          1000
+        ]
+      },
+      {
+        "name": "up again in time and gone again: counted from when it last went",
+        "steps": [
+          {
+            "act": "start"
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          },
+          {
+            "act": "end"
+          },
+          {
+            "act": "wait",
+            "ms": 1500
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          },
+          {
+            "act": "wait",
+            "ms": 500
+          },
+          {
+            "act": "end"
+          },
+          {
+            "act": "wait",
+            "ms": 3000
+          }
+        ],
+        "told": [
+          "0 up fleet",
+          "1500 up fleet",
+          "5000 down"
+        ],
+        "opened": [
+          0,
+          1000,
+          4000
+        ]
+      },
+      {
+        "name": "the node's refusal is down at once, up a moment ago or not, and not tried again on a timer",
+        "steps": [
+          {
+            "act": "start"
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          },
+          {
+            "act": "refusing"
+          },
+          {
+            "act": "end"
+          },
+          {
+            "act": "wait",
+            "ms": 1000
+          },
+          {
+            "act": "wait",
+            "ms": 60000
+          }
+        ],
+        "told": [
+          "0 up fleet",
+          "1000 down"
+        ],
+        "opened": [
+          0,
+          1000
+        ]
+      },
+      {
+        "name": "stopped while it waits to be said down, nothing is said; started again, it waits for a hello afresh",
+        "steps": [
+          {
+            "act": "start"
+          },
+          {
+            "act": "hello",
+            "topics": [
+              "fleet"
+            ]
+          },
+          {
+            "act": "end"
+          },
+          {
+            "act": "wait",
+            "ms": 1000
+          },
+          {
+            "act": "stop"
+          },
+          {
+            "act": "wait",
+            "ms": 5000
+          },
+          {
+            "act": "start"
+          },
+          {
+            "act": "wait",
+            "ms": 3000
+          }
+        ],
+        "told": [
+          "0 up fleet",
+          "9000 down"
+        ],
+        "opened": [
+          0,
+          1000,
+          6000
+        ]
+      }
     ]
   },
   "verdicts": [

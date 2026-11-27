@@ -277,6 +277,69 @@ class LiveLinkTest {
         assertTrue(Live.SILENT_MS <= 5_000)
     }
 
+    /** The web app's link, played on a clock in hand (the vectors' `live.links`): what it told, when, and when it opened each
+     * stream, the same here, step for step; the iPhone's plays the same. */
+    @Test fun playedTheWebAppsStepsItTellsWhatTheWebAppsTellsAtTheSameTimes() {
+        val live = Json.parse(javaClass.classLoader!!.getResource("core-vectors.json")!!.readText())["live"]
+        val links = live["links"].list
+        assertTrue(links.size >= 7)
+        for (item in links) {
+            val (told, opened) = play(item["steps"].list, live["beatMs"].long!!)
+            assertEquals(item["name"].string, item["told"].list.map { it.string }, told)
+            assertEquals(item["name"].string, item["opened"].list.map { it.long }, opened)
+        }
+    }
+
+    /** The vectors' steps (`live.links`, made by playing the web app's link), played on a clock in hand: what the link told,
+     * each with when, and when it opened each stream. */
+    private fun play(steps: List<Json>, beat: Long): Pair<List<String>, List<Long>> {
+        val clock = Clock()
+        val opened = ArrayList<Stream>()
+        val openedAt = ArrayList<Long>()
+        var failing: Throwable? = null
+        val told = ArrayList<String>()
+        val link = LiveLink(
+            open = { since, alive, event, ended ->
+                val stream = Stream(since, alive, event, ended)
+                opened += stream
+                openedAt += clock.now
+                failing?.let { stream.fail(it) }
+                ({ stream.close() })
+            },
+            refused = { it is Refused },
+            after = clock.after,
+            now = { clock.now },
+        )
+        link.attach(object : LinkHandlers {
+            override fun up(topics: List<String>, at: Long, changed: List<String>?) { told += "${clock.now} up ${topics.joinToString(",")}" }
+            override fun changed(topics: List<String>) { told += "${clock.now} changed ${topics.joinToString(",")}" }
+            override fun down() { told += "${clock.now} down" }
+        })
+        for (step in steps) {
+            when (val act = step["act"].string) {
+                "start" -> link.start()
+                "stop" -> link.stop()
+                "hello" -> opened.last().push(LiveEvent.Hello(step["topics"].list.mapNotNull { it.string }, beat))
+                "end" -> opened.last().end()
+                "offline" -> failing = java.io.IOException("no network")
+                "refusing" -> failing = Refused()
+                "online" -> failing = null
+                "wait" -> clock.advance(step["ms"].long!!)
+                "steady" -> {
+                    var moved = 0L
+                    while (moved < step["ms"].long!!) {
+                        clock.advance(beat)
+                        opened.last().beat()
+                        moved += beat
+                    }
+                }
+                else -> throw AssertionError("a step these tests don't know: $act")
+            }
+        }
+        link.stop()
+        return told to openedAt
+    }
+
     @Test fun oneOpenButSayingNoHelloIsDownAfterAWhileAndStaysOpen() {
         val s = Setup()
         s.link.start()

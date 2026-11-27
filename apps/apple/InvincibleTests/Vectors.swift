@@ -532,11 +532,28 @@ struct Vectors: Decodable {
         let topics: [String]
         /// Which a device keeps and opens the stream again from (core's LIVE_CURSOR), and the path it sends for each.
         let cursors: [Cursor]
+        /// The web app's link played on a clock in hand: its steps, what it told and when, and when it opened each stream.
+        let links: [Link]
 
         struct Cursor: Decodable {
             let cursor: String
             let kept: Bool
             let path: String
+        }
+
+        struct Link: Decodable {
+            let name: String
+            let steps: [Step]
+            /// Each "<ms> up <topics>", "<ms> changed <topics>" or "<ms> down".
+            let told: [String]
+            let opened: [Double]
+        }
+
+        /// start, stop, hello (`topics`), end, offline, refusing, online, wait and steady (`ms`): apps/apple/scripts/vectors.ts.
+        struct Step: Decodable {
+            let act: String
+            let topics: [String]?
+            let ms: Double?
         }
     }
 

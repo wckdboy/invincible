@@ -153,6 +153,83 @@ describe("the stream, kept open", () => {
     expect(told).toEqual(["up fleet", "down"]);
   });
 
+  // Seen on Android's emulator (26 November 2026), and so on any phone: Wi-Fi off, cellular 0.2 s later, and a fresh
+  // stream opened in that gap fails at once; down was said at once, "can't reach" at every handover. Up a moment ago, it
+  // is down only if it isn't up again within HELLO_WAIT_MS of then, whatever its fresh ones do meanwhile (Android since
+  // e86072d; the vectors' `live.links` hold the iPhone and Android to the same).
+  test("up a moment ago, a fresh one failing at once (a phone between networks) doesn't say it's down: back in time, it never was", async () => {
+    const { c, s, told, l } = link();
+    l.start();
+    s.last().push(hello("fleet"));
+    for (let at = 0; at < STEADY_MS; at += LIVE_BEAT_MS) {
+      await c.advance(LIVE_BEAT_MS);
+      s.last().beat();
+    }
+    s.refuse(new TypeError("fetch failed"));
+    s.last().end();
+    await c.advance(0);
+    // Opened again at once, and that one failed at once.
+    expect(s.opened.length).toBe(2);
+    expect(told).toEqual(["up fleet"]);
+    s.refuse(null);
+    await c.advance(RETRY_FIRST_MS);
+    expect(s.opened.length).toBe(3);
+    s.last().push(hello("fleet"));
+    await c.advance(HELLO_WAIT_MS);
+    expect(told).toEqual(["up fleet", "up fleet"]);
+  });
+
+  test("up a moment ago and failing since, it is down when HELLO_WAIT_MS ends after it went: not sooner, and a fresh one saying nothing doesn't put it off", async () => {
+    const { c, s, told, l } = link();
+    l.start();
+    s.last().push(hello("fleet"));
+    await c.flush();
+    s.refuse(new TypeError("fetch failed"));
+    s.last().end();
+    await c.advance(HELLO_WAIT_MS - 1);
+    // (Its fresh ones failed meanwhile, and said nothing.)
+    expect(s.opened.length).toBe(2);
+    expect(told).toEqual(["up fleet"]);
+    await c.advance(1);
+    expect(told).toEqual(["up fleet", "down"]);
+    // A fresh one that hangs, saying nothing, is held to the same: the time is counted from when the last went.
+    const t = link();
+    t.l.start();
+    t.s.last().push(hello("fleet"));
+    await t.c.flush();
+    t.s.last().end();
+    await t.c.advance(RETRY_FIRST_MS);
+    expect(t.s.opened.length).toBe(2);
+    await t.c.advance(HELLO_WAIT_MS - RETRY_FIRST_MS);
+    expect(t.told).toEqual(["up fleet", "down"]);
+    // Up again, and gone again: counted from then.
+    t.s.last().push(hello("fleet"));
+    await t.c.advance(500);
+    t.s.last().end();
+    await t.c.advance(HELLO_WAIT_MS - 1);
+    expect(t.told).toEqual(["up fleet", "down", "up fleet"]);
+    await t.c.advance(1);
+    expect(t.told).toEqual(["up fleet", "down", "up fleet", "down"]);
+  });
+
+  test("stopped while it waits to be said down, nothing is said; started again, it waits for a hello afresh", async () => {
+    const { c, s, told, l } = link();
+    l.start();
+    s.last().push(hello("fleet"));
+    await c.flush();
+    s.last().end();
+    await c.advance(RETRY_FIRST_MS);
+    l.stop();
+    await c.advance(10 * HELLO_WAIT_MS);
+    expect(told).toEqual(["up fleet"]);
+    l.start();
+    await c.advance(HELLO_WAIT_MS - 1);
+    expect(told).toEqual(["up fleet"]);
+    await c.advance(1);
+    expect(told).toEqual(["up fleet", "down"]);
+    expect(s.opened.length).toBe(3);
+  });
+
   test("one the node refuses (no stream on an older node, a device that may not) is down, and not tried again on a timer", async () => {
     const { c, s, told, l } = link();
     s.refuse(new Refused("404"));

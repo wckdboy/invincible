@@ -8,10 +8,12 @@ import { LIVE_BEAT_MS, LIVE_CURSOR, type LiveEvent, type LiveTopic } from "@invi
  * second later, then twice as long each time, up to half a minute. One the node refuses (an older node without it, a
  * device that may not read it, a revoked one) is opened again only when told to: the app shown again, the network
  * back. One that says nothing at all for SILENT_MS (the node beats every LIVE_BEAT_MS) is taken for dead and opened
- * again. Each is opened from where the last left off: the last cursor its node gave (a hello's or a change's `at`),
- * and that hello says what changed since (core's live.ts). It is trusted only from a stream opened from a cursor whose
- * hello tells of the same topics as the stream before it; otherwise the device's scopes changed, and it is read as a
- * fresh hello.
+ * again. A link up a moment ago is said down only if it isn't up again within HELLO_WAIT_MS of then, whatever its
+ * fresh ones do meanwhile: a phone between networks fails a fresh one at once, and that is no reason to say it sooner
+ * (the iPhone's and Android's links hold to the same, by the vectors' `live.links`). Each is opened from where the last
+ * left off: the last cursor its node gave (a hello's or a change's `at`), and that hello says what changed since
+ * (core's live.ts). It is trusted only from a stream opened from a cursor whose hello tells of the same topics as the
+ * stream before it; otherwise the device's scopes changed, and it is read as a fresh hello.
  *
  * Followers are what the app reads, each for its topics. When a fresh stream comes up, each whose last read began
  * before the stream said hello runs once (what it shows may be from before the node was telling of changes); one read
@@ -90,6 +92,8 @@ export function liveLink(o: LinkOptions): LiveLink {
   let cursor: string | null = null;
   /** Down has been said since it was last up. */
   let saidDown = false;
+  /** Up a moment ago: down only if it isn't up again within HELLO_WAIT_MS of then, whatever fresh ones do meanwhile. */
+  let grace = false;
   let delay = RETRY_FIRST_MS;
   let retrying: (() => void) | null = null;
   let downing: (() => void) | null = null;
@@ -104,19 +108,32 @@ export function liveLink(o: LinkOptions): LiveLink {
     upAt = o.now();
     saidDown = false;
     downing = off(downing);
+    grace = false;
     topics = told;
     handlers?.up(told, upAt, changed);
   };
   const keep = (at: unknown): string | null => (typeof at === "string" && LIVE_CURSOR.test(at) ? at : null);
   const goDown = () => {
     downing = off(downing);
+    grace = false;
     if (isUp || saidDown || !running) return;
     saidDown = true;
     handlers?.down();
   };
+  /** A stream opened: down if it says no hello in time; but up a moment ago, the time is still counted from then. */
   const waitForHello = () => {
+    if (grace) return;
     downing = off(downing);
     if (!saidDown) downing = o.after(HELLO_WAIT_MS, goDown);
+  };
+  /**
+   * It was up a moment ago (its stream ended): down only if it isn't up again within HELLO_WAIT_MS. A fresh one that
+   * fails at once meanwhile (a phone between networks) doesn't say it sooner, nor do its retries put it off.
+   */
+  const wasUp = () => {
+    downing = off(downing);
+    grace = !saidDown;
+    if (grace) downing = o.after(HELLO_WAIT_MS, goDown);
   };
   const watch = (controller: AbortController) => {
     silence = off(silence);
@@ -172,9 +189,9 @@ export function liveLink(o: LinkOptions): LiveLink {
       const steady = helloAt !== null && o.now() - helloAt >= STEADY_MS;
       const wait = steady ? 0 : delay;
       delay = steady ? RETRY_FIRST_MS : Math.min(delay * 2, RETRY_MAX_MS);
-      // Up a moment ago: down only if it isn't up again soon. Never up: down now.
-      if (was) waitForHello();
-      else goDown();
+      // Up a moment ago: down only if it isn't up again soon. Never up (and not up a moment before): down now.
+      if (was) wasUp();
+      else if (!grace) goDown();
       retrying = o.after(wait, connect);
     })();
   }
@@ -196,6 +213,7 @@ export function liveLink(o: LinkOptions): LiveLink {
       silence = off(silence);
       isUp = false;
       saidDown = false;
+      grace = false;
     },
     retry() {
       if (!running || current) return;

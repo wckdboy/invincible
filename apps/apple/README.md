@@ -38,7 +38,9 @@ held to its cases): nothing is asked while nothing changes, a change is read wit
 link silent for three of the node's beats is taken for dead and opened again, and a change of network opens a fresh one
 at once (`Node/PathWatch.swift`). Each is opened from where the last left off, so a renewal reads only what changed
 meanwhile, and a read that got no answer is owed until it does: a stall costs the stream's one request
-(`PerfTests.testRequestsThroughAStall`). Home says "Reconnecting" in one line while it is down.
+(`PerfTests.testRequestsThroughAStall`). Home says "Reconnecting" in one line while it is down: a link up a moment ago
+is down only if it isn't up again within three seconds of going, so a fresh one that fails at once between networks
+says nothing (the vectors' `live.links`, which the web app, this app and Android's play alike).
 
 **The primary's name** is the node's to say: "Invincible" until you name it (`Core/Primary.swift`, from `GET
 /api/whoami`'s `primaryName` when a node sends one). Its handle on the wire is `primary`. Where a line is the web app's
