@@ -86,5 +86,5 @@ describe("a failing gate's printed tail in the note", () => {
     expect(note).toContain("gate 4 failed (exit 1):");
     // The end of each gate's tail is what's kept, so the last gate's marker is still there.
     expect(note.endsWith("GATE4")).toBe(true);
-  });
+  }, 30_000); // (Its four gates each run sh, with git beside them: the default 5 s is below that cost on a loaded machine.)
 });

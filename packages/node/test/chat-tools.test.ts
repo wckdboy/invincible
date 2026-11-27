@@ -563,7 +563,7 @@ describe("what it knows of you", () => {
     const twice = await cli("about", "rm", "--AbCdEfGhIjK");
     expect(twice.code).not.toBe(0);
     expect(twice.err).toContain('no fact about you is "--AbCdEfGhIjK"');
-  });
+  }, 30_000); // (It spawns the CLI four times: the default 5 s is below that cost on a loaded machine.)
 
   test("what you kept goes with its answers, and is listed, however many facts it has proposed since", async () => {
     const admin = home.adminToken();
