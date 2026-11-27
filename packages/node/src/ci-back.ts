@@ -1,4 +1,4 @@
-import { type ArgValue, capLabel, TEAM_LIMITS, TEAM_PRIMARY, type TeamOutcomeStatus, type TeamTask, type TeamTaskFix, usdLabel } from "@invincible/core";
+import { type ActionView, type ArgValue, capLabel, TEAM_LIMITS, TEAM_PRIMARY, type TeamOutcomeStatus, type TeamTask, type TeamTaskFix, usdLabel } from "@invincible/core";
 import type { CiFailure, CiReview, ShippedPull } from "./ci-watch.ts";
 import { fenced } from "./fence.ts";
 import type { OutcomeRunner } from "./outcomes.ts";
@@ -42,6 +42,19 @@ export interface CiBackDeps {
   outcomes: () => OutcomeRunner | undefined;
   /** Whether you declined a fix's push onto this pull request's branch (its ship.update denied): its fixes are yours then. */
   declined?: (pull: ShippedPull) => boolean;
+}
+
+/**
+ * Whether you declined a fix's push onto this pull request's branch, read from the node's actions as what it shipped is
+ * (shippedPulls): a ship.update this node filed through the pull request's connector, onto that branch of that
+ * repository, that you denied. One you edited is recorded so too (sent as another: connectors.ts), the safe way. The
+ * daemon's `declined` (the review of 27 November, S4).
+ */
+export function declinedPush(actions: ActionView[], pull: ShippedPull, node: string): boolean {
+  return actions.some((a) => {
+    const args = a.args as { owner?: unknown; repo?: unknown; branch?: unknown };
+    return a.tool === "ship.update" && a.state === "denied" && a.connector === pull.connector && a.node === node && String(args.owner).toLowerCase() === pull.owner.toLowerCase() && String(args.repo).toLowerCase() === pull.repo.toLowerCase() && args.branch === pull.branch;
+  });
 }
 
 const OUTCOME_ENDED: Record<Exclude<TeamOutcomeStatus, "active">, string> = { paused: "paused", done: "done", stopped: "stopped", spent: "out of budget" };

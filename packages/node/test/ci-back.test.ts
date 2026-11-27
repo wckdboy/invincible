@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { newNodeIdentity, TEAM_PRIMARY, TEAM_LIMITS, type TeamTask } from "@invincible/core";
+import { type ActionView, newNodeIdentity, TEAM_PRIMARY, TEAM_LIMITS, type TeamTask } from "@invincible/core";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
-import { CI_FIXES, giveBack, offerFix, type OfferDeps, reviewBack, wantsReviews } from "../src/ci-back.ts";
+import { CI_FIXES, declinedPush, giveBack, offerFix, type OfferDeps, reviewBack, wantsReviews } from "../src/ci-back.ts";
 import type { CiFailure, ShippedPull } from "../src/ci-watch.ts";
 import { OutcomeRunner } from "../src/outcomes.ts";
 import { TeamStore } from "../src/team-store.ts";
@@ -301,6 +301,52 @@ describe("who a fix on its own word reaches, and with how much", () => {
     const deps = { ...w.deps, declined: (shipped: ShippedPull) => shipped.branch === pull.branch };
     expect(giveBack(deps, pull, failure(1))).toEqual({ said: "You declined a fix's push onto invincible/units: further fixes of this pull request are yours.", fixing: false });
     expect(w.fixes()).toEqual([]);
+  });
+
+  // The re-review of 27 November, T6 (F36): what the daemon reads as a push you declined, once inline there and untested.
+  test("S4: a push you declined is read from this node's actions: a ship.update of its you denied, or edited, onto that very branch, through that connector", () => {
+    const push = (over: Partial<ActionView> = {}): ActionView => ({
+      id: "a_push1",
+      connector: "github",
+      tool: "ship.update",
+      args: { owner: "amiriteorg", repo: "shipyard", branch: "invincible/units", artifact: FIX_ART, title: "Fix the units" },
+      class: "outward",
+      target: "PATCH /repos/amiriteorg/shipyard/git/refs/heads/invincible/units (ship.update)",
+      by: "primary",
+      why: null,
+      node: "n_here",
+      requestedAt: "x",
+      expires: 0,
+      state: "denied",
+      sendBy: null,
+      decidedVia: null,
+      order: null,
+      receipt: null,
+      note: null,
+      self: false,
+      ...over,
+    });
+    expect(declinedPush([push()], pull, "n_here")).toBe(true);
+    // One you edited is recorded as denied, sent as another (connectors.ts): its further fixes are yours too, the safe way.
+    expect(declinedPush([push({ id: "a_push2", state: "done", why: "(edited by you from a_push1)" }), push({ note: "you edited it: sent as a_push2" })], pull, "n_here")).toBe(true);
+    // GitHub's owner and repository names are any case; its branch names are not.
+    expect(declinedPush([push({ args: { owner: "AmiriteOrg", repo: "Shipyard", branch: "invincible/units" } })], pull, "n_here")).toBe(true);
+    // Not a push that waits, was approved, went through or failed; not another branch's, repository's or owner's; not
+    // through another connector, nor another node's; not another call.
+    for (const other of [
+      push({ state: "waiting" }),
+      push({ state: "approved" }),
+      push({ state: "done" }),
+      push({ state: "failed" }),
+      push({ args: { owner: "amiriteorg", repo: "shipyard", branch: "invincible/other" } }),
+      push({ args: { owner: "amiriteorg", repo: "shipyard", branch: "Invincible/Units" } }),
+      push({ args: { owner: "amiriteorg", repo: "other", branch: "invincible/units" } }),
+      push({ args: { owner: "someone", repo: "shipyard", branch: "invincible/units" } }),
+      push({ connector: "github-amiriteorg" }),
+      push({ node: "n_other" }),
+      push({ tool: "ship" }),
+    ]) expect(declinedPush([other], pull, "n_here")).toBe(false);
+    expect(declinedPush([], pull, "n_here")).toBe(false);
   });
 
   test("S5: a failure said to be yours stays yours: the same commit never goes back later, though its day frees; a new commit's is judged anew", () => {

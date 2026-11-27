@@ -49,7 +49,7 @@ import { LoopRunner, loopRecords } from "./loops.ts";
 import { loopRun, privateLoops, runOfLoops, withheldRunLine } from "./private-data.ts";
 import { LoopDrafts } from "./loop-drafts.ts";
 import { ConnectorRequests } from "./connector-requests.ts";
-import { giveBack, reviewBack, wantsReviews } from "./ci-back.ts";
+import { declinedPush, giveBack, reviewBack, wantsReviews } from "./ci-back.ts";
 import { CiWatch, type ShippedPull, shippedPulls } from "./ci-watch.ts";
 import { WakeWatcher } from "./wakes.ts";
 import { Questions } from "./questions.ts";
@@ -1056,11 +1056,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     outcomes: () => team.outcomes,
     // A fix's push onto a pull request's branch that you declined (its ship.update denied): its further fixes are yours
     // (the review of 27 November, S4).
-    declined: (pull: ShippedPull) =>
-      connectors.actions(500).some((a) => {
-        const args = a.args as { owner?: unknown; repo?: unknown; branch?: unknown };
-        return a.tool === "ship.update" && a.state === "denied" && a.connector === pull.connector && a.node === identity.id && String(args.owner).toLowerCase() === pull.owner.toLowerCase() && String(args.repo).toLowerCase() === pull.repo.toLowerCase() && args.branch === pull.branch;
-      }),
+    declined: (pull: ShippedPull) => declinedPush(connectors.actions(500), pull, identity.id),
   };
   const ciWatch = new CiWatch({
     store,
