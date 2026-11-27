@@ -131,6 +131,8 @@ if (role === "serve") {
   });
   await call("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${models.port}/v1` });
   for (const r of ["planner", "engineer", "reviewer"]) await call("setRoster", { role: r, models: [`stand-in/${r}`] });
+  // Priced above nothing: another node's task runs only on a model its budget counts at more than $0 (N7).
+  for (const r of ["planner", "engineer", "reviewer"]) await call("setPrice", { model: `stand-in/${r}`, input: 1, output: 2 });
   await call("saveAgent", { id: "ada", name: "Ada", role: "engineer" });
   // Your word, once, that the measuring node may hand this one's Ada work (its default of $3 a task, every sample).
   const grantClient = async () => {
