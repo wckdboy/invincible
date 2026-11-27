@@ -79,6 +79,7 @@ import {
   type TeamMessage,
   type TeamRoom,
   TEAM_PRIMARY,
+  TEAM_LIMITS,
   AgentId,
   teamArmLabel,
   type SecretView,
@@ -2400,7 +2401,9 @@ export function createApp(ctx: AppContext) {
     const { choice, considered } = chooseAgent(input.goal, { ...needs, ...(on ? { node: resolveNode(on).id } : {}) }, facts);
     if (!choice) throw new HttpError(409, `No agent can take this task now${considered.length ? `: ${considered.map((c) => `${c.name}: ${c.why.join("; ")}`).join(" · ")}` : ": there are no agents"}`);
     const room = teamOf().direct(choice.id);
-    const task = teamOf().createTask({ room: room.id, assignee: choice.id, title: input.title ?? input.goal.slice(0, 200), goal: input.goal, gates: input.gates ?? [], ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}) }, by);
+    const fields = { room: room.id, assignee: choice.id, title: input.title ?? input.goal.slice(0, 200), goal: input.goal, gates: input.gates ?? [], ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}) };
+    // On its own word it is held to what it may commit on its own, judged again as it is written (TeamService.giveOwn).
+    const task = by === TEAM_PRIMARY ? teamOf().giveOwn(fields) : teamOf().createTask(fields, by);
     return { task, choice, considered };
   }
   /** The stop's word to a coding agent's run in its VM (its tool's own interrupt): bound to its VM as every command is, and sent once its task has stopped. */
@@ -2586,7 +2589,8 @@ export function createApp(ctx: AppContext) {
       log: ctx.log,
     });
     team.outcomes = outcomes;
-    // What it starts on its own yes (TeamService.approveOwn) must fit what is left of your budget, when you set one.
+    // What it gives or starts on its own word (TeamService.giveOwn, approveOwn) must fit what is left of your budget past
+    // what approved work holds, when you set one, and else its own daily cap (TeamService.ownLeft).
     ctx.team.service = new TeamService({ store: ctx.team.store, ...runtime, onChange: () => ctx.handoffs?.poke(), answer: answerInRoom, timeoutMs: 15 * 60_000, taskTimeoutMs: null, restartWaitMs: (TEAM_COMMAND_SECONDS + 60) * 1000, budgetLeft: () => ctx.usage.meter(ctx.nodeName, moneyOf(ctx.store)).leftUsd, onRecruit, onTaskEnded: (task) => {
       if (task.outcome) outcomes.nudge();
       // A fix to a pull request that ended verified is offered to you as a push onto its branch, as its agent's (ci-back.ts).
@@ -2837,7 +2841,11 @@ export function createApp(ctx: AppContext) {
     giveTeamTask: (input, p, req) => { ownerOnly(p); return giveTask(input, TEAM_OWNER, req.signal); },
     giveToTeam: (input, p, req) => {
       if (!leadsTeam(p)) throw new HttpError(403, "only your agent itself gives the agents work this way; you give one among the agents");
-      return giveTask(input, TEAM_PRIMARY, req.signal);
+      // On its own word its money is its budget: $3 unless it names less, within what it may commit on its own
+      // (TeamService.mayGiveOwn), said before any host is asked which agent may take it.
+      const budgetUsd = input.budgetUsd ?? TEAM_LIMITS.ownTaskUsd;
+      teamOf().mayGiveOwn(budgetUsd);
+      return giveTask({ ...input, budgetUsd }, TEAM_PRIMARY, req.signal);
     },
     controlTeam: (input, p) => {
       ownerOnly(p);
@@ -2864,6 +2872,7 @@ export function createApp(ctx: AppContext) {
     teamEngram: (input, p) => { ownerOnly(p); return { engram: teamOf().setEngram(input.on) }; },
     teamCi: (input, p) => { ownerOnly(p); return { ci: teamOf().setCiBack(input.on) }; },
     teamBacklog: (input, p) => { ownerOnly(p); return { backlog: teamOf().setBacklog(input.on) }; },
+    teamOwnDaily: (input, p) => { ownerOnly(p); return { usd: teamOf().setOwnDaily(input.usd) }; },
     /* An agent's verified work as a pull request, on your word (PLAN #37's next step): filed as its agent's ship, so it is
      * in the outbox that the CI watcher follows (and a failure can go back to that agent), and answered by you at once,
      * from the device you tapped on. Only from this node, which keeps the work. */

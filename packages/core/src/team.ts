@@ -8,7 +8,7 @@ import { hasUndrawn, oneScript, readAlike } from "./lookalike.ts";
 import { SpendLines } from "./usage.ts";
 import { ATTACHMENT_LIMITS } from "./attachments.ts";
 import { AttachmentRef } from "./attachment-ref.ts";
-export { TEAM_LIMITS } from "./team-limits.ts";
+export { TEAM_LIMITS, capLabel } from "./team-limits.ts";
 import type { InterventionKind, NorthStar } from "./interventions.ts";
 export { INTERVENTIONS, type InterventionKind, interventionWords, type NorthStar, northStar } from "./interventions.ts";
 
@@ -333,6 +333,10 @@ export type TeamEngramInput = z.infer<typeof TeamEngramInput>;
 export const TeamCiInput = z.strictObject({ on: z.boolean() });
 /** Whether the primary offers idle agents work from your backlog (on until you turn it off). */
 export const TeamBacklogInput = z.strictObject({ on: z.boolean() });
+/** What the primary may commit on its own word in a day while you set no usage budget: the budgets of the tasks it gives,
+ * and of the proposals it approves itself (TEAM_LIMITS.ownDailyUsd until you set another; 0: none, all of them yours). */
+export const TeamOwnDailyInput = z.strictObject({ usd: z.number().min(0).max(1000) });
+export type TeamOwnDailyInput = z.infer<typeof TeamOwnDailyInput>;
 
 /** What an agent's Workspace is told of the notes store: the node's switch, and whether this VM has the pinned binary. */
 export interface TeamEngramStatus {
@@ -657,8 +661,11 @@ export interface TeamSnapshot {
   engram?: boolean;
   /** Failing checks go back to the agent whose work it was, outside an outcome too (PLAN #29): said only when on. */
   ciBack?: boolean;
-  /** The primary offers idle agents work from your backlog, a proposal each that waits for you (on unless you turned it off). */
+  /** The primary offers idle agents work from your backlog, a proposal each, which it approves itself when its cost fits
+   * what it may commit on its own and which otherwise waits for you (on unless you turned it off). */
   backlog?: boolean;
+  /** What the primary may commit on its own word in a day while you set no usage budget (TeamOwnDailyInput; absent from an older node). */
+  ownDailyUsd?: number;
   /** The primary's own computer, when it has one: its persistent VM, made and watched as an agent's is (under its handle). */
   computer?: TeamWorkspace;
   /** When you last looked, on any device, at each agent's page (`agent:<id>`) and each room (`room:<id>`): what ended

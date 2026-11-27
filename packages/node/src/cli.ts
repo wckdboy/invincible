@@ -126,8 +126,12 @@ of its own; "agents" and "team" are the same command)
                                     are yours, though an outcome gives its own back within its budget
   agents backlog [on|off]        work for idle agents: one with a repository and nothing to do is given the next
                                     step of its repository's plan, a task a day at most, on your agent's own yes within its
-                                    budget ($3 at most); one that may spend more than is left of your budget (primary
-                                    usage budget) waits for you (invincible agents approve <task>); on until you turn it off
+                                    budget ($3 at most); one that may spend more than it may commit on its own (below)
+                                    waits for you (invincible agents approve <task>); on until you turn it off
+  agents daily [<usd>]           what your agent may commit on its own word in a day while you set no usage budget:
+                                    the budgets of the tasks it gives and of the proposals it approves itself ($3 a task
+                                    at most); $10 until you set another, 0 for none. With a budget (usage budget), what is
+                                    left of it past what approved work holds (queued and running tasks) is the bound
   agents avatar <id> [--color #rrggbb | --reset]
                                     an agent's mark, the Grille: pick its colour (its node snaps it to the
                                     nearest of eight), or give it the mark it would get now; with neither, its

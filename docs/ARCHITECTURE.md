@@ -138,7 +138,9 @@ Its event kinds are Invincible's own (`chat.*`, `task.*`, `run.*`, `project.*`, 
   - research to a research agent;
   - a review always to a reviewer on a different model from the one that did the work.
 
-  It follows each task to its proof, and comes back to you with the result, not the play-by-play.
+  It follows each task to its proof, and comes back to you with the result, not the play-by-play. What it gives or
+  approves on its own word spends at most $3 a task, within what is left of your budget past what approved work holds,
+  or, while you set no budget, within $10 a day, which you set; past that the money is yours.
 - **Initiative:** it writes first when something happened while you were away, and it proposes the next step when a
   task ends. Loops and triggers (a schedule, a webhook, a failed CI run) wake it.
 

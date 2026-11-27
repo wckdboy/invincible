@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  TEAM_PRIMARY, TEAM_LIMITS, TeamControlInput, TeamRoomId, type TeamSayInput, AgentId, TeamSteerInput, type TeamSteer,
+  TEAM_PRIMARY, TEAM_LIMITS, capLabel, TeamControlInput, TeamRoomId, type TeamSayInput, AgentId, TeamSteerInput, type TeamSteer,
   type Agent, type AgentInput, type TeamRecruitInput, type TeamRoom, type TeamRoomInput, type TeamPostInput, type TeamWorkspace,
   type TeamMessage, type TeamTask, type TeamTaskChanges, type TeamTaskInput, type TeamTaskRecord, type TeamTrailEntry, type TeamSnapshot, type TeamRoomView, type TeamOverview, type TeamSeenInput,
   type InterventionKind, type TeamWorkStatus, type TeamTaskFix, type TeamTaskShipped,
@@ -38,6 +38,10 @@ export interface TeamServiceOptions {
   /** What is left of your usage budget now, in US dollars (usage.ts meter; null: you set none): what it starts on its own yes must fit it. */
   budgetLeft?(): number | null;
 }
+
+/** What the primary may still commit on its own word (TeamService.ownLeft), with what that is said against: what approved
+ * work holds of your budget, and its daily cap. */
+export type OwnBound = { usd: number; of: "budget" | "day"; held: number; daily: number };
 
 interface Active {
   job: TeamJob;
@@ -139,20 +143,77 @@ export class TeamService {
   setBacklog(on: boolean): boolean { this.accepting(); const set = this.store.setBacklog(on); this.changed(); return set; }
   /** Work the primary offers an agent from your backlog (backlog.ts): proposed, it starts when it approves it itself, or you do. */
   proposeTask(input: TeamTaskInput): TeamTask { this.accepting(); const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, propose: true }); this.changed(); return task; }
+  /** What the primary may commit on its own word in a day while you set no usage budget: yours to set, never its. */
+  ownDaily(): number { return this.store.ownDaily(); }
+  setOwnDaily(usd: number): number { this.accepting(); const set = this.store.setOwnDaily(usd); this.changed(); return set; }
+  /**
+   * What the primary may still commit on its own word now, to the cent (money is yours past it: your word, 23 November
+   * 2026). With a usage budget of yours, what is left of it past what approved work holds (TeamStore.heldUsd: the budgets
+   * of the tasks queued or running, whoever gave them, as an outcome holds its own); with none, what is left of its own
+   * daily cap, yours to set, past what it committed in the last day (TeamStore.ownCommitted).
+   */
+  ownLeft(): { usd: number; of: "budget" | "day" } {
+    const { usd, of } = this.ownBound();
+    return { usd, of };
+  }
+  private ownBound(): OwnBound {
+    const left = this.options.budgetLeft?.() ?? null;
+    const held = this.store.heldUsd();
+    const daily = this.store.ownDaily();
+    const usd = left !== null ? left - held : daily - this.store.ownCommitted();
+    return { usd: Math.max(0, Math.round(usd * 100) / 100), of: left !== null ? "budget" : "day", held, daily };
+  }
+  /** What a commitment on its own word was within, as its trail says it. */
+  private within(bound: OwnBound): string {
+    return bound.of === "budget"
+      ? `and of the $${bound.usd.toFixed(2)} left of yours${bound.held > 0 ? " past what approved work holds" : ""}`
+      : `and of the $${bound.usd.toFixed(2)} left of the ${capLabel(bound.daily)} a day it may commit on its own`;
+  }
+  /**
+   * Whether the primary may commit `budget` on its own word now: a budget named, at most TEAM_LIMITS.ownTaskUsd, that
+   * fits what it may still commit (ownLeft). Throws why not, the work being yours to give; else the bound it fits.
+   */
+  mayGiveOwn(budget: number | undefined): OwnBound {
+    if (budget === undefined || budget > TEAM_LIMITS.ownTaskUsd) throw new TeamError(400, `A task your agent gives on its own word names its budget, ${capLabel(TEAM_LIMITS.ownTaskUsd)} at most: more is yours to give.`);
+    const bound = this.ownBound();
+    if (bound.usd < budget) {
+      const left = bound.of === "budget"
+        ? `$${bound.usd.toFixed(2)} is left of your budget${bound.held > 0 ? " past what approved work holds" : ""}`
+        : `$${bound.usd.toFixed(2)} is left of the ${capLabel(bound.daily)} a day it may commit on its own (yours to set: invincible agents daily)`;
+      throw new TeamError(409, `That's past what your agent may commit on its own: ${left}. Give it among the agents yourself.`);
+    }
+    return bound;
+  }
+  /**
+   * A task the primary gives on its own word (team_give, from your conversation): within mayGiveOwn, judged again as it is
+   * written (nothing between the two awaits) so two at once can't both take what one fits. It waits its turn like any
+   * task, and its trail says whose word it was and what it was within.
+   */
+  giveOwn(input: TeamTaskInput): TeamTask {
+    this.accepting();
+    const bound = this.mayGiveOwn(input.budgetUsd);
+    const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, own: true });
+    this.store.noteTask(task.id, `Given by your agent on its own word, within its budget of $${input.budgetUsd}, ${this.within(bound)}`.slice(0, 500));
+    this.changed();
+    this.kick();
+    return task;
+  }
   /**
    * A proposed task, its own from your backlog or an agent's from a room, started on its own yes (your word, 23 November
    * 2026: it approves its own decisions and its agents'; what is monetary asks you): only when it names its budget, at
-   * most TEAM_LIMITS.ownTaskUsd, and that fits what is left of yours, if you set one. It waits its turn like any task,
-   * and its trail says whose yes it was and why. Null when it isn't its to approve: it waits for yours.
+   * most TEAM_LIMITS.ownTaskUsd, and that fits what it may still commit on its own (ownLeft). It waits its turn like any
+   * task, and its trail says whose yes it was, why, and what it was within. Null when it isn't its to approve: it waits
+   * for yours.
    */
   approveOwn(task: string, why: string): TeamTask | null {
     this.accepting();
     const proposed = this.store.task(task);
     const budget = proposed?.budgetUsd;
-    const left = this.options.budgetLeft?.() ?? null;
-    if (proposed?.status !== "proposed" || budget === undefined || budget > TEAM_LIMITS.ownTaskUsd || (left !== null && left < budget)) return null;
-    const approved = this.store.approve(task);
-    this.store.noteTask(task, `Approved by your agent itself: ${why}, within its budget of $${budget}${left === null ? "" : `, and of the $${left.toFixed(2)} left of yours`}`.slice(0, 500));
+    if (proposed?.status !== "proposed" || budget === undefined || budget > TEAM_LIMITS.ownTaskUsd) return null;
+    const bound = this.ownBound();
+    if (bound.usd < budget) return null;
+    const approved = this.store.approve(task, true);
+    this.store.noteTask(task, `Approved by your agent itself: ${why}, within its budget of $${budget}, ${this.within(bound)}`.slice(0, 500));
     this.changed();
     this.kick();
     return approved;

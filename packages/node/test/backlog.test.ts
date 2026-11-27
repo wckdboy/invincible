@@ -71,7 +71,7 @@ describe("work for idle agents, from your backlog", () => {
     const task = await w.runner.tick();
     expect(task).toMatchObject({ assignee: "ada", proposedBy: "primary", title: "A template of outcomes", gates: ["bun run typecheck", "bun test outcomes"], budgetUsd: 2 });
     expect(w.store.task(task!.id)!.status).not.toBe("proposed");
-    expect(w.trail(task!.id)).toContain("Approved by your agent itself: the next step of Ada's repository's own plan, within its budget of $2");
+    expect(w.trail(task!.id)).toContain("Approved by your agent itself: the next step of Ada's repository's own plan, within its budget of $2, and of the $10.00 left of the $10 a day it may commit on its own");
     // In its conversation with you, read in its own VM; asked of the planner, as a plan is, as coding work.
     expect(task!.room).toBe(w.store.direct("ada").id);
     expect(w.read).toEqual([`ada: ${BACKLOG_READ}`]);
@@ -105,11 +105,19 @@ describe("work for idle agents, from your backlog", () => {
     expect(w.notices()).toEqual([]);
   });
 
+  test("with no budget of yours, past what your agent may commit on its own in a day it waits for you too, and your Inbox says which bound it met: that cap, yours to set", async () => {
+    const w = world([PROPOSAL]);
+    w.store.setOwnDaily(1);
+    const task = await w.runner.tick();
+    expect(task).toMatchObject({ status: "proposed", budgetUsd: 2 });
+    expect(w.notices()[0]!.body).toBe(`A template of outcomes\nIt may spend $2, more than is left of the $1 a day your agent may commit on its own ($1.00; yours to set: invincible agents daily), so it waits in your conversation with Ada, and starts when you approve it there (or invincible agents approve ${task!.id}).`);
+  });
+
   test("a proposal that names no budget is given the backlog's cap: money nobody capped is never its to spend", async () => {
     const w = world([JSON.stringify({ title: "The board view", goal: "Show an outcome's tasks as a board, by agent and state.", gates: ["bun run typecheck"] })]);
     const task = await w.runner.tick();
     expect(task!.budgetUsd).toBe(BACKLOG.taskUsd);
-    expect(w.trail(task!.id)).toContain(`Approved by your agent itself: the next step of Ada's repository's own plan, within its budget of $${BACKLOG.taskUsd}`);
+    expect(w.trail(task!.id)).toContain(`Approved by your agent itself: the next step of Ada's repository's own plan, within its budget of $${BACKLOG.taskUsd}, and of the $10.00 left of the $10 a day it may commit on its own`);
   });
 
   test("an agent in sensitive mode has its repository read on its own models, never the planner's", async () => {

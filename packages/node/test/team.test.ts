@@ -446,7 +446,8 @@ describe("task orchestration", () => {
     const [check, big, uncapped] = ["Check migrations", "Big", "Uncapped"].map((title) => store.tasks("workshop").find((t) => t.title === title)!);
     expect(ran).toEqual(["Check migrations"]);
     expect(store.task(check!.id)).toMatchObject({ status: "done", verified: true, proposedBy: "ada" });
-    expect(store.trail(check!.id).entries.map((e) => e.text)).toContain("Approved by your agent itself: proposed by @ada in Workshop, within its budget of $2");
+    // With no budget of yours, within its own daily cap (yours to set), as its trail says.
+    expect(store.trail(check!.id).entries.map((e) => e.text)).toContain("Approved by your agent itself: proposed by @ada in Workshop, within its budget of $2, and of the $10.00 left of the $10 a day it may commit on its own");
     // Money past its cap, or uncapped, is yours: those wait for you.
     expect([big!.status, uncapped!.status]).toEqual(["proposed", "proposed"]);
     // Past what is left of your budget it waits too; within it, it says how much was left.
@@ -456,6 +457,50 @@ describe("task orchestration", () => {
     const small = store.createTask({ room: "workshop", assignee: "lin", title: "Smaller", goal: "A smaller piece.", budgetUsd: 2 }, { agent: "ada", chainId: asked.chainId });
     expect(service.approveOwn(small.id, "proposed by @ada in Workshop")?.status).toBe("queued");
     expect(store.trail(small.id).entries.map((e) => e.text)).toContain("Approved by your agent itself: proposed by @ada in Workshop, within its budget of $2, and of the $4.00 left of yours");
+  });
+  test("what your agent commits on its own word holds back what approved work still holds: with your budget, what is left of it; without one, its own daily cap, which is yours to set", async () => {
+    const left = { usd: 10 as number | null };
+    const { store, service } = setup({ budgetLeft: () => left.usd });
+    const chainId = service.post({ room: "workshop", text: "Plan the release." }).chainId;
+    const propose = (title: string, budgetUsd = 3) => store.createTask({ room: "workshop", assignee: "lin", title, goal: title, budgetUsd }, { agent: "ada", chainId });
+    // Work already approved holds its budget whole until it ends, as an outcome's does: two of yours, $3 each, waiting.
+    for (const title of ["One", "Two"]) service.createTask({ room: "workshop", assignee: "ada", title, goal: title, budgetUsd: 3 });
+    expect(service.ownLeft()).toEqual({ usd: 4, of: "budget" });
+    const fits = propose("Fits");
+    expect(service.approveOwn(fits.id, "proposed by @ada in Workshop")?.status).toBe("queued");
+    expect(store.trail(fits.id).entries.map((e) => e.text)).toContain("Approved by your agent itself: proposed by @ada in Workshop, within its budget of $3, and of the $4.00 left of yours past what approved work holds");
+    expect(service.ownLeft()).toEqual({ usd: 1, of: "budget" });
+    expect(service.approveOwn(propose("Too much").id, "proposed by @ada in Workshop")).toBeNull();
+    // Without a budget of yours: its own daily cap, $10 unless you set it, less what it gave or approved itself today.
+    left.usd = null;
+    expect(service.ownDaily()).toBe(10);
+    expect(service.ownLeft()).toEqual({ usd: 7, of: "day" });
+    const more = propose("More");
+    expect(service.approveOwn(more.id, "proposed by @ada in Workshop")?.status).toBe("queued");
+    expect(store.trail(more.id).entries.map((e) => e.text)).toContain("Approved by your agent itself: proposed by @ada in Workshop, within its budget of $3, and of the $7.00 left of the $10 a day it may commit on its own");
+    expect(service.ownLeft()).toEqual({ usd: 4, of: "day" });
+    // Yours to set: lower it, and what is left follows at once, never below naught; past it, a proposal waits for you.
+    expect(service.setOwnDaily(5)).toBe(5);
+    expect(service.ownLeft()).toEqual({ usd: 0, of: "day" });
+    expect(service.approveOwn(propose("Past it", 1).id, "proposed by @ada in Workshop")).toBeNull();
+    expect(() => service.setOwnDaily(-1)).toThrow();
+  });
+  test("a task your agent gives on its own word names its budget, $3 at most, within what it may commit on its own: its trail says so, and it counts toward its day", async () => {
+    const { store, service } = setup();
+    const give = (title: string, budgetUsd?: number) => service.giveOwn({ room: "workshop", assignee: "ada", title, goal: title, ...(budgetUsd !== undefined ? { budgetUsd } : {}) });
+    // Money nobody capped, or past its cap a task, is yours to give.
+    expect(() => give("Uncapped")).toThrow(/names its budget, \$3 at most/);
+    expect(() => give("Big", 3.5)).toThrow(/names its budget, \$3 at most/);
+    const given = give("Fits", 3);
+    expect(given).toMatchObject({ status: "queued", givenBy: "primary", budgetUsd: 3 });
+    expect(store.trail(given.id).entries.map((e) => e.text)).toContain("Given by your agent on its own word, within its budget of $3, and of the $10.00 left of the $10 a day it may commit on its own");
+    expect(service.ownLeft()).toEqual({ usd: 7, of: "day" });
+    for (const title of ["Two", "Three"]) give(title, 3);
+    // Past its day it is refused, said in what is left, and nothing is written.
+    expect(() => give("Fourth", 1.5)).toThrow("That's past what your agent may commit on its own: $1.00 is left of the $10 a day it may commit on its own (yours to set: invincible agents daily). Give it among the agents yourself.");
+    expect(store.tasks("workshop").map((t) => t.title)).toEqual(expect.not.arrayContaining(["Uncapped", "Big", "Fourth"]));
+    expect(give("Last", 1).status).toBe("queued");
+    expect(service.ownLeft()).toEqual({ usd: 0, of: "day" });
   });
   test("tasks you give run at once: only an agent's waits for you", async () => {
     const { store, service } = setup();

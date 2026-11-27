@@ -1,4 +1,4 @@
-import { interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint } from "@invincible/core";
+import { capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint } from "@invincible/core";
 import { MARK_PALETTE, markForm, markOf } from "@invincible/core/agent-mark";
 
 /** An agent's mark as the CLI says it (agent-mark.ts): its hue's name and both its forms (light page, dark page), and its
@@ -45,7 +45,7 @@ export const taskRecordLine = (task: Pick<TeamTask, "record">, prices: Prices): 
 /** What a task changed in its repository and where that is kept (`invincible ship <artifact>` opens a pull request from it). Empty when it kept nothing. */
 export const taskChangesLine = (task: Pick<TeamTask, "changes">): string => (task.changes ? ` · ${task.changes.files} file${task.changes.files === 1 ? "" : "s"} changed, kept as ${task.changes.artifact}` : "");
 
-const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
+const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
 
 /** What an agent works on, in a sentence: its own models or its role's, and whether it is in sensitive mode. */
 const agentModels = (m: Agent): string =>
@@ -370,8 +370,17 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     if (args.length > 1 || (args.length === 1 && args[0] !== "on" && args[0] !== "off")) throw new Error("usage: invincible agents backlog [on|off]");
     const on = args.length ? (await api.call<{ backlog: boolean }>("teamBacklog", { on: args[0] === "on" })).backlog : (await api.call<TeamSnapshot>("team")).backlog === true;
     print(on
-      ? "An agent with a repository and nothing to do is offered one task a day at most, the next step of its repository's own plan (docs/PLAN.md, PLAN.md, ROADMAP.md or TODO.md): a proposal in its conversation with you, which your agent approves itself and starts when its cost fits its rule (at most $3, within your budget), and which otherwise waits for you. Turn it off with: invincible agents backlog off"
+      ? "An agent with a repository and nothing to do is offered one task a day at most, the next step of its repository's own plan (docs/PLAN.md, PLAN.md, ROADMAP.md or TODO.md): a proposal in its conversation with you, which your agent approves itself and starts when its cost fits its rule (at most $3, within what it may commit on its own: invincible agents daily), and which otherwise waits for you. Turn it off with: invincible agents backlog off"
       : "Idle agents are offered nothing: their work is what you and its outcomes give them. Turn it on with: invincible agents backlog on");
+    return;
+  }
+  // What your agent may commit on its own word in a day while you set no usage budget: said, or set (yours alone).
+  if (sub === "daily") {
+    if (args.length > 1 || (args.length === 1 && !(/^\d{1,4}(\.\d{1,2})?$/.test(args[0]!) && Number(args[0]) <= 1000))) throw new Error("usage: invincible agents daily [<usd>] (up to 1000, to the cent)");
+    const usd = args.length ? (await api.call<{ usd: number }>("teamOwnDaily", { usd: Number(args[0]) })).usd : (await api.call<TeamSnapshot>("team")).ownDailyUsd ?? TEAM_LIMITS.ownDailyUsd;
+    print(usd > 0
+      ? `With no usage budget of yours, your agent may commit ${capLabel(usd)} a day on its own word: the budgets of the tasks it gives and of the proposals it approves itself, ${capLabel(TEAM_LIMITS.ownTaskUsd)} a task at most; past that they are yours. With a budget (invincible usage budget), what is left of it past what approved work holds is the bound instead. Change it with: invincible agents daily <usd>`
+      : "With no usage budget of yours, your agent commits nothing on its own word: the tasks it would give are yours to give, and its proposals and its agents' wait for you. Change it with: invincible agents daily <usd>");
     return;
   }
   // (An agent by either word: `agent` is what the command took before it was called agents.)

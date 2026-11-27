@@ -18,7 +18,7 @@ import { PricedModel, PriceSchema, SpendLines, type EvalSpent, UsageBudgetInput 
 import { type ComputeUsage, EffortAsk, EffortLevel } from "./compute.ts";
 import { DecisionRequest } from "./decisions.ts";
 import { CancelLookInput, ConversationId, LookLaterInput, ProjectBranchInput, ProjectCommitInput, ProjectGitInput, ProjectId, ProjectInput } from "./chats.ts";
-import { AgentId, AgentInput, TeamBacklogInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamSteerInput, TeamWorkspaceRun, AgentModels } from "./team.ts";
+import { AgentId, AgentInput, TeamBacklogInput, TeamOwnDailyInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamSteerInput, TeamWorkspaceRun, AgentModels } from "./team.ts";
 import { RunGates, RunProgressInput } from "./runs.ts";
 import { type StopReason, TURN_ID } from "./turns.ts";
 import { type ArchiveContextEntry, ArchiveBudgetInput, ArchiveDeleteInput, ArchiveId, ArchiveReindexInput, ArchiveSearchInput, NoteIdeaInput } from "./archive.ts";
@@ -405,8 +405,10 @@ export const routes = {
   teamEngram: { method: "POST", path: "/api/team/engram", scope: "fleet:admin", input: TeamEngramInput },
   /** Whether a pull request's failing checks go back to the agent whose work it was, outside an outcome too (PLAN #29): yours alone to say. `team` says when it is on. */
   teamCi: { method: "POST", path: "/api/team/ci", scope: "fleet:admin", input: TeamCiInput },
-  /** Whether the primary offers idle agents work from your backlog: one task a day at most for each, which it approves itself when its cost fits its rule (at most $3, within your budget), and which otherwise waits for you. */
+  /** Whether the primary offers idle agents work from your backlog: one task a day at most for each, which it approves itself when its cost fits its rule (at most $3, within what it may commit on its own: what is left of your budget past what approved work holds, or its daily cap), and which otherwise waits for you. */
   teamBacklog: { method: "POST", path: "/api/team/backlog", scope: "fleet:admin", input: TeamBacklogInput },
+  /** What the primary may commit on its own word in a day while you set no usage budget (the budgets of the tasks it gives, and of the proposals it approves itself): yours alone to say, never its. `team` says it. */
+  teamOwnDaily: { method: "POST", path: "/api/team/own-daily", scope: "fleet:admin", input: TeamOwnDailyInput },
   /** An agent's verified work as a pull request, on your word (PLAN #37): filed as its agent's ship and answered by you at once, so the outbox (and the CI watcher) has it. */
   shipTeamTask: { method: "POST", path: "/api/team/ship", scope: "fleet:admin", input: TeamShipInput },
   /* The primary's own way to the other agents, from your conversation with it (its tools: team, team_recruit, team_message,

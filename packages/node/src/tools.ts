@@ -893,26 +893,27 @@ export const TOOLS: PrimaryTool[] = [
     name: "team_give",
     title: "Give the agents a task",
     description:
-      "Give a task to the agents when the user asks for work to be done by the agents, or when it is better done by an agent in its own VM than by you here: long work, work in a repository, work that needs a browser. The agent best suited to it takes it (free, its work verified before, its job about this, a desktop or the repository it needs), in its own conversation with the user, and you are told who and why. Say what done means with gates: shell commands that must exit 0 in its workspace before an independent reviewer is asked. The result comes in that conversation in its own time: read it with team. You may give only so many in a day.",
+      `Give a task to the agents when the user asks for work to be done by the agents, or when it is better done by an agent in its own VM than by you here: long work, work in a repository, work that needs a browser. The agent best suited to it takes it (free, its work verified before, its job about this, a desktop or the repository it needs), in its own conversation with the user, and you are told who and why. Say what done means with gates: shell commands that must exit 0 in its workspace before an independent reviewer is asked. Its money is its budget: $${TEAM_LIMITS.ownTaskUsd} unless you name less, and only within what you may commit on your own word (what is left of the user's budget past what approved work holds, or with none, your daily cap): past that it is refused, and the work is the user's to give. The result comes in that conversation in its own time: read it with team. You may give only so many in a day.`,
     input: {
       goal: z.string().min(1).max(8000).describe("The task, in full: what to do, where, and what done looks like. Never a key or a password."),
       title: z.string().min(1).max(200).describe("A short title for it").optional(),
       gates: z.array(z.string().min(1).max(1000)).max(16).describe("Commands that prove it done, e.g. bun test; each must exit 0 in its workspace").optional(),
+      budgetUsd: z.number().positive().max(TEAM_LIMITS.ownTaskUsd).describe(`What its model calls may spend, in US dollars: $${TEAM_LIMITS.ownTaskUsd} unless you name less`).optional(),
       desktop: z.boolean().describe("true when it needs a screen: a browser to open, a page to click").optional(),
       repository: z.string().max(300).describe("The repository it must work on, https://github.com/owner/repo, when it matters which").optional(),
     },
     routes: ["giveToTeam"],
     flow: "egress",
     own: true,
-    async run(api, { goal, title, gates, desktop, repository }) {
+    async run(api, { goal, title, gates, budgetUsd, desktop, repository }) {
       const needs = { ...(desktop ? { desktop: true } : {}), ...(repository ? { repository } : {}) };
       const given = await api.call<{ task: TeamTask; choice: { id: string; name: string; reasons: string[] }; considered: { name: string; eligible: boolean; why: string[] }[] }>("giveToTeam", {
-        goal, ...(title ? { title } : {}), ...(gates?.length ? { gates } : {}), ...(Object.keys(needs).length ? { needs } : {}),
+        goal, ...(title ? { title } : {}), ...(gates?.length ? { gates } : {}), ...(budgetUsd !== undefined ? { budgetUsd } : {}), ...(Object.keys(needs).length ? { needs } : {}),
       });
       const others = given.considered.filter((c) => c.name !== given.choice.name).map((c) => `${c.name}${c.eligible ? "" : " (could not take it)"}: ${c.why.join("; ")}`);
       return [
         `${given.choice.name} takes it: ${given.choice.reasons.join("; ")}.`,
-        `${given.task.id} is queued in ${given.choice.name}'s own conversation with the user (conversation ${given.task.room}); its gates and an independent reviewer decide when it is done. Read how it went with team, room "${given.task.room}".`,
+        `${given.task.id} is queued in ${given.choice.name}'s own conversation with the user (conversation ${given.task.room}), with a budget of $${given.task.budgetUsd}; its gates and an independent reviewer decide when it is done. Read how it went with team, room "${given.task.room}".`,
         ...(others.length ? [`The others: ${others.join(" · ")}`] : []),
       ].join("\n");
     },

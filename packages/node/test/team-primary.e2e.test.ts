@@ -341,7 +341,8 @@ test("asked for work in your conversation, it gives it to the agents: the agent 
   expect(told("team_give")).toMatch(/task-[a-z0-9_-]{12} is queued in Rev's own conversation with the user/);
   // The task is there, given by it, in Rev's own conversation with you.
   const task = (await api<TeamSnapshot>("team")).tasks.find((t) => t.title === "Review the importer change")!;
-  expect(task).toMatchObject({ assignee: "rev", gates: ["bun test"], givenBy: "primary" });
+  // On its own word, with a budget: $3, unless it names less.
+  expect(task).toMatchObject({ assignee: "rev", gates: ["bun test"], givenBy: "primary", budgetUsd: 3 });
   expect(task.room).toBe((await api<{ room: { id: string } }>("directAgent", { id: "rev" })).room.id);
   await settled();
 });
@@ -365,6 +366,19 @@ test("a task it gives from a kept chat is in that chat's row of what is under wa
   expect(daemon.chats.handoffs(id)).toEqual([task.id]);
   const other = daemon.chats.create({ title: "Elsewhere", project: null, role: "planner" }).id;
   expect(daemon.chats.handoffs(other)).toEqual([]);
+});
+
+test("what it gives on its own word fits what it may commit: past its daily cap (yours to set) or a budget of yours, the work is yours to give", async () => {
+  expect((await api<{ usd: number }>("teamOwnDaily", { usd: 1 })).usd).toBe(1);
+  try {
+    script = [callTool("team_give", { goal: "Rewrite the importer.", title: "Rewrite the importer" }), say("That's past what I may commit today.")];
+    const events = await ask("Have the agents rewrite the importer.");
+    expect(results(events)).toEqual([{ name: "team_give", ok: false, summary: expect.stringMatching(/past what your agent may commit on its own/) }]);
+    expect((await api<TeamSnapshot>("team")).tasks.some((t) => t.title === "Rewrite the importer")).toBe(false);
+    expect((await api<TeamSnapshot>("team")).ownDailyUsd).toBe(1);
+  } finally {
+    await api("teamOwnDaily", { usd: 10 });
+  }
 });
 
 test("the Mac itself: it asks, and nothing of it is its until you let it; then each step answers with its screen, your tripwires hold on its commands, and it ends it", async () => {

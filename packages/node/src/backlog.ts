@@ -1,4 +1,4 @@
-import { type ExecResult, heldModels, type NodeIdentity, redact, TEAM_PRIMARY, TEAM_LIMITS, type Agent, type TeamTask } from "@invincible/core";
+import { capLabel, type ExecResult, heldModels, type NodeIdentity, redact, TEAM_PRIMARY, TEAM_LIMITS, type Agent, type TeamTask } from "@invincible/core";
 import { chat, STEP_EFFORT } from "@invincible/models";
 import type { LedgerStore } from "@invincible/ledger";
 import { z } from "zod";
@@ -12,8 +12,9 @@ import type { TeamService } from "./team.ts";
  * ROADMAP.md or TODO.md, read in the agent's VM as it last fetched it, with its newest commits) or of its open issues
  * (read through your GitHub connector), in its conversation with you. It approves it itself and it starts (your word,
  * 23 November 2026: it approves its own decisions and its agents'; what is monetary asks you): its money is its budget,
- * always set and at most BACKLOG.taskUsd, which must fit what is left of yours when you set one (`invincible usage
- * budget`; TeamService.approveOwn holds the rule). Past that it waits for you as a proposal, to approve or decline. Each look is one answer of the planner's,
+ * always set and at most BACKLOG.taskUsd, which must fit what it may commit on its own: what is left of yours past what
+ * approved work holds when you set one (`invincible usage budget`), else its own daily cap, yours to set (`invincible
+ * agents daily`; TeamService.approveOwn holds the rule). Past that it waits for you as a proposal, to approve or decline. Each look is one answer of the planner's,
  * at a plan's care (roster.ts STEP_EFFORT). On until you say otherwise: `invincible agents backlog off`.
  *
  * A proposal you leave unanswered for a day is looked at again with the repository as it is then: kept when it is still
@@ -242,9 +243,11 @@ export class BacklogRunner {
     const task = this.o.service().proposeTask({ room: room.id, assignee: agent.id, title: found.title, goal: found.goal, gates: found.gates, budgetUsd: found.budgetUsd ?? BACKLOG.taskUsd });
     if (waiting) this.withdraw(waiting, `"${found.title}" comes first now`);
     if (this.approveIfHis(task, agent)) return this.o.store.task(task.id);
-    // Past what is left of your budget it is money, so yours: in your Inbox, in the node's own words, it waits in its
-    // conversation with you, to approve or decline.
-    this.o.mind.emit(this.o.identity, "notice.raised", { key: `backlog:${task.id}`, severity: "info", title: `Work proposed for ${agent.name}`, body: `${found.title}\nIt may spend $${task.budgetUsd}, more than is left of your budget, so it waits in your conversation with ${agent.name}, and starts when you approve it there (or invincible agents approve ${task.id}).`.slice(0, 600), source: "backlog", at: this.now() });
+    // Past what it may commit on its own it is money, so yours: in your Inbox, in the node's own words, it waits in its
+    // conversation with you, to approve or decline. The words say which bound it met: your budget, or its daily cap.
+    const left = this.o.service().ownLeft();
+    const past = left.of === "budget" ? "more than is left of your budget" : `more than is left of the ${capLabel(this.o.service().ownDaily())} a day your agent may commit on its own ($${left.usd.toFixed(2)}; yours to set: invincible agents daily)`;
+    this.o.mind.emit(this.o.identity, "notice.raised", { key: `backlog:${task.id}`, severity: "info", title: `Work proposed for ${agent.name}`, body: `${found.title}\nIt may spend $${task.budgetUsd}, ${past}, so it waits in your conversation with ${agent.name}, and starts when you approve it there (or invincible agents approve ${task.id}).`.slice(0, 600), source: "backlog", at: this.now() });
     return task;
   }
 

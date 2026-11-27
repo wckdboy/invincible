@@ -291,6 +291,36 @@ test("agents ci says whether failing checks and reviews go back to the agent, an
   expect(asked).toHaveLength(before);
 });
 
+test("agents daily says what your agent may commit on its own word in a day with no budget of yours, and sets it by the one route for it", async () => {
+  const lines: string[] = [];
+  const asked: { name: RouteName; input: unknown }[] = [];
+  let usd = 10;
+  const api = {
+    async call<T>(name: RouteName, input?: unknown): Promise<T> {
+      asked.push({ name, input });
+      if (name === "team") return { agents: [], rooms: [], tasks: [], deliveries: [], ownDailyUsd: usd } as T;
+      if (name === "teamOwnDaily") { usd = (input as { usd: number }).usd; return { usd } as T; }
+      throw new Error(`unexpected call: ${name}`);
+    },
+  };
+  const say = (line: string) => lines.push(line);
+  await teamCommand(api, "daily", [], {}, say);
+  expect(lines.at(-1)).toBe("With no usage budget of yours, your agent may commit $10 a day on its own word: the budgets of the tasks it gives and of the proposals it approves itself, $3 a task at most; past that they are yours. With a budget (invincible usage budget), what is left of it past what approved work holds is the bound instead. Change it with: invincible agents daily <usd>");
+  await teamCommand(api, "daily", ["5"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "teamOwnDaily", input: { usd: 5 } });
+  expect(lines.at(-1)).toStartWith("With no usage budget of yours, your agent may commit $5 a day on its own word");
+  await teamCommand(api, "daily", ["2.50"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "teamOwnDaily", input: { usd: 2.5 } });
+  expect(lines.at(-1)).toStartWith("With no usage budget of yours, your agent may commit $2.50 a day on its own word");
+  await teamCommand(api, "daily", ["0"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "teamOwnDaily", input: { usd: 0 } });
+  expect(lines.at(-1)).toBe("With no usage budget of yours, your agent commits nothing on its own word: the tasks it would give are yours to give, and its proposals and its agents' wait for you. Change it with: invincible agents daily <usd>");
+  // Anything but an amount of dollars, up to $1,000, is not sent anywhere.
+  const before = asked.length;
+  for (const bad of [["-1"], ["ten"], ["5", "6"], ["1e3"], ["Infinity"], [""], ["1000.01"], ["2.505"]]) await expect(teamCommand(api, "daily", bad, {}, say)).rejects.toThrow(/invincible agents daily \[<usd>\]/);
+  expect(asked).toHaveLength(before);
+});
+
 test("agents provision makes an agent's VM with a desktop unless --no-desktop, and says which it got", async () => {
   const lines: string[] = [];
   const asked: { name: RouteName; input: unknown }[] = [];

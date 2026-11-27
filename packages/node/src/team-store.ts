@@ -7,7 +7,7 @@ import { z } from "zod";
 import {
   TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, AgentId, AgentInput, TeamRecruitInput, TeamRoomInput, TeamPostInput, TeamSayInput, TeamTaskChanges, TeamTaskInput, TeamTaskRecord, type TeamTrailEntry, TeamWorkspace,
   type Agent, type TeamRoom, type TeamMessage, type TeamTask, type TeamDelivery, type TeamSnapshot, type TeamRoomView, type TeamWorkStatus, type TeamOverview,
-  TeamOutcomeInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, type TeamSteer, heldModels, SENSITIVE_WORK,
+  TeamOutcomeInput, TeamOwnDailyInput, type TeamOutcomeStatus, type TeamTaskFix, type TeamTaskShipped, type TeamCheckpoint, type TeamSteer, heldModels, SENSITIVE_WORK,
 } from "../../core/src/team.ts";
 import { type InterventionKind, type NorthStar, northStar } from "../../core/src/interventions.ts";
 import { TaskAccount } from "../../core/src/seats.ts";
@@ -159,6 +159,8 @@ export class TeamStore {
       CREATE INDEX IF NOT EXISTS team_jobs_agent ON team_jobs(agent, status);
       CREATE INDEX IF NOT EXISTS team_jobs_activity ON team_jobs(updated_at, agent, kind, status);
       CREATE TABLE IF NOT EXISTS team_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS team_own (task TEXT PRIMARY KEY, usd REAL NOT NULL, at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS team_own_at ON team_own(at);
       CREATE TABLE IF NOT EXISTS team_outcomes (id TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS team_trail (task TEXT NOT NULL, n INTEGER NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY(task, n));
       CREATE TABLE IF NOT EXISTS team_checkpoints (task TEXT NOT NULL, step INTEGER NOT NULL, at INTEGER NOT NULL, commit_id TEXT NOT NULL, command TEXT NOT NULL, PRIMARY KEY(task, step));
@@ -262,6 +264,26 @@ export class TeamStore {
   backlogLooked(agent: string): number { return Number(this.db.query<DocRow, [string]>("SELECT value FROM team_settings WHERE key=?").get(`backlog:${agent}`)?.value ?? 0); }
   setBacklogLooked(agent: string, at: number): void {
     this.db.query("INSERT INTO team_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(`backlog:${agent}`, String(at));
+  }
+  /** What the primary may commit on its own word in a day while you set no usage budget: TEAM_LIMITS.ownDailyUsd until you set another. */
+  ownDaily(): number {
+    const set = Number(this.db.query<DocRow, []>("SELECT value FROM team_settings WHERE key='own-daily'").get()?.value ?? Number.NaN);
+    return Number.isFinite(set) && set >= 0 ? set : TEAM_LIMITS.ownDailyUsd;
+  }
+  setOwnDaily(raw: number): number {
+    const usd = Math.round(teamInput(TeamOwnDailyInput.shape.usd, raw) * 100) / 100;
+    this.db.query("INSERT INTO team_settings(key,value) VALUES('own-daily',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(usd));
+    return usd;
+  }
+  /** What the primary committed on its own word in the last day: the budgets of the tasks it gave, and of the proposals it approved itself, as each was then (team_own). */
+  ownCommitted(): number {
+    return this.db.query<{ usd: number }, [number]>("SELECT COALESCE(SUM(usd),0) AS usd FROM team_own WHERE at > ?").get(this.now() - 86_400_000)!.usd;
+  }
+  /** What approved work still holds: the budgets of the tasks queued or running, whoever gave or approved them, as an
+   * outcome holds its own (a running one its whole budget until it ends, though some of it is spent: more than it needs
+   * for that while, never less). */
+  heldUsd(): number {
+    return this.db.query<{ usd: number }, []>("SELECT COALESCE(SUM(json_extract(data,'$.budgetUsd')),0) AS usd FROM team_jobs WHERE kind='task' AND status IN ('queued','running')").get()!.usd;
   }
   /** Whether failing checks go back to the agent whose work it was when no outcome gives them back (PLAN #29): off until you turn it on. */
   ciBack(): boolean { return this.db.query<DocRow, []>("SELECT value FROM team_settings WHERE key='ci'").get()?.value === "on"; }
@@ -654,7 +676,8 @@ export class TeamStore {
     this.db.query("INSERT INTO team_jobs(id,kind,room,agent,chain_id,status,data,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(key, kind, room, agent, chain, status, JSON.stringify(data), at, at);
     return key;
   }
-  createTask(raw: TeamTaskInput, by: { agent?: string; chainId?: string; givenBy?: string; fix?: TeamTaskFix; propose?: boolean } = {}): TeamTask {
+  /** `own`: the primary gives it on its own word (TeamService.giveOwn), so its budget is kept as what it committed (team_own). */
+  createTask(raw: TeamTaskInput, by: { agent?: string; chainId?: string; givenBy?: string; fix?: TeamTaskFix; propose?: boolean; own?: boolean } = {}): TeamTask {
     const input = teamInput(TeamTaskInput, raw);
     teamText([input.title, input.goal, ...(input.gates ?? [])].join("\n"));
     return this.db.transaction(() => {
@@ -697,6 +720,7 @@ export class TeamStore {
       // is the work the primary offers an idle agent from your backlog (backlog.ts): a proposal isn't a give.
       const proposed = by.agent ? { proposedBy: by.agent } : by.propose ? { proposedBy: by.givenBy ?? TEAM_PRIMARY } : {};
       const key = this.insertJob("task", room.id, input.assignee, chain, { title: input.title, goal: input.goal, dependsOn: input.dependsOn ?? [], gates: input.gates ?? [], ...(input.budgetUsd !== undefined ? { budgetUsd: input.budgetUsd } : {}), verified: false, progress: "", output: "", ...(by.givenBy ? { givenBy: by.givenBy } : {}), ...(input.outcome ? { outcome: input.outcome } : {}), ...(models ? { models: [...models] } : {}), ...(from ? { from } : {}), ...(by.fix ? { fix: by.fix } : {}), ...proposed }, by.agent || by.propose ? "proposed" : "queued");
+      if (by.own) this.db.query("INSERT INTO team_own(task,usd,at) VALUES(?,?,?)").run(key, input.budgetUsd ?? 0, this.now());
       return this.task(key)!;
     })();
   }
@@ -791,7 +815,7 @@ export class TeamStore {
     const direct = this.rooms().filter((room) => room.direct).sort((a, b) => a.members.length - b.members.length);
     const removed = this.removed().map(({ id, name, removedAt }) => { const conversations = direct.filter((room) => room.members.includes(id)).map((room) => room.id); return { id, name, removedAt, ...(conversations.length ? { conversations } : {}) }; });
     const computer = this.computer();
-    return { northStar: this.northStar(this.now() - 30 * 86_400_000), agents: this.agents(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.primaryAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ...(computer ? { computer } : {}), seen: this.seen() };
+    return { northStar: this.northStar(this.now() - 30 * 86_400_000), agents: this.agents(), rooms: this.openRooms(), tasks: this.tasks(), deliveries: [...this.deliveries(), ...this.primaryAnswers()], ...(removed.length ? { removed } : {}), ...(this.engram() ? { engram: true } : {}), ...(this.ciBack() ? { ciBack: true } : {}), ...(this.backlog() ? { backlog: true } : {}), ownDailyUsd: this.ownDaily(), ...(computer ? { computer } : {}), seen: this.seen() };
   }
   /**
    * Which writing of the team this is, for the live stream: the rows this store has written, and the database's
@@ -1112,14 +1136,16 @@ export class TeamStore {
     // A proposal you stop is declined: it never ran.
     for (const row of this.db.query<JobRow, []>("SELECT * FROM team_jobs WHERE status='proposed' ORDER BY seq").all()) if (matches(jobOf(row), select)) this.finish(row.id, "stopped", "Declined by you.");
   }
-  /** A task an agent proposed, approved by you: it waits its turn like one you gave, in a chain of its own. */
-  approve(task: string): TeamTask {
+  /** A task an agent proposed, approved by you: it waits its turn like one you gave, in a chain of its own. `own`: the
+   * primary's own yes (TeamService.approveOwn), so its budget is kept as what it committed (team_own). */
+  approve(task: string, own = false): TeamTask {
     return this.db.transaction(() => {
       const row = this.jobRow(task);
       if (!row || row.kind !== "task") throw new TeamError(404, "No such team task.");
       if (row.status !== "proposed") throw new TeamError(409, "That task isn't waiting for your approval.");
       if (!this.agent(row.agent)) throw new TeamError(410, "That task's agent was removed. Give the work to another agent.");
       this.db.query("UPDATE team_jobs SET status='queued',chain_id=?,updated_at=? WHERE id=? AND status='proposed'").run(this.chain(this.requireRoom(row.room)), this.now(), row.id);
+      if (own) this.db.query("INSERT INTO team_own(task,usd,at) VALUES(?,?,?)").run(row.id, (JSON.parse(row.data) as { budgetUsd?: number }).budgetUsd ?? 0, this.now());
       return this.task(row.id)!;
     })();
   }
