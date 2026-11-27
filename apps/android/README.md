@@ -16,8 +16,9 @@ wrong, colour kept for the agents. The primary is the I-beam in one ink (`core/I
 a tile of its own where the primary is shown, in ink or, as Settings has it, in pearl glass. Each agent is its glass:
 one of 22 shapes in one of eight colour ramps (`core/Glass.kt`, its numbers in `core/GlassData.kt`, core's `glass.ts`;
 drawn by `ui/GlassView.kt`, each shape, ramp, size and page drawn once and kept; held to the vectors' `glass` by
-`GlassTest`), its state a dot cut out of its corner beside its word. Only a working agent's light moves, breathing, 15
-frames a second while the app is in front, and never while the phone's animations are off.
+`GlassTest`), its state a dot cut out of its corner beside its word. Only a working agent's light moves, and only on its
+own page: breathing, 15 frames a second while the app is in front, never while the phone's animations are off. In rows
+it is still, as each breath is a frame of the app's own work (`GlassBreathTest`).
 
 While it's on screen it keeps the node's live stream open (`core/LiveLink.kt`: the web's `lib/live-link.ts`, the
 iPhone's LiveLink.swift) and reads again only what the stream says changed, so at rest it asks the node nothing; a link

@@ -20,16 +20,17 @@ import sh.invincible.bot.core.Json
  * An agent's mark: its glass (core/Glass.kt, drawn by GlassView.kt; core's glass.ts, the owner's word of 27 November 2026
  * that the Grille goes), its shape and its ramp as its node gave them, the same on every device. What the Grille said in
  * its shape is a dot beside the word now: working, needs you, failed, and idle for the rest (Glass.state), the line beside
- * it saying which. Where no state is given (a speaker, a pick list), no dot.
+ * it saying which. Where no state is given (a speaker, a pick list), no dot. Only the one in focus breathes while it works
+ * (an agent's own page, [live]); rows are still.
  */
 
 /** An agent's mark, by its handle and saved avatar ([profile]: its glass, v 4; a mark, v 3, or a colour chosen before
  * the marks, v 2, whose colour it keeps; or nothing), its dot showing [state] where one is given. Decorative beside its
  * name; named ([description]) where it stands alone. */
 @Composable
-fun AgentMarkView(id: String, profile: Json?, size: Dp, state: AgentMark.State? = null, description: String? = null) {
+fun AgentMarkView(id: String, profile: Json?, size: Dp, state: AgentMark.State? = null, description: String? = null, live: Boolean = false) {
     val glass = remember(id, profile) { Glass.of(id, profile) }
-    GlassMark(glass, size, state?.let(Glass::state), description)
+    GlassMark(glass, size, state?.let(Glass::state), description, live)
 }
 
 /** An agent's mark or the primary's by handle ("primary" is the primary's: your agent's mark), with a dot only where a

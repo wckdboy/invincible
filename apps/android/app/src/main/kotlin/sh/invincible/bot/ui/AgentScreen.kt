@@ -107,8 +107,8 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
     ) {
         val scope = rememberCoroutineScope()
         Column(Modifier.fillMaxWidth().padding(Space.margin), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-            // Its glass, its dot saying how it stands (its light breathing while it works).
-            AgentMarkView(id, person?.avatar, 96.dp, state = AgentMark.state(row?.state), description = person?.name)
+            // Its glass, its dot saying how it stands: the one in focus, so its light breathes while it works.
+            AgentMarkView(id, person?.avatar, 96.dp, state = AgentMark.state(row?.state), description = person?.name, live = true)
             Text(person?.name ?: id, style = MaterialTheme.typography.headlineSmallEmphasized)
             StateChip(row?.state)
             row?.let { Text(Roster.besideChip(it.line, it.state), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }

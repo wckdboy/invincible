@@ -50,23 +50,29 @@ import kotlin.math.sqrt
  * An agent's glass, drawn (core/Glass.kt's numbers, core's): its shape in its ramp, as one picture made once for each
  * shape, ramp, size and page and kept (with its blur from 40 dp); its glow beside it, a pool of its light behind it on a
  * dark page and a tinted shadow under it on a light one; and its state's dot, cut out of whatever it sits on. Only working
- * moves: its light breathes, by opacity, 15 times a second, while the phone's animations are on and the app is in front
- * (Compose's frame clock stops with the activity). Nothing it draws lays anything out beyond its own box.
+ * moves, and only on its agent's own page: its light breathes, by opacity, 15 times a second, while the phone's animations
+ * are on and the app is in front (Compose's frame clock stops with the activity). In rows it is still: here each breath is
+ * a frame of the app's own work, so rows wait for a breath the render thread runs, measured. Nothing it draws lays
+ * anything out beyond its own box.
  */
 
-/** An agent's glass: its shape in its ramp, its glow, and its state's dot where its state is known (null: no dot).
- * Decorative beside its name; named ([description]) where it stands alone. */
+/** An agent's glass: its shape in its ramp, its glow, and its state's dot where its state is known (null: no dot);
+ * [live] where it is the one in focus (its agent's own page), which alone breathes. Decorative beside its name; named
+ * ([description]) where it stands alone. */
 @Composable
-fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: String? = null) {
+fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: String? = null, live: Boolean = false) {
     val dark = LocalBrand.current.paper.luminance() < 0.5f
     val box = with(LocalDensity.current) { size.roundToPx() }
     val picture = remember(glass, size, box, dark) { GlassPictures.picture(glass.shape, glass.color, size.value, box, dark) }
-    val breath = breathing(state == Glass.State.WORKING && motionAllowed())
+    val breath = breathing(glassBreathes(state, live, motionAllowed()))
     val named = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier.clearAndSetSemantics { }
     Canvas(Modifier.size(size).then(named)) {
         drawGlass(picture, Glass.RAMPS[glass.color], size.value, dark, state, breath.floatValue)
     }
 }
+
+/** Whether a glass breathes: a working agent's, on its own page ([live]), while the phone's animations are on. */
+internal fun glassBreathes(state: Glass.State?, live: Boolean, motion: Boolean): Boolean = live && motion && state == Glass.State.WORKING
 
 /** Your agent's mark, where a face goes: the app's I-beam on a tile of its own in one ink (the page's on its ink), or,
  * where this phone is set so (Settings), in pearl glass: on a graphite tile on a light page, glowing on its own on a dark
