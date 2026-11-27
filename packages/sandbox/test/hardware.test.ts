@@ -57,6 +57,29 @@ describe("the hardware image", () => {
   });
 });
 
+describe("kipy, where an agent's commands run", () => {
+  // An agent's commands run in login shells, where Debian's /etc/profile sets PATH afresh (the workshop's tools-path.sh
+  // says why): kipy's venv must be put back there, first, so their python3 imports it. deskd, and the apps it starts,
+  // aren't login shells: they keep Debian's own python3, the image setting no PATH of its own.
+  const PROFILE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games";
+  const script = fileURLToPath(new URL("hardware-path.sh", context));
+  const after = (path: string, times = 1) => {
+    const p = Bun.spawnSync(["/bin/sh", "-c", `${'. "$1"; '.repeat(times)}printf %s "$PATH"`, "sh", script], { env: { PATH: path, HOME: "/work" }, stdout: "pipe", stderr: "pipe" });
+    expect({ stderr: p.stderr.toString(), code: p.exitCode }).toEqual({ stderr: "", code: 0 });
+    return p.stdout.toString();
+  };
+
+  test("a login shell has kipy's venv first, once, however many times it is read", () => {
+    expect(dockerfile).toContain("COPY hardware-path.sh /etc/profile.d/invincible-hardware.sh\n");
+    expect(after(PROFILE_PATH).split(":")).toEqual(["/opt/hardware/bin", ...PROFILE_PATH.split(":")]);
+    expect(after(PROFILE_PATH, 2)).toBe(after(PROFILE_PATH));
+  });
+
+  test("the image puts nothing on its own PATH: deskd and what it starts keep Debian's python3", () => {
+    expect(dockerfile).not.toMatch(/^ENV PATH=/m);
+  });
+});
+
 describe("its seed, as the VM runs it as it starts", () => {
   /** hardware-seed in a home of the test's own (and a seed folder of its own, where given), the VM's command after it. */
   function seed(home: string, command: string[] = [], env: Record<string, string> = {}) {

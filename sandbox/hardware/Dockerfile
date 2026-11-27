@@ -24,7 +24,10 @@ RUN python3 -m venv --system-site-packages /opt/hardware \
  && /opt/hardware/bin/pip install --no-cache-dir --disable-pip-version-check -r /opt/hardware/requirements.txt \
  && /opt/hardware/bin/python -c "import kipy, pcbnew" \
  && chmod -R a+rX /opt/hardware
-ENV PATH=/opt/hardware/bin:$PATH INVINCIBLE_IMAGE=hardware
+# On the PATH of an agent's commands, which run in login shells, first: their python3 is the venv's. deskd, and what it
+# starts, keep Debian's own (hardware-path.sh says why).
+COPY hardware-path.sh /etc/profile.d/invincible-hardware.sh
+RUN chmod 0644 /etc/profile.d/invincible-hardware.sh
 
 # What stopped their windows in C0, seeded into the agent's own settings as its VM starts, where they aren't there yet
 # (hardware-seed): its home is /work, a volume of its own, which no image can fill. KiCad's global footprint and symbol
