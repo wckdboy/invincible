@@ -269,7 +269,9 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
   command's environment, never as an argument.
 - **Its screen goes to its own models.** A computer action's result carries a picture of the agent's own screen to the
   model its run asks; the pictures before and after its desktop work go to the run's reviewer too (the latest six),
-  and are kept in its VM's `/work/.evidence/desktop` by their SHA-256; to no other model. The node scans what results
+  and are kept in its VM's `/work/.evidence/desktop` by their SHA-256; to no other model. A run of yours from a
+  terminal or an eval sends its reviewer's through your node as your own files go, kept there by the same hash until
+  a week unused (only you attach files: a run on another's token sends their hashes). The node scans what results
   and calls say for secrets, not pictures (what is on that screen is what the agent already sees). Your take-over's
   screens are step 9's.
 - **The accessibility bus is the VM's own.** It starts with the desktop, as the agent's user, its sockets in deskd's

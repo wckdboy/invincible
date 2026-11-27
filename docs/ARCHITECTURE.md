@@ -312,7 +312,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
     export read back): work whose trail acted on the desktop, with no gate, is never verified. Each batch of its
     actions on the desktop is pictured before and after, each picture kept in the VM's `/work/.evidence/desktop` by
     its SHA-256, the hashes in the task's trail, and the latest shown to the reviewer with the criteria: evidence,
-    never the proof. A task whose gate looks
+    never the proof (a run of yours through a node's chat route sends them as files the node keeps, by the same
+    hash). A task whose gate looks
     at the desktop is an eval case as any other is: its eval's sandboxes are made from the desktop image. A Mac makes
     none yet: there an agent's VM is made without one, and the
     ledger says why. What it costs and how fast it is: the scorecard's desktop suite ([BENCHMARKS.md](BENCHMARKS.md)).

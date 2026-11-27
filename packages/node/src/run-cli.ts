@@ -31,8 +31,9 @@ import {
   type UsageLine,
   type ClientCall,
   type ChatMessage,
+  type AttachmentRef,
 } from "@invincible/core";
-import type { ModelMessage } from "@invincible/models";
+import type { ModelMessage, ToolImage } from "@invincible/models";
 import { DESKTOP_EVIDENCE, desktopBriefing, SHIPMENT_SCRIPT, stepsNamed } from "@invincible/agents";
 import { learnedLines, learnFromRun, type RunTrail, runTrail } from "@invincible/agents";
 import { AGENTS, attemptInstructions, chooseAgentModels, commandsRun, type EffortEvent, type EffortPick, type EffortResult, ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramShell, evidenceCollector, gateBy, type GateResult, investigate, type InvestigationOutcome, observation, RUN_DEFAULTS, type RunEvent, type RunOptions, type RunOutcome, runStanding, readResults, runEffort, runLoop, standingAfter, type Trip, timingLine } from "@invincible/agents";
@@ -356,14 +357,30 @@ function environment(sandbox: SandboxView, host: string): string {
 }
 
 /**
- * A run's messages as the node's chat route takes them: with no pictures on a question (the reviewer's of the desktop,
- * C1 step 8), each said where it would have gone, named above by its hash and kept in the sandbox.
+ * A run's messages as the node's chat route takes them (C1 step 8). A question's pictures (the reviewer's, of the
+ * desktop) go as files the node keeps by their SHA-256, as yours do (uploadAttachment), and the node takes those from
+ * its owner alone. Where it doesn't take them, the question names each by its hash, and says why and where it is kept.
  */
-export function withoutPictures(messages: readonly ModelMessage[]): ChatMessage[] {
-  return messages.map(({ images, ...message }) =>
-    images?.length ? { ...message, content: `${message.content}\n\n(The ${images.length === 1 ? "picture" : `${images.length} pictures`} named above can't go with this through the node's chat route: ${images.length === 1 ? "it is" : "each is"} kept in the sandbox's ${DESKTOP_EVIDENCE} under its SHA-256.)` } : message,
+export async function sendable(messages: readonly ModelMessage[], upload: (picture: ToolImage) => Promise<AttachmentRef>): Promise<ChatMessage[]> {
+  return Promise.all(
+    messages.map(async ({ images, ...message }): Promise<ChatMessage> => {
+      if (!images?.length) return message;
+      try {
+        const attachments: AttachmentRef[] = [];
+        for (const picture of images) attachments.push(await upload(picture));
+        return { ...message, attachments };
+      } catch (error) {
+        const why = redact(String((error as Error)?.message ?? error)).slice(0, 300);
+        const one = images.length === 1;
+        return { ...message, content: `${message.content}\n\n(The ${one ? "picture" : `${images.length} pictures`} named above didn't go with this (the node: ${why}): ${one ? "it is" : "each is"} kept in the sandbox's ${DESKTOP_EVIDENCE} under its SHA-256.)` };
+      }
+    }),
   );
 }
+
+/** A picture's name as the node keeps it: its words (the desktop, where in the trail it was taken, its hash), as a file's. */
+export const pictureName = (picture: ToolImage): string =>
+  `${picture.alt.replace(/[/\\\u0000-\u001f\u007f]/g, " ").replace(/[.\s]+$/, "").slice(0, 180) || "The desktop"}.${picture.mediaType.split("/")[1]}`;
 
 /** Whether a sandbox was made from the desktop image. */
 const hasDesktop = (sandbox: SandboxView): boolean => /(^|\/)desktop:/.test(sandbox.image);
@@ -661,7 +678,8 @@ async function workIn(
         let called: { calls: ClientCall[]; carry?: string } | null = null;
         const input = {
           role,
-          messages: withoutPictures(messages),
+          // (A question's pictures go as files the node keeps, where it takes them from this run: C1 step 8.)
+          messages: await sendable(messages, (picture) => node.call<{ attachment: AttachmentRef }>("uploadAttachment", { name: pictureName(picture), type: picture.mediaType, data: picture.data }).then((r) => r.attachment)),
           tools: false,
           // A run is coding work, whichever of its roles speaks: a coding plan on the role may answer it.
           coding: true,
