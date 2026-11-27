@@ -108,19 +108,27 @@ struct AgentsTests {
         #expect(Set(json.keys) == ["id", "name", "instructions", "repository", "harness", "role", "enabled", "dailyTurns"])
     }
 
-    @Test func itsMarksColourIsSentAsCoreTakesItAndNullAsksItsNodeAgain() throws {
-        // (The PWA's avatarEditor: { v: 2, color } when you chose, null to ask its node again, nothing when untouched. A node
-        // before the marks keeps it as it is; one with them snaps it to the eight and keeps the agent's form.)
+    @Test func itsLookIsSentAsCoreTakesItAndNullAsksItsNodeAgain() throws {
+        // (The PWA's avatarEditor: its glass, { v: 4, color, shape }, when you chose; { v: 2, color } as an app before the
+        // glass sent a colour; null to ask its node again; nothing when untouched. A node with the glass snaps a v 2 colour
+        // to the eight and keeps the agent's shape.)
         var input = AgentInput(id: "ada", name: "Ada", instructions: "", repository: nil, harness: "native", role: "engineer", enabled: true, dailyTurns: 40, avatar: .chosen("#0084ba"))
         let chosen = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(input)) as? [String: Any])
         let profile = try #require(chosen["avatar"] as? [String: Any])
         #expect(Set(profile.keys) == ["v", "color"])
         #expect(profile["v"] as? Int == 2)
         #expect(profile["color"] as? String == "#0084ba")
-        // What was sent is what core takes as a chosen colour, and the mark it reads from it: Sky, in its handle's form.
+        // What was sent is what core takes as a chosen colour, and the glass it reads from it: Sky, in its handle's shape.
         let sent = try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: profile))
         #expect(AgentMark.chosenColor(sent) == "#0084ba")
-        #expect(AgentMark.of(id: "ada", profile: sent) == AgentMark(color: 4, form: AgentMark.seeded("ada").form))
+        #expect(AgentGlass.of(id: "ada", profile: sent) == AgentGlass(color: 4, shape: AgentGlass.seeded("ada").shape))
+        // What the editor sends since the glass: its glass, { v: 4, color (its light form), shape }, read back as it was.
+        input.avatar = .glass(AgentGlass(color: 4, shape: 12))
+        let glass = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(input)) as? [String: Any])
+        let saved = try #require(glass["avatar"] as? [String: Any])
+        #expect(Set(saved.keys) == ["v", "color", "shape"])
+        #expect(saved["v"] as? Int == 4 && saved["color"] as? String == "#0084ba" && saved["shape"] as? Int == 12)
+        #expect(AgentGlass.read(try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: saved))) == AgentGlass(color: 4, shape: 12))
         input.avatar = .handle
         let reset = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(input)) as? [String: Any])
         #expect(reset.keys.contains("avatar"))

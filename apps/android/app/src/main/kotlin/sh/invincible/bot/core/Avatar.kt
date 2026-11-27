@@ -1,9 +1,9 @@
 package sh.invincible.bot.core
 
 /**
- * What an agent's saved avatar says beyond its mark (core's avatar.ts): a colour chosen for it before the marks (an orb
- * profile, `{ "v": 2, "color": "#rrggbb" }`), which its mark snaps to one of the eight (AgentMark.markOf), and the whole
- * number its handle gives it, which sets its mark's colour and form until a node gives it one, and its slats' phase.
+ * What an agent's saved avatar says beyond its glass (core's avatar.ts): a colour chosen for it before the marks (an orb
+ * profile, `{ "v": 2, "color": "#rrggbb" }`), which its glass snaps to one of the eight (Glass.of), and the whole
+ * number its handle gives it, which sets its glass's shape and colour until a node gives it its own (Glass.seeded).
  */
 object Avatar {
     private val hex = Regex("^#[0-9a-fA-F]{6}$")

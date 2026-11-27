@@ -1700,45 +1700,14 @@ const liveActivities = activityCases.map((c) => {
   return { ...c, others: c.others ?? 0, at: NOW, state, line: activityLine(state), short: activityShort(state), othersLine: activityOthers(state) };
 });
 
-// ---- an agent's mark, the Grille (core's agent-mark.ts): the palette, the forms, the marks a node gives, the snap, the
-// geometry: every app draws the mark from these numbers ---------------------------------------------------------------
+// ---- what the Grille (core's agent-mark.ts) leaves the glass: the palette, a colour you pick snapped to it, a mark an
+// app or a node from before the glass saved, read for its colour, and the states an agent is shown in ------------------
+// (The dev fleet and five more: the glass's `given` gives them their glass in this order.)
 const markFleet = ["builder", "writer", "researcher", "coder", "reviewer", "operator", "designer", "tester", "ops", "docs", "scout", "scribe", "warden", "pilot", "smith"];
-const markGiven: core.AgentMark[] = [];
-for (const id of markFleet) markGiven.push(core.assignMark(id, markGiven));
-const markGeometryCases = (() => {
-  const out: { id: string; mark: core.AgentMark; seed: number; state: core.MarkState; size: number; theme: core.MarkTheme; t: number | null; since: number | null; geometry: core.MarkGeometry; colors: { body: string; key: string } }[] = [];
-  // Two slots and three; 64 pt and 16 pt (a slot is 7.5 units from 18 pt up, wider below: nothing else depends on size).
-  for (const id of ["builder", "coder"]) {
-    const mark = markGiven[markFleet.indexOf(id)]!;
-    const seed = core.handleSeed(id);
-    for (const state of core.MARK_STATES) {
-      for (const [n, size] of [64, 16].entries()) {
-        const theme: core.MarkTheme = n % 2 ? "dark" : "light";
-        const moments: [number | null, number | null][] = [[null, null], [1.3, null], [2.1, null]];
-        if (state === "done" || state === "failed") moments.push([0.3, 0.3], [0.7, 0.7], [3, 3]);
-        for (const [t, since] of moments) out.push({ id, mark, seed, state, size, theme, t, since, geometry: core.markGeometry({ mark, seed, state, size, t, since }), colors: core.markColors(mark.color, state, theme) });
-      }
-    }
-  }
-  return out;
-})();
 const marks = {
   palette: core.MARK_PALETTE,
-  queued: core.MARK_QUEUED,
-  paused: core.MARK_PAUSED,
-  page: core.MARK_PAGE,
-  ink: core.MARK_INK,
-  red: core.MARK_RED,
-  forms: Array.from({ length: core.MARK_FORMS }, (_, n) => core.markForm(n)),
-  timing: core.MARK_TIMING,
   states: core.MARK_STATES,
   stateOf: core.AVATAR_EXPRESSIONS.map((expression) => ({ expression, state: core.markState(expression) })),
-  // As a node gives them, one by one in the order they join: fifteen, so every form is worn and some colours twice.
-  given: markFleet.map((id, n) => ({ id, seed: core.handleSeed(id), ...markGiven[n]! })),
-  chosen: [
-    { id: "writer", others: [{ color: 0, form: 1 }], chosen: "#ffbc63", mark: core.assignMark("writer", [{ color: 0, form: 1 }], "#ffbc63") },
-    { id: "ops", others: markGiven.slice(0, 8), chosen: "#ff0000", mark: core.assignMark("ops", markGiven.slice(0, 8), "#ff0000") },
-  ],
   // A colour you pick, to the nearest hue of the eight (OKLCH), reckoned with + − × ÷ and √ alone from these: sRGB's
   // levels in linear light, a cube root by Newton's method, the chroma under which a colour is a grey.
   linear: core.MARK_LINEAR,
@@ -1762,7 +1731,8 @@ const marks = {
     }
     return { digest: digest.toString(16).padStart(8, "0"), counts };
   })(),
-  // Profiles as an agent has them: its mark (v 3); a colour chosen before the marks (v 2); nothing; and what reads as neither.
+  // Profiles as an agent may have them: a mark (v 3), read strictly; a colour chosen before the marks (v 2); nothing;
+  // and what reads as no mark.
   profiles: [
     { id: "coder", profile: { v: 3, color: "#0084ba", form: 10 } },
     { id: "coder", profile: { v: 2, color: "#3abeff" } },
@@ -1770,11 +1740,7 @@ const marks = {
     { id: "docs", profile: { v: 3, color: "#0084ba", form: 12 } },
     { id: "docs", profile: { v: 3, color: "#3bb7f7", form: 1 } },
     { id: "docs", profile: { v: 3, color: "#0084ba", form: 1, glow: true } },
-  ].map((c) => ({ ...c, saved: core.isMarkProfile(c.profile), mark: core.markOf(c.id, c.profile ?? undefined) })),
-  geometry: markGeometryCases,
-  // Its sines and cosines, from + − × ÷ and floor alone (core's markSin and markCos): each port says these to the last
-  // bit, its forms' angles, its motion's phases and a page open a day among them.
-  trig: [0, 1, -2.5, 100, Math.PI / 4, Math.PI / 2, Math.PI, -Math.PI, 3 * Math.PI / 2, 2.1, 6.283185307179586, 98_700.1, -98_700.1, 1e-9, -0.785398, ...core.MARK_ANGLES.map((a) => (a * Math.PI) / 180)].map((x) => ({ x, sin: core.markSin(x), cos: core.markCos(x) })),
+  ].map((c) => ({ ...c, saved: core.isMarkProfile(c.profile), mark: core.readMarkProfile(c.profile) })),
 };
 
 // ---- an agent's glass (core's glass.ts), which every app draws from the same numbers -------------------------------

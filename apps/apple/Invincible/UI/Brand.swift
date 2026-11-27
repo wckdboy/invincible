@@ -82,7 +82,7 @@ extension Color {
 struct WorkerFace: View {
     /// An agent's handle, or `primary` for Invincible itself (a handle no agent can have).
     let id: String
-    /// Its saved avatar: its mark (AgentMark.of).
+    /// Its saved avatar: its glass (AgentGlass.of).
     var profile: JSONValue? = nil
     var size: CGFloat = 40
     /// What it is doing (AgentOrb.expression); nil: still.
