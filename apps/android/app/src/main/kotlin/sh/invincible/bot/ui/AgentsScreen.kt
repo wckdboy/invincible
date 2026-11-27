@@ -32,6 +32,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -289,11 +290,12 @@ internal fun GiveDialog(app: AppModel, done: () -> Unit) {
 
 /**
  * Forget this device…, confirmed first (the iPhone's words, I10's 81361e56): the pairing and this phone's key go, and a
- * fresh invite joins it again. The way out of a refusal on the chat and Work, and Settings' own.
+ * fresh invite joins it again. The way out of a refusal on the chat and Work, and Settings' own. Its question is saved
+ * with the page, as Settings' was, so turning the phone or a change of theme leaves it asked.
  */
 @Composable
 internal fun ForgetThisDevice(app: AppModel, modifier: Modifier = Modifier, outlined: Boolean = false) {
-    var asking by remember { mutableStateOf(false) }
+    var asking by rememberSaveable { mutableStateOf(false) }
     val label = @Composable { Text("Forget this device…", color = LocalBrand.current.failed) }
     if (outlined) androidx.compose.material3.OutlinedButton(onClick = { asking = true }, modifier = modifier) { label() } else TextButton(onClick = { asking = true }, modifier = modifier) { label() }
     if (asking) {
