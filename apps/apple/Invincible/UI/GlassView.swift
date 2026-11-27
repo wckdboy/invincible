@@ -36,9 +36,11 @@ struct GlassMarkView: View {
     }
 }
 
-/// Your agent's mark, in the box an orb takes: the app icon's I-beam on a tile of its own in one ink, or, where this
-/// device is set so (Settings), in pearl glass, lit as an agent's glass is: on a graphite tile on a light page (so no
-/// shadow under it), glowing on its own on a dark one (its pool from 24 pt), its blur from 40.
+/// Your agent's mark, in the box an orb takes: the bare I-beam in the page's ink, on nothing (the owner's word of 27 November
+/// 2026: "the Logo is just the I beam, not the appicon squircle around it"; the squircle is the app's icon alone, on the
+/// home screen, in the App Store and in Settings), or, where this device is set so (Settings), in pearl glass, lit as an
+/// agent's glass is: on a graphite tile on a light page (so no shadow under it), glowing on its own on a dark one (its
+/// pool from 24 pt), its blur from 40.
 struct GuardianMark: View {
     let size: CGFloat
     @AppStorage("invincible.guardian-mark") private var style = "mono"
@@ -55,9 +57,8 @@ struct GuardianMark: View {
             }
             .frame(width: size, height: size)
         } else {
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+            IBeam()
                 .fill(.primary)
-                .overlay(IBeam().fill(.background))
                 .frame(width: size, height: size)
         }
     }
