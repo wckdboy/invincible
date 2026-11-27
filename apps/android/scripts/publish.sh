@@ -26,7 +26,10 @@ with an invite: on the node, \`invincible invite --client\`, and compare the six
 
 Signed with Invincible's release key: certificate SHA-256 $CERT. Every build is signed with the same key, so each installs
 over the last. The APK's SHA-256: $SHA."
-../../scripts/release-tag.sh "$TAG" "$COMMIT"
+# (No checkout has a `github` remote of its own, sovware.io being origin: release-tag.sh's watch for the mirror is given
+# one here, by git's own environment, for this run only. Nothing is written to any git config.)
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.github.url GIT_CONFIG_VALUE_0=https://github.com/wckdboy/invincible.git \
+  ../../scripts/release-tag.sh "$TAG" "$COMMIT"
 gh release create "$TAG" "$APK#$NAME" --repo wckdboy/invincible --verify-tag --title "Invincible for Android $BUILD" --notes "$NOTES"
 cat > ../site/public/android/latest.json <<JSON
 {
