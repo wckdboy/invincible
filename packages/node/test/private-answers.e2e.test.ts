@@ -103,7 +103,7 @@ test("your agent reads your mail: nothing an agent reads of the node, and no lin
   const waiting = (reads.actions as { actions: ActionView[] }).actions.find((a) => a.tool === "send")!;
   expect(waiting).toMatchObject({ connector: "gmail", tool: "send", state: "waiting", args: {}, target: "gmail.send" });
   // Of the ledger it reads only that you signed an order (which, and until when): none of the mail's lines.
-  expect((reads.ledger as { entries: { resource: string; target: string; detail: string }[] }).entries.map((e) => [e.resource, e.target, e.detail.replace(/^o_\w+ · until \d{4}-\d{2}-\d{2}$/, "an order · until its day")])).toEqual([["policy.order", "gmail.trash", "an order · until its day"]]);
+  expect((reads.ledger as { entries: { resource: string; target: string; detail: string }[] }).entries.map((e) => [e.resource, e.target, e.detail.replace(/^o_[\w-]+ · until \d{4}-\d{2}-\d{2}$/, "an order · until its day")])).toEqual([["policy.order", "gmail.trash", "an order · until its day"]]);
 
   // You read it all: the send's words, so you can answer it.
   const yours = ((await admin("actions")).body.actions as ActionView[]).find((a) => a.tool === "send")!;
