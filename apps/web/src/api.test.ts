@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { routes } from "@invincible/core";
+import { desktopBeat } from "@invincible/core/desktop-frames";
 import { ApiError, apiFor, READING_POSTS, READS_UNDER_OTHER_SCOPES, setNetworkHandler } from "./api.ts";
 import type { BrowserIdentity } from "./identity.ts";
 
@@ -114,4 +115,64 @@ test("the POSTs that leave what places showed are every reading route, and a nam
   expect([...READING_POSTS].sort()).toEqual([...reading, ...READS_UNDER_OTHER_SCOPES].sort());
   // Each of those few is a POST route that exists.
   for (const path of READS_UNDER_OTHER_SCOPES) expect([path, Object.values(routes).some((route) => route.path === path && route.method === "POST")]).toEqual([path, true]);
+});
+
+describe("an agent's desktop as a stream of frames", () => {
+  /** A frame as the node sends one (core's desktop-frames.ts), its payload a byte that says which. */
+  const frame = (kind: number, n: number) => {
+    const out = new Uint8Array(14);
+    new DataView(out.buffer).setUint32(0, 10);
+    out[4] = kind;
+    new DataView(out.buffer).setBigUint64(5, BigInt(1_764_216_000_000 + n));
+    out[13] = n;
+    return out;
+  };
+  let cancelled = false;
+  const node = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (request) => {
+      if (new URL(request.url).pathname !== "/api/team/desktop/stream") return Response.json({ error: "not found" }, { status: 404 });
+      return request.json().then((asked: { id?: string }) => {
+        if (asked.id !== "rio") return Response.json({ error: "this agent has no VM yet" }, { status: 424 });
+        // Three frames and a beat, cut across their bounds, then nothing more until the watcher goes.
+        const all = new Uint8Array([...frame(1, 1), ...frame(2, 2), ...desktopBeat(1_764_216_000_003), ...frame(2, 4)]);
+        const cuts = [0, 3, 17, 30, all.length];
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (let i = 0; i + 1 < cuts.length; i++) controller.enqueue(all.slice(cuts[i], cuts[i + 1]));
+            },
+            cancel: () => void (cancelled = true),
+          }),
+          { headers: { "content-type": "application/vnd.invincible.desktop-frames" } },
+        );
+      });
+    },
+  });
+  afterAll(() => node.stop(true));
+
+  test("its frames come whole however the bytes are cut, beats among them; leaving ends the watching", async () => {
+    at(node.port!);
+    const leave = new AbortController();
+    const seen: [number, number][] = [];
+    for await (const f of apiFor(identity).frames("/api/team/desktop/stream", { id: "rio" }, leave.signal)) {
+      seen.push([f.kind, f.payload[0] ?? -1]);
+      if (seen.length === 4) break;
+    }
+    expect(seen).toEqual([[1, 1], [2, 2], [0, -1], [2, 4]]);
+    leave.abort();
+    for (let i = 0; i < 100 && !cancelled; i++) await Bun.sleep(5);
+    expect(cancelled).toBe(true);
+  });
+
+  test("a refusal is the node's own words, as any answer's is", async () => {
+    at(node.port!);
+    const error = await (async () => {
+      for await (const _ of apiFor(identity).frames("/api/team/desktop/stream", { id: "nobody" }, new AbortController().signal)) return null;
+      return null;
+    })().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 424, message: "this agent has no VM yet" });
+  });
 });

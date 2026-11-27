@@ -4,6 +4,8 @@
  * the node sends as an image's source, and the node's refusal that a VM has no desktop. Pure (no DOM).
  */
 
+import type { DesktopHold } from "./desktop-stream.ts";
+
 /** One thing done on an agent's desktop, as the node takes it (core's DesktopAction, without its schema). */
 export type DesktopDo =
   | { do: "click"; x: number; y: number }
@@ -12,11 +14,21 @@ export type DesktopDo =
   | { do: "key"; keys: string[] }
   | { do: "open"; address: string };
 
-/** What comes back from every look and everything done: the screen as it then is, and its size in its own pixels. */
+/**
+ * What comes back from every look and everything done: the screen as it then is, and its size in its own pixels; and
+ * whether you have it (`held`: absent from a node or an image older than take-over).
+ */
 export interface DesktopView {
   shot: { mediaType: string; data: string };
   width: number;
   height: number;
+  held?: DesktopHold | null;
+}
+
+/** A thing done with no picture asked back (while you watch it live), or a look that asks only whether you have it. */
+export interface DesktopDone {
+  done: true;
+  held?: DesktopHold | null;
 }
 
 /** The keys offered beside the picture, by the names X gives them. */

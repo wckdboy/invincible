@@ -1618,9 +1618,10 @@
       .task-answers { display: flex; align-items: center; gap: var(--sp-2); margin-top: 4px; }
       /* An agent's desktop in its Workspace: its screen as a picture (a click on it clicks there), then the ways to take it over. */
       .desktop h3 { font-size: var(--fs-15); }
-      .desktop-shot { aspect-ratio: 16 / 10; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-sunken); }
-      .desktop-shot img { display: block; width: 100%; height: 100%; cursor: crosshair; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-      .desktop-shot img:not([data-shown]) { visibility: hidden; }
+      .desktop-shot { position: relative; aspect-ratio: 16 / 10; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-sunken); }
+      .desktop-shot img, .desktop-shot canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: crosshair; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      .desktop-shot img:not([data-shown]), .desktop-shot canvas:not([data-shown]) { visibility: hidden; }
+      .desktop-hold { min-height: 32px; gap: var(--sp-3); }
       .desktop-line { display: flex; align-items: center; gap: var(--sp-2); }
       .desktop-line .input { flex: 1; min-width: 0; }
       .desktop-slot:empty { display: none; }

@@ -1,5 +1,6 @@
 import type { ChatStreamEvent } from "@invincible/core";
 import { utf8 } from "@invincible/core/bytes";
+import { type DesktopFrame, DesktopFrames } from "@invincible/core/desktop-frames";
 import { signRequest, ZONE_HEADER } from "@invincible/core/request-auth";
 import { type BrowserIdentity, signerFor } from "./identity.ts";
 
@@ -96,10 +97,10 @@ export interface Bytes {
  * The POSTs that change nothing: they leave what the places showed as it was (and keep their own answers), where any
  * other POST forgets it all. Every route whose scope is a reading one, and these few that read under another scope:
  * the doctor (it changes nothing), watching a turn, opening a kept chat, listing sandboxes, a task's trail and its steps,
- * and a room.
+ * a room, and watching an agent's desktop.
  * api.test.ts holds the list to the routes. Kept here, not read from the routes, so the app's bundle carries no schema.
  */
-export const READS_UNDER_OTHER_SCOPES = ["/api/doctor", "/api/turns/attach", "/api/conversations/get", "/api/sandboxes/list", "/api/team/trail", "/api/team/steps", "/api/team/room"] as const;
+export const READS_UNDER_OTHER_SCOPES = ["/api/doctor", "/api/turns/attach", "/api/conversations/get", "/api/sandboxes/list", "/api/team/trail", "/api/team/steps", "/api/team/room", "/api/team/desktop/stream"] as const;
 export const READING_POSTS: ReadonlySet<string> = new Set([
   ...READS_UNDER_OTHER_SCOPES,
   "/api/team/overview",
@@ -143,6 +144,8 @@ export interface Api {
   events(path: string, body: unknown, signal: AbortSignal): AsyncGenerator<ChatStreamEvent>;
   /** A POST that answers with events of another kind (a terminal's screen). Aborting the signal ends the watching. */
   stream<T>(path: string, body: unknown, signal: AbortSignal): AsyncGenerator<T>;
+  /** A POST that answers with an agent's desktop as it is (teamDesktopStream): its frames, whole, as they come. Aborting the signal ends the watching. */
+  frames(path: string, body: unknown, signal: AbortSignal): AsyncGenerator<DesktopFrame>;
   /**
    * A GET that answers with events as they come (the node's live stream): `alive` is told of everything that arrives,
    * its keep-alives too, so a stream gone quiet can be told from a dead one. Aborting the signal ends it.
@@ -201,6 +204,23 @@ export function apiFor(identity: BrowserIdentity): Api {
     changing(path);
     return stream<ChatStreamEvent>(path, body, signal);
   };
+  async function* frames(path: string, body: unknown, signal: AbortSignal): AsyncGenerator<DesktopFrame> {
+    changing(path);
+    const response = await signedFetch(identity, "POST", path, body, signal);
+    if (!response.body) return;
+    const reader = response.body.getReader();
+    const parser = new DesktopFrames();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        yield* parser.push(value);
+      }
+    } finally {
+      // (The watcher stopping reading is its leaving: the node ends the encoder when the last one goes.)
+      await reader.cancel().catch(() => {});
+    }
+  }
   async function* listen<T>(path: string, signal: AbortSignal, alive?: () => void): AsyncGenerator<T> {
     const response = await signedFetch(identity, "GET", path, undefined, signal);
     if (!response.body) return;
@@ -242,6 +262,7 @@ export function apiFor(identity: BrowserIdentity): Api {
     chat: (body: unknown, signal: AbortSignal) => events("/api/chat", body, signal),
     events,
     stream,
+    frames,
     listen,
   };
 }

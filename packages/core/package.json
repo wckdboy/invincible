@@ -11,6 +11,7 @@
     "./avatar": "./src/avatar.ts",
     "./blocks": "./src/blocks.ts",
     "./bytes": "./src/bytes.ts",
+    "./desktop-frames": "./src/desktop-frames.ts",
     "./doctor": "./src/doctor.ts",
     "./eval-index": "./src/eval-index.ts",
     "./identity": "./src/identity.ts",
