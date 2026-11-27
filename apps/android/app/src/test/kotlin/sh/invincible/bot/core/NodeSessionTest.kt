@@ -177,6 +177,27 @@ class NodeSessionTest {
         assertEquals(listOf(a), seen.kept)
     }
 
+    @Test fun afterTheCutoffAnUnpinnedPairingAtANodeThatGivesNoProofIsRefused() = runBlocking {
+        // (The lead's word of 27 November 2026: after the cutoff no proof is a failed one, pinned or not; every node of
+        // ours proves by then. Before it, a node from before, as today: beforeTheCutoffAnUnpinnedPairingIsAsToday.)
+        val pin = NodePin(null, proofFirst = true)
+        val seen = Seen()
+        val s = session(pin, seen, now = { NodeProof.NAMED_FROM + 60_000L }) { challenge -> answer(a, challenge, proof = null) }
+        assertFalse(s.prove())
+        assertNotNull(pin.refused)
+        assertFalse(pin.isOpen)
+        assertNull(pin.node)
+        assertEquals(emptyList<String?>(), seen.names)
+    }
+
+    @Test fun beforeTheCutoffAnUnpinnedPairingAtANodeThatGivesNoProofIsAsToday() = runBlocking {
+        val pin = NodePin(null, proofFirst = true)
+        val seen = Seen()
+        assertTrue(session(pin, seen) { challenge -> answer(a, challenge, proof = null) }.prove())
+        assertTrue(pin.isOpen)
+        assertNull(pin.refused)
+    }
+
     @Test fun beforeTheCutoffAnUnpinnedPairingIsAsToday() = runBlocking {
         val pin = NodePin(null, proofFirst = true)
         val seen = Seen()
@@ -235,5 +256,16 @@ class NodeSessionTest {
             assertFalse(pin.isOpen)
         }
         assertEquals(0, seen.reopened)
+    }
+
+    // ---- the lead's word of 27 November 2026: while refused, the reach banner says nothing ----
+
+    @Test fun theReachBannerSaysNothingWhileTheNodeIsRefused() {
+        // ("Can't reach Invincible right now" contradicted the refusal, which says what's wrong.)
+        assertNull(reachShown(online = false, refused = true))
+        assertNull(reachShown(online = true, refused = true))
+        assertEquals(false, reachShown(online = false, refused = false))
+        assertEquals(true, reachShown(online = true, refused = false))
+        assertNull(reachShown(online = null, refused = false))
     }
 }

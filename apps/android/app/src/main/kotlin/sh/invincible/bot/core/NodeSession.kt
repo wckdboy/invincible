@@ -17,8 +17,9 @@ import kotlinx.coroutines.withContext
  * 2. Try again keeps the refusal while it asks, and lifts it only on a proof that holds; then the stream opens again
  *    ([reopen]).
  * 3. Once a node is pinned, no proof is a failed one (NodeProof.judge): a node that leaves it out is refused.
- * 4. With no node pinned yet, after the cutoff (NodeProof.NAMED_FROM) it proves first, pins, then signs for the node; before
- *    the cutoff, as before: it asks whoami first, and what it can't prove holds nothing back.
+ * 4. With no node pinned yet, after the cutoff (NodeProof.NAMED_FROM) it proves first, pins, then signs for the node, and
+ *    a node that gives no proof is refused; before the cutoff, as before: it asks whoami first, and what it can't prove
+ *    holds nothing back.
  * 5. A late proof never writes over a newer pairing: the node it pins is kept with the pairing ([keep]) only while that
  *    pairing is still this phone's ([isCurrent]).
  * 6. The proof is judged off the caller's thread ([judging]: AppModel's is the main one), and nothing is taken from the
@@ -114,7 +115,7 @@ class NodeSession(
     }
 
     /** Whoami's answer judged where [judging] says: never on the thread that asked (AppModel's is the main one). */
-    private suspend fun judged(who: Json, challenge: String): NodeProof.Proven = withContext(judging) { NodeProof.judge(pin.node, who, challenge, check) }
+    private suspend fun judged(who: Json, challenge: String): NodeProof.Proven = withContext(judging) { NodeProof.judge(pin.node, who, challenge, now = now(), check = check) }
 
     /** A first proof: this session's client names the node from now on; its pairing keeps it, if still this phone's. */
     private fun pinned(node: String) {
@@ -149,3 +150,10 @@ class NodeSession(
         const val LONGEST_PAUSE_MS = 60_000L
     }
 }
+
+/**
+ * What the reach banner says of the link ([online]: null, nothing to say) while this phone's node is refused
+ * ([refused]): nothing. The refusal says what's wrong; "Can't reach Invincible right now" beside it said otherwise (the
+ * lead's word, 27 November 2026).
+ */
+fun reachShown(online: Boolean?, refused: Boolean): Boolean? = if (refused) null else online

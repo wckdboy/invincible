@@ -37,7 +37,7 @@ object NodeProof {
         data class Same(val node: String) : Proven
         /** Proven, but another node than the one pinned: not this phone's node. */
         data class Other(val node: String) : Proven
-        /** No proof, and none pinned: a node from before, spoken to as before (v1). Once pinned, no proof is Failed. */
+        /** No proof, none pinned, before the cutoff: a node from before, spoken to as before (v1). Otherwise no proof is Failed. */
         data object Older : Proven
         /** A proof that fails: never taken. */
         data object Failed : Proven
@@ -62,12 +62,14 @@ object NodeProof {
     /**
      * Whoami's answer [said], as it came, judged against the node pinned (core's judgeNodeProof, and the rules the review
      * of apps-name-node set, 27 November 2026, which core and the Apple app hold too): no proof at all is a node from
-     * before, spoken to as before only while none is pinned; once a node is pinned, no proof is a failed one; a proof or a
+     * before, spoken to as before only while none is pinned and before the cutoff ([now]); once a node is pinned, or after
+     * the cutoff, no proof is a failed one; a proof or a
      * node that isn't a string (`"proof": null`, `"proof": 5`, no `node`), or a proof that doesn't hold, is never taken.
      */
-    fun judge(pinned: String?, said: Json, challenge: String, check: Checker = strict): Proven {
+    fun judge(pinned: String?, said: Json, challenge: String, now: Long = System.currentTimeMillis(), check: Checker = strict): Proven {
         val fields = (said as? Json.Obj)?.fields ?: return Proven.Failed
-        val proof = fields["proof"] ?: return if (pinned == null) Proven.Older else Proven.Failed
+        // (After the cutoff no proof is a failed one, pinned or not: every node of ours proves by then. The lead's word.)
+        val proof = fields["proof"] ?: return if (pinned == null && now < NAMED_FROM) Proven.Older else Proven.Failed
         val node = (fields["node"] as? Json.Str)?.value
         val text = (proof as? Json.Str)?.value
         if (node == null || text == null || !isNode(node) || !isChallenge(challenge) || !check.verify(node, challenge, text)) return Proven.Failed

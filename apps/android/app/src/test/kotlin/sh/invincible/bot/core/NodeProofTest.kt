@@ -9,6 +9,8 @@ import sh.invincible.bot.app.PairedNode
 
 /** Which node this phone speaks to, proven, judged as core's judgeNodeProof judges it (the slice 8 note's item 11). */
 class NodeProofTest {
+    /** A moment before the cutoff: what this test says of a node from before holds whatever day it runs. */
+    private val BEFORE = NodeProof.NAMED_FROM - 86_400_000L
     private val v = Fixture.vectors
     private val proofs = v["nodeProofs"].list
 
@@ -37,9 +39,10 @@ class NodeProofTest {
         assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, said(Json.Str(other), Json.Str(proof)), challenge))
         assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, said(Json.Str(node), Json.Str(proof)), NodeProof.challenge()))
         assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, said(null, Json.Str(proof)), challenge))
-        // A node from before offers no proof: spoken to as before while none is pinned (once one is, no proof is a failed
-        // one: oncePinnedNoProofIsAFailedOneAndUnpinnedItIsANodeFromBefore).
-        assertEquals(NodeProof.Proven.Older, NodeProof.judge(null, said(Json.Str(node), null), challenge))
+        // A node from before offers no proof: spoken to as before while none is pinned, before the cutoff (once one is,
+        // or after it, no proof is a failed one: oncePinnedNoProofIsAFailedOneAndUnpinnedItIsANodeFromBefore and
+        // afterTheCutoffNoProofIsAFailedOneUnpinnedToo).
+        assertEquals(NodeProof.Proven.Older, NodeProof.judge(null, said(Json.Str(node), null), challenge, now = BEFORE))
         // Every one of core's proofs holds under the strict rule, and only by its own node.
         for (q in proofs) assertEquals(NodeProof.Proven.Pin(q["node"].string!!), NodeProof.judge(null, said(Json.Str(q["node"].string!!), Json.Str(q["proof"].string!!)), q["challenge"].string!!))
     }
@@ -56,7 +59,7 @@ class NodeProofTest {
         val challenge = p["challenge"].string!!
         // (The review's L7, and the shared rule 3 of 27 November 2026.)
         assertEquals(NodeProof.Proven.Failed, NodeProof.judge(node, said(Json.Str(node), null), challenge))
-        assertEquals(NodeProof.Proven.Older, NodeProof.judge(null, said(Json.Str(node), null), challenge))
+        assertEquals(NodeProof.Proven.Older, NodeProof.judge(null, said(Json.Str(node), null), challenge, now = BEFORE))
         assertEquals(NodeProof.Proven.Same(node), NodeProof.judge(node, said(Json.Str(node), Json.Str(p["proof"].string!!)), challenge))
     }
 
@@ -71,6 +74,17 @@ class NodeProofTest {
             assertEquals("no node, pinned $pinned", NodeProof.Proven.Failed, NodeProof.judge(pinned, said(null, Json.Str(p["proof"].string!!)), challenge))
             assertEquals("a node that isn't a string, pinned $pinned", NodeProof.Proven.Failed, NodeProof.judge(pinned, said(Json.Num(1.0), Json.Str(p["proof"].string!!)), challenge))
         }
+    }
+
+    @Test fun afterTheCutoffNoProofIsAFailedOneUnpinnedToo() {
+        val p = proofs.first()
+        val node = p["node"].string!!
+        val challenge = p["challenge"].string!!
+        // (The lead's word of 27 November 2026: every node of ours proves by then.)
+        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(null, said(Json.Str(node), null), challenge, now = NodeProof.NAMED_FROM))
+        assertEquals(NodeProof.Proven.Failed, NodeProof.judge(node, said(Json.Str(node), null), challenge, now = NodeProof.NAMED_FROM))
+        assertEquals(NodeProof.Proven.Older, NodeProof.judge(null, said(Json.Str(node), null), challenge, now = NodeProof.NAMED_FROM - 1))
+        assertEquals(NodeProof.Proven.Pin(node), NodeProof.judge(null, said(Json.Str(node), Json.Str(p["proof"].string!!)), challenge, now = NodeProof.NAMED_FROM))
     }
 
     @Test fun theCutoffIsCores() {
