@@ -109,6 +109,8 @@ const STOP_WAIT_MS = 15_000;
  * stops the work, and the longest its run's grant is renewed. A task the agents there give no clock of their own.
  */
 export const HAND_CALL_MS = 24 * 3_600_000;
+/** A length of time as a hand-off's words say it. */
+const span = (ms: number): string => (ms % 3_600_000 === 0 ? `${ms / 3_600_000} h` : ms % 60_000 === 0 ? `${ms / 60_000} min` : `${Math.ceil(ms / 1000)} s`);
 /** How long a run's link (the run's key to its node's) lasts at most; it is signed again as the grant renews. */
 const LINK_TTL = RUN_GRANT_TTL;
 /** A link is signed again this long before it would end (or its grant's token would). */
@@ -570,6 +572,15 @@ export class Handoffs implements FabricTools {
   // ---- the runner ----
 
   private async runHanded(inv: Invocation, caller: Device | null): Promise<void> {
+    // Its life here, from its call's arrival: that call's deadline, or the longest a hand-off may last, whichever comes
+    // first. Its giver's deadline alone bounded it, so a giver that set none kept the work going while it stayed.
+    const began = this.now();
+    const longest = this.deps.handCallMs ?? HAND_CALL_MS;
+    const lifeMs = Math.min(inv.deadlineMs ?? Infinity, longest);
+    const lifeEnded =
+      inv.deadlineMs !== null && inv.deadlineMs <= longest
+        ? `Its call's deadline passed (${span(inv.deadlineMs)} from when it was handed over): it ends here with its call.`
+        : `It reached the longest a hand-off may last here (${span(longest)}): it ends rather than run on, whatever its giver's call allows.`;
     if (!caller || caller.role !== "full") return inv.fail(3, "a task is handed over by an active full node of this fleet alone");
     const parsed = HandArgs.safeParse(inv.args);
     if (!parsed.success) return inv.fail(2, `that isn't a task handed over: ${parsed.error.issues.map((i) => i.message).join("; ").slice(0, 300)}`);
@@ -662,6 +673,10 @@ export class Handoffs implements FabricTools {
       for (;;) {
         const task = this.team.task(run.task);
         if (!task) break;
+        if (!ENDED.has(task.status) && this.now() - began >= lifeMs) {
+          this.team.stop(run.task, lifeEnded);
+          continue;
+        }
         // Approved by you: taken now (a proposal you declined ends stopped, never taken).
         if (!run.accepted && (task.status === "queued" || task.status === "running" || task.record !== undefined)) accept();
         const page = this.team.trail(run.task, after);

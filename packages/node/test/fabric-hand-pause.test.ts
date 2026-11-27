@@ -16,6 +16,9 @@ import { until } from "./fabric-pair.ts";
  * be, and a broad resume ran it again, unfollowed, and past the 8 at once. Now the runner ends what its call no longer
  * follows, a broad resume passes over another node's tasks, and a revocation ends the store's tasks of that node,
  * followed or not. The server's binding of HandTeam is mirrored (server.ts), the team's changes waking the followers.
+ *
+ * Nor does it outlive what the runner allows it (N7): its call's deadline, or the longest a hand-off may last
+ * (HAND_CALL_MS), whichever comes first. Its giver's deadline alone bounded it, so a giver that set none kept it going.
  */
 
 setDefaultTimeout(30_000);
@@ -30,7 +33,7 @@ afterEach(async () => {
 const node = (name: string, c: string): Device => ({ id: "n_" + c.repeat(43), kind: "node", role: "full", name, scopes: [], enrolledHlc: "0", revokedHlc: null }) as unknown as Device;
 
 /** A runner with `agents` agents, and a ledger whose devices and grants the test revokes. */
-function runner(agents = 1) {
+function runner(agents = 1, clock: { now?: () => number; handCallMs?: number } = {}) {
   const store = new TeamStore(":memory:");
   const names = ["ada", ...Array.from({ length: agents - 1 }, (_, i) => `ada${i + 1}`)];
   for (const name of names) store.saveAgent({ id: name, name });
@@ -61,7 +64,7 @@ function runner(agents = 1) {
     activeDevice: (id: string) => (id === alpha.id && ledger.active.has(id) ? alpha : null),
     device: (id: string) => (id === alpha.id ? alpha : null),
   } as unknown as LedgerStore;
-  const h = new Handoffs({ db: new Database(":memory:"), store: held, identity: self, fabric: { sidecar: { client: null, did: null } } as unknown as Fabric, log: () => {} });
+  const h = new Handoffs({ db: new Database(":memory:"), store: held, identity: self, fabric: { sidecar: { client: null, did: null } } as unknown as Fabric, log: () => {}, ...clock });
   fixtures.push({ service, h });
   wake.poke = () => h.poke();
   const team: HandTeam = {
@@ -87,8 +90,8 @@ function runner(agents = 1) {
   return { store, service, h, self, alpha, names, runs, ledger, applied };
 }
 
-/** alpha's call handing a task to `agent`, as the fabric's socket delivers it. */
-function hand(h: Handoffs, giver: Device, agent: string) {
+/** alpha's call handing a task to `agent`, as the fabric's socket delivers it (with no deadline, unless given one). */
+function hand(h: Handoffs, giver: Device, agent: string, deadlineMs: number | null = null) {
   const said: { kind: string; task?: string }[] = [];
   let failed: { code: number; message: string } | null = null;
   let completed: { task?: { status?: string; error?: string | null } } | null = null;
@@ -101,7 +104,7 @@ function hand(h: Handoffs, giver: Device, agent: string) {
     authorization: { kind: "public" },
     chain: [],
     meta: null,
-    deadlineMs: null,
+    deadlineMs,
     input: true,
     signal: new AbortController().signal,
     inputs: { [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }) },
@@ -215,5 +218,38 @@ describe("a revocation, for what no call follows", () => {
     r.applied([{ kind: "device.revoked", body: { device: "n_" + "R".repeat(43) } }]);
     expect(r.store.task(t.underGrant)?.status).toBe("stopped");
     expect(r.store.task(t.approved)?.status).toBe("running");
+  });
+});
+
+describe("a handed task's life on the runner", () => {
+  const MINUTE = 60_000;
+
+  test("ends at the longest a hand-off may last, though its giver set no deadline", async () => {
+    const clock = { now: 1_000_000 };
+    const r = runner(1, { now: () => clock.now, handCallMs: 60 * MINUTE });
+    const k = hand(r.h, r.alpha, "ada");
+    await until(() => k.taken() && r.store.task(k.task()!)?.status === "running", 5_000, "running");
+    clock.now += 59 * MINUTE;
+    r.h.poke();
+    await Bun.sleep(50);
+    expect(r.store.task(k.task()!)?.status).toBe("running");
+    clock.now += MINUTE;
+    r.h.poke();
+    await until(() => k.completed() !== null, 5_000, "its giver answered");
+    expect(k.completed()!.task?.status).toBe("stopped");
+    expect(r.store.task(k.task()!)?.status).toBe("stopped");
+    expect(r.store.task(k.task()!)?.error).toContain("the longest a hand-off may last here");
+  });
+
+  test("ends at its call's deadline when that comes first", async () => {
+    const clock = { now: 1_000_000 };
+    const r = runner(1, { now: () => clock.now, handCallMs: 60 * MINUTE });
+    const k = hand(r.h, r.alpha, "ada", 10 * MINUTE);
+    await until(() => k.taken() && r.store.task(k.task()!)?.status === "running", 5_000, "running");
+    clock.now += 10 * MINUTE;
+    r.h.poke();
+    await until(() => k.completed() !== null, 5_000, "its giver answered");
+    expect(k.completed()!.task?.status).toBe("stopped");
+    expect(r.store.task(k.task()!)?.error).toContain("deadline");
   });
 });
