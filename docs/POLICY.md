@@ -61,7 +61,7 @@ These cannot be overridden by any instruction. Only a signed amendment changes t
 | **Read** | Search, read files, recall, browse | Free |
 | **Create / modify** | Create a bucket, branch, container, scoped credential; edit a working tree; write objects | Free, logged |
 | **Delete** | Remove anything persistent | Ask (ephemeral cleanup by the owning run excepted) |
-| **Outward** | Push, merge, deploy, send, post, purchase, change permissions, physical actions | Ask; no answer means **no**. Its and its agents' work in the repositories you gave them (a pull request from an `invincible/…` branch, a fix onto one, an issue, a comment on an issue or a pull request, a review that isn't an approval) it approves itself, and says so |
+| **Outward** | Push, merge, deploy, send, post, purchase, change permissions, physical actions | Ask; no answer means **no**. Its and its agents' work in the repositories you gave them, their own calls from their VMs included (a pull request from an `invincible/…` branch, a fix onto one, an issue, a comment on an issue or a pull request, a review that isn't an approval), it approves itself, and says so |
 | **Forbidden** | Anything that breaks a limit above | Never |
 
 You grant standing orders by signed amendment, and each one is scoped narrowly and expires. For example: "Invincible may open pull requests from `feat/*` branches of `amiriteorg/*` until 1 December."

@@ -65,9 +65,9 @@ describe("what your agent approves itself", () => {
 });
 
 describe("what every replica holds your agent's own approval to", () => {
-  test("its own callers: it, its agents' work as the node carries it out, and its loops; never a tool you run with a token of its own, nor another node", () => {
-    for (const by of ["primary", "arm:primary", "team.0123456789.ada", "loop:nightly"]) expect([by, primaryCaller(by)]).toEqual([by, true]);
-    for (const by of ["arm:claude-code", "arm:team.0123456789.ada", "n_node", "you", ""]) expect([by, primaryCaller(by)]).toEqual([by, false]);
+  test("its own callers: it, its agents' work as the node carries it out, its agents' own calls from their VMs, and its loops; never a tool you run with a token of its own, nor another node", () => {
+    for (const by of ["primary", "arm:primary", "team.0123456789.ada", "arm:team.0123456789.ada", "loop:nightly"]) expect([by, primaryCaller(by)]).toEqual([by, true]);
+    for (const by of ["arm:claude-code", "arm:teams.x", "arm:team", "n_node", "you", ""]) expect([by, primaryCaller(by)]).toEqual([by, false]);
   });
 
   test("from the log alone: a call of its own caller that ownApproval allows, in the repository the call names", () => {

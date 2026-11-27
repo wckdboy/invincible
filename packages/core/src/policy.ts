@@ -112,11 +112,13 @@ export function ownApproval(call: OwnCall, repositories: readonly string[]): str
 
 /**
  * The primary's own callers, whose calls it may approve itself: it (its chat's tools, and the node's work for it, by its
- * handle "primary"), its agents' work as the node carries it out (`team.…`), and its loops (`loop:…`). Not a tool you run
- * with a token of its own (`arm:…`), another node, or you asking to be asked. No token you mint can take these names.
+ * handle "primary"), its agents' work as the node carries it out (`team.…`), its agents' own calls from their VMs
+ * (`arm:team.…`), and its loops (`loop:…`). Not a tool you run with a token of its own (`arm:…`), another node, or you
+ * asking to be asked. No token you mint can take these names, and none minted before they were reserved authenticates
+ * as one (arms.ts).
  */
 export function primaryCaller(by: string): boolean {
-  return by === "primary" || by === "arm:primary" || by.startsWith("team.") || by.startsWith("loop:");
+  return by === "primary" || by === "arm:primary" || by.startsWith("team.") || by.startsWith("arm:team.") || by.startsWith("loop:");
 }
 
 /**

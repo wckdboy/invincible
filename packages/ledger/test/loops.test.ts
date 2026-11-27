@@ -227,6 +227,10 @@ describe("your agent's own approvals in the log", () => {
     storeA.emit(a, "action.requested", its(20));
     storeA.emit(a, "action.decided", { id: actionId(20), verdict: "approved", note: "Your agent approved it itself: an issue" }, own);
     expect(storeA.lww(`action-decision:${actionId(20)}`)?.value).toMatchObject({ verdict: "approved", self: true });
+    // Its agent's own call from its VM (arm:team.…): its own caller too, under the same rule.
+    storeA.emit(a, "action.requested", its(25, { by: "arm:team.0123456789.ada" }));
+    storeA.emit(a, "action.decided", { id: actionId(25), verdict: "approved" }, own);
+    expect(storeA.lww(`action-decision:${actionId(25)}`)?.value).toMatchObject({ verdict: "approved", self: true });
     // A tool you run with a token of its own is not its caller: yours to answer.
     storeA.emit(a, "action.requested", its(21, { by: "arm:claude-code" }));
     expect(() => storeA.emit(a, "action.decided", { id: actionId(21), verdict: "approved" }, own)).toThrow(/not one your agent may approve itself/);

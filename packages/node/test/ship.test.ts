@@ -457,6 +457,12 @@ describe("the gate, end to end", () => {
     // Its own tools in chat, in a repository you gave an agent.
     const opened = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/its-own", base: "main", title: "Parse SI units" } }, { kind: "agent", by: "arm:primary" });
     expect(opened.status === "done" && opened.own).toBe("a pull request in amiriteorg/shipyard, a repository you gave an agent");
+    // Its agent's own call, from its VM (arm:team.…: a name no token you mint can take, and none older authenticates as):
+    // the same rule, its to approve.
+    before = seen.length;
+    const agents = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/liv-own", base: "main", title: "Units in the docs" } }, { kind: "agent", by: "arm:team.0123456789.liv" });
+    expect(agents.status === "done" && agents.own).toBe("a pull request in amiriteorg/shipyard, a repository you gave an agent");
+    expect(seen.slice(before).filter((s) => s.method === "POST" && s.url.endsWith("/pulls"))).toHaveLength(1);
   });
 
   test("what isn't its still waits for you: another repository, a tool you run with a token of its own, your own tap", async () => {
@@ -467,6 +473,10 @@ describe("the gate, end to end", () => {
     expect(tool.body.status).toBe("asked");
     const tapped = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/y", base: "main", title: "Another" } }, { kind: "agent", by: "team.0123456789.liv", yours: true });
     expect(tapped.status).toBe("asked");
+    // Its agents' own calls past the rule wait for you too: another repository, a branch that isn't its.
+    const own = { kind: "agent" as const, by: "arm:team.0123456789.liv" };
+    expect((await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "oven-sh", repo: "bun", head: "invincible/x", base: "main", title: "A fix" } }, own)).status).toBe("asked");
+    expect((await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "feat/x", base: "main", title: "A fix" } }, own)).status).toBe("asked");
     expect(seen.length).toBe(before);
   });
 });
