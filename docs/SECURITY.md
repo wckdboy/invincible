@@ -149,17 +149,27 @@ The review also confirmed what held up:
     stamped before still counts (below). The tests: `packages/core/test/core.test.ts` ("Ed25519's strict rule"),
     `packages/ledger/test/strict-keys.test.ts` and `packages/link/test/pairing-host.test.ts`.
   - **The log and link calls, from 14 December 2026** (`SIGNATURES_STRICT_FROM`): a log event stamped at or after it
-    (its own HLC), and a link call made at or after it (its own time), are held to the rule (`verifyDeviceSignature`'s
-    `at`: `parseEvent`, `verifyRequestSignature`). Before it, as they always were, so what a log holds from before is
-    judged alike by every node, whatever its version. Whether an event is admitted depends on the event alone, so every
-    replica keeps the same log in any order and a rebuild gives the same state: a weak key's forgery stamped before the
-    cutoff is kept as it always was, one stamped after is refused (`strict-keys.test.ts`, "the log, from the cutoff").
-    What an honest node signs always holds the rule. **Residual:** an event may claim an HLC before the cutoff, so the
-    rule binds a forgery only by when it says it was made. A key that fails the rule and was enrolled before the cutoff
-    (by any node before today, or by an older node since) stays enrolled, and its events stamped before the cutoff still
-    count: anyone can forge those for it. Only a node of the fleet can enroll a key, and only with your approval of its
-    pairing. Fabric's transport claims and statements, and Q-AMP's envelopes (`fabric.ts`, `qdt.ts`), still verify a
-    node's signature under ZIP-215, not the rule, at any date: theirs is Q-AMP's work, after R5-3.
+    (its own HLC) is held to the rule, and so is a link call made at or after it, judged by the later of the call's own
+    time and the node's clock, so none stamped in the minute before gets the minute after (`verifyDeviceSignature`'s
+    `at`: `parseEvent`, `verifyRequestSignature`; the review of log-strict, F5). Before it, as they always were, so what
+    a log holds from before is judged alike by every node, whatever its version.
+    - **What the event alone decides:** whether its signature holds, by its key, its signature and its HLC, the same on
+      every replica: a weak key's forgery stamped before the cutoff is taken as it always was, one stamped after is
+      refused (`strict-keys.test.ts`, "the log, from the cutoff"). What an honest node signs always holds the rule.
+    - **What it doesn't:** whether a replica logs an event also turns on whether its signer is known there when it comes
+      (an enrollment of it in that replica's log). An enrollment refused only after the fact (its enroller revoked late,
+      or the enroller's own chain forked below it) can leave its device's events in one replica's log and parked in
+      another's (the review of log-strict, F1). A weak key's enrollment refused from the cutoff still makes it known,
+      never active, so that one leaves every replica alike (F2).
+    - **Residual:** an event may claim an HLC before the cutoff, so the rule binds a forgery only by when it says it was
+      made. A key that fails the rule gets in only by being enrolled before the cutoff: by any node before 27 November
+      2026, or since then by a node still on an older release, with your approval of its pairing. Once in, as a full
+      node, anyone can act as it for good by stamping before the cutoff: enroll devices with no pairing and no approval,
+      revoke other nodes, set providers and loops, and publish its profile, which then names where others sync from.
+      `invincible doctor` names such a node (`mind.keys`); revoking it (`invincible revoke <id>`) pins its head, so
+      nothing signed as it afterwards counts (F4). Fabric's transport claims and statements, and Q-AMP's envelopes
+      (`fabric.ts`, `qdt.ts`), still verify a node's signature under ZIP-215, not the rule, at any date: theirs is
+      Q-AMP's work, after R5-3.
   - **The apps check the proof under the same rule, and answer alike:** the parity vectors hold RFC 8032's test vectors
     and all 210 of Wycheproof's, each with core's answer (`apps/apple/scripts/vectors.ts`), and core, Swift and Kotlin
     are each held to every one.
