@@ -401,6 +401,11 @@ The models layer, carried (§10):
   - Every client keeps up over the node's live stream (core's live.ts): nothing asked while nothing changes, a dead link
     told within three of the node's beats (4.5 s), and the stream opened again from where it left off, so a renewal
     reads only what changed meanwhile.
+  - Streams are renewed at least every 255 s by the server's idle limit, and clients resume. Bun closes a request at its
+    listener's idleTimeout however many bytes it has streamed (daemon.ts: 255 s; measured on Bun 1.4.4, 27 November
+    2026), so the live stream and a turn's stream are cut that often and taken up again from where they left off, by
+    the resume and the handover rule. That is by design until a measurement shows a cost. Only answers made long on
+    purpose (longRunning: making an agent's computer, a project's first clone) are let run past it (`listening`).
   - The Mac app tells you what the node tells your other devices while it runs, its window or the agents in the menu
     bar: it collects them from the node as the Android app does, when the live stream says `notify` changed, and shows
     them as its own notifications with the iPhone's buttons. Nothing goes through Apple's push service for a Mac.
