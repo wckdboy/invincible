@@ -80,7 +80,7 @@ test("sensitive mode's lease: its models through, any other refused before a byt
   expect((await g.call("Qwen/Qwen3.8-27B-abliterated")).status).toBe(200);
   const refused = await g.call("anthropic/claude-opus-5-5");
   expect(refused.status).toBe(403);
-  expect(((await refused.json()) as { error: { message: string } }).error.message).toBe("this lease is for work in sensitive mode, on nearai/Qwen/Qwen3.8-27B-abliterated alone");
+  expect(((await refused.json()) as { error: { message: string } }).error.message).toBe("this lease is for nearai/Qwen/Qwen3.8-27B-abliterated alone");
   // A listing asks no model: it is let through.
   expect((await g.list()).status).toBe(200);
   expect(asked).toEqual(["POST /v1/chat/completions Qwen/Qwen3.8-27B-abliterated", "GET /v1/models"]);

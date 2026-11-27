@@ -77,7 +77,7 @@ export interface LedgerEntryInput {
 }
 
 export interface TokenMinter {
-  /** `models`: a lease good for these alone, whatever its providers serve (work in sensitive mode). */
+  /** `models`: a lease good for these alone, whatever its providers serve (work in sensitive mode, or another node's task). */
   mint(scope: { label: string; providers?: string[]; models?: string[]; ttlMinutes: number; maxRequests: number }): {
     token: string;
     info: { hash: string };
@@ -936,7 +936,8 @@ export class SandboxHost {
   /**
    * An agent's VM, ready for a task: started if it isn't, and given a fresh lease. `providers`: what the lease covers,
    * the providers with a key now (the controller says), so a key added since the VM was made reaches it; absent, what
-   * the VM was made with. `models`: work in sensitive mode, whose lease is good for those models alone.
+   * the VM was made with. `models`: a lease good for those models alone (work in sensitive mode, or another node's task
+   * on the models its budget counts).
    */
   async prepareTeam(id: string, run: string, git?: { connector: string; owner: string; repo: string }, providers?: readonly string[], models?: readonly string[], keys?: readonly string[]): Promise<SandboxView> {
     const sandbox = await this.get(id);
@@ -971,7 +972,7 @@ export class SandboxHost {
       this.opts.tokens.revoke(minted.info.hash);
       throw new SandboxError("could not prepare the agent's model access", 424);
     }
-    this.opts.ledger({ class: "modify", resource: "sandbox.team-ready", target: sandbox.name, verdict: "allow", run, detail: `existing VM resumed; model access capped at ${TEAM_LEASE_MINUTES} minutes and 500 requests${models?.length ? `, in sensitive mode: ${models.join(", ")} alone` : ""}` });
+    this.opts.ledger({ class: "modify", resource: "sandbox.team-ready", target: sandbox.name, verdict: "allow", run, detail: `existing VM resumed; model access capped at ${TEAM_LEASE_MINUTES} minutes and 500 requests${models?.length ? `, for ${models.join(", ")} alone` : ""}` });
     return { ...sandbox, status: "running" };
   }
 

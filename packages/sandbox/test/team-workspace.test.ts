@@ -161,7 +161,7 @@ describe("persistent agent workspaces", () => {
     const f = agentHost({ status: "running" });
     await f.host.prepareTeam(ID, RUN, undefined, ["nearai"], ["nearai/Qwen/Qwen3.8-27B-abliterated"]);
     expect(f.minted).toEqual([{ label: `sandbox:${ID}`, providers: ["nearai"], models: ["nearai/Qwen/Qwen3.8-27B-abliterated"], ttlMinutes: 30, maxRequests: 500 }]);
-    expect(f.ledger.at(-1)!.detail).toBe("existing VM resumed; model access capped at 30 minutes and 500 requests, in sensitive mode: nearai/Qwen/Qwen3.8-27B-abliterated alone");
+    expect(f.ledger.at(-1)!.detail).toBe("existing VM resumed; model access capped at 30 minutes and 500 requests, for nearai/Qwen/Qwen3.8-27B-abliterated alone");
   });
 
   test("renewal revokes the persisted prior lease and then each superseded lease", async () => {

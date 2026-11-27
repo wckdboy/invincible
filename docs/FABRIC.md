@@ -116,11 +116,13 @@ transport keys carries all of it:
    - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of its
      day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among those it
      names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever smaller budget
-     it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its agent's own loop and
-     its coding tool run only on models its budget counts at more than $0 (one you've priced above nothing, on no coding
-     plan): never on one it counts as nothing, nor on a coding tool's own sign-in in the VM (a seat), nor in an ACP
-     agent of yours. Its commands aren't held to those models yet (R3-4, below), and a paid model's call that reports
-     no usage counts nothing, whatever the budget (I-l).
+     it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its work runs only on
+     models its budget counts at more than $0 (one you've priced above nothing, on no coding plan): its agent's own
+     loop, its coding tool, and its commands, whose VM's lease is good for those models alone, the gateway refusing
+     any other (the third re-review's R3-4). Never on one it counts as nothing, nor on a coding tool's own sign-in in the
+     VM (a seat), nor in an ACP agent of yours. Two things it doesn't bound (I-l): a paid model's call that reports no
+     usage counts nothing, whatever the budget, and a command can start a coding tool itself on that tool's own sign-in
+     in the VM, if it has one, which no lease reaches.
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node
@@ -162,13 +164,10 @@ transport keys carries all of it:
      - Not bounded, besides the known gaps: work it hands to a process that was running in the VM before it began
        isn't one it started, so it isn't ended. The VM time its work takes isn't counted itself: its budget's dollars
        and its life bound it.
-     - **Known gaps, until they're fixed** (the third re-review's, both Low). The fabric runs only when you switch it
-       on.
+     - **Known gaps, until they're fixed** (the third re-review's, Low). The fabric runs only when you switch it on.
        - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
          ends, or, in the VM, fork successors faster than its helper's scan. What it started then outlives the gate,
          the task, your grant and its node's revocation.
-       - R3-4: its VM's gateway lease serves every provider you've keyed and any model, so its commands can work on
-         models its budget counts at $0.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:

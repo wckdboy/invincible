@@ -691,6 +691,43 @@ test("the end of another node's task reaches its VM though its agent was paused 
   expect(lines.some((l) => l.startsWith("Processes ·"))).toBe(false);
 });
 
+/* Nor do its commands work on a model its budget counts as nothing (the third re-review's R3-4): its VM was prepared
+ * with no models, so its lease served every keyed provider and any model, and its commands could call one at $0 to its
+ * budget. Now the lease is good for the models its budget counts at more than $0 alone (its coding tool's, its eyes'),
+ * as sensitive mode's is for its own models, and the gateway refuses every other. With none, it reaches no provider. */
+test("another node's task's VM is leased only the models its budget counts at more than $0", async () => {
+  const leases: (readonly string[] | undefined)[] = [];
+  const roster = [{ provider: "local", model: "fake" }, { provider: "paid", model: "m" }];
+  const script = () => [say("1. Do it."), say("DONE\nDone."), say("PASS\nFine.")];
+  const overrides = (paid: (ref: string) => boolean) => ({
+    prepare: async (_m: Agent, _s: AbortSignal, models?: readonly string[]) => void leases.push(models),
+    models: () => roster,
+    eyes: () => "paid/eyes",
+    paid,
+  });
+  const f = fixture(script(), overrides((ref) => ref === "paid/m" || ref === "paid/eyes"));
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await f.runtime.executeTask(member, handedTask, f.context);
+  expect(leases).toEqual([["paid/m", "paid/eyes"]]);
+  // Nothing it counts above $0: its lease is for no model at all.
+  leases.length = 0;
+  const g = fixture(script(), overrides(() => false));
+  g.store.emit(g.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await g.runtime.executeTask(member, handedTask, g.context).catch(() => {});
+  expect(leases).toEqual([[]]);
+  // Its eyes given with the space their check measured them answering in (C1 step 7): their model is leased all the same.
+  leases.length = 0;
+  const spaced = fixture(script(), { ...overrides((ref) => ref === "paid/m" || ref === "paid/eyes"), eyes: () => ({ ref: "paid/eyes", space: "per-mille" }) });
+  spaced.store.emit(spaced.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await spaced.runtime.executeTask(member, handedTask, spaced.context);
+  expect(leases).toEqual([["paid/m", "paid/eyes"]]);
+  // Your own task's lease is as before: every keyed provider's.
+  leases.length = 0;
+  const yours = fixture(script(), overrides(() => true));
+  await yours.runtime.executeTask(member, task, yours.context);
+  expect(leases).toEqual([undefined]);
+});
+
 test("what a harness runs another node's task on: never the tool's own sign-in or setup, only models through the gateway", () => {
   const claude = AGENTS.claude!;
   const ok = (told: object) => ({ exitCode: 0, stdout: JSON.stringify({ type: "status", installed: true, ...told }) });

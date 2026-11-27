@@ -223,10 +223,11 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   for (const [name, value] of Object.entries(keyHeaders(provider))) headers.set(name, value);
   const target = `${provider.baseUrl.replace(/\/$/, "")}/${rest}${url.search}`;
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
-  // A lease for work in sensitive mode is good for its models alone: any other, on this provider or another, is refused
-  // before a byte of the call leaves (a provider that serves others' models too, as NEAR AI's does, serves only those).
+  // A lease held to models (work in sensitive mode, or another node's task on the models its budget counts) is good for
+  // them alone: any other, on this provider or another, is refused before a byte of the call leaves (a provider that
+  // serves others' models too, as NEAR AI's does, serves only those).
   const held = ctx.tokens.modelsOf(token);
-  if (held && body && !held.includes(`${providerId}/${modelOf(body)}`)) return json(403, `this lease is for work in sensitive mode, on ${held.join(", ")} alone`);
+  if (held && body && !held.includes(`${providerId}/${modelOf(body)}`)) return json(403, `this lease is for ${held.join(", ")} alone`);
   // A plan whose allowance is spent past the next minute (windows.ts) isn't asked a model call again until it resets;
   // nor is a model of any other provider's that was told to wait that long (its others are asked as ever).
   const windows = windowsOf(ctx.store);

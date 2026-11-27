@@ -616,9 +616,11 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     re-review's N5). A handed task's gates (its giver's commands, in your agent's VM) get 15 minutes in all, every
     round counted.
   - What a handed task does is bounded with it (the second re-review's N7), but for the known gaps below:
-    - Its agent's own loop and its coding tool run only on models its budget counts at more than $0, never on a coding
-      tool's own sign-in (a seat) or an ACP agent, so what they spend is counted, but for a paid model's call that
-      reports no usage, which counts nothing for any budget (I-l). Its commands aren't held to those models (R3-4).
+    - Its agent's own loop, its coding tool and its commands run only on models its budget counts at more than $0 (its
+      VM's lease is good for those alone, and the gateway refuses any other: the third re-review's R3-4), never on a
+      coding tool's own sign-in (a seat) or an ACP agent, so what they spend is counted. But not (I-l): a paid model's
+      call that reports no usage counts nothing, for any budget, and a command can start a coding tool itself on that
+      tool's own sign-in in the VM, if it has one, which no lease reaches.
     - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
       in a process group of its own and under its own deadline, its `desktop` verbs too: they don't take your own
       work's shortcut to the VM's desktop process (the third re-review's R3-3). Not the commands its coding tool runs
@@ -636,14 +638,11 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).
     - Residual: work it hands to a process that was already running in the VM isn't one it started, and isn't ended.
       Its VM time isn't counted itself. And the known gaps:
-    - **Known gaps, until they're fixed** (the third re-review's, both Low; the fabric runs only when you switch it
-      on):
+    - **Known gaps, until they're fixed** (the third re-review's, Low; the fabric runs only when you switch it on):
       - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
         ends, or, in the VM, fork successors faster than its helper's scan; and the task's list of what to end is a
         file in the VM that its commands can rewrite. What it started then outlives the gate, the task, the grant and
         the node's revocation.
-      - R3-4: its VM's gateway lease serves every keyed provider and any model, so its commands can work on models its
-        budget counts at $0.
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
     these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1),
     and those you take up again by id (R3-6).

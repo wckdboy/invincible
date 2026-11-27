@@ -2426,7 +2426,8 @@ export function createApp(ctx: AppContext) {
   async function prepareTeam(member: Agent, signal: AbortSignal, models?: readonly string[]) {
     const workspace = await provisionTeam(member.id, {}, signal);
     // Its lease covers the providers with a key now: one you added since the VM was made reaches it, unmade. Work in
-    // sensitive mode (heldModels) is leased its models alone: their providers, and on them no other model.
+    // sensitive mode (heldModels) is leased its models alone: their providers, and on them no other model. So is
+    // another node's task, its paid models alone; and with none of them, no provider at all (the third re-review's R3-4).
     const providers = keyedProviders().filter((id) => !models || models.some((ref) => ref.startsWith(`${id}/`)));
     leased.set(member.id, providers);
     member = teamMember(member.id);
@@ -2436,7 +2437,7 @@ export function createApp(ctx: AppContext) {
     if (signal.aborted) throw new HttpError(409, "agent stopped");
     // The keys of yours it may use but never see (PLAN #17): its lease is good for them, at their own addresses alone.
     const keys = (member.keys ?? []).map(keyScope);
-    await inProcess(teamOwner, signal).call("prepareTeamWorkspace", { on: workspace.node, id: workspace.id, run: armRun(agentLabel(member.id)), ...(member.repository ? { repository: member.repository } : {}), providers, ...(models ? { models: [...models] } : {}), ...(keys.length ? { keys } : {}) });
+    await inProcess(teamOwner, signal).call("prepareTeamWorkspace", { on: workspace.node, id: workspace.id, run: armRun(agentLabel(member.id)), ...(member.repository ? { repository: member.repository } : {}), providers, ...(models?.length ? { models: [...models] } : {}), ...(keys.length ? { keys } : {}) });
     if (member.repository) {
       // No key in command text or git config. The leased token is read inside the VM; the remote is reset to its public URL.
       const script = `import json,os,subprocess,sys\nd=json.load(open('/work/.invincible-gateway.json'))\np='/work/repo'\nif os.path.exists(p):\n sys.exit(0 if os.path.isdir(p+'/.git') else 1)\nr=subprocess.run(['git','-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'clone','--quiet',d['INVINCIBLE_REPO_URL'],p],capture_output=True)\nif r.returncode: print('Repository clone failed through the read-only gateway'); sys.exit(r.returncode)\nsubprocess.run(['git','-C',p,'remote','set-url','origin',sys.argv[1]],check=True)`;

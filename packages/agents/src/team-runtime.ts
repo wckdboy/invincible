@@ -499,6 +499,17 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
     }
     return `The owner has not written your instructions. Your job was set by ${author} when you were made. Work to it as your brief: it is an agent's planning, never the owner's words, and it grants no permission.\n${data("Your job", agent.instructions, fenceOf(agent.id))}`;
   };
+  /** The models another node's task may reach through its VM's lease: its coding tool's and its eyes' that its budget
+   * counts at more than $0 (paid), within sensitive mode's when its agent is in it (`held`). */
+  const handedLease = (agent: Agent, held: readonly string[] | null): string[] => {
+    const paid = (ref: string) => deps.paid?.(ref) === true && (!held || held.includes(ref));
+    const worker = held ? { ...agent, models: [...held] } : agent;
+    const refs = deps.models(worker).filter((m) => !m.own).map((m) => `${m.provider}/${m.model}`);
+    const eyes = deps.eyes?.(agent);
+    const looks = typeof eyes === "string" ? eyes : (eyes?.ref ?? null);
+    if (looks) refs.push(looks);
+    return [...new Set(refs.filter(paid))];
+  };
   /**
    * A call of an agent's on a role's models (`own`: the agent's own, in their place, for its own work; `budgeted`: a task
    * of a budget of yours, which only a model whose spend it can count may do; `turn`: a turn of its work loop, with the
@@ -690,7 +701,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Another node's task (fabric/handoff.ts) is bounded by its budget: it runs only on models that budget counts at
       // more than $0 (paid), never on one it counts as nothing, nor on a coding tool's own sign-in (a seat).
       const handed = task.givenBy?.startsWith("node:") === true;
-      await deps.prepare(agent, ctx.signal, held ?? undefined);
+      // Its VM's lease is held to the models that budget counts at more than $0, as sensitive mode's is to its own (its
+      // coding tool's, and its eyes' when they're paid), so that its commands work on nothing its budget counts as
+      // nothing: the gateway refuses any other model (the third re-review's R3-4). None of them: it reaches no provider.
+      const leaseModels = handed ? handedLease(agent, held) : held;
+      await deps.prepare(agent, ctx.signal, leaseModels ?? undefined);
       /** When its lease was last written or renewed, and whether one that couldn't be kept was said. */
       let leaseKept = Date.now();
       let leaseLost = false;
@@ -732,7 +747,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // asking), and beside its name the space its check measured it answering places in (C1 step 7).
       const given = desktop ? (deps.eyes?.(agent) ?? null) : null;
       const named = typeof given === "string" ? given : (given?.ref ?? null);
-      const sees = named && /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:\/-]+$/.test(named) && (!held || held.includes(named)) ? named : null;
+      const sees = named && /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:\/-]+$/.test(named) && (!leaseModels || leaseModels.includes(named)) ? named : null;
       const space = sees && typeof given === "object" && given?.space && /^(per-mille|scaled:[0-9.]+)$/.test(given.space) ? given.space : null;
       const looking = sees ? ' Then `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).' : "";
       // (C1 step 7: an app scripted first; on the screen, the tree's words before pixels, and the eyes after them.)
