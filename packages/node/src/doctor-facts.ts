@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync, statfsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type DoctorReport, freeSlots, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, qampEndpointOf, redact, type Agent } from "@invincible/core";
+import { type DoctorReport, freeSlots, isStrictNodeId, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, qampEndpointOf, redact, type Agent } from "@invincible/core";
 import { type ModelsContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, onPlan, parseRef, planOf, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import { containerKernel, macFirewallInstalled, readImagesRecord, type SandboxHost } from "@invincible/sandbox";
@@ -537,7 +537,7 @@ export async function gatherFacts(deps: DoctorDeps, opts: DoctorOptions = {}): P
       home: system.file(deps.home.dir),
       adminToken: system.file(deps.home.adminTokenPath),
     },
-    mind: { events: store.eventCount(), integrity, head: store.head(self), forks: store.forks().map((id) => ({ id, name: store.device(id)?.name ?? id.slice(0, 12) })), newestEventAt: newest || null, ownNewestAt: frontier[self] ? hlcMs(frontier[self]!) : null, timeSynced, peers, backup },
+    mind: { events: store.eventCount(), integrity, head: store.head(self), forks: store.forks().map((id) => ({ id, name: store.device(id)?.name ?? id.slice(0, 12) })), weakKeys: weakNodeKeys(store), newestEventAt: newest || null, ownNewestAt: frontier[self] ? hlcMs(frontier[self]!) : null, timeSynced, peers, backup },
     vault: { unlocked: deps.vault.unlocked(), secrets: deps.vault.list().length, requests: deps.vault.requests().map((r) => r.name) },
     ...(deps.fabric ? { fabric: deps.fabric() } : {}),
     providers: { setUp: providerRecords(store).length, byDefault: [...new Set(ROLES.planner!.defaults.map((ref) => ref.slice(0, ref.indexOf("/"))))] },
@@ -596,3 +596,9 @@ export async function runDoctor(deps: DoctorDeps, opts: DoctorOptions = {}): Pro
 export async function heartbeatFromDoctor(deps: DoctorDeps): Promise<DoctorFinding[]> {
   return doctorFindings((await runDoctor(deps, { quick: true, offline: true })).diagnoses);
 }
+
+/** The enrolled nodes, not revoked, whose key fails Ed25519's strict rule (doctor's mind.keys; the review of log-strict, F4). */
+export function weakNodeKeys(store: LedgerStore): { id: string; name: string }[] {
+  return store.devices().filter((d) => d.kind === "node" && !isStrictNodeId(d.id)).map((d) => ({ id: d.id, name: d.name }));
+}
+

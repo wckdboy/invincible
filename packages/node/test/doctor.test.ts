@@ -155,6 +155,16 @@ describe("each fault gives its own line and advice", () => {
     expect(step.finding?.severity).toBe("warn");
     expect(fault((f) => (f.mind.peers[0]!.clockOffsetMs = -45_000), "mind.clock").line).toContain("ahead of rack's");
 
+    // The review of log-strict, F4: a node key that fails Ed25519's strict rule, enrolled before the cutoff, is anyone's to
+    // sign as, stamping before it: named, with the command that revokes it.
+    const weakId = `n_${"A".repeat(42)}Q`;
+    const weak = fault((f) => (f.mind.weakKeys = [{ id: weakId, name: "old-pi" }]), "mind.keys");
+    expect(weak.state).toBe("broken");
+    expect(weak.line).toContain("old-pi");
+    expect(weak.line).toContain("Ed25519's strict rule");
+    expect(weak.fix).toContain(`invincible revoke ${weakId}`);
+    expect(fault((f) => (f.mind.weakKeys = []), "mind.keys").state).toBe("ok");
+
     const unsynced = fault((f) => (f.mind.timeSynced = false), "mind.clock");
     expect(unsynced.state).toBe("needs-you");
     expect(unsynced.fix).toContain("timedatectl set-ntp true");

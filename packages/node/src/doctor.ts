@@ -53,6 +53,11 @@ export interface DoctorFacts {
     /** This node's newest event in its own hash chain (null: it has written none). */
     head: string | null;
     forks: { id: string; name: string }[];
+    /**
+     * Enrolled nodes whose key fails Ed25519's strict rule (isStrictNodeId), each enrolled before the cutoff: anyone can
+     * sign as one, stamping before the cutoff, until it is revoked (the review of log-strict, F4). Absent: not looked at.
+     */
+    weakKeys?: { id: string; name: string }[];
     /** The time of the newest event held, by its own clock stamp. */
     newestEventAt: number | null;
     /**
@@ -291,6 +296,16 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
       "Revoke it (invincible revoke), then rotate the keys it could read.",
     );
   } else add("mind", "mind.chain", "ok", f.mind.head ? `its own hash chain ends at ${f.mind.head.slice(0, 10)}, and no device has signed two histories` : "no device has signed two histories");
+
+  if (f.mind.weakKeys?.length) {
+    add(
+      "mind",
+      "mind.keys",
+      "broken",
+      `${f.mind.weakKeys.map((d) => d.name).join(", ")}: its key fails Ed25519's strict rule, so anyone can sign as it, stamping before 14 December 2026`,
+      `Revoke it (${f.mind.weakKeys.map((d) => `invincible revoke ${d.id}`).join("; ")}): its head is pinned, and nothing signed as it afterwards counts.`,
+    );
+  } else if (f.mind.weakKeys) add("mind", "mind.keys", "ok", "every node's key holds Ed25519's strict rule");
 
   {
     const ahead = f.mind.newestEventAt === null ? 0 : f.mind.newestEventAt - f.now;
