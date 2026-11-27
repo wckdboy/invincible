@@ -91,10 +91,12 @@ struct TaskActivityAttributes: ActivityAttributes {
     /// The task, by id: a tap opens its thread.
     let task: String
     let title: String
-    /// Its agent's name, and its mark: its colour (its light form, "#rrggbb", one of the eight) and its form (0 to 11). One
-    /// an app from before the marks started has no form, and its colour is its orb's: it is drawn as a disc of it.
+    /// Its agent's name, and its glass: its colour (its light form, "#rrggbb", one of the eight) and its shape (0 to 21).
+    /// One an app from before the glass started has a Grille's form instead, or nothing, and is drawn as a disc of its
+    /// colour.
     let agentName: String
     let colour: String
     var form: Int? = nil
+    var shape: Int? = nil
 }
 #endif

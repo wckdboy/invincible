@@ -8,7 +8,11 @@ import Foundation
  * never a Grille. Its colour and its form are the node's to give, once, as the agent joins, and are saved as its avatar
  * ({v: 3, color, form}), so every device draws the same mark; an agent a node from before the marks sends is read from
  * what it has (a colour chosen for its orb, snapped to the eight, with its handle's form; else its handle's). Everything
- * here is data and pure geometry, the widgets' as well as the app's; AgentMarkView draws it.
+ * here is data and pure geometry, the widgets' as well as the app's.
+ *
+ * Since 27 November 2026 an agent wears its glass instead (Glass.swift). What the glass takes from here: the palette (its
+ * eight colours), the seed, the snap, and the reading of a mark (v 3) and of a colour chosen before (v 2), which keep their
+ * colour. The Grille's geometry and motion are drawn nowhere now; they stay, held to core's, until both are taken out.
  */
 
 /// An agent's mark: its colour (an index into `AgentMark.palette`) and its form (0 to 11).

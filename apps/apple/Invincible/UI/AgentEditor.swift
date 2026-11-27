@@ -12,10 +12,11 @@ struct AgentEditor: View {
     @State private var handle: String
     /// A handle you typed yourself stops following the name.
     @State private var handleTyped: Bool
-    /// The colour you chose here for its mark (one of the eight, as its light form); nil: what it has, or (touched) its
-    /// node's choice again.
-    @State private var chosenColor: String?
-    /// Whether its colour was chosen here: untouched, what is saved stays as it is (the PWA's avatarEditor).
+    /// The colour and the shape you chose here for its glass (each an index); nil: what it has, or (touched) its node's
+    /// choice again.
+    @State private var chosenColor: Int?
+    @State private var chosenShape: Int?
+    /// Whether its glass was chosen here: untouched, what is saved stays as it is (the PWA's avatarEditor).
     @State private var colorTouched = false
     @State private var instructions: String
     @State private var repository: String
@@ -58,25 +59,23 @@ struct AgentEditor: View {
 
     private var taken: [String] { (session.team?.agents.map(\.id) ?? []) + (session.team?.removed?.map(\.id) ?? []) }
 
-    /// Its mark as it will be once saved, as its node gives one (AgentMark.assign: after the marks the others wear, which
-    /// is all that counts): untouched, the one it has (a new agent, the one its node will give it); a colour you chose,
-    /// that colour in its own form; its node's choice again, the one its node gives it now.
-    private var mark: AgentMark {
+    /// Its glass as it will be once saved, as its node gives one (AgentGlass.assign: after the glass the others wear, which
+    /// is all that counts): untouched, the one it has (a new agent, the one its node will give it); a colour or a shape
+    /// you chose, with the other as it is; its node's choice again, the one its node gives it now.
+    private var glass: AgentGlass {
         let id = handle.isEmpty ? "agent" : handle
-        let others = (session.team?.agents ?? []).filter { $0.id != id }.map { AgentMark.of(id: $0.id, profile: $0.avatar) }
-        if let existing {
-            let now = AgentMark.of(id: existing.id, profile: existing.avatar)
-            if !colorTouched { return now }
-            if let chosenColor { return AgentMark(color: AgentMark.snap(chosenColor), form: now.form) }
-        }
-        return AgentMark.assign(id, after: others, chosen: colorTouched ? chosenColor : nil)
+        let others = (session.team?.agents ?? []).filter { $0.id != id }.map { AgentGlass.of(id: $0.id, profile: $0.avatar) }
+        let now = existing.map { AgentGlass.of(id: $0.id, profile: $0.avatar) } ?? AgentGlass.assign(id, after: others)
+        if existing != nil, !colorTouched { return now }
+        if chosenColor == nil, chosenShape == nil { return colorTouched ? AgentGlass.assign(id, after: others) : now }
+        return AgentGlass(color: chosenColor ?? now.color, shape: chosenShape ?? now.shape)
     }
 
-    /// What its mark's colour is, in words.
+    /// What its glass is, in words.
     private var colorNote: String {
-        if colorTouched, chosenColor != nil { return "The colour you chose. Its form stays its own." }
-        if existing != nil, !colorTouched { return "The colour its node gave it. Choose another and its form stays its own." }
-        return "Its node gives it a colour no other agent has, while one is free, and a form of its own."
+        if colorTouched, chosenColor != nil || chosenShape != nil { return "\(AgentMark.palette[glass.color].name), \(AgentGlass.shapes[glass.shape].name): as you chose." }
+        if existing != nil, !colorTouched { return "The glass its node gave it. Choose a colour or a shape, and the other stays as it is." }
+        return "Its node gives it a colour and a shape no agent near it has, while there are some to go round."
     }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -100,13 +99,18 @@ struct AgentEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    MarkColorPicker(handle: handle, mark: mark, note: colorNote) { color in
-                        chosenColor = color
+                    GlassPicker(glass: glass, note: colorNote) { color, shape in
+                        if color == nil, shape == nil {
+                            (chosenColor, chosenShape) = (nil, nil)
+                        } else {
+                            chosenColor = color ?? chosenColor ?? glass.color
+                            chosenShape = shape ?? chosenShape ?? glass.shape
+                        }
                         colorTouched = true
                     }
                     .listRowBackground(Color.clear)
                 } header: {
-                    Text("Colour")
+                    Text("Its glass")
                 }
 
                 Section {
@@ -279,8 +283,8 @@ struct AgentEditor: View {
         var input = AgentInput(
             id: handle, name: trimmedName, instructions: instructions, repository: address.isEmpty ? nil : address,
             harness: harness, role: role, enabled: enabled, dailyTurns: dailyTurns,
-            // Its colour, when you chose here: the one you chose, or its node's choice again. Untouched, it is left as it is.
-            avatar: colorTouched ? (chosenColor.map(AgentInput.OrbColor.chosen) ?? .handle) : nil
+            // Its glass, when you chose here: the one you chose, or its node's choice again. Untouched, it is left as it is.
+            avatar: colorTouched ? (chosenColor == nil && chosenShape == nil ? .handle : .glass(glass)) : nil
         )
         // Its own models, to a node that knows them: none is its role's again.
         input.models = own.isEmpty ? nil : own
@@ -305,47 +309,59 @@ struct AgentEditor: View {
     }
 }
 
-/// An agent's colour as you choose it (the PWA's avatarEditor): its mark as it will be, the palette's eight colours to
-/// choose from, each named, the one it will wear ringed in the ink, and its node's choice.
-struct MarkColorPicker: View {
-    /// Its handle: its mark's seed.
-    let handle: String
-    /// Its mark as it will be once saved.
-    let mark: AgentMark
-    /// What its colour is, in words.
+/// An agent's glass as you choose it (the PWA's avatarEditor): it as it will be, the eight colours (its ramps) and the
+/// 22 shapes to choose from, each named, the one it will wear ringed in the ink, and its node's choice.
+struct GlassPicker: View {
+    /// Its glass as it will be once saved.
+    let glass: AgentGlass
+    /// What its glass is, in words.
     let note: String
-    /// A colour chosen (one of the eight, as its light form), or (nil) its node's choice again.
-    let choose: (String?) -> Void
+    /// A colour or a shape chosen (each an index, the other nil), or (both nil) its node's choice again.
+    let choose: (Int?, Int?) -> Void
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(spacing: Space.s3) {
             HStack(spacing: Space.s4) {
-                AgentMarkView(mark: mark, seed: AgentMark.seed(handle.isEmpty ? "agent" : handle), size: 96)
+                GlassMarkView(glass: glass, size: 96)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: Space.s2) {
                     Text(note).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button("Its node's choice") { choose(nil) }
+                    Button("Its node's choice") { choose(nil, nil) }
                         .buttonStyle(.borderless)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: Metrics.touch), spacing: Space.s1)], spacing: Space.s1) {
-                ForEach(AgentMark.palette.indices, id: \.self) { n in
-                    let hue = AgentMark.palette[n]
-                    Button { choose(hue.forms.light) } label: {
+                ForEach(AgentGlass.ramps.indices, id: \.self) { n in
+                    let ramp = AgentGlass.ramps[n].on(scheme == .dark ? .dark : .light)
+                    Button { choose(n, nil) } label: {
                         Circle()
-                            .fill(Color(hex: hue.forms.on(scheme == .dark ? .dark : .light)))
+                            .fill(LinearGradient(colors: [Color(hex: ramp.a), Color(hex: ramp.b)], startPoint: .topLeading, endPoint: .bottomTrailing))
                             .frame(width: 30, height: 30)
                             .padding(Space.s1)
-                            .overlay(Circle().strokeBorder(mark.color == n ? Color.ink : .clear, lineWidth: 2))
+                            .overlay(Circle().strokeBorder(glass.color == n ? Color.ink : .clear, lineWidth: 2))
                             .frame(width: Metrics.touch, height: Metrics.touch)
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(hue.name)
-                    .accessibilityAddTraits(mark.color == n ? .isSelected : [])
-                    .help(hue.name)
+                    .accessibilityLabel(AgentMark.palette[n].name)
+                    .accessibilityAddTraits(glass.color == n ? .isSelected : [])
+                    .help(AgentMark.palette[n].name)
+                }
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: Metrics.touch), spacing: Space.s1)], spacing: Space.s1) {
+                ForEach(AgentGlass.shapes.indices, id: \.self) { n in
+                    Button { choose(nil, n) } label: {
+                        GlassMarkView(glass: AgentGlass(color: glass.color, shape: n), size: 28)
+                            .frame(width: Metrics.touch, height: Metrics.touch)
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(glass.shape == n ? Color.ink : .clear, lineWidth: 2))
+                            .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(AgentGlass.shapes[n].name)
+                    .accessibilityAddTraits(glass.shape == n ? .isSelected : [])
+                    .help(AgentGlass.shapes[n].name)
                 }
             }
         }

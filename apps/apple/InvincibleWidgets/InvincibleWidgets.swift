@@ -148,24 +148,20 @@ struct VerdictMark: View {
     }
 }
 
-/// The agent's mark, still, as a row in the app draws it (AgentMark.swift): its colour and form as the app gave them, how
-/// its task stands in its shape. One an app from before the marks started (no form) is a disc of its orb's colour.
+/// The agent's glass, still, as the app draws it (Core/GlassDrawing.swift): its shape in its ramp, as the app gave them;
+/// how its task stands is said beside it. One an app from before the glass started (no shape) is a disc of its colour.
 struct AgentDisc: View {
     let attributes: TaskActivityAttributes
     let state: TaskActivityState
     let size: CGFloat
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         Group {
-            if let form = attributes.form, (0..<AgentMark.forms).contains(form), let color = AgentMark.palette.firstIndex(where: { $0.forms.light == attributes.colour }) {
-                let colors = AgentMark.colors(color, state: state.markState, theme: scheme == .dark ? .dark : .light)
-                let geometry = AgentMark.geometry(AgentMark(color: color, form: form), seed: 0, state: state.markState, size: Double(size), t: nil, since: nil)
-                ZStack {
-                    ForEach(Array(AgentMark.paths(geometry, side: size).enumerated()), id: \.offset) { _, slat in
-                        Path(slat.path).fill(Color(hex: slat.key ? colors.key : colors.body))
-                    }
-                }
+            if let shape = attributes.shape, (0..<AgentGlass.shapes.count).contains(shape), let color = AgentMark.palette.firstIndex(where: { $0.forms.light == attributes.colour }),
+               let picture = GlassDrawing.draw(shape: AgentGlass.shapes[shape], ramp: AgentGlass.ramps[color], size: size, theme: scheme == .dark ? .dark : .light, scale: displayScale, pad: 0, blur: nil) {
+                Image(decorative: picture, scale: displayScale).resizable()
             } else {
                 Circle().fill(Color(hex: attributes.colour))
             }

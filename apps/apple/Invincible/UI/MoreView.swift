@@ -12,6 +12,8 @@ struct MoreView<Leading: View>: View {
     @State private var problem: String?
     /// What Return does in the primary's chat while it works, on this device (the PWA's Settings → Chat).
     @AppStorage("chat.enter") private var enter = ComposerWords.Enter.steer.rawValue
+    /// How your agent's mark is drawn on this device (GuardianMark): ink, until the owner chooses, or pearl glass.
+    @AppStorage("invincible.guardian-mark") private var guardian = "mono"
 
     init(app: AppModel, session: Session, places: Bool = true, @ViewBuilder leading: () -> Leading) {
         (self.app, self.session, self.places, self.leading) = (app, session, places, leading())
@@ -32,6 +34,17 @@ struct MoreView<Leading: View>: View {
             }
             if session.can("mind:read") {
                 NotificationsSection(session: session)
+            }
+            Section {
+                Picker("Your agent's mark", selection: $guardian) {
+                    Text("Ink").tag("mono")
+                    Text("Pearl glass").tag("pearl")
+                }
+                .accessibilityIdentifier("settings.guardian-mark")
+            } header: {
+                SectionHead("Appearance")
+            } footer: {
+                PageNote("The I-beam on its tile in one ink, or in pearl glass, on this device.")
             }
             if session.can("chat") {
                 Section {

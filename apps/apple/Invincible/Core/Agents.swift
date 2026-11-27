@@ -28,21 +28,28 @@ struct AgentInput: Encodable, Sendable, Equatable {
     var sendKeys = false
     var enabled: Bool
     var dailyTurns: Int
-    /// Its mark's colour, as you chose it in its form (the PWA's avatarEditor): one of the eight, or its node's choice
-    /// again; nil, untouched: left as it is, and not sent (a new agent takes the one its node gives it).
+    /// Its glass, as you chose it in its form (the PWA's avatarEditor), or its node's choice again; nil, untouched: left
+    /// as it is, and not sent (a new agent takes the one its node gives it).
     var avatar: OrbColor? = nil
 
-    /// A colour you chose for an agent's mark, sent as core's OrbProfile (`{ v: 2, color }`: a node with marks snaps it to
-    /// the eight and keeps the agent's form, one from before them keeps it as it is); or its node's choice again, sent as
-    /// null.
+    /// What you chose for an agent's look: a colour, sent as core's OrbProfile (`{ v: 2, color }`: its node snaps it to
+    /// the eight and keeps its shape); its glass, colour and shape (`{ v: 4, color, shape }`, core's GlassProfile); or its
+    /// node's choice again, sent as null.
     enum OrbColor: Equatable, Sendable {
         case chosen(String)
+        case glass(AgentGlass)
         case handle
     }
 
     private struct OrbProfile: Encodable {
         var v = 2
         let color: String
+    }
+
+    private struct GlassProfile: Encodable {
+        var v = 4
+        let color: String
+        let shape: Int
     }
 
     enum CodingKeys: String, CodingKey { case id, name, instructions, repository, harness, role, models, sensitive, acp, keys, enabled, dailyTurns, avatar }
@@ -63,6 +70,7 @@ struct AgentInput: Encodable, Sendable, Equatable {
         try c.encode(dailyTurns, forKey: .dailyTurns)
         switch avatar {
         case .chosen(let color)?: try c.encode(OrbProfile(color: color), forKey: .avatar)
+        case .glass(let glass)?: try c.encode(GlassProfile(color: AgentMark.palette[glass.color].forms.light, shape: glass.shape), forKey: .avatar)
         case .handle?: try c.encodeNil(forKey: .avatar)
         case nil: break
         }

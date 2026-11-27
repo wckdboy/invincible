@@ -44198,6 +44198,171 @@
         },
         "own": false
       }
+    ],
+    "given": [
+      {
+        "id": "builder",
+        "seed": 3828680000,
+        "glass": {
+          "color": 2,
+          "shape": 2
+        }
+      },
+      {
+        "id": "writer",
+        "seed": 2228000106,
+        "glass": {
+          "color": 3,
+          "shape": 5
+        }
+      },
+      {
+        "id": "researcher",
+        "seed": 1844902523,
+        "glass": {
+          "color": 4,
+          "shape": 13
+        }
+      },
+      {
+        "id": "coder",
+        "seed": 3469596402,
+        "glass": {
+          "color": 5,
+          "shape": 8
+        }
+      },
+      {
+        "id": "reviewer",
+        "seed": 829999642,
+        "glass": {
+          "color": 6,
+          "shape": 11
+        }
+      },
+      {
+        "id": "operator",
+        "seed": 4225036029,
+        "glass": {
+          "color": 7,
+          "shape": 6
+        }
+      },
+      {
+        "id": "designer",
+        "seed": 3572601220,
+        "glass": {
+          "color": 0,
+          "shape": 12
+        }
+      },
+      {
+        "id": "tester",
+        "seed": 3348513014,
+        "glass": {
+          "color": 1,
+          "shape": 1
+        }
+      },
+      {
+        "id": "ops",
+        "seed": 3089275291,
+        "glass": {
+          "color": 3,
+          "shape": 7
+        }
+      },
+      {
+        "id": "docs",
+        "seed": 686503122,
+        "glass": {
+          "color": 2,
+          "shape": 10
+        }
+      },
+      {
+        "id": "scout",
+        "seed": 3273829637,
+        "glass": {
+          "color": 4,
+          "shape": 21
+        }
+      },
+      {
+        "id": "scribe",
+        "seed": 4245756147,
+        "glass": {
+          "color": 1,
+          "shape": 17
+        }
+      },
+      {
+        "id": "warden",
+        "seed": 3840010980,
+        "glass": {
+          "color": 5,
+          "shape": 14
+        }
+      },
+      {
+        "id": "pilot",
+        "seed": 268856033,
+        "glass": {
+          "color": 6,
+          "shape": 18
+        }
+      },
+      {
+        "id": "smith",
+        "seed": 1475481488,
+        "glass": {
+          "color": 7,
+          "shape": 19
+        }
+      }
+    ],
+    "chosen": [
+      {
+        "id": "writer",
+        "others": [
+          {
+            "color": 0,
+            "shape": 1
+          },
+          {
+            "color": 3,
+            "shape": 6
+          }
+        ],
+        "chosen": "#ffbc63",
+        "glass": {
+          "color": 0,
+          "shape": 5
+        }
+      },
+      {
+        "id": "ops",
+        "others": [],
+        "chosen": "#ff0000",
+        "glass": {
+          "color": 0,
+          "shape": 3
+        }
+      },
+      {
+        "id": "ops",
+        "others": [
+          {
+            "color": 2,
+            "shape": 0
+          }
+        ],
+        "chosen": 5,
+        "glass": {
+          "color": 5,
+          "shape": 3
+        }
+      }
     ]
   },
   "loops": {

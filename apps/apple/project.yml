@@ -92,8 +92,12 @@ targets:
     sources:
       - path: InvincibleWidgets
       - path: Invincible/Core/TaskActivity.swift
-      # The agent's mark, drawn still beside its task (AgentMark reads an agent's avatar, a JSONValue).
+      # The agent's glass, drawn still beside its task (AgentGlass reads an agent's avatar, a JSONValue, with AgentMark's
+      # palette and seed; GlassDrawing draws it).
       - path: Invincible/Core/AgentMark.swift
+      - path: Invincible/Core/Glass.swift
+      - path: Invincible/Core/GlassData.swift
+      - path: Invincible/Core/GlassDrawing.swift
       - path: Invincible/Core/JSONValue.swift
     info:
       path: InvincibleWidgets/Info.plist

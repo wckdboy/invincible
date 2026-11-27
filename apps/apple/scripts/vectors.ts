@@ -1790,6 +1790,18 @@ const glass = {
   dot: core.GLASS_DOT,
   states: core.MARK_STATES.map((state) => ({ state, glass: core.glassState(state) })),
   reads: glassReads.map((r) => ({ ...r, glass: core.glassOf(r.id, r.profile), own: core.isGlassProfile(r.profile) })),
+  // As a node gives them, one by one in the order they join (the apps preview a new agent's with the same rule): the
+  // fifteen of the marks' fleet, so every family and every colour is worn; and a colour chosen, snapped to the eight.
+  given: (() => {
+    const out: { id: string; seed: number; glass: core.Glass }[] = [];
+    for (const id of markFleet) out.push({ id, seed: core.handleSeed(id), glass: core.assignGlass(id, out.map((g) => g.glass)) });
+    return out;
+  })(),
+  chosen: [
+    { id: "writer", others: [{ color: 0, shape: 1 }, { color: 3, shape: 6 }], chosen: "#ffbc63", glass: core.assignGlass("writer", [{ color: 0, shape: 1 }, { color: 3, shape: 6 }], "#ffbc63") },
+    { id: "ops", others: [], chosen: "#ff0000", glass: core.assignGlass("ops", [], "#ff0000") },
+    { id: "ops", others: [{ color: 2, shape: 0 }], chosen: 5, glass: core.assignGlass("ops", [{ color: 2, shape: 0 }], 5) },
+  ],
 };
 
 // ---- a loop's task and what wakes it, in words (lib/loops.ts, lib/wakes.ts): a loop it drafted, in Needs you --------

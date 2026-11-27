@@ -47,8 +47,8 @@ import Foundation
         }
         guard !state.ended, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         Self.endSoon(Self.showing(besides: task.id))
-        let mark = AgentMark.of(id: task.assignee, profile: agent?.avatar)
-        let attributes = TaskActivityAttributes(task: task.id, title: task.title, agentName: agent?.name ?? task.assignee, colour: AgentMark.palette[mark.color].forms.light, form: mark.form)
+        let glass = AgentGlass.of(id: task.assignee, profile: agent?.avatar)
+        let attributes = TaskActivityAttributes(task: task.id, title: task.title, agentName: agent?.name ?? task.assignee, colour: AgentMark.palette[glass.color].forms.light, shape: glass.shape)
         guard let started = try? Activity.request(attributes: attributes, content: .init(state: state, staleDate: Date.now.addingTimeInterval(3600)), pushType: .token) else { return }
         watch(started, client: session.client)
     }

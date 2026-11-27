@@ -2,9 +2,9 @@ import Foundation
 
 /*
  * How a face stands, in two words the places that draw one pass it: a tone (its line's, or where it stands among the
- * agents) and a mood (what it is doing). An agent's mark shows its mood as a state in its shape (MarkState: AgentMark.swift);
- * the primary's I-beam wears neither. (Until 26 November 2026 these were the orbs', which drew them in light: O2 made every
- * agent a Grille and the primary an I-beam, and the orbs went.)
+ * agents) and a mood (what it is doing). An agent's glass shows its mood as its dot (AgentGlass.state: Glass.swift); the
+ * primary's I-beam wears neither. (Until 26 November 2026 these were the orbs', which drew them in light: O2 made every
+ * agent a Grille and the primary an I-beam, and the orbs went; on 27 November the Grille went for the glass.)
  */
 enum Orb {
     /// Its line's tone (PrimaryNow.Tone), and red for a failure.
