@@ -170,7 +170,10 @@ targets:
         SUEnableAutomaticChecks: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: sh.invincible.bot.mac
+        PRODUCT_BUNDLE_IDENTIFIER: $(INVINCIBLE_MAC_BUNDLE_ID)
+        # The Mac app's bundle ID. A picture run passes its own (INVINCIBLE_MAC_BUNDLE_ID=sh.invincible.bot.mac.shots), so it
+        # shares no defaults, pairing or Launch Services entry with the app on the Mac it runs on.
+        INVINCIBLE_MAC_BUNDLE_ID: sh.invincible.bot.mac
         PRODUCT_NAME: Invincible
         # Sparkle's public EdDSA key (base64), Invincible's own: its private half is never in here.
         INVINCIBLE_SPARKLE_PUBLIC_KEY: "fGmi0V7McrwLLcVYohLgL23IxUiLqSq8SofCP4VeSMk="

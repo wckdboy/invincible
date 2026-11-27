@@ -47,11 +47,12 @@ struct PairedNode: Codable, Equatable, Sendable {
         if startNow { start() }
     }
 
-    func start() {
+    /// Reads this device's key (`tag`: the app's; a test's own, which reads nothing of the device it runs on) and its pairing.
+    func start(tag: String = DeviceKey.appTag) {
         // (Each window starts it: the first that finds this device paired is the one.)
         if case .paired = phase { return }
         do {
-            let key = try DeviceKey.load()
+            let key = try DeviceKey.load(tag: tag)
             Self.mark("key read")
             guard let key, let node = PairedNode.load(), node.device == key.device else {
                 // (A team kept for a pairing that's gone goes with it.)

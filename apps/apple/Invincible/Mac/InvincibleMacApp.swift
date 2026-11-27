@@ -88,6 +88,13 @@ struct InvincibleMacApp: App {
         UserDefaults.standard.data(forKey: placeKey).flatMap { try? JSONDecoder().decode(Place.self, from: $0) } ?? .home
     }
 
+    /// Whether the app starts itself as it launches (reads this Mac's device key, reads and may restart This Mac's node,
+    /// keeps the live stream open): not while a test hosts it. A test makes its own key, session and node (MacShots), so a
+    /// test run never reads the key, the pairing or the node of the Mac it runs on.
+    static func startsItself(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        environment["XCTestConfigurationFilePath"] == nil
+    }
+
     /// Reads this Mac's key, then keeps the node's live stream open while the app runs, windows or not (the menu bar shows
     /// the agents), and reads this Mac's own node again (the sidebar's foot shows it): every 5 s in front, every 15 behind.
     /// A node the app runs is restarted onto a new release once, at launch.
@@ -136,6 +143,7 @@ final class MacDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         // An approval's Approve… and Decline, a task's Ship it…, as the iPhone's (NoticeAnswers).
         NoticeAnswers.register()
+        guard MacApp.startsItself() else { return }
         MacApp.shared.run()
     }
 
