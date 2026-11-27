@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, decodeHlc, type FabricSettingView, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, screenSessionView } from "@invincible/core";
+import { canonical, decodeHlc, type FabricSettingView, fitLedger, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, screenSessionView } from "@invincible/core";
 import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, signInWindowsOf, windowsOf } from "@invincible/models";
 // The apps' own words for a task's verdict, cost and what can be done with it (the CLI reads them too).
 import { activityOf } from "../../../apps/web/src/lib/live-activity.ts";
@@ -458,7 +458,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   const ledger = (entry: LedgerEntryInput) => {
     const plain = Object.fromEntries(Object.entries(entry).filter(([, v]) => v !== undefined)) as LedgerEntryInput;
     const withheld = loopRun(plain.run) ? withheldRunLine(plain) : null;
-    const body = withheld && runOfLoops(plain.run, privateLoops(store)) ? withheld : plain;
+    // (Within the log's limits, so no line is refused for its length and left unrecorded: the re-review's A4.)
+    const body = fitLedger(withheld && runOfLoops(plain.run, privateLoops(store)) ? withheld : plain);
     try {
       store.emit(identity, "ledger.recorded", body);
     } catch (error) {

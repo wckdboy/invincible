@@ -79,6 +79,28 @@ export const NoticeSeverity = z.enum(["info", "warn", "alert"]);
  */
 const Open = z.record(z.string(), z.unknown());
 
+/** The log's limits on a ledger line's words (ledger.recorded): a longer one is clipped to them (fitLedger), never refused. */
+export const LEDGER_LIMITS = { target: 256, reason: 500, detail: 2000 } as const;
+
+/**
+ * A ledger line within the log's limits: each of its words cut to its limit, with an ellipsis, so no line is refused for
+ * its length and left unrecorded (the re-review of 27 November, A4). What it is and whose run it is stay as given: an
+ * identifier cut short would be another's.
+ */
+export function fitLedger<T extends { target: string; reason?: string; detail?: string }>(line: T): T {
+  const cut = (text: string, max: number): string => {
+    if (text.length <= max) return text;
+    const head = text.slice(0, max - 1);
+    return `${/[\uD800-\uDBFF]$/.test(head) ? head.slice(0, -1) : head}…`;
+  };
+  return {
+    ...line,
+    target: cut(line.target, LEDGER_LIMITS.target),
+    ...(line.reason !== undefined ? { reason: cut(line.reason, LEDGER_LIMITS.reason) } : {}),
+    ...(line.detail !== undefined ? { detail: cut(line.detail, LEDGER_LIMITS.detail) } : {}),
+  };
+}
+
 export const Bodies = {
   "fleet.genesis": z.strictObject({ name: z.string().min(1).max(64), created: z.number().int() }),
   "device.enrolled": z.strictObject({
@@ -136,11 +158,11 @@ export const Bodies = {
   "ledger.recorded": z.strictObject({
     class: z.enum(["read", "create", "modify", "outward", "delete", "forbidden"]),
     resource: z.string().min(1).max(64),
-    target: z.string().min(1).max(256),
+    target: z.string().min(1).max(LEDGER_LIMITS.target),
     verdict: z.enum(["allow", "ask", "deny", "approved"]),
-    reason: z.string().max(500).optional(),
+    reason: z.string().max(LEDGER_LIMITS.reason).optional(),
     run: z.string().max(64).optional(),
-    detail: z.string().max(2000).optional(),
+    detail: z.string().max(LEDGER_LIMITS.detail).optional(),
   }),
   "roster.set": z.strictObject({ role: Name, models: z.array(z.string().min(1).max(256)).max(16) }),
   /**

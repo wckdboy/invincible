@@ -75,8 +75,9 @@ describe("your agent's own words in a private repository of yours", () => {
       ["done", true, "Your agent approved it itself: a comment on its own thread #4 in lin-example/notes, a private repository of yours"],
       ["done", true, "Your agent approved it itself: an issue in lin-example/notes, a private repository of yours"],
     ]);
-    // Each read is in the ledger, with what GitHub said.
+    // Each read is in the ledger, by the size and digest of what GitHub said (A4).
     expect(w.ledgered.filter((e) => e.target.startsWith("GET ")).map((e) => e.target)).toEqual(["GET /user", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/contents/.github/workflows?ref=main", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4"]);
+    for (const read of w.ledgered.filter((e) => e.target.startsWith("GET "))) expect([read.target, read.detail]).toEqual([read.target, expect.stringMatching(/^said \d+ bytes, sha256 [A-Za-z0-9_-]{43}$/)]);
   });
 
   // The re-review of 27 November (R4b, R8): a repository made public, or a name renamed and taken, is seen at once.

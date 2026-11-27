@@ -36,8 +36,10 @@ import {
   randomId,
   redact,
   sendCovered,
+  sha256B64u,
   supposedFacts,
   toolDigest,
+  utf8,
 } from "@invincible/core";
 import {
   callMcpTool,
@@ -201,7 +203,7 @@ export class ConnectorService {
 
   /**
    * GitHub's answer to a fixed read of its own (never a tool of the manifest's), with the connector's key at its pinned
-   * origin, null when it didn't say; each one asked is said in the ledger. Asked afresh each time, but for whose the key
+   * origin, null when it didn't say; each one asked is said in the ledger, by its size and digest (never its words). Asked afresh each time, but for whose the key
    * is (`keep`), which is kept FACTS_MS for this connector and this version of its key.
    */
   private async githubRead<T>(manifest: ConnectorManifest, path: string, read: (body: unknown) => T | null, keep = false, missing?: T, raw = false): Promise<T | null> {
@@ -222,7 +224,10 @@ export class ConnectorService {
       this.o.log(`${manifest.label}: GET ${path} wasn't said (${(error as Error).message})`);
     }
     if (keep) this.githubSaid.set(key, { at: this.now(), value });
-    this.o.ledger({ class: "read", resource: `connector.${manifest.id}`, target: `GET ${path}`, verdict: "allow", reason: "what GitHub says of your key, a repository, a thread, a branch or a pull request, before your agent may answer its own call there", detail: value === null ? "not said: nothing there is its to approve" : JSON.stringify(value) });
+    // (What it read goes in as its size and its digest, never its words: a private repository's workflows, a pull
+    // request's files, aren't every agent's to read, and a line within the log's limits is always recorded. A4.)
+    const said = value === null ? null : JSON.stringify(value);
+    this.o.ledger({ class: "read", resource: `connector.${manifest.id}`, target: `GET ${path}`, verdict: "allow", reason: "what GitHub says of your key, a repository, a thread, a branch or a pull request, before your agent may answer its own call there", detail: said === null ? "not said: nothing there is its to approve" : `said ${utf8(said).length} bytes, sha256 ${sha256B64u(said)}` });
     return value;
   }
 
