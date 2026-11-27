@@ -485,15 +485,19 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   - Anything else waits on the node that would run it as a proposal that only you approve; its own agent never does,
     whatever it would spend.
   - Either way the task is recorded as the giving node's (`givenBy: node:<id>`), never yours.
-  - A grant revoked stops what was handed under it, and a revocation that lands while a task is being given stops it.
-    So does a grant ending with the node that recorded it (I-f), and a restart: a planned one ends a handed task as
-    stopped and never takes it up again, and one a crash cut off ends as the node comes back (N2).
+  - A grant revoked stops what was handed under it, whether a call still follows it or not, and a revocation that
+    lands while a task is being given stops it. So does a grant ending with the node that recorded it (I-f), and a
+    restart: a planned one ends a handed task as stopped and never takes it up again, and one a crash cut off ends as
+    the node comes back (N2). A handed task never outlives the call that follows it: a pause ends it, and a resume of
+    an agent or a room passes over it, so it can't come back unfollowed or past the 8 at once (the second re-review's
+    N6). Named by its id, you can still take one up again yourself; revoking its node or your grant still ends it.
   - Tests: `fabric-hand-grant.test.ts` (the review's proof of concept, which failed before the fix: a node's hand call
     made a task as yours, queued at once), `fabric-hand-burst.test.ts` and `fabric-hand-burst.e2e.test.ts` (a burst
     naming no agent: 12 taken against 8, and $36 against a $3 day, before the fix), `fabric-hand-day.test.ts`,
-    `fabric-hand-restart.test.ts`, `fabric-grant-writer.test.ts`, `handoff-grants.test.ts` (only your word, any order,
-    a rebuild, an upgrade, its recorder), `gates.test.ts` and `team-runtime.test.ts` (the gates' bound), `team.test.ts`,
-    `fabric-cli.test.ts`.
+    `fabric-hand-restart.test.ts`, `fabric-hand-pause.test.ts` (a paused task escaped every revocation, and a resume
+    ran it again with 16 of one node's open at once, before the fix), `fabric-grant-writer.test.ts`,
+    `handoff-grants.test.ts` (only your word, any order, a rebuild, an upgrade, its recorder), `gates.test.ts` and
+    `team-runtime.test.ts` (the gates' bound), `team.test.ts`, `fabric-cli.test.ts`.
   - **Residual:** a full node that turned on you can write itself a grant as your word, as it can write a rule, and it
     can enroll a client that is you over HTTPS, which gives your agents work as you do: a full node is owner-equivalent
     across the fleet. Each grant names the node that recorded it (`invincible fabric grants`), and every grant a node

@@ -122,10 +122,14 @@ transport keys carries all of it:
      are open there at once (waiting for you, queued or running, and those still waiting their turn to be given). One
      node's hand-offs are looked at one at a time: each is counted, given and written before the next, so a burst keeps
      the day's budget and the 8 at once.
-   - **It ends with what it was taken under.** Your grant revoked stops what was handed under it, and so does a grant
-     whose recorder is revoked (below). A node that restarts ends what was handed to it before, as nobody follows it
-     any more: a planned restart (a deploy, an update) ends it as stopped and never takes it up again, and one a crash
-     cut off ends as the node comes back.
+   - **It ends with what it was taken under, and with its call.** Your grant revoked stops what was handed under it,
+     and so does a grant whose recorder is revoked (below), whether a call still follows the task or not. A pause ends
+     it too (its agent, its room or the task paused, or the agent turned off): its call ends then, and nobody follows
+     it after, so it stops rather than wait for a resume, and its proof says so. A resume of an agent or a room passes
+     over another node's task; named by its id you can still take one up again, with nobody following it, and
+     revoking its node or your grant still ends it. A node that restarts ends what was handed to it before, as nobody
+     follows it any more: a planned restart (a deploy, an update) ends it as stopped and never takes it up again, and
+     one a crash cut off ends as the node comes back.
    - **Its gates are bounded.** They are its giver's commands, run in your agent's VM: all of them together get as long
      as one command may (15 minutes), every round counted, and once that is spent they aren't run and the work isn't
      done.

@@ -76,8 +76,9 @@ export interface HandTeam {
   runningIn(sandbox: string): string | null;
   /** What one node has handed here: how many are open now, and what those under your grant since `since` were given. */
   handed(by: string, since: number): { atOnce: number; given: number };
-  /** The tasks other nodes handed here that haven't ended. */
-  handedOpen(): string[];
+  /** The tasks other nodes handed here that haven't ended: who handed each (`node:<id>`), and whether it was taken under
+   * your grant (not proposed to you and approved). */
+  handedOpen(): { id: string; by: string; granted: boolean }[];
 }
 
 /** A tool of the primary's, run on this node for a run another node runs for it (the server binds it, as that run's principal). */
@@ -195,10 +196,14 @@ export class Handoffs implements FabricTools {
               const pair = event.body as { from?: unknown; to?: unknown };
               if (pair.to !== deps.identity.id || typeof pair.from !== "string" || deps.store.handoffGrant(pair.from, deps.identity.id)) continue;
               for (const run of [...this.runs.values()].filter((r) => r.giver === pair.from && r.granted)) this.team?.stop(run.task, "Your grant for the node that handed it over was revoked.");
+              // And what it handed under that grant that the agents hold and no call follows.
+              for (const t of this.team?.handedOpen() ?? []) if (t.granted && t.by === handedBy(pair.from)) this.team?.stop(t.id, "Your grant for the node that handed it over was revoked.");
             }
             if (!events.some((e) => e.kind === "device.revoked")) return;
             for (const run of [...this.runs.values()].filter((r) => r.granted && !deps.store.handoffGrant(r.giver, deps.identity.id)))
               this.team?.stop(run.task, "The grant it was taken under ended: the node that recorded it was revoked.");
+            for (const t of this.team?.handedOpen() ?? [])
+              if (t.granted && !deps.store.handoffGrant(t.by.slice("node:".length), deps.identity.id)) this.team?.stop(t.id, "The grant it was taken under ended: the node that recorded it was revoked.");
           })
         : () => {};
     // A hand-off a node that stopped was following has lost its call: the runner stopped the work when it did.
@@ -211,7 +216,7 @@ export class Handoffs implements FabricTools {
    */
   attachTeam(team: HandTeam): void {
     this.team = team;
-    for (const id of team.handedOpen()) team.stop(id, "The node that handed it over no longer follows it: its call ended when this node stopped.");
+    for (const { id } of team.handedOpen()) team.stop(id, "The node that handed it over no longer follows it: its call ended when this node stopped.");
   }
 
   /** The giver's side: how a run elsewhere calls this node's tools. */
@@ -257,6 +262,8 @@ export class Handoffs implements FabricTools {
       this.team?.stop(run.task, "The node that handed it over was revoked.");
       run.inv.fail(3, "the node that handed this task over was revoked");
     }
+    // And what it handed that the agents hold and no call follows (one you took up again by its id).
+    for (const t of this.team?.handedOpen() ?? []) if (t.by === handedBy(device)) this.team?.stop(t.id, "The node that handed it over was revoked.");
   }
 
   // ---- the giver ----
@@ -671,6 +678,10 @@ export class Handoffs implements FabricTools {
         if (!page.more) await this.nap(250);
       }
       if (inv.signal.aborted) return;
+      // Paused while its call followed it (its agent, its room or the task, or the agent turned off): it ends now, as
+      // it would at a restart, since nobody follows it after this call, and a resume would run it unseen. Its proof
+      // says it stopped.
+      if (this.team.task(run.task)?.status === "interrupted") this.team.stop(run.task, "This work was paused, and it was handed over by another node: its call ended with the pause, and nobody follows it now, so it ends here rather than be resumed unseen.");
       const task = this.team.task(run.task)!;
       const output = task.output.slice(0, 20_000);
       const statement: ProofStatement = {

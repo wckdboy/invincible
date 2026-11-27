@@ -734,9 +734,13 @@ export class TeamStore {
     const given = this.db.query<{ usd: number | null }, [number, string, number]>("SELECT SUM(MAX(COALESCE(json_extract(data, '$.budgetUsd'), 0), ?)) AS usd FROM team_jobs WHERE kind = 'task' AND json_extract(data, '$.givenBy') = ? AND json_extract(data, '$.proposedBy') IS NULL AND created_at > ?").get(HANDOFF_MIN_USD, by, since)!.usd ?? 0;
     return { atOnce, given };
   }
-  /** The tasks other nodes handed here that haven't ended (waiting for you, queued, running, or cut off by a crash), by id. */
-  handedOpen(): string[] {
-    return this.db.query<{ id: string }, []>("SELECT id FROM team_jobs WHERE kind = 'task' AND status IN ('proposed','queued','running','interrupted') AND json_extract(data, '$.givenBy') LIKE 'node:%' ORDER BY seq").all().map((r) => r.id);
+  /** The tasks other nodes handed here that haven't ended (waiting for you, queued, running, or cut off): each by id, who
+   * handed it (`node:<id>`), and whether it was taken under your grant rather than proposed to you. */
+  handedOpen(): { id: string; by: string; granted: boolean }[] {
+    return this.db
+      .query<{ id: string; giver: string; proposed: string | null }, []>("SELECT id, json_extract(data, '$.givenBy') AS giver, json_extract(data, '$.proposedBy') AS proposed FROM team_jobs WHERE kind = 'task' AND status IN ('proposed','queued','running','interrupted') AND json_extract(data, '$.givenBy') LIKE 'node:%' ORDER BY seq")
+      .all()
+      .map((r) => ({ id: r.id, by: r.giver, granted: r.proposed === null }));
   }
   /** Interrupted work nobody should take up again (another node's hand-off whose call ended with it): stopped, in these words. */
   endInterrupted(key: string, error: string): void {
@@ -1178,10 +1182,12 @@ export class TeamStore {
     })();
   }
   /** Your resume makes interrupted or stopped work runnable again (the one other way: a planned restart's own work, once,
-   * by itself: resumeRestarted). */
+   * by itself: resumeRestarted). Another node's hand-off is taken up again only when you name it by its id: its call
+   * has ended, so it would run with nobody following it. */
   resume(select: TeamSelection): void {
     this.db.transaction(() => {
-      const found = this.db.query<JobRow, []>("SELECT * FROM team_jobs WHERE status IN ('interrupted','stopped','failed') ORDER BY seq").all().filter((r) => matches(jobOf(r), select) && (select.task || r.status === "interrupted"));
+      const handed = (r: JobRow) => r.kind === "task" && String((JSON.parse(r.data) as { givenBy?: unknown }).givenBy ?? "").startsWith("node:");
+      const found = this.db.query<JobRow, []>("SELECT * FROM team_jobs WHERE status IN ('interrupted','stopped','failed') ORDER BY seq").all().filter((r) => matches(jobOf(r), select) && (select.task || (r.status === "interrupted" && !handed(r))));
       // What a removed worker left unfinished is never started again: asked for by name it says so, otherwise it is passed over.
       const rows = found.filter((r) => this.agent(r.agent));
       if (select.task && found.length && !rows.length) throw new TeamError(410, "That task's agent was removed. Revise the task for another agent.");
