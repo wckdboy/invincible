@@ -222,6 +222,15 @@ describe("shipping to GitHub", () => {
   });
 });
 
+// Each test here starts its processes one after another, so its time is the machine's to give: the shipment script's
+// held git reads the repository's configuration before each of its commands (held-git.ts), 13 gits a run, so "told where
+// the work began" starts 38 processes (10 gits of its own, two runs of the script) and "every change" 21. Alone they
+// took 0.35 s and 0.21 s; beside 96 loops starting git and python3, 4.1 to 5.0 s and up to 3.3 s, and beside 144 the
+// first hit bun's 5 s default every time (27 November 2026; it had in a full run beside other suites too). SHIP_MS, a
+// second for each process the first starts (the busiest such test measured took 0.43 s a process: team-steps.test), is
+// how long a busy machine may take, never what a test checks.
+const SHIP_MS = 40_000;
+
 describe("the shipment the sandbox leaves", () => {
   const have = (cmd: string[]) => {
     try {
@@ -270,7 +279,7 @@ describe("the shipment the sandbox leaves", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, SHIP_MS);
 
   test.skipIf(!python)("told where the work began, it ships what was committed since as well as what wasn't: an agent in its own worktree may commit", () => {
     const dir = mkdtempSync(join(tmpdir(), "invincible-ship-"));
@@ -310,7 +319,7 @@ describe("the shipment the sandbox leaves", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, SHIP_MS);
 });
 
 describe("the gate, end to end", () => {
