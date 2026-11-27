@@ -6,7 +6,9 @@ import SwiftUI
  * needs you first, with its count, always there (so its count coming moves nothing); then your agent, with its line;
  * then each agent (its glass with its state's dot, its name, its latest line muted, red when its work failed) and each
  * room. At its foot, pinned under the list as it scrolls (the web's), the work, Settings, everything else, and the
- * machine it talks to. The place on screen is its row, marked: a task's is its agent's.
+ * machine it talks to. The place on screen is its row, marked by the roster itself on a quiet ground, its words as they
+ * are (a task's is its agent's): never by the list's own selection, which an iPad's sidebar drew in the ink, white on
+ * a dark page, its words white on it (27 November 2026).
  */
 struct RosterList<Foot: View>: View {
     let session: Session
@@ -28,30 +30,29 @@ struct RosterList<Foot: View>: View {
     }
 
     var body: some View {
-        List(selection: Binding<Place?>(get: { RosterList.marked(current, assignee: assignee) }, set: { if let place = $0 { go(place) } })) {
+        let marked = RosterList.marked(current, assignee: assignee)
+        List {
             Section {
                 if let since = session.keptSince {
-                    KeptLine(since: since, asking: session.asksAgain).listRowBackground(Color.clear).selectionDisabled()
+                    KeptLine(since: since, asking: session.asksAgain).listRowBackground(Color.clear)
                 }
-                RosterNeeds(count: session.needsYou)
-                    .rosterRow()
-                    .tag(Place.inbox)
+                pick(.inbox, marked) { RosterNeeds(count: session.needsYou) }
                     .accessibilityIdentifier("roster.needs")
-                RosterPerson(name: "Your agent", line: session.primary.line, failed: false) {
-                    GuardianFace(size: Self.face, standing: session.primaryStanding)
+                pick(.primary, marked) {
+                    RosterPerson(name: "Your agent", line: session.primary.line, failed: false) {
+                        GuardianFace(size: Self.face, standing: session.primaryStanding)
+                    }
                 }
-                .rosterRow()
-                .tag(Place.primary)
                 .accessibilityIdentifier("roster.primary")
             }
             if !session.rows.isEmpty {
                 Section("Agents") {
                     ForEach(session.rows) { row in
-                        RosterPerson(name: row.name, line: row.standing.beside(row.line), failed: row.standing == .failed) {
-                            AgentFace(id: row.id, profile: session.drawn(row.id)?.avatar, size: Self.face, mood: Orb.Mood(row.standing))
+                        pick(.agent(row.id), marked) {
+                            RosterPerson(name: row.name, line: row.standing.beside(row.line), failed: row.standing == .failed) {
+                                AgentFace(id: row.id, profile: session.drawn(row.id)?.avatar, size: Self.face, mood: Orb.Mood(row.standing))
+                            }
                         }
-                        .rosterRow()
-                        .tag(Place.agent(row.id))
                         .accessibilityIdentifier("roster.agent.\(row.id)")
                     }
                 }
@@ -60,11 +61,11 @@ struct RosterList<Foot: View>: View {
             if !rooms.isEmpty {
                 Section("Rooms") {
                     ForEach(rooms) { room in
-                        RosterPerson(name: room.name, line: room.line, failed: false) {
-                            Image(systemName: "number").font(.body.weight(.medium)).foregroundStyle(.secondary)
+                        pick(.room(room.id), marked) {
+                            RosterPerson(name: room.name, line: room.line, failed: false) {
+                                Image(systemName: "number").font(.body.weight(.medium)).foregroundStyle(.secondary)
+                            }
                         }
-                        .rosterRow()
-                        .tag(Place.room(room.id))
                         .accessibilityIdentifier("roster.room.\(room.id)")
                     }
                 }
@@ -95,18 +96,29 @@ struct RosterList<Foot: View>: View {
             }
             .padding(.horizontal, Space.s2)
         }
-        // A chat, an agent or a room in a window of its own, where there are windows (an iPad's, a Mac's).
-        .contextMenu(forSelectionType: Place.self) { places in
-            if windows, let place = places.first, places.count == 1, let window = place.window(chat: session.chat.conversation) {
-                Button("Open in New Window", systemImage: "macwindow.badge.plus") { openWindow(value: window) }
-            }
-        }
         // An agent's or a room's coming or going, as an animation of the list, never a jump.
         .animation(.snappy, value: session.rows.map(\.id) + session.roomRows.map(\.id))
         // (A container by that name, its rows their own: an identifier on a view that is no element of its own goes to
         // every element in it, its pinned foot's places too.)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("roster")
+    }
+
+    /// A row that goes to its place: marked on a quiet ground while that place is on screen, said so to VoiceOver, and a
+    /// chat, an agent or a room in a window of its own from its menu where there are windows (an iPad's, a Mac's).
+    private func pick<Row: View>(_ place: Place, _ marked: Place?, @ViewBuilder _ row: () -> Row) -> some View {
+        let here = place == marked
+        return Button { go(place) } label: { row().contentShape(.rect) }
+            .buttonStyle(.plain)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: Space.line, leading: Space.s3, bottom: Space.line, trailing: Space.s3))
+            .listRowBackground(here ? RosterMark() : nil)
+            .accessibilityAddTraits(here ? .isSelected : [])
+            .contextMenu {
+                if windows, let window = place.window(chat: session.chat.conversation) {
+                    Button("Open in New Window", systemImage: "macwindow.badge.plus") { openWindow(value: window) }
+                }
+            }
     }
 
     /// The faces' size: an agent's glass, your agent's tile, a room's mark in the same box.
@@ -133,11 +145,14 @@ extension RosterList where Foot == EmptyView {
     }
 }
 
-extension View {
-    /// A row of the roster: no hairline between rows (the web's), and the room a row needs, no more.
-    fileprivate func rosterRow() -> some View {
-        listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: Space.line, leading: Space.s3, bottom: Space.line, trailing: Space.s3))
+/// The place on screen's row: a quiet ground of the page's own fills, under words that stay as they are (the web's current
+/// row), in light and dark alike.
+struct RosterMark: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(.fill.secondary)
+            .padding(.horizontal, Space.s1 + Space.line)
+            .padding(.vertical, 1)
     }
 }
 
