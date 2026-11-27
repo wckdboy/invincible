@@ -282,10 +282,13 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
     a uid that is never the agent's (1001), on a socket of its own beside deskd's directory. deskd counts a connection
     there as yours only from that uid, as the kernel says (`SO_PEERCRED`). A request can't say it is yours: an agent's
     session that does is refused.
+  - **How you take it:** with a tap on Take over, or with your first input on its desktop (a click, a key, some
+    typing): whatever you do there is done under your hold, never beside the agent's. Looking takes nothing.
   - **While you hold it:** the agent's desktop requests wait, 30 s at most, then do nothing and exit 75, saying the
     desktop is yours. Its looks wait too, so no picture taken while you type reaches its model.
   - **How it ends:** on your second tap, after 120 s with no input from you, after 15 min at most, or when the node's
-    session ends. A second take starts a fresh window.
+    session ends. A second take starts a fresh window. Your looks don't count as input, so a page left open on the
+    screen keeps no hold of yours alive.
   - **What it can't promise:** the VM is the agent's. A program of its own there runs as deskd's own user. It can read
     the display and what you type into it, or stand in for deskd's sockets. Take-over keeps the agent's model from
     taking the screen while you hold it. It doesn't make the VM a place for a secret you wouldn't give the agent.

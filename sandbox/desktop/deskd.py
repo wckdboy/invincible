@@ -1337,13 +1337,18 @@ class Desk:
                 self.hold_changed.notify_all()
             return h
 
-    def take(self, who, idle=HOLD_IDLE, most=HOLD_MOST):
-        """The owner takes the desktop over, through `who` (the node's connection): a second take starts a fresh window."""
+    def take(self, who, idle=HOLD_IDLE, most=HOLD_MOST, keep=False):
+        """The owner takes the desktop over, through `who` (the node's connection): a second take starts a fresh window.
+        With `keep` (their input), a hold in force is kept, its idle time started again. (The hold, whether this took it.)"""
         with self.hold_changed:
+            h = self.holding() if keep else None
+            if h is not None:
+                h["last"] = self.now()
+                return h, False
             now = self.now()
             self.hold = {"who": who, "since": time.time(), "taken": now, "last": now, "idle": idle, "most": most}
             self.hold_changed.notify_all()
-            return self.hold
+            return self.hold, True
 
     def give_back(self, who, anyone=False):
         """The desktop given back: by the owner (their second tap, `anyone` of their connections), or as the connection
@@ -1354,12 +1359,6 @@ class Desk:
             self.hold = None
             self.hold_changed.notify_all()
             return True
-
-    def touched(self):
-        """The owner's own input: a hold's idle time starts again."""
-        with self.hold_changed:
-            if self.hold is not None:
-                self.hold["last"] = self.now()
 
     def hold_ends(self, h):
         """How long the hold has left, at most: its idle time or its most, whichever ends it first."""
@@ -1376,6 +1375,10 @@ class Desk:
                 if h is None or waited >= cap:
                     return waited, h
                 self.hold_changed.wait(timeout=max(0.01, min(cap - waited, self.hold_ends(h))))
+
+    def hold_view(self, h):
+        """A hold as the owner's node is told it: since when (the epoch's seconds), its idle time and its most, and how long it has left."""
+        return None if h is None else {"since": h["since"], "idle": h["idle"], "most": h["most"], "ends_in": round(self.hold_ends(h), 3)}
 
     def held_said(self, h):
         return "the owner took this desktop over %d s ago, and has it for up to %d s more: until they give it back, or %d s pass with no input from them" % (
@@ -2241,6 +2244,10 @@ ENV_KEYS = ("INVINCIBLE_EYES", "INVINCIBLE_EYES_SPACE", "INVINCIBLE_GATEWAY", "I
 # What an agent may ask while the owner holds the desktop, without waiting: its help, whether it is up, and `start`
 # (which the owner's own stream runs first: `desktop stream`).
 UNHELD = {"help", "--help", "-h", "status", "start"}
+# What the owner may ask that is not their input: looking, and asking how it is. Their input (anything else) takes the
+# desktop over if it is free, and starts a hold's idle time again; looking does neither, so a page that shows them the
+# screen every few seconds keeps no hold of theirs alive.
+LOOKS = UNHELD | {"screenshot", "zoom", "cursor_position", "text", "windows", "tree", "find", "settle", "look"}
 
 
 def agent_waits(desk, verb):
@@ -2277,27 +2284,40 @@ def peer_uid(conn):
 def session(desk, request, who=None):
     """One request of a held session (the host's, for the owner or the agent's loop): a toolset member, or a command line.
     The owner's are the requests of an owner's connection (Who), whatever a request says: only they take the desktop
-    over and give it back, and theirs never wait."""
-    rid = request.get("id")
+    over and give it back, theirs never wait, and each answer of theirs says whether they have it (`hold`)."""
     owner = who is not None and who.owner
+    answer = _session(desk, request, who, owner)
+    if owner:
+        answer["hold"] = desk.hold_view(desk.holding())
+    return answer
+
+
+def _session(desk, request, who, owner):
+    rid = request.get("id")
     name = str(request.get("name", ""))
     try:
-        if name in ("take", "release"):
+        if name in ("take", "release", "hold"):
             if not owner:
                 raise Refused("only the owner takes the desktop over, or gives it back: through their node")
+            if name == "hold":
+                # (Whether they have it, and nothing else: every answer of theirs says so.)
+                return {"id": rid, "ok": True}
             if name == "release":
                 return {"id": rid, "ok": True, "released": desk.give_back(who, anyone=True)}
             i = request.get("input") or {}
-            h = desk.take(who, idle=min(max(float(i.get("idle", HOLD_IDLE)), 1.0), HOLD_MOST), most=min(max(float(i.get("most", HOLD_MOST)), 1.0), HOLD_MOST))
-            return {"id": rid, "ok": True, "held": {"since": h["since"], "idle": h["idle"], "most": h["most"], "ends_in": desk.hold_ends(h)}}
+            desk.take(who, idle=min(max(float(i.get("idle", HOLD_IDLE)), 1.0), HOLD_MOST), most=min(max(float(i.get("most", HOLD_MOST)), 1.0), HOLD_MOST))
+            return {"id": rid, "ok": True, "took": True}
         note = None
+        took = False
+        verb = str(request["argv"][0]) if request.get("argv") else name
         if owner:
-            desk.touched()
+            if ALIASES.get(verb, verb) not in LOOKS:
+                took = desk.take(who, keep=True)[1]
         else:
-            note = agent_waits(desk, str(request["argv"][0]) if request.get("argv") else name)
+            note = agent_waits(desk, verb)
         if "argv" in request:
             code, out, err = cli(desk, [str(a) for a in request["argv"]], request.get("cwd", "/work"), {k: str(v) for k, v in (request.get("env") or {}).items() if k in ENV_KEYS})
-            return {"id": rid, "ok": code == 0, "code": code, "stdout": out, "stderr": (note or "") + err}
+            return {"id": rid, "ok": code == 0, "code": code, "stdout": out, "stderr": (note or "") + err, **({"took": True} if took else {})}
         answer = desk.tool(name, request.get("input") or {})
         if request.get("screenshot") and "image" not in answer:
             answer["image"] = desk.picture(request.get("format", "png"), settle=request.get("settle", True))
@@ -2305,7 +2325,7 @@ def session(desk, request, who=None):
             image = answer["image"]
             answer["image"] = {"media_type": image["media_type"], "data": base64.b64encode(image["data"]).decode(), "width": image["width"], "height": image["height"], "settled": image["settled"]}
         answer["text"] = (note or "") + describe(answer)
-        return {"id": rid, **answer}
+        return {"id": rid, **answer, **({"took": True} if took else {})}
     except Held as error:
         return {"id": rid, "ok": False, "held": True, "code": HELD_EXIT, "error": str(error)}
     except Refused as error:

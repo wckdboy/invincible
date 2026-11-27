@@ -242,7 +242,8 @@ int main(int argc, char **argv) {
   /*
    * desktop --owner-session: the owner's held session (C1 step 9), the node's own exec as the owner's uid. On the owner's
    * socket beside the run directory, where deskd takes a connection from that uid as the owner's. It starts no desktop
-   * process: that runs as the agent, started by the node's other session.
+   * process: that runs as the agent, started by the node's other session, which may be starting it as this begins, so
+   * this waits for it as long as a command waits for one it started.
    */
   if (!strcmp(argv[1], "--owner-session")) {
     char path[4200];
@@ -250,10 +251,17 @@ int main(int argc, char **argv) {
     size_t n = strlen(run);
     while (n > 1 && run[n - 1] == '/') n--;
     snprintf(path, sizeof path, "%.*s.owner.sock", (int)n, run);
-    int fd = connect_to(path);
-    if (fd < 0) {
-      fprintf(stderr, "desktop: the desktop process isn't running (desktop start)\n");
-      return 1;
+    double wait = atof(setting("INVINCIBLE_DESKTOP_WAIT", "20"));
+    struct timespec t0, t;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    int fd;
+    while ((fd = connect_to(path)) < 0) {
+      clock_gettime(CLOCK_MONOTONIC, &t);
+      if ((t.tv_sec - t0.tv_sec) + (t.tv_nsec - t0.tv_nsec) / 1e9 > wait) {
+        fprintf(stderr, "desktop: the desktop process isn't running (desktop start)\n");
+        return 1;
+      }
+      usleep(5000);
     }
     return relay(fd);
   }

@@ -266,7 +266,7 @@ describe("the desktop command: deskd's thin client", () => {
     if (!needs()) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me, INVINCIBLE_DESKTOP_HOLD_WAIT: "10" });
     const node = await opened(r, true);
-    expect(await node.ask({ id: 1, name: "take", input: { idle: 30 } })).toMatchObject({ ok: true, held: { idle: 30, most: 900 } });
+    expect(await node.ask({ id: 1, name: "take", input: { idle: 30 } })).toMatchObject({ ok: true, took: true, hold: { idle: 30, most: 900 } });
     const clicking = agentAsync(r, ["click", "10", "20"]);
     await Bun.sleep(700);
     expect(calls(r.trace(), "button")).toHaveLength(0);
@@ -309,11 +309,39 @@ describe("the desktop command: deskd's thin client", () => {
     await node.close();
   });
 
+  test("the owner's input takes the desktop over when no one has it, and keeps their hold; their looks don't, and each answer of theirs says whether they have it", async () => {
+    if (!needs()) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me, INVINCIBLE_DESKTOP_HOLD_WAIT: "0.3" });
+    const node = await opened(r, true);
+    // Looking is not taking, and asking whether they have it is neither.
+    expect(await node.ask({ id: 0, name: "hold" })).toEqual({ id: 0, ok: true, hold: null });
+    expect(await node.ask({ id: 1, argv: ["status"] })).toMatchObject({ ok: true, hold: null });
+    expect((await agentAsync(r, ["click", "10", "20"])).code).toBe(0);
+    // Their first click takes it, for the usual window.
+    const first = await node.ask({ id: 2, name: "left_click", input: { coordinate: [5, 5] } });
+    expect(first).toMatchObject({ ok: true, took: true, hold: { idle: 120, most: 900 } });
+    expect((await agentAsync(r, ["click", "10", "20"])).code).toBe(75);
+    // Their next keeps it: the same hold, not a fresh one.
+    const next = await node.ask({ id: 3, argv: ["click", "6", "6"] });
+    expect(next).toMatchObject({ ok: true, code: 0, hold: { since: first.hold.since } });
+    expect(next.took).toBeUndefined();
+    // A hold with a short idle time: a look of theirs doesn't start it again, as input does.
+    await node.ask({ id: 4, name: "take", input: { idle: 2 } });
+    await Bun.sleep(1000);
+    expect((await node.ask({ id: 5, argv: ["status"] })).hold).toMatchObject({ idle: 2 });
+    await Bun.sleep(1300);
+    // (2.3 s after their last input, past its idle time, however often they looked meanwhile.)
+    expect(await node.ask({ id: 6, name: "screenshot" })).toMatchObject({ hold: null });
+    expect(await agentAsync(r, ["click", "10", "20"])).toMatchObject({ code: 0, err: "" });
+    await node.close();
+  });
+
   test("only the owner's socket, from the owner's uid, takes the desktop over: the agent's own session can't, whatever it says", async () => {
     if (!needs()) return;
     const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me });
-    const [plain, claiming] = await session(r, [{ id: 1, name: "take" }, { id: 2, name: "take", as: "owner" }]);
-    for (const answer of [plain, claiming]) expect(answer).toMatchObject({ ok: false, refused: true, error: "only the owner takes the desktop over, or gives it back: through their node" });
+    const [plain, claiming, asking] = await session(r, [{ id: 1, name: "take" }, { id: 2, name: "take", as: "owner" }, { id: 3, name: "hold" }]);
+    for (const answer of [plain, claiming, asking]) expect(answer).toMatchObject({ ok: false, refused: true, error: "only the owner takes the desktop over, or gives it back: through their node" });
+    expect(plain.hold).toBeUndefined();
     // On the owner's socket, from another uid than the owner's: no more the owner's than the agent's own.
     const other = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: "4242" });
     const stranger = await opened(other, true);
@@ -330,7 +358,7 @@ describe("the desktop command: deskd's thin client", () => {
     await first.ask({ id: 1, name: "take", input: { idle: 1 } });
     await Bun.sleep(700);
     const again = await first.ask({ id: 2, name: "take", input: { idle: 2 } });
-    expect(again.held.ends_in).toBeGreaterThan(1.9);
+    expect(again.hold.ends_in).toBeGreaterThan(1.9);
     await Bun.sleep(700);
     // (1.4 s after the first take, its idle second long gone: the second's window, to 2.7 s, holds it still.)
     expect((await agentAsync(r, ["click", "10", "20"])).code).toBe(75);
@@ -477,6 +505,36 @@ describe("the desktop command: deskd's thin client", () => {
       expect((await look(["--space", "inches", "Where is Send?"])).code).toBe(2);
     } finally {
       gateway.stop(true);
+    }
+  });
+
+  test("the owner's session, opened beside the agent's before deskd runs, waits for the agent's to start it, and starts none itself", async () => {
+    if (!needs()) return;
+    const dir = mkdtempSync(join(root, "cold-"));
+    const run = join(dir, "run");
+    const trace = join(dir, "trace");
+    writeFileSync(trace, "");
+    const env = { PATH: `${bin(join(dir, "bin"), trace)}:${process.env.PATH}`, HOME: dir, INVINCIBLE_DESKTOP_RUN: run, DESKD_TRACE: trace, INVINCIBLE_DESKD: harness, INVINCIBLE_DESKTOP_OWNER_UID: String(process.getuid!()) };
+    const owner = Bun.spawn([built!, "--owner-session"], { env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    owner.stdin.write('{"id":1,"name":"hold"}\n');
+    owner.stdin.flush();
+    try {
+      await Bun.sleep(300);
+      expect(existsSync(join(run, "deskd.sock"))).toBe(false);
+      // The agent's own command starts deskd (as the node's session for the agent does), and the owner's is answered.
+      expect(Bun.spawnSync([built!, "status"], { env, stdout: "pipe", stderr: "pipe" }).exitCode).toBe(0);
+      const reader = owner.stdout.getReader();
+      let said = "";
+      while (!said.includes("\n")) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        said += new TextDecoder().decode(value);
+      }
+      expect(JSON.parse(said)).toEqual({ id: 1, ok: true, hold: null });
+    } finally {
+      owner.kill();
+      const pid = readFileSync(trace, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((t) => t.call === "serving")?.pid;
+      if (pid) process.kill(pid);
     }
   });
 
