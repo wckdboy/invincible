@@ -27,7 +27,9 @@ export const STATES: Record<AgentState, StateLook> = {
   failed: { words: "Failed", tone: "failed" },
   paused: { words: "Paused", tone: "neutral" },
   queued: { words: "Queued", tone: "neutral" },
-  verified: { words: "Verified", tone: "ok" },
+  // (Verified work is new to you until you look, as the iPhone says it: never "Verified" over a verdict that may say it
+  // wasn't proven. Its line says the verdict.)
+  verified: { words: "New", tone: "ok" },
   unread: { words: "New", tone: "ok" },
   resting: { words: null, tone: "neutral" },
 };

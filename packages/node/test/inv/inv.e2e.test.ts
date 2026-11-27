@@ -170,7 +170,8 @@ describe("inv against a node of its own", () => {
     expect([given.code, given.err]).toEqual([0, ""]);
     const proof = json(given.out);
     verifiedTask = proof.task;
-    expect(proof).toMatchObject({ v: 1, state: "verified", exit: 0, word: "Verified", agent: "ada", node: "keep", budgetUsd: 2, review: { verdict: "pass", sameModel: false } });
+    // (Its word is the apps', its verdict as its proof allows: Proven, as its exit code says.)
+    expect(proof).toMatchObject({ v: 1, state: "verified", exit: 0, word: "Proven", agent: "ada", node: "keep", budgetUsd: 2, review: { verdict: "pass", sameModel: false } });
     expect(proof.gates).toEqual([expect.objectContaining({ cmd: "test -f result.txt # gate-one", exit: 0, before: 1, failedBefore: true })]);
     // inv proof says the same, and its exit code is the verdict.
     const again = await run(me, "proof", verifiedTask, "--json");
@@ -187,10 +188,10 @@ describe("inv against a node of its own", () => {
     const board = await run(me);
     expect(board.code).toBe(0);
     expect(board.out).toMatch(/^Invincible · /);
-    expect(board.out).toContain("Verified  TASK_ONE: write result.txt");
+    expect(board.out).toContain("Proven  TASK_ONE: write result.txt");
     expect(board.out).not.toContain("\x1b");
     const tasks = json((await run(me, "tasks", "--done", "--json")).out);
-    expect(tasks.tasks.find((row: { id: string }) => row.id === verifiedTask)).toMatchObject({ word: "Verified", state: "verified", agent: "ada" });
+    expect(tasks.tasks.find((row: { id: string }) => row.id === verifiedTask)).toMatchObject({ word: "Proven", state: "verified", agent: "ada" });
     const peek = await run(me, "peek", verifiedTask, "--json");
     expect([peek.code, json(peek.out).lines.length > 0]).toEqual([0, true]);
     const cost = await run(me, "cost", "--json");

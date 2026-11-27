@@ -91,7 +91,7 @@ fun rememberWork(app: AppModel): Work.Attended? {
 
 /** A row's words, for a screen reader: what it is, where, how it stands and who is on it. */
 fun rowLabel(row: Work.Row): String =
-    listOfNotNull(row.title, row.project.name, row.verdict?.word ?: row.word, "${row.agentName}${if (row.detail.isNotEmpty()) ": ${row.detail}" else ""}", row.age?.let { "$it ago" }).joinToString(", ")
+    listOfNotNull(row.title, row.project.name, row.word, "${row.agentName}${if (row.detail.isNotEmpty()) ": ${row.detail}" else ""}", row.age?.let { "$it ago" }).joinToString(", ")
 
 /** A project's badge: its letter on a small tile (other work's is an empty, dashed one). */
 @Composable
@@ -140,7 +140,7 @@ fun StateWord(row: Work.Row) {
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         if (verdict?.verdict == Steps.Verdict.PROVEN) Icon(CheckIcon, null, Modifier.size(14.dp), tint = color)
-        Text(verdict?.word ?: row.word, style = Type.word, color = color, maxLines = 1)
+        Text(row.word, style = Type.word, color = color, maxLines = 1)
     }
 }
 
@@ -180,7 +180,7 @@ fun WorkRow(row: Work.Row, onOpen: () -> Unit, face: Dp = 18.dp, current: Boolea
             AgentMarkView(row.agent, row.avatar, face, state = AgentMark.state(row.state))
             Text(row.agentName, style = Type.meta, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (calm) 0.72f else 0.86f), maxLines = 1)
             // (Not what its word says already: "Gave up", then "gave up".)
-            if (row.detail.isNotEmpty() && !row.detail.equals(row.verdict?.word ?: row.word, ignoreCase = true)) Text(row.detail, style = if (row.mono) Type.mono else Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            if (row.detail.isNotEmpty() && !row.detail.equals(row.word, ignoreCase = true)) Text(row.detail, style = if (row.mono) Type.mono else Type.meta, color = quiet, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         }
     }
 }

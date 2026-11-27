@@ -48,7 +48,8 @@ enum Standing: String, Sendable, Equatable {
         case .failed: "Failed"
         case .paused: "Paused"
         case .queued: "Queued"
-        case .verified: "Verified"
+        // (Verified work is new to you until you look: never "Verified" over a verdict that may say it wasn't proven.)
+        case .verified: "New"
         case .unread: "New"
         case .resting: nil
         }
@@ -236,11 +237,13 @@ enum Roster {
         return "\(who.map { "\($0) proposes" } ?? "Proposes") \(titled(latest))\(proposed.count > 1 ? ", and \(proposed.count - 1) more" : "")"
     }
 
-    /// How a task ended, when that is the latest thing to say.
+    /// How a task ended, when that is the latest thing to say: its verdict as its proof allows (Steps.verdict, from its
+    /// record), as its card and its thread say it, never "Verified" where its gates proved nothing (lib/roster.ts).
     private static func ended(_ task: TeamTask) -> String {
         if task.status == "stopped" { return "Stopped: \(titled(task))" }
         let kept = task.changes.map { " · \($0.files) file\($0.files == 1 ? "" : "s") kept" } ?? ""
-        return "\(task.verified ? "Verified" : "Done"): \(titled(task))\(kept)"
+        let word = Steps.verdict(status: task.status, verified: task.verified, error: task.error, record: task.record, facts: Steps.facts(record: task.record))?.word ?? TaskCard.badge(task).text
+        return "\(word): \(titled(task))\(kept)"
     }
 
     /// A queued task can't run until every task before it completed and passed its checks.

@@ -112,9 +112,9 @@ describe("the work by attention", () => {
     const inRoom = task("ada", "done", 20, { verified: true, room: "forge" });
     const look = (seen: Record<string, number>) => attended({ snapshot: snapshot([ada], [failed, verified, inRoom], seen), projects: [], now: NOW });
     expect(look({}).active.map((row) => [row.title, row.word, row.detail])).toEqual([
-      [verified.title, "Verified", "5 files kept"],
-      [inRoom.title, "Verified", ""],
-      [failed.title, "Failed", "gave up"],
+      [verified.title, "Reviewed", "5 files kept"],
+      [inRoom.title, "Reviewed", ""],
+      [failed.title, "Gave up", "gave up"],
     ]);
     // Ada's page seen after the failure, but before the newer two: only those are new.
     expect(look({ "agent:ada": ago(25) }).active.map((row) => row.id)).toEqual([verified.id, inRoom.id]);
@@ -125,6 +125,41 @@ describe("the work by attention", () => {
     const old = task("ada", "done", NEW_FOR_MS / 60_000 + 1, { verified: true });
     const fresh = attended({ snapshot: snapshot([ada], [old, verified]), projects: [], now: NOW });
     expect([fresh.active.map((row) => row.id), fresh.done.map((row) => row.id)]).toEqual([[verified.id], [old.id]]);
+  });
+
+  // Your word through the lead, 27 November 2026: no "Verified" beside a "Reviewed, not proven". A row that ended says
+  // its verdict as its proof allows (lib/steps.ts verdictOf, from its record), as its card and its thread say it, in its
+  // colour: in ink with its tick only where it is proven, red where it failed, quiet otherwise (the iPhone's StateWord).
+  test("a row that ended says its verdict as its proof allows, never Verified", () => {
+    const record = (proof?: { before: number[]; after: number[]; review: "pass" | "revise" | null; sameModel: boolean }, ended: "done" | "unverified" | "gave-up" = "done") => ({ startedAt: 0, endedAt: 1, ended, commands: 1, revisions: 0, spent: [], ...(proof ? { proof } : {}) });
+    const tasks = [
+      task("ada", "done", 10, { verified: true, record: record({ before: [1], after: [0], review: "pass", sameModel: false }) }),
+      task("ada", "done", 11, { verified: true, record: record({ before: [0], after: [0], review: "pass", sameModel: false }) }),
+      task("ada", "done", 12, { verified: true }),
+      task("ada", "done", 13, { verified: false }),
+      task("ada", "failed", 14, { record: record({ before: [1, 1], after: [0, 2], review: null, sameModel: false }, "unverified") }),
+      task("ada", "failed", 15, { record: record({ before: [1], after: [0], review: "revise", sameModel: false }, "unverified") }),
+      // A record from before its gates were kept: the failing gate its progress names, as before.
+      task("ada", "failed", 16, { progress: "Gate 2/3 · exit 1 · bun test" }),
+      task("ada", "failed", 17, { error: "gave-up" }),
+      task("ada", "stopped", 18, { error: "stopped" }),
+    ];
+    const rows = byAttention(attended({ snapshot: snapshot([ada], tasks, {}), projects: [], now: NOW }));
+    expect(rows.map((row) => [row.word, row.tone, row.verdict])).toEqual([
+      ["Proven", "ok", "proven"],
+      ["Reviewed, not proven", "neutral", "reviewed"],
+      ["Reviewed", "neutral", "reviewed"],
+      ["Not verified", "neutral", "unverified"],
+      ["Failed · gate 2", "failed", "failed"],
+      ["Sent back", "failed", "rejected"],
+      ["Failed · gate 2", "failed", "failed"],
+      ["Gave up", "failed", "gave-up"],
+      ["Stopped", "neutral", "stopped"],
+    ]);
+    expect(rows.filter((row) => row.word.includes("Verified"))).toEqual([]);
+    // Work in hand has no verdict yet.
+    const inHand = byAttention(attended({ snapshot: snapshot([ada], [task("ada", "running", 1), task("ada", "queued", 2)], {}), projects: [], now: NOW }));
+    expect(inHand.map((row) => row.verdict)).toEqual([null, null]);
   });
 
   test("a failure you have seen is settled, folded with what was verified, but counted on its own so it never hides", () => {
@@ -162,7 +197,7 @@ describe("the work by attention", () => {
     const [row] = attended({ snapshot: snapshot([ada], [running], {}), projects: [{ name: "Invincible", repo: `${PRIMARY}.git` }], now: NOW }).working;
     expect(row).toEqual({
       id: running.id, room: running.room, title: running.title, project: { key: "github.com/amiriteorg/invincible", name: "Invincible", badge: "I" },
-      agent: { id: "ada", name: "Ada", avatar: undefined }, state: "working", attention: "working", word: "Working · 7m", tone: "work", age: null,
+      agent: { id: "ada", name: "Ada", avatar: undefined }, state: "working", attention: "working", word: "Working · 7m", tone: "work", verdict: null, age: null,
       detail: "bun test packages/link", mono: true, at: running.updatedAt,
     });
   });

@@ -56,7 +56,7 @@ struct StateWord: View {
     var body: some View {
         HStack(spacing: 3) {
             if row.verdict?.kind == .proven { Image(systemName: "checkmark").font(.caption2.weight(.bold)) }
-            Text(row.verdict?.word ?? row.word)
+            Text(row.word)
         }
         .fontWeight(.semibold)
         .foregroundStyle(ink)
@@ -123,7 +123,7 @@ struct WorkRowView: View {
                     .opacity(quiet ? 0.62 : 1)
                 Text(row.agent.name).foregroundStyle(.secondary).lineLimit(1).layoutPriority(1)
                 // (Not what its word says already: "Gave up", then "gave up".)
-                if !row.detail.isEmpty, row.detail.lowercased() != (row.verdict?.word ?? row.word).lowercased() {
+                if !row.detail.isEmpty, row.detail.lowercased() != row.word.lowercased() {
                     Text(row.detail)
                         .font(row.mono ? .caption.monospaced() : .footnote)
                         .foregroundStyle(.tertiary)
@@ -151,7 +151,7 @@ struct WorkRowView: View {
 
     /// A row's words for VoiceOver and a tooltip: what it is, where, how it stands and who is on it.
     static func label(_ row: WorkRow) -> String {
-        [row.title, row.project.name, row.verdict?.word ?? row.word, "\(row.agent.name)\(row.detail.isEmpty ? "" : ": \(row.detail)")", row.age.map { "\($0) ago" }].compactMap(\.self).joined(separator: ", ")
+        [row.title, row.project.name, row.word, "\(row.agent.name)\(row.detail.isEmpty ? "" : ": \(row.detail)")", row.age.map { "\($0) ago" }].compactMap(\.self).joined(separator: ", ")
     }
 }
 

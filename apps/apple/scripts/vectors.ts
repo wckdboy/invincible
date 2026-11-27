@@ -273,7 +273,8 @@ const rows = rosterRows({ snapshot, asks, now: NOW }).filter((row) => row.kind =
 const besides = [
   ...rows.map((row) => ({ line: row.line, state: row.state })),
   { line: "Paused", state: "paused" }, { line: "Paused · 2 waiting", state: "paused" }, { line: "Pausedness", state: "paused" },
-  { line: "Verified: “Ship it” · 3 files kept", state: "verified" }, { line: "Verified: “Ship it”", state: "resting" },
+  // (Verified work's chip says New, and its line its verdict: neither says the other again.)
+  { line: "Reviewed, not proven: “Ship it” · 3 files kept", state: "verified" }, { line: "New", state: "verified" }, { line: "Proven: “Ship it”", state: "resting" },
 ].map(({ line, state }) => ({ line, state, beside: besideChip(line, state as AgentState) }));
 const nows: NowInput[] = [
   { turns: [], runs: [], needs: null },

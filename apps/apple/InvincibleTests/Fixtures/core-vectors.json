@@ -1416,7 +1416,7 @@
       },
       {
         "id": "cy",
-        "line": "Verified: “The keep task” · 3 files kept",
+        "line": "Reviewed: “The keep task” · 3 files kept",
         "needs": false,
         "expression": "idle",
         "state": "resting"
@@ -1532,9 +1532,9 @@
         "beside": "Working on “The plain task”"
       },
       {
-        "line": "Verified: “The keep task” · 3 files kept",
+        "line": "Reviewed: “The keep task” · 3 files kept",
         "state": "resting",
-        "beside": "Verified: “The keep task” · 3 files kept"
+        "beside": "Reviewed: “The keep task” · 3 files kept"
       },
       {
         "line": "Paused",
@@ -1622,14 +1622,19 @@
         "beside": "Pausedness"
       },
       {
-        "line": "Verified: “Ship it” · 3 files kept",
+        "line": "Reviewed, not proven: “Ship it” · 3 files kept",
         "state": "verified",
-        "beside": "“Ship it” · 3 files kept"
+        "beside": "Reviewed, not proven: “Ship it” · 3 files kept"
       },
       {
-        "line": "Verified: “Ship it”",
+        "line": "New",
+        "state": "verified",
+        "beside": ""
+      },
+      {
+        "line": "Proven: “Ship it”",
         "state": "resting",
-        "beside": "Verified: “Ship it”"
+        "beside": "Proven: “Ship it”"
       }
     ],
     "primary": [
@@ -2210,7 +2215,7 @@
       {
         "id": "cy",
         "kind": "agent",
-        "line": "Verified: “The pass task”",
+        "line": "Reviewed: “The pass task”",
         "needs": false,
         "unread": true,
         "state": "verified"
@@ -2218,7 +2223,7 @@
       {
         "id": "dee",
         "kind": "agent",
-        "line": "Done: “The ran task”",
+        "line": "Not verified: “The ran task”",
         "needs": false,
         "unread": false,
         "state": "resting"
@@ -29463,8 +29468,8 @@
           },
           "state": "verified",
           "attention": "active",
-          "word": "Verified",
-          "tone": "ok",
+          "word": "Reviewed",
+          "tone": "neutral",
           "age": "20m",
           "detail": "PR #12",
           "mono": false,
@@ -29529,8 +29534,8 @@
           },
           "state": "verified",
           "attention": "active",
-          "word": "Verified",
-          "tone": "ok",
+          "word": "Reviewed",
+          "tone": "neutral",
           "age": "13h",
           "detail": "3 files kept",
           "mono": false,
@@ -29731,8 +29736,8 @@
           },
           "state": "verified",
           "attention": "done",
-          "word": "Verified",
-          "tone": "ok",
+          "word": "Reviewed",
+          "tone": "neutral",
           "age": "25m",
           "detail": "shipped",
           "mono": false,
@@ -29753,7 +29758,7 @@
           },
           "state": "failed",
           "attention": "done",
-          "word": "Failed · gate 2",
+          "word": "Gave up",
           "tone": "failed",
           "age": "35m",
           "detail": "gave up",
@@ -29961,8 +29966,8 @@
           },
           "state": "verified",
           "attention": "active",
-          "word": "Verified",
-          "tone": "ok",
+          "word": "Reviewed",
+          "tone": "neutral",
           "age": "20m",
           "detail": "PR #12",
           "mono": false,
@@ -29983,8 +29988,8 @@
           },
           "state": "verified",
           "attention": "active",
-          "word": "Verified",
-          "tone": "ok",
+          "word": "Reviewed",
+          "tone": "neutral",
           "age": "25m",
           "detail": "shipped",
           "mono": false,
@@ -30027,7 +30032,7 @@
           },
           "state": "failed",
           "attention": "active",
-          "word": "Failed · gate 2",
+          "word": "Gave up",
           "tone": "failed",
           "age": "35m",
           "detail": "gave up",
@@ -30229,8 +30234,8 @@
           },
           "state": "verified",
           "attention": "done",
-          "word": "Verified",
-          "tone": "ok",
+          "word": "Reviewed",
+          "tone": "neutral",
           "age": "13h",
           "detail": "3 files kept",
           "mono": false,

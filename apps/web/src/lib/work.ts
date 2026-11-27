@@ -3,6 +3,7 @@ import { costOf, type Prices, type UsageLine } from "@invincible/core/spend";
 import type { TeamSnapshot, TeamTask, Agent } from "@invincible/core/team";
 import { type AgentState, STATES, type StateLook } from "./agent-state.ts";
 import { type Ask, agentOfCaller } from "./roster.ts";
+import { factsOfRecord, type Verdict, verdictOf } from "./steps.ts";
 import { relativeTime } from "./time.ts";
 
 /*
@@ -165,10 +166,16 @@ export interface WorkRow {
   agent: { id: string; name: string; avatar: unknown };
   state: AgentState;
   attention: Attention;
-  /** How it stands in a word or two, at the end of its first line in its state's colour: "Allow?", "Failed · gate 2",
-   * "Verified", "Working · 4m", "Queued". Never colour alone: the word says it. */
+  /** How it stands in a word or two, at the end of its first line in its colour: "Allow?", "Working · 4m", "Queued";
+   * once it has ended, its verdict as its proof allows: "Proven", "Reviewed, not proven", "Failed · gate 2", never
+   * "Verified". Never colour alone: the word says it. */
   word: string;
+  /** Its word's colour: its state's while in hand; once it has ended, its verdict's (ok where it is proven, failed where
+   * it failed, was sent back or gave up, neutral otherwise: the iPhone's StateWord). */
   tone: StateLook["tone"];
+  /** Once it has ended, its verdict (lib/steps.ts verdictOf, from its record): its tick is for proven work alone. Null
+   * while it is in hand. */
+  verdict: Verdict | null;
   /** How long since it last moved ("12m", "3h", "2d"); null at work, whose word says how long it has been in hand. */
   age: string | null;
   /** Its third line, after its agent's name: what it is doing, or what it came to ("bun test packages/link", "5 files
@@ -323,11 +330,11 @@ interface RowFacts {
   titles: ReadonlyMap<string, string>;
 }
 
-type RowState = Pick<WorkRow, "state" | "attention" | "word" | "tone" | "age" | "detail" | "mono">;
+type RowState = Pick<WorkRow, "state" | "attention" | "word" | "tone" | "verdict" | "age" | "detail" | "mono">;
 
 function rowOf(task: TeamTask, f: RowFacts): RowState {
   const age = shortSpan(f.now - task.updatedAt);
-  const say = (state: AgentState, attention: Attention, word: string, detail = "", mono = false, shownAge: string | null = age): RowState => ({ state, attention, word, tone: STATES[state].tone, age: shownAge, detail, mono });
+  const say = (state: AgentState, attention: Attention, word: string, detail = "", mono = false, shownAge: string | null = age): RowState => ({ state, attention, word, tone: STATES[state].tone, verdict: null, age: shownAge, detail, mono });
   switch (task.status) {
     case "proposed": {
       const by = task.proposedBy && task.proposedBy !== task.assignee ? `proposed for ${f.name}` : "proposed by its agent";
@@ -348,18 +355,26 @@ function rowOf(task: TeamTask, f: RowFacts): RowState {
       return say("queued", "working", "Queued", waiting ? `after “${waiting}”` : "");
     }
     case "stopped":
-      return say("paused", "done", "Stopped");
+      return { ...say("paused", "done", "Stopped"), verdict: "stopped" };
   }
-  // Ended: done (verified), or failed (which a task that wasn't verified is). New to you until you look.
+  // Ended: done (verified, or not), or failed. New to you until you look. Its word is its verdict as its proof allows,
+  // as its card and its thread say it (the owner's word, 27 November 2026: no "Verified" beside a "Reviewed, not
+  // proven"); a failure from before its gates were kept names the gate its progress says failed.
   const unread = f.seen === null ? f.now - task.updatedAt < NEW_FOR_MS : task.updatedAt > f.seen;
   const attention: Attention = unread ? "active" : "done";
+  const verdict = verdictOf(task, factsOfRecord(task.record))!;
+  const gate = verdict.word === "Failed" ? failedGate(task.progress) : null;
+  const ended = (state: AgentState, detail: string): RowState => ({
+    ...say(state, attention, gate ? `Failed · gate ${gate}` : verdict.word, detail),
+    tone: verdict.verdict === "proven" ? "ok" : verdict.verdict === "failed" || verdict.verdict === "rejected" || verdict.verdict === "gave-up" ? "failed" : "neutral",
+    verdict: verdict.verdict,
+  });
   if (task.status === "done") {
     const detail = task.shipped ? (task.shipped.pr ? `PR #${task.shipped.pr}` : "shipped") : task.changes ? `${task.changes.files} file${task.changes.files === 1 ? "" : "s"} kept` : "";
-    return task.verified ? say("verified", attention, "Verified", detail) : say("resting", attention, "Not verified", detail);
+    return ended(task.verified ? "verified" : "resting", detail);
   }
   const why = firstLine(task.error);
-  const gate = failedGate(task.progress);
-  return say("failed", attention, gate ? `Failed · gate ${gate}` : "Failed", ENDED[why] ?? (why.length > 60 ? `${why.slice(0, 59)}…` : why));
+  return ended("failed", ENDED[why] ?? (why.length > 60 ? `${why.slice(0, 59)}…` : why));
 }
 
 /** What waits in the Inbox beyond the task rows that ask for it: its count, less the approvals a needs row stands for

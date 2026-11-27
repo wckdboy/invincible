@@ -22,7 +22,8 @@ function board(over: Partial<BoardData> = {}): BoardData {
     task({ id: "task-needs0000001", status: "proposed", proposedBy: "ada", title: "Raise the cache's size" }),
     task({ id: "task-work00000001", status: "running", progress: "Running · bun test packages/link", createdAt: NOW - 4 * 60_000, updatedAt: NOW - 60_000 }),
     task({ id: "task-fail00000001", status: "failed", error: "unverified", progress: "Gate 2/3 · exit 1 · bun run typecheck", updatedAt: NOW - 30 * 60_000, title: "Hero copy, three variants" }),
-    task({ id: "task-done00000001", status: "done", verified: true, updatedAt: T0 - 2 * 86_400_000, title: "P-256 did:key for hardware keys" }),
+    // (Proven: its gate failed before the work and passes after it, and a reviewer that didn't do the work passed it.)
+    task({ id: "task-done00000001", status: "done", verified: true, updatedAt: T0 - 2 * 86_400_000, title: "P-256 did:key for hardware keys", record: { startedAt: T0 - 2 * 86_400_000 - 60_000, endedAt: T0 - 2 * 86_400_000, ended: "done", commands: 3, revisions: 0, spent: [], proof: { before: [1], after: [0], review: "pass", sameModel: false } } }),
   ];
   return {
     whoami: { device: "c_x", kind: "client", scopes: [], node: "n_x", nodeName: "ultra", fleet: null, fleetName: "home" },
@@ -49,11 +50,13 @@ describe("the board", () => {
     expect(lines[0]).toContain("$2.00 today");
     const titles = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trim()).filter((line) => /^[A-Z ]{4,}( ·|$)/.test(line));
     expect(titles).toEqual(["NEEDS YOU", "ACTIVE", "WORKING", "DONE"]);
-    // The apps' words, each in its state's colour: amber needs you, red failed, blue at work, green verified.
+    // The apps' words, each in its colour: amber needs you, red failed, blue at work, green proven (its verdict as its
+    // proof allows, as the apps say it: never "Verified" where its gates proved nothing).
     expect(text).toContain(`${ESC}[33mApprove?`);
     expect(text).toContain(`${ESC}[31mFailed · gate 2`);
     expect(text).toContain(`${ESC}[34mWorking · 4m`);
-    expect(text).toContain(`${ESC}[32mVerified`);
+    expect(text).toContain(`${ESC}[32mProven`);
+    expect(text).not.toContain("Verified");
     expect(text).toContain("1 more waits for your approval: inv asks");
     for (const line of lines) expect(width(line)).toBeLessThanOrEqual(TTY.width - 1);
     // Nothing that blinks, rings or moves: no bell, no blink, no cursor moved by the drawing itself.

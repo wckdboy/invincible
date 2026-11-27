@@ -61,9 +61,9 @@ struct StateLabel: View {
 }
 
 extension Standing {
-    /// Its word where a screen shows it beside a name: as the chip has it, but a task that ended verified is "New" to you
-    /// until you open it (Home's strip says so too), never "Verified" over a verdict that may say it wasn't proven.
-    var shown: String? { self == .verified ? "New" : word }
+    /// Its word where a screen shows it beside a name: the chip's (a task that ended verified is "New" to you until you
+    /// open it, never "Verified" over a verdict that may say it wasn't proven).
+    var shown: String? { word }
 }
 
 /// A section's name as Home has it: small capitals, tracked, in the secondary ink (the ink where it needs you, red where

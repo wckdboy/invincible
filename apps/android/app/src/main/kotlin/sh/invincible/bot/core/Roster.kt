@@ -48,12 +48,14 @@ data class Job(
     val proposedBy: String?,
     val room: String?,
     val dependsOn: List<String>,
+    /** A task's record, for its verdict once it has ended (null: a delivery, or none yet). */
+    val record: TeamTask.Record? = null,
 ) {
     companion object {
         fun task(j: Json) = Job(
             true, j["id"].string ?: "", j["title"].string ?: "", j["assignee"].string ?: "", j["status"].string ?: "", j["verified"].bool ?: false,
             j["updatedAt"].long ?: 0, j["progress"].string, j["error"].string, j["changes"]["files"].int, j["proposedBy"].string, j["room"].string,
-            j["dependsOn"].list.mapNotNull { it.string },
+            j["dependsOn"].list.mapNotNull { it.string }, (j["record"] as? Json.Obj)?.let(TeamTask.Record::of),
         )
 
         fun delivery(j: Json) = Job(
@@ -97,7 +99,9 @@ data class Ask(val by: String, val connector: String?, val tool: String?)
 /** An agent's state in a word: the ring round its face and the chip beside its name. */
 enum class AgentState(val words: String?, val tone: Tone) {
     WORKING("Working", Tone.WORK), NEEDS("Needs you", Tone.NEEDS), FAILED("Failed", Tone.FAILED), PAUSED("Paused", Tone.NEUTRAL),
-    QUEUED("Queued", Tone.NEUTRAL), VERIFIED("Verified", Tone.OK), UNREAD("New", Tone.OK), RESTING(null, Tone.NEUTRAL);
+    // (Verified work is new to you until you look, as the iPhone and the web say it: never "Verified" over a verdict that
+    // may say it wasn't proven. Its line says the verdict.)
+    QUEUED("Queued", Tone.NEUTRAL), VERIFIED("New", Tone.OK), UNREAD("New", Tone.OK), RESTING(null, Tone.NEUTRAL);
 
     enum class Tone { WORK, NEEDS, FAILED, OK, NEUTRAL }
 
@@ -150,10 +154,14 @@ object Roster {
         val who = latest.proposedBy?.let(by)
         return "${if (who != null) "$who proposes" else "Proposes"} ${titled(latest)}${if (proposed.size > 1) ", and ${proposed.size - 1} more" else ""}"
     }
+    /** How a task ended: its verdict as its proof allows (Steps.verdict, from its record), as its card and its thread say
+     * it, never "Verified" where its gates proved nothing (lib/roster.ts ended). */
     private fun ended(task: Job): String {
         if (task.status == "stopped") return "Stopped: ${titled(task)}"
         val kept = task.files?.let { " · $it file${if (it == 1) "" else "s"} kept" } ?: ""
-        return "${if (task.verified) "Verified" else "Done"}: ${titled(task)}$kept"
+        val word = Steps.verdict(task.status, task.verified, task.error, task.record, Steps.facts(task.record))?.word
+            ?: when (task.status) { "proposed" -> "Waiting for you"; "queued" -> "Queued"; "running" -> "Running"; "interrupted" -> "Interrupted"; else -> "Done" }
+        return "$word: ${titled(task)}$kept"
     }
     private fun maker(person: Agent, s: Snapshot): String? {
         val by = person.createdBy

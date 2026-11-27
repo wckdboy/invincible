@@ -31,12 +31,13 @@ describe("an agent's state in a word and a colour", () => {
     expect(besideChip("Paused · 2 waiting", "paused")).toBe("2 waiting");
     expect(besideChip("Paused", "paused")).toBe("");
     expect(besideChip("Queued: “Ship it”", "queued")).toBe("“Ship it”");
-    expect(besideChip("Verified: “Ship it” · 3 files kept", "verified")).toBe("“Ship it” · 3 files kept");
+    // Work that ended verified is new to you (as the iPhone says it): its chip says New, and its verdict stays in its line.
+    expect(besideChip("Reviewed, not proven: “Ship it” · 3 files kept", "verified")).toBe("Reviewed, not proven: “Ship it” · 3 files kept");
     // What doesn't begin with the chip's words stays as it is: another state's line, or words that only start alike.
     expect(besideChip("Interrupted: “Ship it” · review it before resuming", "needs")).toBe("Interrupted: “Ship it” · review it before resuming");
     expect(besideChip("Working on “Ship it”", "working")).toBe("Working on “Ship it”");
     expect(besideChip("Pausedness", "paused")).toBe("Pausedness");
-    expect(besideChip("Verified: “Ship it”", "resting")).toBe("Verified: “Ship it”");
+    expect(besideChip("Proven: “Ship it”", "resting")).toBe("Proven: “Ship it”");
     expect(besideChip("Paused", undefined)).toBe("Paused");
   });
 
@@ -44,5 +45,7 @@ describe("an agent's state in a word and a colour", () => {
     expect(withState("Ada", "working")).toBe("Ada, working");
     expect(withState("Ada", "needs")).toBe("Ada, needs you");
     expect(withState("Ada", "resting")).toBe("Ada");
+    // Its verified work is new to you, never "Verified" over a verdict that may say it wasn't proven (the iPhone's).
+    expect(withState("Ada", "verified")).toBe("Ada, new");
   });
 });

@@ -53,9 +53,11 @@ export const projectTile = (project: WorkRow["project"]): HTMLElement => h("span
  * `current`: it is the task open now.
  */
 export function workRow(row: WorkRow, opts: { face?: number; current?: boolean; project?: boolean } = {}): HTMLAnchorElement {
-  const verified = row.state === "verified";
-  // How it stands: a dot of its colour and its word (verified, its check), so neither the colour nor the word is alone.
-  const stands = [h("span", { class: "work-word", "data-tone": row.tone }, verified ? icon("check", { size: 12 }) : dot(row.tone as Tone), row.word), row.age ? h("span", { class: "work-age tnum" }, row.age) : null];
+  // How it stands: a dot of its colour and its word (proven work, its tick: a tick for nothing less), so neither the
+  // colour nor the word is alone.
+  const stands = [h("span", { class: "work-word", "data-tone": row.tone }, row.verdict === "proven" ? icon("check", { size: 12 }) : dot(row.tone as Tone), row.word), row.age ? h("span", { class: "work-age tnum" }, row.age) : null];
+  // (What it came to, unless its word says it already: "Gave up", never "gave up" again under it.)
+  const detail = row.detail && row.detail.toLowerCase() !== row.word.toLowerCase() ? row.detail : "";
   // Its project named only where the work is in more than one (lib/work.ts namesProjects): a row is then two lines, its
   // title with how it stands and its age, and its agent with what it is doing (as the iPhone's).
   const named = opts.project ?? true;
@@ -79,7 +81,7 @@ export function workRow(row: WorkRow, opts: { face?: number; current?: boolean; 
       { class: "work-l3" },
       agentFace({ id: row.agent.id, profile: row.agent.avatar, size: opts.face ?? 16 }),
       h("span", { class: "work-agent" }, row.agent.name),
-      row.detail ? h("span", { class: cx("work-detail ellipsis", row.mono && "mono") }, row.detail) : null,
+      detail ? h("span", { class: cx("work-detail ellipsis", row.mono && "mono") }, detail) : null,
     ),
   );
 }

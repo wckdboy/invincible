@@ -42,10 +42,12 @@ struct WorkRow: Equatable, Identifiable, Sendable {
     let agent: Agent
     let state: Standing
     let attention: Attention
-    /// How it stands in a word or two, at the end of its first line in its state's colour: "Allow?", "Failed · gate 2",
-    /// "Verified", "Working · 4m", "Queued". Never colour alone: the word says it.
+    /// How it stands in a word or two, at the end of its first line in its colour: "Allow?", "Working · 4m", "Queued";
+    /// once it has ended, its verdict as its proof allows: "Proven", "Reviewed, not proven", "Failed · gate 2", never
+    /// "Verified" (lib/work.ts rowOf). Never colour alone: the word says it.
     let word: String
-    /// Its state's tone (Standing.tone): work, needs, failed, ok or neutral.
+    /// Its word's tone: its state's (Standing.tone: work, needs, failed, ok or neutral) while in hand; once it has ended,
+    /// its verdict's (ok where it is proven, failed where it failed, was sent back or gave up, neutral otherwise).
     let tone: String
     /// How long since it last moved ("12m", "3h", "2d"); nil at work, whose word says how long it has been in hand.
     let age: String?
@@ -56,8 +58,8 @@ struct WorkRow: Equatable, Identifiable, Sendable {
     let mono: Bool
     /// When it last moved: the order within a section.
     let at: Double
-    /// Once it has ended, its verdict in words that follow its proof (Steps.verdict, from its record): what its row says in
-    /// place of `word`, so a row never says "Verified" where its gates proved nothing. Nil while it is in hand.
+    /// Once it has ended, its verdict in words that follow its proof (Steps.verdict, from its record): its kind gives its
+    /// word its ink and proven work its tick. Nil while it is in hand.
     var verdict: Verdict? = nil
 
     struct Verdict: Equatable, Sendable {
@@ -293,7 +295,7 @@ enum Work {
             let row = rowOf(task, name: name, paused: agent.map { !$0.enabled } ?? false, asks: task.status == "running" ? asking[task.assignee] ?? [] : [], seen: seenAt(task), now: now, titles: titles)
             out[row.attention].append(WorkRow(
                 id: task.id, room: task.room, title: task.title, project: project, agent: .init(id: task.assignee, name: name, avatar: agent?.avatar),
-                state: row.state, attention: row.attention, word: row.word, tone: row.state.tone, age: row.age, detail: row.detail, mono: row.mono, at: task.updatedAt,
+                state: row.state, attention: row.attention, word: row.word, tone: row.tone ?? row.state.tone, age: row.age, detail: row.detail, mono: row.mono, at: task.updatedAt,
                 verdict: Steps.verdict(status: task.status, verified: task.verified, error: task.error, record: task.record, facts: Steps.facts(record: task.record)).map { WorkRow.Verdict(word: $0.word, kind: $0.verdict) }
             ))
             if counts[project.key] == nil { order.append(project.key) }
@@ -328,6 +330,8 @@ enum Work {
         let age: String?
         let detail: String
         let mono: Bool
+        /// Its word's tone where its verdict gives it one; nil: its state's.
+        var tone: String? = nil
     }
 
     private static func rowOf(_ task: TeamTask, name: String, paused: Bool, asks: [Ask], seen: Double?, now: Double, titles: [String: String]) -> RowState {
@@ -358,17 +362,31 @@ enum Work {
         default:
             break
         }
-        // Ended: done (verified, or not), or failed. New to you until you look.
+        // Ended: done (verified, or not), or failed. New to you until you look. Its word is its verdict as its proof
+        // allows, as its card and its thread say it (lib/work.ts rowOf; the owner's word, 27 November 2026: no "Verified"
+        // beside a "Reviewed, not proven"); a failure from before its gates were kept names the gate its progress says failed.
         let unread = seen.map { task.updatedAt > $0 } ?? (now - task.updatedAt < newForMs)
         let attention: Attention = unread ? .active : .done
+        let verdict = Steps.verdict(status: task.status, verified: task.verified, error: task.error, record: task.record, facts: Steps.facts(record: task.record))
+        let gate = verdict == nil || verdict?.word == "Failed" ? failedGate(task.progress) : nil
+        let word = gate.map { "Failed · gate \($0)" } ?? verdict?.word ?? "Failed"
+        let tone: String = switch verdict?.verdict {
+        case .proven: "ok"
+        case .failed, .rejected, .gaveUp, nil: "failed"
+        default: "neutral"
+        }
+        func endedRow(_ state: Standing, _ detail: String) -> RowState {
+            var row = say(state, attention, word, detail)
+            row.tone = tone
+            return row
+        }
         if task.status == "done" {
             let kept = task.changes.map { "\($0.files) file\($0.files == 1 ? "" : "s") kept" } ?? ""
             let detail = task.shipped.map { shipped in shipped.pr.map { "PR #\($0)" } ?? "shipped" } ?? kept
-            return task.verified ? say(.verified, attention, "Verified", detail) : say(.resting, attention, "Not verified", detail)
+            return endedRow(task.verified ? .verified : .resting, detail)
         }
         let why = firstLine(task.error)
-        let gate = failedGate(task.progress)
-        return say(.failed, attention, gate.map { "Failed · gate \($0)" } ?? "Failed", ended[why] ?? cut(why, 60))
+        return endedRow(.failed, ended[why] ?? cut(why, 60))
     }
 
     /// What waits in the Inbox beyond the task rows that ask for it: its count, less the approvals a needs row stands for

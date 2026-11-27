@@ -1,6 +1,8 @@
 import { avatarExpression, type AvatarExpression } from "@invincible/core/avatar";
 import type { TeamDelivery, TeamMessage, TeamRoom, TeamSnapshot, TeamTask, Agent } from "@invincible/core/team";
 import type { AgentState } from "./agent-state.ts";
+import { factsOfRecord, verdictOf } from "./steps.ts";
+import { taskBadge } from "./task-card.ts";
 import { taskDependencies, agentMaker, teamSpeaker } from "./team.ts";
 
 /*
@@ -87,11 +89,12 @@ function proposing(proposed: TeamTask[], by: (id: string) => string | null): str
   return `${who ? `${who} proposes` : "Proposes"} ${titled(latest)}${proposed.length > 1 ? `, and ${proposed.length - 1} more` : ""}`;
 }
 
-/** How a task ended, when that is the latest thing to say. */
+/** How a task ended, when that is the latest thing to say: its verdict as its proof allows (verdictOf, from its record),
+ * as its card and its thread say it, never "Verified" where its gates proved nothing. */
 function ended(task: TeamTask): string {
   if (task.status === "stopped") return `Stopped: ${titled(task)}`;
   const kept = task.changes ? ` · ${task.changes.files} file${task.changes.files === 1 ? "" : "s"} kept` : "";
-  return `${task.verified ? "Verified" : "Done"}: ${titled(task)}${kept}`;
+  return `${verdictOf(task, factsOfRecord(task.record))?.word ?? taskBadge(task).text}: ${titled(task)}${kept}`;
 }
 
 /** The last thing said in a conversation, if the app's reading of it is still the latest (the room hasn't moved since). */

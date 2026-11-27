@@ -58,6 +58,14 @@ data class TeamTask(
     /** What its run came to, once it ended in the agent's hands: when it began and ended, how, its model calls, and what
      * proves it (null: a record from before the runner kept that). */
     data class Record(val startedAt: Long, val endedAt: Long, val ended: String, val spent: List<UsageLine>, val proof: Proof? = null) {
+        companion object {
+            /** A record as the node keeps it, read leniently. */
+            fun of(r: Json.Obj) = Record(
+                r["startedAt"].long ?: 0, r["endedAt"].long ?: 0, r["ended"].string ?: "", r["spent"].list.map(UsageLine::of),
+                (r["proof"] as? Json.Obj)?.let { p -> Proof(p["before"].list.map { it.int }, p["after"].list.map { it.int }, p["review"].string, p["sameModel"].bool ?: false) },
+            )
+        }
+
         /** Each gate's exit before the work and after it (null: not run), the reviewer's verdict ("pass", "revise"; null:
          * none), and whether the reviewer was the model that did the work. */
         data class Proof(val before: List<Int?>, val after: List<Int?>, val review: String?, val sameModel: Boolean)
@@ -95,14 +103,7 @@ data class TeamTask(
                 createdAt = j["createdAt"].long ?: updatedAt,
                 updatedAt = updatedAt,
                 budgetUsd = j["budgetUsd"].double,
-                record = (j["record"] as? Json.Obj)?.let { r ->
-                    Record(
-                        r["startedAt"].long ?: 0, r["endedAt"].long ?: 0, r["ended"].string ?: "", r["spent"].list.map(UsageLine::of),
-                        (r["proof"] as? Json.Obj)?.let { p ->
-                            Record.Proof(p["before"].list.map { it.int }, p["after"].list.map { it.int }, p["review"].string, p["sameModel"].bool ?: false)
-                        },
-                    )
-                },
+                record = (j["record"] as? Json.Obj)?.let(Record::of),
                 changes = (j["changes"] as? Json.Obj)?.let { c -> c["files"].int?.let { Changes(it, c["base"].string) } },
                 givenBy = j["givenBy"].string,
                 proposedBy = j["proposedBy"].string,
@@ -156,8 +157,8 @@ object Work {
         val detail: String,
         val mono: Boolean,
         val at: Long,
-        /** Once it has ended, its verdict in words that follow its proof (Steps.verdict, from its record): what its row
-         * says in place of [word], so a row never says "Verified" where its gates proved nothing. Null while in hand. */
+        /** Once it has ended, its verdict in words that follow its proof (Steps.verdict, from its record): its kind gives its
+         * word its colour and proven work its tick. Null while in hand. */
         val verdict: Steps.Said? = null,
     )
 
@@ -400,18 +401,28 @@ object Work {
             }
             "stopped" -> return say(AgentState.PAUSED, Attention.DONE, "Stopped")
         }
-        // Ended: done (verified), or failed (which a task that wasn't verified is). New to you until you look.
+        // Ended: done (verified, or not), or failed. New to you until you look. Its word is its verdict as its proof allows,
+        // as its card and its thread say it (lib/work.ts rowOf; the owner's word, 27 November 2026: no "Verified" beside a
+        // "Reviewed, not proven"); a failure from before its gates were kept names the gate its progress says failed.
         val unread = if (seen == null) now - task.updatedAt < NEW_FOR_MS else task.updatedAt > seen
         val attention = if (unread) Attention.ACTIVE else Attention.DONE
+        val verdict = Steps.verdict(task.status, task.verified, task.error, task.record, Steps.facts(task.record))
+        val gate = if (verdict == null || verdict.word == "Failed") failedGate(task.progress) else null
+        val word = if (gate != null && gate != 0) "Failed · gate $gate" else verdict?.word ?: "Failed"
+        val tone = when {
+            verdict?.verdict == Steps.Verdict.PROVEN -> AgentState.Tone.OK
+            verdict == null || verdict.verdict.wrong -> AgentState.Tone.FAILED
+            else -> AgentState.Tone.NEUTRAL
+        }
+        fun endedRow(state: AgentState, detail: String) = say(state, attention, word, detail).copy(tone = tone)
         if (task.status == "done") {
             val shipped = task.shipped
             val changes = task.changes
             val detail = if (shipped != null) (if (shipped.pr != null && shipped.pr != 0) "PR #${shipped.pr}" else "shipped") else if (changes != null) "${changes.files} file${if (changes.files == 1) "" else "s"} kept" else ""
-            return if (task.verified) say(AgentState.VERIFIED, attention, "Verified", detail) else say(AgentState.RESTING, attention, "Not verified", detail)
+            return endedRow(if (task.verified) AgentState.VERIFIED else AgentState.RESTING, detail)
         }
         val why = JsText.firstLine(task.error)
-        val gate = failedGate(task.progress)
-        return say(AgentState.FAILED, attention, if (gate != null && gate != 0) "Failed · gate $gate" else "Failed", ENDED[why] ?: if (why.length > 60) "${why.substring(0, 59)}…" else why)
+        return endedRow(AgentState.FAILED, ENDED[why] ?: if (why.length > 60) "${why.substring(0, 59)}…" else why)
     }
 
     /** What waits in the Inbox beyond the task rows that ask for it: its count, less the approvals a needs row stands for

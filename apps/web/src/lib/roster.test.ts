@@ -51,15 +51,30 @@ describe("the roster: each agent, then each room", () => {
   test("the mark is for the latest work only: given again, or done since, it is gone", () => {
     const failed = task("ada", "failed", { id: "task-first", updatedAt: 20 });
     expect(ada({ tasks: [failed, task("ada", "queued", { id: "task-again", updatedAt: 30 })] })).toMatchObject({ line: "Queued: “Fix the importer”", needs: false });
-    expect(ada({ tasks: [failed, task("ada", "done", { id: "task-again", updatedAt: 30 })] })).toMatchObject({ line: "Verified: “Fix the importer”", needs: false });
+    expect(ada({ tasks: [failed, task("ada", "done", { id: "task-again", updatedAt: 30 })] })).toMatchObject({ line: "Reviewed: “Fix the importer”", needs: false });
     // You stopped it yourself: said, not marked.
     expect(ada({ tasks: [task("ada", "stopped")] })).toMatchObject({ line: "Stopped: “Fix the importer”", needs: false });
   });
 
   test("a verified task says what it kept", () => {
     const changes = { artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", files: 3, base: "a".repeat(40) };
-    expect(ada({ tasks: [task("ada", "done", { changes })] }).line).toBe("Verified: “Fix the importer” · 3 files kept");
-    expect(ada({ tasks: [task("ada", "done", { changes: { ...changes, files: 1 } })] }).line).toBe("Verified: “Fix the importer” · 1 file kept");
+    expect(ada({ tasks: [task("ada", "done", { changes })] }).line).toBe("Reviewed: “Fix the importer” · 3 files kept");
+    expect(ada({ tasks: [task("ada", "done", { changes: { ...changes, files: 1 } })] }).line).toBe("Reviewed: “Fix the importer” · 1 file kept");
+  });
+
+  // Your word through the lead, 27 November 2026: no "Verified" beside a "Reviewed, not proven". A task that ended is
+  // said as its proof allows (lib/steps.ts verdictOf, from its record), as its card and its thread say it.
+  test("a task that ended says its verdict as its proof allows, never Verified", () => {
+    const record = (proof?: { before: number[]; after: number[]; review: "pass" | "revise" | null; sameModel: boolean }, ended: "done" | "unverified" = "done") => ({ startedAt: 0, endedAt: 1, ended, commands: 1, revisions: 0, spent: [], ...(proof ? { proof } : {}) });
+    const line = (more: Partial<TeamTask>) => ada({ tasks: [task("ada", "done", more)] }).line;
+    expect(line({ record: record({ before: [1], after: [0], review: "pass", sameModel: false }) })).toBe("Proven: “Fix the importer”");
+    expect(line({ record: record({ before: [0], after: [0], review: "pass", sameModel: false }) })).toBe("Reviewed, not proven: “Fix the importer”");
+    expect(line({ record: record({ before: [1], after: [0], review: "pass", sameModel: true }) })).toBe("Reviewed, not proven: “Fix the importer”");
+    expect(line({})).toBe("Reviewed: “Fix the importer”");
+    // Ended without its proof (it said "Done" for this): what its record says of it.
+    expect(line({ verified: false })).toBe("Not verified: “Fix the importer”");
+    expect(line({ verified: false, record: record({ before: [1, 1], after: [0, 2], review: null, sameModel: false }, "unverified") })).toBe("Failed · gate 2: “Fix the importer”");
+    for (const more of [{}, { verified: false }, { record: record({ before: [0], after: [0], review: "pass", sameModel: false }) }]) expect(line(more)).not.toContain("Verified");
   });
 
   test("a paused agent, or one whose allowance is spent, is marked only when work waits on it", () => {
@@ -79,7 +94,7 @@ describe("the roster: each agent, then each room", () => {
     const said = new Map([["dm-ada", { speaker: "ada", speakerName: "Ada", text: "The gate passes.\nDetails follow.", createdAt: 50 }]]);
     expect(ada({}, { said }).line).toBe("Ada: The gate passes.");
     expect(ada({ tasks: [task("ada", "done", { updatedAt: 40 })] }, { said }).line).toBe("Ada: The gate passes.");
-    expect(ada({ tasks: [task("ada", "done", { updatedAt: 60 })] }, { said }).line).toBe("Verified: “Fix the importer”");
+    expect(ada({ tasks: [task("ada", "done", { updatedAt: 60 })] }, { said }).line).toBe("Reviewed: “Fix the importer”");
     expect(ada({}, { said: new Map([["dm-ada", { speaker: "owner", speakerName: "You", text: "Start with the parser", createdAt: 50 }]]) }).line).toBe("You: Start with the parser");
     // Something was said after what the app read: its words aren't known, so the old ones aren't shown as the latest.
     expect(ada({ rooms: [room("dm-ada", ["ada"], { updatedAt: 70 })] }, { said }).line).toBe("Does ada's job.");

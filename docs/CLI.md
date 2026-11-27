@@ -91,8 +91,9 @@ comes with grants ("What comes later").
 
 The rows, their words and the proof are the apps' own pure logic, imported from `apps/web/src/lib` (`work.ts`,
 `steps.ts`, `now.ts`), never ported. So `inv` says exactly what the apps say:
-- **A row's word:** Allow?, Approve?, Interrupted, Agent paused, Working · 4m, Queued, Verified, Not verified,
-  Failed · gate 2, Failed, Stopped.
+- **A row's word:** Allow?, Approve?, Interrupted, Agent paused, Working · 4m, Queued; once it has ended, its verdict
+  as its proof allows: Proven, Reviewed, not proven, Reviewed, Not verified, Failed · gate 2, Sent back, Gave up,
+  Failed, Stopped (never "Verified" beside a verdict that may say it wasn't proven; since 27 November 2026).
 - **The sections:** Needs you, Active (a result new to you), Working, Done.
 - **Your agent's name:** the node's to say (`whoami`'s `primaryName` when a node sends one), else "Invincible".
 
@@ -178,7 +179,7 @@ with 1.
   "title": "Fix the flaky link sync test",
   "state": "verified",
   "exit": 0,
-  "word": "Verified",
+  "word": "Proven",
   "agent": "coder",
   "node": "ultra",
   "project": "invincible",
