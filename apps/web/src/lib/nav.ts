@@ -44,8 +44,9 @@ const LIST = [
   // A task's own thread (#/task/<id>): its brief, its work folded, what proves it, and its details. Opened from its row;
   // #/task alone opens the one that needs you most.
   { id: "task", label: "Task", icon: "layers", under: "thread", scope: "chat", key: "", keywords: [], about: "" },
-  // (What needs you shows on the row it belongs to; the Inbox is where all of it is answered.)
-  { id: "inbox", label: "Inbox", icon: "inbox", under: "work", scope: null, key: "i", keywords: ["approvals", "pairing", "requests", "actions", "notices", "policy"], about: "Everything that needs you, to answer" },
+  // (What needs you shows on the row it belongs to; Needs you, its own page, is where all of it is answered. It was the
+  // Inbox, and its address and its key still say so.)
+  { id: "inbox", label: "Needs you", icon: "inbox", under: "work", scope: null, key: "i", keywords: ["inbox", "approvals", "pairing", "requests", "actions", "notices", "policy"], about: "Everything that needs you, to answer" },
   { id: "more", label: "More", icon: "more", under: null, scope: null, key: ".", keywords: ["everything", "all", "index", "menu"], about: "" },
   { id: "overview", label: "Overview", icon: "overview", under: "work", scope: null, key: "o", keywords: ["dashboard", "health", "doctor"], about: "Health, what's in hand and recent activity" },
   { id: "projects", label: "Projects", icon: "folder", under: "work", scope: "mind:read", key: "p", keywords: ["workspaces", "instructions", "repositories", "folders"], about: "Instructions and chats, by project" },

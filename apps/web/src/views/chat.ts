@@ -746,9 +746,9 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   const who = h("button", { class: "chat-who", type: "button", onclick: () => openInHand(ctx) }, face, h("span", { class: "chat-who-text" }, h("span", { class: "chat-name" }, "Your agent", answers), nowLine));
   // On a phone its conversation is the whole screen: the way back Home.
   const back = h("a", { class: "btn ghost sm icon-only pane-back", href: "#/home", "aria-label": "Home", title: "Home" }, icon("chevron-left", { size: 16 }));
-  // The Inbox, one tap from it, counting what waits for you that is no other agent's (theirs is on their own rows).
+  // Needs you, one tap from it, counting what waits for you that is no other agent's (theirs is on their own rows).
   const inboxCount = h("span", { class: "count", hidden: true });
-  const inbox = h("a", { class: "btn ghost sm icon-only chat-inbox", href: "#/inbox", "aria-label": "Inbox", title: "Inbox" }, icon("inbox", { size: 16 }), inboxCount);
+  const inbox = h("a", { class: "btn ghost sm icon-only chat-inbox", href: "#/inbox", "aria-label": "Needs you", title: "Needs you" }, icon("inbox", { size: 16 }), inboxCount);
   // Its own computer: watched and taken over from here, and given to it here while it has none.
   const computer = ctx.can("sandbox") ? h("button", { class: "btn ghost sm icon-only chat-computer", type: "button", "aria-label": "Its computer", title: "Its computer", onclick: () => openComputer(ctx) }, icon("monitor", { size: 16 })) : null;
   let shownTone = "";
@@ -763,7 +763,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     }
     inboxCount.hidden = !needs;
     inboxCount.textContent = String(needs ?? "");
-    inbox.setAttribute("aria-label", needs ? `Inbox: ${needs} waiting` : "Inbox");
+    inbox.setAttribute("aria-label", needs ? `Needs you: ${needs} waiting` : "Needs you");
     // Its orbs in the colour and the mood of where it stands: at work while it answers or works, waiting while
     // something needs you, done while an answer of its is new to you, idle otherwise. (Both are its one orb: drawn
     // again, each carries on where it was, and a change of mood fades or bursts.)

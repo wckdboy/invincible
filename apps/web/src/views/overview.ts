@@ -50,7 +50,7 @@ export const overviewView: View = (root, ctx, { scope }) => {
       );
     }
     const inbox = ctx.live.inboxCount.value;
-    tiles.push(statTile({ label: "Inbox", icon: "inbox", value: String(inbox), note: inbox ? [dot("accent"), "waiting for you"] : "nothing needs you", href: "#/inbox" }));
+    tiles.push(statTile({ label: "Needs you", icon: "inbox", value: String(inbox), note: inbox ? [dot("accent"), "waiting for you"] : "nothing needs you", href: "#/inbox" }));
     if (ctx.can("vault:read")) {
       tiles.push(
         statTile({

@@ -44,8 +44,8 @@ export const LATEST_CHATS = 5;
  * others are under More. */
 const NAMED = ["inbox", "team", "vault", "connectors", "settings"] as const satisfies readonly Route[];
 
-/** What it calls them (the iPhone's words): what needs you, the agents, the keys. */
-const NAMES: Partial<Record<Route, string>> = { inbox: "Needs you", vault: "Keys" };
+/** What it calls them (the iPhone's words): the keys. */
+const NAMES: Partial<Record<Route, string>> = { vault: "Keys" };
 
 export interface PlacesNav {
   el: HTMLElement;
