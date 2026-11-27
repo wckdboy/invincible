@@ -18,9 +18,11 @@ terminal there. It's on the Mac alone, and everything in it happens in the prima
   `teamFile`).
 - **The branch menu** lists its branches and New Branch… (started where it stands, with what isn't committed carried
   over); Set Up Checkout clones its repository the first time. **Commit** takes everything changed or new, with your
-  message. In a checkout whose git configuration names a filter (Git LFS installed in it, git-crypt's), neither a
-  switch nor a commit is made here, and the window says which filter: the node never runs one, and without it a commit
-  would keep those files as they are in the workspace. Use its terminal for those.
+  message, by you: as the checkout's git configuration names you, else as its computer's does (`git config --global
+  user.name` and `user.email` in its terminal), else as Invincible <invincible@localhost>. In a checkout whose git
+  configuration names a filter (Git LFS installed in it, git-crypt's), neither a switch nor a commit is made here, and
+  the window says which filter: the node never runs one, and without it a commit would keep those files as they are in
+  the workspace. Use its terminal for those.
 - **The terminal** (⌘J) is a shell in its computer, in the checkout: one of the node's terminals, four at most, each
   closed after 15 minutes with nobody at it.
 - **No computer yet:** the window says so, and Make Its Computer makes one.

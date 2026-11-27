@@ -535,7 +535,11 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
   - no filter its configuration names (Git LFS's, its own, or one it includes). Status reads its files as they are. A
     switch or a commit is refused, naming the filter: either would write its files without it, so a commit would keep a
     file git-crypt encrypts unencrypted in your history, or one LFS keeps as a pointer whole;
-  - a repository whose configuration names another worktree is refused, and says so by name.
+  - a repository whose configuration names another worktree is refused, and says so by name;
+  - the computer's global configuration is read for one thing alone, who you are: `user.name` and `user.email`, each
+    by `git config --global --get`, which runs nothing. A commit is by the checkout's own, else by those, else by
+    Invincible, which the script's answer then says (the route doesn't pass a commit's answer on yet). Never by a name
+    git guesses from the host: on Linux it has none to guess, and fails.
   Before, `git -C` read all of it: a commit ran the repository's hooks and its signing program, `add -A` and status its
   filters, status its fsmonitor, a switch its post-checkout hook, and a clone a hook of the template a global
   configuration named.

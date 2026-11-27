@@ -69,16 +69,35 @@ if g('check-ref-format','--branch',name).returncode!=0:
 r=g('switch',*(['-c',name] if create else [name]))
 print(json.dumps({"ok":r.returncode==0,"said":(r.stderr or r.stdout).decode(errors='replace')[-600:]}))`;
 
-/** `python3 -I -c COMMIT <checkout> <message>`: everything changed or new, committed; as the primary where the checkout has no author set. */
+/**
+ * `python3 -I -c COMMIT <checkout> <message>`: everything changed or new, committed, by you: as the checkout's own git
+ * configuration names you, else as its computer's global one does (read on its own, which runs nothing: the held git
+ * reads no global configuration), else as Invincible <invincible@localhost>, and the answer says so. Never a name git
+ * guesses from the host, which on Linux has none to guess and fails.
+ */
 export const COMMIT_SCRIPT = `${HELD}root,message=sys.argv[1],sys.argv[2]
 bad=refused(root) or unwritten(root)
 if bad:
     print(json.dumps({"ok":False,"said":bad}));sys.exit(0)
 g=lambda *a: git(root,*a,timeout=120)
-who=[] if g('config','user.email').stdout.strip() else ['-c','user.name=Invincible','-c','user.email=invincible@localhost']
+def yours(key):
+    # The checkout's own configuration's, else its computer's global one (read alone: it runs nothing), as git takes it.
+    for where,env in (([],GIT_ENV),(['--global','--includes'],{k:v for k,v in GIT_ENV.items() if k!='GIT_CONFIG_GLOBAL'})):
+        r=subprocess.run(['git','-C',root,'config',*where,'--get',key],capture_output=True,timeout=30,env=env)
+        v=r.stdout.decode(errors='replace').strip()
+        if r.returncode==0 and v and len(v)<=200 and all(ord(c)>=32 for c in v):
+            return v
+    return None
+name,email=yours('user.name'),yours('user.email')
+told='' if name and email else "\\n(Committed as "+(name or 'Invincible')+" <"+(email or 'invincible@localhost')+">: neither the checkout's git configuration nor its computer's says who you are. git config --global user.name and user.email, in its terminal, do.)"
+by={'GIT_AUTHOR_NAME':name or 'Invincible','GIT_AUTHOR_EMAIL':email or 'invincible@localhost'}
+by.update({'GIT_COMMITTER_NAME':by['GIT_AUTHOR_NAME'],'GIT_COMMITTER_EMAIL':by['GIT_AUTHOR_EMAIL']})
 g('add','-A')
-r=g(*who,'commit','-m',message)
-print(json.dumps({"ok":r.returncode==0,"said":(r.stdout if r.returncode==0 else (r.stdout+r.stderr)).decode(errors='replace')[-600:]}))`;
+r=git(root,'commit','-m',message,timeout=120,env=by)
+if r.returncode==0:
+    print(json.dumps({"ok":True,"said":r.stdout.decode(errors='replace')[-(600-len(told)):]+told}))
+else:
+    print(json.dumps({"ok":False,"said":(r.stdout+r.stderr).decode(errors='replace')[-600:]}))`;
 
 /** `python3 -I -c CLONE <checkout> <repository>`: its first clone, into a folder that isn't there yet (or is empty). */
 export const CLONE_SCRIPT = `${HELD}dest,repo=sys.argv[1],sys.argv[2]

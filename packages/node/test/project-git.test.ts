@@ -241,6 +241,36 @@ describe("a checkout's own git settings, held off", () => {
     expect(() => actionDone(inVm(vmHome(), BRANCH_SCRIPT, repo, "feature", "0"))).toThrow(why);
   });
 
+  test("a commit is by you: the checkout's own name and address, else its computer's git configuration's, else Invincible, said so; never a guess", () => {
+    // (Each checkout holds user.useConfigOnly, so git takes an address from its configuration or none, as on Linux, whose
+    // host name has no domain for git to guess one from.)
+    const by = (repo: string) => git(repo, "log", "-1", "--format=%an <%ae>|%cn <%ce>");
+    const commit = (repo: string, home_: string, message: string) => {
+      writeFileSync(join(repo, "a.ts"), `export const a = "${message}";\n`);
+      const out = inVm(home_, COMMIT_SCRIPT, repo, message);
+      actionDone(out);
+      return (JSON.parse(out) as { said: string }).said;
+    };
+    const yours = vmHome("[user]\n\tname = Ada Lovelace\n\temail = ada@example.test\n");
+    // Its own, where it names one: whatever the computer's says.
+    const own = repository();
+    git(own, "config", "user.useConfigOnly", "true");
+    git(own, "config", "user.name", "Grace Hopper");
+    git(own, "config", "user.email", "grace@example.test");
+    expect(commit(own, yours, "Own")).not.toContain("Committed as");
+    expect(by(own)).toBe("Grace Hopper <grace@example.test>|Grace Hopper <grace@example.test>");
+    // None of its own: the computer's, as you set it there (the held git reads no global configuration of itself).
+    const computers = repository();
+    git(computers, "config", "user.useConfigOnly", "true");
+    expect(commit(computers, yours, "Yours")).not.toContain("Committed as");
+    expect(by(computers)).toBe("Ada Lovelace <ada@example.test>|Ada Lovelace <ada@example.test>");
+    // Neither: Invincible's, and the answer says so.
+    const neither = repository();
+    git(neither, "config", "user.useConfigOnly", "true");
+    expect(commit(neither, vmHome(), "Nobody's")).toContain("(Committed as Invincible <invincible@localhost>: neither the checkout's git configuration nor its computer's says who you are.");
+    expect(by(neither)).toBe("Invincible <invincible@localhost>|Invincible <invincible@localhost>");
+  });
+
   test("a clone runs no hook of a template a global configuration names", () => {
     const origin = repository();
     const said = join(folder(), "said");
