@@ -81,7 +81,7 @@ struct AgentView: View {
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom) {
             if agent != nil {
-                RoomComposer(room: room, name: name, client: session.client, composing: $composing, seats: [Mentions.Seat(id: id, name: name), Mentions.Seat(id: "primary", name: Primary.name)])
+                RoomComposer(room: room, name: name, client: session.client, composing: $composing, seats: [Mentions.Seat(id: id, name: name), Mentions.Seat(id: "primary", name: Primary.name)], give: room.view == nil ? nil : { giving = true })
             }
         }
         .screen("agent.screen")
@@ -471,6 +471,8 @@ struct RoomComposer: View {
     var seats: [Mentions.Seat] = []
     /// What the empty box says (nil: "Message" and its name).
     var prompt: String? = nil
+    /// Gives it a task, from the box's own line (the web's): nil where the box has none.
+    var give: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
@@ -485,38 +487,30 @@ struct RoomComposer: View {
     }
 
     private var field: some View {
-        let empty = !room.sendable
-        return GlassEffectContainer(spacing: 10) {
-            HStack(alignment: .bottom, spacing: Space.s2) {
-                AttachButton(outbox: room.outbox, client: client)
-                TextField(prompt ?? "Message \(name)", text: $room.draft, axis: .vertical)
-                    .plainField()
-                    .lineLimit(1...6)
-                    .focused(composing)
-                    .sendsOnReturn { if room.sendable { Task { await room.send(with: client) } } }
-                    .padding(.horizontal, Space.s4)
-                    // One line high, the field is 44 points: Apple's least for a thing to tap.
-                    .padding(.vertical, 11)
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22, style: .continuous))
-                // Filled only while there is something to send: the one prominent thing on the screen then, and never a
-                // grey filled disc before (the same size either way, so nothing moves).
-                if empty {
-                    Button {} label: { Image(systemName: "arrow.up").font(.body.weight(.bold)).frame(width: 30, height: 30) }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                        .disabled(true)
-                        .accessibilityLabel("Send to \(name)")
-                } else {
-                    Button {
-                        Task { await room.send(with: client) }
-                    } label: {
-                        Image(systemName: "arrow.up").font(.body.weight(.bold)).foregroundStyle(Prominent.label()).frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel("Send to \(name)")
+        ComposerBox(composing: composing) {
+            TextField(prompt ?? "Message \(name)…", text: $room.draft, axis: .vertical)
+                .plainField()
+                .lineLimit(1...8)
+                .focused(composing)
+                .sendsOnReturn { if room.sendable { Task { await room.send(with: client) } } }
+        } leading: {
+            AttachButton(outbox: room.outbox, client: client)
+        } trailing: {
+            if let give {
+                Button(action: give) {
+                    Label("Give a task", systemImage: "square.stack.3d.up")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, Space.s3)
+                        .frame(minHeight: ComposerBoxMetrics.disc)
+                        .overlay(Capsule().strokeBorder(.separator))
+                        .frame(minHeight: Metrics.touch)
+                        .contentShape(.capsule)
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("composer.give")
             }
+            // Filled only while there is something to send: the one prominent thing on the screen then.
+            ComposerSend(ready: room.sendable, label: "Send to \(name)") { Task { await room.send(with: client) } }
         }
     }
 }

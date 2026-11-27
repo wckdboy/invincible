@@ -767,8 +767,9 @@ private struct OnItsWay: View {
 }
 
 /// The box while its task runs: what you write steers the task or is queued for after it (the web's words), each its own
-/// button over the box, the one Return does in ink once there is something to send (⌘-Return the other). A steer is words
-/// alone, of SteerWords.limit characters at most: files, or longer words, go as a message queued for after it.
+/// button under the words (over the box at the accessibility sizes), the one Return does in ink once there is something to
+/// send (⌘-Return the other). A steer is words alone, of SteerWords.limit characters at most: files, or longer words, go as
+/// a message queued for after it.
 private struct SteerComposer: View {
     @Bindable var room: AgentRoom
     let name: String
@@ -788,31 +789,26 @@ private struct SteerComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
             OutboxLines(outbox: room.outbox)
-            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s2)) : AnyLayout(HStackLayout(spacing: Space.s2))
-            layout {
-                button(SteerWords.queue, .queue, hint: SteerWords.queueTitle, can: ready && room.sendable)
-                button(SteerWords.steer, .steer, hint: SteerWords.steerTitle, can: ready && !long && room.outbox.carried.isEmpty && !room.outbox.going)
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: Space.s2) { buttons }
             }
             if long {
                 Text("A steer holds \(SteerWords.limit.formatted(.number.locale(Locale(identifier: "en_US")))) characters at most: queue it for after this task instead.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            GlassEffectContainer(spacing: 10) {
-                HStack(alignment: .bottom, spacing: Space.s2) {
-                    AttachButton(outbox: room.outbox, client: client)
-                    TextField("Tell \(name)…", text: $room.draft, axis: .vertical)
-                        .plainField()
-                        .lineLimit(1...6)
-                        .focused(composing)
-                        .sendsOnReturn(modified: { deliver(SteerWords.action(running: true, enter: enter, modifier: $0)) })
-                        .padding(.horizontal, Space.s4)
-                        // One line high, the field is 44 points: Apple's least for a thing to tap.
-                        .padding(.vertical, 11)
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22, style: .continuous))
-                        .accessibilityLabel("Steer \(name)'s task, or queue a message for after it")
-                        .accessibilityIdentifier("task.composer")
-                }
+            ComposerBox(composing: composing) {
+                TextField("Tell \(name)…", text: $room.draft, axis: .vertical)
+                    .plainField()
+                    .lineLimit(1...8)
+                    .focused(composing)
+                    .sendsOnReturn(modified: { deliver(SteerWords.action(running: true, enter: enter, modifier: $0)) })
+                    .accessibilityLabel("Steer \(name)'s task, or queue a message for after it")
+                    .accessibilityIdentifier("task.composer")
+            } leading: {
+                AttachButton(outbox: room.outbox, client: client)
+            } trailing: {
+                if !typeSize.isAccessibilitySize { buttons }
             }
         }
         .padding(.horizontal, Metrics.margin)
@@ -821,26 +817,16 @@ private struct SteerComposer: View {
         .takingFiles(room.outbox, client: client, composing: composing)
     }
 
-    @ViewBuilder private func button(_ title: String, _ how: ComposerWords.Action, hint: String, can: Bool) -> some View {
+    /// Queue and Steer.
+    @ViewBuilder private var buttons: some View {
+        button(SteerWords.queue, .queue, hint: SteerWords.queueTitle, can: ready && room.sendable)
+        button(SteerWords.steer, .steer, hint: SteerWords.steerTitle, can: ready && !long && room.outbox.carried.isEmpty && !room.outbox.going)
+    }
+
+    private func button(_ title: String, _ how: ComposerWords.Action, hint: String, can: Bool) -> some View {
         let chosen = (enter == .steer ? ComposerWords.Action.steer : .queue) == how
-        if chosen && can {
-            Button { deliver(how) } label: {
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Prominent.label()).frame(minHeight: 30).padding(.horizontal, Space.s1)
-            }
-            .buttonStyle(.glassProminent)
-            .buttonBorderShape(.capsule)
-            .accessibilityHint(hint)
+        return ComposerChoice(title: title, filled: chosen && can, ready: can, hint: hint) { deliver(how) }
             .accessibilityIdentifier("task.\(how.rawValue)")
-        } else {
-            Button { deliver(how) } label: {
-                Text(title).font(.subheadline.weight(.medium)).frame(minHeight: 30).padding(.horizontal, Space.s1)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
-            .disabled(!can)
-            .accessibilityHint(hint)
-            .accessibilityIdentifier("task.\(how.rawValue)")
-        }
     }
 
     /// Steered (the node takes it, and the task says it is on its way), or queued: a message in its conversation, which its

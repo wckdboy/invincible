@@ -313,11 +313,11 @@ struct AttachButton: View {
             }
             #endif
         } label: {
-            Image(systemName: "paperclip").font(.body.weight(.semibold)).frame(width: 30, height: 30)
+            // In the message box (ComposerBox), on its glass: no glass of its own, a thumb's target.
+            Image(systemName: "paperclip").font(.body.weight(.semibold)).frame(minWidth: Metrics.touch, minHeight: Metrics.touch).contentShape(.rect)
         }
         .menuIndicator(.hidden)
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
+        .buttonStyle(.borderless)
         .disabled(outbox.full)
         .accessibilityLabel("Attach pictures or files")
         .accessibilityIdentifier("attach")

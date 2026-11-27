@@ -375,7 +375,8 @@ struct MessageRow: View {
     }
 }
 
-/// The message box: on the keyboard, growing to six lines; Send, or Stop while it answers.
+/// The message box (ComposerBox): on the keyboard, growing to eight lines; Send, or while it answers Queue, Steer and Stop
+/// under its words.
 struct Composer: View {
     @Bindable var chat: ChatModel
     let client: NodeClient
@@ -383,7 +384,7 @@ struct Composer: View {
     /// Told once a message has gone (the iPhone's home shows the chat it began).
     var sent: (() -> Void)? = nil
     /// What the empty box says.
-    var prompt = "Message \(Primary.name)"
+    var prompt = "Ask your agent…"
     /// A side question typed into the box ("/btw …"): asked apart, never sent as a message (nil: not offered here).
     var askAside: ((String) -> Void)? = nil
     /// What Return does while it works, on this device (Settings → Chat; steer unless you chose otherwise).
@@ -410,82 +411,40 @@ struct Composer: View {
     }
 
     private var field: some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(alignment: .bottom, spacing: Space.s2) {
-                AttachButton(outbox: chat.outbox, client: client)
-                // Made anew with each message sent: clearing a focused multi-line field can leave what was sent on
-                // screen, or let the keyboard put back what it still held (a word it was correcting, a dictation
-                // finishing). A new one is empty, and nothing late reaches it. While it works it stays open: what you
-                // write steers it or is queued (the PWA's words for it).
-                TextField(chat.answering ? ComposerWords.placeholder(canQueue: chat.canQueue) : prompt, text: $chat.draft, axis: .vertical)
-                    .plainField()
-                    .id(chat.sent)
-                    .lineLimit(1...6)
-                    .focused(composing)
-                    .sendsOnReturn(modified: { send(modifier: $0) })
-                    .padding(.horizontal, Space.s4)
-                    // One line high, the field is 44 points: Apple's least for a thing to tap.
-                    .padding(.vertical, 11)
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22, style: .continuous))
-                    .accessibilityIdentifier("composer")
-                if chat.answering {
-                    if !typeSize.isAccessibilitySize { busyButtons }
-                    Button {
-                        chat.stop(with: client)
-                    } label: {
-                        Image(systemName: "stop.fill").font(.body.weight(.semibold)).frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel("Stop \(Primary.name) answering")
+        ComposerBox(composing: composing) {
+            // Made anew with each message sent: clearing a focused multi-line field can leave what was sent on screen, or
+            // let the keyboard put back what it still held (a word it was correcting, a dictation finishing). A new one is
+            // empty, and nothing late reaches it. While it works it stays open: what you write steers it or is queued
+            // (the PWA's words for it).
+            TextField(chat.answering ? ComposerWords.placeholder(canQueue: chat.canQueue) : prompt, text: $chat.draft, axis: .vertical)
+                .plainField()
+                .id(chat.sent)
+                .lineLimit(1...8)
+                .focused(composing)
+                .sendsOnReturn(modified: { send(modifier: $0) })
+                .accessibilityIdentifier("composer")
+        } leading: {
+            AttachButton(outbox: chat.outbox, client: client)
+        } trailing: {
+            if chat.answering {
+                if !typeSize.isAccessibilitySize { busyButtons }
+                ComposerStop(label: "Stop \(Primary.name) answering") { chat.stop(with: client) }
                     .accessibilityIdentifier("composer.stop")
-                } else if !chat.sendable {
-                    // Filled only while there is something to send (the same size either way, so nothing moves).
-                    Button {} label: { Image(systemName: "arrow.up").font(.body.weight(.bold)).frame(width: 30, height: 30) }
-                        .buttonStyle(.glass)
-                        .buttonBorderShape(.circle)
-                        .disabled(true)
-                        .accessibilityLabel("Send")
-                        .accessibilityIdentifier("send")
-                } else {
-                    Button { send() } label: {
-                        Image(systemName: "arrow.up").font(.body.weight(.bold)).foregroundStyle(Prominent.label()).frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .buttonBorderShape(.circle)
-                    .accessibilityLabel("Send")
-                    .accessibilityIdentifier("send")
-                }
+            } else {
+                ComposerSend(ready: chat.sendable, label: "Send") { send() }
             }
         }
     }
 
     /// While it works: Queue (where the chat is kept) and Steer, each its own button (the way on a phone); the one Return
-    /// does is in ink once there is something to send, the other in glass.
+    /// does is in ink once there is something to send, the other quiet.
     @ViewBuilder private var busyButtons: some View {
-        if chat.canQueue { busyButton("Queue", .queue, filled: ready && choice == .queue, hint: "Keep it on the node and send it when it's done") }
-        busyButton("Steer", .steer, filled: ready && (choice == .steer || !chat.canQueue), hint: "Tell it now: it reaches it at its next safe point")
-    }
-
-    @ViewBuilder private func busyButton(_ title: String, _ how: ComposerWords.Action, filled: Bool, hint: String) -> some View {
-        if filled {
-            Button { send(how: how) } label: {
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Prominent.label()).frame(minHeight: 30).padding(.horizontal, Space.s1)
-            }
-            .buttonStyle(.glassProminent)
-            .buttonBorderShape(.capsule)
-            .accessibilityHint(hint)
-            .accessibilityIdentifier("composer.\(how.rawValue)")
-        } else {
-            Button { send(how: how) } label: {
-                Text(title).font(.subheadline.weight(.medium)).frame(minHeight: 30).padding(.horizontal, Space.s1)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.capsule)
-            .disabled(!ready)
-            .accessibilityHint(hint)
-            .accessibilityIdentifier("composer.\(how.rawValue)")
+        if chat.canQueue {
+            ComposerChoice(title: "Queue", filled: ready && choice == .queue, ready: ready, hint: "Keep it on the node and send it when it's done") { send(how: .queue) }
+                .accessibilityIdentifier("composer.queue")
         }
+        ComposerChoice(title: "Steer", filled: ready && (choice == .steer || !chat.canQueue), ready: ready, hint: "Tell it now: it reaches it at its next safe point") { send(how: .steer) }
+            .accessibilityIdentifier("composer.steer")
     }
 
     /// What's in the box, by its button or Return: a side question typed into it is asked apart; while it works the
