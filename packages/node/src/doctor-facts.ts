@@ -498,7 +498,8 @@ export async function gatherFacts(deps: DoctorDeps, opts: DoctorOptions = {}): P
       integrity = message(error);
     }
   }
-  const newest = Object.values(store.frontier()).reduce((max, hlc) => Math.max(max, hlcMs(hlc)), 0);
+  const frontier = store.frontier();
+  const newest = Object.values(frontier).reduce((max, hlc) => Math.max(max, hlcMs(hlc)), 0);
 
   // Where backups are looked for: where the owner said, else beside the node's home, as the server's are kept.
   const backupDirs = deps.backupDir ? [deps.backupDir] : [join(deps.home.dir, "backups"), join(dirname(deps.home.dir), "backups")];
@@ -531,7 +532,7 @@ export async function gatherFacts(deps: DoctorDeps, opts: DoctorOptions = {}): P
       home: system.file(deps.home.dir),
       adminToken: system.file(deps.home.adminTokenPath),
     },
-    mind: { events: store.eventCount(), integrity, head: store.head(self), forks: store.forks().map((id) => ({ id, name: store.device(id)?.name ?? id.slice(0, 12) })), newestEventAt: newest || null, timeSynced, peers, backup },
+    mind: { events: store.eventCount(), integrity, head: store.head(self), forks: store.forks().map((id) => ({ id, name: store.device(id)?.name ?? id.slice(0, 12) })), newestEventAt: newest || null, ownNewestAt: frontier[self] ? hlcMs(frontier[self]!) : null, timeSynced, peers, backup },
     vault: { unlocked: deps.vault.unlocked(), secrets: deps.vault.list().length, requests: deps.vault.requests().map((r) => r.name) },
     ...(deps.fabric ? { fabric: deps.fabric() } : {}),
     providers: { setUp: providerRecords(store).length, byDefault: [...new Set(ROLES.planner!.defaults.map((ref) => ref.slice(0, ref.indexOf("/"))))] },

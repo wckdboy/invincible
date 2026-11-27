@@ -165,6 +165,34 @@ describe("each fault gives its own line and advice", () => {
     expect(byId(diagnose(again), "mind.clock").finding).toEqual(step.finding!);
   });
 
+  test("the mind: its own last write stamped ahead of its clock by more than its peers take: said, with when they will", () => {
+    // Its clock went back after it wrote (it ran fast, and was set right since): its own newest stamp leads it by 20
+    // minutes. It goes on writing (the ledger stamps each write after the newest it holds), and a peer whose clock agrees
+    // with this one refuses a stamp more than 5 minutes ahead of its own: for 15 minutes, until 12:15 UTC.
+    const led = fault((f) => {
+      f.mind.newestEventAt = NOW + 20 * MIN;
+      f.mind.ownNewestAt = NOW + 20 * MIN;
+    }, "mind.clock");
+    expect(led.state).toBe("broken");
+    expect(led.line).toBe("its own last write is stamped 20 minutes after its clock, which went back after it wrote: its peers won't take its writes for about 15 minutes (until 12:15 UTC by this clock), as they take none stamped more than 5 minutes ahead of their own");
+    expect(led.fix).toContain("Nothing is lost");
+    expect(led.fix).toContain("timedatectl set-ntp true");
+    expect(led.finding).toMatchObject({ severity: "alert", key: "doctor:mind.clock:n_self" });
+    // Its words for the heartbeat don't move with the clock: the same lead a minute on writes nothing new.
+    const later = healthy();
+    later.now += MIN;
+    later.mind.newestEventAt = later.mind.ownNewestAt = NOW + 20 * MIN;
+    expect(byId(diagnose(later), "mind.clock").finding).toEqual(led.finding!);
+    // Within the bound its peers take its writes as they come: nothing to say.
+    expect(fault((f) => (f.mind.newestEventAt = f.mind.ownNewestAt = NOW + 4 * MIN), "mind.clock").state).toBe("ok");
+    // Another device's stamp ahead, its own not: this node's clock is behind, as before.
+    const behind = fault((f) => {
+      f.mind.newestEventAt = NOW + 20 * MIN;
+      f.mind.ownNewestAt = NOW - 1000;
+    }, "mind.clock");
+    expect(behind.line).toContain("this node's clock is behind");
+  });
+
   test("the mind: a server offline, a peer that refuses, a laptop asleep, no backup, an old backup", () => {
     const offline = fault((f) => (f.mind.peers[0] = { name: "rack", alwaysOn: true, online: false, lastSeen: NOW - 3 * HOUR, error: "fetch failed", clockOffsetMs: null }), "mind.sync.rack");
     expect(offline.state).toBe("needs-you");

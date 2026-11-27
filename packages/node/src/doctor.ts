@@ -55,6 +55,11 @@ export interface DoctorFacts {
     forks: { id: string; name: string }[];
     /** The time of the newest event held, by its own clock stamp. */
     newestEventAt: number | null;
+    /**
+     * This node's own newest stamp (its last write; null: it has written none). Its next writes are stamped after it, and
+     * after the newest it took in (absent: gathered before this was known).
+     */
+    ownNewestAt?: number | null;
     /** Whether the system says its clock is synchronised (null: it can't be asked here). */
     timeSynced: boolean | null;
     peers: {
@@ -284,9 +289,26 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
 
   {
     const ahead = f.mind.newestEventAt === null ? 0 : f.mind.newestEventAt - f.now;
+    // Its own last write, stamped ahead of its clock by more than any peer takes: its clock went back after it wrote (it
+    // ran fast, and was set right since). It goes on writing, each write stamped after the newest it holds (the ledger's
+    // clock), and a peer whose clock agrees with this one refuses a stamp more than CLOCK_GUARD_MS ahead of its own (the
+    // ledger's drift bound): until its clock is within that of the stamp. Its writes wait here meanwhile, and none is lost.
+    const own = f.mind.ownNewestAt == null ? null : f.mind.ownNewestAt - f.now;
     const off = f.mind.peers.filter((p) => p.clockOffsetMs !== null && Math.abs(p.clockOffsetMs) > CLOCK_STEP_MS);
     const known = f.mind.peers.filter((p) => p.clockOffsetMs !== null);
-    if (ahead > CLOCK_GUARD_MS) {
+    if (own !== null && own > CLOCK_GUARD_MS) {
+      const wait = Math.max(own, ahead) - CLOCK_GUARD_MS;
+      add(
+        "mind",
+        "mind.clock",
+        "broken",
+        `its own last write is stamped ${span(own)} after its clock, which went back after it wrote: its peers won't take its writes for about ${span(wait)} (until ${clockUtc(f.now + wait)} UTC by this clock), as they take none stamped more than ${span(CLOCK_GUARD_MS)} ahead of their own`,
+        "Nothing is lost: its writes are kept here, and its peers take them once their clocks are within 5 minutes of their stamps. If this node's clock is the wrong one (behind), set it: timedatectl set-ntp true. Until then it sends no approval and lapses none.",
+        {
+          finding: { severity: "alert", title: `${self}'s writes are stamped ahead of its clock`, body: "Its own last write is stamped further ahead of its clock than its peers take: its clock went back after it wrote. Its writes are kept, and its peers take them once their clocks reach their stamps. If this clock is the wrong one, set it: timedatectl set-ntp true." },
+        },
+      );
+    } else if (ahead > CLOCK_GUARD_MS) {
       add("mind", "mind.clock", "broken", `this node's clock is behind: the newest event it holds is dated ${span(ahead)} after its own time`, "Set the clock (timedatectl set-ntp true). Until it's right it sends no approval and lapses none, and other nodes refuse its requests.", {
         finding: { severity: "alert", title: `${self}'s clock is behind`, body: "It reads earlier than the newest event it holds by more than any clock may lead another. Until it's set (timedatectl set-ntp true) it sends no approval and lapses none." },
       });

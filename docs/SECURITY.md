@@ -99,7 +99,9 @@ Since then, a device whose chain holds a refused event, and a revoked device, ha
   the clock an hour ahead and back found it (27 November 2026). Now the event a node has just stamped (`emit`) is taken:
   its time is its own clock's, strictly after everything it issued or took in. Every other event is held to the bound as
   before, so a peer takes this node's events once its own clock has caught up. A rebuild replays the log with no bound at
-  all, so it gives the same state (`chain.test.ts`, `team.e2e.test.ts`).
+  all, so it gives the same state (`chain.test.ts`, `team.e2e.test.ts`). Until then `invincible doctor` says so: its own
+  last write stamped ahead of its clock by more than the bound, and for about how long its peers won't take its writes,
+  which wait meanwhile, none lost (`doctor.test.ts`, `doctor-clock.test.ts`).
 
 ## Loops, connectors and approvals (tested)
 
