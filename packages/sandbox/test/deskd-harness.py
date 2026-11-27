@@ -301,12 +301,12 @@ class FakePieces:
         """Someone watches while the test's file is there (the stream's encoder running, in a VM)."""
         return os.path.exists(os.environ.get("DESKD_WATCHED", "/nonexistent/deskd-watched"))
 
-    def _spawn(self, argv, log, keep=None):
-        trace(call="spawn", argv=argv)
+    def _spawn(self, argv, log, keep=None, env=None):
+        trace(call="spawn", argv=argv, **({"env": env} if env else {}))
 
 
 if sys.argv[1:2] == ["help"]:
-    print(deskd.HELP)
+    print(deskd.help_text())
     sys.exit(0)
 screen = Screen()
 class FakeTree:

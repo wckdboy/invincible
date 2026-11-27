@@ -393,6 +393,34 @@ describe("the desktop command: deskd's thin client", () => {
     expect(desktop(r, ["cursor_position"]).out).toBe("X=10, Y=20\n");
   });
 
+  test("the hardware image's apps (C1 step 11): KiCad and FreeCAD start on the screen where the image has them, a file named whole; elsewhere, they're not said", async () => {
+    if (!needs()) return;
+    // (Stand-ins for the hardware image's programs, on the PATH deskd sees: it starts what it finds, nothing else.)
+    const tools = mkdtempSync(join(root, "hardware-"));
+    for (const name of ["kicad", "pcbnew", "eeschema", "freecad"]) {
+      writeFileSync(join(tools, name), "#!/bin/sh\nexit 0\n");
+      chmodSync(join(tools, name), 0o755);
+    }
+    const r = await deskd({ PATH: `${tools}:${process.env.PATH}` });
+    const started = desktop(r, ["app", "pcbnew", "/work/board.kicad_pcb"]);
+    expect(started).toMatchObject({ code: 0, out: "Started pcbnew on /work/board.kicad_pcb.\n" });
+    expect(desktop(r, ["app", "freecad"])).toMatchObject({ code: 0, out: "Started freecad.\n" });
+    expect(r.trace().filter((t) => t.call === "spawn").map((t) => t.argv)).toEqual([["pcbnew", "/work/board.kicad_pcb"], ["freecad"]]);
+    // (In /tmp: KiCad's API server makes its socket in TMPDIR, and kipy looks for it in /tmp/kicad, whatever TMPDIR a
+    // command of the agent's had.)
+    expect(r.trace().filter((t) => t.call === "spawn").map((t) => t.env)).toEqual([{ TMPDIR: "/tmp" }, { TMPDIR: "/tmp" }]);
+    // A file by its whole path, and one: anything else is refused before anything starts.
+    for (const args of [["app", "pcbnew", "board.kicad_pcb"], ["app", "freecad", "/work/a.FCStd", "/work/b.FCStd"]]) expect(desktop(r, args)).toMatchObject({ code: 2, err: expect.stringContaining("by its whole path") });
+    expect(r.trace().filter((t) => t.call === "spawn")).toHaveLength(2);
+    expect(desktop(r, ["help"]).out).toContain("desktop app <kicad|pcbnew|eeschema|freecad> [file]");
+    expect(desktop(r, ["app", "inkscape"]).err).toContain("desktop app <terminal|editor|kicad|pcbnew|eeschema|freecad>");
+    // On the desktop's own image, none of them is there, nor said.
+    const plain = await deskd();
+    expect(desktop(plain, ["app", "pcbnew"])).toMatchObject({ code: 2, err: expect.stringContaining("desktop app <terminal|editor>") });
+    expect(desktop(plain, ["help"]).out).not.toContain("kicad");
+    expect(plain.trace().filter((t) => t.call === "spawn")).toEqual([]);
+  });
+
   test("what isn't a place, a key or a verb is refused with exit 2 before anything is touched", async () => {
     if (!needs()) return;
     const r = await deskd();

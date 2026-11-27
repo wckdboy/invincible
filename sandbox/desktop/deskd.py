@@ -24,6 +24,7 @@ import json
 import os
 import re
 import select
+import shutil
 import signal
 import socket
 import struct
@@ -1183,10 +1184,10 @@ class Pieces:
         self.session_bus = None  # (its address, its process id)
         self.lock = threading.Lock()  # (the keeper and a command may both find one gone: one of them starts it)
 
-    def _spawn(self, argv, log, keep=None):
+    def _spawn(self, argv, log, keep=None, env=None):
         # (Every app it starts shows its accessibility tree: Chromium's switch, and Qt's, as the image's own environment has them.)
         p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=open(os.path.join(RUN, log), "ab"), stderr=subprocess.STDOUT, start_new_session=True,
-                             env=dict(os.environ, DISPLAY=DISPLAY, ACCESSIBILITY_ENABLED="1", QT_LINUX_ACCESSIBILITY_ALWAYS_ON="1"))
+                             env=dict(os.environ, DISPLAY=DISPLAY, ACCESSIBILITY_ENABLED="1", QT_LINUX_ACCESSIBILITY_ALWAYS_ON="1", **(env or {})))
         if keep:
             self.kept[keep] = (p, time.monotonic())
             threading.Thread(target=self._wait, args=(keep, p), daemon=True, name="keep-" + keep).start()
@@ -2018,6 +2019,27 @@ def describe(answer):
     return " · ".join(parts)
 
 
+# The hardware image's apps (C1 step 11), where the image has them: KiCad, its board and schematic editors, and FreeCAD.
+HARDWARE_APPS = ("kicad", "pcbnew", "eeschema", "freecad")
+HARDWARE_HELP = """desktop app <kicad|pcbnew|eeschema|freecad> [file]   KiCad, its board or schematic editor, or FreeCAD, on the
+                                   screen, a file of /work open in it, named by its whole path (script them first:
+                                   kicad-cli, kipy, freecadcmd)
+"""
+
+
+def hardware_apps():
+    """The hardware image's apps this VM has: none on the desktop's own image."""
+    return [name for name in HARDWARE_APPS if shutil.which(name)]
+
+
+def help_text():
+    """`desktop help`: its verbs, and after the terminal's and the editor's, the hardware image's apps where this VM has them."""
+    if not hardware_apps():
+        return HELP
+    at = HELP.index("desktop shot ")
+    return HELP[:at] + HARDWARE_HELP + HELP[at:]
+
+
 def cli(desk, argv, cwd="/work", env=None):
     """One `desktop` command: (exit code, what it prints, what it says on stderr)."""
     env = env or {}
@@ -2034,7 +2056,7 @@ def cli(desk, argv, cwd="/work", env=None):
                 raise Refused("--hold takes the keys to hold while it acts: shift, ctrl, alt or super, joined by + (--hold ctrl+shift)")
             held, args = {"text": combo}, args[:at] + args[at + 2:]
         if verb in ("help", "--help", "-h"):
-            return 0, HELP + "\n", ""
+            return 0, help_text() + "\n", ""
         if verb == "start":
             desk.ready()
             return 0, "The desktop is up: %dx%d, display %s.\n" % (W, H, DISPLAY), ""
@@ -2063,12 +2085,26 @@ def cli(desk, argv, cwd="/work", env=None):
             got = desk.browser_ready().evaluate("document.title + '\\n' + location.href + '\\n' + (document.body ? document.body.innerText : '').slice(0, 20000)")
             return 0, (got or "") + "\n", ""
         if verb == "app":
-            app = {"terminal": ["xterm", "-fa", "DejaVu Sans Mono", "-fs", "11", "-geometry", "100x30+120+80"], "editor": ["mousepad"]}.get(args[0] if args else "")
+            name = args[0] if args else ""
+            app = {"terminal": ["xterm", "-fa", "DejaVu Sans Mono", "-fs", "11", "-geometry", "100x30+120+80"], "editor": ["mousepad"]}.get(name)
+            said = "Started the %s (%s).\n" % (name, app[0]) if app else ""
+            if not app and name in hardware_apps():
+                # The hardware image's (C1 step 11): KiCad's and FreeCAD's windows, each with the file it opens, named whole.
+                if len(args) > 2 or (len(args) == 2 and (not args[1].startswith("/") or "\0" in args[1])):
+                    raise Refused("desktop app %s [file]: one file, by its whole path (/work/...)" % name)
+                app = [name] + args[1:]
+                said = "Started %s%s.\n" % (name, " on %s" % args[1] if len(args) == 2 else "")
             if not app:
-                raise Refused("app starts a terminal or an editor: desktop app <terminal|editor>")
+                there = hardware_apps()
+                raise Refused("app starts a terminal or an editor%s: desktop app <%s>" % (", KiCad or FreeCAD" if there else "", "|".join(["terminal", "editor"] + there)))
             desk.ready()
-            desk.pieces._spawn(app, "app-%s.log" % args[0])
-            return 0, "Started the %s (%s).\n" % (args[0], app[0]), ""
+            if name in HARDWARE_APPS:
+                # (KiCad's API server makes its socket in TMPDIR, which a command of the agent's may have set to its own
+                # folder: in /tmp, it is where kipy looks, /tmp/kicad/api.sock.)
+                desk.pieces._spawn(app, "app-%s.log" % name, env={"TMPDIR": "/tmp"})
+            else:
+                desk.pieces._spawn(app, "app-%s.log" % name)
+            return 0, said, ""
         if verb in ("screenshot", "zoom"):
             now, printed = "--now" in args, "--base64" in args
             args = [a for a in args if a not in ("--now", "--base64")]
@@ -2537,6 +2573,6 @@ def serve(desk=None, run=RUN):
 
 if __name__ == "__main__":
     if sys.argv[1:2] == ["help"]:
-        print(HELP)
+        print(help_text())
         sys.exit(0)
     sys.exit(serve())
