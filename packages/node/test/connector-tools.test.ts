@@ -59,7 +59,7 @@ describe("a tool the catalog has added since you installed a connector", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test("it is offered: listed as new, and in your Inbox in words that say how to add it; never added by itself", async () => {
+  test("it is offered: listed as new, and in Needs you in words that say how to add it; never added by itself", async () => {
     const github = ((await send(home.adminToken(), "connectors")).body.connectors as ConnectorView[]).find((c) => c.id === "github")!;
     expect(github.newTools).toEqual(["pull.review"]);
     expect(github.tools.map((t) => t.name)).not.toContain("pull.review");
@@ -85,7 +85,7 @@ describe("a tool the catalog has added since you installed a connector", () => {
     const opened = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "feat/units", base: "main", title: "Units" } }, { kind: "agent", by: "arm:coder" });
     expect(opened.status === "done" && opened.order?.label).toBe("pull requests on the shipyard");
     expect(posted).toEqual(["POST /repos/amiriteorg/shipyard/pulls"]);
-    // Offered no more, and out of your Inbox.
+    // Offered no more, and out of Needs you.
     const github = ((await send(home.adminToken(), "connectors")).body.connectors as ConnectorView[]).find((c) => c.id === "github")!;
     expect(github.newTools).toEqual([]);
     expect(daemon.store.lww("notice:connector-tool:github:pull.review")?.value ?? null).toBeNull();

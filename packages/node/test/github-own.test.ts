@@ -195,7 +195,7 @@ describe("your agent's own words in a private repository of yours", () => {
     expect([await call(), whose()]).toEqual(["asked", 3]);
   });
 
-  test("nothing waits in your Inbox while GitHub is asked: the call is filed after it has answered, and answered at once", async () => {
+  test("nothing waits in Needs you while GitHub is asked: the call is filed after it has answered, and answered at once", async () => {
     let release = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
     const w = world({ ...MINE, paths: { ...MINE.paths, "/repos/lin-example/notes": async () => { await gate; return Response.json(repository("lin-example/notes", 501)); } } });
@@ -245,7 +245,7 @@ describe("its pushes and its words in a repository you gave an agent", () => {
     const before = w.service.actions().length;
     expect((await w.service.call(branch("lin-example", "site", "refs/heads/invincible/pr-7"), vm)).status).toBe("asked");
     expect(w.service.actions()).toHaveLength(before + 1);
-    // Nothing was sent, nothing asked of GitHub, every one is in your Inbox; your own call is yours and goes.
+    // Nothing was sent, nothing asked of GitHub, every one is in Needs you; your own call is yours and goes.
     expect(w.asked).toEqual([]);
     expect(w.service.actions().map((a) => [a.tool, a.state, a.class])).toEqual(Array(5).fill(["branch.create", "waiting", "outward"]));
     expect((await w.service.call(branch("lin-example", "site", "refs/heads/invincible/mine"), { kind: "owner", device: "d_laptop" })).status).toBe("done");

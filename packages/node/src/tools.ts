@@ -1023,7 +1023,7 @@ export const TOOLS: PrimaryTool[] = [
   tool({
     name: "team_ship",
     title: "Ship an agent's proven work",
-    description: "Open a pull request of an agent's task whose gates and independent reviewer passed it and whose changes were kept: a new invincible/… branch on the repository the work was done on. In a repository the user gave an agent it is yours to approve and it opens at once, unless it changes what the repository's CI runs (its workflows, its pipelines); anywhere else it waits for the user in their Inbox. Each task ships once.",
+    description: "Open a pull request of an agent's task whose gates and independent reviewer passed it and whose changes were kept: a new invincible/… branch on the repository the work was done on. In a repository the user gave an agent it is yours to approve and it opens at once, when GitHub says the work is built on the default branch's head and it changes nothing the repository's CI runs (its workflows, its pipelines, its actions); otherwise it waits for the user in Needs you. Each task ships once.",
     input: {
       task: z.string().regex(/^task-[a-z0-9_-]{12}$/).describe("The task's id, as team lists it"),
       title: z.string().min(1).max(120).describe("The pull request's title (the task's when absent)").optional(),
@@ -1034,7 +1034,7 @@ export const TOOLS: PrimaryTool[] = [
     async run(api, { task, title }) {
       const shipped = await api.call<{ receipt: string; url: string | null } | { asked: string }>("primaryShip", { task, ...(title ? { title } : {}) });
       return "asked" in shipped
-        ? `It waits for the user in their Inbox (action ${shipped.asked}): a pull request there isn't yours to open.`
+        ? `It waits for the user in Needs you (action ${shipped.asked}): a pull request there isn't yours to open.`
         : `Shipped: ${shipped.url ?? shipped.receipt}. Its checks are followed, and a failure goes back to its agent when that is on.`;
     },
   }),
@@ -1051,7 +1051,7 @@ export const TOOLS: PrimaryTool[] = [
     own: true,
     async run(api, { task }) {
       const merged = await api.call<{ merged: string } | { asked: string }>("primaryMerge", { task });
-      return "asked" in merged ? `It waits for the user in their Inbox (action ${merged.asked}): a merge there isn't yours.` : `Merged: ${merged.merged}. Its trail says it was you, and what proved it.`;
+      return "asked" in merged ? `It waits for the user in Needs you (action ${merged.asked}): a merge there isn't yours.` : `Merged: ${merged.merged}. Its trail says it was you, and what proved it.`;
     },
   }),
 

@@ -1372,7 +1372,7 @@ export function createApp(ctx: AppContext) {
     const catalog = catalogFor(id, manifest);
     return catalog ? Object.keys(catalog.manifest.tools).filter((tool) => !Object.hasOwn(manifest.tools, tool)) : [];
   };
-  /** Each such tool offered once in your Inbox, in words that say what it does and how you add it (a notice you may dismiss). */
+  /** Each such tool offered once in Needs you, in words that say what it does and how you add it (a notice you may dismiss). */
   function offerNewTools(only?: string): void {
     for (const { id, manifest } of installedConnectors(ctx.store)) {
       if (!manifest || (only && id !== only)) continue;
@@ -2579,7 +2579,7 @@ export function createApp(ctx: AppContext) {
       receipt = action.receipt ?? "";
     } else {
       // Not its to approve there (policy.ts ownApproval): it waits for you, as any of its agents' ships does.
-      teamOf().noteTask(task.id, `Shipping it waits for you: its pull request there isn't your agent's to open (Inbox, action ${filed.action})`.slice(0, 500));
+      teamOf().noteTask(task.id, `Shipping it waits for you: its pull request there isn't your agent's to open (Needs you, action ${filed.action})`.slice(0, 500));
       return { asked: filed.action };
     }
     const url = /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.exec(receipt)?.[0] ?? null;
@@ -2624,7 +2624,7 @@ export function createApp(ctx: AppContext) {
       ),
     );
     if (filed.status === "asked") {
-      teamOf().noteTask(task.id, `Merging it waits for you: a merge there isn't your agent's own (Inbox, action ${filed.action})`.slice(0, 500));
+      teamOf().noteTask(task.id, `Merging it waits for you: a merge there isn't your agent's own (Needs you, action ${filed.action})`.slice(0, 500));
       return { asked: filed.action };
     }
     if (!filed.result.ok) {
