@@ -587,7 +587,10 @@ elif [[ $(uname) == Darwin ]]; then
 <plist version="1.0"><dict>
   <key>Label</key><string>dev.invincible.node</string>
   <key>ProgramArguments</key><array><string>$BUN</string><string>$APP/packages/node/src/cli.ts</string><string>serve</string></array>
-  <key>EnvironmentVariables</key><dict><key>INVINCIBLE_KEYSTORE</key><string>file</string></dict>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>INVINCIBLE_KEYSTORE</key><string>file</string>
+  </dict>
   <key>WorkingDirectory</key><string>$APP</string>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>$HOME/.invincible/node.log</string>

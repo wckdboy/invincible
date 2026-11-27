@@ -57,6 +57,22 @@ test("Q-AMP's binary shipped with a deploy that isn't the pinned one refuses the
 
 // ufw refuses a rule whose comment holds an apostrophe ("ERROR: Invalid syntax"): the Q-AMP bridges' rule said "grants'"
 // and was never added on Ultra (25 November 2026), with the deploy otherwise fine. Its root phase runs only on a server.
+// A Mac node's service has launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin) unless its LaunchAgent gives one, and there it
+// can't find tailscale (/usr/local/bin, /opt/homebrew/bin): it then advertised 127.0.0.1 and listened on loopback alone,
+// so a peer following its endpoint reached only itself (the mini, 27 November 2026: Ultra's sync was refused, 401, by
+// Ultra's own node, and the mini stayed "offline" to it). The deploy's LaunchAgent gives the node the PATH the
+// installer's and the Mac app's give it.
+test("the deploy's LaunchAgent gives a Mac node the PATH the installer's and the Mac app's give it, tailscale's folders in it", () => {
+  const darwin = /elif \[\[ \$\(uname\) == Darwin \]\]; then[\s\S]*?<\/plist>/.exec(readFileSync(script, "utf8"))?.[0] ?? "";
+  const pathIn = (text: string) => /<key>PATH<\/key><string>([^<]*)<\/string>/.exec(text)?.[1];
+  const installer = pathIn(readFileSync(resolve(import.meta.dir, "../../../scripts/install.sh"), "utf8"));
+  const app = /static let servicePath = "([^"]*)"/.exec(readFileSync(resolve(import.meta.dir, "../../../apps/apple/Invincible/Mac/MacNode.swift"), "utf8"))?.[1];
+  expect(darwin).toContain("<key>Label</key><string>dev.invincible.node</string>");
+  expect(installer?.split(":")).toEqual(expect.arrayContaining(["/opt/homebrew/bin", "/usr/local/bin"]));
+  expect(app).toBe(installer);
+  expect(pathIn(darwin)).toBe(installer);
+});
+
 test("every firewall rule the setup adds has a comment ufw accepts: no apostrophe in it", () => {
   const comments = [...readFileSync(script, "utf8").matchAll(/ufw allow [^\n]*comment "([^"]*)"/g)].map((m) => m[1]!);
   expect(comments.length).toBeGreaterThanOrEqual(3);
