@@ -64,6 +64,12 @@ fabric's independent security review are reviewed again.
   0.1's bridges).
 - 🔨 The security review's findings (H1, M1, L1 to L8, I1 to I6): fixed, each with a failing test first; their
   independent re-review is next.
+- 🔜 A signed request names the node it is for (the second re-review's I-g), before the first limited node.
+  - Today its signing input is the method, the path, the time, the nonce and the body's digest.
+  - So a limited node that a full node syncs with over HTTP receives that node's signed `POST /link/sync` every 5 s.
+    Within its minute it could replay it to a third node as the full node, and read the answer.
+  - Over Q-AMP the door already holds the signer to the transport key's node.
+  - The target's id goes into the signing input. It is a contract change, with fixtures for the old form and the new.
 - 🔜 The pin: a Q-AMP release with the sidecar, and the owner's pair switched on (FABRIC.md, the runbook).
 
 **Exit:** the first answer on a fresh connection, and sync's lag, are measured before and after (the carried grants measured 96 vs
