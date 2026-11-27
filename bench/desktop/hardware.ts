@@ -1,5 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DESKTOP_IMAGE, HARDWARE_IMAGE } from "../../packages/sandbox/src/spec.ts";
+import { OUT_DIR } from "../scorecard.ts";
 import type { Samples } from "./measure.ts";
 import { spawnDocker } from "./scratch.ts";
 import { type Bench, type BenchVm, IN_VM, type Ran, ROOT } from "./vm.ts";
@@ -146,9 +148,19 @@ export async function byScript(vm: BenchVm, n: number): Promise<Record<"gerbers"
   return { gerbers, drc, edit, step };
 }
 
-/** One run through the screen: its commands counted, its targets from the accessibility tree, the careful policy. */
-function screen(vm: BenchVm) {
+/** What a run through the screen asks of its VM: commands as the agent runs them, and the bench's own. */
+type OnScreen = Pick<BenchVm, "agent" | "raw">;
+
+/**
+ * One run through the screen: its commands counted, its targets from the accessibility tree, the careful policy. A
+ * press that finds nothing leaves what was on the screen, to look at (`keep`: bench/out/hardware/, never committed), in
+ * files named by the run's `label`, so a miss says why.
+ */
+export function screen(vm: OnScreen, label: string, opts: { keep?: string; pause?: (ms: number) => Promise<unknown> } = {}) {
+  const keep = opts.keep ?? join(OUT_DIR, "hardware");
+  const pause = opts.pause ?? ((ms: number) => Bun.sleep(ms));
   let commands = 0;
+  let misses = 0;
   const sh = async (command: string): Promise<Ran> => {
     commands++;
     return vm.agent(command);
@@ -158,9 +170,26 @@ function screen(vm: BenchVm) {
     for (let i = 0; i < tries; i++) {
       const said = (await sh("desktop focus")).stdout.trim();
       if (title.test(said)) return said;
-      await Bun.sleep(200);
+      await pause(200);
     }
     return null;
+  };
+  /**
+   * What was on the screen as a press found nothing, by the bench's own looks (no agent's turn): the focus, the windows,
+   * the tree and the screen itself, kept; the focus, and where they went, said.
+   */
+  const kept = async (missed: string): Promise<string> => {
+    const said = async (argv: string[]) => (await vm.raw(argv)).stdout.trim();
+    const focus = await said(["desktop", "focus"]);
+    const windows = await said(["desktop", "windows"]);
+    const tree = await said(["desktop", "tree"]);
+    const shot = await vm.raw(["sh", "-c", "f=/tmp/failed.png; desktop shot $f >/dev/null && base64 -w0 $f"]);
+    const base = join(keep, `failed-${label}-${++misses}`);
+    mkdirSync(keep, { recursive: true });
+    writeFileSync(`${base}.txt`, `${[missed, focus, windows, tree].join("\n\n")}\n`);
+    const png = shot.code === 0 && shot.stdout.trim() !== "";
+    if (png) writeFileSync(`${base}.png`, Buffer.from(shot.stdout.trim(), "base64"));
+    return `${focus.split("\n")[0]}; kept: ${base}.txt${png ? " and .png" : ""}`;
   };
   /** The first of `roles` named like `name` on the screen, pressed where `desktop find` says it is. */
   const press = async (roles: string[], name: string): Promise<void> => {
@@ -172,18 +201,27 @@ function screen(vm: BenchVm) {
           return;
         }
       }
-      await Bun.sleep(300);
+      await pause(300);
     }
-    throw new Error(`no ${roles.join(" or ")} named like "${name}" on the screen`);
+    const missed = `no ${roles.join(" or ")} named like "${name}" on the screen`;
+    throw new Error(`${missed} (${await kept(missed)})`);
   };
-  return { sh, settle, focusIs, press, commands: () => commands };
+  /**
+   * The app quit by its own key, as a person quits it: where it asks first whether to save (its focus like `asks`), its
+   * changes discarded by the button named like `discard`, so it ends by its quit, never by stopAll's kill.
+   */
+  const quit = async (asks: RegExp, discard: string): Promise<void> => {
+    await sh("desktop key ctrl+q");
+    if (await focusIs(asks, 10)) await press(["push button"], discard);
+  };
+  return { sh, settle, focusIs, press, quit, commands: () => commands };
 }
 
 /** C0's examples through the screen, `n` runs each, as C0 found them done (KiCad's Plot, FreeCAD's STEP export). */
 export async function byScreen(vm: BenchVm, n: number): Promise<Record<"kicadPlot" | "freecadStep", Case>> {
   const counted: Record<"kicadPlot" | "freecadStep", number> = { kicadPlot: 0, freecadStep: 0 };
-  const kicadPlot = await timed(n, async () => {
-    const s = screen(vm);
+  const kicadPlot = await timed(n, async (i) => {
+    const s = screen(vm, `kicad-plot-${i}`);
     const t0 = performance.now();
     let acted = 0;
     try {
@@ -208,7 +246,9 @@ export async function byScreen(vm: BenchVm, n: number): Promise<Record<"kicadPlo
       }
       await s.press(["push button"], "Close").catch(() => {});
       await s.settle();
-      await s.sh("desktop key ctrl+q");
+      // (The Plot keeps its settings in the board, so KiCad asks whether to save it as it quits: discarded, the board
+      // stays as the case found it, and KiCad ends by its quit. The gate is the plot: stopAll is still there after.)
+      await s.quit(/Save Changes\?/, "Discard").catch(() => {});
       return { ms: acted, ok: plotted(listing), why: `the plot made: ${listing.split("\n").filter((f) => f.includes(".g")).join(" ") || "nothing"}` };
     } catch (error) {
       return { ms: acted || performance.now() - t0, ok: false, why: (error as Error).message };
@@ -218,7 +258,7 @@ export async function byScreen(vm: BenchVm, n: number): Promise<Record<"kicadPlo
     }
   });
   const freecadStep = await timed(n, async (i) => {
-    const s = screen(vm);
+    const s = screen(vm, `freecad-step-${i}`);
     const t0 = performance.now();
     let acted = 0;
     const file = `${OUT}/screen-${i}.step`;

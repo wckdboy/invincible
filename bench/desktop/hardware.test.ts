@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { drcAgrees, foundAt, plotted } from "./hardware.ts";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { drcAgrees, foundAt, plotted, screen } from "./hardware.ts";
+import type { Ran } from "./vm.ts";
 
 /* What the hardware suite's gates read (C1 step 11): a plot's files, a DRC's exit and report, where `desktop find` says a node is. */
 
@@ -41,5 +45,66 @@ describe("where desktop find says a node is", () => {
     expect(foundAt('640,450 · [3] push button "Plot" at 640,450 (80x30)\n')).toEqual([640, 450]);
     expect(foundAt("")).toBeNull();
     expect(foundAt('desktop: no push button named like "Plot" is on the screen\n')).toBeNull();
+  });
+});
+
+/** A VM whose desktop answers each command as `answer` says (null: it found nothing), every command it was asked kept. */
+function answering(answer: (command: string) => string | null) {
+  const asked: string[] = [];
+  const reply = (command: string): Ran => {
+    asked.push(command);
+    const out = answer(command);
+    return { code: out === null ? 1 : 0, stdout: out ?? "", stderr: "", ms: 1 };
+  };
+  return { asked, vm: { agent: async (command: string) => reply(command), raw: async (argv: string[]) => reply(argv.join(" ")) } };
+}
+const nowait = { pause: async () => {} };
+/** A PNG's signature: enough of one to be kept as one. */
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64");
+
+describe("a screen case's press that finds nothing", () => {
+  test("keeps what was on the screen, the focus, the windows, the tree and the screen itself, says where, and none of that is the agent's turns", async () => {
+    const keep = mkdtempSync(join(tmpdir(), "invincible-bench-kept-"));
+    const { vm } = answering((command) => {
+      if (command.startsWith("desktop find ")) return null;
+      if (command === "desktop focus") return 'focus: pcbnew "Loading PCB"';
+      if (command === "desktop windows") return '"board — PCB Editor" (pcbnew)\n"Loading PCB" (pcbnew) · focused';
+      if (command === "desktop tree") return '[1] progress bar "Loading" at 640,400 (300x20)';
+      if (command.includes("desktop shot")) return PNG;
+      return "";
+    });
+    const s = screen(vm, "kicad-plot-3", { keep, ...nowait });
+    const error = (await s.press(["menu item"], "Plot...").catch((e: Error) => e)) as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('no menu item named like "Plot..." on the screen');
+    expect(error.message).toContain('focus: pcbnew "Loading PCB"');
+    expect(error.message).toContain(join(keep, "failed-kicad-plot-3-1"));
+    expect(readdirSync(keep).sort()).toEqual(["failed-kicad-plot-3-1.png", "failed-kicad-plot-3-1.txt"]);
+    expect(readFileSync(join(keep, "failed-kicad-plot-3-1.png")).toString("base64")).toBe(PNG);
+    const kept = readFileSync(join(keep, "failed-kicad-plot-3-1.txt"), "utf8");
+    for (const part of ['no menu item named like "Plot..."', 'focus: pcbnew "Loading PCB"', '"Loading PCB" (pcbnew) · focused', 'progress bar "Loading"']) expect(kept).toContain(part);
+    // (Its ten looks for the item are the agent's; the bench's own, for what was there, aren't.)
+    expect(s.commands()).toBe(10);
+  });
+});
+
+describe("KiCad's quit", () => {
+  test("answers its question to save by discarding, so KiCad ends by its own quit and the board stays as the case found it", async () => {
+    let quitting = false;
+    const { vm, asked } = answering((command) => {
+      if (command === "desktop key ctrl+q") return (quitting = true), "pressed ctrl+q";
+      if (command === "desktop focus") return quitting ? 'focus: pcbnew "Save Changes?"' : 'focus: pcbnew "board — PCB Editor"';
+      if (command === "desktop find 'push button' 'Discard'") return quitting ? '412,388 · [7] push button "Discard Changes" at 412,388 (120x30)' : null;
+      if (command.startsWith("desktop click ")) return "clicked";
+      return "";
+    });
+    await screen(vm, "kicad-plot-1", { keep: mkdtempSync(join(tmpdir(), "invincible-bench-kept-")), ...nowait }).quit(/Save Changes\?/, "Discard");
+    expect(asked.filter((c) => !c.startsWith("desktop focus"))).toEqual(["desktop key ctrl+q", "desktop find 'push button' 'Discard'", "desktop click 412 388"]);
+  });
+
+  test("asks nothing more of an app that ends without asking", async () => {
+    const { vm, asked } = answering((command) => (command === "desktop focus" ? 'focus: Chromium "about:blank - Chromium"' : command.startsWith("desktop find ") ? null : ""));
+    await screen(vm, "kicad-plot-2", { keep: mkdtempSync(join(tmpdir(), "invincible-bench-kept-")), ...nowait }).quit(/Save Changes\?/, "Discard");
+    expect(asked.filter((c) => !c.startsWith("desktop focus"))).toEqual(["desktop key ctrl+q"]);
   });
 });

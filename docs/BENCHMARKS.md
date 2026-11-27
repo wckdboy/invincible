@@ -143,6 +143,9 @@ agent's own path, each to a gate that reads what was made, never the screen:
 - **Through the screen, where a person would** (the careful policy; the apps started with `desktop app`, their targets
   from the accessibility tree with `desktop find`): KiCad's Plot (File, Plot..., Plot), its Gerbers there after; and
   FreeCAD's STEP export (Model, Block, Export, the STEP filter, a name), read back. Each run's commands are counted.
+  A press that finds nothing keeps what was on the screen (the focus, the windows, the tree and a screenshot, in
+  `bench/out/hardware/`), so a miss says why; KiCad's question to save the board as it quits, after the Plot, is
+  answered by discarding, so KiCad ends by its quit.
 - **Held:** by script, each within a second and through its gate every time; through the screen, every time, KiCad's
   Plot within 10 s and FreeCAD's STEP export within 20 s (C0 measured 6.3 to 6.8 s and 13.8 to 17.7 s); the image at
   most 6 GB (C0's: 5.53).
