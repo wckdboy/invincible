@@ -42,6 +42,7 @@ import sh.invincible.bot.core.Spend
 import sh.invincible.bot.core.TeamTask
 import sh.invincible.bot.core.UsageMeter
 import sh.invincible.bot.core.bool
+import sh.invincible.bot.core.double
 import sh.invincible.bot.core.get
 import sh.invincible.bot.core.int
 import sh.invincible.bot.core.list
@@ -76,8 +77,12 @@ data class Inbox(
     val notices: List<Json> = emptyList(),
     /** Its asks to use a Mac itself, and its sessions on one now. */
     val screens: List<Json> = emptyList(),
+    /** Loops it drafted when you asked for one in a chat: each runs nothing until you add it. */
+    val drafts: List<Json> = emptyList(),
+    /** Connectors it or an agent asked for: to add, or (one that's its alone) to let the asker use. */
+    val connectors: List<Json> = emptyList(),
 ) {
-    val count: Int get() = actions.size + questions.size + keys.size + pairings.size + facts.size + notices.size + screens.size
+    val count: Int get() = actions.size + questions.size + keys.size + pairings.size + facts.size + notices.size + screens.size + drafts.size + connectors.size
 
     companion object {
         /** The notices still open: one you dismissed stays quiet until it changes. */
@@ -427,6 +432,8 @@ class AppModel(context: Context) {
         Route("/api/about-you", listOf("aboutYou"), 5_000),
         Route("/api/notices", listOf("notices"), 5_000),
         Route("/api/screen/sessions", listOf("screenSessions"), 5_000),
+        Route("/api/loops/drafts", listOf("loopDrafts"), 5_000),
+        Route("/api/connectors/requests", listOf("connectorRequests"), 5_000),
         // (Spend moves as turns, runs and the agents' work do: no topic of its own. Read now and then while they move.)
         Route("/api/usage/meter", listOf("turns", "runs", "team"), 60_000, gapMs = 30_000),
         Route("/api/fleet", listOf("fleet"), 60_000),
@@ -582,6 +589,8 @@ class AppModel(context: Context) {
             facts = answers["/api/about-you"]?.let { it["proposed"].list } ?: _inbox.value.facts,
             notices = answers["/api/notices"]?.let { Inbox.open(it["notices"].list) } ?: _inbox.value.notices,
             screens = answers["/api/screen/sessions"]?.let { Inbox.live(it["sessions"].list) } ?: _inbox.value.screens,
+            drafts = answers["/api/loops/drafts"]?.let { it["drafts"].list } ?: _inbox.value.drafts,
+            connectors = answers["/api/connectors/requests"]?.let { it["requests"].list } ?: _inbox.value.connectors,
         )
         if (inbox != _inbox.value) _inbox.value = inbox
         answers["/api/usage/meter"]?.let(UsageMeter::of)?.let { if (it != _usage.value) _usage.value = it }
@@ -595,7 +604,7 @@ class AppModel(context: Context) {
         // What needs you, one count for every place: the work's own rows that only you can move on, and what waits beside.
         val drawn = team ?: _table.value.snapshot
         val work = drawn?.let { Work.attended(it.agents, tasks ?: _table.value.tasks, it.seen, _projects.value, asks, now) }
-        val needs = Work.needsCount(inbox.actions.size, work?.needs ?: emptyList(), inbox.pairings.size, inbox.keys.size, inbox.questions.map { it["expires"].long }, inbox.screens.size, now)
+        val needs = Work.needsCount(inbox.actions.size, work?.needs ?: emptyList(), inbox.pairings.size, inbox.keys.size, inbox.questions.map { it["expires"].long }, inbox.screens.size, inbox.drafts.size, inbox.connectors.size, now)
         if (needs != _needsYou.value) {
             _needsYou.value = needs
             PerfProbe.mark("needs $needs")
@@ -684,6 +693,41 @@ class AppModel(context: Context) {
     }
 
     /** Your answer to its ask to use a Mac itself: its for its minutes from now, or not. */
+    /** Adds a loop it drafted, as it was drafted (POST /api/loops, naming the draft): it runs from now. A loop a webhook
+     * wakes comes back with its secret, said this once (null: none). */
+    suspend fun addLoop(draft: Json): String? {
+        val wakes = draft["wakes"].list
+        val cooldown = draft["cooldownMs"].double?.takeIf { it != 0.0 }
+        val added = client?.post(
+            "/api/loops",
+            Json.obj(
+                "name" to draft["name"], "schedule" to draft["schedule"], "tz" to draft["tz"], "task" to draft["task"],
+                "wakes" to wakes.takeIf { it.isNotEmpty() }?.let { Json.Arr(it) }, "cooldownMs" to cooldown, "on" to draft["on"].string,
+                "label" to draft["label"].string, "draft" to draft["id"],
+            ),
+        )
+        refresh()
+        return added?.get("hookSecret")?.string
+    }
+
+    /** Dismisses a loop it drafted: nothing is added. */
+    suspend fun dismissDraft(id: String) {
+        client?.post("/api/loops/drafts/dismiss", Json.obj("id" to id))
+        refresh()
+    }
+
+    /** Lets the asker use a connector that's its alone, until you stop it (POST /api/connectors/access). */
+    suspend fun allowConnector(request: Json) {
+        client?.post("/api/connectors/access", Json.obj("id" to request["connector"], "agent" to request["agent"], "allow" to true))
+        refresh()
+    }
+
+    /** Dismisses a connector asked for: nothing is installed or allowed. */
+    suspend fun dismissConnectorRequest(id: String) {
+        client?.post("/api/connectors/requests/dismiss", Json.obj("id" to id))
+        refresh()
+    }
+
     suspend fun decideScreen(id: String, allow: Boolean) {
         client?.post("/api/screen/decide", Json.obj("id" to id, "allow" to allow))
         refresh()

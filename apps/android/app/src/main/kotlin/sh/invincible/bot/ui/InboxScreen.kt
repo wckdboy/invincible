@@ -45,6 +45,7 @@ import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.app.Inbox
 import sh.invincible.bot.app.Table
 import sh.invincible.bot.core.Json
+import sh.invincible.bot.core.Loops
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Roster
 import sh.invincible.bot.core.bool
@@ -63,7 +64,7 @@ import sh.invincible.bot.core.Primary
  * at once, signed by this phone's key; nothing here is answered for you. [watch]: a Mac it is using, by its node.
  */
 @Composable
-fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit) {
+fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit, openConnectors: () -> Unit = {}) {
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
     var said by remember { mutableStateOf<String?>(null) }
@@ -77,6 +78,8 @@ fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit) 
         }
     }
     val asker = askerIn(table)
+    // A loop a webhook wakes, just added: its secret, said this once (its card has left the list by then).
+    var hook by remember { mutableStateOf<Pair<String, String>?>(null) }
     // An approval opened from its notification's Approve…: its card first, the whole request in front of you.
     val asked by app.approvalAsked.collectAsState()
     val first = asked?.let { id -> inbox.actions.firstOrNull { it["id"].string == id } }
@@ -115,6 +118,14 @@ fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit) 
         items(inbox.keys, key = { "k:${it["name"].string}" }) { k ->
             KeyAsked(k, asker(k["requestedBy"].string ?: ""), seal = { value -> act { app.sealKey(k["name"].string!!, value, k["provider"].string) } }, dismiss = { act { app.dismissKey(k["name"].string!!) } })
         }
+        if (inbox.drafts.isNotEmpty()) item { SectionTitle("Loops ${Primary.name} drafted") }
+        items(inbox.drafts, key = { "d:${it["id"].string}" }) { d ->
+            LoopDrafted(d, add = { act { app.addLoop(d)?.let { hook = (d["name"].string ?: "") to it } } }, dismiss = { act { app.dismissDraft(d["id"].string!!) } })
+        }
+        if (inbox.connectors.isNotEmpty()) item { SectionTitle("Connectors asked for") }
+        items(inbox.connectors, key = { "c:${it["id"].string}" }) { c ->
+            ConnectorAsked(c, allow = { act { app.allowConnector(c) } }, dismiss = { act { app.dismissConnectorRequest(c["id"].string!!) } }, openConnectors = openConnectors)
+        }
         if (inbox.facts.isNotEmpty()) item { SectionTitle("Facts it noticed about you") }
         items(inbox.facts, key = { "f:${it["id"].string}" }) { f ->
             Fact(f, keep = { words -> act { app.keepFact(f["id"].string!!, words) } }, drop = { act { app.dropFact(f["id"].string!!) } })
@@ -124,6 +135,81 @@ fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit) 
         item { Spacer(Modifier.height(Space.s10)) }
     }
     }
+    hook?.let { (name, secret) -> HookSecret(name, secret) { hook = null } }
+}
+
+/**
+ * A loop it drafted when you asked for one in a chat (the web's loopDraftCard): what it is, when it runs and where, what
+ * it runs and what else wakes it (Loops, the web's words), why, and whether it replaces one of yours; then Add loop or
+ * Dismiss. It runs nothing until you add it.
+ */
+@Composable
+internal fun LoopDrafted(d: Json, add: () -> Unit, dismiss: () -> Unit) {
+    val name = d["name"].string ?: ""
+    val label = d["label"].string
+    val schedule = d["schedule"].string ?: ""
+    val tz = d["tz"].string ?: "UTC"
+    val replaces = d["replaces"].bool == true
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+    Panel {
+        Text(label ?: name, style = MaterialTheme.typography.titleMediumEmphasized)
+        if (label != null) Text(name, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace), color = quiet)
+        Text(
+            (if (schedule == "never") "Only when woken" else schedule + if (tz != "UTC") " ($tz)" else "") + (d["on"].string?.let { " on $it" } ?: ""),
+            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+        )
+        Text(Loops.describeTask(d["task"]), style = MaterialTheme.typography.bodyMedium)
+        Loops.describeWakes(d["wakes"].list, d["cooldownMs"].double).takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        d["why"].string?.takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = quiet) }
+        if (replaces) Text("Adding it replaces your loop $name.", style = MaterialTheme.typography.bodySmall, color = LocalBrand.current.failed)
+        Text("Drafted by ${if (d["by"].string == "primary") Primary.name else d["by"].string ?: "someone"}", style = MaterialTheme.typography.bodySmall, color = quiet)
+        Decision(no = "Dismiss", yes = if (replaces) "Add, replacing yours" else "Add loop", onNo = dismiss, onYes = add)
+    }
+}
+
+/**
+ * A connector it or an agent asked for (the web's connectorRequestCard): who asked and why. One that's its alone,
+ * installed, it lets the asker use (Allow); one it doesn't have is added from Connectors; or it's dismissed. Asking
+ * installs nothing.
+ */
+@Composable
+internal fun ConnectorAsked(c: Json, allow: () -> Unit, dismiss: () -> Unit, openConnectors: () -> Unit) {
+    val name = c["label"].string ?: c["connector"].string ?: "a connector"
+    val by = c["by"].string ?: "An agent"
+    val access = c["access"].bool == true
+    Panel {
+        Text(if (access) "$by asks to use $name" else "$by asks for $name", style = MaterialTheme.typography.titleMediumEmphasized)
+        c["why"].string?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        Text(
+            if (access) "$name is ${Primary.name}'s alone: allowed, $by may read it too, until you stop it." else "Asking installs nothing: it waits for you to add it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (access) {
+            Decision(no = "Dismiss", yes = "Allow $by", onNo = dismiss, onYes = allow)
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+                OutlinedButton(onClick = dismiss) { Text("Dismiss") }
+                TextButton(onClick = openConnectors) { Text("Add it in Connectors") }
+            }
+        }
+    }
+}
+
+/** A loop a webhook wakes, just added: its secret, shown this once, to select and keep where the sender keeps its keys. */
+@Composable
+internal fun HookSecret(name: String, secret: String, done: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = done,
+        title = { Text("The webhook of $name") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s2)) {
+                Text("Its secret, shown this once. Keep it where the sender keeps its keys; a new one, from the loop on a computer, retires it.")
+                androidx.compose.foundation.text.selection.SelectionContainer { Text(secret, fontFamily = FontFamily.Monospace) }
+            }
+        },
+        confirmButton = { TextButton(onClick = done) { Text("Done") } },
+    )
 }
 
 /** A device asking to join: its name and the code it shows, to compare before you let it in. */

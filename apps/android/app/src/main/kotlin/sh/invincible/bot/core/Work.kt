@@ -467,8 +467,8 @@ object Work {
      * machine. What the node noticed (a notice, a fact about you) is news, not a decision: shown in the Inbox, counted
      * nowhere. (The iPhone's Session.needsCount.)
      */
-    fun needsCount(approvals: Int, needs: List<Row>, pairings: Int, keys: Int, questionsUntil: List<Long?>, screens: Int, now: Long): Int =
-        approvals + needs.count { it.word != "Allow?" } + pairings + keys + questionsUntil.count { (it ?: Long.MAX_VALUE) > now } + screens
+    fun needsCount(approvals: Int, needs: List<Row>, pairings: Int, keys: Int, questionsUntil: List<Long?>, screens: Int, loops: Int, connectors: Int, now: Long): Int =
+        approvals + needs.count { it.word != "Allow?" } + pairings + keys + questionsUntil.count { (it ?: Long.MAX_VALUE) > now } + screens + loops + connectors
 
     fun inboxBeyond(inbox: Int, asks: List<Ask>, needs: List<Row>): Int {
         val asking = needs.filter { it.word == "Allow?" }.map { it.agent }.toSet()

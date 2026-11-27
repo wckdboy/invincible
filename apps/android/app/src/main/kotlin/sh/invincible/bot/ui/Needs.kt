@@ -79,7 +79,7 @@ private class Decision(val key: String, val lead: Lead, val who: String, val wha
  * first [limit] and "N more" ([openAll]: Needs you). [openTask] opens a task's thread, [watch] a machine it is using.
  */
 @Composable
-fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit) {
+fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (String) -> Unit, openAll: () -> Unit, watch: (String) -> Unit, openConnectors: () -> Unit = {}) {
     val inbox by app.inbox.collectAsState()
     val table by app.table.collectAsState()
     val count by app.needsYou.collectAsState()
@@ -89,6 +89,8 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
     var busy by remember { mutableStateOf<Set<String>>(emptySet()) }
     var sheet by remember { mutableStateOf<Pair<String, @Composable () -> Unit>?>(null) }
     var confirming by remember { mutableStateOf<Json?>(null) }
+    // A loop a webhook wakes, just added: its secret, said this once.
+    var hook by remember { mutableStateOf<Pair<String, String>?>(null) }
     fun act(key: String, block: suspend () -> Unit) {
         busy = busy + key
         scope.launch {
@@ -171,6 +173,38 @@ fun NeedsYou(app: AppModel, work: Work.Attended, limit: Int = 3, openTask: (Stri
         val see = { sheet = name to @Composable { MacSession(s, answer = { allow -> act("s:${s["id"].string}") { app.decideScreen(s["id"].string!!, allow) }; sheet = null }, end = { act("s:${s["id"].string}") { app.endScreen(s["id"].string!!) }; sheet = null }, watch = { sheet = null; s["node"].string?.let(watch) }) } }
         decisions += Decision("s:${s["id"].string}", Lead.Icon(MonitorIcon), if (allowed) "${Primary.name} is using $name" else "${Primary.name} asks to use $name", s["why"].string ?: "", answer = Answer(if (allowed) "See it…" else "Answer…", onClick = see), rest = emptyList(), open = see)
     }
+    // A loop it drafted and a connector asked for: decisions, as the web and the iPhone have them, each its card in a sheet.
+    for (d in inbox.drafts) {
+        val name = d["label"].string ?: d["name"].string ?: "a loop"
+        val key = "d:${d["id"].string}"
+        val review = {
+            sheet = "A loop: $name" to @Composable {
+                LoopDrafted(
+                    d,
+                    add = { act(key) { app.addLoop(d)?.let { hook = (d["name"].string ?: "") to it } }; sheet = null },
+                    dismiss = { act(key) { app.dismissDraft(d["id"].string!!) }; sheet = null },
+                )
+            }
+        }
+        decisions += Decision(key, Lead.Icon(ClockIcon), "${Primary.name} drafted a loop", name, answer = Answer("Review…", onClick = review), rest = emptyList(), open = review)
+    }
+    for (c in inbox.connectors) {
+        val name = c["label"].string ?: c["connector"].string ?: "a connector"
+        val key = "c:${c["id"].string}"
+        val review = {
+            sheet = "A connector: $name" to @Composable {
+                ConnectorAsked(
+                    c,
+                    allow = { act(key) { app.allowConnector(c) }; sheet = null },
+                    dismiss = { act(key) { app.dismissConnectorRequest(c["id"].string!!) }; sheet = null },
+                    openConnectors = { sheet = null; openConnectors() },
+                )
+            }
+        }
+        decisions += Decision(key, Lead.Icon(PlugIcon), "${c["by"].string ?: "An agent"} asks for a connector", name, answer = Answer("Review…", onClick = review), rest = emptyList(), open = review)
+    }
+    // (Before the list may end: the loop just added has left it by the time its secret is said.)
+    hook?.let { (name, secret) -> HookSecret(name, secret) { hook = null } }
     if (decisions.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         // (The one count, as Home's line says it: the decisions below are the same ones.)

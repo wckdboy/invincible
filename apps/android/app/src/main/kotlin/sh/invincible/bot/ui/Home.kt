@@ -136,7 +136,7 @@ fun HomeScreen(app: AppModel, nav: Nav, drawer: (() -> Unit)?, search: () -> Uni
                 }
                 return@LazyColumn
             }
-            item(key = "needs") { NeedsYou(app, work, openTask = { nav.go(Nav.task(it)) }, openAll = { nav.go("inbox") }, watch = { nav.go("mac:$it") }) }
+            item(key = "needs") { NeedsYou(app, work, openTask = { nav.go(Nav.task(it)) }, openAll = { nav.go("inbox") }, watch = { nav.go("mac:$it") }, openConnectors = { nav.go("connectors") }) }
             if (work.projects.size > 1) item(key = "filters") { ProjectFilters(work.projects, filtered) { filtered = it } }
             // The work by proof: in hand first (a running task one tap from here), then proven, then failed; the rest folds.
             val groups = Work.ByProof(shown!!)

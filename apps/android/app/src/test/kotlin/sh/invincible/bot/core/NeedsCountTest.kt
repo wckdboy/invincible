@@ -23,13 +23,21 @@ class NeedsCountTest {
             keys = 1,
             questionsUntil = listOf(now + 60_000, now - 1, null),
             screens = 1,
+            loops = 0,
+            connectors = 0,
             now = now,
         )
         assertEquals(2 + 2 + 1 + 1 + 2 + 1, count)
     }
 
+    /** A loop it drafted and a connector asked for are decisions, as the web counts them: every client counts the same. */
+    @Test fun aDraftedLoopAndAConnectorRequestAreDecisions() {
+        assertEquals(3, Work.needsCount(0, emptyList(), 0, 0, emptyList(), 0, loops = 2, connectors = 1, now = 0))
+        assertEquals(7, Work.needsCount(1, emptyList(), 1, 1, listOf(10L, -1L), 1, loops = 1, connectors = 1, now = 0))
+    }
+
     @Test fun newsIsCountedNowhere() {
         // Nothing to decide: notices and facts the node noticed aren't among what's counted at all.
-        assertEquals(0, Work.needsCount(0, emptyList(), 0, 0, emptyList(), 0, 0))
+        assertEquals(0, Work.needsCount(0, emptyList(), 0, 0, emptyList(), 0, 0, 0, 0))
     }
 }
