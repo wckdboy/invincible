@@ -4,8 +4,9 @@ import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type Team
  * Looking into an agent's workspace (its VM's /work, or the primary's computer's) from your devices: a folder's entries, one
  * file, and what a task changed in its repository. Read only, and yours alone (the routes are owner-only). Each look is
  * one of these fixed scripts, run in the VM with Python as the VM's own user, its only input the path or the task given
- * as arguments (never in the script's text). What comes back is bounded in the VM, checked here, and a text or a diff
- * has anything that looks like a key redacted before it leaves the node.
+ * as arguments (never in the script's text). A folder and a file are looked at within /work alone, never through a link
+ * out of it (WALK). What comes back is bounded in the VM, checked here, and a text or a diff has anything that looks like
+ * a key redacted before it leaves the node.
  */
 
 /** A file shown whole up to this many bytes (its bytes go base64 through the VM's 1 MB of output). */
@@ -17,35 +18,108 @@ export const LIST_LIMIT = 2_000;
 /** Kept from view, whatever is asked: the file that holds the VM's gateway token. */
 export const KEPT_FROM_VIEW = ["/work/.invincible-gateway.json"] as const;
 
-/** `python3 -I -c LIST <path>`: a folder's entries, folders and files each with its size and when it changed. */
-export const LIST_SCRIPT = `import json,os,stat,sys
+/**
+ * The way to what a look names, within /work alone (its second argument names another, for tests): each folder on the
+ * way and the last one opened from the one before it, never by its path, with O_NOFOLLOW. A link on the way is read, not
+ * followed, and its target walked in its place: within /work it works as ever; one that leads out (an absolute target
+ * elsewhere, or `..` above /work) is refused, and so is a chain of more than 40. What is read is what was opened, so a
+ * link swapped in as it reads can change which name is walked, never take it outside (27 November 2026: a link an agent
+ * left in /work could make the node read a file outside it, a tool's sign-in among them).
+ */
+const WALK = `import base64,errno,json,os,stat,sys
 p=sys.argv[1]
-try:
-    names=sorted(os.listdir(p),key=lambda n:n.lower())
-except Exception as e:
-    print(json.dumps({"error":type(e).__name__}));sys.exit(0)
-out=[]
+root=sys.argv[2] if len(sys.argv)>2 else '/work'
+KEPT=${JSON.stringify(KEPT_FROM_VIEW.map((path) => path.slice("/work/".length)))}
+def out(**said):
+    print(json.dumps(said));sys.exit(0)
+def walk(p,want):
+    if p!=root and not p.startswith(root+'/'):
+        out(error='OutsideWorkspace')
+    rest=[c for c in p[len(root):].split('/') if c]
+    held=[os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)]
+    names=[];links=0
+    while rest:
+        c=rest.pop(0)
+        if c=='.':
+            continue
+        if c=='..':
+            if len(held)==1:
+                out(error='OutsideWorkspace')
+            os.close(held.pop());names.pop();continue
+        last=not rest
+        flags=os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|(os.O_NONBLOCK if last and want=='file' else os.O_DIRECTORY)
+        try:
+            fd=os.open(c,flags,dir_fd=held[-1])
+        except OSError as e:
+            # A link (by lstat: a link opened as a folder is ELOOP on Linux, ENOTDIR on a Mac) is read. Not a link, its
+            # own error, unless it was one as it was opened (ELOOP) and changed since; and one that changed as it was
+            # read: either walked again, within the links' bound.
+            try:
+                seen=os.stat(c,dir_fd=held[-1],follow_symlinks=False)
+            except OSError:
+                seen=None
+            to=None
+            if seen is not None and stat.S_ISLNK(seen.st_mode):
+                try:
+                    to=os.readlink(c,dir_fd=held[-1])
+                except OSError:
+                    pass
+            elif e.errno!=errno.ELOOP:
+                raise e
+            links+=1
+            if links>40:
+                out(error='TooManyLinks')
+            if to is None:
+                rest.insert(0,c);continue
+            if to.startswith('/'):
+                if to!=root and not to.startswith(root+'/'):
+                    out(error='OutsideWorkspace')
+                for d in held[1:]:
+                    os.close(d)
+                held=held[:1];names=[];to=to[len(root):]
+            rest=[x for x in to.split('/') if x]+rest
+            continue
+        held.append(fd);names.append(c)
+    return held,names
+`;
+
+/** `python3 -I -c LIST <path>`: a folder's entries, folders and files each with its size and when it changed, a link as a link. */
+export const LIST_SCRIPT = `${WALK}try:
+    held,_=walk(p,'dir')
+    names=sorted(os.listdir(held[-1]),key=lambda n:n.lower())
+except OSError as e:
+    out(error=type(e).__name__)
+entries=[]
 for n in names[:${LIST_LIMIT}]:
     try:
-        s=os.lstat(os.path.join(p,n))
+        s=os.stat(n,dir_fd=held[-1],follow_symlinks=False)
     except Exception:
         continue
     k='link' if stat.S_ISLNK(s.st_mode) else 'dir' if stat.S_ISDIR(s.st_mode) else 'file' if stat.S_ISREG(s.st_mode) else 'other'
-    out.append({"name":n,"kind":k,"size":s.st_size,"modified":int(s.st_mtime*1000)})
-print(json.dumps({"entries":out,"more":len(names)>${LIST_LIMIT}}))`;
+    entries.append({"name":n,"kind":k,"size":s.st_size,"modified":int(s.st_mtime*1000)})
+out(entries=entries,more=len(names)>${LIST_LIMIT})`;
 
-/** `python3 -I -c READ <path>`: one regular file's first READ_LIMIT bytes, base64, with its size and when it changed. */
-export const READ_SCRIPT = `import base64,json,os,stat,sys
-p=sys.argv[1]
-try:
-    s=os.stat(p)
-except Exception as e:
-    print(json.dumps({"error":type(e).__name__}));sys.exit(0)
+/**
+ * `python3 -I -c READ <path>`: one regular file's first READ_LIMIT bytes, base64, with its size and when it changed. Not
+ * the VM's lease (KEPT_FROM_VIEW), whatever leads to it: its name, a link to it, or the same file under another name.
+ */
+export const READ_SCRIPT = `${WALK}try:
+    held,names=walk(p,'file')
+    s=os.fstat(held[-1])
+except OSError as e:
+    out(error=type(e).__name__)
 if not stat.S_ISREG(s.st_mode):
-    print(json.dumps({"error":"NotAFile"}));sys.exit(0)
-with open(p,'rb') as f:
+    out(error='NotAFile')
+for kept in KEPT:
+    try:
+        k=os.stat(kept,dir_fd=held[0],follow_symlinks=False)
+    except OSError:
+        k=None
+    if '/'.join(names)==kept or (k is not None and (k.st_dev,k.st_ino)==(s.st_dev,s.st_ino)):
+        out(error='KeptFromView')
+with os.fdopen(held[-1],'rb') as f:
     b=f.read(${READ_LIMIT}+1)
-print(json.dumps({"size":s.st_size,"modified":int(s.st_mtime*1000),"cut":len(b)>${READ_LIMIT},"data":base64.b64encode(b[:${READ_LIMIT}]).decode()}))`;
+out(size=s.st_size,modified=int(s.st_mtime*1000),cut=len(b)>${READ_LIMIT},data=base64.b64encode(b[:${READ_LIMIT}]).decode())`;
 
 /**
  * `python3 -I -c CHANGES <worktree> <kept>`: what a task changed in its worktree (a task's own git worktree, /work/tasks/<id>,
@@ -96,6 +170,9 @@ function said(stdout: string): Record<string, unknown> {
       NotAFile: ["that isn't a file", 409],
       PermissionError: ["the workspace's user may not read that", 403],
       NotARepository: ["that isn't a git repository", 404],
+      OutsideWorkspace: ["that is outside the workspace", 403],
+      TooManyLinks: ["too many links on the way to it", 422],
+      KeptFromView: ["kept from view: it holds this VM's gateway token", 403],
     };
     const [message, status] = why[error] ?? ["it couldn't be read", 422];
     throw new LookError(message, status);
