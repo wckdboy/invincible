@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BranchName } from "@invincible/core";
@@ -25,7 +25,7 @@ afterAll(() => {
   if (home) rmSync(home, { recursive: true, force: true });
 });
 const run = (script: string, ...args: string[]) => {
-  const ran = Bun.spawnSync(["python3", "-c", script, ...args], { stdout: "pipe", stderr: "pipe", env });
+  const ran = Bun.spawnSync(["python3", "-I", "-c", script, ...args], { stdout: "pipe", stderr: "pipe", env });
   expect(ran.exitCode).toBe(0);
   return ran.stdout.toString();
 };
@@ -110,5 +110,92 @@ describe("a project's checkout, as git has it", () => {
   test("a branch's name is held to what git takes before it reaches the VM", () => {
     for (const name of ["main", "fix/one", "release-0.4", "a_b.c"]) expect(BranchName.safeParse(name).success).toBe(true);
     for (const name of ["-x", "/x", ".x", "a..b", "x/", "x.", "x.lock", "a b", "a;rm -rf", ""]) expect(BranchName.safeParse(name).success).toBe(false);
+  });
+});
+
+/*
+ * A checkout's own git settings, held off (as a task's changes are, workspace-look.ts CHANGES_SCRIPT; the apps thread's
+ * finding, 27 November 2026). These are run as the VM runs them, with nothing holding git's settings off but the scripts
+ * themselves: a HOME as the VM's is, where a global configuration would be the agent's own to write (in layout 1 its
+ * HOME is its /work). Each plants a program that says it ran, where git would run one: a hook, a filter, an fsmonitor,
+ * a gpg, a template's hook. None may run.
+ */
+describe("a checkout's own git settings, held off", () => {
+  /** The VM's HOME, as the test makes it: empty, or with a global configuration in it. */
+  const vmHome = (gitconfig = "") => {
+    const dir = folder();
+    if (gitconfig) writeFileSync(join(dir, ".gitconfig"), gitconfig);
+    return dir;
+  };
+  /** A script as the VM runs it: python3 -I, its HOME the VM's, and nothing else holding git's settings off. */
+  const inVm = (home_: string, script: string, ...args: string[]) => {
+    const ran = Bun.spawnSync(["python3", "-I", "-c", script, ...args], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH, HOME: home_ } });
+    expect(ran.exitCode).toBe(0);
+    return ran.stdout.toString();
+  };
+  /** A program that says it ran (a line in `said`), passing what it is given through: a filter's, a hook's, a gpg's. */
+  const program = (said: string) => {
+    const path = join(folder(), "ran.sh");
+    writeFileSync(path, `#!/bin/sh\necho "$0 $*" >> '${said}'\ncat\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const ran = (said: string) => (existsSync(said) ? readFileSync(said, "utf8") : "");
+
+  test("a commit runs none of its hooks, and no program of its signs it", () => {
+    const repo = repository();
+    const said = join(folder(), "said");
+    for (const hook of ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"]) {
+      writeFileSync(join(repo, ".git", "hooks", hook), `#!/bin/sh\necho ${hook} >> '${said}'\n`);
+      chmodSync(join(repo, ".git", "hooks", hook), 0o755);
+    }
+    git(repo, "config", "commit.gpgSign", "true");
+    git(repo, "config", "gpg.program", program(said));
+    writeFileSync(join(repo, "a.ts"), "export const a = 4;\n");
+    actionDone(inVm(vmHome(), COMMIT_SCRIPT, repo, "Four"));
+    expect(ran(said)).toBe("");
+    expect(git(repo, "log", "-1", "--format=%s")).toBe("Four");
+  });
+
+  test("status and a switch run no fsmonitor or hook of its, and nothing of a global configuration in the VM's HOME", () => {
+    const repo = repository();
+    const said = join(folder(), "said");
+    git(repo, "config", "core.fsmonitor", program(said));
+    writeFileSync(join(repo, ".git", "hooks", "post-checkout"), `#!/bin/sh\necho post-checkout >> '${said}'\n`);
+    chmodSync(join(repo, ".git", "hooks", "post-checkout"), 0o755);
+    const home_ = vmHome(`[core]\n\tfsmonitor = ${program(said)}\n[status]\n\tshowUntrackedFiles = no\n`);
+    writeFileSync(join(repo, "new.ts"), "export {};\n");
+    // (Untracked files are counted: the global configuration that would hide them wasn't read.)
+    expect(gitView(inVm(home_, GIT_SCRIPT, repo), "/work/projects/site")).toMatchObject({ state: "ready", changed: 1 });
+    actionDone(inVm(home_, BRANCH_SCRIPT, repo, "feature", "0"));
+    expect(ran(said)).toBe("");
+  });
+
+  test("a repository whose configuration names a filter, an include, another worktree or a hooks path is refused, saying why", () => {
+    const said = join(folder(), "said");
+    for (const [key, value] of [["filter.x.clean", program(said)], ["include.path", join(folder(), "elsewhere")], ["core.worktree", folder()], ["core.hooksPath", folder()]] as const) {
+      const repo = repository();
+      git(repo, "config", key, value);
+      if (key.startsWith("filter.")) writeFileSync(join(repo, ".gitattributes"), "* filter=x\n");
+      writeFileSync(join(repo, "a.ts"), "export const a = 5;\n");
+      const why = `its configuration names ${key.toLowerCase()}`;
+      expect(() => gitView(inVm(vmHome(), GIT_SCRIPT, repo), "/work/projects/site"), key).toThrow(why);
+      expect(() => actionDone(inVm(vmHome(), COMMIT_SCRIPT, repo, "Five")), key).toThrow(why);
+      expect(() => actionDone(inVm(vmHome(), BRANCH_SCRIPT, repo, "feature", "0")), key).toThrow(why);
+    }
+    expect(ran(said)).toBe("");
+  });
+
+  test("a clone runs no hook of a template a global configuration names", () => {
+    const origin = repository();
+    const said = join(folder(), "said");
+    const templates = folder();
+    mkdirSync(join(templates, "hooks"));
+    writeFileSync(join(templates, "hooks", "post-checkout"), `#!/bin/sh\necho post-checkout >> '${said}'\n`);
+    chmodSync(join(templates, "hooks", "post-checkout"), 0o755);
+    const dest = join(folder(), "projects", "site");
+    actionDone(inVm(vmHome(`[init]\n\ttemplateDir = ${templates}\n`), CLONE_SCRIPT, dest, origin));
+    expect(gitView(inVm(vmHome(), GIT_SCRIPT, dest), "/work/projects/site")).toMatchObject({ state: "ready", branch: "main" });
+    expect(ran(said)).toBe("");
   });
 });

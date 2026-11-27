@@ -162,7 +162,7 @@ beforeAll(async () => {
       if (text.includes("write-steer")) { steerEntered = true; await steerHold; }
       if (text.includes("hold-its")) { hisEntered = true; await hisHold; }
       // A project's clone, and a look at its checkout, answered as their scripts print (project-git.ts).
-      if (text.includes("['git','clone'")) { cloneEntered = true; await cloneHold; return { code: 0, stdout: JSON.stringify({ ok: true, said: "Cloning into '/work/projects/slow'..." }) }; }
+      if (text.includes("'clone','--',")) { cloneEntered = true; await cloneHold; return { code: 0, stdout: JSON.stringify({ ok: true, said: "Cloning into '/work/projects/slow'..." }) }; }
       if (text.includes("'symbolic-ref','--short'")) return { code: 0, stdout: JSON.stringify({ state: "ready", branch: "main", head: "abc1234", branches: ["main"], changed: 0, upstream: "origin/main", ahead: 0, behind: 0, remote: "https://example.test/slow.git", log: [] }) };
       return { code: 0, stdout: text.includes("gate-") ? "required gate passed" : "command completed" };
     } finally { active.set(container, count - 1); }
@@ -755,6 +755,29 @@ test("a project's first clone is answered as it goes: its head comes while the c
   } finally {
     releaseClone?.();
     await api("removeProject", { id: "slow" });
+  }
+});
+
+// (Before the test that moves the clock: after it, setProject itself answered 500.)
+test("what a VM says that a look can't take comes back as its own error, never as an internal one", async () => {
+  // (I10's finding, 27 November 2026: the converter caught only what its look threw at once, not what it threw later.)
+  if (!(await snapshot()).computer) await api("provisionAgent", { id: "primary" });
+  await api("setProject", { id: "site", name: "The site" });
+  const answered = docker.onExec;
+  docker.onExec = async (container, command) => {
+    const text = command.join("\n");
+    // Git's refusal, for a commit; an answer that isn't the script's, for a look into the checkout or the workspace.
+    if (text.includes("'commit','-m'")) return { code: 0, stdout: JSON.stringify({ ok: false, said: "nothing to commit, working tree clean" }) };
+    if (text.includes("symbolic-ref") || text.includes("held,_=walk(p,'dir')")) return { code: 0, stdout: "not the script's answer" };
+    return answered!(container, command);
+  };
+  try {
+    await expect(api("projectGit", { id: "site" })).rejects.toThrow("projectGit: 502 the checkout couldn't be read");
+    await expect(api("projectCommit", { id: "site", message: "Fix" })).rejects.toThrow("projectCommit: 409 nothing to commit, working tree clean");
+    await expect(api("teamFiles", { id: "primary" })).rejects.toThrow("teamFiles: 502 the workspace didn't answer as it should");
+  } finally {
+    docker.onExec = answered;
+    await api("removeProject", { id: "site" });
   }
 });
 

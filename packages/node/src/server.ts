@@ -2220,9 +2220,13 @@ export function createApp(ctx: AppContext) {
     if (ran.exitCode !== 0) throw new HttpError(502, `the workspace couldn't be read: ${redact(ran.stderr || ran.stdout).trim().slice(0, 300) || `it ended with ${ran.exitCode}`}`);
     return ran.stdout;
   }
-  const looked = <T>(look: () => T): T => {
+  /**
+   * A look's error as its route's, with its own status: one it throws at once or later alike. (Its looks are async: caught
+   * only as they were called, a LookError the VM's answer brought was an internal error, a 500. I10's finding.)
+   */
+  const looked = async <T>(look: () => T | Promise<T>): Promise<T> => {
     try {
-      return look();
+      return await look();
     } catch (error) {
       if (error instanceof LookError) throw new HttpError(error.status, error.message);
       throw error;

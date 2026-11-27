@@ -338,6 +338,33 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
 - **Bounded, and redacted.** A folder's first 2,000 entries; a file's first 700 KB (a picture shown up to 5 MB, as an attachment); a diff's first 600,000 characters. What comes back is checked for its shape before it is shown, and a text or a diff has anything that looks like a key redacted (`redact`, the secret scanner's) before it leaves the node (tested with a key-shaped fake).
 - **Residual risk:** what an agent keeps in its workspace in a form the scanner doesn't know is shown as it is, to you. Reading runs beside the agent's own work in its VM, so a very large folder or repository costs that VM a moment of its time.
 
+## The Build view's git (tested)
+
+- **Yours alone.** `projectGit`, `projectBranch`, `projectCommit` and `projectClone` (the Mac's Build window, docs/BUILD.md)
+  need `sandbox` and an owner's device or the admin token (`ownerOnly`): an agent, a node or a terminal is refused.
+- **Fixed scripts, in the primary's own computer.** Each is one of four fixed scripts (`packages/node/src/project-git.ts`)
+  run there by Python (`python3 -I`), as its own user, never through a shell. Its only inputs are arguments: the project's
+  checkout (`/work/projects/<id>`, the node's own name for it), a branch's name (held to what git takes, `BranchName`, and
+  checked by git too), a commit's message, or the project's repository for its first clone. What comes back is checked
+  (`gitView`, `actionDone`): never more than a checkout's state, with any credentials in its remote's address taken out,
+  and everything git says redacted.
+- **The repository's own configuration, held off**, as a task's changes are (above; the apps thread's finding, 27 November
+  2026). The checkout is the agent's to change, and so is the computer's HOME, where a global configuration would be (in
+  layout 1 its HOME is its `/work`), so what you ask here runs nothing of either:
+  - no system or global configuration, and no attributes or excludes from outside the repository;
+  - no fsmonitor, no hook (a commit's, a switch's, a clone's template's), and no signing, so no `gpg.program` of its;
+  - no submodule's own git: a switch doesn't recurse, and status asks nothing of a submodule's uncommitted changes;
+  - a repository whose own configuration names a filter, an include, another worktree or a hooks path is refused, and
+    says so by name.
+  Before, `git -C` read all of it: a commit ran the repository's hooks and its signing program, `add -A` and status its
+  filters, status its fsmonitor, a switch its post-checkout hook, and a clone a hook of the template a global
+  configuration named.
+- **Residual risk:** there is no new privilege to guard, since the scripts run in the same computer as the same user as
+  the primary. What the checkout holds (its scripts, its build) still runs whenever the primary runs it, and a commit takes
+  everything changed or new as it is left (`add -A`). The routes neither push nor open a pull request.
+- Tests: `packages/node/test/project-git.test.ts` (a planted hook, filter, fsmonitor, gpg program and template hook ran
+  before, and none runs now; a repository naming a filter, an include, another worktree or a hooks path is refused).
+
 ## Coding agents (tested)
 
 - **Keys stay out.** OpenCode in a sandbox reaches models only through the gateway, on a token scoped to one provider that dies with the sandbox; the provider key never enters the sandbox. Its config is written by Invincible and holds only `{env:…}` references.

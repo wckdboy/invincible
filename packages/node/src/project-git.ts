@@ -10,20 +10,46 @@ import { LookError } from "./workspace-look.ts";
  * checked here, and anything git says is redacted before it leaves the node.
  */
 
+/**
+ * How each script runs git: with the repository's own configuration held off, as a task's changes are (workspace-look.ts
+ * CHANGES_SCRIPT; the apps thread's finding, 27 November 2026). The checkout is the agent's to change, and so is the VM's
+ * HOME, where a global configuration would be (in layout 1 its HOME is its /work): what you ask here runs nothing of
+ * either. No system or global configuration, no fsmonitor, no hooks, no signing (so no gpg.program of its), no
+ * submodule's own git run, and no attributes or excludes from outside the repository. A repository whose own configuration
+ * names a filter, an include, another worktree or a hooks path is refused (`refused`), and says so.
+ */
+const HELD = `import json,os,re,subprocess,sys
+ENV={'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),'HOME':os.environ.get('HOME','/nonexistent'),'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':os.devnull,'GIT_ATTR_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0','LC_ALL':'C'}
+HELD_OFF=['-c','core.fsmonitor=false','-c','core.hooksPath='+os.devnull,'-c','core.excludesFile='+os.devnull,'-c','core.attributesFile='+os.devnull,'-c','commit.gpgSign=false','-c','log.showSignature=false','-c','submodule.recurse=false']
+def git(root,*a,timeout=60):
+    return subprocess.run(['git','-C',root,*HELD_OFF,*a],capture_output=True,timeout=timeout,env=ENV)
+def refused(root):
+    # Its own configuration, as written (no include followed): one that names a filter, an include, another worktree or a
+    # hooks path is refused, by its name.
+    named=subprocess.run(['git','-C',root,'config','--list','--no-includes','--name-only'],capture_output=True,timeout=60,env=ENV)
+    for key in named.stdout.decode(errors='replace').splitlines():
+        if re.match(r'(core\\.worktree$|core\\.hookspath$|include\\.|includeif\\.|filter\\.)',key.lower()):
+            return "this repository isn't used here: its configuration names "+key.lower()[:200]+", and what you ask here holds a repository's own configuration off"
+    return None
+`;
+
 /** `python3 -I -c GIT <checkout>`: its branch and branches, what isn't committed, how it stands with its upstream, its latest commits. */
-export const GIT_SCRIPT = `import json,os,re,subprocess,sys
-root=sys.argv[1]
+export const GIT_SCRIPT = `${HELD}root=sys.argv[1]
 if not os.path.isdir(root):
     print(json.dumps({"state":"missing"}));sys.exit(0)
 if not os.path.exists(os.path.join(root,'.git')):
     print(json.dumps({"state":"not-a-repository"}));sys.exit(0)
+bad=refused(root)
+if bad:
+    print(json.dumps({"state":"refused","said":bad}));sys.exit(0)
 def out(*a):
-    r=subprocess.run(['git','-C',root,*a],capture_output=True,timeout=60)
+    r=git(root,*a)
     return r.stdout.decode(errors='replace').strip() if r.returncode==0 else ''
 branch=out('symbolic-ref','--short','-q','HEAD') or None
 head=out('rev-parse','--short','HEAD') or None
 branches=[b for b in out('for-each-ref','--sort=-committerdate','--format=%(refname:short)','refs/heads').splitlines() if b][:200]
-changed=len([l for l in out('status','--porcelain').splitlines() if l.strip()])
+# (A submodule's own changes aren't asked of it: that would run its git, with its configuration.)
+changed=len([l for l in out('status','--porcelain','--ignore-submodules=dirty').splitlines() if l.strip()])
 upstream=out('rev-parse','--abbrev-ref','--symbolic-full-name','@{u}') or None
 ahead=behind=None
 if upstream:
@@ -39,30 +65,33 @@ for l in out('log','-n','10','--format=%h%x1f%s%x1f%ct').splitlines():
 print(json.dumps({"state":"ready","branch":branch,"head":head,"branches":branches,"changed":changed,"upstream":upstream,"ahead":ahead,"behind":behind,"remote":remote,"log":log}))`;
 
 /** `python3 -I -c BRANCH <checkout> <name> <1|0>`: switch to the branch, or start it (1) from where it stands; git checks the name too. */
-export const BRANCH_SCRIPT = `import json,subprocess,sys
-root,name,create=sys.argv[1],sys.argv[2],sys.argv[3]=='1'
-g=lambda *a: subprocess.run(['git','-C',root,*a],capture_output=True,timeout=60)
+export const BRANCH_SCRIPT = `${HELD}root,name,create=sys.argv[1],sys.argv[2],sys.argv[3]=='1'
+bad=refused(root)
+if bad:
+    print(json.dumps({"ok":False,"said":bad}));sys.exit(0)
+g=lambda *a: git(root,*a)
 if g('check-ref-format','--branch',name).returncode!=0:
     print(json.dumps({"ok":False,"said":"git doesn't take that as a branch's name"}));sys.exit(0)
 r=g('switch',*(['-c',name] if create else [name]))
 print(json.dumps({"ok":r.returncode==0,"said":(r.stderr or r.stdout).decode(errors='replace')[-600:]}))`;
 
 /** `python3 -I -c COMMIT <checkout> <message>`: everything changed or new, committed; as the primary where the checkout has no author set. */
-export const COMMIT_SCRIPT = `import json,subprocess,sys
-root,message=sys.argv[1],sys.argv[2]
-g=lambda *a: subprocess.run(['git','-C',root,*a],capture_output=True,timeout=120)
+export const COMMIT_SCRIPT = `${HELD}root,message=sys.argv[1],sys.argv[2]
+bad=refused(root)
+if bad:
+    print(json.dumps({"ok":False,"said":bad}));sys.exit(0)
+g=lambda *a: git(root,*a,timeout=120)
 who=[] if g('config','user.email').stdout.strip() else ['-c','user.name=Invincible','-c','user.email=invincible@localhost']
 g('add','-A')
 r=g(*who,'commit','-m',message)
 print(json.dumps({"ok":r.returncode==0,"said":(r.stdout if r.returncode==0 else (r.stdout+r.stderr)).decode(errors='replace')[-600:]}))`;
 
 /** `python3 -I -c CLONE <checkout> <repository>`: its first clone, into a folder that isn't there yet (or is empty). */
-export const CLONE_SCRIPT = `import json,os,subprocess,sys
-dest,repo=sys.argv[1],sys.argv[2]
+export const CLONE_SCRIPT = `${HELD}dest,repo=sys.argv[1],sys.argv[2]
 if os.path.isdir(dest) and os.listdir(dest):
     print(json.dumps({"ok":False,"said":"the checkout is there already"}));sys.exit(0)
 os.makedirs(os.path.dirname(dest),exist_ok=True)
-r=subprocess.run(['git','clone','--',repo,dest],capture_output=True,timeout=840)
+r=subprocess.run(['git',*HELD_OFF,'clone','--',repo,dest],capture_output=True,timeout=840,env=ENV)
 print(json.dumps({"ok":r.returncode==0,"said":(r.stderr or r.stdout).decode(errors='replace')[-600:]}))`;
 
 /** How long each may run in the VM, in seconds: a look and a commit are quick; a clone may be large. */
@@ -87,6 +116,8 @@ export function gitView(stdout: string, checkout: string): ProjectGitView {
   const said = record(stdout);
   const none: ProjectGitView = { checkout, state: "missing", branch: null, head: null, branches: [], changed: 0, upstream: null, ahead: null, behind: null, remote: null, log: [] };
   if (said.state === "missing" || said.state === "not-a-repository") return { ...none, state: said.state };
+  // One whose own configuration names what would run (a filter, a hooks path, ...): not read, and you're told why.
+  if (said.state === "refused") throw new LookError(redact(text(said.said, 600) ?? "").trim() || "this repository isn't used here", 409);
   if (said.state !== "ready") throw new LookError("the checkout couldn't be read", 502);
   const log = Array.isArray(said.log) ? said.log : [];
   return {
