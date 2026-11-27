@@ -68,7 +68,8 @@ const admin = (home: Home, port: number) => async <T = any>(name: RouteName, inp
 
 let held: { release: () => void; done: Promise<void>; entered: boolean } | null = null;
 const written = new Set<string>();
-// (It says it is Docker Engine 27, so Ada's VM is in layout 2, and a task handed to her runs in a VM of its own beside it.)
+// (It says it is Docker Engine 27, and each node's setting turns layout 2 on, so Ada's VM is in layout 2, and a task handed to
+// her runs in a VM of its own beside it.)
 const docker = fakeDocker({ engine: "27.3.1" });
 docker.onExec = async (_container, command) => {
   const text = command.join("\n");
@@ -115,7 +116,7 @@ async function node(name: string, founder: Node | null, extra: Partial<DaemonOpt
     const store = new LedgerStore(home.ledgerPath);
     const fleet = foundFleet(store, identity, { fleetName: "bench", nodeName: name });
     store.close();
-    home.writeConfig({ v: 1, name, fleet, port, keystore, advertise: "127.0.0.1", fabric: true });
+    home.writeConfig({ v: 1, name, fleet, port, keystore, advertise: "127.0.0.1", fabric: true, layout2: true });
   } else {
     const invite = await founder.call<{ invite: string }>("createInvite", { kind: "node" });
     const joining = await home.createIdentity("file");
@@ -128,7 +129,7 @@ async function node(name: string, founder: Node | null, extra: Partial<DaemonOpt
     store.expectFleet(approved.fleet);
     store.ingest((await signedPost<SyncPage>(joining.identity, { id: founder.d.identity.id, endpoint: founder.d.endpoint }, "/link/sync", { have: {} })).events);
     store.close();
-    home.writeConfig({ v: 1, name, fleet: approved.fleet, port, keystore: joining.keystore, advertise: "127.0.0.1", fabric: true });
+    home.writeConfig({ v: 1, name, fleet: approved.fleet, port, keystore: joining.keystore, advertise: "127.0.0.1", fabric: true, layout2: true });
   }
   const d = await startDaemon(home, base);
   nodes.push(d);

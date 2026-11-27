@@ -292,7 +292,12 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   shares. A link left in a tree resolves in that VM's own view, where the store's other trees aren't, so it reaches
   nothing of them (`spec.test.ts`, `team-layout.test.ts`; on real Docker, `layout.integration.test.ts`, which runs on a
   Linux host with Docker Engine 26 or later and is skipped elsewhere).
-- **Made new in it; moved to it once.** A new agent's VM is made in layout 2. One made before is moved at its next
+- **Off until you turn it on.** Layout 2 is each node's own setting, off by default as the fabric is
+  (`invincible sandbox layout on|off|status`, kept in its config; a running node applies it at the next VM it makes or
+  prepares). Off, every agent's VM is made and kept in layout 1, nothing of any store is moved, and another node's task
+  is refused there, since it would share a HOME. Turned off after it was on, no VM is moved from then on, and one already
+  moved stays in layout 2 (`packages/node/test/layout-switch.test.ts`).
+- **Made new in it; moved to it once.** With it on, a new agent's VM is made in layout 2. One made before is moved at its next
   prepare while nothing runs in it (no command, terminal or desktop session, and no VM sharing its workspace): its
   store's top-level entries are renamed into the three trees inside the store's own filesystem, so nothing is copied.
   Its notes go to their own tree by one rename, and only where every part of their place is a folder: a link there is

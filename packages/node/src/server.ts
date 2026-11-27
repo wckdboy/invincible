@@ -4,6 +4,7 @@ import {
   type TeamWorkspace,
   ZONE_HEADER,
   type FabricSettingView,
+  type SandboxLayoutView,
   type HandoffGrantView,
   HandoffTerms,
   readHandoffTerms,
@@ -238,6 +239,8 @@ export interface AppContext {
   fabricSetting?(on?: boolean): Promise<FabricSettingView>;
   /** A new transport key for its sidecar (daemon.ts): its peers refuse the old one from then on. */
   rotateTransport?(): Promise<FabricSettingView>;
+  /** The node's own switch for layout 2 (daemon.ts): set and applied at the next VM made or prepared (`on`), or only read. */
+  sandboxLayout?(on?: boolean): SandboxLayoutView;
   tokens: GatewayTokens;
   arms: ArmTokens;
   /** Grants to agents on your other machines, over Q-AMP (qamp-grants.ts): each an arm, a chain and a bridge. */
@@ -4897,6 +4900,11 @@ export function createApp(ctx: AppContext) {
       ownerOnly(p);
       if (!ctx.fabricSetting) throw new HttpError(424, "this node has no fabric");
       return ctx.fabricSetting(input.on);
+    },
+    sandboxLayout: (input, p) => {
+      ownerOnly(p);
+      if (!ctx.sandboxLayout) throw new HttpError(424, "this node has no sandbox host");
+      return ctx.sandboxLayout(input.on);
     },
     rotateTransportKey: (_input, p) => {
       ownerOnly(p);

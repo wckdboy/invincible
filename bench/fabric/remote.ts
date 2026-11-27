@@ -70,8 +70,8 @@ const stats = (samples: number[]) => {
 
 const home = new Home(join(ROOT, "node"));
 // The serving node's VM, through a stand-in Docker: a command tagged write-hold… waits until it is told to go on (a run
-// under way, to stop or to revoke), every other command answers at once. It says it is Docker Engine 27, so its agent's
-// VM is in layout 2, and a task handed to it runs in a VM of its own beside that one.
+// under way, to stop or to revoke), every other command answers at once. It says it is Docker Engine 27, and the node's
+// setting turns layout 2 on, so its agent's VM is in layout 2, and a task handed to it runs in a VM of its own beside that one.
 const docker = fakeDocker({ engine: "27.3.1" });
 let release: () => void = () => {};
 let held = new Promise<void>((resolve) => (release = resolve));
@@ -115,7 +115,7 @@ if (role === "serve") {
   const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "q5-bench", nodeName: "server" });
   store.close();
-  home.writeConfig({ v: 1, name: "server", fleet, port: PORT, keystore, advertise: ADVERTISE, fabric: true });
+  home.writeConfig({ v: 1, name: "server", fleet, port: PORT, keystore, advertise: ADVERTISE, fabric: true, layout2: true });
   node = await startDaemon(home, base("server"));
   const call = admin(home, PORT);
   // Stand-in models for its agent's work: the engineer writes a file, the reviewer passes it.
@@ -222,7 +222,7 @@ try {
   const serving = { ...(proven ? { id: proven } : {}), endpoint: serverEndpoint };
   store.ingest((await signedPost<SyncPage>(joining.identity, serving, "/link/sync", { have: {} })).events);
   store.close();
-  home.writeConfig({ v: 1, name: "client", fleet: approved.fleet, port: PORT, keystore: joining.keystore, advertise: ADVERTISE, fabric: true });
+  home.writeConfig({ v: 1, name: "client", fleet: approved.fleet, port: PORT, keystore: joining.keystore, advertise: ADVERTISE, fabric: true, layout2: true });
   node = await startDaemon(home, base("client"));
   const me = node;
   const call = admin(home, PORT);

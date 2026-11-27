@@ -141,6 +141,20 @@ export type AttemptTag = z.infer<typeof AttemptTag>;
 export const SandboxNetwork = z.enum(["isolated", "gateway", "online"]);
 export type SandboxNetwork = z.infer<typeof SandboxNetwork>;
 
+/**
+ * Layout 2 (the sandbox's layout.ts): an agent's HOME apart from its workspace, so that a VM sharing the workspace (another
+ * node's task, a run on a seat) reaches nothing of it. Each node's own switch, off by default: off, every agent's VM is made
+ * and kept in layout 1, and another node's task is refused there (it shares only a workspace). On, an agent's VM is made in
+ * layout 2, and one in layout 1 is moved to it at its next prepare while nothing runs in it; off again, none is moved from
+ * then on, and one already moved stays as it is.
+ */
+export const SandboxLayoutInput = z.strictObject({ on: z.boolean().optional() });
+export interface SandboxLayoutView {
+  on: boolean;
+  /** Why it does nothing here, whatever it is set to (no sandbox host; a Mac's VMs, which stay in layout 1), or null. */
+  idle: string | null;
+}
+
 export const SandboxRequest = z.strictObject({
   /** isolated = no network · gateway = models only (default) · online = internet + models */
   network: SandboxNetwork.default("gateway"),
@@ -1060,6 +1074,8 @@ export const routes = {
     scope: "sandbox",
     input: z.strictObject({ on: NodeRef.optional(), lab: z.boolean().optional(), desktop: z.boolean().optional(), hardware: z.boolean().optional() }),
   },
+  /** This node's own switch for layout 2 (`invincible sandbox layout on|off`), off by default: set and applied now, or only read. */
+  sandboxLayout: { method: "POST", path: "/api/sandboxes/layout", scope: "fleet:admin", input: SandboxLayoutInput },
   loops: { method: "GET", path: "/api/loops", scope: "mind:read", input: null },
   setLoop: {
     method: "POST",

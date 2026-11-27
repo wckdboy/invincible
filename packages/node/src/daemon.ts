@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonical, decodeHlc, type FabricSettingView, fitLedger, moneyPrices, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, REQUESTS_READ, screenSessionView } from "@invincible/core";
+import { canonical, decodeHlc, type FabricSettingView, fitLedger, moneyPrices, type SandboxLayoutView, type NodeIdentity, pricesOf, QAMP_SIDECAR_PORT, type QampEndpoint, REQUESTS_READ, screenSessionView } from "@invincible/core";
 import { type ModelsContext, CATALOG, GatewayTokens, installedConnectors, type OAuthEndpoints, PLAN_PROVIDERS, pinLegacyKeys, refusedKeysOf, signInWindowsOf, windowsOf } from "@invincible/models";
 // The apps' own words for a task's verdict, cost and what can be done with it (the CLI reads them too).
 import { activityOf } from "../../../apps/web/src/lib/live-activity.ts";
@@ -519,6 +519,21 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     store.emit(identity, "notice.raised", { key: `layout:${handle}`.slice(0, 160), severity: "info", title: said.title.slice(0, 200), body: said.body.slice(0, 2000), source: "sandbox", at: Date.now() });
   };
   let sandbox: GovernedSandboxHost | null = null;
+  /**
+   * Layout 2, its own setting (`invincible sandbox layout on|off`), off by default as the fabric is: off, every agent's VM
+   * is made and kept in layout 1, and another node's task is refused here. Applied at once, at the next VM made or
+   * prepared. Why it does nothing here, whatever it says: no sandbox host, or a Mac's (its VMs stay in layout 1).
+   */
+  let layout2On = config.layout2 === true;
+  let layoutIdle: string | null = "this node has no sandbox host";
+  const sandboxLayout = (on?: boolean): SandboxLayoutView => {
+    if (on !== undefined && on !== layout2On) {
+      home.writeConfig({ ...home.readConfig(), layout2: on });
+      layout2On = on;
+      log(`sandbox: layout 2 switched ${on ? "on" : "off"} on this node`);
+    }
+    return { on: layout2On, idle: layoutIdle };
+  };
   const sandboxContext = resolve(dirname(fileURLToPath(import.meta.url)), "../../../sandbox");
   if (caps.sandbox !== undefined && caps.sandbox !== null) {
     // On a Mac with container: every sandbox a VM of its own, its /work container's own volume, its resolver container's.
@@ -528,6 +543,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     const readIf = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : null);
     if (!apple) writeFileSync(resolvConf, vmResolvConf(readIf("/run/systemd/resolve/resolv.conf"), readIf("/etc/resolv.conf")), { mode: 0o644 });
     const microVMs = caps.sandbox.vm ?? microVMsAvailable();
+    layoutIdle = apple ? "a Mac's VMs stay in layout 1: no VM there shares an agent's workspace" : null;
     sandbox = new GovernedSandboxHost(
       {
       node: identity.id,
@@ -554,9 +570,10 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       // Online sandboxes run in KVM microVMs where Kata is installed (scripts/remote-setup.sh).
       microVMs,
       ...(apple ? {} : { resolvConf }),
-      // Layout 2 (sandbox's layout.ts): an agent's HOME apart from its workspace, on a Linux host with Docker. A Mac's VMs
-      // stay in layout 1: no VM there shares a workspace. An agent's VM moved to it is said to you once, by name.
-      ...(apple ? {} : { layout2: true, moved: (run: string, entries: readonly LayoutEntry[]) => tellMoved(run, entries) }),
+      // Layout 2 (sandbox's layout.ts): an agent's HOME apart from its workspace, on a Linux host with Docker, when its own
+      // setting says so (sandboxLayout). A Mac's VMs stay in layout 1: no VM there shares a workspace. An agent's VM moved to
+      // it is said to you once, by name.
+      ...(apple ? {} : { layout2: () => layout2On, moved: (run: string, entries: readonly LayoutEntry[]) => tellMoved(run, entries) }),
       },
       { governor, capacity: () => computeService!.selfCapacity() },
     );
@@ -569,6 +586,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     } catch (error) {
       log(`sandbox networks unavailable: ${(error as Error).message}`);
       sandbox = null;
+      layoutIdle = "this node has no sandbox host";
     }
   }
   // Terminals in this node's sandboxes, where it runs any (terminals.ts).
@@ -867,6 +885,7 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
     handoffs,
     fabricSetting,
     rotateTransport,
+    sandboxLayout,
     tokens,
     arms,
     qamp,

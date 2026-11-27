@@ -124,9 +124,10 @@ export interface SandboxHostOptions {
   /**
    * Layout 2 (layout.ts): an agent's VM is made in it, and one in layout 1 is moved to it at its next prepare while nothing
    * runs in it. A Linux host with Docker alone (a Mac's stay in layout 1); a store that is a Docker volume, only on Docker
-   * Engine 26 or later, whose volumes' subpaths its trees are mounted as. Absent: every VM stays as it is made.
+   * Engine 26 or later, whose volumes' subpaths its trees are mounted as. Absent: every VM stays as it is made. A function:
+   * the node's own switch as it is now (`invincible sandbox layout`), asked at each VM made or prepared.
    */
-  layout2?: boolean;
+  layout2?: boolean | (() => boolean);
   /** An agent's VM moved to layout 2: its run, and what of its store went where, by name and size (its owner's notice). */
   moved?: (run: string, entries: readonly LayoutEntry[]) => void;
   node: string;
@@ -1170,9 +1171,14 @@ export class SandboxHost {
     return this.engineMajor;
   }
 
+  /** Whether layout 2 is switched on here (the node's own setting, as it is now). */
+  private layout2On(): boolean {
+    return typeof this.opts.layout2 === "function" ? this.opts.layout2() : this.opts.layout2 === true;
+  }
+
   /** Whether an agent's store may be in layout 2 here: told so, on Docker, and on a volume only where subpaths are mounted. */
   private async layout2Here(onVolume: boolean): Promise<boolean> {
-    if (!this.opts.layout2 || this.apple) return false;
+    if (!this.layout2On() || this.apple) return false;
     return !onVolume || ((await this.engine()) ?? 0) >= 26;
   }
 
@@ -1917,7 +1923,14 @@ export class SandboxHost {
     const own = await this.get(input.shares);
     if (!own || own.ephemeral) throw new SandboxError("another node's task shares an agent's own VM on this host, and that one is not here", 404);
     const shares = await this.sharedWork(input.shares);
-    if (!shares.tree) throw new SandboxError("another node's task shares only an agent's workspace, and this agent's VM has no HOME apart from it yet (layout 2): it is moved at its next prepare while nothing runs in it", 409);
+    if (!shares.tree) {
+      throw new SandboxError(
+        this.layout2On()
+          ? "another node's task shares only an agent's workspace, and this agent's VM has no HOME apart from it yet (layout 2): it is moved at its next prepare while nothing runs in it"
+          : "another node's task shares only an agent's workspace, and layout 2 (a HOME apart from it) is off on this node: invincible sandbox layout on",
+        409,
+      );
+    }
     const vm = await this.create(
       { network: own.network, image: own.image, cpus: own.cpus, memoryGb: own.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run, isolation: own.isolation },
       { shares, task: input.task },

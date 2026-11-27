@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { type ArtifactView, type AwayView, b64u, type LookView, type ChatStreamEvent, decodeInvite, encodeQr, type FleetView, type InvestigationView, qrToTerminal, type RouteName, routes, type SandboxView, type ScreenSessionView, type ScreenStatus, type ScreenView, type TeamOutcome, type SlackView, SLACK_APP_MANIFEST, type TelegramView, type EvalView, type QuestionView, plainLine, type LiveEvent } from "@invincible/core";
+import { type ArtifactView, type AwayView, b64u, type LookView, type ChatStreamEvent, decodeInvite, encodeQr, type FleetView, type InvestigationView, qrToTerminal, type RouteName, routes, type SandboxLayoutView, type SandboxView, type ScreenSessionView, type ScreenStatus, type ScreenView, type TeamOutcome, type SlackView, SLACK_APP_MANIFEST, type TelegramView, type EvalView, type QuestionView, plainLine, type LiveEvent } from "@invincible/core";
 import { onPlan, planOf, sseData } from "@invincible/models";
 import { provenNode, requestPairing, signedPost, type SyncPage, waitForApproval } from "@invincible/link";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
@@ -296,6 +296,9 @@ Work
   sandbox save <id> [/work/dir] [--label …]   keep a sandbox's work (default /work/out) after it's gone
   sandbox build [--on ultra] [--lab|--desktop|--hardware]
                                   build the sandbox image (or the Lab, the agents' desktop, or its hardware tools) on a host
+  sandbox layout on|off|status    layout 2: each agent's VM with a HOME apart from its workspace, so that a VM sharing the
+                                  workspace (another node's task, a run on a seat) reaches nothing of it. Off by default;
+                                  on, a VM in layout 1 is moved at its next prepare while nothing runs in it (Linux, Docker)
   sandbox setup [status] [--json]
                                   a Mac given its agents' VMs: Apple's container (its signed installer, checked, when
                                   it has none), its service and kernel, the sandbox firewall, the node restarted to host
@@ -1790,6 +1793,26 @@ Evidence: invincible artifact ${i!.artifact}`));
         const node = (): SetupNode | null => (home.exists() ? { name: home.readConfig().name, call: (route, input) => new Admin(home).call(route, input) } : null);
         if (rest[0] && rest[0] !== "status") fail("usage: invincible sandbox setup [status] [--json]");
         process.exitCode = await sandboxSetup(systemSetupDeps({ node, say: (line) => console.log(json ? JSON.stringify(line) : setupWords(line)) }), { check: rest[0] === "status" });
+        return;
+      }
+      if (sub === "layout") {
+        // Layout 2, the node's own switch (home.ts NodeConfig.layout2): a running node applies it at once, one that isn't
+        // keeps it in its config for its next start.
+        const want = rest[0];
+        if (want !== undefined && want !== "on" && want !== "off" && want !== "status") fail("usage: invincible sandbox layout [on|off|status]");
+        const set = want === "on" ? true : want === "off" ? false : undefined;
+        let view: SandboxLayoutView;
+        try {
+          view = await new Admin(home).call<SandboxLayoutView>("sandboxLayout", set === undefined ? {} : { on: set });
+        } catch (error) {
+          if (!/^no daemon on/.test((error as Error).message)) throw error;
+          if (set !== undefined) home.writeConfig({ ...home.readConfig(), layout2: set });
+          console.log(`layout 2: ${(set ?? home.readConfig().layout2 === true) ? "on" : "off"} · the node isn't running${set === undefined ? "" : ": it applies this when it next starts"}`);
+          return;
+        }
+        console.log(`layout 2: ${view.on ? "on" : "off"}${view.idle ? ` · ${view.idle}` : ""}`);
+        if (set === true && !view.idle) console.log(dim("An agent's VM is made in it from now on, and one in layout 1 is moved at its next prepare while nothing runs in it: you're told once for each."));
+        if (set === false) console.log(dim("No VM is moved from now on, and one already moved stays as it is. Another node's task is refused beside a VM in layout 1."));
         return;
       }
       const admin = new Admin(home);

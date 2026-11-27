@@ -28,7 +28,8 @@ const fence = "```";
 const written = new Set<string>();
 let hold: { tag: string; entered: boolean; release: () => void; done: Promise<void> } | null = null;
 
-// (On an engine that mounts its volumes' subpaths: its agents' VMs in layout 2, where another node's task gets a VM of its own.)
+// (On an engine that mounts its volumes' subpaths, with layout 2 on (fabric-pair.ts): its agents' VMs in layout 2, where another
+// node's task gets a VM of its own.)
 const docker = fakeDocker({ engine: "27.3.1" });
 docker.onExec = async (_container, command) => {
   const text = command.join("\n");

@@ -33,6 +33,11 @@ const Config = z.strictObject({
    * binary it has: a `qamp` with a sidecar in its place switches nothing on by being there (the grants' bridges run it either way).
    */
   fabric: z.boolean().optional(),
+  /**
+   * Layout 2 for its agents' VMs, a HOME apart from each one's workspace (`invincible sandbox layout on`; the sandbox's
+   * layout.ts), on a Linux host with Docker. Absent: off, every agent's VM in layout 1, and another node's task refused here.
+   */
+  layout2: z.boolean().optional(),
 });
 export type NodeConfig = z.infer<typeof Config>;
 

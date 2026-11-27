@@ -152,7 +152,9 @@ transport keys carries all of it:
        the task started there: nothing it starts outlives the task, your grant or its node's revocation. One an earlier
        process of the node left is removed as the node starts. No route reaches into it, yours included.
      - It is made on a Linux host with Docker, beside an agent's VM whose HOME is apart from its workspace (layout 2,
-       SECURITY.md); beside one still in layout 1 it is refused, since that VM's HOME is its workspace. On a node with
+       SECURITY.md); beside one still in layout 1 it is refused, since that VM's HOME is its workspace. Layout 2 is each
+       node's own setting, off by default (`invincible sandbox layout on`): until it is on, every task handed to that
+       node is refused so. On a node with
        no room beside its agent's VM for one as big, the task waits for room as any sandbox does, within its life.
      - **A Mac takes no other node's task.** No VM on a Mac shares an agent's workspace: a Mac's workspace is a disk
        image only one VM may mount, and its VMs' HOME is their `/work` (layout 1). A task handed to a Mac would run in
@@ -370,7 +372,9 @@ answered and a Q-AMP release with the sidecar is pinned.
 
    The binary alone switches nothing on.
 3. **Switch it on, on each node:** `invincible fabric on`. A running node starts its sidecar at once (and asks the binary
-   whether it has one); a stopped one does when it starts.
+   whether it has one); a stopped one does when it starts. A Linux node that is to take other nodes' tasks needs layout
+   2 too, its own setting (`invincible sandbox layout on`, SECURITY.md): each of its agents' VMs is moved at its next
+   prepare while nothing runs in it, and you're told once for each. Until then a task handed to it is refused.
 4. **The port.** On a Linux node with UFW, `deploy.sh --open-qamp` (UDP 7410–7419, `tailscale0` alone), or the one rule
    `ufw allow in on tailscale0 to any port 7410 proto udp`. A Mac with its application firewall off needs nothing; with
    it on, allow the qamp binary.
