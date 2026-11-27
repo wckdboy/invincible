@@ -1071,7 +1071,9 @@ export class SandboxHost {
       this.opts.ledger({ class: "modify", resource: "sandbox.seat-lease", target: vm.name, verdict: "allow", run, detail: `no lease: ${containerName(agent)} wasn't prepared by this process, so it has none to share` });
       return;
     }
-    const minted = this.opts.tokens.mint({ label: `sandbox:${vm.id}`, providers: [...lease.scopes], ...(lease.models ? { models: [...lease.models] } : {}), ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    // (Under the agent's VM's label: what the gateway counts by it is what a task's spend is read by, so what a run on a seat
+    // spends through the gateway is its task's, as it was when it used the agent's lease. Its token is its own.)
+    const minted = this.opts.tokens.mint({ label: `sandbox:${agent}`, providers: [...lease.scopes], ...(lease.models ? { models: [...lease.models] } : {}), ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
     this.tokenStore.put(vm.id, minted.info.hash);
     const env = gatewayEnv(minted.token, [...lease.covered], lease.keys);
     if (lease.git) env.INVINCIBLE_REPO_URL = repositoryUrl(env.INVINCIBLE_GATEWAY!, lease.git);

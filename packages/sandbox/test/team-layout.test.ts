@@ -286,7 +286,10 @@ describe("an agent's VM in layout 2", () => {
     expect(f.tokens.minted).toHaveLength(2);
     const mine = f.tokens.minted[0]!;
     const its = f.tokens.minted[1]!;
-    expect(its).toEqual({ ...mine, label: `sandbox:${seatId}` });
+    // (Under the agent's VM's label, which a task's spend is counted by: what a run on a seat spends through the gateway is
+    // its task's, as it was when it used the agent's lease. Its token, and so its revoking, is its own.)
+    expect(its).toEqual({ ...mine, label: `sandbox:${ID}` });
+    expect(seatId).not.toBe(ID);
     expect(its).toMatchObject({ providers: ["anthropic", "git:github:example:app", "key:test-only"], models: ["anthropic/claude-test"], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
     // Written in its own HOME (its write's HOME is the VM's), and nowhere else of the agent's.
     const agentLease = f.leases.get(containerName(ID))!;
@@ -310,7 +313,7 @@ describe("an agent's VM in layout 2", () => {
     // neither your keys nor its repository, as the server leases one), a seat's VM made then carries none of them.
     await f.host.prepareTeam(ID, RUN, undefined, ["anthropic"], ["anthropic/claude-paid"], []);
     await f.host.createSeatVm(onSeat);
-    expect(f.tokens.minted.at(-1)).toEqual({ label: `sandbox:${seatVm(f)[0].replace("invincible-sbx-", "")}`, providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    expect(f.tokens.minted.at(-1)).toEqual({ label: `sandbox:${ID}`, providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
     const narrow = f.leases.get(seatVm(f)[0])!;
     expect([narrow.INVINCIBLE_REPO_URL, narrow.INVINCIBLE_KEYS]).toEqual([undefined, undefined]);
   });
