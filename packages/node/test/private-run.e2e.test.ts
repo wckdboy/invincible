@@ -90,6 +90,16 @@ test("a run that your mail woke writes none of the mail's words into the ledger,
   for (const name of ["loopRuns", "runs", "loops"] as RouteName[]) expect([name, /Ingrid|rent arrears/.test(JSON.stringify(await call(name, name === "loopRuns" ? { name: "triage" } : {}, agent)))]).toEqual([name, false]);
 }, 60_000);
 
+test("and the mind keeps no word of it: the run writes no memory of itself (no skill from it either), so no agent recalls one", async () => {
+  // (The run above ran: its record is there, and says how it went.)
+  expect(daemon.store.loopRuns("triage").length).toBeGreaterThan(0);
+  const agent = (await call<{ token: string }>("mintArm", { label: "reader" })).token;
+  for (const q of ["Ingrid", "rent arrears", "Run"]) {
+    const { memories } = await call<{ memories: { text: string }[] }>("recall", { q, limit: 50 }, agent);
+    expect([q, memories.filter((m) => /Ingrid|Vestergaard|rent arrears/.test(m.text)).length]).toEqual([q, 0]);
+  }
+});
+
 test("a command of that run that a rule of yours stops, or tells you of, is written without the mail's words: its line and its notice", async () => {
   // (The sandbox's hook says so for the run's arm, so the run it names is a run of the loop's arm: arm.loop.triage.<id>.)
   await call("setRule", { name: "no-printf", does: "refuse", words: [], contains: "printf" });

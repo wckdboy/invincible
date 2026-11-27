@@ -385,11 +385,16 @@ export function loopExecutor(deps: LoopTaskDeps) {
           // Your gates go with it as you gave them; on its own, the planner proposes none of its own.
           // What woke it goes with its goal as data from outside, within the goal's own limit (wakes.ts).
           const goal = `${task.goal}${wokenData(ctx.woken, RUN_GOAL_CHARS - task.goal.length)}`;
-          const { outcome, learned, usage } = await runOnNode(client, { goal, network: task.network, maxSteps: task.maxSteps, ...(task.gates?.length ? { gates: task.gates } : {}) }, { signal: ctx.signal });
+          // Woken by your private data (new mail), its goal says who wrote and what about. So it writes no memory of
+          // itself, nor a skill from its evidence: the mind replicates, and agents recall it. (It is still offered its
+          // skills: an offer records only that one was used. What it keeps, the node names by its loop: artifacts.ts.)
+          const secret = ctx.woken.some((event) => event.private);
+          const quiet = secret ? { remember: false, offerSkills: true } : {};
+          const { outcome, learned, usage } = await runOnNode(client, { goal, network: task.network, maxSteps: task.maxSteps, ...(task.gates?.length ? { gates: task.gates } : {}), ...quiet }, { signal: ctx.signal });
           const gated = outcome.gates?.some((g) => g.exitCode !== 0) ?? false;
           const review = outcome.status !== "done" && outcome.review ? ` ${gated ? "Never reviewed:" : "Reviewer:"} ${outcome.review.trim()}` : "";
           // Woken by your private data (new mail), what it says it did may say what it read: none of it is recorded.
-          if (ctx.woken.some((event) => event.private)) {
+          if (secret) {
             return { status: outcome.status === "done" ? "ok" : "attention", summary: `${outcome.status} after ${commandsRun(outcome)} commands${usage.length ? ` (${spendLabel(usage)})` : ""}: what it did with what woke it, yours alone, isn't recorded.` };
           }
           return {
