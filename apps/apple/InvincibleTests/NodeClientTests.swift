@@ -105,6 +105,16 @@ struct NodeClientTests {
         #expect(NodePin.shared(origin: origin, device: "c_tests-shared-pin", node: nil) !== NodePin.shared(origin: origin, device: "c_tests-another-device", node: nil))
     }
 
+    // The lead's word of 27 November 2026: while the node at this address isn't this device's, its trouble says so, never
+    // "can't reach".
+    @Test func theReachLineIsntShownWhileTheNodeIsntThisDevices() {
+        #expect(Session.showsReconnecting(true, trouble: nil))
+        #expect(Session.showsReconnecting(true, trouble: NodeError(status: 0, message: "Can't reach it", unreachable: true)))
+        #expect(!Session.showsReconnecting(true, trouble: .notYours(other: vectors.nodeProofs[0].anotherNode)))
+        #expect(!Session.showsReconnecting(true, trouble: .notYours(other: nil)))
+        #expect(!Session.showsReconnecting(false, trouble: nil))
+    }
+
     @Test func aCloneIsWaitedForAsLongAsTheNodeLetsItRun() throws {
         // The node clones a project's repository inside the request that asked, for as long as its CLONE_TIMEOUT lets it,
         // then looks at the checkout's git (GIT_TIMEOUT), and stops the clone if the request goes: the app waits that long

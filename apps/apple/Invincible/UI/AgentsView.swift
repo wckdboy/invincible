@@ -58,7 +58,7 @@ struct AgentsView: View {
             }
             if let since = session.keptSince {
                 // A still line over what it speaks of, not a row of its own.
-                Section { KeptLine(since: since) }
+                Section { KeptLine(since: since, asking: session.asksAgain) }
                     .listRowBackground(Color.clear)
             }
             #if os(iOS)
@@ -406,12 +406,19 @@ extension Standing {
 /// still line, so it is never taken for what the node says now.
 struct KeptLine: View {
     let since: Date
+    /// The node is being asked again (Session.asksAgain): not while it isn't this device's, when nothing is asked.
+    var asking = true
+
+    /// What it says: when the node last said it, and that it is asked again, where it is.
+    nonisolated static func words(_ ago: String, asking: Bool) -> String {
+        asking ? "As your node last said it, \(ago). Asking it again." : "As your node last said it, \(ago)."
+    }
 
     var body: some View {
         // (Said again each minute, so how long ago stays true while the node is away.)
         TimelineView(.everyMinute) { moment in
             Label {
-                Text("As your node last said it, \(ago(moment.date)). Asking it again.")
+                Text(Self.words(ago(moment.date), asking: asking))
             } icon: {
                 Image(systemName: "clock.arrow.circlepath")
             }

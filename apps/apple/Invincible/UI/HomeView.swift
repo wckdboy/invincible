@@ -69,12 +69,12 @@ struct HomeView: View {
         let _ = PerfProbe.shared.mark("home attended")
         #endif
         List {
-            if session.reconnecting {
+            if Session.showsReconnecting(session.reconnecting, trouble: session.trouble) {
                 ReconnectingLine(session: session).listRowSeparator(.hidden)
             } else if let trouble = session.trouble {
                 TroubleRow(trouble: trouble).font(.callout).listRowSeparator(.hidden)
             }
-            if let since = session.keptSince { KeptLine(since: since).listRowSeparator(.hidden) }
+            if let since = session.keptSince { KeptLine(since: since, asking: session.asksAgain).listRowSeparator(.hidden) }
             if !session.rows.isEmpty {
                 AgentStrip(session: session, rows: session.rows) { go(.agent($0)) }
                     .listRowInsets(EdgeInsets())

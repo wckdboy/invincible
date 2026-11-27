@@ -426,6 +426,15 @@ import Observation
         }
     }
 
+    /// Whether the reach line shows (HomeView): the stream is down and being found again, unless the node at this address
+    /// isn't this device's, which its trouble says instead; "can't reach" would say otherwise (the lead's word of 27
+    /// November 2026).
+    nonisolated static func showsReconnecting(_ reconnecting: Bool, trouble: NodeError?) -> Bool { reconnecting && trouble?.notYourNode == nil }
+
+    /// Whether the node is asked again (the kept line says so): not while the node at this address isn't this device's,
+    /// when nothing is asked but whoami, at your Try again (the lead's word of 27 November 2026).
+    var asksAgain: Bool { trouble?.notYourNode == nil }
+
     @discardableResult private func readTeam() async -> Bool {
         switch await attempt({ [client] in try await client.read("/api/team", as: TeamSnapshot.self) }) {
         case .success(let team):

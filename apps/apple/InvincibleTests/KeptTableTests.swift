@@ -132,6 +132,13 @@ struct KeptTableTests {
         #expect(KeptTable.Store.writing.contains(.atomic))
     }
 
+    // The lead's word of 27 November 2026: while the node at this address isn't this device's, nothing is asked of it, so
+    // the kept line says when it last spoke and no more.
+    @Test func theKeptLineSaysItAsksAgainOnlyWhileItDoes() {
+        #expect(KeptLine.words("5 minutes ago", asking: true) == "As your node last said it, 5 minutes ago. Asking it again.")
+        #expect(KeptLine.words("5 minutes ago", asking: false) == "As your node last said it, 5 minutes ago.")
+    }
+
     @MainActor @Test func aSessionDrawsItUntilTheNodeAnswersAndChangesNothingFromIt() async throws {
         let tag = "sh.invincible.bot.tests.kept"
         defer { try? DeviceKey.delete(tag: tag) }

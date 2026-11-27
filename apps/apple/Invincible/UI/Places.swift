@@ -211,7 +211,7 @@ struct PlacesSidebar<Foot: View>: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let since = session.keptSince {
-                    KeptLine(since: since)
+                    KeptLine(since: since, asking: session.asksAgain)
                         .padding(Space.s3)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
