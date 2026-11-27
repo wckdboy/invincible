@@ -919,6 +919,11 @@ export class SandboxHost {
         }
         spec.layout = { path: await this.imagePath(image) };
       }
+      // Nothing shares a store whose move is under way: half moved, its root holds neither layout as it should.
+      if (seated.shares && this.moves.started(seated.shares.sandbox)) {
+        if (tokenHash) this.opts.tokens.revoke(tokenHash);
+        throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);
+      }
       // One that shares an agent's store in layout 2 (another node's task, a run on a seat): its trees checked as they are
       // about to be mounted, as the agent's VM's are.
       if (seated.shares?.tree) {
@@ -992,6 +997,14 @@ export class SandboxHost {
 
   /** This node's sandboxes as Docker lists them, or null when Docker couldn't say (never mistaken for "none"). */
   async listed(): Promise<SandboxView[] | null> {
+    return (await this.inspected())?.map((c) => c.view) ?? null;
+  }
+
+  /**
+   * This node's sandboxes as Docker lists them, each with its container's own name (an agent's VM set aside as it is made
+   * again is `…-replaced`), or null when Docker couldn't say.
+   */
+  private async inspected(): Promise<{ view: SandboxView; name: string }[] | null> {
     if (!(await this.available())) return null;
     if (this.apple) {
       const listing = await this.docker(containerListArgs());
@@ -1002,7 +1015,8 @@ export class SandboxHost {
         .filter((c) => c.labels[LABEL] === "1" && c.labels[`${LABEL}.node`] === this.opts.node)
         .map((c) => toView(c.labels, c.image, c.status, usage, { ...(c.cpus ? { NanoCpus: c.cpus * 1e9 } : {}), ...(c.memoryBytes ? { Memory: c.memoryBytes } : {}) }))
         .filter((v): v is SandboxView => v !== null)
-        .sort((a, b) => b.createdAt - a.createdAt);
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((view) => ({ view, name: view.name }));
     }
     const listing = await this.docker(["ps", "-aq", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`]);
     if (listing.code !== 0) return null;
@@ -1016,12 +1030,15 @@ export class SandboxHost {
     // are the listing. Any other failure is Docker not saying (listing-race.test.ts).
     const ended = inspected.code !== 0 && inspected.stderr.trim().split("\n").every((line) => /no such object/i.test(line));
     if (inspected.code !== 0 && !ended) return null;
-    const containers = JSON.parse(inspected.stdout) as { Config: { Labels: Record<string, string>; Image: string }; State: { Status: string }; HostConfig?: { NanoCpus?: number; Memory?: number } }[];
+    const containers = JSON.parse(inspected.stdout) as { Name?: string; Config: { Labels: Record<string, string>; Image: string }; State: { Status: string }; HostConfig?: { NanoCpus?: number; Memory?: number } }[];
     const usage = await this.workspaceStats();
     return containers
-      .map((c) => toView(c.Config.Labels, c.Config.Image, c.State.Status, usage, c.HostConfig))
-      .filter((v): v is SandboxView => v !== null)
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .map((c) => {
+        const view = toView(c.Config.Labels, c.Config.Image, c.State.Status, usage, c.HostConfig);
+        return view ? { view, name: c.Name?.replace(/^\//, "") || view.name } : null;
+      })
+      .filter((c): c is { view: SandboxView; name: string } => c !== null)
+      .sort((a, b) => b.view.createdAt - a.view.createdAt);
   }
 
   private async workspaceStats(): Promise<WorkspaceStats | null> {
@@ -1045,7 +1062,9 @@ export class SandboxHost {
    * on the models its budget counts).
    */
   async prepareTeam(id: string, run: string, git?: { connector: string; owner: string; repo: string }, providers?: readonly string[], models?: readonly string[], keys?: readonly string[]): Promise<SandboxView> {
-    let sandbox = await this.get(id);
+    const name = containerName(id);
+    const found = ((await this.inspected()) ?? []).filter((c) => c.view.id === id);
+    let sandbox = found.find((c) => c.name === name)?.view ?? found[0]?.view ?? null;
     if (!sandbox) throw new SandboxError("the agent's VM is missing; its workspace must be recovered, not replaced", 404);
     if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") {
       throw new SandboxError("that is not this agent's persistent VM", 403);
@@ -1054,6 +1073,20 @@ export class SandboxHost {
       if (!this.opts.workspaces?.mount || !this.opts.workspaces.retain) throw new SandboxError("update the workspace helper before resuming this agent", 424);
       await this.opts.workspaces.retain(id);
       await this.opts.workspaces.mount(id);
+    }
+    // One set aside by a move or a remake the node was cut off in (it stopped as the new VM was being made): it gets its
+    // name back first, as remakeTeam does; or, where the new one was made, it goes, as a remake's last step would have.
+    if (found.some((c) => c.name === `${name}-replaced`)) {
+      const named = found.some((c) => c.name === name);
+      const settled = named ? await this.docker(["rm", "--force", `${name}-replaced`]) : await this.docker(["rename", `${name}-replaced`, name]);
+      if (settled.code !== 0 && !named) throw new SandboxError("the agent's VM is missing; its workspace must be recovered, not replaced", 404);
+      sandbox = (await this.get(id)) ?? sandbox;
+    }
+    // A move the node was cut off at the very end of (its VM made again in layout 2, never said): said now, and done.
+    const cut = this.moves.started(id);
+    if (cut && (await this.layoutOf(id)) === 2) {
+      this.moves.end(id);
+      this.saidMoved(id, run, cut.entries, "a move the node was cut off at the end of");
     }
     // Still in layout 1: moved to layout 2 now, while nothing runs in it. One that can't be is put back as it was, and its
     // work goes on in layout 1 (it is tried again at its next prepare). One whose store couldn't be put back (its move is
@@ -1072,6 +1105,9 @@ export class SandboxHost {
           if (half) throw new SandboxError("the agent's store is half moved to layout 2 and couldn't be put back, so its VM isn't started on it: its next prepare takes the move up again", 424);
         }
         sandbox = (await this.get(id)) ?? sandbox;
+      } else if (this.moves.started(id) && !here) {
+        // Layout 2 turned off since its move began: the move is put back, by its own word, and its work goes on in layout 1.
+        await this.putMoveBack(sandbox, run);
       } else if (this.moves.started(id)) {
         throw new SandboxError("the agent's store is half moved to layout 2, so its VM isn't started on it: its next prepare while nothing runs in it takes the move up again", 424);
       }
@@ -1369,18 +1405,37 @@ export class SandboxHost {
       throw error;
     }
     this.moves.end(sandbox.id);
+    this.saidMoved(sandbox.id, run, entries, underway ? "taking up a move that was under way" : null);
+  }
+
+  /** An agent's VM moved to layout 2, said once: a line in the ledger, by names and sizes alone, and its owner's notice. */
+  private saidMoved(id: string, run: string, entries: readonly LayoutEntry[], how: string | null): void {
     const sum = (to: LayoutEntry["to"]) => entries.filter((e) => e.to === to);
     const notes = sum("notes")[0];
     this.opts.ledger({
       class: "modify",
       resource: "docker.container",
-      target: containerName(sandbox.id),
+      target: containerName(id),
       verdict: "allow",
       reason: "layout 2: its HOME apart from its workspace, made again at a prepare while nothing ran in it",
       run,
-      detail: `made again in layout 2${underway ? ", taking up a move that was under way" : ""} · to its HOME: ${sum("home").length} entries, ${sum("home").reduce((n, e) => n + e.bytes, 0)} bytes · its notes: ${notes ? `${notes.bytes} bytes, to a tree of their own` : "none yet, a tree of their own made for them"} · kept in its workspace: ${sum("work").length} entries · its old lease dropped`,
+      detail: `made again in layout 2${how ? `, ${how}` : ""} · to its HOME: ${sum("home").length} entries, ${sum("home").reduce((n, e) => n + e.bytes, 0)} bytes · its notes: ${notes ? `${notes.bytes} bytes, to a tree of their own` : "none yet, a tree of their own made for them"} · kept in its workspace: ${sum("work").length} entries · its old lease dropped`,
     });
     this.opts.moved?.(run, entries);
+  }
+
+  /**
+   * A move under way put back, by its own word, where it can't be taken up (layout 2 was turned off since it began): its
+   * store's entries where they were, and its VM as it was, in layout 1. One that can't be put back isn't started on it.
+   */
+  private async putMoveBack(sandbox: SandboxView, run: string): Promise<void> {
+    const move = this.moves.started(sandbox.id)!;
+    const back = await this.layoutRun(await this.storeOf(sandbox), sandbox.image, "back", move.nonce);
+    if (back.code !== 0) {
+      throw new SandboxError(`the agent's store is half moved to layout 2 and couldn't be put back, so its VM isn't started on it: ${redact(back.stderr).trim().split("\n").at(-1)?.slice(0, 300) || `exit ${back.code}`}`, 424);
+    }
+    this.moves.end(sandbox.id);
+    this.opts.ledger({ class: "modify", resource: "docker.container", target: containerName(sandbox.id), verdict: "allow", run, detail: "a move to layout 2 under way was put back, layout 2 being off here now: its store's entries are where they were, and its VM in layout 1" });
   }
 
   async remakeTeam(

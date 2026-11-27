@@ -278,6 +278,18 @@ describe("what was at a store's root before its move (the fourth fabric review's
     expect(ls(root)).toEqual(before);
   });
 
+  test("a store holding another move's manifest (its node lost its word for it) is neither moved again nor touched (R4-6)", () => {
+    const root = store();
+    expect(run("move", root).status).toBe(0);
+    // A move begun by a node that has no word for the one before: it would take the trees for the agent's entries.
+    const again = run("move", root, "f".repeat(32));
+    expect(again.status).toBe(3);
+    expect(again.stderr).toContain(`the store holds another move's manifest (${MANIFEST})`);
+    expect(ls(root)).toEqual([MANIFEST, "home", "lost+found", "notes", "work"]);
+    expect(ls(join(root, "work"))).toEqual(WORK);
+    expect(ls(join(root, "home"))).toEqual([".config", ".local", ".memory"]);
+  });
+
   test("a move, its putting back and a store made new each need the node's word: without one nothing is done", () => {
     const root = store();
     const before = ls(root);

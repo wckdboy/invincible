@@ -318,8 +318,17 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   checked against the workspace's own entries, so one the code comes to keep there isn't moved away (`layout.test.ts`).
   A move that can't be finished is put back by the reverse renames, and its work goes on in layout 1 until the next
   prepare. One whose store couldn't be put back isn't started on it, since its `/work` would be that store's root as the
-  move left it: its next prepare takes the move up again, with its own word. Each move is a line in the ledger and a
-  notice to you that names the agent. Its list mode says what a move would do by entry name and size alone, reading no
+  move left it: its next prepare takes the move up again, with its own word.
+- **A node that stops in the middle of a move** (the fourth fabric review's R4-6) takes it up at the agent's next
+  prepare, its word and what the store listed before it began kept in its database: the VM it had set aside gets its
+  name back first, as a remake does, and the move is finished, or put back if layout 2 was turned off since. One cut at
+  its very end (its VM made again, the old one not yet taken away) has the old one taken away. Nothing shares a store
+  while its move is under way. A store holding the manifest of a move its node has no word for (its database lost) is
+  neither moved again nor touched, since a fresh move would take its trees for the agent's entries
+  (`layout-planted.test.ts`, `layout.test.ts`).
+- **Said as it is.** Each move is a line in the ledger and a notice to you that names the agent and what moved, by
+  names and sizes from the store's list before the move began: a move taken up says so, one put back says so, and one
+  that couldn't be made says why. Its list mode says what a move would do by entry name and size alone, reading no
   file.
 - **Where it holds.** A Linux host with Docker: a store on a Docker volume needs Docker Engine 26 or later (its trees are
   the volume's subpaths), and stays in layout 1 on an older engine; a workspace image's store moves on any. **A Mac's VMs

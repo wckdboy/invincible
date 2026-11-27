@@ -4,7 +4,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LEASE_FILE, NOTES_DIR } from "@invincible/core";
-import { containerName, type DockerRunner, LABEL, type LayoutEntry, memoryLayoutMoves, memoryTokenStore, runArgs, SandboxHost } from "../src/index.ts";
+import { containerName, type DockerRunner, LABEL, type LayoutEntry, type LayoutMoves, memoryLayoutMoves, memoryTokenStore, runArgs, SandboxHost } from "../src/index.ts";
 
 /*
  * What a layout-1 store's root held before its move, as the host moves it (the fourth fabric review's R4-1 and R4-2, its
@@ -63,9 +63,16 @@ const RUN = "arm.team.abcdef0123.builder";
 const IMAGE = "invincible/sandbox:1";
 type Mount = { Type: string; Source?: string; Destination: string };
 
-function hostOver(root: string) {
-  const containers = new Map<string, { labels: Record<string, string>; mounts: Mount[]; status: string }>();
-  containers.set(containerName(ID), {
+type Containers = Map<string, { labels: Record<string, string>; mounts: Mount[]; status: string }>;
+
+/**
+ * The host over a stand-in for Docker. `containers` and `moves`: a process before this one's, on the same Docker and the
+ * same node database, as a node that comes back has them. `hang`: the node stops as the moved VM is being made (nothing
+ * after that runs, its put-back neither). `layout2`: the node's setting.
+ */
+function hostOver(root: string, opts: { containers?: Containers; moves?: LayoutMoves; hang?: { on: boolean; entered?: boolean }; layout2?: boolean } = {}) {
+  const containers: Containers = opts.containers ?? new Map();
+  if (!opts.containers) containers.set(containerName(ID), {
     labels: {
       [LABEL]: "1", [`${LABEL}.id`]: ID, [`${LABEL}.node`]: "test", [`${LABEL}.run`]: RUN, [`${LABEL}.network`]: "gateway", [`${LABEL}.ephemeral`]: "false",
       [`${LABEL}.isolation`]: "vm", [`${LABEL}.providers`]: "openai", [`${LABEL}.disk`]: "20", [`${LABEL}.created`]: "1000", [`${LABEL}.expires`]: "2000",
@@ -96,6 +103,10 @@ function hostOver(root: string) {
           const ran = spawnSync("python3", ["-I", "-c", script!, mode!, src, ...more], { encoding: "utf8", timeout: 20_000 });
           modes.push({ mode: mode!, code: ran.status ?? 1, stderr: ran.stderr });
           return { code: ran.status ?? 1, stdout: ran.stdout, stderr: ran.stderr };
+        }
+        if (opts.hang?.on) {
+          opts.hang.entered = true;
+          return new Promise<never>(() => {});
         }
         made.push(rest);
         const labels: Record<string, string> = {};
@@ -134,9 +145,10 @@ function hostOver(root: string) {
           const label = /^\{\{index \.Config\.Labels "([^"]+)"\}\}$/.exec(rest[1]!)?.[1];
           return label ? ok(c.labels[label] ?? "") : ok(JSON.stringify(c.mounts));
         }
-        const found = rest.map((name) => containers.get(name)).filter((c) => !!c);
+        // (As Docker says them, each with its own name.)
+        const found = rest.filter((name) => containers.has(name));
         if (!found.length) return { code: 1, stdout: "", stderr: "No such object" };
-        return ok(JSON.stringify(found.map((c) => ({ Config: { Labels: c!.labels, Image: IMAGE }, State: { Status: c!.status }, HostConfig: { NanoCpus: 2e9, Memory: 4 * 2 ** 30 } }))));
+        return ok(JSON.stringify(found.map((name) => ({ Name: `/${name}`, Config: { Labels: containers.get(name)!.labels, Image: IMAGE }, State: { Status: containers.get(name)!.status }, HostConfig: { NanoCpus: 2e9, Memory: 4 * 2 ** 30 } }))));
       }
       case "rename": {
         const c = containers.get(rest[0]!);
@@ -165,11 +177,12 @@ function hostOver(root: string) {
   };
   const ledger: { detail?: string }[] = [];
   const moved: { run: string; entries: readonly LayoutEntry[] }[] = [];
+  const moves = opts.moves ?? memoryLayoutMoves();
   const host = new SandboxHost({
-    node: "test", maxCpus: 8, maxMemoryGb: 16, microVMs: true, runner, ledger: (e) => void ledger.push(e), layout2: true, moved: (run, entries) => void moved.push({ run, entries }),
+    node: "test", maxCpus: 8, maxMemoryGb: 16, microVMs: true, runner, ledger: (e) => void ledger.push(e), layout2: opts.layout2 ?? true, moved: (run, entries) => void moved.push({ run, entries }),
     tokens: { mint: () => ({ token: "test-only-token", info: { hash: "test-only-hash" } }), revoke: () => true, extend: () => true },
     tokenStore: memoryTokenStore(),
-    layoutMoves: memoryLayoutMoves(),
+    layoutMoves: moves,
     workspaces: { available: async () => true, create: async () => root, mount: async () => {}, retain: async () => {}, remove: async () => {}, stats: async () => ({ totalBytes: 10 ** 12, freeBytes: 10 ** 12, images: [] }) },
   });
   /** Each bind of the latest VM made, by where it is mounted: its source, and where that resolves on this host. */
@@ -181,7 +194,7 @@ function hostOver(root: string) {
       return [{ dst: p.dst!, src: p.src!, real: realpathSync(p.src!), dir: lstatSync(p.src!).isDirectory() }];
     });
   };
-  return { host, made, modes, ledger, moved, containers, binds, labels: () => containers.get(containerName(ID))!.labels };
+  return { host, made, modes, ledger, moved, containers, moves, binds, labels: () => containers.get(containerName(ID))!.labels };
 }
 
 describe("R4-1: a planted manifest and tree-named links at a layout-1 store's root", () => {
@@ -251,5 +264,88 @@ describe("R4-2: a staging folder's name planted as a link in layout 1", () => {
     expect(work).toBe(join(root, "work"));
     expect(existsSync(join(work, LEASE_FILE))).toBe(false);
     expect(readdirSync(work).sort()).toEqual(["repo", "work"]);
+  });
+});
+
+describe("R4-6: a node that stops in the middle of a move", () => {
+  /** A first process that moves the store and stops as its VM is made again: what it leaves, and the node's database. */
+  async function cut(root: string) {
+    const hang = { on: true, entered: false };
+    const first = hostOver(root, { hang });
+    void first.host.prepareTeam(ID, RUN).catch(() => {});
+    const until = Date.now() + 10_000;
+    while (!hang.entered && Date.now() < until) await Bun.sleep(5);
+    expect(hang.entered).toBe(true);
+    // What it leaves: its VM set aside, its store moved (the manifest says so), and its move under way in its database.
+    expect([...first.containers.keys()]).toEqual([`${containerName(ID)}-replaced`]);
+    expect(readdirSync(root).filter((n) => !n.startsWith(".invincible-layout-")).sort()).toEqual(["home", "notes", "work"]);
+    expect(first.moves.started(ID)).not.toBeNull();
+    return first;
+  }
+
+  test("is taken up at its next prepare: its VM gets its name back, its move is done with its own word, and you're told what moved", async () => {
+    const root = store();
+    const first = await cut(root);
+    const word = first.moves.started(ID)!.nonce;
+    const second = hostOver(root, { containers: first.containers, moves: first.moves });
+    const prepared = await second.host.prepareTeam(ID, RUN);
+    expect(prepared.status).toBe("running");
+    // (No list: what it listed before it began is in the node's database. The move, then its trees checked.)
+    expect(second.modes.map((m) => [m.mode, m.code])).toEqual([["move", 0], ["check", 0]]);
+    expect(second.labels()[`${LABEL}.layout`]).toBe("2");
+    expect([...second.containers.keys()]).toEqual([containerName(ID)]);
+    expect(second.moves.started(ID)).toBeNull();
+    expect(readdirSync(root).filter((n) => n.startsWith(".invincible-layout-"))).toEqual([`.invincible-layout-${word}.json`]);
+    // What you're told is what moved, and that it was taken up.
+    expect(second.ledger.find((e) => e.detail?.startsWith("made again in layout 2"))!.detail).toStartWith("made again in layout 2, taking up a move that was under way · to its HOME: 2 entries");
+    expect(second.ledger.some((e) => e.detail?.startsWith("not moved"))).toBe(false);
+    expect(second.moved[0]!.entries.filter((e) => e.to === "home").map((e) => e.name)).toEqual([".claude", ".memory"]);
+    expect(readFileSync(join(root, "home/.claude/.credentials.json"), "utf8")).toContain("not-a-real-secret-sentinel");
+    // And the prepare after: nothing more to do.
+    second.modes.length = 0;
+    await second.host.prepareTeam(ID, RUN);
+    expect(second.modes).toEqual([]);
+  });
+
+  test("with layout 2 turned off since, it is put back with its own word: its store's entries where they were, its VM in layout 1", async () => {
+    const root = store();
+    const first = await cut(root);
+    const second = hostOver(root, { containers: first.containers, moves: first.moves, layout2: false });
+    const prepared = await second.host.prepareTeam(ID, RUN);
+    expect(prepared.status).toBe("running");
+    expect(second.modes.map((m) => [m.mode, m.code])).toEqual([["back", 0]]);
+    expect(second.labels()[`${LABEL}.layout`]).toBeUndefined();
+    expect(second.moves.started(ID)).toBeNull();
+    expect(readdirSync(root).sort()).toEqual([".claude", ".memory", "repo"]);
+    expect(readFileSync(join(root, NOTES_DIR, "notes.db"), "utf8")).toBe("the agent's notes");
+    expect(second.ledger.some((e) => e.detail?.startsWith("a move to layout 2 under way was put back"))).toBe(true);
+    expect(second.moved).toEqual([]);
+  });
+
+  test("cut at its very end (its VM made again, the old one still set aside): the old one goes, and you're told it moved", async () => {
+    const root = store();
+    const moves = memoryLayoutMoves();
+    const first = hostOver(root, { moves });
+    await first.host.prepareTeam(ID, RUN);
+    // As the node would have left it, stopping before its last step: the old container still there, its move under way.
+    first.containers.set(`${containerName(ID)}-replaced`, { labels: { ...first.labels(), [`${LABEL}.layout`]: "" }, mounts: [{ Type: "bind", Source: root, Destination: "/work" }], status: "exited" });
+    moves.start(ID, { nonce: "f".repeat(32), entries: [{ name: ".claude", to: "home", kind: "dir", bytes: 100 }] });
+    const second = hostOver(root, { containers: first.containers, moves });
+    await second.host.prepareTeam(ID, RUN);
+    expect([...second.containers.keys()]).toEqual([containerName(ID)]);
+    expect(second.moves.started(ID)).toBeNull();
+    expect(second.ledger.some((e) => e.detail?.startsWith("made again in layout 2, a move the node was cut off at the end of · to its HOME: 1 entries, 100 bytes"))).toBe(true);
+    expect(second.moved).toHaveLength(1);
+    expect(second.modes.map((m) => m.mode)).toEqual([]);
+  });
+
+  test("nothing shares a store while its move is under way", async () => {
+    const root = store();
+    const first = await cut(root);
+    const second = hostOver(root, { containers: first.containers, moves: first.moves });
+    // (As a run on a seat would: a VM that shares the agent's workspace.)
+    second.containers.set(containerName(ID), second.containers.get(`${containerName(ID)}-replaced`)!);
+    second.containers.delete(`${containerName(ID)}-replaced`);
+    await expect(second.host.create({ network: "gateway", cpus: 1, memoryGb: 1, ttlMinutes: 30, persistent: false, run: "seat-run-x" }, { shares: { sandbox: ID, workspace: root } })).rejects.toThrow("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back");
   });
 });

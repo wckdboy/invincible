@@ -73,7 +73,7 @@ export function layoutPath(imagePath: string): string {
  *   middle is moved on, or back, from where it was: the manifest (at the store's root, which no VM mounts in layout 2)
  *   says what went where as it goes, and is read only by the move whose word its name carries.
  */
-export const MOVE_PY = String.raw`import json, os, stat, sys
+export const MOVE_PY = String.raw`import json, os, re, stat, sys
 MODE, ROOT = sys.argv[1], sys.argv[2]
 OWN = set(json.loads(sys.argv[3]))
 LEASE = sys.argv[4]
@@ -214,6 +214,11 @@ def move():
         refuse("a move needs the node's word for it")
     manifest = load()
     if manifest is None:
+        # A move begins. One whose manifest is here under another word (its node lost its own) may have left the store
+        # half moved: that store is neither moved again nor touched, as a fresh move would take its trees for entries.
+        other = sorted(name for name in os.listdir(ROOT) if re.fullmatch(r"\.invincible-layout-[0-9a-f]{32}\.json", name))
+        if other:
+            refuse("the store holds another move's manifest (" + other[0] + "), and the node has no word for it: it may be half moved, so it is neither moved again nor touched")
         manifest = {"layout": 2, "state": "moving", "moved": [], "nonce": NONCE}
         save(manifest)
     if manifest["state"] == "moved":
