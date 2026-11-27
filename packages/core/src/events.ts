@@ -2,7 +2,7 @@ import { z } from "zod";
 import { canonical, type Json } from "./canonical.ts";
 import { b64u, fromB64u } from "./bytes.ts";
 import { sha256B64u } from "./crypto.ts";
-import { isHlc } from "./hlc.ts";
+import { decodeHlc, isHlc } from "./hlc.ts";
 import { type DeviceId, domain, isNodeId, type NodeIdentity, verifyDeviceSignature } from "./identity.ts";
 import { ProjectId } from "./chats.ts";
 import { Conclusion, InvestigationId, InvestigationStatus, PredictionOutcome } from "./investigations.ts";
@@ -451,7 +451,8 @@ export function parseEvent(raw: unknown): GEvent {
   if (canonical(event).length > MAX_EVENT_BYTES) throw new Error("event too large");
   if (!isNodeId(event.device)) throw new Error("only nodes sign log events");
   if (eventId(unsignedOf(event)) !== event.id) throw new Error("event id does not match content");
-  if (!verifyDeviceSignature(event.device as DeviceId, fromB64u(event.sig), signingInput(event.id))) {
+  // Held to Ed25519's strict rule from the cutoff, by the event's own HLC: the same answer on every replica (identity.ts).
+  if (!verifyDeviceSignature(event.device as DeviceId, fromB64u(event.sig), signingInput(event.id), decodeHlc(event.hlc).ms)) {
     throw new Error("bad event signature");
   }
   if (isKnownKind(event.kind)) Bodies[event.kind].parse(event.body);

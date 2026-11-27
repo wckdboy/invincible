@@ -112,8 +112,9 @@ export function verifyRequestSignature(
   // since WebCrypto's signatures aren't low-S (verifyP256): harmless, as the nonce cache keys on the device and the
   // nonce, and refuses the second form of a request once the first is seen.
   if (b64u(signature) !== sig) return null;
-  if (node !== undefined && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body, node))) return { device, nonce, ts: time, named: true };
-  if ((node === undefined || legacy) && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body))) return { device, nonce, ts: time, named: false };
+  // A link call's node signature is held to Ed25519's strict rule from the cutoff, by the request's own time (identity.ts).
+  if (node !== undefined && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body, node), time)) return { device, nonce, ts: time, named: true };
+  if ((node === undefined || legacy) && verifyDeviceSignature(device, signature, requestSigningInput(method, path, ts, nonce, body), time)) return { device, nonce, ts: time, named: false };
   return null;
 }
 

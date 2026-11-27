@@ -10,6 +10,7 @@ import {
   signP256,
   strictEd25519Point,
   verifyEd25519,
+  verifyEd25519Strict,
   verifyP256,
 } from "./crypto.ts";
 
@@ -39,8 +40,18 @@ export function isStrictNodeId(id: string): boolean {
 }
 export const isClientId = (id: string): boolean => /^c_[A-Za-z0-9_-]{87}$/.test(id);
 
-export function verifyDeviceSignature(device: DeviceId, signature: Bytes, message: Bytes): boolean {
-  if (isNodeId(device)) return verifyEd25519(signature, message, fromB64u(device.slice(2)));
+/**
+ * From this moment a node's Ed25519 signature on the log and on link calls is held to the strict rule (crypto.ts
+ * verifyEd25519Strict): an event stamped (its HLC) or a request made (its own time) at or after it. Before it, as it always
+ * was (noble's ZIP-215 rules), so what a log holds from before is judged alike by every node, whatever its version, and
+ * replicas converge (the lead's word of 27 November 2026). The same day requests must name their node.
+ */
+export const SIGNATURES_STRICT_FROM = Date.UTC(2026, 11, 14);
+
+/** A device's signature of `message`. `at`: when it was made (a log event's HLC, a request's own time), which holds a
+ * node's to the strict rule from SIGNATURES_STRICT_FROM; without it, as it always was. */
+export function verifyDeviceSignature(device: DeviceId, signature: Bytes, message: Bytes, at?: number): boolean {
+  if (isNodeId(device)) return (at !== undefined && at >= SIGNATURES_STRICT_FROM ? verifyEd25519Strict : verifyEd25519)(signature, message, fromB64u(device.slice(2)));
   if (isClientId(device)) return verifyP256(signature, message, fromB64u(device.slice(2)));
   return false;
 }

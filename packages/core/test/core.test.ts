@@ -34,6 +34,9 @@ import {
   NODE_CHALLENGE,
   nodeProofInput,
   REQUESTS_NAME_THEIR_NODE_FROM,
+  SIGNATURES_STRICT_FROM,
+  encodeHlc,
+  eventId,
   verifyNodeProof,
   isStrictNodeId,
   strictEd25519Point,
@@ -387,5 +390,55 @@ describe("Ed25519's strict rule", () => {
     forgery.set(SMALL[0]!, 0);
     for (const point of SMALL) expect(verifyEd25519Strict(forgery, message, point)).toBe(false);
     expect(verifyEd25519Strict(signature.subarray(0, 63), message, key)).toBe(false);
+  });
+
+  // The lead's word of 27 November 2026: the log's and link calls' node signatures are held to the rule from 14 December
+  // 2026, by the event's own HLC and the request's own time; before it, as they always were, so a log converges the same.
+  const weakKey = SMALL[0]!;
+  const weak = `n_${b64u(weakKey)}`;
+  /** R the identity, S zero: under ZIP-215's rules, the identity's key "signs" any message so. */
+  const universal = (() => {
+    const signature = new Uint8Array(64);
+    signature.set(weakKey, 0);
+    return signature;
+  })();
+
+  test("a log event is held to the rule from the cutoff by its own HLC: a weak key's forgery stamped before it is taken as it always was, after it refused", () => {
+    const at = (ms: number, device = weak) => ({ v: 1 as const, fleet: b64u(randomBytes(32)), hlc: encodeHlc({ ms, counter: 0 }), device, kind: "run.started", body: { any: "thing" } });
+    const forged = (ms: number) => {
+      const unsigned = at(ms);
+      return { ...unsigned, id: eventId(unsigned), sig: b64u(universal) };
+    };
+    // The lead's date: the day requests must name their node too.
+    expect(new Date(SIGNATURES_STRICT_FROM).toISOString()).toBe("2026-12-14T00:00:00.000Z");
+    expect(SIGNATURES_STRICT_FROM).toBe(REQUESTS_NAME_THEIR_NODE_FROM);
+    expect(verifyEd25519(universal, utf8("anything at all"), weakKey)).toBe(true);
+    expect(parseEvent(forged(SIGNATURES_STRICT_FROM - 1)).device).toBe(weak);
+    expect(() => parseEvent(forged(SIGNATURES_STRICT_FROM))).toThrow("bad event signature");
+    expect(() => parseEvent(forged(SIGNATURES_STRICT_FROM + 86_400_000))).toThrow("bad event signature");
+    // A real node's events verify on either side.
+    const node = newNodeIdentity();
+    for (const ms of [SIGNATURES_STRICT_FROM - 1, SIGNATURES_STRICT_FROM]) expect(parseEvent(signEvent(at(ms, node.id), node)).device).toBe(node.id);
+  });
+
+  test("a link call is held to the rule from the cutoff by its own time: a weak key's forgery made before it is taken as it always was, after it refused", async () => {
+    const body = utf8('{"have":{}}');
+    const forged = (ms: number) =>
+      new Headers({ [AUTH.device]: weak, [AUTH.ts]: String(ms), [AUTH.nonce]: "a-link-call-nonce", [AUTH.sig]: b64u(universal) });
+    const node = newNodeIdentity().id;
+    const before = SIGNATURES_STRICT_FROM - 60_000;
+    expect(verifyRequestSignature(forged(before), "POST", "/link/sync", body, before, node)?.named).toBe(true);
+    expect(verifyRequestSignature(forged(before), "POST", "/link/sync", body, before)?.named).toBe(false);
+    for (const after of [SIGNATURES_STRICT_FROM, SIGNATURES_STRICT_FROM + 60_000]) {
+      expect(verifyRequestSignature(forged(after), "POST", "/link/sync", body, after, node)).toBeNull();
+      // Nor as one that names no node, whoami's (taken after the cutoff when its caller says so).
+      expect(verifyRequestSignature(forged(after), "POST", "/link/sync", body, after, node, true)).toBeNull();
+    }
+    // A real node's link calls verify on either side.
+    const real = newNodeIdentity();
+    for (const ms of [before, SIGNATURES_STRICT_FROM + 60_000]) {
+      const headers = new Headers(await signRequest(real.id, real.sign, "POST", "/link/sync", body, ms, node));
+      expect(verifyRequestSignature(headers, "POST", "/link/sync", body, ms, node)?.device).toBe(real.id);
+    }
   });
 });
