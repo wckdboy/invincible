@@ -35,6 +35,11 @@ const flag = (name: string): string | undefined => {
   return at < 0 ? undefined : process.argv[at + 1];
 };
 const setup = JSON.parse(readFileSync(flag("setup") ?? "", "utf8")) as { endpoint: string; invite: string; room: string; agent: string; timeUrl: string; vmOffsetMs: number; vmOffsetBoundMs: number; standIn?: boolean };
+/** The glass page's clock less the node's, as the node last measured it (it does every 5 s), or null from a node that doesn't say. */
+const pageOffset = async (): Promise<{ ms: number; boundMs: number } | null> => {
+  const said = (await (await fetch(setup.timeUrl)).json()) as { vmOffsetMs?: number; vmOffsetBoundMs?: number };
+  return said.vmOffsetMs === undefined ? null : { ms: said.vmOffsetMs, boundMs: said.vmOffsetBoundMs ?? 0 };
+};
 const CHROME = flag("chrome") ?? process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 if (!existsSync(CHROME)) throw new Error(`no Chrome at ${CHROME}: --chrome <Chrome or Chrome for Testing>`);
 const SECONDS = Number(flag("seconds") ?? 20);
@@ -173,11 +178,18 @@ try {
   // ---------- running: glass to glass ----------
   await pressed("Return");
   await sleep(1000);
+  // (The page's offset as measured while it runs, before and after: the one each frame is aligned by, and its drift.)
+  const offsetFrom = await pageOffset();
   const ranFrom = now();
   await sleep(SECONDS * 1000);
   const ranTo = now();
+  const offsetTo = await pageOffset();
+  const during = offsetFrom && offsetTo ? { ms: (offsetFrom.ms + offsetTo.ms) / 2, boundMs: Math.max(offsetFrom.boundMs, offsetTo.boundMs) + Math.abs(offsetTo.ms - offsetFrom.ms) / 2 } : { ms: setup.vmOffsetMs, boundMs: setup.vmOffsetBoundMs };
+  const aheadDuring = during.ms + clock.ms;
   const ran = (await frames()).filter((f) => f.at >= ranFrom && f.at < ranTo);
-  const glass = ran.map((f) => f.at - (f.vm - ahead));
+  const glass = ran.map((f) => f.at - (f.vm - aheadDuring));
+  // (And raw: the page's clock taken as this machine's, the node's offset alone applied.)
+  const raw = ran.map((f) => f.at - (f.vm - clock.ms));
 
   // ---------- clicks: click to seeing it ----------
   const seeing: number[] = [];
@@ -214,11 +226,20 @@ try {
   const report = {
     standIn: Boolean(setup.standIn),
     glassToGlass: { n: glass.length, medianMs: at(glass, 0.5), p95Ms: at(glass, 0.95), minMs: at(glass, 0), maxMs: at(glass, 1) },
+    glassToGlassRaw: { n: raw.length, medianMs: at(raw, 0.5), p95Ms: at(raw, 0.95), minMs: at(raw, 0), maxMs: at(raw, 1) },
     clickToSeeing: { n: seeing.length, unseen, medianMs: at(seeing, 0.5), p95Ms: at(seeing, 0.95), minMs: at(seeing, 0), maxMs: at(seeing, 1) },
     drawnFps: ran.length / SECONDS,
     unread: await evaluate<number>("window.__glass.unread"),
     kbitPerSecond: { running: kbit(ranFrom, ranTo), still: kbit(stillFrom, stillTo) },
-    clocks: { nodeAheadMs: clock.ms, nodeBoundMs: clock.rtt / 2, vmAheadMs: ahead, vmBoundMs: bound },
+    clocks: {
+      nodeAheadMs: clock.ms,
+      nodeBoundMs: clock.rtt / 2,
+      // (The page's, at the node's start, as setup.json said it; then as measured before and after the run.)
+      vmAheadAtStartMs: ahead,
+      vmAheadMs: aheadDuring,
+      vmBoundMs: during.boundMs + clock.rtt / 2 + 1,
+      vmDriftMs: offsetFrom && offsetTo ? offsetTo.ms - offsetFrom.ms : null,
+    },
     load: (await Bun.$`sysctl -n vm.loadavg`.nothrow().quiet()).stdout.toString().trim(),
   };
   if (report.standIn) say("a stand-in's run: the clock it showed is a recording's and a click changes nothing on it, so these numbers measure nothing");

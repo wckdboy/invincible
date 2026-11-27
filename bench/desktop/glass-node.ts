@@ -12,8 +12,11 @@
  *   (the node's proxied listener), and --time-port. The browser treats that origin as secure by its own flag (glass.ts).
  * - It makes one agent, "glass", with an isolated desktop VM, opens the glass clock's page on its screen (glass-page.ts)
  *   and gives the desktop back.
- * - The clocks: the VM's against this machine's, by a held exec's exchanges (sub-millisecond), and this machine's for
- *   the browser's, on its own port (--time-port): `{ now }`, nothing else.
+ * - The clocks: the glass page's own (the clock its strip shows: the VM's Chromium's Date.now(), asked over its DevTools
+ *   on the VM's loopback) against this machine's, by a held exec's exchanges, timed here below the millisecond, the
+ *   least round trip kept; measured again every 5 s while it serves. And this machine's for the browser's, on its own
+ *   port (--time-port): `{ now }`, with the page's latest offset beside it. (Measured once, at its start, from Python's
+ *   clock in the VM, the offset read 15 ms off what the strip showed during a run: glass to glass came out below zero.)
  * - It prints, as one line of JSON, what glass.ts needs: where to pair (an invite, approved as it comes, for ten
  *   minutes), the agent's room, the time's address, and the VM's offset. It runs until it is stopped (Ctrl-C, SIGTERM),
  *   then removes its VM.
@@ -120,10 +123,20 @@ try {
   await admin("teamDesktop", { id: "glass", action: { do: "open", address: "file:///work/glass.html" }, picture: false });
   await admin("teamDesktopRelease", { id: "glass" });
 
-  // The VM's clock against this machine's: a held exec answers each line with its time (ns), the least round trip kept.
-  const offset = standIn ? { ms: 0, boundMs: 0 } : await vmOffset(vm.id);
-  log(`the VM's clock is ${offset.ms.toFixed(2)} ms ahead of this machine's (±${offset.boundMs.toFixed(2)})`);
-  timeServer = Bun.serve({ hostname: ADVERTISE, port: TIME_PORT, fetch: () => Response.json({ now: Date.now() }) });
+  // The page's clock against this machine's, and again every 5 s while it serves: what the browser aligns each frame by.
+  const clock = standIn ? null : pageClock(vm.id);
+  let offset = clock ? await clock.measure() : { ms: 0, boundMs: 0, at: Date.now() };
+  log(`the page's clock is ${offset.ms.toFixed(2)} ms ahead of this machine's (±${offset.boundMs.toFixed(2)})`);
+  if (clock) {
+    const again = async (): Promise<void> => {
+      while (!stopping) {
+        await Bun.sleep(5000);
+        offset = await clock.measure().catch((error) => (log(`the page's clock didn't answer: ${(error as Error).message}`), offset));
+      }
+    };
+    void again();
+  }
+  timeServer = Bun.serve({ hostname: ADVERTISE, port: TIME_PORT, fetch: () => Response.json({ now: Date.now(), vmOffsetMs: offset.ms, vmOffsetBoundMs: offset.boundMs, vmOffsetAt: offset.at }) });
 
   // Where the browser pairs, approved as it comes for ten minutes (the first one: it is the harness's own browser).
   const endpoint = `http://${ADVERTISE}:${PORT}`;
@@ -149,9 +162,32 @@ try {
   await stop(1);
 }
 
-/** The VM's clock less this machine's, in ms: a held exec in it answers each line with its time; the least round trip's. */
-async function vmOffset(id: string): Promise<{ ms: number; boundMs: number }> {
-  const proc = Bun.spawn(["docker", ...scratchArgs(["exec", "--interactive", `invincible-sbx-${id}`, "python3", "-u", "-c", "import sys,time\nfor _ in sys.stdin: print(time.time_ns(), flush=True)"], PREFIX)], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+/** In the VM: each line it reads answered with the glass page's own Date.now(), asked of its Chromium over DevTools. */
+const PAGE_CLOCK = `
+import json, sys, urllib.request, websocket
+pages = [t for t in json.load(urllib.request.urlopen("http://127.0.0.1:9222/json", timeout=5)) if t.get("type") == "page" and t.get("url", "").endswith("/glass.html")]
+ws = websocket.create_connection(pages[0]["webSocketDebuggerUrl"], suppress_origin=True, timeout=10)
+n = 0
+for _ in sys.stdin:
+    n += 1
+    ws.send(json.dumps({"id": n, "method": "Runtime.evaluate", "params": {"expression": "Date.now()", "returnByValue": True}}))
+    while True:
+        m = json.loads(ws.recv())
+        if m.get("id") == n:
+            break
+    print(m["result"]["result"]["value"], flush=True)
+`;
+
+/** This machine's wall clock below the millisecond (Date.now() is whole milliseconds). */
+const wall = (): number => performance.timeOrigin + performance.now();
+
+/**
+ * The glass page's clock less this machine's, in ms: a held exec in the VM answers each line with the page's own
+ * Date.now(); of 40 exchanges, the least round trip's, its bound half that round trip and the page clock's whole
+ * millisecond. One exec, kept, measured again as often as it is asked.
+ */
+function pageClock(id: string): { measure(): Promise<{ ms: number; boundMs: number; at: number }> } {
+  const proc = Bun.spawn(["docker", ...scratchArgs(["exec", "--interactive", `invincible-sbx-${id}`, "python3", "-I", "-u", "-c", PAGE_CLOCK], PREFIX)], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
   let held = "";
@@ -168,16 +204,19 @@ async function vmOffset(id: string): Promise<{ ms: number; boundMs: number }> {
       held += decoder.decode(value, { stream: true });
     }
   };
-  let best = { rtt: Infinity, ms: 0 };
-  for (let i = 0; i < 40; i++) {
-    // (The wall clock, as the VM's is: a process's own monotonic clock drifts from it.)
-    const t0 = Date.now();
-    proc.stdin.write("?\n");
-    void proc.stdin.flush();
-    const vmNs = BigInt(await line());
-    const t1 = Date.now();
-    if (t1 - t0 < best.rtt) best = { rtt: t1 - t0, ms: Number(vmNs / 1000n) / 1000 - (t0 + t1) / 2 };
-  }
-  proc.kill();
-  return { ms: best.ms, boundMs: best.rtt / 2 };
+  return {
+    async measure() {
+      let best = { rtt: Infinity, ms: 0 };
+      for (let i = 0; i < 40; i++) {
+        // (The wall clock, as the page's is: a process's own monotonic clock drifts from it.)
+        const t0 = wall();
+        proc.stdin.write("?\n");
+        void proc.stdin.flush();
+        const page = Number(await line());
+        const t1 = wall();
+        if (t1 - t0 < best.rtt) best = { rtt: t1 - t0, ms: page - (t0 + t1) / 2 };
+      }
+      return { ms: best.ms, boundMs: best.rtt / 2 + 0.5, at: Date.now() };
+    },
+  };
 }
