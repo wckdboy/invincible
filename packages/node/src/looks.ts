@@ -61,6 +61,7 @@ export interface LookRunnerOptions {
 export class LookRunner {
   private readonly now: () => number;
   private prepare: ((look: KeptLook) => TurnSpec) | null = null;
+  private before: (() => void) | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly o: LookRunnerOptions) {
@@ -70,6 +71,11 @@ export class LookRunner {
   /** How a look becomes a turn: the server's, as a queued message's is (who it runs as, its tools, what it holds). */
   setPrepare(prepare: (look: KeptLook) => TurnSpec): void {
     this.prepare = prepare;
+  }
+
+  /** What sets looks of its own accord before each tick takes those that came (write-first.ts: a task it gave ended). */
+  setBefore(before: () => void): void {
+    this.before = before;
   }
 
   start(intervalMs = 15_000): void {
@@ -86,6 +92,11 @@ export class LookRunner {
   /** Every look whose time has come, taken now: unless its chat is busy, or the node at its limit (then at a later tick). */
   tick(): void {
     if (!this.prepare) return;
+    try {
+      this.before?.();
+    } catch (error) {
+      this.o.log?.(`looks: what it writes first wasn't set (${String((error as Error).message ?? error).slice(0, 300)})`);
+    }
     const now = this.now();
     for (const look of this.o.chats.looksDue(now)) {
       if (now - look.at > LOOK_LIMITS.lateMs) {

@@ -257,6 +257,12 @@ export class ChatStore {
       CREATE TABLE IF NOT EXISTS handoffs (
         conversation TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
         task TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (conversation, task));`);
+    // A database from before it wrote first when a task it gave ends: whose turn gave each, its zone, and how it last told
+    // of its end (write-first.ts). One given before then has no device: it isn't told.
+    const handed = new Set(this.db.query<{ name: string }, []>("PRAGMA table_info(handoffs)").all().map((c) => c.name));
+    for (const [column, type] of [["by_kind", "TEXT"], ["by_device", "TEXT"], ["zone", "TEXT"], ["told", "TEXT"]] as const) {
+      if (!handed.has(column)) this.db.exec(`ALTER TABLE handoffs ADD COLUMN ${column} ${type}`);
+    }
     // A database from before queues: two more columns on a conversation (why its queue is held; what waits on you).
     const columns = new Set(this.db.query<{ name: string }, []>("PRAGMA table_info(conversations)").all().map((c) => c.name));
     if (!columns.has("queue_held")) this.db.exec("ALTER TABLE conversations ADD COLUMN queue_held TEXT");
@@ -490,11 +496,12 @@ export class ChatStore {
 
   /** A chat's queued messages, in the order they'll be sent. */
   /** A look it set in a chat, waiting until it comes. */
-  lookAdd(look: { conversation: string; at: number; note: string; zone: string; by: QueuedBy; held: LookHeld | null }): KeptLook {
+  lookAdd(look: { conversation: string; at: number; note: string; zone: string; by: QueuedBy; held: LookHeld | null; set?: number }): KeptLook {
     const id = `lk_${randomId(12)}`;
+    // (Set now, or, for the one each task it gives from a chat comes with, when it gave it: write-first.ts.)
     this.db
       .query("INSERT INTO looks (id, conversation, at, note, set_at, zone, by_kind, by_device, held) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(id, look.conversation, look.at, look.note, this.now(), look.zone, look.by.kind, look.by.device, look.held ? JSON.stringify(look.held) : null);
+      .run(id, look.conversation, look.at, look.note, look.set ?? this.now(), look.zone, look.by.kind, look.by.device, look.held ? JSON.stringify(look.held) : null);
     return this.look(id)!;
   }
 
@@ -521,10 +528,28 @@ export class ChatStore {
     return this.db.query("UPDATE looks SET state = ?, why = ?, ended_at = ? WHERE id = ? AND state = 'waiting'").run(state, why, this.now(), id).changes > 0;
   }
 
-  /** An agent's task it gave from a chat (its row above that chat's message box while it's under way). */
-  handoff(conversation: string, task: string): void {
+  /** An agent's task it gave from a chat (its row above that chat's message box while it's under way), and whose turn
+   * gave it, in which zone: when it ends, it writes first there as that device (write-first.ts). */
+  handoff(conversation: string, task: string, from?: { by: QueuedBy; zone: string }): void {
     if (!this.summary(conversation)) return;
-    this.db.query("INSERT OR IGNORE INTO handoffs (conversation, task, at) VALUES (?, ?, ?)").run(conversation, task, this.now());
+    this.db
+      .query("INSERT OR IGNORE INTO handoffs (conversation, task, at, by_kind, by_device, zone) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(conversation, task, this.now(), from?.by.kind ?? null, from?.by.device ?? null, from?.zone ?? null);
+  }
+
+  /** The tasks it gave whose end it may still tell, oldest first: given by a device's turn, and not told as ended for good. */
+  handoffsToTell(limit = 200): { conversation: string; task: string; at: number; by: QueuedBy; zone: string; told: string | null }[] {
+    return this.db
+      .query<{ conversation: string; task: string; at: number; by_kind: string; by_device: string; zone: string; told: string | null }, [number]>(
+        "SELECT conversation, task, at, by_kind, by_device, zone, told FROM handoffs WHERE by_device IS NOT NULL AND (told IS NULL OR told = 'interrupted') ORDER BY at, task LIMIT ?",
+      )
+      .all(limit)
+      .map((row) => ({ conversation: row.conversation, task: row.task, at: row.at, by: { kind: row.by_kind as QueuedBy["kind"], device: row.by_device }, zone: row.zone, told: row.told }));
+  }
+
+  /** How it told of a task's end (its status then), or that it never will ("gone"). */
+  handoffTold(conversation: string, task: string, told: string): void {
+    this.db.query("UPDATE handoffs SET told = ? WHERE conversation = ? AND task = ?").run(told, conversation, task);
   }
 
   /** The tasks it gave from a chat, newest first. */

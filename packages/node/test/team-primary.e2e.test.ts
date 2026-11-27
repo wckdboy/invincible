@@ -145,7 +145,9 @@ beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file"); const mind = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(mind, identity, { fleetName: "agents", nodeName: "keep" }); mind.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
-  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, shutdownGraceMs: 100, screen: new MacScreen(macHelper, { settleMs: 0, shell: macShell }), fetch: github });
+  // (Its looks are taken only when a test says: one it sets of its own accord, as when a task it gave ends, would else be
+  // a turn of its that takes another test's answers.)
+  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, shutdownGraceMs: 100, screen: new MacScreen(macHelper, { settleMs: 0, shell: macShell }), fetch: github, lookIntervalMs: false });
   await api("setProvider", { id: "stand-in", kind: "openai", baseUrl: `http://127.0.0.1:${model.port}/v1` });
   for (const role of ["planner", "engineer"]) await api("setRoster", { role, models: ["stand-in/m"] });
   await api("saveAgent", { id: "ada", name: "Ada", instructions: "Implement small, verified changes.", role: "engineer" });
@@ -415,6 +417,34 @@ test("a task it gives from a kept chat is in that chat's row of what is under wa
   expect(daemon.chats.handoffs(id)).toEqual([task.id]);
   const other = daemon.chats.create({ title: "Elsewhere", project: null, role: "planner" }).id;
   expect(daemon.chats.handoffs(other)).toEqual([]);
+});
+
+// Your word, 27 November 2026 ("be proactive"; docs/ARCHITECTURE.md: it proposes the next step when a task ends).
+test("when a task it gave from a kept chat ends, it writes first there: a turn of its own, as the device that gave it, saying what came of it and the next step", async () => {
+  // (What earlier tests here gave from a kept chat is told first, and answered "OK.": this chat's is then all that's left.)
+  await settled();
+  daemon.looks.tick();
+  for (let i = 0; i < 200 && daemon.turns.running().length; i++) await Bun.sleep(20);
+  script = [callTool("team_give", { goal: "Count the importer's lines.", title: "Count the lines" }), say("Ada has it.")];
+  const response = await request("chat", { messages: [{ role: "user", content: "Have an agent count the importer's lines." }], save: true });
+  expect(response.status).toBe(200);
+  const events = (await response.text()).split("\n").filter((l) => l.startsWith("data: ")).map((l) => JSON.parse(l.slice(6)) as ChatStreamEvent);
+  const id = (events.find((e) => e.type === "conversation") as { id: string }).id;
+  const task = (await settled()).tasks.find((t) => t.title === "Count the lines")!;
+  expect(["done", "failed"]).toContain(task.status);
+  // Ended, it is told at the next look: a turn of its in that chat, its own tools with it, the next step among them.
+  script = [say("Ada counted 1,204 lines; next I'd split the parser.")];
+  his.length = 0;
+  daemon.looks.tick();
+  for (let i = 0; i < 200 && daemon.turns.runningIn(id); i++) await Bun.sleep(20);
+  const { conversation } = await api<{ conversation: { messages: { role: string; content: string; look?: { note: string } }[] } }>("conversation", { id });
+  const [note, answer] = conversation.messages.slice(-2);
+  expect(note).toMatchObject({ role: "user", look: { note: expect.stringContaining(`When the task you gave @${task.assignee}, “Count the lines” (${task.id}), ended: it `) } });
+  expect(answer).toMatchObject({ role: "assistant", content: "Ada counted 1,204 lines; next I'd split the parser." });
+  expect(offered()).toEqual(expect.arrayContaining(["team_give", "team_again", "team_ship"]));
+  // Once: the next look finds nothing more to say there.
+  daemon.looks.tick();
+  expect(daemon.chats.looksWaiting(id)).toEqual([]);
 });
 
 test("what it gives on its own word fits what it may commit: past its daily cap (yours to set) or a budget of yours, the work is yours to give", async () => {

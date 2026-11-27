@@ -153,6 +153,7 @@ import { ARM_FORBIDDEN_SCOPES, type ArmTokens, armRun, PRIMARY_ARM } from "./arm
 import { chatTools, type ToolApi, toolsFor } from "./tools.ts";
 import { type ChatStore, type ChatStory, foldAt, type KeptLook, type KeptSummary, type QueuedBy, type Waits } from "./chats.ts";
 import { lookAt, LookLaterError, lookMessage, type LookRunner, lookTime } from "./looks.ts";
+import { writeFirst } from "./write-first.ts";
 import { type AnswerRecord, asideMessages, broughtBack, keepStep, type LiveTurn, TurnError, type TurnHub, type TurnSpec } from "./turns.ts";
 import { filesFor, UploadError, type Uploads, withAttachments } from "./uploads.ts";
 import { CHANGES_SCRIPT, changesView, fileView, filesView, KEPT_FROM_VIEW, LIST_SCRIPT, LookError, READ_SCRIPT } from "./workspace-look.ts";
@@ -1704,7 +1705,8 @@ export function createApp(ctx: AppContext) {
         const result = await api.call<T>(name, input);
         // A task it gave an agent from a kept chat: in that chat's row of what is under way while it runs.
         const given = result as { task?: { id?: unknown } } | null;
-        if (name === "giveToTeam" && turn.conversation && typeof given?.task?.id === "string") ctx.chats.handoff(turn.conversation, given.task.id);
+        // When it ends, it writes first there, as this turn's device in its zone (write-first.ts).
+        if (name === "giveToTeam" && turn.conversation && typeof given?.task?.id === "string") ctx.chats.handoff(turn.conversation, given.task.id, { by: turn.by, zone: turn.zone });
         const filed = result as { status?: unknown; action?: unknown } | null;
         if (name === "callConnector" && filed?.status === "asked" && typeof filed.action === "string") waits.actions.push(filed.action);
         const wanted = input as { name?: unknown } | null;
@@ -1818,6 +1820,8 @@ export function createApp(ctx: AppContext) {
   // A look of its, come: a turn of its in the chat it set it in, as the device whose turn set it as that device stands now
   // (as a queued message's is), with its note as the message that starts it, kept as its. What the answer that set it
   // held of yours, this turn starts holding.
+  // It writes first when a task it gave from a chat of yours ends: a look of its there, due at once (write-first.ts).
+  ctx.looks?.setBefore(() => void writeFirst({ chats: ctx.chats, task: (id) => ctx.team?.store?.task(id) ?? null }));
   ctx.looks?.setPrepare((look: KeptLook) => {
     const p = askerNow(look.by);
     const kept = ctx.chats.summary(look.conversation);
