@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkPath } from "@invincible/core";
@@ -74,21 +74,25 @@ describe("an agent's workspace, looked into", () => {
   });
 
   test("what a task changed: from the commit it started at, its files with their lines, the diff redacted, and new files", () => {
-    const repo = folder();
+    // (Its /work, with the repository and the record of where its task started in it.)
+    const work = realpathSync(folder());
+    const repo = join(work, "repo");
+    mkdirSync(repo);
     git(repo, "init", "-q", "-b", "main");
     writeFileSync(join(repo, "sync.ts"), "export const retries = 1;\n");
     writeFileSync(join(repo, "old.ts"), "gone\n");
     git(repo, "add", ".");
     git(repo, "commit", "-q", "-m", "start");
     const base = git(repo, "rev-parse", "HEAD");
-    const kept = join(folder(), "base");
+    const kept = join(work, ".agent", "base");
+    mkdirSync(join(work, ".agent"));
     writeFileSync(kept, `${base} fetched`);
     writeFileSync(join(repo, "sync.ts"), `export const retries = 3;\nexport const token = "${FAKE_KEY}";\n`);
     rmSync(join(repo, "old.ts"));
     git(repo, "add", "-A");
     git(repo, "commit", "-q", "-m", "work");
     writeFileSync(join(repo, "notes.md"), "untracked\n");
-    const view = changesView(run(CHANGES_SCRIPT, repo, kept), "ada", "task-abcdefghijkl", "/work/tasks/task-abcdefghijkl");
+    const view = changesView(run(CHANGES_SCRIPT, repo, kept, work), "ada", "task-abcdefghijkl", "/work/tasks/task-abcdefghijkl");
     expect(view).toMatchObject({ base, head: expect.stringMatching(/^[0-9a-f]{40}$/), untracked: ["notes.md"], cut: false, redacted: true });
     expect(view.files).toEqual([
       { path: "old.ts", status: "D", added: 0, removed: 1 },
@@ -98,8 +102,9 @@ describe("an agent's workspace, looked into", () => {
     expect(view.diff).not.toContain(FAKE_KEY);
     // With no starting commit written down, what isn't committed yet; a folder that isn't a repository says so.
     writeFileSync(join(repo, "sync.ts"), "export const retries = 4;\n");
-    expect(changesView(run(CHANGES_SCRIPT, repo, ""), "ada", null, "/work/repo")).toMatchObject({ base: null, files: [{ path: "sync.ts", status: "M", added: 1, removed: 2 }] });
-    expect(() => changesView(run(CHANGES_SCRIPT, folder(), ""), "ada", null, "/work/repo")).toThrow(new LookError("that isn't a git repository", 404));
+    expect(changesView(run(CHANGES_SCRIPT, repo, "", work), "ada", null, "/work/repo")).toMatchObject({ base: null, files: [{ path: "sync.ts", status: "M", added: 1, removed: 2 }] });
+    mkdirSync(join(work, "plain"));
+    expect(() => changesView(run(CHANGES_SCRIPT, join(work, "plain"), "", work), "ada", null, "/work/plain")).toThrow(new LookError("that isn't a git repository", 404));
   });
 
   test("an answer that isn't the script's is refused, never shown", () => {
@@ -297,5 +302,93 @@ describe("a VM whose HOME is its /work", () => {
     const home = folder();
     expect(fileView(look(home, READ_SCRIPT, join(work, ".config/tool/config.json"), work), "ada", "/work/.config/tool/config.json")).toMatchObject({ kind: "text" });
     expect(filesView(look(home, LIST_SCRIPT, join(work, ".memory"), work), "ada", "/work/.memory").entries.map((e) => e.name)).toEqual(["engram"]);
+  });
+});
+
+/*
+ * What a task changed, as git in the VM says it, held to /work as a file's look is (27 November 2026): git runs in the
+ * worktree the walk opened, its gitdir within /work too, and with the repository's own configuration held off: no
+ * system or global configuration, no textconv, no filter, and a repository whose configuration names another worktree,
+ * a hooks path or an include is refused. Otherwise a link as the worktree, or the repository's own configuration, could
+ * have git read elsewhere in the VM, a tool's sign-in among what it could read, or run something there.
+ */
+describe("what a task changed, held to /work", () => {
+  const SECRET = "not-a-real-secret-sentinel";
+  /** Its /work with a repository that has a commit and a change, and beside it (outside) a file of no workspace's. */
+  const setup = () => {
+    const work = realpathSync(folder());
+    const outside = realpathSync(folder());
+    writeFileSync(join(outside, "secret"), SECRET);
+    const repo = join(work, "repo");
+    mkdirSync(repo);
+    git(repo, "init", "-q", "-b", "main");
+    writeFileSync(join(repo, "notes.txt"), "before\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "start");
+    writeFileSync(join(repo, "notes.txt"), "after\n");
+    return { work, outside, repo };
+  };
+  const changes = (path: string, work: string) => changesView(run(CHANGES_SCRIPT, path, "", work), "ada", null, "/work/repo");
+  const config = new LookError("kept from view: its repository's own configuration would have git look elsewhere or run something", 403);
+
+  test("a link as its worktree, to a repository outside /work, is refused; a link inside works", () => {
+    const { work, outside, repo } = setup();
+    const elsewhere = join(outside, "repo");
+    mkdirSync(elsewhere);
+    git(elsewhere, "init", "-q", "-b", "main");
+    writeFileSync(join(elsewhere, "secret.txt"), "old\n");
+    git(elsewhere, "add", ".");
+    git(elsewhere, "commit", "-q", "-m", "x");
+    writeFileSync(join(elsewhere, "secret.txt"), `${SECRET}\n`);
+    symlinkSync(elsewhere, join(work, "away"));
+    expect(() => changes(join(work, "away"), work)).toThrow(new LookError("that is outside the workspace", 403));
+    symlinkSync("repo", join(work, "here"));
+    expect(changes(join(work, "here"), work).diff).toContain("+after");
+    void repo;
+  });
+
+  test("a .git that names a git dir outside /work is refused; a task's own worktree of its repository works", () => {
+    const { work, outside, repo } = setup();
+    const elsewhere = join(outside, "other");
+    mkdirSync(elsewhere);
+    git(elsewhere, "init", "-q", "-b", "main");
+    mkdirSync(join(work, "wt"));
+    writeFileSync(join(work, "wt", ".git"), `gitdir: ${join(elsewhere, ".git")}\n`);
+    expect(() => changes(join(work, "wt"), work)).toThrow(new LookError("that is outside the workspace", 403));
+    // As a task's is: a worktree of the agent's repository, in /work/tasks.
+    mkdirSync(join(work, "tasks"));
+    git(repo, "worktree", "add", "-q", join(work, "tasks", "t1"));
+    writeFileSync(join(work, "tasks", "t1", "notes.txt"), "on its own\n");
+    expect(changes(join(work, "tasks", "t1"), work).diff).toContain("+on its own");
+  });
+
+  test("a core.worktree outside /work is refused, and so are a hooks path and an include", () => {
+    for (const [key, value] of [["core.worktree", "OUTSIDE"], ["core.hooksPath", "OUTSIDE"], ["include.path", "OUTSIDE/x.config"], ["includeIf.gitdir:/.path", "OUTSIDE/x.config"]] as const) {
+      const { work, outside, repo } = setup();
+      writeFileSync(join(outside, "notes.txt"), `${SECRET}\n`);
+      git(repo, "config", key, value.replace("OUTSIDE", outside));
+      let caught: LookError | undefined;
+      try {
+        changes(repo, work);
+      } catch (error) {
+        caught = error as LookError;
+      }
+      expect([key, caught?.message, caught?.status]).toEqual([key, config.message, 403]);
+    }
+  });
+
+  test("a textconv never runs, and a repository with a filter is refused: neither can show what is outside", () => {
+    const { work, outside, repo } = setup();
+    writeFileSync(join(repo, ".gitattributes"), "*.txt diff=reveal\n");
+    // (git hands it the file as its last word: it says what is outside, then the file, so the two sides differ.)
+    git(repo, "config", "diff.reveal.textconv", `cat ${join(outside, "secret")}`);
+    const shown = changes(repo, work);
+    expect(shown.diff).not.toContain(SECRET);
+    expect(shown.diff).toContain("+after");
+    // A clean filter, which git diff would run on the worktree's files.
+    const filtered = setup();
+    writeFileSync(join(filtered.repo, ".gitattributes"), "*.txt filter=reveal\n");
+    git(filtered.repo, "config", "filter.reveal.clean", `cat ${join(filtered.outside, "secret")}`);
+    expect(() => changes(filtered.repo, filtered.work)).toThrow(config);
   });
 });

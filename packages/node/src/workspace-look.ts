@@ -28,16 +28,16 @@ export const KEPT_FROM_VIEW = ["/work/.invincible-gateway.json"] as const;
  * what it reaches may not be in a top-level dot-entry of /work that isn't the workspace's own (WORKSPACE_OWN): that is its
  * HOME's, what its tools keep for themselves, which no look reads (the same rule a move to layout 2 goes by).
  */
-const WALK = `import base64,errno,json,os,stat,sys
-p=sys.argv[1]
-root=sys.argv[2] if len(sys.argv)>2 else '/work'
+const WALK = `import base64,errno,json,os,re,stat,subprocess,sys
 KEPT=${JSON.stringify(KEPT_FROM_VIEW.map((path) => path.slice("/work/".length)))}
 OWN=${JSON.stringify(WORKSPACE_OWN)}
+class Refused(Exception):
+    pass
 def out(**said):
     print(json.dumps(said));sys.exit(0)
 def walk(p,want):
     if p!=root and not p.startswith(root+'/'):
-        out(error='OutsideWorkspace')
+        raise Refused('OutsideWorkspace')
     rest=[c for c in p[len(root):].split('/') if c]
     held=[os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)]
     names=[];links=0
@@ -47,7 +47,7 @@ def walk(p,want):
             continue
         if c=='..':
             if len(held)==1:
-                out(error='OutsideWorkspace')
+                raise Refused('OutsideWorkspace')
             os.close(held.pop());names.pop();continue
         last=not rest
         flags=os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|(os.O_NONBLOCK if last and want=='file' else os.O_DIRECTORY)
@@ -71,12 +71,12 @@ def walk(p,want):
                 raise e
             links+=1
             if links>40:
-                out(error='TooManyLinks')
+                raise Refused('TooManyLinks')
             if to is None:
                 rest.insert(0,c);continue
             if to.startswith('/'):
                 if to!=root and not to.startswith(root+'/'):
-                    out(error='OutsideWorkspace')
+                    raise Refused('OutsideWorkspace')
                 for d in held[1:]:
                     os.close(d)
                 held=held[:1];names=[];to=to[len(root):]
@@ -84,14 +84,20 @@ def walk(p,want):
             continue
         held.append(fd);names.append(c)
     if names and names[0].startswith('.') and names[0] not in OWN and os.path.normpath(os.environ.get('HOME','')) == root:
-        out(error='KeptHome')
+        raise Refused('KeptHome')
     return held,names
+def at(names):
+    return root+''.join('/'+n for n in names)
 `;
 
 /** `python3 -I -c LIST <path>`: a folder's entries, folders and files each with its size and when it changed, a link as a link. */
-export const LIST_SCRIPT = `${WALK}try:
+export const LIST_SCRIPT = `${WALK}p=sys.argv[1]
+root=sys.argv[2] if len(sys.argv)>2 else '/work'
+try:
     held,_=walk(p,'dir')
     names=sorted(os.listdir(held[-1]),key=lambda n:n.lower())
+except Refused as r:
+    out(error=r.args[0])
 except OSError as e:
     out(error=type(e).__name__)
 entries=[]
@@ -108,9 +114,13 @@ out(entries=entries,more=len(names)>${LIST_LIMIT})`;
  * `python3 -I -c READ <path>`: one regular file's first READ_LIMIT bytes, base64, with its size and when it changed. Not
  * the VM's lease (KEPT_FROM_VIEW), whatever leads to it: its name, a link to it, or the same file under another name.
  */
-export const READ_SCRIPT = `${WALK}try:
+export const READ_SCRIPT = `${WALK}p=sys.argv[1]
+root=sys.argv[2] if len(sys.argv)>2 else '/work'
+try:
     held,names=walk(p,'file')
     s=os.fstat(held[-1])
+except Refused as r:
+    out(error=r.args[0])
 except OSError as e:
     out(error=type(e).__name__)
 if not stat.S_ISREG(s.st_mode):
@@ -129,24 +139,82 @@ out(size=s.st_size,modified=int(s.st_mtime*1000),cut=len(b)>${READ_LIMIT},data=b
 /**
  * `python3 -I -c CHANGES <worktree> <kept>`: what a task changed in its worktree (a task's own git worktree, /work/tasks/<id>,
  * or the repository itself): from the commit it started at (the first word of <kept>, written as it started) or, with
- * none, from HEAD; the files and the diff (bounded), and the files git doesn't track yet.
+ * none, from HEAD; the files and the diff (bounded), and the files git doesn't track yet. Held to /work as a file's look
+ * is (27 November 2026): the worktree is the folder the walk opened, and git runs in it (fchdir), its git dir (and a
+ * worktree's common one) within /work too; and with the repository's own configuration held off: no system or global
+ * configuration, no textconv, no filter, no fsmonitor, no hooks, and a repository whose configuration names another
+ * worktree, a hooks path, an include or a filter is refused. The commit it started at is a commit's name, or none.
  */
-export const CHANGES_SCRIPT = `import json,os,subprocess,sys
-root,kept=sys.argv[1],sys.argv[2]
-if not os.path.exists(os.path.join(root,'.git')):
-    print(json.dumps({"error":"NotARepository"}));sys.exit(0)
-git=lambda *a: subprocess.run(['git','-C',root,*a],capture_output=True,timeout=60)
+export const CHANGES_SCRIPT = `${WALK}work,kept=sys.argv[1],sys.argv[2]
+root=sys.argv[3] if len(sys.argv)>3 else '/work'
+def held_to_work(path,want):
+    try:
+        return walk(path,want)
+    except Refused as r:
+        out(error=r.args[0])
+try:
+    held,names=walk(work,'dir')
+except Refused as r:
+    out(error=r.args[0])
+except OSError as e:
+    out(error=type(e).__name__)
+here=at(names)
+# Its git dir: its own .git folder, or the one a .git file names; a worktree's common git dir, as its commondir says.
+try:
+    g,gnames=held_to_work(here+'/.git','file')
+    gs=os.fstat(g[-1])
+except OSError:
+    out(error='NotARepository')
+if stat.S_ISDIR(gs.st_mode):
+    gitdir=at(gnames)
+elif stat.S_ISREG(gs.st_mode):
+    line=os.read(g[-1],4096).decode(errors='replace').strip()
+    if not line.startswith('gitdir: '):
+        out(error='NotARepository')
+    named=line[8:].strip()
+    try:
+        _,dnames=held_to_work(named if named.startswith('/') else here+'/'+named,'dir')
+    except OSError:
+        out(error='NotARepository')
+    gitdir=at(dnames)
+else:
+    out(error='NotARepository')
+try:
+    c,_=held_to_work(gitdir+'/commondir','file')
+    common=os.read(c[-1],4096).decode(errors='replace').strip()
+except OSError:
+    common=''
+if common:
+    try:
+        held_to_work(common if common.startswith('/') else gitdir+'/'+common,'dir')
+    except OSError:
+        out(error='NotARepository')
+os.fchdir(held[-1])
+env={'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':os.devnull,'GIT_ATTR_NOSYSTEM':'1','GIT_OPTIONAL_LOCKS':'0','GIT_TERMINAL_PROMPT':'0','GIT_DIR':gitdir,'GIT_WORK_TREE':'.','LC_ALL':'C'}
+# Its own configuration, as written (no include followed): one that names another worktree, a hooks path, an include
+# or a filter is refused.
+named=subprocess.run(['git','config','--list','--no-includes','--name-only'],capture_output=True,timeout=60,env=env)
+if named.returncode!=0:
+    out(error='NotARepository')
+if any(re.match(r'(core\\.worktree|core\\.hookspath|include\\.|includeif\\.|filter\\.)',key.lower()) for key in named.stdout.decode(errors='replace').splitlines()):
+    out(error='RepositoryConfig')
+held_off=['-c','core.fsmonitor=false','-c','core.hooksPath='+os.devnull,'-c','core.excludesFile='+os.devnull,'-c','core.attributesFile='+os.devnull]
+git=lambda *a: subprocess.run(['git',*held_off,*a],capture_output=True,timeout=60,env=env)
 base=None
-if os.path.isfile(kept):
-    words=open(kept).read().split()
-    base=words[0] if words else None
+if kept:
+    try:
+        k,_=walk(kept,'file')
+        words=os.read(k[-1],4096).decode(errors='replace').split()
+        base=words[0] if words and re.fullmatch(r'[0-9a-f]{40}',words[0]) else None
+    except (Refused,OSError):
+        base=None
 since=base or 'HEAD'
 head=git('rev-parse','HEAD').stdout.decode().strip() or None
-numstat=git('diff','--numstat','--no-renames',since).stdout.decode(errors='replace')
-names=git('diff','--name-status','--no-renames',since).stdout.decode(errors='replace')
+numstat=git('diff','--no-textconv','--no-ext-diff','--numstat','--no-renames',since).stdout.decode(errors='replace')
+names=git('diff','--no-textconv','--no-ext-diff','--name-status','--no-renames',since).stdout.decode(errors='replace')
 untracked=git('ls-files','--others','--exclude-standard').stdout.decode(errors='replace').splitlines()
-diff=git('diff','--no-color','--no-ext-diff','--no-renames',since).stdout
-print(json.dumps({"base":base,"head":head,"numstat":numstat,"names":names,"untracked":untracked[:500],"diff":diff[:${DIFF_LIMIT}].decode(errors='replace'),"cut":len(diff)>${DIFF_LIMIT}}))`;
+diff=git('diff','--no-color','--no-textconv','--no-ext-diff','--no-renames',since).stdout
+out(base=base,head=head,numstat=numstat,names=names,untracked=untracked[:500],diff=diff[:${DIFF_LIMIT}].decode(errors='replace'),cut=len(diff)>${DIFF_LIMIT})`;
 
 export class LookError extends Error {
   constructor(
@@ -179,6 +247,7 @@ function said(stdout: string): Record<string, unknown> {
       TooManyLinks: ["too many links on the way to it", 422],
       KeptFromView: ["kept from view: it holds this VM's gateway token", 403],
       KeptHome: ["kept from view: in this VM its HOME is its workspace, and that is what its tools keep for themselves", 403],
+      RepositoryConfig: ["kept from view: its repository's own configuration would have git look elsewhere or run something", 403],
     };
     const [message, status] = why[error] ?? ["it couldn't be read", 422];
     throw new LookError(message, status);
