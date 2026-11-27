@@ -95,7 +95,9 @@ struct TaskView: View {
     /// What its answers do, from its bar's menu and from the thread.
     @State private var answers = TaskAnswers()
     @State private var detailsSheet = false
-    @AppStorage("task.details") private var detailsShown = true
+    /// Its details beside it, as you last left them; closed until you open them (the owner's word of 27 November 2026: the
+    /// web's right panel, closed until opened, so the thread never moves as it comes).
+    @AppStorage("task.details") private var detailsShown = false
     /// Whether the thread has room for its details beside it (DetailsRoom); without, they open over it as a sheet.
     @State private var roomy = true
     @FocusState private var composing: Bool
@@ -138,11 +140,20 @@ struct TaskView: View {
         }
     }
 
-    /// Its bar: its details, and the rest of its answers in a menu (the one in full is the thread's). Its title is the
-    /// page's own, in full: the bar says none of it again.
+    /// Its bar, slim (the owner's word of 27 November 2026, the web's): its title and, under it, where it is and who has it
+    /// (a Mac's window title says its title); its details; its agent's glass; and while there is no proof to answer under,
+    /// the rest of its answers in a menu.
     @ToolbarContentBuilder private func toolbar(_ task: TeamTask) -> some ToolbarContent {
         #if os(iOS)
-        ToolbarItem(placement: .principal) { Color.clear.frame(width: 1, height: 1).accessibilityHidden(true) }
+        ToolbarItem(placement: .principal) {
+            VStack(spacing: Space.line) {
+                Text(task.title).font(.headline).lineLimit(1).truncationMode(.tail)
+                Text([project(task), name(task)].compactMap(\.self).joined(separator: " · ")).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("task.title")
+        }
         #endif
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
@@ -154,7 +165,14 @@ struct TaskView: View {
             .keyboardShortcut("i", modifiers: [.command, .option])
             .help("The task's details: its VM, changes, gates, reviewer and cost")
             .accessibilityIdentifier("task.details")
-            let rest = session.can("fleet:admin") && session.can("chat") ? TaskCard.answers(task).rest : []
+            // Its agent's glass, as the web's bar has it: the subtitle names it. (Not a way to its page: TaskView depending on
+            // the window's openPlace, a closure an iPad's window makes anew each time it draws, kept the two drawing each other,
+            // the app at 100 % of a core and a task opened from a link never shown, 27 November 2026.)
+            AgentFace(id: task.assignee, profile: session.drawn(task.assignee)?.avatar, size: 24, mood: Orb.Mood(task: task.status, verified: task.verified))
+                .accessibilityHidden(true)
+            // (Once it has ended its answers are under its proof.)
+            let ended = task.status == "done" || task.status == "failed"
+            let rest = session.can("fleet:admin") && session.can("chat") && !ended ? TaskCard.answers(task).rest : []
             if !rest.isEmpty {
                 Menu {
                     ForEach(rest, id: \.self) { action in
@@ -167,6 +185,16 @@ struct TaskView: View {
                 .accessibilityIdentifier("task.more")
             }
         }
+    }
+
+    /// Who has it, by name.
+    private func name(_ task: TeamTask) -> String {
+        session.drawn(task.assignee)?.name ?? session.team?.removed?.first { $0.id == task.assignee }?.name ?? task.assignee
+    }
+
+    /// Where it is: its project's name, or "Other work" (the web's bar).
+    private func project(_ task: TeamTask) -> String? {
+        session.attended?.byAttention.first { $0.id == task.id }?.project.name
     }
 
     /// While it is on screen: its trail read (then again as the node says the agents moved, while it works), its
@@ -437,39 +465,15 @@ private struct TaskThreadView: View {
         }
     }
 
-    /// Its title in full (the bar says none of it), and who has it and how it stands: a dot and its word while it is in
-    /// hand, when it ended once it has (its verdict is its proof's, below).
+    /// How it stands: a dot and its word while it is in hand, when it ended once it has (its verdict is its proof's,
+    /// below). Its title, where it is and who has it are its bar's (the web's slim bar).
     private func header(running: Bool) -> some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
-            Text(task.title)
-                .font(Typeset.title)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("task.title")
-            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s1)) : AnyLayout(HStackLayout(spacing: Space.s2))
-            layout {
-                HStack(spacing: 6) {
-                    // Its agent's mark, the one in focus, in how the task stands: its slats slide while it works; as the task
-                    // ends it settles (done) or its bottom slat drops (failed), once, then it is still.
-                    AgentFace(id: task.assignee, profile: agent?.avatar, size: 20, mood: Orb.Mood(task: task.status, verified: task.verified), key: "task:\(task.assignee)")
-                    Text(name).fontWeight(.semibold).foregroundStyle(.primary)
-                }
-                standing(running: running)
-                if let project = project { Text(project).lineLimit(typeSize.isAccessibilitySize ? nil : 1) }
-            }
+        standing(running: running)
             .font(Typeset.detail)
             .foregroundStyle(.secondary)
-        }
-        .padding(.top, Space.s2)
-        .padding(.bottom, Space.s4)
-        .accessibilityElement(children: .combine)
-    }
-
-    /// Its project's name, where it has one (never "Other work").
-    private var project: String? {
-        let project = session.attended?.byAttention.first { $0.id == task.id }?.project
-        return project.flatMap { $0.key == Work.other.key ? nil : $0.name }
+            .padding(.top, Space.s3)
+            .padding(.bottom, Space.s3)
+            .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private func standing(running: Bool) -> some View {
@@ -912,9 +916,11 @@ private struct ThreadMessage: View {
     }
 }
 
-/// What proves it, apart from what the agent says: its verdict as its proof allows, what that rests on, each gate and how
-/// it stood before the work, the reviewer, what it kept and cost, and its one answer in full. A section of the thread
-/// with hairlines, no card: red only where it failed.
+/// What proves it, apart from what the agent says (the owner's word of 27 November 2026, the web's: "one line with its
+/// verdict, expandable"): a card whose first line is its verdict as its proof allows, what its gates came to and what it
+/// changed, and a warning's mark where one is said inside; opened, what the verdict rests on, each gate and how it stood
+/// before the work, the reviewer, and what it kept and cost. What to do with it stays out, under it: its one answer in
+/// full and the rest beside it (Ship it, Give again). Red only where it failed.
 private struct ProofSection: View {
     let session: Session
     let task: TeamTask
@@ -924,6 +930,8 @@ private struct ProofSection: View {
     let canAct: Bool
     @Bindable var answers: TaskAnswers
     @State private var reviewing = false
+    /// Opened, as you last left a proof on this device (folded until you open one).
+    @AppStorage("task.proof.open") private var open = false
 
     var body: some View {
         let proof = Steps.proof(status: task.status, gates: task.gates ?? [], thread.entries)
@@ -933,82 +941,126 @@ private struct ProofSection: View {
         let kind = said?.verdict
         let failed = kind == .failed || kind == .rejected || kind == .gaveUp
         let word = said?.word ?? (verified ? "Reviewed" : "Not verified")
+        let warnings = caveats(proof, verified: verified)
         VStack(alignment: .leading, spacing: 0) {
-            SectionHead("Proof").padding(.top, Space.s4).padding(.bottom, Space.s3)
-            HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
-                Image(systemName: kind == .proven ? "checkmark" : failed ? "xmark" : "minus")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(failed ? AnyShapeStyle(Color.white) : AnyShapeStyle(.background))
-                    .frame(width: 22, height: 22)
-                    .background(failed ? Color.danger : kind == .proven ? Color.primary : Color.secondary, in: .circle)
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: Space.line) {
-                    Text(word).font(Typeset.row).foregroundStyle(failed ? AnyShapeStyle(Color.danger) : AnyShapeStyle(.primary))
-                    if let why = Self.why(kind, end: TaskCard.end(task), word: word) {
-                        Text(why).font(Typeset.detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button { withAnimation(.snappy) { open.toggle() } } label: {
+                HStack(spacing: Space.s2) {
+                    Image(systemName: kind == .proven ? "checkmark" : failed ? "xmark" : "minus")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(failed ? AnyShapeStyle(Color.white) : AnyShapeStyle(.background))
+                        .frame(width: 22, height: 22)
+                        .background(failed ? Color.danger : kind == .proven ? Color.primary : Color.secondary, in: .circle)
+                        .accessibilityHidden(true)
+                    Text("\(Text(word).fontWeight(.semibold).foregroundStyle(failed ? Color.danger : Color.primary))\(Text(summary(proof).map { " · \($0)" } ?? "").foregroundStyle(.secondary))")
+                        .font(Typeset.row)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                    Spacer(minLength: Space.s1)
+                    if !warnings.isEmpty {
+                        Image(systemName: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary).accessibilityLabel("A warning, inside")
                     }
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                        .accessibilityHidden(true)
                 }
+                .frame(minHeight: Metrics.touch)
+                .contentShape(.rect)
             }
-            .padding(.bottom, Space.s3)
+            .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(open ? "Opened" : "Folded")
+            .accessibilityHint(open ? "Folds what it rests on" : "Opens what it rests on: its gates, the reviewer, its changes and cost")
             .accessibilityIdentifier("task.verdict")
-            ForEach(caveats(proof, verified: verified), id: \.self) { line in
-                Divider()
-                Label(line, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary).padding(.vertical, Space.s2)
-            }
-            if !proof.gates.isEmpty {
-                Divider()
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(proof.gates.enumerated()), id: \.offset) { _, gate in GateLine(gate: gate, running: task.status == "running", ended: true) }
+            if open {
+                if let why = Self.why(kind, end: TaskCard.end(task), word: word) {
+                    Divider()
+                    Text(why).font(Typeset.detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.vertical, Space.s2)
                 }
-                .padding(.vertical, Space.s1)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Its gates")
-            }
-            if let review = proof.review {
+                ForEach(warnings, id: \.self) { line in
+                    Divider()
+                    Label(line, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary).padding(.vertical, Space.s2)
+                }
+                if !proof.gates.isEmpty {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(proof.gates.enumerated()), id: \.offset) { _, gate in GateLine(gate: gate, running: task.status == "running", ended: true) }
+                    }
+                    .padding(.vertical, Space.s1)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Its gates")
+                }
+                if let review = proof.review {
+                    Divider()
+                    Label {
+                        Text("\(Text(review.verdict == "pass" ? "The reviewer passed it" : "The reviewer sent it back").fontWeight(.semibold).foregroundStyle(.primary))\(review.notes.isEmpty ? "" : ": “\(review.notes.components(separatedBy: "\n")[0].prefix(200))”")")
+                    } icon: {
+                        Image(systemName: "person.badge.shield.checkmark").foregroundStyle(.tertiary)
+                    }
+                    .font(Typeset.detail)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, Space.s2)
+                    // Steered work was judged against its brief and its steers, in order: said beside the verdict.
+                    if let judged = SteerWords.judgedLine(Steps.judgedWith(thread.entries), steers: task.steers ?? []) {
+                        Label(judged, systemImage: "arrow.up")
+                            .font(Typeset.detail)
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, Space.s2)
+                            .accessibilityIdentifier("task.judged")
+                    }
+                }
                 Divider()
-                Label {
-                    Text("\(Text(review.verdict == "pass" ? "The reviewer passed it" : "The reviewer sent it back").fontWeight(.semibold).foregroundStyle(.primary))\(review.notes.isEmpty ? "" : ": “\(review.notes.components(separatedBy: "\n")[0].prefix(200))”")")
-                } icon: {
-                    Image(systemName: "person.badge.shield.checkmark").foregroundStyle(.tertiary)
+                HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
+                    changes
+                    Spacer(minLength: Space.s2)
+                    Text(session.prices != nil || task.record == nil ? Steps.costWords(budgetUsd: task.budgetUsd, record: task.record, prices: session.prices ?? [:]) : "")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
                 .font(Typeset.detail)
-                .foregroundStyle(.secondary)
-                .padding(.vertical, Space.s2)
-                // Steered work was judged against its brief and its steers, in order: said beside the verdict.
-                if let judged = SteerWords.judgedLine(Steps.judgedWith(thread.entries), steers: task.steers ?? []) {
-                    Label(judged, systemImage: "arrow.up")
-                        .font(Typeset.detail)
-                        .foregroundStyle(.secondary)
-                        .padding(.bottom, Space.s2)
-                        .accessibilityIdentifier("task.judged")
+                .frame(minHeight: Metrics.touch)
+            }
+            // What to do with it, under it: its answer in full, the rest beside it.
+            let offered = canAct ? TaskCard.answers(task) : (prominent: nil, rest: [])
+            if offered.prominent != nil || !offered.rest.isEmpty || TaskCard.shipped(task) != nil {
+                Divider()
+                HStack(spacing: Space.s2) {
+                    if let answer = offered.prominent {
+                        NeedButton(title: TaskAnswers.title(answer), prominent: true, busy: answers.busy) { answers.run(answer, task, session: session) }
+                            .accessibilityIdentifier("task.answer")
+                    }
+                    ForEach(offered.rest, id: \.self) { action in
+                        NeedButton(title: TaskAnswers.title(action), busy: answers.busy) { answers.run(action, task, session: session) }
+                            .accessibilityIdentifier("task.answer.\(action.rawValue)")
+                    }
+                    if let shipped = TaskCard.shipped(task), let url = URL(string: shipped.url) {
+                        Link(destination: url) { Label(shipped.text, systemImage: "arrow.up.right.square") }
+                            .font(Typeset.detail.weight(.semibold))
+                            .frame(minHeight: Metrics.touch)
+                    }
+                    Spacer(minLength: 0)
                 }
-            }
-            Divider()
-            HStack(alignment: .firstTextBaseline, spacing: Space.s3) {
-                changes
-                Spacer(minLength: Space.s2)
-                Text(session.prices != nil || task.record == nil ? Steps.costWords(budgetUsd: task.budgetUsd, record: task.record, prices: session.prices ?? [:]) : "")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            .font(Typeset.detail)
-            .frame(minHeight: Metrics.touch)
-            if canAct, let answer = TaskCard.answers(task).prominent {
-                NeedButton(title: TaskAnswers.title(answer), prominent: true, busy: answers.busy) { answers.run(answer, task, session: session) }
-                    .padding(.top, Space.s2)
-                    .padding(.bottom, Space.s4)
-                    .accessibilityIdentifier("task.answer")
-            }
-            if let shipped = TaskCard.shipped(task), let url = URL(string: shipped.url) {
-                Link(destination: url) { Label(shipped.text, systemImage: "arrow.up.right.square") }
-                    .font(Typeset.detail.weight(.semibold))
-                    .frame(minHeight: Metrics.touch)
+                .padding(.vertical, Space.s3)
             }
         }
+        .padding(.horizontal, Space.s4)
+        .overlay(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous).strokeBorder(.separator))
+        .padding(.vertical, Space.s4)
         .sheet(isPresented: $reviewing) { WorkspaceView(session: session, id: task.assignee, name: name, startOn: .changes) }
+    }
+
+    /// Beside its verdict, folded: what its gates came to and what it changed (the web's words).
+    private func summary(_ proof: Steps.Proof) -> String? {
+        let files = task.changes?.files ?? thread.changes?.files.count ?? 0
+        let added = thread.changes?.files.reduce(0) { $0 + ($1.added ?? 0) }
+        let removed = thread.changes?.files.reduce(0) { $0 + ($1.removed ?? 0) }
+        let parts = [
+            proof.gates.isEmpty ? nil : "\(proof.passed) of \(proof.gates.count) \(proof.gates.count == 1 ? "gate" : "gates") passed",
+            files == 0 ? nil : "\(files) \(files == 1 ? "file" : "files")\(added.map { a in removed.map { " +\(a) −\($0)" } ?? "" } ?? "")",
+        ].compactMap(\.self)
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// What the verdict rests on, under its word, never that word again (TaskCard.because).

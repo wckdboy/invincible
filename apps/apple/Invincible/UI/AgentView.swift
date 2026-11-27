@@ -102,7 +102,11 @@ struct AgentView: View {
             ToolbarItem(placement: .principal) {
                 // Not a Button: the bar sizes a button by its whole line, which then runs under the bar's own buttons; a
                 // plain title gets the room between them, and ends in an ellipsis there.
-                TimelineTitle(title: name, line: row?.line, needs: row?.needs ?? false, standing: row?.standing)
+                HStack(spacing: Space.s2) {
+                    // Its glass, its state's dot on it, as the roster has it.
+                    AgentFace(id: id, profile: profile, size: 28, mood: row.map { Orb.Mood($0.standing) })
+                    TimelineTitle(title: name, line: row?.line, needs: row?.needs ?? false, alignment: .leading, standing: row?.standing)
+                }
                     .contentShape(.rect)
                     .onTapGesture { about = true }
                     .accessibilityElement(children: .combine)
@@ -260,10 +264,11 @@ struct TeamBubble: View {
     }
 }
 
-/// A task where it was given, between hairlines (I10: no cards): what it is and how it stands (a dot and its word while it
-/// is in hand, its verdict as its proof allows once it ended, never "Verified"), who proposed or gave it, how it ended and
-/// why in a line, and its answers, none filled (the screen's one is its message box's send). A tap on its title opens
-/// its thread, where its proof is in full.
+/// A task where it was given, compact (the owner's word of 27 November 2026, the web's: a line shorter): its title and how it
+/// stands on one line (a dot and its word while it is in hand, its verdict as its proof allows once it ended, never
+/// "Verified"), one muted line for who gave or proposed it and how you stepped in, and one fixed line for its latest step,
+/// or how it ended and why; then its answers, none filled (the screen's one is its message box's send): Approve, Ship it,
+/// Give again, each a tap. A tap on its title opens its thread, where its proof is in full.
 struct TaskCardView: View {
     let task: TeamTask
     /// The name of the agent that proposed it, when one did.
@@ -275,12 +280,12 @@ struct TaskCardView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s2) {
-            Divider()
+        VStack(alignment: .leading, spacing: Space.s1) {
+            Divider().padding(.bottom, Space.s2)
             Button { openPlace?(.task(task.id)) } label: {
                 let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s1)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Space.s2))
                 layout {
-                    Text(task.title).font(Typeset.row).foregroundStyle(.primary).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                    Text(task.title).font(Typeset.row).foregroundStyle(.primary).multilineTextAlignment(.leading).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     if !typeSize.isAccessibilitySize { Spacer(minLength: Space.s1) }
                     standing.font(.caption)
                     if openPlace != nil { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).accessibilityHidden(true) }
@@ -291,45 +296,48 @@ struct TaskCardView: View {
             .buttonStyle(.plain)
             .disabled(openPlace == nil)
             .accessibilityIdentifier("card.\(task.id)")
-            if let proposed = TaskCard.proposed(task, proposer: proposer) { Text(proposed).font(.caption).foregroundStyle(.secondary) }
-            if let given = TaskCard.given(task) { Text(given).font(.caption).foregroundStyle(.secondary) }
-            if let sensitive = TaskCard.sensitive(task) { Text(sensitive).font(.caption).foregroundStyle(.secondary) }
-            if let stepped = TaskCard.stepped(task) { Text(stepped).font(.caption).foregroundStyle(.secondary) }
+            // Who gave it or proposed it, and how you stepped in: one muted line.
+            let who = [TaskCard.proposed(task, proposer: proposer), TaskCard.given(task), TaskCard.sensitive(task), TaskCard.stepped(task)].compactMap(\.self)
+            if !who.isEmpty {
+                Text(who.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+            }
             if task.status == "proposed" {
-                Text(task.goal).font(Typeset.body).lineLimit(6).fixedSize(horizontal: false, vertical: true)
+                Text(task.goal).font(Typeset.body).lineLimit(4).fixedSize(horizontal: false, vertical: true)
                 if let gates = task.gates, !gates.isEmpty {
                     Label("Done when \(gates.joined(separator: " · ")) pass\(gates.count == 1 ? "es" : "")", systemImage: "checkmark.seal")
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
-                        .lineLimit(3)
+                        .lineLimit(2)
                 }
             }
             if task.status == "running" {
-                // Two lines kept from the start, so the row doesn't grow as its latest line comes and lengthens.
+                // One line kept from the start, so the row doesn't grow as its latest step comes and lengthens.
                 let latest = Roster.firstLine(task.progress)
-                Text(latest.isEmpty ? " " : latest).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
+                Text(latest.isEmpty ? " " : latest).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1, reservesSpace: true)
             }
-            if let end = TaskCard.end(task), let verdict {
-                if let why = TaskCard.because(end.why, verdict: verdict.word) {
-                    Text(why).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-                if let said = TaskCard.saidBesideProof(end.said) {
-                    Text(said).font(.caption).foregroundStyle(.secondary).lineLimit(4)
-                }
-            }
-            if let kept = TaskCard.kept(task) {
-                Label(kept, systemImage: "doc.badge.plus").font(.caption).foregroundStyle(.secondary)
+            // How it ended and why, and what it kept: one line.
+            let ended = [TaskCard.end(task).flatMap { end in verdict.flatMap { TaskCard.because(end.why, verdict: $0.word) } }, TaskCard.kept(task)].compactMap(\.self)
+            if !ended.isEmpty {
+                Text(ended.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(typeSize.isAccessibilitySize ? nil : 1)
             }
             if let shipped = TaskCard.shipped(task), let url = URL(string: shipped.url) {
                 Link(destination: url) { Label(shipped.text, systemImage: "arrow.up.forward.square") }.font(.caption.weight(.semibold))
             }
-            // Its one answer in full, unfilled, as its thread gives it (TaskCard.answers: none for a task at work, whose
-            // Stop is in its thread's menu), the rest a long press away: a list of ten queued tasks isn't ten Stops.
-            if let answer = TaskCard.answers(task).prominent {
-                NeedButton(title: Self.title(answer)) { act(answer) }
+            // Its answers, each a tap (TaskCard.answers: none for a task at work, whose Stop is in its thread): its one in
+            // full first, the rest beside it.
+            let answers = TaskCard.answers(task)
+            if answers.prominent != nil || (task.status != "running" && task.status != "queued" && !answers.rest.isEmpty) {
+                HStack(spacing: Space.s2) {
+                    if let answer = answers.prominent {
+                        NeedButton(title: Self.title(answer)) { act(answer) }.accessibilityIdentifier("card.\(task.id).\(answer.rawValue)")
+                    }
+                    ForEach(task.status == "running" || task.status == "queued" ? [] : answers.rest, id: \.rawValue) { action in
+                        NeedButton(title: Self.title(action)) { act(action) }.accessibilityIdentifier("card.\(task.id).\(action.rawValue)")
+                    }
+                }
+                .padding(.top, Space.s1)
             }
         }
-        .padding(.bottom, Space.s2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
         .contextMenu { rest }

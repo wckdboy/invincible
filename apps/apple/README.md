@@ -6,31 +6,37 @@ does and signs every request the way `packages/core` verifies it. The Mac's app 
 (docs/ARCHITECTURE.md §10), and are Invincible's own: every word of the old theme is gone, and the vocabulary check
 reads these sources too.
 
-On an iPhone it opens on Home, with no tab bar (the owner's ruling; X2's "Home, a bar and a drawer"): the I-beam (a tap
-opens the drawer), the primary's name and one line of how things stand (a tap opens its conversation); the agents in a
-strip, their marks the only colour on the page, each a tap from its page; what needs you, decisions only, three at most,
-each with its one answer in place and the rest a swipe away; the work by proof (Working, Proven, Failed, the rest of
-what's done folded), a lazy list however many tasks there are; and at its foot the bar: search and ask, the primary's
-message box, a task to give (`Invincible/UI/HomeView.swift`, `HomeParts.swift`). The drawer (`UI/Drawer.swift`: the
-I-beam, or a swipe from the left edge) holds a new chat and your latest five, what needs you, the agents, all chats, keys,
-connectors and Settings, so every place is two taps from Home. A task opens as a thread of its own (`UI/TaskView.swift`:
-the brief, the work folded, the proof card apart from the agent's words, its details in a sheet). A notification, or an
-`invincible://` link (`task/<id>`, `agent/<handle>`, `approval/<id>`, `chat/<id>`), opens its place over Home; one about
-what the screen shows is told only in the list, and a task's Ship it asks Face ID first. Every screen beyond Home is
-held to Home's bar (I10): its title in SF Pro Display bold on one type scale (`UI/Page.swift`, `Typeset`), sections
-named in small capitals over rows split by hairlines (no cards), a state as a still dot with its word, the verdict said
-once (the agent's bare "Verified." is never shown beside its proof), one answer in full a screen and the rest in its
-menu or a swipe, and Dynamic Type to the largest accessibility size without clipping. Needs you is Home's decisions in
-full, with what was noticed below them, counted nowhere. While the primary answers, its chat's message box stays open:
-Steer and Queue beside Stop (Return does the one Settings → Chat chose), what you queued above the box with Send now,
+On an iPhone it opens on your agent's chat (the owner's word of 27 November 2026: "something like t3code on desktop, and
+openmausbot/grokbot on mobile"; the web's phone): almost no chrome, a back arrow that counts what needs you, its name with
+its line, and one menu (a new chat, a task to give, all chats, a side question, its computer), and a big message box whose
+words have its whole width, its buttons on a line under them (`UI/ComposerBox.swift`: Queue, Steer and Stop beside the
+words had left them a few words wide). The back arrow, or a swipe from the left edge, opens the roster as a drawer
+(`UI/RosterList.swift`, shared with an iPad's and a Mac's sidebar; `UI/Drawer.swift`): what needs you with its count, your
+agent, each agent with its glass and its latest line muted, each room; at its foot, pinned, the work, Settings, everything
+else and the machine. A place chosen there opens over the chat, alone: the work (`UI/HomeView.swift`, Home's until then:
+what needs you, decisions only, three at most, each with its one answer in place, and the work by proof, a lazy list),
+an agent's timeline (its tasks compact: their title and state, one muted line of who and how you stepped in, one line of
+the latest step, and their answers, Approve, Ship it, Give again, each a tap), Needs you, Settings, Everything else
+(`UI/EverythingView.swift`: the agents' board, all chats, keys, connectors). A task opens as a thread of its own
+(`UI/TaskView.swift`: a slim bar with its title, where it is and who has it; the brief, the work folded, the proof as one
+line with its verdict that opens to what it rests on, its answers under it; its details in a sheet). A notification, or an
+`invincible://` link (`task/<id>`, `agent/<handle>`, `approval/<id>`, `chat/<id>`), opens its place over the chat; one
+about what the screen shows is told only in the list, and a task's Ship it asks Face ID first. Every screen is held to
+the bar Home was held to (I10): its title in SF Pro Display bold on one type scale (`UI/Page.swift`, `Typeset`), sections
+named in small capitals over rows split by hairlines (no cards but a proof's), a state as a still dot with its word,
+the verdict said once (the agent's bare "Verified." is never shown beside its proof), and Dynamic Type to the largest
+accessibility size without clipping. Needs you is the work's decisions in full, with what was noticed below them,
+counted nowhere. While the primary answers, its chat's message box stays open: Steer and Queue beside Stop under its
+words (Return does the one Settings → Chat chose), what you queued above the box with Send now,
 Edit and Remove, a held queue saying why with Resume, and a side question asked apart from its menu or with `/btw …`
 (`UI/ChatQueue.swift`, the web's words through the vectors' `composer`). While an agent's task runs, its thread's box
-steers it: Steer this task and Queue for after it over the box, Return again the one Settings → Chat chose, what you
+steers it: Steer this task and Queue for after it under its words, Return again the one Settings → Chat chose, what you
 said on its way to it above the box until its run takes it, then in its trail as yours where it was taken, what an
 ended task never took, and its proof saying what its review judged against (`Core/Steer.swift`, the vectors' `steer`;
-`TaskSteerTests` taps it against the dev node). An iPad's and a Mac's window are three panes:
-the mark and the INVINCIBLE wordmark at the head of a sidebar of the work by attention (`UI/Places.swift`), the place
-chosen, and a task's details beside it; ⌘K searches or asks. A tap anywhere but a field closes the keyboard
+`TaskSteerTests` taps it against the dev node). An iPad's window is the roster in a sidebar under the mark and the
+INVINCIBLE wordmark, your agent's chat beside it first, a slim bar over each place, and its panels (a task's details, an
+agent's workspace) closed until you open them; ⌘K searches or asks. A Mac's window has the work by attention in its
+sidebar (`UI/Places.swift`) until it takes the roster too. A tap anywhere but a field closes the keyboard
 (`KeyboardCloser`).
 
 The app keeps up with its node over its live stream (`Node/LiveLink.swift`, the web app's lib/live-link.ts ported and
