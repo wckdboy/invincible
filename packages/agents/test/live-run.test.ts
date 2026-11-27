@@ -149,6 +149,57 @@ describe("a run, followed", () => {
   });
 });
 
+describe("what a VM says of its run, checked", () => {
+  test("a follow that ends having said nothing (its VM at a limit) is opened again after a pause; three running, its run is looked at instead", async () => {
+    const commands: string[] = [];
+    let opened = 0;
+    const waits: number[] = [];
+    let t = 1_000_000;
+    const exec = async (command: string): Promise<ExecResult> => {
+      commands.push(command);
+      if (command.startsWith("stat -c")) return { exitCode: 0, stdout: "0\n", stderr: "", durationMs: 1, truncated: false };
+      return { exitCode: 0, stdout: JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }), stderr: "", durationMs: 1, truncated: false };
+    };
+    // (A follow that opens and ends at once, saying nothing; past twelve opens, one that can't be opened at all.)
+    const follow = async (): Promise<FollowedRun> => {
+      opened += 1;
+      if (opened > 12) throw new Error("this host can't keep a command open");
+      const lines = new Lines();
+      lines.end();
+      return { lines, close: () => {} };
+    };
+    const done = await runAgent(CLAUDE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work" }, { exec, follow, now: () => t, sleep: async (ms) => { waits.push(ms); t += ms; await Bun.sleep(0); } });
+    expect(done.status).toBe("finished");
+    expect(opened).toBe(3);
+    expect(waits.filter((ms) => ms >= 1_000).length).toBeGreaterThanOrEqual(2);
+    expect(polls(commands)).toBe(1);
+  });
+
+  test("a look's answer that isn't one (an offset that isn't a number, or behind; lines that aren't lines) is no news, and never reaches a command", async () => {
+    const commands: string[] = [];
+    const answers = [
+      { alive: true, exit: null, next: "0; touch /tmp/owned", lines: [] },
+      { alive: true, exit: null, next: 40, lines: "not lines" },
+      { alive: true, exit: null, next: 20, lines: [JSON.stringify({ type: "text", text: "so far" })] },
+      { alive: true, exit: null, next: 10, lines: [JSON.stringify({ type: "text", text: "said again" })] },
+      { alive: false, exit: 0, next: 20, lines: [] },
+    ];
+    const exec = async (command: string): Promise<ExecResult> => {
+      commands.push(command);
+      if (command.startsWith("stat -c")) return { exitCode: 0, stdout: "0\n", stderr: "", durationMs: 1, truncated: false };
+      if (command.includes("d, off =")) return { exitCode: 0, stdout: JSON.stringify(answers.shift() ?? { alive: false, exit: 0, next: 20, lines: [] }), stderr: "", durationMs: 1, truncated: false };
+      return { exitCode: 0, stdout: "", stderr: "", durationMs: 1, truncated: false };
+    };
+    const done = await runAgent(OPENCODE, { model, prompt: "x", session: null, deadline: Number.MAX_SAFE_INTEGER, workdir: "/work" }, { exec, ...clock() });
+    expect(done.status).toBe("finished");
+    const looks = commands.filter((command) => command.includes("d, off ="));
+    expect(looks.every((command) => / [0-9]+$/.test(command))).toBe(true);
+    expect(looks.some((command) => command.includes("touch"))).toBe(false);
+    // (Said once: an answer from behind where it stood is passed over.)
+    expect(done.summary).not.toBe("said again");
+  });
+});
+
 describe("a run cut off before it ended", () => {
   test("its process gone with no exit code (killed, its VM restarted): failed, and said to be cut off", async () => {
     const box = vm();

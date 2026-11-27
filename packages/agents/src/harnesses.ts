@@ -535,8 +535,10 @@ export async function runAgent(
       let lines: AsyncIterator<string> | null = null;
       let next: Promise<IteratorResult<string>> | null = null;
       let state = { alive: true, exit: null as number | null };
-      /** Follows that couldn't be opened again in a row. */
+      /** Follows lost in a row: one that couldn't be opened, or that ended having said nothing (not even how its run stands). */
       let lost = 0;
+      /** Whether the follow open now has said how its run stands. */
+      let stood = false;
       let ticked = Number.NEGATIVE_INFINITY;
       let looked = now();
       const end = () => {
@@ -555,7 +557,7 @@ export async function runAgent(
               lines = stream.lines[Symbol.asyncIterator]();
               next = lines.next();
               followed = true;
-              lost = 0;
+              stood = false;
             } catch {
               // Never followed, or lost three times running: looked at instead, from where it stands.
               if (!followed || ++lost >= 3) return null;
@@ -565,9 +567,14 @@ export async function runAgent(
           if (next) {
             const got = await Promise.race([next, deps.sleep(FOLLOW_TICK_MS).then(() => null)]);
             if (got?.done) {
-              // Its follow ended: at its time (opened again where it stopped), or with the run.
+              // Its follow ended: at its time (opened again where it stopped), or with the run. One that said nothing at all
+              // (its VM at its limit, say) is lost: opened again after a pause, and lost three times running, looked at instead.
               end();
               if (!state.alive) return await finished(state.exit);
+              if (!stood) {
+                if (++lost >= 3) return null;
+                await deps.sleep(1_000);
+              }
             } else if (got) {
               next = lines!.next();
               const line = got.value;
@@ -587,6 +594,8 @@ export async function runAgent(
                   // (Not its own: passed over.)
                 }
                 state = { alive: said.alive !== false, exit: Number.isSafeInteger(said.exit) ? (said.exit as number) : null };
+                stood = true;
+                lost = 0;
                 if (Number.isSafeInteger(said.next) && (said.next as number) > offset) offset = said.next as number;
                 if (!state.alive) {
                   end();
@@ -639,7 +648,12 @@ export async function runAgent(
       let looked: ExecResult | null = null;
       try {
         looked = await deps.exec(`python3 -I -c ${quote(POLL)} ${offset}`, 60);
-        poll = JSON.parse(looked.stdout.trim().split("\n").at(-1) ?? "");
+        // (What its VM says is data: an answer that isn't one, or one from behind where it stood, is no news.)
+        const said = JSON.parse(looked.stdout.trim().split("\n").at(-1) ?? "") as { alive?: unknown; exit?: unknown; next?: unknown; lines?: unknown };
+        if (typeof said.alive !== "boolean" || !Number.isSafeInteger(said.next) || (said.next as number) < offset || !Array.isArray(said.lines) || !said.lines.every((line) => typeof line === "string") || !(said.exit === null || said.exit === undefined || Number.isSafeInteger(said.exit))) {
+          throw new Error("its look said something that isn't one");
+        }
+        poll = { alive: said.alive, exit: (said.exit as number | null | undefined) ?? null, next: said.next as number, lines: said.lines as string[] };
         unreadSince = null;
       } catch (error) {
         // A look that couldn't be read is no news, for a while; a run unread for long is one the primary can't see.

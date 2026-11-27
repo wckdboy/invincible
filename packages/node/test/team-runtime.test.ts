@@ -485,7 +485,8 @@ test("a coding tool on a task with a budget is offered only the models it can co
   const counted = (ref: string) => ref === "plan/coder";
   const f = fixture([], {
     agent: () => agent, models: () => roster, countable: counted,
-    exec: async (_m, command) => { commands.push(command); return result({ stdout: "0" }); },
+    // (Its run ends at its first look, having said nothing: only its launch matters here.)
+    exec: async (_m, command) => { commands.push(command); return result({ stdout: command.includes('"next": nxt') ? JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }) : "0" }); },
   });
   // It starts on the one it can count (the run itself isn't played here: its launch says which model).
   await f.runtime.executeTask(agent, { ...task, budgetUsd: 2 }, f.context).catch(() => {});
