@@ -113,6 +113,14 @@ class NodeSession(
         }
     }
 
+    /**
+     * [c]'s GET of [path] once this session's proof holds, waiting for whoami while it is out: what the app asks as it
+     * comes to the front (AppModel.inFront). Asked before the proof, at every cold start beside the stream's first whoami,
+     * it was refused as unproven and dropped, and the notification handover, take-downs and collection with it (K3 of the
+     * re-check of 27 November 2026). Null: refused, nothing proven, or no answer.
+     */
+    suspend fun read(c: NodeClient, path: String): Json? = if (c.pin === pin && prove()) runCatching { c.get(path) }.getOrNull() else null
+
     /** Whoami's answer judged where [judging] says: never on the thread that asked (AppModel's is the main one). */
     private suspend fun judged(who: Json, challenge: String): NodeProof.Proven = withContext(judging) { NodeProof.judge(pin.node, who, challenge, now = now(), check = check) }
 

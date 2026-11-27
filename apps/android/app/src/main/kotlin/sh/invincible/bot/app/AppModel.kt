@@ -419,7 +419,7 @@ class AppModel(context: Context) {
      */
     suspend fun inFront() {
         val c = client ?: return
-        val view = runCatching { c.get("/api/notify") }.getOrNull() ?: return
+        val view = session?.read(c, "/api/notify") ?: return
         val subscribed = view["subscribed"].bool ?: return
         Notices.takeDown(appContext, view["withdrawn"].list.mapNotNull { it.string })
         val lost = view["lost"].takeIf { it is Json.Obj }

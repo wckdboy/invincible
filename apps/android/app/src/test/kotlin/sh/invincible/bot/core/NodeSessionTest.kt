@@ -222,6 +222,56 @@ class NodeSessionTest {
         }
     }
 
+    // ---- K3 (the re-check): what the app asks as it comes to the front waits for the first proof, then goes ----
+
+    @Test fun whatTheAppAsksAsItComesToTheFrontWaitsForTheFirstProofThenGoes() = runBlocking {
+        val signer = object : Signer {
+            override val device = "c_" + "D".repeat(43)
+            override fun sign(message: ByteArray) = ByteArray(64)
+        }
+        java.net.ServerSocket(0, 50, java.net.InetAddress.getLoopbackAddress()).use { server ->
+            // A node at the address: what it was asked, in order; its whoami answered only when the test says.
+            val asked = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val whoamiOut = java.util.concurrent.CountDownLatch(1)
+            val answerIt = java.util.concurrent.CountDownLatch(1)
+            kotlin.concurrent.thread(isDaemon = true) {
+                while (true) {
+                    val socket = runCatching { server.accept() }.getOrNull() ?: break
+                    socket.use { s ->
+                        val reader = s.getInputStream().bufferedReader()
+                        val target = reader.readLine()?.split(" ")?.getOrNull(1) ?: return@use
+                        while (!reader.readLine().isNullOrEmpty()) Unit
+                        val path = target.substringBefore("?")
+                        asked += path
+                        val body = if (path == "/api/whoami") {
+                            whoamiOut.countDown()
+                            answerIt.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                            answer(a, target.substringAfter("challenge=")).text()
+                        } else "{}"
+                        val bytes = body.toByteArray()
+                        s.getOutputStream().apply {
+                            write("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: ${bytes.size}\r\nconnection: close\r\n\r\n".toByteArray())
+                            write(bytes)
+                            flush()
+                        }
+                    }
+                }
+            }
+            val pin = NodePin(a, proofFirst = true)
+            val c = NodeClient("http://127.0.0.1:${server.localPort}", signer, pin)
+            val s = NodeSession(pin, ask = { c.provenWhoami(it) }, keep = {}, named = {}, refused = {}, check = check)
+            // A cold start: the stream's first whoami out (live()) as the app comes to the front (inFront()).
+            val first = async(kotlinx.coroutines.Dispatchers.IO) { s.prove() }
+            assertTrue(whoamiOut.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val front = async(kotlinx.coroutines.Dispatchers.IO) { s.read(c, "/api/notify") }
+            kotlinx.coroutines.delay(200)
+            answerIt.countDown()
+            assertTrue(first.await())
+            assertNotNull("asked once the proof held, not dropped", front.await())
+            assertEquals(listOf("/api/whoami", "/api/notify"), asked.toList())
+        }
+    }
+
     // ---- L7, I1, rule 3: once pinned, no proof is a failure ----
 
     @Test fun oncePinnedANodeThatGivesNoProofIsRefused() = runBlocking {
