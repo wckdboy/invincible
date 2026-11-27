@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { type ActionView, type ChatStreamEvent, type RouteName, routes, type TeamSnapshot, type TeamTrailEntry, utf8 } from "@invincible/core";
+import { type ActionView, type ChatStreamEvent, type RouteName, routes, teamArmLabel, type TeamSnapshot, type TeamTrailEntry, utf8 } from "@invincible/core";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -239,4 +239,39 @@ test("N4: what you declined or stopped, it may neither take up again nor give ag
   expect(results[3]!.summary).toContain("You stopped it: giving it again is yours.");
   const again = (await api<TeamSnapshot>("team")).tasks.filter((t) => t.givenBy === "primary" && (t.goal === "Drop them." || t.goal === "Force-push a cleaned history."));
   expect(again).toEqual([]);
+}, 30_000);
+
+// The review of 27 November, N8 (G26): a merge after a fix lands the pull request at the fix's commit, its last push.
+test("N8: after a verified fix (ci-back's path), its own merge lands the pull request at the fix's commit, naming both commits", async () => {
+  const proven = ended("Round SI units", await keep("round", MAIN, { "src/round.ts": "export const r = 1;\n" }), true);
+  const pr = await shipped(proven);
+  // Its checks failed and ci-back gave the fix to Noa: a verified fix task for this branch, its work kept where the ship left it.
+  const fixed = await keep("round-fix", pr.head, { "src/round.ts": "export const r = 2;\n" });
+  const team = new TeamStore(join(home.dir, "team.db"));
+  try {
+    const work = team.createTask({ room: team.direct("noa").id, assignee: "noa", title: "Fix the failing checks", goal: "Make them pass." }, { fix: { connector: "github", owner: "amiriteorg", repo: "shipyard", branch: pr.branch, pr: pr.pr, head: pr.head } });
+    team.finish(work.id, "done", null, { verified: true, output: "They pass.\n\nReview: PASS", changes: { artifact: fixed, files: 1, base: pr.head } });
+  } finally {
+    team.close();
+  }
+  // Offered as Noa's push, as offerFix sends it: its own, being a verified fix's for this branch.
+  const pushed = await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact: fixed, branch: pr.branch, title: "Fix the failing checks" }, why: "its checks failed" }, { kind: "agent", by: teamArmLabel(daemon.identity.id, "noa") });
+  expect(pushed.status).toBe("done");
+  const head = heads.get(pr.branch)!;
+  expect(head).not.toBe(pr.head);
+  script = [callTool("team_merge", { task: proven }), say("Merged.")];
+  expect((await ask("Merge the rounding work.")).map((r) => [r.name, r.ok])).toEqual([["team_merge", true]]);
+  expect(merged.find((m) => m.number === pr.pr)).toMatchObject({ into: "main", body: { sha: head } });
+  expect(await trail(proven)).toContainEqual(`Merged · the commits it landed: ${pr.head}, ${head}`);
+}, 30_000);
+
+// N8 (A11): the route's own check, where the work was kept: only work its gates and its reviewer passed is shipped.
+test("N8: work whose gates failed is never shipped, though its work was kept", async () => {
+  const failed = ended("Speed up rounding", await keep("speedup", MAIN, { "src/round.ts": "export const r = 3;\n" }), false);
+  const before = pulls.size;
+  script = [callTool("team_ship", { task: failed }), say("It isn't shipped.")];
+  const results = await ask("Ship the speed-up.");
+  expect(results.map((r) => [r.name, r.ok])).toEqual([["team_ship", false]]);
+  expect(results[0]!.summary).toContain("only work that was verified, and kept, is shipped");
+  expect(pulls.size).toBe(before);
 }, 30_000);
