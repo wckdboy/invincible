@@ -365,6 +365,28 @@ describe("runs", () => {
     expect(events.filter((e) => e.type === "retry")).toHaveLength(2);
   });
 
+  test("a stop said before the pause after a failed call began is not slept through: the run ends at once", async () => {
+    // The pause before a failed call is asked again ends with the run's stop. One said before it began waiting (here, as
+    // the failure is told) was missed: the stop's event had been and gone, and the pause slept out its 15 s.
+    const stop = new AbortController();
+    const began = performance.now();
+    const outcome = await runLoop(
+      { goal: "g", environment: "e" },
+      {
+        ask: async () => {
+          throw new Error("the planner could not answer: down");
+        },
+        exec: async () => ({ exitCode: 0, stdout: "ok", stderr: "", durationMs: 1, truncated: false }),
+        signal: stop.signal,
+        emit: (event) => {
+          if (event.type === "retry") stop.abort();
+        },
+      },
+    ).catch((error: Error) => ({ status: "threw", error }));
+    expect(performance.now() - began).toBeLessThan(2_000);
+    expect(["stopped", "threw"]).toContain(outcome.status);
+  }, 20_000);
+
   test("a model that keeps failing ends the run with the error, after a few tries", async () => {
     let calls = 0;
     const run = runLoop(

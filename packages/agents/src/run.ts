@@ -1281,6 +1281,8 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     deps.sleep ??
     ((ms: number) =>
       new Promise<void>((resolve) => {
+        // (A stop said before it began waiting ends it too: its abort event has been and gone.)
+        if (deps.signal?.aborted) return resolve();
         const timer = setTimeout(resolve, ms);
         deps.signal?.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
       }));
