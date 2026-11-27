@@ -2408,7 +2408,9 @@ def serve(desk=None, run=RUN):
     except OSError:
         return 0
     desk = desk or Desk()
-    agents, owners = listening(os.path.join(run, "deskd.sock"), 0o600), listening(owners_socket(run), 0o666)
+    # (The owner's first: once the agent's is there, deskd answers on both, as what waits for the agent's takes it to.)
+    owners = listening(owners_socket(run), 0o666)
+    agents = listening(os.path.join(run, "deskd.sock"), 0o600)
 
     def accept(s, mine):
         while True:
