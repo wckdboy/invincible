@@ -1025,7 +1025,13 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   - **A runner can lie with its own key.** The proof says which node vouches for the work; it can't show that node ran
     its gates truthfully. A false proof is signed evidence against that node, and kept.
   - **A full node is still owner-equivalent.** The fabric narrows what runs elsewhere may do, not what a full node may:
-    one that turned on you can enroll a client that is you over HTTPS, and grant itself hand-offs as your word.
+    one that turned on you can enroll a client that is you over HTTPS, and grant itself hand-offs as your word. Your
+    words signed end to end (slice 8) will end that for what is yours to say: each word goes with a companion
+    (`word.signed`, core's `words.ts`) that carries a device of yours' P-256 signature of the word's kind, body, fleet,
+    nonce and time, and from `WORDS_SIGNED_FROM`, by the word's own HLC, every replica applies a word only when its
+    companion holds, signed by an active device of yours with the word's scope (`store.ts` `signedWord`,
+    `packages/ledger/test/words.test.ts`). That cutoff is far off until the routes, the apps and `inv` sign their words,
+    enrollment becomes a word, and the cutoff is set: until then a full node is owner-equivalent as said.
   - **The hand-off has no HTTPS form**, so a task for another node's agents waits on Q-AMP between them.
   - **A sidecar holding the transport key replays its own chains.** A compromised sidecar holds the node's transport
     key and sees each call's chain, so it can use a run's grant within its task, its tools and its 300 s, as the node

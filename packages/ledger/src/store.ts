@@ -34,6 +34,12 @@ import {
   toolDigest,
   evalProblem,
   type NodeIdentity,
+  isWord,
+  verifyWordSignature,
+  WORD_SCOPES,
+  WORD_SKEW_MS,
+  wordDigest,
+  WORDS_SIGNED_FROM,
 } from "@invincible/core";
 
 /*
@@ -162,9 +168,12 @@ CREATE INDEX IF NOT EXISTS v_skill_versions_skill ON v_skill_versions (skill, n)
 CREATE TABLE IF NOT EXISTS v_skill_uses (
   skill TEXT NOT NULL, run TEXT NOT NULL, version TEXT NOT NULL, hlc TEXT NOT NULL, status TEXT, PRIMARY KEY (skill, run)
 );
+-- The nonce of each word of yours that applied, by the device that signed it, from WORDS_SIGNED_FROM (core's words.ts):
+-- no other word of that device's may use it. Empty until then, so it is in no digest, and no replica rebuilds for it.
+CREATE TABLE IF NOT EXISTS v_word_nonces (device TEXT NOT NULL, nonce TEXT NOT NULL, word TEXT NOT NULL, PRIMARY KEY (device, nonce));
 `;
 
-const VIEW_TABLES = ["v_state", "v_devices", "v_memories", "v_memories_fts", "v_lww", "v_grants", "v_rejected", "v_slots", "v_chainbad", "v_skills", "v_skill_versions", "v_skill_uses"];
+const VIEW_TABLES = ["v_state", "v_devices", "v_memories", "v_memories_fts", "v_lww", "v_grants", "v_rejected", "v_slots", "v_chainbad", "v_skills", "v_skill_versions", "v_skill_uses", "v_word_nonces"];
 
 /** Who wrote a skill's version, as its event says (core's skills.ts). */
 const SKILL_OWNER = "owner";
@@ -780,6 +789,39 @@ export class LedgerStore {
     if (!reason && event.v === 2) this.setState(`head:${event.device}`, event.id);
     if (!reason) reason = this.applyKind(event);
     if (reason) this.db.query("INSERT OR REPLACE INTO v_rejected (id, reason) VALUES (?, ?)").run(event.id, reason);
+    // A word of yours that applied, from the cutoff, uses its companion's nonce: no other word of that device may. Only a
+    // word that applied: a companion copied with no word, or with one refused, takes none (signedWord).
+    else if (this.signedFrom(event)) {
+      const said = bodyOf(this.event(event.prev!)!, "word.signed");
+      this.db.query("INSERT OR IGNORE INTO v_word_nonces (device, nonce, word) VALUES (?, ?, ?)").run(said.device, said.nonce, event.id);
+    }
+  }
+
+  /** Whether an event is a word of yours held to its companion: one stamped (its own HLC) from WORDS_SIGNED_FROM. */
+  private signedFrom(event: GEvent): boolean {
+    return isWord(event) && decodeHlc(event.hlc).ms >= WORDS_SIGNED_FROM;
+  }
+
+  /**
+   * Why a word of yours, from WORDS_SIGNED_FROM, isn't applied, or null: its prev is its companion (word.signed, written
+   * by the same node just before it), whose statement names this word's kind, its body's digest and this fleet, is signed
+   * by a device of yours active at the companion's HLC and holding the word's scope (WORD_SCOPES), was made within
+   * WORD_SKEW_MS of that HLC, and has a nonce no applied word of that device used. It reads only what the log holds, in
+   * the log's order, so every replica decides it alike (slice 8; core's words.ts). A full node can still delay or withhold
+   * your word, never forge one, change it or say it twice.
+   */
+  private signedWord(event: GEvent): string | null {
+    const companion = event.prev ? this.event(event.prev) : null;
+    if (!companion || companion.kind !== "word.signed" || companion.device !== event.device) return "your word goes with its companion, signed by a device of yours";
+    const said = bodyOf(companion, "word.signed");
+    if (said.kind !== event.kind || said.digest !== wordDigest(event.body)) return "its companion signs another word";
+    if (Math.abs(said.at - decodeHlc(companion.hlc).ms) > WORD_SKEW_MS) return "its companion's time is more than five minutes from when it was written";
+    const device = this.deviceAt(said.device, companion.hlc);
+    const scope = WORD_SCOPES[event.kind as keyof typeof WORD_SCOPES];
+    if (!device || device.kind !== "client" || !device.scopes.includes(scope)) return "its companion isn't signed by a device of yours that may say it";
+    if (!verifyWordSignature(said.device, said.sig, { v: 1, fleet: this.fleet ?? "", kind: said.kind, digest: said.digest, nonce: said.nonce, at: said.at })) return "its companion's signature doesn't hold";
+    if (this.db.query("SELECT 1 FROM v_word_nonces WHERE device = ? AND nonce = ?").get(said.device, said.nonce)) return "its companion's nonce was used by another word of that device";
+    return null;
   }
 
   private chainReason(event: GEvent): string | null {
@@ -809,6 +851,12 @@ export class LedgerStore {
       return null;
     }
     if (!genesis) return "no genesis yet";
+
+    // From WORDS_SIGNED_FROM, by its own HLC, a word of yours applies only with its companion (signedWord; slice 8).
+    if (this.signedFrom(event)) {
+      const unsigned = this.signedWord(event);
+      if (unsigned) return unsigned;
+    }
 
     if (event.kind === "device.enrolled") {
       const body = bodyOf(event, "device.enrolled");
