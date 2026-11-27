@@ -25,12 +25,16 @@ struct DesktopWatchTests {
         /// How it stood at each wait: drawing, and whether its last frame was still what the box shows.
         var during: [(watching: Bool, drawn: Bool)] = []
         var said: [String] = []
+        /// The clock the watch is handed (ms): each wait moves it on by its own length, and by any more it is told.
+        var clock: Double = 1_764_216_000_000
+        var later: [Double] = []
     }
 
     /// The watch run on a script of streams, one for each time it opens one (a stream that ends at once after them).
-    func run(_ script: [AsyncThrowingStream<DesktopFrame, any Error>]) async -> (DesktopWatch, Seen) {
+    func run(_ script: [AsyncThrowingStream<DesktopFrame, any Error>], later: [Double] = []) async -> (DesktopWatch, Seen) {
         let watch = DesktopWatch()
         let seen = Seen()
+        seen.later = later
         var left = script
         await watch.run(
             open: {
@@ -42,11 +46,35 @@ struct DesktopWatchTests {
             wait: { ms in
                 seen.waits.append(ms)
                 seen.during.append((watch.watching, watch.drawn))
+                seen.clock += Double(ms) + (seen.later.isEmpty ? 0 : seen.later.removeFirst())
             },
             began: { seen.said.append("began") },
-            stopped: { seen.said.append("stopped") }
+            stopped: { seen.said.append("stopped") },
+            now: { seen.clock }
         )
         return (watch, seen)
+    }
+
+    /// A stream that draws, then falls behind.
+    static func behind() -> AsyncThrowingStream<DesktopFrame, any Error> { stream(2, then: DesktopStream.Behind()) }
+
+    @Test func threeBehindsInARowEachWithin30sGiveWayToThePictureAndSaySo() async {
+        let (watch, seen) = await run([Self.behind(), Self.behind(), Self.behind()])
+        // Each drew frames, so the count of ends started again each time: the behinds give way, at the third.
+        #expect(watch.givenUp == .behind && !watch.drawn)
+        #expect(seen.waits == [500, 500])
+        #expect(seen.said == ["began", "stopped", "began", "stopped", "began", "stopped"])
+    }
+
+    @Test func aBehindOver30sAfterTheLastStartsANewRowAndEndsBetweenThemDontBreakIt() async {
+        // 30.5 s between the second and the third: a new row, so the three never give way (a refusal ends it here).
+        let (apart, seenApart) = await run([Self.behind(), Self.behind(), Self.behind(), Self.stream(0, then: NodeError(status: 404, message: "gone"))], later: [0, 30_000])
+        #expect(apart.givenUp == .refused)
+        #expect(seenApart.waits == [500, 500, 500])
+        // An end that isn't a behind, between them, is counted apart: the third behind still gives way.
+        let (between, seenBetween) = await run([Self.behind(), Self.stream(0), Self.behind(), Self.behind()])
+        #expect(between.givenUp == .behind)
+        #expect(seenBetween.waits == [500, 1000, 500])
     }
 
     @Test func fourEndsInARowGiveWayToThePictureAndSaySo() async {

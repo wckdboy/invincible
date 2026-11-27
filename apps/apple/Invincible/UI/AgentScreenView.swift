@@ -78,8 +78,10 @@ struct AgentScreenView: View {
                             .buttonStyle(.bordered).controlSize(.small)
                     }
                 }
-                if watch.givenUp == .tried {
-                    Label("The live picture of \(agent.name)'s screen isn't coming through, so it is shown every two seconds instead.", systemImage: "info.circle")
+                if let why = watch.givenUp, why != .refused {
+                    Label(why == .behind
+                        ? "This device can't keep up with \(agent.name)'s screen live, so it is shown every two seconds instead."
+                        : "The live picture of \(agent.name)'s screen isn't coming through, so it is shown every two seconds instead.", systemImage: "info.circle")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

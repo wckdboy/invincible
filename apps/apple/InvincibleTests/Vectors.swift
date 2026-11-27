@@ -149,6 +149,7 @@ struct Vectors: Decodable {
         struct Codec: Decodable { let payload: String; let codec: String? }
         struct Hold: Decodable { let held: DesktopHold; let at: Double; let ends: Double }
         struct Again: Decodable { let n: Int; let ms: Int }
+        struct BehindRow: Decodable { let row: DesktopStream.Behinds?; let at: Double; let next: DesktopStream.Behinds; let tooOften: Bool }
         struct Glass: Decodable {
             struct Strip: Decodable { let x: Int; let y: Int; let block: Int; let bits: Int }
             struct Shown: Decodable { let kind: UInt8; let time: UInt64; let clicks: Int }
@@ -169,6 +170,10 @@ struct Vectors: Decodable {
         let holds: [Hold]
         let again: [Again]
         let liveTries: Int
+        let behind: Int
+        let behindTimes: Int
+        let behindWithinMs: Double
+        let behinds: [BehindRow]
         let glass: Glass
     }
 

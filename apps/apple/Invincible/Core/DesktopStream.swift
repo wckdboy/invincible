@@ -131,6 +131,27 @@ enum DesktopStream {
     /// the stream again, and the new one starts from its keyframe.
     struct Behind: Error, Equatable {}
 
+    /// Falling behind again and again (the web's BEHIND_TIMES and BEHIND_WITHIN_MS): this many times in a row, each within
+    /// `behindWithinMs` of the last, gives way to the picture every two seconds, said once. A device too slow for the
+    /// screen would otherwise go live, fall behind and go live again for ever. Counted apart from ends.
+    static let behindTimes = 3
+    static let behindWithinMs: Double = 30_000
+
+    /// Behinds in a row: how many, and when the last was (ms since the epoch).
+    struct Behinds: Codable, Equatable, Sendable {
+        let count: Int
+        let at: Double
+    }
+
+    /// The row once the stream has fallen behind at `at`: one more, or a new row of one when the last was over
+    /// `behindWithinMs` before.
+    static func behindAgain(_ row: Behinds?, at: Double) -> Behinds {
+        Behinds(count: row.map { at - $0.at <= behindWithinMs ? $0.count + 1 : 1 } ?? 1, at: at)
+    }
+
+    /// Whether falling behind that often gives way to the picture.
+    static func behindTooOften(_ row: Behinds) -> Bool { row.count >= behindTimes }
+
     /// Where a stream's frames wait to be decoded: at most `behind` of them, the oldest first.
     static func queue() -> (frames: AsyncThrowingStream<DesktopFrame, any Error>, queue: AsyncThrowingStream<DesktopFrame, any Error>.Continuation) {
         let made = AsyncThrowingStream.makeStream(of: DesktopFrame.self, throwing: (any Error).self, bufferingPolicy: .bufferingOldest(behind))

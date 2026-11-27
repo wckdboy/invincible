@@ -55,7 +55,7 @@ struct DesktopStreamTests {
 
     @Test func aStreamThatFallsBehindEndsAfterWhatWaitsAndIsWatchedAgain() async throws {
         let frame = { (n: Int) in DesktopFrame(kind: n == 0 ? DesktopFrame.key : DesktopFrame.delta, time: UInt64(n), payload: Data([0, 0, 1, 0x41])) }
-        #expect(DesktopStream.behind == 20)
+        #expect(DesktopStream.behind == cases.behind)
         // A watcher that keeps up never falls behind, however many come.
         let kept = DesktopStream.queue()
         var each = kept.frames.makeAsyncIterator()
@@ -79,7 +79,16 @@ struct DesktopStreamTests {
             #expect(error is DesktopStream.Behind)
             #expect(!DesktopWatch.refuses(error))
         }
-        #expect(got == (0..<20).map { UInt64($0) })
+        #expect(got == (0..<cases.behind).map { UInt64($0) })
+    }
+
+    @Test func fallingBehindAgainAndAgainIsTheWebsRule() {
+        #expect(DesktopStream.behindTimes == cases.behindTimes && DesktopStream.behindWithinMs == cases.behindWithinMs)
+        for each in cases.behinds {
+            let next = DesktopStream.behindAgain(each.row, at: each.at)
+            #expect(next == each.next, "\(String(describing: each.row)) at \(each.at)")
+            #expect(DesktopStream.behindTooOften(next) == each.tooOften, "\(next)")
+        }
     }
 
     @Test func aHoldEndsWhenTheNodeSaidAndWatchingAgainWaitsALittleLongerEachTime() {
