@@ -401,6 +401,7 @@ struct RoomEditor: View {
                                     .foregroundStyle(members.contains(agent.id) ? Color.ink : Color.secondary)
                             }
                         }
+                        .listRowButton()
                         .accessibilityAddTraits(members.contains(agent.id) ? .isSelected : [])
                     }
                 } header: {

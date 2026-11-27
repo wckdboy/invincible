@@ -7,6 +7,8 @@ struct ChatsView: View {
     let open: (String) -> Void
     let startNew: () -> Void
     @Environment(\.dismiss) private var dismiss
+    /// Shown over something (a sheet, or pushed on an iPhone), which Done goes back from; a Mac's place has nowhere to go.
+    @Environment(\.isPresented) private var presented
     @Environment(\.openWindow) private var openWindow
     /// Whether a chat can open in a window of its own: a Mac's, an iPad's.
     @Environment(\.supportsMultipleWindows) private var windows
@@ -31,6 +33,7 @@ struct ChatsView: View {
                             } label: {
                                 ChatRow(chat: chat, group: group.label, current: chat.id == session.chat.conversation)
                             }
+                            .listRowButton()
                             .tint(.primary)
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) { deleting = chat } label: { Label("Delete", systemImage: "trash") }
@@ -64,7 +67,7 @@ struct ChatsView: View {
             .inlineTitle()
             .searchable(text: $query, placement: .alwaysShown, prompt: "Chats")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                if presented { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
                 ToolbarItem(placement: .primaryAction) {
                     Button(action: startNew) { Label("New chat", systemImage: "square.and.pencil") }
                         .disabled(session.chat.answering)

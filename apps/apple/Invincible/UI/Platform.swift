@@ -214,6 +214,8 @@ extension View {
     func readingWidth() -> some View { modifier(ReadingWidth()) }
     /// A field drawn by what holds it (a message box's glass, a quiet fill): an iPhone's field draws nothing of its own.
     func plainField() -> some View { self }
+    /// A button that is a list's or a form's row: an iPhone draws it as the row already.
+    func listRowButton() -> some View { self }
 }
 
 /// The tab bar hidden on an iPhone (compact width) only.
@@ -360,6 +362,9 @@ extension View {
     }
     /// A Mac's field draws its own bezel; inside a message box's glass or a quiet fill, it draws none.
     func plainField() -> some View { textFieldStyle(.plain) }
+    /// A button that is a list's or a form's row: a Mac would draw it as a push button, a control's fixed height that cut a
+    /// row of two lines to one in a grey box (the chats, 27 November 2026); as a row, all of it is clicked.
+    func listRowButton() -> some View { buttonStyle(.plain).contentShape(.rect) }
 }
 
 /// The words being typed, in the key window's field: whether an input method is still composing them, and a new line.
