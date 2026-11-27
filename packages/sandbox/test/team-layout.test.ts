@@ -21,7 +21,7 @@ const LISTED: LayoutEntry[] = [
   { name: "repo", to: "work", kind: "dir", bytes: 4096 },
 ];
 
-function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean; listCut?: boolean; checkFails?: string; backFails?: boolean; labelFails?: boolean; layout2?: boolean } = {}) {
+function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean; listCut?: boolean; checkFails?: string; backFails?: boolean; labelFails?: boolean; layout2?: boolean; listWaits?: Promise<void>; stopFails?: boolean } = {}) {
   const containers = new Map<string, { labels: Record<string, string>; mounts: Mount[]; status: string; image: string }>();
   const calls: string[][] = [];
   /** The modes MOVE_PY was run in, in order, and the word each was given (the move's own), if any. */
@@ -83,6 +83,8 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
           // (Its check, as MOVE_PY says what it found: a tree that isn't a folder of the store's own.)
           if (mode === "check" && opts.checkFails) return { code: 3, stdout: "", stderr: opts.checkFails };
           if (mode === "back" && opts.backFails) return { code: 1, stdout: "", stderr: "back: input/output error" };
+          // (Held open where a test holds it, as a long list of a large store is.)
+          if (mode === "list" && opts.listWaits) await opts.listWaits;
           // (Cut, as the node's read of it is past its cap: whole lines here, so that only its being cut can tell.)
           if (mode === "list" && opts.listCut) return { ...ok(LISTED.map((e) => JSON.stringify(e)).join("\n")), truncated: true };
           return mode === "list" ? ok(LISTED.map((e) => JSON.stringify(e)).join("\n")) : ok();
@@ -126,7 +128,8 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
         return ok();
       }
       case "stop":
-        return ok();
+        // (A VM that won't stop, as one whose runtime is stuck: it runs on.)
+        return opts.stopFails ? { code: 1, stdout: "", stderr: "Error response from daemon: cannot stop container: did not receive an exit event" } : ok();
       case "start": {
         const c = containers.get(rest.at(-1)!);
         if (c) c.status = "running";
@@ -486,6 +489,71 @@ describe("a VM whose layout Docker can't say (the fifth fabric review's R5-8)", 
     await expect(f.host.createSeatVm({ seat: SEAT, network: "online", cpus: 1, memoryGb: 2, ttlMinutes: 30, run: `seat.${SEAT.id}`, shares: ID })).rejects.toThrow(CANT);
     expect(mounted(f)).toEqual([]);
     expect([...f.containers.values()].some((c) => c.labels[`${LABEL}.shares`] === ID)).toBe(false);
+  });
+});
+
+describe("a VM that shares an agent's store, and its move to layout 2 (the fifth fabric review's R5-1)", () => {
+  const SEAT = { id: `st_${"c".repeat(22)}`, kind: "claude-subscription" as const, runs: 1 };
+  const onSeat = { seat: SEAT, network: "online" as const, cpus: 1, memoryGb: 2, ttlMinutes: 30, run: `seat.${SEAT.id}`, shares: ID };
+  /** A VM made before the agent's move that shares its whole store (no tree): in layout 1 a seat's run's. */
+  const rootSharer = (f: ReturnType<typeof fake>, status: string) =>
+    f.containers.set("invincible-sbx-7777777777", { labels: { [LABEL]: "1", [`${LABEL}.id`]: "7777777777", [`${LABEL}.node`]: "test", [`${LABEL}.shares`]: ID }, mounts: [{ Type: "volume", Name: volumeName(ID), Destination: "/work" }], status, image: IMAGE });
+  const sharers = (f: ReturnType<typeof fake>) => [...f.containers.entries()].filter(([name, c]) => c.labels[`${LABEL}.shares`] === ID && name !== "invincible-sbx-7777777777");
+
+  test("a seat's VM asked for while a move is about to begin is refused, and none is made on the store's root", async () => {
+    let release!: () => void;
+    const f = fake({ listWaits: new Promise<void>((resolve) => (release = resolve)) });
+    const preparing = f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
+    // (The move has begun: the store's list is under way, before anything of it is written down as moving.)
+    for (let i = 0; i < 200 && !f.modes.includes("list"); i++) await Bun.sleep(5);
+    expect(f.modes).toEqual(["list"]);
+    await expect(f.host.createSeatVm(onSeat)).rejects.toThrow("that agent's store is being moved to layout 2");
+    expect(sharers(f)).toEqual([]);
+    release();
+    await preparing;
+    expect(f.agent().labels[`${LABEL}.layout`]).toBe("2");
+  });
+
+  test("a move doesn't begin while a VM shares the store, stopped as well as running", async () => {
+    for (const status of ["exited", "running"]) {
+      const f = fake();
+      rootSharer(f, status);
+      await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
+      expect([status, f.modes]).toEqual([status, []]);
+      expect(f.agent().labels[`${LABEL}.layout`]).toBeUndefined();
+    }
+  });
+
+  test("a VM in layout 2 isn't started, made again or shared beside one that holds its store's whole root", async () => {
+    const f = fake({ layout: "2" });
+    rootSharer(f, "exited");
+    const held = "a VM made before that agent's move to layout 2 shares its whole store (invincible-sbx-7777777777), and holds its root";
+    await expect(f.host.prepareTeam(ID, RUN, undefined, ["openai"])).rejects.toThrow(held);
+    expect(f.calls.some((a) => a[0] === "start")).toBe(false);
+    await expect(f.host.remakeTeam(ID, RUN, { providers: ["openai"], approvedBy: "test-owner" })).rejects.toThrow(held);
+    expect(f.calls.some((a) => a[0] === "stop" || a[0] === "rename")).toBe(false);
+    f.agent().status = "running";
+    await expect(f.host.createTaskVm({ shares: ID, task: "task-held", run: "fabric.task-held", providers: ["openai"], models: ["openai/gpt-paid"], ttlMinutes: 30 })).rejects.toThrow(held);
+    expect(sharers(f)).toEqual([]);
+    expect(f.modes).toEqual([]);
+  });
+
+  test("what a VM shares is decided again as it is made: a share decided in layout 1 isn't made once the store is in layout 2", async () => {
+    const f = fake({ layout: "2" });
+    f.agent().status = "running";
+    await expect(f.host.create({ network: "online", cpus: 1, memoryGb: 2, ttlMinutes: 30, persistent: false, run: "seat.late" }, { shares: { sandbox: ID, volume: volumeName(ID) } })).rejects.toThrow("that agent's store is in layout 2 now, not as this VM was to share it");
+    expect(sharers(f)).toEqual([]);
+  });
+
+  test("a move whose VM won't stop is never begun: nothing of its store is renamed, and the ledger says why", async () => {
+    const f = fake({ stopFails: true });
+    f.agent().status = "running";
+    await f.host.prepareTeam(ID, RUN, undefined, ["openai"]);
+    expect(f.modes).toEqual(["list"]);
+    expect(f.calls.some((a) => a[0] === "rename")).toBe(false);
+    expect(f.agent().labels[`${LABEL}.layout`]).toBeUndefined();
+    expect(f.ledger.some((e) => e.detail?.startsWith("not moved to layout 2, so it stays as it was: could not stop the agent's VM, so it isn't made again"))).toBe(true);
+    expect(f.layoutMoves.started(ID)).toBeNull();
   });
 });
 

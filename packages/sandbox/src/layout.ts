@@ -237,8 +237,10 @@ def move():
         if NOTES_AT not in moved:
             notes = notes_here()
             if notes is not None and not os.path.lexists(staged(NOTES)):
+                # (Its mode kept, as its tree's is the VMs' user's alone once named, and back gives it its own again.)
+                mode = stat.S_IMODE(os.lstat(notes).st_mode)
                 os.rename(notes, staged(NOTES))
-                entry = {"name": NOTES_AT, "to": NOTES}
+                entry = {"name": NOTES_AT, "to": NOTES, "mode": mode}
             elif real_folder(staged(NOTES)) and os.listdir(staged(NOTES)):
                 # (Renamed before a cut, and not written down.)
                 entry = {"name": NOTES_AT, "to": NOTES}
@@ -293,6 +295,13 @@ def back():
                 os.rmdir(place)
             if folders(ROOT, os.path.dirname(NOTES_AT)) and real_folder(staged(NOTES)) and not os.path.lexists(place):
                 os.rename(staged(NOTES), place)
+                # Its own mode again, as it was before the move: through the folder itself, never a link in its place.
+                if isinstance(entry.get("mode"), int):
+                    fd = os.open(place, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    try:
+                        os.fchmod(fd, entry["mode"] & 0o7777)
+                    finally:
+                        os.close(fd)
             continue
         src, dst = os.path.join(staged(entry["to"]), entry["name"]), os.path.join(ROOT, entry["name"])
         if real_folder(staged(entry["to"])) and os.path.lexists(src) and not os.path.lexists(dst):

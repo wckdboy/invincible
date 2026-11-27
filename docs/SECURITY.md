@@ -315,6 +315,19 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   layout a VM is in is its container's label. One Docker can't say (an inspect that fails) is taken for neither, and
   nothing of its store is mounted: it isn't started, moved, made again or shared, and the error says why (the fifth
   review's R5-8; `team-layout.test.ts`).
+- **No VM holds a layout-2 store's root** (the fifth review's R5-1), so the check isn't raced. Only a VM made before
+  the move, sharing the whole store, could swap a tree for a link between the check and the mount:
+  - a move doesn't begin while any VM shares the store, stopped or running, nor while one is being made;
+  - nothing is made to share the store while its move is about to begin or under way. Each side marks itself before
+    its first await, so neither begins once the other has;
+  - what a sharing VM is given is decided again as it is made: its tree in layout 2, never the root of a store moved
+    since its share was asked;
+  - a store in layout 2 isn't mounted (a start, a remake, a task's VM, a seat's run) while a VM that shares its whole
+    store is there, in any state. A VM that shares a tree of it says so in a label of its own;
+  - the move's VM is stopped first, and one that won't stop is neither moved nor made again.
+
+  Tested in `team-layout.test.ts`. The escape tests run on real Docker in a container and in a Kata microVM
+  (`layout.integration.test.ts`; on Ultra, 27 November 2026: Docker 29.10, 8 of 8).
 - **Made new in it; moved to it once.** With it on, a new agent's VM is made in layout 2. One made before is moved at
   its next prepare while nothing runs in it (no command, terminal or desktop session, and no VM sharing its workspace):
   its store's top-level entries are renamed into the three trees inside the store's own filesystem, so nothing is
@@ -328,14 +341,14 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   to its HOME, everything else stays its workspace, and the old lease is dropped (each prepare writes a fresh one).
   Which files are a tool's is never named: the move goes by that one rule, and every `/work/.name` the code names is
   checked against the workspace's own entries, so one the code comes to keep there isn't moved away (`layout.test.ts`).
-  A move that can't be finished is put back by the reverse renames, and its work goes on in layout 1 until the next
-  prepare. One whose store couldn't be put back isn't started on it, since its `/work` would be that store's root as the
+  A move that can't be finished is put back by the reverse renames, its notes' folder with the mode it had (a move makes
+  their tree the VMs' user's alone), and its work goes on in layout 1 until the next prepare. One whose store couldn't be put back isn't started on it, since its `/work` would be that store's root as the
   move left it: its next prepare takes the move up again, with its own word.
 - **A node that stops in the middle of a move** (the fourth fabric review's R4-6) takes it up at the agent's next
   prepare, its word and what the store listed before it began kept in its database: the VM it had set aside gets its
   name back first, as a remake does, and the move is finished, or put back if layout 2 was turned off since. One cut at
   its very end (its VM made again, the old one not yet taken away) has the old one taken away. Nothing shares a store
-  while its move is under way. A store holding the manifest of a move its node has no word for (its database lost) is
+  while its move is under way, or about to be (R5-1: "No VM holds a layout-2 store's root", above). A store holding the manifest of a move its node has no word for (its database lost) is
   neither moved again nor touched, since a fresh move would take its trees for the agent's entries
   (`layout-planted.test.ts`, `layout.test.ts`).
 - **Said as it is.** Each move is a line in the ledger and a notice to you that names the agent and what moved, by

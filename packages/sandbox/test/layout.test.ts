@@ -115,6 +115,16 @@ describe("moving a store to layout 2", () => {
     expect(existsSync(join(root, MANIFEST))).toBe(false);
   });
 
+  test("back leaves its notes' folder the mode it had: a move makes their tree the VMs' user's alone, and back undoes that too", () => {
+    // (Ultra's dry run on copies of live stores, 27 November 2026: the notes' folder came back 0700 from 0755.)
+    const root = store();
+    chmodSync(join(root, NOTES_DIR), 0o755);
+    expect(run("move", root).status).toBe(0);
+    expect(statSync(join(root, "notes")).mode & 0o777).toBe(0o700);
+    expect(run("back", root).status).toBe(0);
+    expect(statSync(join(root, NOTES_DIR)).mode & 0o777).toBe(0o755);
+  });
+
   test("a store with no notes yet gets an empty tree for them, which back takes away", () => {
     const root = store({ notes: false });
     expect(run("move", root).status).toBe(0);

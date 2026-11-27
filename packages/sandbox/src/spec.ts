@@ -204,6 +204,8 @@ export function labels(spec: SandboxSpec): Record<string, string> {
     ...(spec.seat ? { [`${LABEL}.seat`]: spec.seat.id } : {}),
     ...(spec.task ? { [`${LABEL}.task`]: spec.task } : {}),
     ...(spec.shares ? { [`${LABEL}.shares`]: spec.shares.sandbox } : {}),
+    // (A tree of the store alone, in layout 2: one without holds the store's root, so no layout-2 mount is made beside it.)
+    ...(spec.shares?.tree ? { [`${LABEL}.shares.tree`]: spec.shares.tree } : {}),
     ...(spec.layout ? { [`${LABEL}.layout`]: "2" } : {}),
     // The gateway token's hash is deliberately NOT a label: images can carry labels of
     // their own, so anything security-relevant lives in node-local state instead.

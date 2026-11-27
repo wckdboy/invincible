@@ -547,6 +547,13 @@ export class SandboxHost {
   private readonly desktopRoomTried = new Map<string, number>();
   /** What runs in each sandbox now, by its id: commands and terminals (a store isn't moved under them). */
   private readonly busy = new Map<string, number>();
+  /**
+   * Agents whose store a move to layout 2 may be about to take, or is taking (R5-1): marked before the move's first await,
+   * as `sharing` is before a share's, so that neither begins while the other is under way.
+   */
+  private readonly moving = new Set<string>();
+  /** VMs being made to share an agent's store, by its id, counted from before their first await (R5-1). */
+  private readonly sharing = new Map<string, number>();
   private engineMajor: Promise<number | null> | null = null;
   /**
    * What each agent's VM was last leased (prepareTeam), by its id: the scopes of its lease, the providers its models are
@@ -808,6 +815,25 @@ export class SandboxHost {
   }
 
   async create(input: CreateInput, seated: CreateOptions = {}): Promise<SandboxView> {
+    // (A VM that shares an agent's store is counted from here, before anything is awaited, and none is begun while its move
+    // may be about to be: R5-1.)
+    if (seated.shares && this.moving.has(seated.shares.sandbox)) throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);
+    return seated.shares ? this.sharingWhile(seated.shares.sandbox, () => this.made(input, seated)) : this.made(input, seated);
+  }
+
+  /** `fn`, with a VM being made to share `id`'s store counted while it runs: no move of that store begins meanwhile. */
+  private async sharingWhile<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    this.sharing.set(id, (this.sharing.get(id) ?? 0) + 1);
+    try {
+      return await fn();
+    } finally {
+      const left = (this.sharing.get(id) ?? 1) - 1;
+      if (left > 0) this.sharing.set(id, left);
+      else this.sharing.delete(id);
+    }
+  }
+
+  private async made(input: CreateInput, seated: CreateOptions): Promise<SandboxView> {
     const providers = sandboxScopes(input);
     // Never weaker than asked: what a Mac can't give (no network at all, an image not built for it) isn't made here.
     const cannot = this.refusal(input);
@@ -919,10 +945,21 @@ export class SandboxHost {
         }
         spec.layout = { path: await this.imagePath(image) };
       }
-      // Nothing shares a store whose move is under way: half moved, its root holds neither layout as it should.
-      if (seated.shares && this.moves.started(seated.shares.sandbox)) {
+      // Nothing shares a store whose move is under way, or about to be: half moved, its root holds neither layout as it
+      // should. And what it shares is decided again as it is made (R5-1): its tree in layout 2, the store in layout 1.
+      if (seated.shares && (this.moving.has(seated.shares.sandbox) || this.moves.started(seated.shares.sandbox))) {
         if (tokenHash) this.opts.tokens.revoke(tokenHash);
         throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);
+      }
+      if (seated.shares) {
+        try {
+          const now = await this.layoutOf(seated.shares.sandbox);
+          if ((now === 2) !== Boolean(seated.shares.tree)) throw new SandboxError(`that agent's store is in layout ${now} now, not as this VM was to share it: ask again`, 409);
+          if (seated.shares.tree) await this.rootFree(seated.shares.sandbox);
+        } catch (error) {
+          if (tokenHash) this.opts.tokens.revoke(tokenHash);
+          throw error;
+        }
       }
       // One that shares an agent's store in layout 2 (another node's task, a run on a seat): its trees checked as they are
       // about to be mounted, as the agent's VM's are.
@@ -1095,21 +1132,29 @@ export class SandboxHost {
     // (Docker is asked which layout it is in only where it may be moved, or its move is under way.)
     const here = await this.layout2Here(!sandbox.disk);
     if ((here || this.moves.started(id) !== null) && (await this.layoutOf(id)) === 1) {
-      if (here && (await this.idle(id))) {
-        try {
-          await this.moveToLayout2(sandbox, run);
-        } catch (error) {
-          const why = redact(String((error as Error).message ?? error)).slice(0, 300);
-          const half = this.moves.started(id) !== null;
-          this.opts.ledger({ class: "modify", resource: "docker.container", target: containerName(id), verdict: "allow", run, detail: half ? `not moved to layout 2, and its store isn't as it was: its VM isn't started on it until a prepare takes the move up again: ${why}` : `not moved to layout 2, so it stays as it was: ${why}` });
-          if (half) throw new SandboxError("the agent's store is half moved to layout 2 and couldn't be put back, so its VM isn't started on it: its next prepare takes the move up again", 424);
+      // (Marked as moving before it is asked whether anything shares its store, so nothing begins to share it from then
+      // on: a share under way holds the move off instead. The fifth fabric review's R5-1.)
+      const mayMove = here && !this.moving.has(id) && !(this.sharing.get(id) ?? 0);
+      if (mayMove) this.moving.add(id);
+      try {
+        if (mayMove && (await this.idle(id))) {
+          try {
+            await this.moveToLayout2(sandbox, run);
+          } catch (error) {
+            const why = redact(String((error as Error).message ?? error)).slice(0, 300);
+            const half = this.moves.started(id) !== null;
+            this.opts.ledger({ class: "modify", resource: "docker.container", target: containerName(id), verdict: "allow", run, detail: half ? `not moved to layout 2, and its store isn't as it was: its VM isn't started on it until a prepare takes the move up again: ${why}` : `not moved to layout 2, so it stays as it was: ${why}` });
+            if (half) throw new SandboxError("the agent's store is half moved to layout 2 and couldn't be put back, so its VM isn't started on it: its next prepare takes the move up again", 424);
+          }
+          sandbox = (await this.get(id)) ?? sandbox;
+        } else if (this.moves.started(id) && !here) {
+          // Layout 2 turned off since its move began: the move is put back, by its own word, and its work goes on in layout 1.
+          await this.putMoveBack(sandbox, run);
+        } else if (this.moves.started(id)) {
+          throw new SandboxError("the agent's store is half moved to layout 2, so its VM isn't started on it: its next prepare while nothing runs in it takes the move up again", 424);
         }
-        sandbox = (await this.get(id)) ?? sandbox;
-      } else if (this.moves.started(id) && !here) {
-        // Layout 2 turned off since its move began: the move is put back, by its own word, and its work goes on in layout 1.
-        await this.putMoveBack(sandbox, run);
-      } else if (this.moves.started(id)) {
-        throw new SandboxError("the agent's store is half moved to layout 2, so its VM isn't started on it: its next prepare while nothing runs in it takes the move up again", 424);
+      } finally {
+        if (mayMove) this.moving.delete(id);
       }
     }
     if (sandbox.status !== "running") {
@@ -1349,7 +1394,10 @@ export class SandboxHost {
    * checked first (checkTrees), and it isn't started unless they are the store's own. Throws, saying why, if it isn't.
    */
   private async startTeamVm(sandbox: SandboxView): Promise<void> {
-    if (!this.apple && (await this.layoutOf(sandbox.id)) === 2) await this.checkTrees(await this.storeOf(sandbox), sandbox.image);
+    if (!this.apple && (await this.layoutOf(sandbox.id)) === 2) {
+      await this.rootFree(sandbox.id);
+      await this.checkTrees(await this.storeOf(sandbox), sandbox.image);
+    }
     const started = await this.docker(["start", containerName(sandbox.id)], 120_000);
     if (started.code !== 0) throw new SandboxError(`could not resume the agent's VM: ${redact(started.stderr).slice(0, 300)}`, 424);
   }
@@ -1363,9 +1411,24 @@ export class SandboxHost {
 
   /** Whether nothing runs in an agent's VM: no command, no terminal, no desktop session, and no VM sharing its /work. */
   private async idle(id: string): Promise<boolean> {
-    if (this.busy.has(id) || this.sessions.has(id)) return false;
-    const sharing = await this.docker(["ps", "-q", "--filter", `label=${LABEL}.shares=${id}`, "--filter", "status=running"]);
+    if (this.busy.has(id) || this.sessions.has(id) || (this.sharing.get(id) ?? 0) > 0) return false;
+    // (Any VM that shares its store, in any state: one stopped would mount the store's root again as it started. R5-1.)
+    const sharing = await this.docker(["ps", "-a", "-q", "--filter", `label=${LABEL}.shares=${id}`]);
     return sharing.code === 0 && sharing.stdout.trim() === "";
+  }
+
+  /**
+   * An agent's store in layout 2 is mounted only where no VM holds its root (R5-1): one that shares it without a tree, made
+   * before its move, in any state, could put a link where a tree was as the store was mounted, and the mount would follow
+   * it. Throws, saying which, if one does, or if Docker can't say.
+   */
+  private async rootFree(id: string): Promise<void> {
+    const all = await this.docker(["ps", "-a", "--filter", `label=${LABEL}.shares=${id}`, "--format", "{{.Names}}"]);
+    const treed = await this.docker(["ps", "-a", "--filter", `label=${LABEL}.shares=${id}`, "--filter", `label=${LABEL}.shares.tree`, "--format", "{{.Names}}"]);
+    if (all.code !== 0 || treed.code !== 0) throw new SandboxError("docker couldn't say which VMs share that agent's store, so nothing of it is mounted", 424);
+    const withTree = new Set(treed.stdout.split("\n").filter(Boolean));
+    const held = all.stdout.split("\n").filter((name) => name && !withTree.has(name));
+    if (held.length) throw new SandboxError(`a VM made before that agent's move to layout 2 shares its whole store (${held.slice(0, 3).join(", ")}), and holds its root: nothing of the store is mounted until it is gone`, 409);
   }
 
   /** An image's own PATH, as it was built: a VM in layout 2 runs with it, followed by its HOME (layoutPath). */
@@ -1520,10 +1583,13 @@ export class SandboxHost {
     const inLayout2 = opts.layout !== undefined || (await this.layoutOf(id)) === 2;
     if (inLayout2 && workspace?.endsWith(`/${WORK_TREE}`) && !opts.layout) workspace = workspace.slice(0, -WORK_TREE.length - 1);
     const layout = inLayout2 ? { path: await this.imagePath(image) } : undefined;
+    if (inLayout2) await this.rootFree(id);
     await this.ensureNetworks();
 
     this.endSession(id);
-    await this.docker(["stop", "-t", "10", name], 60_000);
+    // (Stopped, or nothing of it is set aside, moved or made again: a VM still running on its store would see it change. R5-1.)
+    const stopped = await this.docker(["stop", "-t", "10", name], 60_000);
+    if (stopped.code !== 0 && (await this.get(id))?.status === "running") throw new SandboxError(`could not stop the agent's VM, so it isn't made again: ${redact(stopped.stderr).trim().slice(0, 300)}`, 424);
     let moved = await this.docker(["rename", name, aside]);
     if (moved.code !== 0) {
       // (A remake before this one may have ended with its new VM running and the old container still set aside: that one goes.)
@@ -2067,13 +2133,18 @@ export class SandboxHost {
       if (using === null) throw new SandboxError("docker couldn't say which VMs have this seat's home, so none was made", 503);
       if (using.length >= input.seat.runs) throw new SandboxError(`this seat's home is in use (${using.length} VM${using.length === 1 ? "" : "s"}, and it takes ${input.seat.runs} at once): it waits`, 409);
       await this.seatHome(input.seat.id);
-      // A run on a seat is the agent's own work: in layout 2 its notes' tree too, never its HOME.
-      const shared = input.shares ? await this.sharedWork(input.shares) : undefined;
-      const shares = shared?.tree ? { ...shared, notes: true as const } : shared;
-      const vm = await this.create(
-        { network: input.network, image: HARNESS_IMAGE, cpus: input.cpus, memoryGb: input.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run },
-        { seat: input.seat, ...(shares ? { shares } : {}) },
-      );
+      // A run on a seat is the agent's own work: in layout 2 its notes' tree too, never its HOME. (Counted as sharing the
+      // store from before its layout is asked, so no move begins under it: R5-1.)
+      const seated = async () => {
+        const shared = input.shares ? await this.sharedWork(input.shares) : undefined;
+        const shares = shared?.tree ? { ...shared, notes: true as const } : shared;
+        return this.create(
+          { network: input.network, image: HARNESS_IMAGE, cpus: input.cpus, memoryGb: input.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run },
+          { seat: input.seat, ...(shares ? { shares } : {}) },
+        );
+      };
+      if (input.shares && this.moving.has(input.shares)) throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);
+      const vm = input.shares ? await this.sharingWhile(input.shares, seated) : await seated();
       if (input.shares) await this.leaseSeatVm(vm, input.shares, input.run);
       return vm;
     })();
@@ -2096,22 +2167,26 @@ export class SandboxHost {
    */
   async createTaskVm(input: TaskVmInput, signal?: AbortSignal): Promise<SandboxView> {
     if (this.apple) throw new SandboxError("another node's task is taken only on a Linux host with Docker: on a Mac no VM shares an agent's workspace", 424);
-    const own = await this.get(input.shares);
-    if (!own || own.ephemeral) throw new SandboxError("another node's task shares an agent's own VM on this host, and that one is not here", 404);
-    const shares = await this.sharedWork(input.shares);
-    if (!shares.tree) {
-      throw new SandboxError(
-        this.layout2On()
-          ? "another node's task shares only an agent's workspace, and this agent's VM has no HOME apart from it yet (layout 2): it is moved at its next prepare while nothing runs in it"
-          : "another node's task shares only an agent's workspace, and layout 2 (a HOME apart from it) is off on this node: invincible sandbox layout on",
-        409,
+    if (this.moving.has(input.shares)) throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);
+    // (Counted as sharing the store from before its layout is asked, so no move begins under it: R5-1.)
+    const vm = await this.sharingWhile(input.shares, async () => {
+      const own = await this.get(input.shares);
+      if (!own || own.ephemeral) throw new SandboxError("another node's task shares an agent's own VM on this host, and that one is not here", 404);
+      const shares = await this.sharedWork(input.shares);
+      if (!shares.tree) {
+        throw new SandboxError(
+          this.layout2On()
+            ? "another node's task shares only an agent's workspace, and this agent's VM has no HOME apart from it yet (layout 2): it is moved at its next prepare while nothing runs in it"
+            : "another node's task shares only an agent's workspace, and layout 2 (a HOME apart from it) is off on this node: invincible sandbox layout on",
+          409,
+        );
+      }
+      // (A task that ends while its VM waits for room leaves the queue: none is made for it then. The fourth review's I-2.)
+      return this.create(
+        { network: own.network, image: own.image, cpus: own.cpus, memoryGb: own.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run, isolation: own.isolation },
+        { shares, task: input.task, ...(signal ? { signal } : {}) },
       );
-    }
-    // (A task that ends while its VM waits for room leaves the queue: none is made for it then. The fourth review's I-2.)
-    const vm = await this.create(
-      { network: own.network, image: own.image, cpus: own.cpus, memoryGb: own.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run, isolation: own.isolation },
-      { shares, task: input.task, ...(signal ? { signal } : {}) },
-    );
+    });
     // (Under the agent's VM's label, which its task's spend and budget are counted by. Its token is its own.)
     const minted = this.opts.tokens.mint({ label: `sandbox:${input.shares}`, providers: [...input.providers], models: [...input.models], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
     this.tokenStore.put(vm.id, minted.info.hash);
