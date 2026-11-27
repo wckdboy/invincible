@@ -20,20 +20,14 @@ object Loops {
         is Json.Obj -> "[object Object]"
     }
 
-    /** A number as JavaScript writes it: whole numbers below 1e21 in figures, others in their shortest form, plain from
-     * 1e-6 and in an exponent below it or from 1e21 ("1e-7", "1e+21"). */
+    /** A number as JavaScript writes it (Number::toString): its shortest digits that read back as it, in figures from
+     * 1e-6 up to 1e21 ("0.00001", "12345678901234567000": a whole number past 2^53 its shortest digits and zeros, never its
+     * exact value), in an exponent outside that ("1e-7", "1e+21"). As the canonical JSON writes it (Json.kt), and the
+     * words JavaScript has for what JSON has no number for. */
     fun jsNumber(number: Double): String {
         if (number.isNaN()) return "NaN"
         if (number.isInfinite()) return if (number > 0) "Infinity" else "-Infinity"
-        if (number == 0.0) return "0"
-        val size = Math.abs(number)
-        if (number == Math.floor(number) && size < 1e21) return java.math.BigDecimal(number).toPlainString()
-        val shortest = java.math.BigDecimal(number.toString()).stripTrailingZeros()
-        if (size >= 1e-6 && size < 1e21) return shortest.toPlainString()
-        val digits = shortest.unscaledValue().abs().toString()
-        val exponent = digits.length - 1 - shortest.scale()
-        val mantissa = if (digits.length > 1) "${digits[0]}.${digits.substring(1)}" else digits
-        return "${if (number < 0) "-" else ""}${mantissa}e${if (exponent < 0) "-" else "+"}${Math.abs(exponent)}"
+        return sh.invincible.bot.core.jsNumber(number)
     }
 
     /** What a loop runs, in a sentence: a heartbeat, a run (its network, its goal, what proves it), a call (its tool and

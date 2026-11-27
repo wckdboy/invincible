@@ -1583,6 +1583,12 @@ const loops = {
     { kind: "call", connector: "github", tool: "comment", args: {} },
     { kind: "call", connector: "github", tool: "comment" },
     { kind: "call", connector: "notes", tool: "append", args: { text: "x".repeat(130) } },
+    // Numbers as JavaScript writes them: whole ones past 2^53 in their shortest digits and zeros, never their exact value,
+    // up to 1e21; decimals in figures from 1e-6, in an exponent below it.
+    { kind: "call", connector: "calc", tool: "set", args: { a: 2 ** 53, b: 2 ** 53 + 2, c: 12345678901234567890, d: 2 ** 64 } },
+    { kind: "call", connector: "calc", tool: "set", args: { e: 1e20, f: 999999999999999900000, g: 1e21, h: -(2 ** 60), i: 123456789012345680000 } },
+    { kind: "call", connector: "calc", tool: "set", args: { a: 0.0001, b: 0.00001, c: 0.000015, d: 0.000001, e: 1e-7, f: 0.0000099 } },
+    { kind: "call", connector: "calc", tool: "set", args: { g: 0.00009999, h: -0.00005, i: 0.0001234, j: 1.5e-6, k: [0.00002, 2 ** 53 + 2] } },
     { kind: "tell", text: "Stand up" },
     { kind: "tell" },
     null,

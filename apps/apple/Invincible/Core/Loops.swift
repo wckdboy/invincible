@@ -23,20 +23,44 @@ enum Loops {
         }
     }
 
-    /// A number as JavaScript writes it: whole numbers below 1e21 in figures, the rest in its shortest form, an
-    /// exponent without its leading zeros ("1e-7").
+    /// A number as JavaScript writes it (Number::toString): its shortest digits that read back as it, in figures from 1e-6
+    /// up to 1e21 ("0.00001", "12345678901234567000": a whole number past 2^53 its shortest digits and zeros, never its
+    /// exact value), in an exponent outside that ("1e-7", "1e+21").
     static func jsNumber(_ number: Double) -> String {
         if number.isNaN { return "NaN" }
         if number.isInfinite { return number > 0 ? "Infinity" : "-Infinity" }
         if number == 0 { return "0" }
-        if number == number.rounded(), abs(number) < 1e21 { return String(format: "%.0f", number) }
-        let text = "\(number)"
-        guard let e = text.firstIndex(of: "e") else { return text }
-        let mantissa = text[..<e]
-        var exponent = String(text[text.index(after: e)...])
-        let sign = exponent.hasPrefix("-") ? "-" : "+"
-        exponent = String(exponent.drop { $0 == "-" || $0 == "+" || $0 == "0" })
-        return "\(mantissa)e\(sign)\(exponent.isEmpty ? "0" : exponent)"
+        // JavaScript's k digits, and n: the number is 0.digits × 10^n.
+        let (digits, n) = shortest(abs(number))
+        let k = digits.count
+        let sign = number < 0 ? "-" : ""
+        if k <= n && n <= 21 { return sign + digits + String(repeating: "0", count: n - k) }
+        if 0 < n && n <= 21 { return sign + digits.prefix(n) + "." + digits.dropFirst(n) }
+        if -6 < n && n <= 0 { return sign + "0." + String(repeating: "0", count: -n) + digits }
+        let e = n - 1
+        return sign + (k == 1 ? digits : String(digits.prefix(1)) + "." + digits.dropFirst(1)) + "e" + (e < 0 ? "-" : "+") + String(abs(e))
+    }
+
+    /// The shortest digits of a positive number that read back as it (Swift's description finds them, as JavaScript's
+    /// does), with no zeros at either end, and n: the number is 0.digits × 10^n.
+    private static func shortest(_ x: Double) -> (digits: String, n: Int) {
+        let text = "\(x)"
+        var mantissa = Substring(text)
+        var exponent = 0
+        if let e = text.firstIndex(where: { $0 == "e" || $0 == "E" }) {
+            mantissa = text[..<e]
+            exponent = Int(text[text.index(after: e)...]) ?? 0
+        }
+        let parts = mantissa.split(separator: ".", omittingEmptySubsequences: false)
+        let whole = String(parts[0])
+        var digits = whole + (parts.count > 1 ? String(parts[1]) : "")
+        var n = whole.count + exponent
+        while digits.hasPrefix("0") {
+            digits.removeFirst()
+            n -= 1
+        }
+        while digits.hasSuffix("0") { digits.removeLast() }
+        return (digits, n)
     }
 
     /// What a loop runs, in a sentence: a heartbeat, a run (its network, its goal, what proves it), a call (its tool and

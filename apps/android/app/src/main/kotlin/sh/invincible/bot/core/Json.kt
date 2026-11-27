@@ -103,8 +103,8 @@ internal fun jsString(s: String, out: StringBuilder) {
 }
 
 /**
- * A number as JavaScript writes it: the shortest digits that read back as the same double (BigDecimal of Kotlin's
- * shortest repr), plain from 1e-7 up to 1e21 and with an exponent outside it (`1e+21`, `1.5e-7`); -0 is 0.
+ * A number as JavaScript writes it: the shortest digits that read back as the same double (shortestDecimal), plain from
+ * 1e-7 up to 1e21 and with an exponent outside it (`1e+21`, `1.5e-7`); -0 is 0.
  */
 internal fun jsNumber(x: Double): String {
     require(x.isFinite()) { "JSON has no non-finite numbers" }
@@ -112,7 +112,7 @@ internal fun jsNumber(x: Double): String {
     if (x == Math.rint(x) && Math.abs(x) < 1e21) {
         if (Math.abs(x) < 9.007199254740992E15) return x.toLong().toString()
     }
-    val dec = java.math.BigDecimal(x.toString()).stripTrailingZeros()
+    val dec = shortestDecimal(Math.abs(x)).stripTrailingZeros()
     val digits = dec.unscaledValue().abs().toString()
     // The value is digits × 10^(exp - k + 1), where k is how many digits: n is the decimal point's place (JS's "n").
     val n = digits.length - dec.scale()
@@ -128,6 +128,32 @@ internal fun jsNumber(x: Double): String {
             sign + mantissa + "e" + (if (e > 0) "+" else "-") + Math.abs(e)
         }
     }
+}
+
+/**
+ * The shortest decimal that reads back as [x] (above 0), the closest of those to it, the even one of two as close: what
+ * JavaScript's Number::toString writes. Java's own Double.toString isn't always the shortest before JDK 19
+ * (JDK-4511638: -2^60 as -1.15292150460684698E18, 18 digits where 16 read back), so it is found here: at each length,
+ * the two decimals either side of x's exact value, the first length at which one of them reads back as x.
+ */
+private fun shortestDecimal(x: Double): java.math.BigDecimal {
+    val exact = java.math.BigDecimal(x)
+    for (length in 1..17) {
+        val down = exact.round(java.math.MathContext(length, java.math.RoundingMode.DOWN))
+        val up = exact.round(java.math.MathContext(length, java.math.RoundingMode.UP))
+        val downReads = down.toDouble() == x
+        val upReads = up.toDouble() == x
+        if (!downReads && !upReads) continue
+        if (downReads != upReads) return if (downReads) down else up
+        val below = exact.subtract(down)
+        val above = up.subtract(exact)
+        return when {
+            below < above -> down
+            above < below -> up
+            else -> if (down.unscaledValue().testBit(0)) up else down
+        }
+    }
+    return java.math.BigDecimal(x.toString())
 }
 
 /* ---------- parsing ---------- */

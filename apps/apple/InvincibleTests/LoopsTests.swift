@@ -19,6 +19,9 @@ struct LoopsTests {
 
     @Test func aNumberIsWrittenAsJavaScriptWritesIt() {
         #expect([2, 1.5, -0.0, 1e21, 1e-7, 123, 0.1].map(Loops.jsNumber) == ["2", "1.5", "0", "1e+21", "1e-7", "123", "0.1"])
+        // Past 2^53 its shortest digits and zeros, never its exact value; from 1e-6 to 1e-4 in figures (the vectors' calls
+        // hold more).
+        #expect([1.2345678901234567890e19, 0x1p64, 0.00001, 0.000001, 1.5e-6, -0.00005].map(Loops.jsNumber) == ["12345678901234567000", "18446744073709552000", "0.00001", "0.000001", "0.0000015", "-0.00005"])
     }
 
     @Test func aDraftAndAConnectorRequestAreReadAsTheNodeSendsThem() throws {
