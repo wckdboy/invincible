@@ -28,6 +28,16 @@ struct PairedNode: Codable, Equatable, Sendable {
     static func forget(in defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: key)
     }
+
+    /// Its node's id, kept with the pairing once that node first proved it: only while the pairing kept is still `pairing`
+    /// (the same origin and device), so a late first proof never writes over a newer pairing (the review of apps-name-node,
+    /// L4). Whether it was kept.
+    @discardableResult static func keep(pinned id: String, for pairing: PairedNode, in defaults: UserDefaults = .standard) -> Bool {
+        guard var kept = load(from: defaults), kept.origin == pairing.origin, kept.device == pairing.device else { return false }
+        kept.nodeId = id
+        kept.save(to: defaults)
+        return true
+    }
 }
 
 /// Whether this device is paired, and with what: the app's one piece of state that outlives a launch (with, on an iPhone

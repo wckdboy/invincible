@@ -29,6 +29,9 @@ protocol RequestSigner: Sendable {
 enum RequestAuth {
     static let domain = "invincible-req/v1"
     static let domainNamed = "invincible-req/v2"
+    /// core's REQUESTS_NAME_THEIR_NODE_FROM, 14 December 2026: from then a node takes a request that names no node only for
+    /// whoami, and every node proves which it is, so a whoami that gives no proof is a proof that fails (NodeProof.judge).
+    static let namedFrom = Date(timeIntervalSince1970: 1_797_206_400)
 
     enum Header {
         static let device = "x-invincible-device"

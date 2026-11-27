@@ -5,7 +5,7 @@ import Foundation
  * with a fresh challenge, whoami answers with the node's Ed25519 signature of it under `invincible-node/v1`, by the key
  * its id is. The first proof pins the node, and what this device signs names it from then on (RequestAuth's v2). A node
  * that proves to be another, or whose proof fails, is asked nothing more (NodePin). A node from before, which proves
- * nothing, is spoken to as before.
+ * nothing, is spoken to as before while none is pinned and until the cutoff; past either, giving no proof fails.
  */
 enum NodeProof {
     static let domain = "invincible-node/v1"
@@ -37,7 +37,7 @@ enum NodeProof {
         case same(String)
         /// Proven, but another node than the one pinned: not this device's node.
         case other(String)
-        /// No proof: a node from before, spoken to as before (v1), until the cutoff.
+        /// No proof, none pinned, and before the cutoff: a node from before, spoken to as before (v1).
         case older
         /// A proof that fails: never taken.
         case failed
@@ -60,9 +60,50 @@ enum NodeProof {
         static let app = strict
     }
 
-    static func judge(pinned: String?, node: String, proof: String?, challenge: String, check: Checker) -> Proven {
-        guard let proof else { return .older }
-        guard isNode(node), isChallenge(challenge), check.verify(node, challenge, proof) else { return .failed }
+    /// What a whoami answer says of which node it is, read as core reads it (judgeNodeProof): its `node`, when it is a
+    /// string, and its `proof`: absent, a string, or something that is no proof at all (null, a number). So every app
+    /// judges the same bytes alike (the parity vectors' judgedNodeProofs; the review of apps-name-node, I1).
+    struct Said: Decodable, Sendable, Equatable {
+        enum Proof: Sendable, Equatable {
+            case absent
+            case text(String)
+            case malformed
+        }
+
+        let node: String?
+        let proof: Proof
+
+        init(node: String?, proof: Proof) {
+            self.node = node
+            self.proof = proof
+        }
+
+        init(from decoder: any Decoder) throws {
+            let fields = try decoder.container(keyedBy: Field.self)
+            node = try? fields.decode(String.self, forKey: .node)
+            if !fields.contains(.proof) {
+                proof = .absent
+            } else if let text = try? fields.decode(String.self, forKey: .proof) {
+                proof = .text(text)
+            } else {
+                proof = .malformed
+            }
+        }
+
+        private enum Field: String, CodingKey {
+            case node, proof
+        }
+    }
+
+    /// core's judgeNodeProof, answered when `now`: a proof that holds pins the node or finds it the same or another; one
+    /// that fails, or an answer whose proof is no proof, is never taken. An answer that gives no proof is a node from
+    /// before only while none is pinned and before the cutoff (RequestAuth.namedFrom); else it fails too (the review of
+    /// apps-name-node, L7; the lead's word of 27 November 2026).
+    static func judge(pinned: String?, said: Said, challenge: String, now: Date, check: Checker) -> Proven {
+        guard case .text(let proof) = said.proof else {
+            return said.proof == .absent && pinned == nil && now < RequestAuth.namedFrom ? .older : .failed
+        }
+        guard let node = said.node, isNode(node), isChallenge(challenge), check.verify(node, challenge, proof) else { return .failed }
         guard let pinned else { return .pin(node) }
         return node == pinned ? .same(node) : .other(node)
     }

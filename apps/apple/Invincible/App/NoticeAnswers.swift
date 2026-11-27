@@ -58,8 +58,14 @@ enum NoticeAnswers {
         let said: (title: String, body: String)
         do {
             guard let key = try DeviceKey.load(), let node = PairedNode.load(), node.device == key.device else { throw Unpaired() }
-            // (Signed for the node it proved to be, as every request of this device's is.)
-            _ = try await NodeClient(origin: node.origin, signer: key, pin: NodePin(node.nodeId)).post("/api/actions/decide", Decision(id: action, approve: false), as: JSONValue.self)
+            // As every request of this device's: sent once its node has proved itself here, signed for it. The pin is the
+            // pairing's in this process, so a refusal the app holds stands here too; with none yet, it proves first (the
+            // review of apps-name-node, L3 and rule 1).
+            let client = NodeClient(origin: node.origin, signer: key, pin: NodePin.shared(origin: node.origin, device: key.device, node: node.nodeId))
+            if !client.pin.proven, client.pin.refused == nil, case .pin(let id) = try await client.prove(check: .app).proven {
+                PairedNode.keep(pinned: id, for: node)
+            }
+            _ = try await client.post("/api/actions/decide", Decision(id: action, approve: false), as: JSONValue.self)
             said = ("Declined", "Nothing was sent.")
         } catch {
             said = ("Not answered", "\(error.localizedDescription) It still waits in Needs you.")

@@ -10,6 +10,8 @@ struct Vectors: Decodable {
         let domainNamed: String
         let nodeProofDomain: String
         let nodeChallenge: String
+        /// From when a request must name its node (core's REQUESTS_NAME_THEIR_NODE_FROM), in ms.
+        let namedFrom: Double
         let headers: [String: String]
         let maxSkewMs: Int
     }
@@ -73,6 +75,22 @@ struct Vectors: Decodable {
         let challenge: String
         let signingInput: String
         let proof: String
+    }
+
+    /// A whoami answer as a node sends it (malformed ones too), with or without a pin, a moment before the cutoff or at
+    /// it, and core's judgement of it (judgeNodeProof): every app judges the same bytes alike.
+    struct JudgedNodeProof: Decodable {
+        struct Judged: Decodable {
+            let kind: String
+            let node: String?
+        }
+
+        let what: String
+        let answer: String
+        let pinned: String?
+        let challenge: String
+        let now: Double
+        let judged: Judged
     }
 
     struct Canonical: Decodable {
@@ -427,6 +445,7 @@ struct Vectors: Decodable {
     let requests: [Request]
     let requestsForNode: [NodeRequest]
     let nodeProofs: [NodeProofCase]
+    let judgedNodeProofs: [JudgedNodeProof]
     let ed25519: [Ed25519Vector]
     let canonical: [Canonical]
     let pairing: Pairing

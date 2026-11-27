@@ -2,26 +2,97 @@ import Foundation
 import Synchronization
 
 /**
- * The node this device speaks to, as that node proved it (NodeProof), shared by every copy of a client: what each request
- * signs names (RequestAuth's v2), and, once the node at its address proved to be another or its proof failed, why nothing
- * more is sent there (the slice 8 note's item 11).
+ * The node this device speaks to, as that node proved it (NodeProof), shared by every copy of a client and, per pairing, by
+ * all that speaks to it in this process (`shared`): what each request signs names (RequestAuth's v2), and whether
+ * anything but whoami is sent at all (the slice 8 note's item 11; the review of apps-name-node's rules 1 to 3):
+ * - until the node at its address has proved itself here (`proven`), what is asked waits (`ready`), and is signed once
+ *   it has, so it names the node the proof pinned;
+ * - once it proved to be another, or its proof failed (`refused`), nothing is sent but whoami's proof, asked again, and
+ *   only a proof that holds lifts that (`proved`);
+ * - a whoami that got no answer that proves anything leaves the refusal as it was, and otherwise is what waits is told
+ *   (`unanswered`), until the next look asks again.
  */
 final class NodePin: Sendable {
     private struct State: Sendable {
         var node: String?
         var refused: NodeError?
+        var proven = false
+        var unanswered: NodeError?
+        var waiting: [UUID: CheckedContinuation<Void, any Error>] = [:]
+
+        /// What what waits is told now, or nil: it waits on.
+        var answer: Result<Void, any Error>? {
+            if let refused { return .failure(refused) }
+            if proven { return .success(()) }
+            if let unanswered { return .failure(unanswered) }
+            return nil
+        }
     }
 
     private let state: Mutex<State>
 
-    init(_ node: String? = nil) { state = Mutex(State(node: node)) }
+    /// `proven`: no proof is waited for (a client with nothing to prove, as the tests' are).
+    init(_ node: String? = nil, proven: Bool = false) { state = Mutex(State(node: node, proven: proven)) }
+
+    /// One pin per pairing in this process (its node's origin and this device), so whatever speaks to the node shares its
+    /// proof and its refusal: the session, and a notification's answer (the review of apps-name-node, L3).
+    static func shared(origin: URL, device: String, node: String?) -> NodePin {
+        pins.withLock { pins in
+            let key = "\(origin.absoluteString) \(device)"
+            if let pin = pins[key] { return pin }
+            let pin = NodePin(node)
+            pins[key] = pin
+            return pin
+        }
+    }
+
+    private static let pins = Mutex<[String: NodePin]>([:])
 
     var node: String? { state.withLock { $0.node } }
     var refused: NodeError? { state.withLock { $0.refused } }
-    func pin(_ node: String) { state.withLock { $0.node = node } }
-    func refuse(_ why: NodeError) { state.withLock { $0.refused = why } }
-    /// Asked again (Try again): its proof is judged afresh, and nothing else is sent until it holds.
-    func clear() { state.withLock { $0.refused = nil } }
+    var proven: Bool { state.withLock { $0.proven } }
+
+    /// Returns once the node has proved itself here, or throws why nothing is sent: it proved to be another, its proof
+    /// failed, or the last whoami got no answer that proves anything. Until one of those, waits.
+    func ready() async throws {
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                let now = state.withLock { state -> Result<Void, any Error>? in
+                    if let answer = state.answer { return answer }
+                    // (Cancelled before it waits: its handler has run already, and would never find it.)
+                    if Task.isCancelled { return .failure(CancellationError()) }
+                    state.waiting[id] = continuation
+                    return nil
+                }
+                if let now { continuation.resume(with: now) }
+            }
+        } onCancel: {
+            state.withLock { $0.waiting.removeValue(forKey: id) }?.resume(throwing: CancellationError())
+        }
+    }
+
+    /// Its first proof held: pinned, and proven.
+    func pin(_ node: String) { settle { $0.node = node; $0.proven = true; $0.refused = nil; $0.unanswered = nil } }
+    /// Its proof held for the node pinned (or, before the cutoff, a node from before answered with none, unpinned).
+    func proved() { settle { $0.proven = true; $0.refused = nil; $0.unanswered = nil } }
+    /// It proved to be another, or its proof failed: nothing more is sent but whoami's proof until it proves to be this one.
+    func refuse(_ why: NodeError) { settle { $0.refused = why; $0.proven = false } }
+    /// Whoami is being asked: what waits waits for its answer (a refusal stays as it is).
+    func asking() { state.withLock { if !$0.proven { $0.unanswered = nil } } }
+    /// Whoami got no answer that proves anything: what waits is told so, unless the node proved itself before or a refusal
+    /// stands, which this changes nothing of.
+    func unanswered(_ why: NodeError) { settle { if !$0.proven && $0.refused == nil { $0.unanswered = why } } }
+
+    private func settle(_ change: (inout State) -> Void) {
+        let told = state.withLock { state -> [(CheckedContinuation<Void, any Error>, Result<Void, any Error>)] in
+            change(&state)
+            guard let answer = state.answer else { return [] }
+            defer { state.waiting = [:] }
+            return state.waiting.values.map { ($0, answer) }
+        }
+        for (continuation, answer) in told { continuation.resume(with: answer) }
+    }
 }
 
 /**
@@ -71,9 +142,10 @@ struct NodeClient: Sendable {
 
     /// The request, signed. `path` is the path and query, exactly as the node will read them back. It waits `timeout`, else
     /// as long as its path needs (wait(for:)). Signed for the pinned node (`named`; never for whoami's proof), and never
-    /// made once a node at this address proved to be another (NodePin.refused).
-    func request(_ method: String, _ path: String, body: Data?, timeout: TimeInterval? = nil, named: Bool = true) throws -> URLRequest {
-        if let refused = pin.refused { throw refused }
+    /// made once a node at this address proved to be another (NodePin.refused), but for whoami's proof (`proving`), which
+    /// is how it proves to be this device's again. What sends it waits first for the node's proof (NodePin.ready).
+    func request(_ method: String, _ path: String, body: Data?, timeout: TimeInterval? = nil, named: Bool = true, proving: Bool = false) throws -> URLRequest {
+        if !proving, let refused = pin.refused { throw refused }
         guard path.hasPrefix("/"), let url = URL(string: path, relativeTo: origin)?.absoluteURL else {
             throw NodeError(status: 0, message: "\(path) isn't a path on the node")
         }
@@ -90,22 +162,49 @@ struct NodeClient: Sendable {
     }
 
     func get<T: Decodable>(_ path: String, as type: T.Type = T.self) async throws -> T {
-        try decode(T.self, from: await send(request("GET", path, body: nil)))
+        try await pin.ready()
+        return try decode(T.self, from: await send(request("GET", path, body: nil)))
     }
 
     /// Whoami, asked with `challenge`, which the node answers with its proof of which node it is (NodeProof). Signed for
     /// no node, as whoami's always is taken: so another node at this address still says which it is.
-    func provenWhoami(challenge: String) async throws -> WhoAmI {
-        try decode(WhoAmI.self, from: await send(request("GET", "/api/whoami?challenge=\(challenge)", body: nil, named: false)))
+    func provenWhoami(challenge: String) async throws -> (said: NodeProof.Said, me: WhoAmI?) {
+        let data = try await send(request("GET", "/api/whoami?challenge=\(challenge)", body: nil, named: false, proving: true))
+        return (try decode(NodeProof.Said.self, from: data), try? JSONDecoder().decode(WhoAmI.self, from: data))
+    }
+
+    /// Whoami, asked with a fresh challenge and judged against the pin (NodeProof.judge, as `now` stands), and the pin set
+    /// as the judgement says: pinned (`pin`; whoever keeps the pairing saves it), proven, or refused. An answer that proves
+    /// nothing throws, and leaves a refusal as it was (NodePin.unanswered).
+    func prove(check: NodeProof.Checker, now: @Sendable () -> Date = { .now }) async throws -> (proven: NodeProof.Proven, me: WhoAmI?) {
+        let challenge = NodeProof.challenge()
+        pin.asking()
+        let answer: (said: NodeProof.Said, me: WhoAmI?)
+        do {
+            answer = try await provenWhoami(challenge: challenge)
+        } catch let error as NodeError {
+            pin.unanswered(error)
+            throw error
+        }
+        let proven = NodeProof.judge(pinned: pin.node, said: answer.said, challenge: challenge, now: now(), check: check)
+        switch proven {
+        case .pin(let id): pin.pin(id)
+        case .same, .older: pin.proved()
+        case .other(let id): pin.refuse(.notYours(other: id))
+        case .failed: pin.refuse(.notYours(other: nil))
+        }
+        return (proven, answer.me)
     }
 
     /// A GET answered as `T`, and the bytes it came in (to keep a part of them: KeptTable).
     func read<T: Decodable>(_ path: String, as type: T.Type = T.self) async throws -> (value: T, bytes: Data) {
+        try await pin.ready()
         let data = try await send(request("GET", path, body: nil))
         return (try decode(T.self, from: data), data)
     }
 
     func post<T: Decodable>(_ path: String, _ body: some Encodable, as type: T.Type = T.self) async throws -> T {
+        try await pin.ready()
         let data = try await send(request("POST", path, body: JSONEncoder().encode(body)))
         if let late = NodeError.late(in: data) { throw late }
         return try decode(T.self, from: data)
@@ -113,7 +212,8 @@ struct NodeClient: Sendable {
 
     /// A POST answered with bytes (a file of yours kept on the node): the bytes as they are.
     func bytes(_ path: String, _ body: some Encodable) async throws -> Data {
-        try await send(request("POST", path, body: JSONEncoder().encode(body)))
+        try await pin.ready()
+        return try await send(request("POST", path, body: JSONEncoder().encode(body)))
     }
 
     /// A POST answered with server-sent events (the primary's chat): each event as it arrives. Ending the stream (its
@@ -127,7 +227,7 @@ struct NodeClient: Sendable {
     /// last cursor the node gave) when there is one. `alive` is told of every line that arrives, its beats too (LiveLink
     /// takes a stream silent for three of them for dead).
     func live(since: String? = nil, alive: @escaping @Sendable () -> Void) -> AsyncThrowingStream<LiveEvent, any Error> {
-        stream(Result { try self.request("GET", Self.livePath(since: since), body: nil, timeout: 120) }, alive: alive, as: LiveEvent.init(json:))
+        stream({ try self.request("GET", Self.livePath(since: since), body: nil, timeout: 120) }, alive: alive, as: LiveEvent.init(json:))
     }
 
     /// The stream's path, opened again from `since` when it is a cursor (core's livePath): signed over exactly this, path
@@ -139,7 +239,8 @@ struct NodeClient: Sendable {
 
     /// A POST answered with server-sent events, each read as `read` reads it (one it can't read is passed over).
     func payloads<Event: Sendable>(_ path: String, _ body: some Encodable, alive: (@Sendable () -> Void)? = nil, as read: @escaping @Sendable (String) -> Event?) -> AsyncThrowingStream<Event, any Error> {
-        stream(Result { try self.request("POST", path, body: JSONEncoder().encode(body), timeout: 120) }, alive: alive, as: read)
+        let body = Result { try JSONEncoder().encode(body) }
+        return stream({ try self.request("POST", path, body: body.get(), timeout: 120) }, alive: alive, as: read)
     }
 
     /// An agent's desktop as you watch it (POST /api/team/desktop/stream): its frames, each whole as its last byte comes
@@ -147,11 +248,15 @@ struct NodeClient: Sendable {
     /// the stream (its consumer goes away) ends the watching: the node ends the VM's encoder when its last watcher goes.
     /// The node's beats keep it from timing out while the screen is still.
     func frames(_ path: String, _ body: some Encodable) -> AsyncThrowingStream<DesktopFrame, any Error> {
-        let request = Result { try self.request("POST", path, body: JSONEncoder().encode(body), timeout: 120) }
+        let body = Result { try JSONEncoder().encode(body) }
         // (At most DesktopStream.behind frames wait to be decoded: past that the stream ends, and is watched again.)
         let (frames, queue) = DesktopStream.queue()
         let task = Task {
+            // (Made once the node has proved itself here, so it names that node: NodePin.ready.)
+            var request: Result<URLRequest, any Error> = .failure(CancellationError())
             do {
+                try await pin.ready()
+                request = Result { try self.request("POST", path, body: body.get(), timeout: 120) }
                 let (bytes, response) = try await Self.session.bytes(for: request.get())
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard (200..<300).contains(status) else {
@@ -173,10 +278,15 @@ struct NodeClient: Sendable {
         return frames
     }
 
-    private func stream<Event: Sendable>(_ request: Result<URLRequest, any Error>, alive: (@Sendable () -> Void)?, as read: @escaping @Sendable (String) -> Event?) -> AsyncThrowingStream<Event, any Error> {
+    /// A stream of the node's events, its request made once the node has proved itself here (NodePin.ready), so it names
+    /// that node.
+    private func stream<Event: Sendable>(_ make: @escaping @Sendable () throws -> URLRequest, alive: (@Sendable () -> Void)?, as read: @escaping @Sendable (String) -> Event?) -> AsyncThrowingStream<Event, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
+                var request: Result<URLRequest, any Error> = .failure(CancellationError())
                 do {
+                    try await pin.ready()
+                    request = Result { try make() }
                     let (bytes, response) = try await Self.session.bytes(for: request.get())
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                     guard (200..<300).contains(status) else {

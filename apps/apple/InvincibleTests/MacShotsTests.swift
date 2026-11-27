@@ -311,7 +311,7 @@ struct MacShots {
         try #require(code == joining.code, "the node shows another code: not approved")
         try code.filter(\.isNumber).write(to: node.appending(path: "approve"), atomically: true, encoding: .utf8)
         try await joining.approval()
-        let me = try? await NodeClient(origin: origin, signer: key).get("/api/whoami", as: WhoAmI.self)
+        let me = try? await NodeClient(origin: origin, signer: key).provenWhoami(challenge: NodeProof.challenge()).me
         MacApp.shared.app.paired(key: key, node: PairedNode(origin: origin, device: key.device, name: "Invincible app on Mac", fleet: invite.f, nodeName: me?.nodeName, fleetName: me?.fleetName))
         return try #require(MacApp.shared.session)
     }

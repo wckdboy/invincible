@@ -103,8 +103,9 @@ import Observation
             try await joining.approval(onRetry: waiting)
             await finish(app: app, key: key, origin: origin, invite: invite, name: name)
         } catch Joining.Stop.alreadyEnrolled {
-            // Approved earlier, then the app went away: a signed request says whether the node takes this key.
-            if (try? await NodeClient(origin: origin, signer: key).get("/api/whoami", as: WhoAmI.self)) != nil {
+            // Approved earlier, then the app went away: a signed request says whether the node takes this key (whoami, the
+            // one request a node that hasn't proved itself yet is asked: NodePin).
+            if (try? await NodeClient(origin: origin, signer: key).provenWhoami(challenge: NodeProof.challenge()))?.me != nil {
                 await finish(app: app, key: key, origin: origin, invite: invite, name: name)
             } else {
                 stage = .refusedKey
@@ -138,7 +139,7 @@ import Observation
         // the first proof it gives.
         let challenge = NodeProof.challenge()
         let me = try? await NodeClient(origin: origin, signer: key).provenWhoami(challenge: challenge)
-        let proven = me.map { NodeProof.judge(pinned: nil, node: $0.node, proof: $0.proof, challenge: challenge, check: .app) }
+        let proven = me.map { NodeProof.judge(pinned: nil, said: $0.said, challenge: challenge, now: .now, check: .app) }
         if proven == .failed {
             stage = .stopped("The node's proof of which node it is didn't hold: this device isn't paired with it.")
             return
@@ -146,7 +147,7 @@ import Observation
         stage = .approved
         link = ""
         try? await Task.sleep(for: .milliseconds(700))
-        var paired = PairedNode(origin: origin, device: key.device, name: name, fleet: invite.f, nodeName: me?.nodeName, fleetName: me?.fleetName)
+        var paired = PairedNode(origin: origin, device: key.device, name: name, fleet: invite.f, nodeName: me?.me?.nodeName, fleetName: me?.me?.fleetName)
         if case .pin(let id) = proven { paired.nodeId = id }
         app.paired(key: key, node: paired)
     }

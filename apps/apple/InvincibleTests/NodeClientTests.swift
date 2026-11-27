@@ -53,8 +53,56 @@ struct NodeClientTests {
             #expect(error.message == "It proved to be another node (\(vectors.nodeProofs[0].anotherNode.dropFirst(2).prefix(8))), not the one this device paired with.")
         }
         #expect(NodeError.notYours(other: nil).notYourNode == "")
-        pin.clear()
+        // Whoami's proof alone is still asked (Try again), and only a proof that holds lifts the refusal.
+        #expect(try verifies(client.request("GET", "/api/whoami?challenge=c2xpY2UtOC1jaGFsbGVuZ2U", body: nil, named: false, proving: true), method: "GET", path: "/api/whoami?challenge=c2xpY2UtOC1jaGFsbGVuZ2U", body: Data()))
+        pin.unanswered(NodeError(status: 401, message: "unknown device"))
+        #expect(pin.refused?.notYourNode == vectors.nodeProofs[0].anotherNode)
+        pin.proved()
         #expect(try verifies(client.request("GET", "/api/team", body: nil), method: "GET", path: "/api/team", body: Data(), node: vectors.nodeProofs[0].node))
+    }
+
+    // The review of apps-name-node, rules 1 to 3: what is asked waits for the node's proof, here, and is told what came of it.
+    @Test func whatIsAskedWaitsForTheNodesProofAndIsToldWhatCameOfIt() async throws {
+        let node = vectors.nodeProofs[0].node
+        // Waiting, then proven: it goes.
+        let pin = NodePin(node)
+        let waiting = Task { try await pin.ready() }
+        try await Task.sleep(for: .milliseconds(20))
+        pin.proved()
+        try await waiting.value
+        // Refused: told at once, and an answer that proves nothing changes nothing of it.
+        pin.refuse(.notYours(other: vectors.nodeProofs[0].anotherNode))
+        await #expect(throws: NodeError.self) { try await pin.ready() }
+        pin.unanswered(NodeError(status: 0, message: "Can't reach it", unreachable: true))
+        #expect(pin.refused?.notYourNode == vectors.nodeProofs[0].anotherNode)
+        // A whoami that got no answer that proves anything: what waits is told so; asked again, it waits for that answer.
+        let fresh = NodePin()
+        let told = Task { try await fresh.ready() }
+        try await Task.sleep(for: .milliseconds(20))
+        fresh.unanswered(NodeError(status: 401, message: "unknown device"))
+        do {
+            try await told.value
+            Issue.record("a request went before its node proved itself")
+        } catch let error as NodeError {
+            #expect(error.status == 401)
+        }
+        fresh.asking()
+        let again = Task { try await fresh.ready() }
+        try await Task.sleep(for: .milliseconds(20))
+        fresh.pin(node)
+        try await again.value
+        #expect(fresh.node == node && fresh.proven && fresh.refused == nil)
+        // Once proven, a later whoami that goes unanswered takes nothing back.
+        fresh.unanswered(NodeError(status: 0, message: "Can't reach it", unreachable: true))
+        try await fresh.ready()
+        // What stops waiting stops: cancelled before or while it waits.
+        let cancelled = Task { try await NodePin().ready() }
+        cancelled.cancel()
+        await #expect(throws: CancellationError.self) { try await cancelled.value }
+        // One pin per pairing in this process: the session's and a notification's are the same.
+        let origin = try #require(URL(string: "http://127.0.0.1:47121"))
+        #expect(NodePin.shared(origin: origin, device: "c_tests-shared-pin", node: nil) === NodePin.shared(origin: origin, device: "c_tests-shared-pin", node: node))
+        #expect(NodePin.shared(origin: origin, device: "c_tests-shared-pin", node: nil) !== NodePin.shared(origin: origin, device: "c_tests-another-device", node: nil))
     }
 
     @Test func aCloneIsWaitedForAsLongAsTheNodeLetsItRun() throws {

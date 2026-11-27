@@ -60,8 +60,10 @@ import Observation
         self.key = key
         self.node = node
         self.proofs = proofs
-        // Every request it signs names the node it proved to be, where it proved one (the slice 8 note's item 11).
-        self.client = NodeClient(origin: node.origin, signer: key, pin: NodePin(node.nodeId))
+        // Every request it signs names the node it proved to be, where it proved one (the slice 8 note's item 11), and none
+        // but whoami's is sent until that node has proved itself in this session: the pin is the pairing's, shared with all
+        // else that speaks to it here (NodePin.shared).
+        self.client = NodeClient(origin: node.origin, signer: key, pin: NodePin.shared(origin: node.origin, device: key.device, node: node.nodeId))
         self.kept = kept
         self.keeping = keeping
         // The chat on screen read: its answers in it stop being new here at once, not at the next look.
@@ -375,13 +377,14 @@ import Observation
     /// The Inbox's parts, each read by its own route.
     private static let inboxTopics = ["actions", "secretRequests", "pairings", "aboutYou", "notices", "screenSessions", "questions", "loopDrafts", "connectorRequests"]
 
-    /// Everything, now (pulled to refresh, or Try again): each part read as the stream would have it read. A node at its
-    /// address that proved to be another is first asked again only which node it is, and nothing more until it proves to
-    /// be this device's.
+    /// Everything, now (pulled to refresh, or Try again): each part read as the stream would have it read, once the node has
+    /// proved itself (NodePin.ready). A node at its address that proved to be another is asked again only which node it
+    /// is, its refusal standing until a proof holds; then the stream, refused with it, opens again (the review of
+    /// apps-name-node, rule 2 and I3).
     func refresh() async {
         if client.pin.refused != nil {
-            client.pin.clear()
             guard await readMe(), client.pin.refused == nil else { return }
+            if liveOn { link.retry() }
         }
         async let me = readMe()
         async let team = readTeam()
@@ -392,40 +395,35 @@ import Observation
         _ = await (me, team, inbox, turns, runs, usage)
     }
 
-    /// Whoami, read and proven (NodeProof): whether it was answered (false: owed, Followers). The first proof pins the node
-    /// with the pairing, and what this device signs names it from then on; a node that proves to be another, or whose
-    /// proof fails, is asked nothing more (NodePin) until you try again.
+    /// Whoami, read and proven (NodeClient.prove): whether it was answered (false: owed, Followers). The first proof pins
+    /// the node, kept with the pairing while it is still this one, and what this device signs names it from then on; a
+    /// node that proves to be another, or whose proof fails, is asked nothing more (NodePin) until you try again, and an
+    /// answer that proves nothing leaves that as it was, said as it was.
     @discardableResult private func readMe() async -> Bool {
-        let challenge = NodeProof.challenge()
-        switch await attempt({ [client] in try await client.provenWhoami(challenge: challenge) }) {
-        case .success(let me):
-            switch NodeProof.judge(pinned: client.pin.node, node: me.node, proof: me.proof, challenge: challenge, check: proofs) {
+        switch await attempt({ [client, proofs] in try await client.prove(check: proofs) }) {
+        case .success(let answer):
+            switch answer.proven {
             case .pin(let id):
-                client.pin.pin(id)
                 node.nodeId = id
-                node.save()
-            case .other(let id):
-                return notYours(.notYours(other: id))
-            case .failed:
-                return notYours(.notYours(other: nil))
+                PairedNode.keep(pinned: id, for: node)
+            case .other, .failed:
+                trouble = client.pin.refused
+                return true
             case .same, .older:
                 break
+            }
+            guard let me = answer.me else {
+                trouble = NodeError(status: 200, message: "The node's answer to whoami wasn't what this app reads.")
+                return true
             }
             (whoami, trouble) = (me, nil)
             Primary.named(me.primaryName)
             return true
         case .failure(let error as NodeError):
-            trouble = error
+            if client.pin.refused == nil { trouble = error }
             return Self.settled(error)
         case .failure(let error): return Self.settled(error)
         }
-    }
-
-    /// The node at this address isn't this device's: said above everything, and nothing more is sent there (NodePin).
-    private func notYours(_ why: NodeError) -> Bool {
-        client.pin.refuse(why)
-        trouble = why
-        return true
     }
 
     @discardableResult private func readTeam() async -> Bool {

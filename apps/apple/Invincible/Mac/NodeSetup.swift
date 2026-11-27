@@ -121,8 +121,10 @@ import Observation
             node = try await SelfPairing.pair(admin: admin, origin: admin.origin, transport: NodePairTransport(origin: admin.origin), device: key.device, name: name)
         } catch Joining.Stop.alreadyEnrolled {
             // This Mac's key is in the fleet already (paired with another of its nodes before): a signed request says
-            // whether this node takes it.
-            _ = try await NodeClient(origin: admin.origin, signer: key).get("/api/whoami", as: WhoAmI.self)
+            // whether this node takes it (whoami, the one request a node that hasn't proved itself yet is asked: NodePin).
+            guard try await NodeClient(origin: admin.origin, signer: key).provenWhoami(challenge: NodeProof.challenge()).me != nil else {
+                throw NodeError(status: 200, message: "The node's answer to whoami wasn't what this app reads.")
+            }
             node = PairedNode(origin: admin.origin, device: key.device, name: name, fleet: me.fleet ?? "")
         }
         (node.nodeName, node.fleetName) = (me.nodeName, me.fleetName)
