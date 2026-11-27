@@ -301,7 +301,11 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   - the node's own git in an agent's repository holds the repository's configuration off (below). So no hook of the
     repository's runs when the node makes a task's worktree or keeps a step, no filter (Git LFS's included), and no
     global configuration of the VM's. A repository naming another worktree isn't used, and one whose configuration
-    would take the fetch elsewhere isn't fetched with the lease.
+    would take the fetch elsewhere isn't fetched with the lease;
+  - a sensitive-mode lease is held to models, as a handed task's is (R4-3 and I-l, in the fabric's section below). Only
+    model calls, embeddings among them, and the model listing pass. A streamed OpenAI-style call is asked for its usage
+    (`stream_options`, which a local server that refuses fields it doesn't know would refuse). A call whose answer says
+    none is counted at its upper bound.
 - **The trees are checked before every mount** (the fourth fabric review's R4-1). Before a VM is made, made again or
   started on an agent's store in layout 2, and before a VM that shares it is made, the host checks each tree as it is
   about to mount it, in a one-off container of the store's own (`MOVE_PY`'s check): a folder at the store's root, by
@@ -721,15 +725,16 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   - What a handed task does is bounded with it (the second re-review's N7), but for the known gaps below:
     - Its agent's own loop, its coding tool and its commands run only on models its budget counts at more than $0 (its
       VM's lease is good for those models' calls alone: the gateway refuses any other model, the third re-review's
-      R3-4, and on that lease any route but its protocol's model calls, a POST, and their listing, a GET, so nothing
-      else of yours with that provider, its files, stored responses, batches or vector stores, is reached with your
-      key: R4-3, `packages/models/test/gateway-lease.test.ts`; the lease carries neither the keys of yours its agent may
-      use nor its agent's repository), never on a coding tool's own
-      sign-in (a seat) or an ACP agent, so what they spend is counted. Every call on that lease is counted, whether or
-      not its answer says its usage (the fourth re-review's I-l, `gateway-lease.test.ts`): a streamed OpenAI-style call
-      is asked to say it, and one whose answer says none all the same counts at the most it could have been, every byte
-      sent and answered a token. But not: a command can start a coding tool itself on that tool's own sign-in in the
-      VM, if it has one, which no lease reaches (a task's own VM starts with an empty HOME).
+      R3-4, and on that lease any route but its protocol's model calls (embeddings among them: the fifth re-review's
+      R5-7), a POST, and their listing, a GET, so nothing else of yours with that provider, its files, stored
+      responses, batches or vector stores, is reached with your key: R4-3,
+      `packages/models/test/gateway-lease.test.ts`; the lease carries neither the keys of yours its agent may use nor
+      its agent's repository), never on a coding tool's own sign-in (a seat) or an ACP agent, so what they spend is
+      counted. Every call on that lease is counted, whether or not its answer says its usage (the fourth re-review's
+      I-l, `gateway-lease.test.ts`): a streamed OpenAI-style call is asked to say it, and one whose answer says none
+      all the same counts at the most it could have been, every byte sent and answered a token. But not: a command can
+      start a coding tool itself on that tool's own sign-in in the VM, if it has one, which no lease reaches (a task's
+      own VM starts with an empty HOME).
     - **In a VM of its own** (the owner's decision of 27 November 2026, the third re-review's R3-1;
       `packages/node/src/task-vms.ts`, `createTaskVm`, tested in `task-vms.test.ts`, `team-layout.test.ts`,
       `team-runtime.test.ts` and `fabric-handoff.e2e.test.ts`). Every command of it, its agent's, its coding tool's and

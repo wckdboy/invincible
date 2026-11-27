@@ -31,10 +31,20 @@ export function responsesUsage(raw: unknown): Usage | null {
   return { input, output, ...(cached !== null ? { cached: Math.min(cached, input) } : {}), ...(reasoning !== null ? { reasoning: Math.min(reasoning, output) } : {}) };
 }
 
+/**
+ * An embeddings answer's usage as a Usage: its input's tokens (`prompt_tokens`), and no output, as embeddings are billed.
+ * Read so only for an embeddings call: a model call's usage that leaves out its output tokens is no usage.
+ */
+export function embeddingsUsage(raw: unknown): Usage | null {
+  const input = tokenCount(record(raw)?.prompt_tokens);
+  return input === null ? null : { input, output: 0 };
+}
+
 /** A body's usage, whichever of the three it is: Anthropic's has `cache_read_input_tokens` or `input_tokens` beside no `prompt_tokens`. */
-function bodyUsage(body: Record<string, unknown>, kind: "openai" | "anthropic"): Usage | null {
+function bodyUsage(body: Record<string, unknown>, kind: "openai" | "anthropic", embeddings: boolean): Usage | null {
   const usage = record(body.usage);
   if (!usage) return null;
+  if (embeddings && kind === "openai") return embeddingsUsage(usage);
   if (kind === "anthropic") return anthropicUsage(usage);
   return "prompt_tokens" in usage ? openAIUsage(usage) : responsesUsage(usage);
 }
@@ -46,8 +56,8 @@ export interface UsageReader {
   end(): Usage | null;
 }
 
-/** Reads one answer's usage as it goes by. `kind` is the provider's protocol. */
-export function usageReader(kind: "openai" | "anthropic"): UsageReader {
+/** Reads one answer's usage as it goes by. `kind` is the provider's protocol; `embeddings`, that the call is one. */
+export function usageReader(kind: "openai" | "anthropic", embeddings = false): UsageReader {
   const text = new TextDecoder();
   let pending = "";
   let overlong = false;
@@ -126,7 +136,7 @@ export function usageReader(kind: "openai" | "anthropic"): UsageReader {
       if (sawEvent || bodyTooLong || !body.trim()) return null;
       try {
         const whole = record(JSON.parse(body));
-        return whole ? bodyUsage(whole, kind) : null;
+        return whole ? bodyUsage(whole, kind, embeddings) : null;
       } catch {
         return null;
       }

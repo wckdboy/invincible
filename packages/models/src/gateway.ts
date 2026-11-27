@@ -178,10 +178,12 @@ const json = (status: number, error: string) =>
  * What a lease held to models (work in sensitive mode, another node's task) may ask of a provider with your key: its
  * models' calls and their listing, nothing else (the fourth fabric review's R4-3). So no file, stored response, batch or
  * vector store of yours is read through it, nor a batch made, by any method. By the provider's protocol, each after an
- * optional `v1/`, as its base URL may or may not hold it.
+ * optional `v1/`, as its base URL may or may not hold it. Embeddings are a model's call too (the fifth review's R5-7:
+ * sensitive mode's work embeds, on its own local provider among others).
  */
+const EMBEDDINGS = /^(?:v1\/)?embeddings$/;
 const MODEL_CALLS: Record<"openai" | "anthropic", RegExp> = {
-  openai: /^(?:v1\/)?(?:chat\/completions|completions|responses)$/,
+  openai: /^(?:v1\/)?(?:chat\/completions|completions|responses|embeddings)$/,
   anthropic: /^(?:v1\/)?messages(?:\/count_tokens)?$/,
 };
 const MODEL_LISTING = /^(?:v1\/)?models(?:\/[A-Za-z0-9._:@/-]+)?$/;
@@ -311,7 +313,7 @@ export async function handleGateway(request: Request, ctx: GatewayContext): Prom
   // A model call (a POST) is counted as its answer goes by; a listing or a lookup isn't one.
   const report = ctx.onUsage;
   if (!report || request.method !== "POST" || !upstream.body) return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
-  const reader = usageReader(provider.kind);
+  const reader = usageReader(provider.kind, EMBEDDINGS.test(rest));
   const call = { label: ctx.tokens.labelOf(token) ?? "unknown", provider: providerId, model: modelOf(body) };
   let answered = 0;
   const counted = upstream.body.pipeThrough(

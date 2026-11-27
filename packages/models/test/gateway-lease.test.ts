@@ -253,3 +253,66 @@ test("a held lease's streamed call is asked to say its usage; one that says none
   expect(streamed).toEqual([{}]);
   expect(plain.usage).toEqual([null]);
 });
+
+/*
+ * A held lease's embeddings (the fifth fabric review's R5-7): sensitive mode's lease is held to its models as a handed
+ * task's is, and its work embeds, on its own local provider too. So an embeddings call passes by either route, and is
+ * counted as its answer says: its input's tokens, and no output, as embeddings are billed.
+ */
+const embedded: string[] = [];
+let embeddingsSay = true;
+const embedding = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch: async (req) => {
+    embedded.push(`${req.method} ${new URL(req.url).pathname}`);
+    const vector = Array.from({ length: 1536 }, (_, i) => Math.sin(i) / 7);
+    return Response.json({ object: "list", data: [{ object: "embedding", index: 0, embedding: vector }], model: "embed-paid", ...(embeddingsSay ? { usage: { prompt_tokens: 8, total_tokens: 8 } } : {}) });
+  },
+});
+afterAll(async () => await embedding.stop(true));
+
+function embeds(models?: string[]) {
+  const identity = newNodeIdentity();
+  const store = new LedgerStore(":memory:");
+  foundFleet(store, identity, { fleetName: "homelab", nodeName: "ultra" });
+  const vault = new Vault(store, identity);
+  // (Its base URL without a /v1, so a tool calls v1/embeddings; and with one, so it calls embeddings.)
+  vault.set("local", HELD_KEY, { provider: "local", origin: `http://127.0.0.1:${embedding.port}` });
+  store.emit(identity, "provider.set", { id: "local", kind: "openai", baseUrl: `http://127.0.0.1:${embedding.port}`, secret: "local" });
+  vault.set("openai", HELD_KEY, { provider: "openai", origin: `http://127.0.0.1:${embedding.port}` });
+  store.emit(identity, "provider.set", { id: "openai", kind: "openai", baseUrl: `http://127.0.0.1:${embedding.port}/v1`, secret: "openai" });
+  const tokens = new GatewayTokens(new Database(":memory:"));
+  const { token } = tokens.mint({ label: "sandbox:0123456789", providers: ["local", "openai"], ...(models ? { models } : {}), ttlMinutes: 30, maxRequests: 500 });
+  const usage: (Usage | null)[] = [];
+  const call = async (path: string) => {
+    const answer = await handleGateway(new Request(`http://127.0.0.1:7400/gw/${path}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ model: "embed-paid", input: "a sentence of the owner's" }) }), { store, vault, tokens, onUsage: (c) => void usage.push(c.usage) });
+    const text = await answer.text();
+    await Bun.sleep(5);
+    return { status: answer.status, text };
+  };
+  return { call, usage };
+}
+
+test("a held lease's embeddings pass by either route, and are counted as their answer says, its input alone (R5-7)", async () => {
+  embedded.length = 0;
+  embeddingsSay = true;
+  const held = embeds(["local/embed-paid", "openai/embed-paid"]);
+  expect((await held.call("local/v1/embeddings")).status).toBe(200);
+  expect((await held.call("openai/embeddings")).status).toBe(200);
+  expect(embedded).toEqual(["POST /v1/embeddings", "POST /v1/embeddings"]);
+  expect(held.usage).toEqual([{ input: 8, output: 0 }, { input: 8, output: 0 }]);
+  // One whose answer says no usage is still counted at its most, never $0: every byte sent an input token, every byte
+  // answered an output token.
+  embeddingsSay = false;
+  const said = await held.call("openai/embeddings");
+  expect(held.usage.at(-1)).toEqual({ input: JSON.stringify({ model: "embed-paid", input: "a sentence of the owner's" }).length, output: Buffer.byteLength(said.text) });
+  // A lease not held to models reads an embedding's usage the same way (it was unknown before).
+  embeddingsSay = true;
+  const plain = embeds();
+  await plain.call("openai/embeddings");
+  expect(plain.usage).toEqual([{ input: 8, output: 0 }]);
+  // And a model call's usage that leaves out its output tokens is still no usage: embeddings' own reading is for embeddings.
+  await plain.call("openai/chat/completions");
+  expect(plain.usage.at(-1)).toBeNull();
+});
