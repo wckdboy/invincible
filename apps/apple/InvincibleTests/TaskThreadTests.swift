@@ -59,3 +59,19 @@ struct TaskThreadTests {
         }
     }
 }
+
+/// Where a task's details stand on a wide screen: a column beside the thread only where both have room (DetailsRoom). On
+/// 27 November 2026 a Mac's smallest window left the thread 190 points beside the column, its message box a word a line.
+struct DetailsRoomTests {
+    @Test func aThreadKeepsItsDetailsBesideItOnlyWhereBothHaveRoom() {
+        // A Mac's smallest window, beside its sidebar (530 points for the page): no room, the column there or gone.
+        #expect(!DetailsRoom.roomy(content: 190, column: 340))
+        #expect(!DetailsRoom.roomy(content: 530, column: nil))
+        // Its default window (890 for the page): room, the column there or not.
+        #expect(DetailsRoom.roomy(content: 550, column: 340))
+        #expect(DetailsRoom.roomy(content: 890, column: nil))
+        // The thread's and the column's least, exactly: room. Not measured yet: room, so a wide screen doesn't flash a sheet.
+        #expect(DetailsRoom.roomy(content: DetailsRoom.thread, column: DetailsRoom.column))
+        #expect(DetailsRoom.roomy(content: 0, column: nil))
+    }
+}

@@ -96,13 +96,15 @@ struct TaskView: View {
     @State private var answers = TaskAnswers()
     @State private var detailsSheet = false
     @AppStorage("task.details") private var detailsShown = true
+    /// Whether the thread has room for its details beside it (DetailsRoom); without, they open over it as a sheet.
+    @State private var roomy = true
     @FocusState private var composing: Bool
 
     var body: some View {
         Group {
             if let task = session.task(id), let thread {
                 TaskThreadView(session: session, task: task, thread: thread, answers: answers, composing: $composing)
-                    .modifier(DetailsPlace(wide: wide, shown: $detailsShown, sheet: $detailsSheet) {
+                    .modifier(DetailsPlace(wide: wide, shown: $detailsShown, sheet: $detailsSheet, roomy: $roomy) {
                         TaskDetails(session: session, task: task, thread: thread)
                     })
                     // (Outside the details column, so its buttons are the thread's bar's, not the column's.)
@@ -144,10 +146,12 @@ struct TaskView: View {
         #endif
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
-                if wide { withAnimation(.snappy) { detailsShown.toggle() } } else { detailsSheet = true }
+                if wide && roomy { withAnimation(.snappy) { detailsShown.toggle() } } else { detailsSheet = true }
             } label: {
-                Label(wide && detailsShown ? "Hide the details" : "Show the details", systemImage: "sidebar.trailing")
+                Label(wide && roomy && detailsShown ? "Hide the details" : "Show the details", systemImage: "sidebar.trailing")
             }
+            // (A Mac's inspector key, and an iPad keyboard's.)
+            .keyboardShortcut("i", modifiers: [.command, .option])
             .help("The task's details: its VM, changes, gates, reviewer and cost")
             .accessibilityIdentifier("task.details")
             let rest = session.can("fleet:admin") && session.can("chat") ? TaskCard.answers(task).rest : []
@@ -202,31 +206,72 @@ struct TaskView: View {
     TaskActivityState.of(status: task.status, verified: task.verified, error: task.error, gates: task.gates ?? [], record: task.record, entries: thread.entries, at: Date.now.timeIntervalSince1970 * 1000)
 }
 
-/// Where a task's details are: a column beside its thread on a wide screen (shown or hidden as you last left it), a sheet
-/// on an iPhone.
+/// Whether a thread has room for its details in a column beside it: the thread keeps a working width of its own (its
+/// message box, its steer and queue) beside the column's narrowest. Measured as the thread and the column take the width
+/// between them, so the column coming or going never changes the answer. (On 27 November 2026 a Mac's smallest window
+/// left a thread 190 points beside its details, its message box wrapped to a word a line over the words above it.)
+enum DetailsRoom {
+    static let thread: CGFloat = 420
+    static let column: CGFloat = 300
+
+    /// `content`: the thread's width (0: not measured yet, which is room); `column`: the details column's, while it shows.
+    static func roomy(content: CGFloat, column shown: CGFloat?) -> Bool {
+        content == 0 || content + (shown ?? 0) >= thread + column
+    }
+}
+
+/// Where a task's details are: a column beside its thread on a wide screen (shown or hidden as you last left it) where the
+/// thread has room for it (DetailsRoom), else a sheet over it, as on an iPhone.
 private struct DetailsPlace<Details: View>: ViewModifier {
     let wide: Bool
     @Binding var shown: Bool
     @Binding var sheet: Bool
+    @Binding var roomy: Bool
     @ViewBuilder let details: () -> Details
+    /// The thread's width, and the details column's while it shows.
+    @State private var threadWidth: CGFloat = 0
+    @State private var columnWidth: CGFloat?
 
     func body(content: Content) -> some View {
         if wide {
-            content.inspector(isPresented: $shown) {
-                ScrollView { details().padding(.vertical, Space.s3) }
-                    .inspectorColumnWidth(min: 300, ideal: 340, max: 420)
-            }
-        } else {
-            content.sheet(isPresented: $sheet) {
-                NavigationStack {
-                    ScrollView { details().padding(.vertical, Space.s3) }
-                        .navigationTitle("The task's details")
-                        .inlineTitle()
-                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { sheet = false } } }
+            content
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                    threadWidth = width
+                    judge()
                 }
-                .presentationDetents([.medium, .large])
-            }
+                .inspector(isPresented: Binding(get: { shown && roomy }, set: { if roomy { shown = $0 } })) {
+                    ScrollView { details().padding(.vertical, Space.s3) }
+                        .inspectorColumnWidth(min: DetailsRoom.column, ideal: 340, max: 420)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                            columnWidth = width
+                            judge()
+                        }
+                        .onDisappear {
+                            columnWidth = nil
+                            judge()
+                        }
+                }
+                .sheet(isPresented: $sheet) { overThread }
+        } else {
+            content.sheet(isPresented: $sheet) { overThread }
         }
+    }
+
+    private func judge() {
+        let now = DetailsRoom.roomy(content: threadWidth, column: columnWidth)
+        if now != roomy { roomy = now }
+    }
+
+    /// The details over the thread: an iPhone's way, and a window too narrow for a column.
+    private var overThread: some View {
+        NavigationStack {
+            ScrollView { details().padding(.vertical, Space.s3) }
+                .navigationTitle("The task's details")
+                .inlineTitle()
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { sheet = false } } }
+        }
+        .presentationDetents([.medium, .large])
+        .sheetSize(width: 420, height: 640)
     }
 }
 
