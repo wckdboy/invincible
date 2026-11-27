@@ -92,6 +92,9 @@ The review also confirmed what held up:
     it (`REQUESTS_NAME_THEIR_NODE_FROM`).
   - **A node's link calls over Q-AMP** stay v1. They are bound to the node whose transport key sent them, so one
     relayed by another node is refused there already.
+  - **The node's own Slack and Telegram bridges** send what you wrote, and the files you send, to the node they run on,
+    each as a device of its own, and name that node too (`packages/node/test/slack.e2e.test.ts` and
+    `telegram.e2e.test.ts`, run with a clock past the cutoff).
   - **The tests:** `packages/node/test/request-auth.e2e.test.ts`, `packages/core/test/core.test.ts`,
     `packages/link/test/client.test.ts`.
 - **Which node it speaks to, proven.** Asked with a challenge (`/api/whoami?challenge=…`), whoami answers with the

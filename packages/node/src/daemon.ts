@@ -679,9 +679,9 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   };
   const loopDrafts = new LoopDrafts(local);
   // Telegram (telegram.ts): a bot of yours, polled from here once connected on this node; it answers as a device of its own.
-  const telegram = new TelegramGateway({ local, vault, apiBase: `http://127.0.0.1:${port}`, ...(opts.telegramBase ? { telegramBase: opts.telegramBase } : {}), log });
+  const telegram = new TelegramGateway({ local, vault, apiBase: `http://127.0.0.1:${port}`, node: identity.id, ...(opts.telegramBase ? { telegramBase: opts.telegramBase } : {}), log });
   // Slack (slack.ts): an app of yours, its Socket Mode connection opened from here once connected on this node; the same.
-  const slack = new SlackGateway({ local, vault, apiBase: `http://127.0.0.1:${port}`, ...(opts.slackBase ? { slackBase: opts.slackBase } : {}), log });
+  const slack = new SlackGateway({ local, vault, apiBase: `http://127.0.0.1:${port}`, node: identity.id, ...(opts.slackBase ? { slackBase: opts.slackBase } : {}), log });
   const connectorRequests = new ConnectorRequests(local);
   const loops = new LoopRunner({
     store,

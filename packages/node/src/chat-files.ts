@@ -1,4 +1,4 @@
-import { ATTACHMENT_LIMITS, type AttachmentRef, type ClientIdentity, pictureType, signRequest } from "@invincible/core";
+import { ATTACHMENT_LIMITS, type AttachmentRef, type ClientIdentity, type DeviceId, pictureType, signRequest } from "@invincible/core";
 
 /*
  * A file you sent the primary through a chat app (a photo, a screenshot, a log), kept on your node as an attachment of your
@@ -49,13 +49,16 @@ export async function cappedBytes(response: Response, max: number): Promise<Uint
   return new Uint8Array(Buffer.concat(chunks));
 }
 
-/** Keep a file you sent on your node, as the chat app's device: the attachment your message then carries, or why not. */
-export async function keepFile(o: { apiBase: string; fetch: typeof fetch; device: ClientIdentity }, name: string, bytes: Uint8Array): Promise<{ attachment: AttachmentRef } | { refused: string }> {
+/**
+ * Keep a file you sent on your node, as the chat app's device: the attachment your message then carries, or why not.
+ * Signed for that node (`node`, its id), as it takes from the cutoff (the slice 8 note's item 11).
+ */
+export async function keepFile(o: { apiBase: string; node: DeviceId; fetch: typeof fetch; device: ClientIdentity }, name: string, bytes: Uint8Array): Promise<{ attachment: AttachmentRef } | { refused: string }> {
   const refused = refusedFile(bytes);
   if (refused) return { refused };
   const path = "/api/uploads";
   const body = new TextEncoder().encode(JSON.stringify({ name: nameOf(name), type: fileKind(bytes), data: Buffer.from(bytes).toString("base64") }));
-  const headers = await signRequest(o.device.id, (m) => o.device.sign(m), "POST", path, body);
+  const headers = await signRequest(o.device.id, (m) => o.device.sign(m), "POST", path, body, Date.now(), o.node);
   const response = await o.fetch(`${o.apiBase}${path}`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body });
   const answer = (await response.json().catch(() => ({}))) as { attachment?: AttachmentRef; error?: string };
   if (!response.ok || !answer.attachment) return { refused: answer.error ?? `your node answered ${response.status}` };

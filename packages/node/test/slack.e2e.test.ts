@@ -1,9 +1,9 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import type { ServerWebSocket } from "bun";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ConversationSummary, type ConversationView, type FleetView, type RouteName, routes, SLACK_APP_MANIFEST, type SlackView } from "@invincible/core";
+import { type ConversationSummary, type ConversationView, type FleetView, REQUESTS_NAME_THEIR_NODE_FROM, type RouteName, routes, SLACK_APP_MANIFEST, type SlackView } from "@invincible/core";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -269,6 +269,31 @@ describe("Slack", () => {
     message(OWNER, "Still there?");
     await until("answered", () => posts().find((p) => p.params.text === "You said: Still there?"));
   });
+
+  // The slice 8 note's item 11: from the cutoff a node takes only a request that names it. The app's device signs for
+  // its own node, so your words, and a file you share, still reach it. Bun's set clock stands still until it's reset:
+  // a connection made after it is set is heard at that time, so it is not taken for a quiet one meanwhile.
+  test("from the day a node takes only requests that name it, your message and your file still reach it", async () => {
+    setSystemTime(new Date(REQUESTS_NAME_THEIR_NODE_FROM + 60_000));
+    try {
+      const opened = calls.filter((c) => c.method === "apps.connections.open").length;
+      sockets.at(-1)!.send(JSON.stringify({ type: "disconnect", reason: "refresh_requested" }));
+      await until("a new connection", () => calls.filter((c) => c.method === "apps.connections.open").length > opened && sockets.length === 1);
+      const before = posts().length;
+      message(OWNER, "After the cutoff");
+      await until("answered", () => posts().slice(before).find((p) => p.params.text === "You said: After the cutoff"));
+      const asking = posts().length;
+      message(OWNER, "And this", { subtype: "file_share", files: [{ name: "shot.png", size: SHOT.byteLength, url_private_download: `http://127.0.0.1:${slackApi.port}/files/T0/shot.png` }] });
+      await until("the file answered", () => posts().slice(asking).find((p) => (p.params.text ?? "").startsWith("You said:")));
+      expect(posts().slice(before).some((p) => /revoked|Not sent with your message/.test(p.params.text ?? ""))).toBe(false);
+      const { conversations } = await json<{ conversations: ConversationSummary[] }>(await call("conversations", undefined));
+      const latest = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt)[0]!;
+      const { conversation } = await json<{ conversation: ConversationView }>(await call("conversation", { id: latest.id }));
+      expect(conversation.messages.filter((m) => m.role === "user").at(-1)!.attachments).toEqual([expect.objectContaining({ name: "shot.png", type: "image/png" })]);
+    } finally {
+      setSystemTime();
+    }
+  }, 20_000);
 
   test("disconnecting revokes its device and deletes its tokens; its chats stay yours", async () => {
     const before = await json<{ slack: SlackView }>(await call("slack", undefined));

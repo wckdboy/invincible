@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { ATTACHMENT_LIMITS, type AttachmentRef, b64u, type ChatStreamEvent, clientIdentity, type ClientIdentity, fromB64u, newClientSecret, type Scope, signRequest } from "@invincible/core";
+import { ATTACHMENT_LIMITS, type AttachmentRef, b64u, type ChatStreamEvent, clientIdentity, type ClientIdentity, type DeviceId, fromB64u, newClientSecret, type Scope, signRequest } from "@invincible/core";
 import { sseData } from "@invincible/models";
 import type { Vault } from "@invincible/ledger";
 import { cappedBytes, keepFile } from "./chat-files.ts";
@@ -97,6 +97,8 @@ export interface SlackOptions {
   vault: Pick<Vault, "has" | "reveal" | "set" | "delete">;
   /** The node's own API, where the gateway's device sends what you wrote (loopback). */
   apiBase: string;
+  /** That node's id: what the gateway's device signs names it, as a node takes from the cutoff (the slice 8 note's item 11). */
+  node: DeviceId;
   fetch?: typeof fetch;
   /** Where Slack's Web API is (tests: a stand-in, whose sockets may then be ws:). */
   slackBase?: string;
@@ -423,7 +425,7 @@ export class SlackGateway {
       if (!response.ok) return { refused: response.status === 403 ? "the app can't read files (give it files:read, then install it again)" : `Slack answered ${response.status}` };
       const bytes = await cappedBytes(response, ATTACHMENT_LIMITS.imageBytes);
       if (!bytes) return { refused: "it's over 5 MB" };
-      return await keepFile({ apiBase: this.o.apiBase, fetch: this.fetch, device }, file.name ?? "file", bytes);
+      return await keepFile({ apiBase: this.o.apiBase, node: this.o.node, fetch: this.fetch, device }, file.name ?? "file", bytes);
     } catch (error) {
       return { refused: (error as Error).message.slice(0, 200) };
     }
@@ -452,7 +454,7 @@ export class SlackGateway {
       const conversation = this.get<string>(`chat:${channel}`);
       const path = "/api/chat";
       const body = new TextEncoder().encode(JSON.stringify({ messages: [{ role: "user", content: text, ...(attachments.length ? { attachments } : {}) }], save: true, ...(conversation ? { conversation } : {}) }));
-      const headers = await signRequest(device.id, (m) => device.sign(m), "POST", path, body);
+      const headers = await signRequest(device.id, (m) => device.sign(m), "POST", path, body, Date.now(), this.o.node);
       const response = await this.fetch(`${this.o.apiBase}${path}`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body });
       if (response.status === 401) {
         this.problem = "The node no longer takes the gateway's device (revoked?): connect Slack again.";

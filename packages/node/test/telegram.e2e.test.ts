@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ConversationSummary, type ConversationView, type FleetView, type RouteName, routes, type TelegramView } from "@invincible/core";
+import { type ConversationSummary, type ConversationView, type FleetView, REQUESTS_NAME_THEIR_NODE_FROM, type RouteName, routes, type TelegramView } from "@invincible/core";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
@@ -215,6 +215,27 @@ describe("Telegram", () => {
     await Bun.sleep(200);
     expect(asked.length).toBe(asking);
   });
+
+  // The slice 8 note's item 11: from the cutoff a node takes only a request that names it. The bot's device signs for
+  // its own node, so your words, and a photo you send, still reach it. (Bun's set clock stands still until it's reset.)
+  test("from the day a node takes only requests that name it, your message and your photo still reach it", async () => {
+    setSystemTime(new Date(REQUESTS_NAME_THEIR_NODE_FROM + 60_000));
+    try {
+      const before = messages().length;
+      from(OWNER, "After the cutoff");
+      await until("answered", () => messages().slice(before).find((m) => m.params.text === "You said: After the cutoff"));
+      const asking = messages().length;
+      updates.push({ update_id: nextUpdate++, message: { message_id: 903, from: OWNER, chat: { id: OWNER.id, type: "private" }, photo: [{ file_id: "big", file_size: 23 }], caption: "And this photo?" } });
+      await until("the photo answered", () => messages().slice(asking).find((m) => String(m.params.text).startsWith("You said:")));
+      expect(messages().slice(before).some((m) => /revoked|Not sent with your message/.test(String(m.params.text)))).toBe(false);
+      const { conversations } = await json<{ conversations: ConversationSummary[] }>(await call("conversations", undefined));
+      const latest = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt)[0]!;
+      const { conversation } = await json<{ conversation: ConversationView }>(await call("conversation", { id: latest.id }));
+      expect(conversation.messages.filter((m) => m.role === "user").at(-1)!.attachments).toEqual([expect.objectContaining({ name: "photo.jpg", type: "image/jpeg" })]);
+    } finally {
+      setSystemTime();
+    }
+  }, 20_000);
 
   test("disconnecting revokes its device and deletes its token; its chats stay yours", async () => {
     const before = await json<{ telegram: TelegramView }>(await call("telegram", undefined));
