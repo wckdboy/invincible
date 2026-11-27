@@ -56,6 +56,21 @@ export interface SeatRun {
   release(signedOut?: boolean): Promise<void>;
 }
 
+/** A task's VM held for as long as its task runs (`await using`): released as it ends, however it ends. */
+const releasing = (vm: HandedVm) => ({ vm, [Symbol.asyncDispose]: () => vm.release().catch(() => {}) });
+
+/**
+ * Another node's task's VM (the fabric's R3-1 (a), the owner's decision of 27 November 2026): its own, beside its agent's,
+ * sharing that agent's workspace alone. Every command of the task runs there, its coding tool's follow and stop too, and
+ * it is released as the task ends, however it ends: with it goes whatever the task started there.
+ */
+export interface HandedVm {
+  exec(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
+  follow?(offset: number, signal: AbortSignal): Promise<FollowedRun>;
+  stop(): Promise<void>;
+  release(): Promise<void>;
+}
+
 /** What asking for a seat comes to: one to run on, none (the run is in the agent's own VM), or a rest until the soonest reset of the seats that could take it. */
 export type SeatAnswer = { run: SeatRun } | { none: true } | { rest: { until: number; why: string } };
 
@@ -136,6 +151,11 @@ export interface TeamRuntimeDeps {
    * it waits for a seat that is busy, or rests until one that is spent resets. Absent: no seats, as before them.
    */
   seat?(agent: Agent, harness: string, opts: { from: TaskAccount | null; wait: boolean }, signal: AbortSignal): Promise<SeatAnswer>;
+  /**
+   * Another node's task's own VM (HandedVm), beside its agent's, leased `models` alone (the ones its budget counts at more
+   * than $0): every command of the task runs there. Absent: this node gives another node's task no VM, and takes none.
+   */
+  handedVm?(agent: Agent, task: TeamTask, models: readonly string[], signal: AbortSignal): Promise<HandedVm>;
   /** Told of each window of a seat's plan that its tool says as a run on it goes: the seat's to keep (seat.window; spent, seat.rested). */
   seatWindow?(seat: SeatRun["seat"], window: Extract<RunEvent, { type: "window" }>): void;
   /** The node's switch for the VMs' notes store (Engram): on, a task is given the store when its VM has the pinned binary. Absent: off. */
@@ -711,6 +731,12 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // nothing: the gateway refuses any other model (the third re-review's R3-4). None of them: it reaches no provider.
       const leaseModels = handed ? handedLease(agent, held) : held;
       await deps.prepare(agent, ctx.signal, leaseModels ?? undefined, handed ? { handed: true } : undefined);
+      // Another node's task runs in a VM of its own beside its agent's, every command of it, never in the agent's own (the
+      // fabric's R3-1 (a)): released as this ends, however it ends, and with it whatever the task started there.
+      if (handed && !deps.handedVm) throw new Error("This node gives another node's task no VM of its own, so it doesn't take one");
+      await using own = handed ? releasing(await deps.handedVm!(agent, task, leaseModels ?? [], ctx.signal)) : null;
+      /** A command in the task's VM: its own for another node's task, else its agent's. */
+      const inVm = (command: string, timeout: number, signal: AbortSignal): Promise<ExecResult> => (own ? own.vm.exec(command, timeout, signal) : deps.exec(agent, command, timeout, signal));
       /** When its lease was last written or renewed, and whether one that couldn't be kept was said. */
       let leaseKept = Date.now();
       let leaseLost = false;
@@ -720,7 +746,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const setup = agent.repository
         ? `python3 -I -c ${quote(REPO_TASK_START)} ${quote(root)} ${quote(`/work/.agent/base/${task.id}`)}${task.fix || task.from ? ` ${quote(task.fix?.branch ?? "")}` : ""}${task.from ? ` ${quote(task.from.task)} ${quote(task.from.commit)}` : ""}`
         : `mkdir -p ${quote(root)}`;
-      const ready = await deps.exec(agent, setup, agent.repository ? 420 : 120, ctx.signal);
+      const ready = await inVm(setup, agent.repository ? 420 : 120, ctx.signal);
       if (ready.exitCode !== 0) throw new Error(`Workspace not ready: ${redact(ready.stderr || ready.stdout)}`);
       // In a repository: the commit the work starts from, and whether the repository could be fetched for it.
       const [base = "", fetched = ""] = agent.repository ? ready.stdout.trim().split(/\s+/) : [];
@@ -728,19 +754,20 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Its commits carry its own name, never yours: with none set, the first real task's agent copied the repository's
       // owner's from its history. An address under .invalid, which can't belong to anyone. (Set at each task: an agent's
       // VM is its own, and one set by hand there goes back to the agent's.)
-      if (agent.repository) await deps.exec(agent, `git -C /work/repo config user.name ${quote(agent.name)} && git -C /work/repo config user.email ${quote(`${agent.id}@agents.invalid`)}`, 30, ctx.signal);
+      if (agent.repository) await inVm(`git -C /work/repo config user.name ${quote(agent.name)} && git -C /work/repo config user.email ${quote(`${agent.id}@agents.invalid`)}`, 30, ctx.signal);
       // The VM's notes store (Engram), when the node's switch is on: kept under the agent's repository, or with none
       // its own handle, so every task of its finds them. Whether this VM has the pinned binary is asked as the task
       // starts: one that doesn't does the task without the store, and the task says which it was, never nothing.
       // The VM's own HOME, as the VM says it (its own tree in layout 2; /work in layout 1, and when it says nothing
       // plain): where its tools' config and its notes are written, and its lease is.
-      const told = (await deps.exec(agent, 'printf %s "$HOME"', 30, ctx.signal).catch(() => null))?.stdout.trim() ?? "";
+      const told = (await inVm('printf %s "$HOME"', 30, ctx.signal).catch(() => null))?.stdout.trim() ?? "";
       const home = /^\/[A-Za-z0-9._/-]{1,200}$/.test(told) ? told : VM_WORK;
       let engram: string | undefined;
       let notes = "";
-      if (deps.engram?.()) {
+      // (Not another node's task: the agent's notes are never in its VM.)
+      if (deps.engram?.() && !handed) {
         const project = engramProjectFor(agent.repository, agent.id);
-        const found = engramFound(await deps.exec(agent, ENGRAM_PROBE, 30, ctx.signal));
+        const found = engramFound(await inVm(ENGRAM_PROBE, 30, ctx.signal));
         if (found.present) engram = project;
         notes = found.present ? `Engram ${ENGRAM_VERSION}, project ${project}` : `none: ${found.reason}`;
         ctx.emit(`Notes · ${notes}`);
@@ -749,7 +776,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // A desktop in this VM (the desktop image: a display, a window manager, a browser), and on it the hardware tools
       // (KiCad and FreeCAD: the hardware image, C1 step 11)? Asked of the VM as the task starts, in one question, so the
       // agent is told what it has and how to operate it, and one without is told nothing of either.
-      const found = ((await deps.exec(agent, "command -v desktop kicad-cli", 30, ctx.signal).catch(() => null))?.stdout ?? "").split("\n").map((line) => line.trim());
+      const found = ((await inVm("command -v desktop kicad-cli", 30, ctx.signal).catch(() => null))?.stdout ?? "").split("\n").map((line) => line.trim());
       const desktop = found.some((path) => path.endsWith("/desktop"));
       const hardware = desktop && found.some((path) => path.endsWith("/kicad-cli"));
       // Its eyes: the model `desktop look` asks, named to every command of the task (the VM's own gateway token does the
@@ -772,7 +799,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const keepStep = (step: number) => {
         const command = steps.command;
         keeping = keeping.then(async () => {
-          const kept = await deps.exec(agent, checkpointCommand(root, task.id, step, steps.last), 60, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: String(error?.message ?? error), durationMs: 0, truncated: false }));
+          const kept = await inVm(checkpointCommand(root, task.id, step, steps.last), 60, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: String(error?.message ?? error), durationMs: 0, truncated: false }));
           const line = kept.stdout.trim().split("\n").at(-1) ?? "";
           const made = /^([0-9a-f]{40}) ([0-9a-f]{40} [0-9a-f]{40})$/.exec(line);
           if (made) [steps.commit, steps.last] = [made[1]!, made[2]!];
@@ -796,8 +823,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         const limit = Math.min(timeout, TEAM_COMMAND_SECONDS);
         // Another node's task runs each command under the handed helper: in a process group of its own, under its own
         // deadline, what a gate started ended with it and what any other leaves running kept for the task's end.
-        if (handed) return deps.exec(agent, inTask(handedCommand(command, { task: task.id, limitSec: limit, ends: what === "gate" ? "gate" : "task" })), limit + HANDED_MARGIN_SECONDS, ctx.signal);
-        return deps.exec(agent, inTask(command), limit, ctx.signal);
+        if (handed) return inVm(inTask(handedCommand(command, { task: task.id, limitSec: limit, ends: what === "gate" ? "gate" : "task" })), limit + HANDED_MARGIN_SECONDS, ctx.signal);
+        return inVm(inTask(command), limit, ctx.signal);
       };
       /**
        * What another node's task left running in its VM ends with the task, however it ended; said when it can't be. It
@@ -806,7 +833,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
        */
       const endHanded = async () => {
         const end = handedEndCommand(task.id);
-        const ended = await (deps.stopTell ? deps.stopTell(agent, end, 60) : deps.exec(agent, end, 60, AbortSignal.timeout(90_000))).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+        const ended = await (own ? own.vm.exec(end, 60, AbortSignal.timeout(90_000)) : deps.stopTell ? deps.stopTell(agent, end, 60) : deps.exec(agent, end, 60, AbortSignal.timeout(90_000))).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
         if (ended.exitCode !== 0) ctx.emit(`Processes · what this task left running in its VM couldn't all be ended: ${redact(ended.stderr || ended.stdout).slice(0, 300)}`);
       };
       const execOn = (seat: SeatRun) => (command: string, timeout = 120) => seat.exec(inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
@@ -1016,10 +1043,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           const cost = costOf(mergeSpend(spent, await deps.toolSpent?.(agent, startedAt)), deps.prices?.() ?? {});
           return { usd: cost.usd, complete: cost.complete };
         },
-        stopAgent: () => deps.stopWorker(agent),
-        ...(deps.stopTell ? { tellStop: (command: string, timeout: number) => deps.stopTell!(agent, command, timeout) } : {}),
+        // (Another node's task's in its own VM, as all its commands are.)
+        stopAgent: () => (own ? own.vm.stop() : deps.stopWorker(agent)),
+        ...(own ? { tellStop: (command: string, timeout: number) => own.vm.exec(command, timeout, new AbortController().signal) } : deps.stopTell ? { tellStop: (command: string, timeout: number) => deps.stopTell!(agent, command, timeout) } : {}),
         // Its coding agent's run followed as it goes, where its VM's node can keep a command open: else looked at.
-        ...(deps.follow ? { follow: (offset: number) => deps.follow!(agent, offset, ctx.signal) } : {}),
+        ...(own ? (own.vm.follow ? { follow: (offset: number) => own.vm.follow!(offset, ctx.signal) } : {}) : deps.follow ? { follow: (offset: number) => deps.follow!(agent, offset, ctx.signal) } : {}),
         // On a seat: its coding tool's own commands, its follow and its stop are in the seat's VM; everything else stays here.
         ...(onSeat ? { harness: harnessOn(onSeat) } : {}),
         // What you and your agent said to it as it ran, taken at its safe points.
@@ -1069,7 +1097,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         changed = `\nBase: ${base.slice(0, 12)}${fetched === "stale" ? " (the repository could not be fetched: this is the clone as it was)" : ""}\n${changed}`;
       }
       // (Whatever the task left in its temporary directory goes with it.)
-      await deps.exec(agent, `rm -rf ${quote(temp)}`, 60, ctx.signal).catch(() => {});
+      await inVm(`rm -rf ${quote(temp)}`, 60, ctx.signal).catch(() => {});
       return { verified, output: `${outcome.summary}\n\nReview: ${outcome.review ?? outcome.status}\nWorkspace: ${root}${changed}${notes ? `\nNotes: ${notes}` : ""}`, ...(verified ? {} : { error: outcome.status }), record, ...(changes ? { changes } : {}), ...(!verified && outcome.rest ? { rest: outcome.rest } : {}) };
     },
   };

@@ -144,7 +144,7 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
   // Each lease minted is a token of its own, by its number; what was asked of each is kept.
   const tokens = { minted: [] as { label: string; providers?: string[]; models?: string[]; ttlMinutes: number; maxRequests: number }[], extended: [] as string[], revoked: [] as string[] };
   const host = new SandboxHost({
-    node: "test", maxCpus: 8, maxMemoryGb: 16, runner, ledger: (e) => void ledger.push(e), layout2: true, moved: (run, entries) => void moved.push({ run, entries }),
+    node: "test", maxCpus: 8, maxMemoryGb: 16, microVMs: true, runner, ledger: (e) => void ledger.push(e), layout2: true, moved: (run, entries) => void moved.push({ run, entries }),
     tokens: {
       mint: (scope) => {
         tokens.minted.push(scope);
@@ -352,5 +352,59 @@ describe("an agent's VM in layout 2", () => {
     f.modes.length = 0;
     await f.host.create({ network: "gateway", cpus: 1, memoryGb: 2, ttlMinutes: 60, persistent: false, run: "adhoc-test" });
     expect(f.modes).toEqual([]);
+  });
+});
+
+/*
+ * Another node's task's VM (createTaskVm; the owner's decision of 27 November 2026, the fabric's R3-1 (a)): one of its
+ * own, made like a seat's, sharing the agent's workspace alone, never its HOME nor its notes; leased the task's models
+ * alone, never your keys nor its repository; labelled with its task, and gone, with all it started, as the task ends.
+ */
+describe("another node's task's VM", () => {
+  const task = { task: "task-abcdefghijkl", shares: ID, run: "handed.task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: 60 };
+
+  test("shares the agent's workspace alone, with a HOME of its own; leased the task's models alone; labelled with its task", async () => {
+    const f = fake({ layout: "2" });
+    await f.host.prepareTeam(ID, RUN, { connector: "github", owner: "example", repo: "app" }, ["anthropic"], undefined, ["key:test-only"]);
+    const vm = await f.host.createTaskVm(task);
+    const made = f.containers.get(containerName(vm.id))!;
+    expect(made.labels[`${LABEL}.task`]).toBe(task.task);
+    expect(made.labels[`${LABEL}.shares`]).toBe(ID);
+    expect(made.image).toBe(IMAGE);
+    expect(made.mounts).toEqual([{ Type: "volume", Name: volumeName(ID), Destination: "/work", Subpath: "work" }]);
+    const run = f.calls.find((a) => a[0] === "run" && a.includes(`${LABEL}.task=${task.task}`))!;
+    expect(run).toEqual(expect.arrayContaining(["--tmpfs", "/home/agent:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700", "HOME=/home/agent"]));
+    // Its lease: its models alone, on their providers; none of the agent's keys or its repository, though the agent's has them.
+    // (Under the agent's VM's label, which its task's spend and budget are counted by: its token is its own.)
+    expect(f.tokens.minted.at(-1)).toEqual({ label: `sandbox:${ID}`, providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    const lease = f.leases.get(containerName(vm.id))!;
+    expect([lease.INVINCIBLE_REPO_URL, lease.INVINCIBLE_KEYS]).toEqual([undefined, undefined]);
+    expect(f.leases.get(containerName(ID))!.INVINCIBLE_REPO_URL).toBeDefined();
+    expect(f.ledger.find((e) => e.resource === "sandbox.task-lease")?.detail).toContain("for anthropic/claude-paid alone");
+    // Renewed with the agent's, and revoked as it goes.
+    await f.host.renewTeam(ID, RUN);
+    expect(f.tokens.extended).toEqual(["test-only-hash-1", "test-only-hash-2"]);
+    await f.host.destroy(vm.id, { run: task.run });
+    expect(f.tokens.revoked).toEqual(["test-only-hash-2"]);
+    // And it is known as what it is: a task's, which no route reaches into.
+    expect(await f.host.taskVms()).toEqual([]);
+  });
+
+  test("is listed by its id while it is there, and is a task's in its view", async () => {
+    const f = fake({ layout: "2" });
+    f.agent().status = "running";
+    const vm = await f.host.createTaskVm(task);
+    expect(await f.host.taskVms()).toEqual([vm.id]);
+    expect((await f.host.get(vm.id))?.task).toBe(task.task);
+  });
+
+  test("is refused beside an agent's VM whose HOME is its /work, beside one that isn't here, and on a Mac", async () => {
+    const old = fake();
+    old.agent().status = "running";
+    await expect(old.host.createTaskVm(task)).rejects.toMatchObject({ status: 409 });
+    expect([...old.containers.values()].some((c) => c.labels[`${LABEL}.task`])).toBe(false);
+    await expect(fake({ layout: "2" }).host.createTaskVm({ ...task, shares: "9876543210" })).rejects.toMatchObject({ status: 404 });
+    const mac = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, runner: async () => ({ code: 1, stdout: "", stderr: "" }), ledger: () => {}, engine: "container", tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true } });
+    await expect(mac.createTaskVm(task)).rejects.toMatchObject({ status: 424 });
   });
 });

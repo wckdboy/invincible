@@ -28,7 +28,8 @@ setDefaultTimeout(60_000);
 if (!HAVE_QAMP) console.log(`${import.meta.file} SKIPPED, unverified: no Q-AMP binary. Run it with INVINCIBLE_QAMP_TEST_BIN=<qamp 0.2's sidecar for this machine>.`);
 
 describe.skipIf(!HAVE_QAMP)(`the fabric between two nodes on one machine${HAVE_QAMP ? "" : " (skipped: no Q-AMP binary; set INVINCIBLE_QAMP_TEST_BIN)"}`, () => {
-  const docker = fakeDocker();
+  // (On an engine that mounts its volumes' subpaths: its agents' VMs in layout 2, where another node's task gets a VM of its own.)
+  const docker = fakeDocker({ engine: "27.3.1" });
   let pair: Pair;
   let a: Daemon;
   let b: Daemon;

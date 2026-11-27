@@ -141,38 +141,33 @@ transport keys carries all of it:
      re-review's R3-6). A node that restarts ends what was handed to it before, as nobody follows it any more: a planned
      restart (a deploy, an update) ends it as stopped and never takes it up again, and one a crash cut off ends as the
      node comes back.
-   - **Its work is bounded, but for the known gaps below.**
-     - Its gates are its giver's commands, run in your agent's VM: all of them together get as long as one command may
-       (15 minutes), every round counted, and once that is spent they aren't run and the work isn't done.
+   - **Its work is bounded, in a VM of its own.**
+     - Every command of it, its agent's, its coding tool's and its gates, runs in a VM made for it beside its agent's
+       (`packages/node/src/task-vms.ts`, `createTaskVm`; the owner's decision of 27 November 2026, the third
+       re-review's R3-1). That VM is made from the agent's VM's image, as big as it and on its network. It shares the
+       agent's workspace alone (its `work/` tree: never its HOME, nor its notes) and has a HOME of its own in memory.
+       Its lease is the task's paid models alone (never your keys, nor its repository), counted under its agent's
+       label, so its budget counts what it spends. None of its commands runs in the agent's own VM.
+     - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
+       the task started there: nothing it starts outlives the task, your grant or its node's revocation. One an earlier
+       process of the node left is removed as the node starts. No route reaches into it, yours included.
+     - It is made on a Linux host with Docker, beside an agent's VM whose HOME is apart from its workspace (layout 2,
+       SECURITY.md); beside one still in layout 1 it is refused, since that VM's HOME is its workspace. On a node with
+       no room beside its agent's VM for one as big, the task waits for room as any sandbox does, within its life.
+     - Its gates are its giver's commands, run in its VM: all of them together get as long as one command may (15
+       minutes), every round counted, and once that is spent they aren't run and the work isn't done.
      - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
-       in a process group of its own under its own deadline: its `desktop` verbs too, which don't take the shortcut to
-       the VM's desktop process that your own work's do (the third re-review's R3-3). Not the commands its coding tool
-       runs itself, which are the tool's own children. A command that ends or stops its own helper is held to neither
-       from then on (R3-1).
-     - What a gate starts ends with the gate: in the background, under nohup, and in the VM (Linux) having left its
-       group with setsid, while the gate's helper lives. A command can end or stop its own helper (R3-1).
-     - What its other commands leave running as they end (a server the next one uses, or a desktop it started, with
-       its apps), its coding tool's included, is listed then, and ended with the task however it ends: a pause of its
-       agent, or turning it off, included (its end goes as the stop's word to a coding tool does, which a pause doesn't
-       refuse), and after a crash as the node comes back (the third re-review's R3-5). Not a leftover that double-forks
-       out with setsid after its command ended, nor what a command that ended its helper started (R3-1). A desktop that
-       was already running in the VM (yours, or its agent's from before) isn't one it started: what it opens there is
-       the residual's, below. The list is a file in the VM, which its commands can rewrite (R3-1).
+       in a process group of its own under its own deadline, its `desktop` verbs too (the third re-review's R3-3). What
+       a gate starts ends with the gate, and what its other commands leave running is listed and ended with the task
+       (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
+       bound, but not the task's VM, which goes as the task ends.
      - The runner stops it at its call's deadline or after 24 hours, whichever comes first, waiting for your approval
        included. A stop that can't be written (the node stopping, or a write that fails) ends its call all the same,
        answered as failed (the third re-review's R3-2). A task you take up again by its id lives no longer than the
        longest a hand-off may last, from then (R3-6).
-     - Not bounded, besides the known gaps: work it hands to a process that was running in the VM before it began
-       isn't one it started, so it isn't ended. The VM time its work takes isn't counted itself: its budget's dollars
-       and its life bound it.
-     - **Known gaps, until they're fixed** (the third re-review's, Low). The fabric runs only when you switch it on.
-       - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
-         ends, or, in the VM, fork successors faster than its helper's scan. What it started then outlives the gate,
-         the task, your grant and its node's revocation.
-       Its fix (the owner's decision of 27 November 2026) is a VM of the task's own, made like a seat's and removed as
-       the task ends, which shares only the agent's workspace: on a Linux host with Docker, where an agent's HOME is
-       apart from its workspace (layout 2, SECURITY.md). A Mac's agents' VMs stay in layout 1, as no VM there shares a
-       workspace, so a Mac will take no hand-offs.
+     - Not bounded: the VM time its work takes isn't counted itself (its budget's dollars and its life bound it), and
+       what it leaves in the workspace it shares (the repository's scripts and hooks among them) is there for the
+       agent's later work, as SECURITY.md's layout 2 section says.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:

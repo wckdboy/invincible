@@ -57,6 +57,8 @@ export interface SandboxSpec {
   resolvConf?: string;
   /** A VM made for a seat (a run on it, or its sign-in): the seat's home mounted, and its tool told where (seatEnv). */
   seat?: { id: string; kind: SeatKind };
+  /** A VM made for another node's task (createTaskVm): its own, removed as the task ends, by the task it is for. */
+  task?: string;
   /**
    * A VM made for an agent's run: that agent's own /work (its volume, or its workspace's path on this host), never one of
    * its own. Removing this VM leaves it as it was: it has no disk of its own to remove.
@@ -200,6 +202,7 @@ export function labels(spec: SandboxSpec): Record<string, string> {
     [`${LABEL}.disk`]: spec.workspace && spec.diskGb ? String(spec.diskGb) : "none",
     [`${LABEL}.isolation`]: spec.isolation,
     ...(spec.seat ? { [`${LABEL}.seat`]: spec.seat.id } : {}),
+    ...(spec.task ? { [`${LABEL}.task`]: spec.task } : {}),
     ...(spec.shares ? { [`${LABEL}.shares`]: spec.shares.sandbox } : {}),
     ...(spec.layout ? { [`${LABEL}.layout`]: "2" } : {}),
     // The gateway token's hash is deliberately NOT a label: images can carry labels of

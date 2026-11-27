@@ -141,17 +141,23 @@ export function fakeDocker(opts: { engine?: string } = {}): FakeDocker {
         case "ps": {
           const wanted = rest.filter((_, i) => rest[i - 1] === "--filter").map((f) => f.replace(/^label=/, ""));
           const matching = [...containers.values()].filter((c) => wanted.every((w) => {
+            // (A label's key alone: whatever its value.)
             const [key, ...value] = w.split("=");
-            return c.labels[key!] === value.join("=");
+            return value.length ? c.labels[key!] === value.join("=") : key! in c.labels;
           }));
           if (rest.includes("--format")) return ok(matching.map((c) => c.labels["dev.invincible.id"] ?? "").join("\n"));
           return ok(matching.map((c) => c.name).join("\n"));
         }
         case "inspect": {
-          // (Its mounts alone, as the host asks where an agent's /work is.)
+          // (Its mounts alone, as the host asks where an agent's /work is; or one of its labels, as it asks which layout it is in.)
           if (rest[0] === "--format" && rest[1] === "{{json .Mounts}}") {
             const container = containers.get(rest[2]!);
             return container ? ok(JSON.stringify(container.mounts)) : no();
+          }
+          const label = rest[0] === "--format" ? /^\{\{index \.Config\.Labels "([^"]+)"\}\}$/.exec(rest[1]!)?.[1] : undefined;
+          if (label) {
+            const container = containers.get(rest[2]!);
+            return container ? ok(container.labels[label] ?? "") : no();
           }
           const found = rest.map((name) => containers.get(name)).filter((c): c is Container => !!c);
           if (!found.length) return no();

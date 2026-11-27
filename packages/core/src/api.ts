@@ -1741,6 +1741,8 @@ export interface SandboxView {
   isolation: "container" | "vm";
   /** A seat's VM (core's seats.ts: a run on it, its sign-in or its status): the seat whose home it has. No route reaches into one. */
   seat?: string;
+  /** A VM made for another node's task (the fabric's hand-offs): the task it is for. No route reaches into one either. */
+  task?: string;
 }
 
 export interface ExecResult {

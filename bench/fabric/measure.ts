@@ -67,7 +67,8 @@ const admin = (home: Home, port: number) => async <T = any>(name: RouteName, inp
 
 let held: { release: () => void; done: Promise<void>; entered: boolean } | null = null;
 const written = new Set<string>();
-const docker = fakeDocker();
+// (It says it is Docker Engine 27, so Ada's VM is in layout 2, and a task handed to her runs in a VM of its own beside it.)
+const docker = fakeDocker({ engine: "27.3.1" });
 docker.onExec = async (_container, command) => {
   const text = command.join("\n");
   const gate = /gate-([a-z0-9]+)/.exec(text)?.[1];

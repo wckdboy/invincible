@@ -1,0 +1,92 @@
+import { describe, expect, test } from "bun:test";
+import type { ExecResult, SandboxView } from "@invincible/core";
+import { TASK_VM_MINUTES, TaskVms } from "../src/task-vms.ts";
+
+/*
+ * Other nodes' tasks' VMs on this node (task-vms.ts; the fabric's R3-1 (a)): one for each task, beside its agent's,
+ * every command of the task run there, and gone as the task ends; one an earlier process of this node left is removed
+ * before the next is made, and one that couldn't be removed is tried again then.
+ */
+
+const STARTED = Date.UTC(2026, 10, 27, 11, 0);
+const done = (stdout = ""): ExecResult => ({ exitCode: 0, stdout, stderr: "", durationMs: 1, truncated: false });
+
+/** A host as TaskVms uses it: VMs made for tasks, their commands, their streams, their removal. */
+function host(options: { left?: string[]; failRemove?: string } = {}) {
+  const vms = new Map<string, { createdAt: number; run: string }>();
+  for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
+  const asked: unknown[] = [], ran: { vm: string; cmd: string[] }[] = [], removed: string[] = [];
+  let made = 0;
+  const fake = {
+    get: async (id: string) => (vms.has(id) ? ({ id, createdAt: vms.get(id)!.createdAt, run: vms.get(id)!.run } as unknown as SandboxView) : null),
+    taskVms: async () => [...vms.keys()],
+    createTaskVm: async (input: unknown) => {
+      asked.push(input);
+      const id = `vm-${++made}`;
+      vms.set(id, { createdAt: STARTED + made, run: (input as { run: string }).run });
+      return { id } as SandboxView;
+    },
+    exec: async (vm: string, cmd: string[]) => (ran.push({ vm, cmd }), done()),
+    stream: async () => ({ lines: (async function* () {})(), write: () => {}, close: () => {}, kill: () => {}, exited: Promise.resolve(0) }),
+    destroy: async (vm: string) => {
+      if (options.failRemove === vm) {
+        options.failRemove = undefined;
+        throw new Error("docker couldn't remove it");
+      }
+      removed.push(vm);
+      vms.delete(vm);
+      return { verdict: "allow" } as never;
+    },
+  };
+  return { fake, vms, asked, ran, removed };
+}
+
+const ask = { vm: "agent-vm", task: "task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"] };
+
+describe("another node's task's VM, on this node", () => {
+  test("made for it beside its agent's, its lease its models alone; its commands there; gone as it ends, its run stopped first", async () => {
+    const h = host();
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
+    const vm = await vms.open(ask, new AbortController().signal);
+    expect(h.asked).toEqual([{ task: ask.task, shares: "agent-vm", run: `handed.${ask.task}`, providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: TASK_VM_MINUTES }]);
+    await vm.exec("echo one", 30, new AbortController().signal);
+    expect(h.ran).toEqual([{ vm: "vm-1", cmd: ["bash", "-lc", "echo one"] }]);
+    await vm.release();
+    // Its run stopped (the same cleanup as a seat's), then its VM removed; released again, nothing more.
+    expect(h.ran.at(-1)!.cmd.join(" ")).toContain("bash -lc");
+    expect(h.removed).toEqual(["vm-1"]);
+    await vm.release();
+    expect(h.removed).toEqual(["vm-1"]);
+  });
+
+  test("one an earlier process left is removed before the first is made; one this process made is not", async () => {
+    const h = host({ left: ["old-1", "old-2"] });
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED });
+    await vms.open(ask, new AbortController().signal);
+    expect(h.removed.sort()).toEqual(["old-1", "old-2"]);
+    expect([...h.vms.keys()]).toEqual(["vm-1"]);
+    // (Swept once: the next takes none of this process's away.)
+    await vms.open({ ...ask, task: "task-mnopqrstuvwx" }, new AbortController().signal);
+    expect([...h.vms.keys()].sort()).toEqual(["vm-1", "vm-2"]);
+  });
+
+  test("one that couldn't be removed as its task ended is removed before the next is made", async () => {
+    const h = host({ failRemove: "vm-1" });
+    const logged: string[] = [];
+    const vms = new TaskVms({ host: () => h.fake as never, now: () => STARTED, log: (line) => void logged.push(line) });
+    await (await vms.open(ask, new AbortController().signal)).release();
+    expect(h.removed).toEqual([]);
+    expect(logged.some((line) => line.includes("couldn't be removed"))).toBe(true);
+    await vms.open({ ...ask, task: "task-mnopqrstuvwx" }, new AbortController().signal);
+    expect(h.removed).toEqual(["vm-1"]);
+  });
+
+  test("none is made for work that has stopped, nor where this node has no VMs", async () => {
+    const h = host();
+    const stopped = new AbortController();
+    stopped.abort();
+    await expect(new TaskVms({ host: () => h.fake as never }).open(ask, stopped.signal)).rejects.toThrow("its work has stopped");
+    await expect(new TaskVms({ host: () => null }).open(ask, new AbortController().signal)).rejects.toThrow("this node has no VMs for another node's task");
+    expect(h.asked).toEqual([]);
+  });
+});

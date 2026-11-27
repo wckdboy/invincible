@@ -178,6 +178,7 @@ import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.t
 import { addSeat, askSeat, recordSeatStatus, removeSeat, SeatError, seatSalt, seatUse, seatViews, setSeatPolicy, setSeatServes } from "./seats.ts";
 import { SeatSignIns } from "./seat-sign-in.ts";
 import { SeatRuns } from "./seat-runs.ts";
+import { TaskVms } from "./task-vms.ts";
 import { QuestionError, type Questions } from "./questions.ts";
 
 /** An agent's uses of each key it was given are counted over this many days (teamKeyUses). */
@@ -1184,7 +1185,10 @@ export function createApp(ctx: AppContext) {
    */
   const outOfReach = (sandbox: SandboxView | null | undefined): void => {
     if (sandbox?.seat) throw new HttpError(403, "that is a seat's VM, the node's own: no route reaches into it");
+    if (sandbox?.task) throw new HttpError(403, "that is another node's task's VM, the node's own: no route reaches into it");
   };
+  /** Other nodes' tasks' VMs on this node (task-vms.ts): each its own, beside its agent's, gone as its task ends. */
+  const taskVms = new TaskVms({ host: () => ctx.sandbox ?? null, log: ctx.log });
   /** Coding agents' runs on this node's seats (seat-runs.ts): the node chooses, and nothing asks you. */
   const seatRuns = new SeatRuns({
     store: ctx.store,
@@ -2791,6 +2795,14 @@ export function createApp(ctx: AppContext) {
         return seatRuns.take({ agent: current.id, made: current.createdAt, vm: bound.id, harness, from: opts.from, wait: opts.wait }, signal);
       },
       seatWindow: (seat, window) => seatRuns.window(seat.id, window),
+      // Another node's task's own VM (the fabric's R3-1 (a)), beside its agent's on this node: leased its models alone, on
+      // the providers with a key now that serve them, as its prepare's lease is (never your keys, nor its repository).
+      handedVm: async (member, task, models, signal) => {
+        const bound = teamMember(member.id).workspace;
+        if (!bound || bound.node !== ctx.identity.id || !ctx.sandbox) throw new Error("another node's task runs beside its agent's VM on this node, and this agent's VM isn't here");
+        const providers = keyedProviders().filter((id) => models.some((ref) => ref.startsWith(`${id}/`)));
+        return taskVms.open({ vm: bound.id, task: task.id, providers, models }, signal);
+      },
       // An agent on the roster's engineer models works with its own tools, as was measured (team-runtime toolsLoop).
       toolsLoop: true,
       files: (refs) => filesFor(refs, ctx.uploads),
@@ -2901,8 +2913,10 @@ export function createApp(ctx: AppContext) {
       // A fix to a pull request that ended verified is offered to you as a push onto its branch, as its agent's (ci-back.ts).
       if (task.fix) void offerFix({ call: (input) => ctx.connectors.call(input, { kind: "agent", by: agentLabel(task.assignee) }), note: (id, text) => team.service?.noteTask(id, text), log: ctx.log }, task);
     } });
-    // (Seats' VMs an earlier process of this node left are removed first: the work they ran ended with it.)
+    // (Seats' VMs an earlier process of this node left are removed first: the work they ran ended with it. So are other
+    // nodes' tasks' VMs: their tasks are taken up again, if at all, each in a VM made for it then.)
     void seatRuns.sweep();
+    void taskVms.sweep().catch((error: Error) => ctx.log(`fabric: other nodes' tasks' VMs an earlier process left couldn't be listed: ${redact(String(error?.message ?? error)).slice(0, 200)}`));
     ctx.team.service.start();
     // A task another node handed over (fabric/handoff.ts): given to the agents here as that node's (never as yours), at
     // once within your grant for the pair, or as a proposal that waits for your approval; followed, stopped.

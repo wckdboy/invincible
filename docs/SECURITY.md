@@ -652,7 +652,7 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     isn't your word or wasn't written by a full node, on replay too. Each names the full node that recorded it.
   - It bounds the agents, the tools and the day's budget, counted by the budgets given (the most each may spend), each
     hand-off at least $0.10 whatever smaller budget it asks for, so the day bounds how many there are too (the
-    re-review's N5). A handed task's gates (its giver's commands, in your agent's VM) get 15 minutes in all, every
+    re-review's N5). A handed task's gates (its giver's commands, in its own VM) get 15 minutes in all, every
     round counted.
   - What a handed task does is bounded with it (the second re-review's N7), but for the known gaps below:
     - Its agent's own loop, its coding tool and its commands run only on models its budget counts at more than $0 (its
@@ -661,28 +661,28 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       sign-in (a seat) or an ACP agent, so what they spend is counted. But not (I-l): a paid model's call that reports
       no usage counts nothing, for any budget, and a command can start a coding tool itself on that tool's own sign-in
       in the VM, if it has one, which no lease reaches.
+    - **In a VM of its own** (the owner's decision of 27 November 2026, the third re-review's R3-1;
+      `packages/node/src/task-vms.ts`, `createTaskVm`, tested in `task-vms.test.ts`, `team-layout.test.ts`,
+      `team-runtime.test.ts` and `fabric-handoff.e2e.test.ts`). Every command of it, its agent's, its coding tool's and
+      its gates, runs in a VM made for it beside its agent's: from the agent's VM's image, as big as it and on its
+      network, sharing the agent's workspace alone (its `work/` tree: never its HOME, nor its notes), with a HOME of its
+      own in memory. Its lease is the task's paid models alone, never your keys nor its repository, counted under its
+      agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. The VM
+      goes as the task ends, however it ends, and with it everything the task started there; one an earlier process of
+      the node left is removed as the node starts; no route reaches into it. It is made only beside an agent's VM in
+      layout 2, on a Linux host with Docker; beside one whose HOME is its workspace it is refused. On a node with no
+      room beside the agent's VM for one as big, the task waits for room as any sandbox does, within its life.
     - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
-      in a process group of its own and under its own deadline, its `desktop` verbs too: they don't take your own
-      work's shortcut to the VM's desktop process (the third re-review's R3-3). Not the commands its coding tool runs
-      itself, which are the tool's children, and a command that ends or stops its own helper is held to neither from
-      then on (R3-1). In the VM (Linux) the helper is the command's subreaper while it lives, so a process that left
-      the group with setsid is still found. What a gate starts ends with the gate; what its other commands leave
-      running as they end (a desktop it started among them, with its apps), its coding tool's included, is listed by
-      identity and ended with the task however it ends, a pause of its agent and a crash included: its end goes the
-      way a pause doesn't refuse, and a node coming back ends what its handed tasks left in their VMs (the third
-      re-review's R3-5). Not when a command ends or stops its own helper, nor a leftover that double-forks out with
-      setsid after its command ended (R3-1). A desktop already running in the VM isn't one it started: what it opens
-      there is the residual's.
+      in a process group of its own and under its own deadline, its `desktop` verbs too (the third re-review's R3-3).
+      In the VM (Linux) the helper is the command's subreaper while it lives. What a gate starts ends with the gate;
+      what its other commands leave running, its coding tool's included, is listed and ended with the task however it
+      ends (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
+      bound, but not the task's VM (R3-1, closed).
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).
-    - Residual: work it hands to a process that was already running in the VM isn't one it started, and isn't ended.
-      Its VM time isn't counted itself. And the known gaps:
-    - **Known gaps, until they're fixed** (the third re-review's, Low; the fabric runs only when you switch it on):
-      - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
-        ends, or, in the VM, fork successors faster than its helper's scan; and the task's list of what to end is a
-        file in the VM that its commands can rewrite. What it started then outlives the gate, the task, the grant and
-        the node's revocation.
+    - Residual: its VM time isn't counted itself, and what it leaves in the workspace it shares (the repository's
+      scripts and hooks among them) is there for the agent's later work (layout 2's residual, above).
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
     these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1),
     and those you take up again by id (R3-6).

@@ -67,8 +67,9 @@ const stats = (samples: number[]) => {
 
 const home = new Home(join(ROOT, "node"));
 // The serving node's VM, through a stand-in Docker: a command tagged write-hold… waits until it is told to go on (a run
-// under way, to stop or to revoke), every other command answers at once.
-const docker = fakeDocker();
+// under way, to stop or to revoke), every other command answers at once. It says it is Docker Engine 27, so its agent's
+// VM is in layout 2, and a task handed to it runs in a VM of its own beside that one.
+const docker = fakeDocker({ engine: "27.3.1" });
 let release: () => void = () => {};
 let held = new Promise<void>((resolve) => (release = resolve));
 const written = new Set<string>();

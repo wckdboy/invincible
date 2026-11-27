@@ -314,6 +314,8 @@ export interface CreateOptions {
   signal?: AbortSignal;
   seat?: SeatVmInput["seat"];
   shares?: NonNullable<SandboxSpec["shares"]>;
+  /** A VM made for another node's task (createTaskVm's alone): the task it is for. */
+  task?: string;
 }
 
 /** A VM for a seat (createSeatVm): which seat, how many VMs its home may be in at once, and an agent's VM whose /work it shares. */
@@ -326,6 +328,18 @@ export interface SeatVmInput {
   memoryGb: number;
   ttlMinutes: number;
   run: string;
+}
+
+/** A VM for another node's task (createTaskVm): the task, the agent's VM whose workspace it shares, and its lease. */
+export interface TaskVmInput {
+  task: string;
+  /** The agent's own VM on this host, in layout 2: its workspace (its work/ tree alone) is this VM's /work. */
+  shares: string;
+  run: string;
+  /** Its lease: the providers its models are on, and those models alone (the task's paid ones: never a key, never a repository). */
+  providers: readonly string[];
+  models: readonly string[];
+  ttlMinutes: number;
 }
 
 /** One thing done on an agent's desktop from outside its VM (`look`: nothing, only the picture). */
@@ -831,6 +845,7 @@ export class SandboxHost {
       ...(tokenHash ? { tokenHash } : {}),
       ...(seated.seat ? { seat: { id: seated.seat.id, kind: seated.seat.kind } } : {}),
       ...(seated.shares ? { shares: seated.shares } : {}),
+      ...(seated.task ? { task: seated.task } : {}),
       // One that shares an agent's workspace has a HOME of its own, empty and in memory: never the agent's (a Linux host's alone).
       ...(seated.shares && !this.apple ? { ownHome: { path: await this.imagePath(image) } } : {}),
     };
@@ -1869,6 +1884,43 @@ export class SandboxHost {
     }
   }
 
+  /**
+   * A VM of its own for another node's task (the owner's decision of 27 November 2026, the fabric's R3-1 (a)), made like a
+   * seat's VM: from the agent's VM's image, as big as it and on its network, sharing the agent's workspace alone (its work/
+   * tree: never its HOME, nor its notes) with a HOME of its own in memory; leased the task's models alone (never your keys,
+   * nor its repository), renewed with the agent's (renewTeam); labelled with its task. It goes as the task ends (destroy),
+   * and with it whatever the task started there; one an earlier process left is swept as its node starts. On a Linux host
+   * with Docker, beside an agent's VM in layout 2: one whose HOME is its /work would share that HOME. A Mac refuses (no VM
+   * there shares a workspace).
+   */
+  async createTaskVm(input: TaskVmInput): Promise<SandboxView> {
+    if (this.apple) throw new SandboxError("another node's task is taken only on a Linux host with Docker: on a Mac no VM shares an agent's workspace", 424);
+    const own = await this.get(input.shares);
+    if (!own || own.ephemeral) throw new SandboxError("another node's task shares an agent's own VM on this host, and that one is not here", 404);
+    const shares = await this.sharedWork(input.shares);
+    if (!shares.tree) throw new SandboxError("another node's task shares only an agent's workspace, and this agent's VM has no HOME apart from it yet (layout 2): it is moved at its next prepare while nothing runs in it", 409);
+    const vm = await this.create(
+      { network: own.network, image: own.image, cpus: own.cpus, memoryGb: own.memoryGb, ttlMinutes: input.ttlMinutes, persistent: false, run: input.run, isolation: own.isolation },
+      { shares, task: input.task },
+    );
+    // (Under the agent's VM's label, which its task's spend and budget are counted by. Its token is its own.)
+    const minted = this.opts.tokens.mint({ label: `sandbox:${input.shares}`, providers: [...input.providers], models: [...input.models], ttlMinutes: TEAM_LEASE_MINUTES, maxRequests: 500 });
+    this.tokenStore.put(vm.id, minted.info.hash);
+    if (!(await this.writeLease(vm.id, gatewayEnv(minted.token, [...input.providers])))) {
+      // (Removed, which revokes its token: its commands would find no lease where they read one.)
+      await this.destroy(vm.id, { run: input.run }).catch(() => {});
+      throw new SandboxError("could not give another node's task's VM its lease, so it was removed", 424);
+    }
+    this.opts.ledger({ class: "modify", resource: "sandbox.task-lease", target: vm.name, verdict: "allow", run: input.run, detail: `another node's task ${input.task}: a VM of its own beside ${containerName(input.shares)}, sharing its workspace alone; model access capped at ${TEAM_LEASE_MINUTES} minutes and 500 requests, for ${input.models.join(", ") || "no model"} alone` });
+    return vm;
+  }
+
+  /** The VMs on this host made for other nodes' tasks, in any state, by their own ids: null when docker can't say. */
+  async taskVms(): Promise<string[] | null> {
+    const listed = await this.docker(["ps", "-a", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.task`, "--format", `{{.Label "${LABEL}.id"}}`]);
+    return listed.code === 0 ? listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : null;
+  }
+
   /** The VMs on this host that have a seat's home, in any state (a stopped one still holds it), by their own ids: null when docker can't say. */
   async seatVms(seat: string): Promise<string[] | null> {
     const listed = await this.docker(["ps", "-a", "--filter", `label=${LABEL}=1`, "--filter", `label=${LABEL}.node=${this.opts.node}`, "--filter", `label=${LABEL}.seat=${seat}`, "--format", `{{.Label "${LABEL}.id"}}`]);
@@ -2282,5 +2334,6 @@ function toView(labels: Record<string, string>, image: string, status: string, u
     isolation: labels[`${LABEL}.isolation`] === "vm" ? "vm" : "container",
     // (Its seat's label is set by createSeatVm alone: never by a route.)
     ...(labels[`${LABEL}.seat`] ? { seat: labels[`${LABEL}.seat`] } : {}),
+    ...(labels[`${LABEL}.task`] ? { task: labels[`${LABEL}.task`] } : {}),
   };
 }

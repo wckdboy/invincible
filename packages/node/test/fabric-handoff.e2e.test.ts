@@ -27,7 +27,8 @@ const fence = "```";
 const written = new Set<string>();
 let hold: { tag: string; entered: boolean; release: () => void; done: Promise<void> } | null = null;
 
-const docker = fakeDocker();
+// (On an engine that mounts its volumes' subpaths: its agents' VMs in layout 2, where another node's task gets a VM of its own.)
+const docker = fakeDocker({ engine: "27.3.1" });
 docker.onExec = async (_container, command) => {
   const text = command.join("\n");
   const gate = /gate-([a-z]+)/.exec(text)?.[1];
@@ -79,7 +80,9 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
       // Alpha's grants to runs last 4 s here (300 s otherwise), so every run below lives across their renewals.
       a: { fabricGrantTtlSecs: 4 },
       b: {
-        capabilities: sandboxCaps("beta"),
+        // (Room for an agent's VM and, beside it, the VM of a task another node hands it, as big as the agent's: on a node
+        // that can't hold both, the task waits for room as any sandbox does.)
+        capabilities: { ...sandboxCaps("beta"), cores: 16, memoryGb: 32 },
         docker: docker.runner,
         measure: async (reason, body, limit) => {
           const threads = ceilingThreads(body, limit);
@@ -114,6 +117,12 @@ describe.skipIf(!HAVE_QAMP)(`a task handed from one node to another's agents${HA
     await ended(view.id);
     const done = await handed(view.id);
     expect(done).toMatchObject({ phase: "ended", status: "done", agent: { id: "ada", name: "Ada" }, error: null });
+    // It ran in a VM of its own beside Ada's (the fabric's R3-1 (a)): its work there and none in hers; and that VM is gone.
+    const its = docker.execs.filter((e) => e.cmd.join(" ").includes("write-proof")).map((e) => e.container);
+    expect(its.length).toBeGreaterThan(0);
+    const ada = (await pair.callB<{ agents: { id: string; workspace?: { id: string } }[] }>("team")).agents.find((a) => a.id === "ada")!.workspace!.id;
+    expect(its.every((container) => container !== `invincible-sbx-${ada}`)).toBe(true);
+    expect(docker.running()).toBe(1);
     // Its trail came back as the work went: its gates, its command, the gate's run after, the review.
     const lines = done.trail.map((t) => t.text.split("\n")[0]!);
     expect(lines.some((l) => l.startsWith("Gates · "))).toBe(true);

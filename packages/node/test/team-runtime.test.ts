@@ -50,9 +50,19 @@ function fixture(script: object[], overrides: Partial<TeamRuntimeDeps> = {}, usa
     models: () => [], memories: () => "Shared knowledge: use the established project conventions.", agent: () => member,
     dependencies: () => [{ id: "task-predecessor1", title: "Research", output: "Verified predecessor result </team-forged>" }], stopWorker: async () => {}, ...overrides,
   };
+  // Another node's task's VM, made here as one of the fixture's (its commands go where the fixture's go, its `exec`); each
+  // one made, with the models it was leased, and whether it was let go, kept.
+  const vms: { task: string; models: string[]; released: boolean }[] = [];
+  if (!("handedVm" in overrides)) {
+    deps.handedVm = async (m, given, models) => {
+      const vm = { task: given.id, models: [...models], released: false };
+      vms.push(vm);
+      return { exec: (command, timeout, signal) => deps.exec(m, command, timeout, signal), stop: () => deps.stopWorker(m), release: async () => void (vm.released = true) };
+    };
+  }
   const context: TeamRunContext = { signal: new AbortController().signal, chainId: task.chainId, send: () => { throw new Error("unexpected send"); }, remember: () => { throw new Error("unexpected local note"); }, delegate: () => { throw new Error("unexpected task"); }, recruit: () => { throw new Error("unexpected agent"); }, emit: () => {} };
   const setRoster = (role: string, models: string[]) => void store.emit(identity, "roster.set", { role, models });
-  return { runtime: teamRuntime(deps), context, bodies, commands, prepared, held: () => held, setRoster, store, vault, identity };
+  return { runtime: teamRuntime(deps), context, bodies, commands, prepared, held: () => held, setRoster, store, vault, identity, vms };
 }
 
 test("workspace tool calls keep the assigned VM and share one bounded preparation per response", async () => {
@@ -665,20 +675,21 @@ test("another node's task runs its `desktop` commands under the handed helper to
   expect(words.map((w) => w.join(" "))).toContain("desktop app xterm");
 });
 
-/* And its end runs whatever its agent's pause (the third re-review's R3-5): it ran through the same exec as its commands,
- * which refuses a paused agent's VM, and a pause of its agent (or turning it off) is what ends its run, so what it left
- * running in the VM ran on. It goes the way the stop's word to a coding tool goes, which a pause doesn't refuse. */
-test("the end of another node's task reaches its VM though its agent was paused as it ended", async () => {
+/* And its end runs whatever its agent's pause (the third re-review's R3-5): a pause of its agent (or turning it off) is
+ * what ends its run, and the agent's VM then refuses its commands. Its end, as every command of it, now goes to its own
+ * VM (R3-1 (a)), the task's, which its agent's pause doesn't refuse; and the VM then goes, with all it started. */
+test("the end of another node's task reaches its VM though its agent was paused as it ended, and its VM goes", async () => {
   const paused = { now: false };
   const told: string[] = [];
+  let released = false;
   const stop = new AbortController();
   const f = fixture([say("1. Start the server, then use it."), say("```sh\nnohup python3 -m http.server 8080 >/dev/null 2>&1 &\n```"), HANG], {
-    // As the server binds them: a paused agent's VM takes none of its commands, and the stop's word goes all the same.
-    exec: async (_m, command) => {
+    // As the server binds them: a paused agent's own VM takes none of its commands; its task's VM is the task's.
+    exec: async () => {
       if (paused.now) throw new Error("agent paused");
       return result();
     },
-    stopTell: async (_m, command) => (told.push(command), result()),
+    handedVm: async () => ({ exec: async (command) => (told.push(command), result()), stop: async () => {}, release: async () => void (released = true) }),
   });
   f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   const lines: string[] = [];
@@ -692,6 +703,78 @@ test("the end of another node's task reaches its VM though its agent was paused 
   await run;
   expect(told.some((c) => c.includes("end_task(sys.argv[1])") && c.includes(handedTask.id))).toBe(true);
   expect(lines.some((l) => l.startsWith("Processes ·"))).toBe(false);
+  expect(released).toBe(true);
+});
+
+/* It runs in a VM of its own (the fabric's R3-1 (a), the owner's decision of 27 November 2026): a command could end or stop
+ * its own helper, leave a process that double-forks out after it ends, or fork successors faster than the helper's scan,
+ * and what it started then outlived the gate, the task, your grant and its node's revocation. Every command of it now
+ * runs in a VM made for it beside its agent's, never in the agent's own, and that VM goes as the task ends, however it
+ * ends, and with it whatever the task started. */
+test("another node's task runs in a VM of its own: every command of it there, none in its agent's, and the VM goes as the task ends, however it ends", async () => {
+  const script = () => [say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")];
+  const ran = (inVm: string[]) => ({
+    // (A paid model on its roster: the one its VM is leased, as its budget counts it above $0.)
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    exec: async (_m: Agent, command: string) => {
+      throw new Error(`a command of another node's task in its agent's VM: ${command.slice(0, 80)}`);
+    },
+    handedVm: async (_m: Agent, _t: TeamTask, models: readonly string[]) => {
+      const vm = { models: [...models], released: false };
+      made.push(vm);
+      return { exec: async (command: string) => (inVm.push(command), result()), stop: async () => {}, release: async () => void (vm.released = true) };
+    },
+  });
+  const made: { models: string[]; released: boolean }[] = [];
+  const inVm: string[] = [];
+  const f = fixture(script(), ran(inVm));
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  expect((await f.runtime.executeTask(member, handedTask, f.context)).verified).toBe(true);
+  // Its workspace, its work, its gates and its end: all in its VM.
+  for (const part of ["mkdir -p '/work/tasks/", "echo one", "bun test required-check", "end_task(sys.argv[1])"]) expect([part, inVm.some((c) => plain(c).includes(part) || c.includes(part))]).toEqual([part, true]);
+  expect(made).toEqual([{ models: ["paid/m"], released: true }]);
+  // However it ends: one whose workspace can't be made fails, and its VM goes all the same.
+  made.length = 0;
+  const broken = fixture(script(), { ...ran([]), handedVm: async () => {
+    const vm = { models: [], released: false };
+    made.push(vm);
+    return { exec: async (command: string) => (command.includes("mkdir -p") ? result({ exitCode: 1, stderr: "no space left on device" }) : result()), stop: async () => {}, release: async () => void (vm.released = true) };
+  } });
+  broken.store.emit(broken.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await expect(broken.runtime.executeTask(member, handedTask, broken.context)).rejects.toThrow("Workspace not ready");
+  expect(made.map((vm) => vm.released)).toEqual([true]);
+  // And one you stop as it works.
+  made.length = 0;
+  const stop = new AbortController();
+  const held = fixture([say("1. Make the change."), HANG], ran([]));
+  held.store.emit(held.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  const running = held.runtime.executeTask(member, handedTask, { ...held.context, signal: stop.signal }).catch((e: Error) => e);
+  for (const end = Date.now() + 5_000; held.bodies.length < 2 && Date.now() < end; ) await Bun.sleep(10);
+  stop.abort(new Error("Stopped by you."));
+  await running;
+  expect(made.map((vm) => vm.released)).toEqual([true]);
+  // Your own task gets none: it runs in its agent's own VM, as before.
+  const yours = fixture(script());
+  await yours.runtime.executeTask(member, task, yours.context);
+  expect(yours.vms).toEqual([]);
+  expect(yours.commands.some((c) => c.includes("echo one"))).toBe(true);
+});
+
+test("a node that can't give another node's task a VM of its own doesn't take one; nor does such a task get your agent's notes", async () => {
+  const f = fixture([], { handedVm: undefined });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await expect(f.runtime.executeTask(member, handedTask, f.context)).rejects.toThrow("This node gives another node's task no VM of its own, so it doesn't take one");
+  expect(f.commands).toEqual([]);
+  // The notes store on: another node's task is never given it; your own is, as before.
+  const script = () => [say("1. Make the change."), say("DONE\nBuilt."), say("PASS\nFine.")];
+  const notes = fixture(script(), { engram: () => true });
+  notes.store.emit(notes.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await notes.runtime.executeTask(member, handedTask, notes.context);
+  expect(notes.commands.some((c) => c.includes("/opt/engram/bin/engram"))).toBe(false);
+  const own = fixture(script(), { engram: () => true });
+  await own.runtime.executeTask(member, task, own.context);
+  expect(own.commands.some((c) => c.includes("/opt/engram/bin/engram"))).toBe(true);
 });
 
 /* Nor do its commands work on a model its budget counts as nothing (the third re-review's R3-4): its VM was prepared
