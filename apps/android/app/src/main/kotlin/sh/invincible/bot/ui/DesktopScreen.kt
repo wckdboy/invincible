@@ -52,12 +52,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.viewinterop.AndroidView
 import java.text.DateFormat
 import java.util.Date
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
@@ -65,7 +61,7 @@ import kotlinx.coroutines.sync.withLock
 import sh.invincible.bot.app.AppModel
 import sh.invincible.bot.core.Desktop
 import sh.invincible.bot.core.DesktopHold
-import sh.invincible.bot.core.DesktopStream
+import sh.invincible.bot.core.DesktopWatch
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.get
@@ -75,7 +71,7 @@ import sh.invincible.bot.core.int
  * An agent's screen, watched and taken over (the PWA's desktop viewer, the Apple app's AgentScreenView).
  * - An agent's VM: live, the node's stream of its screen (DesktopDecoder, MediaCodec onto a surface) while it is on screen
  *   and the app is in front; a stream that ends is watched again a little later each time, and after a few tries in a
- *   row, or a refusal, it gives way to the picture.
+ *   row, or a refusal, it gives way to the picture (DesktopWatch).
  * - The picture: a Mac's own screen ([onMac]: [id] is its node, while the primary is let use it), or a VM's where it isn't
  *   live, asked for about every two seconds.
  * - What you do there: a tap clicks at that place on its screen; text is typed (and never written to the ledger); a key,
@@ -101,14 +97,13 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
     // Each look or thing done waits for the one before it: none is dropped, and never two at once.
     val turn = remember { Mutex() }
     val brand = LocalBrand.current
-    // A VM's screen live: its surface; whether the stream is drawing now; whether its last frame is what the box shows
-    // (between one stream and the next too, until it is given up); its size; and whether it was given up (and why).
+    // A VM's screen live: its surface, its size, and how it stands (DesktopWatch: drawing now; its last frame what the box
+    // shows, between one stream and the next too; or given up for the picture, and why). What runs on reads it as it is
+    // now (watch.state.value); what is drawn, as it was when drawn (live).
     var surface by remember { mutableStateOf<Surface?>(null) }
-    var watching by remember { mutableStateOf(false) }
-    var drawn by remember { mutableStateOf(false) }
     var liveSize by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    var pictures by remember { mutableStateOf(onMac) }
-    var liveNote by remember { mutableStateOf<String?>(null) }
+    val watch = remember { DesktopWatch() }
+    val live by watch.state.collectAsState()
     // Your take-over as the node said it last, and when it ends by this phone's clock (ms).
     var held by remember { mutableStateOf<DesktopHold?>(null) }
     var heldEnds by remember { mutableStateOf<Double?>(null) }
@@ -120,10 +115,10 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
     suspend fun send(action: Json?) = turn.withLock {
         val client = app.client ?: return@withLock
         sending = true
-        if (action != null && !watching) status = "Sending…"
+        if (action != null && !watch.state.value.watching) status = "Sending…"
         try {
             // Live, nothing comes back but whether you have it: the stream shows what was done.
-            if (watching && !onMac) {
+            if (watch.state.value.watching && !onMac) {
                 heard(DesktopHold.of(client.post("/api/team/desktop", Json.obj("id" to id, "action" to action, "picture" to false))["held"]))
                 problem = null
                 return@withLock
@@ -140,7 +135,7 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                 noDesktop = false
                 if (!onMac) heard(DesktopHold.of(next["held"]))
                 // (A picture that comes back while it is live isn't shown over it.)
-                if (!watching) status = "Seen just now · ${next["width"].int}×${next["height"].int}"
+                if (!watch.state.value.watching) status = "Seen just now · ${next["width"].int}×${next["height"].int}"
             }
         } catch (e: NodeError) {
             // Nothing more is asked until you ask: a refusal is said once, not every two seconds.
@@ -159,60 +154,39 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
     LaunchedEffect(id, front) {
         if (!front) return@LaunchedEffect
         while (true) {
-            if (problem == null && !noDesktop && !sending && !watching) send(null)
+            if (problem == null && !noDesktop && !sending && !watch.state.value.watching) send(null)
             delay(2_000)
         }
     }
-    // A VM's screen live while you're watching: watched again a little later each time it ends; given up for the
-    // picture after a few ends in a row (said), or at once when the node refuses it (an older node, a VM with no stream).
+    // A VM's screen live while you're watching: the node's stream decoded onto the surface, kept by DesktopWatch (watched
+    // again after an end, and given way to the picture after four in a row, or at once on a refusal).
     LaunchedEffect(id, front, surface) {
         val target = surface
-        if (!front || pictures || target == null) return@LaunchedEffect
-        var tries = 0
-        while (!pictures) {
-            val client = app.client ?: return@LaunchedEffect
-            val decoder = DesktopDecoder(target)
-            var refused = false
-            try {
+        if (!front || onMac || target == null) return@LaunchedEffect
+        val client = app.client ?: return@LaunchedEffect
+        // Each stream's own decoder, made when it opens and let go when it ends, even when it is left (the codec is the
+        // phone's). MediaCodec's calls wait on it: each frame is decoded off the main thread.
+        var decoder: DesktopDecoder? = null
+        watch.run(
+            open = {
+                decoder = DesktopDecoder(target)
                 client.frames("/api/team/desktop/stream", Json.obj("id" to id))
-                    // (MediaCodec's calls wait on it: each frame is decoded off the main thread as it comes.)
-                    .map { frame -> if (decoder.show(frame)) decoder.size ?: (1280 to 800) else null }
-                    .flowOn(Dispatchers.Default)
-                    .collect { size ->
-                        if (size != null && !watching) {
-                            watching = true
-                            drawn = true
-                            tries = 0
-                            liveSize = size
-                            problem = null
-                            noDesktop = false
-                            status = "Live · ${size.first}×${size.second}"
-                        }
-                    }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: NodeError) {
-                // A refusal (an older node, a VM with no stream) isn't mended by asking again.
-                if (!e.unreachable && (e.status in 400..499 || e.status == 501)) refused = true
-            } catch (e: Exception) {
-                // (A decoder that can't go on: the next stream starts it anew from a keyframe.)
-            } finally {
-                // (Let go even when it is left: the codec is the phone's.)
-                withContext(NonCancellable + Dispatchers.Default) { decoder.release() }
-                if (watching) {
-                    watching = false
-                    status = "As it was last seen"
-                }
-            }
-            tries += 1
-            if (refused || tries >= DesktopStream.LIVE_TRIES) {
-                pictures = true
-                drawn = false
-                if (!refused) liveNote = "The live picture of $name's screen isn't coming through, so it is shown every two seconds instead."
-                break
-            }
-            delay(DesktopStream.againIn(tries).toLong())
-        }
+            },
+            show = { frame -> withContext(Dispatchers.Default) { decoder?.show(frame) == true } },
+            ended = {
+                withContext(Dispatchers.Default) { decoder?.release() }
+                decoder = null
+            },
+            wait = { delay(it) },
+            began = {
+                val size = decoder?.size ?: (1280 to 800)
+                liveSize = size
+                problem = null
+                noDesktop = false
+                status = "Live · ${size.first}×${size.second}"
+            },
+            stopped = { status = "As it was last seen" },
+        )
     }
     // Your take-over ends by itself when nothing more is done there: said once, when it does.
     LaunchedEffect(heldEnds) {
@@ -236,7 +210,7 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(Space.margin), verticalArrangement = Arrangement.spacedBy(Space.s3)) {
             // What the box shows, in the screen's own pixels: the stream's last frame while it is drawn, else the picture.
             val still = picture
-            val (w, h) = liveSize?.takeIf { drawn } ?: ((shot?.get("width").int ?: 16) to (shot?.get("height").int ?: 10))
+            val (w, h) = liveSize?.takeIf { live.drawn } ?: ((shot?.get("width").int ?: 16) to (shot?.get("height").int ?: 10))
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -246,7 +220,7 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                     .pointerInput(w, h) {
                         // The box has the screen's own shape, and what it shows fills it: a tap is read against the box.
                         detectTapGestures { at ->
-                            if (drawn || picture != null) Desktop.point(at.x.toDouble(), at.y.toDouble(), 0.0, 0.0, size.width.toDouble(), size.height.toDouble(), w, h)?.let { act(Desktop.click(it.x, it.y)) }
+                            if (watch.state.value.drawn || picture != null) Desktop.point(at.x.toDouble(), at.y.toDouble(), 0.0, 0.0, size.width.toDouble(), size.height.toDouble(), w, h)?.let { act(Desktop.click(it.x, it.y)) }
                         }
                     },
                 contentAlignment = Alignment.Center,
@@ -262,21 +236,21 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                                     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
                                     override fun surfaceDestroyed(holder: SurfaceHolder) {
                                         surface = null
-                                        drawn = false
+                                        watch.forget()
                                     }
                                 })
                             }
                         },
                         update = { view ->
                             view.contentDescription = "$name's screen, live. A tap clicks at that place on it."
-                            view.importantForAccessibility = if (drawn) View.IMPORTANT_FOR_ACCESSIBILITY_YES else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                            view.importantForAccessibility = if (live.drawn) View.IMPORTANT_FOR_ACCESSIBILITY_YES else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-                if (!drawn && still != null) {
+                if (!live.drawn && still != null) {
                     Image(still, contentDescription = "$name's screen. A tap clicks at that place on it.", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-                } else if (!drawn) {
+                } else if (!live.drawn) {
                     Text("Looking…", color = Color(0xFFEDEDEF), style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -290,7 +264,9 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                     OutlinedButton(onClick = { scope.launch { hold(held == null) } }) { Text(if (held == null) "Take over" else "Give back") }
                 }
             }
-            liveNote?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (live.givenUp == DesktopWatch.GivenUp.TRIED) {
+                Text("The live picture of $name's screen isn't coming through, so it is shown every two seconds instead.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (noDesktop) {
                 Text("$name's VM has no desktop just now. Make it again with a desktop from a terminal or the web app: its work in /work stays.", style = MaterialTheme.typography.bodyMedium, color = brand.failed)
             } else problem?.let { p ->
@@ -340,7 +316,7 @@ fun DesktopScreen(app: AppModel, id: String, name: String, onMac: Boolean = fals
                 Text("Hide what I type", style = MaterialTheme.typography.bodyMedium)
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                val ready = shot != null || drawn
+                val ready = shot != null || live.drawn
                 for ((label, key) in Desktop.keys) OutlinedButton(onClick = { act(Desktop.key(key)) }, enabled = ready) { Text(label) }
                 OutlinedButton(onClick = { act(Desktop.scroll(up = true, times = 3)) }, enabled = ready) { Text("Scroll up") }
                 OutlinedButton(onClick = { act(Desktop.scroll(up = false, times = 3)) }, enabled = ready) { Text("Scroll down") }

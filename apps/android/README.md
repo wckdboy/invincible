@@ -26,8 +26,9 @@ An agent's screen (`ui/DesktopScreen.kt`; its page's Its VM, then Its screen) is
 the node's stream of it (`core/NodeClient.kt`'s `frames`, read whole as its bytes come by `core/DesktopStream.kt`), each
 frame handed to MediaCodec, the phone's own H.264 decoder, and drawn on a SurfaceView as it comes
 (`ui/DesktopDecoder.kt`), while it is on screen and the app is in front. It is watched again after an end, its last
-frame kept meanwhile, and given up for a picture every two seconds after four ends in a row or a refusal, as the web app
-and the iPhone do (the vectors' `desktopStream`). A tap clicks there and brings back no picture; Take over and Give back
+frame kept meanwhile, and given up for a picture every two seconds after four ends in a row or a refusal (never a node that
+didn't answer), as the web app and the iPhone do (the vectors' `desktopStream`; `core/DesktopWatch.kt`, tested on
+stand-in streams). A tap clicks there and brings back no picture; Take over and Give back
 sit under it from its first frame, the row saying until when by the clock. On an emulator its decoder
 (`c2.goldfish.h264.decoder`) gives back each frame of the glass page's recording with the pixels it was drawn with.
 
