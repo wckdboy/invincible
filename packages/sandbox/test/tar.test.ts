@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractTar, safePath } from "../src/tar.ts";
@@ -75,7 +75,7 @@ const dest = () => {
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
-const limits = { maxBytes: 1 << 20, maxFiles: 100 };
+const limits = { maxBytes: 1 << 20, maxFiles: 100, maxEntries: 400 };
 
 describe("taking files out of a sandbox", () => {
   test("regular files and folders land under the destination, hashed; docker cp's source folder is dropped", async () => {
@@ -124,9 +124,35 @@ describe("taking files out of a sandbox", () => {
   });
 
   test("limits hold while streaming: bytes and file count", async () => {
-    await expect(extractTar(stream(tar([{ name: "out/big", data: "x".repeat(2000) }])), dest(), { maxBytes: 1000, maxFiles: 10 })).rejects.toThrow(/more than 0 MB/);
+    await expect(extractTar(stream(tar([{ name: "out/big", data: "x".repeat(2000) }])), dest(), { ...limits, maxBytes: 1000, maxFiles: 10 })).rejects.toThrow(/more than 0 MB/);
     const many = Array.from({ length: 5 }, (_, i) => ({ name: `out/f${i}`, data: "x" }));
-    await expect(extractTar(stream(tar(many)), dest(), { maxBytes: 1 << 20, maxFiles: 3 })).rejects.toThrow(/more than 3 files/);
+    await expect(extractTar(stream(tar(many)), dest(), { ...limits, maxFiles: 3 })).rejects.toThrow(/more than 3 files/);
+  });
+
+  test("every entry counts against a cap: a folder, each parent a path implies, and whatever is left out", async () => {
+    // Folders alone, as many as the VM writes headers for: each was made, bounded only by the collect's deadline.
+    const folders = Array.from({ length: 300 }, (_, i) => ({ name: `out/d${i}/`, type: "5" }));
+    const d = dest();
+    await expect(extractTar(stream(tar(folders)), d, { ...limits, maxEntries: 100 })).rejects.toThrow(/more than 100 entries/);
+    // (As many folders as the cap, each its own header's, and not one more.)
+    expect(readdirSync(d).length).toBe(100);
+    // Ten files, each 31 folders deep in folders of its own: 310 folders, none named by a header of its own.
+    const deep = Array.from({ length: 10 }, (_, i) => ({ name: `out/${`f${i}/`.repeat(31)}x`, data: "x" }));
+    await expect(extractTar(stream(tar(deep)), dest(), { ...limits, maxEntries: 100 })).rejects.toThrow(/more than 100 entries/);
+    // Links, devices and unsafe paths count as they are left out.
+    const links = Array.from({ length: 300 }, (_, i) => ({ name: `out/l${i}`, type: "2", link: "/etc/passwd" }));
+    await expect(extractTar(stream(tar(links)), dest(), { ...limits, maxEntries: 100 })).rejects.toThrow(/more than 100 entries/);
+  });
+
+  test("the count: each header once, and each folder a path implies that no header named", async () => {
+    // Four headers: out/ (docker cp's own, made nowhere), report.md, plots/ (named by its header) and a.csv.
+    const named = tar([{ name: "out/", type: "5" }, { name: "out/report.md", data: "r" }, { name: "out/plots/", type: "5" }, { name: "out/plots/a.csv", data: "a" }]);
+    expect((await extractTar(stream(named), dest(), { ...limits, maxEntries: 4 })).files.length).toBe(2);
+    await expect(extractTar(stream(named), dest(), { ...limits, maxEntries: 3 })).rejects.toThrow(/more than 3 entries/);
+    // Two headers, and the two folders the first one's path implies (a and a/b): four.
+    const implied = tar([{ name: "out/a/b/x", data: "x" }, { name: "out/a/b/y", data: "y" }]);
+    expect((await extractTar(stream(implied), dest(), { ...limits, maxEntries: 4 })).files.length).toBe(2);
+    await expect(extractTar(stream(implied), dest(), { ...limits, maxEntries: 3 })).rejects.toThrow(/more than 3 entries/);
   });
 
   test("a truncated archive is an error, not a silent partial result", async () => {

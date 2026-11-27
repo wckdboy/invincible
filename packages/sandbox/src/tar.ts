@@ -10,14 +10,18 @@ import { join } from "node:path";
  *   - only regular files and directories are written; symlinks, hard links,
  *     devices and FIFOs are skipped (a link could point at the host's files)
  *   - paths are relative, normalized, and never climb out (no "..", no "/")
- *   - total bytes and file count are capped while streaming, so an archive can't
- *     fill the host's disk before the check
+ *   - total bytes, files and entries are capped while streaming, so an archive can't
+ *     fill the host's disk, nor make it folders without end, before the check: every
+ *     header counts as an entry (a folder's, a link's, any refused), and so does each
+ *     folder a path implies that no header of its own named
  *   - every file is hashed as it's written
  */
 
 export interface ExtractLimits {
   maxBytes: number;
   maxFiles: number;
+  /** Every header the archive holds, of whatever kind, and every folder a path implies that no header named. */
+  maxEntries: number;
 }
 
 export interface ExtractedFile {
@@ -102,12 +106,33 @@ export async function extractTar(stream: ReadableStream<Uint8Array>, dest: strin
     return out;
   };
 
+  // Every entry counted before anything of it is made: each header, and each folder made that no header named.
+  let entries = 0;
+  const count = (n: number) => {
+    entries += n;
+    if (entries > limits.maxEntries) throw new ExtractError(`more than ${limits.maxEntries} entries`);
+  };
+  const made = new Set<string>();
+  /** The folders of `parts`, each made once: those not made yet are counted, but for the last when its own header named it. */
+  const folders = (parts: string[], named: boolean) => {
+    const fresh: string[] = [];
+    for (let i = 1; i <= parts.length; i++) {
+      const dir = parts.slice(0, i).join("/");
+      if (!made.has(dir)) fresh.push(dir);
+    }
+    if (!fresh.length) return;
+    count(named && fresh.at(-1) === parts.join("/") ? fresh.length - 1 : fresh.length);
+    for (const dir of fresh) made.add(dir);
+    mkdirSync(join(dest, ...parts), { recursive: true });
+  };
+
   let longName: string | null = null;
   try {
     for (;;) {
       if (!(await fill(BLOCK))) break;
       const header = take(BLOCK);
       if (header.every((b) => b === 0)) break; // end of archive
+      count(1);
       const size = octal(header.subarray(124, 136));
       const type = String.fromCharCode(header[156]!) || "0";
       const magic = cstring(header.subarray(257, 263));
@@ -134,7 +159,7 @@ export async function extractTar(stream: ReadableStream<Uint8Array>, dest: strin
         if (result.files.length + 1 > limits.maxFiles) throw new ExtractError(`more than ${limits.maxFiles} files`);
         if (result.bytes + size > limits.maxBytes) throw new ExtractError(`more than ${Math.round(limits.maxBytes / 2 ** 20)} MB`);
         const parts = path.split("/");
-        if (parts.length > 1) mkdirSync(join(dest, ...parts.slice(0, -1)), { recursive: true });
+        folders(parts.slice(0, -1), false);
         const fd = openSync(join(dest, ...parts), "wx", 0o644);
         const hash = createHash("sha256");
         try {
@@ -154,7 +179,7 @@ export async function extractTar(stream: ReadableStream<Uint8Array>, dest: strin
         result.bytes += size;
         result.files.push({ path, size, sha256: hash.digest("hex") });
       } else if (type === "5") {
-        if (path) mkdirSync(join(dest, ...path.split("/")), { recursive: true });
+        if (path) folders(path.split("/"), true);
         await discard(padded);
       } else {
         // Links, devices, FIFOs, global headers: never written.

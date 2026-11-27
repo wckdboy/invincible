@@ -12,7 +12,7 @@ import type { ExtractLimits, ExtractResult, LedgerEntryInput } from "@invincible
  * device sees the record; the files are served by the node that holds them.
  */
 
-export const ARTIFACT_LIMITS: ExtractLimits = { maxBytes: 512 * 2 ** 20, maxFiles: 5000 };
+export const ARTIFACT_LIMITS: ExtractLimits = { maxBytes: 512 * 2 ** 20, maxFiles: 5000, maxEntries: 20_000 };
 /** All artifacts on one node together. */
 export const ARTIFACT_BUDGET_BYTES = 20 * 2 ** 30;
 /** The log entry lists files up to this many bytes of JSON (the event cap is 64 KB); the rest are in the manifest. */

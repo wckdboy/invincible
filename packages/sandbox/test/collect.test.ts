@@ -53,7 +53,7 @@ async function collect(path: string, work: string, home: string, opts: { fds?: n
   const argv = opts.fds ? ["sh", "-c", `ulimit -n ${opts.fds} && exec "$@"`, "sh", ...command] : command;
   const proc = Bun.spawn(argv, { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" });
   const dest = folder();
-  const [result, stderr, code] = await Promise.all([extractTar(proc.stdout, dest, { maxBytes: 1 << 22, maxFiles: opts.maxFiles ?? 1000 }, 1).catch(() => null), new Response(proc.stderr).text(), proc.exited]);
+  const [result, stderr, code] = await Promise.all([extractTar(proc.stdout, dest, { maxBytes: 1 << 22, maxFiles: opts.maxFiles ?? 1000, maxEntries: 4000 }, 1).catch(() => null), new Response(proc.stderr).text(), proc.exited]);
   const files = (result?.files ?? []).map((f) => f.path).sort();
   const read = files.map((f) => readFileSync(join(dest, f), "utf8")).join("\n");
   return { code, files, read, skipped: [...(result?.skipped ?? []), ...collectSkipped(stderr)], stderr };

@@ -188,12 +188,12 @@ describe.if(microVMs)("KVM microVMs on real Docker", () => {
       await sh(sb.id, "mkdir -p /work/out/plots && printf '# report\\n' > /work/out/report.md && head -c 4096 /dev/urandom > /work/out/plots/a.bin && ln -s /etc/passwd /work/out/passwd");
       const dest = mkdtempSync(join(tmpdir(), "invincible-collect-"));
       try {
-        const result = await host.collect(sb.id, "/work/out", dest, { maxBytes: 1 << 20, maxFiles: 100 });
+        const result = await host.collect(sb.id, "/work/out", dest, { maxBytes: 1 << 20, maxFiles: 100, maxEntries: 400 });
         expect(result!.files.map((f) => f.path).sort()).toEqual(["plots/a.bin", "report.md"]);
         expect(result!.skipped).toEqual([{ path: "out/passwd", reason: "link" }]);
         expect(readFileSync(join(dest, "report.md"), "utf8")).toBe("# report\n");
         expect(existsSync(join(dest, "passwd"))).toBe(false);
-        expect(await host.collect(sb.id, "/work/nothing-here", dest, { maxBytes: 1 << 20, maxFiles: 100 })).toBeNull();
+        expect(await host.collect(sb.id, "/work/nothing-here", dest, { maxBytes: 1 << 20, maxFiles: 100, maxEntries: 400 })).toBeNull();
       } finally {
         rmSync(dest, { recursive: true, force: true });
         await host.destroy(sb.id, { run: "it-vm" });
