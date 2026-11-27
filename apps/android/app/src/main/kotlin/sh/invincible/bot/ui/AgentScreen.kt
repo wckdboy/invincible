@@ -430,38 +430,25 @@ internal fun ShipDialog(app: AppModel, t: Json, done: () -> Unit) {
 fun Composer(placeholder: String, asTask: String?, sending: Boolean, stop: (() -> Unit)? = null, onSend: (String, Boolean) -> Unit) {
     var text by remember { mutableStateOf("") }
     var task by remember { mutableStateOf(false) }
-    val brand = LocalBrand.current
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    fun send() {
+        if (text.isBlank() || sending) return
+        onSend(text.trim(), task)
+        text = ""
+    }
+    // One big box, as the chat's: the words across all of it; under them, the same words as a task on the left, and Send
+    // (or Stop) on the right.
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = Space.s3, vertical = Space.s2)) {
-        if (asTask != null) {
-            androidx.compose.material3.FilterChip(selected = task, onClick = { task = !task }, label = { Text(asTask) }, modifier = Modifier.padding(start = Space.s1))
-        }
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s1)) {
-            androidx.compose.material3.TextField(
-                value = text,
-                onValueChange = { text = it },
-                placeholder = { Text(placeholder) },
-                maxLines = 6,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
-                colors = androidx.compose.material3.TextFieldDefaults.colors(
-                    focusedContainerColor = brand.raised, unfocusedContainerColor = brand.raised, disabledContainerColor = brand.raised,
-                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                ),
-                modifier = Modifier.weight(1f),
-            )
-            if (stop != null) {
-                androidx.compose.material3.FilledTonalIconButton(onClick = stop, modifier = Modifier.padding(bottom = 4.dp)) { Icon(StopIcon, contentDescription = "Stop") }
-            } else {
-                androidx.compose.material3.FilledIconButton(
-                    onClick = {
-                        onSend(text.trim(), task)
-                        text = ""
-                    },
-                    enabled = text.isNotBlank() && !sending,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                ) { Icon(SendIcon, contentDescription = if (task) "Give it as a task" else "Send") }
-            }
-        }
+        ComposerBox(
+            focus = focus,
+            field = { ComposerField(text, { text = it }, placeholder, focus, enter = ::send) },
+            leading = {
+                if (asTask != null) androidx.compose.material3.FilterChip(selected = task, onClick = { task = !task }, label = { Text(asTask) }, modifier = Modifier.padding(start = Space.s1))
+            },
+            trailing = {
+                if (stop != null) ComposerDisc(StopIcon, "Stop", ready = true, onClick = stop)
+                else ComposerDisc(SendIcon, if (task) "Give it as a task" else "Send", ready = text.isNotBlank() && !sending, onClick = ::send)
+            },
+        )
     }
 }

@@ -60,51 +60,27 @@ fun MessageDock(
 ) {
     val brand = LocalBrand.current
     var text by rememberSaveable(key) { mutableStateOf("") }
-    val shape = RoundedCornerShape(26.dp)
     fun deliver() {
         val words = text.trim()
         if (words.isNotEmpty() && enabled && send(words)) text = ""
     }
+    // One big box (the owner's word, 27 November 2026): the words across all of it, and under them what leads on the left and
+    // what sends on the right, the second way to send ([also]) beside Send.
+    val focus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = Space.s3, vertical = Space.s2)) {
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-        before?.invoke()
-        Row(
-            Modifier.weight(1f).clip(shape).border(BorderStroke(1.dp, brand.line), shape).background(brand.raised).padding(Space.s1),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(Space.s1),
-        ) {
-            if (lead != null) lead() else Spacer(Modifier.size(Space.s2))
-            TextField(
-                value = text,
-                onValueChange = { text = it },
-                placeholder = { Text(placeholder, style = Type.body) },
-                textStyle = Type.body,
-                maxLines = 6,
-                enabled = enabled,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-                keyboardActions = KeyboardActions(),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent,
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .semantics { contentDescription = placeholder.trimEnd('…') }
-                    // A hardware keyboard's Enter sends; Shift+Enter is a new line (a phone's own keyboard keeps its return).
-                    .onPreviewKeyEvent { e ->
-                        val physical = e.nativeKeyEvent.deviceId != android.view.KeyCharacterMap.VIRTUAL_KEYBOARD
-                        if (physical && e.type == KeyEventType.KeyDown && e.key == Key.Enter && !e.isShiftPressed) {
-                            deliver()
-                            true
-                        } else false
-                    },
+            before?.invoke()
+            ComposerBox(
+                focus = focus,
+                modifier = Modifier.weight(1f),
+                field = { ComposerField(text, { text = it }, placeholder, focus, enabled = enabled, enter = ::deliver) },
+                leading = { lead?.invoke() },
+                trailing = {
+                    also?.let { (label, go) -> ComposerChoice(label, filled = false, ready = enabled && text.isNotBlank()) { if (go(text.trim())) text = "" } }
+                    ComposerDisc(SendIcon, "Send", ready = enabled && text.isNotBlank(), onClick = ::deliver)
+                },
             )
-            FilledIconButton(onClick = ::deliver, enabled = enabled && text.isNotBlank()) { Icon(SendIcon, contentDescription = "Send") }
-        }
-        after?.invoke()
-        }
-        also?.takeIf { text.isNotBlank() && enabled }?.let { (label, go) ->
-            androidx.compose.material3.TextButton(onClick = { if (go(text.trim())) text = "" }, modifier = Modifier.padding(start = Space.s2)) { Text(label) }
+            after?.invoke()
         }
         hint?.let { Text(it, style = Type.small, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = Space.s4, top = Space.s1)) }
     }

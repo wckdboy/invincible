@@ -330,81 +330,73 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
         }
         said?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
         QueuePanel(app)
-        // As the iPhone's: a paperclip, a rounded field that grows to six lines, and a round send, or stop while it answers.
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s1)) {
-            androidx.compose.foundation.layout.Box(Modifier.padding(bottom = 4.dp)) {
-                androidx.compose.material3.IconButton(onClick = { menu = true }, enabled = !sending) { Icon(AttachIcon, contentDescription = "Attach, or ask on the side") }
-                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("A photo") }, onClick = {
-                        menu = false
-                        photo.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    })
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("A text file") }, onClick = {
-                        menu = false
-                        textFile.launch("text/*")
-                    })
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("Ask on the side") }, onClick = {
-                        menu = false
-                        app.chat.askAside("")
-                    })
+        // One big box (the owner's word, 27 November 2026, as the iPhone's and the web's): the words across all of it, and
+        // under them the paperclip on the left and what sends on the right: Send, or while it answers Queue, Steer and Stop.
+        val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+        fun send() {
+            val client = app.client ?: return
+            if ((text.isBlank() && files.isEmpty()) || sending) return
+            sending = true
+            scope.launch {
+                try {
+                    val refs = files.map { Attachments.upload(client, it) }
+                    app.chat.send(text, refs)
+                    text = ""
+                    files = emptyList()
+                    said = null
+                    sent?.invoke()
+                } catch (e: sh.invincible.bot.core.NodeError) {
+                    said = e.message
+                } catch (e: Attachments.Refused) {
+                    said = e.message
+                } finally {
+                    sending = false
                 }
-            }
-            androidx.compose.material3.TextField(
-                value = text,
-                onValueChange = { text = it },
-                placeholder = { Text(if (live) sh.invincible.bot.core.Composer.placeholder(app.chat.canQueue) else "Message ${Primary.name}") },
-                maxLines = 6,
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
-                colors = androidx.compose.material3.TextFieldDefaults.colors(
-                    focusedContainerColor = brand.raised, unfocusedContainerColor = brand.raised, disabledContainerColor = brand.raised,
-                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                ),
-                modifier = Modifier.weight(1f),
-            )
-            if (live) {
-                // Stop, and once you've written something, Queue (for after this turn) and Steer (now, at its next safe point).
-                androidx.compose.material3.FilledTonalIconButton(onClick = app.chat::stop, modifier = Modifier.padding(bottom = 4.dp)) {
-                    Icon(StopIcon, contentDescription = "Stop ${Primary.name} answering")
-                }
-                if (text.isNotBlank()) {
-                    if (app.chat.canQueue && sh.invincible.bot.core.Composer.aside(text) == null) {
-                        androidx.compose.material3.FilledTonalIconButton(onClick = { steerOrQueue(sh.invincible.bot.core.Composer.Action.QUEUE) }, modifier = Modifier.padding(bottom = 4.dp)) {
-                            Icon(ClockIcon, contentDescription = "Queue it for after this turn")
-                        }
-                    }
-                    androidx.compose.material3.FilledIconButton(onClick = { steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) }, modifier = Modifier.padding(bottom = 4.dp)) {
-                        Icon(SendIcon, contentDescription = if (sh.invincible.bot.core.Composer.aside(text) != null) "Ask on the side" else "Steer it")
-                    }
-                }
-            } else {
-                androidx.compose.material3.FilledIconButton(
-                    enabled = (text.isNotBlank() || files.isNotEmpty()) && !sending,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                    onClick = {
-                        val client = app.client ?: return@FilledIconButton
-                        sending = true
-                        scope.launch {
-                            try {
-                                val refs = files.map { Attachments.upload(client, it) }
-                                app.chat.send(text, refs)
-                                text = ""
-                                files = emptyList()
-                                said = null
-                                sent?.invoke()
-                            } catch (e: sh.invincible.bot.core.NodeError) {
-                                said = e.message
-                            } catch (e: Attachments.Refused) {
-                                said = e.message
-                            } finally {
-                                sending = false
-                            }
-                        }
-                    },
-                ) { Icon(SendIcon, contentDescription = if (sending) "Sending" else "Send") }
             }
         }
+        val written = text.isNotBlank()
+        val aside = sh.invincible.bot.core.Composer.aside(text) != null
+        ComposerBox(
+            focus = focus,
+            field = {
+                ComposerField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = if (live) sh.invincible.bot.core.Composer.placeholder(app.chat.canQueue) else "Ask your agent…",
+                    focus = focus,
+                    enter = { if (live) steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) else send() },
+                )
+            },
+            leading = {
+                androidx.compose.foundation.layout.Box {
+                    androidx.compose.material3.IconButton(onClick = { menu = true }, enabled = !sending) { Icon(AttachIcon, contentDescription = "Attach, or ask on the side") }
+                    androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("A photo") }, onClick = {
+                            menu = false
+                            photo.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("A text file") }, onClick = {
+                            menu = false
+                            textFile.launch("text/*")
+                        })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("Ask on the side") }, onClick = {
+                            menu = false
+                            app.chat.askAside("")
+                        })
+                    }
+                }
+            },
+            trailing = {
+                if (live) {
+                    // Queue (for after this turn) and Steer (now, at its next safe point), in words, then Stop.
+                    if (app.chat.canQueue && !aside) ComposerChoice("Queue", filled = false, ready = written) { steerOrQueue(sh.invincible.bot.core.Composer.Action.QUEUE) }
+                    ComposerChoice(if (aside) "Ask on the side" else "Steer", filled = true, ready = written) { steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) }
+                    ComposerDisc(StopIcon, "Stop ${Primary.name} answering", ready = true, onClick = app.chat::stop)
+                } else {
+                    ComposerDisc(SendIcon, if (sending) "Sending" else "Send", ready = (written || files.isNotEmpty()) && !sending, onClick = ::send)
+                }
+            },
+        )
     }
 }
 
