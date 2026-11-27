@@ -38,7 +38,8 @@ export interface KeyGatewayContext {
 /**
  * Whether a secret can be given to an agent: in the vault, pinned to an https address, and nobody else's purpose. A
  * model provider's key goes through the model gateway (its metering, its plan's terms, sensitive mode), and a
- * connector's through the primary's own calls (a push waits for your approval): a script never takes them past those.
+ * connector's through the primary's own calls (an outward one held to the gate: yours to approve, or its own where its
+ * rule allows): a script never takes them past those.
  * Null: it can be; else why not.
  */
 export function ungivable(vault: Pick<Vault, "info">, secret: string): string | null {
