@@ -42,7 +42,7 @@ import { activityLine, activityOf, activityShort } from "../../web/src/lib/live-
 import { describeTask } from "../../web/src/lib/loops.ts";
 import { describeWakes } from "../../web/src/lib/wakes.ts";
 import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, taskActions, taskBadge, taskEnd } from "../../web/src/lib/task-card.ts";
-import { agentModelChoices, agentModelsLine, agentRoleLine, agentRoles, agentWorksOn, removalPlan, teamSpeaker, agentId, toggleAgentModel } from "../../web/src/lib/team.ts";
+import { agentModelChoices, agentModelsLine, agentRoleLine, agentRoles, type AgentRoleSpec, agentWorksOn, removalPlan, teamSpeaker, agentId, toggleAgentModel } from "../../web/src/lib/team.ts";
 import { budgetFrom } from "../../web/src/lib/give.ts";
 import { applyEvent, ASIDE_ANSWERING, ASIDE_FAILED, ASIDE_NOTHING_YET, asideNote, asideOf, asidePlaceholder, BRING_BACK_FAILED, beginTurn, broughtBackWords, busyPlaceholder, composerAction, endTurn, failTurn, FILES_WAIT, JUST_STARTING, keptDiffers, NOT_KEPT, queueHead, shownAgain, steeringLine, turnOf, undeliveredWords } from "../../web/src/lib/turns.ts";
 import { chatStateWords } from "../../../packages/core/src/turns.ts";
@@ -407,7 +407,7 @@ const agentForms = {
     { roster: agentRoster, current: "reviewer" },
     { roster: agentRoster, current: "frontend" },
     { roster: { swift: { models: [] }, engineer: { models: ["a/e"] }, fold: { models: ["a/x"] }, Odd: { models: ["a/o"] } }, current: "made-up" },
-    { roster: {} },
+    { roster: {} as Record<string, AgentRoleSpec> },
   ].map((c) => ({ ...c, roles: agentRoles(c.roster, c.current) })),
   // A task's budget as typed (the PWA's budgetFrom): the dollars, or what is wrong with it.
   budgets: ["", "  ", "0.50", "$2", "$ 1,5", "100", "abc", "1.2.3", ".5", "5.", "-1", "1e3", "0", "0.00", "100.01", "250", " 3 "].map((text) => {
@@ -877,7 +877,6 @@ const summary = (id: string, updatedAt: number, pinned = false): core.Conversati
   createdAt: updatedAt - 1000,
   updatedAt,
   count: 2,
-  bank: false,
   state: "done",
   queued: 0,
   held: null,
@@ -1603,7 +1602,7 @@ async function playLink(steps: LinkStep[]): Promise<{ told: string[]; opened: nu
     else if (step.act === "refusing") failing = new LinkRefused("refused");
     else if (step.act === "online") failing = null;
     else if (step.act === "wait") await advance(step.ms);
-    else
+    else if (step.act === "steady")
       for (let moved = 0; moved < step.ms; moved += core.LIVE_BEAT_MS) {
         await advance(core.LIVE_BEAT_MS);
         newest().alive();
@@ -1664,7 +1663,7 @@ const activityCases: { name: string; task: { status: core.TeamTask["status"]; ve
   { name: "gave up", task: { status: "failed", verified: false, error: "gave-up", gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go") },
   { name: "stopped", task: { status: "stopped", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go") },
   { name: "interrupted", task: { status: "interrupted", verified: false, error: null, gates: ACTIVITY_GATES }, entries: activityTrail("Plan · go") },
-  { name: "proven, from its record alone", task: { status: "done", verified: true, error: null, gates: ACTIVITY_GATES, record: { startedAt: NOW - 600_000, endedAt: NOW, ended: "done", spent: [], proof: { before: [1, 0], after: [0, 0], review: "pass", sameModel: false } } as core.TeamTask["record"] }, entries: [] },
+  { name: "proven, from its record alone", task: { status: "done", verified: true, error: null, gates: ACTIVITY_GATES, record: { startedAt: NOW - 600_000, endedAt: NOW, ended: "done", commands: 0, revisions: 0, spent: [], proof: { before: [1, 0], after: [0, 0], review: "pass", sameModel: false } } }, entries: [] },
 ];
 const liveActivities = activityCases.map((c) => {
   const state = activityOf({ ...c.task, record: c.task.record }, c.entries, NOW);
