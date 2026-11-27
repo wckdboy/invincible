@@ -40,3 +40,15 @@ describe("the caller's own tools in the chat contract", () => {
     expect(chat.safeParse({ messages: asked, tools: false, clientTools: [tool], save: true }).success).toBe(false);
   });
 });
+
+describe("what an answer is asked apart from", () => {
+  test("a model, or each of a list (every model that did the work, and a vendor's own sign-in's family): none empty, none past sixteen", () => {
+    const chat = routes.chat.input;
+    const messages = [{ role: "user", content: "Review this." }];
+    expect(chat.safeParse({ messages, apart: "anthropic/claude-opus-5-5" }).success).toBe(true);
+    expect(chat.safeParse({ messages, apart: ["orcarouter/anthropic/claude-opus-5.5", "deepseek/deepseek-v4-pro", "family:claude"] }).success).toBe(true);
+    expect(chat.safeParse({ messages, apart: [] }).success).toBe(false);
+    expect(chat.safeParse({ messages, apart: Array.from({ length: 17 }, (_, n) => `p/m${n}`) }).success).toBe(false);
+    expect(chat.safeParse({ messages, apart: ["a"] }).success).toBe(false);
+  });
+});
