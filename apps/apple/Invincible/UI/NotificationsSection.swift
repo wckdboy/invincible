@@ -1,8 +1,8 @@
-#if os(iOS)
 import SwiftUI
 
-/// Notifications on this iPhone or iPad: on and off, said plainly, and a test. What it tells you about and when it stays quiet
-/// are the node's own settings, the same from every device (the web app's Settings, or `invincible notify`).
+/// Notifications on this iPhone, iPad or Mac: on and off, said plainly, and a test. What it tells you about and when it stays
+/// quiet are the node's own settings, the same from every device (the web app's Settings, or `invincible notify`). An
+/// iPhone's come through Apple's push service; a Mac collects its own from the node while the app runs (MacNotices).
 struct NotificationsSection: View {
     let session: Session
     /// Whether the node notifies this device (nil: not read yet).
@@ -53,12 +53,19 @@ struct NotificationsSection: View {
         said = nil
         do {
             if want {
+                #if os(iOS)
                 let service = try await PushCenter.shared.turnOn(session)
-                on = true
                 said = "On, through \(service)'s push service."
+                #else
+                said = try await MacNotices.shared.turnOn(session)
+                #endif
+                on = true
             } else {
                 _ = try await session.client.post("/api/notify/unsubscribe", Nothing(), as: Removed.self)
                 on = false
+                #if os(macOS)
+                MacNotices.shared.turnedOff()
+                #endif
             }
         } catch {
             problem = error.localizedDescription
@@ -79,6 +86,7 @@ struct NotificationsSection: View {
     }
 }
 
+#if os(iOS)
 /// The card at the top of the primary's home and the Inbox while it can't reach this device when Invincible is closed (the web
 /// app's reachCard): its notifications were lost (Apple stopped taking its token), or no device of yours can be reached.
 /// Turn on asks iOS from your tap (if it hasn't asked before); when iOS says no, Open Settings. Not now puts it away for a

@@ -30,11 +30,9 @@ struct MoreView<Leading: View>: View {
             } header: {
                 SectionHead("This device")
             }
-            #if os(iOS)
             if session.can("mind:read") {
                 NotificationsSection(session: session)
             }
-            #endif
             if session.can("chat") {
                 Section {
                     Picker("Return while it works", selection: $enter) {

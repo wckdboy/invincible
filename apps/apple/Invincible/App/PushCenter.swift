@@ -84,11 +84,7 @@ import UserNotifications
 
     /// The notifications still shown whose matter was answered, dismissed, cleared or lapsed on any device: taken down.
     func takeDown(_ tags: [String]) async {
-        guard !tags.isEmpty else { return }
-        let center = UNUserNotificationCenter.current()
-        let shown = await center.deliveredNotifications().map { (id: $0.request.identifier, userInfo: $0.request.content.userInfo) }
-        let gone = Push.withdrawn(shown, tags: Set(tags))
-        if !gone.isEmpty { center.removeDeliveredNotifications(withIdentifiers: gone) }
+        await NoticeAnswers.takeDown(tags)
     }
 
     /// Asks you once (iOS's own prompt), then Apple, for this install's token.
@@ -119,11 +115,9 @@ import UserNotifications
 
 enum PushProblem: LocalizedError {
     case declined
-    case unpaired
     var errorDescription: String? {
         switch self {
         case .declined: "Notifications are off for Invincible in the iPhone's Settings: turn them on there, then here."
-        case .unpaired: "This iPhone isn't paired with your node."
         }
     }
 }
@@ -133,18 +127,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         // An approval from its notification, here and on the Watch: Approve opens the app at its card, the whole request in
-        // front of you and a yes behind Face ID there (your word, 25 November 2026: never a yes from the lock screen
-        // without the request); Decline is answered where it's told, behind the iPhone's own unlock.
-        let approve = UNNotificationAction(identifier: Push.Button.approve, title: "Approve…", options: [.authenticationRequired, .foreground])
-        let decline = UNNotificationAction(identifier: Push.Button.decline, title: "Decline", options: [.authenticationRequired, .destructive])
-        // A task's work that can be shipped: Ship it opens the app at the task, and asks Face ID before the pull request
-        // (X2: behind Face ID as Approve is).
-        let ship = UNNotificationAction(identifier: Push.Button.shipIt, title: "Ship it…", options: [.authenticationRequired, .foreground])
-        UNUserNotificationCenter.current().setNotificationCategories([
-            UNNotificationCategory(identifier: Push.Button.approval, actions: [approve, decline], intentIdentifiers: []),
-            UNNotificationCategory(identifier: Push.Button.declineOnly, actions: [decline], intentIdentifiers: []),
-            UNNotificationCategory(identifier: Push.Button.ship, actions: [ship], intentIdentifiers: []),
-        ])
+        // front of you and a yes behind Face ID there; Decline is answered where it's told, behind the iPhone's own unlock.
+        // A task's work that can be shipped: Ship it opens the app at the task, its ship behind Face ID (NoticeAnswers).
+        NoticeAnswers.register()
         return true
     }
 
@@ -159,53 +144,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// While the app is open a notification still shows, as it is often about something other than what is on screen; one
     /// about what the screen shows now is told only in the list (Push.presentation), and news never sounds.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        let userInfo = notification.request.content.userInfo
-        let destination = Push.destination(userInfo)
-        let kind = Push.kind(userInfo)
         let showing = await MainActor.run { PushCenter.shared.showing }
-        let told = Push.presentation(destination, kind: kind, showing: showing)
-        var options: UNNotificationPresentationOptions = [.list]
-        if told.banner { options.insert(.banner) }
-        if told.sound { options.insert(.sound) }
-        return options
+        return NoticeAnswers.options(notification.request.content.userInfo, showing: showing)
     }
 
+    /// Approve: the app, at the approval's card. Decline: answered there, without opening the app. Ship it: the app, at the
+    /// task, its ship asked for behind Face ID there. Anything else: where it says (NoticeAnswers.answer).
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let userInfo = response.notification.request.content.userInfo
-        // Approve: the app, at the approval's card. Decline: answered there, without opening the app.
-        if response.actionIdentifier == Push.Button.approve, let action = Push.action(userInfo) {
-            await MainActor.run { PushCenter.shared.opened = .approval(action) }
-            return
-        }
-        if response.actionIdentifier == Push.Button.decline, let action = Push.action(userInfo) {
-            await Self.decline(action)
-            return
-        }
-        // Ship it: the app, at the task, its ship asked for behind Face ID there.
-        if response.actionIdentifier == Push.Button.shipIt, let task = Push.shipTask(userInfo) {
-            await MainActor.run { PushCenter.shared.opened = .ship(task) }
-            return
-        }
-        let destination = Push.destination(userInfo)
+        guard let destination = await NoticeAnswers.answer(response) else { return }
         await MainActor.run { PushCenter.shared.opened = destination }
-    }
-
-    /// Your no to an action, signed by this device as the Inbox's is; then a word of how it went (a failure says to open
-    /// the app, where it still waits). A yes is never given here: Approve opens the app at its card.
-    private static func decline(_ action: String) async {
-        struct Decision: Encodable { let id: String; let approve: Bool }
-        let said: (title: String, body: String)
-        do {
-            guard let key = try DeviceKey.load(), let node = PairedNode.load(), node.device == key.device else { throw PushProblem.unpaired }
-            _ = try await NodeClient(origin: node.origin, signer: key).post("/api/actions/decide", Decision(id: action, approve: false), as: JSONValue.self)
-            said = ("Declined", "Nothing was sent.")
-        } catch {
-            said = ("Not answered", "\(error.localizedDescription) It still waits in your Inbox.")
-        }
-        let content = UNMutableNotificationContent()
-        content.title = said.title
-        content.body = said.body
-        try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "answered-\(action)", content: content, trigger: nil))
     }
 }
 #endif

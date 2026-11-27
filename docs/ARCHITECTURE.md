@@ -355,6 +355,9 @@ The models layer, carried (§10):
   - Every client keeps up over the node's live stream (core's live.ts): nothing asked while nothing changes, a dead link
     told within three of the node's beats (4.5 s), and the stream opened again from where it left off, so a renewal
     reads only what changed meanwhile.
+  - The Mac app tells you what the node tells your other devices while it runs, its window or the agents in the menu
+    bar: it collects them from the node as the Android app does, when the live stream says `notify` changed, and shows
+    them as its own notifications with the iPhone's buttons. Nothing goes through Apple's push service for a Mac.
   - The iPhone shows a task's proof on its Lock Screen and in its Dynamic Island (core's live-activity.ts): a Live
     Activity the app starts for a task it gives or opens in hand, kept up by the app while it's in front and by the node
     through Apple's `liveactivity` pushes otherwise (each gate, the reviewer, the verdict; fixed words, never a title).

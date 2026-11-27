@@ -32,6 +32,34 @@ struct MacPlaces: View {
         .environment(\.openPlace) { mac.place = $0 }
         .environment(\.openSearch) { mac.searching = true }
         .task { await session.refresh() }
+        // Where a notification asked to go; and what this window shows, as a notification would name it (MacNotices).
+        .task(id: MacNotices.shared.opened) { await follow() }
+        .onChange(of: mac.place, initial: true) { MacNotices.shared.showing = mac.place.shown(chat: session.chat.conversation) }
+        .onChange(of: session.chat.conversation) { MacNotices.shared.showing = mac.place.shown(chat: session.chat.conversation) }
+        .onDisappear { MacNotices.shared.showing = nil }
+    }
+
+    /// Where a tapped notification or one of its buttons asked to go, as an iPad's window goes there: an approval's card in
+    /// Needs you (its yes behind Touch ID or the Mac's password), a task (its ship asked for behind the same), a kept chat.
+    private func follow() async {
+        guard let opened = MacNotices.shared.opened else { return }
+        MacNotices.shared.opened = nil
+        switch opened {
+        case .inbox: mac.place = .inbox
+        case .settings: mac.place = .more
+        case .overview: mac.place = .agents
+        case .chat(let id):
+            mac.place = .primary
+            if let id { await session.chat.open(id, with: session.client) }
+        case .approval(let id):
+            mac.place = .inbox
+            session.approvalToOpen = id
+        case .task(let id): mac.place = .task(id)
+        case .agent(let id): mac.place = .agent(id)
+        case .ship(let id):
+            mac.place = .task(id)
+            session.shipToOpen = id
+        }
     }
 
     @ViewBuilder private var detail: some View {

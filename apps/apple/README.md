@@ -211,6 +211,16 @@ owner's Sparkle key (the login keychain's account `invincible`), and `apps/site/
 half is in the owner's login keychain, its public half in `project.yml`'s `INVINCIBLE_SPARKLE_PUBLIC_KEY`. A build
 without that key leaves its updater off.
 
+The Mac's notifications are its own (`Invincible/Mac/MacNotices.swift`): no Apple push service, no entitlement. Turned
+on in Settings, the node keeps for the Mac what it would send it, by the rules every device is told by, and the app
+collects it over its own signed connection when the live stream says `notify` changed (as the Android app collects),
+while it runs, its window or only the agents in the menu bar; coming to the front, it takes what was kept and lets it go,
+as the window shows it all. Each is read as strictly as core reads it (`Core/NotifyPayload.swift`, held to the vectors'
+`notifyPayload`) and shown as the iPhone is sent it (`App/NoticeAnswers.swift`, shared with the iPhone): its buttons,
+thread and sound. Approve… opens its card in the main window, its yes behind Touch ID or the Mac's password; Decline is
+answered from the notification, signed by the Mac's key; the Dock's badge is what needs you. Quit, the Mac is told
+nothing: the iPhone and the web still are.
+
 `MacShotsTests` pictures the Mac app against a dev node; it launches the Mac app, so it runs only on a Mac set aside for
 it, never in CI or on a laptop whose own key the app would load.
 

@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import SwiftUI
+import UserNotifications
 
 /*
  * Invincible on the Mac (docs/MAC.md, M1): the iPhone and iPad app's own views, in a Mac's frame. One main window, the
@@ -103,6 +104,8 @@ struct InvincibleMacApp: App {
                 // The node's live stream, open while the app runs (the menu bar shows the agents): nothing is asked of the
                 // node while nothing changes.
                 if let session = self?.session, !session.liveOn { session.live(true) }
+                // Its notifications, while the node tells this Mac (MacNotices): followed on the stream.
+                if let session = self?.session { await MacNotices.shared.start(session) }
                 await self?.thisMac.refresh()
                 try? await Task.sleep(for: .seconds(NSApplication.shared.isActive ? 5 : 15))
             }
@@ -112,6 +115,7 @@ struct InvincibleMacApp: App {
     /// Back in front: the chat on screen as the node holds it now (an answer it was watching may have gone on).
     func cameBack() async {
         guard let session else { return }
+        await MacNotices.shared.cameBack(session)
         await session.chat.resume(with: session.client)
         if !session.linkUp { await session.refresh() }
     }
@@ -125,9 +129,13 @@ struct InvincibleMacApp: App {
     }
 }
 
-/// What macOS tells the app: it has started, and it is in front again. Closing its last window leaves it in the menu bar.
-final class MacDelegate: NSObject, NSApplicationDelegate {
+/// What macOS tells the app: it has started, it is in front again, and a notification is shown or answered. Closing its
+/// last window leaves it in the menu bar.
+final class MacDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+        // An approval's Approve… and Decline, a task's Ship it…, as the iPhone's (NoticeAnswers).
+        NoticeAnswers.register()
         MacApp.shared.run()
     }
 
@@ -136,6 +144,19 @@ final class MacDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// While the app is in front a notification still shows, but one about what its main window shows now only in the list.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        let showing = await MainActor.run { MacNotices.shared.showing }
+        return NoticeAnswers.options(notification.request.content.userInfo, showing: showing)
+    }
+
+    /// Approve…: the main window, at the approval's card, its yes behind Touch ID or the Mac's password. Decline: answered
+    /// there, signed by this Mac's key. Ship it…: the task, its ship behind the same check. Anything else: where it says.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard let destination = await NoticeAnswers.answer(response) else { return }
+        await MainActor.run { MacNotices.shared.opened = destination }
+    }
 }
 
 /// The main window: joining until this Mac is in the fleet, the app itself after.

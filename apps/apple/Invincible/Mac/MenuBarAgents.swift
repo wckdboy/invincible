@@ -6,6 +6,7 @@ import SwiftUI
 /// things need you beside it when any do.
 struct MenuBarMark: View {
     let mac: MacApp
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let count = mac.session?.needsYou ?? 0
@@ -14,6 +15,14 @@ struct MenuBarMark: View {
             if count > 0 { Text("\(count)").monospacedDigit() }
         }
         .accessibilityLabel(count > 0 ? "\(Primary.name): \(PrimaryNow.needsYou(count))" : Primary.name)
+        // There while the app runs, windows or not: the Dock's badge is what needs you, and a notification tapped opens
+        // the main window, which goes where it asked (MacPlaces).
+        .onChange(of: count, initial: true) { NSApplication.shared.dockTile.badgeLabel = count > 0 ? "\(count)" : nil }
+        .onChange(of: MacNotices.shared.opened) { _, asked in
+            guard asked != nil else { return }
+            openWindow(id: MacApp.main)
+            NSApplication.shared.activate()
+        }
     }
 
     /// The mark at the menu bar's size, as a template.

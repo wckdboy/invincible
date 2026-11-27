@@ -32,6 +32,20 @@ enum Place: Hashable, Codable {
     static func seat(_ id: String) -> Place { id == "primary" ? .primary : .agent(id) }
 }
 
+extension Place {
+    /// What this place shows, as a notification would name it: one about that very thing is told only in the list while
+    /// it shows (Push.presentation). Home and the rest name nothing. An iPhone's screen and a Mac's main window alike.
+    func shown(chat: String?) -> Push.Destination? {
+        switch self {
+        case .task(let id): .task(id)
+        case .agent(let id): .agent(id)
+        case .primary: .chat(chat)
+        case .inbox: .inbox
+        default: nil
+        }
+    }
+}
+
 /// What a window of its own shows: one of the primary's chats (by its id on the node), an agent's page, or a room's. Kept by
 /// the system with the window, so it opens again where it was.
 enum PlaceWindow: Hashable, Codable {

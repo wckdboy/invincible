@@ -53,6 +53,48 @@ struct NotifyPayloadTests {
     }
 }
 
+/// How a Mac shows what it collected (NotifyPayload.content), and how any of the app's notifications shows while it is open
+/// (NoticeAnswers.options): as the iPhone is sent it, and quiet about what the screen shows.
+struct NoticeShownTests {
+    @Test func aCollectedOneIsShownAsTheIPhoneIsSentIt() {
+        var shown = 0
+        for item in Vectors.shared.notifyPayload.read {
+            guard let apple = item.apple, apple != .null, let read = NotifyPayload.read(item.raw) else { continue }
+            shown += 1
+            let aps = apple["aps"]
+            let content = read.content
+            #expect(content.title == aps?["alert"]?["title"]?.string)
+            #expect(content.body == aps?["alert"]?["body"]?.string)
+            #expect(content.threadIdentifier == aps?["thread-id"]?.string)
+            #expect(content.categoryIdentifier == (aps?["category"]?.string ?? ""))
+            #expect((content.sound != nil) == (aps?["sound"] != nil), "\(read.kind)")
+            #expect(content.interruptionLevel == (aps?["interruption-level"]?.string == "passive" ? .passive : .active), "\(read.kind)")
+            #expect(Push.tag(content.userInfo) == read.tag)
+            #expect(read.request.identifier == read.tag)
+        }
+        #expect(shown >= 15)
+    }
+
+    @Test func whileTheAppIsOpenItIsQuietAboutWhatTheScreenShows() {
+        let task = NotifyPayload.read(.object(["v": .number(1), "kind": .string("finished"), "title": .string("Your agent's task: Proven"), "body": .string("Proven."), "open": .string("task"), "task": .string("task-abc123def456"), "tag": .string("t-1")]))!
+        let ask = NotifyPayload.read(.object(["v": .number(1), "kind": .string("approval"), "title": .string("Your agent asks your approval"), "body": .string("An action waits."), "open": .string("inbox"), "tag": .string("t-2")]))!
+        // About what shows: only in the list.
+        #expect(NoticeAnswers.options(task.userInfo, showing: .task("task-abc123def456")) == [.list])
+        #expect(NoticeAnswers.options(ask.userInfo, showing: .inbox) == [.list])
+        // About something else: a banner, and a sound unless it's news.
+        #expect(NoticeAnswers.options(task.userInfo, showing: .task("task-zzz999zzz999")) == [.list, .banner])
+        #expect(NoticeAnswers.options(ask.userInfo, showing: nil) == [.list, .banner, .sound])
+    }
+
+    @Test func aPlaceShowsWhatANotificationWouldName() {
+        #expect(Place.task("task-abc123def456").shown(chat: nil) == .task("task-abc123def456"))
+        #expect(Place.agent("coder").shown(chat: nil) == .agent("coder"))
+        #expect(Place.primary.shown(chat: "cv_1") == .chat("cv_1"))
+        #expect(Place.inbox.shown(chat: nil) == .inbox)
+        for place in [Place.home, .agents, .more, .thisMac, .chats, .keys, .connectors, .room("forge")] { #expect(place.shown(chat: "cv_1") == nil) }
+    }
+}
+
 /// A payload as the vectors hold core's reading of it.
 private func payload(_ v: JSONValue) -> NotifyPayload? {
     guard let kind = v["kind"]?.string, let title = v["title"]?.string, let body = v["body"]?.string, let open = v["open"]?.string, let tag = v["tag"]?.string else { return nil }

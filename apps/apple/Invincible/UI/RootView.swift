@@ -193,13 +193,7 @@ struct PhoneRoot: View {
 
     /// What the screen shows, as a notification would name it (the last place over Home; Home itself names nothing).
     static func showing(_ path: [Place], chat: String?) -> Push.Destination? {
-        switch path.last {
-        case .task(let id): .task(id)
-        case .agent(let id): .agent(id)
-        case .primary: .chat(chat)
-        case .inbox: .inbox
-        default: nil
-        }
+        path.last?.shown(chat: chat)
     }
 }
 
