@@ -305,7 +305,10 @@ The run loop is carried and renamed (§10), the most proven part of it:
     toolset is offered it in the engineer's tool loop: each action is one of its commands, the VM's `desktop` verb of the
     same name; the actions after one that fails aren't run; and a turn that acted ends with what can be acted on, as
     text, then a picture of the screen. Any other model works the desktop by the command: `desktop find`, then `desktop
-    tree`, then its eyes. A Mac makes none yet: there an agent's VM is made without one, and the
+    tree`, then its eyes (`desktop look`). The eyes' check measures the space they answer places in (the picture's
+    pixels, their own 0 to 1000, or a frame of their own), and their places come back in the screen's pixels: the space
+    goes beside their name to every command (`INVINCIBLE_EYES_SPACE`, or `--space` to the held session). A Mac makes
+    none yet: there an agent's VM is made without one, and the
     ledger says why. What it costs and how fast it is: the scorecard's desktop suite ([BENCHMARKS.md](BENCHMARKS.md)).
 - **Shipping:** a run's verified changes become a pull request. Its CI and the review comments come back to the same
   task.

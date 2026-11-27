@@ -63,12 +63,26 @@ describe("checking a model", () => {
     expect(check.reads).toBeUndefined();
   });
 
-  test("one that answers places on its own scale, as qwen3.8-max did: it reads the screen, and its clicks miss", async () => {
+  test("one that answers places on its own 0 to 1000 scale, as qwen3.8-max did: that is the space it is measured in, and its clicks land once converted (C1 step 7)", async () => {
     const m = model((body, picture) => (picture && !JSON.stringify(body.messages).includes("largest heading") ? thousandths : able(body, picture)));
     const check = await checkModel(m.ctx, "stand-in/scaled", { parts: ["reads", "places"] });
     expect(check.reads?.ok).toBe(true);
-    expect(check.places!.landed).toBeLessThan(4);
-    expect(check.places!.meanErrorPx).toBeGreaterThan(50);
+    expect(check.places).toMatchObject({ targets: 8, landed: 8, space: "per-mille" });
+    expect(check.places!.meanErrorPx).toBeLessThanOrEqual(1);
+  });
+
+  test("one that answers in the pixels of the picture as it was shrunk for it: a frame of its own, by the factor that fits; one in the picture's pixels, those", async () => {
+    const shrunk = JSON.stringify(Object.fromEntries(Object.entries(card.targets).map(([id, t]) => [id, [Math.round(t.centre[0] * 0.75), Math.round(t.centre[1] * 0.75)]])));
+    const resized = await checkModel(model((body, picture) => (picture && !JSON.stringify(body.messages).includes("largest heading") ? shrunk : able(body, picture))).ctx, "stand-in/resized", { parts: ["places"] });
+    expect(resized.places).toMatchObject({ targets: 8, landed: 8, space: "scaled" });
+    expect(resized.places!.scale).toBeCloseTo(4 / 3, 2);
+    const pixels = await checkModel(model(able).ctx, "stand-in/able", { parts: ["places"] });
+    expect(pixels.places).toEqual({ targets: 8, landed: 8, meanErrorPx: 0, space: "pixels" });
+    // Places that fit no space better than its pixels are judged in its pixels: a space is measured, never guessed.
+    const scattered = JSON.stringify(Object.fromEntries(Object.keys(card.targets).map((id, i) => [id, [((i * 397) % 1280), ((i * 211) % 800)]])));
+    const lost = await checkModel(model((body, picture) => (picture && !JSON.stringify(body.messages).includes("largest heading") ? scattered : able(body, picture))).ctx, "stand-in/lost", { parts: ["places"] });
+    expect(lost.places).toMatchObject({ space: "pixels" });
+    expect(lost.places!.landed).toBeLessThan(4);
   });
 
   test("one that misreads the heading, or refuses a picture: said, and the rest is still checked", async () => {

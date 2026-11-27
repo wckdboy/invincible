@@ -1465,7 +1465,7 @@ test("an agent whose VM has a desktop is told so, and how to operate it; one wit
 });
 
 test("an agent with a desktop and a model that can see is given its eyes: each command knows which model looks, and the agent is told how to ask it", async () => {
-  const run = async (eyes: string | null) => {
+  const run = async (eyes: string | { ref: string; space: string } | null) => {
     const commands: string[] = [];
     const f = fixture([say("1. Make the change."), say("```sh\ndesktop look \"Where is Sign in?\"\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
       exec: async (_m, command) => { commands.push(command); return command === "command -v desktop" ? result({ stdout: "/usr/local/bin/desktop\n" }) : result(); },
@@ -1480,6 +1480,10 @@ test("an agent with a desktop and a model that can see is given its eyes: each c
   // (No angle brackets in what an agent is told: a model copied them onto its own command fence, and nothing ran.)
   expect(seeing.told.slice(seeing.told.indexOf("This VM has a desktop"), seeing.told.indexOf("to click).") + 10)).not.toMatch(/[<>]/);
   // No model that sees on the roster: the desktop is still there to read as text, and nothing is promised of looking.
+  // Eyes measured to answer places in a space of their own: the space goes beside their name, to every command (C1 step 7).
+  const measured = await run({ ref: "opencode-go/gpt-6-luna", space: "per-mille" });
+  expect(measured.ran).toContain("export INVINCIBLE_EYES='opencode-go/gpt-6-luna' && export INVINCIBLE_EYES_SPACE='per-mille' && ");
+  expect(seeing.ran).not.toContain("INVINCIBLE_EYES_SPACE");
   const blind = await run(null);
   expect(blind.ran).not.toContain("INVINCIBLE_EYES");
   expect(blind.told).toContain("This VM has a desktop");

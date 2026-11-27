@@ -8,6 +8,7 @@ import {
   type ActionView,
   canonical,
   chooseAgent,
+  eyesSpaceOf,
   readModelCheck,
   type AgentFacts,
   TEAM_OWNER,
@@ -2315,7 +2316,7 @@ export function createApp(ctx: AppContext) {
    * A VM's eyes (an agent's, or its own computer's): the roster's first `eyes` model on a provider this VM's gateway
    * token covers (a task's token covers the providers with a key when it starts). The VM itself asks it, through the gateway.
    */
-  function eyesFor(id: string): string | null {
+  function eyesFor(id: string): { ref: string; space: string | null } | null {
     const covered = leased.get(id) ?? [];
     const usable = (ref: string) => {
       const at = ref.indexOf("/");
@@ -2327,7 +2328,9 @@ export function createApp(ctx: AppContext) {
       const check = readModelCheck(entry.value);
       return check ? [{ ref: entry.key.slice("modelcheck:".length), check }] : [];
     });
-    return eyesOf(roster(ctx.store).eyes?.models ?? [], checks, usable);
+    const ref = eyesOf(roster(ctx.store).eyes?.models ?? [], checks, usable);
+    // (And the space its check measured it answering places in, beside its name: `desktop look` gives them in pixels.)
+    return ref ? { ref, space: eyesSpaceOf(checks.find((c) => c.ref === ref)?.check ?? null) } : null;
   }
   /** Its computer's lease of model access, on this node since it started: when it was asked for, a renewal under way, and how many of its commands run there now. */
   const computer = { leased: 0, renewing: null as Promise<void> | null, running: 0 };
@@ -2967,7 +2970,7 @@ export function createApp(ctx: AppContext) {
       const done = await useComputer();
       const ran = (async () => {
         const eyes = eyesFor(TEAM_PRIMARY);
-        return execTeam(seat, withGateway(`cd /work && ${eyes ? `export INVINCIBLE_EYES=${quote(eyes)} && ` : ""}${input.command}`), Math.min(input.timeoutSec ?? 120, TEAM_COMMAND_SECONDS), req.signal);
+        return execTeam(seat, withGateway(`cd /work && ${eyes ? `export INVINCIBLE_EYES=${quote(eyes.ref)} && ${eyes.space ? `export INVINCIBLE_EYES_SPACE=${quote(eyes.space)} && ` : ""}` : ""}${input.command}`), Math.min(input.timeoutSec ?? 120, TEAM_COMMAND_SECONDS), req.signal);
       })().finally(done);
       return longRunning(ran);
     },

@@ -145,8 +145,12 @@ export interface TeamRuntimeDeps {
   search?(agent: string, query: string): { room: string; speaker: string; speakerName: string; text: string; at: string }[];
   dependencies(task: TeamTask): { id: string; title: string; output: string }[];
   stopWorker(agent: Agent): Promise<void>;
-  /** The model that looks at this agent's screen (`provider/model`, from the roster's `eyes`, on a provider its VM's token covers); null: none. */
-  eyes?(agent: Agent): string | null;
+  /**
+   * The model that looks at this agent's screen (`provider/model`, from the roster's `eyes`, on a provider its VM's token
+   * covers), with the space its check measured it answering places in where that isn't the screen's pixels (core's
+   * eyesSpaceOf); null: none.
+   */
+  eyes?(agent: Agent): string | { ref: string; space: string | null } | null;
   /** Keep a directory of the agent's VM (under /work) as an artifact on its host; gives the artifact's id. Absent: nothing is kept. */
   keep?(agent: Agent, path: string, label: string): Promise<string>;
   /**
@@ -667,9 +671,12 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // A desktop in this VM (the desktop image: a display, a window manager, a browser)? Asked of the VM as the task
       // starts, so the agent is told what it has and how to operate it, and one without is told nothing of one.
       const desktop = (await deps.exec(agent, "command -v desktop", 30, ctx.signal).catch(() => null))?.stdout.trim().endsWith("/desktop") === true;
-      // Its eyes: the model `desktop look` asks, named to every command of the task (the VM's own gateway token does the asking).
-      const named = desktop ? (deps.eyes?.(agent) ?? null) : null;
+      // Its eyes: the model `desktop look` asks, named to every command of the task (the VM's own gateway token does the
+      // asking), and beside its name the space its check measured it answering places in (C1 step 7).
+      const given = desktop ? (deps.eyes?.(agent) ?? null) : null;
+      const named = typeof given === "string" ? given : (given?.ref ?? null);
       const sees = named && /^[A-Za-z0-9._:-]+\/[A-Za-z0-9._:\/-]+$/.test(named) && (!held || held.includes(named)) ? named : null;
+      const space = sees && typeof given === "object" && given?.space && /^(per-mille|scaled:[0-9.]+)$/.test(given.space) ? given.space : null;
       const looking = sees ? ' Then `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).' : "";
       // (C1 step 7: an app scripted first; on the screen, the tree's words before pixels, and the eyes after them.)
       const screen = desktop
@@ -699,11 +706,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         });
       };
       /** A command of the task's, in its workspace: in the agent's own VM (`exec`), or in the VM of the seat its coding tool runs on (`execOn`). */
-      const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`);
+      const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}${space ? `export INVINCIBLE_EYES_SPACE=${quote(space)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`);
       const exec = async (command: string, timeout = 120) => {
         await keeping;
         // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms.
-        const direct = deps.execArgv ? desktopArgv(command, sees) : null;
+        const direct = deps.execArgv ? desktopArgv(command, sees, space) : null;
         if (direct) return deps.execArgv!(agent, ["desktop", ...direct], Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
         return deps.exec(agent, inTask(command), Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
       };

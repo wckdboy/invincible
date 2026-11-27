@@ -313,6 +313,28 @@ describe("the desktop command: deskd's thin client", () => {
     }
   });
 
+  test("eyes that answer places in a space of their own (--space, or INVINCIBLE_EYES_SPACE) have them put in the screen's pixels, and said so", async () => {
+    if (!needs()) return;
+    let said = "";
+    const gateway = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: async () => Response.json({ choices: [{ message: { content: said } }] }) });
+    try {
+      const r = await deskd();
+      const eyes = { INVINCIBLE_EYES: "vision/model-1", INVINCIBLE_GATEWAY: `http://127.0.0.1:${gateway.port}/gw`, INVINCIBLE_TOKEN: "gw_test-only" };
+      const look = async (args: string[], extra: Record<string, string> = {}) => {
+        const looking = Bun.spawn([built!, "look", ...args], { env: { ...r.env, ...eyes, ...extra }, stdout: "pipe", stderr: "pipe" });
+        return { out: await new Response(looking.stdout).text(), err: await new Response(looking.stderr).text(), code: await looking.exited };
+      };
+      said = "Send is at 500,500; Cancel at (250, 125).";
+      expect(await look(["--space", "per-mille", "Where is Send?"])).toEqual({ out: "Send is at 640,400; Cancel at (320, 100).\n(Its places, in its own 0 to 1000, are given here in the screen's pixels.)\n", err: "", code: 0 });
+      expect((await look(["Where is Send?"], { INVINCIBLE_EYES_SPACE: "scaled:1.25" })).out).toBe("Send is at 625,625; Cancel at (313, 156).\n(Its places, in a frame of its own, are given here in the screen's pixels.)\n");
+      // Its own pixels: as it said them. A space that isn't one is refused.
+      expect((await look(["Where is Send?"])).out).toBe("Send is at 500,500; Cancel at (250, 125).\n");
+      expect((await look(["--space", "inches", "Where is Send?"])).code).toBe(2);
+    } finally {
+      gateway.stop(true);
+    }
+  });
+
   test("with no desktop process running, the command starts one and is answered; help needs none", async () => {
     if (!needs()) return;
     const dir = mkdtempSync(join(root, "cold-"));

@@ -9,8 +9,9 @@
  *
  * INVINCIBLE_DESKTOP_RUN is the directory of its socket (default /tmp/invincible-desktop), INVINCIBLE_DESKD the
  * process to start (default /usr/local/lib/invincible/deskd.py), INVINCIBLE_DESKTOP_WAIT how long it waits for it
- * to start (seconds, default 20). The eyes' model, gateway and token (INVINCIBLE_EYES, INVINCIBLE_GATEWAY,
- * INVINCIBLE_TOKEN) go with a command from its environment, never as arguments.
+ * to start (seconds, default 20). The eyes' model, the space they answer places in, their gateway and token
+ * (INVINCIBLE_EYES, INVINCIBLE_EYES_SPACE, INVINCIBLE_GATEWAY, INVINCIBLE_TOKEN) go with a command from its
+ * environment, never as arguments.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -192,9 +193,9 @@ int main(int argc, char **argv) {
     puts_(&b, "],\"cwd\":");
     put_json(&b, getcwd(cwd, sizeof cwd) ? cwd : "/work");
     puts_(&b, ",\"env\":{");
-    const char *keys[] = {"INVINCIBLE_EYES", "INVINCIBLE_GATEWAY", "INVINCIBLE_TOKEN"};
+    const char *keys[] = {"INVINCIBLE_EYES", "INVINCIBLE_EYES_SPACE", "INVINCIBLE_GATEWAY", "INVINCIBLE_TOKEN"};
     int any = 0;
-    for (int i = 0; i < 3; i++) {
+    for (size_t i = 0; i < sizeof keys / sizeof *keys; i++) {
       const char *v = getenv(keys[i]);
       if (!v) continue;
       if (any++) puts_(&b, ",");

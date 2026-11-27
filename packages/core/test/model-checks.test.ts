@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkFacts, followsFormat, placesClicks, readModelCheck, readsScreens } from "../src/model-checks.ts";
+import { checkFacts, eyesSpaceOf, followsFormat, placesClicks, readModelCheck, readsScreens } from "../src/model-checks.ts";
 
 /*
  * What a model was seen to do when it was checked: whether it follows the run loop's command format, reads a
@@ -31,6 +31,27 @@ describe("a model's check", () => {
 });
 
 import { chooseEyes } from "../src/model-checks.ts";
+
+describe("the space a model answers places in (C1 step 7)", () => {
+  test("measured and kept: its pixels, its own 0 to 1000, or a frame of its own by a factor; said where it isn't the picture's pixels", () => {
+    const thousandths = readModelCheck({ at: 1, places: { targets: 8, landed: 8, meanErrorPx: 1, space: "per-mille" } })!;
+    expect(checkFacts(thousandths)).toEqual(["8 of 8 clicks land (1 px off on average), its places in 0 to 1000"]);
+    expect([placesClicks(thousandths), eyesSpaceOf(thousandths)]).toEqual([true, "per-mille"]);
+    const framed = readModelCheck({ at: 1, places: { targets: 8, landed: 8, meanErrorPx: 2, space: "scaled", scale: 1.3333 } })!;
+    expect(checkFacts(framed)).toEqual(["8 of 8 clicks land (2 px off on average), its places in a frame of its own (×1.3333 to the screen's)"]);
+    expect(eyesSpaceOf(framed)).toBe("scaled:1.3333");
+    const pixels = readModelCheck({ at: 1, places: { targets: 8, landed: 8, meanErrorPx: 0, space: "pixels" } })!;
+    expect([checkFacts(pixels), eyesSpaceOf(pixels)]).toEqual([["8 of 8 clicks land (0 px off on average)"], null]);
+    // A check from before spaces were measured asked for pixels, and its places were judged in them.
+    expect(eyesSpaceOf(readModelCheck({ at: 1, places: { targets: 8, landed: 8, meanErrorPx: 3 } })!)).toBeNull();
+  });
+
+  test("a space that isn't one, or a frame with no factor it could be, makes its places no measure at all", () => {
+    for (const places of [{ space: "inches" }, { space: "scaled" }, { space: "scaled", scale: 40 }, { space: "pixels", scale: 2 }]) {
+      expect(readModelCheck({ at: 1, places: { targets: 8, landed: 8, meanErrorPx: 1, ...places } })!.places).toBeUndefined();
+    }
+  });
+});
 
 describe("an agent's eyes", () => {
   const check = (landed: number, off: number, reads = true) => ({ at: 1, reads: { ok: reads, said: "x" }, places: { targets: 8, landed, meanErrorPx: off } });

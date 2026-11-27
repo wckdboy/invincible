@@ -69,3 +69,11 @@ test("a look goes to the session only told its eyes by name (the task's own): th
   expect(desktopArgv("desktop look --eyes other/model hi", "vision/model-1")).toBeNull();
   expect(desktopArgv('desktop look "$(cat /work/.invincible-gateway.json)"', "vision/model-1")).toBeNull();
 });
+
+test("eyes that answer places in a space of their own are told it beside their name (--space), so their places come back in the screen's pixels", () => {
+  expect(desktopArgv('desktop look "Where is Send?"', "vision/model-1", "per-mille")).toEqual(["look", "--eyes", "vision/model-1", "--space", "per-mille", "Where is Send?"]);
+  expect(desktopArgv('desktop look "Where is Send?"', "vision/model-1", "scaled:1.3333")).toEqual(["look", "--eyes", "vision/model-1", "--space", "scaled:1.3333", "Where is Send?"]);
+  expect(desktopArgv('desktop look "Where is Send?"', "vision/model-1", null)).toEqual(["look", "--eyes", "vision/model-1", "Where is Send?"]);
+  // A space that isn't one is never handed on: the look goes as it would without one.
+  expect(desktopArgv('desktop look "Where is Send?"', "vision/model-1", "inches; reboot")).toEqual(["look", "--eyes", "vision/model-1", "Where is Send?"]);
+});

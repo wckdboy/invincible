@@ -14,7 +14,9 @@ import { parseAction, runLoop } from "./run.ts";
  *   stand-in for the sandbox; counted are the replies that held a command (or said DONE or GIVE UP);
  * - reading a screen: a page drawn once by Chrome (assets/check-card), its largest heading asked for;
  * - placing a click: the centres of eight things on that page, asked for in its pixels, each judged by whether
- *   it lands inside the thing as the page itself measured it.
+ *   it lands inside the thing as the page itself measured it; in the space its answers were in, measured from them
+ *   (C1 step 7): the picture's pixels, its own 0 to 1000, or the pixels of a frame of its own (the picture as it was
+ *   resized for it), whichever lands more of them, its pixels when none lands more.
  *
  * About eight calls, a few thousand tokens. The picture is sent whatever is known of the model seeing: that is
  * what is checked. Each call's cost is counted, as role `check`.
@@ -90,7 +92,11 @@ export async function checkModel(ctx: ModelsContext, ref: string, options: { ver
 /** Words as words: case, punctuation and spacing aside. */
 const plainWords = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
-/** Each answered place judged against its target: does a click there land inside it (four pixels' grace), and how far off is it. */
+/**
+ * The answered places judged against their targets: in each space they could be in, does a click there land inside
+ * its target (four pixels' grace), and how far off is it. The space that lands more than the picture's pixels is
+ * the model's (0 to 1000 first, then a frame of its own), and its places are judged in it.
+ */
 function judgePlaces(said: string): NonNullable<ModelCheck["places"]> {
   const from = said.indexOf("{");
   const to = said.lastIndexOf("}");
@@ -101,18 +107,37 @@ function judgePlaces(said: string): NonNullable<ModelCheck["places"]> {
     // (Not JSON: nothing answered.)
   }
   const targets = Object.entries(CARD.targets);
-  let landed = 0;
-  const errors: number[] = [];
-  for (const [id, target] of targets) {
+  const points = targets.flatMap(([id, target]) => {
     const point = answered[id];
-    if (!Array.isArray(point) || point.length < 2 || !point.slice(0, 2).every((n) => typeof n === "number" && Number.isFinite(n))) continue;
-    const [x, y] = point as [number, number];
-    const [left, top, right, bottom] = target.box;
-    if (x >= left - 4 && x <= right + 4 && y >= top - 4 && y <= bottom + 4) landed++;
-    errors.push(Math.hypot(x - target.centre[0], y - target.centre[1]));
+    return Array.isArray(point) && point.length >= 2 && point.slice(0, 2).every((n) => typeof n === "number" && Number.isFinite(n)) ? [{ target, at: point as [number, number] }] : [];
+  });
+  const judged = (screen: (x: number, y: number) => [number, number]) => {
+    let landed = 0;
+    const errors: number[] = [];
+    for (const { target, at } of points) {
+      const [x, y] = screen(at[0], at[1]);
+      const [left, top, right, bottom] = target.box;
+      if (x >= left - 4 && x <= right + 4 && y >= top - 4 && y <= bottom + 4) landed++;
+      errors.push(Math.hypot(x - target.centre[0], y - target.centre[1]));
+    }
+    return { targets: targets.length, landed, meanErrorPx: errors.length ? Math.round(errors.reduce((a, b) => a + b, 0) / errors.length) : null };
+  };
+  let best: NonNullable<ModelCheck["places"]> = { ...judged((x, y) => [x, y]), space: "pixels" };
+  const perMille = judged((x, y) => [(x * CARD.width) / 1000, (y * CARD.height) / 1000]);
+  if (perMille.landed > best.landed) best = { ...perMille, space: "per-mille" };
+  // A frame of its own: the one factor that brings its places nearest their targets (least squares, from the corner).
+  const along = points.reduce((sum, { target, at }) => sum + at[0] * target.centre[0] + at[1] * target.centre[1], 0);
+  const across = points.reduce((sum, { at }) => sum + at[0] * at[0] + at[1] * at[1], 0);
+  const scale = across > 0 ? Math.round((along / across) * 10_000) / 10_000 : 1;
+  if (scale >= SCALES[0] && scale <= SCALES[1] && Math.abs(scale - 1) >= 0.02) {
+    const framed = judged((x, y) => [x * scale, y * scale]);
+    if (framed.landed > best.landed) best = { ...framed, space: "scaled", scale };
   }
-  return { targets: targets.length, landed, meanErrorPx: errors.length ? Math.round(errors.reduce((a, b) => a + b, 0) / errors.length) : null };
+  return best;
 }
+
+/** The factors a frame of a model's own may be from the picture's pixels: a picture resized for it to a quarter of its size, or four times. */
+const SCALES = [0.25, 4] as const;
 
 /** One question with the test screen as its picture, sent whether or not the model is known to see; its answer, whole. */
 async function withPicture(ctx: ModelsContext, ref: string, question: string, signal?: AbortSignal): Promise<string> {

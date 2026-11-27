@@ -47,14 +47,19 @@ export function plainWords(command: string): string[] | null {
   return words;
 }
 
+/** The space an agent's eyes answer places in, other than the screen's own pixels (core's eyesSpaceOf). */
+const SPACE = /^(per-mille|scaled:(0\.\d*[1-9]\d*|[1-9]\d*(\.\d+)?))$/;
+
 /**
  * `desktop <verb> …` alone, as its arguments (without `desktop`), when a held session may run it; else null. `eyes`:
  * the model a look asks (the task's INVINCIBLE_EYES), which a held session is told by name: its gateway and token are
  * deskd's to read from the VM's lease, as the shell's would be, never an argument. Without it a look stays a shell's.
+ * `space`: the one its check measured it answering places in (C1 step 7), told beside its name, so they come back in
+ * the screen's pixels.
  */
-export function desktopArgv(command: string, eyes?: string | null): string[] | null {
+export function desktopArgv(command: string, eyes?: string | null, space?: string | null): string[] | null {
   const words = plainWords(command.trim());
-  if (words && words[0] === "desktop" && words[1] === "look" && eyes && words.length > 2 && words[2] !== "--eyes") return ["look", "--eyes", eyes, ...words.slice(2)];
+  if (words && words[0] === "desktop" && words[1] === "look" && eyes && words.length > 2 && words[2] !== "--eyes") return ["look", "--eyes", eyes, ...(space && SPACE.test(space) ? ["--space", space] : []), ...words.slice(2)];
   if (!words || words.length < 2 || words[0] !== "desktop" || !DIRECT.has(words[1]!)) return null;
   if (WRITES.has(words[1]!)) {
     const file = words.slice(2).filter((w) => w !== "--now" && w !== "--base64").find((w) => !/^\d+$/.test(w));

@@ -15,11 +15,22 @@ export interface ModelCheck {
   format?: { replies: number; good: number };
   /** A screenshot's largest heading, read back: right or not, and what it said. */
   reads?: { ok: boolean; said: string };
-  /** Places on that screenshot: how many it was asked for, how many of its answers land on them, how far off on average (px). */
-  places?: { targets: number; landed: number; meanErrorPx: number | null };
+  /**
+   * Places on that screenshot: how many it was asked for, how many of its answers land on them, how far off on average
+   * (px), in the space its answers were measured to be in (C1 step 7): the picture's pixels, its own 0 to 1000
+   * (per-mille), or a frame of its own (scaled: its places times `scale` are the screen's). None said: pixels, as a
+   * check from before spaces were measured asked for them.
+   */
+  places?: { targets: number; landed: number; meanErrorPx: number | null; space?: PlaceSpace; scale?: number };
   /** Each part that could not be done, and why. */
   errors?: string[];
 }
+
+/** The spaces a model may answer places in. */
+export type PlaceSpace = "pixels" | "per-mille" | "scaled";
+const SPACES: readonly string[] = ["pixels", "per-mille", "scaled"];
+/** The factors a frame of a model's own may be from the screen's pixels. */
+const SCALE = { least: 0.25, most: 4 } as const;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const count = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1_000_000;
@@ -36,7 +47,20 @@ export function readModelCheck(raw: unknown): ModelCheck | null {
   if (isObj(format) && count(format.replies) && count(format.good) && format.good <= format.replies) check.format = { replies: format.replies, good: format.good };
   if (isObj(reads) && typeof reads.ok === "boolean" && typeof reads.said === "string") check.reads = { ok: reads.ok, said: reads.said.slice(0, 200) };
   if (isObj(places) && count(places.targets) && count(places.landed) && places.landed <= places.targets) {
-    check.places = { targets: places.targets, landed: places.landed, meanErrorPx: typeof places.meanErrorPx === "number" && Number.isFinite(places.meanErrorPx) ? places.meanErrorPx : null };
+    // (Places judged in a space that isn't one, or a frame with no factor it could be, measure nothing.)
+    const scaled = places.space === "scaled";
+    const scale = places.scale;
+    const spaced = places.space === undefined || (typeof places.space === "string" && SPACES.includes(places.space));
+    const factored = scaled ? typeof scale === "number" && Number.isFinite(scale) && scale >= SCALE.least && scale <= SCALE.most : scale === undefined;
+    if (spaced && factored) {
+      check.places = {
+        targets: places.targets,
+        landed: places.landed,
+        meanErrorPx: typeof places.meanErrorPx === "number" && Number.isFinite(places.meanErrorPx) ? places.meanErrorPx : null,
+        ...(places.space !== undefined ? { space: places.space as PlaceSpace } : {}),
+        ...(scaled ? { scale: scale as number } : {}),
+      };
+    }
   }
   if (Array.isArray(errors)) {
     const said = errors.filter((e): e is string => typeof e === "string").map((e) => e.slice(0, 300));
@@ -50,6 +74,16 @@ export function readModelCheck(raw: unknown): ModelCheck | null {
 export const followsFormat = (check: ModelCheck | null): boolean | null =>
   check?.format && check.format.replies ? check.format.good / check.format.replies >= 0.8 : null;
 
+/**
+ * The space an agent's eyes answer places in, as `desktop look` is told it (--space), to put them in the screen's
+ * pixels: per-mille, or scaled:<factor>; null for the picture's own pixels, nothing to convert.
+ */
+export function eyesSpaceOf(check: ModelCheck | null): string | null {
+  if (check?.places?.space === "per-mille") return "per-mille";
+  if (check?.places?.space === "scaled" && check.places.scale) return `scaled:${check.places.scale}`;
+  return null;
+}
+
 /** It read the screen's heading right. null: not checked. */
 export const readsScreens = (check: ModelCheck | null): boolean | null => (check?.reads ? check.reads.ok : null);
 
@@ -62,7 +96,10 @@ export function checkFacts(check: ModelCheck): string[] {
   const facts: string[] = [];
   if (check.format) facts.push(`commands in ${check.format.good} of ${check.format.replies} replies`);
   if (check.reads) facts.push(check.reads.ok ? "reads a screen" : `misreads a screen (said: ${check.reads.said.slice(0, 60)})`);
-  if (check.places) facts.push(`${check.places.landed} of ${check.places.targets} clicks land${check.places.meanErrorPx === null ? "" : ` (${Math.round(check.places.meanErrorPx)} px off on average)`}`);
+  if (check.places) {
+    const space = check.places.space === "per-mille" ? ", its places in 0 to 1000" : check.places.space === "scaled" ? `, its places in a frame of its own (×${check.places.scale} to the screen's)` : "";
+    facts.push(`${check.places.landed} of ${check.places.targets} clicks land${check.places.meanErrorPx === null ? "" : ` (${Math.round(check.places.meanErrorPx)} px off on average)`}${space}`);
+  }
   for (const error of check.errors ?? []) {
     const at = error.indexOf(":");
     facts.push(at > 0 ? `could not check ${error.slice(0, at)}:${error.slice(at + 1)}` : `could not check: ${error}`);

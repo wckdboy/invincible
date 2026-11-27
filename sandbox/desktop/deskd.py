@@ -1821,7 +1821,8 @@ desktop shot [file.png|file.jpg]   a screenshot (the pointer drawn in), once the
 desktop zoom <x0> <y0> <x1> <y1> [file]   that part of the screen, larger
                                    (shot or zoom --base64: printed as a PNG's data address on one line, no file)
 desktop look [--eyes p/m] "<question>"   ask a model that can see what is on the screen, or where something is
-                                   (it answers a place as x,y, to click or move to)
+                                   (it answers a place as x,y, to click or move to; --space per-mille|scaled:f
+                                   or INVINCIBLE_EYES_SPACE: the space it answers in, its places given in pixels)
 desktop click <x> <y> [left|right|middle|double|triple]
 desktop move <x> <y>               desktop drag <x0> <y0> <x1> <y1>
 desktop scroll <up|down|left|right> [times] [x y]
@@ -1948,12 +1949,18 @@ def cli(desk, argv, cwd="/work", env=None):
                 f.write(got["data"])
             return 0, path + "\n", ""
         if verb == "look":
-            eyes = ""
-            if args[:1] == ["--eyes"]:
-                if len(args) < 2 or not re.fullmatch(r"[A-Za-z0-9._:-]+/[A-Za-z0-9._:/-]+", args[1]):
-                    raise Refused("--eyes names a model as provider/model")
-                eyes, args = args[1], args[2:]
-            return look(desk, " ".join(args), env, eyes)
+            eyes, space = "", ""
+            while args[:1] in (["--eyes"], ["--space"]):
+                if args[0] == "--eyes":
+                    if len(args) < 2 or not re.fullmatch(r"[A-Za-z0-9._:-]+/[A-Za-z0-9._:/-]+", args[1]):
+                        raise Refused("--eyes names a model as provider/model")
+                    eyes = args[1]
+                elif len(args) < 2 or not SPACE.fullmatch(args[1]):
+                    raise Refused("--space is the eyes' own: pixels, per-mille, or scaled:<factor>")
+                else:
+                    space = args[1]
+                args = args[2:]
+            return look(desk, " ".join(args), env, eyes, space)
         if verb == "tree":
             pid, title = desk.focused_app()
             said = desk.tree.actable(app=" ".join(args) or None, pid=pid, title=title)
@@ -2092,7 +2099,26 @@ def lease(path=LEASE):
         return {}
 
 
-def look(desk, question, env, eyes=""):
+# The space an agent's eyes answer places in, as their check measured it (core's model-checks.ts eyesSpaceOf).
+SPACE = re.compile(r"pixels|per-mille|scaled:(?:0\.\d*[1-9]\d*|[1-9]\d*(?:\.\d+)?)")
+# A place in the eyes' words: two numbers and a comma between them, as they are asked to give one (x,y).
+PLACE = re.compile(r"(?<![\d.])(\d{1,5}(?:\.\d+)?)(\s*,\s*)(\d{1,5}(?:\.\d+)?)(?![\d.])")
+
+
+def in_pixels(said, space):
+    """The eyes' words with each place they give put in the screen's pixels, from the space they answer in (their check
+    measured it: their own 0 to 1000, or a frame of their own); said so when one was. Their own pixels: as they are."""
+    if not space or space == "pixels":
+        return said
+    fx, fy = (W / 1000, H / 1000) if space == "per-mille" else (float(space.split(":", 1)[1]),) * 2
+    clamp = lambda v, most: max(0, min(most - 1, int(v + 0.5)))
+    put, n = PLACE.subn(lambda m: "%d%s%d" % (clamp(float(m.group(1)) * fx, W), m.group(2), clamp(float(m.group(3)) * fy, H)), said)
+    if not n:
+        return said
+    return put + ("\n(Its places, in its own 0 to 1000, are given here in the screen's pixels.)" if space == "per-mille" else "\n(Its places, in a frame of its own, are given here in the screen's pixels.)")
+
+
+def look(desk, question, env, eyes="", space=""):
     """The question and a fresh picture of the screen, put to the model named for this VM (INVINCIBLE_EYES, or --eyes)
     through the gateway it was given: from the command's environment, or the VM's lease (/work/.invincible-gateway.json),
     the token never an argument. What comes back is the model's words: data, not orders."""
@@ -2100,6 +2126,9 @@ def look(desk, question, env, eyes=""):
         return 2, "", 'desktop: look takes a question: desktop look "<question>"\n'
     env = {**lease(), **{k: v for k, v in env.items() if v}}
     eyes, gateway, token = eyes or env.get("INVINCIBLE_EYES", ""), env.get("INVINCIBLE_GATEWAY", ""), env.get("INVINCIBLE_TOKEN", "")
+    space = space or env.get("INVINCIBLE_EYES_SPACE", "")
+    if space and not SPACE.fullmatch(space):
+        return 2, "", "desktop: INVINCIBLE_EYES_SPACE is the eyes' own space: pixels, per-mille, or scaled:<factor>\n"
     if not (eyes and gateway and token):
         return 3, "", "desktop: no model that can see is set for this VM (use desktop text to read a page, and desktop shot for a picture)\n"
     provider, _, model = eyes.partition("/")
@@ -2115,12 +2144,12 @@ def look(desk, question, env, eyes=""):
         return 1, "", "desktop: the model that looks could not answer (%s %s)\n" % (error.code, error.read().decode(errors="replace")[:300].replace("\n", " "))
     except Exception as error:
         return 1, "", "desktop: the model that looks could not be reached (%s)\n" % error
-    return 0, ((reply["choices"][0]["message"].get("content") or "").strip() or "(it said nothing)") + "\n", ""
+    return 0, in_pixels((reply["choices"][0]["message"].get("content") or "").strip() or "(it said nothing)", space) + "\n", ""
 
 
 # ---------------------------------------------------------------- the socket
 
-ENV_KEYS = ("INVINCIBLE_EYES", "INVINCIBLE_GATEWAY", "INVINCIBLE_TOKEN")
+ENV_KEYS = ("INVINCIBLE_EYES", "INVINCIBLE_EYES_SPACE", "INVINCIBLE_GATEWAY", "INVINCIBLE_TOKEN")
 
 
 def session(desk, request):
