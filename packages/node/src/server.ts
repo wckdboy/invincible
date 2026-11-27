@@ -2781,6 +2781,13 @@ export function createApp(ctx: AppContext) {
     const models = choose(views.filter((p) => !vm || vm.includes(p.id)));
     return { models, outside: models.length ? [] : choose(views) };
   };
+  /**
+   * Resolved once the routes' handlers exist (`const handlers`, below): what the node sends through them in-process
+   * (inProcess) as it starts waits for it. The sweep of what handed tasks left running went out as the team was attached,
+   * before them, and reached no VM: "Cannot access 'handlers' before initialization" (Ultra, 27 November 2026).
+   */
+  let routesExist: () => void = () => {};
+  const routesReady = new Promise<void>((resolve) => (routesExist = resolve));
   if (ctx.team) {
     const runtime = teamRuntime({
       brain: (member) => ({ ...brainFor(agentPrincipal(member.id)), ...(ctx.fetch ? { fetch: overFleet(ctx.fetch) } : {}) }),
@@ -2965,7 +2972,7 @@ export function createApp(ctx: AppContext) {
         const agent = snapshot.agents.find((m) => m.workspace?.id === sandbox && m.workspace.node === ctx.identity.id);
         return agent ? (snapshot.tasks.find((t) => t.assignee === agent.id && t.status === "running")?.id ?? null) : null;
       },
-      sweep: () => void sweepHanded(),
+      sweep: () => void routesReady.then(sweepHanded).catch((error: Error) => ctx.log(`fabric: what handed tasks left running in agents' VMs wasn't swept: ${redact(String(error?.message ?? error)).slice(0, 200)}`)),
     });
     outcomes.start();
     // Work for idle agents from your backlog (backlog.ts): one proposal a day at most for each, which your agent approves
@@ -5113,6 +5120,7 @@ export function createApp(ctx: AppContext) {
       return notifyErrors(() => ctx.notify.test(notifyTarget(input.device, p) ?? undefined));
     },
   };
+  routesExist();
 
   /** Notifications are the owner's: a terminal or a paired device, never an agent (its own tools included) or another node. */
   function ownerOfNotify(p: Principal): void {
