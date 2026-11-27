@@ -93,8 +93,11 @@ C1 step 10. An agent whose desktop isn't used costs what an agent without one do
   stream), the node grows it, live, to 4 GB (the sandbox host's `desktopRoom`, through the governor, so within the
   ceiling, and in the ledger). It is never made again for it: where it can't grow (no room under the ceiling, a microVM
   that can't take more), its desktop runs with what it has, its work as it was, the ledger says why, and it is tried
-  again a minute later at the soonest. A `desktop` command inside a shell command reaches deskd and starts the desktop,
-  but not the node's growing: the VM grows at the next command that comes through the node.
+  again a minute later at the soonest. A `desktop` verb given in a shell command counts as well: a look, which runs in
+  the agent's shell for its eyes' environment, or a verb inside a longer command. The node reads the verb in the
+  shell's words (`desktopVerbIn`) and grows the VM before the command runs. One a file runs out of the node's sight (a
+  script that calls `desktop`) starts the desktop without the growing: the VM grows at the next command where the node
+  sees a desktop verb.
 - **Held to** (the desktop suite's `desktop.light.*`, [BENCHMARKS.md](BENCHMARKS.md), to be run on a sandbox host): a
   desktop never started at most +50 MB, with 2 GB given; growing to 4 GB within 1 s, its work as it was; after an idle
   stop, nothing of it left running and the guest's memory back, within 50 MB; started again to its first page within

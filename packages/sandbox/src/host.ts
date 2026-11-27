@@ -457,6 +457,19 @@ export interface DesktopDone {
 const NO_DESKTOP = "this agent's VM has no desktop: have it made again with one (invincible agents provision <id> --remake --desktop)";
 /** What asks only whether a desktop is up, or how to use it, or stops it: none of it needs the room a desktop takes (deskd's ASKING, and stop). */
 const DESKTOP_ASKING = new Set(["help", "--help", "-h", "status", "stop"]);
+
+/**
+ * The first `desktop` verb a shell command gives that may start the desktop, or null: `desktop <verb>` where a command
+ * may begin in it (as agents' actsOnDesktop reads one), a verb that only asks (DESKTOP_ASKING) aside. A look runs in the
+ * agent's shell, as its eyes' environment is there, and so does any verb inside a longer command: either starts the
+ * desktop as the verb given alone does, so it is room for the desktop first (desktopRoom). The word inside a text isn't.
+ */
+export function desktopVerbIn(cmd: readonly string[]): string | null {
+  const shell = cmd.length >= 3 && /^(ba)?sh$/.test(cmd[0]!.split("/").pop()!) && /^-l?c$/.test(cmd[1]!) ? cmd[2]! : null;
+  if (!shell) return null;
+  for (const given of shell.matchAll(/(?:^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+([A-Za-z_-]+)/g)) if (!DESKTOP_ASKING.has(given[1]!)) return given[1]!;
+  return null;
+}
 /** How soon a VM that couldn't grow for its desktop is tried again, at the soonest. */
 const DESKTOP_ROOM_AGAIN_MS = 60_000;
 
@@ -2253,6 +2266,10 @@ export class SandboxHost {
         // (One that ended before it answered was no session: the command is run as any other.)
         if (!(error instanceof SessionEnded) || session?.answered) result = { code: 1, stdout: "", stderr: `desktop: ${(error as Error).message}\n`, truncated: false };
       }
+    } else if (sandbox.image.includes("desktop")) {
+      // A desktop verb in a shell command (a look, or one inside a longer command) may start the desktop too: room first.
+      const verb = desktopVerbIn(cmd);
+      if (verb) await this.desktopRoom(sandbox, verb);
     }
     result ??= await this.docker(this.commandArgs(id, cmd, timeoutSec), (timeoutSec + 15) * 1000);
     this.opts.ledger({

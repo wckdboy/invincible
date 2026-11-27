@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { containerName, LABEL, SandboxHost, type DockerRunner, type LedgerEntryInput } from "../src/index.ts";
+import { containerName, desktopVerbIn, LABEL, SandboxHost, type DockerRunner, type LedgerEntryInput } from "../src/index.ts";
 
 /*
  * Watching an agent's desktop and taking it over, from outside its VM: the host does one thing there with the
@@ -423,6 +423,34 @@ describe("room for its desktop (C1 step 10): an agent's VM made with 2 GB grows 
     expect(d.updates).toHaveLength(0);
     await d.host.exec(ID, ["desktop", "click", "10", "20"]);
     expect(d.updates).toHaveLength(1);
+  });
+
+  test("a look grows it first, though it runs in the agent's shell (its eyes' environment), and so does any desktop verb inside a longer command; one that only asks, or the word in a text, doesn't", async () => {
+    const d = desk({ memoryGb: 2 });
+    // (How the node runs an agent's command, its primary's computer's included: in a login shell.)
+    await d.host.exec(ID, ["bash", "-lc", `cd /work && echo "desktop look is how you ask its eyes" && desktop status && desktop help`]);
+    expect(d.updates).toHaveLength(0);
+    await d.host.exec(ID, ["bash", "-lc", `echo "eyes: $INVINCIBLE_EYES"; desktop look "What is on the screen right now?"`]);
+    expect(d.updates).toEqual([["update", "--cpus", "1", "--memory", "4096m", "--memory-swap", "4096m", containerName(ID)]]);
+    const looked = d.calls.findIndex((a) => a[0] === "exec" && a.join(" ").includes('desktop look "What is on the screen'));
+    expect(d.calls.findIndex((a) => a[0] === "update")).toBeLessThan(looked);
+    expect(d.ledger.find((e) => e.resource === "docker.container")).toMatchObject({ verdict: "allow", reason: expect.stringContaining("its desktop's first use") });
+    // Grown once: the next command with a desktop verb in it finds as much already.
+    await d.host.exec(ID, ["bash", "-lc", "cd /work && desktop type 'Søren Ærø'"]);
+    expect(d.updates).toHaveLength(1);
+  });
+
+  test("the desktop verb in a shell command: where a command may begin in it, in a login shell or a plain one; none in a text, or in a command not run by a shell", () => {
+    const sh = (script: string, shell = "bash", flag = "-lc") => desktopVerbIn([shell, flag, script]);
+    expect(sh('desktop look "Where is Save?"')).toBe("look");
+    expect(sh("cd /work && desktop status; desktop shot /tmp/a.png")).toBe("shot");
+    expect(sh('x=$(desktop text) && echo "$x"')).toBe("text");
+    expect(sh("echo `desktop windows`", "/bin/sh", "-c")).toBe("windows");
+    expect(sh("ls\ndesktop click 10 20")).toBe("click");
+    expect(sh('echo "use desktop look to ask"; desktop help; desktop stop')).toBeNull();
+    expect(sh("my-desktop look")).toBeNull();
+    expect(desktopVerbIn(["python3", "-c", "desktop look"])).toBeNull();
+    expect(desktopVerbIn(["desktop", "look", "q"])).toBeNull();
   });
 
   test("a VM without a desktop, with no limit of its own, with as much already, or not an agent's own, is left as it is", async () => {
