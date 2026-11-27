@@ -77,6 +77,38 @@ describe("a merge of its agents' proven work", () => {
     }
   });
 
+  // The review of 27 November, N2 (N8's run: its mutants N2e and N2f): its own approval merges only what it stood on.
+  test("on its own approval, only what that approval stood on, read again just before: into the default branch, from the branch it shipped, in this repository", async () => {
+    const at = { full_name: "amiriteorg/shipyard" };
+    const stood = { number: 7, baseRef: "main", baseRepo: "amiriteorg/shipyard", headRepo: "amiriteorg/shipyard", headRef: "invincible/units", headSha: HEAD, changedFiles: 1 };
+    const own = async (answers: Parameters<typeof github>[0]) => {
+      const gh = github(answers);
+      const result = await mergeNative()({ ...CATALOG.github!.manifest, origin: "https://api.github.com" }, ARGS, gh.send, { own: true, facts: { pull: stood } });
+      return { result, merged: gh.sent.some((s) => s.method === "PUT") };
+    };
+    const now = (over: object = {}) => pull({ base: { ref: "main", repo: at }, head: { sha: HEAD, ref: "invincible/units", repo: at }, ...over });
+    // As it stood: merged.
+    expect(await own({ pull: now(), repo: repo({ default_branch: "main" }) })).toMatchObject({ result: { ok: true }, merged: true });
+    // Retargeted, the default branch changed, from another branch, or from a fork since: not merged, and it is yours.
+    for (const [why, answers] of [
+      ["retargeted onto production", { pull: now({ base: { ref: "production", repo: at } }), repo: repo({ default_branch: "main" }) }],
+      ["the default branch is develop now", { pull: now(), repo: repo({ default_branch: "develop" }) }],
+      ["from another branch", { pull: now({ head: { sha: HEAD, ref: "invincible/other", repo: at } }), repo: repo({ default_branch: "main" }) }],
+      ["from a fork", { pull: now({ head: { sha: HEAD, ref: "invincible/units", repo: { full_name: "lin-example/shipyard" } } }), repo: repo({ default_branch: "main" }) }],
+    ] as const) {
+      const { result, merged } = await own(answers);
+      expect([why, result.ok, result.status, merged]).toEqual([why, false, 409, false]);
+      expect(result.body).toContain("merging it is yours");
+    }
+  });
+
+  test("an own approval whose reads weren't kept (sent after a restart) merges nothing, and GitHub isn't asked: it is asked again", async () => {
+    const gh = github({});
+    const result = await mergeNative()({ ...CATALOG.github!.manifest, origin: "https://api.github.com" }, ARGS, gh.send, { own: true });
+    expect(result).toMatchObject({ ok: false, status: 409, body: "not merged: what your agent's own approval of #7 stood on wasn't kept (it was sent after a restart): merging it is asked again" });
+    expect(gh.sent).toEqual([]);
+  });
+
   test("what GitHub refuses is said, and never tried again another way", async () => {
     const { result, sent } = await merge(ARGS, { merged: { status: 405, json: { message: "Required status check \"test\" is expected." } } });
     expect(result).toMatchObject({ ok: false, status: 405, body: "not merged: GitHub said 405: Required status check \"test\" is expected." });

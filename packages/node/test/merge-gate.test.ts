@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { newNodeIdentity } from "@invincible/core";
-import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
+import { b64u, newNodeIdentity } from "@invincible/core";
+import { enrollDevice, foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { CATALOG } from "@invincible/models";
 import { ConnectorService, type NativeTool } from "../src/connectors.ts";
 
@@ -25,6 +25,8 @@ const KEPT: Record<string, { files: string[]; base: string }> = {
   art_BBBBBBBBBBBBBBBBBBBBBB: { files: ["src/units.ts"], base: SHIPPED },
   art_CCCCCCCCCCCCCCCCCCCCCC: { files: [".github/workflows/ci.yml"], base: SHIPPED },
   art_EEEEEEEEEEEEEEEEEEEEEE: { files: ["src/parse.ts"], base: MAIN },
+  // Kept work no verified task's: a task whose gates failed.
+  art_GGGGGGGGGGGGGGGGGGGGGG: { files: ["src/units.ts"], base: SHIPPED },
 };
 /** Whose proven work each is: the ship's, a verified task's; each fix's, a verified fix task's for the shipped branch. */
 const PROVEN: Record<string, { fix?: { owner: string; repo: string; branch: string } }> = {
@@ -75,11 +77,11 @@ function world(over: { said?: Record<string, unknown> } = {}) {
   const answer = (status: number, body: string): ReturnType<NativeTool> => Promise.resolve({ ok: status < 300, status, contentType: "text/plain", body, truncated: false, durationMs: 1 });
   const natives: Record<string, NativeTool> = {
     "github.ship": (_m, args) => (args.branch === "invincible/parse" ? answer(201, `pull request #8: ${URL8} (1 file on invincible/parse into main, commit ${"f".repeat(40)})`) : answer(201, `pull request #7: ${URL7} (2 files on invincible/units into main, commit ${"c".repeat(40)})`)),
-    "github.ship.update": () => answer(200, `1 file pushed onto invincible/units, commit ${"e".repeat(40)}: pull request #7 updated, ${URL7}`),
+    "github.ship.update": (_m, args) => answer(200, `1 file pushed onto invincible/units, commit ${args.artifact === "art_GGGGGGGGGGGGGGGGGGGGGG" ? "9".repeat(40) : "e".repeat(40)}: pull request #7 updated, ${URL7}`),
     "github.merge": (_m, args) => (merged.push(args), answer(200, `merged #${args.number} into main (squash) at ${"d".repeat(40)}: https://github.com/amiriteorg/shipyard/pull/${args.number}`)),
   };
   const service = new ConnectorService({ store, vault, identity, local: new Database(":memory:"), ledger: () => {}, log: () => {}, natives, fetch: github, repositories: () => ["https://github.com/amiriteorg/shipyard"], shipment: (artifact) => kept[artifact] ?? null, proven: (artifact) => PROVEN[artifact] ?? null });
-  return { service, merged, kept };
+  return { service, merged, kept, store, identity };
 }
 const noa = { kind: "agent" as const, by: "team.0123456789.noa" };
 const at = { owner: "amiriteorg", repo: "shipyard" };
@@ -139,6 +141,34 @@ describe("what a merge of its agents' work lands", () => {
     expect((await lost.service.call(merge(SHIPPED, 7), primary)).status).toBe("done");
     expect((await lost.service.call(merge("f".repeat(40), 8), primary)).status).toBe("asked");
     expect(lost.merged).toEqual([{ ...at, number: 7, sha: SHIPPED }]);
+  });
+
+  // The review of 27 November, N1 (N8's run: its mutants N1c and N1d): every commit it lands is this node's push of proven work.
+  test("a fix another node of yours pushed onto its branch, though a verified fix task's work: the merge that would land it is yours", async () => {
+    const w = world();
+    expect((await w.service.call(ship("art_AAAAAAAAAAAAAAAAAAAAAA"), noa)).status).toBe("done");
+    // Another node of the fleet pushed it (its action, its receipt): this node never pushed that commit.
+    const other = newNodeIdentity();
+    enrollDevice(w.store, w.identity, { device: other.id, name: "mini", kind: "node", box: b64u(other.boxPublic) });
+    const id = `a_${"B".repeat(22)}`;
+    w.store.emit(other, "action.requested", { id, connector: "github", tool: "ship.update", args: { ...at, artifact: "art_BBBBBBBBBBBBBBBBBBBBBB", branch: "invincible/units", title: "Fix the checks" }, class: "outward", target: "PATCH /repos/amiriteorg/shipyard/git/refs/heads/invincible%2Funits (ship.update)", by: "team.0123456789.noa", expires: Date.now() + 60_000 });
+    w.store.emit(w.identity, "action.decided", { id, verdict: "approved" }, { trust: "owner" });
+    w.store.emit(other, "action.done", { id, ok: true, status: 200, receipt: `200 1 file pushed onto invincible/units, commit ${"e".repeat(40)}: pull request #7 updated, ${URL7}` });
+    expect((await w.service.call(merge("e".repeat(40)), { kind: "agent", by: "primary" })).status).toBe("asked");
+    expect(w.merged).toEqual([]);
+  });
+
+  test("a push onto its branch of work no verified task made, approved by you, makes the merge yours, though GitHub's list no longer has its commit", async () => {
+    const w = world();
+    expect((await w.service.call(ship("art_AAAAAAAAAAAAAAAAAAAAAA"), noa)).status).toBe("done");
+    for (const artifact of ["art_GGGGGGGGGGGGGGGGGGGGGG", "art_BBBBBBBBBBBBBBBBBBBBBB"]) {
+      const pushed = await w.service.call(fix(artifact), noa);
+      if (pushed.status === "asked") w.service.decide(pushed.action, true, null);
+      await w.service.drain();
+    }
+    // GitHub lists the ship's commit and the fix's: the node's own record of what it pushed there still says.
+    expect((await w.service.call(merge("e".repeat(40)), { kind: "agent", by: "primary" })).status).toBe("asked");
+    expect(w.merged).toEqual([]);
   });
 
   test("a pull request this node didn't ship, or one whose kept work it can't read: the merge is yours", async () => {
