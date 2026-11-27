@@ -1191,6 +1191,10 @@ class Pieces:
         if keep:
             self.kept[keep] = (p, time.monotonic())
             threading.Thread(target=self._wait, args=(keep, p), daemon=True, name="keep-" + keep).start()
+        else:
+            # (What it starts and doesn't keep, an app the agent asked for, is waited on too, so it ends as itself as it
+            # quits: never a zombie under deskd, which a look at the processes takes for one still running.)
+            threading.Thread(target=p.wait, daemon=True, name="app-%d" % p.pid).start()
         return p.pid
 
     def _wait(self, name, p):

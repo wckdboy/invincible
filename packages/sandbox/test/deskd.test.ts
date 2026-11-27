@@ -804,6 +804,29 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
   });
 });
 
+describe("what deskd starts and doesn't keep, an app the agent asked for, ends as itself", () => {
+  test("waited on as it quits: never a zombie under deskd, which a look at the processes takes for one still running", () => {
+    // (KiCad quit by its own key closed its window at once, and stayed in the process table under deskd, a zombie, until
+    // deskd next started anything: Ultra, 27 November 2026.)
+    expect(
+      py(`
+import os, tempfile
+d.RUN = tempfile.mkdtemp()
+p = d.Pieces(home=tempfile.mkdtemp())
+pid = p._spawn(["sh", "-c", "exit 0"], "app-quits.log")
+for _ in range(100):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        print(json.dumps("ended"))
+        break
+    time.sleep(0.05)
+else:
+    print(json.dumps("still in the process table"))`),
+    ).toBe("ended");
+  });
+});
+
 describe("nothing hangs, nothing is silent (step 5)", () => {
   test("a key that commits (Return) waits for the screen to settle after what was typed before it, as a person's would; other keys don't wait", async () => {
     // (C1's step 3 run: a Save As dialog's name typed in full, and the Return 20 ms after it never saved, 5 runs of 5.)
