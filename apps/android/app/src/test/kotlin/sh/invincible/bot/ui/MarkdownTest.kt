@@ -88,11 +88,15 @@ class MarkdownTest {
     @Test fun aLongLineIsDrawnInOnePass() {
         // 40,000 characters: the reference took seconds on this (a pattern compiled at every character, on a copy).
         val long = buildString { repeat(2_000) { append("word **bold** `tick` plain _it_ ") } }
-        val started = System.nanoTime()
+        // Timed by its own thread's CPU, not the wall's: on a Mac shared with other work it once took 516 ms of the wall's
+        // (27 November 2026, at a load of 53), waiting for a CPU, not working longer. It works about 40 ms; drawn as the
+        // reference drew it, it works seconds.
+        val cpu = java.lang.management.ManagementFactory.getThreadMXBean()
+        val started = cpu.currentThreadCpuTime
         val drawn = inline(long, code, link)
-        val ms = (System.nanoTime() - started) / 1_000_000
+        val ms = (cpu.currentThreadCpuTime - started) / 1_000_000
         // (Each repeat loses its eight marks: two pairs of stars, a pair of ticks, a pair of underscores.)
         assertEquals(long.length - 2_000 * 8, drawn.text.length)
-        assert(ms < 500) { "took $ms ms" }
+        assert(ms < 500) { "took $ms ms of CPU" }
     }
 }
