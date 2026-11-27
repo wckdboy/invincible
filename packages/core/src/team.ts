@@ -26,10 +26,11 @@ export const TeamTaskId = z.string().regex(/^task-[a-z0-9_-]{12}$/);
 /** An outcome the primary owns (PLAN #43): its id is its room's too. */
 export const TeamOutcomeId = z.string().regex(/^out-[a-z0-9_-]{12}$/);
 /**
- * `claude` and `codex` are the vendors' own tools (Claude Code, Codex), which the owner installs and signs in in the
- * agent's VM; `acp`, any agent that speaks the Agent Client Protocol, started by the command you name (`acp`).
+ * `claude`, `codex` and `antigravity` are the vendors' own tools (Claude Code, Codex, Google's Antigravity CLI), which
+ * the owner signs in in the agent's VM or on a seat; `acp`, any agent that speaks the Agent Client Protocol, started by
+ * the command you name (`acp`).
  */
-export const TeamHarness = z.enum(["native", "opencode", "hermes", "claude", "codex", "acp"]);
+export const TeamHarness = z.enum(["native", "opencode", "hermes", "claude", "codex", "antigravity", "acp"]);
 export type TeamHarness = z.infer<typeof TeamHarness>;
 /**
  * A key of yours an agent may use but never see (PLAN #17): a secret in the vault, pinned to its API's address, that the
@@ -512,7 +513,7 @@ export type TeamTaskProof = z.infer<typeof TeamTaskProof>;
  */
 export const TeamTaskPlan = z.strictObject({
   seat: z.string().regex(/^st_[A-Za-z0-9_-]{22}$/).nullable(),
-  kind: z.enum(["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "plan", "api"]),
+  kind: z.enum(["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "google-antigravity", "plan", "api"]),
   windows: z.array(z.strictObject({ window: z.string().regex(/^[a-z0-9][a-z0-9_]{0,31}$/), share: z.number().int().min(0).max(100) })).max(8),
   usd: z.number().min(0).max(1_000_000).nullable(),
   sessionUsd: z.number().min(0).max(1_000_000).optional(),

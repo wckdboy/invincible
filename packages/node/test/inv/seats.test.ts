@@ -80,6 +80,16 @@ describe("inv seat add", () => {
     expect(n.asked.filter((a) => a.name === "answerSeatSignIn").map((a) => a.input)).toEqual([{ id: ID, attempt: ATTEMPT, code: "FAKEcode0000#FAKE-state" }]);
   });
 
+  test("a Gemini plan: the risk Google's terms put on your account said first, Google's page, then the code its last page shows read here", async () => {
+    const google: SeatSignInCard = { attempt: ATTEMPT, seat: ID, kind: "paste-code", url: "https://accounts.google.com/o/oauth2/v2/auth?state=FAKE", until: 1 };
+    const n = node([], google);
+    const io = { ...testIo({}), readLine: async (prompt: string) => (prompt === "Paste the code it shows: " ? "  4/0FAKE-code-0000  " : null) };
+    expect(await seatCommand(n.conn, ["add", "gemini"], flags(), io)).toBe(EXIT.ok);
+    expect(n.asked.find((a) => a.name === "addSeat")?.input).toEqual({ kind: "google-antigravity", label: "Gemini 1" });
+    expect(io.stdout()).toContain("Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account.\nOpen https://accounts.google.com/o/oauth2/v2/auth?state=FAKE and sign in to the account this seat is for.\n");
+    expect(n.asked.filter((a) => a.name === "answerSeatSignIn").map((a) => a.input)).toEqual([{ id: ID, attempt: ATTEMPT, code: "4/0FAKE-code-0000" }]);
+  });
+
   test("where it can't read a code (a pipe, --no-ask) it says to run it in a terminal; no code given cancels it; not signed in is 1", async () => {
     await expect(seatCommand(node([], PASTE).conn, ["add", "claude"], flags(), testIo({}))).rejects.toMatchObject({ exit: EXIT.usage });
     const empty = node([], PASTE);
@@ -103,7 +113,7 @@ describe("inv seats, sign-in and remove", () => {
     expect(JSON.parse(json.stdout()).seats[0].label).toBe("Work Max");
     const none = testIo({});
     await seatsCommand(node([], PASTE).conn, [], flags(), none);
-    expect(none.stdout()).toBe("No seats yet: inv seat add claude, or inv seat add chatgpt.\n");
+    expect(none.stdout()).toBe("No seats yet: inv seat add claude, inv seat add chatgpt, or inv seat add gemini.\n");
   });
 
   test("a seat by its label or its id: signed in again, or removed with its sign-in", async () => {
@@ -118,11 +128,11 @@ describe("inv seats, sign-in and remove", () => {
   });
 
   test("its usage, and the help says it", async () => {
-    await expect(seatCommand(node([], PASTE).conn, ["add", "gemini"], flags(), testIo({}))).rejects.toMatchObject({ exit: EXIT.usage });
+    await expect(seatCommand(node([], PASTE).conn, ["add", "cursor"], flags(), testIo({}))).rejects.toMatchObject({ exit: EXIT.usage });
     await expect(seatCommand(node([], PASTE).conn, [], flags(), testIo({}))).rejects.toMatchObject({ exit: EXIT.usage });
     const io = testIo({});
     expect(await run(["help"], io)).toBe(EXIT.ok);
-    expect(io.stdout()).toContain("inv seat add <claude|chatgpt>");
+    expect(io.stdout()).toContain("inv seat add <claude|chatgpt|gemini>");
     expect(io.stdout()).toContain("inv seat serve <seat> <agent>");
     expect(io.stdout()).toContain("inv seat share <seat> <agent> <agent>");
   });

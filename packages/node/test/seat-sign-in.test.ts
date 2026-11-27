@@ -77,7 +77,7 @@ function node(options: { status?: Record<string, unknown>; attemptMs?: number } 
     destroy: async (id: string, opts: unknown) => (asked.push(["destroy", id, opts]), { verdict: "allow" as const, reason: "its own run" }),
   };
   const signIns = new SeatSignIns({ store, vault, node: identity, host: () => host, cardWaitMs: 2_000, ...(options.attemptMs ? { attemptMs: options.attemptMs } : {}) });
-  const add = (id: string, kind: "claude-subscription" | "chatgpt-codex" | "mistral-vibe" | "chatgpt-siwc" = "claude-subscription", on = identity.id) =>
+  const add = (id: string, kind: "claude-subscription" | "chatgpt-codex" | "mistral-vibe" | "chatgpt-siwc" | "google-antigravity" = "claude-subscription", on = identity.id) =>
     (store.emit(identity, "seat.added", { id, kind, label: "Work", node: on, runs: 1 }, yourWord(null)), id);
   const seat = (id: string) => store.seats().find((s) => s.id === id)!;
   const log = () => JSON.stringify(store.eventsSince({}, 100_000).events);
@@ -208,6 +208,62 @@ describe("a ChatGPT seat's sign-in, by Codex's device code", () => {
     n.bridge().say({ type: "done", ok: false, why: "device code sign-in is off for this workspace" }, true);
     await expect(started).rejects.toThrow("Its sign-in couldn't start: device code sign-in is off for this workspace");
     expect(n.asked.at(-1)).toEqual(["destroy", "vm00000001", { run: `seat.${A}` }]);
+  });
+});
+
+/*
+ * A Gemini plan's seat, signed in with Antigravity's CLI as T3 Code signs it in (agents' antigravity.ts): Google's page on
+ * the card, the code its page then shows pasted back to agy once, and its status asked of agy itself in the same VM.
+ */
+describe("an Antigravity seat's sign-in, Google's to finish", () => {
+  const GOOGLE = "https://accounts.google.com/o/oauth2/v2/auth?client_id=FAKE-client.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=FAKE-state-0000";
+  const GOOGLE_CODE = "4/0FAKE-code-0000";
+
+  test("Google's page on the card, its code to agy once, then ready as agy says: no account's fingerprint, nothing of it in the log", async () => {
+    const n = node({ status: { type: "status", signedIn: true, version: "1.5.18" } });
+    n.add(A, "google-antigravity");
+    const started = n.signIns.start(A);
+    await n.settled(() => n.bridge().told.length > 0);
+    // (agy starts on no account: it is told nothing of one.)
+    expect(n.bridge().told[0]).toEqual({});
+    n.bridge().say({ type: "card", url: GOOGLE });
+    const card = await started;
+    expect(card).toMatchObject({ seat: A, kind: "paste-code", url: GOOGLE });
+    n.signIns.answer(A, card.attempt, GOOGLE_CODE);
+    expect(n.bridge().told.filter((t) => "code" in t)).toEqual([{ code: GOOGLE_CODE }]);
+    n.bridge().say({ type: "done", ok: true }, true);
+    await n.settled(() => n.asked.some((a) => a[0] === "destroy"));
+    expect(seatState(n.seat(A), Date.now())).toEqual({ is: "ready", renewBy: null });
+    expect(n.seat(A).signIn).toMatchObject({ outcome: "ready", method: "signed in" });
+    expect(n.seat(A).account).toBeNull();
+    // Its status asked of agy itself, by its own driver's check, in the same VM; then the VM gone, as its own run.
+    expect(n.asked.find((a) => a[0] === "exec")).toEqual(["exec", "vm00000001", ["bash", "-lc", AGENTS.antigravity!.signIn!.seatCheck(seatSalt(n.vault))]]);
+    expect(n.asked.at(-1)).toEqual(["destroy", "vm00000001", { run: `seat.${A}` }]);
+    for (const kept of [GOOGLE, "FAKE-state-0000", GOOGLE_CODE]) expect(n.log()).not.toContain(kept);
+  });
+
+  test("an address that isn't Google's own sign-in is never shown, the page that shows its code included", async () => {
+    const n = node();
+    n.add(A, "google-antigravity");
+    const started = n.signIns.start(A);
+    await n.settled(() => n.bridge().told.length > 0);
+    n.bridge().say({ type: "card", url: "https://antigravity.google/oauth-callback?code=FAKE" });
+    await expect(started).rejects.toThrow("isn't its vendor's own");
+    expect(n.store.seats()[0]!.signIn).toBeNull();
+  });
+
+  test("signed out after it, as agy says: the seat is out, and nothing is signed out by a command of ours", async () => {
+    const n = node({ status: { type: "status", signedIn: false } });
+    n.add(A, "google-antigravity");
+    const started = n.signIns.start(A);
+    await n.settled(() => n.bridge().told.length > 0);
+    n.bridge().say({ type: "card", url: GOOGLE });
+    const card = await started;
+    n.signIns.answer(A, card.attempt, GOOGLE_CODE);
+    n.bridge().say({ type: "done", ok: true }, true);
+    await n.settled(() => n.asked.some((a) => a[0] === "destroy"));
+    expect(seatState(n.seat(A), Date.now())).toEqual({ is: "signed-out", why: "signed-out" });
+    expect(n.asked.filter((a) => a[0] === "exec")).toHaveLength(1);
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   accountSeat,
   chooseSeat,
+  HOMED_KINDS,
   mayCarryOn,
   seatKindOf,
   seatOpensAt,
@@ -267,6 +268,47 @@ describe("a sign-in's card", () => {
     expect(signInUrlOk("claude-subscription", "https://auth.openai.com/codex/device")).toBe(false);
     expect(signInUrlOk("api", "https://claude.ai/oauth/authorize")).toBe(false);
   });
+
+  test("an Antigravity seat's card shows Google's own sign-in page alone: not the page that shows its code, nor a look-alike", () => {
+    const google = "https://accounts.google.com/o/oauth2/v2/auth?client_id=FAKE-client.apps.googleusercontent.com&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=FAKE-state-0000";
+    expect(signInUrlOk("google-antigravity", google)).toBe(true);
+    for (const url of [
+      "http://accounts.google.com/o/oauth2/v2/auth",
+      "https://accounts.google.com.example.test/o/oauth2/v2/auth",
+      "https://user:pass@accounts.google.com/o/oauth2/v2/auth",
+      "https://accounts.google.com:8443/o/oauth2/v2/auth",
+      "https://antigravity.google/oauth-callback",
+      "https://claude.ai/oauth/authorize",
+    ]) expect([url, signInUrlOk("google-antigravity", url)]).toEqual([url, false]);
+    expect(signInUrlOk("claude-subscription", google)).toBe(false);
+    expect(signInUrlOk("chatgpt-codex", google)).toBe(false);
+  });
+});
+
+/*
+ * A Gemini plan (Google AI Pro or Ultra), signed in with Google's Antigravity CLI (agy) in the seat's own home and run
+ * by it, as T3 Code drives it: the owner's choice of 27 November 2026 (agents' antigravity.ts says what was taken).
+ */
+describe("an Antigravity seat", () => {
+  test("is Google's, has a home of its own, runs Antigravity, and takes one run at a time until more is shown safe", () => {
+    expect(SEAT_KINDS).toContain("google-antigravity");
+    expect(HOMED_KINDS).toContain("google-antigravity");
+    expect(SEAT_HARNESS["google-antigravity"]).toBe("antigravity");
+    expect(seatKindOf("antigravity")).toBe("google-antigravity");
+    expect(seatVendor({ kind: "google-antigravity" })).toBe("google");
+    expect(seatRuns({ kind: "google-antigravity", runs: 3 })).toBe(SHARED_RUNS_PROVEN);
+    expect(SeatAddInput.safeParse({ kind: "google-antigravity", label: "Gemini Ultra", agent: "ada" }).success).toBe(true);
+    // Its sign-in is Google's own page: no provider, no key.
+    expect(SeatAddInput.safeParse({ kind: "google-antigravity", label: "Gemini Ultra", provider: "gemini" }).success).toBe(false);
+  });
+
+  test("work that ran on one never goes on on a second Google sign-in; another vendor's seat, or a key, may take it", () => {
+    const agy = (id: string) => ({ id, kind: "google-antigravity" as const });
+    expect(mayCarryOn(agy("st_g"), agy("st_g"))).toBe(true);
+    expect(mayCarryOn(agy("st_g"), agy("st_h"))).toBe(false);
+    expect(mayCarryOn(agy("st_g"), { id: "st_a", kind: "claude-subscription" })).toBe(true);
+    expect(mayCarryOn(agy("st_g"), { id: "st_k", kind: "api", provider: "gemini" })).toBe(true);
+  });
 });
 
 /*
@@ -362,7 +404,7 @@ describe("which seat a run takes", () => {
     expect(chooseSeat("claude", [codex, c, b, a], idle, NOW, { agent: ADA })?.label).toBe("c");
     expect(chooseSeat("codex", [a, b, c, codex], idle, NOW, { agent: ADA })?.label).toBe("x");
     expect(chooseSeat("opencode", [a, b, c, codex], idle, NOW, { agent: ADA })).toBeNull();
-    expect(SEAT_HARNESS).toEqual({ "claude-subscription": "claude", "chatgpt-codex": "codex" });
+    expect(SEAT_HARNESS).toEqual({ "claude-subscription": "claude", "chatgpt-codex": "codex", "google-antigravity": "antigravity" });
   });
 
   test("a window past its reset is fresh again, one its tool refused is used whole, and a seat with none left, resting, signed out or at its runs is passed over", () => {

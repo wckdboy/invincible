@@ -56,7 +56,7 @@ The agents (your agents beside your agent, none beneath another: each with a las
 of its own; "agents" and "team" are the same command)
   agents                        agents, rooms and tasks (those your agent made say so:
                                     ask it in chat to seat and brief an agent)
-  agents add <id> --name <name> [--instructions text] [--role planner] [--harness native|opencode|hermes|claude|codex|acp]
+  agents add <id> --name <name> [--instructions text] [--role planner] [--harness native|opencode|hermes|claude|codex|antigravity|acp]
                                     [--acp "<command>"] [--repo https://github.com/owner/repo] [--limit daily-turns]
                                     --harness acp runs any agent that speaks the Agent Client Protocol, started in its VM
                                     by the command you name (--acp "goose acp", "gemini --acp", "opencode acp")

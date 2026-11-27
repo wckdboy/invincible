@@ -88,7 +88,7 @@ struct RoomInput: Encodable, Sendable, Equatable {
 
 enum Agents {
     /// The harnesses an agent can work in, as they are named to you (the PWA's HARNESS), in its order.
-    static let harnesses: [(id: String, name: String)] = [("native", "Invincible"), ("opencode", "OpenCode"), ("hermes", "Hermes Agent"), ("claude", "Claude Code"), ("codex", "Codex"), ("acp", "Any ACP agent")]
+    static let harnesses: [(id: String, name: String)] = [("native", "Invincible"), ("opencode", "OpenCode"), ("hermes", "Hermes Agent"), ("claude", "Claude Code"), ("codex", "Codex"), ("antigravity", "Antigravity"), ("acp", "Any ACP agent")]
 
     /// A roster role, as far as an agent's editor needs it (`forAgents` is absent from an older node).
     struct RoleInfo: Decodable, Sendable, Equatable {

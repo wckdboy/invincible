@@ -540,6 +540,13 @@ export function planTaken(on: TaskAccount, spent: readonly UsageLine[], sessionU
   return { seat: on.seat, kind: on.kind, windows, usd, ...(sessionUsd !== null ? { sessionUsd: micro(sessionUsd) } : {}) };
 }
 
+/** The API a harness speaks, as a refusal names it (its driver's `kind`). */
+const API_OF: Readonly<Record<AgentDriver["kind"], { whose: string; model: string }>> = {
+  openai: { whose: "OpenAI's", model: "OpenAI-compatible" },
+  anthropic: { whose: "Anthropic's", model: "Anthropic-API" },
+  gemini: { whose: "Gemini's", model: "Gemini-API" },
+};
+
 export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "exitCode" | "stdout">, roster: readonly AgentModel[], outside: readonly AgentModel[] = [], role = "engineer", held = false, ownSpent: { until: number } | null = null, bound = false, handed = false): HarnessReadiness {
   const on = role === "engineer" ? "the engineer's roster" : `the ${role} role`;
   if (probe.exitCode !== 0) return { ready: false, models: [], reason: `Install ${driver.title} in this agent's VM (Your agent never installs or signs in a harness)` };
@@ -557,12 +564,12 @@ export function harnessReadiness(driver: AgentDriver, probe: Pick<ExecResult, "e
   // An ACP agent you named runs as you set it up in its VM: the role's model through the gateway is offered to it.
   if (driver.ownSetup && !held && !handed) return { ready: true, models: gateway ? [...roster] : [OWN_SIGN_IN], on: gateway ? `its own setup in this VM, with ${gateway} for an agent that reads OPENAI_BASE_URL` : "its own setup in this VM" };
   if (gateway) return { ready: true, models: [...roster], on: gateway };
-  if (handed) return { ready: false, models: [], reason: `This task was handed over by another node: it runs only on a model its budget counts at more than $0, through the gateway, never on ${driver.title}'s own sign-in in this VM, and none of those speaks its API (${driver.kind === "anthropic" ? "Anthropic's" : "OpenAI's"})` };
-  if (held) return { ready: false, models: [], reason: `This work is in sensitive mode, and none of its models speaks ${driver.title}'s API (${driver.kind === "anthropic" ? "Anthropic's" : "OpenAI's"}): give it one that does, or your agent's own harness` };
+  if (handed) return { ready: false, models: [], reason: `This task was handed over by another node: it runs only on a model its budget counts at more than $0, through the gateway, never on ${driver.title}'s own sign-in in this VM, and none of those speaks its API (${API_OF[driver.kind].whose})` };
+  if (held) return { ready: false, models: [], reason: `This work is in sensitive mode, and none of its models speaks ${driver.title}'s API (${API_OF[driver.kind].whose}): give it one that does, or your agent's own harness` };
   const uncovered = outside[0] ? `. ${agentModelName(outside[0])} is on the roster, but this VM's gateway token doesn't cover its provider: it covers the providers with a key when its task began` : "";
-  if (bound && driver.signIn) return { ready: false, models: [], reason: `its work began on a seat of yours, which can't take it now, and it goes on on no other account of its vendor's: sign that seat in again, or put ${driver.signIn.roster} on ${on}${uncovered}` };
-  if (driver.signIn) return { ready: false, models: [], reason: `Sign ${driver.title} in in this agent's VM (${driver.signIn.login}), or put ${driver.signIn.roster} on ${on}${uncovered}` };
-  return { ready: false, models: [], reason: `Put a keyed ${driver.kind === "anthropic" ? "Anthropic-API" : "OpenAI-compatible"} model on ${on}${uncovered}` };
+  if (bound && driver.signIn) return { ready: false, models: [], reason: `its work began on a seat of yours, which can't take it now, and it goes on on no other account of its vendor's: sign that seat in again${driver.signIn.roster ? `, or put ${driver.signIn.roster} on ${on}` : ""}${uncovered}` };
+  if (driver.signIn) return { ready: false, models: [], reason: `Sign ${driver.title} in in this agent's VM (${driver.signIn.login})${driver.signIn.roster ? `, or put ${driver.signIn.roster} on ${on}` : ""}${uncovered}` };
+  return { ready: false, models: [], reason: `Put a keyed ${API_OF[driver.kind].model} model on ${on}${uncovered}` };
 }
 
 /** A task's progress line for one step of its run. Each starts with its step's mark, which the agent's avatar reads (taskStep). */

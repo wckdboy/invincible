@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { cardWords, quickAgent, quickLabel, RENEW_DAYS, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, seatUseWords, seatWindowWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "./seats.ts";
+import { cardWords, QUICK_ADDS, quickAgent, quickLabel, RENEW_DAYS, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, seatUseWords, seatWindowWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "./seats.ts";
+import { SEAT_TERMS } from "@invincible/core/seat-agents";
 
 /*
  * Seats, in words (lib/seats.ts): what each kind is, the one-tap names, where a seat stands, what its button offers and
@@ -15,6 +16,27 @@ describe("seats in words", () => {
     expect(quickLabel("claude-subscription", [])).toBe("Claude 1");
     expect(quickLabel("claude-subscription", [{ label: "Claude 1" }, { label: "Claude 3" }])).toBe("Claude 2");
     expect(quickLabel("chatgpt-codex", [{ label: "Claude 1" }])).toBe("ChatGPT 1");
+  });
+
+  test("a Gemini plan: Antigravity's, added in one tap like the others, signed in on Google's page with a code pasted back", () => {
+    expect(SEAT_KIND_WORDS["google-antigravity"]).toEqual({ name: "Gemini plan", how: "Google AI Pro or Ultra, signed in with Antigravity" });
+    expect(QUICK_ADDS.map((quick) => quick.button)).toEqual(["Add a Claude plan", "Add a ChatGPT plan", "Add a Gemini plan"]);
+    expect(quickLabel("google-antigravity", [{ label: "Gemini 1" }])).toBe("Gemini 2");
+    expect(signInAction({ kind: "google-antigravity", state: { is: "signed-out", why: "never" } }, NOW)).toBe("Sign in");
+    // Its card says, before anything, the risk Google's terms put on your account, which you chose to take.
+    const card = cardWords({ kind: "paste-code" }, "google-antigravity");
+    expect(card).toEqual({
+      title: "Sign in on Google's page",
+      open: "Open Google's page",
+      steps: ["Open the page and sign in to the account this seat is for.", "Paste the code its last page shows you here."],
+      first: "Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account.",
+    });
+    // What it rests on: Google's own words, where Google says them, and what that lets its agents do.
+    expect(SEAT_TERMS["google-antigravity"]).toEqual({
+      says: 'Google: "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement." "Such actions may be grounds for suspension or termination of your Antigravity and/or Gemini CLI accounts." The owner chose this on 27 November 2026, accepting the risk to their Google account (as T3 Code drives agy).',
+      terms: "https://antigravity.google/terms",
+      allows: { native: false, tools: "unattended" },
+    });
   });
 
   test("where a seat stands: signed in with its tier, to sign in again within a week of its end, resting until its reset, and why it's out", () => {
@@ -43,14 +65,14 @@ describe("seats in words", () => {
   });
 
   test("a card: Codex's code to enter on its page (the first ChatGPT seat's says to turn device codes on); Claude's code to paste back", () => {
-    expect(cardWords({ kind: "device-code", code: "FAKE-1234", firstTime: true })).toEqual({
+    expect(cardWords({ kind: "device-code", code: "FAKE-1234", firstTime: true }, "chatgpt-codex")).toEqual({
       title: "Sign in on ChatGPT's page",
       open: "Open ChatGPT's page",
       steps: ["Open the page and sign in to the account this seat is for.", "Enter this code there: FAKE-1234", "This finishes by itself once you have."],
       first: "First, turn on device code sign-in in ChatGPT's settings (Security): this is its first ChatGPT seat.",
     });
-    expect(cardWords({ kind: "device-code", code: "FAKE-1234" }).first).toBeNull();
-    expect(cardWords({ kind: "paste-code" })).toEqual({ title: "Sign in on Claude's page", open: "Open Claude's page", steps: ["Open the page and sign in to the account this seat is for.", "Paste the code it shows you here."], first: null });
+    expect(cardWords({ kind: "device-code", code: "FAKE-1234" }, "chatgpt-codex").first).toBeNull();
+    expect(cardWords({ kind: "paste-code" }, "claude-subscription")).toEqual({ title: "Sign in on Claude's page", open: "Open Claude's page", steps: ["Open the page and sign in to the account this seat is for.", "Paste the code it shows you here."], first: null });
   });
 });
 

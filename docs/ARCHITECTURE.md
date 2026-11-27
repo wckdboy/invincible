@@ -251,8 +251,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
     run loop's own state (its plan, its gates' first run, the steers it had taken) kept beside it, is not built yet.
 - **Seats:** an account you hold with a vendor, added once, that serves the agents you choose
   (`packages/core/src/seats.ts`):
-  - the kinds: a Claude plan, a ChatGPT plan (through Codex, or Sign in with ChatGPT), a Mistral plan, a coding plan's
-    key, an API key;
+  - the kinds: a Claude plan, a ChatGPT plan (through Codex, or Sign in with ChatGPT), a Mistral plan, a Gemini plan
+    (Google AI Pro or Ultra, through Google's Antigravity CLI, agy), a coding plan's key, an API key;
   - a subscription seat's sign-in lives in its own home on its node, made there by the vendor's own tool in the vendor's
     own flow. The node never reads its files: only the tool's own status command, and five things of what it says;
   - in the ledger (`seat.added`, `seat.policy`, `seat.serves`, `seat.removed` on your word alone; `seat.signin`,
@@ -282,13 +282,21 @@ The run loop is carried and renamed (§10), the most proven part of it:
     refused;
   - signed in on the vendor's own page, by the vendor's own tool in a VM made for the seat (`seat-sign-in.ts`): Codex's
     app server by ChatGPT's device code, Claude Code's `auth login` on a terminal of its own, its page's code relayed
-    to it once (D7). The card (its page, and Codex's code) is answered to you and kept nowhere; it shows only an address
-    on the vendor's own hosts (`signInUrlOk`). Ten minutes, then it lapses. Then the tool's own status says how it
-    stands; another account than the seat's is refused and signed out again by the tool's own command. A Mistral plan
-    is a key seat (Vibe's sign-in ends in an API key), and Sign in with ChatGPT is the node's own (to come);
+    to it once (D7), and Antigravity's `agy acp --login`, the code the page after Google's shows relayed to it once. The
+    card (its page, and Codex's code) is answered to you and kept nowhere; it shows only an address on the vendor's own
+    hosts (`signInUrlOk`: Google's accounts page alone for Antigravity). Ten minutes, then it lapses. Then the tool's own
+    status says how it stands; another account than the seat's is refused and signed out again by the tool's own
+    command (agy says no account without its token read, so an Antigravity seat keeps none to hold a later sign-in to).
+    A Mistral plan is a key seat (Vibe's sign-in ends in an API key), and Sign in with ChatGPT is the node's own (to come);
+  - Antigravity on a Gemini plan, driven as T3 Code drives agy (the owner's choice, 27 November 2026, accepting that
+    Google's Antigravity terms call it a breach that may suspend the account: core's `SEAT_TERMS`): `agy acp` in the
+    seat's own profile (`--gemini-dir`), its client named truthfully, signed in with the profile's sign-in before
+    anything else, its updates and telemetry off, and never an agy older than 1.5.1 (`packages/agents/src/antigravity.ts`).
+    It speaks Gemini's API, which no provider of the gateway's does: it runs on its Google sign-in alone, never on a
+    roster model;
   - which seat a run takes is Invincible's to choose, and nothing asks you (`chooseSeat`, `seat-runs.ts`): of its node's
     seats that serve its agent, whose plan runs the agent's tool (Claude Code on a Claude plan, Codex on a ChatGPT
-    plan), signed in, not resting, with a run to spare and some of their plan left, the one with the most headroom (the
+    plan, Antigravity on a Gemini plan), signed in, not resting, with a run to spare and some of their plan left, the one with the most headroom (the
     share its most used open window has used), then the soonest reset. A task's first run takes a free seat; with none
     free it runs in its agent's own VM as before seats; with no other way to go on it waits for a busy seat (it has it
     the moment that one is let go) or rests until a spent one opens. Work in sensitive mode never takes one;

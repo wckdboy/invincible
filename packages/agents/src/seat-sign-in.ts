@@ -199,7 +199,89 @@ def main():
 main()
 `;
 
+/**
+ * Antigravity (Google's agy): its own ACP sign-in, `agy acp --login`, in the seat's profile, as T3 Code signs it in
+ * (pingdotgg/t3code, Drivers/AntigravityDriver.ts codeLogin; antigravityAuthSupport.ts): a remote session with no display,
+ * so it prints Google's page, and reads from its input the code that page shows (Google's own callback page,
+ * antigravity.google/oauth-callback, shows it). The code goes to agy alone, once; what it makes, agy keeps in the profile.
+ */
+export const ANTIGRAVITY_SIGN_IN = String.raw`${COMMON}import subprocess
+ESCAPES = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+PAGE = re.compile(r"https://accounts\.google\.com/[^\s\x1b\"'<>]+")
+CODE = re.compile(r"[\w./~-]{1,2048}")
+def main():
+    sys.stdin.readline()
+    gemini = os.environ.get("INVINCIBLE_AGY_DIR", "")
+    if not gemini:
+        emit("done", ok=False, why="this VM names no Antigravity profile")
+        return
+    # As T3 Code's antigravityEnvironment: no key of yours, no display or browser, its updates off, a remote session.
+    env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "TERM", "HOME", "USER") if k in os.environ}
+    env.update({"AGY_CLI_DISABLE_AUTO_UPDATE": "true", "SSH_CONNECTION": "127.0.0.1 0 127.0.0.1 0"})
+    os.makedirs(gemini, mode=0o700, exist_ok=True)
+    argv = ["agy", "acp", "--gemini-dir", gemini, "--app-data-dir", "antigravity-acp", "--disable-telemetry", "--login"]
+    try:
+        child = subprocess.Popen(argv, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except OSError:
+        emit("done", ok=False, why="agy isn't in this VM")
+        return
+    out, stdin = Lines(child.stdout.fileno()), Lines(sys.stdin.fileno())
+    seen, carded, asked, answered, why = "", False, False, False, ""
+    until = time.monotonic() + WAIT
+    try:
+        while True:
+            if time.monotonic() > until:
+                why = "expired"
+                break
+            ready, _, _ = select.select([child.stdout.fileno()] + ([] if stdin.ended else [sys.stdin.fileno()]), [], [], 1.0)
+            if child.stdout.fileno() in ready:
+                try:
+                    chunk = os.read(child.stdout.fileno(), 65536)
+                except OSError:
+                    chunk = b""
+                if not chunk:
+                    break
+                seen = (seen + ESCAPES.sub("", chunk.decode("utf-8", "replace")).replace("\r", ""))[-65536:]
+                if not carded:
+                    found = PAGE.search(seen)
+                    # (Whole once something follows it.)
+                    if found and found.end() < len(seen):
+                        emit("card", url=found.group(0))
+                        carded = True
+                if carded and not asked and "authorization code" in seen.lower():
+                    emit("asks")
+                    asked = True
+            if sys.stdin.fileno() in ready:
+                for line in stdin.read():
+                    told = said(line)
+                    if told.get("cancel"):
+                        why = "cancelled"
+                    code = told.get("code")
+                    # Once, as it was given: to agy alone.
+                    if isinstance(code, str) and carded and not answered and CODE.fullmatch(code):
+                        try:
+                            child.stdin.write((code + "\n").encode())
+                            child.stdin.flush()
+                        except OSError:
+                            pass
+                        answered = True
+                if why == "cancelled" or stdin.ended:
+                    why = why or "cancelled"
+                    break
+    finally:
+        if child.poll() is None and why:
+            child.terminate()
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.kill()
+        code = child.wait()
+    ok = not why and code == 0
+    emit("done", ok=ok, **({} if ok else {"why": (why or "it ended without saying it was signed in")[:200]}))
+main()
+`;
+
 /** The sign-in bridge of a seat's tool, by the seat's kind (none: it isn't signed in by a tool of its own in a VM). */
 export function seatSignInBridge(kind: string): string | null {
-  return kind === "claude-subscription" ? CLAUDE_SIGN_IN : kind === "chatgpt-codex" ? CODEX_SIGN_IN : null;
+  return kind === "claude-subscription" ? CLAUDE_SIGN_IN : kind === "chatgpt-codex" ? CODEX_SIGN_IN : kind === "google-antigravity" ? ANTIGRAVITY_SIGN_IN : null;
 }

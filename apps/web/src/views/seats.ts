@@ -33,7 +33,7 @@ export const seatsView: View = (root, ctx, { scope }) => {
   const here = ctx.whoami.node;
   const rosterOf = (seat: Pick<SeatView, "node">) => (seat.node === here ? roster : null);
   /** The sign-in under way from this device, and the code field it may have. */
-  let signing: { card: SeatSignInCard; label: string } | null = null;
+  let signing: { card: SeatSignInCard; label: string; kind: SeatView["kind"] } | null = null;
   let poll: ReturnType<typeof setInterval> | null = null;
 
   const adds = yours ? h("div", { class: "row wrap" }, ...QUICK_ADDS.map((quick) => button(quick.button, { variant: "primary", icon: "plus", onClick: (event) => void add(event.currentTarget as HTMLButtonElement, quick.kind) }))) : null;
@@ -90,8 +90,8 @@ export const seatsView: View = (root, ctx, { scope }) => {
       replace(cardBox);
       return;
     }
-    const { card: open, label } = signing;
-    const words = cardWords(open);
+    const { card: open, label, kind } = signing;
+    const words = cardWords(open, kind);
     const code = open.kind === "paste-code" ? (h("input", { class: "input mono", type: "text", autocomplete: "off", autocorrect: "off", autocapitalize: "off", spellcheck: "false", "aria-label": "The code its page shows", placeholder: "Paste the code it shows" }) as HTMLInputElement) : null;
     const submit = code ? button("Sign in", { variant: "primary", onClick: (event) => void answer(event.currentTarget as HTMLButtonElement, code) }) : null;
     const opened = h("a", { class: "btn primary", href: open.url, target: "_blank", rel: "noopener noreferrer" }, words.open);
@@ -127,7 +127,7 @@ export const seatsView: View = (root, ctx, { scope }) => {
         drawCard();
         stopPolling();
       }
-      replace(listBox, list(seats.map(row), { empty: { icon: "user", title: "No seats yet", body: yours ? "Add a Claude or ChatGPT plan: it signs in on its vendor's page." : "The owner adds them." } }));
+      replace(listBox, list(seats.map(row), { empty: { icon: "user", title: "No seats yet", body: yours ? "Add a Claude, ChatGPT or Gemini plan: it signs in on its vendor's page." : "The owner adds them." } }));
     } catch (error) {
       if (!scope.disposed) replace(listBox, errorState("The seats can't be read", error, () => void refresh()));
     }
@@ -144,10 +144,10 @@ export const seatsView: View = (root, ctx, { scope }) => {
   }
   scope.add(() => stopPolling());
 
-  async function begin(seat: Pick<SeatView, "id" | "label" | "node" | "serves">): Promise<void> {
+  async function begin(seat: Pick<SeatView, "id" | "kind" | "label" | "node" | "serves">): Promise<void> {
     const started = await ctx.api.post<{ card: SeatSignInCard }>("/api/seats/sign-in", { id: seat.id }, scope.signal);
     const serves = servesWords(seat, rosterOf(seat));
-    signing = { card: started.card, label: seat.serves.length ? `${seat.label}, ${serves.word.charAt(0).toLowerCase()}${serves.word.slice(1)}` : seat.label };
+    signing = { card: started.card, label: seat.serves.length ? `${seat.label}, ${serves.word.charAt(0).toLowerCase()}${serves.word.slice(1)}` : seat.label, kind: seat.kind };
     drawCard();
     startPolling();
   }

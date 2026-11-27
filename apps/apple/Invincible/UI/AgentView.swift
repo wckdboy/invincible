@@ -205,7 +205,7 @@ struct AgentView: View {
     }
 
     /// An agent's coding harness, as it is named to you (the PWA's HARNESS).
-    static let harness = ["native": Primary.name, "opencode": "OpenCode", "hermes": "Hermes Agent", "claude": "Claude Code", "codex": "Codex", "acp": "Any ACP agent"]
+    static let harness = ["native": Primary.name, "opencode": "OpenCode", "hermes": "Hermes Agent", "claude": "Claude Code", "codex": "Codex", "antigravity": "Antigravity", "acp": "Any ACP agent"]
 }
 
 /// A word in an agent's room: yours on the right in the ink, the agent's and the primary's on the left beside their orbs

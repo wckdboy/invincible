@@ -4,6 +4,17 @@ What a release has to say beyond its commits: what you must do, and by when. The
 
 ## Next
 
+- **A Gemini plan as a seat: Google AI Pro or Ultra, signed in with Google's Antigravity CLI (agy), as T3 Code drives it.**
+  - **What changes:** a seat of a new kind, `google-antigravity` (the web's "Add a Gemini plan", `inv seat add gemini`),
+    and a harness, Antigravity, that an agent may be given. Its card opens Google's own sign-in page; the code the page
+    that follows shows is pasted back once, to agy in the seat's own VM. agy 1.5.18 is pinned in the tools' image, its
+    updates off. It runs on its Google sign-in alone: no model of the gateway's speaks its API.
+  - **The risk, yours (27 November 2026):** Google's Antigravity terms call reaching it through another tool a breach
+    that may get your Antigravity and Gemini CLI accounts suspended. You chose to run it so, as T3 Code does.
+  - **What you must do: add a Gemini plan only once every node of yours runs this release.** A node on an older
+    release refuses a seat of a kind it doesn't know, and then holds back everything the node that added it writes
+    after it, until it is upgraded too.
+  - **Where it is said:** docs/ARCHITECTURE.md, "Seats"; docs/SECURITY.md, "A seat is signed in by its owner".
 - **Every device signs for the node it speaks to, by 14 December 2026.**
   - **What changes:** a request's signature now names the node it is for, so one sent to another node is refused
     there. A node learns which node a peer is from the signed log. A device learns it from whoami, which the node

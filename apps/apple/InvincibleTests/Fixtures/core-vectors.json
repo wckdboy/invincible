@@ -39835,6 +39835,10 @@
         "name": "Mistral plan",
         "how": "its key from Mistral's console"
       },
+      "google-antigravity": {
+        "name": "Gemini plan",
+        "how": "Google AI Pro or Ultra, signed in with Antigravity"
+      },
       "plan": {
         "name": "Coding plan",
         "how": "its key, in the vault"
@@ -40423,6 +40427,7 @@
           "code": "FAKE-1234",
           "firstTime": true
         },
+        "seat": "chatgpt-codex",
         "words": {
           "title": "Sign in on ChatGPT's page",
           "open": "Open ChatGPT's page",
@@ -40440,6 +40445,7 @@
           "code": "FAKE-1234",
           "firstTime": false
         },
+        "seat": "chatgpt-codex",
         "words": {
           "title": "Sign in on ChatGPT's page",
           "open": "Open ChatGPT's page",
@@ -40455,6 +40461,7 @@
         "card": {
           "kind": "paste-code"
         },
+        "seat": "claude-subscription",
         "words": {
           "title": "Sign in on Claude's page",
           "open": "Open Claude's page",
@@ -40463,6 +40470,21 @@
             "Paste the code it shows you here."
           ],
           "first": null
+        }
+      },
+      {
+        "card": {
+          "kind": "paste-code"
+        },
+        "seat": "google-antigravity",
+        "words": {
+          "title": "Sign in on Google's page",
+          "open": "Open Google's page",
+          "steps": [
+            "Open the page and sign in to the account this seat is for.",
+            "Paste the code its last page shows you here."
+          ],
+          "first": "Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account."
         }
       }
     ]

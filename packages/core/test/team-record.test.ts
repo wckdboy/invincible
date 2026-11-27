@@ -36,6 +36,9 @@ describe("a task's record, in words", () => {
     expect(taskPlanFacts({ ...plan, windows: [{ window: "five_hour", share: 0 }], usd: null })).toEqual(["on your Claude plan"]);
     // Its VM's own sign-in, not a seat of yours: said as that.
     expect(taskPlanFacts({ ...plan, seat: null, kind: "chatgpt-codex", windows: [], usd: 2.8 })).toEqual(["on its own ChatGPT sign-in", "≈$2.80 at API prices, covered by the plan"]);
+    // A Gemini plan, Antigravity's: on your seat, or on its VM's own Google sign-in.
+    expect(taskPlanFacts({ ...plan, kind: "google-antigravity", windows: [], usd: null })).toEqual(["on your Gemini plan"]);
+    expect(taskPlanFacts({ ...plan, seat: null, kind: "google-antigravity", windows: [], usd: null })).toEqual(["on its own Google sign-in"]);
     // A record without a plan says nothing of one.
     expect(taskRecordFacts({ startedAt: 0, endedAt: 724_000, ended: "done", commands: 8, revisions: 1, spent }, prices)).toHaveLength(4);
   });

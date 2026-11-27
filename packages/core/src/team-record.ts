@@ -30,6 +30,7 @@ const PLAN_NAMES: Readonly<Record<string, { plan: string; vendor: string }>> = {
   "chatgpt-codex": { plan: "ChatGPT plan", vendor: "ChatGPT" },
   "chatgpt-siwc": { plan: "ChatGPT plan", vendor: "ChatGPT" },
   "mistral-vibe": { plan: "Mistral plan", vendor: "Mistral" },
+  "google-antigravity": { plan: "Gemini plan", vendor: "Google" },
   plan: { plan: "coding plan", vendor: "coding plan" },
   api: { plan: "API key", vendor: "API key" },
 };

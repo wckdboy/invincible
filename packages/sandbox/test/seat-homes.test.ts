@@ -42,6 +42,10 @@ describe("a seat's home", () => {
     const codex = runArgs({ ...base, seat: { id: SEAT, kind: "chatgpt-codex" } });
     expect(envs(codex)).toContain(`CODEX_HOME=/seats/${SEAT}/codex`);
     expect(envs(codex).some((e) => e.startsWith("CLAUDE_CONFIG_DIR="))).toBe(false);
+    // Antigravity's profile, its sign-in in it: the directory its bridge runs agy in (--gemini-dir), as T3 Code gives it one.
+    const agy = runArgs({ ...base, seat: { id: SEAT, kind: "google-antigravity" } });
+    expect(envs(agy)).toContain(`INVINCIBLE_AGY_DIR=/seats/${SEAT}/antigravity`);
+    expect(envs(agy).some((e) => e.startsWith("CLAUDE_CONFIG_DIR=") || e.startsWith("CODEX_HOME="))).toBe(false);
   });
 
   test("only a seat whose sign-in a tool keeps in its home has one: Sign in with ChatGPT's is the node's, a key's is the vault's", () => {

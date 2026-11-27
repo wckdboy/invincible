@@ -109,12 +109,12 @@ export const HARDWARE_IMAGE = "invincible/desktop-hardware:1";
 /** Claude Code in the workshop image, for evals alone (sandbox/claude-code): tagged by its pinned release. */
 export const CLAUDE_CODE_IMAGE = "invincible/claude-code:2.1.319";
 /**
- * The vendors' own coding tools in the workshop image, pinned (sandbox/harnesses): where every run of Claude Code or Codex
- * is made, on a seat or through the gateway. Tagged by the releases it pins, so a new pin is a new image.
+ * The vendors' own coding tools in the workshop image, pinned (sandbox/harnesses): where every run of Claude Code, Codex
+ * or Antigravity is made, on a seat or through the gateway. Tagged by the releases it pins, so a new pin is a new image.
  */
-export const HARNESS_IMAGE = "invincible/harnesses:claude-2.1.326.codex-0.172.0";
+export const HARNESS_IMAGE = "invincible/harnesses:claude-2.1.326.codex-0.172.0.agy-1.5.18";
 /** The pins it holds, as the tools say their versions (`--version`): what readiness names. */
-export const HARNESS_PINS = { claude: "2.1.326", codex: "0.172.0" } as const;
+export const HARNESS_PINS = { claude: "2.1.326", codex: "0.172.0", agy: "1.5.18" } as const;
 
 /**
  * The primary's own images: where each is built from (under the sandbox directory) and the keeper that holds it. `base`:
@@ -190,13 +190,16 @@ export const seatHome = (seat: string) => `/seats/${seat}`;
 
 /**
  * Where a seat's tool keeps its sign-in, inside the seat's home, told to the tool by the variable its vendor documents
- * for keeping accounts apart (Anthropic's Authentication page, OpenAI's Codex configuration). This is the one place that
- * names them: nothing of Invincible's reads, copies or moves what a tool keeps there.
+ * for keeping accounts apart (Anthropic's Authentication page, OpenAI's Codex configuration), or, for Antigravity's CLI,
+ * which has none, the profile its bridge runs it in (agy's own --gemini-dir, as T3 Code gives each of its profiles one:
+ * packages/agents/src/antigravity.ts). This is the one place that names them: nothing of Invincible's reads, copies or
+ * moves what a tool keeps there.
  */
 export function seatEnv(seat: string, kind: SeatKind): Record<string, string> {
   const home = seatHome(seat);
   if (kind === "claude-subscription") return { CLAUDE_CONFIG_DIR: `${home}/claude` };
   if (kind === "chatgpt-codex") return { CODEX_HOME: `${home}/codex` };
+  if (kind === "google-antigravity") return { INVINCIBLE_AGY_DIR: `${home}/antigravity` };
   return {};
 }
 

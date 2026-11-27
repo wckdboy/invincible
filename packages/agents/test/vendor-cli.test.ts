@@ -11,6 +11,8 @@ import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
 import { GatewayTokens, handleGateway } from "@invincible/models";
 import { type RunEvent, type RunRole, runLoop } from "../src/run.ts";
 import { CLAUDE_BRIDGE, CODEX_BRIDGE } from "../src/vendor-cli.ts";
+import { ANTIGRAVITY_ACP_BRIDGE } from "../src/antigravity.ts";
+import { ANTIGRAVITY_SIGN_IN } from "../src/seat-sign-in.ts";
 
 // Every test here starts a bridge and a stand-in tool as processes of their own, so its time is the machine's to
 // give: "a result that is an error ends the run as failed" took 0.6 s alone and 5.0 s (bun's default limit) in a full
@@ -1398,7 +1400,8 @@ describe("a seat's status", () => {
 describe("a subscription's sign-in never reaches your agent", () => {
   test("no shipped source names where either tool keeps its sign-in, but to tell a seat's tool its own home: nothing reads, copies or moves one", () => {
     // Each tool's sign-in, and the variables that carry one: named nowhere.
-    const kept = [".credentials.json", "CLAUDE_CODE_OAUTH", "auth.json", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY"];
+    // (Antigravity's CLI keeps its sign-in in its OS keyring, or in its profile in a file of this name: agy 1.5.18's.)
+    const kept = [".credentials.json", "CLAUDE_CODE_OAUTH", "auth.json", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "jetski-standalone-oauth-token"];
     // Where each tool keeps its home: named in one place only, to tell a seat's tool the seat's own home (I15 step 3),
     // as a path under it and nothing else, so no source finds or reads what a tool keeps there.
     const homes = ["CODEX_HOME", "CLAUDE_CONFIG_DIR"];
@@ -1430,7 +1433,7 @@ describe("a subscription's sign-in never reaches your agent", () => {
     const pointed = readFileSync(join(root, POINTED), "utf8");
     for (const name of homes) expect([name, pointsAtSeatHome(pointed, name)]).toEqual([name, true]);
     // Nor do the bridges speak to anyone themselves, or say who the tool is: they start it and read it.
-    for (const bridge of [CLAUDE_BRIDGE, CODEX_BRIDGE]) expect(bridge).not.toMatch(/user.agent|urllib\.request|http\.client|\bsocket\b|\bcurl\b|\bwget\b/i);
+    for (const bridge of [CLAUDE_BRIDGE, CODEX_BRIDGE, ANTIGRAVITY_ACP_BRIDGE, ANTIGRAVITY_SIGN_IN]) expect(bridge).not.toMatch(/user.agent|urllib\.request|http\.client|\bsocket\b|\bcurl\b|\bwget\b/i);
   });
 
   test("the tool is only ever asked its version, whether it is signed in, and to do the work: never to install, update, sign in or sign out", async () => {

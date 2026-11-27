@@ -16,15 +16,20 @@ export const SEAT_KIND_WORDS: Readonly<Record<SeatKind, { name: string; how: str
   "chatgpt-codex": { name: "ChatGPT plan", how: "signed in with Codex" },
   "chatgpt-siwc": { name: "ChatGPT plan", how: "Sign in with ChatGPT" },
   "mistral-vibe": { name: "Mistral plan", how: "its key from Mistral's console" },
+  "google-antigravity": { name: "Gemini plan", how: "Google AI Pro or Ultra, signed in with Antigravity" },
   plan: { name: "Coding plan", how: "its key, in the vault" },
   api: { name: "API key", how: "in the vault" },
 };
 
-/** The two kinds added in one tap, each signed in at once. */
+/** The kinds added in one tap, each signed in at once. */
 export const QUICK_ADDS: readonly { kind: SeatKind; button: string; name: string }[] = [
   { kind: "claude-subscription", button: "Add a Claude plan", name: "Claude" },
   { kind: "chatgpt-codex", button: "Add a ChatGPT plan", name: "ChatGPT" },
+  { kind: "google-antigravity", button: "Add a Gemini plan", name: "Gemini" },
 ];
+
+/** The kinds a vendor's tool signs in in a seat's VM, with a card (the rest are keys, or the node's own sign-in). */
+const SIGNED_IN_HERE: readonly SeatKind[] = ["claude-subscription", "chatgpt-codex", "google-antigravity"];
 
 /** A one-tap seat's name: its vendor's, numbered after those you have ("Claude 2"), and never one you have already. */
 export function quickLabel(kind: SeatKind, seats: readonly Pick<SeatView, "label">[]): string {
@@ -75,20 +80,33 @@ export function seatStateWords(state: SeatState, plan: string | null, now: numbe
 
 /** What a seat's button offers: to sign it in, again when it needs to be, and nothing while it is signing in or a key's. */
 export function signInAction(seat: Pick<SeatView, "kind" | "state">, now: number): string | null {
-  if (seat.kind !== "claude-subscription" && seat.kind !== "chatgpt-codex") return null;
+  if (!SIGNED_IN_HERE.includes(seat.kind)) return null;
   if (seat.state.is === "signing-in") return null;
   if (seat.state.is === "ready") return seat.state.renewBy !== null && seat.state.renewBy - now <= RENEW_DAYS * DAY ? "Sign in again" : null;
   return seat.state.is === "resting" ? null : "Sign in";
 }
 
-/** What a sign-in's card asks of you, in order: its vendor's page, and the code to enter there or to paste back here. */
-export function cardWords(card: Pick<SeatSignInCard, "kind" | "code" | "firstTime">): { title: string; open: string; steps: string[]; first: string | null } {
+/**
+ * What a sign-in's card asks of you, in order: its vendor's page, and the code to enter there or to paste back here, of
+ * a seat of this kind. `first`: what to know before you begin (the first ChatGPT seat's device codes; an Antigravity
+ * seat's risk to your Google account, which Google's terms put on it: core's SEAT_TERMS).
+ */
+export function cardWords(card: Pick<SeatSignInCard, "kind" | "code" | "firstTime">, kind: SeatKind): { title: string; open: string; steps: string[]; first: string | null } {
   if (card.kind === "device-code") {
     return {
       title: "Sign in on ChatGPT's page",
       open: "Open ChatGPT's page",
       steps: ["Open the page and sign in to the account this seat is for.", `Enter this code there: ${card.code ?? ""}`, "This finishes by itself once you have."],
       first: card.firstTime ? "First, turn on device code sign-in in ChatGPT's settings (Security): this is its first ChatGPT seat." : null,
+    };
+  }
+  if (kind === "google-antigravity") {
+    return {
+      title: "Sign in on Google's page",
+      open: "Open Google's page",
+      // (Google's page sends you on to antigravity.google, which shows the code.)
+      steps: ["Open the page and sign in to the account this seat is for.", "Paste the code its last page shows you here."],
+      first: "Google's Antigravity terms call reaching it through another tool, as Invincible does, a breach that may get your Antigravity and Gemini CLI accounts suspended: you chose this on 27 November 2026, accepting that risk to your Google account.",
     };
   }
   return {

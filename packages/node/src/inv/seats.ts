@@ -1,5 +1,5 @@
 import { plainLine, type SeatKind, type SeatSignInCard, type SeatUse, type SeatView, type TeamSnapshot } from "@invincible/core";
-import { quickLabel, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, USE_ELSEWHERE } from "../../../../apps/web/src/lib/seats.ts";
+import { cardWords, quickLabel, seatMeterWords, seatStateWords, servesChoiceWords, servesWords, USE_ELSEWHERE } from "../../../../apps/web/src/lib/seats.ts";
 import { CliError, EXIT, usageError } from "./exit.ts";
 import type { Command, Io } from "./io.ts";
 
@@ -8,10 +8,10 @@ import type { Command, Io } from "./io.ts";
  * chose.
  *   inv seats                        each seat, where it stands, and whom it serves; under it, its meter (its
  *                                    windows, its use lately) and where its vendor counts its use, if it asks
- *   inv seat add <claude|chatgpt> ["label"] [--email <address>] [--agent <agent>]
+ *   inv seat add <claude|chatgpt|gemini> ["label"] [--email <address>] [--agent <agent>]
  *                                    adds one (for that agent: without one, it serves none until you choose) and signs
- *                                    it in: its page to open (and Codex's code to enter there); for Claude, the code its
- *                                    page shows is pasted here
+ *                                    it in: its page to open (and Codex's code to enter there); for Claude and Gemini
+ *                                    (Antigravity's), the code its page shows is pasted here
  *   inv seat serve <seat> <agent>    it serves that agent, one of its node's (in place of another, what that means is said)
  *   inv seat share <seat> <agent> <agent>…
  *                                    those agents share it: what that means is said, for they are one trust domain
@@ -20,8 +20,8 @@ import type { Command, Io } from "./io.ts";
  * A sign-in waits until it has ended: 0 signed in, 1 not (in its words). 30: this device may not.
  */
 
-const USAGE = 'usage: inv seat add <claude|chatgpt> ["label"] [--email <address>] [--agent <agent>] · inv seat serve <seat> <agent> · inv seat share <seat> <agent> <agent>… · inv seat sign-in <seat> · inv seat remove <seat>';
-const KINDS: Record<string, SeatKind> = { claude: "claude-subscription", chatgpt: "chatgpt-codex" };
+const USAGE = 'usage: inv seat add <claude|chatgpt|gemini> ["label"] [--email <address>] [--agent <agent>] · inv seat serve <seat> <agent> · inv seat share <seat> <agent> <agent>… · inv seat sign-in <seat> · inv seat remove <seat>';
+const KINDS: Record<string, SeatKind> = { claude: "claude-subscription", chatgpt: "chatgpt-codex", gemini: "google-antigravity" };
 
 /** A seat by its id, its label, or the start of its id. */
 function resolveSeat(seats: readonly SeatView[], ref: string | undefined): SeatView {
@@ -57,7 +57,7 @@ export const seatsCommand: Command = async (conn, args, flags, io) => {
     return EXIT.ok;
   }
   if (!seats.length) {
-    io.out("No seats yet: inv seat add claude, or inv seat add chatgpt.\n");
+    io.out("No seats yet: inv seat add claude, inv seat add chatgpt, or inv seat add gemini.\n");
     return EXIT.ok;
   }
   const roster = await rosterOf(client);
@@ -117,14 +117,15 @@ export const seatCommand: Command = async (conn, args, flags, io) => {
   throw usageError(USAGE);
 };
 
-/** A seat's sign-in, from here: its card said, Claude's code read from this terminal, and how it ended. */
+/** A seat's sign-in, from here: its card said (what to know first, as the PWA's says it), the code its page shows read from this terminal, and how it ended. */
 async function signIn(client: Client, seat: SeatView, json: boolean, noAsk: boolean, io: Io): Promise<number> {
   const { card } = await client.call<{ card: SeatSignInCard }>("startSeatSignIn", { id: seat.id });
+  const first = cardWords(card, seat.kind).first;
   if (json) io.out(`${JSON.stringify({ card })}\n`);
-  else if (card.kind === "device-code") {
-    if (card.firstTime) io.out("First, turn on device code sign-in in ChatGPT's settings (Security): this is its first ChatGPT seat.\n");
-    io.out(`Open ${card.url} and sign in to the account this seat is for, then enter this code there: ${card.code}\n`);
-  } else io.out(`Open ${card.url} and sign in to the account this seat is for.\n`);
+  else {
+    if (first) io.out(`${first}\n`);
+    io.out(card.kind === "device-code" ? `Open ${card.url} and sign in to the account this seat is for, then enter this code there: ${card.code}\n` : `Open ${card.url} and sign in to the account this seat is for.\n`);
+  }
   if (card.kind === "paste-code") {
     if (noAsk || !io.readLine) throw new CliError("its page shows a code to paste back here: run it in a terminal, without --no-ask", EXIT.usage);
     const code = (await io.readLine("Paste the code it shows: "))?.trim();

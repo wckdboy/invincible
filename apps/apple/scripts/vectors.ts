@@ -1963,11 +1963,13 @@ const seats = {
     { seat: "st_ssssssssssssssssssssss", kind: "claude-subscription", windows: [{ window: "five_hour", share: 0 }], usd: null },
     { seat: null, kind: "chatgpt-codex", windows: [], usd: 2.8 },
   ].map((plan) => ({ plan, facts: core.taskPlanFacts(plan) })),
+  // (Each with its seat's kind: a code to paste back is Claude's, or Google's for an Antigravity seat.)
   cards: [
-    { kind: "device-code" as const, code: "FAKE-1234", firstTime: true },
-    { kind: "device-code" as const, code: "FAKE-1234", firstTime: false },
-    { kind: "paste-code" as const },
-  ].map((card) => ({ card, words: cardWords(card) })),
+    { card: { kind: "device-code" as const, code: "FAKE-1234", firstTime: true }, seat: "chatgpt-codex" as const },
+    { card: { kind: "device-code" as const, code: "FAKE-1234", firstTime: false }, seat: "chatgpt-codex" as const },
+    { card: { kind: "paste-code" as const }, seat: "claude-subscription" as const },
+    { card: { kind: "paste-code" as const }, seat: "google-antigravity" as const },
+  ].map(({ card, seat }) => ({ card, seat, words: cardWords(card, seat) })),
 };
 
 const vectors = {

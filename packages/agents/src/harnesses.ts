@@ -5,7 +5,9 @@ import { engramArgv, engramEnv } from "./engram.ts";
 import { acpDriver } from "./acp.ts";
 import { HERMES } from "./hermes.ts";
 import { CLAUDE, CODEX } from "./vendor-cli.ts";
+import { ANTIGRAVITY } from "./antigravity.ts";
 export { ACP_BRIDGE, ACP_PROBE, acpDriver } from "./acp.ts";
+export { ANTIGRAVITY, ANTIGRAVITY_ACP_BRIDGE } from "./antigravity.ts";
 export { HERMES } from "./hermes.ts";
 export { CLAUDE, CODEX } from "./vendor-cli.ts";
 export { agentCleanupCommand } from "./agent-process.ts";
@@ -79,8 +81,11 @@ export interface AgentDriver {
   name: string;
   /** What a person calls it. */
   title: string;
-  /** The API a gateway model must speak for it: a provider's kind. */
-  kind: "openai" | "anthropic";
+  /**
+   * The API a gateway model must speak for it: a provider's kind. (Gemini's, Antigravity's: no provider of the gateway's
+   * speaks it, so a harness of it is offered no roster model and runs on its own sign-in alone.)
+   */
+  kind: "openai" | "anthropic" | "gemini";
   /** What it can do as it runs. A `live` one reads its run's input channel (runAgent: AGENT_DIR/input). */
   capabilities: DriverCapabilities;
   /** A command that exits 0 in a sandbox where it is installed and can start. */
@@ -89,13 +94,13 @@ export interface AgentDriver {
    * A vendor's own tool, which its owner signs in itself, in the sandbox, through the vendor's own flow
    * (vendor-cli.ts). `check` then also prints whether it has a sign-in, and `read` reads that: signed in or
    * not, and the tool's word for how. The sign-in itself is never the primary's to see. `login`: the tool's own
-   * command to sign in; `roster`: what kind of model it runs on through the gateway instead.
+   * command to sign in; `roster`: what kind of model it runs on through the gateway instead (none: it runs on none).
    */
   signIn?: {
     /** What its `--status` said: signed in or not and how, and for a seat (seatCheck) its tier, its account's fingerprint and when it ends. */
     read(stdout: string): { signedIn: boolean; method?: string; plan?: string; fingerprint?: string; renewBy?: number };
     login: string;
-    roster: string;
+    roster?: string;
     /** Its status for a seat: the check with the salt its account's fingerprint is made with (core's seats.ts). */
     seatCheck(salt: string): string;
   };
@@ -215,7 +220,7 @@ export const OPENCODE: AgentDriver = {
   },
 };
 
-export const AGENTS: Record<string, AgentDriver> = { opencode: OPENCODE, hermes: HERMES, claude: CLAUDE, codex: CODEX };
+export const AGENTS: Record<string, AgentDriver> = { opencode: OPENCODE, hermes: HERMES, claude: CLAUDE, codex: CODEX, antigravity: ANTIGRAVITY };
 
 /** An agent's harness driver: one of AGENTS, or (harness `acp`) one for the ACP agent its command starts. */
 export function driverFor(harness: string, acp?: string | null): AgentDriver | undefined {

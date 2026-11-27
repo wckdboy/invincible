@@ -12,6 +12,9 @@ export { HOMED_KINDS, SEAT_HARNESS, type SeatAgent, seatServes, servedBy };
  *   chatgpt-codex        a ChatGPT plan, signed in with Codex in the seat's own home;
  *   chatgpt-siwc         a ChatGPT plan through Sign in with ChatGPT, its tokens held by the node (never in a VM);
  *   mistral-vibe         a Mistral plan, signed in with Mistral Vibe in the seat's own home;
+ *   google-antigravity   a Gemini plan (Google AI Pro or Ultra), signed in with Google's Antigravity CLI (agy) in the
+ *                        seat's own home, and run by it as T3 Code drives it: the owner's choice of 27 November 2026,
+ *                        accepting the risk Google's Antigravity terms put on their Google account (clause 6);
  *   plan                 a coding plan's key, in the vault, through the gateway;
  *   api                  an API key, in the vault, through the gateway.
  * A seat's home is a volume of its own on the node that holds it, where the vendor's own tool keeps its sign-in, made
@@ -36,12 +39,12 @@ export { HOMED_KINDS, SEAT_HARNESS, type SeatAgent, seatServes, servedBy };
  * in the log.
  */
 
-export const SEAT_KINDS = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "plan", "api"] as const;
+export const SEAT_KINDS = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "google-antigravity", "plan", "api"] as const;
 export const SeatKind = z.enum(SEAT_KINDS);
 export type SeatKind = z.infer<typeof SeatKind>;
 
 /** The kinds that are an account of a vendor's own, signed in through its own flow: the rest are keys in the vault. */
-export const SUBSCRIPTION_KINDS: readonly SeatKind[] = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe"];
+export const SUBSCRIPTION_KINDS: readonly SeatKind[] = ["claude-subscription", "chatgpt-codex", "chatgpt-siwc", "mistral-vibe", "google-antigravity"];
 
 export const SEAT_LIMITS = {
   label: 60,
@@ -209,16 +212,18 @@ export interface SeatSignInCard {
 /**
  * Where each vendor's own sign-in is: a sign-in's card shows only an address there, over https, so a VM can never put
  * another site in front of you as its vendor's page. (Codex's device page is OpenAI's own; Claude Code's sign-in is on
- * claude.ai, or Anthropic's console for a key.)
+ * claude.ai, or Anthropic's console for a key; Antigravity's is Google's own accounts page, whose sign-in then shows its
+ * code on antigravity.google, a page the card never shows.)
  */
-export const SIGN_IN_HOSTS: Readonly<Record<"claude-subscription" | "chatgpt-codex", readonly string[]>> = {
+export const SIGN_IN_HOSTS: Readonly<Record<"claude-subscription" | "chatgpt-codex" | "google-antigravity", readonly string[]>> = {
   "claude-subscription": ["claude.ai", "claude.com", "platform.claude.com", "console.anthropic.com"],
   "chatgpt-codex": ["auth.openai.com", "chatgpt.com"],
+  "google-antigravity": ["accounts.google.com"],
 };
 
 /** Whether an address a seat's tool showed is its vendor's sign-in page: https, on one of its hosts, nothing else in it. */
 export function signInUrlOk(kind: SeatKind, url: string): boolean {
-  if (kind !== "claude-subscription" && kind !== "chatgpt-codex") return false;
+  if (kind !== "claude-subscription" && kind !== "chatgpt-codex" && kind !== "google-antigravity") return false;
   if (url.length > 4_096 || /[\s<>"'`]/.test(url)) return false;
   let parsed: URL;
   try {
@@ -375,6 +380,8 @@ export function seatVendor(seat: { kind: SeatKind; provider?: string | null }): 
       return "openai";
     case "mistral-vibe":
       return "mistral";
+    case "google-antigravity":
+      return "google";
     default:
       return seat.provider ?? "unknown";
   }

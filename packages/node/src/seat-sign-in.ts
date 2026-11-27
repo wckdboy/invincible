@@ -1,4 +1,4 @@
-import { type NodeIdentity, randomId, SEAT_LIMITS, type SeatFacts, seatRuns, type SeatSignInCard, signInUrlOk } from "@invincible/core";
+import { type NodeIdentity, randomId, SEAT_HARNESS, SEAT_LIMITS, type SeatFacts, seatRuns, type SeatSignInCard, signInUrlOk } from "@invincible/core";
 import { AGENTS, seatSignInBridge } from "@invincible/agents";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import type { SandboxHost, SandboxStream } from "@invincible/sandbox";
@@ -44,7 +44,10 @@ export interface SeatSignInDeps {
   attemptMs?: number;
 }
 
-/** How the tool's own sign-out is asked, for a seat signed in to an account that isn't its own. */
+/**
+ * How the tool's own sign-out is asked, for a seat signed in to an account that isn't its own. (Antigravity's says no
+ * account's fingerprint, so no sign-in of it is ever found to be another account's: it has none here.)
+ */
 const SIGN_OUT: Record<string, string[]> = { "claude-subscription": ["claude", "auth", "logout"], "chatgpt-codex": ["codex", "logout"] };
 
 export class SeatSignIns {
@@ -197,11 +200,15 @@ export class SeatSignIns {
       }
       if (ok && !attempt.ending) {
         const seat = this.deps.store.seats().find((s) => s.id === attempt.seat.id) ?? attempt.seat;
-        const driver = seat.kind === "claude-subscription" ? AGENTS.claude! : AGENTS.codex!;
-        const asked = await host.exec(attempt.vm, ["bash", "-lc", driver.signIn!.seatCheck(seatSalt(this.deps.vault))], 60);
-        const stands = recordSeatStatus(this.deps.store, this.deps.node, seat, driver.signIn!.read(asked.stdout), attempt.id);
+        // Asked of the tool the seat's plan runs (core's SEAT_HARNESS), by its own driver.
+        const tool = SEAT_HARNESS[seat.kind];
+        const signIn = (tool ? AGENTS[tool] : undefined)?.signIn;
+        if (!signIn) throw new Error(`no tool says how a ${seat.kind} seat's sign-in stands`);
+        const asked = await host.exec(attempt.vm, ["bash", "-lc", signIn.seatCheck(seatSalt(this.deps.vault))], 60);
+        const stands = recordSeatStatus(this.deps.store, this.deps.node, seat, signIn.read(asked.stdout), attempt.id);
         // Another account than the seat's: refused, and signed out again by the tool's own command, so its home holds none.
-        if (stands === "wrong-account") await host.exec(attempt.vm, SIGN_OUT[seat.kind]!, 60).catch(() => undefined);
+        const out = SIGN_OUT[seat.kind];
+        if (stands === "wrong-account" && out) await host.exec(attempt.vm, out, 60).catch(() => undefined);
         return;
       }
       const outcome = attempt.ending ?? "failed";

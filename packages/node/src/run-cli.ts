@@ -1004,7 +1004,7 @@ async function agentFor(node: NodeClient, options: DoOptions): Promise<NonNullab
   // The engineer held to one model (an eval's pin): exactly that one, with nothing to fall back to.
   const pinned = options.pins?.engineer;
   const models = chooseAgentModels(pinned ? [pinned] : (roster.engineer?.models ?? []), providers, pinned ? 1 : 3, driver.kind);
-  const api = driver.kind === "anthropic" ? "an Anthropic-API" : "an OpenAI-compatible";
+  const api = { anthropic: "an Anthropic-API", openai: "an OpenAI-compatible", gemini: "a Gemini-API" }[driver.kind];
   if (!models.length) throw new Error(pinned ? `${pinned} can't run ${driver.name}: it needs ${api} provider with a key` : `no engineer model on ${api} provider with a key: invincible roster set engineer <provider/model> …`);
   return { driver, models, minutes: wanted.minutes, workdir: wanted.repo ? "/work/repo" : "/work" };
 }
