@@ -103,8 +103,12 @@ import sh.invincible.bot.core.AgentMark
 /** A running task's new lines are asked for this often while its thread is on screen. */
 private const val EVERY_MS = 1500L
 
-/** Whether the details card is beside the thread on a wide screen (kept while the app is open). */
-private var detailsShown by mutableStateOf(true)
+/** Whether the details card is beside the thread on a wide screen: closed until you open it (I10's 16dae258), then as you
+ * left it while the app is open. */
+private var detailsShown by mutableStateOf(false)
+
+/** Whether a task's proof is open past its first line: as this device last left a proof, while the app is open. */
+private var proofOpen by mutableStateOf(false)
 
 @Composable
 fun TaskScreen(app: AppModel, id: String, nav: Nav, wide: Boolean, roomy: Boolean) {
@@ -582,16 +586,40 @@ private fun ProofCard(app: AppModel, task: TeamTask, name: String, proof: Steps.
             .semantics { contentDescription = listOfNotNull(word, why).joinToString(". ") },
         verticalArrangement = Arrangement.spacedBy(Space.s3),
     ) {
-        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+        // Its first line (I10's 16dae258): its verdict, its gates' count and what it kept, a mark where a warning is said
+        // inside; it opens, as this device last left a proof.
+        val gatesSaid = proof.gates.takeIf { it.isNotEmpty() }?.let { "${proof.passed} of ${it.size} gate${if (it.size == 1) "" else "s"} passed" }
+        val keptSaid = if (files > 0) "$files file${if (files == 1) "" else "s"} kept" else null
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = Space.touch)
+                .clip(MaterialTheme.shapes.small)
+                .clickable { proofOpen = !proofOpen }
+                .semantics(mergeDescendants = true) {
+                    role = androidx.compose.ui.semantics.Role.Button
+                    stateDescription = if (proofOpen) "Open" else "Closed"
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.s2),
+        ) {
             Box(Modifier.size(22.dp).clip(CircleShape).background(tone), contentAlignment = Alignment.Center) {
                 Icon(if (kind == Steps.Verdict.PROVEN) CheckIcon else if (failed) CrossIcon else DashIcon, null, Modifier.size(14.dp), tint = if (failed) Color.White else brand.paper)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(word, style = Type.rowTitle.copy(fontWeight = FontWeight.SemiBold), color = if (failed) brand.danger else brand.ink)
-                why?.let { Text(it, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                if (task.steered) Text("Judged against its brief and your steer.", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = if (failed) brand.danger else brand.ink)) { append(word) }
+                    for (part in listOfNotNull(gatesSaid, keptSaid)) withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(" · $part") }
+                },
+                style = Type.rowTitle,
+                modifier = Modifier.weight(1f),
+            )
+            if (caveats.isNotEmpty()) Icon(InfoIcon, contentDescription = "A warning inside", modifier = Modifier.size(16.dp), tint = brand.needs)
+            Icon(ChevronIcon, null, Modifier.size(18.dp).rotate(if (proofOpen) 90f else 0f), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (proofOpen) {
+        why?.let { Text(it, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (task.steered) Text("Judged against its brief and your steer.", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
         for (c in caveats) Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
             Icon(InfoIcon, null, Modifier.size(15.dp).padding(top = 2.dp), tint = brand.quiet)
             Text(c, style = Type.meta)
@@ -627,6 +655,8 @@ private fun ProofCard(app: AppModel, task: TeamTask, name: String, proof: Steps.
             )
             Text(if (prices != null || task.record == null) Steps.costWords(task.budgetUsd, task.record, prices ?: emptyMap()) else "", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        }
+        // Its answers stand under it, open or not.
         val shipped = task.shipped
         if (actions.isNotEmpty() || shipped != null || verified) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
@@ -842,7 +872,7 @@ private fun Details(app: AppModel, task: TeamTask, name: String, proof: Steps.Pr
 
 /** The same task given again (Give again…): what was asked, with what came of it last time; it opens the new one. */
 @Composable
-private fun GiveAgainDialog(app: AppModel, task: TeamTask, opened: (String) -> Unit, done: () -> Unit) {
+internal fun GiveAgainDialog(app: AppModel, task: TeamTask, opened: (String) -> Unit, done: () -> Unit) {
     val scope = rememberCoroutineScope()
     var said by remember { mutableStateOf<String?>(null) }
     var sending by remember { mutableStateOf(false) }

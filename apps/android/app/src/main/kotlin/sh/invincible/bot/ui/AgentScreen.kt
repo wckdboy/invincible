@@ -353,38 +353,62 @@ private fun TaskCard(app: AppModel, t: Json, openTask: (String) -> Unit) {
         problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed, modifier = Modifier.padding(horizontal = Space.s2)) }
         return
     }
-    Panel {
+    // Each task a line shorter (I10's 16dae258, as the web's): its title and how it stands on one line; who gave or
+    // proposed it, muted; its latest step, or how it ended and what it kept; its answers each a tap under it. The row
+    // opens its thread.
+    val ended = status == "failed" || status == "stopped" || status == "interrupted"
+    val why = t["error"].string?.lineSequence()?.first()?.trim()?.let { mapOf("gave-up" to "gave up", "unverified" to "not verified")[it] ?: it }
+    val task = remember(t) { sh.invincible.bot.core.TeamTask.of(t) }
+    fun who(id: String): String = when (id) { "primary" -> Primary.name; "owner", "you" -> "you"; else -> id }
+    val by = task.proposedBy?.let { "Proposed by ${who(it)}" } ?: task.givenBy?.let { "Given by ${who(it)}" }
+    val step = (if (ended) why ?: t["progress"].string else t["progress"].string)?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() }
+    val kept = t["changes"]["files"].int?.let { "$it file${if (it == 1) "" else "s"} kept" }
+    val title = t["title"].string ?: ""
+    var shipping by remember { mutableStateOf(false) }
+    var again by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable { t["id"].string?.let(openTask) }
+            .padding(start = Space.s2, top = Space.s2, bottom = Space.s1),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-            Text("Task", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = Type.rowTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             word?.let { w -> Text(w, style = MaterialTheme.typography.labelMedium, color = ink) }
         }
-        Text(t["title"].string ?: "", style = MaterialTheme.typography.titleMediumEmphasized)
-        // Work that ended short says why (a run's word for it in words: "gave-up" is "gave up"); work under way, its latest step.
-        val ended = status == "failed" || status == "stopped" || status == "interrupted"
-        val why = t["error"].string?.lineSequence()?.first()?.trim()?.let { mapOf("gave-up" to "gave up", "unverified" to "not verified")[it] ?: it }
-        (if (ended) why ?: t["progress"].string else t["progress"].string)?.takeIf { it.isNotBlank() }?.let {
-            Text(it.lineSequence().first(), style = MaterialTheme.typography.bodyMedium, color = if (ended && why != null) LocalBrand.current.failed else MaterialTheme.colorScheme.onSurfaceVariant)
+        by?.let { Text(it, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+        listOfNotNull(step, kept).joinToString(" · ").takeIf { it.isNotEmpty() }?.let {
+            Text(it, style = Type.meta, color = if (ended && why != null) LocalBrand.current.failed else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
-        t["changes"]["files"].int?.let { Text("$it file${if (it == 1) "" else "s"} changed, kept", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         val context = androidx.compose.ui.platform.LocalContext.current
-        shipped["url"].string?.let { url ->
-            TextButton(onClick = { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }) {
-                Text(shipped["pr"].int?.let { "Pull request #$it" } ?: "Its pull request")
-            }
-        }
-        var shipping by remember { mutableStateOf(false) }
-        // What a task offers, as the iPhone's card does: by where it stands; and its own thread, where all of it is.
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-            t["id"].string?.let { tid -> TextButton(onClick = { openTask(tid) }) { Text("Open") } }
+        // Its answers, each a tap.
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1), modifier = Modifier.padding(top = Space.s1)) {
             when {
-                status == "proposed" -> Decision(no = "Decline", yes = "Start it", onNo = { control("stop") }, onYes = { control("approve") })
-                ships -> AnswerPill("Ship it", { shipping = true })
-                status == "failed" || status == "stopped" || status == "interrupted" -> OutlinedButton(onClick = { control("resume") }) { Text("Resume") }
+                status == "proposed" -> {
+                    AnswerPill("Approve", { control("approve") })
+                    TextButton(onClick = { control("stop") }) { Text("Decline") }
+                }
+                ships -> {
+                    AnswerPill("Ship it…", { shipping = true })
+                    TextButton(onClick = { again = true }) { Text("Give again…") }
+                }
+                ended -> {
+                    AnswerPill("Resume", { control("resume") })
+                    TextButton(onClick = { again = true }) { Text("Give again…") }
+                }
+            }
+            shipped["url"].string?.let { url ->
+                TextButton(onClick = { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }) {
+                    Text(shipped["pr"].int?.let { "Pull request #$it" } ?: "Its pull request")
+                }
             }
         }
         problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = LocalBrand.current.failed) }
-        if (shipping) ShipDialog(app, t) { shipping = false }
     }
+    if (shipping) ShipDialog(app, t) { shipping = false }
+    if (again) GiveAgainDialog(app, task, opened = openTask) { again = false }
 }
 
 /** An agent's verified work as a pull request: its title first (the task's, to change), on a new branch, as it was verified. */
