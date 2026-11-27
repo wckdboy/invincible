@@ -21,7 +21,7 @@ const LISTED: LayoutEntry[] = [
   { name: "repo", to: "work", kind: "dir", bytes: 4096 },
 ];
 
-function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean; listCut?: boolean; checkFails?: string; backFails?: boolean } = {}) {
+function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: boolean; runFails?: boolean; leaseFails?: (container: string) => boolean; extendFails?: boolean; listCut?: boolean; checkFails?: string; backFails?: boolean; labelFails?: boolean; layout2?: boolean } = {}) {
   const containers = new Map<string, { labels: Record<string, string>; mounts: Mount[]; status: string; image: string }>();
   const calls: string[][] = [];
   /** The modes MOVE_PY was run in, in order, and the word each was given (the move's own), if any. */
@@ -107,6 +107,8 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
           if (!c) return no();
           if (rest[1] === "{{.Name}}") return ok(`/${rest[2]}`);
           const label = /^\{\{index \.Config\.Labels "([^"]+)"\}\}$/.exec(rest[1]!)?.[1];
+          // (Docker failing to say one container's layout, as a daemon under load or restarting does.)
+          if (label === `${LABEL}.layout` && opts.labelFails) return { code: 1, stdout: "", stderr: "Error response from daemon: context deadline exceeded" };
           return label ? ok(c.labels[label] ?? "") : ok(JSON.stringify(c.mounts));
         }
         const found = rest.map((name) => containers.get(name)).filter((c) => !!c);
@@ -153,7 +155,7 @@ function fake(opts: { engine?: string; disk?: boolean; layout?: "2"; sharing?: b
   // Each lease minted is a token of its own, by its number; what was asked of each is kept.
   const tokens = { minted: [] as { label: string; providers?: string[]; models?: string[]; ttlMinutes: number; maxRequests: number }[], extended: [] as string[], revoked: [] as string[] };
   const host = new SandboxHost({
-    node: "test", maxCpus: 8, maxMemoryGb: 16, microVMs: true, runner, ledger: (e) => void ledger.push(e), layout2: true, moved: (run, entries) => void moved.push({ run, entries }),
+    node: "test", maxCpus: 8, maxMemoryGb: 16, microVMs: true, runner, ledger: (e) => void ledger.push(e), layout2: opts.layout2 ?? true, moved: (run, entries) => void moved.push({ run, entries }),
     tokens: {
       mint: (scope) => {
         tokens.minted.push(scope);
@@ -453,6 +455,40 @@ describe("an agent's VM in layout 2", () => {
  * own, made like a seat's, sharing the agent's workspace alone, never its HOME nor its notes; leased the task's models
  * alone, never your keys nor its repository; labelled with its task, and gone, with all it started, as the task ends.
  */
+describe("a VM whose layout Docker can't say (the fifth fabric review's R5-8)", () => {
+  const CANT = "could not tell which layout the agent's VM is in, so nothing of its store is mounted: Error response from daemon: context deadline exceeded";
+  // Anything that mounts the store, or would change it: a VM made, started, stopped or set aside, or a one-off on it.
+  const mounted = (f: ReturnType<typeof fake>) => f.calls.filter((a) => ["run", "start", "stop", "rename", "rm"].includes(a[0]!));
+
+  test("isn't started, nor moved as if it were in layout 1, at a prepare: nothing of its store is mounted, and the error says why", async () => {
+    for (const layout2 of [true, false]) {
+      const f = fake({ layout: "2", labelFails: true, layout2 });
+      await expect(f.host.prepareTeam(ID, RUN, undefined, ["openai"])).rejects.toThrow(CANT);
+      expect([layout2, mounted(f)]).toEqual([layout2, []]);
+      expect(f.modes).toEqual([]);
+      expect(f.agent().status).toBe("exited");
+    }
+  });
+
+  test("isn't made again by its owner in layout 1 on its store", async () => {
+    for (const disk of [false, true]) {
+      const f = fake({ layout: "2", labelFails: true, disk });
+      await expect(f.host.remakeTeam(ID, RUN, { providers: ["openai"], approvedBy: "test-owner" })).rejects.toThrow(CANT);
+      expect([disk, mounted(f)]).toEqual([disk, []]);
+      expect(f.agent().labels[`${LABEL}.layout`]).toBe("2");
+    }
+  });
+
+  test("has no seat's VM made beside it on its store's root", async () => {
+    const SEAT = { id: `st_${"b".repeat(22)}`, kind: "claude-subscription" as const, runs: 1 };
+    const f = fake({ layout: "2", labelFails: true });
+    f.agent().status = "running";
+    await expect(f.host.createSeatVm({ seat: SEAT, network: "online", cpus: 1, memoryGb: 2, ttlMinutes: 30, run: `seat.${SEAT.id}`, shares: ID })).rejects.toThrow(CANT);
+    expect(mounted(f)).toEqual([]);
+    expect([...f.containers.values()].some((c) => c.labels[`${LABEL}.shares`] === ID)).toBe(false);
+  });
+});
+
 describe("another node's task's VM", () => {
   const task = { task: "task-abcdefghijkl", shares: ID, run: "handed.task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"], ttlMinutes: 60 };
 

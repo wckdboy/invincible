@@ -69,7 +69,9 @@ function fake() {
       case "inspect": {
         if (rest[0] === "--format") {
           const c = containers.get(rest[2]!);
-          return c ? ok(JSON.stringify(c.mounts)) : no();
+          // (One of its labels as Docker says it, or where its /work comes from.)
+          const label = /^\{\{index \.Config\.Labels "([^"]+)"\}\}$/.exec(rest[1]!)?.[1];
+          return c ? ok(label ? (c.labels[label] ?? "") : JSON.stringify(c.mounts)) : no();
         }
         const found = rest.map((name) => containers.get(name)).filter((c) => !!c);
         if (!found.length) return no();

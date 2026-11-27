@@ -81,9 +81,12 @@ function agentHost(opts: {
     runner: async (args) => {
       commands.push(args);
       if (args[0] === "ps") return { code: 0, stdout: opts.missing ? "" : ID, stderr: "" };
-      // (Asked of one container by name: whether it is there, and where its /work comes from.)
+      // (Asked of one container by name: whether it is there, one of its labels as Docker says it, and where its /work
+      // comes from.)
       if (args[0] === "inspect" && args[1] === "--format") {
         if (args[2] === "{{.Name}}") return named.has(args[3]!) ? { code: 0, stdout: `/${args[3]}`, stderr: "" } : { code: 1, stdout: "", stderr: "No such object" };
+        const label = /^\{\{index \.Config\.Labels "([^"]+)"\}\}$/.exec(args[2]!)?.[1];
+        if (label) return { code: 0, stdout: `${(labels as Record<string, string>)[label] ?? ""}\n`, stderr: "" };
         return { code: 0, stdout: JSON.stringify([{ Type: "bind", Source: DISK, Destination: "/work" }, { Type: "bind", Source: "/etc/invincible/resolv.conf", Destination: "/etc/resolv.conf" }]), stderr: "" };
       }
       if (args[0] === "stop") all.push("stop");

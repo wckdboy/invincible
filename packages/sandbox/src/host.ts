@@ -1246,10 +1246,19 @@ export class SandboxHost {
    */
   // ---- Layout 2 (layout.ts): an agent's HOME apart from its workspace ----
 
-  /** Which layout an agent's VM is in, as its container's label says (none: 1, as every VM was made before 2). */
+  /**
+   * Which layout an agent's VM is in, as its container's label says (none: 1, as every VM was made before 2). One Docker
+   * can't say is in neither (the fifth fabric review's R5-8): taken for layout 1, a VM in layout 2 would be started
+   * without its trees checked, moved again, made again on its store's root, or shared by that root. So whatever asked
+   * mounts nothing of its store, and says why.
+   */
   private async layoutOf(id: string): Promise<1 | 2> {
     const said = await this.docker(["inspect", "--format", `{{index .Config.Labels "${LABEL}.layout"}}`, containerName(id)]);
-    return said.code === 0 && said.stdout.trim() === "2" ? 2 : 1;
+    const label = said.stdout.trim();
+    if (said.code === 0 && label === "2") return 2;
+    if (said.code === 0 && (label === "" || label === "<no value>")) return 1;
+    const why = said.code !== 0 ? redact(said.stderr).trim().split("\n").at(-1)?.slice(0, 300) || `docker inspect exited ${said.code}` : `its label says ${JSON.stringify(label.slice(0, 40))}`;
+    throw new SandboxError(`could not tell which layout the agent's VM is in, so nothing of its store is mounted: ${why}`, 424);
   }
 
   /** Docker Engine's major version here, asked once: a store on a volume is mounted as its subpaths from 26 on. */

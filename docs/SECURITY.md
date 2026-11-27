@@ -311,7 +311,10 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   about to mount it, in a one-off container of the store's own (`MOVE_PY`'s check): a folder at the store's root, by
   lstat, never a link nor anything that resolves out of the store, and the VMs' user's. Anything else and nothing of the
   store is mounted: the VM isn't made or started, and a move is put back. So no link in a store is ever a bind's source
-  on the host, whoever left it there (`packages/sandbox/test/layout-planted.test.ts`, `team-layout.test.ts`).
+  on the host, whoever left it there (`packages/sandbox/test/layout-planted.test.ts`, `team-layout.test.ts`). Which
+  layout a VM is in is its container's label. One Docker can't say (an inspect that fails) is taken for neither, and
+  nothing of its store is mounted: it isn't started, moved, made again or shared, and the error says why (the fifth
+  review's R5-8; `team-layout.test.ts`).
 - **Made new in it; moved to it once.** With it on, a new agent's VM is made in layout 2. One made before is moved at
   its next prepare while nothing runs in it (no command, terminal or desktop session, and no VM sharing its workspace):
   its store's top-level entries are renamed into the three trees inside the store's own filesystem, so nothing is
