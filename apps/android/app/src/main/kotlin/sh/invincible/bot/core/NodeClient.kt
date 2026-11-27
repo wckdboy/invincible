@@ -30,8 +30,17 @@ class NodeError(
     val serverTime: Long? = null,
     /** Nothing answered, or a proxy answered for a node that's away: try again later; it isn't a refusal. */
     val unreachable: Boolean = false,
+    /** The node at this address proved to be another than the one this phone paired with (its id), or its proof failed (""): nothing more is sent there (NodePin). */
+    val notYourNode: String? = null,
 ) : Exception(message) {
     companion object {
+        /** The node at this address isn't this phone's: it proved to be [other], or its proof failed (null). */
+        fun notYours(other: String?): NodeError = NodeError(
+            0,
+            other?.let { "It proved to be another node (${it.drop(2).take(8)}), not the one this phone paired with." } ?: "Its proof of which node it is didn't hold.",
+            notYourNode = other ?: "",
+        )
+
         fun from(status: Int, contentType: String?, date: String?, body: ByteArray): NodeError {
             val serverTime = date?.let { runCatching { httpDate().parse(it)?.time }.getOrNull() }
             if (status in listOf(502, 503, 504) && contentType?.contains("application/json") != true) {
@@ -55,23 +64,47 @@ class NodeError(
 }
 
 /**
- * This phone talking to its node. Every /api request is signed with the device key over (method, path, time, nonce,
- * body hash) and sent with exactly those bytes, as the PWA's signedFetch and the Apple app do. Nothing is cached, and
- * a redirect is never followed: a signed request goes only where it was meant to go. Nothing is retried either: a
- * nonce is spent once, so a request is only ever signed afresh.
+ * The node this phone speaks to, as that node proved it (NodeProof), shared by every use of a client: what each request
+ * signs names (RequestAuth's v2), and, once the node at its address proved to be another or its proof failed, why nothing
+ * more is sent there (the slice 8 note's item 11).
  */
-class NodeClient(val origin: String, private val signer: Signer) {
+class NodePin(node: String? = null) {
+    private val pinned = java.util.concurrent.atomic.AtomicReference(node)
+    private val refusal = java.util.concurrent.atomic.AtomicReference<NodeError?>(null)
+
+    val node: String? get() = pinned.get()
+    val refused: NodeError? get() = refusal.get()
+    fun pin(node: String) = pinned.set(node)
+    fun refuse(why: NodeError) = refusal.set(why)
+    /** Asked again (Try again): its proof is judged afresh, and nothing else is sent until it holds. */
+    fun clear() = refusal.set(null)
+}
+
+/**
+ * This phone talking to its node. Every /api request is signed with the device key over (method, path, time, nonce,
+ * body hash) and the node it is for ([pin]), and sent with exactly those bytes, as the PWA's signedFetch and the Apple
+ * app do. Nothing is cached, and a redirect is never followed: a signed request goes only where it was meant to go.
+ * Nothing is retried either: a nonce is spent once, so a request is only ever signed afresh.
+ */
+class NodeClient(val origin: String, private val signer: Signer, val pin: NodePin = NodePin()) {
     private val host: String = runCatching { URL(origin).host }.getOrNull() ?: "the node"
 
-    private fun open(method: String, path: String, body: ByteArray?, readTimeoutMs: Int): HttpURLConnection {
+    /** The request, signed for the pinned node ([named]; never for whoami's proof), and never made once a node at this address proved to be another. */
+    internal fun headers(method: String, path: String, body: ByteArray, named: Boolean = true): Map<String, String> {
+        pin.refused?.let { throw it }
+        return RequestAuth.headers(signer, method, path, body, node = if (named) pin.node else null)
+    }
+
+    private fun open(method: String, path: String, body: ByteArray?, readTimeoutMs: Int, named: Boolean = true): HttpURLConnection {
         require(path.startsWith("/")) { "$path isn't a path on the node" }
+        val signed = headers(method, path, body ?: ByteArray(0), named)
         val c = URL(origin.trimEnd('/') + path).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.instanceFollowRedirects = false
         c.useCaches = false
         c.connectTimeout = 15_000
         c.readTimeout = readTimeoutMs
-        for ((name, value) in RequestAuth.headers(signer, method, path, body ?: ByteArray(0))) c.setRequestProperty(name, value)
+        for ((name, value) in signed) c.setRequestProperty(name, value)
         c.setRequestProperty(RequestAuth.ZONE, java.util.TimeZone.getDefault().id)
         if (body != null) {
             c.doOutput = true
@@ -95,10 +128,10 @@ class NodeClient(val origin: String, private val signer: Signer) {
         unreachable = true,
     )
 
-    private suspend fun send(method: String, path: String, body: Json?): Json = withContext(Dispatchers.IO) {
+    private suspend fun send(method: String, path: String, body: Json?, named: Boolean = true): Json = withContext(Dispatchers.IO) {
         val bytes = body?.text()?.toByteArray(Charsets.UTF_8)
         val c = try {
-            open(method, path, bytes, 60_000)
+            open(method, path, bytes, 60_000, named)
         } catch (e: IOException) {
             throw unreachable(e)
         }
@@ -122,6 +155,9 @@ class NodeClient(val origin: String, private val signer: Signer) {
     }
 
     suspend fun get(path: String): Json = send("GET", path, null)
+
+    /** Whoami, asked with [challenge], which the node answers with its proof of which node it is (NodeProof): signed for no node, as whoami's always is taken, so another node at this address still says which it is. */
+    suspend fun provenWhoami(challenge: String): Json = send("GET", "/api/whoami?challenge=$challenge", null, named = false)
 
     suspend fun post(path: String, body: Json): Json = send("POST", path, body)
 

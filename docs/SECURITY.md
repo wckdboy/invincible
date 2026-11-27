@@ -120,6 +120,10 @@ The review also confirmed what held up:
     address refuses them (`inv` exits 30).
   - **The web app asks again at every start.** A node that proves to be another, or whose proof fails, is asked
     nothing more, and the page says so. `inv`, not yet pinned, exits 30 on a proof that fails.
+  - **The iPhone, iPad, Mac and Android apps** pin it the same way: from the pairing, or a pairing from before at its
+    first proven whoami, kept with the pairing; every request they sign names it. A node that proves to be another, or
+    whose proof fails, gets nothing more: the app says "This isn't the node this device paired with", and pulling to
+    refresh (or Try again, on Android) asks that node only which it is, until it proves to be the paired one.
   - **A node from before, which proves nothing,** is spoken to as before, until the cutoff.
   - **Held to Ed25519's strict rule** (`verifyEd25519Strict`, the lead's word of 27 November 2026): A and R are
     canonical points of the prime-order subgroup, neither the identity, S < L, and the equation holds. noble's default
@@ -130,6 +134,14 @@ The review also confirmed what held up:
     log's own check of what is already in it moves to the rule at the cutoff, so a log rebuilds to the same state and a
     fleet mid-update agrees. The tests: `packages/core/test/core.test.ts` ("Ed25519's strict rule"),
     `packages/ledger/test/strict-keys.test.ts` and `packages/link/test/pairing-host.test.ts`.
+  - **The apps check the proof under the same rule, and answer alike:** the parity vectors hold RFC 8032's test vectors
+    and all 210 of Wycheproof's, each with core's answer (`apps/apple/scripts/vectors.ts`), and core, Swift and Kotlin
+    are each held to every one.
+    - **Swift** makes the rule's checks itself, then asks CryptoKit for the equation (`Ed25519Strict.swift`). Alone,
+      CryptoKit takes the 29 vectors Wycheproof calls acceptable, its 8 small-order and 21 mixed-order keys; after the
+      checks it agrees on all 215. A pure check of the equation is held to the vectors beside it.
+    - **Kotlin** checks it all itself (`Ed25519Strict.kt`): verify only, no new dependency, the same on every Android
+      version (the platform's own Ed25519 comes at API 33, and isn't used there either).
   - **What the proof doesn't do:** it doesn't bind the connection. Something in the middle that passed whoami, and the
     requests after it, on to your node is kept out by the tailnet's encryption and `tailscale serve`'s HTTPS, not by
     this.

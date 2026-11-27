@@ -13,11 +13,14 @@ interface Signer {
 
 /**
  * Every request to the node is signed by the device key, as packages/core/src/request-auth.ts verifies it: the domain,
- * the method, the path with its query, the time, a nonce and the body's hash, one per line. A nonce is spent once and
- * the time may be a minute off at most, so a request is signed afresh each time it is sent, never resent as it was.
+ * the method, the path with its query, the time, a nonce and the body's hash, one per line, and the node it is for, last
+ * (`invincible-req/v2`), so another node refuses it (the slice 8 note's item 11). With no node, `invincible-req/v1` and
+ * none: what whoami's proof is asked with (NodeProof), and what a node from before reads. A nonce is spent once and the
+ * time may be a minute off at most, so a request is signed afresh each time it is sent, never resent as it was.
  */
 object RequestAuth {
     const val DOMAIN = "invincible-req/v1"
+    const val DOMAIN_NAMED = "invincible-req/v2"
     const val DEVICE = "x-invincible-device"
     const val TS = "x-invincible-ts"
     const val NONCE = "x-invincible-nonce"
@@ -30,14 +33,17 @@ object RequestAuth {
 
     fun bodyHash(body: ByteArray): String = Base64Url.encode(Hash.sha256(body))
 
-    fun signingInput(method: String, path: String, ts: String, nonce: String, body: ByteArray): ByteArray =
-        "$DOMAIN\n${listOf(method.uppercase(), path, ts, nonce, bodyHash(body)).joinToString("\n")}".toByteArray(Charsets.UTF_8)
+    /** What is signed: for [node], as that node proved it (v2), or for none (v1). */
+    fun signingInput(method: String, path: String, ts: String, nonce: String, body: ByteArray, node: String? = null): ByteArray {
+        val parts = listOf(method.uppercase(), path, ts, nonce, bodyHash(body)) + listOfNotNull(node)
+        return "${if (node == null) DOMAIN else DOMAIN_NAMED}\n${parts.joinToString("\n")}".toByteArray(Charsets.UTF_8)
+    }
 
     /** Twelve random bytes: sixteen characters of base64url. */
     fun nonce(): String = Base64Url.encode(ByteArray(12).also { random.nextBytes(it) })
 
-    fun headers(signer: Signer, method: String, path: String, body: ByteArray, ts: String = System.currentTimeMillis().toString(), nonce: String = nonce()): Map<String, String> {
-        val signature = signer.sign(signingInput(method, path, ts, nonce, body))
+    fun headers(signer: Signer, method: String, path: String, body: ByteArray, ts: String = System.currentTimeMillis().toString(), nonce: String = nonce(), node: String? = null): Map<String, String> {
+        val signature = signer.sign(signingInput(method, path, ts, nonce, body, node))
         return mapOf(DEVICE to signer.device, TS to ts, NONCE to nonce, SIG to Base64Url.encode(signature))
     }
 

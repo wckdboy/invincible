@@ -53,6 +53,7 @@ import sh.invincible.bot.core.Invite
 import sh.invincible.bot.core.Joining
 import sh.invincible.bot.core.NodeClient
 import sh.invincible.bot.core.NodeError
+import sh.invincible.bot.core.NodeProof
 import sh.invincible.bot.core.string
 import sh.invincible.bot.core.get
 
@@ -209,6 +210,12 @@ private suspend fun joined(link: String, name: String, stage: (Stage) -> Unit): 
         stage(Stage.Waiting(joining.code))
         joining.approval(onRetry = { stage(Stage.Waiting(joining.code, it)) })
     }
-    val who = NodeClient(origin, key).get("/api/whoami")
-    return PairedNode(origin, key.device, name, invite.f, who["nodeName"].string, who["fleetName"].string)
+    // Approved: what the node says this phone is, and which node it is, proven: pinned from the pairing, and named in what
+    // this phone signs from then on (the slice 8 note's item 11). A node from before proves nothing: pinned at the first
+    // proof it gives.
+    val challenge = NodeProof.challenge()
+    val who = NodeClient(origin, key).provenWhoami(challenge)
+    val proven = NodeProof.judge(null, who["node"].string, who["proof"].string, challenge)
+    if (proven == NodeProof.Proven.Failed) throw Joining.Stop.Ended("The node's proof of which node it is didn't hold: this phone isn't paired with it.")
+    return PairedNode(origin, key.device, name, invite.f, who["nodeName"].string, who["fleetName"].string, (proven as? NodeProof.Proven.Pin)?.node)
 }

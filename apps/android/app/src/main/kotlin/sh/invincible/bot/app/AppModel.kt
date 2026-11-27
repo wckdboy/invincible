@@ -30,6 +30,8 @@ import sh.invincible.bot.core.liveOpen
 import sh.invincible.bot.core.DeviceKey
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeClient
+import sh.invincible.bot.core.NodePin
+import sh.invincible.bot.core.NodeProof
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Reach
 import sh.invincible.bot.core.Roster
@@ -51,15 +53,19 @@ import sh.invincible.bot.core.string
 import sh.invincible.bot.core.text
 import sh.invincible.bot.core.Primary
 
-/** The node this phone is paired with (kept as the Apple app keeps its PairedNode, outside any backup). */
-data class PairedNode(val origin: String, val device: String, val name: String, val fleet: String, val nodeName: String?, val fleetName: String?) {
-    fun json(): Json = Json.obj("origin" to origin, "device" to device, "name" to name, "fleet" to fleet, "nodeName" to nodeName, "fleetName" to fleetName)
+/**
+ * The node this phone is paired with (kept as the Apple app keeps its PairedNode, outside any backup). [nodeId]: the
+ * node's id, as that node proved it (NodeProof), which every request names; absent from a pairing made before it, or with
+ * a node from before it: proved, and kept, at the next whoami.
+ */
+data class PairedNode(val origin: String, val device: String, val name: String, val fleet: String, val nodeName: String?, val fleetName: String?, val nodeId: String? = null) {
+    fun json(): Json = Json.obj("origin" to origin, "device" to device, "name" to name, "fleet" to fleet, "nodeName" to nodeName, "fleetName" to fleetName, "nodeId" to nodeId)
 
     companion object {
         fun of(j: Json): PairedNode? {
             return PairedNode(
                 j["origin"].string ?: return null, j["device"].string ?: return null, j["name"].string ?: return null,
-                j["fleet"].string ?: return null, j["nodeName"].string, j["fleetName"].string,
+                j["fleet"].string ?: return null, j["nodeName"].string, j["fleetName"].string, j["nodeId"].string,
             )
         }
     }
@@ -198,8 +204,6 @@ class AppModel(context: Context) {
     /** How the fleet stands (GET /api/fleet): read when the live stream says it changed (every minute while it is down). */
     private val _fleet = MutableStateFlow<FleetLook?>(null)
     val fleet: StateFlow<FleetLook?> = _fleet.asStateFlow()
-    /** The primary's name has been asked for this session (whoami). */
-    private var primaryAsked = false
     /** Your prices have been asked for this session. */
     private var pricesAsked = false
 
@@ -310,7 +314,58 @@ class AppModel(context: Context) {
 
     private fun connect() {
         val node = _paired.value
-        client = if (node != null) (key ?: runCatching { DeviceKey.load() }.getOrNull())?.let { NodeClient(node.origin, it) } else null
+        // (Every request it signs names the node it proved to be, where it proved one: the slice 8 note's item 11.)
+        client = if (node != null) (key ?: runCatching { DeviceKey.load() }.getOrNull())?.let { NodeClient(node.origin, it, NodePin(node.nodeId)) } else null
+        proven = false
+    }
+
+    /** Whoami has been asked, and its proof judged, this session (NodeProof). */
+    private var proven = false
+
+    /**
+     * Whoami, proven, once a session and before anything else is asked (NodeProof): the first proof pins the node, kept
+     * with the pairing; a node that proves to be another, or whose proof fails, is asked nothing more (NodePin) and said
+     * so (problem). False: this phone's node isn't the one answering there.
+     */
+    private suspend fun proven(c: NodeClient): Boolean {
+        c.pin.refused?.let {
+            _problem.value = it
+            return false
+        }
+        if (proven) return true
+        val challenge = NodeProof.challenge()
+        // (Not answered: the reads after say why, and it is asked again at the next refresh.)
+        val who = attempt { c.provenWhoami(challenge) }.getOrElse { return true }
+        proven = true
+        Primary.named(who["primaryName"].string)
+        when (val said = NodeProof.judge(c.pin.node, who["node"].string, who["proof"].string, challenge)) {
+            is NodeProof.Proven.Pin -> {
+                c.pin.pin(said.node)
+                _paired.value?.let { node ->
+                    val pinned = node.copy(nodeId = said.node)
+                    prefs.edit().putString("paired-node", pinned.json().text()).apply()
+                    _paired.value = pinned
+                }
+            }
+            is NodeProof.Proven.Other -> return notYours(c, NodeError.notYours(said.node))
+            NodeProof.Proven.Failed -> return notYours(c, NodeError.notYours(null))
+            else -> {}
+        }
+        return true
+    }
+
+    /** The node at this address isn't this phone's: said above everything, and nothing more is sent there. */
+    private fun notYours(c: NodeClient, why: NodeError): Boolean {
+        c.pin.refuse(why)
+        _problem.value = why
+        return false
+    }
+
+    /** Try again, at a node that proved to be another: its proof is asked for afresh, and nothing else until it holds. */
+    fun tryAgain() {
+        client?.pin?.clear()
+        proven = false
+        scope.launch { refresh() }
     }
 
     fun paired(node: PairedNode) {
@@ -350,7 +405,7 @@ class AppModel(context: Context) {
         _needsYou.value = 0
         // (What each route last answered is the forgotten node's: none of it is drawn for the next.)
         answers.clear()
-        primaryAsked = false
+        proven = false
         pricesAsked = false
         chat.reset()
     }
@@ -470,7 +525,7 @@ class AppModel(context: Context) {
             c.stream(Live.path(since), opened, alive, event)
         },
         // (No stream on an older node, a device that may not read it, a revoked one: tried again only when told.)
-        refused = { it is NodeError && it.status in listOf(401, 403, 404) },
+        refused = { it is NodeError && (it.status in listOf(401, 403, 404) || it.notYourNode != null) },
         after = afterMain,
         now = clock,
     ).also { link ->
@@ -554,6 +609,7 @@ class AppModel(context: Context) {
     /** One route read again, and what it changes drawn. False: it got no answer. */
     private suspend fun read(path: String): Boolean {
         val c = client ?: return false
+        if (!proven(c)) return false
         val got = attempt { c.get(path) }
         got.onSuccess { answers[path] = it }
         if (path == TEAM) _problem.value = got.exceptionOrNull() as? NodeError
@@ -568,6 +624,7 @@ class AppModel(context: Context) {
     /** Everything the screens show, read at once (after an answer of yours), the asks in parallel. */
     suspend fun refresh() {
         val c = client ?: return
+        if (!proven(c)) return
         coroutineScope {
             val got = routes.filter { it.path != "/api/fleet" }.map { route -> route.path to async { attempt { c.get(route.path) } } }.map { (path, asked) -> path to asked.await() }
             for ((path, result) in got) result.onSuccess { answers[path] = it }
@@ -628,12 +685,7 @@ class AppModel(context: Context) {
             pricesAsked = true
             attempt { c.get("/api/prices") }.onSuccess { _prices.value = Spend.pricesOf(it) }
         }
-        // What the primary is called, where the node names it (core's Primary): once a session (the fleet's chip follows
-        // the stream's `fleet`).
-        if (!primaryAsked) {
-            primaryAsked = true
-            attempt { c.get("/api/whoami") }.onSuccess { Primary.named(it["primaryName"].string) }.onFailure { primaryAsked = false }
-        }
+        // (What the primary is called is read with whoami's proof, once a session: proven.)
     }
 
     /** That you've looked at an agent's results (opening a task that ended): no longer new to you, on any device. */

@@ -105,6 +105,27 @@ class VectorsTest {
         }
     }
 
+    // The slice 8 note's item 11: a request names the node it is for, last, so another node refuses it.
+    @Test fun aRequestForANodeIsSignedOverCoresBytesWithTheNodeLast() {
+        assertEquals(v["auth"]["domainNamed"].string, RequestAuth.DOMAIN_NAMED)
+        val key = publicKey(Base64Url.decode(v["identity"]["publicKey"].string!!)!!)
+        val requests = v["requestsForNode"].list
+        assertTrue(requests.isNotEmpty())
+        for (r in requests) {
+            val body = r["body"].string!!.toByteArray(Charsets.UTF_8)
+            val method = r["method"].string!!
+            val path = r["path"].string!!
+            val input = RequestAuth.signingInput(method, path, r["ts"].string!!, r["nonce"].string!!, body, r["node"].string!!)
+            assertEquals(r["signingInput"].string, String(input, Charsets.UTF_8))
+            // Core's own signature verifies here over those bytes, and not over the same request for no node.
+            val raw = Base64Url.decode(r["signature"].string!!)!!
+            assertTrue(verifies(key, input, raw))
+            assertFalse(verifies(key, RequestAuth.signingInput(method, path, r["ts"].string!!, r["nonce"].string!!, body), raw))
+            val headers = RequestAuth.headers(signer, method, path, body, r["ts"].string!!, r["nonce"].string!!, r["node"].string!!)
+            assertTrue(verifies(key, input, Base64Url.decode(headers[RequestAuth.SIG]!!)!!))
+        }
+    }
+
     @Test fun aNonceIsSixteenCharactersOfBase64url() {
         val n = RequestAuth.nonce()
         assertEquals(16, n.length)

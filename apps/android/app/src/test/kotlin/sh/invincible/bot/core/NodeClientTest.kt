@@ -171,4 +171,35 @@ class NodeClientTest {
         assertEquals("Nothing answers at 127.0.0.1. Is the node running?", e.message)
         assertTrue(e.unreachable)
     }
+
+    // The slice 8 note's item 11: what this phone signs names the node it proved to be, and never whoami's proof.
+    @Test
+    fun aPinnedClientSignsForItsNodeWhoamisProofForNoneAndNothingOnceItProvedToBeAnother() {
+        val inputs = mutableListOf<String>()
+        val recording = object : Signer {
+            override val device = "c_" + "A".repeat(87)
+            override fun sign(message: ByteArray): ByteArray = ByteArray(64).also { inputs += String(message, Charsets.UTF_8) }
+        }
+        val node = Fixture.vectors["nodeProofs"].list.first()["node"].string!!
+        val pin = NodePin()
+        val client = NodeClient("http://127.0.0.1:7778", recording, pin)
+        client.headers("GET", "/api/team", ByteArray(0))
+        assertTrue(inputs.last().startsWith("${RequestAuth.DOMAIN}\n"))
+        pin.pin(node)
+        client.headers("GET", "/api/team", ByteArray(0))
+        assertTrue(inputs.last().startsWith("${RequestAuth.DOMAIN_NAMED}\n") && inputs.last().endsWith("\n$node"))
+        client.headers("GET", "/api/whoami?challenge=c2xpY2UtOC1jaGFsbGVuZ2U", ByteArray(0), named = false)
+        assertTrue(inputs.last().startsWith("${RequestAuth.DOMAIN}\n"))
+        // Proved to be another: nothing is made, whoami's ask included, until it is asked again.
+        val other = Fixture.vectors["nodeProofs"].list.first()["anotherNode"].string!!
+        pin.refuse(NodeError.notYours(other))
+        val refused = runCatching { client.headers("POST", "/api/chat", "{}".toByteArray()) }.exceptionOrNull() as NodeError
+        assertEquals(other, refused.notYourNode)
+        assertEquals("It proved to be another node (${other.drop(2).take(8)}), not the one this phone paired with.", refused.message)
+        assertTrue(runCatching { client.headers("GET", "/api/whoami?challenge=c2xpY2UtOC1jaGFsbGVuZ2U", ByteArray(0), named = false) }.isFailure)
+        assertEquals("", NodeError.notYours(null).notYourNode)
+        pin.clear()
+        client.headers("GET", "/api/team", ByteArray(0))
+        assertTrue(inputs.last().endsWith("\n$node"))
+    }
 }

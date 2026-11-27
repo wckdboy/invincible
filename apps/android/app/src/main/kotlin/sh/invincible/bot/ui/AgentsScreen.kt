@@ -155,6 +155,12 @@ fun AgentsScreen(app: AppModel, back: () -> Unit, openChat: () -> Unit, openAgen
 internal fun Refused(app: AppModel, p: NodeError) {
     val skew = p.serverTime?.let { System.currentTimeMillis() - it }
     when {
+        // The node at this address isn't this phone's (NodePin): nothing more is sent to it.
+        p.notYourNode != null -> Column {
+            Problem("This isn't the node this phone paired with. ${p.message} Nothing more is sent to it. If you set your node up anew at this address, forget it here, then join with a fresh invite.")
+            TextButton(onClick = app::tryAgain, modifier = Modifier.padding(horizontal = Space.margin)) { Text("Try again") }
+            TextButton(onClick = app::forget, modifier = Modifier.padding(horizontal = Space.margin)) { Text("Forget this node", color = LocalBrand.current.failed) }
+        }
         p.status == 401 && skew != null && Math.abs(skew) > 60_000 ->
             Problem("This phone's clock is ${Math.abs(skew) / 60_000} min ${if (skew > 0) "ahead of" else "behind"} your node's, and the node refuses requests that far out. Set the time to automatic in Settings.")
         p.status == 401 -> Column {
