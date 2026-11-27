@@ -346,7 +346,7 @@ The run loop is carried and renamed (§10), the most proven part of it:
     at the desktop is an eval case as any other is: its eval's sandboxes are made from the desktop image. A Mac makes
     none yet: there an agent's VM is made without one, and the
     ledger says why. The hardware tools (C1 step 11) are a choice per agent as the desktop is (`--hardware`, the forms'
-    **KiCad and FreeCAD**): the hardware image, the desktop's with Debian trixie's KiCad 9.0.2 and FreeCAD 1.0.0 and
+    **KiCad and FreeCAD**): the hardware image, the desktop's with KiCad 9.0.8 (trixie-backports) and FreeCAD 1.0.0 and
     kipy, built on its host the first time an agent needs it, their first run done in the agent's own home as its VM
     starts, and the agent told to script them first (kicad-cli, kipy on the open board editor, freecadcmd) and to use
     their windows only where they have no other way in ([DESKTOP.md](DESKTOP.md)). What it costs and how fast it is: the scorecard's desktop suite ([BENCHMARKS.md](BENCHMARKS.md)).

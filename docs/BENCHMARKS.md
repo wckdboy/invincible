@@ -124,7 +124,7 @@ everything but the model.
 
 ### hardware: KiCad and FreeCAD on an agent's desktop
 
-The hardware image (C1 step 11, `sandbox/hardware`): the desktop image with Debian trixie's KiCad 9.0.2 and FreeCAD
+The hardware image (C1 step 11, `sandbox/hardware`): the desktop image with KiCad 9.0.8 (trixie-backports) and FreeCAD
 1.0.0, and kipy, made as the node makes an agent's VM given the hardware tools, on a sandbox host alone, as the desktop
 suite is (Docker with Kata, the bench's own names, its VM removed whatever happens; elsewhere skipped, and said to be).
 It builds the image from this checkout on the bench's desktop image, and works C0's two examples on it

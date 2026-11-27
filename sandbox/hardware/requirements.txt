@@ -1,7 +1,7 @@
-# KiCad's API client, kipy (kicad-python on PyPI), for Debian trixie's KiCad 9.0.2: 0.3.0, whose API definitions are
-# KiCad 9.0.1's, the newest before 9.0.2 (kicad-python publishes no table of which KiCad each release is for; 0.4.0's
-# are 9.0.3's). Beside it, its two with compiled wheels, pinned within its own ranges (protobuf >=5.29,<6; pynng
-# >=0.8,<0.9), both with CPython 3.13 wheels for x86-64: Debian's python3-protobuf (3.21) is too old for it.
-kicad-python==0.3.0
+# KiCad's API client, kipy (kicad-python on PyPI), for trixie-backports' KiCad 9.0.8: 0.6.0, whose API definitions are
+# KiCad 9.0.8's own (its KICAD_API_VERSION), so its check_version takes this KiCad. Beside it, the two it needs with
+# compiled wheels, pinned within its own ranges (protobuf >=5.29,<6; pynng >=0.9,<0.10), both with CPython 3.13 wheels
+# for x86-64: Debian's python3-protobuf (3.21) is too old for it.
+kicad-python==0.6.0
 protobuf==5.29.6
-pynng==0.8.1
+pynng==0.9.0

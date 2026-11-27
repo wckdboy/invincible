@@ -61,7 +61,7 @@ export const suite: Suite = {
     if (left) ctx.log(`removed ${left} things an earlier run of the bench left behind`);
     await buildImages(b);
     const size = await buildHardware(b);
-    ctx.quality("hardware.image.gb", sig(size / 1e9, 3), "GB", "lower", { resolution: 0.02, note: "the hardware image as built from this checkout: the desktop's, with KiCad and FreeCAD from Debian trixie and kipy" });
+    ctx.quality("hardware.image.gb", sig(size / 1e9, 3), "GB", "lower", { resolution: 0.02, note: "the hardware image as built from this checkout: the desktop's, with KiCad 9.0.8 (trixie-backports), FreeCAD 1.0.0 (trixie) and kipy" });
     // One VM, 1 vCPU and 4 GB, as an agent's VM with the hardware tools is once its desktop is used.
     const { vm } = await BenchVm.make(b, { desktop: true, hardware: true, memoryGb: 4, seed: ctx.seed });
     try {

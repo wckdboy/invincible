@@ -105,10 +105,11 @@ C1 step 10. An agent whose desktop isn't used costs what an agent without one do
 ## The hardware tools
 
 C1 step 11. KiCad and FreeCAD on an agent's desktop, a choice per agent as its desktop is.
-- **The image** (`sandbox/hardware`, `invincible/desktop-hardware:1`, made from the desktop's): Debian trixie's KiCad
-  9.0.2 and FreeCAD 1.0.0, without recommends (no 3D models, no symbol or footprint library), each version checked as it
-  is built, and kipy (kicad-python 0.3.0) in a venv of its own beside pcbnew's own Python module: about 1.9 GB more than
-  the desktop's. Its name says desktop, as the desktop's does, so whatever asks whether a VM has one says it has.
+- **The image** (`sandbox/hardware`, `invincible/desktop-hardware:1`, made from the desktop's): KiCad 9.0.8 from Debian
+  trixie-backports (pinned) and trixie's FreeCAD 1.0.0, without recommends (no 3D models, no symbol or footprint
+  library), each version checked as it is built, and kipy (kicad-python 0.6.0, made from 9.0.8's API) in a venv of its
+  own beside pcbnew's own Python module, first on the PATH of the agent's commands: about 1.9 GB more than the
+  desktop's. Its name says desktop, as the desktop's does, so whatever asks whether a VM has one says it has.
 - **Chosen** with `invincible agents provision <id> --hardware` (and `--remake --hardware` or `--no-hardware`), the web
   app's **KiCad and FreeCAD** beside **No desktop**, or `hardware` on the routes. A desktop comes with them: taking the
   desktop away takes them too, and a Mac, which makes no desktop, makes none of them. A host whose release is older than
@@ -122,12 +123,18 @@ C1 step 11. KiCad and FreeCAD on an agent's desktop, a choice per agent as its d
   starts the terminal, their windows in its tree for `desktop find`, and with TMPDIR at /tmp, so that KiCad's API server
   makes its socket where kipy looks for it (`/tmp/kicad/api.sock`).
 - **The agent is told** (agents' `hardwareBriefing`) to script them first: kicad-cli for every output, its DRC and ERC
-  as gates; kipy on the open board editor for an edit (asking with `ping()`, never `check_version()`, which refuses
-  9.0.2: kipy 0.3.0 was made for 9.0.1); freecadcmd for a part, read back; and their windows only for what only a
-  screen does.
+  as gates; kipy on the open board editor for an edit; freecadcmd for a part, read back; and their windows only for
+  what only a screen does.
 - **Held to** (the bench's hardware suite, [BENCHMARKS.md](BENCHMARKS.md), to be run on a sandbox host): by script, each
   within a second and through its gate every time; through the screen, every time, KiCad's Plot within 10 s and
   FreeCAD's STEP export within 20 s; the image at most 6 GB.
+- **What a newer KiCad or FreeCAD would take** (read 27 November 2026; nothing built). Neither is in Debian for trixie:
+  forky's KiCad 10 and FreeCAD 1.1 need its libc 2.43 and Python 3.14. KiCad 10 waits for a need (an edit kipy can't
+  make, or a KiCad that drops pcbnew's SWIG module in a release we must follow); then it is built in a stage of our own
+  on trixie, as KiCad's own image is, pinned by its tag's commit (e432beac2668) and a snapshot.debian.org timestamp for
+  its build dependencies, the tag's signature checked then, its size (about 356 MiB more installed, mostly WebKitGTK)
+  and build time measured on a sandbox host first. FreeCAD 1.1.4 for Linux is an unsigned 820 MB AppImage, held by its
+  hash alone: not taken without a need.
 
 ## Watching, on each device
 
@@ -186,8 +193,9 @@ The three apps hold to one rule (`apps/web/src/lib/desktop-stream.ts`; the vecto
   host.
 - Light by default's numbers: the bench's cases are built, and its parts tried without a VM, not yet run on a sandbox
   host.
-- The hardware tools: their image isn't built yet (that needs a sandbox host's Docker), nor their suite run; whether
-  kipy 0.3.0 works against KiCad 9.0.2 is unconfirmed, and the screen's steps are C0's, through deskd's own find.
+- The hardware tools: their image isn't built yet (that needs a sandbox host's Docker), nor their suite run; kipy
+  0.6.0 against KiCad 9.0.8 is checked by reading their sources, not by a run, and the screen's steps are C0's, through
+  deskd's own find.
 - The apps on real devices: the decoding was run on simulators, an emulator and a Mac, and both phone apps were watched
   live against a dev node in a simulator and an emulator. No iPhone, iPad or Android phone, nor the Mac app's own live
   screen.

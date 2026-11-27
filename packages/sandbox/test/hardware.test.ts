@@ -17,13 +17,17 @@ const seedScript = fileURLToPath(new URL("hardware-seed", context));
 const seeds = fileURLToPath(new URL("seed/", context));
 
 describe("the hardware image", () => {
-  test("is the desktop's with KiCad and FreeCAD from Debian, without what they recommend, their versions checked as it is built", () => {
+  test("is the desktop's with KiCad 9.0.8 from trixie-backports, pinned, and trixie's FreeCAD, without what they recommend, their versions checked as it is built", () => {
     expect(OWN_IMAGES[HARDWARE_IMAGE]).toEqual({ context: "hardware", keeper: "invincible-hardware-image", base: DESKTOP_IMAGE });
     expect(dockerfile).toMatch(/^FROM invincible\/desktop:1$/m);
     const run = dockerfile.replace(/\\\n/g, " ");
-    expect(run).toMatch(/apt-get install -y --no-install-recommends kicad freecad /);
-    // (C0 measured Debian trixie's: a release that moved fails the build, never makes another image quietly.)
-    expect(run).toContain("kicad-cli version | grep -q '^9\\.0\\.2'");
+    expect(run).toMatch(/apt-get install -y --no-install-recommends kicad=9\.0\.8\+dfsg-1~bpo13\+1 freecad /);
+    // (Backports by Debian's own key, as the image's other sources are; KiCad alone is asked of it, by its version.)
+    expect(dockerfile).toContain("COPY backports.sources /etc/apt/sources.list.d/backports.sources\n");
+    const backports = readFileSync(new URL("backports.sources", context), "utf8");
+    for (const line of ["Types: deb", "URIs: http://deb.debian.org/debian", "Suites: trixie-backports", "Components: main", "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp"]) expect(backports.split("\n")).toContain(line);
+    // (A release that moved fails the build, never makes another image quietly.)
+    expect(run).toContain("kicad-cli version | grep -qx '9\\.0\\.8'");
     expect(run).toContain("freecadcmd --version | grep -q 'FreeCAD 1\\.0\\.0'");
   });
 
@@ -31,7 +35,8 @@ describe("the hardware image", () => {
     const pins = readFileSync(new URL("requirements.txt", context), "utf8").split("\n").filter((line) => line && !line.startsWith("#"));
     expect(pins.length).toBeGreaterThan(0);
     for (const pin of pins) expect(pin).toMatch(/^[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9.]*$/);
-    expect(pins.some((pin) => pin.startsWith("kicad-python=="))).toBe(true);
+    // (0.6.0's API definitions are KiCad 9.0.8's: its check_version takes this KiCad.)
+    expect(pins).toContain("kicad-python==0.6.0");
     expect(dockerfile).toContain("python3 -m venv --system-site-packages /opt/hardware");
     expect(dockerfile).toContain('/opt/hardware/bin/python -c "import kipy, pcbnew"');
     expect(dockerfile).toMatch(/^USER 1000:1000$/m);
@@ -44,7 +49,7 @@ describe("the hardware image", () => {
   test("seeds KiCad with its library tables (none installed, so empty), its first run done, and its API server on, for kipy", () => {
     expect(readFileSync(join(seeds, "fp-lib-table"), "utf8")).toBe("(fp_lib_table\n  (version 7)\n)\n");
     expect(readFileSync(join(seeds, "sym-lib-table"), "utf8")).toBe("(sym_lib_table\n  (version 7)\n)\n");
-    // (KiCad 9.0.2's own: its settings at their schema, so no migration is offered; its update question answered.)
+    // (KiCad 9's own, 9.0.8's: its settings at their schema, so no migration is offered; its update question answered.)
     const common = JSON.parse(readFileSync(join(seeds, "kicad_common.json"), "utf8"));
     expect(common).toEqual({ meta: { filename: "kicad_common.json", version: 3 }, api: { enable_server: true }, do_not_show_again: { update_check_prompt: true } });
   });

@@ -1,6 +1,5 @@
-# An edit of the bench's board through KiCad's API (kipy 0.3.0) on the board editor open on the desktop, as an agent is
-# told to edit one: every track to the width given (mm), as one step of its undo, saved to its file. (kipy 0.3.0 was
-# made for KiCad 9.0.1, so its check_version refuses 9.0.2: whether KiCad answers is asked with ping.)
+# An edit of the bench's board through KiCad's API (kipy 0.6.0, KiCad 9.0.8's) on the board editor open on the desktop,
+# as an agent is told to edit one: every track to the width given (mm), as one step of its undo, saved to its file.
 #   python3 edit.py <width mm>   one JSON line: the tracks, their width, how long it took
 #   python3 edit.py --ping       exit 0 once KiCad answers, with a board open
 import json, sys, time

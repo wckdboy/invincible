@@ -1,0 +1,7 @@
+# Debian trixie's backports, for KiCad 9.0.8 alone (the Dockerfile pins it by its version): signed by Debian's own
+# archive key, as the image's other sources are.
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: trixie-backports
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp

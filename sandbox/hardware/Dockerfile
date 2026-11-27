@@ -5,18 +5,19 @@
 FROM invincible/desktop:1
 
 USER root
-# KiCad 9.0.2 (9.0.2+dfsg-1) and FreeCAD 1.0.0 (1.0.0+dfsg-8+deb13u3), Debian trixie's, as C0 measured them (26
-# November 2026), from the archive the image already uses: about 1.9 GB installed between them. Without recommends: no
-# 3D model library, no symbol or footprint library, no documentation. Each version is checked as the image is built,
-# so a release that moved is never made quietly.
+# KiCad 9.0.8 from trixie-backports (9.0.8+dfsg-1~bpo13+1, pinned: Debian-signed, its dependencies all trixie's own)
+# and FreeCAD 1.0.0 (1.0.0+dfsg-8+deb13u3), trixie's: about 1.9 GB installed between them. Without recommends: no 3D
+# model library, no symbol or footprint library, no documentation. Each version is checked as the image is built, so a
+# release that moved is never made quietly. (What a newer KiCad or FreeCAD would take: docs/DESKTOP.md.)
+COPY backports.sources /etc/apt/sources.list.d/backports.sources
 RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad freecad \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends kicad=9.0.8+dfsg-1~bpo13+1 freecad \
  && rm -rf /var/lib/apt/lists/* \
- && kicad-cli version | grep -q '^9\.0\.2' \
+ && kicad-cli version | grep -qx '9\.0\.8' \
  && HOME=/tmp/freecad-check freecadcmd --version | grep -q 'FreeCAD 1\.0\.0' \
  && rm -rf /tmp/freecad-check
 
-# KiCad's API client (kipy, kicad-python on PyPI), pinned (requirements.txt says why 0.3.0), for board edits on a running
+# KiCad's API client (kipy, kicad-python on PyPI), pinned (requirements.txt says why 0.6.0), for board edits on a running
 # pcbnew: in a venv of its own that sees Debian's packages, pcbnew's own Python module among them (the SWIG one, in the
 # kicad package, for what the API doesn't reach yet). Debian's python3 takes no pip install outside one.
 COPY requirements.txt /opt/hardware/requirements.txt
