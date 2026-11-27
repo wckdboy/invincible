@@ -84,9 +84,9 @@ class Screen:
             self.appeared, self.gone = [], []
         return a, g
 
-    def own(self, text):
-        # (A selection held for a paste: the stand-in app that pastes it is the trace's reader.)
-        trace(call="own", text=text)
+    def own(self, text, selection):
+        # (A selection held for a paste, and which one: the stand-in app that pastes it is the trace's reader.)
+        trace(call="own", text=text, selection=selection)
         self.given = threading.Event()
         self.pending = True
 

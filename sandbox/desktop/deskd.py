@@ -472,13 +472,15 @@ class Watch(threading.Thread):
                         self.clip = None
             select.select([fd], [], [], 1.0)
 
-    def own(self, text):
-        """Hold `text` as the PRIMARY selection and the clipboard, for a paste to take (shift+Insert, ctrl+v)."""
+    def own(self, text, selection):
+        """Hold `text` as `selection`, for a paste to take: the one its keys read (a terminal's shift+Insert PRIMARY,
+        ctrl+v CLIPBOARD), never the other too. An app that loses PRIMARY unselects its own text (GTK's do), so a paste
+        meant to replace what it has selected would land after it: KiCad's field, ctrl+a then a pasted name, got the
+        name after the one selected (27 November 2026)."""
         with self.lock:
             self.clip = text.encode("utf-8")
             self.given.clear()
-        for name in ("PRIMARY", "CLIPBOARD"):
-            self.d.x.XSetSelectionOwner(self.d.dpy, self.d.atoms[name], self.win, 0)
+        self.d.x.XSetSelectionOwner(self.d.dpy, self.d.atoms[selection], self.win, 0)
         # (A round trip: the server has it before the paste's keys come, on the other connection.)
         self.d.sync()
 
@@ -1806,10 +1808,11 @@ class Desk:
                         self.d.key(shift, False)
                 self.landed(text, target)
                 return "typed %d character%s" % (n, plural)
-            self._watch.own(text)
-            for code in self._keys("shift+Insert" if target == "terminal" else "ctrl+v"):
+            selection, paste = ("PRIMARY", "shift+Insert") if target == "terminal" else ("CLIPBOARD", "ctrl+v")
+            self._watch.own(text, selection)
+            for code in self._keys(paste):
                 self.d.key(code, True)
-            for code in reversed(self._keys("shift+Insert" if target == "terminal" else "ctrl+v")):
+            for code in reversed(self._keys(paste)):
                 self.d.key(code, False)
             # A paste is the app asking for the text, in its own time: the next key (a Return) mustn't overtake it (C1's
             # step 4 run: xterm's line came after its Return, 20 of 20). Its keys sent first: unsent, they waited in the

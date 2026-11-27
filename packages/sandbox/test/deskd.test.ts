@@ -784,16 +784,35 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     for (const run of [r, none]) expect(run.trace().filter((t) => ["key", "xdotool", "own"].includes(String(t.call)) || (t.call === "cdp" && t.method === "Input.insertText"))).toEqual([]);
   });
 
-  test("into a terminal, text the keyboard has no keys for is pasted from a selection deskd holds, with shift+Insert; into another app, with ctrl+v", async () => {
+  test("into a terminal, text the keyboard has no keys for is pasted from a selection deskd holds, PRIMARY, with shift+Insert; into another app, CLIPBOARD, with ctrl+v", async () => {
     const term = await deskd({ DESKD_FOCUS: "xterm" });
     await session(term, [{ id: 1, name: "type", input: { text: TEST_STRING } }]);
-    expect(calls(term.trace(), "own")).toEqual([{ call: "own", text: TEST_STRING }]);
+    expect(calls(term.trace(), "own")).toEqual([{ call: "own", text: TEST_STRING, selection: "PRIMARY" }]);
     expect(keys(term.trace())).toEqual(["+Shift_L", "+Insert", "-Insert", "-Shift_L"]);
     const editor = await deskd({ DESKD_FOCUS: "mousepad" });
     await session(editor, [{ id: 1, name: "type", input: { text: TEST_STRING } }]);
-    expect(calls(editor.trace(), "own")).toEqual([{ call: "own", text: TEST_STRING }]);
+    expect(calls(editor.trace(), "own")).toEqual([{ call: "own", text: TEST_STRING, selection: "CLIPBOARD" }]);
     expect(keys(editor.trace())).toEqual(["+Control_L", "+v", "-v", "-Control_L"]);
     for (const run of [term, editor]) expect(calls(run.trace(), "xdotool")).toEqual([]);
+  });
+
+  test("a paste takes only the selection its keys read: CLIPBOARD for ctrl+v, never PRIMARY too, so the text an app has selected stays selected and the paste replaces it", () => {
+    // (Taking PRIMARY from a GTK app unselects its text: KiCad's field, ctrl+a then a pasted name, got the name after
+    // the one selected, 27 November 2026. deskd's own Watch, its display a stand-in that writes down what is taken.)
+    expect(py(`
+import threading
+w = d.Watch.__new__(d.Watch)
+w.lock = threading.Lock(); w.given = threading.Event(); w.win = 7; w.clip = None
+taken = []
+class X:
+    def XSetSelectionOwner(self, dpy, atom, win, when): taken.append((atom, win))
+class D:
+    dpy = None; atoms = {"PRIMARY": 1, "CLIPBOARD": 2}; x = X()
+    def sync(self): pass
+w.d = D()
+w.own("Søren 🙂", "CLIPBOARD"); ctrl_v = list(taken); del taken[:]
+w.own("Søren 🙂", "PRIMARY"); shift_insert = list(taken)
+print(json.dumps({"ctrl+v": ctrl_v, "shift+Insert": shift_insert, "held": w.clip.decode("utf-8")}))`)).toEqual({ "ctrl+v": [[2, 7]], "shift+Insert": [[1, 7]], held: "Søren 🙂" });
   });
 
   test("short text the keyboard has keys for still goes key by key, shift where it needs it, into whatever takes text", async () => {
