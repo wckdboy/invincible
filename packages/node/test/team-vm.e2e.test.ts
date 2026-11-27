@@ -673,6 +673,24 @@ test("what became of its VM is asked of the host and said as it was: Docker that
   expect(said).toContain("It ran on my computer.");
   const onHis = docker.execs.slice(execsBefore).filter((exec) => exec.container === `invincible-sbx-${his.workspace.id}`).map((exec) => exec.cmd.join(" "));
   expect(onHis.some((command) => command.includes("echo computer-ok") && command.includes("/work/.invincible-gateway.json"))).toBe(true);
+  // Your tripwires hold on its computer as on a Mac's run and its agents' tasks: a command one refuses, or halts, never
+  // reaches its VM, and the ledger says which rule, under its computer's own run.
+  for (const does of ["refuse", "halt"] as const) {
+    await api("setRule", { name: `no-computer-${does}`, does, words: [], contains: "echo computer-ok" });
+    try {
+      const before = docker.execs.length;
+      const asked = await fetch(`http://127.0.0.1:${port}${routes.chat.path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: "USE_YOUR_COMPUTER: run echo there." }] }) });
+      await asked.text();
+      expect(docker.execs.slice(before).some((exec) => exec.cmd.join(" ").includes("echo computer-ok"))).toBe(false);
+      expect((await api<{ entries: LedgerEntry[] }>("ledger")).entries.find((entry) => entry.resource === "rule" && entry.target === `no-computer-${does}`)).toMatchObject({
+        verdict: "deny",
+        run: his.workspace.run,
+        detail: expect.stringContaining("echo computer-ok"),
+      });
+    } finally {
+      await api("removeRule", { name: `no-computer-${does}` });
+    }
+  }
   // It gives a VM more itself when its work needs it, within the ceiling (your ruling): the ledger says it was it, and why.
   const growing = await fetch(`http://127.0.0.1:${port}${routes.chat.path}`, { method: "POST", headers: { authorization: `Bearer ${home.adminToken()}`, "content-type": "application/json" }, body: JSON.stringify({ messages: [{ role: "user", content: "GROW_HIS_COMPUTER: the build keeps running out of memory." }] }) });
   expect(await growing.text()).toContain("It has more now.");

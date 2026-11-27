@@ -2969,6 +2969,14 @@ export function createApp(ctx: AppContext) {
       if (p.kind !== "arm" || p.label !== PRIMARY_ARM) throw new HttpError(403, "Your agent's computer is its alone to work on: watch it, take it over or open a terminal there");
       const seat = seatOf(TEAM_PRIMARY);
       if (!seat.workspace) throw new HttpError(424, noVm(TEAM_PRIMARY));
+      // Your tripwires hold on its computer as on a Mac's run and its agents' tasks: a command one refuses or halts is
+      // never run there, and the ledger says which rule, under its computer's own run.
+      const trip = tripOf(rulesInForce(), input.command);
+      if (trip) {
+        ledgerTrip(armRun(agentLabel(TEAM_PRIMARY)), trip, input.command, false, "your agent's own computer");
+        const why = `Not run: the owner's tripwire "${trip.rule}" ${trip.does === "halt" ? "halts this work: stop it here, and say why to the owner" : "refuses this command"} (${trip.why}).`;
+        return longRunning(Promise.resolve({ exitCode: -1, stdout: "", stderr: why, durationMs: 0, truncated: false }));
+      }
       const done = await useComputer();
       const ran = (async () => {
         const eyes = eyesFor(TEAM_PRIMARY);
