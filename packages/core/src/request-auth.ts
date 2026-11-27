@@ -146,14 +146,16 @@ export const nodeChallenge = (): string => b64u(randomBytes(24));
  * What a whoami's answer to `challenge` says of the node a device speaks to, against the one it pinned (`pinned`):
  * - `pin`: proven, and none pinned yet: the device pins it, and names it in what it signs from then on;
  * - `same`: proven, and the one it pinned;
- * - `older`: no proof, a node from before: spoken to as before (v1), until the cutoff;
+ * - `older`: no proof, and none pinned yet: a node from before, spoken to as before (v1), until the cutoff;
  * - `other`: proven, but another node than the one it pinned: not this device's node, and nothing more is asked of it;
- * - `false`: a proof that fails: never taken.
+ * - `false`: a proof that fails: never taken. So is an answer whose proof isn't one (null, not a string, no node), and,
+ *   once a node is pinned, an answer that gives no proof: that node won't say which it is (the review of apps-name-node,
+ *   L7 and I1).
  */
 export type NodeProven = { kind: "pin"; node: string } | { kind: "same"; node: string } | { kind: "other"; node: string } | { kind: "older" } | { kind: "false" };
 
 export function judgeNodeProof(pinned: string | undefined, said: { node?: unknown; proof?: unknown }, challenge: string): NodeProven {
-  if (said.proof === undefined) return { kind: "older" };
+  if (said.proof === undefined) return pinned === undefined ? { kind: "older" } : { kind: "false" };
   if (typeof said.node !== "string" || typeof said.proof !== "string" || !verifyNodeProof(said.node, challenge, said.proof)) return { kind: "false" };
   if (pinned === undefined) return { kind: "pin", node: said.node };
   return said.node === pinned ? { kind: "same", node: said.node } : { kind: "other", node: said.node };

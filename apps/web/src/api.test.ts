@@ -223,6 +223,16 @@ describe("the node this browser speaks to, proven (the slice 8 note's item 11)",
     expect(browser.node).toBeUndefined();
     expect(await apiFor(browser).get("/api/fleet")).toEqual({ named: false });
   });
+
+  // The review of apps-name-node, L7: once this browser pinned its node, one that proves nothing won't say which it is:
+  // a proof that fails, so its page says so and nothing more is asked of it.
+  test("pinned, a node that proves nothing is a proof that fails", async () => {
+    at(node.port!);
+    speaking = "older";
+    const browser: BrowserIdentity = { ...browserKey, node: theNode.id };
+    expect((await provenWhoami(browser)).proven).toEqual({ kind: "false" });
+    expect(browser.node).toBe(theNode.id);
+  });
 });
 
 describe("an agent's desktop as a stream of frames", () => {

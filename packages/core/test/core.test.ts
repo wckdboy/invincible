@@ -246,6 +246,25 @@ describe("request signing", () => {
     expect(judgeNodeProof(undefined, { node: node.id }, challenge)).toEqual({ kind: "older" });
   });
 
+  // The review of apps-name-node, L7 and I1: once a node is pinned, an answer that gives no proof is no node from before
+  // but one that won't prove which it is, so it is a proof that fails; and an answer that isn't one never is taken.
+  test("once a node is pinned, a whoami with no proof is a proof that fails, as one whose proof isn't one is, pinned or not", () => {
+    const node = newNodeIdentity();
+    const challenge = nodeChallenge();
+    const proof = b64u(node.sign(nodeProofInput(challenge)));
+    expect(judgeNodeProof(node.id, { node: node.id }, challenge)).toEqual({ kind: "false" });
+    expect(judgeNodeProof(node.id, {}, challenge)).toEqual({ kind: "false" });
+    for (const pinned of [undefined, node.id]) {
+      expect(judgeNodeProof(pinned, { node: node.id, proof: null }, challenge)).toEqual({ kind: "false" });
+      expect(judgeNodeProof(pinned, { node: node.id, proof: 5 }, challenge)).toEqual({ kind: "false" });
+      expect(judgeNodeProof(pinned, { proof }, challenge)).toEqual({ kind: "false" });
+      expect(judgeNodeProof(pinned, { node: 7, proof }, challenge)).toEqual({ kind: "false" });
+    }
+    // Unpinned, no proof is a node from before still; and a proof that holds is taken either way.
+    expect(judgeNodeProof(undefined, {}, challenge)).toEqual({ kind: "older" });
+    expect(judgeNodeProof(node.id, { node: node.id, proof }, challenge)).toEqual({ kind: "same", node: node.id });
+  });
+
   // The slice 8 note's item 11 (the lead's word of 27 November): a node that restarts forgets the nonces it saw, so a
   // request signed before it began is refused, however fresh its nonce looks to it.
   test("a request signed before the node began is refused: what it saw before is forgotten", () => {
