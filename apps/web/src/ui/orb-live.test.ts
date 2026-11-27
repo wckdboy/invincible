@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { seat, workerAvatar } from "./avatar.ts";
-import { GLASS_SHAPES, glassOf } from "@invincible/core/glass";
+import { GLASS_PEARL, GLASS_SHAPES, glassOf } from "@invincible/core/glass";
 import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 import { appMark, agentFace, orb } from "./orb.ts";
 
@@ -131,12 +131,15 @@ describe("your agent's mark", () => {
     expect(frames).toEqual([]);
   });
 
-  test("or, where this device is set so, the I-beam in pearl glass: its blur from 40", () => {
+  test("or, where this device is set so, the I-beam in pearl glass, lit as an agent's glass is: its pool from 24 and its blur from 40, and no shadow (it has its tile)", () => {
     stub("localStorage", { getItem: (key: string) => (key === "invincible.guardian-mark" ? "pearl" : null), setItem() {} });
     const drawn = orb({ size: 40 }) as unknown as Node_;
-    expect(drawn.attrs.class).toBe("guardian-mark gm-pearl orb orb-mark");
+    // (Its glass's own rules: the pool in the pearl's colours, and the blur's opacity and drop by page.)
+    expect(drawn.attrs.class).toBe("guardian-mark gm-pearl agent-glass gl-pool orb orb-mark");
+    expect(drawn.attrs.style).toContain(`--ga:light-dark(${GLASS_PEARL.light.a}, ${GLASS_PEARL.dark.a});--gb:light-dark(${GLASS_PEARL.light.b}, ${GLASS_PEARL.dark.b})`);
     const uses = drawn.children[0]!.children;
     expect(uses.map((use) => [use.attrs.href, use.attrs.fill, use.attrs.filter])).toEqual([["#gs-ibeam", "url(#gp-pearl)", "url(#gl-blur)"], ["#gs-ibeam", "url(#gp-pearl)", undefined]]);
+    expect((orb({ size: 20 }) as unknown as Node_).attrs.class).toBe("guardian-mark gm-pearl agent-glass orb orb-mark");
   });
 });
 

@@ -75,8 +75,8 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
 internal fun glassBreathes(state: Glass.State?, live: Boolean, motion: Boolean): Boolean = live && motion && state == Glass.State.WORKING
 
 /** Your agent's mark, where a face goes: the app's I-beam on a tile of its own in one ink (the page's on its ink), or,
- * where this phone is set so (Settings), in pearl glass: on a graphite tile on a light page, glowing on its own on a dark
- * one. Decorative unless named ([description]). */
+ * where this phone is set so (Settings), in pearl glass, lit as an agent's glass is: on a graphite tile on a light page,
+ * glowing on its own on a dark one (its pool from 24 dp), its blur from 40. Decorative unless named ([description]). */
 @Composable
 fun GuardianMark(size: Dp, description: String? = null) {
     val brand = LocalBrand.current
@@ -89,7 +89,8 @@ fun GuardianMark(size: Dp, description: String? = null) {
         val side = this.size.minDimension
         val corner = androidx.compose.ui.geometry.CornerRadius(side * 0.28f)
         if (picture != null) {
-            if (!dark) drawRoundRect(Color(hex(Glass.PEARL_TILE)), cornerRadius = corner)
+            // Lit as an agent's glass is: on a light page its graphite tile (so no shadow under it), on a dark one its pool.
+            if (!dark) drawRoundRect(Color(hex(Glass.PEARL_TILE)), cornerRadius = corner) else glow(Glass.PEARL, size.value, dark = true, breath = -1f)
             drawImage(picture.image, Offset(-picture.origin.toFloat(), -picture.origin.toFloat()))
         } else {
             drawRoundRect(brand.ink, cornerRadius = corner)

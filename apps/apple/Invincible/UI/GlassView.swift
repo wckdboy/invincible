@@ -37,7 +37,8 @@ struct GlassMarkView: View {
 }
 
 /// Your agent's mark, in the box an orb takes: the app icon's I-beam on a tile of its own in one ink, or, where this
-/// device is set so (Settings), in pearl glass: on a graphite tile on a light page, glowing on its own on a dark one.
+/// device is set so (Settings), in pearl glass, lit as an agent's glass is: on a graphite tile on a light page (so no
+/// shadow under it), glowing on its own on a dark one (its pool from 24 pt), its blur from 40.
 struct GuardianMark: View {
     let size: CGFloat
     @AppStorage("invincible.guardian-mark") private var style = "mono"
@@ -49,6 +50,7 @@ struct GuardianMark: View {
         if style == "pearl" {
             ZStack {
                 if theme == .light { RoundedRectangle(cornerRadius: size * 0.28, style: .continuous).fill(Color(hex: AgentGlass.pearlTile.light)) }
+                GlassGlow(ramp: AgentGlass.pearl, size: size, theme: theme, working: false, shadow: false)
                 GlassPicture(shape: -1, ramp: -1, size: size, theme: theme, scale: displayScale)
             }
             .frame(width: size, height: size)
@@ -70,6 +72,8 @@ private struct GlassGlow: View {
     let size: CGFloat
     let theme: AgentMark.Theme
     let working: Bool
+    /// Its tinted shadow on a light page: not for your agent's pearl, which sits on its tile there.
+    var shadow = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
@@ -83,7 +87,7 @@ private struct GlassGlow: View {
                     let span = size * (1 + 2 * AgentGlass.Glow.poolSpread)
                     glow(AgentGlass.Glow.poolStops.map { .init(hex: $0.ofB ? stops.b : stops.a, opacity: $0.opacity, at: $0.at) }, still: AgentGlass.Glow.poolOpacity, breathe: breathes ? AgentGlass.Glow.poolBreathe : nil)
                         .frame(width: span, height: span)
-                } else if theme == .light, size >= AgentGlass.Glow.shadowFrom {
+                } else if shadow, theme == .light, size >= AgentGlass.Glow.shadowFrom {
                     let box = AgentGlass.Glow.shadowBox
                     glow(AgentGlass.Glow.shadowStops.map { .init(hex: stops.b, opacity: $0.opacity, at: $0.at) }, still: AgentGlass.Glow.shadowOpacity, breathe: breathes ? AgentGlass.Glow.shadowBreathe : nil)
                         .frame(width: size * (1 - box.left - box.right), height: size * (box.bottom - box.top))

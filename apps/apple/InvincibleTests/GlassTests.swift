@@ -300,6 +300,28 @@ struct GlassTests {
         #expect(at(20, 20) == [255, 0, 0, 255] && at(45, 20) == [255, 0, 0, 255])
     }
 
+    @Test @MainActor func yourAgentsPearlGlowsOnADarkPageAndSitsOnItsTileOnALightOne() throws {
+        // Lit as an agent's glass is: its pool on a dark page (past its box, where its blur doesn't reach); on a light page
+        // its graphite tile, and no shadow under it.
+        let key = "invincible.guardian-mark"
+        UserDefaults.standard.set("pearl", forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        for theme in [ColorScheme.dark, .light] {
+            let (bytes, width) = try drawn(GuardianMark(size: 60).padding(30).environment(\.colorScheme, theme).environment(\.displayScale, 2), width: 120, height: 120)
+            func alpha(_ x: Double, _ y: Double) -> Int { Int(bytes[(Int(y * 2) * width + Int(x * 2)) * 4 + 3]) }
+            // 8 % of its size left of its box, at its middle; and under its box, where an agent's shadow lies.
+            let beside = alpha(30 - 4.8, 60), under = alpha(60, 30 + 60 * 1.08)
+            if theme == .dark {
+                #expect(beside > 4, "its pool, beside it: \(beside)")
+            } else {
+                // (Under it, at most its own blur's last trace, moved down on a light page: 1 of 255. An agent's shadow is
+                // about 21 there.)
+                #expect(beside == 0 && under <= 2, "nothing past its tile on a light page: \(beside), \(under)")
+                #expect(alpha(60, 60) == 255, "its tile")
+            }
+        }
+    }
+
     @Test @MainActor func anAgentsFaceIsItsGlass() throws {
         // AgentFace draws the glass its avatar names: the Pill in Sky's ramp, its middle solid and blue.
         let pill = AgentGlass.shapes.firstIndex { $0.id == "pill" }!

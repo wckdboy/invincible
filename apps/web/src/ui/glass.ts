@@ -188,9 +188,12 @@ export function guardianMark(options: { size: number; label?: string; style?: Gu
   const dot = options.state ? [h("i", { class: "gl-dot" })] : [];
   if (style === "pearl") {
     ensureSprite();
+    // Lit as an agent's glass is (its rules: the pool, and the blur's opacity and drop by page), in the pearl: its pool on a
+    // dark page from 24; on a light one it sits on its graphite tile, so no shadow under it (the designer's gl-guardian).
+    const pool = size >= GLASS_GLOW.pool.minSize ? " gl-pool" : "";
     return h(
       "span",
-      { class: `guardian-mark gm-pearl${extra}`, style: `--orb-size:${size}px${dotted}`, ...state, ...named(options.label) },
+      { class: `guardian-mark gm-pearl agent-glass${pool}${extra}`, style: `--orb-size:${size}px;--ga:${ld(GLASS_PEARL, "a")};--gb:${ld(GLASS_PEARL, "b")}${dotted}`, ...state, ...named(options.label) },
       svg("svg", { viewBox: "0 0 100 100", "aria-hidden": "true", focusable: "false" }, ...glassUse(`#gs-ibeam${size <= 16 ? "-s" : ""}`, "url(#gp-pearl)", size >= GLASS_GLOW.blur.minSize)),
       ...dot,
     );
