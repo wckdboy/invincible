@@ -8,8 +8,9 @@ import { NOTES_DIR, VM_HOME, VM_WORK } from "@invincible/core";
  *   home/   at /home/agent                  its HOME: whatever its tools keep for themselves, its browser's profile, its lease
  *   notes/  at /home/agent/.memory/engram   its notes (Engram's, where ENGRAM_DATA_DIR points)
  *
- * A VM that shares an agent's workspace mounts work/ alone (another node's task), or work/ and notes/ (a run on a seat of
- * yours, which is the agent's own work): nothing of the agent's HOME is in its reach. A link left in a tree resolves in
+ * A VM that shares an agent's workspace mounts work/ alone, or work/ and notes/ (a run on a seat of yours, which is the
+ * agent's own work): nothing of the agent's HOME is in its reach. (Another node's task shares nothing of the store: its VM
+ * has a /work of its own, with a clone of its own of the repository, handed-repo.ts.) A link left in a tree resolves in
  * that VM's own view, where the tree's parent is no part of the store, and no tree is ever mounted from inside another,
  * which the agent writes: each is an entry at the store's root, which no VM mounts. The store's limit, where it has one (a
  * workspace image's), bounds all three.

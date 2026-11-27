@@ -78,7 +78,7 @@ describe("another node's task, handed to a Mac (the owner's decision, 27 Novembe
     mac.invoked(handed.inv, beta);
     await until(() => handed.failed.length > 0);
     expect(handed.failed).toEqual([{ code: 3, message: MAC_TAKES_NO_TASK }]);
-    expect(MAC_TAKES_NO_TASK).toContain("no VM on a Mac shares an agent's workspace");
+    expect(MAC_TAKES_NO_TASK).toContain("such a task runs in a VM of its own, with a clone of its own of the repository, which only a Linux node with Docker makes");
     // Not even a task it couldn't read: a Mac says why it takes none, whatever it was sent.
     const garbled = handedHere({ not: "a task" });
     mac.invoked(garbled.inv, beta);

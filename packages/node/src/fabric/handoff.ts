@@ -109,12 +109,12 @@ export interface HandoffsDeps {
 
 /**
  * A Mac's word on another node's task (the owner's decisions of 27 November 2026): it takes none. Such a task runs in a VM
- * of its own that shares its agent's workspace and nothing else, and no VM on a Mac shares one: a Mac's workspace is a
- * disk image only one VM may mount, and its VMs' HOME is their /work (layout 1). There, the task would run in its agent's
- * own VM, beside what that agent's tools keep for themselves, its sign-ins among them.
+ * of its own beside its agent's, with a /work of its own and a clone of its own of the repository, its changes brought
+ * back to the agent's repository through the node (the fifth fabric review's R5-3). A Linux host with Docker makes that
+ * VM and that pipe between the two; a Mac's makes neither.
  */
 export const MAC_TAKES_NO_TASK =
-  "This node is a Mac, and a Mac takes no other node's task: no VM on a Mac shares an agent's workspace, so the task would run in that agent's own VM, beside what its tools keep there, its sign-ins among them. Hand it to one of your Linux nodes with Docker.";
+  "This node is a Mac, and a Mac takes no other node's task: such a task runs in a VM of its own, with a clone of its own of the repository, which only a Linux node with Docker makes. Hand it to one of your Linux nodes with Docker.";
 
 const ENDED = new Set(["done", "failed", "stopped", "interrupted"]);
 /** The most trail lines a hand-off keeps here (its runner keeps all of them). */

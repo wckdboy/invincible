@@ -1,11 +1,12 @@
 /*
  * How the node's own git runs in an agent's VM, in the agent's repository (the fourth fabric review's R4-4): a task's
- * setup (REPO_TASK_START), its step checkpoints, its evidence and its changes (team-runtime.ts), and what is kept to ship
- * (ship.ts SHIPMENT_SCRIPT). The repository is the agent's to change, and in layout 2 another node's task shares it, its
- * .git among it. So a hook, an fsmonitor, a filter or a signing program written there would otherwise be run by the node
- * itself, as the agent, in its VM, with its lease and sign-ins beside it. What would run is held off instead, so that an
- * ordinary repository (husky's hooks path, Git LFS installed in it, its own HTTP settings) is used as it is (the fifth
- * review's R5-6):
+ * setup (REPO_TASK_START), its step checkpoints, its evidence and its changes (team-runtime.ts), what is kept to ship
+ * (ship.ts SHIPMENT_SCRIPT), and another node's task's clone and changes (handed-repo.ts). The repository is the agent's
+ * to change, so a hook, an fsmonitor, a filter or a signing program written there would otherwise be run by the node
+ * itself, as the agent, in its VM, with its lease and sign-ins beside it. (Another node's task writes there only its
+ * changes, as a patch git apply keeps out of every .git: the fifth review's R5-3.) What would run is held off instead, so
+ * that an ordinary repository (husky's hooks path, Git LFS installed in it, its own HTTP settings) is used as it is (the
+ * fifth review's R5-6):
  *
  * - no system or global configuration (the VM's HOME is the agent's to change too), and no attributes from outside the
  *   repository;
@@ -18,7 +19,8 @@
  *   command of its runs, and none is required, so a file is added, checked out and compared as it is. Git LFS's among
  *   them: its pointers are checked out as they are stored (GIT_LFS_SKIP_SMUDGE too), and a file it would clean is kept
  *   as it is. They are listed just before each git command, so one a writer adds between that list and the command
- *   isn't held off: only another node's task writes there, so only with the fabric on (SECURITY.md says so);
+ *   isn't held off: only the agent's own work writes a configuration there, and what it writes runs as itself anyway
+ *   (SECURITY.md says so);
  * - no external diff or textconv: each diff says --no-ext-diff and --no-textconv;
  * - a repository whose configuration names another worktree (core.worktree) is refused (`refused`): git reads that as
  *   it finds the repository, before any -c, so nothing holds it off, and an ordinary repository never names one;

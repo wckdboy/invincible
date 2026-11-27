@@ -142,11 +142,11 @@ export const SandboxNetwork = z.enum(["isolated", "gateway", "online"]);
 export type SandboxNetwork = z.infer<typeof SandboxNetwork>;
 
 /**
- * Layout 2 (the sandbox's layout.ts): an agent's HOME apart from its workspace, so that a VM sharing the workspace (another
- * node's task, a run on a seat) reaches nothing of it. Each node's own switch, off by default: off, every agent's VM is made
- * and kept in layout 1, and another node's task is refused there (it shares only a workspace). On, an agent's VM is made in
- * layout 2, and one in layout 1 is moved to it at its next prepare while nothing runs in it; off again, none is moved from
- * then on, and one already moved stays as it is.
+ * Layout 2 (the sandbox's layout.ts): an agent's HOME apart from its workspace, so that a VM sharing the workspace (a run on
+ * a seat) reaches nothing of it. Each node's own switch, off by default: off, every agent's VM is made and kept in layout
+ * 1. On, an agent's VM is made in layout 2, and one in layout 1 is moved to it at its next prepare while nothing runs in
+ * it; off again, none is moved from then on, and one already moved stays as it is. Another node's task needs neither: its
+ * VM shares nothing of the agent's store.
  */
 export const SandboxLayoutInput = z.strictObject({ on: z.boolean().optional() });
 export interface SandboxLayoutView {

@@ -302,7 +302,7 @@ Work
   sandbox build [--on ultra] [--lab|--desktop|--hardware]
                                   build the sandbox image (or the Lab, the agents' desktop, or its hardware tools) on a host
   sandbox layout on|off|status    layout 2: each agent's VM with a HOME apart from its workspace, so that a VM sharing the
-                                  workspace (another node's task, a run on a seat) reaches nothing of it. Off by default;
+                                  workspace (a run on a seat) reaches nothing of it. Off by default;
                                   on, a VM in layout 1 is moved at its next prepare while nothing runs in it (Linux, Docker)
   sandbox setup [status] [--json]
                                   a Mac given its agents' VMs: Apple's container (its signed installer, checked, when

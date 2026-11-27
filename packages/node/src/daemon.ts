@@ -256,7 +256,7 @@ function layoutWords(name: string, entries: readonly LayoutEntry[]): { title: st
   return {
     title: `${name}'s VM has a HOME of its own`,
     body: [
-      `${name}'s VM was made again with a HOME of its own, apart from its workspace: what its tools keep for themselves (their sign-ins and config), its notes and its lease are no longer in /work, so no VM that shares its workspace (a run on a seat, another node's task) reaches them.`,
+      `${name}'s VM was made again with a HOME of its own, apart from its workspace: what its tools keep for themselves (their sign-ins and config), its notes and its lease are no longer in /work, so no VM that shares its workspace (a run on a seat) reaches them.`,
       `Moved to its HOME: ${home.map((e) => `${e.name} (${size(e.bytes)})`).join(", ") || "nothing"}. ${notes ? `Its notes (${size(notes.bytes)}) were moved to a place of their own.` : "It had no notes yet: they'll be kept in a place of their own."} Its workspace is as it was. Whatever was running in its VM ended as it was made again.`,
     ].join("\n"),
   };
@@ -546,8 +546,9 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   let sandbox: GovernedSandboxHost | null = null;
   /**
    * Layout 2, its own setting (`invincible sandbox layout on|off`), off by default as the fabric is: off, every agent's VM
-   * is made and kept in layout 1, and another node's task is refused here. Applied at once, at the next VM made or
-   * prepared. Why it does nothing here, whatever it says: no sandbox host, or a Mac's (its VMs stay in layout 1).
+   * is made and kept in layout 1 (another node's task needs neither: its VM shares nothing of the agent's store). Applied
+   * at once, at the next VM made or prepared. Why it does nothing here, whatever it says: no sandbox host, or a Mac's (its
+   * VMs stay in layout 1).
    */
   let layout2On = config.layout2 === true;
   let layoutIdle: string | null = "this node has no sandbox host";

@@ -370,17 +370,18 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   limit bounds all three. No tree is mounted from a place inside another, which the agent writes and could swap for a
   link. Its HOME holds its tools' own files and its lease; its environment and PATH follow HOME, with no directory of
   the workspace on its PATH, so nothing put into the workspace runs in its place (`packages/sandbox/test/spec.test.ts`).
-- **A VM that shares a workspace never mounts its HOME.** Another node's task (to come) gets the workspace's tree
-  alone. A run on a seat of yours, which is the agent's own work, gets it and the notes' tree. Each has a HOME of its
-  own, empty and in memory, where its tools keep whatever they keep, never the agent's and never the workspace it
-  shares. A link left in a tree resolves in that VM's own view, where the store's other trees aren't, so it reaches
-  nothing of them (`spec.test.ts`, `team-layout.test.ts`; on real Docker, `layout.integration.test.ts`, which runs on a
-  Linux host with Docker Engine 26 or later and is skipped elsewhere).
+- **A VM that shares a workspace never mounts its HOME.** A run on a seat of yours, which is the agent's own work, gets
+  the workspace's tree and the notes' tree, and a HOME of its own, empty and in memory, where its tools keep whatever
+  they keep, never the agent's and never the workspace it shares. A link left in a tree resolves in that VM's own view,
+  where the store's other trees aren't, so it reaches nothing of them (`spec.test.ts`, `team-layout.test.ts`; on real
+  Docker, `layout.integration.test.ts`, which runs on a Linux host with Docker Engine 26 or later and is skipped
+  elsewhere). Another node's task shares nothing of the store, in either layout (the fifth fabric review's R5-3: below).
 - **Off until you turn it on.** Layout 2 is each node's own setting, off by default as the fabric is
   (`invincible sandbox layout on|off|status`, kept in its config; a running node applies it at the next VM it makes or
-  prepares). Off, every agent's VM is made and kept in layout 1, nothing of any store is moved, and another node's task
-  is refused there, since it would share a HOME. Turned off after it was on, no VM is moved from then on, and one already
-  moved stays in layout 2 (`packages/node/test/layout-switch.test.ts`).
+  prepares). Off, every agent's VM is made and kept in layout 1, and nothing of any store is moved. Turned off after it
+  was on, no VM is moved from then on, and one already moved stays in layout 2
+  (`packages/node/test/layout-switch.test.ts`). Another node's task needs neither layout: its VM shares nothing of the
+  agent's store.
 - **What changes on every node, with the fabric and layout 2 off:**
   - the node's own git in an agent's repository holds the repository's configuration off (below). So no hook of the
     repository's runs when the node makes a task's worktree or keeps a step, no filter (Git LFS's included), and no
@@ -406,14 +407,15 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
     its first await, so neither begins once the other has;
   - what a sharing VM is given is decided again as it is made: its tree in layout 2, never the root of a store moved
     since its share was asked;
-  - a store in layout 2 isn't mounted (a start, a remake, a task's VM, a seat's run) while a VM that shares its whole
-    store is there, in any state. A VM that shares a tree of it says so in a label of its own;
+  - a store in layout 2 isn't mounted (a start, a remake, a seat's run) while a VM that shares its whole store is
+    there, in any state. A VM that shares a tree of it says so in a label of its own;
   - the move's VM is stopped first, and one that won't stop is neither moved nor made again.
 
   Tested in `team-layout.test.ts`. The escape tests run on real Docker in a container and in a Kata microVM
   (`layout.integration.test.ts`; on Ultra, 27 November 2026: Docker 29.10, 8 of 8).
 - **Made new in it; moved to it once.** With it on, a new agent's VM is made in layout 2. One made before is moved at
-  its next prepare while nothing runs in it (no command, terminal or desktop session, and no VM sharing its workspace):
+  its next prepare while nothing runs in it (no command, terminal or desktop session, no VM sharing its workspace, and
+  no VM of another node's task beside it, whose changes come back to the agent's repository as it goes):
   its store's top-level entries are renamed into the three trees inside the store's own filesystem, so nothing is
   copied. Its notes go to their own tree by one rename, and only where every part of their place is a folder. The move
   follows no link, and takes nothing it finds for its own (R4-1, R4-2): in layout 1 the store's root is the agent's
@@ -445,14 +447,14 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
 - **Where it holds.** A Linux host with Docker: a store on a Docker volume needs Docker Engine 26 or later (its trees are
   the volume's subpaths), and stays in layout 1 on an older engine; a workspace image's store moves on any. **A Mac's VMs
   stay in layout 1**, their HOME their `/work`: a Mac's workspace is a disk image only one VM may mount, so no VM there
-  shares a workspace (no run on a seat, no other node's task), and a HOME apart would keep nothing from anyone. A Mac
-  refuses a VM that would share one, and layout 2 itself (`container-spec.test.ts`, `container-host.test.ts`), and its
-  node takes no other node's task at all (`fabric-handoff.test.ts`).
+  shares a workspace (no run on a seat), and a HOME apart would keep nothing from anyone. A Mac refuses a VM that would
+  share one, and layout 2 itself (`container-spec.test.ts`, `container-host.test.ts`), and its node takes no other
+  node's task at all (`fabric-handoff.test.ts`): the VM of its own such a task runs in is made only on Linux with Docker.
 - **The node's own git there holds the repository's configuration off** (the fourth fabric review's R4-4, and the
   fifth's R5-6; `packages/agents/src/held-git.ts`, tested in `packages/agents/test/held-git.test.ts` and
-  `held-git-evidence.test.ts`). A VM that shares the workspace shares the repository's `.git`, so a hook, an fsmonitor,
-  a filter or a URL rewrite could be written there. A task's setup, its steps' checkpoints, its evidence and what it
-  keeps to ship run git with none of these:
+  `held-git-evidence.test.ts`). The repository is the agent's to change, and a run on a seat's with it, so a hook, an
+  fsmonitor, a filter or a URL rewrite could be written there. A task's setup, its steps' checkpoints, its evidence,
+  what it keeps to ship, and another node's task's clone and changes run git with none of these:
   - a system or global configuration;
   - a hook, whatever hooks path the repository names (husky's among them), an fsmonitor, a signing program, an
     external diff or textconv, or an askpass program;
@@ -470,17 +472,26 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
 - **The backlog look** (`backlog.ts`, an idle agent's plan and newest commits) reads the repository with the same held
   git: its plan as stored, its commits with no signature checked (the fifth review's R5-3: `git log` ran a `gpg.program`
   the repository named, for a signed commit).
-- **Not yet held off** (the fifth review's R5-3, to be fixed before the fabric is switched on):
-  - a nested repository's own filter, which `git add -A` and `git status` run.
-
-  The filters are also listed just before each git command, so one written between that list and the command runs. Only
-  the agent and another node's task write in an agent's repository, and what the agent writes there runs as itself
-  anyway, so each of these matters only with the fabric on.
-- **Residual risk.** The workspace is shared by design: what the agent's own work later runs from it (its repository's
-  scripts, a hook its own commands run, a toolchain it installed into it) is code a VM sharing it could have changed. A
-  toolchain moved to HOME that baked its old place into its own files (a virtualenv's scripts, for one) doesn't run
-  from its new place, and is made again. An rc file in its HOME that puts a directory of the workspace on its PATH
-  still does.
+- **Another node's task writes none of it** (the fifth review's R5-3, by its first option:
+  `packages/agents/src/handed-repo.ts`, tested in `handed-repo.test.ts`, `team-runtime.test.ts`, `task-vms.test.ts` and
+  `pipe.test.ts`). Its VM shares nothing of the agent's store and its repository is a clone of its own, given the task's
+  worktree and that commit's history alone (one ref's bundle: no other branch, task or checkpoint of the repository's).
+  So its configuration, its hooks, a repository nested in it, and anything it writes outside its worktree stay in its VM
+  and go with it. Only its changes come back, as one patch, which the agent's side applies to the task's worktree with
+  the held git. The worktree is set back to where the work began first, with nothing an earlier run left in it, a file
+  git ignores among them: git apply checks the index alone for a link a path goes through, and would write through one
+  left there. Then `git apply` takes it, refusing it whole for a path outside the worktree, into a `.git`, or through a
+  link. A patch that didn't all come (its sender ended, the pipe cut, fewer bytes kept than were carried), or that is
+  past 512 MiB in bytes or as its binary parts inflate, is dropped and never applied. What the held git doesn't hold off
+  is written only by the agent's own work, which runs as itself anyway:
+  - a nested repository's own filter, which `git add -A` and `git status` run;
+  - a filter written between the list of them read just before each git command and that command.
+- **Residual risk.** The workspace is shared by design with a run on a seat, which is the agent's own work: what the
+  agent's work later runs from it (its repository's scripts, a hook its own commands run, a toolchain it installed into
+  it) is code that run could have changed, and so is what another node's task's changes put in its worktree (its
+  scripts, a link, which stays a link), where the agent's later work takes them. A toolchain moved to HOME that baked
+  its old place into its own files (a virtualenv's scripts, for one) doesn't run from its new place, and is made again.
+  An rc file in its HOME that puts a directory of the workspace on its PATH still does.
 
 ## A Mac's sandboxes (tested on the Mac mini)
 
@@ -861,9 +872,11 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     - **In a VM of its own** (the owner's decision of 27 November 2026, the third re-review's R3-1;
       `packages/node/src/task-vms.ts`, `createTaskVm`, tested in `task-vms.test.ts`, `team-layout.test.ts`,
       `team-runtime.test.ts` and `fabric-handoff.e2e.test.ts`). Every command of it, its agent's, its coding tool's
-      and its gates, runs in a VM made for it beside its agent's: from the agent's VM's image, as big as it and on its
-      network, sharing the agent's workspace alone (its `work/` tree: never its HOME, nor its notes), with a HOME of
-      its own in memory. Its lease is the task's paid models alone, never your keys nor its repository, counted under
+      and its gates, runs in a VM made for it beside its agent's: from the agent's VM's image, as big as it (its disk
+      too, where the host holds one to a size) and on its network, sharing nothing of the agent's store (the fifth
+      re-review's R5-3): a `/work` of its own, removed with it, a HOME of its own in memory, and a clone of its own of
+      the repository, whose changes come back as a patch (the held git's section, above; `handed-repo.test.ts`,
+      `pipe.test.ts`). Its lease is the task's paid models alone, never your keys nor its repository, counted under
       its agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. The
       VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
       ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
@@ -871,15 +884,14 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       ends as the task does, whatever becomes of the VM (R4-7, `task-vms.test.ts`, `team-layout.test.ts`): one whose
       removal fails spends nothing more of yours, is never renewed with its agent's again, and is tried again on a
       timer until it goes. One an earlier process of the node left is removed as the node starts; no route reaches
-      into it. It is made only beside an agent's VM in layout 2, on a Linux host with Docker; beside one whose HOME is
-      its workspace it is refused. On a node with no room beside the agent's VM for one as big, the task waits for
-      room as any sandbox does, within its life: a task that ends while it waits leaves the queue, and no VM is made
-      for it (I-2, `governed-host.test.ts`).
-    - **A Mac takes no other node's task** (`fabric-handoff.test.ts`, `container-host.test.ts`). No VM on a Mac shares
-      an agent's workspace (below: a Mac's VMs stay in layout 1), so there a task would run in its agent's own VM,
-      beside its sign-ins. A Mac's node refuses every task handed to it at once, before it reads anything of it, and
-      says why in its own words (`MAC_TAKES_NO_TASK`), which the giver shows as that node's. Below it, a Mac's host
-      refuses a seat's VM and a task's VM before it makes anything, and its spec refuses any VM that would share a
+      into it. It is made beside an agent's VM in either layout, on a Linux host with Docker (I-d, gone with R5-3). On
+      a node with no room beside the agent's VM for one as big, the task waits for room as any sandbox does, within
+      its life: a task that ends while it waits leaves the queue, and no VM is made for it (I-2, `governed-host.test.ts`).
+    - **A Mac takes no other node's task** (`fabric-handoff.test.ts`, `container-host.test.ts`, `pipe.test.ts`). The
+      VM of its own it would run in, and the pipe its clone and its changes go through, are made only on a Linux host
+      with Docker. A Mac's node refuses every task handed to it at once, before it reads anything of it, and says why in
+      its own words (`MAC_TAKES_NO_TASK`), which the giver shows as that node's. Below it, a Mac's host refuses a seat's
+      VM, a task's VM and a pipe before it makes or runs anything, and its spec refuses any VM that would share a
       workspace.
     - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
       in a process group of its own and under its own deadline, its `desktop` verbs too (the third re-review's R3-3).
@@ -890,9 +902,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).
-    - Residual: its VM time isn't counted itself, and what it leaves in the workspace it shares (the repository's
-      scripts among them) is there for the agent's later work, which runs it by its own choice: the node's own git
-      there runs none of it (R4-4, and layout 2's residual, above).
+    - Residual: its VM time isn't counted itself, and what its changes put in its worktree (the repository's scripts
+      among them, and a link, which stays a link) is there for the agent's later work, which runs it by its own choice:
+      the node's own git there runs none of it, and nothing else of the task's reaches the agent's store (R4-4, R5-3,
+      and layout 2's residual, above).
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
     these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1),
     and those you take up again by id (R3-6).

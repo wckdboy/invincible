@@ -156,31 +156,40 @@ transport keys carries all of it:
    - **Its work is bounded, in a VM of its own.**
      - Every command of it, its agent's, its coding tool's and its gates, runs in a VM made for it beside its agent's
        (`packages/node/src/task-vms.ts`, `createTaskVm`; the owner's decision of 27 November 2026, the third
-       re-review's R3-1). That VM is made from the agent's VM's image, as big as it and on its network. It shares the
-       agent's workspace alone (its `work/` tree: never its HOME, nor its notes) and has a HOME of its own in memory.
-       Its lease is the task's paid models alone (never your keys, nor its repository), counted under its agent's
-       label, so its budget counts what it spends. None of its commands runs in the agent's own VM.
+       re-review's R3-1). That VM is made from the agent's VM's image, as big as it (its disk too, where the host
+       holds one to a size) and on its network. It shares nothing of the agent's store (the fifth re-review's R5-3, by
+       its first option): its `/work` is a volume of its own, removed with it, and its HOME is its own, in memory. Its
+       lease is the task's paid models alone (never your keys, nor its repository), counted under its agent's label, so
+       its budget counts what it spends. None of its commands runs in the agent's own VM.
+     - **Its repository is a clone of its own** (`packages/agents/src/handed-repo.ts`). As the task starts, the agent's
+       side gives the task's worktree as it stands (its changes so far, for a task taken up again) as a git bundle of
+       that one commit's history, never the repository's other branches, tasks or checkpoints, and the task's VM clones
+       it at the same place, its HEAD where the work began. After each step it keeps, and as it ends, its changes since
+       then come back as one patch, and the agent's side applies it to the task's worktree with the node's held git: the
+       worktree is set back to where the work began, with nothing an earlier run left in it, and then `git apply` takes
+       the patch, which writes no path outside the worktree, into a `.git`, or through a link. A patch is applied only
+       once all of it came (its sender done, the pipe not cut, as many bytes kept as were carried), and only up to
+       512 MiB, its binary parts counted as they inflate. One that is cut short, or bigger, is dropped, and the task
+       says its changes couldn't be brought back. Both ways go through the node, one side's output the other's input,
+       never kept on the host (`SandboxHost.pipe`). A task with no repository keeps its files in its own VM, and they go
+       with it.
      - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
        the task started there. When its work ends (a revocation among its ends: your brake), its lease ends and the VM
        is removed at once, the command in flight there with it, never once that command returns (the fifth re-review's
        I-1). Its lease ends as the task does, whatever becomes of the VM (R4-7): one whose removal fails spends
-       nothing more of yours, is never renewed with its agent's lease again, and is tried again on a timer until it
-       goes, as well as before the next is made. One an earlier process of the node left is removed as the node
-       starts. No route reaches into it, yours included.
-     - It is made on a Linux host with Docker, beside an agent's VM whose HOME is apart from its workspace (layout 2,
-       SECURITY.md); beside one still in layout 1 it is refused, since that VM's HOME is its workspace. Layout 2 is each
-       node's own setting, off by default (`invincible sandbox layout on`): until it is on, every task handed to that
-       node is refused so. On a node with no room beside its agent's VM for one as big, the task waits for room as any
-       sandbox does, within its life: a task that ends while it waits leaves the queue, and no VM is made for it (the
-       fourth re-review's I-2).
-     - **A Mac takes no other node's task.** No VM on a Mac shares an agent's workspace: a Mac's workspace is a disk
-       image only one VM may mount, and its VMs' HOME is their `/work` (layout 1). A task handed to a Mac would run in
-       its agent's own VM, beside what that agent's tools keep for themselves, its sign-ins among them. So a Mac refuses
-       it at once, before it reads anything of it (`MAC_TAKES_NO_TASK`, `handoff.ts`). You see its words on the
-       hand-off, as that node's: "This node is a Mac, and a Mac takes no other node's task: no VM on a Mac shares an
-       agent's workspace, so the task would run in that agent's own VM, beside what its tools keep there, its sign-ins
-       among them. Hand it to one of your Linux nodes with Docker." A grant to a Mac gives nothing, since every task
-       handed to it is refused so.
+       nothing more of yours, reaches nothing of its agent's store, is never renewed with its agent's lease again, and
+       is tried again on a timer until it goes, as well as before the next is made. One an earlier process of the node
+       left is removed as the node starts. No route reaches into it, yours included.
+     - It is made on a Linux host with Docker, beside its agent's VM in either layout (SECURITY.md): sharing nothing of
+       that VM's store, it needs no layout 2 (the fifth re-review's I-d, gone with R5-3). On a node with no room beside
+       its agent's VM for one as big, the task waits for room as any sandbox does, within its life: a task that ends
+       while it waits leaves the queue, and no VM is made for it (the fourth re-review's I-2).
+     - **A Mac takes no other node's task.** Its VM of its own, and the pipe its clone and its changes go through, are
+       made only by a Linux host with Docker. So a Mac refuses it at once, before it reads anything of it
+       (`MAC_TAKES_NO_TASK`, `handoff.ts`). You see its words on the hand-off, as that node's: "This node is a Mac, and
+       a Mac takes no other node's task: such a task runs in a VM of its own, with a clone of its own of the
+       repository, which only a Linux node with Docker makes. Hand it to one of your Linux nodes with Docker." A grant
+       to a Mac gives nothing, since every task handed to it is refused so.
      - Its gates are its giver's commands, run in its VM: all of them together get as long as one command may (15
        minutes), every round counted, and once that is spent they aren't run and the work isn't done.
      - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
@@ -193,14 +202,15 @@ transport keys carries all of it:
        answered as failed (the third re-review's R3-2). A task you take up again by its id lives no longer than the
        longest a hand-off may last, from then (R3-6).
      - Not bounded: the VM time its work takes isn't counted itself (its budget's dollars and its life bound it), and
-       what it leaves in the workspace it shares (the repository's scripts, a toolchain it installed) is there for the
-       agent's later work, as SECURITY.md's layout 2 section says. The node's own git in that repository (the agent's
-       next task's setup, its steps' checkpoints, its evidence, what it keeps to ship) holds the repository's
-       configuration off (the fourth re-review's R4-4, and the fifth's R5-6): no hook, fsmonitor or signing program
-       written there runs, nor a filter its configuration names when the command starts, and a fetch with the agent's
-       lease goes to the gateway alone, nor to a submodule's own remote, nor does an alternate's refs command run; the
-       backlog look's git is held too. One path still runs what a task writes there (a nested repository's filter: the
-       fifth re-review's R5-3), to be closed before the fabric is switched on.
+       what its changes put in its worktree (the repository's scripts among them, and a link, which stays a link) is
+       there for the agent's later work, which runs it by its own choice, as it would any change it takes. Nothing else
+       of the task's reaches its agent's store: not its clone's `.git` (its configuration, its hooks, a repository
+       nested in it), and nothing outside its worktree (its patch is kept under `/work/.agent` only until it is applied
+       or dropped). The node's own git in the agent's repository (a task's setup, its steps' checkpoints, its evidence,
+       what it keeps to ship, the patch's apply) holds the repository's configuration off (the fourth re-review's R4-4,
+       and the fifth's R5-6): no hook, fsmonitor or signing program written there runs, nor a filter its configuration
+       names when the command starts, and a fetch with the agent's lease goes to the gateway alone, nor to a
+       submodule's own remote, nor does an alternate's refs command run; the backlog look's git is held too.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:
@@ -306,7 +316,8 @@ hand-off doesn't wait on) and the door's map of keys (N4, cheaper) are on a path
 which now also looks through the team's tasks for those it ends. The helper adds a `python3` process to each command of
 a handed task, which no row here times. Nor does any row time the VM each hand-off now has of its own (R3-1): it is made
 from its agent's VM's image as the task starts, and removed as it ends, and the benches' Docker is a stand-in that makes
-no VM. On a real node that is a microVM's start (Kata's), and its trees' check, before the task's first command runs.
+no VM. On a real node that is a microVM's start (Kata's) and its clone of the repository (a bundle of its history,
+through the node) before the task's first command runs, and a patch brought back for each step it keeps.
 
 | | HTTP, signed | Q-AMP, before the review's fixes | Q-AMP, after them |
 |---|---|---|---|
@@ -397,9 +408,8 @@ answered and a Q-AMP release with the sidecar is pinned.
 
    The binary alone switches nothing on.
 3. **Switch it on, on each node:** `invincible fabric on`. A running node starts its sidecar at once (and asks the binary
-   whether it has one); a stopped one does when it starts. A Linux node that is to take other nodes' tasks needs layout
-   2 too, its own setting (`invincible sandbox layout on`, SECURITY.md): each of its agents' VMs is moved at its next
-   prepare while nothing runs in it, and you're told once for each. Until then a task handed to it is refused.
+   whether it has one); a stopped one does when it starts. A node that takes other nodes' tasks is a Linux one with
+   Docker (a Mac takes none), and it needs no other setting: layout 2 isn't one of the fabric's.
 4. **The port.** On a Linux node with UFW, `deploy.sh --open-qamp` (UDP 7410–7419, `tailscale0` alone), or the one rule
    `ufw allow in on tailscale0 to any port 7410 proto udp`. A Mac with its application firewall off needs nothing; with
    it on, allow the qamp binary.
@@ -445,4 +455,9 @@ answered and a Q-AMP release with the sidecar is pinned.
 - **Not driven:** the hand-off from the web app or the native apps (the CLI and the API only); a VM's real harness
   calling its giver's tools (the gateway path is tested with a stand-in, `callGiver` end to end); Linux with real
   Docker, KVM or the workspace helper beside a sidecar.
+- **A handed task's clone of its own (R5-3) has run on real git, never in real VMs.** Its scripts give, clone, send,
+  receive and apply on real repositories (`handed-repo.test.ts`), and the pipe between two VMs is tested with a stand-in
+  for Docker that runs both sides here (`pipe.test.ts`). It has never gone through real Docker's `exec --interactive` on
+  Linux, nor run on the image's own git (Debian trixie's, not checked in a built image). Its apply relies on `git
+  apply`'s checks of links, which need a git with CVE-2023-23946's fix (2.39.2 or later).
 - **Relays and NAT traversal** (Q-AMP's `feat/relays`) aren't used: nodes reach each other on the tailnet, directly.

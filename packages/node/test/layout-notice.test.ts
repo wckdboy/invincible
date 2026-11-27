@@ -40,10 +40,14 @@ describe("the notice of a VM moved to layout 2", () => {
     expect(layoutNotice("Ada", [{ ...old, name: ".x\\xff" }]).body).toContain("Moved to its HOME: .x\\xff (1 KB).");
     // A body past a notice's limit is cut there, and a pair the cut falls in is not left half.
     const long = Array.from({ length: 400 }, (_, i) => ({ name: `.\u{1F6E1}${i}`, to: "home" as const, kind: "dir" as const, bytes: 1 }));
-    const cut = layoutNotice("Ada", long);
+    // (Its cut made to fall in a pair: where it falls follows the words before the names, so the agent's name, which is
+    // among them, is made one letter longer at a time until it does. A name's entry is 15 characters there.)
+    const pair = Array.from({ length: 16 }, (_, n) => `Ada${"a".repeat(n)}`).find((name) => layoutNotice(name, long).body.endsWith("\uFFFD"));
+    expect(pair).toBeDefined();
+    const cut = layoutNotice(pair ?? "Ada", long);
     expect(cut.body.length).toBe(2000);
     expect(lone(cut.body)).toBe(false);
-    // (Its cut falls in a pair, here: the half of it left is said as U+FFFD.)
+    // (Its cut falls in a pair: the half of it left is said as U+FFFD.)
     expect(cut.body.endsWith("\uFFFD")).toBe(true);
     // And well-formed text is as it was: a pair is kept.
     expect(layoutNotice("Ada", [{ ...old, name: ".\u{1F6E1}" }]).body).toContain("Moved to its HOME: .\u{1F6E1} (1 KB).");
