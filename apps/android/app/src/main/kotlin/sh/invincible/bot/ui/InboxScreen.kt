@@ -83,7 +83,7 @@ fun InboxScreen(app: AppModel, watch: (node: String) -> Unit, back: () -> Unit) 
     DisposableEffect(Unit) { onDispose { app.approvalAsked.value = null } }
 
     Column(Modifier.fillMaxSize()) {
-    PageBar("Inbox", back)
+    PageBar("Needs you", back)
     LazyColumn(Modifier.fillMaxSize()) {
         said?.let { item { Problem(it) } }
         first?.let { a ->

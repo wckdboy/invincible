@@ -9,19 +9,28 @@ phone has one) that never leaves it. It came from the system Invincible succeeds
 `sh.invincible.bot.device-key`, its own notification channels, preferences and UnifiedPush registration, so it installs
 beside the app it succeeds until the cutover.
 
-It's small on purpose: it carries no pictures of the agents, which it draws itself, and needs no Google services. Every
-orb is a field, lines of force round a dark core (`core/Field.kt`, `core/FieldOrb.kt`, drawn by `ui/Field.kt`), the web
-app's `lib/field.ts` and `lib/field-orb.ts`, held to them by the parity vectors' `field` section. The primary's is in
-gold with its beam of light along its axis, its embers drifting while it works; each agent's is in the colour you chose
-for it or the one of 24 its handle picks (`core/Avatar.kt`, core's `avatar.ts`). Where orbs are many they are still; the
-one in focus moves only while something is going on, and never while the phone's animations are off. In the light theme
-a field is ink on paper. Its launcher icon is the I-beam (`scripts/brand.ts --png` writes its adaptive and themed
-layers), and its sidebar begins with the mark and the INVINCIBLE wordmark.
+It's small on purpose: it carries no pictures of the agents, which it draws itself, and needs no Google services. Its
+look is monochrome (`ui/Theme.kt`, as the Apple app's Brand.swift): black, white and greys, red only for what went
+wrong, colour kept for the agents. The primary is the I-beam in one ink (`core/IBeam.kt`, drawn by `ui/Mark.kt`, held to
+`scripts/mark.ts` by the vectors' `mark`), as the launcher icon is (`scripts/brand.ts --png` writes its layers). Each
+agent's mark is the Grille, a disc in its own colour cut into slats at its own angle (`core/AgentMark.kt`, core's
+`agent-mark.ts`, drawn by `ui/AgentMarkView.kt`, held to the vectors' `marks`), its state in its shape: the top slat in
+ink while it asks you, the bottom one red and loose once it failed. Marks in rows are still; the one in focus moves only
+while something is going on, and never while the phone's animations are off.
+
+While it's on screen it keeps the node's live stream open (`core/LiveLink.kt`: the web's `lib/live-link.ts`, the
+iPhone's LiveLink.swift) and reads again only what the stream says changed, so at rest it asks the node nothing; a link
+silent for three of the node's beats is said lost at once, and a change of network opens a fresh stream.
 
 It opens on the primary, the one agent you talk to, named by the node ("Invincible" until you name it: `core/Primary.kt`),
-with no tab bar: Home (`ui/Home.kt`) is its orb, its name, the line at a glance and "…" for everything else, then what
-needs you with each answer in place, the work by attention, and its message box docked. A task opens as a thread of its
-own (`ui/TaskScreen.kt`). A tablet (720 dp and wider) has the panes: the sidebar (`ui/Sidebar.kt`) beside the page.
+with no tab bar (the iPhone's Home): Home (`ui/Home.kt`) is the I-beam and the line at a glance, the agents in a strip,
+what needs you (three decisions, each with its one answer in place, counted once everywhere), the work by proof
+(Working, Proven, Failed, the rest folded), and at its foot a bar: search and ask, the message box, a task to give.
+Every other place is in the drawer (`ui/Drawer.kt`), from the I-beam or the left edge. A task opens as a thread of its
+own (`ui/TaskScreen.kt`), its verdict as its proof allows (Proven, Reviewed, not proven, Failed · gate 2…). A tablet
+(600 dp and wider) has the panes: the sidebar (`ui/Sidebar.kt`) beside the page. `invincible://task/<id>`,
+`/agent/<handle>`, `/approval/<id>` and `/chat/<id>` open their place, and only navigate (`core/Links.kt`). While your
+agent answers, the chat's box stays open to steer it or queue what's next, and a running task can be steered.
 
 **Notifications** come at once through a UnifiedPush distributor of yours (ntfy, Sunup), encrypted to this phone so its
 push server can't read them; with none, the phone collects them from the node over its own signed connection, every
@@ -51,7 +60,9 @@ scripts/release.sh                 # the owner's: build/release/Invincible-<buil
 The JVM tests read `apps/apple/InvincibleTests/Fixtures/core-vectors.json` where it is (`bun apps/apple/scripts/vectors.ts`
 writes it from this repository's `packages/core` and `apps/web/src/lib`, and CI checks it), so this app is held to the
 same bytes as the Apple app: request signing, the device id, canonical JSON, invites, the pairing proofs and codes, the
-agents' rows, the orbs and how each mood moves, the work by attention, a task's steps, and every answer block.
+agents' rows, their marks, the work by attention, a task's steps and verdict, the message box's words, and every answer
+block. `bun apps/android/scripts/perf.ts --front http://127.0.0.1:<port>` holds it to its performance budgets
+(`perf/Budgets.json`) on an emulator against the dev node below: a limit over fails, a target missed is said.
 
 ## Running it against a throwaway node
 
