@@ -326,6 +326,10 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
   - **What it can't promise:** the VM is the agent's. A program of its own there runs as deskd's own user. It can read
     the display and what you type into it, or stand in for deskd's sockets. Take-over keeps the agent's model from
     taking the screen while you hold it. It doesn't make the VM a place for a secret you wouldn't give the agent.
+- **What your devices keep of it: nothing.** Each app decodes the stream as it comes and draws it; no frame is written
+  down. `inv desktop` looks and never takes the desktop over, and the ledger doesn't record a look; with `--out` it
+  writes the picture you asked for to a file readable by you alone (0600), replacing whole a file there before
+  (`packages/node/test/inv/desktop.test.ts`).
 - **The accessibility bus is the VM's own.** It starts with the desktop, as the agent's user, its sockets in deskd's
   own directory; deskd reads it for `desktop tree` and `find`. It shows what the apps on that display already show,
   to the same user, and reaches nothing outside the VM.

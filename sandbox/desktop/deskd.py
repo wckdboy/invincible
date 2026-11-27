@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""deskd: an agent's desktop, held by one process in its VM (BRIEF-C1 step 3).
+"""deskd: an agent's desktop, held by one process in its VM (BRIEF-C1 step 3; docs/DESKTOP.md).
 
 The `desktop` command is its thin client (desktop.c); the host's session for the owner and the agent's own loop speak
 to it the same way, over a socket in the VM that nothing outside the VM can reach. It holds one connection to the

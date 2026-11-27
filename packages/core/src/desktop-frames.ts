@@ -1,5 +1,5 @@
 /*
- * The frames of an agent's desktop stream as you watch it (C1 step 9): as its VM's encoder writes them
+ * The frames of an agent's desktop stream as you watch it (C1 step 9; docs/DESKTOP.md): as its VM's encoder writes them
  * (sandbox/desktop/stream.c) and as the node sends them on to your devices.
  *
  * Each is a 4-byte big-endian length of what follows it, a byte for its kind, an 8-byte big-endian time in milliseconds

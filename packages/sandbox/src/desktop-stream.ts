@@ -1,5 +1,5 @@
 /*
- * The stream of an agent's desktop you watch (C1 step 9), from its VM to the node: `desktop stream` in a held exec of
+ * The stream of an agent's desktop you watch (C1 step 9; docs/DESKTOP.md), from its VM to the node: `desktop stream` in a held exec of
  * its own, its frames on stdout (core's desktop-frames.ts), sent on to each of your devices that watches. Nothing
  * listens in the VM, and the encoder runs only while someone watches:
  * - one exec a VM however many watch, started with the first;

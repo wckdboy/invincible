@@ -1,5 +1,5 @@
 /*
- * The live picture of an agent's desktop (C1 step 9.3), as the app decodes it: the stream's frames (core's
+ * The live picture of an agent's desktop (C1 step 9.3; docs/DESKTOP.md), as the app decodes it: the stream's frames (core's
  * desktop-frames.ts) handed to the browser's own decoder (WebCodecs), H.264 from a keyframe; and your take-over as the
  * node says it. Pure (no DOM): views/desktop.ts draws it.
  */

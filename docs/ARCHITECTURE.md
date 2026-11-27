@@ -341,7 +341,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
     at the desktop is an eval case as any other is: its eval's sandboxes are made from the desktop image. A Mac makes
     none yet: there an agent's VM is made without one, and the
     ledger says why. What it costs and how fast it is: the scorecard's desktop suite ([BENCHMARKS.md](BENCHMARKS.md)).
-  - **The stream you watch:**
+  - **The stream you watch** ([DESKTOP.md](DESKTOP.md): what runs where, its protocol, how each device watches it, and
+    its numbers):
     - `desktop stream` is the screen as H.264 Constrained Baseline, encoded in the VM only while someone watches. The
       node runs it in a held exec of its own, so the encoder lives as long as its reader and nothing listens in the VM.
     - It sends 10 frames a second while the screen changes, and nothing while it is still. A `fast` on its stdin, which

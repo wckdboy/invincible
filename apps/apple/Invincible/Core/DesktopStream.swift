@@ -1,7 +1,7 @@
 import Foundation
 
 /*
- * An agent's desktop live (C1 step 9.4), as core's desktop-frames.ts and the PWA's lib/desktop-stream.ts read it: the
+ * An agent's desktop live (C1 step 9.4; docs/DESKTOP.md), as core's desktop-frames.ts and the PWA's lib/desktop-stream.ts read it: the
  * node's stream of its screen (POST /api/team/desktop/stream), frames read whole as their bytes come; the codec a
  * keyframe is; a frame's NAL units as VideoToolbox takes them; your take-over as the node says it; and when to watch
  * again. Pure: DesktopVideo decodes, DesktopLive shows.

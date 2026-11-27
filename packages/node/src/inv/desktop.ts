@@ -8,7 +8,7 @@ import type { Command } from "./io.ts";
 import { faint } from "./render.ts";
 
 /*
- * inv desktop <agent> [--out <file>] [--json] (docs/CLI.md): an agent's desktop, looked at and never touched. A look is no
+ * inv desktop <agent> [--out <file>] [--json] (docs/CLI.md, docs/DESKTOP.md): an agent's desktop, looked at and never touched. A look is no
  * input, so it never takes the desktop over, and the ledger doesn't record it: watching is looking. It says the screen's
  * size and whether you have it; --out writes its picture to a file. Watching it live, and taking it over, are the apps'.
  */

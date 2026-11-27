@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
 
 /**
- * An agent's desktop live (C1 step 9.4), as core's desktop-frames.ts, the PWA's lib/desktop-stream.ts and the Apple
+ * An agent's desktop live (C1 step 9.4; docs/DESKTOP.md), as core's desktop-frames.ts, the PWA's lib/desktop-stream.ts and the Apple
  * app's DesktopStream.swift read it: the node's stream of its screen (POST /api/team/desktop/stream), frames read whole
  * as their bytes come; the codec a keyframe is; its SPS and PPS, which MediaCodec takes as csd-0 and csd-1; your
  * take-over as the node says it; and when to watch again. Pure: DesktopDecoder decodes. Held to the parity vectors'
