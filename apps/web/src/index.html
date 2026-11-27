@@ -372,8 +372,8 @@
       .work-age { flex: none; min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
       /* An agent's orb where the work shows it (ui/orb.ts agentFace, still): sized here, as the face's own sheet is only
          given to the page with a seat's. */
-      :is(.work-row, .need, .thread-page, .td, .thread-said-by) .agent-orb { display: block; flex: none; width: var(--orb-size, 16px); height: var(--orb-size, 16px); }
-      :is(.work-row, .need, .thread-page, .td, .thread-said-by) .agent-orb > :is(svg, canvas) { display: block; width: 100%; height: 100%; }
+      :is(.work-row, .need, .decision, .thread-page, .td, .thread-said-by) .agent-orb { display: block; flex: none; width: var(--orb-size, 16px); height: var(--orb-size, 16px); }
+      :is(.work-row, .need, .decision, .thread-page, .td, .thread-said-by) .agent-orb > :is(svg, canvas) { display: block; width: 100%; height: 100%; }
       .work-agent { flex: none; color: var(--text-2); }
       .work-detail { min-width: 0; }
       .work-detail.mono { font-family: var(--font-mono); font-size: 11.5px; }
@@ -449,15 +449,31 @@
       .home-needs-head, .home-work-head h2 { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-13); font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text); }
       .home-needs-head { padding: 12px 12px 4px; }
       .home-needs-head > .count[data-tone] { min-width: 0; height: auto; padding: 0; background: none; color: inherit; box-shadow: none; font-size: inherit; font-weight: inherit; }
+      /* A row of what needs you (views/needs.ts; the iPhone's DecisionRow): its face or mark beside who asks and what, a
+         tap opening all of it; then its one answer, a grey pill (the screen's one filled button is its bar's, as the
+         iPhone's), and its ⋯ with the rest. */
+      .decision { display: flex; flex-direction: column; gap: 4px; padding: 4px 12px; }
+      .decision + .decision { border-top: 1px solid var(--border); }
+      .decision-row { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+      .decision-open { flex: 1; display: flex; align-items: center; gap: var(--sp-3); min-width: 0; min-height: 52px; padding: 4px 0; border: 0; background: none; color: inherit; font: inherit; text-align: start; text-decoration: none; cursor: pointer; }
+      .decision-icon { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--surface-3); color: var(--text-2); }
+      .decision-words { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+      .decision-who { overflow: hidden; color: var(--text-3); font-size: var(--fs-12); white-space: nowrap; text-overflow: ellipsis; }
+      .decision-what { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: var(--fs-14); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+      .decision-what .mono { font-size: var(--fs-13); font-weight: 500; }
+      .decision-target { color: var(--text-2); }
+      .decision-row > .answer { flex: none; }
+      /* A row with nothing more keeps its ⋯'s place, so every answer stands in one column. */
+      .decision-more-space { flex: none; width: var(--control-h-sm); }
+      @media (pointer: coarse) { :is(.decision-more.selector-trigger, .decision-more-space) { width: 44px; } .decision-more.selector-trigger { height: 44px; } }
+      .home-needs .decision-what { font-size: var(--fs-16); letter-spacing: -0.01em; }
+      .home-needs .decision-who { font-size: var(--fs-13); }
+      /* Needs you, its page: each part a list under its heading, as Home's (no card round it), and its note under it. */
+      .decisions { display: flex; flex-direction: column; }
+      .decisions-head { display: flex; align-items: center; gap: var(--sp-2); padding: 0 12px 4px; color: var(--text); font-size: var(--fs-13); font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
+      .decisions > .note { padding: 8px 12px 0; }
+      /* An asking in a task's thread (views/needs.ts askItem): who asks and what, its note, Allow once, Deny and More. */
       .need { display: flex; flex-direction: column; gap: 4px; padding: 12px; }
-      .need + .need { border-top: 1px solid var(--border); }
-      /* Its answers, pills in grey: Home's one primary action is its bar (ask), as the iPhone's. */
-      .home-needs .need-acts > .btn { --btn-bg: var(--surface-3); --btn-fg: var(--text); --btn-border: transparent; background: var(--btn-bg); box-shadow: none; border-radius: var(--r-full); padding-inline: 16px; font-size: var(--fs-14); font-weight: 650; }
-      .home-needs .need-acts > .btn.icon-only { padding-inline: 0; }
-      .home-needs .need-what { font-size: var(--fs-16); font-weight: 600; letter-spacing: -0.01em; }
-      .home-needs .need-who { font-size: var(--fs-13); }
-      .home-needs .need-acts > .btn.ghost { --btn-bg: transparent; color: var(--text-2); }
-      .home-needs .need-acts > .btn:hover { --btn-bg: var(--border-strong); }
       .need-who { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--fs-12); color: var(--text-3); }
       .need-who > .agent-orb { flex: none; }
       .need-icon { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); }

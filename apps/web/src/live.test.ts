@@ -100,6 +100,25 @@ function app() {
 const EVERYTHING = ["/api/fleet", "/api/pairings", "/api/secret-requests", "/api/actions", "/api/screen/sessions", "/api/questions", "/api/notices", "/api/loops/drafts", "/api/connectors/requests", "/api/about-you"];
 
 describe("what the shell shows, kept by the node's live stream", () => {
+  test("news is counted nowhere: a notice and a fact it noticed about you wait in the Inbox, and only a decision counts", async () => {
+    const kept = { notices: ANSWERS["/api/notices"], facts: ANSWERS["/api/about-you"], pairings: ANSWERS["/api/pairings"] };
+    ANSWERS["/api/notices"] = { notices: [{ key: "disk", title: "The disk is nearly full", severity: "warn", source: "heartbeat", at: 1, dismissed: false }] };
+    ANSWERS["/api/about-you"] = { kept: [], proposed: [{ id: "m_1", text: "Prefers short answers" }] };
+    ANSWERS["/api/pairings"] = { pairings: [{ invite: "i_1", device: "d_1", name: "A test phone", kind: "client", conflict: false }] };
+    try {
+      const { c, live, stream } = app();
+      stream.up();
+      await c.flush();
+      expect([live.notices.value.length, live.aboutYou.value.length, live.pairings.value.length]).toEqual([1, 1, 1]);
+      expect(live.inboxCount.value).toBe(1);
+      live.stop();
+    } finally {
+      ANSWERS["/api/notices"] = kept.notices;
+      ANSWERS["/api/about-you"] = kept.facts;
+      ANSWERS["/api/pairings"] = kept.pairings;
+    }
+  });
+
   test("read once when the stream comes up, then nothing at all for a minute while nothing changes", async () => {
     const { c, asked, live, stream } = app();
     stream.up("fleet", "actions", "notices", "team");

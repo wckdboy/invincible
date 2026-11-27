@@ -23,33 +23,37 @@ const changed = (ctx: Ctx) => {
   void ctx.live.refreshAboutYou();
 };
 
+/** Keep a fact it proposed: it goes with every answer of its from now on. `trigger` is held while the node is told. */
+export const keepFact = (ctx: Ctx, m: MemoryView, trigger: HTMLButtonElement): Promise<void> =>
+  busy(trigger, async () => {
+    try {
+      await ctx.api.post("/api/about-you/keep", { id: m.id });
+      toast("Kept: it goes with every answer of its", { tone: "ok" });
+      changed(ctx);
+    } catch (error) {
+      toast("Couldn't keep it", { tone: "error", description: errorMessage(error) });
+    }
+  });
+
+/** Drop a fact it proposed, or remove one you kept (asked once more). `trigger` is held while the node is told. */
+export const dropFact = (ctx: Ctx, m: MemoryView, proposed: boolean, trigger: HTMLButtonElement): Promise<void> =>
+  busy(trigger, async () => {
+    if (!proposed && !(await confirmAction({ title: "Remove this fact?", body: [h("p", { class: "wrap-anywhere" }, m.text), h("p", {}, "It goes with its answers no more, on every device.")], confirmLabel: "Remove" }))) return;
+    try {
+      await ctx.api.post("/api/memories/forget", { id: m.id });
+      toast(proposed ? "Dropped" : "Removed: it goes with its answers no more", { tone: "info" });
+      changed(ctx);
+    } catch (error) {
+      toast(proposed ? "Couldn't drop it" : "Couldn't remove it", { tone: "error", description: errorMessage(error) });
+    }
+  });
+
 /** One fact: what it says, whose it is, and what you can do with it. */
 export function factRow(ctx: Ctx, m: MemoryView, proposed: boolean): HTMLElement {
   const keep = button("Keep", { size: "sm", variant: "primary", icon: "check" });
-  keep.addEventListener("click", () =>
-    void busy(keep, async () => {
-      try {
-        await ctx.api.post("/api/about-you/keep", { id: m.id });
-        toast("Kept: it goes with every answer of its", { tone: "ok" });
-        changed(ctx);
-      } catch (error) {
-        toast("Couldn't keep it", { tone: "error", description: errorMessage(error) });
-      }
-    }),
-  );
+  keep.addEventListener("click", () => void keepFact(ctx, m, keep));
   const drop = button(proposed ? "Drop" : "Remove", { size: "sm", variant: "ghost", icon: "trash" });
-  drop.addEventListener("click", () =>
-    void busy(drop, async () => {
-      if (!proposed && !(await confirmAction({ title: "Remove this fact?", body: [h("p", { class: "wrap-anywhere" }, m.text), h("p", {}, "It goes with its answers no more, on every device.")], confirmLabel: "Remove" }))) return;
-      try {
-        await ctx.api.post("/api/memories/forget", { id: m.id });
-        toast(proposed ? "Dropped" : "Removed: it goes with its answers no more", { tone: "info" });
-        changed(ctx);
-      } catch (error) {
-        toast(proposed ? "Couldn't drop it" : "Couldn't remove it", { tone: "error", description: errorMessage(error) });
-      }
-    }),
-  );
+  drop.addEventListener("click", () => void dropFact(ctx, m, proposed, drop));
   // The fact across the whole width (a phone has no room beside it), then whose it is and what you can do.
   return h(
     "div",

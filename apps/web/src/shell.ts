@@ -34,8 +34,7 @@ import { syncPush } from "./views/notifications.ts";
 import { connectorsView } from "./views/connectors.ts";
 import { findingsView } from "./views/findings.ts";
 import { fleetView, openInvite } from "./views/fleet.ts";
-import { inboxView } from "./views/inbox.ts";
-import { needsCount } from "./views/needs.ts";
+import { needsCount, needsView } from "./views/needs.ts";
 import { workNow, workSources } from "./views/work-rows.ts";
 import { loopsView, openLoopSheet } from "./views/loops.ts";
 import { memoryView, openRemember } from "./views/memory.ts";
@@ -62,7 +61,7 @@ const VIEWS: Record<Route, View> = {
   chat: chatView,
   team: teamView,
   task: taskView,
-  inbox: inboxView,
+  inbox: needsView,
   more: moreView,
   overview: overviewView,
   projects: projectsView,

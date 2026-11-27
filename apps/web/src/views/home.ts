@@ -14,7 +14,7 @@ import { icon } from "../ui/icons.ts";
 import { orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
 import { answerStep, chatActivity, chatsForPalette, nodeTurns, primaryWork, runsInHand, sendMessage, startNewChat, unreadChats } from "./chat.ts";
-import { needsCount, needsItems, needsVersion, tickExpiries } from "./needs.ts";
+import { needsCount, needsItems, needsVersion } from "./needs.ts";
 import { openPlaces } from "./places.ts";
 import { openSeat, seatFace, tableOf } from "./roster.ts";
 import { editAgent, giveToAgents } from "./team-forms.ts";
@@ -268,9 +268,8 @@ export const homeView: View = (root, ctx, { scope }) => {
   }
 
   for (const source of [...workSources(ctx), ctx.live.inboxCount, ctx.live.inboxLoaded, ctx.live.pairings, ctx.live.secretRequests, ctx.live.questions, ctx.live.notices, ctx.live.loopDrafts, ctx.live.connectorRequests, ctx.live.aboutYou, ctx.live.screenSessions, ctx.live.fleet, ctx.live.teamProblem, nodeTurns, runsInHand, unreadChats, answerStep, chatActivity] as { subscribe(listener: () => void): () => void }[]) scope.add(source.subscribe(() => draw()));
-  // "4m" moves on: drawn again each minute (only what changed is); an approval's time to answer, every half minute.
+  // "4m" moves on: drawn again each minute (only what changed is).
   scope.interval(() => draw(), 60_000);
-  scope.interval(() => tickExpiries(needs), 30_000);
   draw();
   void ctx.live.refreshInbox();
 };

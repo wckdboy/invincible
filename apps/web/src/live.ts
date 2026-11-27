@@ -93,6 +93,8 @@ export function startLive(api: Api, can: (scope: AnyScope) => boolean, events: L
   let primed = false;
   let actionsPrimed = false;
 
+  // What waits for your answer and is no task's (the iPhone's): news (a notice, a fact it noticed about you) is shown in
+  // the Inbox and counted nowhere.
   const recount = () =>
     inboxCount.set(
       pairings.value.length +
@@ -100,10 +102,8 @@ export function startLive(api: Api, can: (scope: AnyScope) => boolean, events: L
         actions.value.filter((a) => isWaiting(a)).length +
         screenSessions.value.filter((s) => s.state === "waiting" || s.state === "allowed").length +
         questions.value.filter((q) => q.expires > Date.now()).length +
-        notices.value.filter((n) => !n.dismissed).length +
         loopDrafts.value.length +
-        connectorRequests.value.length +
-        aboutYou.value.length,
+        connectorRequests.value.length,
     );
   // A read that failed after the stream said its topic changed is asked again a little later (while the stream is
   // up; while it's down the slow poll has it): a hiccup on the way never leaves a place showing what was. One the node
@@ -122,11 +122,9 @@ export function startLive(api: Api, can: (scope: AnyScope) => boolean, events: L
   secretRequests.subscribe(recount);
   loopDrafts.subscribe(recount);
   connectorRequests.subscribe(recount);
-  aboutYou.subscribe(recount);
   actions.subscribe(recount);
   screenSessions.subscribe(recount);
   questions.subscribe(recount);
-  notices.subscribe(recount);
 
   async function refreshFleet(): Promise<void> {
     if (!can("mind:read")) return;

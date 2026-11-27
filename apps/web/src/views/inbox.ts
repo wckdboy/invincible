@@ -1,32 +1,23 @@
-import type { ActionView, LoopDraftView, LoopView, NoticeView, QuestionField, QuestionView, ScreenSessionView } from "@invincible/core";
-import { isNotifyActionId } from "@invincible/core/notify-payload";
-import { type Ctx, errorMessage, type View } from "../context.ts";
-import { isWaiting } from "../live.ts";
-import { noticeFrom } from "../lib/notices.ts";
+import type { ActionView, LoopDraftView, LoopView, QuestionField, QuestionView, ScreenSessionView } from "@invincible/core";
+import { type Ctx, errorMessage } from "../context.ts";
 import { callerName, defaultLabel, deleteName, rowsFromCall } from "../lib/orders.ts";
 import { hlcMs, relativeTime } from "../lib/time.ts";
 import type { ActionClass } from "../types.ts";
-import { badge, busy, button, callout, card, disclosure, empty, field, formActions, linkButton, listRow, note, onePrimary, pageBody, pageHead, rows, section, skeletonRows, type Tone } from "../ui/controls.ts";
+import { badge, busy, button, callout, card, empty, field, formActions, listRow, note, rows, type Tone } from "../ui/controls.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
-import { h, keepPlace, prefersReducedMotion, replace } from "../ui/dom.ts";
+import { h, replace } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { toast } from "../ui/toast.ts";
-import { factRow } from "./about-you.ts";
 import { CLASS_INFO, deviceName } from "./activity.ts";
-import { connectorRequestCard } from "./connectors.ts";
-import { openInvite, pairingCard } from "./fleet.ts";
 import { describeWakes } from "../lib/wakes.ts";
-import { describeTask, findingRow, loopsChanged, showHookSecret } from "./loops.ts";
-import { reachNote } from "./notifications.ts";
+import { describeTask, loopsChanged, showHookSecret } from "./loops.ts";
 import { openOrderFromAction } from "./orders.ts";
-import { secretRequestCard } from "./vault.ts";
 
 /*
- * Everything that needs the owner, in one place: devices asking to join,
- * credentials the primary asked for, actions its policy makes it ask about, and
- * what the heartbeat noticed. Approvals scale with stakes: a phone is one click
- * after comparing codes; a machine asks once more; an outward action is shown
- * in full and confirmed; a delete makes you type what it deletes.
+ * The Inbox's cards: each thing that needs the owner whole, as Needs you opens it in a sheet (views/needs.ts, the page):
+ * an approval, a loop it drafted, a service's question, its use of a Mac, and what was decided lately. Approvals scale
+ * with stakes: a phone is one click after comparing codes; a machine asks once more; an outward action is shown in full
+ * and confirmed; a delete makes you type what it deletes.
  */
 
 const STATE: Record<ActionView["state"], { label: string; tone: Tone }> = {
@@ -394,7 +385,8 @@ export function questionCard(ctx: Ctx, q: QuestionView): HTMLElement {
   );
 }
 
-function decidedRow(ctx: Ctx, action: ActionView): HTMLElement {
+/** An approval that was answered, or expired, as Recent decisions lists it: what, how it ended, who asked, and how. */
+export function decidedRow(ctx: Ctx, action: ActionView): HTMLElement {
   const state = STATE[action.state] ?? { label: action.state, tone: "neutral" as Tone };
   const asked = hlcMs(action.requestedAt);
   return listRow({
@@ -417,248 +409,3 @@ function decidedRow(ctx: Ctx, action: ActionView): HTMLElement {
     body: action.receipt ? h("details", { class: "process" }, h("summary", { "data-key": `receipt:${action.id}` }, icon("chevron-right", { size: 14, class: "chev" }), "Receipt"), h("pre", { class: "result process-body" }, action.receipt)) : null,
   });
 }
-
-export const inboxView: View = (root, ctx, { scope, opts }) => {
-  // An approval named in the address (#/inbox?a=…, a notification's or a link's): its card first, brought into view
-  // once and marked a moment; one no longer waiting says so.
-  const picked = opts.approval && isNotifyActionId(opts.approval) ? opts.approval : null;
-  const pickedNote = h("div");
-  let brought = false;
-  const pairingsBox = h("div", { class: "stack" });
-  const requestsBox = h("div", { class: "stack" });
-  const draftsBox = h("div", { class: "stack" });
-  const connectorsBox = h("div", { class: "stack" });
-  const actionsBox = h("div", { class: "stack" });
-  const screenBox = h("div", { class: "stack" });
-  const questionsBox = h("div", { class: "stack" });
-  const noticesBox = card({ flush: true });
-  const historyRows = rows();
-  const historySummary = h("span", { class: "small strong" });
-  const allClear = h("div");
-  const admin = ctx.can("fleet:admin");
-  const vault = ctx.can("vault:read");
-  const read = ctx.can("mind:read");
-
-  const waiting = () => ctx.live.actions.value.filter((a) => isWaiting(a));
-  const openScreen = () => ctx.live.screenSessions.value.filter((x) => x.state === "waiting" || x.state === "allowed");
-  const openQuestions = () => ctx.live.questions.value.filter((q) => q.expires > Date.now());
-  const openNotices = () => ctx.live.notices.value.filter((n) => !n.dismissed);
-
-  async function dismiss(n: NoticeView, trigger: HTMLButtonElement): Promise<void> {
-    await busy(trigger, async () => {
-      try {
-        await ctx.api.post("/api/notices/dismiss", { key: n.key });
-        toast("Dismissed", { description: "It stays quiet until it changes." });
-        await ctx.live.refreshNotices();
-      } catch (error) {
-        toast("Couldn't dismiss it", { tone: "error", description: errorMessage(error) });
-      }
-    });
-  }
-
-  // Each list re-renders only when it changes, so a half-typed key in a request card survives a new pairing.
-  const renderPairings = () => {
-    const pairings = ctx.live.pairings.value;
-    replace(pairingsBox, ...pairings.map((p) => pairingCard(ctx, p)));
-    pairingsSection.hidden = !admin || !pairings.length;
-    renderAllClear();
-  };
-  const renderRequests = () => {
-    const requests = ctx.live.secretRequests.value;
-    replace(requestsBox, ...requests.map((r) => secretRequestCard(ctx, r)));
-    requestsSection.hidden = !vault || !requests.length;
-    renderAllClear();
-  };
-  let shownWaiting = "";
-  const renderActions = () => {
-    const list = waiting();
-    // Cards are rebuilt only when what waits changes, not when the history moves on.
-    const signature = JSON.stringify(list);
-    if (signature !== shownWaiting) {
-      shownWaiting = signature;
-      const first = picked ? [...list.filter((a) => a.id === picked), ...list.filter((a) => a.id !== picked)] : list;
-      replace(actionsBox, ...first.map((a) => Object.assign(actionCard(ctx, a), { id: `action-${a.id}` })));
-    }
-    replace(pickedNote, picked && ctx.live.inboxLoaded.value && !list.some((a) => a.id === picked) ? callout("quiet", "That approval isn't waiting any more: it was answered, or it expired (no answer in 24 hours means no). What was decided is under Recent decisions.") : null);
-    if (picked && !brought) bring(picked);
-    actionsSection.hidden = !list.length;
-    const decided = ctx.live.actions.value.filter((a) => !isWaiting(a)).slice(0, 6);
-    keepPlace(historyRows, () => replace(historyRows, ...decided.map((a) => decidedRow(ctx, a))));
-    historySummary.textContent = `Recent decisions (${decided.length})`;
-    history.hidden = !decided.length;
-    renderAllClear();
-  };
-  const renderNotices = () => {
-    const list = openNotices();
-    // Dismissing is yours alone: it needs fleet:admin, which agents never hold.
-    const write = ctx.can("fleet:admin");
-    replace(
-      noticesBox,
-      rows(
-        ...list.map((n) =>
-          findingRow(
-            ctx,
-            // What a rule of yours told you leads with a bell, as in the iPhone and Mac apps.
-            n.severity === "info" && n.source.startsWith("rule:") ? { ...n, icon: "bell" } : n,
-            [h("span", {}, noticeFrom(n.source)), h("span", { title: new Date(n.at).toLocaleString() }, relativeTime(n.at))],
-            write ? button("Dismiss", { size: "sm", variant: "ghost", icon: "x", label: `Dismiss: ${n.title}`, onClick: (event) => void dismiss(n, event.currentTarget as HTMLButtonElement) }) : null,
-          ),
-        ),
-      ),
-    );
-    noticesSection.hidden = !list.length;
-    renderAllClear();
-  };
-
-  let shownScreen = "";
-  // (Drawn again only when a question comes or goes: what you've half filled in stays.)
-  let shownQuestions = "";
-  const renderQuestions = () => {
-    const list = openQuestions();
-    const signature = JSON.stringify(list.map((q) => q.id));
-    if (signature !== shownQuestions) {
-      shownQuestions = signature;
-      replace(questionsBox, ...list.map((q) => questionCard(ctx, q)));
-    }
-    questionsSection.hidden = !list.length;
-    renderAllClear();
-  };
-  const renderScreen = () => {
-    const list = openScreen();
-    const signature = JSON.stringify(list);
-    if (signature !== shownScreen) {
-      shownScreen = signature;
-      replace(screenBox, ...list.map((x) => screenSessionCard(ctx, x)));
-    }
-    screenSection.hidden = !list.length;
-    renderAllClear();
-  };
-
-  const renderDrafts = () => {
-    const drafts = ctx.live.loopDrafts.value;
-    replace(draftsBox, ...drafts.map((d) => loopDraftCard(ctx, d)));
-    draftsSection.hidden = !drafts.length;
-    renderAllClear();
-  };
-
-  const renderAboutYou = () => {
-    const facts = ctx.live.aboutYou.value;
-    replace(aboutYouBox, ...facts.map((m) => factRow(ctx, m, true)));
-    aboutYouSection.hidden = !facts.length;
-    renderAllClear();
-  };
-
-  const renderConnectorRequests = () => {
-    const requests = ctx.live.connectorRequests.value;
-    replace(connectorsBox, ...requests.map((r) => connectorRequestCard(ctx, r)));
-    connectorsSection.hidden = !requests.length;
-    renderAllClear();
-  };
-
-  /** The picked approval's card, into view once the page shows it (it waits to be shown whole), and marked a moment. */
-  const bring = (id: string, tries = 30): void => {
-    const card = document.getElementById(`action-${id}`);
-    if (!card) return;
-    if (!card.getClientRects().length) {
-      if (tries > 0) scope.timeout(() => bring(id, tries - 1), 100);
-      return;
-    }
-    brought = true;
-    card.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-    card.classList.add("is-picked");
-    scope.timeout(() => card.classList.remove("is-picked"), 2400);
-  };
-  const renderAllClear = () => {
-    // One primary on the page, whichever part was drawn again: the first decision (ui/controls.ts onePrimary).
-    onePrimary(root);
-    const pending = ctx.live.pairings.value.length + ctx.live.secretRequests.value.length + waiting().length + openNotices().length + ctx.live.loopDrafts.value.length + ctx.live.aboutYou.value.length + ctx.live.connectorRequests.value.length + openScreen().length + openQuestions().length;
-    // Until the first answer, a skeleton: "nothing needs you" would be a guess, and pushed away a moment later.
-    const loaded = ctx.live.inboxLoaded.value;
-    allClear.hidden = loaded && pending > 0;
-    replace(
-      allClear,
-      !loaded
-        ? card({ flush: true }, skeletonRows(2, { avatar: true }))
-        : pending === 0
-        ? card(
-            { flush: true },
-            empty({
-              icon: "check-circle",
-              title: "Nothing needs you",
-              body: "When a device asks to join, your agent needs a credential or a connector, or wants to do something its policy says to ask about, or the heartbeat spots trouble, it waits here.",
-              actions: admin ? button("Pair a device", { icon: "plus", onClick: () => openInvite(ctx, "client") }) : null,
-            }),
-          )
-        : null,
-    );
-  };
-
-  const pairingsSection = section("Devices asking to join", {}, pairingsBox);
-  const screenSection = section("Its use of a Mac itself", {}, screenBox);
-  const questionsSection = section("Services ask you", { note: "An MCP server asked you something in the middle of a call of your agent's. Only you answer it, never a model; what you send goes to that service alone." }, questionsBox);
-  const actionsSection = section(
-    "Your agent asks for your approval",
-    { note: "What spends money, speaks for you, or can't be undone (anything outward, every delete) waits for you unless a standing order answers it; its agents' work in the repositories you gave them it approves itself. Approved, it's sent once; no answer in 24 hours means no." },
-    actionsBox,
-  );
-  const requestsSection = section("Credentials your agent asked for", {}, requestsBox);
-  const go = (text: string, place: string) => linkButton(text, `#/${place}`, { variant: "ghost", size: "sm", next: true });
-  const connectorsSection = section(
-    "Connectors asked for",
-    { actions: go("Connectors", "connectors"), note: "A service your agent or an agent needs and doesn't have. Asking installs nothing; once you add it, every one of them can use it." },
-    connectorsBox,
-  );
-  const draftsSection = section("Loops your agent drafted", { actions: go("Loops", "loops"), note: "You asked in chat for something on a schedule. Each runs only once you add it." }, draftsBox);
-  const aboutYouBox = h("div", { class: "card rows" });
-  const aboutYouSection = section(
-    "Facts it noticed about you",
-    { actions: go("Memory", "memory"), note: "Each goes with every answer of its once you keep it, in your words if you like. Until then it is only its note." },
-    aboutYouBox,
-  );
-  const noticesSection = section("Noticed", { actions: go("Loops", "loops") }, noticesBox);
-  // Kept across re-renders so it stays open while the outbox changes.
-  const history = disclosure(historySummary, { flush: true, hidden: true }, historyRows);
-  // First, while it matters: that it can't reach this device when the primary is closed, and the one thing to do.
-  const reach = reachNote(ctx, scope);
-
-  replace(
-    root,
-    h(
-      "div",
-      { class: "page narrow" },
-      pageHead("Inbox", "Everything that needs you. Nothing here happens without your say."),
-      // Shown whole once the Inbox has been read: what waits comes in at once, not section by section.
-      pageBody(pickedNote, reach.el, allClear, pairingsSection, screenSection, questionsSection, actionsSection, requestsSection, connectorsSection, draftsSection, aboutYouSection, noticesSection, read ? history : null),
-    ),
-  );
-
-  scope.add(ctx.live.pairings.subscribe(renderPairings));
-  scope.add(ctx.live.secretRequests.subscribe(renderRequests));
-  scope.add(ctx.live.loopDrafts.subscribe(renderDrafts));
-  scope.add(ctx.live.connectorRequests.subscribe(renderConnectorRequests));
-  scope.add(ctx.live.aboutYou.subscribe(renderAboutYou));
-  scope.add(ctx.live.actions.subscribe(renderActions));
-  scope.add(ctx.live.screenSessions.subscribe(renderScreen));
-  scope.add(ctx.live.questions.subscribe(renderQuestions));
-  scope.add(ctx.live.notices.subscribe(renderNotices));
-  scope.add(ctx.live.inboxLoaded.subscribe(renderAllClear));
-  renderPairings();
-  renderRequests();
-  renderDrafts();
-  renderConnectorRequests();
-  renderAboutYou();
-  renderActions();
-  renderQuestions();
-  renderNotices();
-  void ctx.live.refreshInbox();
-  // Each part is read again as the node's live stream says it changed (live.ts); while that stream is down, the whole
-  // Inbox every two seconds while it is open.
-  scope.add(ctx.live.follow([], () => ctx.live.refreshInbox(), 2000));
-  // Deadlines tick without a re-render (that would lose a half-made decision).
-  scope.interval(() => {
-    for (const el of root.querySelectorAll<HTMLElement>(".expires")) {
-      const at = Number(el.dataset.expires);
-      el.textContent = at > Date.now() ? `Expires ${relativeTime(at)}` : "Expired";
-    }
-  }, 30_000);
-};
