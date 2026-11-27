@@ -557,16 +557,19 @@ export class LedgerStore {
 
   /**
    * Whether an event's signer is known here, so the event enters the log (to be applied or refused there), not parked:
-   * the founder, or a device an enrollment in this log names, whether apply took that enrollment or refused it. So an
-   * enrollment refused only after the fact (its enroller revoked late, or forked below it) leaves its device's events
+   * the founder, as the genesis in this log names it, or a device an enrollment in this log names, whether apply took
+   * the one or the other or refused it. So an enrollment refused only after the fact (its enroller revoked late, or
+   * forked below it), or the genesis itself (the founder's chain forked at its root), leaves every other device's events
    * in every replica's log alike, refused alike: which events a replica logs turns only on which it has, never on the
-   * order they came in (the review of log-strict, F1). Known is never undone, as nothing leaves the log.
+   * order they came in (the review of log-strict, F1; the final re-check of the v2 stack, RC-2). Known is never undone,
+   * as nothing leaves the log.
    */
   private knownSigner(event: GEvent): boolean {
     if (event.kind === "fleet.genesis") return true;
-    const genesis = this.genesis;
-    if (!genesis) return false;
-    if (genesis.device === event.device || this.device(event.device)) return true;
+    const fleet = this.fleet;
+    const founder = fleet ? this.db.query<{ device: string }, [string]>("SELECT device FROM events WHERE id = ? AND kind = 'fleet.genesis'").get(fleet)?.device : undefined;
+    if (!founder) return false;
+    if (founder === event.device || this.device(event.device)) return true;
     return !!this.db
       .query<{ one: number }, [string]>("SELECT 1 AS one FROM events WHERE kind = 'device.enrolled' AND json_extract(raw, '$.body.device') = ? LIMIT 1")
       .get(event.device);

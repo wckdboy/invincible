@@ -162,12 +162,14 @@ The review also confirmed what held up:
       every replica: a weak key's forgery stamped before the cutoff is taken as it always was, one stamped after is
       refused (`strict-keys.test.ts`, "the log, from the cutoff"). What an honest node signs always holds the rule.
     - **What it doesn't:** whether a replica logs an event also turns on whether its signer is known there: the
-      founder, or a device an enrollment in that replica's log names, whether apply took that enrollment or refused it
-      (`knownSigner`); until then it is parked, never applied and never relayed. So which events a replica logs turns
-      only on which it holds, never on the order they came in: an enrollment refused only after the fact (its enroller
-      revoked late, or the enroller's own chain forked below it) leaves its device's events in every replica's log
-      alike, refused alike (the review of log-strict, F1: `enrolled-after-the-fact.test.ts`), and so does a weak key's
-      enrollment refused from the cutoff (F2: `strict-keys.test.ts`).
+      founder, as the genesis in that replica's log names it, or a device an enrollment in that log names, whether
+      apply took the genesis and that enrollment or refused them (`knownSigner`); until then it is parked, never applied
+      and never relayed. So which events a replica logs turns only on which it holds, never on the order they came in:
+      an enrollment refused only after the fact (its enroller revoked late, or the enroller's own chain forked below
+      it) leaves its device's events in every replica's log alike, refused alike (the review of log-strict, F1:
+      `enrolled-after-the-fact.test.ts`), and so does the genesis refused after the fact (the founder's chain forked at
+      its root: the final re-check of the v2 stack, RC-2) and a weak key's enrollment refused from the cutoff (F2:
+      `strict-keys.test.ts`).
     - **Residual:** an event may claim an HLC before the cutoff, so the rule binds a forgery only by when it says it was
       made. A key that fails the rule gets in only by being enrolled before the cutoff: by any node before 27 November
       2026, or since then by a node still on an older release, with your approval of its pairing. Once in, as a full

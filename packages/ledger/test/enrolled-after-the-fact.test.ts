@@ -110,3 +110,36 @@ test("its enroller forks its own chain below it: the node it enrolled, and what 
   b.ingest([...events, other]);
   converged(a, b);
 });
+
+// The final re-check of the v2 stack, RC-2: the founder is known from its genesis in the log, not from the genesis
+// applied. A fork of the founder's own chain at its root (a second first event) refuses the genesis after the fact, and
+// with the applied one gone, a replica that had the fork first parked every other device's events for good.
+test("the founder forks its own chain at its root: what the others wrote is logged alike on every replica", () => {
+  let now = Date.UTC(2026, 10, 20);
+  const founder = newNodeIdentity();
+  const x = newNodeIdentity();
+  const sF = new LedgerStore(":memory:", new HlcClock(() => now));
+  const fleet = foundFleet(sF, founder, { fleetName: "homelab", nodeName: "f" });
+  now += 1_000;
+  enrollDevice(sF, founder, { device: x.id, name: "x", kind: "node", box: b64u(x.boxPublic) });
+  const sX = new LedgerStore(":memory:", new HlcClock(() => now));
+  sX.expectFleet(fleet);
+  sX.ingest(sF.eventsSince({}, 10_000).events);
+  now += 1_000;
+  const note = sX.emit(x, "memory.added", { text: "x's note" });
+  const root = signEvent({ v: 2, fleet, hlc: encodeHlc({ ms: now + 1_000, counter: 0 }), device: founder.id, prev: null, kind: "memory.added", body: { text: "a second first event" } }, founder);
+  const events = [...sF.eventsSince({}, 10_000).events, note];
+  const replica = () => {
+    const store = new LedgerStore(":memory:", new HlcClock(() => now));
+    store.expectFleet(fleet);
+    return store;
+  };
+  const a = replica();
+  a.ingest(events); // x's note logged while the genesis stands
+  a.ingest([root]); // then the fork, which refuses the genesis
+  const b = replica();
+  b.ingest([...events, root]);
+  expect([a.rejection(fleet), b.rejection(fleet)]).toEqual(["the device forked its own chain (equivocation)", "the device forked its own chain (equivocation)"]);
+  converged(a, b);
+  expect(b.event(note.id)).not.toBeNull();
+});
