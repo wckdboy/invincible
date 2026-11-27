@@ -164,7 +164,7 @@ struct ChatView: View {
         }
         // Shown, what it answered in it is read (and stops being new everywhere); gone from the screen, nothing more is.
         .onAppear {
-            if chat.read == nil { chat.read = { [weak session] id in session?.noteRead(id) } }
+            if chat.read == nil { chat.read = Self.noting(session) }
             chat.onScreen = true
             chat.markRead(with: session.client)
         }
@@ -175,6 +175,13 @@ struct ChatView: View {
             composerWanted.wrappedValue = false
             composing = true
         }
+    }
+
+    /// What a chat tells as its answers are read: the session's list of chats with something new, the session held weakly
+    /// (it holds its own chat, which keeps this). Made apart from the view's closure, which holds the session strongly
+    /// itself: made there, Swift warns that the weak hold inside it differs from that one (ImplicitStrongCapture).
+    private static func noting(_ session: Session) -> (String) -> Void {
+        { [weak session] id in session?.noteRead(id) }
     }
 
     /// A side question, asked apart: about this kept chat, or the turn under way in a new one; nothing yet, said so.
