@@ -753,6 +753,11 @@
       .btn.lg { height: 42px; padding: 0 var(--sp-5); font-size: var(--fs-14); border-radius: 10px; }
       .btn.icon-only { width: var(--control-h); padding: 0; }
       .btn.sm.icon-only { width: var(--control-h-sm); }
+      /* The one answer a task or a decision offers in place (the iPhone's capsule): unfilled, in the text's ink on a light
+         fill, so the screen's one filled button stays its own. (After .btn.sm, whose size it changes; on a touch screen
+         its ::after makes it 44 px to a finger.) */
+      .btn.answer { --btn-bg: var(--surface-3); --btn-fg: var(--text); --btn-border: transparent; box-shadow: none; border-radius: var(--r-full); padding-inline: 16px; font-size: var(--fs-14); font-weight: 650; }
+      .btn.answer:hover { --btn-bg: var(--border-strong); }
       .btn.block { width: 100%; }
       .btn .spinner { width: 14px; height: 14px; }
       .btn[aria-busy="true"] > :not(.spinner) { opacity: 0.6; }
@@ -1560,28 +1565,41 @@
       .team-member-choices, .team-dependency-choices { display: flex; flex-direction: column; gap: var(--sp-2); max-height: 240px; overflow: auto; }
       .team-member-choice { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-md); }
       .team-member-choice .meta { display: block; }
-      /* A task is a card in the timeline: where it stands; while it runs, its latest lines; once it has ended, how. */
-      /* A task's card in a timeline: filled one step off the page, as every card is, never outlined. */
-      .team-task { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--card-pad); border: 1px solid transparent; border-radius: var(--r-xl); background: var(--surface-2); }
+      /* A task where it was given, between hairlines (the iPhone's TaskCardView, I10: no cards): its title row opens its
+         thread; small lines under it; its one answer last, the rest under its ⋯. */
+      .team-task { display: flex; flex-direction: column; gap: 4px; padding-top: var(--sp-1); border-top: 1px solid var(--border); }
       /* A task opened from Work, marked a moment where it is (views/team.ts): a ring of its own, fading. */
-      .team-task.is-focus { box-shadow: 0 0 0 2px var(--work); transition: box-shadow 1.2s ease-out; }
+      .team-task.is-focus { border-radius: var(--r-md); box-shadow: 0 0 0 2px var(--work); transition: box-shadow 1.2s ease-out; }
       /* An approval its address named (#/inbox?a=…): ringed a moment as it comes into view. */
       .card.is-picked { box-shadow: 0 0 0 2px var(--focus); transition: box-shadow 1.2s ease-out; }
-      .task-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
-      .task-head strong { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+      .task-head { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+      .task-open { flex: 1; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 44px; color: inherit; text-decoration: none; }
+      .task-title { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-15); font-weight: 600; }
+      .task-open:hover .task-title { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+      .task-standing { flex: none; display: inline-flex; align-items: center; gap: 3px; color: var(--text-2); font-size: var(--fs-12); }
+      .task-standing[data-strong="true"] { font-weight: 650; }
+      .task-standing[data-tone="proven"] { color: var(--text); }
+      .task-standing[data-tone="failed"] { color: var(--danger); }
+      .task-chev { flex: none; color: var(--text-3); }
+      @media (pointer: coarse) { .task-more.selector-trigger { width: 44px; height: 44px; } }
+      /* Where a pointer can hover, a timeline's ⋯ are out of sight at rest: the one of the task under it, or in focus, shows
+         (its place is kept, so nothing moves). A finger has them all. */
+      @media (hover: hover) and (pointer: fine) {
+        .team-task .task-more:not([aria-expanded="true"]) { opacity: 0; }
+        .team-task:is(:hover, :focus-within) .task-more { opacity: 1; }
+      }
       .task-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; color: var(--text-3); font-size: var(--fs-12); }
-      /* Its latest six lines (TAIL, views/task-card.ts), in a box that is six lines tall from the start: lines arriving fill it, they don't grow the card. */
-      .task-trail { display: flex; flex-direction: column; gap: 2px; min-height: calc(6 * 1.55 * var(--fs-12) + 5 * 2px + 2 * var(--sp-2)); padding: var(--sp-2) var(--sp-3); background: var(--bg-sunken); border-radius: var(--r-md); font: var(--fs-12)/1.55 var(--font-mono); color: var(--text-2); }
-      .task-trail-line { display: flex; gap: 1ch; min-width: 0; white-space: nowrap; }
-      .task-trail-line > .ellipsis { min-width: 0; }
-      .task-trail-line:last-child { color: var(--text); }
+      .task-goal { font-size: var(--fs-14); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
+      .task-gates { display: flex; align-items: baseline; gap: 6px; color: var(--text-2); font: var(--fs-12)/1.5 var(--font-mono); overflow-wrap: anywhere; }
+      .task-gates > svg { flex: none; align-self: center; }
+      .task-gates > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+      /* Its latest line, two lines tall from the start: a line arriving or lengthening fills it, it doesn't grow the card. */
+      .task-latest { min-height: 3em; color: var(--text-2); font: var(--fs-12)/1.5 var(--font-mono); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+      .task-why { color: var(--text-2); font-size: var(--fs-13); line-height: 1.5; overflow-wrap: anywhere; }
       .task-said { color: var(--text-2); font-size: var(--fs-13); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
       .task-kept { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-12); color: var(--text-2); }
       .task-kept a { color: var(--accent); }
-      .task-foot { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; margin-top: 2px; }
-      .team-task-details > summary { color: var(--text-2); font-size: var(--fs-12); cursor: pointer; padding: 3px 0; }
-      .team-task-details[open] > summary { margin-bottom: var(--sp-3); }
-      .team-output { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; padding: var(--sp-3); background: var(--bg-sunken); border-radius: var(--r-md); font: var(--fs-12)/1.6 var(--font-mono); }
+      .task-answers { display: flex; align-items: center; gap: var(--sp-2); margin-top: 4px; }
       /* An agent's desktop in its Workspace: its screen as a picture (a click on it clicks there), then the ways to take it over. */
       .desktop h3 { font-size: var(--fs-15); }
       .desktop-shot { aspect-ratio: 16 / 10; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--bg-sunken); }
@@ -1608,7 +1626,7 @@
       }
       .team-head .workspace-toggle[aria-pressed="true"] { --btn-bg: var(--surface-3); }
       :root[data-keyboard="open"] .team-layout { height: calc(100dvh - var(--topbar-h)); }
-      @media (pointer: coarse) { .team-member-choice, .team-task-details > summary { min-height: 44px; } }
+      @media (pointer: coarse) { .team-member-choice { min-height: 44px; } }
       /* An agent in its seat (ui/avatar.ts seat()): its face, still, in the room its ring once took (so a row keeps its
          height). No ring and no disc round it since 26 November 2026 (a ring round a lit middle read as a nipple): its
          state is said beside it, in words and its colour. */

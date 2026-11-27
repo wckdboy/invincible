@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTask } from "@invincible/core/team";
-import { givenLine, keptChanges, proposedLine, sensitiveLine, steppedLine, taskActions, taskBadge, taskEnd } from "./task-card.ts";
+import { gatesLine, givenLine, keptChanges, latestLine, proposedLine, sensitiveLine, steppedLine, taskActions, taskAnswers, taskBadge, taskEnd, taskStanding } from "./task-card.ts";
 
 const task = (status: TeamTask["status"], more: Partial<TeamTask> = {}): TeamTask => ({ id: "task-abcdefghijkl", room: "dm-ada", assignee: "ada", title: "Fix the importer", goal: "Fix it", dependsOn: [], gates: ["bun test"], status, verified: status === "done", progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, ...more });
 /** A task's output as the runner writes it: the agent's summary, then the review and where it worked. */
@@ -110,5 +110,60 @@ describe("how you stepped in on a task (#28)", () => {
     expect(steppedLine({ interventions: {} })).toBeNull();
     expect(steppedLine({ interventions: { approval: 1, message: 2 } })).toBe("You stepped in: an approval and two messages");
     expect(steppedLine({ interventions: { again: 1 } })).toBe("You stepped in: given again");
+  });
+});
+
+describe("a task where it was given, as the iPhone's TaskCardView says it (I10)", () => {
+  const changes = { artifact: "art_AAAAAAAAAAAAAAAAAAAAAA", files: 2, base: "a".repeat(40) };
+  const statuses = ["proposed", "queued", "running", "done", "failed", "stopped", "interrupted"] as const;
+
+  test("one answer in full, the rest a tap further; none for work in hand, nor for verified work with nothing to ship", () => {
+    expect(taskAnswers(task("proposed"))).toEqual({ prominent: "approve", rest: ["decline"] });
+    expect(taskAnswers(task("queued"))).toEqual({ prominent: null, rest: ["stop"] });
+    expect(taskAnswers(task("running"))).toEqual({ prominent: null, rest: ["stop"] });
+    expect(taskAnswers(task("done", { verified: false }))).toEqual({ prominent: "again", rest: [] });
+    expect(taskAnswers(task("done", { verified: true, changes }))).toEqual({ prominent: "ship", rest: ["again"] });
+    expect(taskAnswers(task("done", { verified: true, changes, fix: { connector: "github", owner: "example", repo: "app", branch: "fix-1", pr: 7, head: "b".repeat(40) } }))).toEqual({ prominent: null, rest: ["again"] });
+    expect(taskAnswers(task("done", { verified: true }))).toEqual({ prominent: null, rest: ["again"] });
+    expect(taskAnswers(task("failed", { verified: false }))).toEqual({ prominent: "again", rest: ["resume"] });
+    expect(taskAnswers(task("stopped", { verified: false }))).toEqual({ prominent: "resume", rest: ["again"] });
+    expect(taskAnswers(task("interrupted", { verified: false }))).toEqual({ prominent: "resume", rest: ["again"] });
+  });
+
+  test("its answers are the ones it always had, and verified work can be given again besides", () => {
+    for (const status of statuses) {
+      for (const verified of [true, false]) {
+        for (const kept of [changes, undefined]) {
+          const t = task(status, { verified, ...(kept ? { changes: kept } : {}) });
+          const { prominent, rest } = taskAnswers(t);
+          const offered = [...(prominent ? [prominent] : []), ...rest].sort();
+          const had = [...new Set([...taskActions(t), ...(status === "done" && verified ? (["again"] as const) : [])])].sort();
+          expect([status, verified, Boolean(kept), offered]).toEqual([status, verified, Boolean(kept), had]);
+          expect(new Set(offered).size).toBe(offered.length);
+        }
+      }
+    }
+  });
+
+  test("how it stands: its word while in hand, its verdict as its proof allows once it ended, never Verified", () => {
+    expect(taskStanding(task("proposed"))).toEqual({ word: "Waits for you", tone: "active", strong: true });
+    expect(taskStanding(task("running"))).toEqual({ word: "Working", tone: "active", strong: false });
+    expect(taskStanding(task("queued"))).toEqual({ word: "Queued", tone: "quiet", strong: false });
+    expect(taskStanding(task("interrupted", { verified: false }))).toEqual({ word: "Interrupted", tone: "active", strong: true });
+    // Verified, with no record of what its gates showed: reviewed, not "Verified".
+    expect(taskStanding(task("done", { verified: true }))).toEqual({ word: "Reviewed", tone: "quiet", strong: true });
+    expect(taskStanding(task("done", { verified: false }))).toEqual({ word: "Not verified", tone: "quiet", strong: true });
+    expect(taskStanding(task("failed", { verified: false, error: "gave-up" }))).toEqual({ word: "Gave up", tone: "failed", strong: true });
+    expect(taskStanding(task("failed", { verified: false }))).toEqual({ word: "Failed", tone: "failed", strong: true });
+    expect(taskStanding(task("stopped", { verified: false }))).toEqual({ word: "Stopped", tone: "quiet", strong: true });
+    for (const status of statuses) expect(taskStanding(task(status)).word).not.toBe("Verified");
+  });
+
+  test("a proposal says what proves it in a line; a running task its latest line, the first of its progress", () => {
+    expect(gatesLine(["bun test"])).toBe("Done when bun test passes");
+    expect(gatesLine(["bun test", "bun run lint"])).toBe("Done when bun test · bun run lint pass");
+    expect(gatesLine([])).toBeNull();
+    expect(latestLine(task("running", { progress: "  Running bun test\nthen the lint  " }))).toBe("Running bun test");
+    expect(latestLine(task("running", { progress: "" }))).toBe("");
   });
 });

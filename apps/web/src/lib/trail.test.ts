@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamTrailEntry } from "@invincible/core/team";
-import { emptyTrail, takeTrail, trailNext, trailTail, type TrailPage } from "./trail.ts";
+import { emptyTrail, takeTrail, trailNext, type TrailPage } from "./trail.ts";
 
 const line = (n: number, text = `line ${n}`): TeamTrailEntry => ({ n, at: 1000 + n, text });
 const page = (entries: TeamTrailEntry[], status: TrailPage["task"]["status"] = "running", more = false): TrailPage => ({ task: { id: "task-abcdefghijkl", status }, entries, more });
@@ -46,18 +46,5 @@ describe("reading a task's trail a page at a time", () => {
     // A node that says there is more and sends nothing new is not asked again in a tight loop.
     expect(trailNext(page([], "running", true), false)).toBe("wait");
     expect(trailNext(page([], "done", true), false)).toBe("done");
-  });
-});
-
-describe("a running task's latest lines, on its card", () => {
-  test("the last few, oldest first, each as one line that says how much more it holds", () => {
-    const trail = takeTrail(emptyTrail(), page([line(1), line(2, "Running · bun test"), line(3, "Exit 1 · 2 fail\n  expected 4\n  got 5\n"), line(4, "  \nGate 1/1 · exit 0 · bun test")]));
-    expect(trailTail(trail, 3)).toEqual([
-      { n: 2, text: "Running · bun test", more: 0 },
-      { n: 3, text: "Exit 1 · 2 fail", more: 2 },
-      { n: 4, text: "Gate 1/1 · exit 0 · bun test", more: 0 },
-    ]);
-    expect(trailTail(trail, 10).map((l) => l.n)).toEqual([1, 2, 3, 4]);
-    expect(trailTail(emptyTrail(), 3)).toEqual([]);
   });
 });

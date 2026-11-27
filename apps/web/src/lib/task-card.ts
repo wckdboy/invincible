@@ -1,5 +1,6 @@
 import { interventionWords } from "@invincible/core/interventions";
 import type { TeamTask } from "@invincible/core/team";
+import { factsOfRecord, verdictOf } from "./steps.ts";
 
 /*
  * What a task's card says, in words (pure: no DOM). Where it stands, how it ended and why, what the agent
@@ -58,6 +59,53 @@ export function taskActions(task: Pick<TeamTask, "status" | "verified" | "change
   if (task.status === "done") return !task.verified ? ["again"] : task.changes && !task.fix && !task.shipped ? ["ship"] : [];
   return ["resume", "again"];
 }
+
+/**
+ * The one answer a task offers in full on its card (as its thread's prominent button), and the rest, a tap further (the
+ * iPhone's TaskCard.answers, I10): a proposal approved, work cut short resumed, verified work shipped, work that wasn't
+ * verified given again; declining, stopping and the others in its menu. Work in hand, or verified with nothing to ship,
+ * has no answer in full: a list of ten queued tasks isn't ten Stops.
+ */
+export function taskAnswers(task: Pick<TeamTask, "status" | "verified" | "changes" | "fix" | "shipped">): { prominent: TaskAction | null; rest: TaskAction[] } {
+  switch (task.status) {
+    case "proposed":
+      return { prominent: "approve", rest: ["decline"] };
+    case "queued":
+    case "running":
+      return { prominent: null, rest: ["stop"] };
+    case "done":
+      if (!task.verified) return { prominent: "again", rest: [] };
+      return { prominent: task.changes && !task.fix && !task.shipped ? "ship" : null, rest: ["again"] };
+    case "failed":
+      return { prominent: "again", rest: ["resume"] };
+    case "stopped":
+    case "interrupted":
+      return { prominent: "resume", rest: ["again"] };
+  }
+}
+
+/**
+ * How a task stands on its card, beside its title (the iPhone's TaskCardView): while it is in hand its word, Waits for
+ * you, Working, Queued or Interrupted; once it has ended its verdict as its proof allows (lib/steps.ts verdictOf),
+ * never "Verified". `tone`: "proven" in ink with its check, "failed" in red, "active" and "quiet" in the secondary ink.
+ */
+export function taskStanding(task: Pick<TeamTask, "status" | "verified" | "record" | "error">): { word: string; tone: "proven" | "failed" | "active" | "quiet"; strong: boolean } {
+  const verdict = verdictOf(task, factsOfRecord(task.record));
+  if (verdict) {
+    const failed = verdict.verdict === "failed" || verdict.verdict === "rejected" || verdict.verdict === "gave-up";
+    return { word: verdict.word, tone: failed ? "failed" : verdict.verdict === "proven" ? "proven" : "quiet", strong: true };
+  }
+  if (task.status === "proposed") return { word: "Waits for you", tone: "active", strong: true };
+  if (task.status === "running") return { word: "Working", tone: "active", strong: false };
+  if (task.status === "queued") return { word: "Queued", tone: "quiet", strong: false };
+  return { word: "Interrupted", tone: "active", strong: true };
+}
+
+/** What proves a proposal, in a line under its goal (null: no command was given to prove it). */
+export const gatesLine = (gates: readonly string[]): string | null => (gates.length ? `Done when ${gates.join(" · ")} pass${gates.length === 1 ? "es" : ""}` : null);
+
+/** A running task's latest line on its card: the first of its progress, as the node last said it ("" before any). */
+export const latestLine = (task: Pick<TeamTask, "progress">): string => (task.progress ?? "").trim().split("\n")[0]?.trim() ?? "";
 
 /** Who gave a task to the agents rather than to an agent by name (null: it was given by name). */
 export const givenLine = (task: Pick<TeamTask, "givenBy">): string | null =>

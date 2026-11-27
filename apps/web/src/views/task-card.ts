@@ -1,130 +1,25 @@
 import type { TeamCheckpoint, TeamTask } from "@invincible/core/team";
-import { taskRecordFacts } from "@invincible/core/team-record";
-import { saidBesideProof } from "../lib/steps.ts";
-import type { Price } from "@invincible/core/spend";
 import { type Api, isAbort } from "../api.ts";
 import type { Ctx } from "../context.ts";
-import { givenLine, keptChanges, proposedLine, sensitiveLine, shippedLine, steppedLine, type TaskAction, taskActions, taskBadge, taskEnd } from "../lib/task-card.ts";
 import { hashOf } from "../lib/nav.ts";
 import { STEER_WORDS } from "../lib/steer.ts";
+import { because, saidBesideProof } from "../lib/steps.ts";
+import { gatesLine, givenLine, keptChanges, latestLine, proposedLine, sensitiveLine, shippedLine, steppedLine, type TaskAction, taskAnswers, taskEnd, taskStanding } from "../lib/task-card.ts";
 import { relativeTime } from "../lib/time.ts";
-import { emptyTrail, takeTrail, type Trail, trailNext, type TrailPage, trailTail } from "../lib/trail.ts";
-import { badge, button, callout, dot } from "../ui/controls.ts";
+import { button } from "../ui/controls.ts";
+import { openSheet } from "../ui/dialog.ts";
 import { h, replace } from "../ui/dom.ts";
-import { icon } from "../ui/icons.ts";
-import { renderMarkdown } from "../ui/markdown.ts";
+import { icon, type IconName } from "../ui/icons.ts";
+import { selector, type SelectorOption } from "../ui/selector.ts";
 
 /*
- * A task, as a card in a timeline: where it stands; while it runs, its latest lines as they happen;
- * once it has ended, whether it was verified, what its run came to, what it kept, and for work that
- * wasn't verified what the agent said and what can be done. What it says is lib/task-card.ts.
+ * A task where it was given, between hairlines (the iPhone's TaskCardView, I10: no cards): what it is and how it stands
+ * (its word while it is in hand, its verdict as its proof allows once it ended, never "Verified"), who proposed or gave
+ * it, a proposal's goal and what proves it, a running task's latest line, why it ended as it did and what the agent said,
+ * what it kept; then its one answer in full, unfilled, the rest under its ⋯: a list of ten queued tasks isn't ten Stops.
+ * Its title opens its thread (views/task.ts), where its work, its proof and its cost are in full. What it says is
+ * lib/task-card.ts.
  */
-
-/** As many of a running task's latest lines as its card shows. */
-const TAIL = 6;
-/** A running card asks for new lines this often while it is on screen. */
-const EVERY_MS = 1500;
-
-export interface LiveTrail {
-  el: HTMLElement;
-  dispose(): void;
-}
-
-/**
- * A running task's latest lines, asked of the node only for what is new (POST /api/team/trail { task, after }), every
- * second or two while the card is on screen and the app is in front; never once the task has ended. `ended`: the node
- * says it has (the team is then asked for again, and the card becomes an ended one).
- */
-export function liveTrail(api: Api, task: string, viewport: Element | null, ended: () => void): LiveTrail {
-  // (A log, but not read aloud as it grows: a list that refreshes by itself is never a live region.)
-  const el = h("div", { class: "task-trail", role: "log", "aria-live": "off", "aria-label": "What it is doing" });
-  const controller = new AbortController();
-  let trail: Trail = emptyTrail();
-  let shown = false;
-  let over = false;
-  let asking = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const draw = (): void =>
-    replace(
-      el,
-      ...(trail.entries.length
-        ? trailTail(trail, TAIL).map((line) => h("div", { class: "task-trail-line" }, h("span", { class: "ellipsis" }, line.text), line.more ? h("span", { class: "subtle", title: `${line.more} more line${line.more === 1 ? "" : "s"}` }, `+${line.more}`) : null))
-        : [h("div", { class: "task-trail-line subtle" }, "Starting…")]),
-    );
-  const later = (ms: number): void => {
-    clearTimeout(timer);
-    if (!over && shown && !document.hidden) timer = setTimeout(() => void ask(), ms);
-  };
-  async function ask(): Promise<void> {
-    if (asking || over || !shown || document.hidden) return;
-    asking = true;
-    try {
-      const page = await api.post<TrailPage>("/api/team/trail", { task, after: trail.after }, controller.signal);
-      const before = trail;
-      trail = takeTrail(trail, page);
-      if (trail !== before) draw();
-      const next = trailNext(page, trail !== before);
-      if (next === "done") {
-        over = true;
-        ended();
-      } else later(next === "now" ? 0 : EVERY_MS);
-    } catch (error) {
-      // Out of reach just now: asked again a little later.
-      if (!isAbort(error)) later(EVERY_MS * 3);
-    } finally {
-      asking = false;
-    }
-  }
-  const observer = new IntersectionObserver(
-    ([entry]) => {
-      shown = Boolean(entry?.isIntersecting);
-      if (shown) void ask();
-      else clearTimeout(timer);
-    },
-    { root: viewport },
-  );
-  observer.observe(el);
-  const inFront = (): void => void (document.hidden ? clearTimeout(timer) : ask());
-  document.addEventListener("visibilitychange", inFront);
-  draw();
-  return {
-    el,
-    dispose() {
-      over = true;
-      clearTimeout(timer);
-      controller.abort();
-      observer.disconnect();
-      document.removeEventListener("visibilitychange", inFront);
-    },
-  };
-}
-
-/** Everything the node kept of what an ended task did, read when it is opened. */
-function wholeTrail(api: Api, task: string, signal: AbortSignal): HTMLElement {
-  const body = h("div", {}, h("p", { class: "tiny subtle" }, "Reading…"));
-  const details = h("details", { class: "team-task-details" }, h("summary", { "data-key": `trail:${task}` }, "What it did"), body);
-  let read = false;
-  details.addEventListener("toggle", async () => {
-    if (!details.open || read) return;
-    read = true;
-    try {
-      let trail = emptyTrail();
-      for (;;) {
-        const page = await api.post<TrailPage>("/api/team/trail", { task, after: trail.after }, signal);
-        const next = takeTrail(trail, page);
-        const done = next === trail || !page.more;
-        trail = next;
-        if (done) break;
-      }
-      replace(body, trail.entries.length ? h("pre", { class: "team-output" }, trail.entries.map((entry) => entry.text).join("\n")) : h("p", { class: "tiny subtle" }, "Nothing was kept of what it did."));
-    } catch (error) {
-      read = false;
-      if (!isAbort(error)) replace(body, h("p", { class: "tiny subtle" }, `Couldn't read it just now: ${error instanceof Error ? error.message : String(error)}`));
-    }
-  });
-  return details;
-}
 
 export interface CardOptions {
   /** The conversation the card is shown in: a task given in another says where. */
@@ -135,13 +30,8 @@ export interface CardOptions {
   /** The name of the agent that proposed it, when one did. */
   proposer: string | null;
   dependencies: { id: string; title: string; satisfied: boolean }[];
-  prices: Record<string, Price> | null;
   /** This device may stop, resume and give tasks. */
   canAct: boolean;
-  /** The view's lifetime: what a card asks for is let go with it. */
-  signal: AbortSignal;
-  /** A running task's latest lines (views/team.ts keeps one per running task, across redraws). */
-  trail: LiveTrail | null;
   act(action: TaskAction): void;
   /** Gives it again from one of its steps (PLAN #15): its workspace as it stood after that step. */
   againFrom?(step: number): void;
@@ -149,59 +39,106 @@ export interface CardOptions {
   steer?(): void;
 }
 
-/**
- * The steps of a task another can be given from, asked of the node when you open them (POST /api/team/steps): each
- * command and when it ended, with Give again from here. Kept for an agent's task in a repository, on its own harness.
- */
-function stepsOf(api: Api, task: TeamTask, again: (step: number) => void, signal: AbortSignal): HTMLElement {
-  const list = h("div", { class: "stack" }, h("p", { class: "tiny subtle" }, "Reading its steps…"));
-  let asked = false;
-  const steps = h("details", { class: "team-task-details" }, h("summary", { "data-key": `task-steps:${task.id}` }, "Give again from a step"), list);
-  steps.addEventListener("toggle", () => {
-    if (!steps.open || asked) return;
-    asked = true;
-    api.post<{ steps: TeamCheckpoint[] }>("/api/team/steps", { task: task.id }, signal).then(
-      ({ steps: kept }) => replace(list, kept.length
-        ? kept.map((s) => h("div", { class: "row" }, h("span", { class: "tiny subtle tnum" }, `${s.step}.`), h("code", { class: "grow ellipsis" }, s.command), h("span", { class: "tiny subtle" }, relativeTime(s.at)), button("Give again from here", { size: "sm", variant: "ghost", icon: "retry", onClick: () => again(s.step) })))
-        : [h("p", { class: "tiny subtle" }, "No steps were kept: they are kept for an agent's task in a repository, on your agent's own harness.")]),
-      (error) => { if (!isAbort(error)) replace(list, [h("p", { class: "tiny subtle" }, `Its steps couldn't be read: ${(error as Error).message}`)]); },
-    );
-  });
-  return steps;
-}
-
-const ACTION = {
+/** Each answer in its words ("…": more is asked before it happens), and its mark in the menu. */
+const ANSWER: Record<TaskAction, { label: string; icon: IconName }> = {
   approve: { label: "Approve", icon: "check" },
   decline: { label: "Decline", icon: "x" },
   stop: { label: "Stop", icon: "stop" },
   resume: { label: "Resume", icon: "play" },
   again: { label: "Give again…", icon: "retry" },
   ship: { label: "Ship it…", icon: "external" },
-} as const;
+};
+
+/**
+ * Its steps, to give it again from one (PLAN #15), asked of the node as the sheet opens (POST /api/team/steps): each
+ * command and when it ended, with Give again from here (the iPhone's StepsPicker). Kept for an agent's task in a
+ * repository, on your agent's own harness.
+ */
+function openSteps(api: Api, task: TeamTask, again: (step: number) => void): void {
+  const list = h("div", { class: "stack" }, h("p", { class: "tiny subtle" }, "Reading its steps…"));
+  const sheet = openSheet({ title: "Give it again from a step", description: "Its workspace as it stood after that step. What came after is set aside, and stays this task's.", body: list });
+  api.post<{ steps: TeamCheckpoint[] }>("/api/team/steps", { task: task.id }, sheet.scope.signal).then(
+    ({ steps }) =>
+      replace(
+        list,
+        ...(steps.length
+          ? steps.map((s) => h("div", { class: "row" }, h("span", { class: "tiny subtle tnum" }, `${s.step}.`), h("code", { class: "grow ellipsis" }, s.command), h("span", { class: "tiny subtle" }, relativeTime(s.at)), button("Give again from here", { size: "sm", variant: "ghost", icon: "retry", onClick: () => (sheet.close(), again(s.step)) })))
+          : [h("p", { class: "tiny subtle" }, "No steps were kept: they are kept for an agent's task in a repository, on your agent's own harness.")]),
+      ),
+    (error) => {
+      if (!isAbort(error)) replace(list, h("p", { class: "tiny subtle" }, `Its steps couldn't be read: ${(error as Error).message}`));
+    },
+  );
+}
+
+/** Its other answers under ⋯ (a popover, a sheet on a phone): the rest of taskAnswers, a steer while it runs, and giving
+ * it again from one of its steps where it can be given again. Null when there is nothing more. (No scope: a card drawn
+ * again would leave each menu it had in the view's.) */
+function moreOf(ctx: Ctx, task: TeamTask, rest: TaskAction[], again: boolean, o: CardOptions): HTMLElement | null {
+  const options: SelectorOption[] = [
+    ...rest.map((action) => ({ value: action, label: ANSWER[action].label, icon: ANSWER[action].icon })),
+    ...(o.steer && task.status === "running" ? [{ value: "steer", label: "Steer…", icon: "arrow-up" as const, meta: STEER_WORDS.steerTitle }] : []),
+    ...(o.againFrom && again ? [{ value: "from-step", label: "From a step…", icon: "layers" as const }] : []),
+  ];
+  if (!options.length) return null;
+  const menu = selector({
+    label: `More for “${task.title}”`,
+    search: false,
+    variant: "ghost",
+    className: "icon-only task-more",
+    current: () => ({ text: "", icon: "more" }),
+    groups: () => [{ id: "rest", mode: "action", options }],
+    onSelect: (_group, option) => {
+      if (option.value === "steer") o.steer?.();
+      else if (option.value === "from-step") openSteps(ctx.api, task, (step) => o.againFrom?.(step));
+      else o.act(option.value as TaskAction);
+    },
+  });
+  return menu.el;
+}
 
 export function taskCard(ctx: Ctx, task: TeamTask, o: CardOptions): HTMLElement {
-  const state = taskBadge(task);
+  const standing = taskStanding(task);
   const end = taskEnd(task);
+  // Why it ended as it did, beside its verdict and never that word again; what the agent said, unless only a verdict.
+  const why = end && task.status !== "interrupted" ? because(end.why, standing.word) : null;
+  const said = saidBesideProof(end?.said);
   const kept = keptChanges(task);
   const shipped = shippedLine(task);
   const meta = [proposedLine(task, o.proposer), givenLine(task), sensitiveLine(task), task.room !== o.room ? `in ${o.roomName(task.room)}` : null, o.assignee].filter(Boolean).join(" · ");
   const stepped = steppedLine(task);
   const waiting = task.status === "queued" ? o.dependencies.filter((dependency) => !dependency.satisfied) : [];
+  const gates = task.status === "proposed" ? gatesLine(task.gates) : null;
+  const answers = o.canAct ? taskAnswers(task) : { prominent: null, rest: [] };
+  const prominent = answers.prominent;
+  const answer = prominent ? button(ANSWER[prominent].label, { size: "sm", onClick: () => o.act(prominent) }) : null;
+  answer?.classList.add("answer");
+  const again = prominent === "again" || answers.rest.includes("again");
   return h(
     "article",
-    { class: "team-task", "data-key": `task:${task.id}`, "data-status": task.status, "aria-label": `Task: ${task.title} · ${state.text}` },
-    // Its title opens it as a thread of its own (#/task/<id>): its work folded, what proves it, its details.
-    h("div", { class: "task-head" }, dot(state.tone, { live: task.status === "running" }), h("a", { class: "grow task-card-title", href: hashOf("task", { task: task.id }), title: "Open it as a thread of its own" }, h("strong", {}, task.title)), badge(state.text, state.tone)),
+    { class: "team-task", "data-key": `task:${task.id}`, "data-status": task.status, "aria-label": `Task: ${task.title} · ${standing.word}` },
+    h(
+      "div",
+      { class: "task-head" },
+      // Its title opens it as a thread of its own (#/task/<id>): its work folded, what proves it, its details.
+      h(
+        "a",
+        { class: "task-open", href: hashOf("task", { task: task.id }), title: "Open it as a thread of its own" },
+        h("strong", { class: "task-title" }, task.title),
+        h("span", { class: "task-standing", "data-tone": standing.tone, "data-strong": String(standing.strong) }, standing.tone === "proven" ? icon("check", { size: 12 }) : null, standing.word),
+        icon("chevron-right", { size: 14, class: "task-chev" }),
+      ),
+      o.canAct ? moreOf(ctx, task, answers.rest, again, o) : null,
+    ),
     meta ? h("p", { class: "task-meta" }, meta) : null,
     stepped ? h("p", { class: "task-meta" }, stepped) : null,
     waiting.length ? h("p", { class: "task-meta" }, icon("clock", { size: 12 }), ` Waiting for ${waiting.map((dependency) => `“${dependency.title}”`).join(", ")} to be done and verified`) : null,
-    o.trail?.el ?? null,
-    // Why it wasn't verified, as the node said it; a stop of your own is said quietly.
-    end?.why ? callout(task.status === "failed" ? "danger" : task.status === "stopped" ? "quiet" : "warn", end.why) : null,
-    // (What it said, unless no more than a verdict its badge says: never "Verified." beside it.)
-    saidBesideProof(end?.said) ? h("p", { class: "task-said" }, saidBesideProof(end?.said)) : null,
-    // What its run came to, as the runner counted it: its time, commands, tokens, and money at your prices.
-    task.record ? h("p", { class: "tiny subtle tnum", title: "Counted by the runner as the task ran" }, taskRecordFacts(task.record, o.prices ?? {}).join(" · ")) : null,
+    task.status === "proposed" ? h("p", { class: "task-goal" }, task.goal) : null,
+    gates ? h("p", { class: "task-gates" }, icon("shield-check", { size: 13 }), h("span", {}, gates)) : null,
+    // Two lines kept from the start, so the card doesn't grow as its latest line comes and lengthens (showLatest).
+    task.status === "running" ? h("p", { class: "task-latest" }, latestLine(task)) : null,
+    why ? h("p", { class: "task-why" }, why) : null,
+    said ? h("p", { class: "task-said" }, said) : null,
     // What it changed in its repository, kept to read and to ship (a pull request from Artifacts, on your word).
     kept
       ? h(
@@ -213,27 +150,14 @@ export function taskCard(ctx: Ctx, task: TeamTask, o: CardOptions): HTMLElement 
           shipped ? [" · ", h("a", { href: shipped.url, target: "_blank", rel: "noopener noreferrer" }, shipped.text)] : null,
         )
       : null,
-    end ? wholeTrail(ctx.api, task.id, o.signal) : null,
-    o.canAct && o.againFrom && task.status !== "queued" && task.status !== "proposed" ? stepsOf(ctx.api, task, o.againFrom, o.signal) : null,
-    h(
-      "details",
-      { class: "team-task-details" },
-      h("summary", { "data-key": `task-details:${task.id}` }, "The task"),
-      h(
-        "div",
-        { class: "stack" },
-        h("p", { class: "pre-wrap small" }, task.goal),
-        task.gates.length ? h("div", {}, h("strong", { class: "small" }, "Done when these pass"), h("pre", { class: "team-output" }, task.gates.join("\n"))) : h("p", { class: "tiny subtle" }, "No commands were given to prove it."),
-        task.output ? h("div", {}, h("strong", { class: "small" }, "Result"), h("div", { class: "md" }, renderMarkdown(task.output))) : null,
-      ),
-    ),
-    h(
-      "div",
-      { class: "task-foot" },
-      h("span", { class: "tiny subtle grow" }, `${task.status === "queued" || task.status === "running" ? "Given" : "Ended"} ${relativeTime(task.status === "queued" || task.status === "running" ? task.createdAt : task.updatedAt)}`),
-      // A task at work can be told something as it runs: its run takes it at its next safe point.
-      o.canAct && o.steer && task.status === "running" ? button("Steer…", { variant: "ghost", size: "sm", icon: "arrow-up", title: STEER_WORDS.steerTitle, onClick: () => o.steer!() }) : null,
-      ...(o.canAct ? taskActions(task).map((action) => button(ACTION[action].label, { variant: action === "approve" || action === "ship" ? "primary" : "ghost", size: "sm", icon: ACTION[action].icon, onClick: () => o.act(action) })) : []),
-    ),
+    answer ? h("div", { class: "task-answers" }, answer) : null,
   );
+}
+
+/** A running card's latest line, set where it is as the task's progress moves on: the card isn't drawn again for it (an
+ * open menu of its stays open). */
+export function showLatest(card: HTMLElement, task: TeamTask): void {
+  const line = card.querySelector<HTMLElement>(".task-latest");
+  const text = latestLine(task);
+  if (line && line.textContent !== text) line.textContent = text;
 }

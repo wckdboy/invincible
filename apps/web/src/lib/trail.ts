@@ -2,8 +2,8 @@ import type { TeamTrailEntry, TeamWorkStatus } from "@invincible/core/team";
 
 /*
  * A task's trail, read as the node gives it (POST /api/team/trail { task, after }): a page
- * of lines after the last one held, and whether there is more. Pure (no DOM, no timers): the
- * card that shows a trail asks only for what is new, and this says what to keep of each
+ * of lines after the last one held, and whether there is more. Pure (no DOM, no timers): a
+ * task's thread (views/task.ts) asks only for what is new, and this says what to keep of each
  * answer and when to ask again.
  */
 
@@ -39,12 +39,4 @@ export function takeTrail(trail: Trail, page: Pick<TrailPage, "entries">, keep =
 export function trailNext(page: Pick<TrailPage, "task" | "more">, took: boolean): "now" | "wait" | "done" {
   if (page.more && took) return "now";
   return page.task.status === "running" || page.task.status === "queued" ? "wait" : "done";
-}
-
-/** The latest lines for a card, oldest first: each one's first line of text, and how many more lines it holds. */
-export function trailTail(trail: Trail, lines: number): { n: number; text: string; more: number }[] {
-  return trail.entries.slice(-lines).map((entry) => {
-    const [first = "", ...rest] = entry.text.trim().split("\n");
-    return { n: entry.n, text: first.trim(), more: rest.length };
-  });
 }

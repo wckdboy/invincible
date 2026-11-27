@@ -3,7 +3,6 @@ import { outcomeBar, isOutcomeRoom } from "./outcome-bar.ts";
 import { findSecrets } from "@invincible/core/secret-scan";
 import type { TeamEngramStatus, TeamHarness, TeamMessage, TeamRoomView, TeamSnapshot, TeamTask, Agent } from "@invincible/core/team";
 import { TEAM_LIMITS } from "@invincible/core/team-limits";
-import { moneyPrices, type Price } from "@invincible/core/spend";
 import { avatarExpression } from "@invincible/core/avatar";
 import { isAbort, isUnavailable } from "../api.ts";
 import { errorMessage, type View } from "../context.ts";
@@ -11,7 +10,7 @@ import { PRIMARY } from "../lib/arrange.ts";
 import { hasDesktop } from "../lib/desktop.ts";
 import { besideChip } from "../lib/agent-state.ts";
 import { rosterRows } from "../lib/roster.ts";
-import { type TaskAction, taskBadge } from "../lib/task-card.ts";
+import { type TaskAction, taskStanding } from "../lib/task-card.ts";
 import { activeTeamWork, engramLine, HARNESS, harnessNote, agentWorksOn, taskDependencies, teamSpeaker, agentMaker, type HarnessStatus } from "../lib/team.ts";
 import { giveAgain, timeline, timelineTasks } from "../lib/timeline.ts";
 import { relativeTime } from "../lib/time.ts";
@@ -29,7 +28,7 @@ import { agentsHome } from "./board.ts";
 import { noteSaid, seatFace, tableOf } from "./roster.ts";
 import { openConsole } from "./sandboxes.ts";
 import { desktopViewer, type DesktopViewer } from "./desktop.ts";
-import { liveTrail, type LiveTrail, taskCard } from "./task-card.ts";
+import { showLatest, taskCard } from "./task-card.ts";
 import { controlTeam, editAgent, editNotes, editRoom, exportAgent, giveTask, growVm, provisionVm, remakeVm, removeAgent, setCiBack, setEngram, shipTask, steerTask } from "./team-forms.ts";
 import { openTerminal } from "./terminal.ts";
 import { openWorkspace } from "./workspace.ts";
@@ -62,8 +61,6 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   let focused = false;
   const panelAsked = opts.teamTab === "workspace";
   let snapshot: TeamSnapshot | null = ctx.live.team.value;
-  /** Your prices, for what a finished task cost (asked for once; without them a task still says its tokens). */
-  let prices: Record<string, Price> | null = null;
   let room: TeamRoomView | null = null;
   let loading = false;
   let sending = false;
@@ -73,12 +70,6 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   let workspaceLoading = false;
   /** Each item of the timeline as last drawn, by key: one that hasn't changed is handed back as it is. */
   let drawnItems = new Map<string, { version: string; el: HTMLElement }>();
-  /** A running task's latest lines, kept across redraws of its card, and let go once it has ended. */
-  const trails = new Map<string, LiveTrail>();
-  scope.add(() => {
-    for (const trail of trails.values()) trail.dispose();
-    trails.clear();
-  });
 
   const head = h("header", { class: "team-head" });
   const notice = h("div", { class: "team-notice", role: "status", hidden: true });
@@ -237,22 +228,13 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   }
 
   function taskEl(task: TeamTask): HTMLElement {
-    let trail = trails.get(task.id) ?? null;
-    if (task.status === "running" && !trail) {
-      // Its end is heard here first: the team and this conversation are asked for again, and its card becomes an ended one.
-      trail = liveTrail(ctx.api, task.id, content, () => void load(true));
-      trails.set(task.id, trail);
-    }
     return taskCard(ctx, task, {
       room: room!.id,
       roomName,
       assignee: room!.direct ? null : nameOf(task.assignee),
       proposer: task.proposedBy ? nameOf(task.proposedBy) : null,
       dependencies: taskDependencies(task, snapshot?.tasks ?? []),
-      prices,
       canAct: canChat,
-      signal: scope.signal,
-      trail: task.status === "running" ? trail : null,
       act: (action) => act(task, action),
       againFrom: (step) => {
         const where = snapshot?.rooms.find((candidate) => candidate.id === task.room) ?? room;
@@ -262,9 +244,12 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     });
   }
 
-  /** What a task's card shows, so that one whose card would look the same is not drawn again (its trail runs on). */
-  const taskVersion = (task: TeamTask): string =>
-    JSON.stringify([task.status, task.verified, task.title, task.goal, task.gates, task.error, task.output, task.record, task.changes, task.givenBy, roomName(task.room), nameOf(task.assignee), taskDependencies(task, snapshot?.tasks ?? []), Boolean(prices), relativeTime(task.status === "queued" || task.status === "running" ? task.createdAt : task.updatedAt)]);
+  /** What a task's card shows, so that one whose card would look the same is not drawn again: everything but a running
+   * task's latest line, which is set where it is (showLatest), and its times, which it doesn't show. */
+  const taskVersion = (task: TeamTask): string => {
+    const { progress: _latest, updatedAt: _ended, ...shown } = task;
+    return JSON.stringify([shown, roomName(task.room), nameOf(task.assignee), task.proposedBy ? nameOf(task.proposedBy) : null, taskDependencies(task, snapshot?.tasks ?? [])]);
+  };
 
   function renderTimeline(): void {
     if (!room || !snapshot) return;
@@ -273,17 +258,12 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     // (Only the latest words of a long conversation come from the node: the timeline begins where they do.)
     const since = current.messages.length >= TEAM_LIMITS.history ? current.messages[0]?.createdAt : undefined;
     const items = timeline(current.messages, tasks, since === undefined ? {} : { since });
-    const running = new Set(items.flatMap((item) => (item.kind === "task" && item.task.status === "running" ? [item.task.id] : [])));
-    for (const [id, trail] of trails) {
-      if (running.has(id)) continue;
-      trail.dispose();
-      trails.delete(id);
-    }
     const next = new Map<string, { version: string; el: HTMLElement }>();
     const els = items.map((item) => {
       const version = item.kind === "message" ? JSON.stringify([item.message.text, teamSpeaker(item.message, snapshot!.agents), personOf(item.message.speaker)?.avatar, relativeTime(item.message.createdAt)]) : taskVersion(item.task);
       const had = drawnItems.get(item.key);
       const el = had?.version === version ? had.el : item.kind === "message" ? messageEl(item.message) : taskEl(item.task);
+      if (item.kind === "task" && item.task.status === "running") showLatest(el, item.task);
       next.set(item.key, { version, el });
       return el;
     });
@@ -334,12 +314,14 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   /** A node by its name: this one, one of the fleet's, or one the app can't name. */
   const nodeName = (id: string): string => (id === ctx.whoami.node ? "this node" : (ctx.live.fleet.value?.devices.find((device) => device.id === id)?.name ?? "another node"));
 
-  /** An agent's task in its side panel: its title and where it stands; a press finds its card in the timeline. */
+  /** An agent's task in its side panel: its title and where it stands, in its card's words (its verdict once it ended,
+   * never "Verified"); a press finds its card in the timeline. */
   const taskRow = (task: TeamTask): HTMLElement => {
-    const stands = taskBadge(task);
+    const stands = taskStanding(task);
+    const tone = stands.tone === "failed" ? "danger" : stands.tone === "proven" ? "ok" : stands.tone === "active" ? "accent" : "neutral";
     return listRow({
       title: task.title,
-      meta: [badge(stands.text, stands.tone), h("time", { datetime: new Date(task.updatedAt).toISOString() }, relativeTime(task.updatedAt))],
+      meta: [badge(stands.word, tone), h("time", { datetime: new Date(task.updatedAt).toISOString() }, relativeTime(task.updatedAt))],
       key: `side-task:${task.id}`,
       onClick: () => {
         if (panelOpen()) return void showPanel(false);
@@ -357,7 +339,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     const table = tableOf(ctx);
     const seated = table.seats.find((one) => one.id === person.id);
     const tasks = snapshot.tasks.filter((task) => task.assignee === person.id).sort((a, b) => b.updatedAt - a.updatedAt);
-    const version = JSON.stringify([person, seated, tasks.map((task) => [task.id, task.title, task.status, task.verified, relativeTime(task.updatedAt)]), panelOpen()]);
+    const version = JSON.stringify([person, seated, tasks.map((task) => [task.id, task.title, taskStanding(task).word, relativeTime(task.updatedAt)]), panelOpen()]);
     if (version === sideVersion) return;
     sideVersion = version;
     side.setAttribute("aria-label", `${person.name}, beside the timeline`);
@@ -604,17 +586,6 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     if (!roomId) return renderHome();
     if (!room) return;
     const next = snapshot;
-    if (!prices && next.tasks.some((task) => task.record)) {
-      prices = {};
-      void ctx.api.get<{ prices: Record<string, Price>; plans?: string[] }>("/api/prices", scope.signal).then(
-        (result) => {
-          // Money as it goes: a coding plan's calls are paid for already (moneyPrices).
-          prices = moneyPrices(result.prices, result.plans ?? []);
-          draw(true);
-        },
-        () => {},
-      );
-    }
     notice.hidden = true;
     // A face that was pleased for a moment changes back by itself, and "2 min ago" moves on: both are drawn again.
     const signature = JSON.stringify([next, room, workspace, next.agents.map((person) => avatarExpression(person, next, Date.now())), Math.floor(Date.now() / 60_000)]);
