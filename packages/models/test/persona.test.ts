@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_PROPOSED_GATES } from "@invincible/core";
 import { BLOCK_KINDS, CHART_TYPES, readChoices, STEP_STATES } from "@invincible/core/blocks";
-import { nowLine, PRIMARY_SYSTEM, SHOW_GUIDE, TOOL_GUIDE } from "../src/persona.ts";
+import { nowLine, PRIMARY_NAME, PRIMARY_SYSTEM, SHOW_GUIDE, TOOL_GUIDE } from "../src/persona.ts";
 
 /*
  * What the primary is told about itself. Asked on a live node what a run's gate is, it recalled
  * nothing and guessed (wrongly: "a reviewer looks at the evidence"). It should be
  * able to say how its own work goes, and say so when it doesn't know.
  */
+
+describe("its name", () => {
+  test("the name its persona gives it is the one its node says to every client (whoami's primaryName): Invincible until you name it", () => {
+    expect(PRIMARY_NAME).toBe("Invincible");
+    expect(PRIMARY_SYSTEM.startsWith(`You are ${PRIMARY_NAME}, the primary agent of one person`)).toBe(true);
+  });
+});
 
 describe("what the primary knows about its own work", () => {
   test("a run and its gates, a turn and how to steer it, in the guide that goes with its tools", () => {

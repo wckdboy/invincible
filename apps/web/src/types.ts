@@ -17,6 +17,8 @@ export interface WhoAmI {
   nodeName: string;
   fleet: string;
   fleetName: string | null;
+  /** Your agent's name, the node's to say (absent from a node from before it said one). */
+  primaryName?: string | null;
 }
 
 export interface PresetView {

@@ -573,7 +573,10 @@ describe("a browser client (the PWA path)", () => {
 
     const who = await sign("GET", "/api/whoami", undefined);
     const whoami = await fetch(`http://127.0.0.1:${portA}/api/whoami`, { headers: who.headers });
-    expect((await whoami.json()).scopes).toEqual(["mind:read", "chat"]);
+    const me = await whoami.json();
+    expect(me.scopes).toEqual(["mind:read", "chat"]);
+    // Your agent's name is the node's to say (its persona's own), and every client takes it from here: the apps, inv.
+    expect(me.primaryName).toBe("Invincible");
 
     const recall = await sign("POST", "/api/memories/search", { q: "tailscale" });
     const found = await fetch(`http://127.0.0.1:${portA}/api/memories/search`, { method: "POST", ...recall });

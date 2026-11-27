@@ -122,7 +122,7 @@ import {
   SEAT_HARNESS as SEAT_HARNESS_OF,
 } from "@invincible/core";
 import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
-import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, nowLine } from "@invincible/models";
+import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, nowLine, PRIMARY_NAME } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
 import { DESKTOP_IMAGE, type LedgerEntryInput, SandboxError, type SandboxStream, STREAM_LINE_LIMIT, TEAM_LEASE_MINUTES } from "@invincible/sandbox";
@@ -3095,6 +3095,8 @@ export function createApp(ctx: AppContext) {
       nodeName: ctx.nodeName,
       fleet: ctx.store.fleet,
       fleetName: ctx.store.genesis?.name ?? null,
+      // Your agent's name, the node's to say (its persona's): the apps and inv call it this.
+      primaryName: PRIMARY_NAME,
     }),
     live: (_input, p, req) => liveStream(p, req),
     fleet: () => fleetView(),
