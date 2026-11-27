@@ -31,6 +31,7 @@ import sh.invincible.bot.core.DeviceKey
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeClient
 import sh.invincible.bot.core.NodePin
+import sh.invincible.bot.core.NodeSession
 import sh.invincible.bot.core.NodeProof
 import sh.invincible.bot.core.NodeError
 import sh.invincible.bot.core.Reach
@@ -316,56 +317,34 @@ class AppModel(context: Context) {
         val node = _paired.value
         // (Every request it signs names the node it proved to be, where it proved one: the slice 8 note's item 11.)
         client = if (node != null) (key ?: runCatching { DeviceKey.load() }.getOrNull())?.let { NodeClient(node.origin, it, NodePin(node.nodeId)) } else null
-        proven = false
+        session = client?.let(::sessionFor)
     }
 
-    /** Whoami has been asked, and its proof judged, this session (NodeProof). */
-    private var proven = false
+    /** This session's proof of which node it speaks to (NodeSession), with the client it was made for. */
+    private var session: NodeSession? = null
 
-    /**
-     * Whoami, proven, once a session and before anything else is asked (NodeProof): the first proof pins the node, kept
-     * with the pairing; a node that proves to be another, or whose proof fails, is asked nothing more (NodePin) and said
-     * so (problem). False: this phone's node isn't the one answering there.
-     */
-    private suspend fun proven(c: NodeClient): Boolean {
-        c.pin.refused?.let {
-            _problem.value = it
-            return false
-        }
-        if (proven) return true
-        val challenge = NodeProof.challenge()
-        // (Not answered: the reads after say why, and it is asked again at the next refresh.)
-        val who = attempt { c.provenWhoami(challenge) }.getOrElse { return true }
-        proven = true
-        Primary.named(who["primaryName"].string)
-        when (val said = NodeProof.judge(c.pin.node, who["node"].string, who["proof"].string, challenge)) {
-            is NodeProof.Proven.Pin -> {
-                c.pin.pin(said.node)
-                _paired.value?.let { node ->
-                    val pinned = node.copy(nodeId = said.node)
-                    prefs.edit().putString("paired-node", pinned.json().text()).apply()
-                    _paired.value = pinned
-                }
+    private fun sessionFor(c: NodeClient): NodeSession = NodeSession(
+        c.pin,
+        ask = { challenge -> c.provenWhoami(challenge) },
+        keep = { id ->
+            _paired.value?.let { node ->
+                val pinned = node.copy(nodeId = id)
+                prefs.edit().putString("paired-node", pinned.json().text()).apply()
+                _paired.value = pinned
             }
-            is NodeProof.Proven.Other -> return notYours(c, NodeError.notYours(said.node))
-            NodeProof.Proven.Failed -> return notYours(c, NodeError.notYours(null))
-            else -> {}
-        }
-        return true
-    }
+        },
+        named = { Primary.named(it) },
+        refused = { _problem.value = it },
+    )
 
-    /** The node at this address isn't this phone's: said above everything, and nothing more is sent there. */
-    private fun notYours(c: NodeClient, why: NodeError): Boolean {
-        c.pin.refuse(why)
-        _problem.value = why
-        return false
-    }
+    /** Whoami, proven (NodeSession). False: this phone's node isn't the one answering there. */
+    private suspend fun proven(c: NodeClient): Boolean = session?.takeIf { it.pin === c.pin }?.prove() ?: false
 
-    /** Try again, at a node that proved to be another: its proof is asked for afresh, and nothing else until it holds. */
+    /** Try again, at a node that proved to be another: its proof is asked for afresh. */
     fun tryAgain() {
-        client?.pin?.clear()
-        proven = false
-        scope.launch { refresh() }
+        scope.launch {
+            if (session?.tryAgain() == true) refresh()
+        }
     }
 
     fun paired(node: PairedNode) {
@@ -405,7 +384,7 @@ class AppModel(context: Context) {
         _needsYou.value = 0
         // (What each route last answered is the forgotten node's: none of it is drawn for the next.)
         answers.clear()
-        proven = false
+        session = null
         pricesAsked = false
         chat.reset()
     }
