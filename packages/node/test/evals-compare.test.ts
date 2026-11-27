@@ -221,7 +221,7 @@ describe("does a change to the harness help? An A/B", () => {
     const { node, recorded } = fakeNode();
     await expect(command(node, "run", [], { suite: "agentic", variant: "opencode" })).rejects.toThrow(/opencode calls its models from the sandbox, through the gateway: give it --net gateway/);
     await expect(command(node, "ab", ["baseline", "opencode"], { suite: "agentic" })).rejects.toThrow(/--net gateway/);
-    await expect(command(node, "run", [], { suite: "agentic", net: "gateway", variant: "mine:agent=cursor" })).rejects.toThrow(/no coding tool "cursor" \(there is: opencode, hermes, claude, codex\)/);
+    await expect(command(node, "run", [], { suite: "agentic", net: "gateway", variant: "mine:agent=cursor" })).rejects.toThrow(/no coding tool "cursor" \(there is: opencode, hermes, claude, codex, antigravity\)/);
     await expect(command(node, "run", [], { variant: "opencode", net: "gateway" })).rejects.toThrow(/the engineering suite's problems are the Lab's/);
     expect(recorded).toEqual([]);
     // And with what it needs, it is listed among the variants as what it is.

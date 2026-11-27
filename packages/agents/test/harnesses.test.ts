@@ -131,12 +131,15 @@ describe("a driver and the notes store", () => {
   // Code's and Codex's again that day, when the lease each bridge reads by default (and Hermes' own home) came to be in
   // the VM's HOME rather than /work (layout 2, the owner's decisions of 27 November 2026): each one's text with those
   // defaults put back as they were hashes to its pin from before (4c07aaa4…, df2588eb…, 6c8cc4d2…), so nothing else
-  // changed. OpenCode's, whose config is written in the HOME it is given (/work in layout 1), is as it was.
+  // changed. OpenCode's, whose config is written in the HOME it is given (/work in layout 1), is as it was. Antigravity's
+  // is new that day (antigravity.ts, the Gemini plan): there was no Antigravity before the store, so its pin is its text
+  // as it came, which giving it the store as every ACP agent is given it (acp.ts's withNotes) left as it was.
   const BEFORE: Record<string, string> = {
     opencode: "cc015190084eb3e39e46df1c15f67e01bb085d0b6649cd5cb39fe5410b20ab22",
     hermes: "a2dcda40c48da625d32e5aa97c122a81bd1945095b369b605e8edf01b7bb4461",
     claude: "da3d8d2b3a1e26f89f545b40d60d28ffbe78d5d0f23a8f2ca53c5927f9ddb96b",
     codex: "e757f19dea735c3929bdbbecaf88ef9924455ec17d754ecab957cdf223e9c00f",
+    antigravity: "a18a4ade6bfea0fb242846cd7b84f6f4fa67e600053b30a9740becbe861fd333",
   };
 
   test("without a notes project, every driver writes and runs byte for byte what it did before there was a store", () => {

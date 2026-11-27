@@ -1,5 +1,5 @@
 import type { AgentDriver } from "./harnesses.ts";
-import { ACP_CLIENT, ACP_ENTRY, readBridge } from "./acp.ts";
+import { ACP_CLIENT, ACP_ENTRY, notesServer, readBridge, withNotes } from "./acp.ts";
 
 /*
  * Google's Antigravity CLI (agy) on its owner's Google sign-in (a Google AI Pro or Ultra plan), driven as T3 Code drives
@@ -129,7 +129,10 @@ export const ANTIGRAVITY: AgentDriver = {
     seatCheck: () => STATUS,
   },
   family: ["gemini"],
-  files: () => ({ "/work/.agent/antigravity-acp.py": ANTIGRAVITY_ACP_BRIDGE }),
+  // With the VM's notes store (engram.ts), its session is opened with the store's one stdio server, as every ACP agent's
+  // is (acp.ts's withNotes): agy starts it for itself, and none of agy's own files is written. If agy refuses a session
+  // with it, the session is opened again without it, and the run says it has no notes store.
+  files: (_models, engram, home) => ({ "/work/.agent/antigravity-acp.py": engram ? `${ACP_CLIENT}${BRIDGE}${withNotes([notesServer(engram, home)])}${ACP_ENTRY}` : ANTIGRAVITY_ACP_BRIDGE }),
   command: (model, session) =>
     `python3 -I /work/.agent/antigravity-acp.py --prompt /work/.agent/prompt.md${model.own || !model.model ? "" : ` --model ${quote(model.model)}`}${session ? ` --session ${quote(session)}` : ""}`,
   read: readBridge,

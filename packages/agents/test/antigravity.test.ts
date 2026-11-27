@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TeamHarness } from "@invincible/core";
 import { AGENTS, ANTIGRAVITY, ANTIGRAVITY_ACP_BRIDGE, ANTIGRAVITY_SIGN_IN, chooseAgentModels, harnessReadiness, OWN_SIGN_IN, seatSignInBridge } from "../src/index.ts";
+import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
 
 /*
  * Google's Antigravity CLI (agy) on its owner's Google sign-in, driven as T3 Code drives it (pingdotgg/t3code,
@@ -13,6 +14,15 @@ import { AGENTS, ANTIGRAVITY, ANTIGRAVITY_ACP_BRIDGE, ANTIGRAVITY_SIGN_IN, choos
  * 1.5.18 that answers as the real one did offline (27 November 2026: its initialize, its auth methods, its refusal when
  * not signed in), and keeps its sign-in where the real one keeps it with no keyring: a file in its profile.
  */
+
+// Each test here starts its processes one after another: a run or a status check is bash, the bridge's python3 and the
+// stand-in agy's python3; a sign-in, the bridge's and agy's. "signed out, then signed in" starts 12, the notes store's
+// 6, 6 and 3. So its time is the machine's to give: 0.6 to 1.4 s each at a load of 170 on the MacBook's 12 cores; past
+// bun's 5 s default for two of them at a spike past 190 (5,005 and 5,013 ms), and for two others with their processes
+// stopped 450 ms of every 500 ms (5,113 and 5,136 ms); with a limit, under that same pause, at most 9.3 s in six runs
+// (0.85 s a process at worst; 27 November 2026). This limit, 2.5 s for each process the busiest starts, is how long a
+// busy machine may take, never what a test checks.
+setDefaultTimeout(30_000);
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -77,8 +87,14 @@ for raw in sys.stdin:
             out({"jsonrpc": "2.0", "id": said["id"], "result": {}})
         else:
             out({"jsonrpc": "2.0", "id": said["id"], "error": {"code": -32603, "message": "No browser is available here (this is a remote (SSH) session, so the browser's sign-in redirect can't reach this machine). Run \`agy acp --login\` in a terminal on this machine, then retry; or use a Gemini API key."}})
+    elif method in ("session/new", "session/load") and said["params"].get("mcpServers") and mode == "no-mcp":
+        # (An agent that takes no MCP server says so by refusing the session: ACP has no word for it. Not agy's own
+        # words: offline, signed out, the real one never reached a session.)
+        out({"jsonrpc": "2.0", "id": said["id"], "error": {"code": -32602, "message": "Invalid params: mcpServers are not supported"}})
     elif method == "session/new":
         out({"jsonrpc": "2.0", "id": said["id"], "result": {"sessionId": "sess-FAKE-0001", "models": {"currentModelId": "gemini-3.8-flash", "availableModels": [{"modelId": "gemini-3.8-flash"}, {"modelId": "gemini-4-pro"}]}}})
+    elif method == "session/load" and said["params"].get("sessionId") == "sess-FAKE-0001":
+        out({"jsonrpc": "2.0", "id": said["id"], "result": {"models": {"currentModelId": "gemini-3.8-flash", "availableModels": [{"modelId": "gemini-3.8-flash"}]}}})
     elif method == "session/set_model":
         out({"jsonrpc": "2.0", "id": said["id"], "result": {}})
     elif method == "session/prompt":
@@ -145,12 +161,21 @@ function signIn(box: ReturnType<typeof vm>) {
   return { said, tell, until, proc, done: async () => (await proc.exited, await reading, said.at(-1)) };
 }
 
-/** The run bridge, written into the VM and run as the driver's command runs it: its events, one JSON line each. */
-async function run(box: ReturnType<typeof vm>, extra = "") {
+/** What a run on the stand-in says, start to end: its session, the call it is in, that call's end, its words, its tokens. */
+const WORKED = [
+  { type: "session", id: "sess-FAKE-0001" },
+  { type: "call", id: "call-1" },
+  { type: "tool", id: "call-1", tool: "Run bun test", input: '{"command": "bun test"}', output: '{"stdout": "1 pass"}', ok: true },
+  { type: "text", text: "Fixed the sum. All tests pass." },
+  { type: "tokens", input: 1200, output: 80 },
+];
+
+/** The run bridge (as the driver writes it, given `bridge`), written into the VM and run as the driver's command runs it: its events, one JSON line each. */
+async function run(box: ReturnType<typeof vm>, extra = "", bridge = ANTIGRAVITY_ACP_BRIDGE) {
   const agent = join(box.dir, "work", ".agent");
   mkdirSync(agent, { recursive: true });
   writeFileSync(join(agent, "prompt.md"), "Fix the sum in calc.py, then run the tests.");
-  writeFileSync(join(agent, "antigravity-acp.py"), ANTIGRAVITY_ACP_BRIDGE);
+  writeFileSync(join(agent, "antigravity-acp.py"), bridge);
   const command = ANTIGRAVITY.command(OWN_SIGN_IN, null).replaceAll("/work/.agent", agent) + extra;
   const proc = Bun.spawn(["bash", "-c", command], { cwd: join(box.dir, "work"), env: box.env, stdout: "pipe", stderr: "pipe" });
   const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
@@ -229,13 +254,7 @@ describe("a run on it, as T3 Code drives agy", () => {
     writeFileSync(join(box.home, "antigravity-acp", TOKEN), "FAKE-token-the-bridge-never-reads");
     const { code, events } = await run(box);
     expect(code).toBe(0);
-    expect(events).toEqual([
-      { type: "session", id: "sess-FAKE-0001" },
-      { type: "call", id: "call-1" },
-      { type: "tool", id: "call-1", tool: "Run bun test", input: '{"command": "bun test"}', output: '{"stdout": "1 pass"}', ok: true },
-      { type: "text", text: "Fixed the sum. All tests pass." },
-      { type: "tokens", input: 1200, output: 80 },
-    ]);
+    expect(events).toEqual(WORKED);
     const trace = box.trace();
     expect(trace[0]).toEqual({
       argv: ["acp", "--gemini-dir", box.home, "--app-data-dir", "antigravity-acp", "--disable-telemetry"],
@@ -277,5 +296,44 @@ describe("a run on it, as T3 Code drives agy", () => {
     expect(harnessReadiness(ANTIGRAVITY, status(false), [])).toEqual({ ready: false, models: [], reason: "Sign Antigravity in in this agent's VM (agy acp --gemini-dir ~/.antigravity --app-data-dir antigravity-acp --login)" });
     // In sensitive mode, or for another node's task, none of its models speaks Gemini's API.
     expect(harnessReadiness(ANTIGRAVITY, status(true), [], [], "engineer", true).reason).toBe("This work is in sensitive mode, and none of its models speaks Antigravity's API (Gemini's): give it one that does, or your agent's own harness");
+  });
+});
+
+/* The VM's notes store (engram.ts): agy is handed its server when a session is opened, as every ACP agent is (acp.ts). */
+describe("Antigravity and the notes store", () => {
+  const withNotes = () => ANTIGRAVITY.files([], "you-project")["/work/.agent/antigravity-acp.py"]!;
+  /** The one stdio server, as ACP names one: its environment inside the entry (the bridge's own for agy is an allowlist). */
+  const server = { name: "engram", command: ENGRAM_BIN, args: engramArgv("you-project").slice(1), env: [{ name: "ENGRAM_DATA_DIR", value: "/work/.memory/engram" }, { name: "ENGRAM_NO_UPDATE_CHECK", value: "1" }] };
+  const opened = (box: ReturnType<typeof vm>, method: string) => box.trace().filter((item) => item.asked === method).map((item) => (item.params as { mcpServers: unknown }).mcpServers);
+  const signedIn = (mode?: string) => {
+    const box = vm(mode);
+    mkdirSync(join(box.home, "antigravity-acp"), { recursive: true });
+    writeFileSync(join(box.home, "antigravity-acp", TOKEN), "FAKE-token-the-bridge-never-reads");
+    return box;
+  };
+
+  test("without the store a session is opened with no MCP server", async () => {
+    const box = signedIn();
+    expect(await run(box)).toEqual({ code: 0, events: WORKED });
+    expect(await run(box, " --session sess-FAKE-0001")).toEqual({ code: 0, events: WORKED });
+    expect(opened(box, "session/new")).toEqual([[]]);
+    expect(opened(box, "session/load")).toEqual([[]]);
+  });
+
+  test("with it, a new session and a resumed one are opened with exactly that one server, and the run is otherwise the same", async () => {
+    const box = signedIn();
+    expect(await run(box, "", withNotes())).toEqual({ code: 0, events: WORKED });
+    expect(await run(box, " --session sess-FAKE-0001", withNotes())).toEqual({ code: 0, events: WORKED });
+    expect(opened(box, "session/new")).toEqual([[server]]);
+    expect(opened(box, "session/load")).toEqual([[server]]);
+    // Its status check opens no session, with the store or without (it is asked of the bridge without the store).
+    expect(ANTIGRAVITY.check).not.toContain("engram");
+  });
+
+  test("an agy that takes no MCP server refuses the session: it is asked again without, and the run says it has no notes store", async () => {
+    const box = signedIn("no-mcp");
+    const refused = { type: "text", text: "Antigravity refused a session with the notes store's MCP server: this run has no notes store" };
+    expect(await run(box, "", withNotes())).toEqual({ code: 0, events: [refused, ...WORKED] });
+    expect(opened(box, "session/new")).toEqual([[server], []]);
   });
 });

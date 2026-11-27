@@ -47,8 +47,8 @@ let releaseClone: (() => void) | undefined;
 let cloneHold: Promise<void> | undefined;
 let cleanupFailure = false;
 let dockerSilent = false;
-/** What a vendor's tool says of itself in a VM, when its bridge is asked (`--status`): by tool. */
-const toolStatus = new Map<"claude" | "codex", { code: number; stdout: string }>();
+/** What a vendor's tool says of itself in a VM, when its bridge is asked (`--status`; Antigravity's, `--check`): by tool. */
+const toolStatus = new Map<"claude" | "codex" | "antigravity", { code: number; stdout: string }>();
 /** What a VM answers when asked for its notes store's version (unset: as a VM made from an image without it does). */
 let engramSays: { code: number; stdout: string; stderr?: string } | undefined;
 // An agent's face as the agents page draws it: from the snapshot the node serves, by the page's own rule.
@@ -158,7 +158,7 @@ beforeAll(async () => {
     active.set(container, count); peak.set(container, Math.max(peak.get(container) ?? 0, count));
     try {
       if (kind === "cleanup" && cleanupFailure) return { code: 137, stdout: "", stderr: "cleanup deadline expired" };
-      const told = text.includes("--status") ? toolStatus.get(text.includes('NAME, LOGIN = "claude"') ? "claude" : "codex") : undefined;
+      const told = text.includes("--status") ? toolStatus.get(text.includes('NAME, LOGIN = "claude"') ? "claude" : "codex") : text.includes('agent = "Antigravity"') && text.trimEnd().endsWith("--check") ? toolStatus.get("antigravity") : undefined;
       if (told) return told;
       if (command.at(-1) === "/opt/engram/bin/engram version") return engramSays ?? { code: 127, stdout: "", stderr: "bash: line 1: /opt/engram/bin/engram: No such file or directory" };
       if (text.includes("write-alpha")) { alphaEntered = true; await alphaHold; }
@@ -322,18 +322,26 @@ test("harness readiness says what each would run on: a vendor's tool on its own 
   const vm = `invincible-sbx-${(await snapshot()).agents.find((member) => member.id === "ada")!.workspace!.id}`;
   const before = events.length;
   try {
-    // Idle, in a running VM. Claude Code says it is signed in there; Codex was never installed.
+    // Idle, in a running VM. Claude Code says it is signed in there; Codex was never installed; Antigravity, in the tools'
+    // image, was never signed in.
     toolStatus.set("claude", { code: 0, stdout: told({ installed: true, signedIn: true, method: "claude.ai" }) });
     toolStatus.set("codex", { code: 1, stdout: told({ installed: false, signedIn: false }) });
+    toolStatus.set("antigravity", { code: 0, stdout: told({ signedIn: false }) });
     const first = await readiness();
-    expect(Object.keys(first)).toEqual(["native", "opencode", "hermes", "claude", "codex"]);
+    expect(Object.keys(first)).toEqual(["native", "opencode", "hermes", "claude", "codex", "antigravity"]);
     expect(first.native).toEqual({ id: "native", ready: true });
     expect(first.claude).toEqual({ id: "claude", ready: true, on: "its own sign-in in this VM (claude.ai)" });
     expect(first.codex).toEqual({ id: "codex", ready: false, reason: "Install Codex in this agent's VM (Your agent never installs or signs in a harness)" });
+    // No model of the gateway's speaks Gemini's API: Antigravity runs on its own Google sign-in, or not at all.
+    const signIn = "Sign Antigravity in in this agent's VM (agy acp --gemini-dir ~/.antigravity --app-data-dir antigravity-acp --login)";
+    expect(first.antigravity).toEqual({ id: "antigravity", ready: false, reason: signIn });
     // Each was asked once, in this agent's own VM, by its bridge's own status question.
     const asked = events.slice(before).filter((event) => event.text.includes("--status"));
     expect(asked.map((event) => event.target)).toEqual([vm, vm]);
     expect(asked.every((event) => event.text.includes("def status(args):") && event.text.trimEnd().endsWith("--status"))).toBe(true);
+    // Antigravity by its bridge's own check: agy's initialize and authenticate, never a model call or its token.
+    const checked = events.slice(before).filter((event) => event.text.includes('agent = "Antigravity"'));
+    expect(checked.map((event) => [event.target, event.text.trimEnd().endsWith("--check")])).toEqual([[vm, true]]);
     // Not signed in, and no Anthropic-API model on the engineer's roster: what a person can do about it.
     toolStatus.set("claude", { code: 0, stdout: told({ installed: true, signedIn: false }) });
     expect((await readiness()).claude).toEqual({ id: "claude", ready: false, reason: "Sign Claude Code in in this agent's VM (claude auth login), or put an Anthropic-API model on the engineer's roster" });
@@ -348,7 +356,13 @@ test("harness readiness says what each would run on: a vendor's tool on its own 
     await api("setProvider", { id: "claude-api", kind: "anthropic", baseUrl: "https://claude-api.example.test", secret: "claude-api" });
     await api("setRoster", { role: "engineer", models: ["stand-in/engineer", "claude-api/claude-opus-5-5"] });
     toolStatus.set("claude", { code: 0, stdout: told({ installed: true, signedIn: false }) });
-    expect((await readiness()).claude).toEqual({ id: "claude", ready: true, on: "claude-api/claude-opus-5-5 through the gateway" });
+    const keyed = await readiness();
+    expect(keyed.claude).toEqual({ id: "claude", ready: true, on: "claude-api/claude-opus-5-5 through the gateway" });
+    // (Nor is that model Antigravity's, keyed or not.)
+    expect(keyed.antigravity).toEqual({ id: "antigravity", ready: false, reason: signIn });
+    // Signed in to its Google account, it runs on that sign-in alone.
+    toolStatus.set("antigravity", { code: 0, stdout: told({ signedIn: true, version: "1.5.18" }) });
+    expect((await readiness()).antigravity).toEqual({ id: "antigravity", ready: true, on: "its own sign-in in this VM (signed in)" });
     // Signed in, it runs on its sign-in first, with that model through the gateway after it.
     toolStatus.set("claude", { code: 0, stdout: told({ installed: true, signedIn: true, method: "claude.ai" }) });
     expect((await readiness()).claude).toEqual({ id: "claude", ready: true, on: "its own sign-in in this VM (claude.ai), then claude-api/claude-opus-5-5 through the gateway" });
