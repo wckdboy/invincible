@@ -339,10 +339,20 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   shares a workspace (no run on a seat, no other node's task), and a HOME apart would keep nothing from anyone. A Mac
   refuses a VM that would share one, and layout 2 itself (`container-spec.test.ts`, `container-host.test.ts`), and its
   node takes no other node's task at all (`fabric-handoff.test.ts`).
+- **The node's own git there runs nothing of it** (the fourth fabric review's R4-4; `packages/agents/src/held-git.ts`,
+  tested in `packages/agents/test/held-git.test.ts` and `held-git-evidence.test.ts`). A VM that shares the workspace
+  shares the repository's `.git`, so a hook, an fsmonitor, a filter or a URL rewrite could be written there. A task's
+  setup, its steps' checkpoints, its evidence and what it keeps to ship run git with the repository's own configuration
+  held off: no system or global configuration, no hooks, no fsmonitor, no signing, no external diff or textconv, no
+  submodule's own git, no credential helper or proxy, and no transport but HTTP and HTTPS. A repository whose own
+  configuration names a filter, an include, another worktree or a hooks path isn't used by them, saying so. One whose
+  configuration would take a fetch elsewhere (a URL rewrite, an HTTP setting, a credential helper) isn't fetched with
+  the agent's lease: the task starts on the clone as it was, and says so.
 - **Residual risk.** The workspace is shared by design: what the agent's own work later runs from it (its repository's
-  scripts and hooks, a toolchain it installed into it) is code a VM sharing it could have changed. A toolchain moved to
-  HOME that baked its old place into its own files (a virtualenv's scripts, for one) doesn't run from its new place, and
-  is made again. An rc file in its HOME that puts a directory of the workspace on its PATH still does.
+  scripts, a hook its own commands run, a toolchain it installed into it) is code a VM sharing it could have changed. A
+  toolchain moved to HOME that baked its old place into its own files (a virtualenv's scripts, for one) doesn't run
+  from its new place, and is made again. An rc file in its HOME that puts a directory of the workspace on its PATH
+  still does.
 
 ## A Mac's sandboxes (tested on the Mac mini)
 
@@ -723,7 +733,8 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).
     - Residual: its VM time isn't counted itself, and what it leaves in the workspace it shares (the repository's
-      scripts and hooks among them) is there for the agent's later work (layout 2's residual, above).
+      scripts among them) is there for the agent's later work, which runs it by its own choice: the node's own git
+      there runs none of it (R4-4, and layout 2's residual, above).
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
     these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1),
     and those you take up again by id (R3-6).

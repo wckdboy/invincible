@@ -8,6 +8,7 @@ import { apartMatches, chat, choreRole, sameModel, workRole, type ModelsContext,
 import { commandsRun, DESKTOP_EVIDENCE, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
+import { HELD_GIT, heldGit } from "./held-git.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
 
 /** What one run of an agent is given by the team service (node/team.ts) that starts it. */
@@ -298,41 +299,53 @@ export const withGateway = (command: string, lease?: string): string => {
  * in a command), in a worktree of the task's own. The commit it started from is written down, with whether the
  * fetch came through (`fetched`) or the clone had to do as it was (`stale`), and printed. A task taken up again
  * finds its worktree and what was written; one from before this was written says `unknown`. A fix to a pull
- * request (`<branch>`, a third argument) starts on that branch as fetched, or not at all.
+ * request (`<branch>`, a third argument) starts on that branch as fetched, or not at all. Its git holds the
+ * repository's own configuration off (held-git.ts: the fourth fabric review's R4-4), so nothing written in the
+ * repository (another node's task shares it) runs as the agent here: a repository whose configuration names a filter,
+ * an include, another worktree or a hooks path isn't started in, and one whose configuration would take the fetch
+ * elsewhere isn't fetched (`stale`, and why on stderr).
  */
-export const REPO_TASK_START = `import json,os,subprocess,sys
-root, kept, repo = sys.argv[1], sys.argv[2], '/work/repo'
+export const REPO_TASK_START = `${HELD_GIT}root, kept, repo = sys.argv[1], sys.argv[2], '/work/repo'
 branch = sys.argv[3] if len(sys.argv) > 3 else ''
 # A task started from a step of another (PLAN #15): that task's id, and the commit its workspace was kept as then.
 from_task, from_commit = (sys.argv[4], sys.argv[5]) if len(sys.argv) > 5 else ('', '')
-git = lambda *a: subprocess.run(['git','-C',repo,*a],capture_output=True)
+said = lambda r: (r.stderr or r.stdout).decode(errors='replace')[-300:]
+head = lambda at: git(at,'rev-parse','HEAD').stdout.decode().strip()
+bad = refused(repo)
+if bad: sys.exit(bad)
 if not os.path.isdir(root) and from_commit:
-    if git('cat-file','-e',from_commit+'^{commit}').returncode: sys.exit('the step it starts from is no longer in the repository')
-    made = git('worktree','add','--detach',root,from_commit)
-    if made.returncode: sys.exit('could not make the worktree: '+made.stderr.decode()[-300:])
+    if git(repo,'cat-file','-e',from_commit+'^{commit}').returncode: sys.exit('the step it starts from is no longer in the repository')
+    made = git(repo,'worktree','add','--detach',root,from_commit,timeout=600)
+    if made.returncode: sys.exit('could not make the worktree: '+said(made))
     # Its HEAD where that step's was, the step's own changes in its files as they were; its base the task's it came from.
-    subprocess.run(['git','-C',root,'reset','-q','--mixed',from_commit+'^'],check=True)
+    back = git(root,'reset','-q','--mixed',from_commit+'^',timeout=600)
+    if back.returncode: sys.exit('could not set the worktree where that step began: '+said(back))
     src = '/work/.agent/base/'+from_task
-    base = open(src).read().split()[0] if os.path.exists(src) else subprocess.check_output(['git','-C',root,'rev-parse','HEAD']).decode().strip()
+    base = open(src).read().split()[0] if os.path.exists(src) else head(root)
     os.makedirs(os.path.dirname(kept),exist_ok=True)
     open(kept,'w').write(base+' from')
 elif not os.path.isdir(root):
     how = 'fetched'
-    try:
-        d = json.load(open(os.path.join(os.path.expanduser('~'), '${LEASE_FILE}')))
-        got = subprocess.run(['git','-C',repo,'-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'fetch','--quiet','--prune',d['INVINCIBLE_REPO_URL'],'+refs/heads/*:refs/remotes/origin/*'],capture_output=True,timeout=300)
-        if got.returncode: how = 'stale'
-    except Exception:
+    away = unfetched(repo)
+    if away:
         how = 'stale'
-    start = 'origin/HEAD' if git('rev-parse','--verify','--quiet','origin/HEAD').returncode == 0 else 'HEAD'
+        sys.stderr.write(away+'\\n')
+    else:
+        try:
+            d = json.load(open(os.path.join(os.path.expanduser('~'), '${LEASE_FILE}')))
+            got = git(repo,'-c','http.extraHeader=Authorization: Bearer '+d['INVINCIBLE_TOKEN'],'fetch','--quiet','--prune',d['INVINCIBLE_REPO_URL'],'+refs/heads/*:refs/remotes/origin/*',timeout=300)
+            if got.returncode: how = 'stale'
+        except Exception:
+            how = 'stale'
+    start = 'origin/HEAD' if git(repo,'rev-parse','--verify','--quiet','origin/HEAD').returncode == 0 else 'HEAD'
     if branch:
         start = 'refs/remotes/origin/'+branch
-        if git('rev-parse','--verify','--quiet',start+'^{commit}').returncode: sys.exit('the branch '+branch+' is not in the repository'+(' (it could not be fetched)' if how == 'stale' else ''))
-    made = git('worktree','add','--detach',root,start)
-    if made.returncode: sys.exit('could not make the worktree: '+made.stderr.decode()[-300:])
+        if git(repo,'rev-parse','--verify','--quiet',start+'^{commit}').returncode: sys.exit('the branch '+branch+' is not in the repository'+(' (it could not be fetched)' if how == 'stale' else ''))
+    made = git(repo,'worktree','add','--detach',root,start,timeout=600)
+    if made.returncode: sys.exit('could not make the worktree: '+said(made))
     os.makedirs(os.path.dirname(kept),exist_ok=True)
-    open(kept,'w').write(subprocess.check_output(['git','-C',root,'rev-parse','HEAD']).decode().strip()+' '+how)
-print(open(kept).read() if os.path.exists(kept) else subprocess.check_output(['git','-C',root,'rev-parse','HEAD']).decode().strip()+' unknown')`;
+    open(kept,'w').write(head(root)+' '+how)
+print(open(kept).read() if os.path.exists(kept) else head(root)+' unknown')`;
 
 /**
  * What an agent is told of the keys of yours it may use but never see (PLAN #17): each one's name and address, and
@@ -347,22 +360,88 @@ export function keysLine(keys: readonly TeamKeyGrant[] | undefined, address: (se
 /**
  * A task's workspace as it stands after a step, kept as a commit under a ref of its own in the agent's repository
  * (PLAN #15), through an index of its own (the task's is never touched). It prints the commit, its tree and its parent,
- * or "same" when neither changed since `last` ("<tree> <parent>" of the step before).
+ * or "same" when neither changed since `last` ("<tree> <parent>" of the step before). Its git holds the repository's own
+ * configuration off (held-git.ts, R4-4): no filter cleans what it adds, no hook runs as it commits.
  */
 export function checkpointCommand(root: string, task: string, step: number, last: string): string {
-  const index = `/work/.agent/checkpoints/${task}.index`;
-  return [
-    `cd ${quote(root)}`,
-    "mkdir -p /work/.agent/checkpoints",
-    // (The task's own index copied first, so only what changed is read again; with its time, so git still reads a file
-    // written in the same tick as the index, whose times can't tell it changed: a copy with a new time hid that.)
-    `{ cp -p "$(git rev-parse --git-path index)" ${quote(index)} 2>/dev/null || rm -f ${quote(index)}; }`,
-    `GIT_INDEX_FILE=${quote(index)} git add -A . >/dev/null 2>&1`,
-    `T=$(GIT_INDEX_FILE=${quote(index)} git write-tree)`,
-    "P=$(git rev-parse HEAD)",
-    `if [ "$T $P" = ${quote(last)} ]; then echo same; else C=$(git commit-tree --no-gpg-sign "$T" -p "$P" -m ${quote(`Your agent: task ${task}, after step ${step}`)}) && git update-ref ${quote(`refs/invincible/checkpoints/${task}/${step}`)} "$C" && echo "$C $T $P"; fi`,
-  ].join(" && ");
+  return heldGit(CHECKPOINT_SCRIPT, root, task, String(step), last);
 }
+
+/**
+ * A task's evidence in a repository, run where it works (after HELD_GIT, R4-4): what `git status --short` and `git diff
+ * <base>`, new files included, say there, with the repository's own configuration held off. The reviewer is shown them
+ * by those words. A repository refused says why instead.
+ */
+const EVIDENCE_STATUS = `bad = refused('.')
+if bad:
+    print(bad)
+    sys.exit(1)
+r = git('.','status','--short','--ignore-submodules=dirty')
+sys.stdout.write(r.stdout.decode(errors='replace'))
+sys.stderr.write(r.stderr.decode(errors='replace'))
+sys.exit(r.returncode)`;
+const EVIDENCE_DIFF = `base = sys.argv[1]
+bad = refused('.')
+if bad:
+    print(bad)
+    sys.exit(1)
+git('.','add','-A','-N','.')
+r = git('.','diff','--no-ext-diff','--no-textconv','--ignore-submodules=dirty',base)
+sys.stdout.write(r.stdout[:24000].decode(errors='replace'))
+sys.stderr.write(r.stderr.decode(errors='replace')[-2000:])`;
+
+/** A task's evidence in a repository (runLoop's `evidence`): run held, shown by the words of what it does. */
+export function repositoryEvidence(base: string): { run: string; shown: string }[] {
+  return [
+    { shown: "git status --short", run: heldGit(EVIDENCE_STATUS) },
+    { shown: `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`, run: heldGit(EVIDENCE_DIFF, base) },
+  ];
+}
+
+/** Where a task works, what it changed since `base` kept at `out`: its patch and its shipment (ship.ts), printing how many files. */
+export function changesCommand(out: string, base: string): string {
+  return `rm -rf ${quote(out)} && mkdir -p ${quote(out)} && ${heldGit(PATCH_SCRIPT, base, `${out}/changes.patch`)} && python3 -I -c ${quote(SHIPMENT_SCRIPT)} . ${quote(out)}/ship ${quote(base)}`;
+}
+
+/** A task's changes since `<base>` as one patch at `<path>`, new files included (after HELD_GIT, R4-4); its index as it was after. */
+const PATCH_SCRIPT = `base, patch = sys.argv[1], sys.argv[2]
+bad = refused('.')
+if bad: sys.exit(bad)
+if git('.','add','-A',timeout=300).returncode: sys.exit('could not read the workspace')
+with open(patch,'wb') as f:
+    r = subprocess.run(['git','-C','.',*HELD_OFF,'diff','--cached','--binary','--no-ext-diff','--no-textconv','--ignore-submodules=dirty',base],stdout=f,stderr=subprocess.PIPE,timeout=300,env=GIT_ENV)
+git('.','reset','-q',timeout=300)
+if r.returncode: sys.exit('could not write the patch: '+r.stderr.decode(errors='replace')[-200:])`;
+
+/** `checkpointCommand`'s script, after HELD_GIT: `<root> <task> <step> <last>`. */
+const CHECKPOINT_SCRIPT = `root, task, step, last = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+bad = refused(root)
+if bad: sys.exit(bad)
+index = '/work/.agent/checkpoints/'+task+'.index'
+os.makedirs('/work/.agent/checkpoints', exist_ok=True)
+# (The task's own index copied first, so only what changed is read again; with its time, so git still reads a file
+# written in the same tick as the index, whose times can't tell it changed: a copy with a new time hid that.)
+own = git(root,'rev-parse','--git-path','index').stdout.decode().strip()
+try:
+    shutil.copy2(own if os.path.isabs(own) else os.path.join(root, own), index)
+except OSError:
+    try:
+        os.remove(index)
+    except OSError:
+        pass
+held = {'GIT_INDEX_FILE': index}
+if git(root,'add','-A','.',env=held,timeout=600).returncode: sys.exit('could not read the workspace')
+tree = git(root,'write-tree',env=held).stdout.decode().strip()
+parent = git(root,'rev-parse','HEAD').stdout.decode().strip()
+if not tree or not parent: sys.exit('could not read the workspace')
+if tree+' '+parent == last:
+    print('same')
+    sys.exit(0)
+made = git(root,'commit-tree','--no-gpg-sign',tree,'-p',parent,'-m','Your agent: task '+task+', after step '+step)
+commit = made.stdout.decode().strip()
+if made.returncode or not commit: sys.exit('could not keep the step: '+made.stderr.decode(errors='replace')[-200:])
+if git(root,'update-ref','refs/invincible/checkpoints/'+task+'/'+step,commit).returncode: sys.exit('could not keep the step')
+print(commit+' '+tree+' '+parent)`;
 
 /*
  * An agent's task has no count of commands and no limit of time (your ruling, 17 November 2026): limits ended real work
@@ -957,7 +1036,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const tools = Boolean(deps.toolsLoop) && !coding && !held && !agent.models?.length;
       // On a seat its tool's commands run in the seat's VM: told so, and not told of a desktop out of their reach.
       const where = onSeat ? ` Your commands run in a VM made for your plan, beside your own VM and sharing its /work${desktop ? ": your own VM's desktop is out of their reach" : ""}.` : screen;
-      const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. ${home}/${LEASE_FILE} is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? ["git status --short", `git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${base} | head -c 24000`] : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, ...(task.givenBy?.startsWith("node:") ? { gateSeconds: HANDED_GATE_SECONDS } : {}), submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "", ...(desktop && !onSeat ? { computer: true } : {}) } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}), home }, {
+      const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. ${home}/${LEASE_FILE} is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? repositoryEvidence(base) : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, ...(task.givenBy?.startsWith("node:") ? { gateSeconds: HANDED_GATE_SECONDS } : {}), submitAtLimit: true, escalate: true, keepReads: true, ...(tools ? { tools: true, plan: "", ...(desktop && !onSeat ? { computer: true } : {}) } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}), home }, {
         // (keepReads: an agent sees whole what it reads, and it stays in view while it is current. The first real outcome's
         // agents, shown 8,000 characters of each, read one file in 26 then 34 commands, and three tasks ended with nothing
         // written: run.ts keepReads. Each command has TEAM_COMMAND_SECONDS: at 120 s, the repository's own tests were cut off.)
@@ -1076,7 +1155,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       let changed = "";
       if (agent.repository) {
         const out = `/work/out/tasks/${task.id}`;
-        const made = await exec(`rm -rf ${quote(out)} && mkdir -p ${quote(out)} && git add -A && git diff --cached --binary ${base} > ${quote(out)}/changes.patch; git reset -q; python3 -I -c ${quote(SHIPMENT_SCRIPT)} . ${quote(out)}/ship ${base}`, 300).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }));
+        const made = await exec(changesCommand(out, base), 300).catch((error: Error) => ({ exitCode: -1, stdout: "", stderr: error.message }));
         const files = made.exitCode === 0 ? Number(made.stdout.trim().split("\n").at(-1)) : NaN;
         const count = `${files} file${files === 1 ? "" : "s"}`;
         if (!Number.isInteger(files)) changed = `Changes: could not be read (${redact(made.stderr || made.stdout).trim().split("\n").at(-1)?.slice(0, 200) ?? "no reason given"})`;

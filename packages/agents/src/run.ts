@@ -117,8 +117,12 @@ export interface RunOptions {
   unreviewed?: boolean;
   /** More instructions for the engineer, after the usual ones. */
   instructions?: string;
-  /** Shell commands whose output the reviewer sees too (run just before each review), e.g. `cat /work/out/results.json`. */
-  evidence?: string[];
+  /**
+   * Shell commands whose output the reviewer sees too (run just before each review), e.g. `cat /work/out/results.json`.
+   * One given as `{ run, shown }` is run as `run` and shown by `shown`'s words: a command the node runs its own way (its
+   * git with the repository's own configuration held off: held-git.ts), said as what it does.
+   */
+  evidence?: (string | { run: string; shown: string })[];
   /** A different review: its prompt, and how to read the answer. */
   review?: RunReview;
   /**
@@ -1597,13 +1601,14 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     // (The latest REVIEWED_STEPS commands: a long run's every one is in the ledger.)
     const shown = trail.slice(-REVIEWED_STEPS);
     let evidence = "";
-    for (const command of o.evidence) {
+    for (const each of o.evidence) {
       check();
+      const [command, shown] = typeof each === "string" ? [each, each] : [each.run, each.shown];
       try {
         const result = await deps.exec(command, Math.min(o.commandTimeoutSec, 60));
-        evidence += `$ ${command}\n${observation(result, SHOWN.evidence)}\n\n`;
+        evidence += `$ ${shown}\n${observation(result, SHOWN.evidence)}\n\n`;
       } catch (error) {
-        evidence += `$ ${command}\n(could not run: ${(error as Error).message})\n\n`;
+        evidence += `$ ${shown}\n(could not run: ${(error as Error).message})\n\n`;
       }
     }
     // The desktop's pictures go with it (C1 step 8): the latest, each named as the trail names it.
@@ -1649,12 +1654,13 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
     audits.at = clock();
     audits.step = steps;
     let evidence = "";
-    for (const command of look ? o.evidence : []) {
+    for (const each of look ? o.evidence : []) {
       check();
+      const [command, shown] = typeof each === "string" ? [each, each] : [each.run, each.shown];
       try {
-        evidence += `$ ${command}\n${clip(observation(await deps.exec(command, Math.min(o.commandTimeoutSec, 60))), 3000, 600)}\n\n`;
+        evidence += `$ ${shown}\n${clip(observation(await deps.exec(command, Math.min(o.commandTimeoutSec, 60))), 3000, 600)}\n\n`;
       } catch (error) {
-        evidence += `$ ${command}\n(could not run: ${(error as Error).message})\n\n`;
+        evidence += `$ ${shown}\n(could not run: ${(error as Error).message})\n\n`;
       }
     }
     let found: { verdict: AuditVerdict; note: string };

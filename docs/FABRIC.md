@@ -179,8 +179,11 @@ transport keys carries all of it:
        answered as failed (the third re-review's R3-2). A task you take up again by its id lives no longer than the
        longest a hand-off may last, from then (R3-6).
      - Not bounded: the VM time its work takes isn't counted itself (its budget's dollars and its life bound it), and
-       what it leaves in the workspace it shares (the repository's scripts and hooks among them) is there for the
-       agent's later work, as SECURITY.md's layout 2 section says.
+       what it leaves in the workspace it shares (the repository's scripts, a toolchain it installed) is there for the
+       agent's later work, as SECURITY.md's layout 2 section says. The node itself runs none of it (the fourth
+       re-review's R4-4): its own git in that repository (the agent's next task's setup, its steps' checkpoints, its
+       evidence, what it keeps to ship) holds the repository's configuration off, so no hook, fsmonitor, filter or
+       signing program written there runs, and a fetch with the agent's lease goes to the gateway alone.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:

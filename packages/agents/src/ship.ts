@@ -1,4 +1,5 @@
 import type { ArgValue } from "@invincible/core";
+import { HELD_GIT } from "./held-git.ts";
 import { z } from "zod";
 
 /*
@@ -175,18 +176,23 @@ async function ship(deps: ShipDeps, args: Record<string, ArgValue>, update: bool
 /**
  * What a run leaves for shipping, run in the sandbox after the work (python3 is in the
  * workshop) as `python3 -I -c SCRIPT <repo> <out> [<base>]`: the starting commit, the remote, and every
- * change since, new files included. Prints how many files changed. The start is the clone's HEAD unless
+ * change since, new files included, its git holding the repository's own configuration off (held-git.ts: no filter
+ * cleans what it adds). Prints how many files changed. The start is the clone's HEAD unless
  * `base` says where the work began: an agent's task works in a worktree of its own and may commit there,
  * and a commit of its own is no start GitHub has ever seen.
  */
-export const SHIPMENT_SCRIPT = `import json, os, shutil, subprocess, sys
-repo, out = sys.argv[1], sys.argv[2]
+export const SHIPMENT_SCRIPT = `${HELD_GIT}repo, out = sys.argv[1], sys.argv[2]
 os.chdir(repo)
-run = lambda *a: subprocess.check_output(["git", *a]).decode()
-subprocess.check_call(["git", "add", "-A"])
+bad = refused(".")
+if bad: sys.exit(bad)
+def run(*a):
+    r = git(".", *a, timeout=300)
+    if r.returncode: sys.exit((r.stderr or r.stdout).decode(errors="replace")[-300:] or "git failed")
+    return r.stdout.decode()
+run("add", "-A")
 base = run("rev-parse", "--verify", (sys.argv[3] if len(sys.argv) > 3 else "HEAD") + "^{commit}").strip()
 remote = run("remote", "get-url", "origin").strip()
-listed = run("diff", "--cached", "--name-status", "--no-renames", "-z", base).split("\\0")[:-1]
+listed = run("diff", "--cached", "--name-status", "--no-renames", "--no-ext-diff", "--ignore-submodules=dirty", "-z", base).split("\\0")[:-1]
 # Modes as git records them (100755 executable; 120000 a link and 160000 a submodule aren't shipped).
 modes = {}
 for entry in run("ls-files", "-s", "-z").split("\\0")[:-1]:
@@ -205,7 +211,7 @@ for status, path in zip(listed[0::2], listed[1::2]):
     os.makedirs(os.path.dirname(target), exist_ok=True)
     shutil.copyfile(path, target)
     files.append({"path": path, "mode": mode})
-subprocess.check_call(["git", "reset", "-q"])
+run("reset", "-q")
 if files:
     os.makedirs(out, exist_ok=True)
     json.dump({"v": 1, "base": base, "remote": remote, "files": files}, open(os.path.join(out, "manifest.json"), "w"), indent=1)

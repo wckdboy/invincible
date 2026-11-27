@@ -1513,7 +1513,7 @@ function notesTask(agent: Agent, options: { on?: boolean; version?: Partial<Exec
     agent: () => agent,
     ...(options.on === undefined ? {} : { engram: () => options.on! }),
     // (A VM with a repository says where the task's worktree starts: REPO_TASK_START.)
-    exec: async (_m, command) => { commands.push(command); return command === "/opt/engram/bin/engram version" ? result({ stdout: "engram 3.7.2\n", ...options.version }) : command.includes("worktree") ? result({ stdout: `${BASE} fetched` }) : result(); },
+    exec: async (_m, command) => { commands.push(command); return command === "/opt/engram/bin/engram version" ? result({ stdout: "engram 3.7.2\n", ...options.version }) : command.includes("from_commit") ? result({ stdout: `${BASE} fetched` }) : result(); },
   });
   const run = () => f.runtime.executeTask(agent, task, { ...f.context, emit: (text) => { progress.push(text); } });
   return { run, commands, progress, engineer: () => String(f.bodies[1].messages.find((m: any) => m.role === "user").content) };
@@ -1591,7 +1591,7 @@ test("on, an agent's harness is written the store's entry in its own way and tol
       exec: async (_m, command) => {
         commands.push(command);
         if (command === "/opt/engram/bin/engram version") return result({ stdout: "engram 3.7.2\n" });
-        if (command.includes("worktree")) return result({ stdout: `${BASE} fetched` });
+        if (command.includes("from_commit")) return result({ stdout: `${BASE} fetched` });
         if (command.includes("--status")) return result({ stdout: status({ installed: true, signedIn: true, method: "claude.ai" }) });
         if (command.includes('"next": nxt')) return result({ stdout: JSON.stringify({ alive: false, exit: 0, next: 42, lines: [JSON.stringify({ type: "session", id: "00000000-0000-4000-8000-000000000001" }), JSON.stringify({ type: "text", text: "Built and checked." })] }) });
         return result({ stdout: command.includes("cat ") ? "" : "0" });
@@ -1632,7 +1632,7 @@ function repoTask(options: { start?: string; changed?: number; reviewer?: string
     agent: () => agent,
     exec: async (_m, command) => {
       commands.push(command);
-      if (command.includes("worktree")) return result({ stdout: `${options.start ?? `${BASE} fetched`}\n` });
+      if (command.includes("from_commit")) return result({ stdout: `${options.start ?? `${BASE} fetched`}\n` });
       if (command.includes("changes.patch")) return result({ stdout: `${options.changed ?? 2}\n` });
       return result();
     },
@@ -1671,7 +1671,7 @@ test("an agent's steps are kept as they end (PLAN #15): after each command of it
       }
       if (command.includes("echo one > a.txt")) order.push("one");
       if (command.includes("cat a.txt")) order.push("cat");
-      if (command.includes("worktree")) return result({ stdout: `${BASE} fetched\n` });
+      if (command.includes("from_commit")) return result({ stdout: `${BASE} fetched\n` });
       if (command.includes("changes.patch")) return result({ stdout: "1\n" });
       return result();
     },
@@ -1709,8 +1709,14 @@ test("an agent's task in a repository starts from the repository as it is now, i
 test("its reviewer is shown the work itself: everything since the start, new files and what the agent committed included", async () => {
   const t = repoTask();
   await t.run();
-  // (New files show only once git is told of them; the agent's own commits only against where it began.)
-  expect(t.commands.some((c) => c.includes(`git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${BASE} | head -c 24000`))).toBe(true);
+  // (New files show only once git is told of them; the agent's own commits only against where it began.) Its git holds
+  // the repository's own configuration off (held-git.ts, R4-4), and the reviewer is shown it by the words it had before.
+  const diff = t.commands.map((c) => plain(plain(c))).find((c) => c.includes("git('.','add','-A','-N','.')"))!;
+  expect(diff).toContain("'diff','--no-ext-diff','--no-textconv','--ignore-submodules=dirty',base");
+  expect(diff).toContain(`base = sys.argv[1]`);
+  expect(diff).toContain(` '${BASE}'`);
+  expect(diff).toContain("HELD_OFF=");
+  expect(JSON.stringify(t.bodies)).toContain(`$ git add -A -N . 2>/dev/null; git diff --no-ext-diff --no-textconv ${BASE} | head -c 24000`);
   expect(t.commands.some((c) => c.includes("git diff --no-ext-diff --no-textconv HEAD"))).toBe(false);
 });
 
@@ -1720,8 +1726,11 @@ test("what it changed is kept to read and to ship: a patch and a shipment from w
   expect(outcome.verified).toBe(true);
   const keep = plain(plain(t.commands.find((c) => c.includes("changes.patch"))!));
   const out = `/work/out/tasks/${task.id}`;
-  expect(keep).toContain(`git diff --cached --binary ${BASE} > '${out}'/changes.patch`);
-  expect(keep).toContain(`'${out}'/ship ${BASE}`);
+  // Its patch and its shipment, each with its git holding the repository's own configuration off (held-git.ts, R4-4).
+  expect(keep).toContain(`'diff','--cached','--binary','--no-ext-diff','--no-textconv','--ignore-submodules=dirty',base`);
+  expect(keep).toContain(`'${BASE}' '${out}/changes.patch'`);
+  expect(keep).toContain(`'${out}'/ship '${BASE}'`);
+  expect(keep.match(/HELD_OFF=/g)).toHaveLength(2);
   expect(t.kept).toEqual([{ path: out, label: "Build · ada · verified" }]);
   expect(outcome.changes).toEqual({ artifact: KEPT, files: 2, base: BASE });
   expect(outcome.output).toContain(`Base: ${BASE.slice(0, 12)}`);
