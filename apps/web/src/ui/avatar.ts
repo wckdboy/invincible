@@ -1,21 +1,22 @@
-import { MARK_PALETTE, type MarkProfile, markOf, markProfile, markState, readMarkProfile } from "@invincible/core/agent-mark";
+import { MARK_PALETTE, markState } from "@invincible/core/agent-mark";
+import { GLASS_RAMPS, GLASS_SHAPES, glassOf, glassProfile, type GlassProfile } from "@invincible/core/glass";
 import { AVATAR_EXPRESSIONS, type AvatarExpression } from "@invincible/core/avatar";
 import { type AgentState, STATES } from "../lib/agent-state.ts";
 import { orbToneOfState } from "../lib/orb.ts";
 import { orbMoodOfExpression } from "../lib/orb-motion.ts";
 import { button, dot } from "./controls.ts";
 import { h, replace } from "./dom.ts";
+import { glassAvatar } from "./glass.ts";
 import { markStateOfAgent } from "./mark.ts";
 import { agentFace, orb } from "./orb.ts";
 
 /*
- * An agent as its mark, the Grille (O2, the owner's choice on 26 November 2026: ui/mark.ts): a disc in its own colour, cut
- * into slats at its own angle, the colour and the form its node gave it as it joined. Its state is in its shape (the top
- * slat in ink while it asks you, the bottom one red and loose once it failed, pale while queued, grey while paused), and
- * said beside it in words (stateChip(), the row's line), so colour never tells it alone. It moves only where it is the one
- * you are looking at and its state moves it; in a row (seat()) it is still. The primary itself is the I-beam. A speaker in
- * a conversation's history is drawn still, and nothing moves when the device asks for reduced motion. Nothing from a
- * profile reaches a URL, a style or a paint: its colour is only ever one of core's eight.
+ * An agent as its glass (ui/glass.ts, the owner's word of 27 November 2026 that the Grille goes): a shape of our own in
+ * one of eight ramps, the shape and the colour its node gave it as it joined. Its state is a dot cut out beside it, and
+ * said beside it in words (stateChip(), the row's line), so colour never tells it alone; only working moves, its light
+ * breathing. The primary itself is the I-beam. A speaker in a conversation's history has no dot, and nothing moves when
+ * the device asks for reduced motion. Nothing from a profile reaches a URL, a style or a paint: its colour is only ever
+ * one of core's eight ramps and its shape one of core's 22.
  */
 
 /** How a face is put on the page, and the colour picker's swatches: given to the page once, by the first drawn. */
@@ -28,6 +29,11 @@ export const AGENT_CSS = `
 .orb-swatch { width: 36px; height: 36px; margin: 4px; padding: 0; border: 0; border-radius: 50%; background: var(--swatch); cursor: pointer; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.14); }
 .orb-swatch:focus-visible { outline: 2px solid var(--focus, currentColor); outline-offset: 2px; }
 .orb-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg, #000), 0 0 0 4px var(--accent, currentColor); }
+.glass-shapes { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px; margin-top: 8px; }
+.glass-shape { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
+.glass-shape:hover { background: var(--hover, rgb(127 127 127 / 0.08)); }
+.glass-shape:focus-visible { outline: 2px solid var(--focus, currentColor); outline-offset: 2px; }
+.glass-shape[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent, currentColor); }
 `;
 
 function ensureStyles(): void {
@@ -43,9 +49,9 @@ export interface WorkerAvatarOptions {
   /** An agent's handle, or "primary" for the primary itself (a handle no other agent can have). */
   id: string;
   name: string;
-  /** Its saved avatar: its mark as its node gave it (v 3), or a colour chosen before the marks (v 2): core's markOf. */
+  /** Its saved avatar: its glass as its node gave it (v 4), or what it had before (v 3, v 2): core's glassOf. */
   profile?: unknown;
-  /** What it is doing (core's avatarExpression): its mark shows it (core's markState), and moves as it does. */
+  /** What it is doing (core's avatarExpression): its dot shows it (core's markState), its light breathing while it works. */
   expression?: AvatarExpression;
   size?: number;
   /** Historical messages identify a speaker, without inventing a past state: drawn still. */
@@ -65,7 +71,7 @@ export function workerAvatar(options: WorkerAvatarOptions): HTMLElement {
   const mood = options.still ? undefined : orbMoodOfExpression(expression);
   const label = options.still ? `${name}'s mark` : `${name} · ${expression}`;
   if (id === "primary") return h("span", { class: "worker-avatar", "data-primary": "true" }, orb({ size, label, mood, key: "invincible:face" }));
-  return h("span", { class: "worker-avatar", "data-expression": expression }, agentFace({ id, profile: options.profile, size, mood, state: markState(expression), label, key: `face:${id}` }));
+  return h("span", { class: "worker-avatar", "data-expression": expression }, agentFace({ id, profile: options.profile, size, ...(options.still ? {} : { mood, state: markState(expression) }), label }));
 }
 
 /** What a seat leaves round its face, by its size (the stylesheet's --seat-pad): the room its ring took, kept so a row
@@ -91,7 +97,7 @@ export function seat(options: WorkerAvatarOptions & { state?: AgentState }): HTM
   const id = String(options.id);
   const words = STATES[state]?.words;
   const label = options.still ? `${name}'s mark` : words ? `${name} · ${words}` : name;
-  return h("span", { class: `seat seat-${scale}`, "data-state": state }, h("span", { class: "worker-avatar" }, agentFace({ id, profile: options.profile, size, state: markStateOfAgent(state), label, key: `seat:${id}` })));
+  return h("span", { class: `seat seat-${scale}`, "data-state": state }, h("span", { class: "worker-avatar" }, agentFace({ id, profile: options.profile, size, state: markStateOfAgent(state), label })));
 }
 
 /** An agent's state in words, beside its name (a badge in the state's tone; working has a live dot, so it isn't read as
@@ -103,42 +109,49 @@ export function stateChip(state: AgentState | undefined): HTMLElement | null {
 }
 
 /**
- * An agent's colour, as you choose it: its mark as it will be, and the eight colours to choose from (core's MARK_PALETTE),
- * its form kept. An unsaved draft: the form it is in decides whether to save it. Its value: its mark in the colour you
- * chose (v 3), null for the one its node would give it now, or undefined when nothing was touched (what is saved stays).
+ * An agent's glass, as you choose it: it as it will be, the eight colours (core's ramps, on the palette's hues) and the
+ * 22 shapes to choose from, each kept as you leave it when you choose the other. An unsaved draft: the form it is in
+ * decides whether to save it. Its value: its glass as you chose it (v 4), null for the one its node would give it now,
+ * or undefined when nothing was touched (what is saved stays).
  */
-export function avatarEditor(options: { id(): string; name(): string; profile?: unknown }): { element: HTMLElement; value(): MarkProfile | null | undefined; refreshIdentity(): void } {
+export function avatarEditor(options: { id(): string; name(): string; profile?: unknown }): { element: HTMLElement; value(): GlassProfile | null | undefined; refreshIdentity(): void } {
   ensureStyles();
-  // (A mark it has, or a colour chosen before the marks, snapped to the eight: core's markOf.)
-  const had = readMarkProfile(options.profile) !== null || (options.profile !== null && options.profile !== undefined);
-  let chosen: number | null = had ? markOf(options.id() || "agent", options.profile).color : null;
+  // (Its glass, or what it had before, read as core's glassOf reads it.)
+  const had = options.profile !== null && options.profile !== undefined;
+  const own = () => glassOf(options.id() || "agent", options.profile);
+  let color: number | null = had ? own().color : null;
+  let shape: number | null = had ? own().shape : null;
   let touched = false;
   const preview = h("div", { class: "orb-editor-preview" });
   const note = h("p", { class: "small muted" });
   const swatches = h("div", { class: "orb-swatches", role: "group", "aria-label": "Its colour" });
-  const choose = (color: number | null) => ((chosen = color), (touched = true), render());
-  const markNow = (): MarkProfile | undefined => {
-    const id = options.id() || "agent";
-    return chosen === null ? undefined : markProfile({ color: chosen, form: markOf(id, options.profile).form });
-  };
+  const shapes = h("div", { class: "glass-shapes", role: "group", "aria-label": "Its shape" });
+  const glassNow = (): GlassProfile | undefined => (color === null && shape === null ? undefined : glassProfile({ color: color ?? own().color, shape: shape ?? own().shape }));
+  const reset = () => ((color = null), (shape = null), (touched = true), render());
   function render(): void {
     const id = options.id() || "agent";
-    replace(preview, workerAvatar({ id, name: options.name() || "Your agent", profile: markNow() ?? options.profile, expression: "idle", size: 96 }));
-    replace(note, touched && chosen === null ? "The colour its node gives it when it is saved: one no other agent has, while there are colours to go round." : chosen !== null ? `${MARK_PALETTE[chosen]!.name}. Its form, the angle and the slots its colour is cut by, stays its own.` : "The colour its node gives it as it joins: one no other agent has, while there are colours to go round.");
-    replace(swatches, ...MARK_PALETTE.map((hue, n) =>
-      h("button", { type: "button", class: "orb-swatch", style: `--swatch:light-dark(${hue.light}, ${hue.dark})`, title: hue.name, "aria-label": hue.name, "aria-pressed": String(chosen === n), onclick: () => choose(n) })));
+    const now = glassNow();
+    const shown = glassOf(id, now ?? options.profile);
+    replace(preview, workerAvatar({ id, name: options.name() || "Your agent", profile: now ?? options.profile, expression: "idle", size: 96 }));
+    replace(note, touched && now === undefined ? "The glass its node gives it when it is saved: a colour and a shape no other agent near it has, while there are some to go round." : now ? `${MARK_PALETTE[shown.color]!.name}, ${GLASS_SHAPES[shown.shape]!.name}.` : "The glass its node gives it as it joins: a colour and a shape no other agent near it has, while there are some to go round.");
+    replace(swatches, ...GLASS_RAMPS.map((ramp, n) =>
+      h("button", { type: "button", class: "orb-swatch", style: `--swatch:linear-gradient(135deg, light-dark(${ramp.light.a}, ${ramp.dark.a}), light-dark(${ramp.light.b}, ${ramp.dark.b}))`, title: MARK_PALETTE[n]!.name, "aria-label": MARK_PALETTE[n]!.name, "aria-pressed": String(now !== undefined && shown.color === n), onclick: () => ((color = n), (shape ??= shown.shape), (touched = true), render()) })));
+    replace(shapes, ...GLASS_SHAPES.map((s, n) =>
+      h("button", { type: "button", class: "glass-shape", title: s.name, "aria-label": s.name, "aria-pressed": String(now !== undefined && shown.shape === n), onclick: () => ((shape = n), (color ??= shown.color), (touched = true), render()) },
+        glassAvatar({ id, profile: glassProfile({ color: shown.color, shape: n }), size: 28 }))));
   }
   const element = h(
     "fieldset",
     { class: "avatar-editor" },
-    h("legend", {}, "Colour"),
-    h("div", { class: "orb-editor-stage" }, preview, h("div", { class: "stack" }, note, button("The colour it would be given", { variant: "ghost", size: "sm", onClick: () => choose(null) }))),
+    h("legend", {}, "Its glass"),
+    h("div", { class: "orb-editor-stage" }, preview, h("div", { class: "stack" }, note, button("The glass it would be given", { variant: "ghost", size: "sm", onClick: reset }))),
     swatches,
+    shapes,
   );
   render();
   return {
     element,
-    value: () => (!touched ? undefined : (markNow() ?? null)),
+    value: () => (!touched ? undefined : (glassNow() ?? null)),
     refreshIdentity: () => render(),
   };
 }

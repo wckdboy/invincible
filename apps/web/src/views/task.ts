@@ -315,7 +315,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     const direct = directRoom(n.snapshot, n.task.assignee);
     // The agent's mark, the one in focus: its slats slide while it works; as its task ends it settles (done) or its bottom
     // slat drops (failed), once, then it is still.
-    const face = h("span", { class: "thread-head-face" }, agentFace({ id: n.task.assignee, profile: n.agent?.avatar, size: 28, mood: orbMoodOfState("working"), state: markStateOfAgent(state), label: `${n.name}${working ? ", working" : ""}`, key: `task:${n.task.assignee}` }));
+    const face = h("span", { class: "thread-head-face" }, agentFace({ id: n.task.assignee, profile: n.agent?.avatar, size: 28, mood: orbMoodOfState("working"), state: markStateOfAgent(state), label: `${n.name}${working ? ", working" : ""}` }));
     keepPlace(head, () =>
       replace(
         head,

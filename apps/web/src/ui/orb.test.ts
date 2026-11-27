@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MARK_PALETTE, markOf } from "@invincible/core/agent-mark";
+import { GLASS_RAMPS, glassOf } from "@invincible/core/glass";
 import { appMark, agentFace, orb, type OrbTone } from "./orb.ts";
 
 /** Captures the renderer's real createElement and createElementNS calls, without an HTML parser or a browser (and with
@@ -34,7 +34,7 @@ describe("Your agent's mark: the I-beam, with or without a canvas", () => {
   test("its box, its tone and its size, at any size and in any state, holding the I-beam alone", () => {
     for (const tone of ["neutral", "accent", "warn", "ok", "danger"] as OrbTone[]) {
       const node = draw(() => orb({ tone, size: 168 }) as unknown as Node_);
-      expect([node.attrs.class, node.attrs["data-tone"], node.attrs.style]).toEqual(["orb orb-mark", tone, "--orb-size:168px"]);
+      expect([node.attrs.class, node.attrs["data-tone"], node.attrs.style]).toEqual(["guardian-mark gm-mono orb orb-mark", tone, "--orb-size:168px"]);
       expect(node.children.map((child) => [child.tag, child.attrs.class])).toEqual([["svg", "ibeam"]]);
       for (const child of walk(node)) for (const key of Object.keys(child.attrs)) expect(key).not.toMatch(/^(on|href|xlink)/i);
     }
@@ -47,7 +47,7 @@ describe("Your agent's mark: the I-beam, with or without a canvas", () => {
     const [named, plain, moving] = draw(() => [orb({ label: "Your agent: at work" }), orb({}), orb({ mood: "working" })] as unknown as Node_[]);
     expect([named!.attrs.role, named!.attrs["aria-label"], named!.attrs["aria-hidden"]]).toEqual(["img", "Your agent: at work", undefined]);
     expect([plain!.attrs.role, plain!.attrs["aria-hidden"]]).toEqual([undefined, "true"]);
-    expect([moving!.attrs.class, moving!.attrs["data-mood"]]).toEqual(["orb orb-mark", undefined]);
+    expect([moving!.attrs.class, moving!.attrs["data-mood"]]).toEqual(["guardian-mark gm-mono orb orb-mark", undefined]);
   });
 });
 
@@ -61,10 +61,11 @@ describe("the app's mark", () => {
 });
 
 describe("an agent's face", () => {
-  test("its mark, the Grille: its colour, its size and its name, drawn as SVG on any page", () => {
+  test("its glass: its ramp, its size and its name, drawn as SVG on any page", () => {
     const face = draw(() => agentFace({ id: "ada", size: 34, label: "Ada · Working" }) as unknown as Node_);
-    expect([face.attrs.class, face.attrs.role, face.attrs["aria-label"]]).toEqual(["agent-orb agent-mark", "img", "Ada · Working"]);
-    expect(face.attrs.style).toStartWith(`--orb-size:34px;--mark-body:light-dark(${MARK_PALETTE[markOf("ada").color]!.light}, `);
+    expect([face.attrs.class, face.attrs.role, face.attrs["aria-label"]]).toEqual(["agent-orb agent-glass gl-pool gl-shade", "img", "Ada · Working"]);
+    const ramp = GLASS_RAMPS[glassOf("ada").color]!;
+    expect(face.attrs.style).toStartWith(`--orb-size:34px;--ga:light-dark(${ramp.light.a}, ${ramp.dark.a});--gb:light-dark(${ramp.light.b}, ${ramp.dark.b});`);
     expect(face.children.map((child) => [child.tag, child.attrs.viewBox])).toEqual([["svg", "0 0 100 100"]]);
     const decorative = draw(() => agentFace({ id: "ada", size: 900 }) as unknown as Node_);
     expect([decorative.attrs["aria-hidden"], decorative.attrs.style!.split(";")[0]]).toEqual(["true", "--orb-size:256px"]);

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { seat, workerAvatar } from "./avatar.ts";
+import { GLASS_SHAPES, glassOf } from "@invincible/core/glass";
+import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 import { appMark, agentFace, orb } from "./orb.ts";
 
 /*
- * Your agent's I-beam and each agent's mark (the Grille, O2: ui/mark.ts) on a page that records what is made, without a
- * browser: no canvas anywhere; still where they are many, where motion is reduced, and at rest; moving slowly where one is
- * looked at and its state moves it; asking for nothing once still.
+ * Your agent's I-beam and each agent's glass (ui/glass.ts) on a page that records what is made, without a browser: no
+ * canvas anywhere, and never a frame asked for: what moves (a working agent's light) is the stylesheet's alone.
  */
 
 /** A 2D context that keeps the name of every call made on it, and every blend it is set to. (A gradient it makes, linear
@@ -121,106 +122,77 @@ afterEach(() => {
 
 
 describe("your agent's mark", () => {
-  test("the I-beam, still, wherever it is: no canvas, no frame asked for, whatever it is doing", () => {
+  test("the I-beam on its tile in one ink, still, wherever it is: no canvas, no frame asked for, whatever it is doing", () => {
     const drawn = orb({ size: 168, mood: "working", label: "Your agent: at work", key: "test:sharp" }) as unknown as Node_;
-    expect([drawn.attrs.class, drawn.attrs.role, drawn.attrs["aria-label"], drawn.attrs["data-mood"]]).toEqual(["orb orb-mark", "img", "Your agent: at work", undefined]);
+    expect([drawn.attrs.class, drawn.attrs.role, drawn.attrs["aria-label"]]).toEqual(["guardian-mark gm-mono orb orb-mark", "img", "Your agent: at work"]);
+    expect(drawn.children[0]!.children.map((child) => [child.tag, child.attrs.points])).toEqual([["polygon", MARK_POLYGON]]);
     expect(made.some((node) => node.tag === "canvas")).toBe(false);
     run(1000);
     expect(frames).toEqual([]);
+  });
+
+  test("or, where this device is set so, the I-beam in pearl glass: its blur from 40", () => {
+    stub("localStorage", { getItem: (key: string) => (key === "invincible.guardian-mark" ? "pearl" : null), setItem() {} });
+    const drawn = orb({ size: 40 }) as unknown as Node_;
+    expect(drawn.attrs.class).toBe("guardian-mark gm-pearl orb orb-mark");
+    const uses = drawn.children[0]!.children;
+    expect(uses.map((use) => [use.attrs.href, use.attrs.fill, use.attrs.filter])).toEqual([["#gs-ibeam", "url(#gp-pearl)", "url(#gl-blur)"], ["#gs-ibeam", "url(#gp-pearl)", undefined]]);
   });
 });
 
-const pathsIn = (node: Node_): Node_[] => (node.tag === "path" ? [node] : node.children.flatMap(pathsIn));
-const slidesOf = (node: Node_) => pathsIn(node).map((path) => path.attrs.transform);
+/** The uses an agent's glass is drawn with. */
+const usesOf = (node: Node_): Node_[] => (node.tag === "use" ? [node] : node.children.flatMap(usesOf));
 
-describe("an agent's mark", () => {
-  test("its Grille at its own size, named: no canvas, a disc cut into three or four slats; in a state that moves, a frame at a time", () => {
-    const drawn = agentFace({ id: "ada", size: 168, mood: "working", label: "Ada · Working", key: "test:sharp" }) as unknown as Node_;
-    expect([drawn.attrs.class, drawn.attrs.role, drawn.attrs["aria-label"], drawn.attrs["data-state"]]).toEqual(["agent-orb agent-mark", "img", "Ada · Working", "working"]);
-    expect(drawn.attrs.style).toStartWith("--orb-size:168px;");
-    expect(made.some((node) => node.tag === "canvas")).toBe(false);
-    expect(pathsIn(drawn).length).toBeWithin(3, 5);
-    expect(frames.length).toBeGreaterThan(0);
+describe("an agent's face", () => {
+  test("its glass alone, at its own size: its shape in its ramp, as its node gave them; no canvas, no beam", () => {
+    const glass = glassOf("coder");
+    const face = agentFace({ id: "coder", size: 24, label: "Coder" }) as unknown as Node_;
+    expect([face.attrs.class, face.attrs["data-shape"], face.attrs.role, face.attrs["aria-label"]]).toEqual(["agent-orb agent-glass gl-pool gl-shade", GLASS_SHAPES[glass.shape]!.id, "img", "Coder"]);
+    expect(usesOf(face).map((use) => [use.attrs.href, use.attrs.fill, use.attrs.stroke])).toEqual([[`#gs-${glass.shape}`, `url(#gp-${glass.color})`, `url(#gp-${glass.color})`]]);
+    expect(made.some((node) => node.tag === "canvas" || node.tag === "polygon")).toBe(false);
   });
 
-  test("at rest (idle), done, queued, paused or failed, still: drawn once, asking for no frame (nothing animates at rest)", () => {
-    for (const mood of ["idle", "done", "queued", "paused", "failed"] as const) agentFace({ id: "ada", size: 48, mood, key: `test:rest-${mood}` });
-    const before = asked;
+  test("at 16 its small form and no glow; from 20 its shadow, from 24 its pool, from 40 its blur", () => {
+    const glass = glassOf("coder");
+    const at = (size: number) => agentFace({ id: "coder", size }) as unknown as Node_;
+    expect([at(16).attrs.class, usesOf(at(16)).map((use) => use.attrs.href)]).toEqual(["agent-orb agent-glass", [`#gs-${glass.shape}-s`]]);
+    expect(at(20).attrs.class).toBe("agent-orb agent-glass gl-shade");
+    expect(at(24).attrs.class).toBe("agent-orb agent-glass gl-pool gl-shade");
+    expect(usesOf(at(40)).map((use) => [use.attrs.class, use.attrs.filter])).toEqual([["gl-blur", "url(#gl-blur)"], [undefined, undefined]]);
+  });
+
+  test("its state a dot where it is known; without a state or a mood (a speaker in the history), none; never a frame asked for", () => {
+    const working = agentFace({ id: "coder", size: 24, mood: "working" }) as unknown as Node_;
+    expect([working.attrs["data-state"], working.children.at(-1)!.attrs.class]).toEqual(["working", "gl-dot"]);
+    const failed = agentFace({ id: "coder", size: 24, state: "failed" }) as unknown as Node_;
+    expect(failed.attrs["data-state"]).toBe("failed");
+    const quiet = agentFace({ id: "coder", size: 24 }) as unknown as Node_;
+    expect([quiet.attrs["data-state"], quiet.children.some((child) => child.attrs.class === "gl-dot")]).toEqual([undefined, false]);
     run(1000);
-    run(2000);
-    expect(asked).toBe(before);
+    expect([frames, asked]).toEqual([[], 0]);
+  });
+});
+
+describe("an agent's seat", () => {
+  test("its glass, still, with no ring round it; its state on the seat, on its dot and in its name", () => {
+    const sat = seat({ id: "tester", name: "Tester", size: 24, state: "needs" }) as unknown as Node_;
+    expect(sat.attrs["data-state"]).toBe("needs");
+    const face = sat.children[0]!.children[0]!;
+    expect([face.attrs["data-state"], face.attrs["aria-label"]]).toEqual(["needs", "Tester · Needs you"]);
+    run(1000);
     expect(frames).toEqual([]);
   });
 
-  test("at work, then at rest: it stops, and asks for no more frames", () => {
-    const working = agentFace({ id: "ada", size: 48, mood: "working", key: "test:settles" }) as unknown as Node_;
-    run(1000);
-    expect(frames.length + timers.length).toBeGreaterThan(0);
-    working.isConnected = false;
-    const resting = agentFace({ id: "ada", size: 48, mood: "idle", key: "test:settles" }) as unknown as Node_;
-    const still = slidesOf(resting);
-    for (let ms = 1000; ms < 4000; ms += 50) run(ms);
-    expect(slidesOf(resting)).toEqual(still);
-    expect([frames, timers]).toEqual([[], []]);
+  test("Your agent's seat is its mark, still, in the room a face and its seat take", () => {
+    const sat = seat({ id: "primary", name: "Your agent", size: 24, state: "working" }) as unknown as Node_;
+    expect(sat.attrs.class).toBe("seat seat-s seat-orb");
+    expect(sat.children[0]!.attrs.class).toBe("guardian-mark gm-mono orb orb-mark");
   });
 
-  test("still where motion is reduced: drawn once, and nothing more", () => {
-    root.dataset.motion = "reduce";
-    const drawn = agentFace({ id: "ada", size: 168, mood: "working", key: "test:still" }) as unknown as Node_;
-    const still = slidesOf(drawn);
-    run(1000);
-    run(2000);
-    expect(slidesOf(drawn)).toEqual(still);
-    expect(frames).toEqual([]);
-  });
-
-  test("without a mood (a row, the history), still: drawn once, whatever its state", () => {
-    agentFace({ id: "ada", size: 28 });
-    agentFace({ id: "ada", size: 28, state: "working" });
-    run(1000);
-    run(2000);
-    expect(frames).toEqual([]);
-  });
-
-  test("on screen it moves a frame at a time at its pace, and once off the page it is forgotten", () => {
-    const drawn = agentFace({ id: "ada", size: 36, mood: "working", key: "test:frames" }) as unknown as Node_;
-    const first = slidesOf(drawn);
-    run(5000);
-    expect(slidesOf(drawn)).not.toEqual(first);
-    // (A frame sooner than its next is due draws nothing: its slats slide at 15 frames a second.)
-    const drawnThen = slidesOf(drawn);
-    run(5040);
-    expect(slidesOf(drawn)).toEqual(drawnThen);
-    run(5070);
-    expect(slidesOf(drawn)).not.toEqual(drawnThen);
-    drawn.isConnected = false;
-    const gone = slidesOf(drawn);
-    run(6000);
-    run(6100);
-    expect(slidesOf(drawn)).toEqual(gone);
-  });
-
-  test("one made before it is put on the page is looked for ten times a second, not at every frame, and forgotten after five", () => {
-    const drawn = agentFace({ id: "ada", size: 36, mood: "working", key: "test:unplaced" }) as unknown as Node_;
-    drawn.isConnected = false;
-    const before = asked;
-    for (let ms = 1000; ms < 2000; ms += 1000 / 60) run(ms);
-    expect(asked - before).toBeWithin(8, 13);
-    drawn.isConnected = true;
-    const then = slidesOf(drawn);
-    for (let ms = 2000; ms < 3000; ms += 1000 / 60) run(ms);
-    expect(slidesOf(drawn)).not.toEqual(then);
-    const other = agentFace({ id: "ada", size: 36, mood: "working", key: "test:never" }) as unknown as Node_;
-    other.isConnected = false;
-    drawn.isConnected = false;
-    for (let ms = 3000; ms < 9000; ms += 1000 / 60) run(ms);
-    expect([frames, timers]).toEqual([[], []]);
-  });
-
-  test("a change of theme draws nothing again: its colours are the page's own pair, light and dark (light-dark())", () => {
-    const drawn = agentFace({ id: "ada", size: 34, key: "test:theme" }) as unknown as Node_;
-    expect(drawn.attrs.style).toMatch(/--mark-body:light-dark\(#[0-9a-f]{6}, #[0-9a-f]{6}\)/);
-    expect(themeWatcher).toBeNull();
+  test("a speaker in the history: its glass, with no dot", () => {
+    const said = workerAvatar({ id: "tester", name: "Tester", size: 24, still: true }) as unknown as Node_;
+    const face = said.children[0]!;
+    expect([face.attrs["data-state"], face.attrs["aria-label"]]).toEqual([undefined, "Tester's mark"]);
   });
 });
 
@@ -230,65 +202,6 @@ describe("the app's mark", () => {
     expect([mark.attrs.class, mark.attrs.style, mark.attrs["aria-hidden"]]).toEqual(["orb app-mark", "--orb-size:20px", "true"]);
     expect(mark.children.map((child) => [child.tag, child.attrs.class])).toEqual([["svg", "ibeam"]]);
     expect(made.some((node) => node.tag === "canvas")).toBe(false);
-    run(1000);
-    expect(frames).toEqual([]);
-  });
-});
-
-describe("an agent's face", () => {
-  test("its mark alone: slats and nothing else, never a beam, never a canvas", () => {
-    const working = agentFace({ id: "max", size: 50, mood: "working", key: "test:no-beam" }) as unknown as Node_;
-    const still = agentFace({ id: "ada", size: 34 }) as unknown as Node_;
-    for (const face of [working, still]) {
-      const svgs = face.children;
-      expect(svgs.map((child) => [child.tag, child.attrs.class])).toEqual([["svg", "agent-mark-svg"]]);
-      expect(made.filter((node) => node.tag !== "span" && node.tag !== "svg" && node.tag !== "g" && node.tag !== "path")).toEqual([]);
-    }
-  });
-
-  test("still unless its state moves it where it is looked at: at rest, in a row or in the history, never asking for a frame", () => {
-    agentFace({ id: "max", size: 34, mood: "idle", key: "test:idle" });
-    agentFace({ id: "max", size: 34 });
-    workerAvatar({ id: "max", name: "Max", still: true });
-    const before = asked;
-    run(1000);
-    run(2000);
-    expect(asked).toBe(before);
-    expect(frames).toEqual([]);
-  });
-
-  test("at work its slats slide; given rest again, it is still and asks for no more frames", () => {
-    const working = agentFace({ id: "max", size: 34, mood: "working", key: "test:rest" }) as unknown as Node_;
-    expect(frames.length).toBeGreaterThan(0);
-    const first = slidesOf(working);
-    for (let ms = 1000; ms < 2000; ms += 1000 / 60) run(ms);
-    expect(slidesOf(working)).not.toEqual(first);
-    working.isConnected = false;
-    agentFace({ id: "max", size: 34, mood: "idle", key: "test:rest" });
-    for (let ms = 2000; ms < 4000; ms += 1000 / 60) run(ms);
-    expect(frames).toEqual([]);
-  });
-});
-
-describe("an agent's seat", () => {
-  test("its mark, still, with no ring round it; its state on the seat, in its mark's shape and in its name", () => {
-    const live = seat({ id: "max", name: "Max", state: "working", expression: "working", size: 40 }) as unknown as Node_;
-    expect(live.children.map((child) => child.attrs.class ?? child.className)).toEqual(["worker-avatar"]);
-    expect(live.attrs["data-state"]).toBe("working");
-    const face = live.children[0]!.children[0]!;
-    expect([face.attrs.class, face.attrs["aria-label"], face.attrs["data-state"]]).toEqual(["agent-orb agent-mark", "Max · Working", "working"]);
-    // Failed: its bottom slat red and loose, still; asks you: its top slat in ink.
-    const failed = seat({ id: "max", name: "Max", state: "failed", size: 40 }) as unknown as Node_;
-    expect(pathsIn(failed).map((path) => path.attrs.class).at(-1)).toBe("key");
-    const asks = seat({ id: "max", name: "Max", state: "needs", size: 40 }) as unknown as Node_;
-    expect(pathsIn(asks).map((path) => path.attrs.class)[0]).toBe("key");
-    run(1000);
-    expect(frames).toEqual([]);
-  });
-
-  test("Your agent's seat is its mark, still, in the room a face and its seat take", () => {
-    const drawn = seat({ id: "primary", name: "Your agent", state: "needs", size: 40 }) as unknown as Node_;
-    expect([drawn.children[0]!.attrs.class, drawn.children[0]!.attrs["data-tone"], drawn.children[0]!.attrs["data-mood"], drawn.children[0]!.attrs.style]).toEqual(["orb orb-mark", "warn", undefined, "--orb-size:48px"]);
     run(1000);
     expect(frames).toEqual([]);
   });

@@ -1,4 +1,5 @@
 import type { View } from "../context.ts";
+import { type GuardianStyle, guardianStyle, setGuardianStyle } from "../ui/glass.ts";
 import { forgetIdentity } from "../identity.ts";
 import { shortId } from "../lib/text.ts";
 import { chatEnter, type ChatEnterPref, type MotionPref, motionPref, setChatEnter, setMotion, setTheme, type ThemePref, themePref } from "../prefs.ts";
@@ -53,6 +54,17 @@ export const settingsView: View = (root, ctx, { scope }) => {
     { label: "Motion" },
   );
 
+  // Your agent's mark on this device: the I-beam in one ink on its tile, or in pearl glass (until the owner chooses).
+  const mark = segmented<GuardianStyle>(
+    [
+      { value: "mono", label: "Ink" },
+      { value: "pearl", label: "Pearl glass" },
+    ],
+    guardianStyle(),
+    setGuardianStyle,
+    { label: "Your agent's mark" },
+  );
+
   // What Enter does when you send a message while it's working (the other is Ctrl or ⌘ with Enter, or its own button).
   const enter = segmented<ChatEnterPref>(
     [
@@ -73,7 +85,7 @@ export const settingsView: View = (root, ctx, { scope }) => {
       "div",
       { class: "page narrow" },
       pageHead("Settings", "How your agent looks on this device, and what this device may do."),
-      section("Appearance", {}, list([row("Theme", "Follows your system unless you choose.", theme.el), row("Motion", "Reduced keeps every change instant.", motion.el)])),
+      section("Appearance", {}, list([row("Theme", "Follows your system unless you choose.", theme.el), row("Motion", "Reduced keeps every change instant.", motion.el), row("Your agent's mark", "The I-beam on its tile, or in pearl glass: from the next page you open.", mark.el)])),
       ctx.can("chat")
         ? section(
             "Chat",

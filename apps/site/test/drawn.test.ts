@@ -2,9 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { inflateSync } from "node:zlib";
-import { markGeometry } from "../../../packages/core/src/agent-mark.ts";
-import { handleSeed } from "../../../packages/core/src/avatar.ts";
-import { markParts } from "../../web/src/ui/mark.ts";
+import { GLASS_RAMPS, GLASS_SHAPES } from "../../../packages/core/src/glass.ts";
 import { agentMarkSvg } from "../src/lib/mark-svg.ts";
 import { FAVICON_SVG, icon64, ogImage, touchIcon } from "../src/lib/icons.ts";
 import { MARK_POLYGON } from "../../../scripts/mark.ts";
@@ -12,7 +10,7 @@ import { MARK, markCorners } from "../src/lib/mark.ts";
 import { AGENTS, agentOrb, MARKS, orbFiles } from "../src/lib/orbs.ts";
 
 /*
- * What invincible.sh draws when it is built: the agents' marks (the app's own drawing of the Grille, written as SVG),
+ * What invincible.sh draws when it is built: the agents' marks (their glass, from core's numbers, written as SVG),
  * and the I-beam and the icons made from it. Each is the same every build.
  */
 
@@ -31,26 +29,29 @@ function readPng(bytes: Uint8Array): { width: number; height: number; type: numb
   return { width: view.getUint32(16), height: view.getUint32(20), type: bytes[25]!, raw: new Uint8Array(inflateSync(Buffer.concat(chunks))) };
 }
 
-describe("the agents' marks: the app's own Grille, as SVG", () => {
-  test("each job's, the same every time, drawn for a dark page and a light one: its slats, core's geometry", () => {
+describe("the agents' marks: their glass, as SVG", () => {
+  test("each job's, the same every time, drawn for a dark page and a light one: core's shape in its ramp, with its blur", () => {
     for (const job of AGENTS) {
-      const a = agentMarkSvg(job, MARKS[job], 72), b = agentMarkSvg(job, MARKS[job], 72);
+      const a = agentMarkSvg(MARKS[job], 72), b = agentMarkSvg(MARKS[job], 72);
       expect(a).toEqual(b);
       expect(a.dark).not.toBe(a.light);
-      const parts = markParts(markGeometry({ mark: MARKS[job], seed: handleSeed(job), state: "idle", size: 72, t: null, since: null }));
-      for (const svg of [a.dark, a.light]) {
+      const shape = GLASS_SHAPES[MARKS[job].shape]!, ramp = GLASS_RAMPS[MARKS[job].color]!;
+      for (const [svg, theme] of [[a.dark, "dark"], [a.light, "light"]] as const) {
         expect(svg).toStartWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="72" height="72">');
-        expect(svg).not.toMatch(/NaN|Infinity|undefined|<script|<foreignObject|<style|href=|url\(/);
-        // One path a slat: three or four, each the app's band of the disc, turned to its angle.
-        expect((svg.match(/<path /g) ?? []).length).toBe(parts.length);
-        for (const part of parts) expect(svg).toContain(`<g transform="${part.turned}"><path d="${part.d}" transform="${part.slid}"`);
+        // It refers to nothing outside itself: no script, no style, no link, and a paint only of its own.
+        expect(svg).not.toMatch(/NaN|Infinity|undefined|<script|<foreignObject|<style|href=/);
+        for (const ref of svg.match(/url\([^)]*\)/g) ?? []) expect(ref).toMatch(/^url\(#[a-z]\)$/);
+        // Its shape twice at 72 (its blur and itself), in its ramp's colours for that page.
+        expect(svg.split(`d="${shape.d}"`).length - 1).toBe(2);
+        for (const colour of Object.values(ramp[theme])) expect(svg).toContain(colour);
       }
     }
   });
 
-  test("each in its own colour, as a node gives them: no two jobs' marks are the same drawing", () => {
+  test("each in its own colour and shape, as a node gives them: no two jobs' marks are the same drawing", () => {
     expect(new Set(AGENTS.map((job) => MARKS[job].color)).size).toBe(AGENTS.length);
-    const drawings = AGENTS.map((job) => agentMarkSvg(job, MARKS[job], 72).light);
+    expect(new Set(AGENTS.map((job) => MARKS[job].shape)).size).toBe(AGENTS.length);
+    const drawings = AGENTS.map((job) => agentMarkSvg(MARKS[job], 72).light);
     expect(new Set(drawings).size).toBe(AGENTS.length);
   });
 
@@ -60,7 +61,7 @@ describe("the agents' marks: the app's own Grille, as SVG", () => {
     for (const { href, svg } of files) {
       expect(href).toMatch(/^\/orbs\/[a-z]+-72-(light|ink)-[0-9a-f]{10}\.svg$/);
       const job = href.split("/")[2]!.split("-")[0]! as (typeof AGENTS)[number];
-      expect(svg).toBe(href.includes("-light-") ? agentMarkSvg(job, MARKS[job], 72).dark : agentMarkSvg(job, MARKS[job], 72).light);
+      expect(svg).toBe(href.includes("-light-") ? agentMarkSvg(MARKS[job], 72).dark : agentMarkSvg(MARKS[job], 72).light);
     }
     expect(agentOrb("coder", 72)).toBe(agentOrb("coder", 72));
   });
