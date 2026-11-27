@@ -555,7 +555,6 @@ export class LedgerStore {
     return { added, invalid, rebuilt };
   }
 
-  /** Genesis, the founder's own events, and anything from an enrolled (even since revoked) device. */
   /**
    * Whether an event's signer is known here, so the event enters the log (to be applied or refused there), not parked:
    * the founder, or a device an enrollment in this log names, whether apply took that enrollment or refused it. So an
