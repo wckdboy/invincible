@@ -198,13 +198,28 @@ class NodeSessionTest {
         assertNull(pin.refused)
     }
 
-    @Test fun beforeTheCutoffAnUnpinnedPairingIsAsToday() = runBlocking {
-        val pin = NodePin(null, proofFirst = true)
-        val seen = Seen()
-        val s = session(pin, seen) { throw unreachable }
-        assertTrue("before the cutoff, a pairing with no pin reads as it did", s.prove())
-        assertTrue(pin.isOpen)
-        assertNull(pin.node)
+    // (K1, the re-check of 27 November 2026: this test said an unanswered whoami opened the gate of a pairing with no pin
+    // before the cutoff. No answer proves nothing, pinned or not, as on the iPhone: what holds before the cutoff, with no
+    // pin, is a node from before, one that answers without a proof: beforeTheCutoffAnUnpinnedPairingAtANodeThatGives….)
+    @Test fun aWhoamiThatGetsNoAnswerHoldsEverythingPinnedOrNotBeforeTheCutoffAndPastIt() = runBlocking {
+        val signer = object : Signer {
+            override val device = "c_" + "D".repeat(43)
+            override fun sign(message: ByteArray) = ByteArray(64)
+        }
+        for (pinned in listOf(null, a)) {
+            var clock = NodeProof.NAMED_FROM - 60_000L
+            val pin = NodePin(pinned, proofFirst = true)
+            val s = session(pin, Seen(), now = { clock }) { throw NodeError(500, "Whatever answers there.") }
+            assertFalse("$pinned: no answer proves nothing", s.prove())
+            assertFalse("$pinned: nothing but whoami may be sent", pin.isOpen)
+            val read = runCatching { NodeClient("https://node.example.test", signer, pin).headers("GET", "/api/team", ByteArray(0)) }.exceptionOrNull()
+            assertTrue("$pinned: a read isn't signed", (read as? NodeError)?.unproven == true)
+            // Past the cutoff and every pause, whoami still unanswered: still held, and nothing refused (no answer isn't another node's).
+            clock = NodeProof.NAMED_FROM + 10 * 60_000L
+            assertFalse("$pinned: past the cutoff, still held", s.prove())
+            assertFalse("$pinned", pin.isOpen)
+            assertNull("$pinned", pin.refused)
+        }
     }
 
     // ---- L7, I1, rule 3: once pinned, no proof is a failure ----

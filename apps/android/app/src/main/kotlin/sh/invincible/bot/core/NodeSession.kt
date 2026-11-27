@@ -18,8 +18,8 @@ import kotlinx.coroutines.withContext
  *    ([reopen]).
  * 3. Once a node is pinned, no proof is a failed one (NodeProof.judge): a node that leaves it out is refused.
  * 4. With no node pinned yet, after the cutoff (NodeProof.NAMED_FROM) it proves first, pins, then signs for the node, and
- *    a node that gives no proof is refused; before the cutoff, as before: it asks whoami first, and what it can't prove
- *    holds nothing back.
+ *    a node that gives no proof is refused; before the cutoff, a node from before (one that answers without a proof) is
+ *    spoken to as before. A whoami that gets no answer holds everything, pinned or not (rule 1; K1 of the re-check).
  * 5. A late proof never writes over a newer pairing: the node it pins is kept with the pairing ([keep]) only while that
  *    pairing is still this phone's ([isCurrent]).
  * 6. The proof is judged off the caller's thread ([judging]: AppModel's is the main one), and nothing is taken from the
@@ -65,10 +65,9 @@ class NodeSession(
             val who = try {
                 ask(challenge)
             } catch (e: NodeError) {
+                // No answer proves nothing, pinned or not (K1 of the re-check): all but whoami waits, asked again after a pause.
                 retryAt = now() + pause
                 pause = minOf(pause * 2, LONGEST_PAUSE_MS)
-                // Before the cutoff, a pairing with no node pinned reads as it did: what it can't prove holds nothing back.
-                if (pin.node == null && now() < NodeProof.NAMED_FROM) pin.open()
                 return@withLock pin.isOpen
             }
             retryAt = 0L
