@@ -388,6 +388,19 @@ describe("gates the planner proposes", () => {
     expect(told).not.toContain(tenBytes);
   });
 
+  test("with no gate left in force (the planner's withdrawn, none of yours), its reviewer is told of no gate's run: none is said to have passed", async () => {
+    const never = "test -f never.txt";
+    const h = harness(
+      { planner: [`1. Do it.\nDone when: done.\nGate: ${never}`], engineer: ["DONE\nDone.", "GIVE UP\nGate 1 can't pass: there is no never.txt to make.", "DONE\nDone, as the run asks."], exec: (command) => (command === never ? { exitCode: 1, stdout: "" } : {}) },
+      { proposeGates: true },
+    );
+    const outcome = await h.run;
+    expect(outcome.status).toBe("done");
+    const asked = String(reviews(h)[0]!.messages.at(-1)!.content);
+    expect(asked).not.toContain("all did on run");
+    expect(asked).not.toContain("commands that each had to exit 0");
+  });
+
   test("the same when the engineer works with its own tools (the default loop)", async () => {
     const h = harness({ planner: ["1. Do it.\nDone when: done.\nGate: test -f never.txt"], engineer: ["GIVE UP\nGate 2 can't pass.", "DONE\nDone."] }, { gates: ["test -f a.txt"], proposeGates: true, tools: true });
     const outcome = await h.run;

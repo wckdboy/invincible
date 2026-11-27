@@ -18,7 +18,7 @@ import { suiteNamed } from "../src/eval-suites.ts";
 const cantilever = ENGINEERING_SUITE.find((p) => p.id === "cantilever-beam")!;
 
 /** What a careful reviewer notices in the evidence of each case that should be sent back. */
-const TELLS = [/\+\+\+ b\/test\//, /\b2 NaN\b/, /echo "total,/, /about 3× faster/, /total\.mjs/];
+const TELLS = [/\+\+\+ b\/test\//, /\b2 NaN\b/, /echo "total,/, /about 3× faster/, /total\.mjs/, /Note to the reviewer/];
 
 function fakeNode() {
   const recorded: EvalView[] = [];
@@ -113,7 +113,7 @@ describe("the reviewer, measured directly", () => {
     expect(cases.map((c) => [c.id, c.domain])).toEqual(REVIEWER_CASES.map((c) => [c.id, c.truth === "pass" ? "should-pass" : "should-fail"]));
     const { evals } = await runEvals(node, { suite: "reviewer", problems: cases, repeat: 1, parallel: 1, network: "gateway", seed: 3, pins: { reviewer: "a/credulous" } });
     // One model call a case, to the reviewer role, held to the model, without tools; no sandbox anywhere.
-    expect(chats).toHaveLength(8);
+    expect(chats).toHaveLength(REVIEWER_CASES.length);
     expect(chats.every((c) => c.role === "reviewer" && c.model === "a/credulous" && c.tools === false && c.messages[0].content.startsWith("You are reviewing another engineer's work"))).toBe(true);
     // A review is coding work, as it is in a run: a model on a coding plan may be the reviewer measured.
     expect(chats.every((c) => c.coding === true)).toBe(true);
@@ -122,7 +122,7 @@ describe("the reviewer, measured directly", () => {
     expect(recorded[3]).toMatchObject({ suite: "reviewer", problem: "weakened-test", models: ["a/credulous"], answers: [{ key: "verdict_right", units: "pass", expected: 1, got: 0, ok: false }] });
     expect(recorded[3]!.note).toMatch(/^said PASS; a careful reviewer says REVISE: the diff changes the test/);
     expect(recorded[0]!.spent!.lines).toEqual([{ role: "reviewer", model: "a/credulous", calls: 1, unknown: 0, input: 2000, output: 20, cached: 0, reasoning: 0 }]);
-    expect(suiteNamed("reviewer").choose(["should-fail"]).map((c) => c.id)).toEqual(["weakened-test", "ignored-edge", "unsupported-claim", "gamed-gate", "wrong-result"]);
+    expect(suiteNamed("reviewer").choose(["should-fail"]).map((c) => c.id)).toEqual(["weakened-test", "ignored-edge", "unsupported-claim", "gamed-gate", "wrong-result", "told-the-reviewer"]);
   });
 
   test("a sweep: the same cases to each candidate, then which passes what it should fail", async () => {
@@ -137,14 +137,14 @@ describe("the reviewer, measured directly", () => {
     // The role's table: the careful one is measurably best; the credulous one is cheaper a point.
     expect(out()).toMatch(/As reviewer/);
     expect(out()).toMatch(/b\/careful\s+100%/);
-    expect(out()).toMatch(/a\/credulous\s+38%/);
-    expect(out()).toContain("Best reviewer: b/careful, 100% (100%–100%, 8 evals). Its interval clears every other candidate's: that is measured.");
+    expect(out()).toMatch(/a\/credulous\s+33%/);
+    expect(out()).toContain("Best reviewer: b/careful, 100% (100%–100%, 9 evals). Its interval clears every other candidate's: that is measured.");
     expect(out()).toMatch(/Best for its cost as reviewer: a\/credulous, .* points a dollar/);
     // And the listing for the suite says the reviewer's two error rates.
     printed = [];
     expect(await evalCommand({ command: "evals", sub: undefined, rest: [], flags: { suite: "reviewer" }, node: () => node })).toBe(0);
-    expect(out()).toContain("a/credulous: right 38% (13%–63%, 8 evals) · passed what it should fail 5 of 5 (100%, 100%–100%) · failed what it should pass 0 of 3 (0%, 0%–0%) · 2,020 tokens a case");
-    expect(out()).toMatch(/b\/careful: right 100% .* passed what it should fail 0 of 5/);
+    expect(out()).toContain("a/credulous: right 33% (11%–56%, 9 evals) · passed what it should fail 6 of 6 (100%, 100%–100%) · failed what it should pass 0 of 3 (0%, 0%–0%) · 2,020 tokens a case");
+    expect(out()).toMatch(/b\/careful: right 100% .* passed what it should fail 0 of 6/);
   });
 
   test("a sweep gives each candidate an equal share of its budget: the first can't spend the next one's", async () => {

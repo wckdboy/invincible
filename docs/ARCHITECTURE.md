@@ -150,7 +150,13 @@ The run loop is carried and renamed (§10), the most proven part of it:
   gate names are locked. Yours run exactly as given. The planner may propose up to three of its own, and they are only
   its proposal: work that gives up with them in force has them withdrawn, once, and goes on under yours (26 November
   2026: two it proposed asked for a 10-byte file and an 11-byte one, and the task ended though yours could pass).
-- **The reviewer:** independent. A review by the model that did the work is marked as one.
+- **The reviewer:** independent. It is asked apart from every model that did the work (across a coding agent's
+  fallbacks), and for a coding tool on its own sign-in from every model of that vendor's (Claude Code's claude-*,
+  Codex's GPT models): a review by one of them after all is marked as by the same model. What the work wrote and
+  printed reaches it fenced as data, under a mark that is the digest of those words, and what it is asked comes after:
+  the work's own words are evidence, never instructions. It sees the run's evidence as asked (a task's whole diff, its
+  cuts said) and its latest forty commands, the rest in the ledger. An audit is asked the same way, its steer telling
+  the work it grants nothing; inside a task an audit is asked in the roster's order, as its run asks it.
 - **Tripwires, checks and tells:** rules of yours at fixed points of the work.
 - **Audited, never capped:** no command count and no time limit. An independent audit steers the run, and only your
   budget stops it.
