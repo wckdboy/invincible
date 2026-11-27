@@ -15,7 +15,6 @@ import {
   type ActionView,
   canonical,
   chooseAgent,
-  eyesSpaceOf,
   readModelCheck,
   type AgentFacts,
   TEAM_OWNER,
@@ -140,7 +139,7 @@ import {
   SEAT_HARNESS as SEAT_HARNESS_OF,
   LEASE_FILE,
 } from "@invincible/core";
-import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, endLeftovers, engramFound, checkModel, eyesOf, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
+import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, endLeftovers, engramFound, checkModel, eyesForVm, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, peerOf, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, type HandoffGrantRecord, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
@@ -2494,24 +2493,11 @@ export function createApp(ctx: AppContext) {
     try { return await work; } finally { vmProvisioning.delete(member.id); }
   }
   /**
-   * A VM's eyes (an agent's, or its own computer's): the roster's first `eyes` model on a provider this VM's gateway
-   * token covers (a task's token covers the providers with a key when it starts). The VM itself asks it, through the gateway.
+   * A VM's eyes (an agent's, or its own computer's), on the providers this VM's gateway token covers (a task's token
+   * covers the providers with a key when it starts): agents' checks.ts eyesForVm. The VM itself asks it, through the gateway.
    */
   function eyesFor(id: string): { ref: string; space: string | null } | null {
-    const covered = leased.get(id) ?? [];
-    const usable = (ref: string) => {
-      const at = ref.indexOf("/");
-      return at > 0 && !ref.includes("*") && covered.includes(ref.slice(0, at)) && !windowsOf(ctx.store).spentFor(ref);
-    };
-    // Named for the role, or with none named the checked model whose clicks land (model-checks.ts): evidence chooses,
-    // among the models it offers (checks.ts eyesOf).
-    const checks = ctx.store.lwwPrefix("modelcheck:").flatMap((entry) => {
-      const check = readModelCheck(entry.value);
-      return check ? [{ ref: entry.key.slice("modelcheck:".length), check }] : [];
-    });
-    const ref = eyesOf(roster(ctx.store).eyes?.models ?? [], checks, usable);
-    // (And the space its check measured it answering places in, beside its name: `desktop look` gives them in pixels.)
-    return ref ? { ref, space: eyesSpaceOf(checks.find((c) => c.ref === ref)?.check ?? null) } : null;
+    return eyesForVm(ctx.store, ctx.vault, leased.get(id) ?? []);
   }
   /** Its computer's lease of model access, on this node since it started: when it was asked for, a renewal under way, and how many of its commands run there now. */
   const computer = { leased: 0, renewing: null as Promise<void> | null, running: 0 };

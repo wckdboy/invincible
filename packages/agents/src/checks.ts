@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
-import { type ChatMessage, chooseEyes, type ModelCheck } from "@invincible/core";
+import { type ChatMessage, chooseEyes, eyesSpaceOf, type ModelCheck, readModelCheck } from "@invincible/core";
+import type { LedgerStore, Vault } from "@invincible/ledger";
 import type { ToolImage } from "@invincible/models";
 import { conversationFor } from "@invincible/models";
 import { type ModelsContext, chat } from "@invincible/models";
-import { mayBeEyes, offersModel, onPlan, resolveProvider, whyNoKey } from "@invincible/models";
+import { mayBeEyes, offersModel, onPlan, refusalsStillSaid, resolveProvider, roster, whyNoKey, windowsOf } from "@invincible/models";
 import { parseRef } from "@invincible/models";
 import { parseAction, runLoop } from "./run.ts";
 
@@ -47,6 +48,29 @@ export type CheckPart = "format" | "reads" | "places";
  */
 export const eyesOf = (named: readonly string[], checks: readonly { ref: string; check: ModelCheck }[], usable: (ref: string) => boolean): string | null =>
   chooseEyes(named, checks.filter(({ ref }) => offersModel(ref) && mayBeEyes(ref)), (ref) => mayBeEyes(ref) && usable(ref));
+
+/**
+ * A VM's eyes, as the node gives them to an agent's VM or its own computer (server.ts eyesFor): the roster's first
+ * `eyes` model a look can use there (eyesOf: one a look may call, on a provider the VM's gateway token covers, `covered`,
+ * its allowance not spent, its key not refused: a refusal the doctor still says, refusalsStillSaid, so the look and the
+ * doctor name the same model), or with none named the checked model whose clicks land; and beside it the space its
+ * check measured it answering places in (`desktop look` gives them in pixels). The VM itself asks it, through the gateway.
+ */
+export function eyesForVm(store: LedgerStore, vault: Vault, covered: readonly string[]): { ref: string; space: string | null } | null {
+  const refused = new Set(refusalsStillSaid(store, vault).map((refusal) => refusal.provider));
+  const usable = (ref: string) => {
+    const at = ref.indexOf("/");
+    return at > 0 && !ref.includes("*") && covered.includes(ref.slice(0, at)) && !windowsOf(store).spentFor(ref) && !refused.has(ref.slice(0, at));
+  };
+  // Named for the role, or with none named the checked model whose clicks land (model-checks.ts): evidence chooses,
+  // among the models it offers.
+  const checks = store.lwwPrefix("modelcheck:").flatMap((entry) => {
+    const check = readModelCheck(entry.value);
+    return check ? [{ ref: entry.key.slice("modelcheck:".length), check }] : [];
+  });
+  const ref = eyesOf(roster(store).eyes?.models ?? [], checks, usable);
+  return ref ? { ref, space: eyesSpaceOf(checks.find((c) => c.ref === ref)?.check ?? null) } : null;
+}
 
 /** Check a model (`provider/model`): every part, or those named. Throws only when the model can't be asked at all. */
 export async function checkModel(ctx: ModelsContext, ref: string, options: { version?: string; parts?: readonly CheckPart[]; signal?: AbortSignal } = {}): Promise<ModelCheck> {

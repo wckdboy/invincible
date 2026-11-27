@@ -316,12 +316,13 @@ async function rolesOf(deps: DoctorDeps, ask: boolean, signal?: AbortSignal): Pr
   if (!ask) return roles;
   // Each role's first usable model, asked once however many roles share it.
   const wanted = new Map<string, RoleFact[]>();
+  const refused = new Set(refusalsStillSaid(deps.store, deps.vault).map((refusal) => refusal.provider));
   for (const role of roles) {
     if (!role.chats) continue;
     // (Its own: a coding plan's model is never asked a word by it. A VM's eyes: the model a look asks, the first in the
-    // chain a look may call and can use, as the node's eyesFor picks it; so none when that one is a plan's, and never a
-    // model of its own after it.)
-    const first = TOOL_ROLES.has(role.role) ? role.models.find((m) => m.problem === null && !m.spent) : role.models.find((m) => m.problem === null && !m.plan);
+    // chain a look may call and can use, its key not refused, as the node's eyesFor picks it; so none when that one is a
+    // plan's, and never a model of its own after it.)
+    const first = TOOL_ROLES.has(role.role) ? role.models.find((m) => m.problem === null && !m.spent && !refused.has(m.ref.slice(0, m.ref.indexOf("/")))) : role.models.find((m) => m.problem === null && !m.plan);
     const ref = first && !first.plan ? concrete(deps, first.ref) : null;
     if (!ref) continue;
     if (!wanted.has(ref) && wanted.size >= MAX_MODEL_PROBES) continue;

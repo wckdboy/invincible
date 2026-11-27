@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { type ChatStreamEvent, newNodeIdentity } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
-import { chat, decide, detectProvider, embed, GatewayTokens, handleGateway, mayBeEyes, offersModel, originOf, planOf, preset, PRESETS, resolveProvider, signIn } from "@invincible/models";
-import { chooseAgentModels, eyesOf } from "../src/index.ts";
+import { chat, decide, detectProvider, embed, GatewayTokens, handleGateway, mayBeEyes, offersModel, originOf, planOf, preset, PRESETS, refusedKeysOf, resolveProvider, signIn } from "@invincible/models";
+import { chooseAgentModels, eyesForVm, eyesOf } from "../src/index.ts";
 
 /*
  * Coding plans and sign-ins. A coding plan is a subscription whose key is for coding (its terms
@@ -417,5 +417,17 @@ describe("a look is our own call: an agent's eyes are a coding plan's only where
     }
     expect((await call("opencode-go", "invincible-desktop/2")).status).toBe(200);
     expect(seen.map((s) => [new URL(s.url).host, s.headers.get("user-agent")])).toEqual([["api.z.ai", "opencode/1.4.0"], ["token-plan-sgp.xiaomimimo.com", "opencode/1.4.0"], ["opencode.ai", "invincible-desktop/2"]]);
+  });
+
+  test("a refused key on the first eyes model: a look asks the next one a look can use, as the doctor names it; its key set again, the first once more", () => {
+    const { store, vault } = mind({ eyes: ["own/eyes-first", "opencode-go/kimi-k3.1-pro"] });
+    const covered = ["own", "opencode-go"];
+    expect(eyesForVm(store, vault, covered)?.ref).toBe("own/eyes-first");
+    refusedKeysOf(store).note("own", "401 invalid api key");
+    expect(eyesForVm(store, vault, covered)?.ref).toBe("opencode-go/kimi-k3.1-pro");
+    // (A key set after the refusal makes it moot, as the doctor reads it: refusalsStillSaid.)
+    Bun.sleepSync(5);
+    vault.set("own", OWN_KEY, { provider: "own", origin: "https://models.example.test" });
+    expect(eyesForVm(store, vault, covered)?.ref).toBe("own/eyes-first");
   });
 });

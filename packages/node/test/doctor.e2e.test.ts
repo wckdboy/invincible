@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bodyFingerprint, type Calibration, ceilingThreads, clientIdFromKey, type DoctorCheck, type DoctorReport, type FindingView, KERNEL, type LedgerEntry, type NoticeView, REFERENCE_SINGLE, type RouteName, routes, type Scope, signRequest, utf8 } from "@invincible/core";
 import { requestPairing, waitForApproval } from "@invincible/link";
-import { windowsOf } from "@invincible/models";
+import { refusedKeysOf, windowsOf } from "@invincible/models";
 import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { DockerRunner } from "@invincible/sandbox";
 import type { Capabilities } from "../src/capabilities.ts";
@@ -359,7 +359,21 @@ describe("faults the owner's server has had, each with its own line and advice",
       expect(check(full, "role.eyes")).toMatchObject({ state: "ok", line: "eyes: opencode-go/kimi-k3.1-pro looks at the VMs' screens, asked by their tools through the gateway (a coding plan: it is asked nothing else, so not a word); zai-coding/glm-5.3-flash is refused (its plan's terms keep the primary's own calls off it, and a look is one)" });
       expect(full.checks.filter((c) => c.id === "role.eyes.plan")).toEqual([]);
       expect(asked).not.toContain("eyes-after");
+      // A key refused on the first eyes model: a look asks the next one a look can use (eyesFor), so the doctor asks and
+      // names that one, and says the first skipped.
+      await json(admin("setSecret", { name: "stand-in-2", value: `FAKE-stand-in-2-${"0".repeat(24)}`, provider: "stand-in-2", baseUrl: `http://127.0.0.1:${models.port}/v1` }));
+      await json(admin("setProvider", { id: "stand-in-2", kind: "openai", baseUrl: `http://127.0.0.1:${models.port}/v1`, secret: "stand-in-2" }));
+      refusedKeysOf(daemon.store).note("stand-in-2", "401 invalid api key");
+      await json(admin("setRoster", { role: "eyes", models: ["stand-in-2/eyes-refused", "stand-in/eyes-next"] }));
+      asked.length = 0;
+      const refusedFirst = await doctor();
+      expect(check(refusedFirst, "role.eyes")).toMatchObject({ state: "ok", line: "eyes: stand-in/eyes-next answered; stand-in-2/eyes-refused is skipped (its provider refused its key)" });
+      expect(asked).toContain("eyes-next");
+      expect(asked).not.toContain("eyes-refused");
     } finally {
+      refusedKeysOf(daemon.store).forget("stand-in-2");
+      await json(admin("removeProvider", { id: "stand-in-2" })).catch(() => {});
+      await json(admin("deleteSecret", { name: "stand-in-2" })).catch(() => {});
       await json(admin("setRoster", { role: "eyes", models: [] }));
       for (const id of ["opencode-go", "kimi-coding", "zai-coding", "mimo-token"]) {
         await json(admin("removeProvider", { id }));
