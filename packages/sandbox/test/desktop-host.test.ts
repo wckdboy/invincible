@@ -106,7 +106,7 @@ describe("an agent's desktop, from outside its VM", () => {
  * session (`desktop --session`) and yours (`desktop --owner-session`, as the owner's uid) are told apart as deskd tells
  * them apart, and yours keep deskd's hold: your input takes it if it is free, and each answer of yours says it.
  */
-function held(options: { neverAnswers?: number; ownerEnds?: number } = {}) {
+function held(options: { neverAnswers?: number; ownerEnds?: number; ownerEndsAt?: number } = {}) {
   const asked: Record<string, unknown>[] = [];
   const owned: Record<string, unknown>[] = [];
   const started: string[][] = [];
@@ -121,12 +121,18 @@ function held(options: { neverAnswers?: number; ownerEnds?: number } = {}) {
     // (An image older than deskd: its `desktop` takes no --session and ends at once; one older than take-over, no --owner-session.)
     const endsAt = owner && options.ownerEnds !== undefined ? options.ownerEnds : options.neverAnswers;
     if (endsAt !== undefined) queueMicrotask(() => ended!(endsAt));
+    let told = 0;
     return {
       write: (text: string) => {
         if (endsAt !== undefined) return;
         for (const line of text.trim().split("\n")) {
           const q = JSON.parse(line) as Record<string, unknown>;
           (owner ? owned : asked).push(q);
+          // (Yours ending at its nth request, unanswered: deskd gone from under it, and not back.)
+          if (owner && ++told === options.ownerEndsAt) {
+            queueMicrotask(() => ended!(1));
+            return;
+          }
           const verb = q.argv ? (q.argv as string[])[0]! : String(q.name);
           let took = false;
           let answer: Record<string, unknown>;
@@ -252,6 +258,16 @@ describe("an agent's desktop through its held session (deskd)", () => {
     expect(s.asked).toEqual([{ id: 1, argv: ["status"] }]);
     expect(d.execs).toEqual([]);
     expect(d.ledger).toEqual([]);
+  });
+
+  test("your session ending later, deskd gone from under it, is a 503 too: what you do never goes the agent's way unheld", async () => {
+    const s = held({ ownerEndsAt: 2 });
+    const d = sessioned(s);
+    await d.host.desktop(ID, RUN, { do: "look" });
+    await expect(d.host.desktop(ID, RUN, { do: "type", text: "hunter2" })).rejects.toMatchObject({ status: 503 });
+    await expect(d.host.desktopHold(ID, RUN, true)).resolves.toMatchObject({ idleSec: 120 });
+    expect(s.asked).toEqual([{ id: 1, argv: ["status"] }]);
+    expect(d.execs).toEqual([]);
   });
 
   test("the VM's own desktop command alone goes to the agent's session, its answer as an exec's; anything else is an exec as ever", async () => {

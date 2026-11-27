@@ -1419,12 +1419,13 @@ export class SandboxHost {
 
   /**
    * Whether your session's failing says the VM's image is older than take-over (its `desktop` takes no --owner-session,
-   * exit 2, or there is none, 127), noted so: yours go the agent's way until it is made again. One that ended before it
-   * answered, on an image that has take-over, is an error, never the agent's way: what you do is never done unheld.
+   * exit 2, or there is none, 127: it never answered), noted so: yours go the agent's way until it is made again. Any
+   * other end before it answered (on an image that has take-over, or later, deskd gone from under it) is an error to try
+   * again, never the agent's way: what you do is never done unheld.
    */
   private olderThanTakeOver(id: string, owner: DesktopSession, error: unknown): boolean {
-    if (!(error instanceof SessionEnded) || owner.answered) return false;
-    if (error.code === 2 || error.code === 127) {
+    if (!(error instanceof SessionEnded)) return false;
+    if (!owner.answered && (error.code === 2 || error.code === 127)) {
       const held = this.sessions.get(id);
       if (held?.owner === owner) held.owner = null;
       return true;
