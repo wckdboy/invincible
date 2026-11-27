@@ -412,6 +412,12 @@ import Observation
             case .same, .older:
                 break
             }
+            // An answer with no proof lifts no refusal (NodePin.older): it stands, and is said as it was (the re-check of
+            // apps-name-node, R1).
+            if let refused = client.pin.refused {
+                trouble = refused
+                return true
+            }
             guard let me = answer.me else {
                 trouble = NodeError(status: 200, message: "The node's answer to whoami wasn't what this app reads.")
                 return true

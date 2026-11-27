@@ -74,8 +74,11 @@ final class NodePin: Sendable {
 
     /// Its first proof held: pinned, and proven.
     func pin(_ node: String) { settle { $0.node = node; $0.proven = true; $0.refused = nil; $0.unanswered = nil } }
-    /// Its proof held for the node pinned (or, before the cutoff, a node from before answered with none, unpinned).
+    /// Its proof held for the node pinned.
     func proved() { settle { $0.proven = true; $0.refused = nil; $0.unanswered = nil } }
+    /// Before the cutoff, with none pinned, a node from before answered with no proof: spoken to as before, unless a
+    /// refusal stands, which no proof at all lifts (the re-check of apps-name-node, R1).
+    func older() { settle { if $0.refused == nil { $0.proven = true; $0.unanswered = nil } } }
     /// It proved to be another, or its proof failed: nothing more is sent but whoami's proof until it proves to be this one.
     func refuse(_ why: NodeError) { settle { $0.refused = why; $0.proven = false } }
     /// Whoami is being asked: what waits waits for its answer (a refusal stays as it is).
@@ -189,7 +192,8 @@ struct NodeClient: Sendable {
         let proven = NodeProof.judge(pinned: pin.node, said: answer.said, challenge: challenge, now: now(), check: check)
         switch proven {
         case .pin(let id): pin.pin(id)
-        case .same, .older: pin.proved()
+        case .same: pin.proved()
+        case .older: pin.older()
         case .other(let id): pin.refuse(.notYours(other: id))
         case .failed: pin.refuse(.notYours(other: nil))
         }
