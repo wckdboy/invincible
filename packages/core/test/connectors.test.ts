@@ -89,6 +89,32 @@ describe("the class a tool is held to", () => {
     expect(heldClass({ ...GITHUB, basePath: "/repos/lin-example/site" }, tool("POST", "/git/refs", "create"))).toBe("outward");
   });
 
+  // The review of 27 November, N7: every other way GitHub's API writes a branch or runs a workflow is held too.
+  test("at GitHub's API a commit, a merge, a release, a fork's sync, a branch updated, a workflow run or a repository dispatch is outward, whatever its label", () => {
+    for (const [method, path] of [
+      ["PUT", "/repos/{owner}/{repo}/contents/{path}"],
+      ["PUT", "/repos/lin-example/site/contents/.github/workflows/ci.yml"],
+      ["POST", "/repos/{owner}/{repo}/merges"],
+      ["POST", "/repos/{owner}/{repo}/releases"],
+      ["PATCH", "/repos/{owner}/{repo}/releases/{id}"],
+      ["POST", "/repos/{owner}/{repo}/merge-upstream"],
+      ["PUT", "/repos/{owner}/{repo}/pulls/{number}/update-branch"],
+      ["POST", "/repos/{owner}/{repo}/actions/workflows/{id}/dispatches"],
+      ["POST", "/repos/{owner}/{repo}/dispatches"],
+    ] as const) {
+      for (const cls of ["create", "modify"] as const) expect([method, path, cls, heldClass(GITHUB, tool(method, path, cls))]).toEqual([method, path, cls, "outward"]);
+    }
+    // GraphQL: a mutation in its body is outward; a query is as labelled; with no arguments to judge, as labelled.
+    const graphql = tool("POST", "/graphql", "modify");
+    expect(heldClass(GITHUB, graphql, { query: "mutation { createRef(input: {}) { ref { name } } }" })).toBe("outward");
+    expect(heldClass(GITHUB, graphql, { query: "MUTATION M { mergePullRequest(input: {}) { clientMutationId } }" })).toBe("outward");
+    expect(heldClass(GITHUB, graphql, { query: "query { viewer { login } }" })).toBe("modify");
+    expect(heldClass(GITHUB, graphql)).toBe("modify");
+    // A delete stays a delete (it asks as one); a read stays a read.
+    expect(heldClass(GITHUB, tool("DELETE", "/repos/{owner}/{repo}/contents/{path}", "delete"))).toBe("delete");
+    expect(heldClass(GITHUB, tool("GET", "/repos/{owner}/{repo}/contents/{path}", "read"))).toBe("read");
+  });
+
   test("anything else keeps its own: a read of refs, a delete, another path, another origin", () => {
     expect(heldClass(GITHUB, tool("GET", "/repos/{owner}/{repo}/git/refs/heads/{branch}", "read"))).toBe("read");
     expect(heldClass(GITHUB, tool("DELETE", "/repos/{owner}/{repo}/git/refs/heads/{branch}", "delete"))).toBe("delete");

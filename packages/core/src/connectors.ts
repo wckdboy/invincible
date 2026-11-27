@@ -282,14 +282,35 @@ function classFits(method: ConnectorTool["method"], cls: ConnectorTool["class"])
 }
 
 /**
- * The class a tool is held to: its own, but outward where its label would let a request go unasked that asks whatever it
- * is called. At GitHub's API that is a write to a repository's refs: a branch or a tag made or moved, which runs that
- * commit's own workflows with the repository's secrets, whoever made the commit (your word, 27 November 2026: it asks,
- * for every caller). A GitHub connector installed while branch.create was free keeps that definition, and is held to this.
+ * What at GitHub's API writes a branch, a tag or a commit, or runs a workflow with the repository's secrets, whatever a
+ * tool calls it (your word, 27 November 2026: a branch asks, for every caller; and the review of 27 November, N7: every
+ * other way GitHub writes one, held as outward rather than the claim narrowed).
  */
-export function heldClass(manifest: { origin?: string; basePath?: string }, tool: ConnectorTool): ConnectorTool["class"] {
-  const writesRefs = manifest.origin === "https://api.github.com" && tool.method !== "GET" && /^\/repos\/[^/]+\/[^/]+\/git\/refs(\/|$)/.test(`${manifest.basePath ?? ""}${tool.path}`);
-  return writesRefs && (tool.class === "create" || tool.class === "modify") ? "outward" : tool.class;
+const GITHUB_WRITES: readonly RegExp[] = [
+  /^\/repos\/[^/]+\/[^/]+\/git\/refs(\/|$)/, // a branch or a tag, made or moved
+  /^\/repos\/[^/]+\/[^/]+\/contents(\/|$)/, // a commit on a branch (main by default)
+  /^\/repos\/[^/]+\/[^/]+\/merges$/, // a merge commit on a branch
+  /^\/repos\/[^/]+\/[^/]+\/releases(\/|$)/, // a tag at a commit: release workflows
+  /^\/repos\/[^/]+\/[^/]+\/merge-upstream$/, // a fork's branch synced with its upstream
+  /^\/repos\/[^/]+\/[^/]+\/pulls\/[^/]+\/update-branch$/, // a pull request's branch merged forward
+  /^\/repos\/[^/]+\/[^/]+\/actions\/workflows\/[^/]+\/dispatches$/, // a workflow run, with the secrets
+  /^\/repos\/[^/]+\/[^/]+\/dispatches$/, // a repository_dispatch: the workflows that listen to it run
+];
+
+/**
+ * The class a tool is held to: its own, but outward where its label would let a request go unasked that asks whatever it
+ * is called. At GitHub's API that is a write of a branch, a tag or a commit, or a run of a workflow (GITHUB_WRITES): each
+ * runs a commit's own workflows, or a workflow itself, with the repository's secrets, whoever made the commit; and a
+ * GraphQL request whose body holds a mutation (createRef, updateRef, createCommitOnBranch, mergePullRequest…), judged by
+ * the call's arguments when there are any. A GitHub connector installed while branch.create was free keeps that
+ * definition, and is held to this.
+ */
+export function heldClass(manifest: { origin?: string; basePath?: string }, tool: ConnectorTool, args?: Record<string, ArgValue>): ConnectorTool["class"] {
+  if (manifest.origin !== "https://api.github.com" || tool.method === "GET" || (tool.class !== "create" && tool.class !== "modify")) return tool.class;
+  const path = `${manifest.basePath ?? ""}${tool.path}`;
+  if (GITHUB_WRITES.some((write) => write.test(path))) return "outward";
+  if (path === "/graphql" && args !== undefined && /\bmutation\b/i.test(JSON.stringify(args))) return "outward";
+  return tool.class;
 }
 
 export function isPrivateHost(host: string): boolean {
@@ -403,7 +424,7 @@ function buildHttpOrNative(manifest: ConnectorManifest, toolName: string, args: 
   const url = new URL(`${manifest.origin}${fullPath}${search}`);
   // Belt and braces: whatever the arguments were, the request goes to the pinned origin.
   if (url.origin !== new URL(manifest.origin).origin) throw new ConnectorError("refusing a request off the connector's origin");
-  if (tool.native) return { kind: "native", native: tool.native, args: checked, class: heldClass(manifest, tool), target: `${tool.method} ${url.pathname} (${toolName})`.slice(0, 256) };
+  if (tool.native) return { kind: "native", native: tool.native, args: checked, class: heldClass(manifest, tool, checked), target: `${tool.method} ${url.pathname} (${toolName})`.slice(0, 256) };
   const hasBody = tool.method !== "GET" && tool.method !== "DELETE" && Object.keys(body).length > 0;
   return {
     kind: "http",
@@ -411,7 +432,7 @@ function buildHttpOrNative(manifest: ConnectorManifest, toolName: string, args: 
     url: url.toString(),
     headers: { ...(manifest.headers ?? {}) },
     ...(hasBody ? { body: JSON.stringify(body) } : {}),
-    class: heldClass(manifest, tool),
+    class: heldClass(manifest, tool, checked),
     target: `${tool.method} ${url.pathname}${search}`.slice(0, 256),
   };
 }
