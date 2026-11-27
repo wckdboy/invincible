@@ -620,14 +620,16 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       tool's own sign-in (a seat) or an ACP agent, so what they spend is counted, but for a paid model's call that
       reports no usage, which counts nothing for any budget (I-l). Its commands aren't held to those models (R3-4).
     - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
-      in a process group of its own and under its own deadline: not its `desktop` verbs (R3-3), nor the commands its
-      coding tool runs itself, which are the tool's children, and a command that ends or stops its own helper is held
-      to neither from then on (R3-1). In the VM (Linux) the helper is the command's subreaper while it lives, so a
-      process that left the group with setsid is still found. What a gate starts ends with the gate; what its other
-      commands leave running as they end, its coding tool's included, is listed by identity and ended with the task
-      when it is done, fails, or is stopped or revoked. Not when a command ends or stops its own helper, nor a leftover
-      that double-forks out with setsid after its command ended (R3-1), nor when the task's agent is paused or turned
-      off, or after a crash (R3-5), nor a desktop session it started (R3-3).
+      in a process group of its own and under its own deadline, its `desktop` verbs too: they don't take your own
+      work's shortcut to the VM's desktop process (the third re-review's R3-3). Not the commands its coding tool runs
+      itself, which are the tool's children, and a command that ends or stops its own helper is held to neither from
+      then on (R3-1). In the VM (Linux) the helper is the command's subreaper while it lives, so a process that left
+      the group with setsid is still found. What a gate starts ends with the gate; what its other commands leave
+      running as they end (a desktop it started among them, with its apps), its coding tool's included, is listed by
+      identity and ended with the task when it is done, fails, or is stopped or revoked. Not when a command ends or
+      stops its own helper, nor a leftover that double-forks out with setsid after its command ended (R3-1), nor when
+      the task's agent is paused or turned off, or after a crash (R3-5). A desktop already running in the VM isn't one
+      it started: what it opens there is the residual's.
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id has no such bound (R3-6).
@@ -639,8 +641,6 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         ends, or, in the VM, fork successors faster than its helper's scan; and the task's list of what to end is a
         file in the VM that its commands can rewrite. What it started then outlives the gate, the task, the grant and
         the node's revocation.
-      - R3-3: its `desktop` verbs bypass the helper (the desktop's fast path runs before it), so what they start is
-        never listed or ended.
       - R3-4: its VM's gateway lease serves every keyed provider and any model, so its commands can work on models its
         budget counts at $0.
       - R3-5: a pause of its agent, or turning it off, ends the task but refuses the cleanup of what it left running,

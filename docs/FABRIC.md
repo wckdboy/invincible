@@ -140,17 +140,19 @@ transport keys carries all of it:
      - Its gates are its giver's commands, run in your agent's VM: all of them together get as long as one command may
        (15 minutes), every round counted, and once that is spent they aren't run and the work isn't done.
      - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
-       in a process group of its own under its own deadline. Its `desktop` verbs don't: they go straight to the VM's
-       desktop session (R3-3). Nor do the commands its coding tool runs itself, which are the tool's own children. A
-       command that ends or stops its own helper is held to neither from then on (R3-1).
+       in a process group of its own under its own deadline: its `desktop` verbs too, which don't take the shortcut to
+       the VM's desktop process that your own work's do (the third re-review's R3-3). Not the commands its coding tool
+       runs itself, which are the tool's own children. A command that ends or stops its own helper is held to neither
+       from then on (R3-1).
      - What a gate starts ends with the gate: in the background, under nohup, and in the VM (Linux) having left its
        group with setsid, while the gate's helper lives. A command can end or stop its own helper (R3-1).
-     - What its other commands leave running as they end (a server the next one uses), its coding tool's included, is
-       listed then, and ended with the task when it is done, fails, or is stopped or revoked. Not when its agent is
-       paused or turned off, which refuses that cleanup, nor after a crash, which leaves the list unread (R3-5). Nor a
-       leftover that double-forks out with setsid after its command ended, nor what a command that ended its helper
-       started (R3-1), nor a desktop session it started (R3-3). The list is a file in the VM, which its commands can
-       rewrite (R3-1).
+     - What its other commands leave running as they end (a server the next one uses, or a desktop it started, with
+       its apps), its coding tool's included, is listed then, and ended with the task when it is done, fails, or is
+       stopped or revoked. Not when its agent is paused or turned off, which refuses that cleanup, nor after a crash,
+       which leaves the list unread (R3-5). Nor a leftover that double-forks out with setsid after its command ended,
+       nor what a command that ended its helper started (R3-1). A desktop that was already running in the VM (yours, or
+       its agent's from before) isn't one it started: what it opens there is the residual's, below. The list is a file
+       in the VM, which its commands can rewrite (R3-1).
      - The runner stops it at its call's deadline or after 24 hours, whichever comes first, waiting for your approval
        included. A stop that can't be written (the node stopping, or a write that fails) ends its call all the same,
        answered as failed (the third re-review's R3-2). A task you take up again by its id has no life bound (R3-6).
@@ -162,8 +164,6 @@ transport keys carries all of it:
        - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
          ends, or, in the VM, fork successors faster than its helper's scan. What it started then outlives the gate,
          the task, your grant and its node's revocation.
-       - R3-3: its `desktop` verbs (`desktop start`, `desktop app …`, its gates' too) bypass the helper, so what they
-         start is never listed or ended.
        - R3-4: its VM's gateway lease serves every provider you've keyed and any model, so its commands can work on
          models its budget counts at $0.
        - R3-5: a pause of its agent, or turning it off, ends the task but refuses the cleanup of what it left

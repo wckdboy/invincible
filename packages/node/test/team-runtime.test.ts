@@ -629,6 +629,39 @@ test("another node's task runs each command under the handed helper: its gates' 
   expect(g.commands.some((c) => c.includes("PR_SET_CHILD_SUBREAPER"))).toBe(false);
 });
 
+/* Nor do its `desktop` commands go round the helper (the third re-review's R3-3): main's shortcut, which hands a plain
+ * `desktop <verb>` to the VM's desktop process as its words alone, came first, so `desktop start` and `desktop app …`,
+ * its giver's gates among them, started what no gate's end, task's end or deadline reached. */
+test("another node's task runs its `desktop` commands under the handed helper too, its giver's gates among them", async () => {
+  const words: string[][] = [];
+  const commands: string[] = [];
+  let gateRuns = 0;
+  const execArgv = async (_m: Agent, argv: string[]) => (words.push(argv), result());
+  const exec = async (_m: Agent, command: string) => {
+    commands.push(command);
+    // The gate fails before the work and passes after it.
+    return command.includes("desktop start") ? result({ exitCode: gateRuns++ === 0 ? 1 : 0 }) : result();
+  };
+  const script = () => [say("1. Open a terminal on the desktop."), say("```sh\ndesktop app xterm\n```"), say("DONE\nOpened."), say("PASS\nFine.")];
+  const f = fixture(script(), { exec, execArgv });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await f.runtime.executeTask(member, { ...handedTask, gates: ["desktop start"] }, f.context);
+  expect(words).toEqual([]);
+  const as = (mode: string) => (command: string) => command.includes(`sys.argv[4]))'\\'' ${mode} '\\''${handedTask.id}`);
+  const gates = commands.filter((c) => c.includes("desktop start"));
+  expect(gates.length).toBeGreaterThan(1);
+  expect(gates.every(as("gate"))).toBe(true);
+  const work = commands.filter((c) => c.includes("desktop app xterm"));
+  expect(work.length).toBe(1);
+  expect(work.every(as("task"))).toBe(true);
+  // Your own task's still take the shortcut.
+  words.length = 0;
+  gateRuns = 0;
+  const g = fixture(script(), { exec, execArgv });
+  await g.runtime.executeTask(member, { ...task, gates: ["desktop start"] }, g.context);
+  expect(words.map((w) => w.join(" "))).toContain("desktop app xterm");
+});
+
 test("what a harness runs another node's task on: never the tool's own sign-in or setup, only models through the gateway", () => {
   const claude = AGENTS.claude!;
   const ok = (told: object) => ({ exitCode: 0, stdout: JSON.stringify({ type: "status", installed: true, ...told }) });

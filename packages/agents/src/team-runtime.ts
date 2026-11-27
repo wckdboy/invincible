@@ -763,8 +763,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       const inTask = (command: string) => withGateway(`mkdir -p ${quote(temp)} && export TMPDIR=${quote(temp)} && ${sees ? `export INVINCIBLE_EYES=${quote(sees)} && ` : ""}${space ? `export INVINCIBLE_EYES_SPACE=${quote(space)} && ` : ""}cd ${quote(root)} && ${engram ? engramShell(engram) : ""}${command}`);
       const exec = async (command: string, timeout = 120, what?: "gate") => {
         await keeping;
-        // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms.
-        const direct = deps.execArgv ? desktopArgv(command, sees, space) : null;
+        // A plain `desktop …` (C1 step 3): its words to the VM's held desktop session, not a login shell's 111 ms. Not
+        // for another node's task: its commands all run under the handed helper below, so what a `desktop start` or a
+        // `desktop app` of its starts is bounded with it too (the third re-review's R3-3).
+        const direct = deps.execArgv && !handed ? desktopArgv(command, sees, space) : null;
         if (direct) return deps.execArgv!(agent, ["desktop", ...direct], Math.min(timeout, TEAM_COMMAND_SECONDS), ctx.signal);
         const limit = Math.min(timeout, TEAM_COMMAND_SECONDS);
         // Another node's task runs each command under the handed helper: in a process group of its own, under its own
