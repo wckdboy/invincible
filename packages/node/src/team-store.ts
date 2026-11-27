@@ -169,6 +169,7 @@ export class TeamStore {
       CREATE TABLE IF NOT EXISTS team_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS team_own (task TEXT PRIMARY KEY, usd REAL NOT NULL, at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS team_own_at ON team_own(at);
+      CREATE TABLE IF NOT EXISTS ci_yours (pull TEXT NOT NULL, head TEXT NOT NULL, said TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (pull, head));
       CREATE TABLE IF NOT EXISTS team_outcomes (id TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS team_trail (task TEXT NOT NULL, n INTEGER NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY(task, n));
       CREATE TABLE IF NOT EXISTS team_checkpoints (task TEXT NOT NULL, step INTEGER NOT NULL, at INTEGER NOT NULL, commit_id TEXT NOT NULL, command TEXT NOT NULL, PRIMARY KEY(task, step));
@@ -289,6 +290,22 @@ export class TeamStore {
    * budget anew), kept as one (team_own, under its own key). */
   commitOwn(key: string, usd: number): void {
     this.db.query("INSERT INTO team_own(task,usd,at) VALUES(?,?,?)").run(key, usd, this.now());
+  }
+  /**
+   * The fixes the primary gave back on its own word in the last day (ci-back.ts), outside an outcome: how many, and their
+   * budgets. They have an allowance of their own inside its day (TEAM_LIMITS.ciFixesPerDay, ciFixDailyUsd).
+   */
+  ownFixes(): { n: number; usd: number } {
+    return this.db
+      .query<{ n: number; usd: number }, [string, number]>("SELECT COUNT(*) AS n, COALESCE(SUM(json_extract(data,'$.budgetUsd')),0) AS usd FROM team_jobs WHERE kind='task' AND json_extract(data,'$.givenBy') = ? AND json_extract(data,'$.fix') IS NOT NULL AND json_extract(data,'$.outcome') IS NULL AND created_at > ?")
+      .get(TEAM_PRIMARY, this.now() - 86_400_000)!;
+  }
+  /** What was said of a pull request's failing commit that stayed yours (ci-back.ts): it stays so (the review of 27 November, S5). */
+  ciYours(pull: string, head: string): string | null {
+    return this.db.query<{ said: string }, [string, string]>("SELECT said FROM ci_yours WHERE pull = ? AND head = ?").get(pull, head)?.said ?? null;
+  }
+  markCiYours(pull: string, head: string, said: string): void {
+    this.db.query("INSERT OR IGNORE INTO ci_yours (pull, head, said, at) VALUES (?, ?, ?, ?)").run(pull, head, said, this.now());
   }
   /** What the primary committed on its own word in the last day: the budgets of the tasks it gave, of the proposals it approved itself, and of the runs it took up again, as each was then (team_own). */
   ownCommitted(): number {

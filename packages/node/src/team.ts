@@ -217,6 +217,10 @@ export class TeamService {
    */
   giveOwn(input: TeamTaskInput, said = "Given by your agent on its own word", fix?: TeamTaskFix): TeamTask {
     this.accepting();
+    // Never behind a pause of yours: it would wait there, holding its money, and run the moment you resume (the review of
+    // 27 November, S1), as work given again would (againOwn).
+    if (this.store.agent(input.assignee)?.enabled === false) throw new TeamError(409, `You paused @${input.assignee}: giving it work is yours.`);
+    if (this.store.room(input.room)?.paused) throw new TeamError(409, "Its conversation is paused: giving work in it is yours.");
     const bound = this.mayGiveOwn(input.budgetUsd);
     const task = this.store.createTask(input, { givenBy: TEAM_PRIMARY, own: true, ...(fix ? { fix } : {}) });
     this.store.noteTask(task.id, `${said}, within its budget of $${input.budgetUsd}, ${this.within(bound)}`.slice(0, 500));

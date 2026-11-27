@@ -118,6 +118,13 @@ export const CATALOG: Record<string, CatalogEntry> = {
           params: { owner, repo, number, per_page: perPage },
           class: "read",
         },
+        "collaborator.permission": {
+          description: "What someone may do in a repository (role_name: admin, maintain, write, triage or read; or none): whether they may push.",
+          method: "GET",
+          path: "/repos/{owner}/{repo}/collaborators/{username}/permission",
+          params: { owner, repo, username: { type: "string", pattern: "[A-Za-z0-9][A-Za-z0-9-]{0,38}", required: true, description: "a GitHub login" } },
+          class: "read",
+        },
         runs: {
           description: "Recent GitHub Actions runs.",
           method: "GET",

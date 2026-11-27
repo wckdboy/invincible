@@ -50,7 +50,7 @@ import { loopRun, privateLoops, runOfLoops, withheldRunLine } from "./private-da
 import { LoopDrafts } from "./loop-drafts.ts";
 import { ConnectorRequests } from "./connector-requests.ts";
 import { giveBack, reviewBack, wantsReviews } from "./ci-back.ts";
-import { CiWatch, shippedPulls } from "./ci-watch.ts";
+import { CiWatch, type ShippedPull, shippedPulls } from "./ci-watch.ts";
 import { WakeWatcher } from "./wakes.ts";
 import { Questions } from "./questions.ts";
 import { SlackGateway } from "./slack.ts";
@@ -1050,7 +1050,18 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
   slack.start();
   notify.start();
   // After you ship: this node follows each pull request it shipped until its checks end (ci-watch.ts).
-  const ciBack = { store: team.store, service: () => team.service, outcomes: () => team.outcomes };
+  const ciBack = {
+    store: team.store,
+    service: () => team.service,
+    outcomes: () => team.outcomes,
+    // A fix's push onto a pull request's branch that you declined (its ship.update denied): its further fixes are yours
+    // (the review of 27 November, S4).
+    declined: (pull: ShippedPull) =>
+      connectors.actions(500).some((a) => {
+        const args = a.args as { owner?: unknown; repo?: unknown; branch?: unknown };
+        return a.tool === "ship.update" && a.state === "denied" && a.connector === pull.connector && a.node === identity.id && String(args.owner).toLowerCase() === pull.owner.toLowerCase() && String(args.repo).toLowerCase() === pull.repo.toLowerCase() && args.branch === pull.branch;
+      }),
+  };
   const ciWatch = new CiWatch({
     store,
     identity,

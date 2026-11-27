@@ -526,7 +526,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
                       "div",
                       { class: "grow" },
                       h("strong", { class: "small" }, "Failing checks and reviews back to the agent, for every agent on this node"),
-                      h("p", { class: "meta" }, snapshot.ciBack ? "On: a fix goes back on the pull request's branch, and your agent approves its push itself, as it may in a repository you gave an agent, unless it changes the repository's CI or the branch moved since it last pushed it." :"Off: they are yours, except in an outcome, which gives its own back."),
+                      h("p", { class: "meta" }, snapshot.ciBack ? "On: a fix goes back on the pull request's branch on your agent's own word, within its money (3 fixes and $3 a day at most), and your agent approves its push itself, as it may in a repository you gave an agent, unless it changes the repository's CI or the branch moved since it last pushed it." :"Off: they are yours, except in an outcome, which gives its own back."),
                     ),
                     badge(snapshot.ciBack ? "On" : "Off", snapshot.ciBack ? "ok" : "neutral"),
                     canEdit ? button(snapshot.ciBack ? "Turn off" : "Turn on", { size: "sm", onClick: () => void setCiBack(ctx, !snapshot?.ciBack) }) : null,

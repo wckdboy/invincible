@@ -12,7 +12,8 @@ import type { LedgerStore } from "@invincible/ledger";
  *     where the work was an agent's, it may go back to that agent, and the notice says whether (ci-back.ts).
  * A fix pushed onto the branch keeps it followed, under the same notice. It writes nothing to GitHub and sends
  * nothing anywhere. What CI printed is someone else's text: it is shown as data, bounded, and a line that looks
- * like a key is left out.
+ * like a key is left out. A pull request GitHub says is merged or closed is let go of: nothing of it is read or handed
+ * on again (the review of 27 November, S6).
  */
 
 export const CI_WATCH_EVERY_MS = 3 * 60_000;
@@ -94,8 +95,23 @@ export interface CiReview {
 /** How long after its last push a pull request's reviews are read, and how often. */
 export const CI_REVIEWS_FOR_MS = 7 * 24 * 3600 * 1000;
 export const CI_REVIEWS_EVERY_MS = 15 * 60_000;
-/** Whose asking for changes counts: someone who may push to the repository (anyone may review a public one). */
-const MAY_PUSH = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+/**
+ * Whose asking for changes counts: someone GitHub says may push to the repository (github.collaborator.permission:
+ * write, maintain or admin), never by their association with it, which a member or guest who may only read shares (the
+ * review of 27 November, S2). Anyone else's is noticed, yours to weigh; anyone may review a public repository.
+ */
+const PUSHERS = new Set(["admin", "maintain", "write"]);
+/** A GitHub login, as the permission read takes one. */
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+
+/** What GitHub says of a pull request (github.pull): whether it is open, and whether it conflicts with its base. */
+interface PullState {
+  state?: unknown;
+  merged?: unknown;
+  mergeable?: unknown;
+  mergeable_state?: unknown;
+  base?: { sha?: unknown };
+}
 
 /** What one review said on the code, from a pull request's comments: "path:line words", one line each. */
 export function reviewLines(comments: unknown[], review: number): string[] {
@@ -127,9 +143,12 @@ export interface CiWatchOptions {
   /** The pull requests to follow (shippedPulls over the outbox). */
   shipped: () => ShippedPull[];
   /** One GitHub read through the connector the pull request was shipped by (<connector>.<tool>), as the node's own. */
-  call: (tool: "checks" | "check.annotations" | "pull" | "pull.reviews" | "pull.comments", args: Record<string, string | number>, connector: string) => Promise<{ ok: boolean; status: number; body: string }>;
-  /** A review that asks for changes on an agent's work (ci-back.ts): whether a pull request's are worth reading, and each one read. */
-  reviews?: { wanted: (pull: ShippedPull) => boolean; asked: (pull: ShippedPull, review: CiReview) => void };
+  call: (tool: "checks" | "check.annotations" | "pull" | "pull.reviews" | "pull.comments" | "collaborator.permission", args: Record<string, string | number>, connector: string) => Promise<{ ok: boolean; status: number; body: string }>;
+  /**
+   * A review that asks for changes on an agent's work (ci-back.ts): whether a pull request's are worth reading, and each
+   * one read, by someone who may push; what came of it, which is noticed when it is yours.
+   */
+  reviews?: { wanted: (pull: ShippedPull) => boolean; asked: (pull: ShippedPull, review: CiReview) => { said: string; fixing: boolean } | null | void };
   /**
    * Whether its failure goes back to the agent whose work it was: what the notice says of that (ci-back.ts), or nothing,
    * and whether a fix is under way (then the notice is a note, for the day's digest: an agent is on it; PLAN #59).
@@ -149,6 +168,10 @@ export class CiWatch {
   private readonly noReviews = new Set<string>();
   /** The connectors that can't read a pull request yet, said once (apart from reviews: one doesn't stop the other). */
   private readonly noConflicts = new Set<string>();
+  /** What GitHub said of whether someone may push to a repository (by connector, repository and login), kept a quarter of an hour. */
+  private readonly pushers = new Map<string, { may: boolean; what: string; at: number }>();
+  /** The connectors that can't tell who may push yet, said once: no review is handed on through them. */
+  private readonly noPermission = new Set<string>();
 
   constructor(private readonly o: CiWatchOptions) {
     this.now = o.now ?? Date.now;
@@ -183,10 +206,36 @@ export class CiWatch {
   private async look(): Promise<void> {
     const now = this.now();
     for (const pull of this.o.shipped()) {
+      if (this.o.local.query<{ state: string }, [string]>("SELECT state FROM ci_watch WHERE action = ?").get(pull.action)?.state === "closed") continue;
+      // What GitHub says of the pull request, read once a look where something may go back: merged or closed, it is let
+      // go of (the review of 27 November, S6); open, whether it conflicts with its base.
+      const followed = !!pull.pr && now - pull.at < CI_REVIEWS_FOR_MS;
+      const state = followed ? await this.pullState(pull) : null;
+      if (state && (state.state === "closed" || state.merged === true)) {
+        this.o.local.query("INSERT INTO ci_watch (action, state, at) VALUES (?, 'closed', ?) ON CONFLICT (action) DO UPDATE SET state = excluded.state, at = excluded.at").run(pull.action, now);
+        this.o.log(`ci: ${pull.owner}/${pull.repo}#${pull.pr} is ${state.merged === true ? "merged" : "closed"}: no longer followed`);
+        continue;
+      }
       if (now - pull.at < CI_WATCH_FOR_MS) await this.followChecks(pull, now);
       const read = this.reviewsRead.get(pull.action);
-      if (pull.pr && now - pull.at < CI_REVIEWS_FOR_MS && (read === undefined || now - read >= CI_REVIEWS_EVERY_MS)) await this.followReviews(pull, now);
-      if (pull.pr && now - pull.at < CI_REVIEWS_FOR_MS) await this.followConflicts(pull, now);
+      if (followed && (read === undefined || now - read >= CI_REVIEWS_EVERY_MS)) await this.followReviews(pull, now);
+      if (state) this.followConflicts(pull, state, now);
+    }
+  }
+
+  /** What GitHub says of a pull request (github.pull), where a failure or a conflict may go back; null where it can't be read. */
+  private async pullState(pull: ShippedPull): Promise<PullState | null> {
+    if (!this.o.back || this.noConflicts.has(pull.connector)) return null;
+    try {
+      const read = await this.o.call("pull", { owner: pull.owner, repo: pull.repo, number: pull.pr! }, pull.connector);
+      return read.ok ? (JSON.parse(read.body) as PullState) : null;
+    } catch (error) {
+      const message = (error as Error).message;
+      if (/has no tool "pull"/.test(message)) {
+        this.noConflicts.add(pull.connector);
+        this.o.log(`ci: ${pull.connector} can't read a pull request yet; add it again to have conflicts followed (invincible connector add github)`);
+      } else this.o.log(`ci: ${pull.owner}/${pull.repo} ${pull.branch}: conflicts: ${message}`);
+      return null;
     }
   }
 
@@ -194,12 +243,9 @@ export class CiWatch {
    * Whether a pull request conflicts with its base (github.pull: mergeable false, mergeable_state "dirty"). Each base
    * commit it conflicts with is handed on once for that pull request, and said in your Inbox with what became of it.
    */
-  private async followConflicts(pull: ShippedPull, now: number): Promise<void> {
-    if (!this.o.back || this.noConflicts.has(pull.connector)) return;
+  private followConflicts(pull: ShippedPull, p: PullState, now: number): void {
+    if (!this.o.back) return;
     try {
-      const read = await this.o.call("pull", { owner: pull.owner, repo: pull.repo, number: pull.pr! }, pull.connector);
-      if (!read.ok) return;
-      const p = JSON.parse(read.body) as { mergeable?: unknown; mergeable_state?: unknown; base?: { sha?: unknown } };
       const base = p.base?.sha;
       if (p.mergeable !== false || p.mergeable_state !== "dirty" || typeof base !== "string" || !/^[0-9a-f]{40}$/.test(base)) return;
       const key = `${pull.owner.toLowerCase()}/${pull.repo.toLowerCase()}/${pull.branch}#${pull.pr}`;
@@ -214,17 +260,13 @@ export class CiWatch {
       const body = [`It conflicts with its base branch (at ${base.slice(0, 12)}): merge the base in and resolve the conflicts.`, ...(back ? [back.said] : [])].join("\n").slice(0, 600);
       this.o.store.emit(this.o.identity, "notice.raised", { key: `ci-conflict:${pull.action}`, severity: back?.fixing ? "info" : "warn", title: `Conflicts on ${pull.owner}/${pull.repo}#${pull.pr}`, body, source: "ci", at: this.now() });
     } catch (error) {
-      const message = (error as Error).message;
-      if (/has no tool "pull"/.test(message)) {
-        this.noConflicts.add(pull.connector);
-        this.o.log(`ci: ${pull.connector} can't read a pull request yet; add it again to have conflicts followed (invincible connector add github)`);
-      } else this.o.log(`ci: ${pull.owner}/${pull.repo} ${pull.branch}: conflicts: ${message}`);
+      this.o.log(`ci: ${pull.owner}/${pull.repo} ${pull.branch}: conflicts: ${(error as Error).message}`);
     }
   }
 
   private async followChecks(pull: ShippedPull, now: number): Promise<void> {
     const seen = this.o.local.query<{ state: string }, [string]>("SELECT state FROM ci_watch WHERE action = ?").get(pull.action)?.state;
-    if (seen === "passed" || seen === "none" || seen === "unreadable") return;
+    if (seen === "passed" || seen === "none" || seen === "unreadable" || seen === "closed") return;
     try {
       const verdict = ciVerdict(await this.checks(pull), now - pull.at);
       if (verdict.state === "running") return;
@@ -243,11 +285,11 @@ export class CiWatch {
   }
 
   /**
-   * A pull request's reviews, where a fix could go back: each one since the last push, by someone who may push, that
-   * asks for changes or says something on the code (one that only comments asks nothing of it: "looks good"). Each is
-   * handed on once with what it said on the code. (GitHub lets no author ask for changes on their own pull request,
-   * and a shipped one is yours: your word on a line of it is how you ask.) Its words are someone else's: bounded, and
-   * anything that looks like a key left out.
+   * A pull request's reviews, where a fix could go back: each one since the last push that asks for changes or says
+   * something on the code (one that only comments asks nothing of it: "looks good"). One by someone GitHub says may push
+   * is handed on once with what it said on the code; anyone else's is noticed once, yours, as is one ci-back didn't give
+   * back. (GitHub lets no author ask for changes on their own pull request, and a shipped one is yours: your word on a
+   * line of it is how you ask.) Its words are someone else's: bounded, and anything that looks like a key left out.
    */
   private async followReviews(pull: ShippedPull, now: number): Promise<void> {
     if (this.noReviews.has(pull.connector) || !this.o.reviews?.wanted(pull)) return;
@@ -256,25 +298,35 @@ export class CiWatch {
       const read = await this.o.call("pull.reviews", { owner: pull.owner, repo: pull.repo, number: pull.pr!, per_page: 100 }, pull.connector);
       if (!read.ok) return;
       let comments: unknown[] | null = null;
+      const yours: string[] = [];
       for (const raw of JSON.parse(read.body) as unknown[]) {
-        const r = raw as { id?: unknown; state?: unknown; author_association?: unknown; submitted_at?: unknown; commit_id?: unknown; body?: unknown; user?: { login?: unknown } };
-        if (typeof r.id !== "number" || (r.state !== "CHANGES_REQUESTED" && r.state !== "COMMENTED") || !MAY_PUSH.has(String(r.author_association)) || typeof r.commit_id !== "string") continue;
+        const r = raw as { id?: unknown; state?: unknown; submitted_at?: unknown; commit_id?: unknown; body?: unknown; user?: { login?: unknown } };
+        if (typeof r.id !== "number" || (r.state !== "CHANGES_REQUESTED" && r.state !== "COMMENTED") || typeof r.commit_id !== "string") continue;
         if (!(Date.parse(String(r.submitted_at)) > pull.at)) continue;
         if (this.o.local.query("SELECT 1 FROM ci_reviews WHERE review = ?").get(r.id)) continue;
         comments ??= await this.comments(pull);
         const lines = reviewLines(comments, r.id);
         const body = typeof r.body === "string" ? r.body.trim().slice(0, 2000) : "";
         if (r.state === "CHANGES_REQUESTED" || lines.length) {
-          this.o.reviews.asked(pull, {
-            id: r.id,
-            by: typeof r.user?.login === "string" ? r.user.login : "someone",
-            head: r.commit_id,
-            body: findSecrets(body).length ? "(its words looked like they held a key, so they were left out: read it on GitHub)" : body,
-            lines,
-          });
+          const login = typeof r.user?.login === "string" && LOGIN.test(r.user.login) ? r.user.login : null;
+          const by = login ?? "someone";
+          const may = login ? await this.mayPush(pull, login, now) : { may: false, what: "GitHub named no one" };
+          if (may === null) yours.push(`@${by} asked for changes, but the GitHub connector can't tell yet who may push: nothing went back to the agent, so it's yours. To have reviews given back, add it again: invincible connector add github`);
+          else if (!may.may) yours.push(`@${by} asked for changes, but GitHub says they can't push to ${pull.owner}/${pull.repo} (${may.what}): nothing went back to the agent, so it's yours.`);
+          else {
+            const back = this.o.reviews.asked(pull, {
+              id: r.id,
+              by,
+              head: r.commit_id,
+              body: findSecrets(body).length ? "(its words looked like they held a key, so they were left out: read it on GitHub)" : body,
+              lines,
+            });
+            if (back && !back.fixing) yours.push(`@${by} asked for changes: ${back.said}`);
+          }
         }
         this.o.local.query("INSERT OR IGNORE INTO ci_reviews (review, at) VALUES (?, ?)").run(r.id, now);
       }
+      if (yours.length) this.noticeReviews(pull, yours);
     } catch (error) {
       const message = (error as Error).message;
       if (/has no tool "pull\.(reviews|comments)"/.test(message)) {
@@ -282,6 +334,47 @@ export class CiWatch {
         this.o.log(`ci: ${pull.connector} can't read reviews yet; add it again to have reviews followed (invincible connector add github)`);
       } else this.o.log(`ci: ${pull.owner}/${pull.repo} ${pull.branch}: reviews: ${message}`);
     }
+  }
+
+  /**
+   * Whether GitHub says `login` may push to the pull request's repository (write, maintain or admin), and what it said
+   * (their role, or that they are no collaborator); null where the connector can't ask yet. Kept a quarter of an hour.
+   */
+  private async mayPush(pull: ShippedPull, login: string, now: number): Promise<{ may: boolean; what: string } | null> {
+    if (this.noPermission.has(pull.connector)) return null;
+    const key = `${pull.connector} ${pull.owner.toLowerCase()}/${pull.repo.toLowerCase()} ${login.toLowerCase()}`;
+    const kept = this.pushers.get(key);
+    if (kept && now - kept.at < CI_REVIEWS_EVERY_MS) return kept;
+    let said: { may: boolean; what: string };
+    try {
+      const read = await this.o.call("collaborator.permission", { owner: pull.owner, repo: pull.repo, username: login }, pull.connector);
+      if (!read.ok) said = { may: false, what: read.status === 404 ? "not a collaborator" : `GitHub answered ${read.status}` };
+      else {
+        const p = JSON.parse(read.body) as { permission?: unknown; role_name?: unknown };
+        const role = typeof p.role_name === "string" ? p.role_name : typeof p.permission === "string" ? p.permission : "none";
+        said = { may: PUSHERS.has(role) || p.permission === "admin" || p.permission === "write", what: role.slice(0, 40) };
+      }
+    } catch (error) {
+      const message = (error as Error).message;
+      if (/has no tool "collaborator\.permission"/.test(message)) {
+        this.noPermission.add(pull.connector);
+        this.o.log(`ci: ${pull.connector} can't tell who may push yet; add it again to have reviews given back (invincible connector add github)`);
+        return null;
+      }
+      this.o.log(`ci: ${pull.owner}/${pull.repo}: who may push: ${message}`);
+      said = { may: false, what: "GitHub didn't say" };
+    }
+    this.pushers.set(key, { ...said, at: now });
+    return said;
+  }
+
+  /** Reviews of yours to answer, one notice for each pull request: its newest lines, each said once. */
+  private noticeReviews(pull: ShippedPull, lines: string[]): void {
+    const key = `ci-review:${pull.action}`;
+    const before = this.o.store.lww<{ body?: string } | null>(`notice:${key}`)?.value?.body;
+    const all = [...(before ? before.split("\n") : []), ...lines];
+    while (all.length > 1 && all.join("\n").length > 600) all.shift();
+    this.o.store.emit(this.o.identity, "notice.raised", { key, severity: "warn", title: `Reviews on ${pull.owner}/${pull.repo}#${pull.pr}`, body: all.join("\n").slice(0, 600), source: "ci", at: this.now() });
   }
 
   /** A pull request's comments on its code (every review's). */
