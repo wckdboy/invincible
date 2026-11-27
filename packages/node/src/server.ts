@@ -167,6 +167,7 @@ import { handleKeyGateway, keyScope, ungivable } from "./key-gateway.ts";
 import { handleSandboxSearch, SearchError, searchWeb } from "./search.ts";
 import { type Caller, ConnectorCallError, type ConnectorService } from "./connectors.ts";
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
+import { loopRun, privateLoops, runOfLoops } from "./private-data.ts";
 import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.ts";
 import { addSeat, askSeat, recordSeatStatus, removeSeat, SeatError, seatSalt, seatUse, seatViews, setSeatPolicy, setSeatServes } from "./seats.ts";
 import { SeatSignIns } from "./seat-sign-in.ts";
@@ -1218,7 +1219,9 @@ export function createApp(ctx: AppContext) {
     // (Below its title, which names the rule: where it ran, how it ended, and the command.)
     const where = about ?? `one of its runs (${run.slice(0, 64)})`;
     const ended = exitCode === 0 ? "and it succeeded" : `and it ended with ${exitCode}`;
-    const body = `In ${where}, ${ended}:\n$ ${clip(redact(command.split("\n")[0] ?? ""), 300, 100)}`;
+    // (A command of a run your private data woke is said to have run, never in its words: B1, as its ledger line.)
+    const secret = loopRun(run) && runOfLoops(run, privateLoops(ctx.store));
+    const body = `In ${where}, ${ended}:\n${secret ? "a command of a run your private data woke" : `$ ${clip(redact(command.split("\n")[0] ?? ""), 300, 100)}`}`;
     ctx.store.emit(ctx.identity, "notice.raised", { key, severity: "info", title: `Your rule ${rule}: a command it matches has run`, body: body.slice(0, 2000), source: `rule:${rule}`, at: Date.now() });
   }
 
@@ -3954,10 +3957,13 @@ export function createApp(ctx: AppContext) {
       // log keeps every line it ever had, so its view leaves them out).
       const yours = p.scopes.includes("fleet:admin");
       const secret = privateResources();
+      // (And the lines of a loop's runs that your private data wakes or feeds: what they ran was in its words. B1.)
+      const loops = yours ? new Set<string>() : privateLoops(ctx.store);
+      const loopOf = (run: unknown) => runOfLoops(run, loops);
       return {
         entries: ctx.store
           .ledger(yours ? 200 : 1000)
-          .filter((e) => yours || !secret(e.body.resource))
+          .filter((e) => yours || (!secret(e.body.resource) && !loopOf(e.body.run)))
           .slice(0, 200)
           .map((e) => ({
             id: e.id,
