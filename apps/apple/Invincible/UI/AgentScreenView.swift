@@ -4,7 +4,7 @@ import SwiftUI
  * An agent's screen, watched and taken over (the PWA's desktop viewer).
  * - An agent's VM: live, the node's stream of its screen (DesktopLive) while it is on screen and the app is in front;
  *   a stream that ends is watched again a little later each time, and after a few tries in a row, or a refusal, it gives
- *   way to the picture.
+ *   way to the picture (DesktopWatch).
  * - The picture: a Mac's own screen, or a VM's where it isn't live, asked for about every two seconds.
  * - What you do there: a tap clicks at that place on its screen; text is typed (and never written to the ledger); a key,
  *   an address and scrolling are one press each. While it is live, a thing done brings back no picture (the stream shows
@@ -56,13 +56,10 @@ struct AgentScreenView: View {
     @State private var address = ""
     @State private var typed = ""
     @State private var hidden = false
-    /// A VM's screen live, and how it stands: drawing now; its last frame what the box shows (between one stream and the
-    /// next too, until it is given up); or given up for the picture (and why, when it was tried).
+    /// A VM's screen live: what shows it, and how it stands (drawing now; its last frame what the box shows, between one
+    /// stream and the next too; or given up for the picture, and why).
     @State private var live = DesktopLive()
-    @State private var watching = false
-    @State private var drawn = false
-    @State private var pictures = false
-    @State private var liveNote: String?
+    @State private var watch = DesktopWatch()
     /// Your take-over as the node said it last, and when it ends by this device's clock (ms).
     @State private var held: DesktopHold?
     @State private var heldEnds: Double?
@@ -81,8 +78,10 @@ struct AgentScreenView: View {
                             .buttonStyle(.bordered).controlSize(.small)
                     }
                 }
-                if let liveNote {
-                    Label(liveNote, systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
+                if watch.givenUp == .tried {
+                    Label("The live picture of \(agent.name)'s screen isn't coming through, so it is shown every two seconds instead.", systemImage: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 if noDesktop {
                     Label("\(agent.name)'s VM has no desktop just now. Make it again with a desktop from a terminal or the PWA: its work in /work stays.", systemImage: "display.trianglebadge.exclamationmark")
@@ -108,12 +107,12 @@ struct AgentScreenView: View {
         .task(id: scenePhase == .active) {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
-                if problem == nil, !noDesktop, !sending, !watching { await act(nil) }
+                if problem == nil, !noDesktop, !sending, !watch.watching { await act(nil) }
                 try? await Task.sleep(for: .seconds(2))
             }
         }
         // A VM's screen live while you're watching.
-        .task(id: scenePhase == .active) { await watch() }
+        .task(id: scenePhase == .active) { await watchLive() }
         // Your take-over ends by itself when nothing more is done there: said once, when it does.
         .task(id: heldEnds) {
             guard let heldEnds else { return }
@@ -130,7 +129,7 @@ struct AgentScreenView: View {
 
     /// The size of what the box shows, in the screen's own pixels: the stream's while its frame is drawn, else the picture's.
     private var shown: (width: Int, height: Int)? {
-        if drawn, let size = live.size { return size }
+        if watch.drawn, let size = live.size { return size }
         return shot.map { (width: $0.width, height: $0.height) }
     }
 
@@ -138,23 +137,23 @@ struct AgentScreenView: View {
         GeometryReader { box in
             ZStack {
                 RoundedRectangle(cornerRadius: Metrics.innerRadius, style: .continuous).fill(.black.opacity(0.85))
-                if let picture, !drawn {
+                if let picture, !watch.drawn {
                     Image(platformImage: picture)
                         .resizable()
                         .interpolation(.medium)
                         .scaledToFit()
                         .accessibilityLabel("\(agent.name)'s screen")
                         .accessibilityHint("A tap clicks at that place on it")
-                } else if !drawn {
+                } else if !watch.drawn {
                     ProgressView().tint(.white)
                 }
                 // The live screen, in the same place: its layer fits it to the box as the picture is fitted.
                 DesktopLiveScreen(live: live)
-                    .opacity(drawn ? 1 : 0)
+                    .opacity(watch.drawn ? 1 : 0)
                     .allowsHitTesting(false)
                     .accessibilityLabel("\(agent.name)'s screen, live")
                     .accessibilityHint("A tap clicks at that place on it")
-                    .accessibilityHidden(!drawn)
+                    .accessibilityHidden(!watch.drawn)
             }
             .clipShape(.rect(cornerRadius: Metrics.innerRadius, style: .continuous))
             .contentShape(.rect)
@@ -262,12 +261,12 @@ struct AgentScreenView: View {
     private func send(_ action: DesktopAction?) async {
         sending = true
         defer { sending = false }
-        if action != nil, !watching { status = "Sending…" }
+        if action != nil, !watch.watching { status = "Sending…" }
         struct Ask: Encodable { let id: String; let action: DesktopAction?; var picture: Bool? = nil }
         struct OnMac: Encodable { let on: String; let action: DesktopAction? }
         do {
             // Live, nothing comes back but whether you have it: the stream shows what was done.
-            if watching, case .seat(let seat) = of {
+            if watch.watching, case .seat(let seat) = of {
                 let done = try await session.client.post("/api/team/desktop", Ask(id: seat.id, action: action, picture: false), as: DesktopDone.self)
                 heard(done.held)
                 problem = nil
@@ -284,7 +283,7 @@ struct AgentScreenView: View {
             (shot, picture, problem, noDesktop) = (next, image, nil, false)
             if case .seat = of { heard(next.held) }
             // (A picture that comes back while it is live isn't shown over it.)
-            if !watching { status = "Seen just now · \(next.width)×\(next.height)" }
+            if !watch.watching { status = "Seen just now · \(next.width)×\(next.height)" }
         } catch {
             // Nothing more is asked until you ask: a refusal is said once, not every two seconds.
             if Desktop.saysNoDesktop(error) { noDesktop = true } else { problem = error.localizedDescription }
@@ -292,40 +291,25 @@ struct AgentScreenView: View {
         }
     }
 
-    /// A VM's screen live, watched again a little later each time it ends; given up for the picture after a few ends in a
-    /// row (said), or at once when the node refuses it (an older node, a VM with no stream: nothing to say).
-    private func watch() async {
-        guard scenePhase == .active, case .seat(let seat) = of, !pictures else { return }
+    /// A VM's screen live while you're watching: the node's stream, drawn by DesktopLive, kept by DesktopWatch (watched
+    /// again after an end, and given way to the picture after four in a row, or at once on a refusal).
+    private func watchLive() async {
+        guard scenePhase == .active, case .seat(let seat) = of else { return }
         struct Watch: Encodable { let id: String }
-        var tries = 0
-        while !Task.isCancelled, !pictures {
-            var refused = false
-            do {
-                for try await frame in session.client.frames("/api/team/desktop/stream", Watch(id: seat.id)) {
-                    try await live.show(frame)
-                    if live.live, !watching, let size = live.size {
-                        (watching, drawn, tries, problem, noDesktop) = (true, true, 0, nil, false)
-                        status = "Live · \(size.width)×\(size.height)"
-                    }
-                }
-            } catch {
-                // A refusal (an older node, a VM with no stream) isn't mended by asking again.
-                if let refusal = error as? NodeError, !refusal.unreachable, (400..<500).contains(refusal.status) || refusal.status == 501 { refused = true }
-            }
-            await live.ended()
-            if watching {
-                watching = false
-                status = "As it was last seen"
-            }
-            if Task.isCancelled { return }
-            tries += 1
-            if refused || tries >= DesktopStream.liveTries {
-                (pictures, drawn) = (true, false)
-                if !refused { liveNote = "The live picture of \(agent.name)'s screen isn't coming through, so it is shown every two seconds instead." }
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(DesktopStream.againIn(tries)))
-        }
+        await watch.run(
+            open: { session.client.frames("/api/team/desktop/stream", Watch(id: seat.id)) },
+            show: { frame in
+                try await live.show(frame)
+                return live.live
+            },
+            ended: { await live.ended() },
+            wait: { ms in try? await Task.sleep(for: .milliseconds(ms)) },
+            began: {
+                (problem, noDesktop) = (nil, false)
+                if let size = live.size { status = "Live · \(size.width)×\(size.height)" }
+            },
+            stopped: { status = "As it was last seen" }
+        )
     }
 
     /// You take the desktop over, or give it back: whether you have it after, as the node says.
