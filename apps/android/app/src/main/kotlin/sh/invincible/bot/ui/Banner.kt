@@ -41,7 +41,7 @@ fun ReachBanner(app: AppModel, modifier: Modifier = Modifier) {
     val link by app.online.collectAsState()
     val problem by app.problem.collectAsState()
     // (Refused, the refusal says what's wrong: the banner says nothing beside it.)
-    val online = sh.invincible.bot.core.reachShown(link, refused = problem?.notYourNode != null)
+    val online = sh.invincible.bot.core.reachShown(link, refused = sh.invincible.bot.core.refusalShown(problem) != null)
     var said by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(online) {
         when (online) {

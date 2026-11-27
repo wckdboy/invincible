@@ -112,6 +112,10 @@ fun ChatScreen(app: AppModel, back: () -> Unit, roster: (() -> Unit)? = null, ro
                 }
             }
         }
+        // While this phone's node is refused, the chat, where the app opens, says so above the conversation, whatever is
+        // scrolled to: the refusal, Try again, Forget this node, as Work and the agents do at their heads.
+        val nodeProblem by app.problem.collectAsState()
+        sh.invincible.bot.core.refusalShown(nodeProblem)?.let { Refused(app, it) }
         LazyColumn(Modifier.weight(1f), state = list) {
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = Space.margin, vertical = Space.s2), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s3)) {

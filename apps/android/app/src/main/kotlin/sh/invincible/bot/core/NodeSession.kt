@@ -182,6 +182,13 @@ class NodeSession(
 fun reachShown(online: Boolean?, refused: Boolean): Boolean? = if (refused) null else online
 
 /**
+ * The refusal a screen says at its head, of what went wrong last ([problem]): only "not your node", a proof that failed
+ * included. The chat, where the app opens, says it above the conversation, as Work and the agents do at their heads, with
+ * Try again and Forget this node; the reach banner keeps quiet only while it is said (the lead's word, 27 November 2026).
+ */
+fun refusalShown(problem: NodeError?): NodeError? = problem?.takeIf { it.notYourNode != null }
+
+/**
  * The line over what this phone kept from its node ([ago]: how long since the node said it). While the node is refused
  * ([refused]) it ends there: nothing is asked of a refused node (rule 1), and "Asking it again" said otherwise (the
  * lead's word, 27 November 2026).

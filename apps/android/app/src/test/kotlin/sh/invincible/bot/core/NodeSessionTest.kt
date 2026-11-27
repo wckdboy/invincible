@@ -384,6 +384,19 @@ class NodeSessionTest {
         assertNull(reachShown(online = null, refused = false))
     }
 
+    // ---- the lead's word of 27 November 2026: the chat, where the app opens, says a refusal; nothing else is one ----
+
+    @Test fun theRefusalIsSaidOnTheChatAndOnlyARefusalIs() {
+        // (The reach banner keeps quiet for exactly these, so a refused phone never opens on a chat that says nothing.)
+        val other = NodeError.notYours(b)
+        val failed = NodeError.notYours(null)
+        assertEquals(other, refusalShown(other))
+        assertEquals("a proof that failed is a refusal too", failed, refusalShown(failed))
+        for (p in listOf(null, NodeError.unproven(), unreachable, NodeError(401, "Your node no longer knows this phone."))) {
+            assertNull("${p?.message}", refusalShown(p))
+        }
+    }
+
     // ---- the lead's word of 27 November 2026: while refused, the line over what was kept doesn't say it's asking ----
 
     @Test fun theLineOverWhatWasKeptSaysNothingOfAskingWhileTheNodeIsRefused() {
