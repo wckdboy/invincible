@@ -115,7 +115,9 @@ transport keys carries all of it:
    - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of its
      day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among those it
      names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever smaller budget
-     it asks for (and keeps), so the day bounds how many there are as well as what they spend.
+     it asks for (and keeps), so the day bounds how many there are as well as what they spend. Its work runs only on a
+     model its budget counts at more than $0 (one you've priced above nothing, on no coding plan): never on one it
+     counts as nothing, nor on a coding tool's own sign-in in the VM (a seat), nor in an ACP agent of yours.
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node
@@ -130,9 +132,17 @@ transport keys carries all of it:
      revoking its node or your grant still ends it. A node that restarts ends what was handed to it before, as nobody
      follows it any more: a planned restart (a deploy, an update) ends it as stopped and never takes it up again, and
      one a crash cut off ends as the node comes back.
-   - **Its gates are bounded.** They are its giver's commands, run in your agent's VM: all of them together get as long
-     as one command may (15 minutes), every round counted, and once that is spent they aren't run and the work isn't
-     done.
+   - **Its work is bounded.**
+     - Its gates are its giver's commands, run in your agent's VM: all of them together get as long as one command may
+       (15 minutes), every round counted, and once that is spent they aren't run and the work isn't done.
+     - Each of its commands runs in a process group of its own under its own deadline. What a gate starts ends with
+       the gate: in the background, under nohup, and in the VM (Linux) even having left its group with setsid. What
+       its other commands leave running (a server the next one uses), its coding tool's included, ends with the task,
+       however it ends.
+     - It lives on the runner no longer than its call's deadline or 24 hours, whichever comes first, waiting for your
+       approval included.
+     - Not bounded: work it hands to a process that was running in the VM before it began isn't one it started, so it
+       isn't ended. The VM time its work takes isn't counted itself: its budget's dollars and its life bound it.
 
    It makes the run a key of its own: Ed25519, in memory alone, destroyed when the run ends.
 3. **It streams back** structured chunks:

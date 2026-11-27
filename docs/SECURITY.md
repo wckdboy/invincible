@@ -480,6 +480,16 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     hand-off at least $0.10 whatever smaller budget it asks for, so the day bounds how many there are too (the
     re-review's N5). A handed task's gates (its giver's commands, in your agent's VM) get 15 minutes in all, every
     round counted.
+  - What a handed task does is bounded with it (the second re-review's N7):
+    - It runs only on models its budget counts at more than $0, never on a coding tool's own sign-in (a seat) or an
+      ACP agent, so what it spends is counted.
+    - Each of its commands runs under a fixed helper (`handed-process.ts`), in a process group of its own and under
+      its own deadline. In the VM (Linux) the helper is the command's subreaper, so a process that left the group with
+      setsid is still found. What a gate starts ends with the gate; what its other commands leave running, its coding
+      tool's included, is kept by identity and ends with the task.
+    - The runner ends it at its call's deadline or after 24 hours, whichever comes first.
+    - Residual: work it hands to a process that was already running in the VM isn't one it started, and isn't ended.
+      Its VM time isn't counted itself.
   - One node's hand-offs are looked at one at a time, each counted, given and written before the next, so a burst keeps
     these bounds; at most 8 tasks from one node are open on another at once, those waiting their turn counted too (N1).
   - Anything else waits on the node that would run it as a proposal that only you approve; its own agent never does,
@@ -497,7 +507,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     `fabric-hand-restart.test.ts`, `fabric-hand-pause.test.ts` (a paused task escaped every revocation, and a resume
     ran it again with 16 of one node's open at once, before the fix), `fabric-grant-writer.test.ts`,
     `handoff-grants.test.ts` (only your word, any order, a rebuild, an upgrade, its recorder), `gates.test.ts` and
-    `team-runtime.test.ts` (the gates' bound), `team.test.ts`, `fabric-cli.test.ts`.
+    `team-runtime.test.ts` (the gates' bound; another node's models, seats and commands), `handed-process.test.ts`
+    (a gate's background processes outlived it before the helper), `budgeted.test.ts` (paidOnly), `team.test.ts`,
+    `fabric-cli.test.ts`.
   - **Residual:** a full node that turned on you can write itself a grant as your word, as it can write a rule, and it
     can enroll a client that is you over HTTPS, which gives your agents work as you do: a full node is owner-equivalent
     across the fleet. Each grant names the node that recorded it (`invincible fabric grants`), and every grant a node
