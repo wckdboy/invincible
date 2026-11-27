@@ -1,4 +1,4 @@
-import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type TeamChangesView, type TeamFileEntry, type TeamFilesView, type TeamFileView, textOf } from "@invincible/core";
+import { ATTACHMENT_LIMITS, pictureType, redact, type TeamChangedFile, type TeamChangesView, type TeamFileEntry, type TeamFilesView, type TeamFileView, textOf, WORKSPACE_OWN } from "@invincible/core";
 
 /*
  * Looking into an agent's workspace (its VM's /work, or the primary's computer's) from your devices: a folder's entries, one
@@ -24,12 +24,15 @@ export const KEPT_FROM_VIEW = ["/work/.invincible-gateway.json"] as const;
  * followed, and its target walked in its place: within /work it works as ever; one that leads out (an absolute target
  * elsewhere, or `..` above /work) is refused, and so is a chain of more than 40. What is read is what was opened, so a
  * link swapped in as it reads can change which name is walked, never take it outside (27 November 2026: a link an agent
- * left in /work could make the node read a file outside it, a tool's sign-in among them).
+ * left in /work could make the node read a file outside it, a tool's sign-in among them). In a VM whose HOME is its /work,
+ * what it reaches may not be in a top-level dot-entry of /work that isn't the workspace's own (WORKSPACE_OWN): that is its
+ * HOME's, what its tools keep for themselves, which no look reads (the same rule a move to layout 2 goes by).
  */
 const WALK = `import base64,errno,json,os,stat,sys
 p=sys.argv[1]
 root=sys.argv[2] if len(sys.argv)>2 else '/work'
 KEPT=${JSON.stringify(KEPT_FROM_VIEW.map((path) => path.slice("/work/".length)))}
+OWN=${JSON.stringify(WORKSPACE_OWN)}
 def out(**said):
     print(json.dumps(said));sys.exit(0)
 def walk(p,want):
@@ -80,6 +83,8 @@ def walk(p,want):
             rest=[x for x in to.split('/') if x]+rest
             continue
         held.append(fd);names.append(c)
+    if names and names[0].startswith('.') and names[0] not in OWN and os.path.normpath(os.environ.get('HOME','')) == root:
+        out(error='KeptHome')
     return held,names
 `;
 
@@ -173,6 +178,7 @@ function said(stdout: string): Record<string, unknown> {
       OutsideWorkspace: ["that is outside the workspace", 403],
       TooManyLinks: ["too many links on the way to it", 422],
       KeptFromView: ["kept from view: it holds this VM's gateway token", 403],
+      KeptHome: ["kept from view: in this VM its HOME is its workspace, and that is what its tools keep for themselves", 403],
     };
     const [message, status] = why[error] ?? ["it couldn't be read", 422];
     throw new LookError(message, status);

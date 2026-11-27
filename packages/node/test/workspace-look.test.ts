@@ -233,3 +233,68 @@ for _ in range(times):
             except SystemExit:
                 pass
         sys.stdout.write(out.getvalue().strip()+'\\n')`;
+
+/*
+ * A VM whose HOME is its /work (layout 1, every agent's VM before one has a HOME of its own): what its tools keep for
+ * themselves, their sign-ins among them, is there too, as /work's top-level dot-entries (27 November 2026: the node
+ * never reads a sign-in). A look refuses every one of those that isn't the workspace's own (WORKSPACE_OWN, the rule a
+ * move to layout 2 goes by, which names no tool's files), however it is reached; a listing of /work names each, and
+ * reads nothing in it. In a VM whose HOME is its own, all of /work is its workspace.
+ */
+describe("a VM whose HOME is its /work", () => {
+  /** A look as such a VM runs it: its HOME its /work (or elsewhere, a HOME of its own). */
+  const look = (home: string, script: string, ...args: string[]) => {
+    const ran = Bun.spawnSync(["python3", "-c", script, ...args], { stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: home } });
+    expect(ran.exitCode).toBe(0);
+    return ran.stdout.toString();
+  };
+  /** Its /work: a repository with its own dot-entries, the workspace's own, and what tools keep for themselves. */
+  const workspace = () => {
+    const work = folder();
+    for (const [path, text] of [
+      ["repo/.git/config", "[core]\n"], ["repo/README.md", "# Hi\n"],
+      [".agent/sessions/task-a.claude", "a session's id"], [".evidence/desktop/0f1e.png", "a picture"],
+      [".config/tool/config.json", '{"token":"not-a-real-secret-sentinel"}'], [".memory/engram/notes.db", "notes"],
+    ] as const) {
+      mkdirSync(join(work, path, ".."), { recursive: true });
+      writeFileSync(join(work, path), text);
+    }
+    return work;
+  };
+  const kept = new LookError("kept from view: in this VM its HOME is its workspace, and that is what its tools keep for themselves", 403);
+
+  test("a top-level dot-entry that isn't the workspace's own is refused, read or listed, however it's reached", () => {
+    const work = workspace();
+    symlinkSync(".config/tool/config.json", join(work, "settings"));
+    symlinkSync(".config", join(work, "conf"));
+    for (const path of [".config/tool/config.json", ".memory/engram/notes.db", "settings", "conf/tool/config.json"]) {
+      expect(() => fileView(look(work, READ_SCRIPT, join(work, path), work), "ada", `/work/${path}`)).toThrow(kept);
+    }
+    for (const path of [".config", ".config/tool", "conf", ".memory"]) {
+      expect(() => filesView(look(work, LIST_SCRIPT, join(work, path), work), "ada", `/work/${path}`)).toThrow(kept);
+    }
+  });
+
+  test("the workspace's own dot-entries, and every dot-entry below the top, are read and listed as ever", () => {
+    const work = workspace();
+    expect(fileView(look(work, READ_SCRIPT, join(work, ".agent/sessions/task-a.claude"), work), "ada", "/work/.agent/sessions/task-a.claude")).toMatchObject({ kind: "text", text: "a session's id" });
+    expect(fileView(look(work, READ_SCRIPT, join(work, "repo/.git/config"), work), "ada", "/work/repo/.git/config")).toMatchObject({ kind: "text" });
+    expect(filesView(look(work, LIST_SCRIPT, join(work, ".evidence"), work), "ada", "/work/.evidence").entries.map((e) => e.name)).toEqual(["desktop"]);
+    expect(filesView(look(work, LIST_SCRIPT, join(work, "repo"), work), "ada", "/work/repo").entries.map((e) => e.name)).toEqual([".git", "README.md"]);
+  });
+
+  test("a listing of /work names each of them, and reads nothing in them", () => {
+    const work = workspace();
+    const listed = look(work, LIST_SCRIPT, work, work);
+    expect(filesView(listed, "ada", "/work").entries.map((e) => [e.name, e.kind])).toEqual([[".agent", "dir"], [".config", "dir"], [".evidence", "dir"], [".memory", "dir"], ["repo", "dir"]]);
+    expect(listed).not.toContain("tool");
+    expect(listed).not.toContain("engram");
+  });
+
+  test("in a VM whose HOME is its own, all of /work is its workspace: its dot-entries are read as any", () => {
+    const work = workspace();
+    const home = folder();
+    expect(fileView(look(home, READ_SCRIPT, join(work, ".config/tool/config.json"), work), "ada", "/work/.config/tool/config.json")).toMatchObject({ kind: "text" });
+    expect(filesView(look(home, LIST_SCRIPT, join(work, ".memory"), work), "ada", "/work/.memory").entries.map((e) => e.name)).toEqual(["engram"]);
+  });
+});

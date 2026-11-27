@@ -572,6 +572,13 @@ export interface TeamTaskFix {
   conflict?: string;
 }
 
+/**
+ * The workspace's own top-level entries of /work that begin with a dot: the runtime's state, temporary files, evals and
+ * the desktop's pictures. In a VM whose HOME is its /work, every other top-level dot-entry there is its HOME's, what its
+ * tools keep for themselves (their sign-ins among them), and a look into the workspace never reads one.
+ */
+export const WORKSPACE_OWN = [".agent", ".tmp", ".eval", ".evidence"] as const;
+
 /** A path in an agent's workspace (its VM's /work): absolute, under /work, with no `.` or `..` in it. */
 export const WorkPath = z
   .string()
