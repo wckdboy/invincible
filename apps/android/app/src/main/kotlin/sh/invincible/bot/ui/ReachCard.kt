@@ -68,7 +68,8 @@ fun ReachCard(app: AppModel) {
         }
         if (shown.step == Reach.Step.SETTINGS) Text("Android isn't showing them: notifications are off for Invincible.", style = MaterialTheme.typography.bodyMedium, color = brand.needs)
         said?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
-        Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+        // (Its buttons wrap where it is narrow, a tablet's sidebar: there Not now was squeezed into a column of letters.)
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s1)) {
             if (shown.step == Reach.Step.SETTINGS) {
                 Button(onClick = { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }) { Text("Open settings") }
             } else {
