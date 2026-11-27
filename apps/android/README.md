@@ -12,8 +12,9 @@ beside the app it succeeds until the cutover.
 It's small on purpose: it carries no pictures of the agents, which it draws itself, and needs no Google services. Its
 look is monochrome (`ui/Theme.kt`, as the Apple app's Brand.swift): black, white and greys, red only for what went
 wrong, colour kept for the agents. The primary is the I-beam in one ink (`core/IBeam.kt`, drawn by `ui/Mark.kt`, held to
-`scripts/mark.ts` by the vectors' `mark`), as the launcher icon is (`scripts/brand.ts --png` writes its layers), and on
-a tile of its own where the primary is shown, in ink or, as Settings has it, in pearl glass. Each agent is its glass:
+`scripts/mark.ts` by the vectors' `mark`), as the launcher icon is (`scripts/brand.ts --png` writes its layers), and
+bare where the primary is shown, in ink or, as Settings has it, in pearl glass: the squircle is the launcher icon's
+alone. Each agent is its glass:
 one of 22 shapes in one of eight colour ramps (`core/Glass.kt`, its numbers in `core/GlassData.kt`, core's `glass.ts`;
 drawn by `ui/GlassView.kt`, each shape, ramp, size and page drawn once and kept; held to the vectors' `glass` by
 `GlassTest`), its state a dot cut out of its corner beside its word. Only a working agent's light moves, and only on its

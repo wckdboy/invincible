@@ -15,8 +15,9 @@ import sh.invincible.bot.core.IBeam
 /*
  * Invincible's mark, the I-beam (core/IBeam.kt, from scripts/mark.ts), as a page shows it: one solid form in one ink, the
  * page's (black on light, white on dark), on nothing, so it sits on a light page as on a dark one. It is the app's own mark;
- * the primary's, the one you talk to, is the I-beam on a tile of its own (GuardianMark, in GlassView.kt: in ink, or in pearl
- * glass where this phone is set so), never an agent's glass, and it is still (what it is doing is said in words).
+ * the primary's, the one you talk to, is the same bare I-beam (GuardianMark, in GlassView.kt: in ink, or in pearl glass
+ * where this phone is set so), never an agent's glass, and it is still (what it is doing is said in words). The squircle
+ * round it is the launcher icon's alone.
  */
 
 /** The I-beam in `color`, in a `size` frame. Its three parts are one path, so no seam shows where they meet. Decorative
@@ -37,6 +38,6 @@ fun IBeamMark(size: Dp, color: Color = LocalBrand.current.ink, description: Stri
 @Composable
 fun AppMark(size: Dp) = IBeamMark(size)
 
-/** The primary, wherever it is shown (Home's head, a chat, the sidebar, who gave a task): the I-beam on its own tile. */
+/** The primary, wherever it is shown (a chat's head, the roster, who gave a task): the bare I-beam, in ink (GuardianMark). */
 @Composable
 fun PrimaryMark(size: Dp, description: String? = null) = GuardianMark(size, description)

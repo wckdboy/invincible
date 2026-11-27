@@ -74,9 +74,10 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
 /** Whether a glass breathes: a working agent's, on its own page ([live]), while the phone's animations are on. */
 internal fun glassBreathes(state: Glass.State?, live: Boolean, motion: Boolean): Boolean = live && motion && state == Glass.State.WORKING
 
-/** Your agent's mark, where a face goes: the app's I-beam on a tile of its own in one ink (the page's on its ink), or,
- * where this phone is set so (Settings), in pearl glass, lit as an agent's glass is: on a graphite tile on a light page,
- * glowing on its own on a dark one (its pool from 24 dp), its blur from 40. Decorative unless named ([description]). */
+/** Your agent's mark, where a face goes: the app's I-beam, bare, in the page's ink, as the app's own mark is; or, where
+ * this phone is set so (Settings), in pearl glass, lit as an agent's glass is: on a graphite tile on a light page (white
+ * glass shows on nothing else there), glowing on its own on a dark one (its pool from 24 dp), its blur from 40.
+ * Decorative unless named ([description]). */
 @Composable
 fun GuardianMark(size: Dp, description: String? = null) {
     val brand = LocalBrand.current
@@ -93,12 +94,13 @@ fun GuardianMark(size: Dp, description: String? = null) {
             if (!dark) drawRoundRect(Color(hex(Glass.PEARL_TILE)), cornerRadius = corner) else glow(Glass.PEARL, size.value, dark = true, breath = -1f)
             drawImage(picture.image, Offset(-picture.origin.toFloat(), -picture.origin.toFloat()))
         } else {
-            drawRoundRect(brand.ink, cornerRadius = corner)
+            // The bare I-beam in the page's ink: the squircle round it is the launcher icon's alone (the owner's word, 27
+            // November 2026).
             val path = androidx.compose.ui.graphics.Path()
             for (part in sh.invincible.bot.core.IBeam.parts(this.size.width.toDouble(), this.size.height.toDouble())) {
                 path.addRect(Rect(part.x0.toFloat(), part.y0.toFloat(), part.x1.toFloat(), part.y1.toFloat()))
             }
-            drawPath(path, brand.paper)
+            drawPath(path, brand.ink)
         }
     }
 }
