@@ -176,6 +176,9 @@ export interface GitHubFacts {
   /** Whether what the repository's workflows run on a pull request has finished green on its head (true when none run
    * on one; false while any runs, or once one failed). */
   checksSettled?: boolean;
+  /** Whether a workflow of the repository's runs on a comment or a review (issue_comment, pull_request_review,
+   * pull_request_review_comment): there, comments drive its automation, and its words on a thread are yours (N5). */
+  commentDriven?: boolean;
 }
 
 const GITHUB = "https://api.github.com";
@@ -246,11 +249,25 @@ export const changesCi = (paths: readonly string[]): boolean => paths.some(names
 /** The merge bot that takes a command by its bare name at a line's start (its name then r+, try, retry): the name is
  * one of the old theme's words, so it is written backwards here, as bench/vocabulary.ts writes them. */
 const MERGE_BOT = [..."srob"].reverse().join("");
-/** A line a repository's bots read as a command: a leading /word (ChatOps: /deploy, /release, /merge), the merge bot's
- * name and a word, or @name word (@mergifyio queue, @dependabot merge), whatever its case, after any spaces. */
-const BOT_COMMAND = new RegExp(`^[^\\S\\n]*(\\/[a-z]|${MERGE_BOT}:?[^\\S\\n]+\\S|@[a-z0-9][a-z0-9-]*(\\[bot\\])?[,:]?[^\\S\\n]+[a-z])`, "im");
+/** The bots that take a command by their bare name and a word: the merge bot, and Terraform's (atlantis, digger,
+ * terrateam: their apply runs with the cloud's credentials). */
+const NAMED_BOTS = [MERGE_BOT, "atlantis", "digger", "terrateam"];
+/**
+ * A line a repository's bots read as a command (your word, 27 November 2026: anything that reads as one, not only its
+ * three examples): a leading /word, .word or !word (ChatOps and IssueOps: /deploy, .deploy, !deploy), a named bot's bare
+ * name and a word, or @name word (@mergifyio queue, @dependabot merge), whatever its case, after any spaces.
+ */
+const BOT_COMMAND = new RegExp(`^[^\\S\\n]*([/.!][a-z]|(${NAMED_BOTS.join("|")}):?[^\\S\\n]+\\S|@[a-z0-9][a-z0-9-]*(\\[bot\\])?[,:]?[^\\S\\n]+[a-z])`, "im");
+/** Characters a reader doesn't see: zero-width ones and bidi controls, stripped before a line is read. */
+const UNSEEN = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g;
+/** Words as a bot would read them: NFKC (a full-width ／ or ＠ is / or @), with what no one sees taken out. */
+const asRead = (text: string): string => text.normalize("NFKC").replace(UNSEEN, "");
 /** Whether the words a call writes (its title, its body) have a line a repository's bots read as a command. */
-export const commandsABot = (args: Record<string, unknown>): boolean => [args.title, args.body].some((text) => typeof text === "string" && BOT_COMMAND.test(text));
+export const commandsABot = (args: Record<string, unknown>): boolean => [args.title, args.body].some((text) => typeof text === "string" && BOT_COMMAND.test(asRead(text)));
+/** Words in a push that tell its CI not to run: [skip ci] and its kin in a commit message, or a skip-checks: trailer. */
+const SKIPS_CHECKS = /\[(skip ci|ci skip|no ci|skip actions|actions skip)\]|^[^\S\n]*skip-checks:/im;
+/** Whether a push's words (its commit's message, its pull request's title and body) tell its CI not to run. */
+export const skipsChecks = (args: Record<string, unknown>): boolean => [args.title, args.body].some((text) => typeof text === "string" && SKIPS_CHECKS.test(asRead(text)));
 
 /**
  * Why the primary may approve this call itself, or null when it waits for you. `repositories` are the ones you gave your
@@ -307,6 +324,8 @@ function inGiven(call: OwnCall, named: string, facts: GitHubFacts): string | nul
  */
 function itsPush(call: OwnCall, named: string, where: string, { repo, head }: GitHubFacts): string | null {
   if (!call.changes || changesCi(call.changes) || !isCommit(call.base) || !head || head.sha !== call.base) return null;
+  // Words that tell its CI not to run ([skip ci], skip-checks:): a pull request then clean with no CI is yours (N5).
+  if (skipsChecks(call.args)) return null;
   if (call.native === "github.ship") {
     // Into the default branch (named, or not named at all), on its head.
     const into = defaultBranchOf(named, { repo });
@@ -354,7 +373,9 @@ function inPrivate(call: OwnCall, where: string, facts: GitHubFacts): string | n
 
 /** A comment, or a review that isn't an approval, on its own thread: one opened under your account (it, its agents and
  * you all open them with your key). Anyone else's thread speaks to them. */
-function onItsThread(call: OwnCall, what: "a comment" | "a review", where: string, { user, thread }: GitHubFacts): string | null {
+function onItsThread(call: OwnCall, what: "a comment" | "a review", where: string, { user, thread, commentDriven }: GitHubFacts): string | null {
+  // Where the repository's workflows run on comments or reviews, its comments drive them: yours (asked, unread: yours).
+  if (commentDriven !== false) return null;
   if (thread === undefined || user === undefined || thread.number !== call.args.number || thread.authorId !== user.id) return null;
   if (what === "a review") return reviewsOnly(call) ? `a review of its own pull request #${call.args.number} in ${where}` : null;
   return `a comment on its own thread #${call.args.number} in ${where}`;
@@ -402,6 +423,7 @@ export function supposedFacts(call: OwnCall): GitHubFacts {
     repo: { name: named, private: true, fork: false, ownerId: 1, ownerType: "User", defaultBranch: call.native === "github.merge" ? "main" : defaultBranch },
     ...(typeof number === "number" ? { thread: { number, authorId: 1 } } : {}),
     ...(branch !== undefined ? { head: { branch, sha } } : {}),
+    commentDriven: false,
     ...merge,
   };
 }

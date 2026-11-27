@@ -539,6 +539,8 @@ describe("the gate, end to end", () => {
       "POST https://api.github.com/repos/lin-example/notes/issues true",
       "GET https://api.github.com/repos/lin-example/notes true",
       "GET https://api.github.com/repos/lin-example/notes/issues/4 true",
+      // Whether its workflows run on comments (none here): its words would drive them.
+      "GET https://api.github.com/repos/lin-example/notes/contents/.github/workflows?ref=main true",
       "POST https://api.github.com/repos/lin-example/notes/issues/4/comments true",
     ]);
     // Someone else's thread, an organization's repository, its agents' own calls from their VMs: they wait, nothing is sent.

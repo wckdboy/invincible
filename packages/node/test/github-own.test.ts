@@ -67,13 +67,13 @@ describe("your agent's own words in a private repository of yours", () => {
     expect(done.status === "done" && done.own).toBe("an issue in lin-example/notes, a private repository of yours");
     const again = await w.service.call(comment("lin-example", "notes", 4), primary);
     expect(again.status === "done" && again.own).toBe("a comment on its own thread #4 in lin-example/notes, a private repository of yours");
-    expect(w.asked).toEqual(["GET /user", "GET /repos/lin-example/notes", "POST /repos/lin-example/notes/issues", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4", "POST /repos/lin-example/notes/issues/4/comments"]);
+    expect(w.asked).toEqual(["GET /user", "GET /repos/lin-example/notes", "POST /repos/lin-example/notes/issues", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4", "GET /repos/lin-example/notes/contents/.github/workflows", "POST /repos/lin-example/notes/issues/4/comments"]);
     expect(w.service.actions().map((a) => [a.state, a.self, a.note])).toEqual([
       ["done", true, "Your agent approved it itself: a comment on its own thread #4 in lin-example/notes, a private repository of yours"],
       ["done", true, "Your agent approved it itself: an issue in lin-example/notes, a private repository of yours"],
     ]);
     // Each read is in the ledger, with what GitHub said.
-    expect(w.ledgered.filter((e) => e.target.startsWith("GET ")).map((e) => e.target)).toEqual(["GET /user", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4"]);
+    expect(w.ledgered.filter((e) => e.target.startsWith("GET ")).map((e) => e.target)).toEqual(["GET /user", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes", "GET /repos/lin-example/notes/issues/4", "GET /repos/lin-example/notes/contents/.github/workflows?ref=main"]);
   });
 
   // The re-review of 27 November (R4b, R8): a repository made public, or a name renamed and taken, is seen at once.
@@ -345,16 +345,30 @@ describe("its pushes and its words in a repository you gave an agent", () => {
     expect(w.asked).toEqual([]);
   });
 
+  // The review of 27 November, N5: where a repository's workflows run on comments, its comments drive its automation.
+  test("where the repository's workflows run on a comment or a review, its words on its own thread wait for you; read with its key, kept as whose it is", async () => {
+    // (A file is given as itself, GitHub's raw media type, as the node asks for it.)
+    const workflow = (on: string) => () => new Response(`name: ops\non:\n  ${on}:\n    types: [created]\njobs: {}\n`, { headers: { "content-type": "text/plain" } });
+    const w = world({ users: { [KEYS.one]: person(501) }, given: GIVEN, paths: { "/repos/lin-example/site": site(), "/repos/lin-example/site/issues/4": { number: 4, user: { id: 501 } }, "/repos/lin-example/site/contents/.github/workflows": [{ type: "file", name: "ops.yml", path: ".github/workflows/ops.yml" }], "/repos/lin-example/site/contents/.github/workflows/ops.yml": workflow("issue_comment") } });
+    const say = { connector: "github", tool: "issue.comment", args: { owner: "lin-example", repo: "site", number: 4, body: "Done in #5." } };
+    expect((await w.service.call(say, vm)).status).toBe("asked");
+    expect((await w.service.call({ ...say, tool: "pull.review", args: { ...say.args, event: "COMMENT" } }, vm)).status).toBe("asked");
+    // Its workflows were read once, and kept as long as whose the key is.
+    expect(w.reads().filter((r) => r.includes("/contents/"))).toEqual(["GET /repos/lin-example/site/contents/.github/workflows", "GET /repos/lin-example/site/contents/.github/workflows/ops.yml"]);
+    expect(w.asked.filter((a) => !a.startsWith("GET "))).toEqual([]);
+  });
+
   test("its words go on its own threads there (one opened under your account); on a contributor's issue or pull request they wait for you", async () => {
-    const w = world({ users: { [KEYS.one]: person(501) }, given: GIVEN, paths: { "/repos/lin-example/site/issues/4": { number: 4, user: { id: 501 } }, "/repos/lin-example/site/issues/7": { number: 7, user: { id: 777 } } } });
+    const w = world({ users: { [KEYS.one]: person(501) }, given: GIVEN, paths: { "/repos/lin-example/site": site(), "/repos/lin-example/site/issues/4": { number: 4, user: { id: 501 } }, "/repos/lin-example/site/issues/7": { number: 7, user: { id: 777 } } } });
     const say = (number: number, tool = "issue.comment") => ({ connector: "github", tool, args: { owner: "lin-example", repo: "site", number, body: "One test fails here.", ...(tool === "pull.review" ? { event: "REQUEST_CHANGES" } : {}) } });
     const mine = await w.service.call(say(4), vm);
     expect(mine.status === "done" && mine.own).toBe("a comment on its own thread #4 in lin-example/site, a repository you gave an agent");
     expect((await w.service.call(say(7), vm)).status).toBe("asked");
     expect((await w.service.call(say(7, "pull.review"), { kind: "agent", by: "loop:triage" })).status).toBe("asked");
     expect((await w.service.call(say(7), primary)).status).toBe("asked");
-    // Whose the key is (once), then each thread afresh; never the repository, which you gave.
-    expect(w.reads()).toEqual(["GET /user", "GET /repos/lin-example/site/issues/4", "GET /repos/lin-example/site/issues/7", "GET /repos/lin-example/site/issues/7", "GET /repos/lin-example/site/issues/7"]);
+    // Whose the key is (once), then each thread afresh, with the repository (its default branch, whose workflows say
+    // whether they run on comments: none here, read once).
+    expect(w.reads()).toEqual(["GET /user", "GET /repos/lin-example/site", "GET /repos/lin-example/site/issues/4", "GET /repos/lin-example/site/contents/.github/workflows", "GET /repos/lin-example/site", "GET /repos/lin-example/site/issues/7", "GET /repos/lin-example/site", "GET /repos/lin-example/site/issues/7", "GET /repos/lin-example/site", "GET /repos/lin-example/site/issues/7"]);
     // An issue there is its own as before: nothing to ask.
     const before = w.reads().length;
     expect((await w.service.call(issue("lin-example", "site"), vm)).status).toBe("done");

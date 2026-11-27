@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { changesCi, commandsABot, decide, type GitHubFacts, type OwnCall, ownApproval, ownApprovalInLog, primaryCaller, supposedFacts } from "../src/index.ts";
+import { changesCi, commandsABot, decide, type GitHubFacts, type OwnCall, ownApproval, ownApprovalInLog, primaryCaller, skipsChecks, supposedFacts } from "../src/index.ts";
 
 describe("approvals", () => {
   test("creating infrastructure is free; deleting it asks", () => {
@@ -44,7 +44,8 @@ describe("what your agent approves itself in a repository you gave an agent", ()
   const fix = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}) => github({ native: "github.ship.update", method: "PATCH", path: "/repos/{owner}/{repo}/git/refs/heads/{branch}", changes: CODE, base: PUSHED, pushed: PUSHED, proven: true, ...over }, { branch: "invincible/units", title: "Fix", ...args });
   const pull = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}) => github({ pushed: PUSHED, ...over }, { head: "invincible/units", base: "main", title: "Units", ...args });
   const words = (path: string, args: Record<string, unknown>, over: Partial<OwnCall> = {}) => github({ path, ...over }, args);
-  const ITS_THREAD: GitHubFacts = { user: { id: 501 }, thread: { number: 4, authorId: 501 } };
+  // Its own thread, in a repository whose workflows don't run on comments or reviews (GitHub said so).
+  const ITS_THREAD: GitHubFacts = { user: { id: 501 }, thread: { number: 4, authorId: 501 }, commentDriven: false };
 
   test("its work on a new branch, built on your default branch's head as GitHub says it stands: its own; and an issue", () => {
     expect(ownApproval(ship(), AGENTS, at("main", MAIN))).toBe(`a pull request of the work on a new branch invincible/units, built on main as it stands, in ${WHERE}`);
@@ -274,6 +275,18 @@ describe("what your agent approves itself in a repository you gave an agent", ()
     });
   });
 
+  test("a push whose words tell its CI not to run is yours: a pull request then clean with no CI run would be its to merge (N5)", () => {
+    expect(ownApproval(ship({}, { title: "Units [skip ci]" }), AGENTS, at("main", MAIN))).toBeNull();
+    expect(ownApproval(fix({}, { title: "Fix", body: "skip-checks: true" }), AGENTS, at("invincible/units", PUSHED))).toBeNull();
+  });
+
+  test("where the repository's workflows run on comments or reviews, its words on its own thread are yours: they drive them (N5); not read, yours too", () => {
+    for (const commentDriven of [true, undefined]) {
+      expect([commentDriven, ownApproval(words("/repos/{owner}/{repo}/issues/{number}/comments", { number: 4, body: "Done in #5." }), AGENTS, { ...ITS_THREAD, commentDriven })]).toEqual([commentDriven, null]);
+      expect([commentDriven, ownApproval(words("/repos/{owner}/{repo}/pulls/{number}/reviews", { number: 4, event: "COMMENT", body: "Looks off." }), AGENTS, { ...ITS_THREAD, commentDriven })]).toEqual([commentDriven, null]);
+    }
+  });
+
   test("a fix is its own only as ci-back gives it: a verified fix task's kept work for this branch (N1)", () => {
     expect(ownApproval(fix({ proven: undefined }), AGENTS, at("invincible/units", PUSHED))).toBeNull();
     expect(ownApproval(fix({ proven: false }), AGENTS, at("invincible/units", PUSHED))).toBeNull();
@@ -305,7 +318,25 @@ describe("words a repository's bots read as a command", () => {
   // The merge bot that takes a command by its bare name: one of the old theme's words, so written backwards (policy.ts).
   const BOT = [..."srob"].reverse().join("");
   const Bot = BOT[0]!.toUpperCase() + BOT.slice(1);
-  const COMMANDS = [`${BOT} r+`, `${Bot}: try`, `${BOT} retry`, "/deploy production", "/release v2.0.0", "  /merge", "Done.\n/approve", "@mergifyio queue", "@Mergifyio refresh", "@dependabot merge", "@dependabot[bot] rebase", "@lin-example, rebase this", "Thanks!\r\n@renovate-bot retry"];
+  const COMMANDS = [
+    // The review of 27 November (N5): anything that reads as a command, not only the three forms: IssueOps' .word and
+    // !word, Terraform's bots by their bare names, and the forms written with what no one sees, or full width.
+    "atlantis apply",
+    "atlantis apply -p production",
+    "digger apply",
+    "terrateam apply",
+    ".deploy",
+    ".deploy to production",
+    "!deploy production",
+    "\u200b/deploy",
+    "@mergifyio\u200b queue",
+    "\uff0fdeploy",
+    "\uff20mergifyio queue",
+    "/de\u200bploy",
+    "\u00a0/deploy",
+    "\ufeff/deploy",
+    "\u202e/deploy",
+    `${BOT} r+`, `${Bot}: try`, `${BOT} retry`, "/deploy production", "/release v2.0.0", "  /merge", "Done.\n/approve", "@mergifyio queue", "@Mergifyio refresh", "@dependabot merge", "@dependabot[bot] rebase", "@lin-example, rebase this", "Thanks!\r\n@renovate-bot retry"];
   const PLAIN = ["Done in #5.", "Fixed the /usr paths in the docs.", "Reach me at lin@example.test", "> /deploy, as you said, waits for you", "@", "@lin-example", BOT, `${BOT}cht recipe`, "//deploy", "/ deploy", "@org/reviewers please look"];
 
   test("a line that starts /word, the merge bot's name and a word, or @name word, in a title or a body: commandsABot", () => {
@@ -318,10 +349,17 @@ describe("words a repository's bots read as a command", () => {
     expect(commandsABot({ owner: "lin-example", repo: "notes", head: "invincible/units", branch: "/deploy", base: "@x y" })).toBe(false);
   });
 
+  test("a push's words that tell its CI not to run are yours: [skip ci] and its kin, a skip-checks: trailer (N5)", () => {
+    for (const words of [{ title: "Parse units [skip ci]" }, { title: "Parse units", body: "Done.\n\n[ci skip]" }, { title: "[no ci] Parse units" }, { title: "Parse units", body: "[skip actions]" }, { title: "Parse units", body: "[Actions Skip]" }, { title: "Parse units", body: "Done.\n\nskip-checks: true" }, { title: "Parse units", body: "Done.\n\n  Skip-Checks:true" }]) {
+      expect([words, skipsChecks(words)]).toEqual([words, true]);
+    }
+    for (const words of [{ title: "Parse units", body: "We never skip ci here." }, { title: "Skip the CI cache", body: "skip-checks is a word" }]) expect([words, skipsChecks(words)]).toEqual([words, false]);
+  });
+
   test("is yours wherever it would be its own: an issue, a comment or a review on its own thread, a pull request, a shipment, a fix", () => {
     const GIVEN = ["https://github.com/lin-example/notes"];
     const SHA = "c".repeat(40);
-    const facts: GitHubFacts = { user: { id: 501 }, repo: { name: "lin-example/notes", private: true, fork: false, ownerId: 501, ownerType: "User", defaultBranch: "main" }, thread: { number: 4, authorId: 501 } };
+    const facts: GitHubFacts = { user: { id: 501 }, repo: { name: "lin-example/notes", private: true, fork: false, ownerId: 501, ownerType: "User", defaultBranch: "main" }, thread: { number: 4, authorId: 501 }, commentDriven: false };
     const call = (over: Partial<OwnCall>, args: Record<string, unknown>): OwnCall => ({ class: "outward", origin: "https://api.github.com", method: "POST", path: "/repos/{owner}/{repo}/issues", by: "arm:primary", ...over, args: { owner: "lin-example", repo: "notes", ...args } });
     const cases: [OwnCall, GitHubFacts][] = [
       [call({}, { title: "Units" }), facts],
@@ -347,7 +385,7 @@ describe("words a repository's bots read as a command", () => {
 // a public repository speaks to everyone, and a push or a pull request runs the repository's CI with its secrets.
 describe("what your agent approves itself in a private repository of your own", () => {
   const FACTS: GitHubFacts = { user: { id: 501 }, repo: { name: "lin-example/notes", private: true, fork: false, ownerId: 501, ownerType: "User", defaultBranch: "main" } };
-  const OWN_THREAD: GitHubFacts = { ...FACTS, thread: { number: 4, authorId: 501 } };
+  const OWN_THREAD: GitHubFacts = { ...FACTS, thread: { number: 4, authorId: 501 }, commentDriven: false };
   const call = (over: Partial<OwnCall> = {}, args: Record<string, unknown> = {}): OwnCall => ({ class: "outward", origin: "https://api.github.com", method: "POST", path: "/repos/{owner}/{repo}/issues", by: "arm:primary", ...over, args: { owner: "lin-example", repo: "notes", ...args } });
   const comment = { path: "/repos/{owner}/{repo}/issues/{number}/comments" };
   const review = { path: "/repos/{owner}/{repo}/pulls/{number}/reviews" };

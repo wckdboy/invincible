@@ -204,7 +204,7 @@ export class ConnectorService {
    * origin, null when it didn't say; each one asked is said in the ledger. Asked afresh each time, but for whose the key
    * is (`keep`), which is kept FACTS_MS for this connector and this version of its key.
    */
-  private async githubRead<T>(manifest: ConnectorManifest, path: string, read: (body: unknown) => T | null, keep = false, missing?: T): Promise<T | null> {
+  private async githubRead<T>(manifest: ConnectorManifest, path: string, read: (body: unknown) => T | null, keep = false, missing?: T, raw = false): Promise<T | null> {
     const secret = manifest.auth?.secret;
     const info = secret ? this.o.vault.info(secret) : null;
     if (manifest.origin !== GITHUB_API || !secret || !info) return null;
@@ -213,8 +213,11 @@ export class ConnectorService {
     if (kept && this.now() - kept.at < FACTS_MS) return kept.value as T | null;
     let value: T | null = null;
     try {
-      const result = await this.send(manifest, { kind: "http", method: "GET", url: `${GITHUB_API}${path}`, headers: { ...(manifest.headers ?? {}) }, class: "read", target: `GET ${path}` });
-      value = result.ok ? read(JSON.parse(result.body)) : result.status === 404 && missing !== undefined ? missing : null;
+      // (A file is asked for as itself, GitHub's raw media type: its base64 in JSON would not come back whole.)
+      const headers = { ...(manifest.headers ?? {}), ...(raw ? { accept: "application/vnd.github.raw+json" } : {}) };
+      const result = await this.send(manifest, { kind: "http", method: "GET", url: `${GITHUB_API}${path}`, headers, class: "read", target: `GET ${path}` });
+      // (A file cut short isn't read: what it doesn't hold can't be told from what it does.)
+      value = result.ok && !(raw && result.truncated) ? read(raw ? result.body : JSON.parse(result.body)) : result.status === 404 && missing !== undefined ? missing : null;
     } catch (error) {
       this.o.log(`${manifest.label}: GET ${path} wasn't said (${(error as Error).message})`);
     }
@@ -243,7 +246,7 @@ export class ConnectorService {
     // Its default branch, for a shipment or a pull request into it (a template judged on a branch is one); and outside the
     // repositories you gave an agent, whether it is yours: nothing more is asked of one that isn't.
     const intoDefault = call.native === "github.ship" || call.native === "github.merge" || (call.native === undefined && judgedBranch(call, undefined) !== undefined);
-    if (!given || intoDefault) {
+    if (!given || intoDefault || onThread) {
       const named = await this.githubRead(manifest, at, readRepo);
       if (!named) return facts;
       facts.repo = named;
@@ -252,6 +255,9 @@ export class ConnectorService {
     if (onThread) {
       const thread = await this.githubRead(manifest, `${at}/issues/${number}`, readThread);
       if (thread) facts.thread = thread;
+      // Whether its workflows run on a comment or a review: its words on a thread would drive them (unread: unknown).
+      const events = await this.workflowEvents(manifest, at, facts.repo?.defaultBranch);
+      if (events) facts.commentDriven = events.has("issue_comment") || events.has("pull_request_review") || events.has("pull_request_review_comment");
     }
     const branch = judgedBranch(call, facts.repo?.defaultBranch);
     if (branch !== undefined) {
@@ -297,7 +303,7 @@ export class ConnectorService {
     if (!listing) return null;
     const events = new Set<string>();
     for (const file of listing) {
-      const text = await this.githubRead(manifest, `${at}/contents/${file.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`, (b: any) => (b?.encoding === "base64" && typeof b.content === "string" ? Buffer.from(b.content, "base64").toString("utf8") : null), true);
+      const text = await this.githubRead(manifest, `${at}/contents/${file.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`, (b) => (typeof b === "string" ? b : null), true, undefined, true);
       if (text === null) return null;
       for (const match of text.matchAll(WORKFLOW_EVENTS)) events.add(match[1]!);
     }
