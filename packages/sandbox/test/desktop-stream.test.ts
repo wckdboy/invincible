@@ -165,6 +165,20 @@ describe("the desktop stream you watch", () => {
     expect(hub.watching).toBe(0);
   });
 
+  test("a watcher already gone starts nothing, and an encoder that can't be started is said at once, not after the first frame's time", async () => {
+    const e = encoder();
+    const hub = new DesktopStream(e.start);
+    const gone = new AbortController();
+    gone.abort();
+    await expect(hub.watch(gone.signal)).rejects.toThrow(/went away/);
+    expect(e.made).toEqual([]);
+    const broken = new DesktopStream(() => { throw new Error("spawn docker ENOENT"); });
+    const t0 = performance.now();
+    await expect(broken.watch()).rejects.toThrow(/ENOENT/);
+    expect(performance.now() - t0).toBeLessThan(1_000);
+    expect(broken.watching).toBe(0);
+  });
+
   test("its end ends each watcher's stream; what isn't frames is its end; and your input asks it for fast frames", async () => {
     const e = encoder();
     const hub = new DesktopStream(e.start);

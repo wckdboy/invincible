@@ -103,6 +103,8 @@ export class DesktopStream {
    * (StreamEnded), and so is one that shows nothing in time; never an empty stream.
    */
   watch(signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    // (One gone before it began starts nothing.)
+    if (signal?.aborted) return Promise.reject(new Error("whoever asked to watch went away"));
     return new Promise((resolve, reject) => {
       let w!: Watcher;
       const stream = new ReadableStream<Uint8Array>(
@@ -118,8 +120,14 @@ export class DesktopStream {
       w.waiting = { resolve: () => resolve(stream), reject, timer };
       this.watchers.add(w);
       signal?.addEventListener("abort", () => (w.waiting ? this.fail(w, new Error("whoever asked to watch went away")) : this.leave(w)), { once: true });
-      if (this.proc) this.proc.write("key\n");
-      else this.begin();
+      try {
+        if (this.proc) this.proc.write("key\n");
+        else this.begin();
+      } catch (error) {
+        // (An encoder that can't be started is said at once.)
+        this.fail(w, error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
       this.beating();
     });
   }
