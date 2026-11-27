@@ -491,14 +491,24 @@ describe("the gate, end to end", () => {
     const filed = (await actions()).find((a) => a.id === (shipped.status === "done" ? shipped.action : ""))!;
     expect([filed.state, filed.self, filed.note]).toEqual(["done", true, `Your agent approved it itself: ${why}`]);
     // A fix pushed onto a branch it shipped (invincible/fixing, by your approval, earlier), from the commit it last pushed
-    // there, likewise.
+    // there, likewise: a verified fix task's kept work for that branch, as ci-back gives it (the review of 27 November, N1).
     const fixed = await keep("fix", [{ path: "src/units.ts" }], "c".repeat(40));
+    const fixing = new TeamStore(join(home.dir, "team.db"));
+    try {
+      const work = fixing.createTask({ room: fixing.direct("liv").id, assignee: "liv", title: "Fix the failing checks", goal: "Make them pass." }, { fix: { connector: "github", owner: "amiriteorg", repo: "shipyard", branch: "invincible/fixing", pr: 7, head: "c".repeat(40) } });
+      fixing.finish(work.id, "done", null, { verified: true, output: "They pass.\n\nReview: PASS", changes: { artifact: fixed, files: 1, base: "c".repeat(40) } });
+    } finally {
+      fixing.close();
+    }
     before = seen.length;
     const pushed = await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact: fixed, branch: "invincible/fixing", title: "Fix the failing checks" }, why: "its checks failed" }, agent);
     expect(pushed.status === "done" && pushed.own).toBe("a fix pushed onto invincible/fixing, a branch it shipped, from where it last pushed it, in amiriteorg/shipyard, a repository you gave an agent");
     expect(seen.slice(before).filter((s) => s.method === "PATCH")).toHaveLength(1);
-    // A fix that began on another commit than the one it last pushed there waits for you.
+    // A fix that began on another commit than the one it last pushed there waits for you; and so does kept work that is no
+    // verified fix task's for that branch, whatever it is built on (N1).
     expect((await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact, branch: "invincible/fixing", title: "Fix" } }, agent)).status).toBe("asked");
+    const unproven = await keep("unproven fix", [{ path: "src/units.ts" }], "c".repeat(40));
+    expect((await daemon.connectors.call({ connector: "github", tool: "ship.update", args: { owner: "amiriteorg", repo: "shipyard", artifact: unproven, branch: "invincible/fixing", title: "Speed it up" } }, agent)).status).toBe("asked");
     // Its own tools in chat: a pull request from the branch it shipped, into main.
     const opened = await daemon.connectors.call({ connector: "github", tool: "pr.create", args: { owner: "amiriteorg", repo: "shipyard", head: "invincible/its-own", base: "main", title: "Parse SI units" } }, { kind: "agent", by: "arm:primary" });
     expect(opened.status === "done" && opened.own).toBe("a pull request from invincible/its-own, a branch it shipped, into main, in amiriteorg/shipyard, a repository you gave an agent");

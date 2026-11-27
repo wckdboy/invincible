@@ -24,8 +24,19 @@ const KEPT: Record<string, { files: string[]; base: string }> = {
   art_BBBBBBBBBBBBBBBBBBBBBB: { files: ["src/units.ts"], base: SHIPPED },
   art_CCCCCCCCCCCCCCCCCCCCCC: { files: [".github/workflows/ci.yml"], base: SHIPPED },
 };
-/** What GitHub says, asked before a push may be its own: the repository, and where main and the shipped branch stand. */
+/** Whose proven work each is: the ship's, a verified task's; each fix's, a verified fix task's for the shipped branch. */
+const PROVEN: Record<string, { fix?: { owner: string; repo: string; branch: string } }> = {
+  art_AAAAAAAAAAAAAAAAAAAAAA: {},
+  art_BBBBBBBBBBBBBBBBBBBBBB: { fix: { owner: "amiriteorg", repo: "shipyard", branch: "invincible/units" } },
+  art_CCCCCCCCCCCCCCCCCCCCCC: { fix: { owner: "amiriteorg", repo: "shipyard", branch: "invincible/units" } },
+};
+/** What GitHub says, asked before a push may be its own: the repository, and where main and the shipped branch stand;
+ * and before a merge: the pull request (into main, from the shipped branch, its head the fix's commit), its two commits
+ * and its files. (No workflows: none runs on a pull request.) */
 const SAID: Record<string, unknown> = {
+  "/repos/amiriteorg/shipyard/pulls/7": { number: 7, state: "open", changed_files: 2, base: { ref: "main", repo: { full_name: "amiriteorg/shipyard" } }, head: { ref: "invincible/units", sha: "e".repeat(40), repo: { full_name: "amiriteorg/shipyard" } } },
+  "/repos/amiriteorg/shipyard/pulls/7/commits": [{ sha: "c".repeat(40) }, { sha: "e".repeat(40) }],
+  "/repos/amiriteorg/shipyard/pulls/7/files": [{ filename: "src/units.ts" }, { filename: "docs/units.md" }],
   "/repos/amiriteorg/shipyard": { full_name: "amiriteorg/shipyard", private: false, fork: false, default_branch: "main", owner: { login: "amiriteorg", id: 600, type: "Organization" } },
   "/repos/amiriteorg/shipyard/git/ref/heads/main": { ref: "refs/heads/main", object: { sha: MAIN, type: "commit" } },
   "/repos/amiriteorg/shipyard/git/ref/heads/invincible/units": { ref: "refs/heads/invincible/units", object: { sha: SHIPPED, type: "commit" } },
@@ -50,7 +61,7 @@ function world() {
     "github.ship.update": () => answer(200, `1 file pushed onto invincible/units, commit ${"e".repeat(40)}: pull request #7 updated, ${URL7}`),
     "github.merge": (_m, args) => (merged.push(args), answer(200, `merged #7 into main (squash) at ${"d".repeat(40)}: ${URL7}`)),
   };
-  const service = new ConnectorService({ store, vault, identity, local: new Database(":memory:"), ledger: () => {}, log: () => {}, natives, fetch: github, repositories: () => ["https://github.com/amiriteorg/shipyard"], shipment: (artifact) => KEPT[artifact] ?? null });
+  const service = new ConnectorService({ store, vault, identity, local: new Database(":memory:"), ledger: () => {}, log: () => {}, natives, fetch: github, repositories: () => ["https://github.com/amiriteorg/shipyard"], shipment: (artifact) => KEPT[artifact] ?? null, proven: (artifact) => PROVEN[artifact] ?? null });
   return { service, merged };
 }
 const noa = { kind: "agent" as const, by: "team.0123456789.noa" };
@@ -65,7 +76,9 @@ describe("what a merge of its agents' work lands", () => {
     expect((await w.service.call(ship("art_AAAAAAAAAAAAAAAAAAAAAA"), noa)).status).toBe("done");
     expect((await w.service.call(fix("art_BBBBBBBBBBBBBBBBBBBBBB"), noa)).status).toBe("done");
     const merged = await w.service.call(merge("e".repeat(40)), { kind: "agent", by: "primary" });
-    expect(merged.status === "done" && merged.own).toBe("a merge of its agents' proven work, through GitHub's own merge once every check its rules require passed, in amiriteorg/shipyard, a repository you gave an agent");
+    expect(merged.status === "done" && merged.own).toBe("a merge of its agents' proven work into main (its 2 commits, each pushed by this node, its checks green), in amiriteorg/shipyard, a repository you gave an agent");
+    // And it says which commits it lands, whole.
+    expect(merged.status === "done" && merged.commits).toEqual(["c".repeat(40), "e".repeat(40)]);
   });
 
   test("a fix since that changes what the CI runs, whose push you approved: the merge that would land it is yours too", async () => {

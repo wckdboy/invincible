@@ -48,6 +48,8 @@ const TOKEN = "github_pat_FAKEFAKEFAKEFAKE0000_fakefakefakefakefakefakefakefakef
 const toGitHub: string[] = [];
 /** Its pull requests, numbered as GitHub numbers them, from 7. */
 let pulls = 6;
+/** Each pull request opened here, by number: the branch it was opened from. */
+const opened = new Map<number, string>();
 const github = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   // (Anything else this node reaches, its models included, is reached as ever.)
@@ -61,16 +63,19 @@ const github = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (method === "GET" && path === "/git/ref/heads/main") return Response.json({ ref: "refs/heads/main", object: { sha: BASE, type: "commit" } });
   if (method === "GET" && path.startsWith("/git/ref/heads/")) return Response.json({}, { status: 404 });
   if (method === "GET" && path === "") return Response.json({ full_name: "amiriteorg/shipyard", private: false, fork: false, default_branch: "main", owner: { login: "amiriteorg", id: 600, type: "Organization" }, allow_merge_commit: false, allow_squash_merge: true, allow_rebase_merge: false });
-  // A pull request of its work, clean (every check and review its rules require passed), its head the commit shipped.
-  const pull = /^\/pulls\/(\d+)(\/merge)?$/.exec(path);
-  if (pull && method === "GET" && !pull[2]) return Response.json({ number: Number(pull[1]), state: "open", merged: false, mergeable: true, mergeable_state: "clean", head: { sha: "c".repeat(40) }, base: { ref: "main" }, html_url: `https://github.com/amiriteorg/shipyard/pull/${pull[1]}` });
+  // A pull request of its work, clean (every check and review its rules require passed), its head the commit shipped,
+  // from the branch it was opened from, into main; its one commit and its one file. (No workflows: none runs on it.)
+  const pull = /^\/pulls\/(\d+)(\/merge|\/commits|\/files)?$/.exec(path);
+  if (pull && method === "GET" && !pull[2]) return Response.json({ number: Number(pull[1]), state: "open", merged: false, mergeable: true, mergeable_state: "clean", changed_files: 1, head: { sha: "c".repeat(40), ref: opened.get(Number(pull[1])) ?? "?", repo: { full_name: "amiriteorg/shipyard" } }, base: { ref: "main", repo: { full_name: "amiriteorg/shipyard" } }, html_url: `https://github.com/amiriteorg/shipyard/pull/${pull[1]}` });
+  if (pull && method === "GET" && pull[2] === "/commits") return Response.json(url.searchParams.get("page") === "1" ? [{ sha: "c".repeat(40) }] : []);
+  if (pull && method === "GET" && pull[2] === "/files") return Response.json(url.searchParams.get("page") === "1" ? [{ filename: "src/units.ts" }] : []);
   if (pull && method === "PUT" && pull[2]) return Response.json({ merged: true, sha: "d".repeat(40), message: "Pull Request successfully merged" });
   if (method === "GET" && path === `/git/commits/${BASE}`) return Response.json({ tree: { sha: "f".repeat(40) } });
   if (path === "/git/blobs") return Response.json({ sha: "b".repeat(40) }, { status: 201 });
   if (path === "/git/trees") return Response.json({ sha: "e".repeat(40) }, { status: 201 });
   if (path === "/git/commits") return Response.json({ sha: "c".repeat(40) }, { status: 201 });
   if (path === "/git/refs") return Response.json({}, { status: 201 });
-  if (method === "POST" && path === "/pulls") return (++pulls, Response.json({ number: pulls, html_url: `https://github.com/amiriteorg/shipyard/pull/${pulls}` }, { status: 201 }));
+  if (method === "POST" && path === "/pulls") return (++pulls, opened.set(pulls, (JSON.parse(String(init?.body ?? "{}")) as { head?: string }).head ?? "?"), Response.json({ number: pulls, html_url: `https://github.com/amiriteorg/shipyard/pull/${pulls}` }, { status: 201 }));
   return Response.json({}, { status: 404 });
 }) as unknown as typeof fetch;
 /** An agent's kept work as a shipment: its manifest and one changed file, on the repository it was cloned from. */
@@ -559,9 +564,11 @@ test("it merges its agents' proven work itself where it may: once GitHub says it
   const shipped = (await api<TeamSnapshot>("team")).tasks.find((t) => t.id === units)!.shipped!;
   expect(told("team_merge")).toContain(`merged #${shipped.pr} into main (squash) at ${"d".repeat(40)}`);
   expect(toGitHub.slice(before).filter((r) => r.startsWith("PUT "))).toEqual([`PUT /repos/amiriteorg/shipyard/pulls/${shipped.pr}/merge`]);
-  expect(await trail(units)).toContain(`Merged by your agent itself · merged #${shipped.pr} into main (squash) at ${"d".repeat(40)}: ${shipped.url}, its gates, its independent reviewer and the pull request's required checks having passed`);
+  expect(await trail(units)).toContain(`Merged by your agent itself · merged #${shipped.pr} into main (squash) at ${"d".repeat(40)}: ${shipped.url}, its gates, its independent reviewer and the pull request's checks having passed`);
+  // Each commit it landed, whole (the review of 27 November, N1).
+  expect(await trail(units)).toContain(`Merged · the commits it landed: ${"c".repeat(40)}`);
   const merge = (await api<{ actions: ActionView[] }>("actions")).actions.find((a) => a.tool === "merge" && a.args.number === shipped.pr)!;
-  expect([merge.state, merge.self, merge.note]).toEqual(["done", true, "Your agent approved it itself: a merge of its agents' proven work, through GitHub's own merge once every check its rules require passed, in amiriteorg/shipyard, a repository you gave an agent"]);
+  expect([merge.state, merge.self, merge.note]).toEqual(["done", true, "Your agent approved it itself: a merge of its agents' proven work into main (its one commit, each pushed by this node, its checks green), in amiriteorg/shipyard, a repository you gave an agent"]);
   expect((await api<TeamSnapshot>("team")).tasks.find((t) => t.id === units)!.interventions).toBeUndefined();
   // Off for that repository, it is yours there: it ships, and the merge is refused, naming how you turn it on again.
   expect(await api("teamMerge", { repository: "amiriteorg/shipyard", on: false })).toEqual({ repository: "amiriteorg/shipyard", on: false });

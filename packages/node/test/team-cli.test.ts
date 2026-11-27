@@ -702,12 +702,18 @@ test("agents merge says whether your agent merges its agents' proven work itself
   await teamCommand(api, "merge", ["amiriteorg/shipyard", "off"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamMerge", input: { repository: "amiriteorg/shipyard", on: false } });
   expect(lines.at(-1)).toBe("Merging in amiriteorg/shipyard is yours: your agent ships its agents' work there and leaves the merge to you. Turn its own merging on again with: invincible agents merge amiriteorg/shipyard on");
+  // (Said as the switch keys it: as GitHub names it, whatever case you wrote it in.)
   await teamCommand(api, "merge", ["AmiriteOrg/Shipyard"], {}, say);
-  expect(lines.at(-1)).toStartWith("Merging in AmiriteOrg/Shipyard is yours");
+  expect(lines.at(-1)).toStartWith("Merging in amiriteorg/shipyard is yours");
   await teamCommand(api, "merge", ["amiriteorg/shipyard", "on"], {}, say);
   expect(asked.at(-1)).toEqual({ name: "teamMerge", input: { repository: "amiriteorg/shipyard", on: true } });
   // Anything but owner/repo, and on or off, is not sent anywhere.
   const before = asked.length;
-  for (const bad of [[], ["shipyard"], ["amiriteorg/shipyard", "maybe"], ["https://github.com/amiriteorg/shipyard"], ["amiriteorg/shipyard", "on", "now"]]) await expect(teamCommand(api, "merge", bad, {}, say)).rejects.toThrow(/invincible agents merge <owner\/repo> \[on\|off\]/);
-  expect(asked).toHaveLength(before);
+  // Named as GitHub names it: its case and a .git don't matter (the review of 27 November, N10); one that can never match
+  // a repository is refused.
+  await teamCommand(api, "merge", ["AmiriteOrg/Shipyard.git", "off"], {}, say);
+  expect(asked.at(-1)).toEqual({ name: "teamMerge", input: { repository: "amiriteorg/shipyard", on: false } });
+  const refused = asked.length;
+  for (const bad of [[], ["shipyard"], ["amiriteorg/shipyard", "maybe"], ["https://github.com/amiriteorg/shipyard"], ["amiriteorg/shipyard", "on", "now"], ["amiriteorg/.git"], ["amiriteorg/.."], ["-amiriteorg/shipyard"]]) await expect(teamCommand(api, "merge", bad, {}, say)).rejects.toThrow(/invincible agents merge <owner\/repo> \[on\|off\]/);
+  expect(asked).toHaveLength(refused);
 });

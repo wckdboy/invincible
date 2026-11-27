@@ -339,7 +339,18 @@ export const TeamOwnDailyInput = z.strictObject({ usd: z.number().min(0).max(100
 export type TeamOwnDailyInput = z.infer<typeof TeamOwnDailyInput>;
 /** Your switch for the primary's own merging of its agents' proven work in a repository you gave an agent (`owner/repo`):
  * on until you turn it off there (your word, 27 November 2026). */
-export const TeamMergeInput = z.strictObject({ repository: z.string().regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/, "a repository as owner/repo"), on: z.boolean() });
+/**
+ * The repository a merge switch names, as GitHub names it, whatever its case and with no .git: the switch is keyed by it,
+ * so one that can never match a repository is refused (null) rather than kept (the review of 27 November, N10).
+ */
+export function mergeRepository(raw: string): string | null {
+  const named = raw.trim().replace(/\/+$/, "").replace(/\.git$/i, "").toLowerCase();
+  return /^[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9._-]{1,100}$/.test(named) && !/\/\.{1,2}$/.test(named) ? named : null;
+}
+export const TeamMergeInput = z.strictObject({
+  repository: z.string().max(200).transform((raw, ctx) => mergeRepository(raw) ?? (ctx.addIssue({ code: "custom", message: "a repository as owner/repo" }), z.NEVER)),
+  on: z.boolean(),
+});
 export type TeamMergeInput = z.infer<typeof TeamMergeInput>;
 
 /** What an agent's Workspace is told of the notes store: the node's switch, and whether this VM has the pinned binary. */

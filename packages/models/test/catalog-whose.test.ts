@@ -30,7 +30,7 @@ const asking = tools.filter((t) => whose(t.key) !== undefined);
 // it shipped into the default one, as a review that only comments, on its own thread, changing code and no CI, built on
 // where the branch it is judged on stands; and GitHub saying all it could (supposedFacts). Where a call goes is all
 // ownApproval reads of them.
-const ARGS = { owner: "lin-example", repo: "notes", head: "invincible/units", branch: "invincible/units", base: "main", event: "COMMENT", number: 7, title: "Units", body: "Parse them.", artifact: "art_AAAAAAAAAAAAAAAAAAAAAA" };
+const ARGS = { owner: "lin-example", repo: "notes", head: "invincible/units", branch: "invincible/units", base: "main", event: "COMMENT", number: 7, sha: "c".repeat(40), title: "Units", body: "Parse them.", artifact: "art_AAAAAAAAAAAAAAAAAAAAAA" };
 const GIVEN = ["https://github.com/lin-example/notes"];
 const SHA = "c".repeat(40);
 const asCall = (t: (typeof tools)[number], args: Record<string, unknown> = ARGS): OwnCall => ({
@@ -45,6 +45,9 @@ const asCall = (t: (typeof tools)[number], args: Record<string, unknown> = ARGS)
   changes: ["src/units.ts"],
   base: SHA,
   pushed: SHA,
+  // (A fix is a verified fix task's kept work; a merge lands only commits this node pushed as proven work.)
+  proven: true,
+  landed: { branch: "invincible/units", commits: [SHA] },
 });
 const said = (call: OwnCall) => supposedFacts(call);
 

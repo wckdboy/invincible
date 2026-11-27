@@ -83,7 +83,7 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
 export type Caller = { kind: "owner"; device: string } | { kind: "agent"; by: string; run?: string; yours?: true };
 
 export type CallOutcome =
-  | { status: "done"; class: string; target: string; result: ConnectorResult; order?: { id: string; label: string }; own?: string; action?: string; private?: true }
+  | { status: "done"; class: string; target: string; result: ConnectorResult; order?: { id: string; label: string }; own?: string; commits?: string[]; action?: string; private?: true }
   | { status: "asked"; action: string; class: string; target: string; expires: number };
 
 type StoredOrder = OrderTerms & { id: string; revoked: boolean; signedHlc: string; via?: string };
@@ -102,7 +102,19 @@ export class ConnectorCallError extends Error {
  * A native tool (see NATIVE_TOOLS): carried out by the node, its requests sent through
  * `send`, which holds the connector's pinned origin and key.
  */
-export type NativeTool = (manifest: ConnectorManifest, args: Record<string, ArgValue>, send: (request: BuiltRequest) => Promise<ConnectorResult>) => Promise<ConnectorResult>;
+export type NativeTool = (manifest: ConnectorManifest, args: Record<string, ArgValue>, send: (request: BuiltRequest) => Promise<ConnectorResult>, context?: NativeContext) => Promise<ConnectorResult>;
+
+/**
+ * What a native is sent on: whether the approval was your agent's own, and what GitHub said that it stood on, when it
+ * was given just before (absent when it is sent later, after a restart: a native then reads again what it must, or
+ * refuses). A native acting on its own approval checks, just before it acts, that what it stood on still holds (the
+ * review of 27 November, N2, N6).
+ */
+export interface NativeContext {
+  own: boolean;
+  facts?: GitHubFacts;
+  call?: OwnCall;
+}
 
 export interface ConnectorServiceOptions {
   store: LedgerStore;
@@ -120,6 +132,9 @@ export interface ConnectorServiceOptions {
   /** What a kept shipment changes and the commit it is built on (its ship/manifest.json), so a push is known before it
    * could be its own to approve. Null, or absent: not known, and such a push is yours. */
   shipment?: (artifact: string) => { files: readonly string[]; base: string } | null;
+  /** Whose proven work kept work is (the team's): a verified task's, or a verified fix task's and where its fix goes.
+   * Null, or absent: none, and a fix or a merge of it is yours (the review of 27 November, N1). */
+  proven?: (artifact: string) => { fix?: { owner: string; repo: string; branch: string } } | null;
   /** Where Google's and Microsoft's sign-ins are reached (tests: a stand-in). */
   oauthEndpoints?: Partial<OAuthEndpoints>;
   /**
@@ -149,6 +164,16 @@ const readHead =
   (branch: string) =>
   (b: any): GitHubFacts["head"] | null =>
     b?.ref === `refs/heads/${branch}` && b.object?.type === "commit" && typeof b.object.sha === "string" && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(b.object.sha) ? { branch, sha: b.object.sha } : null;
+/** A pull request as GitHub gives it: where it goes and comes from, its head, how many files it changes. */
+const readPull = (b: any): GitHubFacts["pull"] | null =>
+  Number.isSafeInteger(b?.number) && typeof b.base?.ref === "string" && typeof b.base?.repo?.full_name === "string" && typeof b.head?.ref === "string" && typeof b.head?.sha === "string" && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(b.head.sha) && Number.isSafeInteger(b.changed_files)
+    ? { number: b.number, baseRef: b.base.ref, baseRepo: b.base.repo.full_name, headRepo: typeof b.head.repo?.full_name === "string" ? b.head.repo.full_name : "", headRef: b.head.ref, headSha: b.head.sha, changedFiles: b.changed_files }
+    : null;
+/** GitHub lists at most this many of a pull request's commits, and of its files: past them, what it lands isn't all said. */
+const PULL_COMMITS_MAX = 250;
+const PULL_FILES_MAX = 3000;
+/** The events a workflow runs on that this reads (a word anywhere in its file counts: it reads more, never less). */
+const WORKFLOW_EVENTS = /\b(pull_request_review_comment|pull_request_review|pull_request_target|pull_request|issue_comment)\b/g;
 /** A ref's path segment by segment, as GitHub's git/ref route takes a branch with slashes. */
 const refPath = (branch: string) => branch.split("/").map(encodeURIComponent).join("/");
 /** The commit a done shipment's or fix's receipt says it pushed, whole ("… commit <40 hex, or 64> …"): a receipt that
@@ -179,7 +204,7 @@ export class ConnectorService {
    * origin, null when it didn't say; each one asked is said in the ledger. Asked afresh each time, but for whose the key
    * is (`keep`), which is kept FACTS_MS for this connector and this version of its key.
    */
-  private async githubRead<T>(manifest: ConnectorManifest, path: string, read: (body: unknown) => T | null, keep = false): Promise<T | null> {
+  private async githubRead<T>(manifest: ConnectorManifest, path: string, read: (body: unknown) => T | null, keep = false, missing?: T): Promise<T | null> {
     const secret = manifest.auth?.secret;
     const info = secret ? this.o.vault.info(secret) : null;
     if (manifest.origin !== GITHUB_API || !secret || !info) return null;
@@ -189,12 +214,12 @@ export class ConnectorService {
     let value: T | null = null;
     try {
       const result = await this.send(manifest, { kind: "http", method: "GET", url: `${GITHUB_API}${path}`, headers: { ...(manifest.headers ?? {}) }, class: "read", target: `GET ${path}` });
-      value = result.ok ? read(JSON.parse(result.body)) : null;
+      value = result.ok ? read(JSON.parse(result.body)) : result.status === 404 && missing !== undefined ? missing : null;
     } catch (error) {
       this.o.log(`${manifest.label}: GET ${path} wasn't said (${(error as Error).message})`);
     }
     if (keep) this.githubSaid.set(key, { at: this.now(), value });
-    this.o.ledger({ class: "read", resource: `connector.${manifest.id}`, target: `GET ${path}`, verdict: "allow", reason: "what GitHub says of your key, a repository, a thread or a branch, before your agent may answer its own call there", detail: value === null ? "not said: nothing there is its to approve" : JSON.stringify(value) });
+    this.o.ledger({ class: "read", resource: `connector.${manifest.id}`, target: `GET ${path}`, verdict: "allow", reason: "what GitHub says of your key, a repository, a thread, a branch or a pull request, before your agent may answer its own call there", detail: value === null ? "not said: nothing there is its to approve" : JSON.stringify(value) });
     return value;
   }
 
@@ -217,7 +242,7 @@ export class ConnectorService {
     }
     // Its default branch, for a shipment or a pull request into it (a template judged on a branch is one); and outside the
     // repositories you gave an agent, whether it is yours: nothing more is asked of one that isn't.
-    const intoDefault = call.native === "github.ship" || (call.native === undefined && judgedBranch(call, undefined) !== undefined);
+    const intoDefault = call.native === "github.ship" || call.native === "github.merge" || (call.native === undefined && judgedBranch(call, undefined) !== undefined);
     if (!given || intoDefault) {
       const named = await this.githubRead(manifest, at, readRepo);
       if (!named) return facts;
@@ -233,7 +258,77 @@ export class ConnectorService {
       const head = await this.githubRead(manifest, `${at}/git/ref/heads/${refPath(branch)}`, readHead(branch));
       if (head) facts.head = head;
     }
+    // A merge: the pull request as GitHub says it is now, every commit and every file of it, and its checks on its head.
+    if (call.native === "github.merge" && typeof number === "number") {
+      const pull = await this.githubRead(manifest, `${at}/pulls/${number}`, readPull);
+      if (!pull) return facts;
+      facts.pull = pull;
+      const commits = await this.everyPage(manifest, `${at}/pulls/${number}/commits`, (c: any) => (typeof c?.sha === "string" && /^([0-9a-f]{40}|[0-9a-f]{64})$/.test(c.sha) ? c.sha : null), PULL_COMMITS_MAX - 1);
+      if (commits) facts.pullCommits = commits;
+      if (pull.changedFiles <= PULL_FILES_MAX) {
+        const files = await this.everyPage(manifest, `${at}/pulls/${number}/files`, (f: any) => (typeof f?.filename === "string" ? f.filename : null), pull.changedFiles);
+        if (files && files.length === pull.changedFiles) facts.pullFiles = files;
+      }
+      facts.checksSettled = await this.checksSettled(manifest, at, facts.repo?.defaultBranch, pull.headSha);
+    }
     return facts;
+  }
+
+  /** Every page of a list GitHub gives, read whole (an item it can't read, or more than `most`: null, not all said). */
+  private async everyPage(manifest: ConnectorManifest, path: string, item: (entry: unknown) => string | null, most: number): Promise<string[] | null> {
+    const all: string[] = [];
+    for (let page = 1; page <= Math.floor(most / 100) + 1; page++) {
+      const list = await this.githubRead(manifest, `${path}?per_page=100&page=${page}`, (b) => (Array.isArray(b) ? b.map(item) : null));
+      if (!list || list.some((entry) => entry === null)) return null;
+      all.push(...(list as string[]));
+      if (all.length > most) return null;
+      if (list.length < 100) return all;
+    }
+    return null;
+  }
+
+  /**
+   * The events the repository's workflows run on, from its default branch's .github/workflows (none there: none),
+   * kept as long as whose your key is; null when they can't be read.
+   */
+  private async workflowEvents(manifest: ConnectorManifest, at: string, ref: string | undefined): Promise<Set<string> | null> {
+    if (!ref) return null;
+    const listing = await this.githubRead(manifest, `${at}/contents/.github/workflows?ref=${encodeURIComponent(ref)}`, (b) => (Array.isArray(b) ? b.filter((f: any) => f?.type === "file" && /\.ya?ml$/i.test(String(f?.name))).map((f: any) => String(f.path)) : null), true, [] as string[]);
+    if (!listing) return null;
+    const events = new Set<string>();
+    for (const file of listing) {
+      const text = await this.githubRead(manifest, `${at}/contents/${file.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`, (b: any) => (b?.encoding === "base64" && typeof b.content === "string" ? Buffer.from(b.content, "base64").toString("utf8") : null), true);
+      if (text === null) return null;
+      for (const match of text.matchAll(WORKFLOW_EVENTS)) events.add(match[1]!);
+    }
+    return events;
+  }
+
+  /**
+   * Whether what the repository's workflows run on a pull request has finished green on this head: true when none runs
+   * on one; false while one runs or hasn't begun, once one didn't pass, or when it can't be read (the review of
+   * 27 November, N10: a clean read before a push's checks are in mustn't merge).
+   */
+  private async checksSettled(manifest: ConnectorManifest, at: string, ref: string | undefined, head: string): Promise<boolean> {
+    const events = await this.workflowEvents(manifest, at, ref);
+    if (!events) return false;
+    if (!events.has("pull_request") && !events.has("pull_request_target")) return true;
+    type Run = { event: string; status: string; conclusion: string | null };
+    const runs = await this.githubRead<Run[]>(manifest, `${at}/actions/runs?head_sha=${head}&per_page=100`, (b: any) => (Array.isArray(b?.workflow_runs) ? b.workflow_runs.map((r: any) => ({ event: String(r?.event), status: String(r?.status), conclusion: r?.conclusion == null ? null : String(r.conclusion) })) : null));
+    const onPull = (runs ?? []).filter((r) => r.event === "pull_request" || r.event === "pull_request_target");
+    return onPull.length > 0 && onPull.every((r) => r.status === "completed" && (r.conclusion === "success" || r.conclusion === "neutral" || r.conclusion === "skipped"));
+  }
+
+  /** Whether a merge's checks are still under way on its head (mergeTask waits for them, up to its deadline). */
+  async mergeChecksPending(connector: string, owner: string, repo: string, head: string): Promise<boolean> {
+    const manifest = this.manifest(connector);
+    const at = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    const named = await this.githubRead(manifest, at, readRepo);
+    const events = await this.workflowEvents(manifest, at, named?.defaultBranch);
+    if (!events || (!events.has("pull_request") && !events.has("pull_request_target"))) return false;
+    const runs = await this.githubRead<{ event: string; status: string }[]>(manifest, `${at}/actions/runs?head_sha=${head}&per_page=100`, (b: any) => (Array.isArray(b?.workflow_runs) ? b.workflow_runs.map((r: any) => ({ event: String(r?.event), status: String(r?.status) })) : null));
+    const onPull = (runs ?? []).filter((r) => r.event === "pull_request" || r.event === "pull_request_target");
+    return onPull.length === 0 || onPull.some((r) => r.status !== "completed");
   }
 
   /**
@@ -268,7 +363,7 @@ export class ConnectorService {
    * read from its kept shipment, and the commit it last pushed onto a branch from the log; GitHub is asked only of a call
    * that could be its own were GitHub to say so, and only what that call needs.
    */
-  private async ownAnswer(manifest: ConnectorManifest, name: string, cls: ConnectorRequest["class"], args: Record<string, ArgValue>, caller: Extract<Caller, { kind: "agent" }>): Promise<string | null> {
+  private async ownAnswer(manifest: ConnectorManifest, name: string, cls: ConnectorRequest["class"], args: Record<string, ArgValue>, caller: Extract<Caller, { kind: "agent" }>): Promise<{ why: string; call: OwnCall; facts: GitHubFacts } | null> {
     const tool = Object.hasOwn(manifest.tools, name) ? manifest.tools[name] : undefined;
     if (!tool || isMcpTool(tool) || !isHis(caller.by) || caller.yours) return null;
     const pushes = tool.native === "github.ship" || tool.native === "github.ship.update";
@@ -282,12 +377,51 @@ export class ConnectorService {
       const pushed = this.lastPushed(args.owner, args.repo, onto);
       if (pushed) call.pushed = pushed;
     }
+    // A fix is its own only as ci-back gives it: a verified fix task's kept work, for this repository and branch.
+    if (tool.native === "github.ship.update" && typeof args.artifact === "string") {
+      const fix = this.o.proven?.(args.artifact)?.fix;
+      call.proven = !!fix && fix.owner.toLowerCase() === String(args.owner).toLowerCase() && fix.repo.toLowerCase() === String(args.repo).toLowerCase() && fix.branch === args.branch;
+    }
+    // A merge: what it lands, as this node pushed it.
+    if (tool.native === "github.merge") {
+      const landed = this.landed(args.owner, args.repo, args.number);
+      if (landed) call.landed = landed;
+    }
     const repositories = this.o.repositories?.() ?? [];
     // Its own with nothing of GitHub said (an issue in a repository you gave an agent), or not its own whatever it says.
     const now = ownApproval(call, repositories);
-    if (now) return now;
+    if (now) return { why: now, call, facts: {} };
     if (ownApproval(call, repositories, supposedFacts(call)) === null) return null;
-    return ownApproval(call, repositories, await this.githubFacts(manifest, call, givenRepository(call, repositories)));
+    const facts = await this.githubFacts(manifest, call, givenRepository(call, repositories));
+    const why = ownApproval(call, repositories, facts);
+    return why ? { why, call, facts } : null;
+  }
+
+  /**
+   * What a merge of a pull request this node shipped would land, as it pushed it: the branch, and every push onto it,
+   * oldest first, by commit. Undefined unless every push there (any node's) is this node's and proven work: its ship of a
+   * verified task's kept work, and each fix a verified fix task's for this branch (the review of 27 November, N1).
+   */
+  private landed(owner: unknown, repo: unknown, number: unknown): { branch: string; commits: string[] } | undefined {
+    if (typeof owner !== "string" || typeof repo !== "string" || typeof number !== "number") return undefined;
+    const there = (a: ActionView) => String(a.args.owner).toLowerCase() === owner.toLowerCase() && String(a.args.repo).toLowerCase() === repo.toLowerCase();
+    const done = this.actions(10_000).filter((a) => a.state === "done" && (a.tool === "ship" || a.tool === "ship.update") && there(a));
+    const ship = done.find((a) => a.tool === "ship" && a.node === this.o.identity.id && new RegExp(`^(\\d{3} )?pull request #${number}:`).test(a.receipt ?? ""));
+    if (!ship || typeof ship.args.branch !== "string") return undefined;
+    const branch = ship.args.branch;
+    const doneAt = (id: string) => this.o.store.lww(`action-done:${id}`)?.hlc ?? "";
+    const pushes = done.filter((a) => a.args.branch === branch).sort((a, b) => (doneAt(a.id) < doneAt(b.id) ? -1 : 1));
+    const commits: string[] = [];
+    for (const push of pushes) {
+      if (push.node !== this.o.identity.id || typeof push.args.artifact !== "string") return undefined;
+      const work = this.o.proven?.(push.args.artifact);
+      if (!work) return undefined;
+      if (push.tool === "ship" ? push.id !== ship.id || work.fix : !work.fix || work.fix.owner.toLowerCase() !== owner.toLowerCase() || work.fix.repo.toLowerCase() !== repo.toLowerCase() || work.fix.branch !== branch) return undefined;
+      const commit = PUSHED_COMMIT.exec(push.receipt ?? "")?.[1];
+      if (!commit) return undefined;
+      commits.push(commit);
+    }
+    return { branch, commits };
   }
 
   /**
@@ -390,12 +524,12 @@ export class ConnectorService {
         }
       }
       if (own) {
-        this.o.store.emit(this.o.identity, "action.decided", { id, verdict: "approved", note: `Your agent approved it itself: ${own}`.slice(0, 500) }, { trust: "agent" });
+        this.o.store.emit(this.o.identity, "action.decided", { id, verdict: "approved", note: `Your agent approved it itself: ${own.why}`.slice(0, 500) }, { trust: "agent" });
         const filed = this.actions(10_000).find((a) => a.id === id);
         if (filed?.state === "approved") {
-          const sent = await this.sendApproved(filed, `on your agent's own approval: ${own}`);
+          const sent = await this.sendApproved(filed, `on your agent's own approval: ${own.why}`, { own: true, facts: own.facts, call: own.call });
           if (!sent.result) throw new ConnectorCallError(sent.status ?? 502, sent.receipt);
-          return { status: "done", class: request.class, target: request.target, result: sent.result, own, action: id };
+          return { status: "done", class: request.class, target: request.target, result: sent.result, own: own.why, ...(own.facts.pullCommits ? { commits: [...own.facts.pullCommits] } : {}), action: id };
         }
       }
       this.o.ledger({ class: request.class, resource, target: this.said(manifest.id, input.tool, request.target), verdict: "ask", reason: decision.reason, run, detail: `action ${id}, asked by ${caller.by}` });
@@ -462,7 +596,7 @@ export class ConnectorService {
     this.o.vault.set(name, value, { ...(info?.origin ? { origin: info.origin } : {}), ...(info?.provider ? { provider: info.provider } : {}), ...(info?.label ? { label: info.label } : {}) });
   };
 
-  private async send(manifest: ConnectorManifest, request: ConnectorRequest): Promise<ConnectorResult> {
+  private async send(manifest: ConnectorManifest, request: ConnectorRequest, context?: NativeContext): Promise<ConnectorResult> {
     try {
       const ctx = { vault: this.o.vault, ...(this.o.fetch ? { fetch: this.o.fetch } : {}), oauth: { save: this.keepRotated, ...(this.o.oauthEndpoints ? { endpoints: this.o.oauthEndpoints } : {}) } };
       if (request.kind === "native") {
@@ -470,10 +604,15 @@ export class ConnectorService {
         if (!native) throw new ConnectorCallError(501, `${request.native} isn't available on this node`);
         // Whatever a native asks to send goes to the connector's own origin, or nowhere: its key is pinned there.
         const own = new URL(manifest.origin).origin;
-        return await native(manifest, request.args, (step) => {
-          if (new URL(step.url).origin !== own) throw new ConnectorError(`refusing a request off ${manifest.label}'s origin`);
-          return sendConnectorRequest(ctx, manifest, step);
-        });
+        return await native(
+          manifest,
+          request.args,
+          (step) => {
+            if (new URL(step.url).origin !== own) throw new ConnectorError(`refusing a request off ${manifest.label}'s origin`);
+            return sendConnectorRequest(ctx, manifest, step);
+          },
+          context,
+        );
       }
       // An MCP server may ask you a question mid-call: it waits in your Inbox (questions.ts), answered by you alone.
       const ask = this.o.ask;
@@ -682,7 +821,7 @@ export class ConnectorService {
   }
 
   /** Send one approved action at most once, through the outbox, and write its receipt. */
-  private async sendApproved(action: ActionView, why: string): Promise<{ ok: boolean; status?: number; receipt: string; result?: ConnectorResult }> {
+  private async sendApproved(action: ActionView, why: string, context?: NativeContext): Promise<{ ok: boolean; status?: number; receipt: string; result?: ConnectorResult }> {
     if (this.inFlight.has(action.id) || this.o.local.query("SELECT 1 FROM outbox WHERE id = ?").get(action.id)) {
       return { ok: false, status: 409, receipt: "already sent or being sent" };
     }
@@ -705,7 +844,8 @@ export class ConnectorService {
       const request = buildCall(manifest, action.tool, ConnectorArgs.parse(action.args));
       if (request.target !== action.target) throw new ConnectorCallError(409, "the connector changed since you approved this; not sent");
       sending = true;
-      result = await this.send(manifest, request);
+      // A native is told whether the approval was its own, and what it stood on when that was just now.
+      result = await this.send(manifest, request, context ?? { own: action.self });
       ok = result.ok;
       status = result.status;
       receipt = secret ? sized(result) : excerpt(result, 1500);

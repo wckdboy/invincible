@@ -143,6 +143,13 @@ export interface OwnCall {
   /** The commit your agent last pushed onto the branch the call names (its done shipment's or fix's receipt says it,
    * whole): absent, it pushed none there, and the branch isn't one it shipped. */
   pushed?: string;
+  /** A fix's kept work is a verified fix task's, for this repository and branch (ci-back's path): only such a fix is
+   * its own (the review of 27 November, N1). */
+  proven?: boolean;
+  /** What a merge would land, as this node knows it: the pull request's branch, and the commits it pushed there (whole,
+   * oldest first), every one proven work of this node's (its ship of the merged task's kept work, each fix a verified
+   * fix task's). Absent: one of them isn't, or isn't known, or another pushed there. */
+  landed?: { branch: string; commits: readonly string[] };
 }
 
 /**
@@ -160,6 +167,15 @@ export interface GitHubFacts {
   thread?: { number: number; authorId: number };
   /** A branch, and the commit GitHub says it stands at: facts of another branch are never this one's. */
   head?: { branch: string; sha: string };
+  /** The pull request a merge names, as GitHub says it is now: where it goes and comes from, its head, how many files. */
+  pull?: { number: number; baseRef: string; baseRepo: string; headRepo: string; headRef: string; headSha: string; changedFiles: number };
+  /** Every commit it holds, every page of them (absent: unreadable, or more than GitHub lists). */
+  pullCommits?: readonly string[];
+  /** Every file it changes, every page, as many as GitHub says it changes (absent: unreadable, or past its 3,000). */
+  pullFiles?: readonly string[];
+  /** Whether what the repository's workflows run on a pull request has finished green on its head (true when none run
+   * on one; false while any runs, or once one failed). */
+  checksSettled?: boolean;
 }
 
 const GITHUB = "https://api.github.com";
@@ -267,12 +283,7 @@ export function givenRepository(call: Pick<OwnCall, "args">, repositories: reado
  * pull request from a branch it shipped, its pushes, and the node's own merge of its agents' proven work. */
 function inGiven(call: OwnCall, named: string, facts: GitHubFacts): string | null {
   const where = `${named}, a repository you gave an agent`;
-  if (call.native === "github.merge") {
-    // Only the node's own merge of its agents' proven work, which it checked was proven and shipped (primaryMerge): one its
-    // chat, an agent or a loop asks for itself is yours, as is one landing a change to what the repository's CI runs.
-    if (call.by !== "primary" || !call.changes || changesCi(call.changes)) return null;
-    return `a merge of its agents' proven work, through GitHub's own merge once every check its rules require passed, in ${where}`;
-  }
+  if (call.native === "github.merge") return itsMerge(call, named, where, facts);
   if (call.native === "github.ship" || call.native === "github.ship.update") return itsPush(call, named, where, facts);
   if (call.native !== undefined) return null;
   const what = GITHUB_OWN[`${call.method} ${call.path}`];
@@ -302,7 +313,30 @@ function itsPush(call: OwnCall, named: string, where: string, { repo, head }: Gi
     const asked = typeof call.args.base === "string" ? call.args.base : into;
     return into !== undefined && asked === into && head.branch === into ? `a pull request of the work on a new branch ${String(call.args.branch)}, built on ${into} as it stands, in ${where}` : null;
   }
+  // A fix: a verified fix task's kept work for this branch (ci-back's path), onto where it last pushed it.
+  if (call.proven !== true) return null;
   return head.branch === call.args.branch && lastPushedAt(call.pushed, head.sha) ? `a fix pushed onto ${head.branch}, a branch it shipped, from where it last pushed it, in ${where}` : null;
+}
+
+/**
+ * The node's own merge of its agents' proven work (primaryMerge: one its chat, an agent or a loop asks for itself is
+ * yours), as GitHub says the pull request is just before (the review of 27 November, N1, N2, N10): into your default
+ * branch, in this repository, from the branch it shipped; its head the very commit it last pushed; every commit in it one
+ * this node pushed as proven work; every file it changes read, as many as it says, and none the repository's CI runs
+ * (nor in the node's own lists of what it pushed); and what the repository's workflows run on a pull request finished
+ * green on that head.
+ */
+function itsMerge(call: OwnCall, named: string, where: string, { repo, pull, pullCommits, pullFiles, checksSettled }: GitHubFacts): string | null {
+  const landed = call.landed;
+  if (call.by !== "primary" || !call.changes || changesCi(call.changes) || !landed || landed.commits.length === 0) return null;
+  const into = defaultBranchOf(named, { repo });
+  if (!pull || pull.number !== call.args.number || into === undefined || pull.baseRef !== into) return null;
+  if (pull.baseRepo.toLowerCase() !== named.toLowerCase() || pull.headRepo.toLowerCase() !== named.toLowerCase() || pull.headRef !== landed.branch) return null;
+  if (!isCommit(call.args.sha) || pull.headSha !== call.args.sha || landed.commits.at(-1) !== pull.headSha) return null;
+  if (!pullCommits || pullCommits.length === 0 || !pullCommits.every((commit) => landed.commits.includes(commit))) return null;
+  if (!pullFiles || pullFiles.length !== pull.changedFiles || changesCi(pullFiles)) return null;
+  if (checksSettled !== true) return null;
+  return `a merge of its agents' proven work into ${into} (${pullCommits.length === 1 ? "its one commit" : `its ${pullCommits.length} commits`}, each pushed by this node, its checks green), in ${where}`;
 }
 
 /** A repository GitHub says is your own (private, not a fork, your key's account's by its id), for the primary itself. */
@@ -358,11 +392,17 @@ export function supposedFacts(call: OwnCall): GitHubFacts {
   const defaultBranch = typeof base === "string" ? base : "main";
   const branch = judgedBranch(call, defaultBranch);
   const sha = isCommit(call.base) ? call.base : isCommit(call.pushed) ? call.pushed : "";
+  const named = `${String(owner)}/${String(repo)}`;
+  // A merge: the pull request as it would have to be, and all it lands as this node says it pushed it.
+  const merge = call.native === "github.merge" && typeof number === "number" && isCommit(call.args.sha) && call.landed
+    ? { pull: { number, baseRef: defaultBranch, baseRepo: named, headRepo: named, headRef: call.landed.branch, headSha: call.args.sha, changedFiles: 0 }, pullCommits: [...call.landed.commits], pullFiles: [], checksSettled: true }
+    : {};
   return {
     user: { id: 1 },
-    repo: { name: `${String(owner)}/${String(repo)}`, private: true, fork: false, ownerId: 1, ownerType: "User", defaultBranch },
+    repo: { name: named, private: true, fork: false, ownerId: 1, ownerType: "User", defaultBranch: call.native === "github.merge" ? "main" : defaultBranch },
     ...(typeof number === "number" ? { thread: { number, authorId: 1 } } : {}),
     ...(branch !== undefined ? { head: { branch, sha } } : {}),
+    ...merge,
   };
 }
 
@@ -391,7 +431,9 @@ export function ownApprovalInLog(call: OwnCall & { by: string }): string | null 
   const { owner, repo } = call.args;
   if (typeof owner !== "string" || typeof repo !== "string") return null;
   const sha = isCommit(call.base) ? call.base : "0".repeat(40);
-  const told: OwnCall = { ...call, changes: call.changes ?? [], base: sha, pushed: call.pushed ?? sha };
+  // (A merge's commits and the branch they are on, a fix's proof, are the approving node's to have checked as the rest.)
+  const head = isCommit(call.args.sha) ? call.args.sha : sha;
+  const told: OwnCall = { ...call, changes: call.changes ?? [], base: sha, pushed: call.pushed ?? sha, proven: call.proven ?? true, landed: call.landed ?? { branch: "invincible/merged", commits: [head] } };
   return whereIts(told, [`https://github.com/${owner}/${repo}`], supposedFacts(told));
 }
 

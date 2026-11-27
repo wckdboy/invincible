@@ -47,6 +47,10 @@ export const SHIP_LIMITS = { bytes: 50 * 2 ** 20 };
 export interface ShipDeps {
   /** One request to api.github.com, with the connector's key. */
   github(method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<{ status: number; json: any }>;
+  /** A shipment on your agent's own approval stood on the head of the branch it goes into: that head (true: the
+   * shipment's own base), read again just before its branch is made; moved since, nothing is pushed (the review of
+   * 27 November, N6). */
+  stoodOn?: string | true;
   /** The kept work, if this node holds it: its file list and a file's bytes. */
   artifact(id: string): { files: { path: string; size: number }[]; read(path: string): Uint8Array } | null;
 }
@@ -150,6 +154,12 @@ async function ship(deps: ShipDeps, args: Record<string, ArgValue>, update: bool
     const open = await deps.github("GET", `${at}/pulls?head=${seg(owner)}:${seg(branch)}&state=open&per_page=1`);
     const pr = open.status === 200 && Array.isArray(open.json) ? open.json[0] : undefined;
     return { ok: true, status: 200, ...(pr?.html_url ? { url: String(pr.html_url) } : {}), receipt: `${changed} pushed onto ${branch}, commit ${sha}${pr ? `: pull request #${pr.number} updated, ${pr.html_url}` : ""}` };
+  }
+  if (deps.stoodOn !== undefined) {
+    const expected = deps.stoodOn === true ? shipment.base : deps.stoodOn;
+    const now = await deps.github("GET", `${at}/git/ref/heads/${refPath(base)}`);
+    const stands = String(now.json?.object?.sha ?? "");
+    if (now.status !== 200 || stands !== expected) return fail(409, `${base} moved since your agent's own approval read it (from ${expected} to ${stands || "nothing"}): nothing was pushed, and the commit made stays unreferenced`);
   }
   const ref = await deps.github("POST", `${at}/git/refs`, { ref: `refs/heads/${branch}`, sha });
   if (ref.status !== 201) return fail(ref.status, `couldn't create the branch ${branch}: ${ref.status}`);

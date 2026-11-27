@@ -7,7 +7,9 @@ import type { NativeTool } from "./connectors.ts";
  * could pass a protection doesn't change that: "blocked" is refused whoever holds the key. Its head must still be the
  * commit that was proven, and GitHub is told that head, so nothing pushed since lands with it. It merges by a method
  * the repository allows, and is never forced, nor tried again another way. Each request goes through `send`: the
- * connector's pinned origin and key.
+ * connector's pinned origin and key. On your agent's own approval it merges only what that approval stood on, read again
+ * just before: into the default branch, in this repository, from the branch it shipped (the review of 27 November, N2);
+ * an own approval whose reads weren't kept (sent after a restart) merges nothing, and is asked again.
  */
 
 type Json = Record<string, any> | null;
@@ -16,7 +18,7 @@ const METHODS = ["merge", "squash", "rebase"] as const;
 const ALLOWS: Record<(typeof METHODS)[number], string> = { merge: "allow_merge_commit", squash: "allow_squash_merge", rebase: "allow_rebase_merge" };
 
 export function mergeNative(): NativeTool {
-  return async (manifest, args, send) => {
+  return async (manifest, args, send, context) => {
     const started = performance.now();
     const origin = new URL(manifest.origin).origin;
     const at = `/repos/${encodeURIComponent(String(args.owner))}/${encodeURIComponent(String(args.repo))}`;
@@ -36,6 +38,8 @@ export function mergeNative(): NativeTool {
       return { status: result.status, json };
     };
 
+    const stood = context?.own ? context.facts?.pull : undefined;
+    if (context?.own && !stood) return said(false, 409, `not merged: what your agent's own approval of #${number} stood on wasn't kept (it was sent after a restart): merging it is asked again`);
     const pull = await ask("GET", `${at}/pulls/${number}`);
     const p = pull.json;
     if (pull.status !== 200 || !p) return said(false, pull.status, `not merged: GitHub didn't say what #${number} is (${pull.status})`);
@@ -49,6 +53,15 @@ export function mergeNative(): NativeTool {
 
     // A method the repository allows: the one asked for, else the only one, else in GitHub's own order.
     const repo = await ask("GET", at);
+    if (stood) {
+      // Its own approval stood on where the pull request goes and comes from: read again, it must be so still.
+      const named = `${String(args.owner)}/${String(args.repo)}`.toLowerCase();
+      const into = typeof repo.json?.default_branch === "string" ? repo.json.default_branch : null;
+      const there = String(p.base?.repo?.full_name ?? "").toLowerCase() === named && String(p.head?.repo?.full_name ?? "").toLowerCase() === named;
+      if (p.base?.ref !== stood.baseRef || into !== p.base?.ref || !there || p.head?.ref !== stood.headRef) {
+        return said(false, 409, `not merged: #${number} goes into ${String(p.base?.ref ?? "?")} from ${String(p.head?.ref ?? "?")} now, not into ${stood.baseRef}${into && into !== stood.baseRef ? ` (the default branch is ${into})` : ""} from ${stood.headRef} as your agent's own approval read it: merging it is yours`);
+      }
+    }
     const allowed = METHODS.filter((method) => repo.json?.[ALLOWS[method]] === true);
     const asked = typeof args.method === "string" ? (args.method as (typeof METHODS)[number]) : null;
     const method = asked ? (allowed.includes(asked) ? asked : null) : (allowed[0] ?? null);

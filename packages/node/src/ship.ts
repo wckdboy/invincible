@@ -10,11 +10,13 @@ import type { NativeTool } from "./connectors.ts";
 
 /** github.ship (or, `update`, github.ship.update) as the connector service runs it: GitHub through `send` (the pinned origin and key), the work from this node's artifacts. */
 export function shipNative(artifacts: ArtifactStore, update = false): NativeTool {
-  return async (manifest, args, send) => {
+  return async (manifest, args, send, context) => {
     const started = performance.now();
     const origin = new URL(manifest.origin).origin;
     const result = await shipToGitHub(
       {
+        // On its own approval: the head that approval stood on, read again before its branch is made (ship.ts).
+        ...(context?.own && !update ? { stoodOn: context.facts?.head?.sha ?? true } : {}),
         github: async (method, path, body) => {
           const url = new URL(path, origin);
           if (url.origin !== origin) throw new Error("refusing a request off the connector's origin");

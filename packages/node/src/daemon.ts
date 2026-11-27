@@ -619,7 +619,14 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
 
   // MCP servers' questions mid-call (questions.ts): each waits in your Inbox for you, and its call with it.
   const questions = new Questions({ log });
-  const connectors = new ConnectorService({ store, vault, identity, local, ledger, log, fetch: opts.fetch, ask: (connector, params, signal) => questions.ask(connector, params, signal), ...(opts.oauthEndpoints ? { oauthEndpoints: opts.oauthEndpoints } : {}), natives: { "github.ship": shipNative(artifacts), "github.ship.update": shipNative(artifacts, true), "github.merge": mergeNative(), ...gmailNatives, ...outlookNatives, ...cloudflareNatives }, repositories: () => team.store.agents().flatMap((k) => (k.repository ? [k.repository] : [])), shipment: shipmentFiles(artifacts) });
+  const connectors = new ConnectorService({ store, vault, identity, local, ledger, log, fetch: opts.fetch, ask: (connector, params, signal) => questions.ask(connector, params, signal), ...(opts.oauthEndpoints ? { oauthEndpoints: opts.oauthEndpoints } : {}), natives: { "github.ship": shipNative(artifacts), "github.ship.update": shipNative(artifacts, true), "github.merge": mergeNative(), ...gmailNatives, ...outlookNatives, ...cloudflareNatives }, repositories: () => team.store.agents().flatMap((k) => (k.repository ? [k.repository] : [])), shipment: shipmentFiles(artifacts),
+    // Whose proven work kept work is: a verified task's, or a verified fix task's and where its fix goes (connectors.ts:
+    // only such a fix is its own, and a merge lands only such pushes).
+    proven: (artifact) => {
+      const task = team.store.taskOfWork(artifact);
+      if (!task || task.status !== "done" || !task.verified) return null;
+      return task.fix ? { fix: { owner: task.fix.owner, repo: task.fix.repo, branch: task.fix.branch } } : {};
+    } });
   const taskDeps: LoopTaskDeps = {
     store,
     vault,

@@ -1,4 +1,4 @@
-import { capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint } from "@invincible/core";
+import { capLabel, TEAM_LIMITS, interventionWords, agentFromFile, agentToFile, plainLine, plainText, type Prices, type TeamChangesView, type TeamFilesView, type TeamFileView, type RouteName, taskRecordFacts, type TeamModelChoice, type TeamSnapshot, type TeamRoomView, type TeamRoom, type TeamTask, type Agent, type TeamCheckpoint, mergeRepository } from "@invincible/core";
 import { MARK_PALETTE, markForm, markOf } from "@invincible/core/agent-mark";
 
 /** An agent's mark as the CLI says it (agent-mark.ts): its hue's name and both its forms (light page, dark page), and its
@@ -385,8 +385,10 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
   }
   // Your agent's own merging of its agents' proven work, in a repository you gave an agent: said, or turned off or on there.
   if (sub === "merge") {
-    if (args.length < 1 || args.length > 2 || !/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/.test(args[0]!) || (args[1] !== undefined && args[1] !== "on" && args[1] !== "off")) throw new Error("usage: invincible agents merge <owner/repo> [on|off]");
-    const repository = args[0]!;
+    // As GitHub names it (its case, no .git): one that can never match a repository is refused (core's mergeRepository).
+    const named = args[0] === undefined ? null : mergeRepository(args[0]);
+    if (args.length < 1 || args.length > 2 || !named || (args[1] !== undefined && args[1] !== "on" && args[1] !== "off")) throw new Error("usage: invincible agents merge <owner/repo> [on|off]");
+    const repository = named;
     const on = args[1] ? (await api.call<{ on: boolean }>("teamMerge", { repository, on: args[1] === "on" })).on : !((await api.call<TeamSnapshot>("team")).mergeOff ?? []).includes(repository.toLowerCase());
     print(on
       ? `Your agent merges its agents' proven work in ${repository} itself, as it may in a repository you gave an agent: once GitHub says a pull request is clean (every check and review its rules require has passed), through GitHub's own merge, never forced, and never one that changes what the repository's CI runs. Turn it off there with: invincible agents merge ${repository} off`
