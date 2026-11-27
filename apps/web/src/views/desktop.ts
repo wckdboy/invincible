@@ -2,7 +2,7 @@ import type { Agent } from "@invincible/core/team";
 import { ApiError, isAbort, isUnavailable } from "../api.ts";
 import { type Ctx, errorMessage } from "../context.ts";
 import { DESKTOP_KEYS, type DesktopDo, type DesktopDone, desktopAddress, type DesktopView, saysNoDesktop, screenPoint, shotSource } from "../lib/desktop.ts";
-import { againIn, chunkOf, codecOf, type DesktopHold, holdEnds, LIVE_TRIES } from "../lib/desktop-stream.ts";
+import { againIn, BEHIND, type Behinds, behindAgain, behindTooOften, chunkOf, codecOf, type DesktopHold, holdEnds, LIVE_TRIES } from "../lib/desktop-stream.ts";
 import { clockTime } from "../lib/time.ts";
 import { button, callout, switchControl } from "../ui/controls.ts";
 import { h, replace } from "../ui/dom.ts";
@@ -26,8 +26,6 @@ import { h, replace } from "../ui/dom.ts";
 const EVERY_MS = 2000;
 /** How far one press of Scroll goes, in the wheel's own steps. */
 const SCROLL_STEPS = 3;
-/** Frames waiting to be decoded past which this device has fallen behind the screen: 2 s at 10 frames a second. */
-const BEHIND = 20;
 
 export interface DesktopViewer {
   el: HTMLElement;
@@ -61,6 +59,8 @@ export function desktopViewer(ctx: Ctx, person: Pick<Agent, "id" | "name">, view
   let pictures = !decodes();
   let watching: AbortController | null = null;
   let tries = 0;
+  /** Behinds in a row, counted apart from the ends (lib/desktop-stream.ts behindAgain). */
+  let behinds: Behinds | null = null;
   let again: ReturnType<typeof setTimeout> | undefined;
 
   const sized = (next: { width: number; height: number }): void => {
@@ -78,6 +78,7 @@ export function desktopViewer(ctx: Ctx, person: Pick<Agent, "id" | "name">, view
     controller.signal.addEventListener("abort", end, { once: true });
     let decoder: VideoDecoder | null = null;
     let refused = false;
+    let behind = false;
     try {
       const draw = screen.getContext("2d");
       if (!draw) throw new Error("no canvas to draw on");
@@ -107,8 +108,11 @@ export function desktopViewer(ctx: Ctx, person: Pick<Agent, "id" | "name">, view
           decoder.configure(config);
         }
         // (A device that decodes slower than the screen changes falls behind: it starts again from a fresh keyframe, and
-        // after a few such tries in a row it is shown the picture every two seconds instead.)
-        if (decoder.decodeQueueSize > BEHIND) break;
+        // after three such in a row, each within 30 s of the last, it is shown the picture every two seconds instead.)
+        if (decoder.decodeQueueSize > BEHIND) {
+          behind = true;
+          break;
+        }
         decoder.decode(new EncodedVideoChunk(chunk));
       }
     } catch (error) {
@@ -126,8 +130,12 @@ export function desktopViewer(ctx: Ctx, person: Pick<Agent, "id" | "name">, view
     }
     // Left (out of view, the app behind): watched again when it is back, as a fresh start.
     if (mine.signal.aborted && (!shown || document.hidden)) return;
+    if (behind) {
+      behinds = behindAgain(behinds, Date.now());
+      if (behindTooOften(behinds)) return toPictures("behind");
+    }
     tries += 1;
-    if (refused || tries >= LIVE_TRIES) return toPictures(!refused);
+    if (refused || tries >= LIVE_TRIES) return toPictures(refused ? null : "tried");
     clearTimeout(again);
     again = setTimeout(() => void watch(), againIn(tries));
   }
@@ -144,12 +152,16 @@ export function desktopViewer(ctx: Ctx, person: Pick<Agent, "id" | "name">, view
     replace(problem);
   }
 
-  /** The stream given up: the picture every two seconds, as before; said only when it was tried and didn't come through. */
-  function toPictures(say: boolean): void {
+  /**
+   * The stream given up: the picture every two seconds, as before. Said why, once, when it was tried and didn't come
+   * through, or when this device kept falling behind it; a refusal says nothing.
+   */
+  function toPictures(why: "tried" | "behind" | null): void {
     pictures = true;
     live = false;
     delete screen.dataset.shown;
-    if (say) replace(problem, callout("info", `The live picture of ${person.name}'s screen isn't coming through, so it is shown every two seconds instead.`));
+    if (why === "tried") replace(problem, callout("info", `The live picture of ${person.name}'s screen isn't coming through, so it is shown every two seconds instead.`));
+    if (why === "behind") replace(problem, callout("info", `This device can't keep up with ${person.name}'s screen live, so it is shown every two seconds instead.`));
     void ask();
   }
 

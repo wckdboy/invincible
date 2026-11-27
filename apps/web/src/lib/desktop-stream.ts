@@ -55,3 +55,30 @@ export const againIn = (n: number): number => Math.min(5000, 500 * 2 ** Math.max
 
 /** After this many ends in a row, the live picture gives way to a picture every two seconds, and says so. */
 export const LIVE_TRIES = 4;
+
+/**
+ * The most frames that may wait to be decoded. Past that, this device has fallen behind the screen: the stream is ended
+ * and watched again from a fresh keyframe, so what it holds, and how far behind what it shows is, stay bounded.
+ */
+export const BEHIND = 20;
+
+/**
+ * Falling behind again and again: this many times in a row, each within BEHIND_WITHIN_MS of the last, and the live
+ * picture gives way to a picture every two seconds, said once. Watched again each time, a device too slow for the screen
+ * would go live, fall behind and go live again for ever, spending a keyframe each time and looking broken. Behinds are
+ * counted apart from ends: a frame drawn starts the count of ends again, never this one.
+ */
+export const BEHIND_TIMES = 3;
+export const BEHIND_WITHIN_MS = 30_000;
+
+/** Behinds in a row: how many, and when the last was (ms since the epoch). */
+export interface Behinds {
+  count: number;
+  at: number;
+}
+
+/** The row once the stream has fallen behind at `at`: one more, or a new row of one when the last was over BEHIND_WITHIN_MS before. */
+export const behindAgain = (row: Behinds | null, at: number): Behinds => ({ count: row && at - row.at <= BEHIND_WITHIN_MS ? row.count + 1 : 1, at });
+
+/** Whether falling behind that often gives way to the picture. */
+export const behindTooOften = (row: Behinds): boolean => row.count >= BEHIND_TIMES;

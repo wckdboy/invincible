@@ -4820,6 +4820,68 @@
       }
     ],
     "liveTries": 4,
+    "behind": 20,
+    "behindTimes": 3,
+    "behindWithinMs": 30000,
+    "behinds": [
+      {
+        "row": null,
+        "at": 1764216000123,
+        "next": {
+          "count": 1,
+          "at": 1764216000123
+        },
+        "tooOften": false
+      },
+      {
+        "row": {
+          "count": 1,
+          "at": 1764216000123
+        },
+        "at": 1764216010123,
+        "next": {
+          "count": 2,
+          "at": 1764216010123
+        },
+        "tooOften": false
+      },
+      {
+        "row": {
+          "count": 2,
+          "at": 1764216010123
+        },
+        "at": 1764216040123,
+        "next": {
+          "count": 3,
+          "at": 1764216040123
+        },
+        "tooOften": true
+      },
+      {
+        "row": {
+          "count": 2,
+          "at": 1764216010123
+        },
+        "at": 1764216040124,
+        "next": {
+          "count": 1,
+          "at": 1764216040124
+        },
+        "tooOften": false
+      },
+      {
+        "row": {
+          "count": 5,
+          "at": 1764216000123
+        },
+        "at": 1764216000122,
+        "next": {
+          "count": 6,
+          "at": 1764216000122
+        },
+        "tooOften": true
+      }
+    ],
     "glass": {
       "fixture": "desktop-glass.frames",
       "strip": {

@@ -21,7 +21,7 @@ import { highlight } from "../../web/src/lib/highlight.ts";
 import { parseMarkdown } from "../../web/src/lib/markdown.ts";
 import { detectProvider, detectSignIn, planLine, providerSetup } from "../../web/src/lib/text.ts";
 import { desktopAddress, screenPoint, shotSource } from "../../web/src/lib/desktop.ts";
-import { againIn, chunkOf, codecOf, holdEnds, LIVE_TRIES } from "../../web/src/lib/desktop-stream.ts";
+import { againIn, BEHIND, BEHIND_TIMES, BEHIND_WITHIN_MS, behindAgain, behindTooOften, chunkOf, codecOf, holdEnds, LIVE_TRIES } from "../../web/src/lib/desktop-stream.ts";
 import { bitsOf, readStrip, STRIP } from "../../../bench/desktop/glass-clock.ts";
 import { cardWords, quickLabel, SEAT_KIND_WORDS, seatMeterWords, seatStateWords, seatUseWords, seatWindowWords, servesChoiceWords, servesWords, signInAction, USE_ELSEWHERE } from "../../web/src/lib/seats.ts";
 import { DATA_GLYPHS, dataGlyph, GLYPH_LADDER, AGENT_SPHERE, agentArcs, orbSphere, paperShades, SPHERE_FLASH, SPHERE_TURN, sphereFrame, sphereGlyph, spherePoints, sphereShades } from "../../web/src/lib/orb-sphere.ts";
@@ -528,6 +528,14 @@ const desktopStream = {
   holds: [{ held: { since: T0 - 30_000, idleSec: 120, mostSec: 900, endsInSec: 119.5 }, at: T0 }, { held: { since: T0, idleSec: 120, mostSec: 900, endsInSec: 0 }, at: T0 + 5 }].map((h) => ({ ...h, ends: holdEnds(h.held, h.at) })),
   again: [1, 2, 3, 4, 5, 9].map((n) => ({ n, ms: againIn(n) })),
   liveTries: LIVE_TRIES,
+  // Falling behind: past BEHIND frames waiting; BEHIND_TIMES in a row, each within BEHIND_WITHIN_MS of the last, gives way.
+  behind: BEHIND,
+  behindTimes: BEHIND_TIMES,
+  behindWithinMs: BEHIND_WITHIN_MS,
+  behinds: ([[null, T0], [{ count: 1, at: T0 }, T0 + 10_000], [{ count: 2, at: T0 + 10_000 }, T0 + 40_000], [{ count: 2, at: T0 + 10_000 }, T0 + 40_001], [{ count: 5, at: T0 }, T0 - 1]] as const).map(([row, at]) => {
+    const next = behindAgain(row, at);
+    return { row, at, next, tooOften: behindTooOften(next) };
+  }),
   // The glass clock (bench/desktop/glass-clock.ts): its strip, and what each frame of the fixture shows, read back here
   // from the bits it was drawn with (its 30 frames drew BASE + 37 ms a frame, and clicks 0 to 4 over and over).
   glass: {

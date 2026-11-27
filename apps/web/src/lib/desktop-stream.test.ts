@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DESKTOP_FRAME_KIND, type DesktopFrame } from "@invincible/core/desktop-frames";
-import { againIn, chunkOf, codecOf, holdEnds, LIVE_TRIES, nalUnits } from "./desktop-stream.ts";
+import { againIn, BEHIND, BEHIND_TIMES, BEHIND_WITHIN_MS, behindAgain, behindTooOften, chunkOf, codecOf, holdEnds, LIVE_TRIES, nalUnits } from "./desktop-stream.ts";
 
 /*
  * The live picture of an agent's desktop, as the app decodes it: the stream's frames to the browser's own decoder, and
@@ -65,5 +65,28 @@ describe("your take-over, and watching again", () => {
   test("after the stream ends, it is watched again a little later each time, at most 5 s, and given up for pictures after a few", () => {
     expect([1, 2, 3, 4, 5, 9].map(againIn)).toEqual([500, 1000, 2000, 4000, 5000, 5000]);
     expect(LIVE_TRIES).toBe(4);
+  });
+});
+
+describe("falling behind", () => {
+  const T = Date.UTC(2026, 10, 27, 10, 0, 0);
+  test("past twenty frames waiting, a device has fallen behind; three times in a row, each within 30 s, gives way", () => {
+    expect([BEHIND, BEHIND_TIMES, BEHIND_WITHIN_MS]).toEqual([20, 3, 30_000]);
+    const first = behindAgain(null, T);
+    const second = behindAgain(first, T + 10_000);
+    // (Exactly 30 s after the last is still within it.)
+    const third = behindAgain(second, T + 40_000);
+    expect([first, second, third]).toEqual([
+      { count: 1, at: T },
+      { count: 2, at: T + 10_000 },
+      { count: 3, at: T + 40_000 },
+    ]);
+    expect([first, second, third].map(behindTooOften)).toEqual([false, false, true]);
+  });
+
+  test("a behind more than 30 s after the last starts a new row", () => {
+    const second = behindAgain(behindAgain(null, T), T + 10_000);
+    expect(behindAgain(second, T + 40_001)).toEqual({ count: 1, at: T + 40_001 });
+    expect(behindTooOften(behindAgain(second, T + 40_001))).toBe(false);
   });
 });
