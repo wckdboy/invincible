@@ -32,8 +32,8 @@ afterEach(async () => {
 
 const node = (name: string, c: string): Device => ({ id: "n_" + c.repeat(43), kind: "node", role: "full", name, scopes: [], enrolledHlc: "0", revokedHlc: null }) as unknown as Device;
 
-/** A runner with `agents` agents, and a ledger whose devices and grants the test revokes. */
-function runner(agents = 1, clock: { now?: () => number; handCallMs?: number } = {}) {
+/** A runner with `agents` agents, and a ledger whose devices and grants the test revokes. `log` is the server's. */
+function runner(agents = 1, clock: { now?: () => number; handCallMs?: number } = {}, log: (message: string) => void = () => {}) {
   const store = new TeamStore(":memory:");
   const names = ["ada", ...Array.from({ length: agents - 1 }, (_, i) => `ada${i + 1}`)];
   for (const name of names) store.saveAgent({ id: name, name });
@@ -64,7 +64,7 @@ function runner(agents = 1, clock: { now?: () => number; handCallMs?: number } =
     activeDevice: (id: string) => (id === alpha.id && ledger.active.has(id) ? alpha : null),
     device: (id: string) => (id === alpha.id ? alpha : null),
   } as unknown as LedgerStore;
-  const h = new Handoffs({ db: new Database(":memory:"), store: held, identity: self, fabric: { sidecar: { client: null, did: null } } as unknown as Fabric, log: () => {}, ...clock });
+  const h = new Handoffs({ db: new Database(":memory:"), store: held, identity: self, fabric: { sidecar: { client: null, did: null } } as unknown as Fabric, log, ...clock });
   fixtures.push({ service, h });
   wake.poke = () => h.poke();
   const team: HandTeam = {
@@ -77,7 +77,15 @@ function runner(agents = 1, clock: { now?: () => number; handCallMs?: number } =
     },
     task: (id) => service.task(id),
     trail: (id, n) => store.trail(id, n),
-    stop: (id, why) => (why ? service.stopTask(id, why) : service.control({ task: id, action: "stop" })),
+    // As server.ts binds it: a stop that throws is logged, never thrown on.
+    stop: (id, why) => {
+      try {
+        if (why) service.stopTask(id, why);
+        else service.control({ task: id, action: "stop" });
+      } catch (error) {
+        log(`fabric: ${id} wasn't stopped: ${(error as Error).message}`);
+      }
+    },
     runningIn: () => null,
     handed: (by, since) => store.handed(by, since),
     handedOpen: () => store.handedOpen(),
@@ -116,6 +124,7 @@ function hand(h: Handoffs, giver: Device, agent: string, deadlineMs: number | nu
   h.invoked(inv, giver);
   return {
     task: () => said.find((s) => s.kind === "accepted")?.task ?? null,
+    proposed: () => said.find((s) => s.kind === "proposed")?.task ?? null,
     taken: () => said.some((s) => s.kind === "accepted"),
     failed: () => failed,
     completed: () => completed,
@@ -251,5 +260,67 @@ describe("a handed task's life on the runner", () => {
     await until(() => k.completed() !== null, 5_000, "its giver answered");
     expect(k.completed()!.task?.status).toBe("stopped");
     expect(r.store.task(k.task()!)?.error).toContain("deadline");
+  });
+});
+
+/*
+ * Nor does a stop that doesn't take keep it going (the third re-review's R3-2). The life bound asked for a stop and went
+ * round again at once: when the stop didn't take, the runner's loop never yielded again, so no timer, no I/O and no
+ * step of the node's shutdown ran. A stop doesn't take while the node stops (its team controller stopped first, its
+ * hand-offs much later) or when the stop can't be written. Now the hand-off ends there all the same, answered as failed.
+ * (The log here ends a spin after a thousand failed stops, as nothing in the node would, so that the test ends.)
+ */
+describe("a handed task whose life ends and whose stop doesn't take", () => {
+  const MINUTE = 60_000;
+  /** The server's log: it counts the stops that didn't take, and ends a spin at a thousand of them. */
+  const stops = () => {
+    const seen = { failed: 0 };
+    const log = (message: string) => {
+      if (!message.includes("wasn't stopped")) return;
+      if (++seen.failed >= 1_000) throw new Error("a spin, ended by the test");
+    };
+    return { seen, log };
+  };
+
+  test("as the node stops: its giver is told it failed, and the node goes on", async () => {
+    const clock = { now: 1_000_000 };
+    const s = stops();
+    const r = runner(1, { now: () => clock.now, handCallMs: 60 * MINUTE }, s.log);
+    // No grant: it waits for your approval as a proposal.
+    r.ledger.granted.delete(r.alpha.id);
+    const k = hand(r.h, r.alpha, "ada");
+    await until(() => k.proposed() !== null, 5_000, "proposed");
+    // The node stops as daemon.ts stops it: its team controller first, its hand-offs much later.
+    void r.service.stop();
+    clock.now += 60 * MINUTE;
+    r.h.poke();
+    await until(() => k.completed() !== null || k.failed() !== null, 5_000, "its giver answered");
+    expect(s.seen.failed).toBe(1);
+    expect(k.failed()).toBeNull();
+    expect(k.completed()!.task?.status).toBe("failed");
+    expect(k.completed()!.task?.error).toContain("couldn't be stopped here");
+  });
+
+  test("when its stop can't be written: its giver is told it failed, and the node goes on", async () => {
+    const clock = { now: 1_000_000 };
+    const s = stops();
+    const r = runner(1, { now: () => clock.now, handCallMs: 60 * MINUTE }, s.log);
+    r.ledger.granted.delete(r.alpha.id);
+    const k = hand(r.h, r.alpha, "ada");
+    await until(() => k.proposed() !== null, 5_000, "proposed");
+    // A write that fails while reads work: a trigger standing in for a full disk.
+    const db = (r.store as unknown as { db: Database }).db;
+    db.exec("CREATE TRIGGER full_disk BEFORE UPDATE ON team_jobs BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END;");
+    try {
+      clock.now += 60 * MINUTE;
+      r.h.poke();
+      await until(() => k.completed() !== null || k.failed() !== null, 5_000, "its giver answered");
+    } finally {
+      db.exec("DROP TRIGGER full_disk");
+    }
+    expect(s.seen.failed).toBe(1);
+    expect(k.failed()).toBeNull();
+    expect(k.completed()!.task?.status).toBe("failed");
+    expect(k.completed()!.task?.error).toContain("couldn't be stopped here");
   });
 });

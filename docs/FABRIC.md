@@ -152,8 +152,8 @@ transport keys carries all of it:
        started (R3-1), nor a desktop session it started (R3-3). The list is a file in the VM, which its commands can
        rewrite (R3-1).
      - The runner stops it at its call's deadline or after 24 hours, whichever comes first, waiting for your approval
-       included. If that stop doesn't take (the node stopping, or a write that fails), the runner's loop spins and the
-       node hangs (R3-2). A task you take up again by its id has no life bound (R3-6).
+       included. A stop that can't be written (the node stopping, or a write that fails) ends its call all the same,
+       answered as failed (the third re-review's R3-2). A task you take up again by its id has no life bound (R3-6).
      - Not bounded, besides the known gaps: work it hands to a process that was running in the VM before it began
        isn't one it started, so it isn't ended. The VM time its work takes isn't counted itself: its budget's dollars
        and its life bound it.
@@ -162,8 +162,6 @@ transport keys carries all of it:
        - R3-1: a command can end or stop its own helper, leave a process that double-forks out with setsid after it
          ends, or, in the VM, fork successors faster than its helper's scan. What it started then outlives the gate,
          the task, your grant and its node's revocation.
-       - R3-2: when the stop at the end of its life doesn't take, the runner's loop spins, and the node hangs until
-         it is killed.
        - R3-3: its `desktop` verbs (`desktop start`, `desktop app …`, its gates' too) bypass the helper, so what they
          start is never listed or ended.
        - R3-4: its VM's gateway lease serves every provider you've keyed and any model, so its commands can work on

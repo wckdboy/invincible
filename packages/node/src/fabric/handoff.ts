@@ -669,13 +669,22 @@ export class Handoffs implements FabricTools {
     else inv.signal.addEventListener("abort", unfollowed, { once: true });
     let after = 0;
     let status = "";
+    // Its life ran out and its stop didn't take: why, as its giver is told it (it is answered as failed).
+    let unstopped: string | null = null;
     try {
       for (;;) {
+        // (The node is stopping: nothing more is followed here.)
+        if (this.closed) break;
         const task = this.team.task(run.task);
         if (!task) break;
         if (!ENDED.has(task.status) && this.now() - began >= lifeMs) {
           this.team.stop(run.task, lifeEnded);
-          continue;
+          if (ENDED.has(this.team.task(run.task)?.status ?? "stopped")) continue;
+          // The stop didn't take (the node is stopping, or the stop couldn't be written): the hand-off ends here all the
+          // same, answered as failed, rather than go round again at once for ever, which froze the node (the third
+          // re-review's R3-2).
+          unstopped = `${lifeEnded} It couldn't be stopped here (the node is stopping, or its stop couldn't be written), so it ends as failed.`;
+          break;
         }
         // Approved by you: taken now (a proposal you declined ends stopped, never taken).
         if (!run.accepted && (task.status === "queued" || task.status === "running" || task.record !== undefined)) accept();
@@ -696,9 +705,12 @@ export class Handoffs implements FabricTools {
       // Paused while its call followed it (its agent, its room or the task, or the agent turned off): it ends now, as
       // it would at a restart, since nobody follows it after this call, and a resume would run it unseen. Its proof
       // says it stopped.
-      if (this.team.task(run.task)?.status === "interrupted") this.team.stop(run.task, "This work was paused, and it was handed over by another node: its call ended with the pause, and nobody follows it now, so it ends here rather than be resumed unseen.");
+      if (!unstopped && this.team.task(run.task)?.status === "interrupted") this.team.stop(run.task, "This work was paused, and it was handed over by another node: its call ended with the pause, and nobody follows it now, so it ends here rather than be resumed unseen.");
       const task = this.team.task(run.task)!;
       const output = task.output.slice(0, 20_000);
+      const endedAs = (unstopped ? "failed" : ENDED.has(task.status) ? task.status : "interrupted") as ProofStatement["status"];
+      const verified = !unstopped && task.status === "done" && task.verified;
+      const error = unstopped ?? task.error;
       const statement: ProofStatement = {
         v: 1,
         by: this.deps.identity.id,
@@ -709,16 +721,16 @@ export class Handoffs implements FabricTools {
         run: did,
         goal: goalDigest(args.goal),
         gates: args.gates,
-        status: (ENDED.has(task.status) ? task.status : "interrupted") as ProofStatement["status"],
-        verified: task.status === "done" && task.verified,
+        status: endedAs,
+        verified,
         ended: task.record?.ended ?? null,
         proof: task.record?.proof ?? null,
         startedAt: task.record?.startedAt ?? null,
         endedAt: task.record?.endedAt ?? null,
         // What it says beside the proof, signed with it: its output and its error, exactly as sent.
-        said: saidDigest(output, task.error),
+        said: saidDigest(output, error),
       };
-      inv.complete({ task: { id: task.id, status: task.status, verified: task.verified, output, error: task.error }, proof: signProof(this.deps.identity, statement) });
+      inv.complete({ task: { id: task.id, status: unstopped ? endedAs : task.status, verified: unstopped ? false : task.verified, output, error }, proof: signProof(this.deps.identity, statement) });
     } catch (error) {
       // Nobody can follow it now: the work stops here too, and the call fails (invoked says why).
       this.team?.stop(run.task, "This node failed while it followed the task, so it was stopped.");

@@ -628,9 +628,9 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       when it is done, fails, or is stopped or revoked. Not when a command ends or stops its own helper, nor a leftover
       that double-forks out with setsid after its command ended (R3-1), nor when the task's agent is paused or turned
       off, or after a crash (R3-5), nor a desktop session it started (R3-3).
-    - The runner stops it at its call's deadline or after 24 hours, whichever comes first, unless that stop doesn't
-      take (the node stopping, or a write that fails): then the runner's loop spins and the node hangs (R3-2). A task
-      you take up again by its id has no such bound (R3-6).
+    - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
+      written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
+      re-review's R3-2). A task you take up again by its id has no such bound (R3-6).
     - Residual: work it hands to a process that was already running in the VM isn't one it started, and isn't ended.
       Its VM time isn't counted itself. And the known gaps:
     - **Known gaps, until they're fixed** (the third re-review: Lows, and R3-6 an Info; the fabric runs only when you
@@ -639,8 +639,6 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         ends, or, in the VM, fork successors faster than its helper's scan; and the task's list of what to end is a
         file in the VM that its commands can rewrite. What it started then outlives the gate, the task, the grant and
         the node's revocation.
-      - R3-2: when the stop at the end of its life doesn't take, the runner's loop spins, and the node hangs until it
-        is killed.
       - R3-3: its `desktop` verbs bypass the helper (the desktop's fast path runs before it), so what they start is
         never listed or ended.
       - R3-4: its VM's gateway lease serves every keyed provider and any model, so its commands can work on models its
