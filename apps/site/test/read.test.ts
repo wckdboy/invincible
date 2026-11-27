@@ -12,6 +12,8 @@ import { installSteps, parts } from "../src/lib/install-steps.ts";
 const ROOT = resolve(import.meta.dir, "../../..");
 const file = (path: string) => readFileSync(join(ROOT, path), "utf8");
 const REPO = "wckdboy/invincible";
+/** The SHA-256 of the certificate of Invincible for Android's release key, as apksigner prints it (public, on every release). */
+const ANDROID_RELEASE_CERTIFICATE = "195ea4ab1e0e52b7a04c01c87a5f338d7c596534e4982a6be52ca1d5e64e05a6";
 
 describe("the installer, as the page tells it", () => {
   const installer = readInstaller(file("scripts/install.sh"));
@@ -52,9 +54,17 @@ describe("the installer, as the page tells it", () => {
 });
 
 describe("the apps' feeds", () => {
-  test("as committed: the Mac's an empty channel and Android's an empty record, until each one's first release", () => {
+  test("as committed: the Mac's an empty channel until its first release; Android's record is a release's, signed with the release key", () => {
     expect(readAppcast(file("apps/site/public/mac/appcast.xml"), REPO)).toBeNull();
-    expect(readAndroid(file("apps/site/public/android/latest.json"), REPO)).toBeNull();
+    // (Android's first release was android-202611272240, 27 November 2026: since then the record names a release.)
+    const android = readAndroid(file("apps/site/public/android/latest.json"), REPO);
+    expect(android).not.toBeNull();
+    expect(android!.build).toMatch(/^20\d{10}$/);
+    expect(android!.url).toBe(`https://github.com/${REPO}/releases/download/android-${android!.build}/Invincible-${android!.build}.apk`);
+    expect(android!.minSdk).toBe(readAndroidMinSdk(file("apps/android/app/build.gradle.kts")));
+    // Every build is signed with the one release key (apps/android/scripts/make-key.sh), so each installs over the last:
+    // a record of another key's fails the build here, never reaching the page.
+    expect(android!.certificate).toBe(ANDROID_RELEASE_CERTIFICATE);
   });
 
   test("the Mac's feed as apps/apple/scripts/mac-release.sh writes it", () => {
