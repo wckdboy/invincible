@@ -104,6 +104,7 @@ import {
   type UsageView,
   ComputeLimit,
   COMPUTE_RESOURCE,
+  computerSize,
   type AttemptStation,
   utf8,
   verifyRequestSignature,
@@ -2241,9 +2242,9 @@ export function createApp(ctx: AppContext) {
       if (!sandbox) {
         const providers = providerViews(ctx.store, ctx.vault).filter((p) => p.hasKey).map((p) => p.id).slice(0, 16);
         // Online unless asked otherwise (the owner's word: agents can use the internet); the gateway is there either way.
-        const made = await api.call<{ sandbox: SandboxView }>("createSandbox", { on: best.device, persistent: true, isolation: "vm", network: input.network ?? "online", run: armRun(agentLabel(id)), cpus: input.cpus ?? 1,
-          // (A browser needs room: a desktop is never made with less than four.)
-          memoryGb: desktop ? Math.max(4, input.memoryGb ?? 4) : (input.memoryGb ?? 2), diskGb: input.diskGb ?? 20, ttlMinutes: 120, providers, ...(desktop ? { desktop: true } : {}) });
+        // (Its size is core's computerSize, which the apps say before it is made: a desktop is never made with less than 4 GB.)
+        const made = await api.call<{ sandbox: SandboxView }>("createSandbox", { on: best.device, persistent: true, isolation: "vm", network: input.network ?? "online", run: armRun(agentLabel(id)),
+          ...computerSize(desktop, input), ttlMinutes: 120, providers, ...(desktop ? { desktop: true } : {}) });
         sandbox = made.sandbox;
         if (without) ctx.ledger?.({ class: "create", resource: "team.workspace", target: id, verdict: "allow", detail: `made without a desktop: no host that can make this VM makes one (${String(without).slice(0, 240)})` });
       }

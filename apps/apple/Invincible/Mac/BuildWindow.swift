@@ -272,7 +272,7 @@ struct BuildWindow: View {
             Image(systemName: "desktopcomputer").foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: Space.line) {
                 Text("\(Primary.name) has no computer yet").font(.headline)
-                Text("Its own VM on your node, kept between conversations: each project's checkout lives there, with a terminal and a desktop. One processor and 2 GB to start; it grows as the work needs.")
+                Text("Its own VM on your node, kept between conversations: each project's checkout lives there, with a terminal and a desktop. \(ComputerStart.words(desktop: true)); it grows as the work needs.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

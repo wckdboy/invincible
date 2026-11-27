@@ -39,6 +39,17 @@ export const VM_OVERHEAD: VmOverhead = { cpus: 1, memoryGb: 2 };
  * Mac's until the VM stops, so a VM is counted at all it was given, and this on top.
  */
 export const MAC_VM_OVERHEAD: VmOverhead = { cpus: 1, memoryGb: 0.5 };
+/**
+ * What an agent's own computer (the primary's too) starts with as the node makes it, unless it is asked for more: one
+ * processor, 2 GB and 20 GB of disk; with a desktop, which a browser needs room for, never less than 4 GB. The apps say it
+ * from here (the Mac's Build window, before the primary's computer is made), held to it by their vectors.
+ */
+export const COMPUTER_START = { cpus: 1, memoryGb: 2, diskGb: 20, desktopMemoryGb: 4 } as const;
+/** The computer a node makes an agent: what was asked for, else COMPUTER_START, and with a desktop its memory at least. */
+export function computerSize(desktop: boolean, asked: { cpus?: number; memoryGb?: number; diskGb?: number } = {}): { cpus: number; memoryGb: number; diskGb: number } {
+  const memoryGb = asked.memoryGb ?? COMPUTER_START.memoryGb;
+  return { cpus: asked.cpus ?? COMPUTER_START.cpus, memoryGb: desktop ? Math.max(COMPUTER_START.desktopMemoryGb, memoryGb) : memoryGb, diskGb: asked.diskGb ?? COMPUTER_START.diskGb };
+}
 /** The most attempts one run runs at once. */
 export const MAX_EFFORT = 3;
 /** Extra attempts (beyond each run's first) the primary may spend in any 24 hours unless the owner says otherwise. */

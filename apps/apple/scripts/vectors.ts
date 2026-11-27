@@ -1581,6 +1581,10 @@ const linkCases: { name: string; steps: LinkStep[] }[] = [
 const links = [];
 for (const c of linkCases) links.push({ ...c, ...(await playLink(c.steps)) });
 
+// ---- an agent's own computer as the node makes it (core's computerSize) ----------------------------------------------
+// (the Mac's Build window says it before the primary's computer is made)
+const computer = { start: core.COMPUTER_START, sizes: [true, false].map((desktop) => ({ desktop, size: core.computerSize(desktop) })) };
+
 const live = { beatMs: core.LIVE_BEAT_MS, silentMs: SILENT_MS, helloWaitMs: HELLO_WAIT_MS, retryFirstMs: RETRY_FIRST_MS, retryMaxMs: RETRY_MAX_MS, steadyMs: STEADY_MS, gapMs: GAP_MS, topics: core.LIVE_TOPICS, cursors: liveCursors, links };
 
 // ---- a task on its Live Activity: its state, from the task and its trail, and its words (lib/live-activity.ts) ----------
@@ -1812,6 +1816,7 @@ const vectors = {
   marks,
   loops,
   seats,
+  computer,
 };
 const text = `${JSON.stringify(vectors, null, 2)}\n`;
 if (Bun.argv.includes("--check")) {

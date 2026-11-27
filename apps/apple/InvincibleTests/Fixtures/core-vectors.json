@@ -43629,5 +43629,31 @@
         }
       }
     ]
+  },
+  "computer": {
+    "start": {
+      "cpus": 1,
+      "memoryGb": 2,
+      "diskGb": 20,
+      "desktopMemoryGb": 4
+    },
+    "sizes": [
+      {
+        "desktop": true,
+        "size": {
+          "cpus": 1,
+          "memoryGb": 4,
+          "diskGb": 20
+        }
+      },
+      {
+        "desktop": false,
+        "size": {
+          "cpus": 1,
+          "memoryGb": 2,
+          "diskGb": 20
+        }
+      }
+    ]
   }
 }

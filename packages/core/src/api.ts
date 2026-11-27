@@ -15,7 +15,7 @@ import { EvalRecord, EvalRunId, type EvalRunSettings } from "./evals.ts";
 import { HarnessOptions, EvalPins, VariantName } from "./evals.ts";
 import type { Usage } from "./spend.ts";
 import { PricedModel, PriceSchema, SpendLines, type EvalSpent, UsageBudgetInput } from "./usage.ts";
-import { type ComputeUsage, EffortAsk, EffortLevel } from "./compute.ts";
+import { COMPUTER_START, type ComputeUsage, EffortAsk, EffortLevel } from "./compute.ts";
 import { DecisionRequest } from "./decisions.ts";
 import { CancelLookInput, ConversationId, LookLaterInput, ProjectBranchInput, ProjectCommitInput, ProjectGitInput, ProjectId, ProjectInput } from "./chats.ts";
 import { AgentId, AgentInput, TeamBacklogInput, TeamOwnDailyInput, TeamChangesInput, TeamCiInput, TeamEngramInput, TeamShipInput, TeamFileInput, TeamFilesInput, TeamRecruitInput, TeamRemoveInput, TeamRoomId, TeamRoomInput, TeamPostInput, TeamSayInput, TeamSeenInput, TeamTaskId, TeamTaskInput, TeamGiveInput, TeamControlInput, TeamOutcomeControlInput, TeamOutcomeInput, TeamSteerInput, TeamWorkspaceRun, AgentModels } from "./team.ts";
@@ -431,7 +431,7 @@ export const routes = {
   provisionAgent: {
     method: "POST", path: "/api/team/provision", scope: "fleet:admin",
     input: z.strictObject({
-      id: z.string().min(1).max(32), on: NodeRef.optional(), cpus: z.number().min(0.25).max(64).default(1), memoryGb: z.number().min(0.25).max(512).default(2), diskGb: z.number().int().min(1).max(2048).default(20),
+      id: z.string().min(1).max(32), on: NodeRef.optional(), cpus: z.number().min(0.25).max(64).default(COMPUTER_START.cpus), memoryGb: z.number().min(0.25).max(512).default(COMPUTER_START.memoryGb), diskGb: z.number().int().min(1).max(2048).default(COMPUTER_START.diskGb),
       /**
        * What the agent's VM can reach: `online` (the internet and the model gateway: the owner's word is that
        * agents can use the internet) or `gateway` (the model gateway and nothing else). Set when the VM is made:

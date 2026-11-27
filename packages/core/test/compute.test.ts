@@ -7,6 +7,8 @@ import {
   calibrationDue,
   ceilingThreads,
   clampNeed,
+  COMPUTER_START,
+  computerSize,
   MAC_VM_OVERHEAD,
   VM_OVERHEAD,
   type ComputeBody,
@@ -394,5 +396,16 @@ describe("the Index per effort level", () => {
     expect(only.levels[0]).toMatchObject({ effort: 1, n: 2 });
     expect(only.helps).toBeNull();
     expect(only.verdict).toMatch(/invincible eval run --effort/);
+  });
+});
+
+describe("an agent's own computer", () => {
+  test("starts with one processor, 2 GB and 20 GB of disk, and with a desktop 4 GB at least, unless asked for more", () => {
+    expect(computerSize(false)).toEqual({ cpus: 1, memoryGb: 2, diskGb: 20 });
+    expect(computerSize(true)).toEqual({ cpus: 1, memoryGb: 4, diskGb: 20 });
+    // What was asked for, where more; a desktop's memory never below its least.
+    expect(computerSize(true, { cpus: 2, memoryGb: 8, diskGb: 40 })).toEqual({ cpus: 2, memoryGb: 8, diskGb: 40 });
+    expect(computerSize(true, { memoryGb: 1 })).toEqual({ cpus: 1, memoryGb: COMPUTER_START.desktopMemoryGb, diskGb: 20 });
+    expect(computerSize(false, { memoryGb: 1 })).toEqual({ cpus: 1, memoryGb: 1, diskGb: 20 });
   });
 });

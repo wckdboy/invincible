@@ -446,6 +446,14 @@ struct Vectors: Decodable {
     let liveActivities: [LiveActivityCase]
     /// A loop's task, and what wakes it, in words (the PWA's lib/loops.ts and lib/wakes.ts): LoopsTests.swift.
     let loops: LoopCases
+    /// An agent's own computer as the node makes it (core's computerSize): ComputerStartTests.swift.
+    let computer: Computer
+
+    struct Computer: Decodable {
+        struct Size: Decodable, Equatable { let cpus: Double; let memoryGb: Double; let diskGb: Double }
+        struct Case: Decodable { let desktop: Bool; let size: Size }
+        let sizes: [Case]
+    }
 
     struct LoopCases: Decodable {
         struct TaskCase: Decodable { let task: JSONValue?; let words: String }
