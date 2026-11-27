@@ -456,8 +456,9 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   - a system or global configuration;
   - a hook, whatever hooks path the repository names (husky's among them), an fsmonitor, a signing program, an
     external diff or textconv, or an askpass program;
-  - a credential helper or proxy, a fetch of a submodule's (which would carry the lease to its own remote), or a
-    transport but HTTP and HTTPS;
+  - a credential helper or proxy, a fetch of a submodule's (which would carry the lease to its own remote: held by
+    a test against git's own smart-HTTP server, `held-git.test.ts`), an alternate object store's refs command (a
+    fetch's negotiation asks one: the fifth re-review's R5-3), or a transport but HTTP and HTTPS;
   - a filter the repository's configuration names, its own or one it includes: none is run or required, so its files
     are read and written as they are. A repository with Git LFS in it is used, with its pointers checked out as stored.
 
@@ -467,7 +468,6 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   an HTTP proxy, an address of its own for the gateway's host, a credential helper, or a remote named by the gateway's
   own address.
 - **Not yet held off** (the fifth review's R5-3, to be fixed before the fabric is switched on):
-  - an alternate object store's refs command, which the setup's fetch runs;
   - a nested repository's own filter, which `git add -A` and `git status` run;
   - the backlog look's `git log`, which isn't held at all.
 

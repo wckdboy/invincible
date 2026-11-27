@@ -10,8 +10,10 @@
  * - no system or global configuration (the VM's HOME is the agent's to change too), and no attributes from outside the
  *   repository;
  * - no fsmonitor, no hooks (core.hooksPath at /dev/null, whatever the repository's says), no signing (so no gpg.program
- *   of its), no askpass program, no fetch of a submodule's (which would carry the lease to the submodule's own remote),
- *   and no credential helper, proxy or transport but HTTP and HTTPS;
+ *   of its), no askpass program, no fetch of a submodule's (which would carry the lease to the submodule's own remote:
+ *   held by a test against git's own smart-HTTP server), no refs command of an alternate object store it borrows
+ *   from (a fetch's negotiation asks one, through a shell: the fifth review's R5-3 A; `true` lists none), and no
+ *   credential helper, proxy or transport but HTTP and HTTPS;
  * - every filter its configuration names, its own or one it includes, held off (`held_env`): no clean, smudge or process
  *   command of its runs, and none is required, so a file is added, checked out and compared as it is. Git LFS's among
  *   them: its pointers are checked out as they are stored (GIT_LFS_SKIP_SMUDGE too), and a file it would clean is kept
@@ -31,7 +33,7 @@
 export const HELD_GIT = `import json,os,re,shutil,subprocess,sys
 GIT_ENV={'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),'HOME':os.environ.get('HOME','/nonexistent'),'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':os.devnull,'GIT_ATTR_NOSYSTEM':'1','GIT_TERMINAL_PROMPT':'0','GIT_ASKPASS':'','GIT_LFS_SKIP_SMUDGE':'1','LC_ALL':'C'}
 # What a repository's configuration would have run, held off for every git of the node's.
-RUN_OFF=['-c','core.fsmonitor=false','-c','core.hooksPath='+os.devnull,'-c','core.excludesFile='+os.devnull,'-c','core.attributesFile='+os.devnull,'-c','core.askPass=','-c','commit.gpgSign=false','-c','tag.gpgSign=false','-c','log.showSignature=false','-c','submodule.recurse=false']
+RUN_OFF=['-c','core.fsmonitor=false','-c','core.hooksPath='+os.devnull,'-c','core.excludesFile='+os.devnull,'-c','core.attributesFile='+os.devnull,'-c','core.askPass=','-c','commit.gpgSign=false','-c','tag.gpgSign=false','-c','log.showSignature=false','-c','submodule.recurse=false','-c','core.alternateRefsCommand=true']
 # Where a fetch with the lease may go: no credential helper or proxy, and no transport but HTTP and HTTPS.
 LEASE_OFF=['-c','credential.helper=','-c','http.proxy=','-c','protocol.allow=never','-c','protocol.http.allow=always','-c','protocol.https.allow=always']
 HELD_OFF=RUN_OFF+LEASE_OFF

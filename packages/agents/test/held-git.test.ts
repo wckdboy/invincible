@@ -236,6 +236,141 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
   });
 });
 
+/** git's own smart-HTTP server (http-backend, as CGI) for the bare repositories under `root`, each request's Authorization kept. */
+function smartHttp(root: string) {
+  const backend = join(spawnSync("git", ["--exec-path"], { encoding: "utf8" }).stdout.trim(), "git-http-backend");
+  const asked: { path: string; auth: string | null }[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (req) => {
+      const url = new URL(req.url);
+      asked.push({ path: url.pathname, auth: req.headers.get("authorization") });
+      const body = req.method === "POST" ? new Uint8Array(await req.arrayBuffer()) : null;
+      const env: Record<string, string> = {
+        PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: root, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_PROJECT_ROOT: root, GIT_HTTP_EXPORT_ALL: "1", PATH_INFO: url.pathname, QUERY_STRING: url.search.slice(1),
+        REQUEST_METHOD: req.method, CONTENT_TYPE: req.headers.get("content-type") ?? "", REMOTE_ADDR: "127.0.0.1",
+        HTTP_CONTENT_ENCODING: req.headers.get("content-encoding") ?? "", HTTP_GIT_PROTOCOL: req.headers.get("git-protocol") ?? "",
+        ...(body ? { CONTENT_LENGTH: String(body.length) } : {}),
+      };
+      const proc = Bun.spawn([backend], { env, stdin: body ? "pipe" : "ignore", stdout: "pipe", stderr: "ignore" });
+      if (body && proc.stdin) {
+        proc.stdin.write(body);
+        await proc.stdin.end();
+      }
+      const out = new Uint8Array(await new Response(proc.stdout).arrayBuffer());
+      await proc.exited;
+      // (CGI: its headers, a blank line, then the body.)
+      const text = new TextDecoder("latin1").decode(out);
+      const end = text.indexOf("\r\n\r\n") >= 0 ? text.indexOf("\r\n\r\n") : text.indexOf("\n\n");
+      const gap = text.startsWith("\r\n", end) ? 4 : 2;
+      const headers = new Headers();
+      let status = 200;
+      for (const line of text.slice(0, end).split(/\r?\n/)) {
+        const at = line.indexOf(":");
+        if (at < 0) continue;
+        const [name, value] = [line.slice(0, at).trim(), line.slice(at + 1).trim()];
+        if (name.toLowerCase() === "status") status = Number.parseInt(value, 10);
+        else headers.set(name, value);
+      }
+      return new Response(out.slice(end + gap), { status, headers });
+    },
+  });
+  return { asked, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };
+}
+
+/*
+ * The lease's fetch against git's own smart-HTTP server (http-backend), behind a stand-in for the gateway and one for
+ * another host: what an experiment showed (R5-6's claims), held by a test. A submodule populated in the agent's
+ * repository, which asks for its submodules to be fetched with it (fetch.recurseSubmodules, as a task may write), has a
+ * remote of its own: a recursing fetch would carry the lease's Authorization there, as git hands its -c settings on to
+ * the submodule's own fetch. The held git's submodule.recurse=false, read after the repository's configuration, keeps
+ * the fetch from recursing at all.
+ */
+describe("the lease's fetch, against a smart-HTTP server", () => {
+  test("carries the lease to no submodule's own remote, whatever the repository asks of its submodules", async () => {
+    const v = vm();
+    const served = temp("held-served-");
+    const gate = smartHttp(served);
+    const other = smartHttp(served);
+    try {
+      const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: v.home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t.invalid" };
+      const run = (cwd: string, ...a: string[]) => spawnSync("git", ["-C", cwd, ...a], { env, encoding: "utf8" });
+      // (One that reaches a server here runs as a process of its own: the servers answer from this one.)
+      const reach = async (cwd: string, ...a: string[]) => (await Bun.spawn(["git", "-C", cwd, ...a], { env, stdout: "ignore", stderr: "ignore" }).exited);
+      // The submodule's repository, served by the other host, and the agent's, served by the gateway's stand-in.
+      const sub = join(served, "sub.git");
+      run(served, "init", "-q", "--bare", "sub.git");
+      const subWork = temp("held-subwork-");
+      run(subWork, "init", "-q");
+      writeFileSync(join(subWork, "lib.txt"), "one\n");
+      run(subWork, "add", ".");
+      run(subWork, "commit", "-q", "-m", "one");
+      run(subWork, "push", "-q", sub, "HEAD:refs/heads/main");
+      run(served, "--git-dir=sub.git", "symbolic-ref", "HEAD", "refs/heads/main");
+      expect(await reach(v.repo, "submodule", "add", "-q", `${other.url}/sub.git`, "sub")).toBe(0);
+      v.git("commit", "-q", "-m", "a submodule");
+      run(served, "init", "-q", "--bare", "repo.git");
+      v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
+      run(served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main");
+      // Since: the submodule moves on, and the repository with it, on the server.
+      writeFileSync(join(subWork, "lib.txt"), "two\n");
+      run(subWork, "commit", "-q", "-am", "two");
+      run(subWork, "push", "-q", sub, "HEAD:refs/heads/main");
+      const next = temp("held-next-");
+      run(next, "clone", "-q", join(served, "repo.git"), ".");
+      expect(await reach(next, "submodule", "update", "-q", "--init", "--remote")).toBe(0);
+      run(next, "commit", "-q", "-am", "the submodule moves on");
+      run(next, "push", "-q", "origin", "HEAD:refs/heads/main");
+      // The agent's repository asks for its submodules to be fetched with it, every time.
+      v.git("config", "fetch.recurseSubmodules", "yes");
+      v.lease(`${gate.url}/repo.git`);
+      gate.asked.length = 0;
+      other.asked.length = 0;
+      const ran = await v.start("task-sub");
+      expect(ran.status).toBe(0);
+      expect(ran.stdout.trim()).toMatch(/^[0-9a-f]{40} fetched$/);
+      expect(gate.asked.length).toBeGreaterThan(0);
+      expect(gate.asked.every((a) => a.auth === `Bearer ${TOKEN}`)).toBe(true);
+      expect(other.asked).toEqual([]);
+      // (The control: the same fetch, the node's -c settings alone and none of what holds it, carries the lease there.)
+      await reach(v.repo, "-c", `http.extraHeader=Authorization: Bearer ${TOKEN}`, "fetch", "-q", `${gate.url}/repo.git`, "+refs/heads/*:refs/remotes/origin/*");
+      expect(other.asked.some((a) => a.auth === `Bearer ${TOKEN}`)).toBe(true);
+    } finally {
+      gate.stop();
+      other.stop();
+    }
+  }, 30_000);
+
+  // (The fifth review's R5-3 A: a fetch's negotiation asks an alternate object store for its refs, by the repository's
+  // core.alternateRefsCommand, through a shell.)
+  test("runs no refs command of an alternate object store the repository names, as its fetch negotiates", async () => {
+    const v = vm();
+    const served = temp("held-served-");
+    const gate = smartHttp(served);
+    try {
+      spawnSync("git", ["-C", served, "init", "-q", "--bare", "repo.git"]);
+      v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
+      spawnSync("git", ["-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main"]);
+      // An object store the repository borrows from, and the command that would list its refs.
+      const alt = temp("held-alt-");
+      spawnSync("git", ["init", "-q", "--bare", alt]);
+      writeFileSync(join(v.repo, ".git/objects/info/alternates"), `${join(alt, "objects")}\n`);
+      writeFileSync(join(v.work, "alt-refs"), v.planted);
+      chmodSync(join(v.work, "alt-refs"), 0o755);
+      v.git("config", "core.alternateRefsCommand", join(v.work, "alt-refs"));
+      v.lease(`${gate.url}/repo.git`);
+      const ran = await v.start("task-alt");
+      expect(ran.status).toBe(0);
+      expect(ran.stdout.trim()).toMatch(/^[0-9a-f]{40} fetched$/);
+      expect(v.ran()).toBe("");
+    } finally {
+      gate.stop();
+    }
+  }, 30_000);
+});
+
 describe("a step's checkpoint, and what is kept to ship", () => {
   test("a checkpoint runs no hook or fsmonitor of the repository's, and keeps the step as before", async () => {
     const v = vm();
