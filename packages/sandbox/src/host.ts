@@ -1459,6 +1459,8 @@ export class SandboxHost {
     if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") {
       throw new SandboxError("that is not this agent's persistent VM", 403);
     }
+    // (Not while its store's move is under way, but by that move itself: half moved, its root holds neither layout.)
+    if (!opts.layout && this.moves.started(id)) throw new SandboxError("the agent's store is being moved to layout 2: its VM is made again by its next prepare, which takes the move up or puts it back", 409);
     const name = containerName(id);
     const aside = `${name}-replaced`;
     const network = opts.network ?? (sandbox.network === "isolated" ? "gateway" : sandbox.network);

@@ -339,6 +339,17 @@ describe("R4-6: a node that stops in the middle of a move", () => {
     expect(second.modes.map((m) => m.mode)).toEqual([]);
   });
 
+  test("nor is its VM made again by its owner while its move is under way: its prepare takes it up, or puts it back, first", async () => {
+    const root = store();
+    const first = await cut(root);
+    const second = hostOver(root, { containers: first.containers, moves: first.moves });
+    second.containers.set(containerName(ID), second.containers.get(`${containerName(ID)}-replaced`)!);
+    second.containers.delete(`${containerName(ID)}-replaced`);
+    await expect(second.host.remakeTeam(ID, RUN, { providers: ["openai"], approvedBy: "test-owner" })).rejects.toThrow("the agent's store is being moved to layout 2");
+    expect(second.made).toEqual([]);
+    expect(second.moves.started(ID)).not.toBeNull();
+  });
+
   test("nothing shares a store while its move is under way", async () => {
     const root = store();
     const first = await cut(root);
