@@ -214,7 +214,38 @@ export function screen(vm: OnScreen, label: string, opts: { keep?: string; pause
     await sh("desktop key ctrl+q");
     if (await focusIs(asks, 10)) await press(["push button"], discard);
   };
-  return { sh, settle, focusIs, press, quit, commands: () => commands };
+  /**
+   * Until no window like `title` is on the screen (`desktop windows`): a modal one, as a progress dialog is, takes the
+   * clicks meant for the window under it. Still there after `tries` looks, a quarter of a second apart, it is said, with
+   * what was on the screen.
+   */
+  const gone = async (title: RegExp, tries = 60): Promise<void> => {
+    for (let i = 0; i < tries; i++) {
+      if (!title.test((await sh("desktop windows")).stdout)) return;
+      await pause(250);
+    }
+    const missed = `${title.source} still on the screen after ${(tries * 250) / 1000} s`;
+    throw new Error(`${missed} (${await kept(missed)})`);
+  };
+  return { sh, settle, focusIs, press, quit, gone, commands: () => commands };
+}
+
+/**
+ * KiCad's board editor open on `board`, ready for its menus: null when it is, otherwise why it isn't. Ready is its
+ * window with the focus, the screen settled, and no "Loading PCB" up: that progress dialog comes and goes after the
+ * editor first takes the focus, and while it is up the editor's menus take no click. A still screen alone doesn't say
+ * it's gone, as its progress can stand still for longer than the settle waits.
+ */
+export async function openBoard(s: ReturnType<typeof screen>, board: string): Promise<string | null> {
+  must(await s.sh(`desktop app pcbnew ${board}`), "pcbnew started");
+  const first = await s.focusIs(/PCB Editor|File Open Warning|Configure Global/);
+  if (!first) return "no KiCad window took the focus";
+  if (/Configure Global/.test(first)) return "KiCad asked for its global library table: its seed didn't take";
+  if (/File Open Warning/.test(first)) await s.press(["push button"], "Open Anyway");
+  if (!(await s.focusIs(/PCB Editor/))) return "the PCB editor never took the focus";
+  await s.settle();
+  await s.gone(/"Loading PCB"/);
+  return null;
 }
 
 /** C0's examples through the screen, `n` runs each, as C0 found them done (KiCad's Plot, FreeCAD's STEP export). */
@@ -226,13 +257,8 @@ export async function byScreen(vm: BenchVm, n: number): Promise<Record<"kicadPlo
     let acted = 0;
     try {
       await s.sh(`rm -f ${HW}/*.gbr ${HW}/*.gbrjob`);
-      must(await s.sh(`desktop app pcbnew ${BOARD}`), "pcbnew started");
-      const first = await s.focusIs(/PCB Editor|File Open Warning|Configure Global/);
-      if (!first) return { ms: performance.now() - t0, ok: false, why: "no KiCad window took the focus" };
-      if (/Configure Global/.test(first)) return { ms: performance.now() - t0, ok: false, why: "KiCad asked for its global library table: its seed didn't take" };
-      if (/File Open Warning/.test(first)) await s.press(["push button"], "Open Anyway");
-      if (!(await s.focusIs(/PCB Editor/))) return { ms: performance.now() - t0, ok: false, why: "the PCB editor never took the focus" };
-      await s.settle();
+      const notReady = await openBoard(s, BOARD);
+      if (notReady) return { ms: performance.now() - t0, ok: false, why: notReady };
       await s.press(["menu"], "File");
       await s.press(["menu item"], "Plot...");
       if (!(await s.focusIs(/"Plot"/))) return { ms: performance.now() - t0, ok: false, why: "the Plot dialog never took the focus" };

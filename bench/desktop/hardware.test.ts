@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { drcAgrees, foundAt, plotted, screen } from "./hardware.ts";
+import { drcAgrees, foundAt, openBoard, plotted, screen } from "./hardware.ts";
 import type { Ran } from "./vm.ts";
 
 /* What the hardware suite's gates read (C1 step 11): a plot's files, a DRC's exit and report, where `desktop find` says a node is. */
@@ -106,5 +106,38 @@ describe("KiCad's quit", () => {
     const { vm, asked } = answering((command) => (command === "desktop focus" ? 'focus: Chromium "about:blank - Chromium"' : command.startsWith("desktop find ") ? null : ""));
     await screen(vm, "kicad-plot-2", { keep: mkdtempSync(join(tmpdir(), "invincible-bench-kept-")), ...nowait }).quit(/Save Changes\?/, "Discard");
     expect(asked.filter((c) => !c.startsWith("desktop focus"))).toEqual(["desktop key ctrl+q"]);
+  });
+});
+
+describe("KiCad's board editor, ready for its menus", () => {
+  /** pcbnew on the board, its editor with the focus and the screen settled at once, and "Loading PCB" up for `loading` looks. */
+  const opening = (loading: number) => {
+    let looks = 0;
+    return answering((command) => {
+      if (command.startsWith("desktop app pcbnew ")) return "started pcbnew";
+      if (command === "desktop focus") return 'focus: pcbnew "board — PCB Editor"';
+      if (command.includes("probe.py settle-full")) return '{"settled":true}';
+      if (command === "desktop windows") return looks++ < loading ? '"board — PCB Editor" (pcbnew)\n"Loading PCB" (KiCad PCB Editor) · focused' : '"board — PCB Editor" (pcbnew) · focused';
+      if (command.includes("desktop shot")) return PNG;
+      return "";
+    });
+  };
+
+  test("only once \"Loading PCB\" is gone: the editor's focus and a still screen aren't enough, as its menus take no click while it is up", async () => {
+    const { vm, asked } = opening(3);
+    const s = screen(vm, "kicad-plot-1", { keep: mkdtempSync(join(tmpdir(), "invincible-bench-kept-")), ...nowait });
+    expect(await openBoard(s, "/work/bench/hw/board.kicad_pcb")).toBeNull();
+    // (Looked at until it was gone: three times with it up, once without.)
+    expect(asked.filter((c) => c === "desktop windows")).toHaveLength(4);
+    expect(asked.lastIndexOf("desktop windows")).toBeGreaterThan(asked.findLastIndex((c) => c.includes("probe.py settle-full")));
+  });
+
+  test("not ready while \"Loading PCB\" never goes, and says so with what was on the screen", async () => {
+    const keep = mkdtempSync(join(tmpdir(), "invincible-bench-kept-"));
+    const { vm } = opening(Infinity);
+    const error = (await openBoard(screen(vm, "kicad-plot-2", { keep, ...nowait }), "/work/bench/hw/board.kicad_pcb").catch((e: Error) => e)) as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('"Loading PCB" still on the screen');
+    expect(readdirSync(keep).sort()).toEqual(["failed-kicad-plot-2-1.png", "failed-kicad-plot-2-1.txt"]);
   });
 });
