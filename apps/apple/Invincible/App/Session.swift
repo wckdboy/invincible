@@ -305,6 +305,10 @@ import Observation
         follow()
         liveOn = on
         if on {
+            // A node not yet proven here is asked at once. The stream waits for its proof (NodePin.ready), and would
+            // otherwise wait until it is said to be down for want of it, the hello's wait later: every cold launch (the
+            // re-check of apps-name-node, R3). A refusal standing is asked again as the stream, refused with it, goes down.
+            if !client.pin.proven, client.pin.refused == nil { Task { [weak self] in await self?.readMe() } }
             link.start()
             link.retry()
             path.start { [weak self] in self?.networkChanged() }

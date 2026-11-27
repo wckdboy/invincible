@@ -5,8 +5,8 @@ import Testing
 @testable import Invincible
 
 /// What a session does as its node answers whoami, against a node on this machine's loopback (LocalNode): a refusal
-/// stands until a proof holds, and a proof that lifts it opens the stream again (the re-check of apps-name-node, R1 and
-/// R2).
+/// stands until a proof holds, a proof that lifts it opens the stream again, and a session going live proves its node at
+/// once (the re-check of apps-name-node, R1 to R3).
 @MainActor @Suite(.serialized) struct SessionProofTests {
     func session(at node: LocalNode, pinned: String?, tag: String) throws -> Session {
         let key = try DeviceKey.create(tag: tag)
@@ -95,6 +95,29 @@ import Testing
         #expect(session.client.pin.refused == nil && session.trouble == nil)
         #expect(await eventually(5) { session.linkUp }, "the stream never opened again: it asked \(node.seen().map(\.path))")
         #expect(!session.reconnecting)
+    }
+
+    // R3: a session going live with its node not yet proven here proves it at once, so the stream opens as the node
+    // answers, never only once LiveLink says it is down for want of the proof (helloWait): every cold launch, before.
+    @Test func aSessionGoingLiveProvesItsNodeAtOnce() async throws {
+        let node = try await LocalNode(.a)
+        defer { node.stop() }
+        let tag = "sh.invincible.bot.tests.proof.r3"
+        defer { try? DeviceKey.delete(tag: tag) }
+        let session = try session(at: node, pinned: node.a, tag: tag)
+        let started = Date.now
+        session.live(true)
+        defer { session.live(false) }
+        #expect(await eventually(10) { session.linkUp })
+        let up = Date.now.timeIntervalSince(started) * 1000
+        let asked = node.asked()
+        let whoami = try #require(asked.first { $0.path.hasPrefix("/api/whoami") })
+        let stream = try #require(asked.first { $0.path.hasPrefix("/api/live") })
+        let ms = { (asked: LocalNode.Asked) in asked.at.timeIntervalSince(started) * 1000 }
+        print("PROOF R3 from live(true): whoami at \(Int(ms(whoami))) ms, the stream asked at \(Int(ms(stream))) ms, up (its hello) at \(Int(up)) ms")
+        #expect(ms(whoami) < LiveLink.helloWait, "whoami came \(Int(ms(whoami))) ms after the session went live, once the stream could be said down")
+        #expect(up < LiveLink.helloWait, "the stream was up \(Int(up)) ms after the session went live")
+        #expect(!asked.contains { $0.at < whoami.at }, "asked before whoami: \(asked.filter { $0.at < whoami.at }.map(\.path))")
     }
 }
 

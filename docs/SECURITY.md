@@ -123,10 +123,11 @@ The review also confirmed what held up:
   - **The iPhone, iPad, Mac and Android apps** pin it the same way: from the pairing, or a pairing from before at its
     first proven whoami, kept with the pairing while it is still that pairing (a late first proof never writes over a
     newer one); every request they sign names it. The review of apps-name-node's rules, in both apps:
-    - **Every session proves first.** Nothing but whoami is sent until the node at the address has proved itself in
-      this session: no read, no live stream, no post, no answer from a notification. What is sent then is signed for the
-      node it proved, so a pairing with no pin yet proves, pins and then signs v2 (`NodePin.ready`, iPhone and Mac; the
-      session's proof gate, Android).
+    - **Every session proves first, as it starts.** Nothing but whoami is sent until the node at the address has proved
+      itself in this session: no read, no live stream, no post, no answer from a notification. Whoami is asked as the
+      session goes live, so what waits waits only for its answer (the re-check of apps-name-node, R3). What is sent then
+      is signed for the node it proved, so a pairing with no pin yet proves, pins and then signs v2 (`NodePin.ready`,
+      iPhone and Mac; the session's proof gate, Android).
     - **A node that proves to be another, or whose proof fails, gets nothing more but whoami:** the app says "This isn't
       the node this device paired with", and hides the "can't reach" line, which would say otherwise. It asks that node
       only which it is: at Try again (pulling to refresh, on the iPhone and the Mac), and on the iPhone and the Mac also
