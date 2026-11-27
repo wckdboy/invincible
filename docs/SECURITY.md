@@ -515,7 +515,10 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
   - **Residual:** a full node that turned on you can write itself a grant as your word, as it can write a rule, and it
     can enroll a client that is you over HTTPS, which gives your agents work as you do: a full node is owner-equivalent
     across the fleet. Each grant names the node that recorded it (`invincible fabric grants`), and every grant a node
-    recorded ends when that node is revoked (I-f).
+    recorded ends when that node is revoked (I-f). Two edges of that (the second re-review's I-i):
+    - The device of yours a grant came from (`via`) is the recorder's own word.
+    - Revoking a node also ends an earlier grant of yours for a pair that node overwrote: the last writer wins, so
+      yours isn't restored, and you grant it again. Every replica agrees.
 - **A stolen chain.** A run's chain ends at the transport key of the node its task was handed to, so presented on any
   other connection it binds to nobody (Q-AMP SPEC 9.4 step 8): refused at the giver's sidecar. Re-signed by the run's
   own key to another key, it is refused at the giver's door (only the node the task was handed to). The chain and the

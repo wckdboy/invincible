@@ -110,8 +110,9 @@ transport keys carries all of it:
      [--tools fleet,…]` (the `grantHandoffs` route; `fabric grants`, `fabric revoke <from> <to>`). It is a
      `handoff.granted` event in the ledger, your word alone, recorded as rules and standing orders are: every replica
      refuses one that isn't your word or wasn't written by a full node, on replay too. Each names the full node that
-     recorded it (`invincible fabric grants` says which, and the device of yours it came from), and every grant a node
-     since revoked recorded ends with that node.
+     recorded it (`invincible fabric grants` says which, and the device of yours it came from, which is that node's
+     own word, its `via`), and every grant a node since revoked recorded ends with that node. So does a grant of yours
+     for the same pair that it overwrote: the last writer wins, so yours isn't restored, and you grant it again.
    - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of its
      day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among those it
      names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever smaller budget
@@ -362,7 +363,9 @@ answered and a Q-AMP release with the sidecar is pinned.
 - **A full node is owner-equivalent across the fleet, and nothing in the fabric changes that.** One that turned on you
   can enroll a client of its own, which is you over HTTPS on every node (it can give your agents work there), and it
   can write itself any grant for hand-offs as your word, as it can a rule. What the fabric adds is a record: each
-  grant names the node that recorded it, and every grant a revoked node recorded ends with it.
+  grant names the node that recorded it, and every grant a revoked node recorded ends with it (and with it any grant of
+  yours for a pair it overwrote, which you grant again). The device of yours a grant came from (`via`) is the
+  recorder's own word.
 - **The native apps** say nothing yet of hand-offs, their grants, or a task a node handed over (the web app and the CLI
   do); their parity vectors are unchanged.
 - **Q-AMP's side for grants that renew themselves** (holder-driven, in its spec first) isn't built. The giver renews
