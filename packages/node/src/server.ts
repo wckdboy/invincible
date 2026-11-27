@@ -168,7 +168,7 @@ import { handleKeyGateway, keyScope, ungivable } from "./key-gateway.ts";
 import { handleSandboxSearch, SearchError, searchWeb } from "./search.ts";
 import { type Caller, ConnectorCallError, type ConnectorService } from "./connectors.ts";
 import { checkSchedule, LoopError, loopRecords, type LoopRunner, runView, selfActionOn } from "./loops.ts";
-import { loopRun, privateLoops, runOfLoops } from "./private-data.ts";
+import { callerOfLoops, loopRun, privateLoops, runOfLoops } from "./private-data.ts";
 import { HOOK_MAX_BYTES, hookEvent, hookSecretName, hookSigned } from "./wakes.ts";
 import { addSeat, askSeat, recordSeatStatus, removeSeat, SeatError, seatSalt, seatUse, seatViews, setSeatPolicy, setSeatServes } from "./seats.ts";
 import { SeatSignIns } from "./seat-sign-in.ts";
@@ -4660,7 +4660,12 @@ export function createApp(ctx: AppContext) {
     connectorTool: (input, p) => connectorErrors(() => ctx.connectors.describe(input, connectorCaller(p))),
     // A private connector's call's words (a send's recipients, subject and words, why it was asked, what came back) reach
     // only your devices (fleet:admin, as the screen's routes): an agent reads that it waits, never what it says.
-    actions: (_input, p): { actions: ActionView[] } => ({ actions: ctx.connectors.actions().map((a) => (p.scopes.includes("fleet:admin") || !ctx.connectors.isPrivate(a.connector) ? a : withheldAction(a))) }),
+    actions: (_input, p): { actions: ActionView[] } => {
+      if (p.scopes.includes("fleet:admin")) return { actions: ctx.connectors.actions() };
+      // (A private loop's call is yours as a private connector's is, to whatever it goes: its words, its why, your note.)
+      const loops = privateLoops(ctx.store);
+      return { actions: ctx.connectors.actions().map((a) => (!ctx.connectors.isPrivate(a.connector) && !callerOfLoops(a.by, loops) ? a : withheldAction(a))) };
+    },
     away: (input, p): AwayView => {
       // Yours alone: its count of what waits for you reaches past what an agent may read (devices asking to join, say).
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you are told what happened while you were away");

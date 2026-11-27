@@ -1,9 +1,9 @@
 // What private-answers left a gap in (the re-review of 27 November, B2, B3, B4; its PoCs turned around): what was
 // recorded before it, a private connector's call a standing order answers, and one removed. And the side doors a
-// private run's words took after it: a loop once private, and a run's web searches. Against a real daemon (startDaemon)
-// and its routes, with stand-ins for Google, for Home Assistant on its LAN address and for the search engine: only
-// loopback reaches the network, and every other origin gets a stand-in's 404. Every name, address and message is made
-// up; the keys are obviously fake.
+// private run's words took after it: a loop once private, a run's web searches, and a private loop's calls to
+// connectors that aren't private. Against a real daemon (startDaemon) and its routes, with stand-ins for Google, for
+// Home Assistant on its LAN address, for a notes service and for the search engine: only loopback reaches the network,
+// and every other origin gets a stand-in's 404. Every name, address and message is made up; the keys are obviously fake.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,12 +28,16 @@ const changed = [
   { entity_id: "lock.front_door", state: "unlocked", attributes: { friendly_name: "Front door" }, last_changed: "2026-11-27T17:00:01+00:00" },
   { entity_id: "alarm_control_panel.home", state: "disarmed", attributes: { friendly_name: "Home alarm" }, last_changed: "2026-11-27T17:00:01+00:00" },
 ];
+/** A notes service that isn't private: what it answers holds what it was given. */
+const NOTES = "https://notes.example.test";
 const stand = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   // The search engine (search.ts SEARXNG) is answered here, never reached: no search leaves the test.
   if (url.origin === "http://127.0.0.1:8889") return Response.json({ results: [{ title: "A result", url: "https://example.test/a", content: "A page." }], suggestions: [] });
   if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return fetch(input, init);
   const method = init?.method ?? "GET";
+  if (url.origin === NOTES && method === "GET" && url.pathname === "/notes/1") return Response.json({ id: 1, text: "Ingrid Vestergaard wrote about the rent arrears" });
+  if (url.origin === NOTES && method === "POST" && url.pathname === "/notes") return Response.json({ id: 2 });
   if (url.origin === "https://oauth2.googleapis.com" && url.pathname === "/token") return Response.json({ access_token: "test-access-FAKE", expires_in: 3600, token_type: "Bearer" });
   if (url.origin === HA && method === "POST" && url.pathname === "/api/services/scene/turn_on") return Response.json(changed);
   if (url.origin === HA && method === "GET" && url.pathname === "/api/states") return Response.json(changed);
@@ -68,6 +72,8 @@ beforeAll(async () => {
   expect((await admin("setSecret", { name: "gmail", value: writeKeep({ client: "client-id.apps.example.test", secret: "test-secret-FAKE", refresh: "test-refresh-FAKE", account: "you@example.test" }), provider: "gmail" })).status).toBe(200);
   expect((await admin("setConnector", { id: "home-assistant", origin: HA })).status).toBe(200);
   expect((await admin("setSecret", { name: "home-assistant", value: "test-ha-token-FAKE", connector: "home-assistant" })).status).toBe(200);
+  const notes = { id: "notes", label: "Notes", origin: NOTES, tools: { look: { description: "Read a note", method: "GET", path: "/notes/{id}", class: "read", params: { id: { type: "string", required: true } } }, post: { description: "Post a note", method: "POST", path: "/notes", class: "outward", params: { text: { type: "string", required: true } } } } };
+  expect((await admin("setConnector", { id: "notes", manifest: notes })).status).toBe(200);
   agent = (await admin("mintArm", { label: "coder" })).body.token;
 });
 afterAll(async () => {
@@ -151,4 +157,23 @@ test("a web search carries the run that made it, as every line of a run does", a
   expect((await send(scout, "webSearch", { q: "quarterly reports" })).status).toBe(200);
   const line = ((await admin("ledger")).body.entries as { resource: string; run: string | null; target: string }[]).find((e) => e.resource === "search")!;
   expect([line.run, line.target]).toEqual(["arm.scout", "quarterly reports"]);
+});
+
+test("a private loop's calls to a connector that isn't private are written as a private one's, and an agent reads none of their words", async () => {
+  const mail = [{ kind: "mail", connector: "gmail", query: "from:ingrid" }];
+  // One it may make, a read: its line names the tool and says how it went, and so does the loop's run.
+  expect((await admin("setLoop", { name: "mailread", schedule: "0 9 * * 1", task: { kind: "call", connector: "notes", tool: "look", args: { id: "1" } }, wakes: mail })).status).toBe(200);
+  expect((await admin("runLoop", { name: "mailread" })).status).toBe(200);
+  for (let n = 0; n < 300 && daemon.store.loopRuns("mailread").length === 0; n++) await Bun.sleep(10);
+  expect(daemon.store.loopRuns("mailread")[0]!.body.summary).toMatch(/^notes\.look → ok \(200\), \d+ bytes \(\d+ ms\)$/);
+  const line = daemon.store.ledger(100).find((e) => e.body.resource === "connector.notes" && e.body.run === "loop.mailread")!;
+  expect([line.body.target, held(JSON.stringify(line.body))]).toEqual(["notes.look", []]);
+  // One that asks you, a post: an agent reads that it waits, not what it would say or why.
+  expect((await admin("setLoop", { name: "mailpost", schedule: "0 9 * * 1", task: { kind: "call", connector: "notes", tool: "post", args: { text: "Ingrid wrote about the rent arrears" } }, wakes: mail })).status).toBe(200);
+  expect((await admin("runLoop", { name: "mailpost" })).status).toBe(200);
+  for (let n = 0; n < 300 && daemon.store.loopRuns("mailpost").length === 0; n++) await Bun.sleep(10);
+  const theirs = ((await send(agent, "actions")).body.actions as ActionView[]).find((a) => a.by === "loop:mailpost")!;
+  expect([theirs.state, theirs.args, theirs.target, held(JSON.stringify(theirs))]).toEqual(["waiting", {}, "notes.post", []]);
+  const yours = ((await admin("actions")).body.actions as ActionView[]).find((a) => a.by === "loop:mailpost")!;
+  expect(yours.args).toEqual({ text: "Ingrid wrote about the rent arrears" });
 });

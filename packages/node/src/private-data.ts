@@ -6,8 +6,8 @@ import type { LedgerEntryInput } from "@invincible/sandbox";
  * Your private data where it isn't a private connector's own call (PRIVATE_CONNECTORS; the re-review of 27 November,
  * B1, B2, B4, and the side doors after it): a connector is private if it ever was, as the log says it was installed,
  * not only as it stands now; and so is a loop, when what it runs on is or was: one that new mail wakes, or one whose task
- * calls a private connector. What such a loop's runs record, and the lines they write in their own words, are yours
- * alone.
+ * calls a private connector. What such a loop's runs record, the lines they write in their own words and the calls
+ * they make are yours alone.
  */
 
 /** Whether a connector's answers are your private data: its id, its manifest now, or any manifest it was ever installed with. */
@@ -26,6 +26,14 @@ export const loopRun = (run: unknown): run is string => typeof run === "string" 
 export function runOfLoops(run: unknown, loops: ReadonlySet<string>): boolean {
   const name = loopRun(run) ? run.replace(/^(?:arm\.)?loop\./, "") : null;
   return name !== null && [...loops].some((loop) => name === loop || name.startsWith(`${loop}.`));
+}
+
+/** Whether a call's caller (an action's `by`) is one of these loops' runs: as the loop calls (`loop:<name>`), or as its arm does (`arm:loop.<name>`). */
+export function callerOfLoops(by: string, loops: ReadonlySet<string>): boolean {
+  const name = /^loop:(.+)$/.exec(by)?.[1];
+  if (name !== undefined) return loops.has(name);
+  const label = /^arm:(.+)$/.exec(by)?.[1];
+  return label !== undefined && runOfLoops(`arm.${label}`, loops);
 }
 
 /**

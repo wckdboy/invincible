@@ -57,7 +57,7 @@ import {
 } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
 import type { LedgerEntryInput } from "@invincible/sandbox";
-import { connectorIsPrivate } from "./private-data.ts";
+import { callerOfLoops, connectorIsPrivate, privateLoops } from "./private-data.ts";
 
 /*
  * Connector calls, through approvals:
@@ -463,9 +463,17 @@ export class ConnectorService {
     return connectorIsPrivate(this.o.store, id);
   }
 
-  /** What a call's line in the ledger names it by: its request, or a private connector's tool alone (no path, no word of its arguments). */
-  private said(connector: string, tool: string, target: string): string {
-    return this.isPrivate(connector) ? `${connector}.${tool}` : target;
+  /**
+   * Whether a call's words are yours alone: a private connector's, or any call a run of a private loop makes (one that
+   * your private data wakes or feeds: private-data.ts), whichever connector it goes to. `by`: who asked.
+   */
+  private secretCall(connector: string, by: string | undefined): boolean {
+    return this.isPrivate(connector) || (by !== undefined && callerOfLoops(by, privateLoops(this.o.store)));
+  }
+
+  /** What a call's line in the ledger names it by: its request, or a private call's tool alone (no path, no word of its arguments). */
+  private said(connector: string, tool: string, target: string, by: string | undefined): string {
+    return this.secretCall(connector, by) ? `${connector}.${tool}` : target;
   }
 
   async call(input: { connector: string; tool: string; args?: Record<string, ArgValue>; why?: string }, caller: Caller): Promise<CallOutcome> {
@@ -489,6 +497,7 @@ export class ConnectorService {
     }
     const resource = `connector.${manifest.id}`;
     const run = caller.kind === "agent" ? caller.run : undefined;
+    const by = caller.kind === "agent" ? caller.by : undefined;
     const decision = decide({ class: request.class, resource, target: request.target, ...(run ? { run } : {}) });
     if (decision.verdict === "deny") throw new ConnectorCallError(403, decision.reason);
 
@@ -529,7 +538,7 @@ export class ConnectorService {
           if (!sent.result) throw new ConnectorCallError(sent.status ?? 502, sent.receipt);
           // (Answered by your order or by your agent's own approval, a private connector's answer is still yours: the
           // chat's gate and a loop's record hold it as they hold any of its answers. The re-review's B3.)
-          return { status: "done", class: request.class, target: request.target, result: sent.result, order: { id: order.id, label: order.label }, action: id, ...(this.isPrivate(manifest.id) ? { private: true as const } : {}) };
+          return { status: "done", class: request.class, target: request.target, result: sent.result, order: { id: order.id, label: order.label }, action: id, ...(this.secretCall(manifest.id, by) ? { private: true as const } : {}) };
         }
       }
       if (own) {
@@ -538,27 +547,27 @@ export class ConnectorService {
         if (filed?.state === "approved") {
           const sent = await this.sendApproved(filed, `on your agent's own approval: ${own.why}`, { own: true, facts: own.facts, call: own.call });
           if (!sent.result) throw new ConnectorCallError(sent.status ?? 502, sent.receipt);
-          return { status: "done", class: request.class, target: request.target, result: sent.result, own: own.why, ...(own.facts.pullCommits ? { commits: [...own.facts.pullCommits] } : {}), action: id, ...(this.isPrivate(manifest.id) ? { private: true as const } : {}) };
+          return { status: "done", class: request.class, target: request.target, result: sent.result, own: own.why, ...(own.facts.pullCommits ? { commits: [...own.facts.pullCommits] } : {}), action: id, ...(this.secretCall(manifest.id, by) ? { private: true as const } : {}) };
         }
       }
-      this.o.ledger({ class: request.class, resource, target: this.said(manifest.id, input.tool, request.target), verdict: "ask", reason: decision.reason, run, detail: `action ${id}, asked by ${caller.by}` });
+      this.o.ledger({ class: request.class, resource, target: this.said(manifest.id, input.tool, request.target, by), verdict: "ask", reason: decision.reason, run, detail: `action ${id}, asked by ${caller.by}` });
       return { status: "asked", action: id, class: request.class, target: request.target, expires };
     }
 
     const approved = decision.verdict === "ask"; // the owner asked: that is the approval
     const result = await this.send(manifest, request);
     // What a private connector answered stays in the answer that read it: its line says only how it went, and its size.
-    const secret = this.isPrivate(manifest.id);
+    const secret = this.secretCall(manifest.id, by);
     this.o.ledger({
       class: request.class,
       resource,
-      target: this.said(manifest.id, input.tool, request.target),
+      target: this.said(manifest.id, input.tool, request.target, by),
       verdict: approved ? "approved" : "allow",
       reason: approved ? "you asked for it" : decision.reason,
       run,
       detail: `${caller.kind === "owner" ? "by you" : `by ${caller.by}`} · ${secret ? sized(result) : excerpt(result, 300)}`.slice(0, 2000),
     });
-    return { status: "done", class: request.class, target: request.target, result, ...(this.isPrivate(manifest.id) ? { private: true as const } : {}) };
+    return { status: "done", class: request.class, target: request.target, result, ...(secret ? { private: true as const } : {}) };
   }
 
   /**
@@ -716,7 +725,7 @@ export class ConnectorService {
     this.o.ledger({
       class: action.class as LedgerEntryInput["class"],
       resource: `connector.${action.connector}`,
-      target: this.said(action.connector, action.tool, action.target),
+      target: this.said(action.connector, action.tool, action.target, action.by),
       verdict: approve ? "approved" : "deny",
       reason: approve ? "you approved it" : "you declined",
       detail: `action ${id}`,
@@ -764,7 +773,7 @@ export class ConnectorService {
     this.o.ledger({
       class: request.class as LedgerEntryInput["class"],
       resource,
-      target: this.said(action.connector, action.tool, request.target),
+      target: this.said(action.connector, action.tool, request.target, action.by),
       verdict: "approved",
       reason: "you approved it as you edited it",
       detail: `action ${id}, edited from ${action.id}`,
@@ -804,7 +813,7 @@ export class ConnectorService {
       this.o.ledger({
         class: action.class as LedgerEntryInput["class"],
         resource: `connector.${action.connector}`,
-        target: this.said(action.connector, action.tool, action.target),
+        target: this.said(action.connector, action.tool, action.target, action.by),
         verdict: "deny",
         reason: "the approval expired before it could be sent",
         detail: `action ${action.id}, asked by ${action.by} · ${receipt}`.slice(0, 2000),
@@ -845,8 +854,9 @@ export class ConnectorService {
     let status: number | undefined;
     let receipt: string;
     let result: ConnectorResult | undefined;
-    // A private connector's receipt, and its line in the ledger, say how it went and nothing it said (PRIVATE_CONNECTORS).
-    const secret = this.isPrivate(action.connector);
+    // A private call's receipt (a private connector's, or a private loop's to any: secretCall), and its line in the ledger,
+    // say how it went and nothing it said.
+    const secret = this.secretCall(action.connector, action.by);
     let sending = false;
     try {
       const manifest = this.manifest(action.connector);
@@ -869,7 +879,7 @@ export class ConnectorService {
     this.o.ledger({
       class: action.class as LedgerEntryInput["class"],
       resource: `connector.${action.connector}`,
-      target: this.said(action.connector, action.tool, action.target),
+      target: this.said(action.connector, action.tool, action.target, action.by),
       verdict: "approved",
       reason: ok ? `sent ${why}` : `failed ${why}`,
       detail: `action ${action.id}, asked by ${action.by} · ${receipt}`.slice(0, 2000),
