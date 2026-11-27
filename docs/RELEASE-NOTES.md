@@ -19,7 +19,11 @@ What a release has to say beyond its commits: what you must do, and by when. The
   - **Where it is said:** docs/SECURITY.md, "Signed requests".
 - **From 14 December 2026, a node's signature on the log and on link calls holds Ed25519's strict rule.**
   - **What changes:** an event stamped from then, or a link call made from then, whose key or signature fails the rule
-    (a small-order or mixed-order point, or one written two ways) is refused. What an honest node signs always holds it.
-  - **What you must do:** nothing. Every node checks the same way from the same moment, so a fleet agrees, and what its
-    log holds from before is judged as it always was.
+    (a small-order or mixed-order point, or a point not in its one canonical encoding) is refused. What an honest node
+    signs always holds it.
+  - **What you must do: run this release on every node before 14 December 2026.** A node still on an older release past
+    that day checks signatures the old way: it takes a forgery the others refuse, and keeps it, and serves it, after it
+    upgrades, so its log no longer agrees with theirs. Then run `invincible doctor` on one of them: it names any node
+    whose key fails the rule (`mind.keys`), which `invincible revoke <id>` ends. What a log holds from before is judged
+    as it always was.
   - **Where it is said:** docs/SECURITY.md, "Held to Ed25519's strict rule".
