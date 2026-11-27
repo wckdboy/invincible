@@ -107,9 +107,8 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
     ) {
         val scope = rememberCoroutineScope()
         Column(Modifier.fillMaxWidth().padding(Space.margin), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-            // Its mark, the one in focus on its own page: moving while it works, still otherwise.
-            // (Its mark, the one in focus here: it moves in its state's way.)
-            AgentMarkView(id, person?.avatar, 96.dp, state = AgentMark.state(row?.state), live = true, description = person?.name)
+            // Its glass, its dot saying how it stands (its light breathing while it works).
+            AgentMarkView(id, person?.avatar, 96.dp, state = AgentMark.state(row?.state), description = person?.name)
             Text(person?.name ?: id, style = MaterialTheme.typography.headlineSmallEmphasized)
             StateChip(row?.state)
             row?.let { Text(Roster.besideChip(it.line, it.state), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -119,13 +118,13 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
                     TextButton(onClick = {
                         scope.launch { runCatching { app.client?.post("/api/team/control", Json.obj("agent" to id, "action" to if (p.enabled) "pause" else "resume")); app.refresh() } }
                     }) { Text(if (p.enabled) "Pause ${p.name}" else "Resume ${p.name}") }
-                    // Its mark's colour, chosen once the node has answered (never from the agents this phone kept).
-                    if (table.asOf == null) TextButton(onClick = { colouring = true }) { Text("Its colour") }
+                    // Its glass, chosen once the node has answered (never from the agents this phone kept).
+                    if (table.asOf == null) TextButton(onClick = { colouring = true }) { Text("Its glass") }
                 }
             }
         }
     }
-    if (colouring) person?.let { p -> ColourDialog(app, id, p.name, p.avatar) { colouring = false } }
+    if (colouring) person?.let { p -> GlassDialog(app, id, p.name, p.avatar) { colouring = false } }
 }
 
 /** A room's page: who sits in it, what was said there and its tasks, and a box to write to them all. */

@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -79,6 +80,7 @@ fun SettingsScreen(app: AppModel, openKeys: () -> Unit, openConnectors: () -> Un
             Text("The services ${Primary.name} reaches for you (mail, calendars, GitHub and more): add one, sign in as yourself or seal its key, and see what it can do.", style = MaterialTheme.typography.bodyMedium)
             OutlinedButton(onClick = openConnectors) { Text("Open Connectors") }
         }
+        GuardianPanel()
         paired?.let { p ->
             Panel {
                 Text("Your node", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -124,6 +126,26 @@ fun SettingsScreen(app: AppModel, openKeys: () -> Unit, openConnectors: () -> Un
  * keeps them and this phone asks for them; instant, they come through a UnifiedPush distributor of your choice (Sunup,
  * ntfy, or another), encrypted to this phone's own key. What it sends and when it stays quiet are the node's settings.
  */
+/** Your agent's mark on this phone: its I-beam on a tile in ink (as it comes), or in pearl glass. */
+@Composable
+private fun GuardianPanel() {
+    val context = LocalContext.current
+    val pearl by GuardianSetting.pearl(context)
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s3)) {
+            PrimaryMark(40.dp)
+            Column(Modifier.weight(1f)) {
+                Text("Your agent's mark", style = MaterialTheme.typography.titleMediumEmphasized)
+                Text("Its I-beam, in ink or in pearl glass: this phone's choice alone.", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+            FilterChip(selected = !pearl, onClick = { GuardianSetting.set(context, false) }, label = { Text("Ink") })
+            FilterChip(selected = pearl, onClick = { GuardianSetting.set(context, true) }, label = { Text("Pearl glass") })
+        }
+    }
+}
+
 @Composable
 private fun NotificationsPanel(app: AppModel) {
     val context = LocalContext.current

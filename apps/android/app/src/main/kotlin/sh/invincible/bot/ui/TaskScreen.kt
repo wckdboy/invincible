@@ -320,7 +320,7 @@ private fun ThreadHead(task: TeamTask, name: String, project: Work.Project, avat
                 contentAlignment = Alignment.Center,
             ) {
                 // (Its agent's mark, in focus here: it moves while the task does, and arrives once as it ends.)
-                AgentMarkView(task.assignee, avatar, 28.dp, state = markStateOf(task.status), live = true)
+                AgentMarkView(task.assignee, avatar, 28.dp, state = markStateOf(task.status))
             }
         }
         Hairline()
