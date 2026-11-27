@@ -94,6 +94,43 @@ async function session(r: Running, requests: unknown[]): Promise<any[]> {
   });
 }
 
+/** A held session that stays open, as the node's does: on the agent's socket, or on the owner's beside the run directory. */
+async function opened(r: Running, owner = false): Promise<{ ask: (q: unknown) => Promise<any>; close: () => Promise<void> }> {
+  const s = createConnection(owner ? `${r.run}.owner.sock` : join(r.run, "deskd.sock"));
+  await new Promise<void>((resolve, reject) => {
+    s.once("connect", () => resolve());
+    s.once("error", reject);
+  });
+  s.write("SESSION\n");
+  let buffer = "";
+  const waiting: ((answer: any) => void)[] = [];
+  s.on("data", (chunk) => {
+    buffer += chunk.toString();
+    let at: number;
+    while ((at = buffer.indexOf("\n")) >= 0) {
+      const answer = JSON.parse(buffer.slice(0, at));
+      buffer = buffer.slice(at + 1);
+      waiting.shift()?.(answer);
+    }
+  });
+  return {
+    ask: (q) =>
+      new Promise((resolve) => {
+        waiting.push(resolve);
+        s.write(`${JSON.stringify(q)}\n`);
+      }),
+    close: () => new Promise((resolve) => s.end(() => resolve())),
+  };
+}
+
+/** The agent's command from its shell, run while the test goes on. */
+async function agentAsync(r: Running, args: string[]) {
+  const t0 = performance.now();
+  const p = Bun.spawn([built!, ...args], { env: r.env, cwd: r.run, stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  return { code, out, err, ms: performance.now() - t0 };
+}
+
 /** A PNG's size and its pixels as RGB (it is made with no filter: deskd's own). */
 function decodePng(png: Buffer): { width: number; height: number; at: (x: number, y: number) => [number, number, number] } {
   expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
@@ -220,6 +257,87 @@ describe("the desktop command: deskd's thin client", () => {
     }
     return true;
   };
+
+  // C1 step 9: the owner's take-over. Their requests come on their own socket, from their own uid (the node's exec as
+  // OWNER_UID: here the test's own uid, set so), and only theirs take the desktop over or give it back.
+  const me = String(process.getuid!());
+
+  test("while the owner holds the desktop, an agent's command waits; it runs once they give it back, and is told how long it waited", async () => {
+    if (!needs()) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me, INVINCIBLE_DESKTOP_HOLD_WAIT: "10" });
+    const node = await opened(r, true);
+    expect(await node.ask({ id: 1, name: "take", input: { idle: 30 } })).toMatchObject({ ok: true, held: { idle: 30, most: 900 } });
+    const clicking = agentAsync(r, ["click", "10", "20"]);
+    await Bun.sleep(700);
+    expect(calls(r.trace(), "button")).toHaveLength(0);
+    expect(await node.ask({ id: 2, name: "release" })).toMatchObject({ ok: true, released: true });
+    const clicked = await clicking;
+    expect(clicked).toMatchObject({ code: 0 });
+    expect(clicked.out).toStartWith("clicked at 10,20");
+    expect(clicked.err).toMatch(/^desktop: the owner had this desktop; they gave it back after \d+ s, and this ran then\.\n/);
+    expect(clicked.ms).toBeGreaterThan(600);
+    expect(calls(r.trace(), "button")).toHaveLength(2);
+    await node.close();
+  });
+
+  test("an agent's command still waiting when its time is up does nothing: it exits 75 and says the owner has the desktop", async () => {
+    if (!needs()) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me, INVINCIBLE_DESKTOP_HOLD_WAIT: "0.4" });
+    const node = await opened(r, true);
+    await node.ask({ id: 1, name: "take" });
+    const held = await agentAsync(r, ["click", "10", "20"]);
+    expect(held).toMatchObject({ code: 75, out: "" });
+    expect(held.err).toMatch(/^desktop: nothing was done: the owner took this desktop over \d+ s ago, and has it for up to \d+ s more/);
+    expect(calls(r.trace(), "button")).toHaveLength(0);
+    // A look waits too: no picture is taken while the owner has the desktop. Its status and `start` don't.
+    expect((await agentAsync(r, ["screenshot", "--base64"])).code).toBe(75);
+    expect((await agentAsync(r, ["status"])).out).toContain("The owner has it: the owner took this desktop over");
+    expect((await agentAsync(r, ["start"])).code).toBe(0);
+    await node.close();
+  });
+
+  test("the owner's own requests run while they hold it; with no input from them for its idle time, it ends by itself", async () => {
+    if (!needs()) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me, INVINCIBLE_DESKTOP_HOLD_WAIT: "0.3" });
+    const node = await opened(r, true);
+    await node.ask({ id: 1, name: "take", input: { idle: 1 } });
+    expect(await node.ask({ id: 2, name: "left_click", input: { coordinate: [5, 5] } })).toMatchObject({ ok: true });
+    expect((await agentAsync(r, ["click", "10", "20"])).code).toBe(75);
+    await Bun.sleep(1300);
+    const after = await agentAsync(r, ["click", "10", "20"]);
+    expect(after).toMatchObject({ code: 0, err: "" });
+    await node.close();
+  });
+
+  test("only the owner's socket, from the owner's uid, takes the desktop over: the agent's own session can't, whatever it says", async () => {
+    if (!needs()) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me });
+    const [plain, claiming] = await session(r, [{ id: 1, name: "take" }, { id: 2, name: "take", as: "owner" }]);
+    for (const answer of [plain, claiming]) expect(answer).toMatchObject({ ok: false, refused: true, error: "only the owner takes the desktop over, or gives it back: through their node" });
+    // On the owner's socket, from another uid than the owner's: no more the owner's than the agent's own.
+    const other = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: "4242" });
+    const stranger = await opened(other, true);
+    expect(await stranger.ask({ id: 1, name: "take" })).toMatchObject({ ok: false, refused: true });
+    await stranger.close();
+    expect(statSync(`${r.run}.owner.sock`).mode & 0o777).toBe(0o666);
+    expect(statSync(r.run).mode & 0o777).toBe(0o700);
+  });
+
+  test("the desktop is given back as the owner's connection ends, and a second take starts a fresh window", async () => {
+    if (!needs()) return;
+    const r = await deskd({ INVINCIBLE_DESKTOP_OWNER_UID: me, INVINCIBLE_DESKTOP_HOLD_WAIT: "0.3" });
+    const first = await opened(r, true);
+    await first.ask({ id: 1, name: "take", input: { idle: 1 } });
+    await Bun.sleep(700);
+    const again = await first.ask({ id: 2, name: "take", input: { idle: 2 } });
+    expect(again.held.ends_in).toBeGreaterThan(1.9);
+    await Bun.sleep(700);
+    // (1.4 s after the first take, its idle second long gone: the second's window, to 2.7 s, holds it still.)
+    expect((await agentAsync(r, ["click", "10", "20"])).code).toBe(75);
+    await first.close();
+    await Bun.sleep(100);
+    expect(await agentAsync(r, ["click", "10", "20"])).toMatchObject({ code: 0, err: "" });
+  });
 
   test("desktop stream starts the desktop, says so on stderr, and becomes the encoder: its stdout is the frames alone", async () => {
     if (!needs()) return;

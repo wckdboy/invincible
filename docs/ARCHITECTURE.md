@@ -345,6 +345,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
     - It sends 10 frames a second while the screen changes, and nothing while it is still. A `fast` on its stdin, which
       your own input will send, makes it 25 for 2 s. Each frame is the whole screen with the pointer drawn in, its
       capture time beside it.
+    - **Take-over:** your input goes through deskd under a lock. While you hold the desktop, the agent's desktop
+      requests wait, and are told (SECURITY.md: how it is yours alone, and what it can't promise).
     - **The codec's licence:** its encoder, `desktop-stream`, is built against OpenH264 (BSD-2-Clause), Debian's
       `libopenh264-8`.
     - **H.264's patents:**

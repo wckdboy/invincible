@@ -276,8 +276,19 @@ On a Mac you choose (the Mac mini, 17 November 2026), Invincible's computer can 
   and are kept in its VM's `/work/.evidence/desktop` by their SHA-256; to no other model. A run of yours from a
   terminal or an eval sends its reviewer's through your node as your own files go, kept there by the same hash until
   a week unused (only you attach files: a run on another's token sends their hashes). The node scans what results
-  and calls say for secrets, not pictures (what is on that screen is what the agent already sees). Your take-over's
-  screens are step 9's.
+  and calls say for secrets, not pictures (what is on that screen is what the agent already sees).
+- **Your take-over is yours alone** (C1 step 9; deskd, tested in `packages/sandbox/test/deskd.test.ts`).
+  - **Who takes it:** the node takes the desktop over for you through a held session of its own, which its exec runs as
+    a uid that is never the agent's (1001), on a socket of its own beside deskd's directory. deskd counts a connection
+    there as yours only from that uid, as the kernel says (`SO_PEERCRED`). A request can't say it is yours: an agent's
+    session that does is refused.
+  - **While you hold it:** the agent's desktop requests wait, 30 s at most, then do nothing and exit 75, saying the
+    desktop is yours. Its looks wait too, so no picture taken while you type reaches its model.
+  - **How it ends:** on your second tap, after 120 s with no input from you, after 15 min at most, or when the node's
+    session ends. A second take starts a fresh window.
+  - **What it can't promise:** the VM is the agent's. A program of its own there runs as deskd's own user. It can read
+    the display and what you type into it, or stand in for deskd's sockets. Take-over keeps the agent's model from
+    taking the screen while you hold it. It doesn't make the VM a place for a secret you wouldn't give the agent.
 - **The accessibility bus is the VM's own.** It starts with the desktop, as the agent's user, its sockets in deskd's
   own directory; deskd reads it for `desktop tree` and `find`. It shows what the apps on that display already show,
   to the same user, and reaches nothing outside the VM.

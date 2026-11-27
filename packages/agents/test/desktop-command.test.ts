@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { desktopArgv, plainWords } from "../src/desktop-command.ts";
+import { desktopArgv, desktopBriefing, plainWords } from "../src/desktop-command.ts";
 
 /*
  * Which of an agent's commands its VM's held desktop session runs (no login shell, a few milliseconds) and which stay
@@ -78,4 +78,8 @@ test("eyes that answer places in a space of their own are told it beside their n
   expect(desktopArgv('desktop look "Where is Send?"', "vision/model-1", null)).toEqual(["look", "--eyes", "vision/model-1", "Where is Send?"]);
   // A space that isn't one is never handed on: the look goes as it would without one.
   expect(desktopArgv('desktop look "Where is Send?"', "vision/model-1", "inches; reboot")).toEqual(["look", "--eyes", "vision/model-1", "Where is Send?"]);
+});
+
+test("an agent with a desktop is told the owner can take it over: its desktop commands then wait, and one that waits too long exits 75 and says so (C1 step 9)", () => {
+  expect(desktopBriefing()).toContain("The owner can take this desktop over: while they have it, your desktop commands wait, and one that waits too long does nothing, exits 75 and says so.");
 });

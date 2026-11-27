@@ -41,6 +41,14 @@ RUN = os.environ.get("INVINCIBLE_DESKTOP_RUN", "/tmp/invincible-desktop")
 WAIT = float(os.environ.get("INVINCIBLE_DESKTOP_WAIT", "20"))
 PORT = 9222
 QUIET = 0.150  # the screen is settled once nothing has been drawn for this long
+# The owner's take-over (C1 step 9): it ends after HOLD_IDLE s with no input from them, and after HOLD_MOST s at most;
+# an agent's request waits HOLD_WAIT s for it to end before it is told the owner still has the desktop.
+HOLD_IDLE, HOLD_MOST = 120.0, 900.0
+HOLD_WAIT = float(os.environ.get("INVINCIBLE_DESKTOP_HOLD_WAIT", "30"))
+HELD_EXIT = 75  # what an agent's command exits with when the owner has the desktop (EX_TEMPFAIL: try again later)
+# The owner's connections: the node's own exec runs its held session as this uid (never the agent's, 1000), on a socket
+# of its own, so an agent can't say it is the owner.
+OWNER_UID = int(os.environ.get("INVINCIBLE_DESKTOP_OWNER_UID", "1001"))
 SETTLE_CAP = 3.0  # and is never waited for longer than this
 GRACE = 0.060  # an action's answer waits this long at most for the screen to show it
 CDP_BOUND = 2.0  # every call to the browser answers within this, or says it didn't
@@ -67,6 +75,10 @@ class Refused(Exception):
 
 class Failed(Exception):
     """It tried, and it didn't happen (exit 1)."""
+
+
+class Held(Exception):
+    """The owner has taken the desktop over, and an agent's request waited as long as it may (exit HELD_EXIT): nothing done."""
 
 
 # ---------------------------------------------------------------- the display's libraries (Linux, loaded on first use)
@@ -1311,6 +1323,63 @@ class Desk:
         self.navigating_since = None
         self.stopping = False
         self._listening = False
+        # The owner's take-over: the connection that took it (the node's held session), since and until when.
+        self.hold = None
+        self.hold_changed = threading.Condition()
+
+    # -- the owner's take-over (C1 step 9): while they hold the desktop, an agent's requests wait, and are told
+    def holding(self):
+        """The hold in force, or None: one past its idle time or its most is given back as it is asked about."""
+        with self.hold_changed:
+            h = self.hold
+            if h and (self.now() - h["last"] > h["idle"] or self.now() - h["taken"] > h["most"]):
+                self.hold = h = None
+                self.hold_changed.notify_all()
+            return h
+
+    def take(self, who, idle=HOLD_IDLE, most=HOLD_MOST):
+        """The owner takes the desktop over, through `who` (the node's connection): a second take starts a fresh window."""
+        with self.hold_changed:
+            now = self.now()
+            self.hold = {"who": who, "since": time.time(), "taken": now, "last": now, "idle": idle, "most": most}
+            self.hold_changed.notify_all()
+            return self.hold
+
+    def give_back(self, who, anyone=False):
+        """The desktop given back: by the owner (their second tap, `anyone` of their connections), or as the connection
+        that took it ends. Whether it was held."""
+        with self.hold_changed:
+            if self.hold is None or (not anyone and self.hold["who"] is not who):
+                return False
+            self.hold = None
+            self.hold_changed.notify_all()
+            return True
+
+    def touched(self):
+        """The owner's own input: a hold's idle time starts again."""
+        with self.hold_changed:
+            if self.hold is not None:
+                self.hold["last"] = self.now()
+
+    def hold_ends(self, h):
+        """How long the hold has left, at most: its idle time or its most, whichever ends it first."""
+        return max(0.0, min(h["last"] + h["idle"], h["taken"] + h["most"]) - self.now())
+
+    def wait_for_owner(self, cap=None):
+        """An agent's request: waits while the owner holds the desktop, `cap` s at most. (seconds waited, the hold still in force or None)."""
+        cap = HOLD_WAIT if cap is None else cap
+        start = self.now()
+        with self.hold_changed:
+            while True:
+                h = self.holding()
+                waited = self.now() - start
+                if h is None or waited >= cap:
+                    return waited, h
+                self.hold_changed.wait(timeout=max(0.01, min(cap - waited, self.hold_ends(h))))
+
+    def held_said(self, h):
+        return "the owner took this desktop over %d s ago, and has it for up to %d s more: until they give it back, or %d s pass with no input from them" % (
+            round(time.time() - h["since"]), round(self.hold_ends(h)), round(h["idle"]))
 
     # -- what it holds, brought up on first use (once: the first commands may come together)
     def ready(self):
@@ -1896,7 +1965,9 @@ def cli(desk, argv, cwd="/work", env=None):
             return 0, "The desktop is up: %dx%d, display %s.\n" % (W, H, DISPLAY), ""
         if verb == "status":
             up = desk.pieces.display_up()
-            return 0, ("The desktop is up: %dx%d, display %s; the browser is %s.\n" % (W, H, DISPLAY, "running" if desk.pieces.browser_up() else "not running")) if up else "The desktop is not up: desktop start\n", ""
+            h = desk.holding()
+            said = ("The desktop is up: %dx%d, display %s; the browser is %s.\n" % (W, H, DISPLAY, "running" if desk.pieces.browser_up() else "not running")) if up else "The desktop is not up: desktop start\n"
+            return 0, said + ("The owner has it: %s.\n" % desk.held_said(h) if h else ""), ""
         if verb == "stop":
             # Answered first; then each window closed as a person would, the pieces stopped, and this process ended with
             # them (the next command starts both).
@@ -2167,21 +2238,76 @@ def look(desk, question, env, eyes="", space=""):
 ENV_KEYS = ("INVINCIBLE_EYES", "INVINCIBLE_EYES_SPACE", "INVINCIBLE_GATEWAY", "INVINCIBLE_TOKEN")
 
 
-def session(desk, request):
-    """One request of a held session (the host's, for the owner or the agent's loop): a toolset member, or a command line."""
-    rid = request.get("id")
+# What an agent may ask while the owner holds the desktop, without waiting: its help, whether it is up, and `start`
+# (which the owner's own stream runs first: `desktop stream`).
+UNHELD = {"help", "--help", "-h", "status", "start"}
+
+
+def agent_waits(desk, verb):
+    """An agent's request while the owner holds the desktop (C1 step 9): it waits for them to give it back, HOLD_WAIT s at
+    most. A note for its stderr when it waited, or None; Held when the owner still has the desktop."""
+    if verb in UNHELD:
+        return None
+    waited, still = desk.wait_for_owner()
+    if still is not None:
+        raise Held("nothing was done: %s. Work on something else meanwhile, and try again after." % desk.held_said(still))
+    return "desktop: the owner had this desktop; they gave it back after %d s, and this ran then.\n" % round(waited) if waited >= 0.05 else None
+
+
+class Who:
+    """One connection to deskd: the owner's only on the owner's socket, from OWNER_UID, as the kernel says."""
+    __slots__ = ("owner",)
+
+    def __init__(self, owner=False):
+        self.owner = owner
+
+
+def peer_uid(conn):
+    """The uid of the process at a socket's other end, the kernel's word: SO_PEERCRED (LOCAL_PEERCRED on a Mac, for its tests)."""
     try:
+        if hasattr(socket, "SO_PEERCRED"):
+            return struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))[1]
+        if hasattr(socket, "LOCAL_PEERCRED"):
+            return struct.unpack_from("I", conn.getsockopt(0, socket.LOCAL_PEERCRED, 76), 4)[0]
+    except OSError:
+        pass
+    return None
+
+
+def session(desk, request, who=None):
+    """One request of a held session (the host's, for the owner or the agent's loop): a toolset member, or a command line.
+    The owner's are the requests of an owner's connection (Who), whatever a request says: only they take the desktop
+    over and give it back, and theirs never wait."""
+    rid = request.get("id")
+    owner = who is not None and who.owner
+    name = str(request.get("name", ""))
+    try:
+        if name in ("take", "release"):
+            if not owner:
+                raise Refused("only the owner takes the desktop over, or gives it back: through their node")
+            if name == "release":
+                return {"id": rid, "ok": True, "released": desk.give_back(who, anyone=True)}
+            i = request.get("input") or {}
+            h = desk.take(who, idle=min(max(float(i.get("idle", HOLD_IDLE)), 1.0), HOLD_MOST), most=min(max(float(i.get("most", HOLD_MOST)), 1.0), HOLD_MOST))
+            return {"id": rid, "ok": True, "held": {"since": h["since"], "idle": h["idle"], "most": h["most"], "ends_in": desk.hold_ends(h)}}
+        note = None
+        if owner:
+            desk.touched()
+        else:
+            note = agent_waits(desk, str(request["argv"][0]) if request.get("argv") else name)
         if "argv" in request:
             code, out, err = cli(desk, [str(a) for a in request["argv"]], request.get("cwd", "/work"), {k: str(v) for k, v in (request.get("env") or {}).items() if k in ENV_KEYS})
-            return {"id": rid, "ok": code == 0, "code": code, "stdout": out, "stderr": err}
-        answer = desk.tool(str(request.get("name", "")), request.get("input") or {})
+            return {"id": rid, "ok": code == 0, "code": code, "stdout": out, "stderr": (note or "") + err}
+        answer = desk.tool(name, request.get("input") or {})
         if request.get("screenshot") and "image" not in answer:
             answer["image"] = desk.picture(request.get("format", "png"), settle=request.get("settle", True))
         if "image" in answer:
             image = answer["image"]
             answer["image"] = {"media_type": image["media_type"], "data": base64.b64encode(image["data"]).decode(), "width": image["width"], "height": image["height"], "settled": image["settled"]}
-        answer["text"] = describe(answer)
+        answer["text"] = (note or "") + describe(answer)
         return {"id": rid, **answer}
+    except Held as error:
+        return {"id": rid, "ok": False, "held": True, "code": HELD_EXIT, "error": str(error)}
     except Refused as error:
         return {"id": rid, "ok": False, "refused": True, "error": str(error)}
     except Failed as error:
@@ -2190,13 +2316,23 @@ def session(desk, request):
         return {"id": rid, "ok": False, "error": "deskd: %s" % error}
 
 
-def handle(desk, conn):
+def handle(desk, conn, owners=False):
     f = conn.makefile("rwb")
+    # (This connection: the owner's only on their socket and from their uid. A take-over is bound to it, and its end
+    # gives the desktop back.)
+    who = Who(owners and peer_uid(conn) == OWNER_UID)
     try:
         hello = f.readline()
         if hello == b"ARGV\n":
+            # A command line is always the agent's (the owner's go through the node's held session).
             request = json.loads(f.readline().decode("utf-8", "replace"))
-            code, out, err = cli(desk, [str(a) for a in request.get("argv", [])], request.get("cwd", "/work"), {k: str(v) for k, v in (request.get("env") or {}).items() if k in ENV_KEYS})
+            argv = [str(a) for a in request.get("argv", [])]
+            try:
+                note = agent_waits(desk, ALIASES.get(argv[0], argv[0]) if argv else "help")
+                code, out, err = cli(desk, argv, request.get("cwd", "/work"), {k: str(v) for k, v in (request.get("env") or {}).items() if k in ENV_KEYS})
+                err = (note or "") + err
+            except Held as error:
+                code, out, err = HELD_EXIT, "", "desktop: %s\n" % error
             out_b, err_b = out.encode(), err.encode()
             f.write(b"exit=%d out=%d err=%d\n" % (code, len(out_b), len(err_b)) + out_b + err_b)
             f.flush()
@@ -2206,11 +2342,12 @@ def handle(desk, conn):
                     request = json.loads(line.decode("utf-8", "replace"))
                 except ValueError:
                     request = {"name": ""}
-                f.write(json.dumps(session(desk, request), ensure_ascii=False).encode() + b"\n")
+                f.write(json.dumps(session(desk, request, who), ensure_ascii=False).encode() + b"\n")
                 f.flush()
     except (BrokenPipeError, ConnectionResetError):
         pass
     finally:
+        desk.give_back(who)
         try:
             f.close()
             conn.close()
@@ -2218,32 +2355,48 @@ def handle(desk, conn):
             pass
 
 
-def serve(desk=None, run=RUN):
-    """The socket in the VM's own /tmp, the agent's alone (mode 0600): one deskd at a time, the second leaves."""
-    os.makedirs(run, mode=0o700, exist_ok=True)
-    lock = open(os.path.join(run, "deskd.lock"), "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return 0
-    path = os.path.join(run, "deskd.sock")
-    # Bound under another name and put in place once it listens: the socket is there only when it answers.
-    staging = os.path.join(run, ".s%d" % (os.getpid() % 10 ** 8))  # (no longer than the socket's own name: a path's room is short)
+def listening(path, mode):
+    """A socket at `path` with `mode`, bound under another name and put in place once it listens: it is there only when it answers."""
+    staging = os.path.join(os.path.dirname(path), ".s%d" % (os.getpid() % 10 ** 8))  # (no longer than the socket's own name: a path's room is short)
     for stale in (path, staging):
         try:
             os.unlink(stale)
         except OSError:
             pass
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    old = os.umask(0o177)
+    old = os.umask(0o777 & ~mode)
     s.bind(staging)
     os.umask(old)
     s.listen(16)
     os.rename(staging, path)
+    return s
+
+
+def owners_socket(run=RUN):
+    """The owner's socket: beside the run directory (in the VM's /tmp), so the directory stays the agent's alone."""
+    return run.rstrip("/") + ".owner.sock"
+
+
+def serve(desk=None, run=RUN):
+    """The agent's socket in the VM's own /tmp, its alone (mode 0600, in a directory of 0700), and the owner's beside it
+    (0666, so the node's exec as OWNER_UID reaches it): a connection there is the owner's only from that uid, as the
+    kernel says. One deskd at a time: the second leaves."""
+    os.makedirs(run, mode=0o700, exist_ok=True)
+    lock = open(os.path.join(run, "deskd.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0
     desk = desk or Desk()
-    while True:
-        conn, _ = s.accept()
-        threading.Thread(target=handle, args=(desk, conn), daemon=True).start()
+    agents, owners = listening(os.path.join(run, "deskd.sock"), 0o600), listening(owners_socket(run), 0o666)
+
+    def accept(s, mine):
+        while True:
+            conn, _ = s.accept()
+            threading.Thread(target=handle, args=(desk, conn, mine), daemon=True).start()
+
+    threading.Thread(target=accept, args=(owners, True), daemon=True).start()
+    accept(agents, False)
 
 
 if __name__ == "__main__":

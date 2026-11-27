@@ -6,6 +6,7 @@
  *
  *   desktop <verb> [arguments...]   one command (desktop help lists them); its exit code is deskd's
  *   desktop --session               JSON lines both ways, for the node's held session (SandboxHost)
+ *   desktop --owner-session         the same, as the owner's: the node's own exec as their uid (take-over)
  *   desktop stream                  the screen as H.264 on stdout, for the node's watching (desktop-stream)
  *
  * INVINCIBLE_DESKTOP_RUN is the directory of its socket (default /tmp/invincible-desktop), INVINCIBLE_DESKD the
@@ -237,6 +238,24 @@ int main(int argc, char **argv) {
     execlp("python3", "python3", "-E", "-s", setting("INVINCIBLE_DESKD", "/usr/local/lib/invincible/deskd.py"), "help", (char *)0);
     perror("desktop: python3");
     return 127;
+  }
+  /*
+   * desktop --owner-session: the owner's held session (C1 step 9), the node's own exec as the owner's uid. On the owner's
+   * socket beside the run directory, where deskd takes a connection from that uid as the owner's. It starts no desktop
+   * process: that runs as the agent, started by the node's other session.
+   */
+  if (!strcmp(argv[1], "--owner-session")) {
+    char path[4200];
+    const char *run = setting("INVINCIBLE_DESKTOP_RUN", "/tmp/invincible-desktop");
+    size_t n = strlen(run);
+    while (n > 1 && run[n - 1] == '/') n--;
+    snprintf(path, sizeof path, "%.*s.owner.sock", (int)n, run);
+    int fd = connect_to(path);
+    if (fd < 0) {
+      fprintf(stderr, "desktop: the desktop process isn't running (desktop start)\n");
+      return 1;
+    }
+    return relay(fd);
   }
   if (!strcmp(argv[1], "--session")) {
     int fd = reach();
