@@ -54,6 +54,7 @@ import {
   NETWORKS,
   networkCreateArgs,
   OWN_IMAGES,
+  refreshOrder,
   remadeImage,
   runArgs,
   type SandboxSpec,
@@ -214,6 +215,39 @@ const lostItsFiles = (stderr: string): boolean => /failed to create shim task/.t
 
 /** One docker command: its arguments in, its exit code and output out. */
 export type DockerRunner = (args: string[], timeoutMs: number) => Promise<{ code: number; stdout: string; stderr: string; truncated?: boolean }>;
+
+/** An agent's VM made again (SandboxHost.remakeTeam). */
+export interface RemakeTeam {
+  providers: string[];
+  network?: "online" | "gateway";
+  desktop?: boolean;
+  hardware?: boolean;
+  approvedBy: string;
+  /**
+   * Its store moved to layout 2 as it is made again (moveToLayout2): `move` once it is set aside, `back` if it can't be
+   * made (whether its store is as it was again).
+   */
+  layout?: { store: { volume: string } | { workspace: string }; move(): Promise<void>; back(): Promise<boolean> };
+}
+
+/**
+ * What a refresh did with one of the node's own images that's built here (SandboxHost.refreshImages): made anew, the
+ * same build as before (nothing it's made of changed), failed (its old build kept), or held, as its base failed.
+ */
+export interface Refreshed {
+  image: string;
+  outcome: "rebuilt" | "unchanged" | "failed" | "held";
+  why?: string;
+}
+
+/** What a failed build said last, redacted: its reason, in a line. */
+const lastLine = (output: string): string =>
+  redact(output)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .at(-1)
+    ?.slice(0, 300) ?? "it said nothing";
 
 /** A process on a terminal: what it prints comes to the `onData` it was started with; keys and sizes go in. */
 export interface TerminalProcess {
@@ -531,6 +565,8 @@ export class SandboxHost {
   /** A seat whose VM is being made: the next ask for that seat waits for it, so two never pass the count at once. */
   private readonly seating = new Map<string, Promise<unknown>>();
   private readonly building = new Map<string, Promise<{ ok: boolean; output: string }>>();
+  /** VMs being made now (create, remakeTeam): a refresh of the images begins no build while one is (refreshImages). */
+  private making = 0;
   /** On a Mac: the networks being held up, once at a time (what it does to their helpers must never overlap). */
   private keeping: Promise<void> | null = null;
   /** On a Mac: why a network's keeper couldn't be started the last time it was tried, or null. */
@@ -757,13 +793,14 @@ export class SandboxHost {
     return this.apple ? (this.opts.firewall ?? (() => macFirewall()))() : null;
   }
 
-  async build(contextDir: string, why?: string, image = DEFAULT_IMAGE): Promise<{ ok: boolean; output: string }> {
+  async build(contextDir: string, why?: string, image = DEFAULT_IMAGE, opts: { pull?: boolean } = {}): Promise<{ ok: boolean; output: string }> {
     // One build per image at a time: two runs that both find it missing wait for the same build.
     let pending = this.building.get(image);
     if (!pending) {
       pending = (async () => {
-        // (A base of its own is in no registry: pulled, it would be looked for on Docker Hub, and the build fail.)
-        const pull = !OWN_IMAGES[image]?.base;
+        // (A base of its own is in no registry: pulled, it would be looked for on Docker Hub, and the build fail. A
+        // refresh pulls none: only the release's own contexts make an image anew.)
+        const pull = opts.pull ?? !OWN_IMAGES[image]?.base;
         const result = await this.docker(this.apple ? containerBuildArgs(image, contextDir, pull) : ["build", ...(pull ? ["--pull"] : []), "-t", image, contextDir], 60 * 60_000);
         // On a Mac its builder is a VM of its own, left running by the build: stopped once no other build needs it.
         if (this.apple && [...this.building.keys()].every((other) => other === image)) await this.docker(containerBuilderStopArgs(), 60_000);
@@ -809,6 +846,73 @@ export class SandboxHost {
     return made.code === 0;
   }
 
+  /**
+   * An image as its engine says it, or null where it isn't built: its id, and what it is made of. On Docker that's its
+   * layers and its config, as its id isn't: BuildKit's provenance attestation gives every build an id of its own, the
+   * same context built twice two ids (Ultra's Docker 29, 27 November 2026). On a Mac, container's digest is both: a
+   * build with nothing changed keeps it.
+   */
+  private async imageOf(image: string): Promise<{ id: string; made: string } | null> {
+    if (!this.apple) {
+      const said = await this.docker(["image", "inspect", image, "--format", "{{.Id}} {{json .RootFS.Layers}} {{json .Config}}"]);
+      const line = said.stdout.trim();
+      const at = line.indexOf(" ");
+      return said.code === 0 && at > 0 ? { id: line.slice(0, at), made: line.slice(at + 1) } : null;
+    }
+    const said = await this.docker(containerImageInspectArgs(image));
+    if (said.code !== 0) return null;
+    try {
+      const digest = String((JSON.parse(said.stdout) as { id?: unknown }[])[0]?.id ?? "");
+      return digest ? { id: digest, made: digest } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Each of the node's own images that's built here made again from its context, as a new release has it: from cache
+   * and with no pull, so only the release's own contexts make one anew (seconds for one that didn't change), and in
+   * refreshOrder, so a base made anew makes the ones made from it anew too. A rebuild moves the image's keeper to the new
+   * build (build → keepImage) and removes the old one, unless a VM still runs on it: that one goes with a prune once its
+   * VM is made again. (On a Mac the tag moves to the new build, and container lists that one alone: there's no keeper
+   * there, and nothing else to remove.) One that fails keeps its old build and keeper, and so does each one made from it,
+   * held. One image at a time, none begun while a VM is being made (it waits for that), and one that isn't built here is
+   * left to be built at its first need.
+   */
+  async refreshImages(opts: { busy?: () => boolean; pause?: (ms: number) => Promise<unknown> } = {}): Promise<Refreshed[]> {
+    const context = this.opts.imageContext;
+    if (!context) return [];
+    const busy = opts.busy ?? (() => this.making > 0);
+    // (A wait that never keeps a stopping node alive.)
+    const pause = opts.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms).unref()));
+    const done: Refreshed[] = [];
+    // (What failed or was held: its old build stands, and so does each one made from it.)
+    const stood = new Set<string>();
+    for (const image of refreshOrder()) {
+      const before = await this.imageOf(image);
+      if (!before) continue;
+      const base = OWN_IMAGES[image]!.base;
+      if (base && stood.has(base)) {
+        stood.add(image);
+        done.push({ image, outcome: "held", why: `${base} wasn't made anew` });
+        continue;
+      }
+      while (busy()) await pause(2000);
+      const built = await this.build(join(context, OWN_IMAGES[image]!.context), "made again for a new release", image, { pull: false });
+      if (!built.ok) {
+        stood.add(image);
+        done.push({ image, outcome: "failed", why: lastLine(built.output) });
+        continue;
+      }
+      const after = await this.imageOf(image);
+      // (Its old id, now held by nothing of the node's, goes either way: made of the same, it's a duplicate under an id
+      // of its own, as Docker gives each build.)
+      if (!this.apple && after && after.id !== before.id) await this.docker(["image", "rm", before.id], 120_000);
+      done.push({ image, outcome: after?.made === before.made ? "unchanged" : "rebuilt" });
+    }
+    return done;
+  }
+
   /** Whether sandboxes here get size-limited workspaces. */
   async diskLimited(): Promise<boolean> {
     return !!this.opts.workspaces && (await this.opts.workspaces.available());
@@ -818,7 +922,7 @@ export class SandboxHost {
     // (A VM that shares an agent's store is counted from here, before anything is awaited, and none is begun while its move
     // may be about to be: R5-1.)
     if (seated.shares && this.moving.has(seated.shares.sandbox)) throw new SandboxError("that agent's store is being moved to layout 2: nothing shares it until its move is done or put back", 409);
-    return seated.shares ? this.sharingWhile(seated.shares.sandbox, () => this.made(input, seated)) : this.made(input, seated);
+    return this.whileMaking(() => (seated.shares ? this.sharingWhile(seated.shares.sandbox, () => this.made(input, seated)) : this.made(input, seated)));
   }
 
   /** `fn`, with a VM being made to share `id`'s store counted while it runs: no move of that store begins meanwhile. */
@@ -1510,22 +1614,21 @@ export class SandboxHost {
     this.opts.ledger({ class: "modify", resource: "docker.container", target: containerName(sandbox.id), verdict: "allow", run, detail: "a move to layout 2 under way was put back, layout 2 being off here now: its store's entries are where they were, and its VM in layout 1" });
   }
 
-  async remakeTeam(
-    id: string,
-    run: string,
-    opts: {
-      providers: string[];
-      network?: "online" | "gateway";
-      desktop?: boolean;
-      hardware?: boolean;
-      approvedBy: string;
-      /**
-       * Its store moved to layout 2 as it is made again (moveToLayout2): `move` once it is set aside, `back` if it can't be
-       * made (whether its store is as it was again).
-       */
-      layout?: { store: { volume: string } | { workspace: string }; move(): Promise<void>; back(): Promise<boolean> };
-    },
-  ): Promise<SandboxView> {
+  async remakeTeam(id: string, run: string, opts: RemakeTeam): Promise<SandboxView> {
+    return this.whileMaking(() => this.remadeTeam(id, run, opts));
+  }
+
+  /** `make` counted as a VM being made while it runs (`making`). */
+  private async whileMaking<T>(make: () => Promise<T>): Promise<T> {
+    this.making++;
+    try {
+      return await make();
+    } finally {
+      this.making--;
+    }
+  }
+
+  private async remadeTeam(id: string, run: string, opts: RemakeTeam): Promise<SandboxView> {
     const sandbox = await this.get(id);
     if (!sandbox) throw new SandboxError("the agent's VM is missing; its workspace must be recovered, not replaced", 404);
     if (!TeamWorkspaceRun.safeParse(run).success || sandbox.run !== run || sandbox.ephemeral || sandbox.isolation !== "vm") {

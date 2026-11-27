@@ -416,6 +416,24 @@ describe("each fault gives its own line and advice", () => {
     expect(fault((f) => (f.archive!.integrity.lastAt = NOW - 6 * DAY), "archive.integrity").line).toContain("6 days ago");
   });
 
+  test("sandbox images: one not made anew for the release the node runs is said, which and why, its VMs on its last build; made anew, ok; not tried yet, nothing", () => {
+    const failed = healthy();
+    failed.sandbox.host = { ...failed.sandbox.host!, images: { refreshed: false, failed: [{ image: "invincible/desktop-hardware:1", why: 'ERROR: failed to solve: process "/bin/sh -c apt-get install" did not complete successfully: exit code: 100' }] } };
+    const said = byId(diagnose(failed), "sandbox.images");
+    expect(said.state).toBe("needs-you");
+    expect(said.line).toContain("invincible/desktop-hardware:1");
+    expect(said.line).toContain("exit code: 100");
+    expect(said.line).toContain("last build");
+    expect(said.fix).toContain("next start");
+    const made = healthy();
+    made.sandbox.host = { ...made.sandbox.host!, images: { refreshed: true, failed: [] } };
+    expect(byId(diagnose(made), "sandbox.images").state).toBe("ok");
+    // (Not tried yet for this release: that's a minute after the node's start.)
+    const pending = healthy();
+    pending.sandbox.host = { ...pending.sandbox.host!, images: { refreshed: false, failed: [] } };
+    expect(diagnose(pending).some((c) => c.id === "sandbox.images")).toBe(false);
+  });
+
   test("sandboxes: Docker down, the image pruned, a network gone, a start that fails, no slot, no firewall, no disk limit, no microVMs", () => {
     const docker = healthy();
     docker.sandbox.host = { ...docker.sandbox.host!, docker: false, start: null };

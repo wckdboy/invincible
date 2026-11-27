@@ -323,6 +323,17 @@ The run loop is carried and renamed (§10), the most proven part of it:
   - Kata microVMs on Linux and Apple containers on macOS;
   - one per run;
   - a firewall that lets a run reach its node's bridge and nothing it wasn't granted;
+  - **their images**, the node's own (the workshop's, the Lab's, the desktop's, the hardware's and the tools': spec.ts's
+    `OWN_IMAGES`), built on a node the first time a VM needs one (the first three by the deploy too), each held in use
+    against pruning by a keeper container. At the first start of a new release, the node makes again each one it has
+    built, from that release's contexts (`SandboxHost.refreshImages`): from cache, so one whose context didn't change
+    stays as it was in seconds, and bases first, so a base made anew makes the ones made from it anew too. It is done
+    in the background a minute after the start, one image at a time, and none is begun while a VM is being made. A
+    rebuild moves its keeper to the new build, and the old one goes once no VM runs on it. One whose build fails keeps
+    its last build, and so does each one made from it; the log and `invincible doctor` say which and why, and the next
+    start tries again, once. A VM keeps the image it was made from until it is made again: `invincible agents provision
+    <id> --remake` makes it again from its image as it is built now, its `/work` kept, with whatever an older image put
+    there when that volume was first made;
   - **a desktop in every agent's VM** unless it is made without one (`--no-desktop`, the forms' **No desktop**): a
     display, a browser, a terminal, an editor and the accessibility bus, which the agent operates with its `desktop`
     command and you watch and take over (the owner's standard, 26 November 2026). One process in the VM holds it

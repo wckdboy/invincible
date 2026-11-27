@@ -13,7 +13,7 @@ import { cloudflareNatives } from "./cloudflare.ts";
 import { gmailNatives, outlookNatives } from "./mail.ts";
 import { PairingHost, SyncEngine } from "@invincible/link";
 import { adoptChains, LedgerStore, Vault } from "@invincible/ledger";
-import { type DockerRunner, type LayoutEntry, type LayoutMove, type LayoutMoves, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnFrames, type SpawnSession, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
+import { type DockerRunner, imagesAtStart, type LayoutEntry, type LayoutMove, type LayoutMoves, type LedgerEntryInput, type MacFirewallState, microVMsAvailable, NETWORKS, SANDBOX_GATEWAY_PORT, type SpawnFrames, type SpawnSession, type SpawnStream, type SpawnTerminal, startContainerService, vmResolvConf, WorkspaceHelper } from "@invincible/sandbox";
 import type { ArgValue, HostLoad, TeamTrailEntry } from "@invincible/core";
 import { calibrate, spawnBench } from "./compute/calibrate.ts";
 import { GovernedSandboxHost } from "./compute/governed-host.ts";
@@ -70,6 +70,7 @@ import { APPLE_PUSH, APPLE_PUSH_SECRET, ApplePushSender, appleTarget, readAppleP
 import { CollectSender, collectTarget } from "./collect-send.ts";
 import { MacScreen, screenHelper, spawnHelper } from "./mac-screen.ts";
 import { DEFAULT_PUSH_CONTACT, PushSender } from "./push-send.ts";
+import { primaryRevision } from "./revision.ts";
 
 export interface Daemon {
   port: number;
@@ -606,8 +607,9 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       if (opts.sandboxNetworks !== false) await sandbox.ensureNetworks();
       // Sandboxes from before this start hold their slots before anything new is admitted.
       await sandbox.reconcile();
-      // Keep the image in use, so pruning (Coolify's nightly cleanup) doesn't take it.
-      if (opts.sandboxNetworks !== false) void sandbox.keepImages().catch((error) => log(`sandbox image keepers: ${(error as Error).message}`));
+      // Keep the images in use, so pruning (Coolify's nightly cleanup) doesn't take them, and at a new release's first
+      // start make them again from its contexts: in the background, a minute on, never holding a start or a stop up.
+      if (opts.sandboxNetworks !== false) void imagesAtStart(sandbox, { home: home.dir, release: primaryRevision(), log }).catch((error) => log(`sandbox images: ${(error as Error).message}`));
     } catch (error) {
       log(`sandbox networks unavailable: ${(error as Error).message}`);
       sandbox = null;

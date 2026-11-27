@@ -137,6 +137,15 @@ export function madeFrom(image: string): string[] {
   return chain;
 }
 
+/**
+ * The node's own images in the order a refresh makes them again: each after its base, so a base made anew makes the
+ * ones made from it anew too, as their builds follow it (the desktop before the hardware's). Otherwise as OWN_IMAGES
+ * lists them.
+ */
+export function refreshOrder(): string[] {
+  return Object.keys(OWN_IMAGES).sort((a, b) => madeFrom(a).length - madeFrom(b).length);
+}
+
 /** How one of its own images is built on a node, when it isn't there: `invincible sandbox build` and its flag. */
 export const buildCommand = (image: string): string =>
   `invincible sandbox build${image === LAB_IMAGE ? " --lab" : image === DESKTOP_IMAGE ? " --desktop" : image === HARDWARE_IMAGE ? " --hardware" : ""}`;

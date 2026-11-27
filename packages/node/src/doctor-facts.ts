@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { type DoctorReport, freeSlots, type NodeCapacity, type NodeIdentity, nextRun, type PeerStatus, qampEndpointOf, redact, type Agent } from "@invincible/core";
 import { type ModelsContext, chat, embed, installedConnectors, isEmbeddingModel, keyState, onPlan, parseRef, planOf, providerRecord, providerRecords, refusalsStillSaid, resolveProvider, ROLES, roster, windowsOf } from "@invincible/models";
 import type { LedgerStore, Vault } from "@invincible/ledger";
-import { containerKernel, macFirewallInstalled, type SandboxHost } from "@invincible/sandbox";
+import { containerKernel, macFirewallInstalled, readImagesRecord, type SandboxHost } from "@invincible/sandbox";
 import type { ArchiveService } from "./archive/service.ts";
 import { ungivable } from "./key-gateway.ts";
 import type { Assets } from "./assets.ts";
@@ -13,6 +13,7 @@ import type { Governor } from "./compute/governor.ts";
 import type { ComputeService } from "./compute/service.ts";
 import { type Diagnosis, diagnose, type DoctorFacts, type DoctorFinding, doctorFindings, type FileFact, reportOf, type RoleFact, TOOL_ROLES, VM_TOOLS_CANT } from "./doctor.ts";
 import { hlcMs, loopRecords } from "./loops.ts";
+import { primaryRevision } from "./revision.ts";
 
 /*
  * The doctor's eyes: the facts `diagnose` judges, gathered from this node. Reading
@@ -386,8 +387,12 @@ async function sandboxOf(deps: DoctorDeps, deep: boolean): Promise<DoctorFacts["
   // Never when the image is missing: creating a sandbox would rebuild it, and the doctor changes nothing.
   // (Nor on a Mac whose firewall is off: it refuses to, by design, and its own line says so.)
   const start = deep && status.docker && status.image && (!wall || wall.on) ? await startSandboxes(host, deps.governor, () => deps.compute.selfCapacity()).catch(() => null) : null;
+  // What the node's start made of its own images for the release it runs (sandbox-images.json).
+  const record = readImagesRecord(deps.home.dir);
+  const release = primaryRevision();
+  const images = { refreshed: record.refreshedFor === release, failed: record.tried?.release === release ? record.tried.failed : [] };
   return {
-    host: { docker: status.docker, ...(caps?.sandbox?.engine === "container" ? { engine: "container" as const } : {}), image: status.image, networks: status.networks.gateway && status.networks.online, diskLimited, kvm: !!caps?.vm.kvm, microVMs, firewall, ...macFirewall, start },
+    host: { docker: status.docker, ...(caps?.sandbox?.engine === "container" ? { engine: "container" as const } : {}), image: status.image, networks: status.networks.gateway && status.networks.online, diskLimited, kvm: !!caps?.vm.kvm, microVMs, firewall, ...macFirewall, start, images },
     others,
     ...container,
   };

@@ -115,6 +115,11 @@ export interface DoctorFacts {
       firewall: "active" | "inactive" | "missing" | null;
       /** A Mac's sandbox firewall (pf, from a helper of root's: invincible firewall), as the node reads it; absent on Linux. */
       macFirewall?: { on: boolean; installed: boolean; soon: boolean; why: string | null; release?: "current" | "other" | "none" };
+      /**
+       * The node's own images for the release it runs (its start makes them again: sandbox-images.json): made anew for
+       * it, and which of them couldn't be, with why. Absent: not read.
+       */
+      images?: { refreshed: boolean; failed: { image: string; why: string }[] };
       /** A sandbox started, ran one command and was removed: each kind tried. "busy": no slot was free. null: not tried. */
       start: { kind: "container" | "vm"; ok: boolean; ms: number; error: string | null }[] | "busy" | null;
     } | null;
@@ -529,6 +534,11 @@ export function diagnose(f: DoctorFacts): Diagnosis[] {
     if (host.docker) {
       if (!host.image) add("sandbox", "sandbox.image", "needs-you", "the sandbox image is missing (another tool's cleanup may have pruned it)", "invincible sandbox build. It also rebuilds it itself when a sandbox is next needed, which makes that run wait.");
       else add("sandbox", "sandbox.image", "ok", "the sandbox image is built and kept in use");
+      const images = host.images;
+      if (images?.failed.length) {
+        const many = images.failed.length > 1;
+        add("sandbox", "sandbox.images", "needs-you", `${images.failed.map((f) => f.image).join(", ")} ${many ? "weren't" : "wasn't"} made anew for the release this node runs, so a VM made from ${many ? "them" : "it"} now gets ${many ? "their" : "its"} last build: ${redact(images.failed[0]!.why).replace(/\s+/g, " ").slice(0, 200)}`, "The node tries once more at its next start. Its log says what each build said.");
+      } else if (images?.refreshed) add("sandbox", "sandbox.images", "ok", "the node's own images are made anew for the release it runs");
       if (!host.networks) add("sandbox", "sandbox.networks", "needs-you", "a sandbox network is missing", "Restart the node: it creates them at its start (systemctl restart invincible).");
       else add("sandbox", "sandbox.networks", "ok", mac ? "both sandbox networks are there, each held up by a VM of the node's own" : "both sandbox networks are there");
 

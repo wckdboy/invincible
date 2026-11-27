@@ -9,3 +9,4 @@ export * from "./workspaces.ts";
 export * from "./tar.ts";
 export * from "./walk.ts";
 export * from "./mac-firewall.ts";
+export * from "./images-refresh.ts";

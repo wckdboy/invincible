@@ -118,7 +118,10 @@ C1 step 11. KiCad and FreeCAD on an agent's desktop, a choice per agent as its d
   app's **KiCad and FreeCAD** beside **No desktop**, or `hardware` on the routes. A desktop comes with them: taking the
   desktop away takes them too, and a Mac, which makes no desktop, makes none of them. A host whose release is older than
   their image isn't asked. The image is built on its host the first time an agent needs it, or by `invincible sandbox
-  build --hardware`.
+  build --hardware`, and made again, after the desktop's, at the first start of each release that follows
+  ([ARCHITECTURE.md](ARCHITECTURE.md) §6, Sandboxes). An agent's VM keeps the build it was made from until `--remake`
+  makes it again; its `/work` stays, with whatever the image put there when that volume was first made. The image before
+  b4444ba1 put root's KiCad folders there, but no agent was ever made with it, so nothing needs cleaning.
 - **Their first run, done:** as the VM starts, its entrypoint (`hardware-seed`) puts in the agent's own home what isn't
   there yet: KiCad's settings at their schema, with its API server on and its update question answered; its global
   footprint and symbol library tables, empty; and FreeCAD's welcome panel and start page, off. What the agent changes
