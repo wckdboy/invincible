@@ -327,7 +327,7 @@ export function askItem(ctx: Ctx, action: ActionView, row: WorkRow | null): HTML
 export function openWaiting(ctx: Ctx, approval?: string): void {
   const scope = new Scope();
   const body = h("div", { class: "waiting" });
-  openSheet({ title: "Waiting on you", body, onClose: () => scope.dispose() });
+  openSheet({ title: "Waiting on you", body, fill: true, onClose: () => scope.dispose() });
   needsView(body, ctx, { scope, opts: { intent: "sheet", ...(approval ? { approval } : {}) } });
 }
 

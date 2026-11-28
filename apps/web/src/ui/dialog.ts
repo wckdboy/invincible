@@ -20,6 +20,9 @@ export interface SheetOptions {
   title: string;
   description?: Child;
   size?: "small" | "wide";
+  /** Its full height from its first frame (a phone's tray, a centred sheet's most): what it holds may come after it opens
+   * (Waiting on you) and scrolls in it, never moving it (the scorecard's layout shift). */
+  fill?: boolean;
   body?: Child;
   footer?: Child;
   /** Element to focus first; defaults to the first field, else the close button. */
@@ -73,7 +76,7 @@ export function openSheet(options: SheetOptions): Sheet {
   const el = h(
     "dialog",
     {
-      class: `sheet${options.size ? ` ${options.size}` : ""}${options.side === "left" ? " drawer" : ""}`,
+      class: `sheet${options.size ? ` ${options.size}` : ""}${options.fill ? " fill" : ""}${options.side === "left" ? " drawer" : ""}`,
       "aria-labelledby": titleId,
       "aria-describedby": options.description ? descId : null,
       role: options.role ?? null,

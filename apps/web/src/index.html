@@ -1054,6 +1054,10 @@
       dialog.sheet[open].shown { opacity: 1; transform: none; transition: opacity var(--d-2) var(--ease-out), transform var(--d-spring) var(--ease-spring), overlay var(--d-spring) allow-discrete, display var(--d-spring) allow-discrete; }
       dialog.sheet.wide { width: min(760px, calc(100vw - 32px)); }
       dialog.sheet.small { width: min(440px, calc(100vw - 32px)); }
+      /* A sheet whose content comes after it opens (Waiting on you): its full height from its first frame, what comes
+         later scrolling in it, so nothing moves it (the scorecard's layout shift). */
+      dialog.sheet.fill { height: min(86vh, 860px); }
+      dialog.sheet.fill .sheet-body { flex: 1; min-height: 0; }
       dialog.sheet::backdrop { background: var(--overlay); opacity: 0; transition: opacity var(--d-2) var(--ease-exit); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
       dialog.sheet.shown::backdrop { opacity: 1; transition: opacity var(--d-3) var(--ease-out); }
       dialog.sheet[data-tone="danger"] { border-color: color-mix(in oklab, var(--danger) 34%, var(--border)); background: radial-gradient(320px 120px at 36px 0, var(--danger-soft), transparent), var(--surface); }
@@ -1074,6 +1078,7 @@
         }
         dialog.sheet[open].shown { transform: translateY(var(--drag, 0px)); transition: transform var(--d-sheet) var(--ease-drawer), overlay var(--d-sheet) allow-discrete, display var(--d-sheet) allow-discrete; }
         dialog.sheet.dragging, dialog.sheet[open].shown.dragging { transition: none; }
+        dialog.sheet.fill { height: calc(100dvh - var(--safe-top) - 32px); }
         .sheet-handle { display: block; flex: none; height: 22px; touch-action: none; cursor: grab; position: relative; }
         .sheet-handle::after { content: ""; position: absolute; left: 50%; top: 8px; width: 36px; height: 5px; margin-left: -18px; border-radius: 99px; background: var(--border-strong); }
         .sheet-head { padding-top: var(--sp-1); }
@@ -1872,8 +1877,11 @@
         .turn.assistant:not(.writing) .process { display: none; }
         .turn:not(.failed) .turn-actions { display: none; }
         .jump-anchor { display: none; }
+        /* (Only what holds something takes a place there: an empty part takes none, and the tail none while nothing in it
+           shows, so nothing moves as its parts fill and empty; the scorecard's layout shift.) */
         .chat-flow-tail { display: flex; flex-direction: column; gap: var(--sp-3); }
-        .chat-flow-tail:empty { display: none; }
+        .chat-flow-tail > :empty { display: none; }
+        .chat-flow-tail:not(:has(> :not(:empty):not([hidden]))) { display: none; }
       }
       .turn-col { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; }
       /* What a message of yours carried: pictures to tap open, texts by name. */
