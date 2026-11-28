@@ -1,11 +1,11 @@
 {
   "suite": "routing",
-  "commit": "78284a60c8fe",
-  "at": 1795843404182,
+  "commit": "2d68853a1495",
+  "at": 1795844517327,
   "seed": 20261112,
   "machine": {
     "name": "Apple M3 Pro",
-    "calibration": 88101,
+    "calibration": 78059,
     "cores": 12
   },
   "metrics": [
@@ -31,6 +31,16 @@
     {"id":"routing.rule.pinned-moved","value":0,"unit":"turns","kind":"quality","better":"lower","note":"turns of a pinned agent's work answered by a model other than its own (the rule: never)"},
     {"id":"routing.rule.climbs","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"tasks whose work moved up more than once: the ladder has one rung (never)"},
     {"id":"routing.rule.same-rung","value":0,"unit":"","kind":"quality","better":"lower","note":"work said to move up onto the model it was on: with the planner's model the work's own there is no rung (never)"},
+    {"id":"routing.memory.off.verified","value":35,"unit":"tasks","kind":"quality","better":"higher","note":"of 36, three agents' tasks in turn, routed, no agent's tasks so far seen"},
+    {"id":"routing.memory.off.usd-per-done","value":0.185692286,"unit":"$","kind":"quality","better":"lower","note":"stand-in dollars per verified task, no agent's tasks so far seen"},
+    {"id":"routing.memory.off.minutes-per-done","value":2.10142857,"unit":"min","kind":"quality","better":"lower","note":"virtual minutes per verified task, no agent's tasks so far seen"},
+    {"id":"routing.memory.off.escalations","value":14,"unit":"","kind":"quality","better":"lower","note":"times work moved up, no agent's tasks so far seen"},
+    {"id":"routing.memory.on.verified","value":35,"unit":"tasks","kind":"quality","better":"higher","note":"of 36, three agents' tasks in turn, routed, each agent's tasks so far its memory's, as a node's are"},
+    {"id":"routing.memory.on.usd-per-done","value":0.124971743,"unit":"$","kind":"quality","better":"lower","note":"stand-in dollars per verified task, each agent's tasks so far its memory's, as a node's are"},
+    {"id":"routing.memory.on.minutes-per-done","value":1.8452381,"unit":"min","kind":"quality","better":"lower","note":"virtual minutes per verified task, each agent's tasks so far its memory's, as a node's are"},
+    {"id":"routing.memory.on.escalations","value":7,"unit":"","kind":"quality","better":"lower","note":"times work moved up, each agent's tasks so far its memory's, as a node's are"},
+    {"id":"routing.memory.on.began-on-lead","value":7,"unit":"tasks","kind":"quality","better":"higher","note":"tasks that began on the lead by what their agent's last tasks needed"},
+    {"id":"routing.rule.memory-misroutes","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"tasks of an agent whose every task the worker does, begun on the lead (never)"},
     {"id":"routing.replay.differs","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"of 36, the tasks whose outcome, cost, time or escalations differed when run again"}
   ]
 }
