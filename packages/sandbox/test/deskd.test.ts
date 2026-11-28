@@ -51,9 +51,12 @@ async function deskd(env: Record<string, string> = {}): Promise<Running> {
   const run = join(dir, "run");
   const trace = join(dir, "trace");
   writeFileSync(trace, "");
-  const all = { PATH: `${bin(join(dir, "bin"), trace)}:${process.env.PATH}`, HOME: dir, INVINCIBLE_DESKTOP_RUN: run, DESKD_TRACE: trace, INVINCIBLE_DESKD: harness, ...env };
+  // (The desktop command waits for deskd as long as a busy machine may take to start it, and this for its socket: with
+  // 2 % of a core, 28 November 2026, the socket came 8 to 18 s after deskd's start. The product's own wait, 20 s
+  // unless told, stays the product's: these are how long a test's machine may take, never what a test checks.)
+  const all = { PATH: `${bin(join(dir, "bin"), trace)}:${process.env.PATH}`, HOME: dir, INVINCIBLE_DESKTOP_RUN: run, DESKD_TRACE: trace, INVINCIBLE_DESKD: harness, INVINCIBLE_DESKTOP_WAIT: "120", ...env };
   const proc = Bun.spawn(["python3", harness], { env: all, stdout: "ignore", stderr: "inherit" });
-  for (let i = 0; i < 500 && !existsSync(join(run, "deskd.sock")); i++) await Bun.sleep(10);
+  for (const until = Date.now() + 120_000; Date.now() < until && !existsSync(join(run, "deskd.sock")); ) await Bun.sleep(10);
   const r: Running = {
     run,
     env: all,
@@ -1103,10 +1106,19 @@ print(json.dumps(spawned))`)).toEqual(["chromium"]);
 
 describe("light by default (C1 step 10): an unused desktop stops, and the next command starts it again", () => {
   const me = String(process.getuid!());
-  /** Until the trace says the desktop was stopped, `ms` at most: whether it was. */
-  const stopped = async (r: Running, ms: number) => {
+  /**
+   * How long these desktops sit unused before they stop: 3 s, where it was 0.3. A command must reach the desktop it
+   * starts before then, and a starved machine's can't within 0.3 s (2 % of a core, 28 November 2026: each deskd started
+   * again stopped before its command came, twelve times over). Its stop is waited for that long and more; each test
+   * has the time a busy machine takes (12 to 14 s with 2 % of a core, one 59 s), which is never what it checks.
+   */
+  const IDLE = "3";
+  const STOPS_WITHIN = 15_000;
+  const LIMIT = 60_000;
+  /** Until the trace says the desktop was stopped (once more than `since` times), `ms` at most: whether it was. */
+  const stopped = async (r: Running, ms: number, since = 0) => {
     for (let waited = 0; waited < ms; waited += 20) {
-      if (calls(r.trace(), "stop").length) return true;
+      if (calls(r.trace(), "stop").length > since) return true;
       await Bun.sleep(20);
     }
     return false;
@@ -1114,25 +1126,25 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
 
   test("left unused, it stops as `desktop stop` does, each window closed first; the agent's next command starts it again and is told, once", async () => {
     if (!built) return;
-    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: "0.3" });
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE });
     expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
-    expect(await stopped(r, 3000)).toBe(true);
+    expect(await stopped(r, STOPS_WITHIN)).toBe(true);
     const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? "close" : "stop"));
     expect(order.at(-1)).toBe("stop");
     expect(order.filter((o) => o === "close").length).toBeGreaterThan(0);
     // (The next deskd keeps it up this time: its own word is the one asked of.)
     const next = desktop(r, ["click", "10", "20"], { INVINCIBLE_DESKTOP_IDLE: "60" });
     expect(next.code).toBe(0);
-    expect(next.err).toMatch(/^desktop: this desktop was stopped after 0\.3 s with nothing done on it and no one watching, its windows closed as a person closes them; this command started it again, a fresh screen \(the browser's profile, and what is signed in there, are kept in \/work\)\.\n/);
+    expect(next.err).toMatch(/^desktop: this desktop was stopped after 3\.0 s with nothing done on it and no one watching, its windows closed as a person closes them; this command started it again, a fresh screen \(the browser's profile, and what is signed in there, are kept in \/work\)\.\n/);
     expect(desktop(r, ["click", "10", "20"]).err).not.toContain("was stopped");
     expect(existsSync(join(r.run, "idle-stopped"))).toBe(false);
-  });
+  }, LIMIT);
 
   test("a deskd the client started on its own, after an idle stop, ends with its test as the one the test started does", async () => {
     if (!built) return;
-    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: "0.3" });
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE });
     expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
-    expect(await stopped(r, 3000)).toBe(true);
+    expect(await stopped(r, STOPS_WITHIN)).toBe(true);
     // (The next one the client starts itself, apart from it, as in a VM: asked only whether the desktop is up, it never
     // brings it up, so it never stops for being unused either. Every run of this file left one running, for hours.)
     expect(desktop(r, ["status"], { INVINCIBLE_DESKTOP_IDLE: "60" }).code).toBe(0);
@@ -1163,32 +1175,37 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     rmSync(trace);
     for (let i = 0; i < 40 && !ended(); i++) await Bun.sleep(100);
     expect(ended()).toBe(true);
-  });
+  }, LIMIT);
 
   test("used, held or watched, it stays up; watched no more, it stops", async () => {
     if (!built) return;
     const watched = join(mkdtempSync(join(root, "watch-")), "watched");
-    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: "0.3", INVINCIBLE_DESKTOP_OWNER_UID: me, DESKD_WATCHED: watched });
-    // Used: a command every 0.1 s for 0.8 s.
-    for (let i = 0; i < 8; i++) {
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE, INVINCIBLE_DESKTOP_OWNER_UID: me, DESKD_WATCHED: watched });
+    // Each for 4 s, longer than it sits unused before it stops. (Its stops are counted from its first command: one a
+    // starved machine made before it came isn't one while it was used.)
+    expect(desktop(r, ["windows"]).code).toBe(0);
+    const before = calls(r.trace(), "stop").length;
+    // Used: a command every 0.1 s.
+    for (let i = 0; i < 40; i++) {
       expect(desktop(r, ["windows"]).code).toBe(0);
       await Bun.sleep(100);
     }
-    expect(calls(r.trace(), "stop")).toHaveLength(0);
-    // Held: the owner has it, with nothing asked, for 0.8 s.
+    expect(calls(r.trace(), "stop")).toHaveLength(before);
+    // Held: the owner has it, with nothing asked.
     const node = await opened(r, true);
     expect(await node.ask({ id: 1, name: "take", input: { idle: 30 } })).toMatchObject({ ok: true, took: true });
-    await Bun.sleep(800);
-    expect(calls(r.trace(), "stop")).toHaveLength(0);
+    await Bun.sleep(4000);
+    expect(calls(r.trace(), "stop")).toHaveLength(before);
     expect(await node.ask({ id: 2, name: "release" })).toMatchObject({ ok: true, released: true });
     await node.close();
-    // Watched: the stream's encoder runs, with nothing asked, for 0.8 s; then no one watches, and it stops.
+    // Watched: the stream's encoder runs, with nothing asked; then no one watches, and it stops.
     writeFileSync(watched, "");
-    await Bun.sleep(800);
-    expect(calls(r.trace(), "stop")).toHaveLength(0);
+    await Bun.sleep(4000);
+    expect(calls(r.trace(), "stop")).toHaveLength(before);
     rmSync(watched);
-    expect(await stopped(r, 3000)).toBe(true);
-  });
+    expect(await stopped(r, STOPS_WITHIN, before)).toBe(true);
+    // (Its forty commands and two 4 s waits took 59 s with 2 % of a core: three times that.)
+  }, 180_000);
 
   test("a command that comes as the unused desktop stops, its deskd still holding the lock, starts deskd again as it waits, and is answered", async () => {
     if (!built) return;
@@ -1208,16 +1225,18 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     const left = new Set(said.filter((t) => t.call === "left").map((t) => t.pid as number));
     expect(left.size).toBeGreaterThanOrEqual(1);
     expect(said.filter((t) => t.call === "serving" && !left.has(t.pid as number))).toHaveLength(2);
-  }, 30_000);
+  }, LIMIT);
 
   test("asking only whether it is up keeps it from nothing; and the owner's look that starts it again leaves the agent's word for the agent", async () => {
     if (!built) return;
-    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: "0.3", INVINCIBLE_DESKTOP_OWNER_UID: me });
+    const r = await deskd({ INVINCIBLE_DESKTOP_IDLE: IDLE, INVINCIBLE_DESKTOP_OWNER_UID: me });
     expect(desktop(r, ["click", "10", "20"]).code).toBe(0);
+    // (The stop that comes while it is asked only whether it is up: one a starved machine made before the click isn't it.)
+    const before = calls(r.trace(), "stop").length;
     let stoppedWhileAsked = false;
-    for (let i = 0; i < 30 && !stoppedWhileAsked; i++) {
+    for (const until = Date.now() + STOPS_WITHIN; Date.now() < until && !stoppedWhileAsked; ) {
       desktop(r, ["status"]);
-      stoppedWhileAsked = calls(r.trace(), "stop").length > 0;
+      stoppedWhileAsked = calls(r.trace(), "stop").length > before;
       await Bun.sleep(100);
     }
     expect(stoppedWhileAsked).toBe(true);
@@ -1231,8 +1250,8 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     const look = await node.ask({ id: 1, name: "screenshot", input: {} });
     expect(JSON.stringify(look)).not.toContain("was stopped");
     await node.close();
-    expect(desktop(r, ["click", "10", "20"]).err).toContain("this desktop was stopped after 0.3 s");
-  });
+    expect(desktop(r, ["click", "10", "20"]).err).toContain("this desktop was stopped after 3.0 s");
+  }, LIMIT);
 });
 
 describe("the accessibility tree beside the pixels (step 6)", () => {
