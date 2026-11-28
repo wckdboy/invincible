@@ -215,87 +215,92 @@ transport keys carries all of it:
          (`pack-objects`) and taken in the round's VM by that VM's own user (`index-pack`). Each is hashed as it comes,
          and every object of the tree is checked to be there, so the round holds that tree whatever the task's VM did.
          With no repository, the folder's tar is taken instead: each entry must be a file, a folder or a link inside it
-         (no name or link out of it, nothing written through a link, no device), and its tree is hashed as git hashes
-         it. The store is the round VM's user's: the gates' user reads it and never writes it. A file the task's VM's
-         user can't read fails the round, and says which: nothing is left out unsaid (the ninth re-review's I-2);
+         (no name or link out of it, nothing written through a link, no device, and no `.git` at any level, which git
+         would hash the folder without and a gate's git would obey: the twelfth re-review's I-12a), and its tree is
+         hashed as git hashes it. The store is the round VM's user's: a gate's user reads it and never writes it. A file
+         the task's VM's user can't read fails the round, and says which: nothing is left out unsaid (the ninth
+         re-review's I-2);
        - each gate, each check of the node's on what they judge (the digests of the test files they name) and, with no
-         repository, the review's evidence then run there as the gates' own user (nobody). Each runs on a copy of that
-         store of its own, in their own folder (`/gates`), with a HOME and a temporary folder of its own. It gets
-         nothing of the VM's environment but a PATH of its read-only folders, and of the login profiles only the image's
-         own (`/etc/profile`);
-       - and what a gate before it left: each copy is a new one, every earlier one gone, and what the gates' user left in
-         the VM's `/tmp` and `/dev/shm` is removed too. Its System V IPC objects and POSIX message queues aren't yet.
-         - A gate's command runs the task's code as the gates' user (its test, say), and that code may leave anything
-           running. The re-reviews found three kinds: a process that ended the gate's helper (the ninth's R9-2); a thread
-           group whose leader thread has exited while another runs on, which `/proc` shows as a zombie; and a chain of
-           processes, each forking its next (the eleventh's R11-1). Each came back verified past a sweep that listed
-           processes, skipped zombies and then signalled each.
-         - So before each copy, the round's VM is swept: `kill(-1, SIGKILL)` as the gates' user, from an exec of its
-           own with nothing of that user's above it, repeated until `/proc` shows none with a thread alive. The kernel
-           delivers the signal to all of them at once and refuses a fork once its parent has it, so no chain outruns
-           it. 20 tries of each of the last two came back with nothing left, in Kata and in runc
-           (`gate-sweep.integration.test.ts`). A round whose sweep can't end them fails its gates, and says so.
-         - **What doesn't hold yet, in Kata** (the twelfth re-review's R12-1, open). The sweep and each gate's helper
-           run as the same user as what a gate leaves. In runc, the host's kernel refuses one process's trace of
-           another's of the same user (Yama). Kata's guest kernel has no Yama, so a process a gate's run of the task's
-           code left can trace the sweep, or a later gate's helper, and turn its `kill` into its own exit. The sweep
-           then says none is left, the copy is made, and that process writes the next gate's file into it: the
-           re-review's task came back verified in Kata, and not in runc. So in Kata, a gate after one that runs the
-           task's code is still the task's to answer. That is why **the fabric stays off until r13**, which gives each
-           gate a user of its own;
-       - a check that can't be made sends the work back, never "no change" (the eleventh re-review's R11-2). That covers a
-         round whose tree can't be given, a sweep that can't end what was left, a copy that can't be made, and a check
-         that didn't end as it does. Before, a process the freeze missed closed the clone's `.git` to the gates' user
-         around the check's copy alone, and the rewritten locked test then passed. Before any work, a check that can't be
-         made ends the run, since nothing could be locked.
+         repository, the review's evidence then run there, each as a user of its own that no other of the round's has
+         (`gate1`, `gate2` and on, uids 61001 to 61256, named in the VM's `/etc/passwd`, which the node mounts
+         read-only; the twelfth re-review's R12-1). A round runs 256 of them at most, and refuses one more. Each runs on
+         a copy of that store of its own, in a folder of its own user's alone (0700) in the sticky gates' folder
+         (`/gates`), with a HOME and a temporary folder of its own there. It gets nothing of the VM's environment but a
+         PATH of its read-only folders, and of the login profiles only the image's own (`/etc/profile`);
+       - and nothing a gate before it left reaches it.
+         - A gate's command runs the task's code as that gate's user (its test, say), and that code may leave anything
+           running. The re-reviews found four kinds: a process that ended the gate's helper (the ninth's R9-2); a thread
+           group whose leader thread has exited while another runs on, which `/proc` shows as a zombie; a chain of
+           processes, each forking its next (the eleventh's R11-1); and, in Kata, a process that traced the round's
+           sweep, which ran as its own user, and turned its `kill` into its own exit (the twelfth's R12-1). Kata's guest
+           kernel has no Yama, which in runc refuses one process's trace of another of the same user. Each came back
+           verified while every gate ran as one user.
+         - Now no process one gate's user left can trace, signal, read or write anything of a later gate's: the kernel
+           refuses a trace or a signal across users without a capability, which no process of a round's VM has or can
+           gain (no-new-privileges), and each copy is its user's alone. Tried in Kata and in runc
+           (`gate-sweep.integration.test.ts`): a seize, a signal, a read, a write and a rename across users are refused,
+           and in Kata a seize of a process of its own user succeeds.
+         - After each gate, what its user left is ended and tidied: `kill(-1, SIGKILL)` as that user, from an exec of
+           its own with nothing of that user's above it, repeated until `/proc` shows none with a thread alive (20 tries
+           of a zombie-led group and of a fork chain came back with nothing left, in Kata and in runc), then its files
+           in `/tmp`, `/dev/shm` and `/dev/mqueue`, its folders in `/gates`, and its System V IPC objects. That keeps
+           the round's VM from filling. It decides nothing: in Kata a process of that user can trace its sweep and
+           outlive it, and then it stays that user's alone, which no later gate of the round is;
+       - a check that can't be made sends the work back, never "no change" (the eleventh re-review's R11-2). That covers
+         a round whose tree can't be given, a copy that can't be made, and a check that didn't end as it does. Before, a
+         process the freeze missed closed the clone's `.git` to the gates' user around the check's copy alone, and the
+         rewritten locked test then passed. Before any work, a check that can't be made ends the run, since nothing
+         could be locked.
 
        Every other command of the node's in the task's VM runs in a shell that reads no profile. The handed helper and its
        end run as `/usr/bin/python3 -I`, named by its path. The task's own commands keep their login shell, inside the
        helper. What they leave running ends with the task, a thread group whose leader has exited among it. In Kata and
        in runc, the PoCs below all come back not verified, with every gate, copy and sweep in a round's VM and none in the
-       task's (`handed-real.integration.test.ts`). The twelfth's, which traces the sweep, comes back verified in Kata
-       (R12-1, above):
+       task's (`handed-real.integration.test.ts`):
        - the eighth review's: a profile whose python3 says each gate passed, and a process that ended its own helper and
          writes the gate's file while a gate looks for it;
        - the ninth's: a first gate's run of the task's test leaving a process that writes the second gate's file;
        - the eleventh's: the same with a zombie-led group, a fork chain, one locked gate beaten by what round 1 left,
-         and the locked check's copy failed.
+         and the locked check's copy failed;
+       - the twelfth's: a process that traces its gate's helper and each later sweep, and writes the second gate's file
+         into each later copy it finds. It came back verified in Kata before each gate had a user of its own.
      - **What a gate gets is what CI gives a job: a checkout of the tree that comes back, offline.**
        - Nothing the task installed or built in its worktree that isn't in that tree: a gate that needs `node_modules`
          makes them (`bun install --frozen-lockfile && bun test`).
        - No network, no lease (no model), and nothing of the task's HOME or VM.
        - Its packages from the node's install cache, mounted read-only at `/cache/bun` (bun's `BUN_INSTALL_CACHE_DIR`).
          - The node fills it as each round begins, before the round's VM is made, in a filler container of its own: no
-           capability, a read-only root, a user of its own, the cache as its one writable mount, and Docker's default
-           bridge, from which it reaches what the host does (below).
-         - The filler is given the tree's `bun.lock` and the `package.json` files it names, and nothing else of the
-           tree: no `bunfig.toml`, `.npmrc` or script.
-         - Before bun reads them, the filler refuses a lockfile package, or a manifest's dependency, that names
-           anything but the default registry or the workspace's own (another registry, a git, GitHub, tarball, file or
-           link dependency, a patch), and a key twice. Bun checks each tarball it takes against the lockfile's hash as it
-           downloads it, and runs no package's script.
-         - A gate that needs a package that wasn't filled fails offline, and says why.
-         - **What doesn't hold yet** (the twelfth re-review's R12-2, open). The filler doesn't read the catalogs a
-           manifest's `workspaces` or the lockfile names, and it takes a dependency of `catalog:<name>` as the
-           registry's. Bun fetches what such a catalog names, a URL or a git repository, before its frozen lockfile
-           refuses the change, and keeps it in the cache. It fetches from the filler's network, Docker's default
-           bridge: from anything the host can reach (another container on that bridge, the tailnet, the LAN). So the
-           cache isn't the registry's tarballs alone. What a catalog fetched there is shared by every task's rounds on
-           the node, and a later gate can read it. r13 fills from the lockfile's packages alone, on a network whose only
-           way out is the registry;
+           capability, a read-only root, a user of its own, the cache as its one writable mount, and no network. Its one
+           way out is the node's proxy, on a socket of the fill's own mounted into it, which opens a tunnel to the
+           registry (`CONNECT registry.npmjs.org:443`) and refuses anything else (the twelfth re-review's R12-2).
+           Before, the filler ran on Docker's default bridge, and bun fetched what a manifest's catalog named, a URL or
+           a git repository, from whatever the host reaches, and kept it in the cache.
+         - The filler is given the tree's `bun.lock` alone: no `package.json`, `bunfig.toml`, `.npmrc` or script. It
+           refuses a lockfile package that isn't the default registry's (an npm name, an exact version, a sha512 hash)
+           or a workspace's own, a patch, and a key twice. It checks the lockfile's workspaces' dependencies, its
+           catalogs and its overrides as strictly, though bun never reads them there: each a table of npm names, asked
+           of the default registry by a version, a range, a tag or an `npm:` alias.
+         - It fills from the lockfile's packages alone: it writes a manifest of its own that asks for each of them by
+           name and version. Bun resolves that manifest from the registry's metadata to a lockfile of the fill's own,
+           which must name each of them by the tree's hash before any tarball is fetched. Bun then installs it, checking
+           each tarball against that hash, and runs no package's script.
+         - A gate that needs a package that wasn't filled fails offline, and says why. Bun doesn't check a hash of what
+           it takes from its cache, which holds what the registry gave, each package checked as it was fetched;
        - A `.git` of its own, whose HEAD is a commit of that tree with no history.
 
        A link in the tree that points out of it, by its words or by where it resolves through other links, is refused.
        Its copies count in its gates' 15 minutes, and a copy is at most 2 GiB. A gate whose command runs the task's code
-       (`bun test`) runs that code as the gates' user, for its own run alone: its verdict is that code's, as ever, and
-       the review reads what it is.
+       (`bun test`) runs that code as its own user, for its own run alone: its verdict is that code's, as ever (in Kata
+       that code can trace its gate's helper too), and the review reads what it is.
 
        With no repository, a process the task's end missed can still change what is tarred for a round. Its gates and
        its evidence then both read that, and the same, and nothing is shipped (a task with no repository ships nothing).
 
-       Within a round, its gates share its VM's System V and POSIX IPC objects, which outlive their processes. One that a
-       gate's run of the task's code made reaches only a later gate whose command reads it, which is the task's code
-       again.
+       Within a round, its gates still share its VM's kernel: its loopback network, its CPU and memory, and what can be
+       made by name in its `/tmp` and `/dev/shm`. A process a gate's run of the task's code left (which, in Kata, can
+       outlive its sweep) can listen on a port of the loopback, or leave a file of a fixed name there, which a later
+       gate's command trusts only if it reads that port or name without making it. A gate's own HOME and `TMPDIR` are
+       its own, in its own folder.
      - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
        the task started there. When its work ends (a revocation among its ends: your brake), its lease ends and the VM
        is removed at once, the command in flight there with it, never once that command returns (the fifth re-review's

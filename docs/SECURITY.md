@@ -915,30 +915,36 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         as it, with no network and no lease, and removed with the next round or the task. Nothing of the task's ever runs
         there.
       - It is given the tree once, through the node. In a repository, the tree's objects are packed in the task's VM and
-        taken by the round VM's own user (`index-pack`), each hashed as it comes, and every object of the tree is checked
-        to be there. With no repository, the folder's tar is taken: files, folders and links inside it alone, nothing
-        written through a link, and its tree hashed. The store is that user's: the gates' user reads it and never writes
-        it.
+        taken by the round VM's own user (`index-pack`), each hashed as it comes, and every object of the tree is
+        checked to be there. With no repository, the folder's tar is taken: files, folders and links inside it alone,
+        nothing written through a link, no `.git` at any level (the twelfth re-review's I-12a: git hashed the folder
+        without it, and a gate's `git status` in its copy ran its `core.fsmonitor`), and its tree hashed. The store is
+        that user's: a gate's user reads it and never writes it.
       - Each gate, each check of the node's on what they judge and, with no repository, the review's evidence then run
-        there as the gates' own user (nobody), each on a copy of that store of its own in their own folder (`/gates`,
-        0700). Each has a HOME and temporary folder of its own, `env -i` but a PATH of the VM's read-only folders, and
-        of the login profiles only the image's own `/etc/profile`.
-      - Before each copy, the round's VM is swept: `kill(-1, SIGKILL)` as the gates' user, from an exec of its own,
-        repeated until `/proc` shows none of that user's processes with a thread alive. The kernel signals them all at
-        once and refuses a fork once its parent has the signal, so a chain of forks can't outrun it, and a thread group
-        whose leader thread has exited is ended with the rest.
-        - Before, the ninth re-review's R9-2 and the eleventh's R11-1 came back verified, in Kata and runc. A first
+        there, each as a user of its own that no other of the round's has (`gate1` on, uids 61001 to 61256, named in an
+        `/etc/passwd` and `/etc/group` the node writes from the image's and mounts read-only; at most 256 a round, and
+        an image that names one of those ids or names makes no round). Each runs on a copy of that store of its own, in
+        a folder of its user's alone (0700) in the sticky gates' folder (`/gates`, 1777), with a HOME and temporary
+        folder of its own there, `env -i` but a PATH of the VM's read-only folders, and of the login profiles only the
+        image's own `/etc/profile` (`spec.test.ts`, `gate-users.test.ts`, `team-runtime.test.ts`,
+        `handed-repo.test.ts`).
+      - So nothing a gate's run of the task's code leaves reaches a later gate: no process of one gate's user can trace,
+        signal, read or write anything of another's. The kernel refuses a trace or a signal across users without a
+        capability, which no process of the round's VM has or can gain (no capability, no-new-privileges), and each copy
+        is its user's alone (`gate-sweep.integration.test.ts`, in Kata and runc: a seize, a signal, a read, a write and
+        a rename across users are refused).
+        - Before, the ninth re-review's R9-2, the eleventh's R11-1 and the twelfth's R12-1 came back verified. A first
           gate's run of the task's code left a process (one that ended its helper, a zombie-led group, a fork chain)
-          that wrote a later gate's file into its copy. Each of those comes back not verified now.
-        - What that user left in the VM's `/tmp` and `/dev/shm` is removed too; its System V IPC objects and POSIX
-          message queues aren't yet. A round whose sweep can't end them fails its gates.
-        - **What doesn't hold yet, in Kata (the twelfth re-review's R12-1, open; the fabric stays off until r13).** The
-          sweep and each gate's helper run as the same user as what a gate leaves. Kata's guest kernel has no Yama,
-          so a process a gate's run of the task's code left can trace the sweep, or a later gate's helper, and turn
-          its `kill` into its own exit. The sweep then says none is left, and that process writes the next gate's file
-          into its copy: the re-review's task came back verified in Kata. In runc the host's Yama refuses the trace,
-          and it comes back not verified. A seccomp filter on `ptrace` wouldn't close it, as `/proc/<pid>/mem` stays
-          open to the same user without Yama. r13 gives each gate and check a user of its own.
+          that wrote a later gate's file into its copy; and in Kata, whose guest kernel has no Yama, one that traced the
+          round's sweep, which ran as its own user, and turned its `kill` into its own exit. Each of those comes back
+          not verified now, in Kata and runc. A seccomp filter on `ptrace` wouldn't have closed the last, as
+          `/proc/<pid>/mem` stays open to the same user without Yama: a user of its own is what holds.
+      - After each gate, what its user left is ended and tidied: `kill(-1, SIGKILL)` as that user, from an exec of its
+        own, repeated until `/proc` shows none of that user's processes with a thread alive (the kernel signals them all
+        at once and refuses a fork once its parent has the signal), then its files in `/tmp`, `/dev/shm` and
+        `/dev/mqueue`, its folders in `/gates`, and its System V IPC objects (`gate-sweep.integration.test.ts`). This
+        keeps the round's VM from filling, and decides nothing: in Kata a process of that user can trace its sweep and
+        outlive it, and stays that user's alone, which no later gate of the round is.
       - A check that can't be made sends the work back, never "no change" (R11-2). Before any work it ends the run, as
         nothing could be locked.
       - With no repository, a file the task's VM's user can't read fails the round and says which, rather than being
@@ -950,35 +956,44 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         its worktree outside that tree, its lease, its HOME and the network are not there. A link out of the tree, by
         its words or by where it resolves through other links, is refused.
       - Its packages come from the node's install cache, mounted read-only (`/cache/bun`, `install-cache.test.ts`,
-        `install-cache.integration.test.ts`).
-        - The node fills it before the round's VM is made, in a filler container of its own (no capability, a read-only
-          root, its own user, the cache its one writable mount, Docker's default bridge), given the tree's `bun.lock`
-          and the `package.json` files it names and nothing else of the tree.
-        - The filler refuses a lockfile package, or a manifest's dependency, from anything but the default registry or
-          the workspace's own, and a key twice, before bun reads them. Bun then checks each tarball it takes against
-          the lockfile's hash as it downloads it, and runs no script.
-        - A gate that needs a package that wasn't filled fails offline, saying why.
-        - **What doesn't hold yet (the twelfth re-review's R12-2, open; the fabric stays off until r13).**
-          - The filler doesn't read the catalogs a manifest's `workspaces` or the lockfile names, and it takes a
-            `catalog:` dependency as the registry's. So bun fetches what such a catalog names, a URL or a git
-            repository (`git+http` runs `git clone`), before its frozen lockfile refuses the change, and keeps it in
-            the cache.
-          - It fetches from Docker's default bridge: from anything the host can reach, another container there (on
-            Ultra, live services), the tailnet as the host, the LAN, a metadata address.
-          - So the cache isn't the registry's tarballs alone. What a catalog fetched there is shared by every task's
-            rounds on the node, and a later gate can read it back to the giver.
-          - r13 fills from the lockfile's packages alone, with every catalog field checked, on a network whose only way
-            out is a proxy to the registry.
-        - The filler runs bun on the tree's lockfile and manifests: a flaw in bun's reading of them would be the
-          filler's to contain, and the cache is its one writable mount.
-      - A gate whose command runs the task's code runs it as the gates' user, for that run alone.
+        `registry-proxy.test.ts`, `install-cache.integration.test.ts`).
+        - The node fills it before the round's VM is made, in a filler container of its own: no capability, a read-only
+          root, its own user, the cache its one writable mount, and no network. Its one way out is the node's proxy
+          (`registry-proxy.ts`), on a socket of the fill's own mounted into it, which opens a tunnel to
+          `registry.npmjs.org:443` for a `CONNECT` to it and refuses anything else: another host or port, a plain
+          request, one it can't read. What passes is TLS between bun and the registry, which bun checks. The ledger says
+          how many tunnels each fill opened and what it refused.
+        - Before, the filler ran on Docker's default bridge, read no catalog, and passed a `catalog:` dependency (the
+          twelfth re-review's R12-2): bun fetched what a manifest's catalog named, a URL or a git repository, from
+          whatever the host reaches (another container on the bridge, the tailnet, the LAN, a metadata address), and
+          kept it in the cache that every task's rounds on the node share. Now a listener on that bridge receives
+          nothing, whether a catalog names it or the filler's container asks it itself
+          (`install-cache.integration.test.ts`).
+        - The filler is given the tree's `bun.lock` alone, never a `package.json` (so never a manifest's catalogs or
+          overrides), a `bunfig.toml`, an `.npmrc` or a script. It refuses a lockfile package that isn't the default
+          registry's, by an npm name, an exact version and a sha512 hash, or a workspace's own; a patch; and a key
+          twice. The lockfile's workspaces' dependencies, its catalogs and its overrides, which bun never reads there,
+          are held as strictly: each a table of npm names, asked of the default registry by a version, a range, a tag or
+          an `npm:` alias of one.
+        - It fills from the lockfile's packages alone, by a manifest of its own asking for each by name and version.
+          Bun resolves that manifest from the registry's metadata to a lockfile of the fill's own, which must name each
+          of them by the tree's hash, before any tarball is fetched; then it installs that lockfile, checking each
+          tarball against its hash, and runs no script.
+        - A gate that needs a package that wasn't filled fails offline, saying why. Bun doesn't check a hash of what it
+          takes from its cache, which holds what the registry gave alone, each package checked as it was fetched.
+        - The filler runs in runc, not Kata: what bun does with the registry's tarballs is the filler's to contain, with
+          no capability, no network and the cache its one writable mount.
+      - A gate whose command runs the task's code runs it as its own user, for that run alone, and that code can make
+        its own gate say anything (in Kata, by tracing its helper too): its verdict is that code's.
       - What a process the task's end missed can still do:
         - In a repository, it can make the round fail; whatever it does to the clone after the tree is read, the
           round's tree is that tree, hashed, and the review's must be the same.
         - With no repository, it can change what is tarred for a round. Its gates and its evidence then both read
           that, the same, and nothing is shipped.
-      - Within a round, its gates share its VM's System V and POSIX IPC objects. One that a gate's run of the task's
-        code made reaches only a later gate whose command reads it, which is the task's code again. The
+      - Within a round, its gates still share its VM's kernel: its loopback network, its CPU and memory, and names in
+        its `/tmp` and `/dev/shm`. A process one gate's run of the task's code left (in Kata it can outlive its sweep)
+        can listen on a port of the loopback, or make a file of a fixed name there, which reaches a later gate only if
+        that gate's command reads the port or the name without making it; a gate's HOME and `TMPDIR` are its own. The
       VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
       ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
       flight there with it, never once that command returns (the fifth re-review's I-1, `task-vms.test.ts`). Its lease
@@ -1001,8 +1016,8 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       ends (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
       bound, but not the task's VM (R3-1, closed): its gates run in a VM of each round's own, which nothing of the task's
       VM reaches (R11-1, above). What a gate's run of the task's code leaves running there, a zombie-led thread group
-      among it, is ended before the next gate's copy, except that in Kata it can trace the sweep and stop it (R12-1,
-      above, open).
+      among it, is its user's alone, which no later gate of the round is, and is ended after its gate, except that in
+      Kata it can trace that sweep and outlive it (R12-1, above).
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).
