@@ -186,7 +186,7 @@ describe("deskd's held session (the node's): toolset actions in, answers out", (
     // How soon the screen changed is the screen's own delay, from the action's start: on a clock of the test's own,
     // drawn 5 ms after the action began (which itself took 3 ms), it says 5 ms, never the time deskd took to see it.
     // (Read on the real clock, "under 20 ms" counted how long a busy machine took to bring the click to the display.)
-    const clocked = py(`
+    const clocked = await py(`
 clock = [50.0]
 class Display:
     def active(self): return 0
@@ -846,7 +846,7 @@ describe("the desk's focus and clicks, as a window manager takes its time", () =
     // The waits counted, on a clock of the test's own: two single clicks at one place take none; a double click there
     // 0.1 s after them waits the rest of the double-click time (0.6 s), then 30 ms between its two presses. (On the real
     // clock, "under 400 ms" counted a busy machine's time, and a pause before the double click outlasted its wait.)
-    const got = py(`
+    const got = await py(`
 clock = [50.0]
 slept = []
 def sleep(s):
