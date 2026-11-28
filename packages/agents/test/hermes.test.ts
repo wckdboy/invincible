@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,13 @@ import { AGENTS } from "../src/harnesses.ts";
 import { HERMES } from "../src/hermes.ts";
 import { ENGRAM_BIN, engramArgv } from "../src/engram.ts";
 import { HERMES_ACP_BRIDGE } from "../src/hermes.ts";
+
+// Every test here starts the bridge and a stand-in Hermes (Python 3) as processes of their own, so its time is the
+// machine's to give: "with it, a new session and a resumed one" took 0.85 s on the Mac mini at a load of 25 on 18
+// cores, the notes store's tests ran past bun's 5 s on main at load (28 November 2026), and it took 39.4 s with 2 % of
+// a core (what each of about 585 runnable tasks gets of 12), its slowest here. The limit is how long a busy machine may
+// take, never what a test checks.
+setDefaultTimeout(120_000);
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -200,7 +207,9 @@ describe("Hermes ACP driver", () => {
     const box = fixture();
     const proc = box.spawn("wait");
     try {
-      const deadline = Date.now() + 3000;
+      // (Waited for as long as a busy machine takes to start the stand-in, the file's time: at 2 % of a core it took
+      // more than the 3 s this waited once. It is a wait for it to start, never a check of how soon.)
+      const deadline = Date.now() + 120_000;
       while (!existsSync(join(box.home, "started")) && Date.now() < deadline) await Bun.sleep(10);
       expect(existsSync(join(box.home, "started"))).toBe(true);
       proc.kill("SIGTERM");
@@ -210,7 +219,7 @@ describe("Hermes ACP driver", () => {
       proc.kill();
       await proc.exited;
     }
-  }, 6000);
+  });
 
   test("RPC failures do not expose raw provider error payloads", async () => {
     const result = await fixture().run("rpc-error");
