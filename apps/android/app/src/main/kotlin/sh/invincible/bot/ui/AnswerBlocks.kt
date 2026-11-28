@@ -6,6 +6,16 @@ import android.annotation.SuppressLint
 import android.webkit.WebView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +29,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -210,13 +219,62 @@ fun StatsBlock(stats: List<Blocks.Stat>) {
     }
 }
 
-/** Answers to tap: one tapped is sent as your reply. Without [choose] (an older answer) they're shown, not offered. */
+/**
+ * A choice's look in the chat, as the web's (ui/blocks.ts choicesRow): offered while none is chosen; once one is, none is
+ * (one answer only), the one chosen keeps its ink and the others step back; an older answer's are shown, not offered, in a
+ * dashed outline.
+ */
+internal data class ChoiceLook(val tappable: Boolean, val faded: Boolean, val inked: Boolean, val dashed: Boolean)
+
+internal fun choiceLook(choice: String, chosen: String?, offered: Boolean) = ChoiceLook(
+    tappable = offered && chosen == null,
+    faded = chosen != null && chosen != choice,
+    inked = chosen == choice,
+    dashed = !offered,
+)
+
+/** A choice's words: as the web's, a step firmer than the body. */
+private val ChoiceWords = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight(550))
+
+/**
+ * Answers to tap, as the web's lighter chips: pills that wrap, each its words on the page's surface in a firm outline; one
+ * tapped is sent as your reply, and then none is offered. Without [choose] (an older answer) they're shown, not offered.
+ */
 @Composable
 fun ChoicesBlock(choices: List<String>, choose: ((String) -> Unit)?) {
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s2)) {
+    val brand = LocalBrand.current
+    // The web's --border-strong: a pill's outline a step firmer than a card's hairline, on each page.
+    val outline = if (brand.paper.luminance() < 0.5f) Color(0xFF2E2E33) else Color(0xFFD4D4D8)
+    var chosen by rememberSaveable(choices) { mutableStateOf<String?>(null) }
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s2), verticalArrangement = Arrangement.spacedBy(Space.s2)) {
         for (c in choices) {
-            if (choose != null) OutlinedButton(onClick = { choose(c) }, modifier = Modifier.fillMaxWidth()) { Text(c) }
-            else Text("· $c", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val look = choiceLook(c, chosen, offered = choose != null)
+            val pill = androidx.compose.foundation.shape.CircleShape
+            Box(
+                Modifier
+                    .heightIn(min = Space.touch)
+                    .let { if (look.faded) it.then(Modifier.alpha(0.5f)) else it }
+                    .clip(pill)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .then(
+                        if (look.dashed) Modifier.drawBehind {
+                            val inset = 0.5.dp.toPx()
+                            drawRoundRect(
+                                outline,
+                                topLeft = Offset(inset, inset),
+                                size = Size(size.width - 2 * inset, size.height - 2 * inset),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2),
+                                style = Stroke(1.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))),
+                            )
+                        } else Modifier.border(1.dp, if (look.inked) brand.ink else outline, pill),
+                    )
+                    .then(if (look.tappable) Modifier.clickable(role = Role.Button) { chosen = c; choose?.invoke(c) } else Modifier)
+                    .semantics { if (look.inked) selected = true }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(c, style = ChoiceWords, color = if (look.dashed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+            }
         }
     }
 }
