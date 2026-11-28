@@ -19,6 +19,12 @@ const root = mkdtempSync(join(tmpdir(), "invincible-deskd-"));
 const client = join(root, "desktop");
 /** Built with the system's compiler, as the image builds it; where there is none, the client's tests say so. */
 let built: string | null = null;
+/**
+ * The time a busy machine takes, never what a test checks: three times what the test took with 2 % of a core
+ * (loadrun.sh 20 980 on the Mac mini, 28 November 2026, the slower of two runs), in whole seconds, never under bun's own
+ * 5 s. A test that needs more than 5 s names its own time at 2 %: `}, BUSY(12.4));`.
+ */
+const BUSY = (secondsAt2: number) => Math.max(5_000, Math.ceil(secondsAt2 * 3) * 1_000);
 
 beforeAll(() => {
   let why: string;
@@ -31,8 +37,10 @@ beforeAll(() => {
     why = (error as Error).message;
   }
   if (!built) console.warn(`deskd.test.ts: the desktop client's tests SKIPPED, unverified: no C compiler here (${why.slice(0, 200)})`);
-});
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+  // (Its build took 3.1 to 9.3 s inside bun with 2 % of a core, where bun's own 5 s for a hook cut the compiler off.)
+}, BUSY(9.3));
+// (Removing every test's tree took 7.3 s with 2 % of a core, past bun's own 5 s for a hook.)
+afterAll(() => rmSync(root, { recursive: true, force: true }), BUSY(7.3));
 
 interface Running {
   run: string;
@@ -182,7 +190,7 @@ describe("deskd's held session (the node's): toolset actions in, answers out", (
     expect(calls(t, "motion")).toEqual([{ call: "motion", x: 640, y: 450 }]);
     expect(calls(t, "button").map(({ at, ...b }) => b)).toEqual([{ call: "button", button: 1, down: true }, { call: "button", button: 1, down: false }]);
     expect(keys(t)).toEqual(["+Control_L", "+l", "-l", "-Control_L"]);
-  });
+  }, BUSY(9.3));
 
   test("an action that changes nothing on the screen says so, having waited no longer than its grace", async () => {
     const r = await deskd({ DESKD_QUIET: "1" });
@@ -214,7 +222,7 @@ print(json.dumps({"changed": answer["changed"], "waited_ms": sum(waited) * 1000}
     expect(clocked.changed).toBe(false);
     expect(clocked.waited_ms).toBeGreaterThanOrEqual(60);
     expect(clocked.waited_ms).toBeLessThanOrEqual(62);
-  });
+  }, BUSY(12.5));
 
   test("a window or a dialog that appears is in the next answer, with its title and its application", async () => {
     const r = await deskd();
@@ -225,7 +233,7 @@ print(json.dumps({"changed": answer["changed"], "waited_ms": sum(waited) * 1000}
     expect(opened.appeared).toEqual([{ id: "0x400002", title: "Save As", app: "Mousepad", dialog: true, box: [300, 200, 600, 400] }]);
     expect(opened.text).toContain('a dialog appeared: "Save As" (Mousepad)');
     expect(after.appeared).toEqual([]);
-  });
+  }, BUSY(9.3));
 
   test("a screenshot is the screen with the pointer drawn in, as a PNG, at the screen's own size", async () => {
     const r = await deskd();
@@ -236,7 +244,7 @@ print(json.dumps({"changed": answer["changed"], "waited_ms": sum(waited) * 1000}
     expect(png.at(605, 405)).toEqual([0, 0, 0]);
     expect(png.at(100, 120)).toEqual([255, 0, 0]);
     expect(png.at(102, 122)).toEqual([255, 255, 255]);
-  });
+  }, BUSY(9.4));
 
   test("a zoom is a region, larger by whole times, in the same space as the screen's coordinates", async () => {
     const r = await deskd();
@@ -248,7 +256,7 @@ print(json.dumps({"changed": answer["changed"], "waited_ms": sum(waited) * 1000}
     expect(png.at(319, 319)).toEqual([0, 0, 0]);
     expect(png.at(330, 10)).toEqual([255, 255, 255]);
     expect(bad).toMatchObject({ ok: false, refused: true });
-  });
+  }, BUSY(10.4));
 
   test("what isn't an action, or isn't one it can do, is refused and touches nothing; a line that isn't JSON is answered too", async () => {
     const r = await deskd();
@@ -263,14 +271,14 @@ print(json.dumps({"changed": answer["changed"], "waited_ms": sum(waited) * 1000}
     for (const answer of answers) expect(answer.ok).toBe(false);
     expect(answers.filter((a) => a.refused)).toHaveLength(6);
     expect(r.trace().filter((t) => ["motion", "button", "key"].includes(String(t.call)))).toEqual([]);
-  });
+  }, BUSY(9.4));
 
   test("a command line through the session answers as the command would (the agent's own commands, routed)", async () => {
     const r = await deskd();
     const [text, bad] = await session(r, [{ id: 7, argv: ["text"], cwd: "/work" }, { id: 8, argv: ["click", "x", "1"] }]);
     expect(text).toEqual({ id: 7, ok: true, code: 0, stdout: "Example\nhttps://example.test/\nHello\n", stderr: "" });
     expect(bad).toMatchObject({ id: 8, ok: false, code: 2, stdout: "" });
-  });
+  }, BUSY(9.4));
 
   test("settling waits for 150 ms with nothing drawn; on a screen that never stops it gives up at its cap and says so", async () => {
     const calm = await deskd();
@@ -310,7 +318,7 @@ print(json.dumps({"calm": settled(False, 3.0), "busy": settled(True, 0.5)}))`) a
     expect(clocked.busy.settled).toBe(false);
     expect(clocked.busy.settled_ms).toBeGreaterThanOrEqual(500);
     expect(clocked.busy.settled_ms).toBeLessThanOrEqual(510);
-  });
+  }, BUSY(19.8));
 });
 
 describe("the desktop command: deskd's thin client", () => {
@@ -325,11 +333,9 @@ describe("the desktop command: deskd's thin client", () => {
   // C1 step 9: the owner's take-over. Their requests come on their own socket, from their own uid (the node's exec as
   // OWNER_UID: here the test's own uid, set so), and only theirs take the desktop over or give it back.
   const me = String(process.getuid!());
-  // How long a busy machine may take an agent's command to come to deskd, and the test it is in to end: with 2 % of a
-  // core, 28 November 2026, the hold test took 10.4 to 11.4 s, so its limit is three times that, as repository-
-  // checkout's are. Neither is what it checks.
+  // How long a busy machine may take an agent's command to come to deskd, never what a test checks: 30 s, where the hold
+  // test took 10.4 to 11.4 s in all with 2 % of a core, 28 November 2026.
   const HELD_WITHIN = 30_000;
-  const HELD_LIMIT = 35_000;
   /** Until the owner's own view says they no longer have the desktop, `ms` at most: whether it did. (Their `hold` asks
    * only that, and is no input of theirs: it keeps no hold.) */
   const holdEnded = async (node: { ask: (q: unknown) => Promise<any> }, ms: number) => {
@@ -359,7 +365,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect(clicked.ms).toBeGreaterThan(600);
     expect(calls(r.trace(), "button")).toHaveLength(2);
     await node.close();
-  }, HELD_LIMIT);
+  }, BUSY(11.4));
 
   test("an agent's command still waiting when its time is up does nothing: it exits 75 and says the owner has the desktop", async () => {
     if (!needs()) return;
@@ -375,7 +381,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect((await agentAsync(r, ["status"])).out).toContain("The owner has it: the owner took this desktop over");
     expect((await agentAsync(r, ["start"])).code).toBe(0);
     await node.close();
-  });
+  }, BUSY(10.4));
 
   test("the owner's own requests run while they hold it; with no input from them for its idle time, it ends by itself", async () => {
     if (!needs()) return;
@@ -398,7 +404,7 @@ describe("the desktop command: deskd's thin client", () => {
     const after = await agentAsync(r, ["click", "10", "20"]);
     expect(after).toMatchObject({ code: 0, err: "" });
     await node.close();
-  });
+  }, BUSY(10.4));
 
   test("the owner's input takes the desktop over when no one has it, and keeps their hold; their looks don't, and each answer of theirs says whether they have it", async () => {
     if (!needs()) return;
@@ -425,7 +431,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect(await node.ask({ id: 6, name: "screenshot" })).toMatchObject({ hold: null });
     expect(await agentAsync(r, ["click", "10", "20"])).toMatchObject({ code: 0, err: "" });
     await node.close();
-  });
+  }, BUSY(12.5));
 
   test("only the owner's socket, from the owner's uid, takes the desktop over: the agent's own session can't, whatever it says", async () => {
     if (!needs()) return;
@@ -440,7 +446,7 @@ describe("the desktop command: deskd's thin client", () => {
     await stranger.close();
     expect(statSync(`${r.run}.owner.sock`).mode & 0o777).toBe(0o666);
     expect(statSync(r.run).mode & 0o777).toBe(0o700);
-  });
+  }, BUSY(18.7));
 
   test("the desktop is given back as the owner's connection ends, and a second take starts a fresh window", async () => {
     if (!needs()) return;
@@ -467,7 +473,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect(await holdEnded(watching, HELD_WITHIN)).toBe(true);
     expect(await agentAsync(r, ["click", "10", "20"])).toMatchObject({ code: 0, err: "" });
     await watching.close();
-  });
+  }, BUSY(12.5));
 
   test("desktop stream starts the desktop, says so on stderr, and becomes the encoder: its stdout is the frames alone", async () => {
     if (!needs()) return;
@@ -480,7 +486,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect(streamed).toMatchObject({ code: 0, out: "FRAMES" });
     // (What `desktop start` says, on stderr: the desktop is up before the encoder runs.)
     expect(streamed.err).toContain("The desktop is up");
-  });
+  }, BUSY(9.4));
 
   test("a click is one short command: it prints what happened, and exits 0", async () => {
     if (!needs()) return;
@@ -493,7 +499,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect(desktop(r, ["left_click", "10", "20"]).out).toStartWith("clicked at 10,20");
     expect(desktop(r, ["double_click", "10", "20"]).out).toStartWith("double-clicked at 10,20");
     expect(desktop(r, ["cursor_position"]).out).toBe("X=10, Y=20\n");
-  });
+  }, BUSY(10.5));
 
   test("the hardware image's apps (C1 step 11): KiCad and FreeCAD start on the screen where the image has them, a file named whole; elsewhere, they're not said", async () => {
     if (!needs()) return;
@@ -521,7 +527,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect(desktop(plain, ["app", "pcbnew"])).toMatchObject({ code: 2, err: expect.stringContaining("desktop app <terminal|editor>") });
     expect(desktop(plain, ["help"]).out).not.toContain("kicad");
     expect(plain.trace().filter((t) => t.call === "spawn")).toEqual([]);
-  });
+  }, BUSY(33.2));
 
   test("what isn't a place, a key or a verb is refused with exit 2 before anything is touched", async () => {
     if (!needs()) return;
@@ -530,7 +536,7 @@ describe("the desktop command: deskd's thin client", () => {
       expect({ args, code: desktop(r, args).code }).toEqual({ args, code: 2 });
     }
     expect(r.trace().filter((t) => ["motion", "button", "key"].includes(String(t.call)))).toEqual([]);
-  });
+  }, BUSY(9.4));
 
   test("a screenshot is a file it names, relative to where the command ran, with the pointer drawn in", async () => {
     if (!needs()) return;
@@ -540,7 +546,7 @@ describe("the desktop command: deskd's thin client", () => {
     const shot = desktop(r, ["shot", "mine.png"], {}, here);
     expect(shot).toMatchObject({ code: 0, out: `${join(here, "mine.png")}\n` });
     expect(decodePng(readFileSync(join(here, "mine.png"))).at(50, 60)).toEqual([255, 0, 0]);
-  });
+  }, BUSY(10.4));
 
   test("a screenshot or a zoom with --base64 is printed as a data address on one line, for a loop to hand its model: no file is written", async () => {
     if (!needs()) return;
@@ -556,7 +562,7 @@ describe("the desktop command: deskd's thin client", () => {
     const [, zoomed] = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})\n$/.exec(zoom.out) ?? [];
     expect(decodePng(Buffer.from(zoomed!, "base64")).width).toBe(1280);
     expect(Bun.spawnSync(["ls", "-A", r.run]).stdout.toString()).toBe(before);
-  });
+  }, BUSY(9.4));
 
   test("a printed picture can be kept as well (--keep): its own bytes in the folder named, under their SHA-256, so the trail's hash names its file", async () => {
     if (!needs()) return;
@@ -570,7 +576,7 @@ describe("the desktop command: deskd's thin client", () => {
     // A folder that isn't absolute is refused, and so is keeping a picture that isn't printed.
     expect(desktop(r, ["screenshot", "--base64", "--keep", "evidence"]).code).toBe(2);
     expect(desktop(r, ["screenshot", "--keep", kept]).code).toBe(2);
-  });
+  }, BUSY(9.4));
 
   test("a click, a drag or a scroll holds the keys it is given (--hold) while it acts, as the toolset's own text asks", async () => {
     if (!needs()) return;
@@ -592,7 +598,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect(desktop(r, ["left_click", "10", "20", "--hold", "ctrl;reboot"]).code).toBe(2);
     expect(desktop(r, ["left_click", "10", "20", "--hold"]).code).toBe(2);
     expect(r.trace().slice(before).filter((e) => ["motion", "button", "key"].includes(String(e.call)))).toEqual([]);
-  });
+  }, BUSY(11.4));
 
   test("look puts the question and a fresh picture to the eyes named for this VM, with its token from the environment, never an argument", async () => {
     if (!needs()) return;
@@ -614,7 +620,7 @@ describe("the desktop command: deskd's thin client", () => {
     } finally {
       gateway.stop(true);
     }
-  });
+  }, BUSY(9.4));
 
   test("a look the gateway couldn't get answered, its plan taking too many calls at once, is said as that, never as a broken model", async () => {
     if (!needs()) return;
@@ -632,7 +638,7 @@ describe("the desktop command: deskd's thin client", () => {
     } finally {
       gateway.stop(true);
     }
-  });
+  }, BUSY(9.4));
 
   test("eyes that answer places in a space of their own (--space, or INVINCIBLE_EYES_SPACE) have them put in the screen's pixels, and said so", async () => {
     if (!needs()) return;
@@ -654,7 +660,7 @@ describe("the desktop command: deskd's thin client", () => {
     } finally {
       gateway.stop(true);
     }
-  });
+  }, BUSY(10.4));
 
   test("the owner's session, opened beside the agent's before deskd runs, waits for the agent's to start it, and starts none itself", async () => {
     if (!needs()) return;
@@ -684,7 +690,7 @@ describe("the desktop command: deskd's thin client", () => {
       const pid = readFileSync(trace, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((t) => t.call === "serving")?.pid;
       if (pid) process.kill(pid);
     }
-  });
+  }, BUSY(2.1));
 
   test("with no desktop process running, the command starts one and is answered; help needs none", async () => {
     if (!needs()) return;
@@ -707,7 +713,7 @@ describe("the desktop command: deskd's thin client", () => {
       const pid = readFileSync(trace, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((t) => t.call === "serving")?.pid;
       if (pid) process.kill(pid);
     }
-  });
+  }, BUSY(9.4));
 });
 
 /** deskd's own classes driven by a few lines of Python, with stand-ins set on them: what they print, as JSON. */
@@ -731,7 +737,7 @@ seen["window"] = "first tab - Chromium"; out.append(b.front()[0])
 seen["window"] = ""; seen["visible"] = "s1"; out.append(b.front()[0])
 seen["visible"] = None; out.append(b.front()[0])
 print(json.dumps(out))`)).toEqual(["t2", "t1", "t1", "t2"]);
-  });
+  }, BUSY(3.2));
 
   test("a browser that isn't running (killed, or its last tab closed) is started again by the next command that needs it, and spoken to afresh", () => {
     expect(py(`
@@ -746,7 +752,7 @@ desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=old)
 fresh = desk.browser_ready()
 again = desk.browser_ready()
 print(json.dumps({"starts": P.starts, "new": fresh is not old, "kept": again is fresh}))`)).toEqual({ starts: 1, new: true, kept: true });
-  });
+  }, BUSY(3.2));
 
   test("a screen isn't settled while a page is loading, however still it looks: the picture after a click that navigates is the new page's (C0's F6)", () => {
     // On a clock of the test's own, which a busy machine can't stretch: the page loads for 300 ms on a screen quiet for
@@ -770,7 +776,7 @@ print(json.dumps(dict(desk.settle(cap=2), waited_ms=sum(waited) * 1000)))`) as {
     expect(got.settled_ms).toBeGreaterThanOrEqual(300);
     expect(got.settled_ms).toBeLessThanOrEqual(310);
     expect(got.waited_ms).toBeCloseTo(got.settled_ms, 0);
-  });
+  }, BUSY(3.2));
 });
 
 describe("deskd's browser client, against a socket that answers as Chromium does", () => {
@@ -801,7 +807,7 @@ b = d.Browser(connect=lambda: ws)
     expect(py(`${CHROMIUM}
 got = b.evaluate("document.title")
 print(json.dumps({"got": got, "pages": list(b.pages), "sent": ws.sent[:3]}))`)).toEqual({ got: "on S1", pages: ["T1"], sent: ["Target.setDiscoverTargets", "Target.attachToTarget", "Page.enable"] });
-  });
+  }, BUSY(3.2));
 });
 
 describe("the desk's focus and clicks, as a window manager takes its time", () => {
@@ -810,7 +816,7 @@ describe("the desk's focus and clicks, as a window manager takes its time", () =
     const [click] = await session(r, [{ id: 1, name: "left_click", input: { coordinate: [900, 500] } }]);
     expect(click.focus).toMatchObject({ before: { app: "Chromium" }, after: { app: "Mousepad" } });
     expect(click.text).toContain('focus: Mousepad "Untitled 1 - Mousepad", was Chromium');
-  });
+  }, BUSY(9.4));
 
   test("a single click at the same place as the last one is never held back; a double click waits out the toolkit's double-click time first (C0's F7)", async () => {
     const r = await deskd();
@@ -820,7 +826,7 @@ describe("the desk's focus and clicks, as a window manager takes its time", () =
     const t1 = performance.now();
     await session(r, [{ id: 3, name: "double_click", input: { coordinate: [10, 10] } }]);
     expect(performance.now() - t1).toBeGreaterThan(300);
-  });
+  }, BUSY(11.4));
 
   test("a window named is brought forward with the keyboard's focus, the way between apps a full-screen browser hides", async () => {
     if (!built) return;
@@ -829,7 +835,7 @@ describe("the desk's focus and clicks, as a window manager takes its time", () =
     expect(moved).toMatchObject({ code: 0, out: 'focus: Mousepad "Untitled 1 - Mousepad"\n' });
     expect(calls(r.trace(), "activate")).toEqual([{ call: "activate", window: "0x600001" }]);
     expect(desktop(r, ["focus", "Nothing like it"]).code).toBe(1);
-  });
+  }, BUSY(10.4));
 
   test("a window that appears is brought to the front with the focus: an app an agent starts is the one it then works in", () => {
     // The watcher's own listing, with a stand-in display: the second listing has a new window.
@@ -845,7 +851,7 @@ class D:
 w.d = D()
 w._list(); w.started = True; w._list()
 print(json.dumps({"activated": D.activated, "appeared": [a["id"] for _, a in w.appeared]}))`)).toEqual({ activated: [2], appeared: ["0x1", "0x2"] });
-  });
+  }, BUSY(3.2));
 
   test("the browser's first window, from the desktop's own start, never takes the focus from a window the agent opened after that start", () => {
     // (Fresh Kata VMs on Ultra, 28 November 2026, 3 of 3: `desktop app editor` as the first command, the browser the
@@ -875,7 +881,7 @@ print(json.dumps(D.activated))`) as number[];
     // A browser up before the watcher began (deskd started again beside it) is no start's window to come: later apps
     // and browser windows are brought forward as any is.
     expect(watched([[browser], [browser, editor], [browser, editor, { id: 3, app: "Chromium" }]])).toEqual([1, 3]);
-  });
+  }, BUSY(9.3));
 
   test("a browser whose process lingers after it was killed, but whose port doesn't answer, is not running: it is started again", () => {
     expect(py(`
@@ -883,7 +889,7 @@ p = d.Pieces(home="/work")
 d._own = lambda comm: [4242]
 p.browser_up = lambda: False
 print(json.dumps(p.browser_running()))`)).toBe(false);
-  });
+  }, BUSY(4.2));
 });
 
 describe("deskd when the browser has no page, and after it opens one", () => {
@@ -907,7 +913,7 @@ class WS:
     def recv(self): return json.dumps(self.q.get())
 b = d.Browser(connect=WS)
 print(json.dumps(b.front()[0]))`)).toBe("T2");
-  });
+  }, BUSY(5.3));
 
   test("an address opened is answered once the page has loaded and the screen has settled, so the picture after it is the page's at once", async () => {
     if (!built) return;
@@ -917,7 +923,7 @@ print(json.dumps(b.front()[0]))`)).toBe("T2");
     // (A screen that never stops: the open waits its settle out, a second at most.)
     expect(opened.ms).toBeGreaterThan(900);
     expect(opened.ms).toBeLessThan(3000);
-  });
+  }, BUSY(11.4));
 });
 
 describe("text that arrives exactly (step 4): typed by what has the focus, never by remapping keys", () => {
@@ -931,7 +937,7 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     expect(calls(t, "cdp").filter((c) => c.method === "Input.insertText")).toEqual([{ call: "cdp", method: "Input.insertText", params: { text: TEST_STRING } }]);
     expect(calls(t, "key")).toEqual([]);
     expect(calls(t, "xdotool")).toEqual([]);
-  });
+  }, BUSY(10.4));
 
   test("with nothing that takes text focused (C0's F1: the page, its body), it is an error, not exit 0, and nothing is typed", async () => {
     if (!built) return;
@@ -942,7 +948,7 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     const none = await deskd({ DESKD_FOCUS: "none" });
     expect(desktop(none, ["type", "x"]).code).toBe(1);
     for (const run of [r, none]) expect(run.trace().filter((t) => ["key", "xdotool", "own"].includes(String(t.call)) || (t.call === "cdp" && t.method === "Input.insertText"))).toEqual([]);
-  });
+  }, BUSY(18.7));
 
   test("desktop open brings the browser forward with the focus: after an app the agent opened, the page it opens is where its typing goes", async () => {
     if (!built) return;
@@ -964,7 +970,7 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     const browsing = await deskd({ DESKD_FOCUS: "field" });
     expect(desktop(browsing, ["open", "http://127.0.0.1:8000/type.html"]).code).toBe(0);
     expect(calls(browsing.trace(), "activate")).toEqual([]);
-  });
+  }, BUSY(19.7));
 
   test("into a terminal, text the keyboard has no keys for is pasted from a selection deskd holds, PRIMARY, with shift+Insert; into another app, CLIPBOARD, with ctrl+v", async () => {
     const term = await deskd({ DESKD_FOCUS: "xterm" });
@@ -976,7 +982,7 @@ describe("text that arrives exactly (step 4): typed by what has the focus, never
     expect(calls(editor.trace(), "own")).toEqual([{ call: "own", text: TEST_STRING, selection: "CLIPBOARD" }]);
     expect(keys(editor.trace())).toEqual(["+Control_L", "+v", "-v", "-Control_L"]);
     for (const run of [term, editor]) expect(calls(run.trace(), "xdotool")).toEqual([]);
-  });
+  }, BUSY(20.8));
 
   test("a paste takes only the selection its keys read: CLIPBOARD for ctrl+v, never PRIMARY too, so the text an app has selected stays selected and the paste replaces it", () => {
     // (Taking PRIMARY from a GTK app unselects its text: KiCad's field, ctrl+a then a pasted name, got the name after
@@ -995,14 +1001,14 @@ w.d = D()
 w.own("Søren 🙂", "CLIPBOARD"); ctrl_v = list(taken); del taken[:]
 w.own("Søren 🙂", "PRIMARY"); shift_insert = list(taken)
 print(json.dumps({"ctrl+v": ctrl_v, "shift+Insert": shift_insert, "held": w.clip.decode("utf-8")}))`)).toEqual({ "ctrl+v": [[2, 7]], "shift+Insert": [[1, 7]], held: "Søren 🙂" });
-  });
+  }, BUSY(3.1));
 
   test("short text the keyboard has keys for still goes key by key, shift where it needs it, into whatever takes text", async () => {
     const r = await deskd({ DESKD_FOCUS: "xterm" });
     await session(r, [{ id: 1, name: "type", input: { text: "Ls -a" } }]);
     expect(keys(r.trace())).toEqual(["+Shift_L", "+l", "-l", "-Shift_L", "+s", "-s", "+space", "-space", "+-", "--", "+a", "-a"]);
     expect(calls(r.trace(), "own")).toEqual([]);
-  });
+  }, BUSY(9.4));
 });
 
 describe("what deskd starts and doesn't keep, an app the agent asked for, ends as itself", () => {
@@ -1025,7 +1031,7 @@ for _ in range(100):
 else:
     print(json.dumps("still in the process table"))`),
     ).toBe("ended");
-  });
+  }, BUSY(4.2));
 });
 
 describe("nothing hangs, nothing is silent (step 5)", () => {
@@ -1039,7 +1045,7 @@ describe("nothing hangs, nothing is silent (step 5)", () => {
     const ret = k.findIndex((e) => e.key === "Return" && e.down);
     expect(k[tab]!.at - lastUp(tab)).toBeLessThan(0.1);
     expect(k[ret]!.at - lastUp(ret)).toBeGreaterThanOrEqual(0.15);
-  });
+  }, BUSY(9.4));
 
   test("a paste is answered once the app has taken the text, so the Return after it can't overtake it; a paste nothing takes is an error", async () => {
     // (C1's step 4 run: in xterm, the line came after its Return, 20 of 20.) The app takes the text as deskd waits for
@@ -1055,7 +1061,7 @@ describe("nothing hangs, nothing is silent (step 5)", () => {
     const [lost] = await session(never, [{ id: 1, name: "type", input: { text: "Søren Ærø 🙂" } }]);
     expect(lost).toMatchObject({ ok: false, error: "nothing took the pasted text within 1 s: is a text field focused?" });
     expect(calls(never.trace(), "paste-wait").map((t) => t.bound)).toEqual([1]);
-  });
+  }, BUSY(17.6));
 
   test("a click's press comes right after its move: nothing is asked of the display between them", async () => {
     const r = await deskd();
@@ -1063,7 +1069,7 @@ describe("nothing hangs, nothing is silent (step 5)", () => {
     const t = r.trace().map((e) => e.call as string);
     const moved = t.indexOf("motion");
     expect(t.slice(moved, moved + 2)).toEqual(["motion", "button"]);
-  });
+  }, BUSY(7.3));
 
   test("double clicks at one place, one after another, are each a double click: the next waits out the double-click time and a margin (C0's F7)", async () => {
     const r = await deskd({ DESKD_QUIET: "1" });
@@ -1071,7 +1077,7 @@ describe("nothing hangs, nothing is silent (step 5)", () => {
     const presses = (calls(r.trace(), "button") as { down: boolean; at: number }[]).filter((b) => b.down);
     expect(presses).toHaveLength(4);
     expect(presses[2]!.at - presses[1]!.at).toBeGreaterThanOrEqual(0.58);
-  });
+  }, BUSY(11.4));
 
   /** A page with a JavaScript alert up: Chromium answers nothing on that page while it is (C0's F4: 30 s, then a traceback). */
   const ALERT = `
@@ -1112,14 +1118,14 @@ print(json.dumps({"code": code, "err": err, "ms": (time.monotonic() - t0) * 1000
     expect(got.code).toBe(1);
     expect(got.err).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
     expect(got.err).toContain("desktop dialog accept");
-  });
+  }, BUSY(2.1));
 
   test("a dialog the page puts up is in the answer of the action that brought it up, with its words and its buttons", async () => {
     const r = await deskd({ DESKD_DIALOG: "confirm" });
     const [click] = await session(r, [{ id: 1, name: "left_click", input: { coordinate: [640, 450] } }]);
     expect(click.dialog).toMatchObject({ type: "confirm", message: "Delete the draft?", buttons: ["OK", "Cancel"] });
     expect(click.text).toContain('a JavaScript confirm is open on the page: "Delete the draft?" [OK] [Cancel]. desktop dialog accept answers it (or Return), desktop dialog dismiss cancels it (or Escape)');
-  });
+  }, BUSY(9.3));
 
   test("the dialog is answered by its own verb, as the page's own buttons would", () => {
     const got = py(`${ALERT}
@@ -1129,7 +1135,7 @@ time.sleep(0.1)
 print(json.dumps({"code": code, "out": out, "sent": [m for m in ws.sent if m["method"] == "Page.handleJavaScriptDialog"], "open": b.dialog()}))`) as { code: number; out: string; sent: unknown[]; open: unknown };
     expect(got).toMatchObject({ code: 0, out: 'accepted the alert "Hello from the page"\n', open: null });
     expect(got.sent).toEqual([{ id: expect.any(Number), method: "Page.handleJavaScriptDialog", params: { accept: true }, sessionId: "S1" }]);
-  });
+  }, BUSY(3.2));
 
   /** A page that puts up its alert as it loads, 100 ms after the navigation, with a read of it already asked for. */
   const ALERT_AS_IT_LOADS = `
@@ -1202,7 +1208,7 @@ print(json.dumps({"code": code, "out": out, "err": err, "reads": reads, "paced":
     expect(got.code).toBe(0);
     expect(got.out).toContain("http://127.0.0.1:8000/alert.html");
     expect(got.out).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
-  });
+  }, BUSY(5.2));
 
   test("a read already waiting when the alert goes up is answered then, with the alert: not at its 2 s bound", () => {
     // Already waiting: the alert goes up as the read comes, never a guessed time after the navigation, which a busy
@@ -1225,7 +1231,7 @@ print(json.dumps({"code": code, "err": err, "reads": reads}))`) as { code: numbe
     expect(got.reads).toEqual(["by the alert"]);
     expect(got.code).toBe(1);
     expect(got.err).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
-  });
+  }, BUSY(3.1));
 
   test("deskd keeps the browser and the window manager running: one that ends is started again as it ends, not at the next command (C0's F9), and not once it is stopping", () => {
     expect(py(`
@@ -1243,7 +1249,7 @@ pieces.ended("browser")
 desk.stopping = True
 pieces.ended("browser")
 print(json.dumps({"starts": P.starts}))`)).toEqual({ starts: 1 });
-  });
+  }, BUSY(3.1));
 
   test("the keeper waits on what deskd started, and asks nothing at rest: a piece's end is known as it happens (C1: asking four times a second cost the idle desktop 0.7 % of a core)", () => {
     const got = py(`
@@ -1278,7 +1284,7 @@ class P:
 desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=d.Browser())
 desk.supervise(); time.sleep(0.6)
 print(json.dumps(P.asked))`)).toBe(0);
-  });
+  }, BUSY(11.4));
 
   test("the keeper and a command that both find the browser gone start one browser, not two", () => {
     expect(py(`
@@ -1296,7 +1302,7 @@ both = [threading.Thread(target=p.start) for _ in range(2)]
 for t in both: t.start()
 for t in both: t.join()
 print(json.dumps(spawned))`)).toEqual(["chromium"]);
-  });
+  }, BUSY(3.2));
 
   test("stopping the desktop closes each window as a person would (WM_DELETE_WINDOW) before any process is ended: no restore question next time", async () => {
     if (!built) return;
@@ -1306,7 +1312,7 @@ print(json.dumps(spawned))`)).toEqual(["chromium"]);
     const order = r.trace().filter((t) => t.call === "close" || t.call === "stop").map((t) => (t.call === "close" ? `close ${t.window}` : "stop"));
     expect(order.at(-1)).toBe("stop");
     expect(order.filter((o) => o.startsWith("close")).sort()).toEqual(["close 0x400001", "close 0x500001", "close 0x600001"]);
-  });
+  }, BUSY(10.4));
 });
 
 describe("light by default (C1 step 10): an unused desktop stops, and the next command starts it again", () => {
@@ -1582,7 +1588,7 @@ print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "refs": so
     // The app searches its own tree, in one call for the window: no walk (the registry's list and the app's windows
     // only, and the combo box's own children, for the option it holds).
     expect(got).toMatchObject({ matches: 1, walked: 3 });
-  });
+  }, BUSY(4.2));
 
   test("a node keeps its ref from one tree to the next, one that appears gets the next, and a ref whose node is gone fails: never another node's", () => {
     // (On Ultra, 28 November 2026: a select's options appeared in the second tree, before the check box, and took its
@@ -1609,7 +1615,7 @@ print(json.dumps({"first": first, "second": second, "terms": terms, "found": fou
     // Found again, it is the ref it has.
     expect(got.found).toBe(4);
     expect(got.gone).toEqual(['ref=7 (menu item "Free") is gone: desktop tree, again', 'ref=8 (menu item "Team") is gone: desktop tree, again']);
-  });
+  }, BUSY(3.2));
 
   test("a field says what it holds beside its name: an entry its text, a combo box its chosen option; a password field never", () => {
     // (Every model run of the form, 28 November 2026, asked its eyes whether the form was filled: 1 to 3 looks a run,
@@ -1634,7 +1640,7 @@ print(json.dumps({"lines": lines, "found": d.say_node(*found)}, ensure_ascii=Fal
     expect(JSON.stringify(got)).not.toContain("fake-password");
     // Found, it says the same.
     expect(got.found).toBe('[3] combo box "Plan" = "Team" at 200,292 (200x24) collapsed');
-  });
+  }, BUSY(4.2));
 
   /**
    * The bus's form as Chromium works it, for `desktop fill`: the desk's actions done to it. A click on an entry gives
@@ -1742,7 +1748,7 @@ filled(["Plan", "Team", "I agree to the terms", "on"])
 print(json.dumps(filled(["Plan", "team", "I agree to the terms", "on"])))`) as Record<string, any>;
     expect(again.out).toBe('chose ref=3 combo box "Plan" = "Team" (it held it already)\nchecked ref=4 check box "I agree to the terms" (it was already)\n');
     expect(again.did).toEqual([]);
-  });
+  }, BUSY(7.3));
 
   test("desktop fill stops at the first field that doesn't hold what it was given, saying what it holds: nothing after it is done", () => {
     const frozen = py(`${BUS}${FORM}
@@ -1758,7 +1764,7 @@ print(json.dumps(filled(["Plan", "Teams", "I agree to the terms", "on"])))`) as 
     expect(option.err).toBe('desktop: ref=3 combo box "Plan" has no option "Teams" (it has "Free", "Team", "Enterprise"): the fields after it weren\'t filled\n');
     expect(option).toMatchObject({ plan: ["Free"], open: false, terms: false });
     expect(option.did.filter((a: any[]) => a[0] !== "settle")).toEqual([["left_click", [200, 292]], ["key", "Escape"]]);
-  });
+  }, BUSY(7.3));
 
   test("desktop fill refuses before doing anything: a field it can't find or tell apart, one that isn't a field, a value that doesn't fit", () => {
     const tried = (args: string[]) => py(`${BUS}${FORM}
@@ -1775,7 +1781,7 @@ print(json.dumps(filled(${JSON.stringify(args)})))`) as Record<string, any>;
     expect(refused(["I agree to the terms", "maybe"])).toBe('ref=4 check box "I agree to the terms" takes on or off, not "maybe"');
     expect(refused(["Name"])).toContain("fill takes each field and its value");
     expect(refused(["ref=99", "x"])).toBe("there is no ref=99: desktop tree (or find) gives them");
-  });
+  }, BUSY(18.7));
 
   test("desktop fill stops when the owner takes the desktop over: the fields after it wait for another command", () => {
     const got = py(`${BUS}${FORM}
@@ -1784,7 +1790,7 @@ print(json.dumps(filled(["Name", "Ada Lovelace", "Email", "ada@example.test"], h
     expect(got.out).toBe('filled ref=1 entry "Name" = "Ada Lovelace"\n');
     expect(got.err).toBe("desktop: the owner took this desktop over 0 s ago: the fields from Email on weren't filled; do something else meanwhile, and try again after\n");
     expect(got.texts["/n2"]).toBeUndefined();
-  });
+  }, BUSY(3.2));
 
   test("desktop find reaches what is below or above the screen: the page scrolled to it its own way (AT-SPI's ScrollTo), and the answer says so", () => {
     // (Every settings run of the models, 28 November 2026, 6 of 6: `desktop find combobox "Font size"` said nothing like
@@ -1817,7 +1823,7 @@ print(json.dumps({"before": before, "box": list(box), "scrolled": bool(node.get(
     expect(got.said[1]).toMatch(/^130,768 · \[\d+\] push button "Post" at 130,768 \(60x24\) · scrolled into view\n$/);
     expect(got.edge[0]).toBe(true);
     expect(got.edge[1]).toBeLessThan(800);
-  });
+  }, BUSY(3.2));
 
   test("desktop open takes the browser's own settings, chrome://settings and its pages, and refuses every other chrome:// page, javascript: and data:", () => {
     // (Every settings run of the models, 28 November 2026, 6 of 6, first asked for
@@ -1837,7 +1843,7 @@ print(json.dumps({"ok": {a: tried(a) for a in ok}, "no": {a: tried(a) for a in n
     for (const [address, [code, said]] of Object.entries(got.no)) expect([address, code, said]).toEqual([address, 2, "desktop: an address begins with http, https, file or about, or is the browser's settings (chrome://settings and its pages)"]);
     // Nothing refused was ever opened.
     expect(got.opened).toEqual(Object.keys(got.ok));
-  });
+  }, BUSY(3.2));
 
   test("desktop tree ends with one line counting what can be acted on off the screen, which desktop find reaches; nothing when there is none", () => {
     const got = py(`${BUS}
@@ -1856,7 +1862,7 @@ print(json.dumps({"on": on, "off": off}))`) as { on: string; off: string };
     expect(lines.filter((l) => l.includes("off the screen"))).toHaveLength(1);
     // The rest of the tree as before.
     expect(got.off.trimEnd().split("\n").slice(0, -1).join("\n")).toBe(got.on.trimEnd());
-  });
+  }, BUSY(3.2));
 
   test("desktop click ref=N on a node the page has scrolled away brings it back into view its own way, clicks it there, and says so; never a click past the screen's edge", () => {
     const got = py(`${BUS}
@@ -1882,7 +1888,7 @@ print(json.dumps({"moved": moved, "clicks": clicks, "code": code, "out": out, "e
     expect(got.clicks[0][1]).toBeGreaterThanOrEqual(80);
     expect(got.clicks[0][1]).toBeLessThan(800);
     expect(got.out).toMatch(/\(ref=1, entry "Name", scrolled into view\)/);
-  });
+  }, BUSY(3.2));
 
   test("desktop fill fills a field below the screen: scrolled into view its own way first, and said", () => {
     const got = py(`${BUS}${FORM}
@@ -1902,7 +1908,7 @@ print(json.dumps(filled(["City", "Aarhus"]) | {"asked": scrolled}, ensure_ascii=
     expect(edge.asked).toEqual(["/n16"]);
     // Its click was where the field is once scrolled to: on the screen.
     expect(got.did.filter((a: any[]) => a[0] === "left_click").at(-1)[1][1]).toBe(768);
-  });
+  }, BUSY(6.3));
 
   test("an app that can't search its own tree (no Collection) is walked, many calls in flight, never below what isn't showing: the same nodes", () => {
     const got = py(`${BUS}
@@ -1917,7 +1923,7 @@ print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said]}))`) as { l
       '[5] push button "Send" at 130,372 (60x24)',
       '[6] push button "Not now" at 230,372 (60x24) disabled',
     ]);
-  });
+  }, BUSY(4.2));
 
   test("GTK 4 says 0,0 for every place on the screen: it is asked for its window's, and that window's place on the screen (from X) is added, by its process and title; others' are the screen's already", () => {
     const got = py(`${BUS}
@@ -1929,7 +1935,7 @@ print(json.dumps({"lines": [d.say_node(r, n, b) for r, n, b in said], "origins":
     expect(py(`${BUS}
 t.actable(pid=300, title="Form - Chromium")
 print(json.dumps(origins))`)).toEqual([]);
-  });
+  }, BUSY(7.2));
 
   test("find: the role in a model's words, the name in any case, the app with the focus first; its centre and a ref", () => {
     const got = py(`${BUS}
@@ -1941,7 +1947,7 @@ except d.Refused as e:
     bad = str(e)
 print(json.dumps({"ref": ref, "role": node["role"], "box": box, "miss": miss, "line": d.say_node(ref, node, box), "bad": bad}))`) as Record<string, unknown>;
     expect(got).toEqual({ ref: 1, role: "push button", box: [100, 360, 60, 24], miss: null, line: '[1] push button "Send" at 130,372 (60x24)', bad: 'there is no role "gizmo" (desktop tree shows the roles on the screen)' });
-  });
+  }, BUSY(3.2));
 
   test("a ref is clicked where its node is at that moment, not where it was said; one that's gone says so", () => {
     const got = py(`${BUS}
@@ -1959,7 +1965,7 @@ except d.Refused as e:
     unknown = str(e)
 print(json.dumps({"box": box, "gone": gone, "unknown": unknown}))`) as Record<string, unknown>;
     expect(got).toEqual({ box: [100, 500, 60, 24], gone: 'ref=5 (push button "Send") is gone: desktop tree, again', unknown: "there is no ref=99: desktop tree (or find) gives them" });
-  });
+  }, BUSY(3.2));
 
   test("an app that isn't on the bus is named among those that are", () => {
     expect(py(`${BUS}
@@ -1968,7 +1974,7 @@ try:
 except d.Failed as e:
     said = str(e)
 print(json.dumps(said))`)).toBe("no app named like kicad is on the accessibility bus (on it: Chromium, notes)");
-  });
+  }, BUSY(3.1));
 
   test("the tree reads what is before the caret of the field with the focus, in the window with the focus; a password field, or an app not on the bus, it can't say", () => {
     expect(py(`${BUS}
@@ -1976,7 +1982,7 @@ got = t.caret_text(pid=300, title="Form - Chromium")
 NODES["/n1"] = NODES["/n1"][:2] + ("password text",) + NODES["/n1"][3:]
 hidden = t.caret_text(pid=300, title="Form - Chromium")
 print(json.dumps({"got": got, "hidden": hidden, "elsewhere": t.caret_text(pid=999)}))`)).toEqual({ got: "Søren Ærø", hidden: null, elsewhere: null });
-  });
+  }, BUSY(4.2));
 
   test("what is typed into an app is checked where its accessibility tree can say what landed, as the page's is by its DOM (step 4's last line)", async () => {
     const right = await deskd({ DESKD_FOCUS: "mousepad", DESKD_LANDED: "Dear Søren,\n  Hello" });
@@ -1995,7 +2001,7 @@ print(json.dumps({"got": got, "hidden": hidden, "elsewhere": t.caret_text(pid=99
     const [termed] = await session(term, [{ id: 1, name: "type", input: { text: "ls" } }]);
     expect(termed).toMatchObject({ ok: true });
     expect(calls(term.trace(), "caret_text")).toEqual([]);
-  });
+  }, BUSY(33.3));
 
   test("the bus's resident listener starts with the first lookup, once, off the answer's path: not at the desktop's start, where it slowed the browser's first page", () => {
     expect(py(`
@@ -2009,7 +2015,7 @@ desk = d.Desk(pieces=P(), display=object(), watch=object(), browser=d.Browser(),
 before = FakeTree.listened
 desk.tree; desk.tree; time.sleep(0.1)
 print(json.dumps({"before": before, "after": FakeTree.listened}))`)).toEqual({ before: 0, after: 1 });
-  });
+  }, BUSY(3.1));
 
   test("the accessibility bus starts before the browser, which is started with its accessibility on", () => {
     const got = py(`
@@ -2031,5 +2037,5 @@ p.start()
 print(json.dumps({"order": order, "bus": d.os.environ.get("DBUS_SESSION_BUS_ADDRESS")}))`) as { order: string[]; bus: string };
     expect(got.order).toEqual(["dbus-daemon", "/usr/libexec/at-spi-bus-launcher", "chromium --force-renderer-accessibility"]);
     expect(got.bus).toBe("unix:path=/tmp/example-session-bus,guid=0");
-  });
+  }, BUSY(2.2));
 });
