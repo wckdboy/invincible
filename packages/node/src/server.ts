@@ -139,7 +139,7 @@ import {
   SEAT_HARNESS as SEAT_HARNESS_OF,
   LEASE_FILE,
 } from "@invincible/core";
-import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, endLeftovers, engramFound, checkModel, eyesForVm, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
+import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, endLeftovers, sweepLeftovers, engramFound, checkModel, eyesForVm, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME } from "@invincible/models";
 import { answerPush, answerSync, PairingError, type PairingHost, peerOf, signedFetch, signedPost, type SyncEngine } from "@invincible/link";
 import { type Device, enrollDevice, type HandoffGrantRecord, isFullNode, type LedgerStore, revokeDevice, type SecretInfo, type Vault } from "@invincible/ledger";
@@ -2690,7 +2690,10 @@ export function createApp(ctx: AppContext) {
   /**
    * What tasks other nodes handed over left running in each agent's VM once they have ended, ended as the node comes back:
    * a crash, or the node's own stop, cut their own end off (fabric/handoff.ts attachTeam; the third re-review's R3-5). It
-   * goes as the stop's word to a coding tool does, which a pause of the agent doesn't refuse.
+   * goes as the stop's word to a coding tool does, which a pause of the agent doesn't refuse. And where the agent has a
+   * repository, what runs of them cut off left on its side (a receive's patch, an index, a give's ref: the seventh fabric
+   * review's I-d) is swept for every task this node can't be running: one that has ended, or one it doesn't know. Each
+   * task's start sweeps its own, so one that never runs again would keep them.
    */
   async function sweepHanded(): Promise<void> {
     const store = ctx.team!.store;
@@ -2698,6 +2701,7 @@ export function createApp(ctx: AppContext) {
       const task = store.task(id);
       return task?.givenBy?.startsWith("node:") === true && (task.status === "done" || task.status === "failed" || task.status === "stopped");
     };
+    const sweepable = (id: string) => ended(id) || !store.task(id);
     for (const member of store.agents()) {
       if (!member.workspace) continue;
       try {
@@ -2705,6 +2709,13 @@ export function createApp(ctx: AppContext) {
         if (failed.length) ctx.log(`fabric: what ${failed.join(", ")} left running in ${member.name}'s VM couldn't all be ended`);
       } catch (error) {
         ctx.log(`fabric: ${member.name}'s VM couldn't be asked what handed tasks left running there: ${(error as Error).message}`);
+      }
+      if (!member.repository) continue;
+      try {
+        const { failed } = await sweepLeftovers((command, timeout) => stopTellTeam(member, command, timeout), sweepable);
+        if (failed.length) ctx.log(`fabric: what runs of ${failed.join(", ")} cut off left on ${member.name}'s side couldn't all be swept`);
+      } catch (error) {
+        ctx.log(`fabric: what runs of handed tasks cut off left on ${member.name}'s side couldn't all be swept: ${redact(String((error as Error)?.message ?? error)).slice(0, 300)}`);
       }
     }
   }

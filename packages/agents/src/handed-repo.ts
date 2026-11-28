@@ -459,3 +459,50 @@ export const handedApply = (root: string, base: string, task: string, nonce: str
 export const handedDrop = (task: string, nonce: string, keep = HANDED_KEEP): string => heldGit(DROP_SCRIPT, keep, task, nonce);
 export const handedTree = (root: string, base: string, task: string, keep = HANDED_KEEP): string => heldGit(TREE_SCRIPT, root, base, keep, task);
 export const handedSweep = (root: string, task: string, keep = HANDED_KEEP): string => heldGit(SWEEP_SCRIPT, root, task, keep);
+
+/**
+ * Its agent's side, as the node starts: the tasks whose cut-off runs left something there (the seventh fabric review's
+ * I-d), by id, one a line. In `keep`: a receive's patch or its apply's index, a give's or a tree's index, the patch of
+ * before, each named as SWEEP_SCRIPT takes it (the task's id and a dot first, `.patch` or `-index` last); a handed
+ * helper's list (`.jsonl`) is endLeftovers'. In the repository at `root`, once it is there: a give's ref. Only names that
+ * can be a task's id are printed, and the node checks each again.
+ */
+const LEFT_SCRIPT = `root, keep = sys.argv[1], sys.argv[2]
+found = set()
+if os.path.isdir(keep):
+    for name in os.listdir(keep):
+        if '.' in name and (name.endswith('.patch') or name.endswith('-index')):
+            found.add(name.split('.',1)[0])
+if os.path.isdir(root):
+    bad = refused(root)
+    if bad: sys.exit(bad)
+    r = git(root,'for-each-ref','--format=%(refname)','refs/invincible/give/')
+    if r.returncode: sys.exit('its gives could not be listed: '+(r.stderr or r.stdout).decode(errors='replace')[-300:])
+    for ref in r.stdout.decode(errors='replace').splitlines():
+        if ref.startswith('refs/invincible/give/'): found.add(ref[len('refs/invincible/give/'):])
+for task in sorted(found):
+    if re.fullmatch('[A-Za-z0-9_-]{1,80}', task): print(task)`;
+
+/** The task-id rule of handed-process.ts (its TASK_ID): every id an agent's VM lists here is checked against it. */
+const HANDED_TASK_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+/**
+ * Sweeps, in one agent's VM as the node starts, what runs of tasks other nodes handed over cut off left on its side (the
+ * seventh fabric review's I-d). Each task's start sweeps its own (handedSweep), so a task that never runs again would
+ * keep them, a receive's patch of up to the limit among them, for as long as the VM lasts. Every task that left any is
+ * listed (LEFT_SCRIPT), its id checked first; each that `sweepable` says can't be running (it has ended, or the node
+ * doesn't know it) is swept by handedSweep, which takes that task's own and nothing of any other's. `exec`: a command in
+ * that VM that a pause of its agent doesn't refuse. A listing that fails throws, saying why.
+ */
+export async function sweepLeftovers(exec: (command: string, timeout: number) => Promise<{ exitCode: number; stdout: string; stderr?: string }>, sweepable: (task: string) => boolean, root = "/work/repo", keep = HANDED_KEEP): Promise<{ swept: string[]; failed: string[] }> {
+  const listed = await exec(heldGit(LEFT_SCRIPT, root, keep), 60);
+  if (listed.exitCode !== 0) throw new Error((listed.stderr || listed.stdout).trim().slice(-300) || "its listing failed");
+  const swept: string[] = [];
+  const failed: string[] = [];
+  for (const task of new Set(listed.stdout.split("\n").map((line) => line.trim()))) {
+    // (Asked just before its own sweep, not once for all: a task stopped here may be resumed meanwhile.)
+    if (!HANDED_TASK_ID.test(task) || !sweepable(task)) continue;
+    ((await exec(handedSweep(root, task, keep), 60)).exitCode === 0 ? swept : failed).push(task);
+  }
+  return { swept, failed };
+}

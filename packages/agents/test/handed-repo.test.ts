@@ -801,3 +801,80 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     expect(createHash("sha256").update(`blob ${data.length}\0`).update(readFileSync(join(root, "x.bin"))).digest("hex")).toBe(id);
   }, 30_000);
 });
+
+import { sweepLeftovers } from "../src/handed-repo.ts";
+
+/*
+ * What runs of other nodes' tasks cut off left on their agents' side, swept as the node starts (the seventh fabric
+ * review's I-d): each task's start sweeps its own, so a task that never runs again would keep them. Every task with any
+ * there is listed, and each that can't be running is swept by its own sweep. Here the agent's VM is a shell on
+ * temporary folders, and the node's store a list.
+ */
+describe("what runs of other nodes' tasks cut off leaves on their agent's side, as the node starts (I-d)", () => {
+  test("is swept for a task that ended and one the node doesn't know, never for one that may still run, nor any other's", async () => {
+    const s = setUp();
+    mkdirSync(s.keep.agent, { recursive: true });
+    const [ended, unknown, running] = ["task-ended", "task-unknown", "task-running"];
+    const known = new Map([[ended, "failed"], [running, "running"]]);
+    const n = handedNonce();
+    // The one that ended: a receive and its apply, a tree's read, the patch of before (its give had ended). The one the
+    // node doesn't know: only its give's ref (its give was killed in its bundle). The one that may still run: all of them.
+    const endedLeft = [`${ended}.${n}.patch`, `${ended}.${n}.apply-index`, `${ended}.tree-index`, `${ended}.patch`];
+    const runningLeft = [`${running}.${n}.patch`, `${running}.${n}.apply-index`, `${running}.give-index`, `${running}.tree-index`, `${running}.patch`];
+    // (And what isn't the sweep's: the handed helper's lists, endLeftovers' to read; a task VM's own scratch names; names
+    // that are no task's; a ref under the gives' that is no task's; a task's checkpoint.)
+    const others = [`${ended}.jsonl`, `${running}.jsonl`, "task-listed.jsonl", "send-index", "given.bundle", "not a task.patch", ".patch", `${"t".repeat(81)}.patch`, "task-ünï.patch"];
+    for (const name of [...endedLeft, ...runningLeft, ...others]) writeFileSync(join(s.keep.agent, name), "left\n");
+    for (const ref of [`give/${unknown}`, `give/${running}`, "give/not/a-task", "give/not.a-task", `checkpoints/${ended}/1`]) s.git(s.repo, "update-ref", `refs/invincible/${ref}`, s.base);
+    const sent: string[] = [];
+    const asked: string[] = [];
+    const exec = async (command: string) => {
+      sent.push(command);
+      const r = sh(command);
+      return { exitCode: r.status ?? -1, stdout: r.stdout, stderr: r.stderr };
+    };
+    const sweepable = (task: string) => {
+      asked.push(task);
+      return !known.has(task) || known.get(task) === "failed";
+    };
+    expect(await sweepLeftovers(exec, sweepable, s.repo, s.keep.agent)).toEqual({ swept: [ended, unknown], failed: [] });
+    // Only task ids were asked about, each once; and only the two were swept, each by its own sweep.
+    expect(asked).toEqual([ended, running, unknown]);
+    expect(sent.slice(1)).toEqual([handedSweep(s.repo, ended, s.keep.agent), handedSweep(s.repo, unknown, s.keep.agent)]);
+    expect(s.left().sort()).toEqual([...runningLeft, ...others].sort());
+    expect(s.git(s.repo, "for-each-ref", "--format=%(refname)", "refs/invincible").stdout.trim().split("\n").sort()).toEqual([`refs/invincible/checkpoints/${ended}/1`, `refs/invincible/give/${running}`, "refs/invincible/give/not.a-task", "refs/invincible/give/not/a-task"].sort());
+    // (And again: what may still run is all that is listed, and nothing is swept.)
+    expect(await sweepLeftovers(exec, sweepable, s.repo, s.keep.agent)).toEqual({ swept: [], failed: [] });
+  });
+
+  test("whatever the agent's VM lists, only a task id is asked about and swept, once; a sweep that fails is said", async () => {
+    // (The VM is the agent's: what answers there as python3 may print anything.)
+    const listing = ["task-a", "not a task", "../../etc", "a/b", "a.b", "", "t".repeat(81), "task-a", "task-b"].join("\n");
+    const sent: string[] = [];
+    const asked: string[] = [];
+    const exec = async (command: string) => {
+      sent.push(command);
+      return sent.length === 1 ? { exitCode: 0, stdout: listing } : { exitCode: command === handedSweep("/work/repo", "task-b") ? 1 : 0, stdout: "" };
+    };
+    const result = await sweepLeftovers(exec, (task) => (asked.push(task), true));
+    expect(result).toEqual({ swept: ["task-a"], failed: ["task-b"] });
+    expect(asked).toEqual(["task-a", "task-b"]);
+    expect(sent.slice(1)).toEqual([handedSweep("/work/repo", "task-a"), handedSweep("/work/repo", "task-b")]);
+  });
+
+  test("an agent's side with no repository yet has only its files listed; a repository it can't list refs of is said", async () => {
+    const s = setUp();
+    mkdirSync(s.keep.agent, { recursive: true });
+    writeFileSync(join(s.keep.agent, "task-ended.give-index"), "left\n");
+    const exec = async (command: string) => {
+      const r = sh(command);
+      return { exitCode: r.status ?? -1, stdout: r.stdout, stderr: r.stderr };
+    };
+    // (Its repository is cloned at its first task: before that, /work/repo isn't there.)
+    expect(await sweepLeftovers(exec, () => true, join(s.agent, "no-repo"), s.keep.agent)).toEqual({ swept: ["task-ended"], failed: [] });
+    expect(s.left()).toEqual([]);
+    // A repository whose configuration names another worktree is refused, as every script of the node's refuses it.
+    s.git(s.repo, "config", "core.worktree", s.agent);
+    await expect(sweepLeftovers(exec, () => true, s.repo, s.keep.agent)).rejects.toThrow("its configuration names core.worktree");
+  });
+});
