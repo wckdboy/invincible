@@ -7,7 +7,7 @@ import { ed25519OfDidKey, QAMP_TOOLS, QampDid } from "./qamp.ts";
 import { MAX_PROPOSED_GATES, MAX_RUN_GATES } from "./runs.ts";
 import type { Scope } from "./scopes.ts";
 import { moneyPrices, type Prices } from "./spend.ts";
-import { AgentId, TeamTaskProof } from "./team.ts";
+import { AgentId, type TeamHarness, TeamTaskProof } from "./team.ts";
 import { TEAM_LIMITS } from "./team-limits.ts";
 
 /*
@@ -183,6 +183,14 @@ export type HandArgs = z.infer<typeof HandArgs>;
  * tools it names, and a budget that fits what is left of its day. Anything else waits there for your approval, as a
  * proposal. Either way the task is recorded as the giving node's, never as yours.
  */
+/**
+ * A coding tool a grant may name for its hand-offs to run on (core's handoffHarness): never an ACP agent, which calls
+ * the models it was set up with, which a budget can't hold it to, nor Antigravity, whose Gemini plan works on your own
+ * repositories alone.
+ */
+export const HandoffHarness = z.enum(["opencode", "claude", "codex", "hermes"]);
+export type HandoffHarness = z.infer<typeof HandoffHarness>;
+
 export const HandoffTerms = z.strictObject({
   /** The runner's agents it may give work to, by id; absent: any of them. */
   agents: z.array(AgentId).min(1).max(32).refine((a) => new Set(a).size === a.length, "each agent once").optional(),
@@ -190,8 +198,23 @@ export const HandoffTerms = z.strictObject({
   tools: z.array(z.enum(FABRIC_RUN_TOOLS)).max(FABRIC_RUN_TOOLS.length).refine((t) => new Set(t).size === t.length, "each tool once"),
   /** What its tasks there may be given to spend in a day, all together, in US dollars (each one's budget, the most it may spend). */
   budgetUsdPerDay: z.number().positive().max(1000),
+  /**
+   * The coding tool its tasks there run on, whatever their agent's own harness; absent: the native tools loop (the lead's
+   * word, 28 November 2026). A node from before reads a grant that names one as terms it doesn't understand: no grant
+   * there, so its hand-offs wait for your approval.
+   */
+  harness: HandoffHarness.optional(),
 });
 export type HandoffTerms = z.infer<typeof HandoffTerms>;
+
+/**
+ * What a hand-off runs on (the lead's word, 28 November 2026): the coding tool your grant for the pair names, else the
+ * native tools loop, never its agent's own coding tool. The node's own loop asks the models itself, so each call is
+ * counted as its provider said it, its cache included; its first request is about a third of OpenCode's (8.3 KB to the
+ * first hand-off's 22 KB, measured offline). A plan that works only on your own repositories still refuses it
+ * (ownWorkRefusal), never moved to another harness.
+ */
+export const handoffHarness = (terms: HandoffTerms | null): TeamHarness => terms?.harness ?? "native";
 
 /** A grant's terms as the log holds them, read strictly: what this version doesn't understand is no grant here. */
 export function readHandoffTerms(raw: unknown): HandoffTerms | null {
@@ -260,6 +283,7 @@ export const HandoffGrantInput = z.strictObject({
   agents: HandoffTerms.shape.agents,
   tools: HandoffTerms.shape.tools.optional(),
   budgetUsdPerDay: HandoffTerms.shape.budgetUsdPerDay,
+  harness: HandoffTerms.shape.harness,
 });
 export const HandoffRevokeInput = z.strictObject({ from: HandTaskInput.shape.node, to: HandTaskInput.shape.node });
 

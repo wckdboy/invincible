@@ -1,4 +1,4 @@
-import { FABRIC_RUN_TOOLS, type FabricSettingView, type FleetView, type HandedView, HandoffGrantInput, type HandoffGrantView, HandTaskInput, plainLine } from "@invincible/core";
+import { FABRIC_RUN_TOOLS, type FabricSettingView, type FleetView, type HandedView, HandoffGrantInput, type HandoffGrantView, HandoffHarness, HandTaskInput, plainLine } from "@invincible/core";
 // The apps' own words for a verdict (the CLI reads them as the apps do).
 import { type ProofFacts, verdictOf } from "../../../apps/web/src/lib/steps.ts";
 import type { Api } from "./loop-cli.ts";
@@ -85,12 +85,13 @@ function verdictExit(view: HandedView): void {
 }
 
 export const FABRIC_USAGE = `usage: invincible fabric on|off|status|rotate
-       invincible fabric grant <from> <to> --budget <usd a day> [--agents <id>,…] [--tools ${FABRIC_RUN_TOOLS.join(",")}]
+       invincible fabric grant <from> <to> --budget <usd a day> [--agents <id>,…] [--tools ${FABRIC_RUN_TOOLS.join(",")}] [--harness ${HandoffHarness.options.join("|")}]
        invincible fabric grants | invincible fabric revoke <from> <to>`;
 
 function grantLine(g: HandoffGrantView): string {
   const t = g.terms;
-  const terms = t ? `${t.agents ? `agents ${t.agents.join(", ")}` : "any agent"} · ${t.tools.length ? `tools ${t.tools.join(", ")}` : "no tools"} · $${t.budgetUsdPerDay} a day` : "terms this version doesn't read (a newer node's)";
+  // (The coding tool its hand-offs run on, where it names one: with none, the native tools loop.)
+  const terms = t ? `${t.agents ? `agents ${t.agents.join(", ")}` : "any agent"} · ${t.tools.length ? `tools ${t.tools.join(", ")}` : "no tools"} · $${t.budgetUsdPerDay} a day${t.harness ? ` · on ${t.harness}` : ""}` : "terms this version doesn't read (a newer node's)";
   return `${bold(`${plainLine(g.from.name)} → ${plainLine(g.to.name)}`)}  ${dim(`${terms} · recorded by ${plainLine(g.by.name)}${g.via ? ` from ${g.via.slice(0, 12)}` : ""}`)}`;
 }
 
@@ -112,7 +113,7 @@ async function grantCommand(api: Api, sub: "grant" | "grants" | "revoke", rest: 
   const list = (flag: unknown) => (typeof flag === "string" ? flag.split(",").map((x) => x.trim()).filter(Boolean) : undefined);
   const budget = typeof flags.budget === "string" ? Number(flags.budget) : undefined;
   const agents = list(flags.agents);
-  const checked = HandoffGrantInput.safeParse({ from, to, ...(agents ? { agents } : {}), tools: list(flags.tools) ?? [], budgetUsdPerDay: budget });
+  const checked = HandoffGrantInput.safeParse({ from, to, ...(agents ? { agents } : {}), tools: list(flags.tools) ?? [], budgetUsdPerDay: budget, ...(flags.harness !== undefined ? { harness: flags.harness } : {}) });
   if (!checked.success) throw new Error(checked.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; "));
   const { grant } = await api.call<{ grant: HandoffGrantView }>("grantHandoffs", checked.data);
   console.log(`Granted: ${grantLine(grant)}`);

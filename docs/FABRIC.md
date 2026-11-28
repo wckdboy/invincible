@@ -105,13 +105,14 @@ transport keys carries all of it:
 1. **The giver opens the call** with the task: `{handoff, nonce, goal, title, gates, budgetUsd?, agent?, tools}`. The
    hand-off's id and a fresh nonce are the giver's own.
 2. **The runner takes it** only from an active full node, and at once only within your grant for that pair of nodes:
-   - **Your grant**, given once for the pair: `invincible fabric grant <from> <to> --budget <usd a day> [--agents <id>,…]
-     [--tools fleet,…]` (the `grantHandoffs` route; `fabric grants`, `fabric revoke <from> <to>`). It is a
-     `handoff.granted` event in the ledger, your word alone, recorded as rules and standing orders are: every replica
-     refuses one that isn't your word or wasn't written by a full node, on replay too. Each names the full node that
-     recorded it (`invincible fabric grants` says which, and the device of yours it came from, which is that node's
-     own word, its `via`), and every grant a node since revoked recorded ends with that node. So does a grant of yours
-     for the same pair that it overwrote: the last writer wins, so yours isn't restored, and you grant it again.
+   - **Your grant**, given once for the pair: `invincible fabric grant <from> <to> --budget <usd a day> [--agents
+     <id>,…] [--tools fleet,…] [--harness opencode|claude|codex|hermes]` (the `grantHandoffs` route; `fabric grants`,
+     `fabric revoke <from> <to>`). It is a `handoff.granted` event in the ledger, your word alone, recorded as rules and
+     standing orders are: every replica refuses one that isn't your word or wasn't written by a full node, on replay
+     too. Each names the full node that recorded it (`invincible fabric grants` says which, and the device of yours it
+     came from, which is that node's own word, its `via`), and every grant a node since revoked recorded ends with that
+     node. So does a grant of yours for the same pair that it overwrote: the last writer wins, so yours isn't restored,
+     and you grant it again.
    - **Within it** (an agent it names, or any when it names none; tools it names; a budget that fits what is left of
      its day, $3 when the hand-off names none) the runner gives it to that agent at once, as the best suited among
      those it names when the hand-off names none. Each hand-off counts at least $0.10 against the day, whatever
@@ -132,26 +133,32 @@ transport keys carries all of it:
      the keyed ones are out (glm-5.3 beside a DeepSeek engineer), so handed work can come back proven. A plan's model
      you haven't priced has no list price, so the work passes it over. From a node that isn't yours (a limited one, or
      one no longer active), never: its budget counts money alone, a plan's calls as nothing, so its work runs on no
-     plan. Every call on that lease is counted, whether or not its answer says its usage (the fourth re-review's I-l): a
-     streamed OpenAI-style call is asked to say it (`stream_options.include_usage`), and one whose answer says none all
-     the same is counted at the most it could have been, every byte it sent an input token and every byte it was
-     answered with an output token. A call cut before its answer ends is counted as it ends (the fifth re-review's
-     R5-2): each byte sent an input token, and the most output it allowed itself, for each answer it asked for, or what
-     was answered if more. Not so a call whose provider had said its usage as its last word when its client went (a
-     usage chunk with no choices left, a Responses completion, Anthropic's output at its stop): that is what it bills,
-     and it is counted so. OpenCode reads a stream to its `[DONE]` and goes before the stream ends, and each of its
-     calls had been counted at its most: $0.30 for about $0.02 on 28 November 2026. A call whose client goes once its
-     answer is generated, before its usage comes, is read on for it for a few seconds, never in the middle of an answer,
-     whose provider would go on generating what no one reads. A call still counted at its most is marked so on its
-     record's line (`atMost`, how many such calls), and every surface says its tokens and money as an upper bound: "at
-     most $0.30", or "about" beside a call that reported nothing. Its lines, as its record kept them, are read with
-     `invincible agents spent <task>` (`--json`: each as kept) and `inv cost --task <id>`. What its budget can't count
-     is taken out of a call where the call means the same without it (R5-4): the providers' own tools, billed per use or
-     run by another model, a fallback to another model, and a dearer speed or tier. Codex, which declares OpenAI's web
-     search in every call, goes on without it. A background response, chat's web search, a tool_choice for a tool taken
-     out and US-only inference are refused. Every held call is sent as it was read. Nor is this: a command can start a
-     coding tool itself on that tool's own sign-in in the VM, if it has one, which no lease reaches (a task's own VM
-     starts with an empty HOME, so it has none).
+     plan. **It runs on the native tools loop**, never its agent's own coding tool, unless your grant names one
+     (`--harness`; core's `handoffHarness`, the lead's word of 28 November 2026): the node's own loop asks the models
+     itself, so each call is counted as its provider said it, its cache included, and its first request is about a third
+     of OpenCode's (8.3 KB to the first hand-off's 22 KB, measured offline). A grant that names one runs its hand-offs
+     on that tool, through the gateway, whatever their agent's own harness. A Gemini plan's agent still refuses one,
+     never moved to another harness. A node from before reads a grant that names a tool as terms it doesn't understand,
+     so it takes no hand-off under it at once. Every call on that lease is counted, whether or not its answer says its
+     usage (the fourth re-review's I-l): a streamed OpenAI-style call is asked to say it
+     (`stream_options.include_usage`), and one whose answer says none all the same is counted at the most it could have
+     been, every byte it sent an input token and every byte it was answered with an output token. A call cut before its
+     answer ends is counted as it ends (the fifth re-review's R5-2): each byte sent an input token, and the most output
+     it allowed itself, for each answer it asked for, or what was answered if more. Not so a call whose provider had
+     said its usage as its last word when its client went (a usage chunk with no choices left, a Responses completion,
+     Anthropic's output at its stop): that is what it bills, and it is counted so. OpenCode reads a stream to its
+     `[DONE]` and goes before the stream ends, and each of its calls had been counted at its most: $0.30 for about $0.02
+     on 28 November 2026. A call whose client goes once its answer is generated, before its usage comes, is read on for
+     it for a few seconds, never in the middle of an answer, whose provider would go on generating what no one reads. A
+     call still counted at its most is marked so on its record's line (`atMost`, how many such calls), and every surface
+     says its tokens and money as an upper bound: "at most $0.30", or "about" beside a call that reported nothing. Its
+     lines, as its record kept them, are read with `invincible agents spent <task>` (`--json`: each as kept) and `inv
+     cost --task <id>`. What its budget can't count is taken out of a call where the call means the same without it
+     (R5-4): the providers' own tools, billed per use or run by another model, a fallback to another model, and a dearer
+     speed or tier. Codex, which declares OpenAI's web search in every call, goes on without it. A background response,
+     chat's web search, a tool_choice for a tool taken out and US-only inference are refused. Every held call is sent as
+     it was read. Nor is this: a command can start a coding tool itself on that tool's own sign-in in the VM, if it has
+     one, which no lease reaches (a task's own VM starts with an empty HOME, so it has none).
    - **Beyond it, or with no grant,** the task waits on the runner as a proposal, for your approval there: it says
      `{kind: "proposed", task, agent, why}`, and is taken once you approve it. Its own agent never approves it.
    - **Either way** the task is the giving node's (`givenBy: node:<id>`), never yours, and at most 8 tasks from one node

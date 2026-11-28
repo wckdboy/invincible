@@ -593,6 +593,9 @@ const permissions = {
     { from: { id: "n_laptop", name: "laptop" }, to: { id: "n_homelab", name: "homelab" }, terms: { agents: ["ada", "bea"], tools: [], budgetUsdPerDay: 5 } },
     { from: { id: "n_homelab", name: "homelab" }, to: { id: "n_ultra", name: "ultra" }, terms: { tools: [], budgetUsdPerDay: 0.5 } },
     { from: { id: "n_ultra", name: "ultra" }, to: { id: "n_laptop", name: "laptop" }, terms: null },
+    // One that names the coding tool its hand-offs run on (none named: the native tools loop, unsaid).
+    { from: { id: "n_laptop", name: "laptop" }, to: { id: "n_ultra", name: "ultra" }, terms: { agents: ["ada"], tools: [], budgetUsdPerDay: 2, harness: "claude" as const } },
+    { from: { id: "n_mini", name: "mini" }, to: { id: "n_ultra", name: "ultra" }, terms: { tools: [], budgetUsdPerDay: 1, harness: "opencode" as const } },
   ].map((grant) => ({ grant, title: handoffTitle(grant), terms: handoffTerms(grant.terms) })),
   // A rule's name heads its row as you'd say it (lib/rules.ts ruleTitle).
   titles: ["pushes", "no-force-push", "ci_on_main", "Deploys"].map((name) => ({ name, title: ruleTitle(name) })),

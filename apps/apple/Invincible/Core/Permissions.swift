@@ -69,6 +69,8 @@ struct HandoffGrantView: Decodable, Sendable, Identifiable {
     struct Terms: Decodable, Sendable {
         let agents: [String]
         var budgetUsdPerDay: Double? = nil
+        /// The coding tool its hand-offs run on; nil: the native tools loop.
+        var harness: String? = nil
     }
 
     let from: Node
@@ -100,11 +102,13 @@ enum Permissions {
         return out + "."
     }
 
-    /// A grant's terms in a line: whose agents, and its day's budget.
+    /// A grant's terms in a line: whose agents, its day's budget, and the coding tool its hand-offs run on where it names
+    /// one (none: the native tools loop, unsaid), as lib/grants.ts handoffTerms says them.
     static func terms(_ grant: HandoffGrantView) -> String {
         guard let terms = grant.terms else { return "Written by a newer node: not understood here." }
         let agents = terms.agents.isEmpty ? "any of its agents" : terms.agents.joined(separator: ", ")
         let budget = terms.budgetUsdPerDay.map { String(format: " · up to $%.2f a day", $0) } ?? ""
-        return "To \(agents)\(budget)"
+        let tool = terms.harness.map { id in " · on \(Agents.harnesses.first { $0.id == id }?.name ?? id)" } ?? ""
+        return "To \(agents)\(budget)\(tool)"
     }
 }

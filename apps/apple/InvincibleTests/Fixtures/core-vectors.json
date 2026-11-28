@@ -5986,6 +5986,47 @@
         },
         "title": "ultra → laptop",
         "terms": "Written by a newer node: not understood here."
+      },
+      {
+        "grant": {
+          "from": {
+            "id": "n_laptop",
+            "name": "laptop"
+          },
+          "to": {
+            "id": "n_ultra",
+            "name": "ultra"
+          },
+          "terms": {
+            "agents": [
+              "ada"
+            ],
+            "tools": [],
+            "budgetUsdPerDay": 2,
+            "harness": "claude"
+          }
+        },
+        "title": "laptop → ultra",
+        "terms": "To ada · up to $2.00 a day · on Claude Code"
+      },
+      {
+        "grant": {
+          "from": {
+            "id": "n_mini",
+            "name": "mini"
+          },
+          "to": {
+            "id": "n_ultra",
+            "name": "ultra"
+          },
+          "terms": {
+            "tools": [],
+            "budgetUsdPerDay": 1,
+            "harness": "opencode"
+          }
+        },
+        "title": "mini → ultra",
+        "terms": "To any of its agents · up to $1.00 a day · on OpenCode"
       }
     ],
     "titles": [

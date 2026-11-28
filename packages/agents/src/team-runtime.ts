@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamTrailEntry, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, beginFor, roundKey, roundNotice, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATE_UID_FIRST, VM_GATE_UIDS, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamTrailEntry, type TeamCheckpoint, type TeamHarness, type TeamKeyGrant, type Usage, type UsageLine, beginFor, roundKey, roundNotice, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATE_UID_FIRST, VM_GATE_UIDS, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { seatVmClearCommand } from "./agent-process.ts";
@@ -176,6 +176,11 @@ export interface TeamRuntimeDeps {
    * given, or any other node: its budget counts money, so it runs on no plan.
    */
   ownNode?(id: string): boolean;
+  /**
+   * What your grant for that node's hand-offs here names for them to run on (core's handoffHarness), read as its task
+   * starts: a coding tool, or the native tools loop. None given: the native tools loop.
+   */
+  handedHarness?(giver: string): TeamHarness;
   /**
    * Its skills that bear on a task's goal (skills.ts: chosen once for the task, fenced as data), for its planner and
    * engineer, never its reviewer. Absent or null: none.
@@ -918,6 +923,12 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         const why = ownWorkRefusal(task, agent);
         if (why) throw new Error(why);
       }
+      // Another node's task runs on the native tools loop, never its agent's own coding tool, unless your grant for that
+      // node's hand-offs names one (core's handoffHarness: the lead's word, 28 November 2026): then on that one. Its agent
+      // works on it as itself otherwise: its job, its notes, its models.
+      const runsOn: TeamHarness | null = handed ? (deps.handedHarness?.(task.givenBy!.slice("node:".length)) ?? "native") : null;
+      const asRun = (a: Agent): Agent => (runsOn && a.harness !== runsOn ? { ...a, harness: runsOn } : a);
+      agent = asRun(agent);
       // Its VM's lease is held to the models that budget counts at more than $0, as sensitive mode's is to its own (its
       // coding tool's, and its eyes' when they're paid), so that its commands work on nothing its budget counts as
       // nothing: the gateway refuses any other model (the third re-review's R3-4). None of them: it reaches no provider.
@@ -938,7 +949,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       /** When its lease was last written or renewed, and whether one that couldn't be kept was said. */
       let leaseKept = Date.now();
       let leaseLost = false;
-      agent = deps.agent(agent.id);
+      agent = asRun(deps.agent(agent.id));
       const root = `/work/tasks/${task.id}`;
       const sessionFile = `/work/.agent/sessions/${task.id}.${agent.harness}`;
       const setup = agent.repository

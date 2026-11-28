@@ -1,6 +1,7 @@
 import {
   ABOUT_YOU_TAG,
   DESKTOP_FRAMES_TYPE,
+  handoffHarness,
   handoffOnPlans,
   type TeamWorkspace,
   ZONE_HEADER,
@@ -2864,6 +2865,8 @@ export function createApp(ctx: AppContext) {
       paid: (ref, onPlans) => paidFor(ctx.store, ref, undefined, onPlans),
       // A node of your own (an active full node of this fleet): its hand-offs may run on your plans, at their list price.
       ownNode: (id) => handoffOnPlans(ctx.store.activeDevice(id)),
+      // What its hand-offs run on: the coding tool your grant for the pair names, else the native tools loop.
+      handedHarness: (giver) => handoffHarness(readHandoffTerms(ctx.store.handoffGrant(giver, ctx.identity.id)?.terms ?? null)),
       // Its skills for an agent's task, as for a run of its: chosen once from its goal, under the task's own ref.
       skills: (_member, task) => {
         let given: { text: string; brief: string } | null = null;
@@ -4935,7 +4938,7 @@ export function createApp(ctx: AppContext) {
       // Your word given once for the pair, as a rule or a standing order is: only you give it, from a terminal or a device of yours.
       if (p.kind !== "admin" && p.kind !== "client") throw new HttpError(403, "only you can grant hand-offs");
       const [from, to] = grantPair(input);
-      const terms = HandoffTerms.parse({ ...(input.agents ? { agents: input.agents } : {}), tools: input.tools ?? [], budgetUsdPerDay: input.budgetUsdPerDay });
+      const terms = HandoffTerms.parse({ ...(input.agents ? { agents: input.agents } : {}), tools: input.tools ?? [], budgetUsdPerDay: input.budgetUsdPerDay, ...(input.harness ? { harness: input.harness } : {}) });
       ctx.store.emit(ctx.identity, "handoff.granted", { from: from.id, to: to.id, terms }, { trust: "owner", ...(p.kind === "client" ? { via: p.device } : {}) });
       return { grant: grantView(ctx.store.handoffGrant(from.id, to.id)!) };
     },

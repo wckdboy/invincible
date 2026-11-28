@@ -1,3 +1,4 @@
+import { HARNESS } from "./team.ts";
 import { relativeTime } from "./time.ts";
 
 /*
@@ -11,11 +12,12 @@ export const isGrantArm = (label: string): boolean => label.startsWith("qamp.");
 /** A hand-off grant (core's HandoffGrantView), as Settings' Permissions says it in every app: from which node to which. */
 export const handoffTitle = (grant: { from: { name: string }; to: { name: string } }): string => `${grant.from.name} → ${grant.to.name}`;
 
-/** Its terms in a line: whose agents (none named: any of them), and what its tasks there may spend a day; terms this
- * version doesn't understand (null), said so. */
-export const handoffTerms = (terms: { agents?: readonly string[]; budgetUsdPerDay: number } | null): string => {
+/** Its terms in a line: whose agents (none named: any of them), what its tasks there may spend a day, and the coding
+ * tool they run on where it names one (none: the native tools loop, unsaid); terms this version doesn't understand
+ * (null), said so. */
+export const handoffTerms = (terms: { agents?: readonly string[]; budgetUsdPerDay: number; harness?: "opencode" | "claude" | "codex" | "hermes" } | null): string => {
   if (!terms) return "Written by a newer node: not understood here.";
-  return `To ${terms.agents?.length ? terms.agents.join(", ") : "any of its agents"} · up to $${terms.budgetUsdPerDay.toFixed(2)} a day`;
+  return `To ${terms.agents?.length ? terms.agents.join(", ") : "any of its agents"} · up to $${terms.budgetUsdPerDay.toFixed(2)} a day${terms.harness ? ` · on ${HARNESS[terms.harness]}` : ""}`;
 };
 
 /** An agent's key, short enough for a row: its kind and the last of it ("did:key:z6Mk…pjyBW"); the whole of it goes in a title. */

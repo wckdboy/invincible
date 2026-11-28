@@ -447,8 +447,10 @@ Agents (MCP, ACP)
                                   default, whatever binary it has; on starts its sidecar now, off stops it (docs/FABRIC.md)
   fabric rotate                   a new transport key for this node's sidecar: its peers refuse the old one from then on
   fabric grant <from> <to> --budget <usd a day> [--agents <id>,…] [--tools fleet,compute,place,ledger]
+               [--harness opencode|claude|codex|hermes]
                                   your word, once for the pair, that <from> may hand tasks to <to>'s agents: within it a
-                                  hand-off is taken at once; beyond it (or with none) it waits there for your approval
+                                  hand-off is taken at once; beyond it (or with none) it waits there for your approval.
+                                  Its hand-offs run on the native tools loop, or on the coding tool --harness names
   fabric grants | fabric revoke <from> <to>
                                   the grants in force; end one (what was handed under it stops)
   hand <node> "<goal>" [--gate "<command>"]… [--agent <id>] [--tools fleet,compute,place,ledger] [--budget 2] [--follow]

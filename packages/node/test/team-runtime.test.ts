@@ -817,6 +817,8 @@ test("a grant's budget holds on your plans: a task from a node of yours runs on 
 });
 
 test("a coding tool on another node's task never runs on its own sign-in, and is offered only models counted above $0", async () => {
+  // (Another node's task runs on a coding tool only where your grant for the pair names it: here Claude Code.)
+  const named = { handedHarness: () => "claude" as const };
   const commands: string[] = [];
   const agent = { ...member, harness: "claude" as const };
   const opus = { provider: "anthropic", model: "claude-opus-5-5" };
@@ -828,7 +830,7 @@ test("a coding tool on another node's task never runs on its own sign-in, and is
     // (Its run ends at its first look, having said nothing: only its launch matters here.)
     return result({ stdout: command.includes('"next": nxt') ? JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }) : "0" });
   };
-  const f = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: (ref) => ref === "anthropic/claude-opus-5-5", exec });
+  const f = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: (ref) => ref === "anthropic/claude-opus-5-5", exec, ...named });
   // (Its planner and reviewer, on the fixture's local/fake, are held to the same: priced, a model on this machine counts.)
   f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   await f.runtime.executeTask(agent, handedTask, f.context).catch(() => {});
@@ -837,23 +839,67 @@ test("a coding tool on another node's task never runs on its own sign-in, and is
   expect(launch).not.toContain("coder");
   // With no model counted above $0 it doesn't start, though the tool is signed in.
   commands.length = 0;
-  const none = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: () => false, exec });
+  const none = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: () => false, exec, ...named });
   await expect(none.runtime.executeTask(agent, handedTask, none.context)).rejects.toThrow("handed over by another node");
   expect(commands.some((c) => c.includes("setsid"))).toBe(false);
   // Nor on one of your seats: its vendor's seats are weighed for your own work, never for another node's.
   let asked = 0;
   const seat = async () => (asked++, { none: true as const });
-  const seats = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: (ref) => ref === "anthropic/claude-opus-5-5", exec, seat });
+  const seats = fixture([], { agent: () => agent, models: () => roster, countable: () => true, paid: (ref) => ref === "anthropic/claude-opus-5-5", exec, seat, ...named });
   seats.store.emit(seats.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
   await seats.runtime.executeTask(agent, handedTask, seats.context).catch(() => {});
   expect(asked).toBe(0);
   const yours = fixture([], { agent: () => agent, models: () => roster, countable: () => true, exec, seat });
   await yours.runtime.executeTask(agent, { ...task, budgetUsd: 2 }, yours.context).catch(() => {});
   expect(asked).toBeGreaterThan(0);
-  // An ACP agent calls the models it was set up with, which its budget can't hold it to.
+  // An ACP agent calls the models it was set up with, which its budget can't hold it to: it never runs another node's
+  // task, which goes on the tool your grant names (with none, on the native tools loop: the test after this one).
   const acp = { ...member, harness: "acp" as const, acp: "goose acp" };
-  const goose = fixture([], { agent: () => acp, models: () => roster, countable: () => true, paid: () => true, exec });
-  await expect(goose.runtime.executeTask(acp, handedTask, goose.context)).rejects.toThrow("handed over by another node");
+  const goose = fixture([], { agent: () => acp, models: () => roster, countable: () => true, paid: (ref) => ref === "anthropic/claude-opus-5-5", exec, ...named });
+  goose.store.emit(goose.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  commands.length = 0;
+  await goose.runtime.executeTask(acp, handedTask, goose.context).catch(() => {});
+  expect(commands.some((c) => c.includes("goose"))).toBe(false);
+  expect(commands.find((c) => c.includes("setsid")) ?? "").toContain("claude-opus-5-5");
+});
+
+/* Another node's task runs on the native tools loop, never its agent's coding tool, unless your grant for that node's
+ * hand-offs names one (core's handoffHarness: the lead's word, 28 November 2026). The node's own loop asks the models
+ * itself, so each call is counted as its provider said it, its cache included, and its first request is about a third
+ * of OpenCode's (8.3 KB to the first hand-off's 22 KB, measured offline). An ACP agent's goes on it too, its ACP agent
+ * never started. */
+test("another node's task runs on the native tools loop unless your grant names a coding tool; then on that one", async () => {
+  const commands: string[] = [];
+  const exec = async (_m: Agent, command: string) => {
+    commands.push(command);
+    // (A coding tool's run ends at its first look, having said nothing: only its launch matters here.)
+    return result({ stdout: command.includes('"next": nxt') ? JSON.stringify({ alive: false, exit: 0, next: 0, lines: [] }) : "0" });
+  };
+  const script = () => [say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")];
+  // (Its planner, engineer and reviewer on the fixture's local/fake, priced: one on this machine counts at a price.)
+  const priced = (f: ReturnType<typeof fixture>) => (f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } }), f);
+  const opencode = { ...member, harness: "opencode" as const };
+  const native = priced(fixture(script(), { agent: () => opencode, paid: () => true, exec }));
+  expect((await native.runtime.executeTask(opencode, handedTask, native.context)).verified).toBe(true);
+  expect(native.bodies.map((body) => body.model)).toEqual(["fake", "fake", "fake", "fake"]);
+  expect(commands.some((c) => c.includes("setsid") || c.includes("opencode run"))).toBe(false);
+  expect(commands.some((c) => c.includes("echo one"))).toBe(true);
+  // An ACP agent's too: its ACP agent is never started.
+  commands.length = 0;
+  const acp = { ...member, harness: "acp" as const, acp: "goose acp" };
+  const viaAcp = priced(fixture(script(), { agent: () => acp, paid: () => true, exec }));
+  expect((await viaAcp.runtime.executeTask(acp, handedTask, viaAcp.context)).verified).toBe(true);
+  expect(commands.some((c) => c.includes("goose"))).toBe(false);
+  // Your grant names OpenCode: on OpenCode, through the gateway.
+  commands.length = 0;
+  const named = priced(fixture([], { agent: () => opencode, models: () => [{ provider: "paid", model: "m" }], paid: () => true, exec, handedHarness: (giver) => (giver === handedTask.givenBy.slice("node:".length) ? "opencode" : "native") }));
+  await named.runtime.executeTask(opencode, handedTask, named.context).catch(() => {});
+  expect(commands.find((c) => c.includes("setsid")) ?? "").toContain("opencode run");
+  // Your own task runs on its agent's own harness, as ever.
+  commands.length = 0;
+  const yours = priced(fixture([], { agent: () => opencode, models: () => [{ provider: "paid", model: "m" }], exec }));
+  await yours.runtime.executeTask(opencode, task, yours.context).catch(() => {});
+  expect(commands.find((c) => c.includes("setsid")) ?? "").toContain("opencode run");
 });
 
 test("another node's task runs each command under the handed helper: its gates' processes end with them, the rest with the task", async () => {

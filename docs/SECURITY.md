@@ -865,8 +865,12 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
     isn't your word or wasn't written by a full node, on replay too. Each names the full node that recorded it.
   - It bounds the agents, the tools and the day's budget, counted by the budgets given (the most each may spend), each
     hand-off at least $0.10 whatever smaller budget it asks for, so the day bounds how many there are too (the
-    re-review's N5). A handed task's gates (its giver's commands, in its own VM) get 15 minutes in all, every
-    round counted.
+    re-review's N5). A handed task's gates (its giver's commands, in its own VM) get 15 minutes in all, every round
+    counted. A handed task runs on the native tools loop, never its agent's own coding tool, unless the grant names one
+    (`harness`: OpenCode, Claude Code, Codex or Hermes; never an ACP agent, whose calls its budget can't hold, nor
+    Antigravity: `HandoffHarness`, `handoffHarness`, the lead's word of 28 November 2026;
+    `packages/node/test/team-runtime.test.ts`, "another node's task runs on the native tools loop unless your grant
+    names a coding tool"). A Gemini plan's agent still refuses one, never moved to another harness (`ownWorkRefusal`).
   - What a handed task does is bounded with it (the second re-review's N7), but for the known gaps below:
     - Its agent's own loop, its coding tool and its commands run only on models its budget counts at more than $0 (its
       VM's lease is good for those models' calls alone: the gateway refuses any other model, the third re-review's

@@ -117,13 +117,18 @@ object Permissions {
     fun handoffTitle(grant: Json): String = "${grant["from"]["name"].string ?: ""} → ${grant["to"]["name"].string ?: ""}"
 
     /**
-     * Its terms in a line (lib/grants.ts handoffTerms): whose agents (none named: any of them), and what its tasks there
-     * may spend a day; terms this version doesn't understand (none), said so.
+     * Its terms in a line (lib/grants.ts handoffTerms): whose agents (none named: any of them), what its tasks there may
+     * spend a day, and the coding tool they run on where it names one (none: the native tools loop, unsaid); terms this
+     * version doesn't understand (none), said so.
      */
     fun handoffTerms(terms: Json?): String {
         if (terms == null || terms !is Json.Obj) return "Written by a newer node: not understood here."
         val agents = terms["agents"].list.mapNotNull { it.string }
         val budget = terms["budgetUsdPerDay"].double ?: 0.0
-        return "To ${if (agents.isEmpty()) "any of its agents" else agents.joinToString(", ")} · up to $${"%.2f".format(java.util.Locale.ROOT, budget)} a day"
+        val tool = terms["harness"].string?.let { " · on ${HANDOFF_TOOLS[it] ?: it}" } ?: ""
+        return "To ${if (agents.isEmpty()) "any of its agents" else agents.joinToString(", ")} · up to $${"%.2f".format(java.util.Locale.ROOT, budget)} a day$tool"
     }
+
+    /** The coding tools a grant may name for its hand-offs, as they're named to you (the PWA's HARNESS). */
+    private val HANDOFF_TOOLS = mapOf("opencode" to "OpenCode", "claude" to "Claude Code", "codex" to "Codex", "hermes" to "Hermes Agent")
 }

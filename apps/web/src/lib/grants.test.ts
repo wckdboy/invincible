@@ -30,5 +30,8 @@ describe("a hand-off grant, as Settings' Permissions says it", () => {
     expect(handoffTerms({ agents: ["ada", "bea"], budgetUsdPerDay: 5 })).toBe("To ada, bea · up to $5.00 a day");
     expect(handoffTerms({ budgetUsdPerDay: 0.5 })).toBe("To any of its agents · up to $0.50 a day");
     expect(handoffTerms(null)).toBe("Written by a newer node: not understood here.");
+    // The coding tool it names for its hand-offs; with none they run on the native tools loop, which goes unsaid.
+    expect(handoffTerms({ agents: ["ada"], budgetUsdPerDay: 5, harness: "claude" })).toBe("To ada · up to $5.00 a day · on Claude Code");
+    expect(handoffTerms({ budgetUsdPerDay: 2, harness: "hermes" })).toBe("To any of its agents · up to $2.00 a day · on Hermes Agent");
   });
 });

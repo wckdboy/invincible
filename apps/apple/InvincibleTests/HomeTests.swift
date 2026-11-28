@@ -114,6 +114,9 @@ struct HomeTests {
         #expect(seat.stateWords == "Signed in · max")
         let grant = try JSONDecoder().decode(HandoffGrantView.self, from: Data(#"{"from":{"id":"n_a","name":"keep"},"to":{"id":"n_b","name":"ultra"},"terms":{"agents":["builder"],"budgetUsdPerDay":5},"via":null,"at":1,"by":{"id":"n_a","name":"keep"}}"#.utf8))
         #expect(Permissions.terms(grant) == "To builder · up to $5.00 a day")
+        // One that names the coding tool its hand-offs run on (with none: the native tools loop, unsaid).
+        let named = try JSONDecoder().decode(HandoffGrantView.self, from: Data(#"{"from":{"id":"n_a","name":"keep"},"to":{"id":"n_b","name":"ultra"},"terms":{"agents":["builder"],"budgetUsdPerDay":5,"harness":"codex"},"via":null,"at":1,"by":{"id":"n_a","name":"keep"}}"#.utf8))
+        #expect(Permissions.terms(named) == "To builder · up to $5.00 a day · on Codex")
         let rules = try JSONDecoder().decode([RuleView].self, from: Data(#"[{"name":"locks","rule":{"on":"command","does":"halt","words":["*.lock"]},"setAt":1,"setVia":null},{"name":"newer","rule":null,"setAt":2,"setVia":"d_x"}]"#.utf8))
         #expect(rules.map(\.name) == ["locks", "newer"])
         #expect(rules[1].rule == nil)

@@ -8,6 +8,8 @@ import {
   costOf,
   didKeyOfEd25519,
   goalDigest,
+  HandoffGrantInput,
+  handoffHarness,
   handoffOnPlans,
   handoffPrices,
   handoffUnder,
@@ -357,6 +359,27 @@ describe("a hand-off from a node of your own may run on your coding plans, count
     // Its three calls on the plan come to $0.55 at list price: past a $0.40 budget, so its run stops there. At $0 they
     // never would.
     expect(costOf([line("zplan/glm")], handoffPrices(prices, ["zplan"], true)).usd).toBeGreaterThan(0.4);
+  });
+});
+
+/*
+ * A hand-off runs on the native tools loop, never its agent's coding tool, unless your grant for the pair names one (the
+ * lead's word, 28 November 2026): one of OpenCode, Claude Code, Codex and Hermes. Never an ACP agent, which calls models
+ * its budget can't hold it to, nor Antigravity, whose Gemini plan works on your own repositories alone.
+ */
+describe("a hand-off runs on the native tools loop unless your grant names a coding tool", () => {
+  test("a grant may name OpenCode, Claude Code, Codex or Hermes, and nothing else", () => {
+    expect(readHandoffTerms({ tools: [], budgetUsdPerDay: 5, harness: "opencode" })).toEqual({ tools: [], budgetUsdPerDay: 5, harness: "opencode" });
+    for (const harness of ["claude", "codex", "hermes"] as const) expect(readHandoffTerms({ tools: [], budgetUsdPerDay: 5, harness })?.harness).toBe(harness);
+    for (const harness of ["acp", "antigravity", "native", "Opencode", ""]) expect(readHandoffTerms({ tools: [], budgetUsdPerDay: 5, harness })).toBeNull();
+    expect(HandoffGrantInput.safeParse({ from: "mini", to: "ultra", budgetUsdPerDay: 2, harness: "opencode" }).success).toBe(true);
+    expect(HandoffGrantInput.safeParse({ from: "mini", to: "ultra", budgetUsdPerDay: 2, harness: "acp" }).success).toBe(false);
+  });
+
+  test("what it runs on: the tool your grant names, else the native tools loop; a grant from before reads as it did", () => {
+    expect(handoffHarness(readHandoffTerms({ tools: [], budgetUsdPerDay: 5, harness: "claude" }))).toBe("claude");
+    expect(handoffHarness(readHandoffTerms({ tools: ["fleet"], budgetUsdPerDay: 5, agents: ["ada"] }))).toBe("native");
+    expect(handoffHarness(null)).toBe("native");
   });
 });
 

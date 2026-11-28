@@ -160,6 +160,18 @@ describe("invincible fabric grant|grants|revoke: your grants for hand-offs", () 
     expect(text).toContain("agents ada · tools fleet · $5 a day · recorded by beta");
   });
 
+  test("grant --harness: the coding tool its hand-offs run on there (else the native tools loop), said in its line", async () => {
+    const sent: [string, unknown][] = [];
+    const named = { ...grant, terms: { ...grant.terms, harness: "opencode" } };
+    const api = { call: async (name: string, input: unknown) => (sent.push([name, input]), { grant: named }) };
+    const text = await printed(() => fabricCommand(api as never, "grant", noConfig, ["alpha", "beta"], { budget: "5", agents: "ada", tools: "fleet", harness: "opencode" }));
+    expect(sent).toEqual([["grantHandoffs", { from: "alpha", to: "beta", agents: ["ada"], tools: ["fleet"], budgetUsdPerDay: 5, harness: "opencode" }]]);
+    expect(text).toContain("agents ada · tools fleet · $5 a day · on opencode · recorded by beta");
+    // One no hand-off may run on (an ACP agent's, Antigravity's) is refused before anything is sent.
+    const refused = { call: async () => Promise.reject(new Error("sent")) };
+    await expect(fabricCommand(refused as never, "grant", noConfig, ["alpha", "beta"], { budget: "5", harness: "acp" })).rejects.toThrow("harness");
+  });
+
   test("a grant with no budget, or a tool no run may be given, is refused before anything is sent", async () => {
     const api = { call: async () => Promise.reject(new Error("sent")) };
     await expect(fabricCommand(api as never, "grant", noConfig, ["alpha", "beta"], {})).rejects.toThrow("budgetUsdPerDay");
