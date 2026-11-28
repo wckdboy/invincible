@@ -127,6 +127,7 @@ const yours: SuiteInfo = {
     throw new Error("your cases are your node's: the suite is read through it first (loadSuite)");
   },
   load: async (node) => {
+    // (At list price on purpose, never moneyPrices: what your tasks cost, set against an eval run's, means the same on any node.)
     const [cases, { prices }] = await Promise.all([readCases(node), node.call<{ prices: Prices }>("prices").catch(() => ({ prices: {} as Prices }))]);
     return yoursRead(cases, prices);
   },

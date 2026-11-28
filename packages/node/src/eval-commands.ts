@@ -156,6 +156,7 @@ async function runOptions(args: EvalArgs, names: readonly string[]) {
   const parallelRaw = str(flags, "parallel");
   const node = args.node();
   // A money budget is counted at your prices: they're read once, when the run starts.
+  // (At list price on purpose, never moneyPrices: a run's budget means the same on any node, a coding plan's calls too.)
   const prices: Prices = (await node.call<{ prices: Record<string, Price> }>("prices").catch(() => ({ prices: {} }))).prices;
   return {
     suite,
@@ -309,6 +310,7 @@ export async function evalCommand(args: EvalArgs): Promise<number> {
   }
 
   const node = args.node();
+  // (At list price on purpose, never moneyPrices: what runs cost compares models the same on any node, a coding plan's calls too.)
   const [{ evals, runs: settings = {} }, { prices }] = await Promise.all([
     node.call<{ evals: EvalView[]; runs?: EvalRunsView }>("evals"),
     node.call<{ prices: Record<string, Price> }>("prices").catch(() => ({ prices: {} as Record<string, Price> })),
