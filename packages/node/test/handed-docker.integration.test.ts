@@ -149,5 +149,28 @@ for (const runtime of ["runc", "kata"] as const) {
         drop();
       }
     }, 300_000);
+
+    test("a pipe cut at its cap leaves no process of either side in either VM: what each started there is ended too, by the pipe's tag and the group its timeout leads (I-c)", async () => {
+      try {
+        const [from, to] = [vm(runtime), vm(runtime)];
+        // (Its ends are asked of Docker as the node asks them, through the binary its sides run by: the host above answers
+        // all but the sides with a stand-in, which would never reach these VMs.)
+        const pipes = new SandboxHost({ node: "test", maxCpus: 8, maxMemoryGb: 16, docker: bin, ledger: () => {}, tokens: { mint: () => ({ token: "t", info: { hash: "h" } }), revoke: () => true } } as never);
+        Object.assign(pipes, { get: async (id: string) => ([from, to].includes(id) ? ({ id, status: "running" } as unknown as SandboxView) : null) });
+        // Neither side would end on its own within the test. Each starts a child without the pipe's tag, as the node's git
+        // runs with an environment of its own, in the group its timeout leads; the sender floods past the cap, the receiver
+        // reads its input to its end, and both then wait on their children.
+        const cut = await pipes.pipe(side(from, "env -u INVINCIBLE_PIPE sleep 271 & head -c 50000000 /dev/zero; wait"), side(to, "env -u INVINCIBLE_PIPE sleep 272 & cat >/dev/null; wait"), { timeoutSec: 120, maxBytes: 1_000_000 });
+        expect(cut.cut).toBe(true);
+        // Once it has returned, nothing of either side runs in either VM: not the untagged children, not the sides' own
+        // timeout, and nothing with a pipe's tag in its environment.
+        for (const [name, pattern] of [[from, "[s]leep 271"], [from, "[h]ead -c 50000000"], [from, "[t]imeout --signal=KILL 120s"], [to, "[s]leep 272"], [to, "[t]imeout --signal=KILL 120s"]] as const) {
+          expect([name, pattern, await gone(name, pattern)]).toEqual([name, pattern, true]);
+        }
+        for (const name of [from, to]) expect([name, inside(name, "grep -lsF INVINCIBLE_PIPE= /proc/[0-9]*/environ | wc -l").stdout.trim()]).toEqual([name, "0"]);
+      } finally {
+        drop();
+      }
+    }, 300_000);
   });
 }
