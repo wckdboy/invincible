@@ -101,3 +101,10 @@ test("an agent with a desktop is told to do several actions in one command where
   // (No angle brackets in what an agent is told: a model copied them onto its own command fence, and nothing ran.)
   expect(told).not.toMatch(/[<>]/);
 });
+
+test("an agent with a desktop is told how a file dialog takes a typed path: Return in the same command, or its Save clicked", () => {
+  // (Ultra, 28 November 2026: in GTK's Save As, Return pressed a command after the path was typed saved nothing, 3 of
+  // 3; Return in the same command saved, 3 of 3, as the suite's editor task does, and so did a click on Save.)
+  expect(desktopBriefing()).toContain("In a file dialog, press Return in the same command as the path you type into it (`desktop type /work/notes.txt && desktop key Return`), or click its Save: a Return that comes in a later command may save nothing.");
+  expect(desktopBriefing()).not.toMatch(/[<>]/);
+});

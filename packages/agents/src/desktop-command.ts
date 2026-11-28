@@ -27,9 +27,10 @@ export function actsOnDesktop(command: string): boolean {
 /**
  * How an agent is told to do several actions in one command where that is safe (C1, fewer model calls an action):
  * refs last from one tree to the next and every verb fails when it can't do its part, so a chain stops where one
- * fails; a form is one `desktop fill`, checked by the tree, which says what each field holds.
+ * fails; a form is one `desktop fill`, checked by the tree, which says what each field holds. And a file dialog's typed
+ * path is given its Return in the same command (GTK's Save As saved nothing on a Return a command later, 3 of 3).
  */
-const CHAINS = ' `desktop tree` says what each field holds: check a form by it. Do several actions in one command, chained with &&, where each one\'s target is known before it starts: a ref from one tree stays that node\'s, and every desktop verb fails when it can\'t do its part, so the chain stops there. A form is one command: `desktop fill "Full name" "Kim Example" Email kim@example.test Plan Pro "I accept the terms" on` fills each field and reads it back, and never sends it. Whatever sends a form or opens a page ends a chain.';
+const CHAINS = ' `desktop tree` says what each field holds: check a form by it. Do several actions in one command, chained with &&, where each one\'s target is known before it starts: a ref from one tree stays that node\'s, and every desktop verb fails when it can\'t do its part, so the chain stops there. A form is one command: `desktop fill "Full name" "Kim Example" Email kim@example.test Plan Pro "I accept the terms" on` fills each field and reads it back, and never sends it. Whatever sends a form or opens a page ends a chain. In a file dialog, press Return in the same command as the path you type into it (`desktop type /work/notes.txt && desktop key Return`), or click its Save: a Return that comes in a later command may save nothing.';
 
 /** How an agent with eyes is told it may ask them, after the tree (desktopBriefing's `looking`). */
 export const LOOKING = ' Then `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).';
