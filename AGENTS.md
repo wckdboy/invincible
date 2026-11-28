@@ -13,7 +13,7 @@ interventions per completed task.
 
 ```sh
 bun install
-bun run check                          # tsc, the vocabulary check, the apps' parity vectors, the whole suite: green before you say "done"
+bun run check                          # tsc, the vocabulary check, the apps' parity vectors, the whole suite in 8 workers: green before you say "done"
 bun run vocabulary                     # no word of the old theme in any tracked file (bench/vocabulary.ts)
 INVINCIBLE_KEYSTORE=file bun test      # tests never touch the OS keychain
 bun test packages/ledger               # one package

@@ -12,7 +12,7 @@
     "inv": "bun packages/node/src/inv/main.ts",
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json && bun bench/vocabulary.ts && bun apps/apple/scripts/vectors.ts --check && bun test",
+    "check": "tsc -p tsconfig.json && bun bench/vocabulary.ts && bun apps/apple/scripts/vectors.ts --check && bun test --parallel=8",
     "bench": "bun bench/run.ts",
     "vocabulary": "bun bench/vocabulary.ts"
   },
