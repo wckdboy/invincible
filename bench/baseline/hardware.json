@@ -1,0 +1,28 @@
+{
+  "suite": "hardware",
+  "commit": "e801ff71",
+  "at": 1795843858489,
+  "seed": 20261112,
+  "machine": {
+    "name": "AMD Ryzen 9 9950X 16-Core Processor",
+    "calibration": 88696,
+    "cores": 32
+  },
+  "metrics": [
+    {"id":"hardware.image.gb","value":5.28,"unit":"GB","kind":"quality","better":"lower","spread":0.02,"note":"the hardware image as built from this checkout: the desktop's, with KiCad 9.0.8 (trixie-backports), FreeCAD 1.0.0 (trixie) and kipy"},
+    {"id":"hardware.script.gerbers.ms","value":440.8,"unit":"ms","kind":"speed","better":"lower","spread":25.1,"n":5,"note":"kicad-cli pcb export gerbers of C0's board, its copper and outline Gerbers there after"},
+    {"id":"hardware.script.gerbers","value":5,"unit":"of 5","kind":"quality","better":"higher","n":5,"note":"kicad-cli pcb export gerbers of C0's board, its copper and outline Gerbers there after: runs that passed their gate"},
+    {"id":"hardware.script.drc.ms","value":647.9,"unit":"ms","kind":"speed","better":"lower","spread":4.45,"n":5,"note":"kicad-cli pcb drc --format json --exit-code-violations of C0's board, its report read and its exit code agreeing"},
+    {"id":"hardware.script.drc","value":5,"unit":"of 5","kind":"quality","better":"higher","n":5,"note":"kicad-cli pcb drc --format json --exit-code-violations of C0's board, its report read and its exit code agreeing: runs that passed their gate"},
+    {"id":"hardware.script.edit.ms","value":282.9,"unit":"ms","kind":"speed","better":"lower","spread":18.3,"n":5,"note":"every track of C0's board to a width of its own through KiCad's API (kipy) on the open board editor, saved, read back from the file"},
+    {"id":"hardware.script.edit","value":5,"unit":"of 5","kind":"quality","better":"higher","n":5,"note":"every track of C0's board to a width of its own through KiCad's API (kipy) on the open board editor, saved, read back from the file: runs that passed their gate"},
+    {"id":"hardware.script.step.ms","value":421.6,"unit":"ms","kind":"speed","better":"lower","spread":12.5,"n":5,"note":"C0's part made by freecadcmd (a block with a hole), exported as STEP and read back, its volume right"},
+    {"id":"hardware.script.step","value":5,"unit":"of 5","kind":"quality","better":"higher","n":5,"note":"C0's part made by freecadcmd (a block with a hole), exported as STEP and read back, its volume right: runs that passed their gate"},
+    {"id":"hardware.screen.kicad-plot.ms","value":3206,"unit":"ms","kind":"speed","better":"lower","spread":378,"n":5,"note":"KiCad's Plot through the screen (File, Plot..., Plot), from the editor's start to the press, its Gerbers there after"},
+    {"id":"hardware.screen.kicad-plot","value":5,"unit":"of 5","kind":"quality","better":"higher","n":5,"note":"KiCad's Plot through the screen (File, Plot..., Plot), from the editor's start to the press, its Gerbers there after: runs that passed their gate"},
+    {"id":"hardware.screen.kicad-plot.commands","value":35,"unit":"commands","kind":"quality","better":"lower","note":"KiCad's Plot through the screen (File, Plot..., Plot), from the editor's start to the press, its Gerbers there after: the most commands a run took, each an agent's turn"},
+    {"id":"hardware.screen.freecad-step.ms","value":7816,"unit":"ms","kind":"speed","better":"lower","spread":106,"n":5,"note":"FreeCAD's STEP export through the screen (Model, Block, Export, the STEP filter, a name), from its start to the export, read back"},
+    {"id":"hardware.screen.freecad-step","value":5,"unit":"of 5","kind":"quality","better":"higher","n":5,"note":"FreeCAD's STEP export through the screen (Model, Block, Export, the STEP filter, a name), from its start to the export, read back: runs that passed their gate"},
+    {"id":"hardware.screen.freecad-step.commands","value":36,"unit":"commands","kind":"quality","better":"lower","note":"FreeCAD's STEP export through the screen (Model, Block, Export, the STEP filter, a name), from its start to the export, read back: the most commands a run took, each an agent's turn"}
+  ]
+}

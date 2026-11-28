@@ -240,3 +240,17 @@ agent's own path, each to a gate that reads what was made, never the screen:
 - **Held:** by script, each within a second and through its gate every time; through the screen, every time, KiCad's
   Plot within 10 s and FreeCAD's STEP export within 20 s (C0 measured 6.3 to 6.8 s and 13.8 to 17.7 s); the image at
   most 6 GB (C0's: 5.53).
+- **28 November 2026, its first runs** (the baseline, `bench/baseline/hardware.json`, is the second). On Ultra, in a
+  Kata VM, from images built from e801ff71 under the bench's scratch names; the load 1 to 5 on 32 cores. Every case
+  passed every run, both runs, within its bar:
+
+  | Case | First run | Second run (the baseline) |
+  |---|---|---|
+  | Gerbers by `kicad-cli` | 5 of 5, 432 ms | 5 of 5, 441 ms |
+  | DRC by `kicad-cli`, its report and exit code | 5 of 5, 647 ms | 5 of 5, 648 ms |
+  | An edit through kipy, read back | 5 of 5, 354 ms | 5 of 5, 283 ms |
+  | The part by `freecadcmd`, its STEP read back | 5 of 5, 466 ms | 5 of 5, 422 ms |
+  | KiCad's Plot through the screen | 5 of 5, 3.21 s, at most 34 commands | 5 of 5, 3.21 s, at most 35 commands |
+  | FreeCAD's STEP export through the screen | 5 of 5, 7.51 s, at most 36 commands | 5 of 5, 7.82 s, at most 36 commands |
+
+  The image: 5.28 GB. Through the screen the two took half of C0's time; by script, each about as C0 had it.
