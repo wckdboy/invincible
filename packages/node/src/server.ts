@@ -205,7 +205,7 @@ import { APPLE_PUSH, APPLE_PUSH_SECRET, appleProviderToken, storedApplePushKey }
 import { inputRefused, type MacScreen, ScreenError, screenDid } from "./mac-screen.ts";
 import { primaryRevision } from "./revision.ts";
 import { localModelsOf, type ModelPeer, serves, viaFleet } from "./local-models.ts";
-import { githubRepo, shipBranch } from "./run-cli.ts";
+import { githubRepo, taskBranch } from "./run-cli.ts";
 import type { Terminals } from "./terminals.ts";
 import { LiveChanges, LedgerCounts, timedStamp } from "./live.ts";
 import { grantScopes, QampGrantError, QampGrants } from "./qamp-grants.ts";
@@ -2602,7 +2602,7 @@ export function createApp(ctx: AppContext) {
     const body = [said, `_Made by @${task.assignee} in task ${task.id}, verified by its gates and an independent reviewer; the work is kept as ${artifact}._`].filter(Boolean).join("\n\n").slice(0, 20_000);
     const filed = await connectorErrors(() =>
       ctx.connectors.call(
-        { connector, tool: "ship", args: { owner: where.owner, repo: where.repo, artifact, branch: shipBranch(title, task.id.slice(-8)), title, body }, why: yours ? `Your word, in the app, on @${task.assignee}'s verified work (task ${task.id}).` : `Your agent's word, on @${task.assignee}'s work (task ${task.id}), which its gates and an independent reviewer passed.` },
+        { connector, tool: "ship", args: { owner: where.owner, repo: where.repo, artifact, branch: taskBranch(title, task.id), title, body }, why: yours ? `Your word, in the app, on @${task.assignee}'s verified work (task ${task.id}).` : `Your agent's word, on @${task.assignee}'s work (task ${task.id}), which its gates and an independent reviewer passed.` },
         { kind: "agent", by: agentLabel(task.assignee), ...(yours ? { yours: true as const } : {}) },
       ),
     );

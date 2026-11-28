@@ -280,6 +280,12 @@ export function shipBranch(title: string, run: string): string {
   return `invincible/${words || "changes"}-${run.replace(/^q-/, "")}`;
 }
 
+/**
+ * A task's branch: its title's words and its id's last eight characters, all of them. shipBranch takes a run's id and drops
+ * the q- it begins with, so a task's own is given its own q- to drop: one id in 2048 ends in q- and six more.
+ */
+export const taskBranch = (title: string, task: string): string => shipBranch(title, `q-${task.slice(-8)}`);
+
 /** The GitHub connector for an owner: github-<owner> if installed with its key, else github if installed, else null. */
 export async function installedGithubConnector(node: NodeClient, owner: string): Promise<string | null> {
   const { connectors } = await node.call<{ connectors: { id: string; installed: boolean; key: string }[] }>("connectors");

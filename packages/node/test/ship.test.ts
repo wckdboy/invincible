@@ -8,7 +8,7 @@ import { foundFleet, LedgerStore } from "@invincible/ledger";
 import type { Capabilities } from "../src/capabilities.ts";
 import { type Daemon, startDaemon } from "../src/daemon.ts";
 import { Home } from "../src/home.ts";
-import { githubRepo, shipBranch } from "../src/run-cli.ts";
+import { githubRepo, shipBranch, taskBranch } from "../src/run-cli.ts";
 import { sameRepository, SHIPMENT_SCRIPT, type ShipDeps, shipToGitHub } from "@invincible/agents";
 import { TeamStore } from "../src/team-store.ts";
 import { freePort } from "./ports.ts";
@@ -219,6 +219,10 @@ describe("shipping to GitHub", () => {
     expect(githubRepo("https://github.com/amiriteorg/invincible.git")).toEqual({ owner: "amiriteorg", repo: "invincible" });
     expect(githubRepo("https://example.com/a/b")).toBeNull();
     expect(shipBranch("Parse SI units, with tests!", "q-mwafrqc4")).toBe("invincible/parse-si-units-with-tests-mwafrqc4");
+    // A task's id ends in any of its characters, and one in 2048 ends in q- and six more: the end-to-end ship below expects
+    // all eight, and a task drawn to end so (task-yevoq-eekvzv) had its branch filed as "…-eekvzv" (28 November 2026).
+    expect(taskBranch("Parse SI units", "task-yevoq-eekvzv")).toBe("invincible/parse-si-units-q-eekvzv");
+    expect(taskBranch("Parse SI units", "task-wxyzq2-ab_cd")).toBe("invincible/parse-si-units-q2-ab_cd");
   });
 });
 
