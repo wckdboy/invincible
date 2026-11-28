@@ -1,10 +1,10 @@
 {
   "version": "0.1.0",
-  "build": "202611272240",
-  "url": "https://github.com/wckdboy/invincible/releases/download/android-202611272240/Invincible-202611272240.apk",
-  "size": 3351442,
-  "sha256": "cdf941bb6c0e129c7baf861afcbbc104878ddb073477e5668f6d1ce963f5acf1",
+  "build": "202611272349",
+  "url": "https://github.com/wckdboy/invincible/releases/download/android-202611272349/Invincible-202611272349.apk",
+  "size": 3352086,
+  "sha256": "0a36eec70bb4b0031a32c8835aa0fe1600fb511c421855e5e8463c2766607344",
   "certificate": "195ea4ab1e0e52b7a04c01c87a5f338d7c596534e4982a6be52ca1d5e64e05a6",
   "minSdk": 29,
-  "date": "2026-11-27T22:49:53Z"
+  "date": "2026-11-28T00:07:21Z"
 }
