@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """deskd as it runs in a VM, with stand-ins for what a VM has: the display (its input, its pixels, its windows), the
 window manager's list, the browser and the desktop's processes. Each stand-in writes what it was asked to the trace
-file, a JSON line a call, and the tests read it. Nothing here is deskd's own logic: that is imported, as it is.
+file, a JSON line a call, and the tests read it. Nothing here is deskd's own logic: that is imported, as it is. (Of
+deskd's own, the trace says one thing more: when an agent's request begins to wait on the owner's hold, owner-wait.)
 
   INVINCIBLE_DESKTOP_RUN=<dir> DESKD_TRACE=<file> python3 deskd-harness.py      serves on <dir>/deskd.sock
   DESKD_QUIET=1             the screen never changes after an input (an action that shows nothing)
@@ -322,6 +323,22 @@ class FakeTree:
 
 desk = deskd.Desk(pieces=FakePieces(), display=FakeDisplay(screen), watch=screen, browser=FakeBrowser(), tree=FakeTree() if "DESKD_LANDED" in os.environ else None)
 trace(call="serving", pid=os.getpid())
+
+# An agent's request that waits on the owner's hold is traced as its wait begins (owner-wait), under the hold's own lock,
+# so the owner's giving it back can't come between the trace and the wait: a test holds the desktop until the request
+# it started is seen waiting, however long a busy machine takes the request to come, never for a guessed time. deskd's
+# wait itself runs as it is (the lock is a reentrant one, which its wait gives up while it waits).
+_wait_for_owner = desk.wait_for_owner
+
+
+def wait_for_owner(cap=None):
+    with desk.hold_changed:
+        if desk.holding() is not None:
+            trace(call="owner-wait")
+        return _wait_for_owner(cap)
+
+
+desk.wait_for_owner = wait_for_owner
 
 
 def ends_with_its_test():

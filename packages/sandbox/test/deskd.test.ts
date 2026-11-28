@@ -158,6 +158,11 @@ function decodePng(png: Buffer): { width: number; height: number; at: (x: number
 
 const calls = (trace: Record<string, unknown>[], kind: string) => trace.filter((t) => t.call === kind);
 const keys = (trace: Record<string, unknown>[]) => calls(trace, "key").map((t) => `${t.down ? "+" : "-"}${t.key}`);
+/** Until deskd's trace has a call of `kind`, `ms` at most: whether it came. */
+const traced = async (r: Running, kind: string, ms: number) => {
+  for (const until = Date.now() + ms; Date.now() < until; await Bun.sleep(10)) if (calls(r.trace(), kind).length) return true;
+  return calls(r.trace(), kind).length > 0;
+};
 
 describe("deskd's held session (the node's): toolset actions in, answers out", () => {
   test("an action is named as the toolset names it, and answers with what it did, whether the screen changed, and the focus", async () => {
@@ -271,6 +276,11 @@ describe("the desktop command: deskd's thin client", () => {
   // C1 step 9: the owner's take-over. Their requests come on their own socket, from their own uid (the node's exec as
   // OWNER_UID: here the test's own uid, set so), and only theirs take the desktop over or give it back.
   const me = String(process.getuid!());
+  // How long a busy machine may take an agent's command to come to deskd, and the test it is in to end: with 2 % of a
+  // core, 28 November 2026, the hold test took 10.4 to 11.4 s, so its limit is three times that, as repository-
+  // checkout's are. Neither is what it checks.
+  const HELD_WITHIN = 30_000;
+  const HELD_LIMIT = 35_000;
 
   test("while the owner holds the desktop, an agent's command waits; it runs once they give it back, and is told how long it waited", async () => {
     if (!needs()) return;
@@ -278,6 +288,12 @@ describe("the desktop command: deskd's thin client", () => {
     const node = await opened(r, true);
     expect(await node.ask({ id: 1, name: "take", input: { idle: 30 } })).toMatchObject({ ok: true, took: true, hold: { idle: 30, most: 900 } });
     const clicking = agentAsync(r, ["click", "10", "20"]);
+    // Held until deskd has the click waiting on the hold, however long a busy machine takes the command to come (the
+    // harness traces deskd's wait as it begins, under the hold's own lock, so no giving back comes between); then 700 ms
+    // more, so the wait it is told of is one (deskd tells one of 50 ms or more). Never a guessed time alone: on the
+    // MacBook at load 289, 28 November 2026, the 700 ms this slept ended before the click came, which then ran at once
+    // and was told nothing.
+    expect(await traced(r, "owner-wait", HELD_WITHIN)).toBe(true);
     await Bun.sleep(700);
     expect(calls(r.trace(), "button")).toHaveLength(0);
     expect(await node.ask({ id: 2, name: "release" })).toMatchObject({ ok: true, released: true });
@@ -288,7 +304,7 @@ describe("the desktop command: deskd's thin client", () => {
     expect(clicked.ms).toBeGreaterThan(600);
     expect(calls(r.trace(), "button")).toHaveLength(2);
     await node.close();
-  });
+  }, HELD_LIMIT);
 
   test("an agent's command still waiting when its time is up does nothing: it exits 75 and says the owner has the desktop", async () => {
     if (!needs()) return;
