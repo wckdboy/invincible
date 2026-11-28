@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, beginFor, roundKey, roundNotice, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, beginFor, roundKey, roundNotice, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATE_UID_FIRST, VM_GATE_UIDS, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { seatVmClearCommand } from "./agent-process.ts";
@@ -95,10 +95,10 @@ export interface HandedRound {
   taken: HandedPipe;
   /** The node's install cache, filled for it from the tree's manifests before its VM was made: whether, why not, and how long it took; null, none was asked (no bun.lock, or no cache). */
   cache: { filled: boolean; said: string; ms: number } | null;
-  /** A command as its gates' own user, in their own folder (core's VM_GATES), in the round's VM. */
-  gates(command: string, timeoutSec: number, signal: AbortSignal): Promise<ExecResult>;
-  /** Every process of its gates' user in the round's VM ended, from an exec of its own (sandbox gate.ts): exit 0, none is left. */
-  sweep(signal: AbortSignal): Promise<ExecResult>;
+  /** A command as gate user `uid` (core's VM_GATE_UID_FIRST…), from the gates' folder (core's VM_GATES), in the round's VM. */
+  gates(command: string, timeoutSec: number, signal: AbortSignal, uid: number): Promise<ExecResult>;
+  /** What gate user `uid` left in the round's VM ended and tidied, from an exec of its own (sandbox gate.ts): exit 0, none is left. */
+  sweep(signal: AbortSignal, uid: number): Promise<ExecResult>;
 }
 
 /** The most another node's task's changes may come to, as a patch or as its binary parts inflate: 512 MiB. */
@@ -1058,24 +1058,26 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
        * ruling): as each run of them begins (beforeGates), its clone's tree is read in its VM, or with no repository its
        * folder is taken as it is then, and given to a VM of the round's own (HandedVm.round), where nothing of the task's
        * runs; or why there is none. Each gate, each check of the node's on what they judge (the digests of the test files
-       * they name) and, with no repository, its review's evidence then runs there on a copy of that tree of its own, made
-       * by the gates' user once every process of theirs there has been ended: nothing of the task's reaches it, nor
-       * anything a gate before it left, as CI runs each job on a checkout of the tree that comes back.
+       * they name) and, with no repository, its review's evidence then runs there as a user of its own, one no other gate
+       * of the round has (the twelfth fabric re-review's R12-1), on a copy of that tree of its own that user made: nothing
+       * of the task's reaches it, nor anything a gate before it left, as CI runs each job on a checkout of the tree that
+       * comes back. What each left is ended and tidied after it.
        */
       let judged: { tree: string } | { why: string } | null = null;
       let round: HandedRound | null = null;
+      /** How many of its gates' users the round under way has given: the next is VM_GATE_UID_FIRST + this, never one again. */
+      let usersGiven = 0;
       const failed = (error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false });
       const said = (r: ExecResult) => redact(r.stderr || r.stdout).trim().split("\n").at(-1)?.slice(0, 200) || "no reason given";
       const treeId = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
-      /** A copy of the round's tree, made by its gates' own user once every process of theirs in its VM is ended: where, and what it took. */
-      const copied = async (on: HandedRound, tree: string): Promise<{ on: string; ms: number } | { why: string; ms: number }> => {
-        const swept = await on.sweep(ctx.signal).catch(failed);
-        if (swept.exitCode !== 0) return { why: `what its gates' user left running in its gates' VM couldn't all be ended: ${said(swept)}`, ms: swept.durationMs };
+      /** A copy of the round's tree, made by a gate's user the round has given no other: where, as whom, and what it took. */
+      const copied = async (on: HandedRound, tree: string): Promise<{ on: string; uid: number; ms: number } | { why: string; ms: number }> => {
+        if (usersGiven >= VM_GATE_UIDS) return { why: `its round has run a gate as each of its ${VM_GATE_UIDS} users: no more run in it`, ms: 0 };
+        const uid = VM_GATE_UID_FIRST + usersGiven++;
         const at = `${VM_GATES}/${handedNonce()}`;
-        const made = await on.gates(handedCopy(tree, at, agent.repository ? "repo" : "folder"), 600, ctx.signal).catch(failed);
-        const ms = swept.durationMs + made.durationMs;
-        if (made.exitCode !== 0 || made.stdout.trim().split(" ")[2] !== tree) return { why: `its gates' copy of its tree couldn't be made: ${said(made)}`, ms };
-        return { on: at, ms };
+        const made = await on.gates(handedCopy(tree, at, agent.repository ? "repo" : "folder"), 600, ctx.signal, uid).catch(failed);
+        if (made.exitCode !== 0 || made.stdout.trim().split(" ")[2] !== tree) return { why: `its gates' copy of its tree couldn't be made: ${said(made)}`, ms: made.durationMs };
+        return { on: at, uid, ms: made.durationMs };
       };
       /** What its gates judge, as their run begins: its clone's tree read in its VM, or its folder, given to a round's VM of its own. */
       const gatesBegin = async (): Promise<void> => {
@@ -1105,6 +1107,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           return;
         }
         round = made;
+        usersGiven = 0;
         judged = { tree: held };
       };
       /** A gate, a check of the node's or the evidence of a task with no repository: on a copy of what its gates judge of its own. */
@@ -1119,10 +1122,17 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           if (what === "check") throw new CheckRefused(made.why);
           return { exitCode: -1, stdout: "", stderr: made.why, durationMs: made.ms, truncated: false };
         }
-        const ran = await there!.gates(handedCommand(command, { task: task.id, limitSec: limit, ends: "gate", on: made.on }), limit + HANDED_MARGIN_SECONDS, ctx.signal).catch((error: Error) => {
-          if (what === "check") throw new CheckRefused(`its check couldn't be run in its gates' VM: ${redact(String(error?.message ?? error)).slice(0, 200)}`);
-          throw error;
-        });
+        const ran = await there!
+          .gates(handedCommand(command, { task: task.id, limitSec: limit, ends: "gate", on: made.on }), limit + HANDED_MARGIN_SECONDS, ctx.signal, made.uid)
+          .catch((error: Error) => {
+            if (what === "check") throw new CheckRefused(`its check couldn't be run in its gates' VM: ${redact(String(error?.message ?? error)).slice(0, 200)}`);
+            throw error;
+          })
+          .finally(async () => {
+            // (What its user left, ended and tidied: hygiene, as no later gate of the round is that user. A process of its
+            // own that stops this sweep keeps only what is that user's.)
+            await there!.sweep(ctx.signal, made.uid).catch(failed);
+          });
         // (A check whose command didn't end as it does, reading every file it names, is no answer of what changed.)
         if (what === "check" && ran.exitCode !== 0) throw new CheckRefused(`its check exited ${ran.exitCode}: ${said(ran)}`);
         // A gate that failed for want of a package says why: its round's VM has no network. Bun, given a package to fetch

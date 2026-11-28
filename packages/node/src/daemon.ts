@@ -623,6 +623,8 @@ export async function startDaemon(home: Home, opts: DaemonOptions = {}): Promise
       ...(apple ? {} : { resolvConf }),
       // (The install cache a round of another node's task's gates takes its packages from, read-only: sandbox install-cache.ts.)
       ...(apple ? {} : { installCache: join(home.dir, "cache", "bun") }),
+      // (Each image's users for a round of gates' VM: its own, and each gate's, mounted read-only there. sandbox gate.ts.)
+      ...(apple ? {} : { gateUsers: join(home.dir, "sandbox", "gate-users") }),
       // Layout 2 (sandbox's layout.ts): an agent's HOME apart from its workspace, on a Linux host with Docker, when its own
       // setting says so (sandboxLayout). A Mac's VMs stay in layout 1: no VM there shares a workspace. An agent's VM moved to
       // it is said to you once, by name.

@@ -163,13 +163,13 @@ export class TaskVms {
         return {
           taken,
           cache,
-          gates: async (command, timeoutSec, signal) => {
+          gates: async (command, timeoutSec, signal, uid) => {
             if (signal.aborted || gating !== gate) throw new Error("its work has stopped");
-            return host.exec(gate, shell(command), timeoutSec, undefined, "gates");
+            return host.exec(gate, shell(command), timeoutSec, undefined, uid);
           },
-          sweep: async (signal) => {
+          sweep: async (signal, uid) => {
             if (signal.aborted || gating !== gate) throw new Error("its work has stopped");
-            return host.sweepGates(gate);
+            return host.sweepGates(gate, uid);
           },
         };
       },

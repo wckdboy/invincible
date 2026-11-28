@@ -18,9 +18,9 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
   /** How often its engine was asked which VMs are other nodes' tasks'. */
   let listed = 0;
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
-  const asked: unknown[] = [], ran: { vm: string; cmd: string[]; as?: "gates" }[] = [], removed: string[] = [];
+  const asked: unknown[] = [], ran: { vm: string; cmd: string[]; as?: number }[] = [], removed: string[] = [];
   /** Each round's VM as it was asked for, each sweep of one, and each fill of the install cache. */
-  const rounds: unknown[] = [], swept: string[] = [], filled: { vm: string; manifests: string }[] = [];
+  const rounds: unknown[] = [], swept: { vm: string; uid: number }[] = [], filled: { vm: string; manifests: string }[] = [];
   /** Each pipe between two VMs, as the host was asked for it: from which VM's command to which. */
   const piped: { from: { id: string; cmd: string[] }; to: { id: string; cmd: string[] }; maxBytes: number }[] = [];
   /** Each step of a removal, in order: a lease ended, a VM removed. */
@@ -50,8 +50,8 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       vms.set(id, { createdAt: STARTED + made, run: (input as { run: string }).run });
       return { id } as SandboxView;
     },
-    sweepGates: async (vm: string) => {
-      swept.push(vm);
+    sweepGates: async (vm: string, uid: number) => {
+      swept.push({ vm, uid });
       return done();
     },
     hasInstallCache: () => !!options.cache,
@@ -60,8 +60,8 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       return options.cache === "fails" ? { ...done(), exitCode: 1, stderr: "its bun.lock names x@github:y/z, which isn't the default registry's, so nothing is filled" } : done();
     },
     // (A command that takes `slow` ms, as one in flight does: it returns then, whatever became of its VM meanwhile.)
-    exec: async (vm: string, cmd: string[], _timeoutSec?: number, _check?: unknown, as?: "gates") => {
-      ran.push({ vm, cmd, ...(as ? { as } : {}) });
+    exec: async (vm: string, cmd: string[], _timeoutSec?: number, _check?: unknown, as?: number) => {
+      ran.push({ vm, cmd, ...(as !== undefined ? { as } : {}) });
       if (options.slow) await Bun.sleep(options.slow);
       // (The manifests' read, in the task's VM: what it prints, base64.)
       if (cmd.at(-1) === "read-the-manifests") return done(options.manifests ?? "");
@@ -132,18 +132,18 @@ describe("another node's task's VM, on this node", () => {
     expect(h.piped).toEqual([{ from: { id: "vm-1", cmd: ["bash", "--noprofile", "--norc", "-c", "take-the-tree"] }, to: { id: "gate-2", cmd: ["bash", "--noprofile", "--norc", "-c", "keep-the-tree"] }, maxBytes: Number.POSITIVE_INFINITY }]);
     expect(first.taken.from.exitCode).toBe(0);
     // Its gates and the node's checks there, as their own user, in their own folder; its sweep there; none in the task's VM.
-    await first.gates("test -f x", 30, live);
-    expect(h.ran.at(-1)).toEqual({ vm: "gate-2", cmd: ["bash", "--noprofile", "--norc", "-c", "test -f x"], as: "gates" });
-    await first.sweep(live);
-    expect(h.swept).toEqual(["gate-2"]);
-    expect(h.ran.filter((r) => r.as === "gates" && r.vm === "vm-1")).toEqual([]);
+    await first.gates("test -f x", 30, live, 61001);
+    expect(h.ran.at(-1)).toEqual({ vm: "gate-2", cmd: ["bash", "--noprofile", "--norc", "-c", "test -f x"], as: 61001 });
+    await first.sweep(live, 61001);
+    expect(h.swept).toEqual([{ vm: "gate-2", uid: 61001 }]);
+    expect(h.ran.filter((r) => r.as !== undefined && r.vm === "vm-1")).toEqual([]);
     // The next round's VM takes its place: the first is gone, and what is asked of it is refused.
     const second = await vm.round("take-the-tree", "keep-the-tree", "", 900, live);
     expect(h.removed).toEqual(["gate-2"]);
-    await expect(first.gates("test -f x", 30, live)).rejects.toThrow("its work has stopped");
-    await expect(first.sweep(live)).rejects.toThrow("its work has stopped");
-    await second.sweep(live);
-    expect(h.swept).toEqual(["gate-2", "gate-3"]);
+    await expect(first.gates("test -f x", 30, live, 61002)).rejects.toThrow("its work has stopped");
+    await expect(first.sweep(live, 61002)).rejects.toThrow("its work has stopped");
+    await second.sweep(live, 61001);
+    expect(h.swept).toEqual([{ vm: "gate-2", uid: 61001 }, { vm: "gate-3", uid: 61001 }]);
     // The task's end takes the round's VM with it.
     await vm.release();
     expect(h.removed).toEqual(["gate-2", "gate-3", "vm-1"]);

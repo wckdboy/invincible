@@ -147,14 +147,19 @@ describe("sandbox hardening", () => {
     expect(execArgs("0123456789", ["cat"], 30, { input: true })).toEqual(["exec", "--interactive", "--workdir", "/work", "invincible-sbx-0123456789", "timeout", "--signal=KILL", "30s", "cat"]);
   });
 
-  test("another node's task's gates run as their own user, from their own folder: a filesystem in memory of theirs alone, which a round of its gates' VM alone has, and says so (R8-3, R11-1)", () => {
-    expect(execArgs("0123456789", ["test", "-f", "x"], 30, { as: "gates" }).slice(0, 6)).toEqual(["exec", "--user", "65534:65534", "--workdir", "/gates", "invincible-sbx-0123456789"]);
+  test("another node's task's gates run each as a user of its own, from the gates' folder: a sticky filesystem in memory, which a round of its gates' VM alone has, and says so (R8-3, R11-1, R12-1)", () => {
+    expect(execArgs("0123456789", ["test", "-f", "x"], 30, { as: 61001 }).slice(0, 6)).toEqual(["exec", "--user", "61001:61001", "--workdir", "/gates", "invincible-sbx-0123456789"]);
+    // (Only a gate's user: never the VMs' own, root, nobody, or one past the gates' range.)
+    for (const uid of [1000, 0, 65534, 61000, 61257, 1.5]) expect(() => execArgs("0123456789", ["true"], 30, { as: uid })).toThrow("not a gate's user");
     const tmpfs = (args: string[]) => args.filter((_, i) => args[i - 1] === "--tmpfs");
     const envs = (args: string[]) => args.filter((_, i) => args[i - 1] === "--env");
     const marks = (args: string[]) => args.filter((_, i) => args[i - 1] === "--label");
     const gate = runArgs({ ...base, network: "isolated", task: "task-abcdefghijkl", beside: "9876543210", gate: true, ownHome: { path: "/usr/bin:/bin" } });
-    // (Mounted exec, unlike /tmp and HOME: a gate runs a tree's scripts. Its user's alone, mode 0700.)
-    expect(tmpfs(gate)).toContain("/gates:rw,exec,nosuid,nodev,size=2g,uid=65534,gid=65534,mode=0700");
+    // (Mounted exec, unlike /tmp and HOME: a gate runs a tree's scripts. Sticky, so each gate's folder is its user's alone.)
+    expect(tmpfs(gate)).toContain("/gates:rw,exec,nosuid,nodev,size=2g,mode=1777");
+    // Its users named by the node's own files, read-only, where it is given them.
+    const named = runArgs({ ...base, network: "isolated", task: "task-abcdefghijkl", beside: "9876543210", gate: true, gateUsers: { passwd: "/var/lib/node/gate-users/abc/passwd", group: "/var/lib/node/gate-users/abc/group" } });
+    expect(named.filter((_, i) => named[i - 1] === "--mount")).toEqual(expect.arrayContaining(["type=bind,src=/var/lib/node/gate-users/abc/passwd,dst=/etc/passwd,readonly", "type=bind,src=/var/lib/node/gate-users/abc/group,dst=/etc/group,readonly"]));
     // Its environment says it is a round's VM, which the sweep between its gates asks; its label says so to the node.
     expect(envs(gate)).toContain("INVINCIBLE_GATE_VM=1");
     expect(marks(gate)).toContain("dev.invincible.gate=1");

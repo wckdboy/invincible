@@ -972,10 +972,13 @@ describe("the round of another node's task's gates: its tree, its store, and eac
     for (const sub of ["home", "tmp", "tree"]) expect((lstatSync(join(on, sub)).mode & 0o777).toString(8)).toBe("700");
     expect((lstatSync(r.store).mode & 0o777).toString(8)).toBe("755");
     expect(made.stdout.trim()).toBe(`4 ${["the agent's repository\n", "two\n", "made by the task\n", "ignored.txt\nnode_modules/\n"].reduce((n, text) => n + text.length, 0)} ${w.tree}`);
-    // The next gate's copy takes the place of every earlier one.
+    // The next gate's copy is a folder of its own beside it (its own user's, in the round's VM: R12-1), and touches none
+    // of the first's; each is its user's alone (0700).
     const next = r.copy(w.tree, "repo");
     expect(next.made.status).toBe(0);
-    expect(readdirSync(r.gates)).toEqual([next.on.slice(r.gates.length + 1)]);
+    expect(readdirSync(r.gates).sort()).toEqual([on.slice(r.gates.length + 1), next.on.slice(r.gates.length + 1)].sort());
+    expect(readFileSync(join(on, "tree", "app.txt"), "utf8")).toBe("two\n");
+    for (const folder of [on, next.on]) expect((lstatSync(folder).mode & 0o777).toString(8)).toBe("700");
   });
 
   test("the store holds that tree, whatever the task's VM does: an object of it changed in the clone isn't taken, and what the clone does after it is taken reaches no copy", () => {

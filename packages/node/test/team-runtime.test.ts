@@ -1179,10 +1179,10 @@ function gatedFixture(opts: { outlives: boolean; changes: "during its gates" | "
  * that user there ended just before the copy: no gate sees what the one before it left, and a copy that can't be made is
  * a gate that fails.
  */
-test("another node's task's gates each run in their round's own VM, on a copy of their own made after every process of their user there is ended, of the tree read as they began (R8-3, R11-1)", async () => {
+test("another node's task's gates each run in their round's own VM, each as a user of its own that no other gate of the round has, on a copy of their own that user made of the tree read as they began, what it left swept after it (R8-3, R11-1, R12-1)", async () => {
   const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
   const agent = { ...member, repository: "https://github.com/you/project" };
-  const said: { via: "exec" | "take" | "store" | "gates" | "sweep"; command: string }[] = [];
+  const said: { via: "exec" | "take" | "store" | "gates" | "sweep"; command: string; uid?: number }[] = [];
   const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
     agent: () => agent,
     models: () => [{ provider: "paid", model: "m" }],
@@ -1201,11 +1201,11 @@ test("another node's task's gates each run in their round's own VM, on a copy of
         return {
           taken: { from: result(), to: roundAnswer(store)!, bytes: 1, cut: false },
           cache: null,
-          gates: async (command: string) => {
-            said.push({ via: "gates", command });
+          gates: async (command: string, _t: number, _s: AbortSignal, uid: number) => {
+            said.push({ via: "gates", command, uid });
             return roundAnswer(command) ?? result({ exitCode: command.includes("bun test required-check") && said.some((c) => plain(c.command).includes("echo one")) ? 0 : 1 });
           },
-          sweep: async () => (said.push({ via: "sweep", command: "" }), result({ stdout: "" })),
+          sweep: async (_s: AbortSignal, uid: number) => (said.push({ via: "sweep", command: "", uid }), result({ stdout: "" })),
         };
       },
       receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
@@ -1227,9 +1227,16 @@ test("another node's task's gates each run in their round's own VM, on a copy of
   expect(new Set(ons).size).toBe(4);
   for (const [i, on] of ons.entries()) {
     const at = said.indexOf(gates[i]!);
+    // Its copy made just before it, as its own user, and that user's leavings swept just after it.
     expect(said[at - 1]!.command).toContain(` '${"7".repeat(40)}' '${on}' 'repo'`);
-    expect(said[at - 2]!.via).toBe("sweep");
+    expect(said[at - 1]!.uid).toBe(gates[i]!.uid);
+    expect(said[at + 1]).toMatchObject({ via: "sweep", uid: gates[i]!.uid });
   }
+  // Each gate's user its own, never one twice within its round (the baseline's round, then the submission's).
+  const users = gates.map((g) => g.uid!);
+  expect(users.every((uid) => uid >= 61001 && uid <= 61256)).toBe(true);
+  expect(new Set(users.slice(0, 2)).size).toBe(2);
+  expect(new Set(users.slice(2, 4)).size).toBe(2);
   expect(copies.length).toBe(4);
   // Two rounds, the baseline's and the submission's: each after the task's end and its tree read, the tree given to the
   // round's VM as a pack of that tree, kept there in its store.
@@ -1307,7 +1314,6 @@ test("another node's task's gate that fails where its round's install cache coul
  */
 for (const [what, breaks] of [
   ["its round's tree can't be given to its VM", { take: true }],
-  ["what its gates' user left can't all be ended", { sweep: true }],
   ["its copy can't be made", { copy: true }],
   ["its check doesn't end as it does", { check: true }],
 ] as const) {
@@ -1343,7 +1349,7 @@ for (const [what, breaks] of [
             gated.push(submitted ? "after" : "before");
             return result({ exitCode: submitted ? 0 : 1 });
           },
-          sweep: async () => (submitted && "sweep" in breaks ? result({ exitCode: 1, stderr: "processes of the gates' user are still running: 1" }) : result({ stdout: "" })),
+          sweep: async () => result({ stdout: "" }),
         }),
         receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
         send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }),

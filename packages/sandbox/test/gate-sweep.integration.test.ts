@@ -40,7 +40,8 @@ const SYS_EXIT = process.arch === "arm64" ? 93 : 60;
 for (const runtime of ["runc", "kata"] as const) {
   describe.skipIf(!available || (runtime === "kata" && !kata))(`the sweep between gates: ${runtime === "kata" ? "Kata microVMs" : "containers (runc)"}`, () => {
     let name = "";
-    const as = (...a: string[]) => docker("exec", "--user", "65534:65534", "--workdir", "/gates", name, ...a);
+    /** As gate user 61001, the one these tries leave processes as, and the sweep ends. */
+    const as = (...a: string[]) => docker("exec", "--user", "61001:61001", "--workdir", "/gates", name, ...a);
     /** Whether a marker its writer touches every 10 ms is still being touched: alive if it is newer than 150 ms, 300 ms on. */
     const touched = (marker: string) =>
       as("/usr/bin/python3", "-I", "-c", `import os, time\ntime.sleep(0.3)\ntry:\n    print("alive" if time.time() - os.stat(${JSON.stringify(marker)}).st_mtime < 0.15 else "gone")\nexcept OSError:\n    print("gone")`).stdout.trim();
@@ -49,17 +50,17 @@ for (const runtime of ["runc", "kata"] as const) {
      * zombie of one thread is dead, waiting for the VM's init to reap it; one with a thread running isn't.
      */
     const left = () =>
-      docker("exec", name, "sh", "-c", `for p in /proc/[0-9]*; do u=$(awk '/^Uid:/{print $2}' $p/status 2>/dev/null); [ "$u" = 65534 ] || continue; s=$(cut -d' ' -f3 $p/stat 2>/dev/null); t=$(awk '/^Threads:/{print $2}' $p/status 2>/dev/null); [ "$s" = Z ] && [ "$t" = 1 ] && continue; printf '%s:%s:%s ' "\${p#/proc/}" "$s" "$t"; done; true`).stdout.trim();
+      docker("exec", name, "sh", "-c", `for p in /proc/[0-9]*; do u=$(awk '/^Uid:/{print $2}' $p/status 2>/dev/null); [ "$u" = 61001 ] || continue; s=$(cut -d' ' -f3 $p/stat 2>/dev/null); t=$(awk '/^Threads:/{print $2}' $p/status 2>/dev/null); [ "$s" = Z ] && [ "$t" = 1 ] && continue; printf '%s:%s:%s ' "\${p#/proc/}" "$s" "$t"; done; true`).stdout.trim();
     const sweep = () => {
       const began = performance.now();
-      const ran = docker(...gateSweepArgs(name));
+      const ran = docker(...gateSweepArgs(name, 61001));
       return { code: ran.status, said: ran.stderr.trim(), ms: Math.round(performance.now() - began) };
     };
 
     test(`made as a gate VM is (${runtime})`, () => {
       name = `${PREFIX}${runtime}`;
       made.push(name);
-      const ran = docker("run", "--detach", "--name", name, ...(runtime === "kata" ? ["--runtime", KATA_RUNTIME] : []), "--init", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777", "--tmpfs", "/gates:rw,exec,nosuid,nodev,size=64m,uid=65534,gid=65534,mode=0700", "--network", "none", "--pids-limit", "512", "--memory", "2g", "--env", `${GATE_VM_ENV}=1`, IMAGE, "sleep", "900");
+      const ran = docker("run", "--detach", "--name", name, ...(runtime === "kata" ? ["--runtime", KATA_RUNTIME] : []), "--init", "--user", "1000:1000", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--read-only", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,mode=1777", "--tmpfs", "/gates:rw,exec,nosuid,nodev,size=64m,mode=1777", "--network", "none", "--pids-limit", "512", "--memory", "2g", "--env", `${GATE_VM_ENV}=1`, IMAGE, "sleep", "900");
       expect([ran.status, ran.stderr.trim()]).toEqual([0, ""]);
       // (With nothing of the gates' user in it, the sweep finds none at once.)
       expect(sweep().code).toBe(0);
@@ -112,9 +113,90 @@ while True:
       expect(lived).toEqual([]);
     });
 
-    test(`it runs only as the gates' user, in a gate VM: as the VM's own user it does nothing (${runtime})`, () => {
+    test(`a process of one gate's user can't trace, signal or write another's, where the VM's kernel lets it trace its own user's (${runtime})`, () => {
+      // Gate user 61002's work: a process, and its folder (0700) in the sticky gates' folder.
+      expect(docker("exec", "--user", "61002:61002", "--workdir", "/gates", name, "sh", "-c", "mkdir -m 0700 /gates/b && echo theirs > /gates/b/f").status).toBe(0);
+      docker("exec", "-d", "--user", "61002:61002", name, "sleep", "300");
+      docker("exec", "-d", "--user", "61001:61001", name, "sleep", "300");
+      Bun.sleepSync(300);
+      const pid = (uid: number) => docker("exec", name, "sh", "-c", `for p in /proc/[0-9]*; do [ "$(awk '/^Uid:/{print $2}' $p/status 2>/dev/null)" = ${uid} ] && grep -qx 'sleep' $p/comm && echo \${p#/proc/} && break; done`).stdout.trim();
+      const theirs = pid(61002), mine = pid(61001);
+      expect(theirs).toMatch(/^\d+$/);
+      // What gate user 61001 tries: to trace each (PTRACE_SEIZE), to signal theirs, to read and write their files.
+      const tried = as("/usr/bin/python3", "-I", "-c", `import ctypes, os, sys
+libc = ctypes.CDLL(None, use_errno=True)
+libc.ptrace.restype = ctypes.c_long
+libc.ptrace.argtypes = [ctypes.c_long, ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p]
+def seize(pid):
+    r = libc.ptrace(0x4206, pid, None, None)
+    return "seized" if r == 0 else os.strerror(ctypes.get_errno())
+def attempt(fn):
+    try:
+        fn()
+        return "done"
+    except OSError as e:
+        return e.strerror
+print("theirs:", seize(${theirs}))
+print("mine:", seize(${mine || 0}))
+print("signal:", attempt(lambda: os.kill(${theirs}, 0)))
+print("read:", attempt(lambda: open("/gates/b/f").read()))
+print("write:", attempt(lambda: open("/gates/b/g", "w").write("x")))
+print("remove:", attempt(lambda: os.rename("/gates/b", "/gates/c")))`).stdout.trim();
+      console.log(`${runtime}: gate user 61001 against 61002's work: ${tried.split("\n").join("; ")}`);
+      const said = Object.fromEntries(tried.split("\n").map((line) => line.split(": ")) as [string, string][]);
+      expect(said).toMatchObject({ theirs: "Operation not permitted", signal: "Operation not permitted", read: "Permission denied", write: "Permission denied", remove: "Operation not permitted" });
+      // (Where the VM's kernel has no Yama, Kata's, a process traces another of its own user: a user of its own is what holds.)
+      if (runtime === "kata") expect(said.mine).toBe("seized");
+    });
+
+    /*
+     * The twelfth review's Info: after the sweep, a System V segment and a POSIX queue that one gate's user left were still
+     * there. Now its sweep tidies what its user left in the VM's shared places, and nothing of another gate's user's.
+     */
+    test(`what a gate's user leaves in the VM's shared places goes with its sweep, and another's stays: /tmp, /dev/shm, /dev/mqueue, its folders, System V IPC (${runtime})`, () => {
+      const leave = (uid: number) =>
+        docker("exec", "--user", `${uid}:${uid}`, "--workdir", "/gates", name, "/usr/bin/python3", "-I", "-c", `import ctypes, os
+libc = ctypes.CDLL(None, use_errno=True)
+try:
+    mq_open = libc.mq_open
+except AttributeError:
+    mq_open = ctypes.CDLL("librt.so.1", use_errno=True).mq_open
+tag = "left-${uid}"
+open("/tmp/" + tag, "w").write("x")
+open("/dev/shm/" + tag, "w").write("x")
+os.mkdir("/gates/" + tag, 0o700)
+made = [libc.shmget(${uid}, 4096, 0o1000 | 0o600), libc.msgget(${uid}, 0o1000 | 0o600), libc.semget(${uid}, 1, 0o1000 | 0o600), mq_open(("/" + tag).encode(), os.O_CREAT | os.O_RDWR, 0o600, None)]
+print(" ".join(str(m) for m in made))`);
+      /** What of user `uid`'s is in the VM's shared places, as the VM's own user lists them. */
+      const held = (uid: number) =>
+        docker("exec", name, "/usr/bin/python3", "-I", "-c", `import os
+uid, out = ${uid}, []
+for kind in ("shm", "msg", "sem"):
+    lines = open("/proc/sysvipc/" + kind).read().splitlines()
+    head = lines[0].split()
+    out += [kind for line in lines[1:] if int(line.split()[head.index("uid")]) == uid]
+for top in ("/tmp", "/dev/shm", "/dev/mqueue", "/gates"):
+    out += [top + "/" + n for n in sorted(os.listdir(top)) if os.lstat(os.path.join(top, n)).st_uid == uid]
+print(" ".join(out))`).stdout.trim();
+      for (const uid of [61001, 61002]) {
+        const made = leave(uid);
+        expect([made.status, made.stderr.trim()]).toEqual([0, ""]);
+        expect(made.stdout.trim().split(" ").every((id) => Number(id) >= 0)).toBe(true);
+      }
+      const all = (uid: number) => `shm msg sem /tmp/left-${uid} /dev/shm/left-${uid} /dev/mqueue/left-${uid} /gates/left-${uid}`;
+      expect(held(61001)).toBe(all(61001));
+      const swept = sweep();
+      expect([swept.code, swept.said]).toEqual([0, ""]);
+      expect(held(61001)).toBe("");
+      // (Gate user 61002's, its /gates/b of the test before among them, are its own sweep's.)
+      expect(held(61002)).toBe(all(61002).replace(" /gates/left-61002", " /gates/b /gates/left-61002"));
+      expect(docker(...gateSweepArgs(name, 61002)).status).toBe(0);
+      expect(held(61002)).toBe("");
+    });
+
+    test(`it runs only as a gate's user, in a gate VM: as the VM's own user it does nothing (${runtime})`, () => {
       const ran = docker("exec", name, "/usr/bin/python3", "-I", "-c", GATE_SWEEP_PY);
-      expect([ran.status, ran.stderr.trim()]).toEqual([1, "this sweep runs only as the gates' own user, in a gate VM"]);
+      expect([ran.status, ran.stderr.trim()]).toEqual([1, "this sweep runs only as a gate's own user, in a gate VM"]);
       // (And the VM is still up: nothing of its own user's was signalled.)
       expect(docker("inspect", "--format", "{{.State.Running}}", name).stdout.trim()).toBe("true");
     });

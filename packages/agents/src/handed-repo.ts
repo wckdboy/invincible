@@ -526,9 +526,9 @@ if git(root,'rev-parse','-q','--verify',ref).returncode == 0 and git(root,'updat
  * made for the round from its task's image, with no network and no lease, where nothing of the task's ever runs (sandbox
  * gate.ts). The task's tree goes there once, as the round begins, through the node (HandedVm.round): the task's VM's side
  * of the pipe prints it (ROUND_PACK_SCRIPT, or ROUND_TAR_SCRIPT with no repository), and the round's VM's own user keeps
- * it in a store of its own (ROUND_STORE_SCRIPT), which the gates' user can read and never write. Each gate, each check of
+ * it in a store of its own (ROUND_STORE_SCRIPT), which a gate's user can read and never write. Each gate, each check of
  * the node's on what they judge and, with no repository, its review's evidence then runs on a copy of that store of its
- * own, made by the gates' user (ROUND_COPY_SCRIPT) once every process of theirs in the round's VM has been ended.
+ * own, made by a user of its own that no other of the round's has (ROUND_COPY_SCRIPT; the twelfth re-review's R12-1).
  */
 
 /** In the task's VM: the objects of its clone's tree `tree`, as a pack on stdout (which the round's store hashes as it takes it). */
@@ -648,7 +648,7 @@ else:
     if not r.returncode: r = ran('-c', 'core.bare=false', 'add', '-A', '--force', '.', extra=hashed, cwd=folder)
     tree = '' if r.returncode else ran('-c', 'core.bare=false', 'write-tree', extra=hashed).stdout.decode().strip()
     if not hexed(tree): sys.exit('its folder could not be read: ' + (said(r) if r.returncode else 'no tree of it'))
-# (For the gates' user to read and never to write: folders and files of this user's alone.)
+# (For a gate's user to read and never to write: folders and files of this user's alone.)
 for here, dirs, files in os.walk(store):
     os.chmod(here, 0o755)
     for name in files:
@@ -657,13 +657,14 @@ for here, dirs, files in os.walk(store):
 print(tree)`;
 
 /**
- * In the round's VM, as its gates' own user: a copy of the round's store at `on`, a folder of its own in the gates'
- * (VM_GATES), for one gate or one check of the node's, with a HOME and a temporary folder of its own beside it. Every
- * earlier folder there goes first, and every process of theirs in the VM was ended just before (sandbox gate.ts), so
- * nothing one gate (whose command may run the task's code) leaves reaches the next.
+ * In the round's VM, as a gate's own user, one no other gate of the round has (the twelfth fabric re-review's R12-1): a
+ * copy of the round's store at `on`, a folder of its own (0700) in the gates' sticky one (VM_GATES), for one gate, check
+ * or evidence of the node's, with a HOME and a temporary folder of its own beside it. No other gate's user can list,
+ * write or move it, nor trace or signal what runs there, so nothing one gate (whose command may run the task's code)
+ * leaves reaches the next.
  *
  * - In a repository ("repo"): its index the tree `tree`, checked out from the store's objects (read through an alternate
- *   of its own, which the gates' user can't write), and HEAD a commit of it with no history.
+ *   of its own, which a gate's user can't write), and HEAD a commit of it with no history.
  * - With none ("folder"): the store's folder, copied.
  * - A link that points out of the tree (an absolute one, one up past its top, or one that resolves out of it through
  *   others, `x -> .` and `l -> x/x/x/../..`) is refused: the gates run on the tree alone.
@@ -674,25 +675,7 @@ const ROUND_COPY_SCRIPT = `import stat
 store, tree, on, kind = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 if not re.fullmatch('[0-9a-f]{32}', os.path.basename(on)) or not os.path.isabs(on) or not os.path.isabs(store) or not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', tree) or kind not in ('repo', 'folder'):
     sys.exit('not a copy for its gates')
-top = os.path.dirname(on)
-def drop(path):
-    def again(fn, p, _):
-        try:
-            os.chmod(os.path.dirname(p), 0o700)
-            if not os.path.islink(p): os.chmod(p, 0o700)
-            fn(p)
-        except OSError:
-            pass
-    shutil.rmtree(path, onerror=again)
-for name in os.listdir(top):
-    path = os.path.join(top, name)
-    if path == on: continue
-    if os.path.isdir(path) and not os.path.islink(path): drop(path)
-    else:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+os.umask(0o077)
 os.mkdir(on, 0o700)
 for sub in ('home', 'tmp', 'tree'):
     os.mkdir(os.path.join(on, sub), 0o700)

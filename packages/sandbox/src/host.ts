@@ -1,7 +1,7 @@
-import { chownSync, existsSync, mkdirSync } from "node:fs";
+import { chownSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, NOTES_DIR, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
-import { gateSweepArgs } from "./gate.ts";
+import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isGateUid, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, NOTES_DIR, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
+import { gateSweepArgs, gateUsers } from "./gate.ts";
 import { FILLER_UID, fillerArgs } from "./install-cache.ts";
 import { layoutPath, MOVE_PY, WORK_TREE } from "./layout.ts";
 import {
@@ -194,6 +194,11 @@ export interface SandboxHostOptions {
    * but those their tree holds. A Linux host's alone.
    */
   installCache?: string;
+  /**
+   * Where the node keeps each image's users for a round of gates' VM (gate.ts gateUsers): the image's own /etc/passwd and
+   * /etc/group with each gate's user after them, mounted read-only. Absent: none, and a gate's user has no name there.
+   */
+  gateUsers?: string;
   tokenStore?: SandboxTokenStore;
   /** The moves to layout 2 under way here (LayoutMove): in the node's own database. Absent: in this process's memory. */
   layoutMoves?: LayoutMoves;
@@ -406,8 +411,9 @@ export interface CreateOptions {
   /** A VM made for another node's task (createTaskVm's alone): the task it is for, and the agent's VM it is beside. */
   task?: string;
   beside?: string;
-  /** A VM for a round of that task's gates, beside its task's VM (createGateVm's alone). */
+  /** A VM for a round of that task's gates, beside its task's VM (createGateVm's alone), and its users' files. */
   gate?: true;
+  gateUsers?: { passwd: string; group: string };
 }
 
 /** A VM for a seat (createSeatVm): which seat, how many VMs its home may be in at once, and an agent's VM whose /work it shares. */
@@ -718,8 +724,8 @@ export class SandboxHost {
   }
 
   /** A command's arguments in a sandbox, for this host's engine (`as`: execArgs; Docker's alone, as task VMs are). */
-  private commandArgs(id: string, cmd: string[], timeoutSec: number, as?: "gates"): string[] {
-    return this.apple ? containerExecArgs(id, cmd, timeoutSec) : execArgs(id, cmd, timeoutSec, as ? { as } : {});
+  private commandArgs(id: string, cmd: string[], timeoutSec: number, as?: number): string[] {
+    return this.apple ? containerExecArgs(id, cmd, timeoutSec) : execArgs(id, cmd, timeoutSec, as !== undefined ? { as } : {});
   }
 
   /** Removing a sandbox's container (or VM), whatever it is doing. */
@@ -1104,6 +1110,7 @@ export class SandboxHost {
       ...(seated.beside ? { beside: seated.beside } : {}),
       ...(seated.gate ? { gate: true as const } : {}),
       ...(seated.gate && this.opts.installCache && !this.apple ? { cache: this.opts.installCache } : {}),
+      ...(seated.gate && seated.gateUsers ? { gateUsers: seated.gateUsers } : {}),
       // One that shares an agent's workspace, and another node's task's, has a HOME of its own, empty and in memory: never the
       // agent's, nor its /work (a Linux host's alone).
       ...((seated.shares || seated.task) && !this.apple ? { ownHome: { path: await this.imagePath(image) } } : {}),
@@ -2285,7 +2292,7 @@ export class SandboxHost {
    * nothing runs. `as`: "gates", as another node's task's gates' own user, in their own folder (execArgs), which only a
    * VM made for such a task has (the eighth fabric review's R8-3).
    */
-  async exec(id: string, cmd: string[], timeoutSec = 600, check?: (sandbox: SandboxView) => void, as?: "gates"): Promise<ExecResult> {
+  async exec(id: string, cmd: string[], timeoutSec = 600, check?: (sandbox: SandboxView) => void, as?: number): Promise<ExecResult> {
     this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
     try {
       return await this.execNow(id, cmd, timeoutSec, check, as);
@@ -2465,7 +2472,7 @@ export class SandboxHost {
     }
   }
 
-  private async execNow(id: string, cmd: string[], timeoutSec: number, check?: (sandbox: SandboxView) => void, as?: "gates"): Promise<ExecResult> {
+  private async execNow(id: string, cmd: string[], timeoutSec: number, check?: (sandbox: SandboxView) => void, as?: number): Promise<ExecResult> {
     // The VM's own `desktop` command alone goes to its held session where it has one: the same command, its answer
     // the same, in milliseconds; while the session is open the VM is running, so no listing comes first.
     const held = cmd[0] === "desktop" && cmd.length > 1 ? this.sessions.get(id) : undefined;
@@ -2473,10 +2480,11 @@ export class SandboxHost {
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
     check?.(sandbox);
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
-    if (as === "gates" && (this.apple || !sandbox.gate)) throw new SandboxError("only a VM made for a round of another node's task's gates has its gates' own user", 409);
+    if (as !== undefined && (this.apple || !sandbox.gate)) throw new SandboxError("only a VM made for a round of another node's task's gates has its gates' own users", 409);
+    if (as !== undefined && !isGateUid(as)) throw new SandboxError("not a gate's user", 409);
     const started = performance.now();
     let result: Run | null = null;
-    if (!as && cmd[0] === "desktop" && cmd.length > 1 && sandbox.image.includes("desktop")) {
+    if (as === undefined && cmd[0] === "desktop" && cmd.length > 1 && sandbox.image.includes("desktop")) {
       await this.desktopRoom(sandbox, String(cmd[1]));
       const session = this.desktopSession(sandbox);
       try {
@@ -2486,7 +2494,7 @@ export class SandboxHost {
         // (One that ended before it answered was no session: the command is run as any other.)
         if (!(error instanceof SessionEnded) || session?.answered) result = { code: 1, stdout: "", stderr: `desktop: ${(error as Error).message}\n`, truncated: false };
       }
-    } else if (!as && sandbox.image.includes("desktop")) {
+    } else if (as === undefined && sandbox.image.includes("desktop")) {
       // A desktop verb in a shell command (a look, or one inside a longer command) may start the desktop too: room first.
       const verb = desktopVerbIn(cmd);
       if (verb) await this.desktopRoom(sandbox, verb);
@@ -2498,7 +2506,7 @@ export class SandboxHost {
       target: sandbox.name,
       verdict: "allow",
       run: sandbox.run,
-      detail: `${truncateLedgerDetail(redact(cmd.join(" ")))}${as ? " (as its gates' user)" : ""} → exit ${result.code}`,
+      detail: `${truncateLedgerDetail(redact(cmd.join(" ")))}${as !== undefined ? ` (as gate user ${as})` : ""} → exit ${result.code}`,
     });
     return {
       exitCode: result.code,
@@ -2644,11 +2652,49 @@ export class SandboxHost {
     if (!of || of.task !== input.task || of.gate) throw new SandboxError("a round of another node's task's gates is made beside that task's own VM on this host, and that one is not here", 404);
     // (Its install cache's folder is there before it is mounted: a mount of none fails the VM.)
     if (this.opts.installCache) this.cacheFolder();
+    const users = this.opts.gateUsers ? await this.gateUsersOf(of.image) : null;
     // (Its disk as big as its task's VM's, where this host holds a VM's disk to a size: its copies of the tree are in it.)
     return this.create(
       { network: "isolated", image: of.image, cpus: of.cpus, memoryGb: of.memoryGb, ...(of.disk ? { diskGb: of.disk.limitGb } : {}), ttlMinutes: input.ttlMinutes, persistent: false, run: input.run, isolation: of.isolation },
-      { task: input.task, beside: input.beside, gate: true, ...(signal ? { signal } : {}) },
+      { task: input.task, beside: input.beside, gate: true, ...(users ? { gateUsers: users } : {}), ...(signal ? { signal } : {}) },
     );
+  }
+
+  /**
+   * An image's users for a round of gates' VM (gate.ts gateUsers), written once for each build of it: its own /etc/passwd
+   * and /etc/group, read in a container of its own with no network and no capability, and each gate's user after them.
+   * One that can't be read, or that has a gate's user already, makes no round: its gates couldn't be told apart.
+   */
+  private async gateUsersOf(image: string): Promise<{ passwd: string; group: string }> {
+    const said = await this.docker(["image", "inspect", "--format", "{{.Id}}", image]);
+    const id = said.stdout.trim().replace(/^sha256:/, "");
+    if (said.code !== 0 || !/^[0-9A-Za-z]+$/.test(id)) throw new SandboxError(`its image ${image} isn't here`, 424);
+    const folder = join(this.opts.gateUsers!, id.slice(0, 32));
+    const passwd = join(folder, "passwd");
+    const group = join(folder, "group");
+    if (existsSync(passwd) && existsSync(group)) return { passwd, group };
+    const read = async (file: string) => {
+      // (By a name of the node's own: a client that runs out of time leaves its container, and it goes by that name.)
+      const name = containerName(`users-${hex(randomBytes(5))}`);
+      const ran = await this.docker(["run", "--rm", "--name", name, "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--user", "1000:1000", "--entrypoint", "/bin/cat", image, file], 120_000);
+      if (ran.code !== 0) {
+        await this.docker(["rm", "-f", name], 60_000).catch(() => null);
+        throw new SandboxError(`its image's ${file} couldn't be read: ${redact(ran.stderr.trim()).slice(-200)}`, 424);
+      }
+      return ran.stdout;
+    };
+    const users = gateUsers(await read("/etc/passwd"), await read("/etc/group"));
+    if ("why" in users) throw new SandboxError(users.why, 424);
+    mkdirSync(folder, { recursive: true, mode: 0o755 });
+    // (By a rename: a round made meanwhile reads the whole of each, or none.)
+    for (const [path, text] of [
+      [passwd, users.passwd],
+      [group, users.group],
+    ] as const) {
+      writeFileSync(`${path}.new`, text, { mode: 0o644 });
+      renameSync(`${path}.new`, path);
+    }
+    return { passwd, group };
   }
 
   /** Whether this host has an install cache for rounds of other nodes' tasks' gates to be filled (fillCache). */
@@ -2703,14 +2749,15 @@ export class SandboxHost {
    * process of its user but its own. Bounded by itself (its rounds), and by this host's wait for its client. Exit 0: none
    * is left. A gate VM's alone.
    */
-  async sweepGates(id: string): Promise<ExecResult> {
+  async sweepGates(id: string, uid: number): Promise<ExecResult> {
     const sandbox = await this.forCommand(id);
     if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
     if (this.apple || !sandbox.gate) throw new SandboxError("only a VM made for a round of another node's task's gates is swept", 409);
+    if (!isGateUid(uid)) throw new SandboxError("only a gate's user is swept", 409);
     if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
     const started = performance.now();
-    const ran = await this.docker(gateSweepArgs(containerName(id)), 60_000);
-    this.opts.ledger({ class: "modify", resource: "sandbox.exec", target: sandbox.name, verdict: "allow", run: sandbox.run, detail: `every process of its gates' user ended → exit ${ran.code}` });
+    const ran = await this.docker(gateSweepArgs(containerName(id), uid), 60_000);
+    this.opts.ledger({ class: "modify", resource: "sandbox.exec", target: sandbox.name, verdict: "allow", run: sandbox.run, detail: `every process of gate user ${uid} ended, and what it left tidied → exit ${ran.code}` });
     return { exitCode: ran.code, stdout: ran.stdout, stderr: ran.stderr, durationMs: Math.round(performance.now() - started), truncated: ran.truncated };
   }
 

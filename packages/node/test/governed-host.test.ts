@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { b64u, MAC_VM_OVERHEAD, type NodeCapacity, newNodeIdentity, SELF_ACTION_RUN, VM_OVERHEAD } from "@invincible/core";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import type { CreateInput, LedgerEntryInput, SpawnFrames, SpawnTerminal } from "@invincible/sandbox";
@@ -9,7 +12,7 @@ import { modelSpeed, sandboxStart } from "../src/compute/measure.ts";
 import { fakeDocker } from "./fake-docker.ts";
 // (The sandbox package's stand-in for Apple's container: a Mac's host, behind the same governor.)
 import { fakeContainer } from "../../sandbox/test/fake-container.ts";
-import { ContainerVolumes, KEEPERS } from "@invincible/sandbox";
+import { ContainerVolumes, KEEPERS, LABEL } from "@invincible/sandbox";
 
 /*
  * The governed sandbox host: the real host's own logic above a stand-in Docker, behind
@@ -21,8 +24,10 @@ import { ContainerVolumes, KEEPERS } from "@invincible/sandbox";
 const capacity = (over: Partial<NodeCapacity> = {}): NodeCapacity => ({ cores: 8, memoryGb: 16, sandboxes: 2, modelCalls: 2, strength: 8, speed: 1, measured: true, reasons: [], ...over });
 const request = (over: Partial<CreateInput> = {}): CreateInput => ({ network: "isolated", cpus: 4, memoryGb: 8, ttlMinutes: 60, persistent: false, ...over });
 
-function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWaitMs?: number; now?: () => number; spawnTerminal?: SpawnTerminal; spawnFrames?: SpawnFrames; layout2?: boolean } = {}) {
+function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWaitMs?: number; now?: () => number; spawnTerminal?: SpawnTerminal; spawnFrames?: SpawnFrames; layout2?: boolean; gateUsers?: string } = {}) {
   const docker = fakeDocker(over.layout2 ? { engine: "27.3.1" } : {});
+  /** Every call the host made of Docker, as it made it. */
+  const calls: string[][] = [];
   const ledger: LedgerEntryInput[] = [];
   const cap = over.capacity ?? (() => capacity());
   const governor = new Governor({ capacity: cap, host: () => null, retryMs: 5, maxWaitMs: over.maxWaitMs ?? 2_000, ...(over.now ? { now: over.now } : {}) });
@@ -34,15 +39,19 @@ function host(over: { capacity?: () => NodeCapacity; microVMs?: boolean; maxWait
       ledger: (entry) => void ledger.push(entry),
       maxCpus: 64,
       maxMemoryGb: 512,
-      runner: docker.runner,
+      runner: (args, timeoutMs) => {
+        calls.push(args);
+        return docker.runner(args, timeoutMs);
+      },
       microVMs: over.microVMs ?? false,
+      ...(over.gateUsers ? { gateUsers: over.gateUsers } : {}),
       ...(over.layout2 ? { layout2: true } : {}),
       ...(over.spawnTerminal ? { spawnTerminal: over.spawnTerminal } : {}),
       ...(over.spawnFrames ? { spawnFrames: over.spawnFrames } : {}),
     },
     { governor, capacity: cap },
   );
-  return { sandbox, governor, docker, ledger };
+  return { sandbox, governor, docker, ledger, calls };
 }
 
 describe("another node's task's VM, waiting for room (the fourth fabric review's I-2)", () => {
@@ -69,22 +78,57 @@ describe("another node's task's VM, waiting for room (the fourth fabric review's
 });
 
 describe("another node's task's gates' own user (the eighth fabric review's R8-3)", () => {
-  test("a command asked as the gates' user runs as it, from their own folder, behind the governor too; and only in a VM made for a round of another node's task's gates", async () => {
+  test("a command asked as a gate's user runs as it, from the gates' folder, behind the governor too; and only in a VM made for a round of another node's task's gates", async () => {
     const { sandbox, docker } = host({ layout2: true, capacity: () => capacity({ cores: 32, memoryGb: 64, sandboxes: 4 }) });
     const agent = await sandbox.create(request({ network: "gateway", persistent: true, run: "arm.team.abcdef0123.ada" }));
     const vm = await sandbox.createTaskVm({ task: "task-abcdefghijkl", beside: agent.id, run: "handed.task-abcdefghijkl", providers: [], models: [], ttlMinutes: 60 });
     const round = await sandbox.createGateVm({ task: "task-abcdefghijkl", of: vm.id, beside: agent.id, run: "handed.task-abcdefghijkl", ttlMinutes: 60 });
     // (Made from its task's VM, with no network, and marked as a round's.)
     expect(round).toMatchObject({ task: "task-abcdefghijkl", gate: true, network: "isolated", image: vm.image });
-    await sandbox.exec(round.id, ["test", "-f", "x"], 30, undefined, "gates");
-    expect(docker.execOptions.at(-1)).toEqual(["--user", "65534:65534", "--workdir", "/gates"]);
+    await sandbox.exec(round.id, ["test", "-f", "x"], 30, undefined, 61001);
+    expect(docker.execOptions.at(-1)).toEqual(["--user", "61001:61001", "--workdir", "/gates"]);
+    // (A gate's user alone: never another.)
+    await expect(sandbox.exec(round.id, ["true"], 30, undefined, 1000)).rejects.toThrow("not a gate's user");
     // (Its other commands, as the VMs' user, from /work, as ever.)
     await sandbox.exec(round.id, ["true"], 30);
     expect(docker.execOptions.at(-1)).toEqual(["--workdir", "/work"]);
     // Neither the task's own VM nor an agent's has the gates' user.
-    for (const other of [vm, agent]) await expect(sandbox.exec(other.id, ["true"], 30, undefined, "gates")).rejects.toThrow("only a VM made for a round of another node's task's gates has its gates' own user");
+    for (const other of [vm, agent]) await expect(sandbox.exec(other.id, ["true"], 30, undefined, 61002)).rejects.toThrow("only a VM made for a round of another node's task's gates has its gates' own users");
     // A round is made beside its task's own VM alone.
     await expect(sandbox.createGateVm({ task: "task-abcdefghijkl", of: agent.id, beside: agent.id, run: "handed.task-abcdefghijkl", ttlMinutes: 60 })).rejects.toThrow("beside that task's own VM");
+  });
+});
+
+describe("another node's task's gates' users by name (the twelfth fabric review's R12-1)", () => {
+  test("a round's VM names its gates' users, the image's own and then gate1… (61001…), read from its image once and mounted read-only", async () => {
+    const users = mkdtempSync(join(tmpdir(), "gate-users-"));
+    try {
+      const { sandbox, calls } = host({ layout2: true, gateUsers: users, capacity: () => capacity({ cores: 32, memoryGb: 64, sandboxes: 4 }) });
+      const agent = await sandbox.create(request({ network: "gateway", persistent: true, run: "arm.team.abcdef0123.ada" }));
+      const vm = await sandbox.createTaskVm({ task: "task-abcdefghijkl", beside: agent.id, run: "handed.task-abcdefghijkl", providers: [], models: [], ttlMinutes: 60 });
+      const reads = () => calls.filter((args) => args[0] === "run" && args.includes("/bin/cat"));
+      await sandbox.createGateVm({ task: "task-abcdefghijkl", of: vm.id, beside: agent.id, run: "handed.task-abcdefghijkl", ttlMinutes: 60 });
+      // (Read as no VM's: no network, no capability, read-only, as the VMs' user, by cat alone.)
+      expect(reads().map((args) => args.at(-1))).toEqual(["/etc/passwd", "/etc/group"]);
+      for (const args of reads()) for (const flag of ["--rm", "--read-only", "no-new-privileges:true"]) expect(args).toContain(flag);
+      expect(reads().every((args) => args[args.indexOf("--network") + 1] === "none" && args[args.indexOf("--cap-drop") + 1] === "ALL" && args[args.indexOf("--user") + 1] === "1000:1000")).toBe(true);
+      // Mounted read-only over the image's, into the round's VM alone.
+      const folder = join(users, "fake");
+      const made = calls.filter((args) => args[0] === "run" && !args.includes("--rm"));
+      const mounts = (args: string[]) => args.filter((_, i) => args[i - 1] === "--mount");
+      const round = made.find((args) => args.includes(`${LABEL}.gate=1`))!;
+      expect(mounts(round)).toEqual(expect.arrayContaining([`type=bind,src=${join(folder, "passwd")},dst=/etc/passwd,readonly`, `type=bind,src=${join(folder, "group")},dst=/etc/group,readonly`]));
+      for (const other of made.filter((args) => args !== round)) expect(mounts(other).some((m) => m.includes("/etc/passwd"))).toBe(false);
+      const passwd = readFileSync(join(folder, "passwd"), "utf8").trimEnd().split("\n");
+      expect(passwd.slice(0, 3)).toEqual(["root:x:0:0:root:/root:/bin/bash", "agent:x:1000:1000::/work:/bin/bash", "gate1:x:61001:61001:a gate's user:/nonexistent:/usr/sbin/nologin"]);
+      expect(passwd).toHaveLength(2 + 256);
+      expect(readFileSync(join(folder, "group"), "utf8").trimEnd().split("\n").at(-1)).toBe("gate256:x:61256:");
+      // Another round of the same image reads it no more.
+      await sandbox.createGateVm({ task: "task-abcdefghijkl", of: vm.id, beside: agent.id, run: "handed.task-abcdefghijkl", ttlMinutes: 60 });
+      expect(reads()).toHaveLength(2);
+    } finally {
+      rmSync(users, { recursive: true, force: true });
+    }
   });
 });
 

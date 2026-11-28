@@ -109,8 +109,9 @@ export function fakeDocker(opts: { engine?: string } = {}): FakeDocker {
         case "build":
           return ok("built");
         case "run": {
-          // A one-off (a store's move, a seat home's hand-over) runs and leaves nothing behind.
-          if (rest.includes("--rm")) return ok();
+          // A one-off (a store's move, a seat home's hand-over) runs and leaves nothing behind; one that reads an image's
+          // users for a round of gates' VM reads the image's own.
+          if (rest.includes("--rm")) return ok(rest.at(-1) === "/etc/passwd" ? "root:x:0:0:root:/root:/bin/bash\nagent:x:1000:1000::/work:/bin/bash\n" : rest.at(-1) === "/etc/group" ? "root:x:0:\nagent:x:1000:\n" : "");
           if (fake.startMs) await Bun.sleep(fake.startMs);
           const name = rest[rest.indexOf("--name") + 1]!;
           const labels: Record<string, string> = {};

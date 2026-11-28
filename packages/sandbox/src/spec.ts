@@ -1,4 +1,4 @@
-import { type SandboxNetwork, type SeatKind, VM_BUN_CACHE, VM_GATES, VM_GATES_USER, VM_HOME, VM_WORK } from "@invincible/core";
+import { isGateUid, type SandboxNetwork, type SeatKind, VM_BUN_CACHE, VM_GATES, VM_HOME, VM_WORK } from "@invincible/core";
 import { GATE_VM_ENV } from "./gate.ts";
 import { cacheMount } from "./install-cache.ts";
 import { HOME_TREE, LAYOUT_ENV, NOTES_TREE, VM_NOTES, WORK_TREE } from "./layout.ts";
@@ -73,6 +73,8 @@ export interface SandboxSpec {
   gate?: true;
   /** The node's install cache's folder on its host (install-cache.ts), mounted read-only into a round of gates' VM alone. */
   cache?: string;
+  /** A round of gates' VM's /etc/passwd and /etc/group, the image's own and each gate's user (gate.ts gateUsers): the node's files on its host, mounted read-only. */
+  gateUsers?: { passwd: string; group: string };
   /**
    * The agent's VM another node's task's VM is made beside (createTaskVm), sharing nothing of it: its lease is renewed with
    * that agent's, and that agent's VM isn't idle while it is there (no move to layout 2 begins under the task's work).
@@ -273,6 +275,12 @@ function storeMounts(spec: SandboxSpec): string[] {
   return ["--mount", mount(store, WORK_TREE, VM_WORK), "--mount", mount(store, HOME_TREE, VM_HOME), "--mount", mount(store, NOTES_TREE, VM_NOTES)];
 }
 
+/** `uid`, checked to be a gate's user (core's isGateUid), before any command is said to run as it. */
+const gateUid = (uid: number): number => {
+  if (!isGateUid(uid)) throw new Error("not a gate's user");
+  return uid;
+};
+
 /** `docker run` arguments. Every hardening flag here is asserted by tests. */
 export function runArgs(spec: SandboxSpec): string[] {
   const memory = `${Math.round(spec.memoryGb * 1024)}m`;
@@ -303,10 +311,12 @@ export function runArgs(spec: SandboxSpec): string[] {
     // Its HOME: /work in layout 1; in layout 2 its own tree, and with it where it installs for itself and its PATH. One
     // that shares a workspace has one of its own, in memory (its notes' tree, when it has it, is mounted inside it).
     ...(spec.ownHome ? ["--tmpfs", `${VM_HOME}:rw,nosuid,nodev,size=1g,uid=1000,gid=1000,mode=0700`] : []),
-    // A round of another node's task's gates' own folder, their user's alone, where a tree's scripts may run (VM_GATES):
-    // in that round's VM alone, where nothing of the task's runs.
+    // A round of another node's task's gates' folder, where a tree's scripts may run (VM_GATES): sticky, as /tmp is, so
+    // each gate's user makes its copy a folder of its own (0700) that no other gate's can list, write or move. In that
+    // round's VM alone, where nothing of the task's runs; its users named there by the node's own passwd and group.
     ...(spec.gate && spec.cache ? cacheMount(spec.cache) : []),
-    ...(spec.gate ? ["--tmpfs", `${VM_GATES}:rw,exec,nosuid,nodev,size=2g,uid=${VM_GATES_USER.split(":")[0]},gid=${VM_GATES_USER.split(":")[1]},mode=0700`] : []),
+    ...(spec.gate ? ["--tmpfs", `${VM_GATES}:rw,exec,nosuid,nodev,size=2g,mode=1777`] : []),
+    ...(spec.gate && spec.gateUsers ? ["--mount", `type=bind,src=${spec.gateUsers.passwd},dst=/etc/passwd,readonly`, "--mount", `type=bind,src=${spec.gateUsers.group},dst=/etc/group,readonly`] : []),
     ...((spec.layout ?? spec.ownHome) ? Object.entries({ ...LAYOUT_ENV, PATH: (spec.layout ?? spec.ownHome)!.path }).flatMap(([key, value]) => ["--env", `${key}=${value}`]) : ["--env", "HOME=/work"]),
     // Bounded resources: a runaway agent cannot starve the host.
     "--cpus",
@@ -372,13 +382,13 @@ export const collectArgs = (id: string, path: string): string[] => execArgs(id, 
  * runc; Ultra, 28 November 2026, Q5's audit), and a command that read its input never saw it end. `sh` execs into the
  * command, so the deadline's process group and what it starts stay as they were (withoutInput). A command given input as
  * it runs (`input`: a stream held open) keeps `--interactive`, and reads what it is given; a pipe's sides are pipeArgs'.
- * `as`: "gates", as another node's task's gates' own user, from their own folder (VM_GATES, a round of its gates' VM's
- * alone: gate.ts), never as the VMs' user.
+ * `as`: a gate's user (core's VM_GATE_UID_FIRST…), from the gates' folder (VM_GATES, a round of gates' VM's alone:
+ * gate.ts), never as the VMs' user.
  */
-export const execArgs = (id: string, cmd: string[], timeoutSec: number, opts: { input?: boolean; as?: "gates" } = {}): string[] => [
+export const execArgs = (id: string, cmd: string[], timeoutSec: number, opts: { input?: boolean; as?: number } = {}): string[] => [
   "exec",
   ...(opts.input ? ["--interactive"] : []),
-  ...(opts.as === "gates" ? ["--user", VM_GATES_USER, "--workdir", VM_GATES] : ["--workdir", "/work"]),
+  ...(opts.as !== undefined ? ["--user", `${gateUid(opts.as)}:${opts.as}`, "--workdir", VM_GATES] : ["--workdir", "/work"]),
   containerName(id),
   "timeout",
   "--signal=KILL",

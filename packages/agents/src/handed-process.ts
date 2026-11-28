@@ -207,8 +207,9 @@ def run(mode, task, limit, command, on=""):
         time.sleep(0.05)
     ended = True
     if code is None or mode == "gate":
-        # (What its command left past this helper, having ended it, is ended by the sweep of its round's VM before the next
-        # gate's copy is made: every process of the gates' user, from an exec of its own. sandbox gate.ts.)
+        # (What its command left past this helper, having ended it, is its gate's user's alone, which no later
+        # gate of its round is, and the sweep after its gate ends it: every process of that user, from an exec of
+        # its own. sandbox gate.ts.)
         ended = end_command(child)
         if not ended:
             sys.stderr.write("(Processes it started could not all be ended.)\n")
