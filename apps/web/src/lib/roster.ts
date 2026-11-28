@@ -67,6 +67,16 @@ const endedSince = (jobs: Job[], seen: number | undefined, keeps: boolean): Job 
   return keeps && ended && ended.updatedAt > (seen ?? 0) ? ended : undefined;
 };
 const waitingIn = (jobs: Job[]): number => jobs.filter((job) => job.status === "queued").length;
+/** An agent's work: the tasks given to it, and its replies, wherever they are. */
+const agentJobs = (snapshot: TeamSnapshot, id: string): Job[] => [
+  ...snapshot.tasks.filter((task) => task.assignee === id).map((task) => ({ ...task, task: true as const })),
+  ...snapshot.deliveries.filter((delivery) => delivery.agent === id),
+];
+/** A room's work: the tasks given in it, and the replies written there. */
+const roomJobs = (snapshot: TeamSnapshot, id: string): Job[] => [
+  ...snapshot.tasks.filter((task) => task.room === id).map((task) => ({ ...task, task: true as const })),
+  ...snapshot.deliveries.filter((delivery) => delivery.room === id),
+];
 
 /** Work that went wrong and waits to be read, in a line (null: it didn't, or it was a stop of your own). */
 function trouble(job: Job | undefined, who: string | null): string | null {
@@ -107,7 +117,7 @@ const saidLine = (said: Said, agents: Agent[]): string => `${teamSpeaker(said, a
 function agentRow(person: Agent, input: RosterInput): RosterRow {
   const { snapshot } = input;
   const room = snapshot.rooms.find((candidate) => candidate.direct && candidate.members.length === 1 && candidate.members[0] === person.id);
-  const jobs: Job[] = [...snapshot.tasks.filter((task) => task.assignee === person.id).map((task) => ({ ...task, task: true as const })), ...snapshot.deliveries.filter((delivery) => delivery.agent === person.id)];
+  const jobs = agentJobs(snapshot, person.id);
   const asked = (input.asks ?? []).filter((ask) => agentOfCaller(ask.by) === person.id);
   const proposed = proposals(jobs);
   // Its face says what its line says: asking for your approval, over whatever else it has in hand.
@@ -151,7 +161,7 @@ function agentRow(person: Agent, input: RosterInput): RosterRow {
 function roomRow(room: TeamRoom, input: RosterInput): RosterRow {
   const { snapshot } = input;
   const nameOf = (id: string): string => named(snapshot, id);
-  const jobs: Job[] = [...snapshot.tasks.filter((task) => task.room === room.id).map((task) => ({ ...task, task: true as const })), ...snapshot.deliveries.filter((delivery) => delivery.room === room.id)];
+  const jobs = roomJobs(snapshot, room.id);
   const fresh = endedSince(jobs, snapshot.seen?.[`room:${room.id}`], snapshot.seen !== undefined);
   const say = (line: string, needs = false): RosterRow => ({ key: `room:${room.id}`, kind: "room", id: room.id, name: room.name, room: room.id, line, needs, unread: fresh !== undefined });
 
@@ -175,4 +185,38 @@ function roomRow(room: TeamRoom, input: RosterInput): RosterRow {
 export function rosterRows(input: RosterInput): RosterRow[] {
   const rooms = input.snapshot.rooms.filter((room) => !room.direct).sort((a, b) => b.updatedAt - a.updatedAt);
   return [...input.snapshot.agents.map((person) => agentRow(person, input)), ...rooms.map((room) => roomRow(room, input))];
+}
+
+/**
+ * A row of the list that is home on a phone (the owner's word of 28 November 2026, after Grok Bot: "like a chat app, with
+ * the primary at the top, the other agents"): an agent's or a room's, with when it last did something and how much of it
+ * waits on you. Your agent's own row, pinned above them all, is the view's (primaryNow, primaryNeeds).
+ */
+export interface HomeRow extends RosterRow {
+  /** When it last did something, in ms: its work's last move or the last word in its conversation (a room's: its own
+   * last word or its work's), and an agent that has done nothing yet, when it was made. */
+  at: number;
+  /** What of it waits on you, for its capsule: each approval it asks for and each task proposed to it (a room: proposed
+   * in it), else one for anything else only you can move on there (0: nothing). */
+  count: number;
+}
+
+/** Every agent and room for the list, the latest first (two at the same moment by their keys, so every app agrees). */
+export function homeRows(input: RosterInput): HomeRow[] {
+  const { snapshot } = input;
+  const latest = (from: number, jobs: Job[]): number => jobs.reduce((at, job) => Math.max(at, job.updatedAt), from);
+  const rows = rosterRows(input).map((row): HomeRow => {
+    if (row.kind === "agent") {
+      const person = snapshot.agents.find((candidate) => candidate.id === row.id)!;
+      const jobs = agentJobs(snapshot, row.id);
+      const own = row.room ? snapshot.rooms.find((candidate) => candidate.id === row.room) : undefined;
+      const asked = (input.asks ?? []).filter((ask) => agentOfCaller(ask.by) === row.id).length;
+      const waits = asked + proposals(jobs).length;
+      return { ...row, at: latest(Math.max(person.createdAt, own?.updatedAt ?? 0), jobs), count: waits || (row.needs ? 1 : 0) };
+    }
+    const room = snapshot.rooms.find((candidate) => candidate.id === row.id)!;
+    const jobs = roomJobs(snapshot, row.id);
+    return { ...row, at: latest(room.updatedAt, jobs), count: proposals(jobs).length || (row.needs ? 1 : 0) };
+  });
+  return rows.sort((a, b) => b.at - a.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }

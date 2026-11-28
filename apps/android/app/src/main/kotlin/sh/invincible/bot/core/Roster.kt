@@ -22,12 +22,14 @@ data class Agent(
     val workspace: Json? = null,
     /** The repository it works in (an https address), which names its tasks' project (Work); null: other work. */
     val repository: String? = null,
+    /** When it was made: where the list that is home places one that has done nothing yet. */
+    val createdAt: Long = 0,
 ) {
     companion object {
         fun of(j: Json) = Agent(
             j["id"].string ?: "", j["name"].string ?: "", j["instructions"].string ?: "", j["role"].string ?: "",
             j["enabled"].bool ?: true, j["dailyTurns"].int ?: 0, j["turnsToday"].int ?: 0, j["createdBy"].string, j["avatar"],
-            j["workspace"]?.takeIf { it != Json.Null }, j["repository"].string,
+            j["workspace"]?.takeIf { it != Json.Null }, j["repository"].string, j["createdAt"].long ?: 0,
         )
     }
 }
@@ -106,6 +108,24 @@ enum class AgentState(val words: String?, val tone: Tone) {
     enum class Tone { WORK, NEEDS, FAILED, OK, NEUTRAL }
 
     val wire: String get() = name.lowercase()
+}
+
+/**
+ * A row of the list that is home on a phone (the PWA's lib/roster.ts HomeRow, the owner's word of 28 November 2026 after
+ * Grok Bot): an agent's or a room's, with when it last did something and how much of it waits on you. Your agent's own
+ * row, pinned above them all, is the screen's.
+ */
+data class HomeRow(
+    val row: RosterRow,
+    /** When it last did something, in ms: its work's last move or the last word in its conversation (a room's: its own last
+     * word or its work's), and an agent that has done nothing yet, when it was made. */
+    val at: Long,
+    /** What of it waits on you, for its capsule: each approval it asks for and each task proposed to it (a room: proposed in
+     * it), else one for anything else only you can move on there (0: nothing). */
+    val count: Int,
+) {
+    /** As the PWA keys it: "person:<handle>", "room:<id>". */
+    val key: String get() = if (row.kind == "agent") "person:${row.id}" else "room:${row.id}"
 }
 
 data class RosterRow(
@@ -199,7 +219,7 @@ object Roster {
 
     private fun agentRow(person: Agent, s: Snapshot, asks: List<Ask>, now: Long): RosterRow {
         val room = s.rooms.firstOrNull { it.direct && it.members.size == 1 && it.members[0] == person.id }
-        val jobs = s.tasks.filter { it.who == person.id } + s.deliveries.filter { it.who == person.id }
+        val jobs = agentJobs(s, person.id)
         val asked = asks.filter { agentOfCaller(it.by) == person.id }
         val proposed = proposals(jobs)
         val expression = if (asked.isNotEmpty() || proposed.isNotEmpty()) "asking" else expression(person, s, now)
@@ -232,7 +252,7 @@ object Roster {
     }
 
     private fun roomRow(room: Room, s: Snapshot): RosterRow {
-        val jobs = s.tasks.filter { it.room == room.id } + s.deliveries.filter { it.room == room.id }
+        val jobs = roomJobs(s, room.id)
         val fresh = endedSince(jobs, s.seen?.get("room:${room.id}"), s.seen != null)
         fun say(line: String, needs: Boolean = false) = RosterRow("room", room.id, room.name, room.id, line, needs, fresh != null)
         val proposed = proposals(jobs)
@@ -251,6 +271,32 @@ object Roster {
     /** Each agent, then each room (the newest first). */
     fun rows(s: Snapshot, asks: List<Ask>, now: Long): List<RosterRow> =
         s.agents.map { agentRow(it, s, asks, now) } + s.rooms.filter { !it.direct }.sortedByDescending { it.updatedAt }.map { roomRow(it, s) }
+
+    /** An agent's work: the tasks given to it, and its replies, wherever they are. */
+    private fun agentJobs(s: Snapshot, id: String) = s.tasks.filter { it.who == id } + s.deliveries.filter { it.who == id }
+
+    /** A room's work: the tasks given in it, and the replies written there. */
+    private fun roomJobs(s: Snapshot, id: String) = s.tasks.filter { it.room == id } + s.deliveries.filter { it.room == id }
+
+    /** Every agent and room for the list that is home, the latest first (two at the same moment by their keys). */
+    fun homeRows(s: Snapshot, asks: List<Ask>, now: Long): List<HomeRow> {
+        fun latest(from: Long, jobs: List<Job>) = jobs.fold(from) { at, job -> maxOf(at, job.updatedAt) }
+        val home = rows(s, asks, now).map { row ->
+            if (row.kind == "agent") {
+                val person = s.agents.first { it.id == row.id }
+                val jobs = agentJobs(s, row.id)
+                val own = row.room?.let { id -> s.rooms.firstOrNull { it.id == id } }
+                val waits = asks.count { agentOfCaller(it.by) == row.id } + proposals(jobs).size
+                HomeRow(row, latest(maxOf(person.createdAt, own?.updatedAt ?: 0), jobs), if (waits > 0) waits else if (row.needs) 1 else 0)
+            } else {
+                val room = s.rooms.first { it.id == row.id }
+                val jobs = roomJobs(s, row.id)
+                val waits = proposals(jobs).size
+                HomeRow(row, latest(room.updatedAt, jobs), if (waits > 0) waits else if (row.needs) 1 else 0)
+            }
+        }
+        return home.sortedWith(compareByDescending<HomeRow> { it.at }.thenBy { it.key })
+    }
 
     /** A line as it reads beside its state's chip: the chip's words aren't said twice. */
     fun besideChip(line: String, state: AgentState?): String {

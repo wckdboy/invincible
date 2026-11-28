@@ -29,6 +29,16 @@ class RosterTest {
         }
     }
 
+    @Test fun theListThatIsHomeIsThePwasEveryAgentAndRoomTheLatestFirst() {
+        val now = v["agents"]["now"].long!!
+        for ((name, asked) in listOf("agents" to asks(v["agents"]["asks"]), "rooms" to emptyList(), "unread" to emptyList())) {
+            val want = v[name]["home"].list.map { listOf(it["key"].string, it["at"].long, it["count"].int) }
+            assertTrue(name, want.size >= 8)
+            val got = Roster.homeRows(Snapshot.of(v[name]["snapshot"]!!), asked, now).map { listOf(it.key, it.at, it.count) }
+            assertEquals(name, want, got)
+        }
+    }
+
     @Test fun aLineBesideItsChipDoesntSayItTwice() {
         for (c in v["agents"]["besides"].list) {
             val state = c["state"].string?.let { s -> AgentState.entries.first { it.wire == s } }

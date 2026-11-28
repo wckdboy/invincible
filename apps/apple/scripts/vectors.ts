@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as core from "../../../packages/core/src/index.ts";
 import { besideChip, primaryState, type AgentState } from "../../web/src/lib/agent-state.ts";
-import { primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
+import { homeRows, primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
 import { groupConversations } from "../../web/src/lib/chats.ts";
 import { highlight } from "../../web/src/lib/highlight.ts";
@@ -412,11 +412,15 @@ const nows: NowInput[] = [
   { turns: [], runs: [], needs: 1, unread: [{ title: "A" }] },
   { turns: [{ title: "A" }], runs: [], needs: 0, unread: [{ title: "B" }] },
 ];
+/** The list that is home on a phone (lib/roster.ts homeRows): each row by its key, the latest first, with when it last did
+ * something and how much of it waits on you. */
+const homeOf = (input: Parameters<typeof homeRows>[0]) => homeRows(input).map(({ key, at, count }) => ({ key, at, count }));
 const agents = {
   now: NOW,
   snapshot,
   asks,
   rows,
+  home: homeOf({ snapshot, asks, now: NOW }),
   besides,
   // (the primary's state from its line; the app adds its own answer being written here, which a node's line doesn't know.
   // needsFirst: its line as every app shows it, what needs you first when there is any, its tone and state the same.)
@@ -471,6 +475,7 @@ const roomsSnapshot: core.TeamSnapshot = {
 const rooms = {
   snapshot: roomsSnapshot,
   rows: rosterRows({ snapshot: roomsSnapshot, asks: [], now: NOW }).filter((row) => row.kind === "room").map((row) => ({ id: row.id, line: row.line, needs: row.needs })),
+  home: homeOf({ snapshot: roomsSnapshot, asks: [], now: NOW }),
 };
 
 // ---- what is new to you among the agents: what ended on an agent's page, or in a room, since you last looked --------
@@ -490,6 +495,7 @@ const seenSnapshot: core.TeamSnapshot = {
 const unread = {
   snapshot: seenSnapshot,
   rows: rosterRows({ snapshot: seenSnapshot, asks: [], now: NOW }).map((row) => ({ id: row.id, kind: row.kind, line: row.line, needs: row.needs, unread: row.unread, state: row.state ?? null })),
+  home: homeOf({ snapshot: seenSnapshot, asks: [], now: NOW }),
 };
 
 // ---- seating and keeping agents (the PWA's forms) --------------------------------------------------------------------

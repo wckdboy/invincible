@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TeamDelivery, TeamRoom, TeamTask, Agent } from "@invincible/core/team";
-import { primaryNeeds, rosterRows, agentOfCaller, type RosterInput } from "./roster.ts";
+import { homeRows, primaryNeeds, rosterRows, agentOfCaller, type RosterInput } from "./roster.ts";
 
 const NOW = 1_000_000;
 const person = (id: string, more: Partial<Agent> = {}): Agent => ({ id, name: id[0]!.toUpperCase() + id.slice(1), instructions: `Does ${id}'s job.\nIn detail.`, role: "engineer", harness: "native", enabled: true, dailyTurns: 40, turnsToday: 1, memory: "", repository: null, workspaceNode: null, workspace: null, createdAt: 1, updatedAt: 1, ...more });
@@ -212,5 +212,62 @@ describe("whose an approval is", () => {
     expect(primaryNeeds(0, [], ["ada"])).toBe(0);
     // Never less than nothing, whatever the two lists say of each other for a moment.
     expect(primaryNeeds(1, asks, ["ada"])).toBe(0);
+  });
+});
+
+describe("the list that is home on a phone: every agent and room, the latest first", () => {
+  const list = (input: Partial<RosterInput["snapshot"]>, more: Partial<Omit<RosterInput, "snapshot">> = {}) =>
+    homeRows({ snapshot: { agents: [], rooms: [], tasks: [], deliveries: [], ...input }, now: NOW, ...more });
+
+  test("each by when it last did something: its work, the last word in its conversation, a room's last word", () => {
+    const got = list({
+      agents: [person("ada", { createdAt: 5 }), person("bo", { createdAt: 5 }), person("cy", { createdAt: 5 })],
+      rooms: [room("dm-ada", ["ada"], { updatedAt: 40 }), room("dm-bo", ["bo"], { updatedAt: 10 }), room("forge", ["ada", "bo"], { name: "Forge", updatedAt: 35 })],
+      tasks: [task("bo", "running", { updatedAt: 50 })],
+    });
+    expect(got.map((row) => [row.key, row.at])).toEqual([["person:bo", 50], ["person:ada", 40], ["room:forge", 35], ["person:cy", 5]]);
+  });
+
+  test("a room's work moves it too, as a task in it moves", () => {
+    const got = list({
+      agents: [person("ada", { createdAt: 5 })],
+      rooms: [room("dm-ada", ["ada"], { updatedAt: 10 }), room("forge", ["ada"], { name: "Forge", direct: false, updatedAt: 20 })],
+      tasks: [task("ada", "done", { room: "forge", updatedAt: 60 })],
+    });
+    // (Ada's own task, in the room: both move with it.)
+    expect(got.map((row) => [row.key, row.at])).toEqual([["person:ada", 60], ["room:forge", 60]]);
+  });
+
+  test("one that has done nothing yet is placed by when it was made; two at the same moment by their keys", () => {
+    const got = list({ agents: [person("zed", { createdAt: 7 }), person("amy", { createdAt: 7 }), person("old", { createdAt: 3 })] });
+    expect(got.map((row) => [row.key, row.at])).toEqual([["person:amy", 7], ["person:zed", 7], ["person:old", 3]]);
+  });
+
+  test("its count: each approval it asks for and each task proposed to it, else one for what only you can move on", () => {
+    const asks = [{ by: "arm:team.0123456789.ada", connector: "forge", tool: "post" }, { by: "arm:team.0123456789.ada", connector: "forge", tool: "bucket.delete" }];
+    const got = list(
+      {
+        agents: [person("ada"), person("bo"), person("cy")],
+        rooms: [room("dm-ada", ["ada"]), room("dm-bo", ["bo"]), room("dm-cy", ["cy"])],
+        tasks: [task("ada", "proposed", { id: "task-adaproposed1" }), task("bo", "failed", { error: "gave-up" })],
+      },
+      { asks },
+    );
+    const count = (key: string) => got.find((row) => row.key === key)?.count;
+    expect([count("person:ada"), count("person:bo"), count("person:cy")]).toEqual([3, 1, 0]);
+  });
+
+  test("a room's count: each task proposed in it, else one for what only you can move on there", () => {
+    const got = list({
+      agents: [person("ada"), person("bo")],
+      rooms: [room("forge", ["ada", "bo"], { name: "Forge", direct: false }), room("shed", ["ada"], { name: "Shed", direct: false, paused: true }), room("yard", ["bo"], { name: "Yard", direct: false })],
+      tasks: [
+        task("ada", "proposed", { id: "task-forgeprop01", room: "forge" }),
+        task("bo", "proposed", { id: "task-forgeprop02", room: "forge" }),
+        task("ada", "queued", { id: "task-shedqueue01", room: "shed" }),
+      ],
+    });
+    const count = (key: string) => got.find((row) => row.key === key)?.count;
+    expect([count("room:forge"), count("room:shed"), count("room:yard")]).toEqual([2, 1, 0]);
   });
 });

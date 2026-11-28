@@ -4126,6 +4126,93 @@
         "state": "needs"
       }
     ],
+    "home": [
+      {
+        "key": "person:jo",
+        "at": 1763199880000,
+        "count": 1
+      },
+      {
+        "key": "person:ada",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:bea",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:cy",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:fay",
+        "at": 1763199700000,
+        "count": 1
+      },
+      {
+        "key": "person:gus",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:kit",
+        "at": 1763199700000,
+        "count": 1
+      },
+      {
+        "key": "person:lou",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:max",
+        "at": 1763199700000,
+        "count": 2
+      },
+      {
+        "key": "person:ned",
+        "at": 1763199700000,
+        "count": 1
+      },
+      {
+        "key": "person:eve",
+        "at": 1763199400000,
+        "count": 1
+      },
+      {
+        "key": "person:oz",
+        "at": 1763198200000,
+        "count": 2
+      },
+      {
+        "key": "person:pip",
+        "at": 1763198200000,
+        "count": 1
+      },
+      {
+        "key": "person:quin",
+        "at": 1763198200000,
+        "count": 1
+      },
+      {
+        "key": "person:dot",
+        "at": 1763164000000,
+        "count": 0
+      },
+      {
+        "key": "person:hal",
+        "at": 1763164000000,
+        "count": 0
+      },
+      {
+        "key": "person:ivy",
+        "at": 1763164000000,
+        "count": 0
+      }
+    ],
     "besides": [
       {
         "line": "The run task · Running · bun test packages/link",
@@ -4866,6 +4953,48 @@
         "unread": false,
         "state": null
       }
+    ],
+    "home": [
+      {
+        "key": "person:ada",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:bea",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:cy",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:dee",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:eli",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "person:fin",
+        "at": 1763199700000,
+        "count": 1
+      },
+      {
+        "key": "room:forge",
+        "at": 1763199700000,
+        "count": 0
+      },
+      {
+        "key": "room:shed",
+        "at": 1763199700000,
+        "count": 0
+      }
     ]
   },
   "rooms": {
@@ -5394,6 +5523,88 @@
         "id": "studio",
         "line": "Ada · The studio1 task",
         "needs": false
+      }
+    ],
+    "home": [
+      {
+        "key": "person:ada",
+        "at": 1763199940000,
+        "count": 0
+      },
+      {
+        "key": "room:asks",
+        "at": 1763199880000,
+        "count": 1
+      },
+      {
+        "key": "room:quiet",
+        "at": 1763199880000,
+        "count": 0
+      },
+      {
+        "key": "room:held",
+        "at": 1763199820000,
+        "count": 1
+      },
+      {
+        "key": "room:rest",
+        "at": 1763199820000,
+        "count": 0
+      },
+      {
+        "key": "room:failed",
+        "at": 1763199760000,
+        "count": 1
+      },
+      {
+        "key": "room:gave",
+        "at": 1763199760000,
+        "count": 1
+      },
+      {
+        "key": "room:unsure",
+        "at": 1763199760000,
+        "count": 1
+      },
+      {
+        "key": "room:cut",
+        "at": 1763199700000,
+        "count": 1
+      },
+      {
+        "key": "room:broken",
+        "at": 1763199640000,
+        "count": 1
+      },
+      {
+        "key": "room:chatter",
+        "at": 1763199580000,
+        "count": 0
+      },
+      {
+        "key": "room:talk",
+        "at": 1763199580000,
+        "count": 0
+      },
+      {
+        "key": "room:pair",
+        "at": 1763199520000,
+        "count": 0
+      },
+      {
+        "key": "room:studio",
+        "at": 1763199460000,
+        "count": 0
+      },
+      {
+        "key": "person:bea",
+        "at": 1763199400000,
+        "count": 1
+      },
+      {
+        "key": "person:cy",
+        "at": 1763199400000,
+        "count": 0
       }
     ]
   },
