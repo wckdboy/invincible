@@ -186,11 +186,14 @@ everything but the model.
   - the agent's path: `true`, a click, a key, a screenshot; the owner's: a look, a click, a key;
   - a look, a click and a look with the stand-in eyes;
   - typing the test string `Søren Ærø – blåbærgrød 25 °C ✓ € ü 日本語 🙂` (40 characters), exactly, and how long;
-  - the four tasks (a form, a terminal command, a browser setting, a file saved in an editor), five runs each, four
+  - the four tasks (a form, a terminal command, a browser setting, a file saved in an editor), five runs each, five
     ways: naive, settled (naive with `desktop settle` before a key that commits), careful (focus checked, the screen
-    let settle by pictures compared) and toolset (through an agent's own tool loop with Claude's computer toolset, its
+    let settle by pictures compared), toolset (through an agent's own tool loop with Claude's computer toolset, its
     model a stand-in speaking Anthropic's stream, its places the oracle's: the adapters, the loop, deskd and the apps,
-    everything but the model; its model calls, its actions and the calls per action), each to its gate;
+    everything but the model; its model calls, its actions and the calls per action) and shell (the same loop, its
+    stand-in working the desktop by its shell's `desktop` commands, as a model offered no toolset does: several
+    actions in one command where each one's target is known before it starts, a form in one `desktop fill`; the
+    shell's way at its fewest calls), each to its gate;
   - what breaks (the F tests): typing with nothing focused, a JavaScript alert, the tab in front, the picture after a
     click that navigates, double clicks, a killed browser, the last tab closed;
   - the accessibility tree: the form's controls where `desktop find` puts them against the DOM's, a lookup's time, and
@@ -220,7 +223,8 @@ everything but the model.
   going down.
 - **Held:** what C1's steps reached is held to bars whatever the baseline says: every task's passes, each way (the
   editor the naive way included: step 3 broke it and C0's 0/5 hid that), the toolset way at no more than a model call
-  an action, the test string exact in each app, and the F tests' checks. The stream is held to at least 10 frames a
+  an action, the shell way at no more calls a task than it took (form 3, terminal 2, settings 4, editor 3; an action
+  there may fill a whole form), the test string exact in each app, and the F tests' checks. The stream is held to at least 10 frames a
   second while it moves, at most 6 % of a core on the encoder and deskd together, and at most 100 kbit/s while the
   screen is still. Light by default is held to: a desktop never started at most 50 MB over none; grown within a second,
   its work as it was; started and idle at most 600 MB over; once stopped, nothing of it still running and at most
@@ -272,6 +276,19 @@ everything but the model.
     until it has its five of each: run to the end, it has form 5, terminal 4, settings 4 and editor 2, all passed; two
     more were cut, at 01:26 by that refusal and on 28 November by the cap. Its five come on another day's cap, as a
     baseline of their own.
+- **The shell way's first runs, 28 November 2026.** On Ultra, in Kata VMs from images built from this branch, no
+  model, the load 2.4 to 3.9 on 32 cores. Five runs a task, each to its gate:
+
+  | Task | Passed | Model calls | Actions | What its commands were |
+  |---|---|---|---|---|
+  | form | 5 of 5 | 3 | 4 | `desktop open … && desktop tree`; `desktop fill …` (five fields) `&& desktop click` on Send |
+  | terminal | 5 of 5 | 2 | 3 | its click, the line typed and Return, in one command |
+  | settings | 5 of 5 | 4 | 6 | the address in one command; a scroll; `desktop fill "Font size" Large` |
+  | editor | 5 of 5 | 3 | 5 | the text typed and ctrl+s in one; the name typed and Return in the Save As dialog |
+
+  The toolset's stand-in takes 3 calls for the form as well; the six model runs of the form that day took 6 to 15.
+  With what each field holds in its tree, a typical front page's tree came to 983 tokens (966 in the baseline) and
+  the browser's settings' to 724 (686): within the 50 tokens these are read to.
 
 ### hardware: KiCad and FreeCAD on an agent's desktop
 

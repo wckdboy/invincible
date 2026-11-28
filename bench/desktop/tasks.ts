@@ -31,7 +31,7 @@ import { type BenchVm, IN_VM, type Ran } from "./vm.ts";
 
 export const TASKS = ["form", "terminal", "settings", "editor"] as const;
 export type TaskName = (typeof TASKS)[number];
-export const POLICIES = ["naive", "settled", "careful", "toolset"] as const;
+export const POLICIES = ["naive", "settled", "careful", "toolset", "shell"] as const;
 /** The scorecard's ways, and a real model's (model-runs.ts, by hand: it spends money). */
 export type Policy = (typeof POLICIES)[number] | "model";
 
@@ -132,6 +132,50 @@ export async function* standInTurns(task: TaskName, where: Where, file: string):
   }
 }
 
+/** A command for the engineer's own bash tool, as a model that works the desktop by its shell gives it. */
+const bash = (command: string) => ({ name: "bash", input: { command } });
+
+/**
+ * The stand-in's turns the shell's way, as a model offered no toolset, or one that doesn't take it, works the desktop
+ * (C1, fewer model calls an action): the VM's `desktop` commands in its shell, several in one command where each one's
+ * target is known before it starts (the briefing's chains), a form in one `desktop fill`, and where a command needs a
+ * place, the oracle's at the turn's start. What it measures is the shell's way at its fewest calls: the floor a real
+ * model's runs are read against.
+ */
+export async function* shellTurns(task: TaskName, where: Where, file: string): AsyncGenerator<Turn, void> {
+  const at = (p: Record<string, any>): string => {
+    if (typeof p.x !== "number") throw new Error(`no target: ${JSON.stringify(p).slice(0, 200)}`);
+    return `${p.x} ${p.y}`;
+  };
+  if (task === "form") {
+    yield { calls: [bash("desktop open http://127.0.0.1:8000/form.html && desktop tree")] };
+    const send = at(await polled(() => where("dom '#send'"), (p) => typeof p.x === "number", 10, 300));
+    yield { calls: [bash(`desktop fill "Full name" '${FORM_VALUES.name}' Email ${FORM_VALUES.email} Plan ${FORM_VALUES.plan} "I accept the terms" on Note '${FORM_VALUES.note}' && desktop click ${send}`)] };
+    yield { text: "DONE\nThe form is filled in and sent." };
+  } else if (task === "terminal") {
+    const w = await polled(() => where("window '^xterm$'"), (p) => typeof p.x === "number", 20, 250);
+    yield { calls: [bash(`desktop click ${at(w)} && desktop type 'echo $((6*7)) > ${file}' && desktop key Return`)] };
+    yield { text: "DONE\nRan it in the terminal." };
+  } else if (task === "settings") {
+    yield { calls: [bash("desktop key ctrl+l && desktop type chrome://settings/appearance && desktop key Return && desktop settle")] };
+    let p = await polled(() => where("settings-font"), (q) => typeof q.x === "number" || Boolean(q.offscreen), 8, 400);
+    for (let i = 0; i < 4 && p.offscreen; i++) {
+      yield { calls: [bash("desktop scroll down 3 640 450")] };
+      p = await where("settings-font");
+    }
+    if (typeof p.x !== "number") return yield { text: `GIVE UP\nThe font size setting isn't on the screen: ${JSON.stringify(p).slice(0, 200)}` };
+    if (p.value !== "16") return yield { text: `GIVE UP\nThe font size was ${p.value} before the run, not 16.` };
+    yield { calls: [bash('desktop fill "Font size" Large')] };
+    yield { text: "DONE\nThe font size is Large." };
+  } else {
+    const w = await polled(() => where("window 'Mousepad$'"), (p) => typeof p.x === "number" && p.w > 600, 20, 250);
+    yield { calls: [bash(`desktop click ${at(w)} && desktop type 'Written on the desktop' && desktop key ctrl+s`)] };
+    await polled(() => where("window 'Save As'"), (p) => typeof p.x === "number", 10, 300);
+    yield { calls: [bash(`desktop type ${file} && desktop key Return`)] };
+    yield { text: "DONE\nSaved it." };
+  }
+}
+
 /**
  * How the model was asked, in a phrase when something wasn't the toolset's shape (null: every request was). `pictures`:
  * each turn that acted ended with exactly one picture of the screen, as the stand-in's do (a real model may look in the
@@ -174,7 +218,7 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
   const careful = policy === "careful";
   // Through the loop (toolset, model): the stand-in's turns or a real model's, the VM's commands through the agent's
   // path; what it took, kept.
-  const byLoop = policy === "toolset" || policy === "model";
+  const byLoop = policy === "toolset" || policy === "shell" || policy === "model";
   if (policy === "model" && !way) throw new Error("a real model's way needs its mind (model-runs.ts)");
   let looped: LoopRun | null = null;
   let shape: string | null = null;
@@ -182,7 +226,7 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
   const loop = async (file: string) => {
     const asked: Asked[] = [];
     counted = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
-    const ctx = way ? way.ctx(asked) : modelsContext("bench-stand-in-key-FAKE-0000", standIn(standInTurns(task, where, file), asked));
+    const ctx = way ? way.ctx(asked) : modelsContext("bench-stand-in-key-FAKE-0000", standIn((policy === "shell" ? shellTurns : standInTurns)(task, where, file), asked));
     const inVm = async (command: string, timeoutSec: number): Promise<ExecResult> => {
       const r = await vm.agent(command, timeoutSec);
       return { exitCode: r.code, stdout: r.stdout, stderr: r.stderr, durationMs: Math.round(r.ms), truncated: false };
@@ -199,7 +243,7 @@ export async function runTask(vm: BenchVm, task: TaskName, policy: Policy, run: 
     looped = await viaLoop(GOALS[task](file), ask, exec, counted, way?.maxSteps ?? 40, way?.signal, environmentFor(way?.eyes ?? false));
     commands += looped.actions + looped.commands;
     // (A model offered no toolset works the desktop by its shell's `desktop` command: no toolset's shape to hold it to.)
-    shape = way?.toolset === false ? null : shapeOf(asked, !way);
+    shape = way?.toolset === false || policy === "shell" ? null : shapeOf(asked, !way);
     if (looped.error) throw new Error(`the loop failed: ${looped.error}`);
     // (Given no gate of its own, desktop work ends unverified by the run (C1 step 8): the task's gate, below, decides.)
     const ended = looped.outcome;

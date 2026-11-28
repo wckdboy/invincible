@@ -35,14 +35,14 @@ function tasks(ctx: SuiteContext, runs: TaskRun[], n: number, span: [number, num
       const these = runs.filter((r) => r.task === task && r.policy === policy);
       const passed = these.filter((r) => r.pass).length;
       const failed = these.find((r) => !r.pass);
-      const way = policy === "toolset" ? "through the agent's tool loop with Claude's computer toolset, its model the stand-in (its places the oracle's)" : `the ${policy} way, with perfect targeting`;
+      const way = policy === "toolset" ? "through the agent's tool loop with Claude's computer toolset, its model the stand-in (its places the oracle's)" : policy === "shell" ? "through the agent's tool loop by its shell's desktop commands, as a model offered no toolset works it, its model the stand-in (several actions a command, a form in one desktop fill; its places the oracle's)" : `the ${policy} way, with perfect targeting`;
       ctx.quality(`desktop.task.${task}.${policy}`, passed, "of 5", "higher", { n, note: `${task}, ${way}: runs that passed their gate${failed ? `; one that didn't: ${failed.why.slice(0, 160)}` : ""}` });
       const acted = these.filter((r) => r.actedMs !== null).map((r) => r.actedMs!);
       if (acted.length) ctx.speed(`desktop.task.${task}.${policy}.ms`, acted, "ms", "lower", span, `${task}, ${policy}: from its first command to its last action's return (no model)`);
       if (passed) {
         const ok = these.filter((r) => r.pass);
         // (Through the loop, its commands and looks would be the stand-in's own reads of the truth: its calls and actions say it.)
-        if (policy !== "toolset") {
+        if (policy !== "toolset" && policy !== "shell") {
           ctx.quality(`desktop.task.${task}.${policy}.commands`, Math.max(...ok.map((r) => r.commands)), "commands", "lower", { note: `${task}, ${policy}: commands a passing run took (each one an agent turn with a model)` });
           ctx.quality(`desktop.task.${task}.${policy}.looks`, Math.max(...ok.map((r) => r.looks)), "looks", "lower", { note: `${task}, ${policy}: where it would have asked its eyes (each one a model's call)` });
         }
@@ -115,6 +115,17 @@ export const suite: Suite = {
     "desktop.task.terminal.toolset.calls-per-action": 1,
     "desktop.task.settings.toolset.calls-per-action": 1,
     "desktop.task.editor.toolset.calls-per-action": 1,
+    // C1, fewer model calls an action: every task the shell's way too, as a model offered no toolset works it, its
+    // stand-in at the fewest calls (several actions a command, a form in one desktop fill): no more calls a task than
+    // it took on Ultra (28 November 2026). An action there may fill a whole form, so its calls a task are what is held.
+    "desktop.task.form.shell": 5,
+    "desktop.task.terminal.shell": 5,
+    "desktop.task.settings.shell": 5,
+    "desktop.task.editor.shell": 5,
+    "desktop.task.form.shell.calls": 3,
+    "desktop.task.terminal.shell.calls": 2,
+    "desktop.task.settings.shell.calls": 4,
+    "desktop.task.editor.shell.calls": 3,
     "desktop.type.chromium.exact": 1,
     "desktop.type.xterm.exact": 1,
     "desktop.type.mousepad.exact": 1,

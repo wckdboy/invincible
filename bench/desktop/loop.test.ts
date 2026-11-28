@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { ExecResult } from "../../packages/core/src/index.ts";
 import { UNPROVEN } from "../../packages/agents/src/run.ts";
 import { type Asked, desktopActions, dollarsOf, gatewayAlone, loopAsk, modelsContext, standIn, throughGateway, viaLoop } from "./loop.ts";
-import { GOALS, shapeOf, standInTurns } from "./tasks.ts";
+import { GOALS, shapeOf, shellTurns, standInTurns } from "./tasks.ts";
 
 /*
  * The bench's way through a task by an agent's own tool loop with Claude's computer toolset (loop.ts), here without a
@@ -73,6 +73,24 @@ test("the stand-in drives a task through the loop in the toolset's own shape: se
     { calls: 11, asToolset: 11, results: 11, resultsAsToolset: 11, pictures: 1 },
   ]);
   expect(shapeOf(asked)).toBeNull();
+});
+
+test("the stand-in that works the shell's way, as a model offered no toolset does, does the form in two commands: open and the tree, then the form filled and sent in one", async () => {
+  const asked: Asked[] = [];
+  const counted = { calls: 0, usage: { input: 0, output: 0, cached: 0 } };
+  const ctx = modelsContext("bench-stand-in-key-FAKE-0000", standIn(shellTurns("form", where, ""), asked));
+  const vm = desk();
+  const run = await viaLoop(GOALS.form(""), loopAsk(ctx, counted), vm.exec, counted);
+  expect([run.error, run.outcome?.status]).toEqual([null, "unverified"]);
+  // Two turns that act and its DONE: a model call each; four of the desktop's actions in two commands.
+  expect([run.calls, run.actions, run.commands]).toEqual([3, 4, 0]);
+  expect(run.said).toEqual([
+    "desktop open http://127.0.0.1:8000/form.html && desktop tree",
+    `desktop fill "Full name" 'Søren Ærø' Email soren@example.test Plan Team "I accept the terms" on Note 'Ready by Friday' && desktop click 640 600`,
+  ]);
+  // (Its commands are its shell's: no toolset call, so none comes back as one.)
+  expect(asked.slice(1).map((a) => a.echoed.calls)).toEqual([0, 0]);
+  expect(vm.ran.filter((c) => c.startsWith("desktop fill"))).toHaveLength(1);
 });
 
 test("a request or a turn not in the toolset's shape is said, so a task that passed its gate that way doesn't pass", () => {
