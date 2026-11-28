@@ -7,6 +7,7 @@ export * from "./archive.ts";
 export * from "./chats.ts";
 export * from "./team.ts";
 export * from "./team-record.ts";
+export * from "./routing.ts";
 export * from "./agents.ts";
 export * from "./questions.ts";
 export * from "./model-checks.ts";

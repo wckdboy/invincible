@@ -1,4 +1,5 @@
 import { costOf, type Prices, spendTotal, tokensLabel, type UsageLine, usdLabel } from "./spend.ts";
+import { KIND_WORDS, type TaskKind } from "./routing.ts";
 
 /*
  * What an agent's task came to, in words: the same from the same record at a terminal and in the
@@ -18,6 +19,7 @@ export interface TaskRoutingRead {
   began: string;
   because?: string;
   moved?: string;
+  kind?: string;
 }
 
 /** A task's record as this reads it (a TeamTaskRecord has all of this). */
@@ -100,8 +102,11 @@ const MOVED: Readonly<Record<string, string>> = {
  * engineer's did it all.
  */
 export function taskRoutingFacts(routing: TaskRoutingRead): string[] {
+  const kind = routing.kind && routing.kind in KIND_WORDS ? KIND_WORDS[routing.kind as TaskKind] : null;
+  const memory = kind ? `its agent's last ${kind.one} was verified there` : "its agent's last tasks needed them";
   return [
-    routing.began === "planner" ? `began on the planner's models: ${routing.because === "memory" ? "its agent's last tasks needed them" : "its plan asked for them"}` : "",
+    routing.began === "planner" ? `began on the planner's models: ${routing.because === "memory" ? memory : "its plan asked for them"}` : "",
+    routing.began === "engineer" && routing.because === "probe" ? `began on the engineer's models: a try of them after its ${kind?.many ?? "tasks"} began on the planner's` : "",
     routing.moved ? `moved up to the planner's models: ${MOVED[routing.moved] ?? routing.moved}` : "",
   ].filter(Boolean);
 }

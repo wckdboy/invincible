@@ -34,6 +34,7 @@
     "./turns": "./src/turns.ts",
     "./team": "./src/team.ts",
     "./team-record": "./src/team-record.ts",
+    "./routing": "./src/routing.ts",
     "./agents": "./src/agents.ts",
     "./model-checks": "./src/model-checks.ts",
     "./team-limits": "./src/team-limits.ts",

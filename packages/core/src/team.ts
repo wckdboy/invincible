@@ -528,8 +528,11 @@ export type TeamTaskPlan = z.infer<typeof TeamTaskPlan>;
  */
 export const TeamTaskRouting = z.strictObject({
   began: z.enum(["engineer", "planner"]),
-  because: z.enum(["plan", "memory"]).optional(),
+  /** Why it began where it did: its plan, the memory of its kind, or a try of the engineer's after the planner's (routing.ts). */
+  because: z.enum(["plan", "memory", "probe"]).optional(),
   moved: z.enum(["gate", "review", "stall", "rereads"]).optional(),
+  /** Its kind (routing.ts TASK_KINDS, said again here: core's tests hold them equal); absent: a record from before kinds were kept. */
+  kind: z.enum(["fix", "desktop", "code", "task"]).optional(),
 });
 export type TeamTaskRouting = z.infer<typeof TeamTaskRouting>;
 
