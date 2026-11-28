@@ -145,7 +145,7 @@ struct PhoneRoot: View {
 
     @ViewBuilder private func destination(_ place: Place) -> some View {
         switch place {
-        case .home: HomeView(session: session, go: go, search: { searching = true }, give: mayGive ? { giving = true } : nil)
+        case .home: HomeView(session: session, go: go, search: { searching = true }, give: mayGive ? { giving = true } : nil, back: { if !path.isEmpty { path.removeLast() } })
         case .primary: ChatView(session: session)
         case .task(let id): TaskView(session: session, id: id)
         case .agents: AgentsView(session: session) { path.append(Place($0)) }

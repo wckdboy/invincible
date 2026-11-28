@@ -37,13 +37,14 @@ extension View {
 }
 
 /// The app's mark where a page shows it (joining, Settings' About, a Mac's first run, the sidebar's head): the I-beam in
-/// the page's ink, on nothing, so it sits on a light page as on a dark one. Decorative: what it is in is named.
+/// the page's ink, on nothing, so it sits on a light page as on a dark one. Decorative: what it is in is named. The ink
+/// itself, not `.primary`: an iPad sidebar's bar draws an item that is no button in a muted grey, which `.primary` follows.
 struct AppMark: View {
     var size: CGFloat = 40
 
     var body: some View {
         IBeam()
-            .fill(.primary)
+            .fill(Color.ink)
             .frame(width: size, height: size)
             .accessibilityHidden(true)
     }
