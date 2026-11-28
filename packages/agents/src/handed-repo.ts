@@ -131,6 +131,208 @@ if size > limit:
 print(size)`;
 
 /**
+ * The binary parts of a task's patch, held to what git apply does with them, before git ever reads the patch (the
+ * seventh fabric review's R7-1 and R7-2): `binary_refused(root, base, path, limit)` is None when the patch may go to
+ * git, else why not. It reads them as git's own parser does (apply.c's parse_binary_hunk, parse_binary and
+ * apply_binary, and patch-delta.c), so that no part git would apply goes unread here.
+ *
+ * - git apply takes a binary part's content from the agent's object store whenever the store holds the id its index
+ *   line names, of any type, and ignores the part's data; and one with no data at all (`Binary files … differ`) is
+ *   applied only that way (R7-1). So each part's own data must make the id it names: a literal's as it inflates, a
+ *   delta's applied to the file of `base`'s tree it names, which the task's own bundle carried, and a delta from any
+ *   other content is refused without that content being read, its size included. Then whatever git reads under the id
+ *   is those same bytes: no object of the store the task wasn't given reaches its worktree, and whether the store holds
+ *   one changes nothing, so none is an oracle either.
+ * - git reads a part's sizes with strtoul (R7-2). So every line that starts `literal` or `delta` and a space is as git
+ *   writes it, and is one of a `GIT binary patch` section's, read here as git reads one, or the patch is refused. What
+ *   git inflates as it reads them (each hunk's size, both ways) and what a delta makes, with the file this check reads
+ *   to make it, is held to `limit` before any of it is inflated, read or built: the check's own memory with it. The
+ *   patch, which may be as large as the limit, is read a line at a time.
+ */
+const BINARY_CHECK = `import base64,hashlib,zlib
+def binary_refused(root, base, path, limit):
+    spelled = "its changes have a binary part not written as git writes one"
+    carried = "its changes name content their binary parts don't carry"
+    given = "its changes make a binary part from content the task wasn't given"
+    over = 'its changes inflate to more than %d bytes' % limit
+    method = re.compile(rb'(?:literal|delta)\\s').match
+    sized = re.compile(rb'(literal|delta) (0|[1-9][0-9]{0,14})').fullmatch
+    held = {}
+    def text(line):
+        return line[:-1] if line.endswith(b'\\n') else line
+    def blobs():
+        # (The blobs of where the work began, by id with their sizes, read once: what the task's own bundle carried.)
+        if 'blobs' not in held:
+            r = git(root,'ls-tree','-r','-z','-l','--full-tree',base,timeout=600)
+            found = {}
+            for entry in (r.stdout.split(b'\\0') if not r.returncode else []):
+                meta = entry.split(b'\\t',1)[0].split()
+                if len(meta) == 4 and meta[1] == b'blob':
+                    found[meta[2].decode()] = int(meta[3])
+            held['blobs'] = None if r.returncode else found
+        return held['blobs']
+    def varint(data, at):
+        # (A delta's size, as get_delta_hdr_size reads it: None past the delta's end, or past what git's size_t holds.)
+        value = shift = 0
+        while at < len(data) and shift < 64:
+            byte = data[at]
+            at += 1
+            value |= (byte & 0x7f) << shift
+            shift += 7
+            if not byte & 0x80:
+                return value, at
+        return None, at
+    def patched(source, delta, at, size):
+        # (What a delta makes of its source, as patch-delta.c's patch_delta makes it, each bound checked as it checks it:
+        # None where it would fail.)
+        out = bytearray(size)
+        source = memoryview(source)
+        done = 0
+        while at < len(delta):
+            op = delta[at]
+            at += 1
+            if op & 0x80:
+                offset = length = 0
+                for bit, shift in ((1,0),(2,8),(4,16),(8,24)):
+                    if op & bit:
+                        if at >= len(delta): return None
+                        offset |= delta[at] << shift
+                        at += 1
+                for bit, shift in ((16,0),(32,8),(64,16)):
+                    if op & bit:
+                        if at >= len(delta): return None
+                        length |= delta[at] << shift
+                        at += 1
+                length = length or 0x10000
+                if offset + length > len(source) or length > size - done: return None
+                out[done:done+length] = source[offset:offset+length]
+                done += length
+            elif op:
+                if op > size - done or op > len(delta) - at: return None
+                out[done:done+op] = delta[at:at+op]
+                at += op
+                done += op
+            else:
+                return None
+        return out if done == size else None
+    def hunk(lines, inflated):
+        # (A hunk's data lines to the blank line that ends it, as parse_binary_hunk reads them, and what they inflate to,
+        # held to the size it states as inflate_it holds them: None where git would find it corrupt. A reverse hunk is
+        # read and counted, never applied, so it isn't inflated.)
+        z = zlib.decompressobj() if inflated is not None else None
+        out = bytearray()
+        for line in lines:
+            if line == b'\\n':
+                break
+            n, c = len(line), line[0]
+            length = c - 64 if 65 <= c <= 90 else c - 70 if 97 <= c <= 122 else 0
+            room = (n - 2) // 5 * 4
+            if n < 7 or (n - 2) % 5 or line[-1] != 10 or not room - 4 < length <= room:
+                return None
+            try:
+                data = base64.b85decode(line[1:-1])[:length]
+            except ValueError:
+                return None
+            if z is not None and not z.eof:
+                try:
+                    out += z.decompress(data, inflated + 1 - len(out))
+                except zlib.error:
+                    return None
+                if len(out) > inflated:
+                    return None
+        else:
+            return None
+        return out if z is None or (z.eof and len(out) == inflated) else None
+    with open(path,'rb') as f:
+        def read():
+            while True:
+                line = f.readline(1<<16)
+                if not line:
+                    return
+                # (A line longer than any of a binary part's is kept only as far as its start: it is none of them.)
+                rest = line
+                while len(rest) == 1<<16 and rest[-1] != 10:
+                    rest = f.readline(1<<16)
+                yield line
+        lines = read()
+        total, index = 0, None
+        line = next(lines, None)
+        while line is not None:
+            if method(line):
+                return spelled
+            if line.startswith((b'Binary files ', b'Files ')):
+                return carried
+            if line.startswith(b'index '):
+                index = text(line)
+            if text(line) != b'GIT binary patch':
+                line = next(lines, None)
+                continue
+            # (A section: its ids from the index line before it, as full as git needs them, then its forward hunk.)
+            if 'algo' not in held:
+                r = git(root,'rev-parse','--show-object-format')
+                held['algo'] = '' if r.returncode else r.stdout.decode(errors='replace').strip()
+            algo = held['algo']
+            if algo not in ('sha1','sha256'):
+                return "could not read its repository's object format"
+            hexsz = 40 if algo == 'sha1' else 64
+            ids = index and re.fullmatch(rb'index ([0-9a-f]{%d})\\.\\.([0-9a-f]{%d})(?: [0-7]{6})?' % (hexsz, hexsz), index)
+            if not ids:
+                return 'its changes have a binary part without full ids'
+            old, new = ids.group(1).decode(), ids.group(2).decode()
+            line = next(lines, None)
+            m = line is not None and sized(text(line))
+            if not m:
+                return spelled
+            total += int(m.group(2))
+            if total > limit:
+                return over
+            data = hunk(lines, int(m.group(2)))
+            if data is None:
+                return spelled
+            # (A deletion's result is no content at all. Any other part's is its own data, or what its delta makes of a
+            # file of where the work began, and must be the blob it names.)
+            if new != '0' * hexsz:
+                if m.group(1) == b'delta':
+                    have = blobs()
+                    if have is None:
+                        return 'could not read the files where its work began'
+                    if old not in have:
+                        return given
+                    source, at = varint(data, 0)
+                    size, at = varint(data, at) if source is not None else (None, at)
+                    if len(data) < 4 or size is None or source != have[old]:
+                        return spelled
+                    total += source + size
+                    if total > limit:
+                        return over
+                    r = git(root,'cat-file','blob',old,timeout=600)
+                    if r.returncode or len(r.stdout) != source:
+                        return 'could not read the file its binary part changes'
+                    data = patched(r.stdout, data, at, size)
+                    if data is None:
+                        return spelled
+                made = hashlib.new(algo)
+                made.update(b'blob %d\\0' % len(data))
+                made.update(data)
+                if made.hexdigest() != new:
+                    return carried
+            data = None
+            # (Its reverse hunk, if it has one: counted, since git inflates it too.)
+            line = next(lines, None)
+            if line is not None and method(line):
+                m = sized(text(line))
+                if not m:
+                    return spelled
+                total += int(m.group(2))
+                if total > limit:
+                    return over
+                if hunk(lines, None) is None:
+                    return spelled
+                line = next(lines, None)
+    return None
+`;
+
+/**
  * Its agent's side: the patch of one receive (`nonce`) kept in `keep`, applied with the node's held git to `base` alone, in
  * an index of its own, and then dropped; the tree that made is then the task's worktree at `root`, and its index, with
  * nothing else in it (what git ignores too). Its size and that tree printed. Refused whole unless it is the `size` bytes
@@ -158,15 +360,13 @@ except OSError:
 if got != size:
     gone()
     sys.exit('its changes came cut short: %d of %d bytes' % (max(got, 0), size))
-# (What each binary part inflates to, as it says: a small patch can't fill the store either.)
-inflated = 0
-with open(path,'rb') as f:
-    for line in f:
-        m = re.fullmatch(rb'(?:literal|delta) ([0-9]{1,15})', line.rstrip(b'\\n'))
-        if m: inflated += int(m.group(1))
-if inflated > limit:
+# (Each binary part carries the content it names, and what they inflate to is held to the limit, as git reads them:
+# BINARY_CHECK. A small patch can't copy the store, or fill it, either.)
+${BINARY_CHECK}
+bad = binary_refused(root, base, path, limit)
+if bad:
     gone()
-    sys.exit('its changes inflate to more than %d bytes' % limit)
+    sys.exit(bad)
 said = lambda r: (r.stderr or r.stdout).decode(errors='replace')[-300:]
 # (The patch applied to where the work began alone, in an index of this apply's own. git apply --cached reads and writes
 # nothing of the worktree, so no file or link there is read or written through: not an earlier run's, nor one another
