@@ -91,3 +91,13 @@ test("eyes that answer places in a space of their own are told it beside their n
 test("an agent with a desktop is told the owner can take it over: its desktop commands then wait, and one that waits too long exits 75 and says so (C1 step 9)", () => {
   expect(desktopBriefing()).toContain("The owner can take this desktop over: while they have it, your desktop commands wait, and one that waits too long does nothing, exits 75 and says so.");
 });
+
+test("an agent with a desktop is told to do several actions in one command where that is safe, a form in one fill, and to check it by the tree (C1, fewer model calls an action)", () => {
+  const told = desktopBriefing();
+  expect(told).toContain("`desktop tree` says what each field holds: check a form by it.");
+  expect(told).toContain("Do several actions in one command, chained with &&, where each one's target is known before it starts: a ref from one tree stays that node's, and every desktop verb fails when it can't do its part, so the chain stops there.");
+  expect(told).toContain('A form is one command: `desktop fill "Full name" "Kim Example" Email kim@example.test Plan Pro "I accept the terms" on` fills each field and reads it back, and never sends it.');
+  expect(told).toContain("Whatever sends a form or opens a page ends a chain.");
+  // (No angle brackets in what an agent is told: a model copied them onto its own command fence, and nothing ran.)
+  expect(told).not.toMatch(/[<>]/);
+});

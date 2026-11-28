@@ -408,7 +408,9 @@ The run loop is carried and renamed (§10), the most proven part of it:
     (an entry's text, a combo box's chosen option; never a password field's), `desktop find` gives where one is, and
     `desktop click ref=N` clicks it where it is at that moment. A node keeps its ref from one tree to the next, and a
     ref whose node is gone fails, so several actions on one tree's refs are safe in one command; `desktop fill` fills
-    a form in one, each field read back before the next, and never sends it. An agent's model that takes Claude's computer
+    a form in one, each field read back before the next, and never sends it. An agent is told to do several actions
+    in one command where each one's target is known before it starts, and to check a form by the tree, not by a
+    look. An agent's model that takes Claude's computer
     toolset is offered it in the engineer's tool loop: each action is one of its commands, the VM's `desktop` verb of the
     same name; the actions after one that fails aren't run; and a turn that acted ends with what can be acted on, as
     text, then a picture of the screen. Any other model works the desktop by the command: `desktop find`, then `desktop

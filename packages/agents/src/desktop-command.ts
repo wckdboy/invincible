@@ -24,6 +24,13 @@ export function actsOnDesktop(command: string): boolean {
   return /(^|[;&|(\n]\s*|\$\(\s*|`\s*)desktop\s+(open|click|type|fill|key|scroll|move|drag|app|dialog|left_click|right_click|middle_click|double_click|triple_click|left_click_drag|mouse_move|left_mouse_down|left_mouse_up|hold_key)\b/.test(command);
 }
 
+/**
+ * How an agent is told to do several actions in one command where that is safe (C1, fewer model calls an action):
+ * refs last from one tree to the next and every verb fails when it can't do its part, so a chain stops where one
+ * fails; a form is one `desktop fill`, checked by the tree, which says what each field holds.
+ */
+const CHAINS = ' `desktop tree` says what each field holds: check a form by it. Do several actions in one command, chained with &&, where each one\'s target is known before it starts: a ref from one tree stays that node\'s, and every desktop verb fails when it can\'t do its part, so the chain stops there. A form is one command: `desktop fill "Full name" "Kim Example" Email kim@example.test Plan Pro "I accept the terms" on` fills each field and reads it back, and never sends it. Whatever sends a form or opens a page ends a chain.';
+
 /** How an agent with eyes is told it may ask them, after the tree (desktopBriefing's `looking`). */
 export const LOOKING = ' Then `desktop look "your question"` asks a model that can see the screen what is on it, or where something is (it answers a place as x,y, to click).';
 
@@ -33,7 +40,7 @@ export const LOOKING = ' Then `desktop look "your question"` asks a model that c
  * it has them, said after the tree. One text for every run that has a desktop: an agent's task, an eval's, the bench's.
  */
 export function desktopBriefing(looking = ""): string {
-  return " This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it. Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do. To find something on the screen, ask `desktop find` first (`desktop find button \"Send\"` says where it is), then `desktop tree` (what can be acted on in the window with the focus)." + looking + " Computer tools of your own (screenshot, left_click, type and the rest), if you have them, work this same screen, in its pixels. The owner can take this desktop over: while they have it, your desktop commands wait, and one that waits too long does nothing, exits 75 and says so. Do something else meanwhile, and try again after. Left unused for 10 minutes with no one watching, the desktop stops, its windows closed: your next desktop command starts it again, on a fresh screen, and says so.";
+  return " This VM has a desktop: a display (1280 by 800), a browser, a terminal and an editor, which you operate with the `desktop` command (open an address, read the page as text, start the terminal or the editor with `desktop app`, take a screenshot, click, type, press keys). `desktop help` lists it. Where an app can be scripted (its files, its command line, its API), script it: the screen is for what only the screen can do. To find something on the screen, ask `desktop find` first (`desktop find button \"Send\"` says where it is), then `desktop tree` (what can be acted on in the window with the focus)." + looking + CHAINS + " Computer tools of your own (screenshot, left_click, type and the rest), if you have them, work this same screen, in its pixels. The owner can take this desktop over: while they have it, your desktop commands wait, and one that waits too long does nothing, exits 75 and says so. Do something else meanwhile, and try again after. Left unused for 10 minutes with no one watching, the desktop stops, its windows closed: your next desktop command starts it again, on a fresh screen, and says so.";
 }
 
 /**
