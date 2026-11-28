@@ -1,5 +1,6 @@
-import { costOf, type Prices, spendTotal, type UsageLine, usdLabel } from "@invincible/core/spend";
+import { costOf, type Prices, spendTotal, type UsageLine } from "@invincible/core/spend";
 import type { TeamTask, TeamTrailEntry } from "@invincible/core/team";
+import { moneyWords } from "./usage.ts";
 
 /*
  * A task's work, folded (T3 Code's "Worked for 2m 14s ›", its steps grouped: "Read 6 files", "Edited 3 files", "Ran 4
@@ -534,11 +535,11 @@ export function because(why: string | null | undefined, verdict: string): string
  * Before it has ended, its budget alone (the runner records its spend at the end). A run of under half a second says no time.
  */
 export function costWords(task: Pick<TeamTask, "record" | "budgetUsd">, prices: Prices): string {
-  const budget = task.budgetUsd !== undefined ? usdLabel(task.budgetUsd) : null;
+  const budget = task.budgetUsd !== undefined ? moneyWords(task.budgetUsd) : null;
   if (!task.record) return budget ? `budget ${budget}` : "";
   const total = spendTotal(task.record.spent as readonly UsageLine[]);
   const cost = costOf(task.record.spent as readonly UsageLine[], prices);
-  const money = !total.calls ? null : total.unknown === total.calls ? "spend unknown" : cost.unpriced.length ? "no price" : `${cost.complete ? "" : "at least "}${usdLabel(cost.usd)}`;
+  const money = !total.calls ? null : total.unknown === total.calls ? "spend unknown" : cost.unpriced.length ? "no price" : `${cost.complete ? "" : "at least "}${moneyWords(cost.usd)}`;
   const spent = money ? (budget ? `${money} of ${budget}` : money) : budget ? `budget ${budget}` : !total.calls ? "no model calls" : null;
   // (A run of under half a second says no time: never "0s", which reads as broken.)
   const ran = task.record.endedAt - task.record.startedAt;

@@ -1,6 +1,7 @@
 import type { UsageMeter } from "@invincible/core";
-import { tokensLabel, usdLabel } from "@invincible/core/spend";
+import { tokensLabel } from "@invincible/core/spend";
 import { type Ctx, errorMessage } from "../context.ts";
+import { budgetWords, moneyWords, spentWords } from "../lib/usage.ts";
 import { spentWindowLines } from "../lib/usage-windows.ts";
 import { button, callout, meter, segmented, statTile } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
@@ -14,15 +15,6 @@ import { toast } from "../ui/toast.ts";
  */
 
 const period = (m: UsageMeter) => (m.per === "day" ? "Today" : "This month");
-/** "at least" where some calls had no price or reported nothing (never of $0: nothing priced is simply $0). */
-const spentWords = (m: UsageMeter) => `${m.complete || m.spentUsd === 0 ? "" : "at least "}${usdLabel(m.spentUsd)}`;
-
-/** The meter in words, against the budget (or how much, with none). */
-export function meterWords(m: UsageMeter): string {
-  if (m.budgetUsd === null) return `${tokensLabel(m.tokens)} tokens, no budget`;
-  return m.leftUsd ? `of ${usdLabel(m.budgetUsd)} · ${usdLabel(m.leftUsd)} left` : `of ${usdLabel(m.budgetUsd)} · spent`;
-}
-
 /** The tile: the period's spend, against the budget with a bar; a tap opens the sheet. */
 /**
  * The place a usage tile's bar takes, kept with no budget to fill it (and while the meter loads): a tile whose bar came
@@ -41,7 +33,7 @@ export function usageTile(ctx: Ctx, m: UsageMeter, changed: (m: UsageMeter) => v
     label: `${period(m)}'s usage`,
     icon: "gauge",
     value: spentWords(m),
-    note: [meterWords(m), m.budgetUsd ? meter(m.spentUsd / m.budgetUsd, spent ? "var(--danger)" : undefined, `${Math.round((m.spentUsd / m.budgetUsd) * 100)}% of the budget`) : meterSlot(), ...spentWindowLines(m.windows)],
+    note: [budgetWords(m), m.budgetUsd ? meter(m.spentUsd / m.budgetUsd, spent ? "var(--danger)" : undefined, `${Math.round((m.spentUsd / m.budgetUsd) * 100)}% of the budget`) : meterSlot(), ...spentWindowLines(m.windows)],
   });
   tile.classList.add("usage-tile");
   tile.setAttribute("role", "button");
@@ -59,7 +51,7 @@ export function openUsage(ctx: Ctx, m: UsageMeter, changed: (m: UsageMeter) => v
   const amount = h("input", { class: "input tnum", inputmode: "decimal", maxlength: 10, placeholder: "No budget", autocomplete: "off", value: m.budgetUsd === null ? "" : String(m.budgetUsd) });
   const problem = h("div");
   const top = m.top.length
-    ? h("div", { class: "card flat" }, h("div", { class: "rows" }, ...m.top.map((t) => h("div", { class: "item center" }, h("span", { class: "grow mono small ellipsis" }, t.model), h("span", { class: "tnum small muted" }, t.usd === null ? `${tokensLabel(t.tokens)} tokens` : usdLabel(t.usd))))))
+    ? h("div", { class: "card flat" }, h("div", { class: "rows" }, ...m.top.map((t) => h("div", { class: "item center" }, h("span", { class: "grow mono small ellipsis" }, t.model), h("span", { class: "tnum small muted" }, t.usd === null ? `${tokensLabel(t.tokens)} tokens` : moneyWords(t.usd))))))
     : null;
   const save = canSet
     ? button("Save budget", {
@@ -72,7 +64,7 @@ export function openUsage(ctx: Ctx, m: UsageMeter, changed: (m: UsageMeter) => v
             const next = await ctx.api.post<UsageMeter>("/api/usage/budget", { usd, per: chosen });
             changed(next);
             sheet.close();
-            toast(usd === null ? "No budget" : `Budget: ${usdLabel(usd)} a ${next.per}`, { tone: "ok" });
+            toast(usd === null ? "No budget" : `Budget: ${moneyWords(usd)} a ${next.per}`, { tone: "ok" });
           } catch (error) {
             replace(problem, callout("danger", errorMessage(error)));
           }
@@ -89,7 +81,7 @@ export function openUsage(ctx: Ctx, m: UsageMeter, changed: (m: UsageMeter) => v
         "div",
         { class: "stack" },
         h("div", { class: "stat-value" }, spentWords(m)),
-        h("p", { class: "small muted" }, `${period(m).toLowerCase()}: ${meterWords(m)} · ${tokensLabel(m.tokens)} tokens in ${m.calls} call${m.calls === 1 ? "" : "s"}`),
+        h("p", { class: "small muted" }, `${period(m).toLowerCase()}: ${budgetWords(m)} · ${tokensLabel(m.tokens)} tokens in ${m.calls} call${m.calls === 1 ? "" : "s"}`),
         m.budgetUsd ? meter(m.spentUsd / m.budgetUsd, m.leftUsd ? undefined : "var(--danger)") : null,
       ),
       top ? h("div", { class: "stack" }, h("strong", { class: "small" }, "What cost most"), top) : null,

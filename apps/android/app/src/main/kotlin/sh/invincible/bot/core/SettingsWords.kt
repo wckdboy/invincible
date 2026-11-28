@@ -70,8 +70,23 @@ object Seats {
     }
 }
 
+/** Settings' own words, every app's (lib/usage.ts SETTINGS_WORDS). */
+object SettingsWords {
+    /** What this device's grant lets it do on its node, heading its line on This device ("May" read as the month). */
+    const val SCOPES = "Can do"
+
+    /** A page that shows but can't change yet, said in one line. */
+    const val READ_ONLY = "Read-only for now: adding and changing come next."
+}
+
 /** Your rules and the hand-offs one node may make without asking you, in the PWA's words. */
 object Permissions {
+    /**
+     * A rule's name as its row's title (lib/rules.ts ruleTitle): a rule's name is its id, typed as one ("pushes",
+     * "no-force-push"), so it is said as you'd say it, a capital first and its hyphens and underscores spaces.
+     */
+    fun ruleTitle(name: String): String = name.replace(Regex("[-_]+"), " ").trim().replaceFirstChar { it.uppercase() }
+
     /**
      * A rule (core's RuleView's rule) as a sentence (lib/rules.ts ruleSentence): what it does, and when, its globs and text
      * as written, its first word a capital, its text in curly quotes, a full stop.

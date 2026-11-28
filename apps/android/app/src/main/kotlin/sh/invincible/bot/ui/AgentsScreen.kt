@@ -125,7 +125,7 @@ fun AgentsScreen(app: AppModel, back: () -> Unit, openChat: () -> Unit, openAgen
         items(agents, key = { "k:${it.id}" }) { row ->
             val person = table.snapshot?.agents?.firstOrNull { it.id == row.id }
             val spent = prices?.let { sh.invincible.bot.core.Work.spentSince(table.tasks, row.id, week, it) }
-            Seat(row.id, row.avatar, row.name, row.state, row.line, row.needs, row.unread, role = person?.role, cost = spent?.let { "${if (it.complete) "" else "at least "}${sh.invincible.bot.core.Usage.usd(it.usd)} this week" }) { openAgent(row.id) }
+            Seat(row.id, row.avatar, row.name, row.state, row.line, row.needs, row.unread, role = person?.role, cost = spent?.let { "${if (it.complete) "" else "at least "}${sh.invincible.bot.core.Usage.money(it.usd)} this week" }) { openAgent(row.id) }
         }
         if (table.snapshot != null && agents.isEmpty()) {
             item {

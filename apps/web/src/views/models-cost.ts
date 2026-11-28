@@ -1,7 +1,8 @@
 import type { UsageView } from "@invincible/core";
-import { type Price, tokensLabel, usdLabel } from "@invincible/core/spend";
+import { type Price, tokensLabel } from "@invincible/core/spend";
 import { type Ctx, errorMessage } from "../context.ts";
 import { priceLabel, type PriceRow, priceRows } from "../lib/eval-cost.ts";
+import { moneyWords } from "../lib/usage.ts";
 import { badge, busy, button, callout, empty, field, section } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { h, replace } from "../ui/dom.ts";
@@ -87,7 +88,7 @@ export function modelCost(ctx: Ctx, signal: AbortSignal): { el: HTMLElement; ref
 
   function costRow(row: PriceRow): HTMLElement {
     const spent = row.calls
-      ? `${tokensLabel(row.tokens)} tokens in ${row.calls} call${row.calls === 1 ? "" : "s"}${row.unknown ? ` (${row.unknown} unreported)` : ""}${row.usd !== null ? ` · ${row.unknown ? "at least " : ""}${usdLabel(row.usd)}` : ""}`
+      ? `${tokensLabel(row.tokens)} tokens in ${row.calls} call${row.calls === 1 ? "" : "s"}${row.unknown ? ` (${row.unknown} unreported)` : ""}${row.usd !== null ? ` · ${row.unknown ? "at least " : ""}${moneyWords(row.usd)}` : ""}`
       : "no calls here";
     return h(
       "div",
@@ -116,7 +117,7 @@ export function modelCost(ctx: Ctx, signal: AbortSignal): { el: HTMLElement; ref
       const priced = rows.filter((r) => r.usd !== null);
       replace(
         note,
-        `On ${usage.node}, since ${usage.since}: ${tokensLabel(total)} tokens as the providers reported them${priced.length ? `, ${usdLabel(priced.reduce((sum, r) => sum + r.usd!, 0))} at your prices${priced.length < rows.filter((r) => r.calls).length ? " (models without a price not counted)" : ""}` : ""}. Each node counts its own calls; prices are shared by all of them. From a terminal: invincible usage · invincible price set <provider/model> <in> <out>.`,
+        `On ${usage.node}, since ${usage.since}: ${tokensLabel(total)} tokens as the providers reported them${priced.length ? `, ${moneyWords(priced.reduce((sum, r) => sum + r.usd!, 0))} at your prices${priced.length < rows.filter((r) => r.calls).length ? " (models without a price not counted)" : ""}` : ""}. Each node counts its own calls; prices are shared by all of them. From a terminal: invincible usage · invincible price set <provider/model> <in> <out>.`,
       );
     } catch {
       // A node that predates the count has neither route: the section says nothing rather than something wrong.

@@ -1,5 +1,7 @@
 package sh.invincible.bot.core
 
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -55,42 +57,56 @@ data class UsageMeter(
     }
 }
 
-/** The meter's words, as the node's own say money and tokens (core's spend.ts: usdLabel, tokensLabel) and the iPhone's. */
+/**
+ * The meter's words, every app's (lib/usage.ts, held by the vectors): money always in two decimals, tokens as the node
+ * says them (core's spend.ts tokensLabel).
+ */
 object Usage {
-    fun usd(usd: Double): String = when {
-        usd == 0.0 -> "$0"
-        usd < 0.01 -> String.format(Locale.US, "$%.4f", usd)
-        usd < 10 -> String.format(Locale.US, "$%.2f", usd)
-        usd < 100 -> String.format(Locale.US, "$%.1f", usd)
-        else -> String.format(Locale.US, "$%.0f", usd)
-    }
-
     fun tokens(n: Long): String = when {
         n < 10_000 -> String.format(Locale.US, "%,d", n)
         n < 1_000_000 -> String.format(Locale.US, if (n < 100_000) "%.1fk" else "%.0fk", n / 1000.0)
         else -> String.format(Locale.US, if (n < 10_000_000) "%.2fM" else "%.1fM", n / 1_000_000.0)
     }
 
-    /** The meter in a line: what it came to ("at least" when some calls had no price, never of $0), against the budget. */
-    fun line(m: UsageMeter): String {
-        val spent = "${if (m.complete || m.spentUsd == 0.0) "" else "at least "}${usd(m.spentUsd)}"
-        val budget = m.budgetUsd ?: return "$spent · ${tokens(m.tokens)} tokens"
-        val left = m.leftUsd
-        return if (left == null || left <= 0) "$spent of ${usd(budget)} · spent" else "$spent of ${usd(budget)} · ${usd(left)} left"
+    /**
+     * Money as the apps say it (lib/usage.ts moneyWords): always two decimals ($36.60), four under a cent so a little is
+     * never $0.00. Rounded as the PWA's toFixed rounds, on the number's exact value (1.005 is $1.00).
+     */
+    fun money(usd: Double): String {
+        if (!usd.isFinite()) return "$$usd"
+        return "$" + BigDecimal(usd).setScale(if (usd > 0 && usd < 0.01) 4 else 2, RoundingMode.HALF_UP).toPlainString()
     }
+
+    /** The meter's figure (lib/usage.ts spentWords): what this period came to, "At least" when some calls had no price (never of $0). */
+    fun spentWords(spentUsd: Double, complete: Boolean): String = "${if (complete || spentUsd == 0.0) "" else "At least "}${money(spentUsd)}"
+
+    /**
+     * Under the figure (lib/usage.ts budgetWords): of what budget, then what is left, all of it spent, or over budget; with
+     * no budget, its tokens.
+     */
+    fun budgetWords(spentUsd: Double, budgetUsd: Double?, tokenCount: Long): String {
+        val budget = budgetUsd ?: return "${tokens(tokenCount)} tokens · no budget"
+        val of = "of ${money(budget)}"
+        return when {
+            spentUsd > budget -> "$of · over budget"
+            spentUsd == budget -> "$of · all spent"
+            else -> "$of · ${money(budget - spentUsd)} left"
+        }
+    }
+
+    /** The meter in a line, as Settings' Providers says it in every app (lib/usage.ts meterLine): the two together. */
+    fun meterLine(spentUsd: Double, complete: Boolean, budgetUsd: Double?, tokenCount: Long): String =
+        "${spentWords(spentUsd, complete)}${if (budgetUsd == null) " · " else " "}${budgetWords(spentUsd, budgetUsd, tokenCount)}"
+
+    fun line(m: UsageMeter): String = meterLine(m.spentUsd, m.complete, m.budgetUsd, m.tokens)
 
     /** How much of the budget is spent, 0 to 1 (null with none). */
     fun share(m: UsageMeter): Double? = m.budgetUsd?.takeIf { it > 0 }?.let { minOf(1.0, m.spentUsd / it) }
 
     fun period(m: UsageMeter): String = if (m.per == "day") "Today" else "This month"
 
-    /** Under the big figure: of what budget, and what is left. */
-    fun subline(m: UsageMeter): String {
-        val period = if (m.per == "day") "today" else "this month"
-        val budget = m.budgetUsd ?: return "spent $period, with no budget"
-        val left = m.leftUsd
-        return if (left != null && left > 0) "of ${usd(budget)} $period: ${usd(left)} left" else "of ${usd(budget)} $period: spent"
-    }
+    /** Under the big figure: the period, then of what budget and what is left (the PWA's sheet says it so). */
+    fun subline(m: UsageMeter): String = "${period(m)}: ${budgetWords(m.spentUsd, m.budgetUsd, m.tokens)}"
 
     /**
      * A plan whose allowance is spent, in a line: whose, and until when by this phone's clock (`invincible usage` says it in

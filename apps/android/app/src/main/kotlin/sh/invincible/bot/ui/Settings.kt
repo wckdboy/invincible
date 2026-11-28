@@ -65,6 +65,7 @@ import sh.invincible.bot.core.Permissions
 import sh.invincible.bot.core.Primary
 import sh.invincible.bot.core.Providers
 import sh.invincible.bot.core.Seats
+import sh.invincible.bot.core.SettingsWords
 import sh.invincible.bot.core.ThisPhone
 import sh.invincible.bot.core.Usage
 import sh.invincible.bot.core.get
@@ -156,7 +157,7 @@ private fun LinkRow(icon: ImageVector, title: String, value: String? = null, onC
 /** What a read-only page says of itself, in one line. */
 @Composable
 private fun ReadOnly() {
-    Text("Read-only for now: adding and changing come next.", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.s1))
+    Text(SettingsWords.READ_ONLY, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.s1))
 }
 
 /** This build's version, as About and the list say it. */
@@ -227,7 +228,7 @@ private fun PermissionsPage(app: AppModel, back: () -> Unit) {
         rules?.let { list ->
             Group(
                 if (list.isEmpty()) listOf({ SettingRow(null, sub = "No rules yet.") })
-                else list.map { r -> { SettingRow(r["name"].string ?: "", sub = r["rule"].takeIf { it is Json.Obj }?.let { Permissions.sentence(it) } ?: "Written by a newer node: not understood here.") } },
+                else list.map { r -> { SettingRow(Permissions.ruleTitle(r["name"].string ?: ""), sub = r["rule"].takeIf { it is Json.Obj }?.let { Permissions.sentence(it) } ?: "Written by a newer node: not understood here.") } },
             )
         }
         grants?.let { list -> if (list.isNotEmpty()) Group(list.map { g -> { SettingRow(Permissions.handoffTitle(g), sub = Permissions.handoffTerms(g["terms"])) } }) }
@@ -246,7 +247,7 @@ private fun ThisDevicePage(app: AppModel, back: () -> Unit) {
                 listOfNotNull<@Composable () -> Unit>(
                     { Fact("Name", p.name) },
                     { Fact("Its key", ThisPhone.shortId(p.device, 16), mono = true) },
-                    scopes?.let { s -> { Fact("May", s.joinToString(", ").ifEmpty { "nothing" }) } },
+                    scopes?.let { s -> { Fact(SettingsWords.SCOPES, s.joinToString(", ").ifEmpty { "nothing" }) } },
                     { Fact("Node", ThisPhone.talksTo(p.nodeName, p.origin)) },
                     { Fact("Fleet", ThisPhone.fleet(p.fleetName, p.fleet)) },
                 ),

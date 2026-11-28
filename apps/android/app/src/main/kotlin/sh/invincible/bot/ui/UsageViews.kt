@@ -96,7 +96,7 @@ fun UsageDialog(app: AppModel, m: UsageMeter, close: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Space.s3)) {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s1)) {
-                    Text("${if (m.complete || m.spentUsd == 0.0) "" else "At least "}${Usage.usd(m.spentUsd)}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                    Text(Usage.spentWords(m.spentUsd, m.complete), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     Text(Usage.subline(m), style = MaterialTheme.typography.bodyMedium, color = quiet)
                     Usage.share(m)?.let { UsageBar(it, (m.leftUsd ?: 0.0) <= 0) }
                     Text("Since ${m.since} (UTC), on this node, at the prices you've set. ${Usage.tokens(m.tokens)} tokens in ${m.calls} call${if (m.calls == 1L) "" else "s"}.", style = MaterialTheme.typography.bodySmall, color = quiet)
@@ -107,7 +107,7 @@ fun UsageDialog(app: AppModel, m: UsageMeter, close: () -> Unit) {
                         m.top.forEach { top ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(top.model, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, modifier = Modifier.weight(1f))
-                                Text(top.usd?.let(Usage::usd) ?: "${Usage.tokens(top.tokens)} tokens", style = MaterialTheme.typography.bodySmall, color = quiet, modifier = Modifier.padding(start = Space.s2))
+                                Text(top.usd?.let(Usage::money) ?: "${Usage.tokens(top.tokens)} tokens", style = MaterialTheme.typography.bodySmall, color = quiet, modifier = Modifier.padding(start = Space.s2))
                             }
                         }
                     }

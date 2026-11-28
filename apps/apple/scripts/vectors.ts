@@ -16,7 +16,8 @@ import * as core from "../../../packages/core/src/index.ts";
 import { besideChip, primaryState, type AgentState } from "../../web/src/lib/agent-state.ts";
 import { homePrimaryLine, homeRows, primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
 import { listLocale, listTime, timeMark } from "../../web/src/lib/time.ts";
-import { ruleSentence } from "../../web/src/lib/rules.ts";
+import { ruleSentence, ruleTitle } from "../../web/src/lib/rules.ts";
+import { budgetWords, meterLine, moneyWords, SETTINGS_WORDS, spentWords } from "../../web/src/lib/usage.ts";
 import { handoffTerms, handoffTitle } from "../../web/src/lib/grants.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
 import { groupConversations, timeMarks } from "../../web/src/lib/chats.ts";
@@ -560,6 +561,21 @@ const permissions = {
     { from: { id: "n_homelab", name: "homelab" }, to: { id: "n_ultra", name: "ultra" }, terms: { tools: [], budgetUsdPerDay: 0.5 } },
     { from: { id: "n_ultra", name: "ultra" }, to: { id: "n_laptop", name: "laptop" }, terms: null },
   ].map((grant) => ({ grant, title: handoffTitle(grant), terms: handoffTerms(grant.terms) })),
+  // A rule's name heads its row as you'd say it (lib/rules.ts ruleTitle).
+  titles: ["pushes", "no-force-push", "ci_on_main", "Deploys"].map((name) => ({ name, title: ruleTitle(name) })),
+  // Settings' own words (lib/usage.ts SETTINGS_WORDS): "Can do" for what a device may do; a read-only page's one line.
+  words: SETTINGS_WORDS,
+  // Money as the apps say it, always two decimals, rounded on the exact value (1.005 is under; 0.125 is half way), and the
+  // usage meter: its figure, the line under it, and the two in one line (lib/usage.ts moneyWords, spentWords, budgetWords, meterLine).
+  money: [0, 0.0042, 0.61, 12.3, 36.6, 240, 1.005, 0.125, 2.675].map((usd) => ({ usd, words: moneyWords(usd) })),
+  meters: [
+    { spentUsd: 0.4, budgetUsd: 1, complete: true, tokens: 1_204_000 },
+    { spentUsd: 1, budgetUsd: 1, complete: true, tokens: 1_204_000 },
+    { spentUsd: 36.6, budgetUsd: 1, complete: false, tokens: 1_204_000 },
+    { spentUsd: 36.6, budgetUsd: 1, complete: true, tokens: 1_204_000 },
+    { spentUsd: 36.6, budgetUsd: null, complete: true, tokens: 1_204_000 },
+    { spentUsd: 0, budgetUsd: null, complete: false, tokens: 8_200 },
+  ].map((meter) => ({ meter, spent: spentWords(meter), budget: budgetWords(meter), line: meterLine(meter) })),
 };
 
 // ---- your agent's line in the list that is home (lib/roster.ts homePrimaryLine): never what waits on you, which its row
@@ -1656,6 +1672,9 @@ const steps = {
     { budgetUsd: undefined, record: record(40, 34, [usage("deepseek/deepseek-v4-pro", 2, 0, 0, { unknown: 2 })]) },
     { budgetUsd: 3, record: record(40, 34, []) },
     { budgetUsd: undefined, record: record(130, 4, []) },
+    // (Money in two decimals however much: $14.40 of $25.00, never $14.4 of $25.0.)
+    { budgetUsd: 25, record: undefined },
+    { budgetUsd: 25, record: record(40, 34, [usage("deepseek/deepseek-v4-pro", 4, 20_000_000, 1_000_000)]) },
   ].map(({ budgetUsd, record: r }) => ({ budgetUsd: budgetUsd ?? null, record: r ?? null, words: costWords({ budgetUsd, record: r }, PRICES) })),
 };
 

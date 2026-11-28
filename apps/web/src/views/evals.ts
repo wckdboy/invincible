@@ -1,6 +1,6 @@
 import type { EvalRunsView, EvalView } from "@invincible/core";
 import { effortReport } from "@invincible/core/eval-index";
-import { type Price, tokensLabel, usdLabel } from "@invincible/core/spend";
+import { type Price, tokensLabel } from "@invincible/core/spend";
 import { type Comparison, doneLine, doneReport, modelReport, type ModelRow, reviewerReport, type ReviewerRow, type RoleReport, variantReport } from "@invincible/core/eval-reports";
 import { isUnavailable } from "../api.ts";
 import type { Ctx, View } from "../context.ts";
@@ -8,6 +8,7 @@ import { plural } from "../lib/text.ts";
 import { absoluteTime, relativeTime } from "../lib/time.ts";
 import { checkLabel, heldLabels, isCheck, runCost, spentLine } from "../lib/eval-cost.ts";
 import { byProblem, durationLabel, groupRuns, type Mark, markOf, numberLabel, offBy, percent, type RunSummary } from "../lib/evals.ts";
+import { moneyWords } from "../lib/usage.ts";
 import { badge, button, callout, copyField, empty, errorState, meter, pageHead, section, segmented, skeletonBlock, skeletonRows, statTile, type Tone } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
 import { h, keepPlace, replace } from "../ui/dom.ts";
@@ -246,7 +247,7 @@ export const evalsView: View = (root, ctx, { scope }) => {
     const cost = [
       row.tokensPerEval !== null ? `${tokensLabel(row.tokensPerEval)} tokens an eval` : "tokens unknown",
       durationLabel(Math.round(row.secondsPerEval)),
-      row.usdPerEval !== null ? `${usdLabel(row.usdPerEval)} an eval` : "no price",
+      row.usdPerEval !== null ? `${moneyWords(row.usdPerEval)} an eval` : "no price",
     ];
     return h(
       "div",

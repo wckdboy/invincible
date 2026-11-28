@@ -1,6 +1,7 @@
 import type { EvalAnswer, EvalRunSettings, EvalView, UsageRow } from "@invincible/core";
 import { costed, costIndex, type Interval } from "@invincible/core/eval-index";
-import { costOf, type Price, priceFor, type Prices, spendTotal, tokensLabel, type UsageLine, usdLabel } from "@invincible/core/spend";
+import { costOf, type Price, priceFor, type Prices, spendTotal, tokensLabel, type UsageLine } from "@invincible/core/spend";
+import { moneyWords } from "./usage.ts";
 
 /*
  * What evals and model calls cost, as people read it. Pure functions (no DOM),
@@ -23,7 +24,7 @@ export function spentLine(t: Pick<EvalView, "spent">, prices: Prices): string | 
   const total = spendTotal(lines);
   if (total.unknown === total.calls) return `tokens unknown (${total.calls} calls, none reported by its provider)`;
   const cost = costOf(lines, prices);
-  const money = cost.complete ? usdLabel(cost.usd) : cost.unpriced.length ? `no price for ${cost.unpriced.join(", ")}` : `at least ${usdLabel(cost.usd)}`;
+  const money = cost.complete ? moneyWords(cost.usd) : cost.unpriced.length ? `no price for ${cost.unpriced.join(", ")}` : `at least ${moneyWords(cost.usd)}`;
   return `${total.complete ? "" : "at least "}${tokensLabel(total.input)} tokens in, ${tokensLabel(total.output)} out · ${total.calls} calls · ${money}`;
 }
 
@@ -47,7 +48,7 @@ export function runCost(evals: readonly EvalView[], prices: Prices): RunCost | n
   const index = costIndex(scored.map((t) => costed(t, prices)));
   return {
     tokens: index.tokens !== null ? `${tokensLabel(index.tokens)} tokens` : "tokens unknown",
-    money: index.usd !== null && index.perUsd && index.perUsd.n === scored.length ? usdLabel(index.usd) : null,
+    money: index.usd !== null && index.perUsd && index.perUsd.n === scored.length ? moneyWords(index.usd) : null,
     buys: [ratio(index.perMTok, "points per million tokens"), ratio(index.perHour, "per hour"), ratio(index.perUsd, "per dollar")].filter((x): x is string => x !== null),
     counted,
     of: scored.length,

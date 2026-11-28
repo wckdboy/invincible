@@ -37,6 +37,29 @@ class SettingsWordsVectorsTest {
         for (c in cases) assertEquals(c["sentence"].string, Permissions.sentence(c["rule"]!!))
     }
 
+    @Test fun aRulesNameHeadsItsRowAsYoudSayIt() {
+        val cases = v["permissions"]["titles"].list
+        assertTrue(cases.size >= 4)
+        for (c in cases) assertEquals(c["title"].string, Permissions.ruleTitle(c["name"].string!!))
+    }
+
+    @Test fun moneyAndTheUsageMeterAreSaidAsThePwaSaysThem() {
+        for (c in v["permissions"]["money"].list) assertEquals(c["words"].string, Usage.money(c["usd"].double!!))
+        val meters = v["permissions"]["meters"].list
+        assertTrue(meters.size >= 6)
+        for (c in meters) {
+            val m = c["meter"]
+            assertEquals(c["spent"].string, Usage.spentWords(m["spentUsd"].double!!, m["complete"].bool!!))
+            assertEquals(c["budget"].string, Usage.budgetWords(m["spentUsd"].double!!, m["budgetUsd"].double, m["tokens"].long!!))
+            assertEquals(c["line"].string, Usage.meterLine(m["spentUsd"].double!!, m["complete"].bool!!, m["budgetUsd"].double, m["tokens"].long!!))
+        }
+    }
+
+    @Test fun settingsOwnWordsAreEveryApps() {
+        assertEquals(v["permissions"]["words"]["scopes"].string, SettingsWords.SCOPES)
+        assertEquals(v["permissions"]["words"]["readOnly"].string, SettingsWords.READ_ONLY)
+    }
+
     @Test fun eachHandOffIsSaidAsThePwaSaysIt() {
         val cases = v["permissions"]["handoffs"].list
         assertTrue(cases.size >= 3)

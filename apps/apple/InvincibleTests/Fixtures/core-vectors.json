@@ -5949,6 +5949,134 @@
         "title": "ultra → laptop",
         "terms": "Written by a newer node: not understood here."
       }
+    ],
+    "titles": [
+      {
+        "name": "pushes",
+        "title": "Pushes"
+      },
+      {
+        "name": "no-force-push",
+        "title": "No force push"
+      },
+      {
+        "name": "ci_on_main",
+        "title": "Ci on main"
+      },
+      {
+        "name": "Deploys",
+        "title": "Deploys"
+      }
+    ],
+    "words": {
+      "scopes": "Can do",
+      "readOnly": "Read-only for now: adding and changing come next."
+    },
+    "money": [
+      {
+        "usd": 0,
+        "words": "$0.00"
+      },
+      {
+        "usd": 0.0042,
+        "words": "$0.0042"
+      },
+      {
+        "usd": 0.61,
+        "words": "$0.61"
+      },
+      {
+        "usd": 12.3,
+        "words": "$12.30"
+      },
+      {
+        "usd": 36.6,
+        "words": "$36.60"
+      },
+      {
+        "usd": 240,
+        "words": "$240.00"
+      },
+      {
+        "usd": 1.005,
+        "words": "$1.00"
+      },
+      {
+        "usd": 0.125,
+        "words": "$0.13"
+      },
+      {
+        "usd": 2.675,
+        "words": "$2.67"
+      }
+    ],
+    "meters": [
+      {
+        "meter": {
+          "spentUsd": 0.4,
+          "budgetUsd": 1,
+          "complete": true,
+          "tokens": 1204000
+        },
+        "spent": "$0.40",
+        "budget": "of $1.00 · $0.60 left",
+        "line": "$0.40 of $1.00 · $0.60 left"
+      },
+      {
+        "meter": {
+          "spentUsd": 1,
+          "budgetUsd": 1,
+          "complete": true,
+          "tokens": 1204000
+        },
+        "spent": "$1.00",
+        "budget": "of $1.00 · all spent",
+        "line": "$1.00 of $1.00 · all spent"
+      },
+      {
+        "meter": {
+          "spentUsd": 36.6,
+          "budgetUsd": 1,
+          "complete": false,
+          "tokens": 1204000
+        },
+        "spent": "At least $36.60",
+        "budget": "of $1.00 · over budget",
+        "line": "At least $36.60 of $1.00 · over budget"
+      },
+      {
+        "meter": {
+          "spentUsd": 36.6,
+          "budgetUsd": 1,
+          "complete": true,
+          "tokens": 1204000
+        },
+        "spent": "$36.60",
+        "budget": "of $1.00 · over budget",
+        "line": "$36.60 of $1.00 · over budget"
+      },
+      {
+        "meter": {
+          "spentUsd": 36.6,
+          "budgetUsd": null,
+          "complete": true,
+          "tokens": 1204000
+        },
+        "spent": "$36.60",
+        "budget": "1.20M tokens · no budget",
+        "line": "$36.60 · 1.20M tokens · no budget"
+      },
+      {
+        "meter": {
+          "spentUsd": 0,
+          "budgetUsd": null,
+          "complete": false,
+          "tokens": 8200
+        },
+        "spent": "$0.00",
+        "budget": "8,200 tokens · no budget",
+        "line": "$0.00 · 8,200 tokens · no budget"
+      }
     ]
   },
   "proofLines": [
@@ -37479,6 +37607,34 @@
           "spent": []
         },
         "words": "no model calls · 2h 06m"
+      },
+      {
+        "budgetUsd": 25,
+        "record": null,
+        "words": "budget $25.00"
+      },
+      {
+        "budgetUsd": 25,
+        "record": {
+          "startedAt": 1763197600000,
+          "endedAt": 1763197960000,
+          "ended": "done",
+          "commands": 12,
+          "revisions": 1,
+          "spent": [
+            {
+              "role": "engineer",
+              "model": "deepseek/deepseek-v4-pro",
+              "calls": 4,
+              "unknown": 0,
+              "input": 20000000,
+              "output": 1000000,
+              "cached": 0,
+              "reasoning": 0
+            }
+          ]
+        },
+        "words": "$14.40 of $25.00 · 6m 00s"
       }
     ]
   },

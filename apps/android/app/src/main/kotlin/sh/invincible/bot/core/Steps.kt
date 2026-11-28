@@ -456,7 +456,7 @@ object Steps {
      * Before it has ended, its budget alone.
      */
     fun costWords(budgetUsd: Double?, record: TeamTask.Record?, prices: Map<String, Price>): String {
-        val budget = budgetUsd?.let(Usage::usd)
+        val budget = budgetUsd?.let(Usage::money)
         if (record == null) return if (budget != null) "budget $budget" else ""
         val total = Spend.total(record.spent)
         val cost = Spend.costOf(record.spent, prices)
@@ -464,7 +464,7 @@ object Steps {
             total.calls == 0.0 -> null
             total.unknown == total.calls -> "spend unknown"
             cost.unpriced.isNotEmpty() -> "no price"
-            else -> "${if (cost.complete) "" else "at least "}${Usage.usd(cost.usd)}"
+            else -> "${if (cost.complete) "" else "at least "}${Usage.money(cost.usd)}"
         }
         val spent = if (money != null) (if (budget != null) "$money of $budget" else money) else if (budget != null) "budget $budget" else if (total.calls == 0.0) "no model calls" else null
         // (A run of under half a second says no time: never "0s".)

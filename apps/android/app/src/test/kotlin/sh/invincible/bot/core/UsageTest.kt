@@ -10,32 +10,33 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The meter's words, as the node's own say money and tokens and as the iPhone's meter says them (UsageTests.swift). */
+/** The meter's words: money in two decimals as every app says it (lib/usage.ts), tokens as the node says them. */
 class UsageTest {
     private fun meter(spent: Double, budget: Double?, left: Double?, complete: Boolean = true) =
         UsageMeter("month", "2026-11-01", budget, spent, complete, emptyList(), 3_610_000, 3, left, emptyList())
 
-    @Test fun moneyAndTokensReadAsTheNodesDo() {
-        assertEquals("$0", Usage.usd(0.0))
-        assertEquals("$0.0050", Usage.usd(0.005))
-        assertEquals("$3.40", Usage.usd(3.4))
-        assertEquals("$10.0", Usage.usd(10.0))
-        assertEquals("$150", Usage.usd(150.0))
+    @Test fun moneyIsAlwaysTwoDecimalsAndTokensReadAsTheNodesDo() {
+        assertEquals("$0.00", Usage.money(0.0))
+        assertEquals("$0.0050", Usage.money(0.005))
+        assertEquals("$3.40", Usage.money(3.4))
+        assertEquals("$10.00", Usage.money(10.0))
+        assertEquals("$150.00", Usage.money(150.0))
         assertEquals("9,999", Usage.tokens(9_999))
         assertEquals("48.2k", Usage.tokens(48_210))
         assertEquals("2.34M", Usage.tokens(2_340_000))
     }
 
-    @Test fun theLineSaysWhatIsLeftOrThatItIsSpent() {
-        assertEquals("at least $3.40 of $10.0 · $6.60 left", Usage.line(meter(3.4, 10.0, 6.6, complete = false)))
-        assertEquals("$2.10 of $2.00 · spent", Usage.line(meter(2.1, 2.0, 0.0)))
-        assertEquals("$3.40 · 3.61M tokens", Usage.line(meter(3.4, null, null)))
-        // Nothing priced yet is $0, never "at least $0".
-        assertEquals("$0 · 3.61M tokens", Usage.line(meter(0.0, null, null, complete = false)))
+    @Test fun theLineSaysWhatIsLeftOrThatItIsOverBudget() {
+        assertEquals("At least $3.40 of $10.00 · $6.60 left", Usage.line(meter(3.4, 10.0, 6.6, complete = false)))
+        assertEquals("$2.10 of $2.00 · over budget", Usage.line(meter(2.1, 2.0, 0.0)))
+        assertEquals("$2.00 of $2.00 · all spent", Usage.line(meter(2.0, 2.0, 0.0)))
+        assertEquals("$3.40 · 3.61M tokens · no budget", Usage.line(meter(3.4, null, null)))
+        // Nothing priced yet is $0.00, never "At least $0.00".
+        assertEquals("$0.00 · 3.61M tokens · no budget", Usage.line(meter(0.0, null, null, complete = false)))
         assertEquals(1.0, Usage.share(meter(15.0, 10.0, 0.0))!!, 0.0)
         assertNull(Usage.share(meter(3.0, null, null)))
-        assertEquals("of $10.0 this month: $6.60 left", Usage.subline(meter(3.4, 10.0, 6.6)))
-        assertEquals("spent this month, with no budget", Usage.subline(meter(3.4, null, null)))
+        assertEquals("This month: of $10.00 · $6.60 left", Usage.subline(meter(3.4, 10.0, 6.6)))
+        assertEquals("This month: 3.61M tokens · no budget", Usage.subline(meter(3.4, null, null)))
     }
 
     @Test fun aSpentPlanIsSaidWithTheHourItResetsOnThisPhonesClock() {

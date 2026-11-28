@@ -75,6 +75,13 @@ export function ruleParts(rule: { does: RuleDoes; words: readonly string[]; cont
   return parts;
 }
 
+/** A rule's name as Settings' Permissions heads its row in every app (a rule's name is its id, typed as one: "pushes",
+ * "no-force-push"): as you'd say it, a capital first and its hyphens and underscores spaces. */
+export const ruleTitle = (name: string): string => {
+  const words = name.replace(/[-_]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 /** The same as a sentence, as Settings' Permissions says it in every app (the iPhone's Permissions.sentence): its first
  * word a capital, its text in curly quotes, a full stop. */
 export const ruleSentence = (rule: { does: RuleDoes; words: readonly string[]; contains?: string; run?: string }): string => {
