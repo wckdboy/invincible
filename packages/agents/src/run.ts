@@ -1973,8 +1973,10 @@ export async function runLoop(options: RunOptions, deps: RunDeps): Promise<RunOu
       if (revisions < o.maxRevisions) revisions += 1;
       const words = `${sentBack(verdict, "verify it, then end with a short summary and the evidence.")}${late.length ? `\n\n${steersSaid(late, o.unreviewed)}` : ""}`;
       prompt = told(words);
-      // (Only a message that carries steers is said again after a model's failure: one without is what it always was.)
-      carried = late.length ? words : "";
+      // (Only a message that carries steers is said again after a model's failure: one without is what it always was. With
+      // no session the reviewer's words are carried too, since only this message holds them: a run cut off is taken up in
+      // a new one, which is told them again (the third re-check of 28 November 2026, N2b).)
+      carried = late.length || !session ? words : "";
     }
   };
 

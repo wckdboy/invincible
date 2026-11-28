@@ -353,6 +353,19 @@ describe("steers that must still reach the work (the independent review, 27 Nove
     expect(q.prompts.join("\n")).toContain("Use the new schema.");
   });
 
+  // The third re-check of 28 November 2026, N2b: with no session, a revision run cut off was taken up told its briefing
+  // and that it was cut off, but not the reviewer's words, which only the revision's own message held.
+  test("one that keeps no session, sent back and its revision run cut off, is taken up told the reviewer's words too, its briefing once", async () => {
+    const q = harness([[tool(1), { type: "text", text: "Written." }]], ["REVISE\nThe parser has no test.", "PASS\nNow it has one."], () => {}, 1, { repeat: true, cut: 1 });
+    const outcome = await q.run;
+    expect(outcome.status).toBe("done");
+    expect(q.prompts).toHaveLength(3);
+    expect(q.prompts[2]).toStartWith(q.prompts[0]!);
+    expect(q.prompts[2]!.split(q.prompts[0]!)).toHaveLength(2);
+    expect(q.prompts[2]).toContain("Your last run was cut off before it ended");
+    expect(q.prompts[2]).toContain("The parser has no test.");
+  });
+
   test("one that keeps no session, cut off before it ended, is taken up once in a new run told its briefing; cut off again, it goes on as any failure", async () => {
     const q = harness([[tool(1)], [tool(2), { type: "text", text: "Written." }]], ["PASS\nIt parses."], () => {}, 1, { repeat: true, cut: 0 });
     const outcome = await q.run;
