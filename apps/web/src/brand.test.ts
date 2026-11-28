@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { BRAND_PNGS, FAVICON_SVG, ZOOM } from "../../../scripts/brand.ts";
+import { ANDROID_ICON, BRAND_PNGS, FAVICON_SVG, ZOOM } from "../../../scripts/brand.ts";
 import { downscale, greyscale, png, roundTile } from "../../../scripts/field-icon.ts";
-import { MARK_FORMS, MARK_POLYGON, MARK_RECTS, markCoverage, markReach, renderMark } from "../../../scripts/mark.ts";
+import { MARK_BOX, MARK_FORMS, MARK_INK, MARK_POLYGON, MARK_RECTS, markCoverage, markReach, renderMark } from "../../../scripts/mark.ts";
 
 const ROOT = resolve(import.meta.dir, "../../..");
 /** A PNG's width, height and colour type (2: RGB, 6: RGBA), from its header. */
@@ -79,7 +79,7 @@ describe("the app icon: the I-beam, one solid form in one ink", () => {
       const h = header(path);
       expect([path, h.width, h.height]).toEqual([path, size, size]);
       // The full-bleed forms are opaque (iOS wants its touch icon so); the rounded and layered forms keep their alpha.
-      const transparent = /icon-(64|192|512|mono-96)\.png$|assets\/icon\.png$|ic_launcher_(foreground|monochrome)\.png$/.test(path);
+      const transparent = /icon-(64|192|512|mono-96)\.png$|assets\/icon\.png$/.test(path);
       expect([path, h.type]).toEqual([path, transparent ? 6 : 2]);
     }
   });
@@ -121,6 +121,27 @@ describe("the app icon: the I-beam, one solid form in one ink", () => {
     const svg = '<link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />';
     expect(page).toContain(png64);
     expect(page.indexOf(svg)).toBeGreaterThan(page.indexOf(png64));
+  });
+
+  // Android's launcher keeps the form it drew at install (checked on a Pixel launcher, 28 November 2026), so its icon
+  // can't follow the mode: it stays the black icon, now drawn from the mark itself, and its themed form is the bare
+  // I-beam the system tints in light and dark.
+  test("Android's adaptive icon: the near black field, the white I-beam in front, and its themed form, exactly the mark", () => {
+    const res = "apps/android/app/src/main/res";
+    for (const [path, text] of Object.entries(ANDROID_ICON)) expect([path, readFileSync(join(ROOT, res, path), "utf8")]).toEqual([path, text]);
+    expect(ANDROID_ICON["values/ic_launcher.xml"]).toContain(`<color name="ic_launcher_background">${MARK_INK.tile.toUpperCase().replace("#", "#FF")}</color>`);
+    const scale = (MARK_BOX * ZOOM.adaptive * 108) / 100;
+    for (const layer of ["foreground", "monochrome"]) {
+      const vector = ANDROID_ICON[`drawable/ic_launcher_${layer}.xml`]!;
+      expect(vector).toContain(`android:scaleX="${+scale.toFixed(4)}" android:scaleY="${+scale.toFixed(4)}" android:translateX="${+(54 - 50 * scale).toFixed(4)}" android:translateY="${+(54 - 50 * scale).toFixed(4)}"`);
+      const rects = [...vector.matchAll(/M(\d+),(\d+)H(\d+)V(\d+)H(\d+)Z/g)].map((m) => [m[1], m[2], m[3], m[4]].map(Number));
+      expect(rects).toEqual(MARK_RECTS.map((r) => [...r]));
+      expect(vector).toContain('android:fillColor="#FFFFFFFF"');
+    }
+    expect(ANDROID_ICON["mipmap-anydpi/ic_launcher.xml"]).toContain('<monochrome android:drawable="@drawable/ic_launcher_monochrome" />');
+    // No raster layers left behind.
+    for (const density of ["mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"])
+      for (const layer of ["foreground", "background", "monochrome"]) expect(existsSync(join(ROOT, res, `mipmap-${density}/ic_launcher_${layer}.png`))).toBe(false);
   });
 
   test("the favicon is the bare I-beam, near black in a light tab and white in a dark one, on nothing", () => {

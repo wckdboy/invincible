@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Made by scripts/brand.ts: the launcher icon's field, near black in light and dark alike (scripts/mark.ts MARK_INK). -->
+<resources>
+    <color name="ic_launcher_background">#FF0A0A0B</color>
+</resources>
