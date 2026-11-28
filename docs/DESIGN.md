@@ -332,12 +332,27 @@ These are enforced in code and, where possible, in tests (`packages/node/test/as
 
 ## Keyboard
 
+T3 Code's keys, where Invincible has what they do, and its own where T3 Code leaves a key free (`lib/keys.ts`; the owner's
+word, 28 November 2026: the Mac app a near copy of T3 Code, its keyboard included). ⌘ on a Mac, Ctrl elsewhere; they work
+from a message box too, but not over a sheet. A bracket or a digit is read by where it lies on the keyboard as well, so the
+owner's Danish keyboard has ⌘[ on Å. In a browser its own keys stay its own (its tabs, its zoom, its history: the rows
+marked *app*); the Mac app's window has none of those, so there they are the app's.
+
 | Keys | Action |
 |---|---|
 | ⌘K / Ctrl+K, `/` | Search and commands |
+| ⌘N | A new chat with your agent |
+| ⌘⇧N | Give a task to the agents |
+| ⌘⇧I | Needs you |
+| ⌘B, `[` | Fold the sidebar away, or bring it back |
+| ⌘D | A task's details, or an agent's side panel (from 1200 px), shown or hidden |
+| ⌘J | A task's terminal (from 1024 px), shown or hidden |
+| ⌘0 (*app*) | Your agent |
+| ⌘1–⌘9 (*app*) | The first nine threads in a desk's sidebar |
+| ⌘⇧[ ⌘⇧] (*app*) | The thread above or below the one you are on, in a desk's sidebar |
+| ⌘[ ⌘] (*app*) | Back, forward |
 | `G` then `J C H I .` | Go to Home, Invincible's conversation, the agents, Needs you, More |
 | `G` then `O P R A W T M U K E F S V L N ,` | Go to Overview, Projects, Loops, Activity, Artifacts, Evals, Memory, Skills, Archive, Findings, Fleet, Sandboxes, Vault, Models, Connectors, Settings |
-| `[` | Fold the sidebar away, or bring it back |
 | `?` | Show shortcuts |
 | Enter / Shift+Enter | Send / new line (chat) |
 | Enter, Ctrl+Enter (⌘+Enter) while it works | Steer it now, or queue it for after: Enter does the one this device chose, the modifier the other (a chat's answer, or a task's run in its thread) |

@@ -6,6 +6,7 @@ import { TEAM_LIMITS } from "@invincible/core/team-limits";
 import { isAbort } from "../api.ts";
 import { type Ctx, errorMessage, type View } from "../context.ts";
 import { isWaiting } from "../live.ts";
+import { keyWords } from "../lib/keys.ts";
 import { hashOf } from "../lib/nav.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
 import { agentOfCaller } from "../lib/roster.ts";
@@ -22,7 +23,7 @@ import { chatEnter, setTaskDetailsShown, taskDetailsShown } from "../prefs.ts";
 import { badge, button, callout, dot, empty, errorState, skeletonBlock } from "../ui/controls.ts";
 import { composerBox } from "../ui/composer.ts";
 import { openSheet } from "../ui/dialog.ts";
-import { cx, h, keepPlace, replace, type Child, type Scope } from "../ui/dom.ts";
+import { cx, h, isMac, keepPlace, replace, type Child, type Scope } from "../ui/dom.ts";
 import { icon, type IconName } from "../ui/icons.ts";
 import { codeBlock, renderMarkdown } from "../ui/markdown.ts";
 import { markStateOfAgent } from "../ui/mark.ts";
@@ -31,6 +32,7 @@ import { toast } from "../ui/toast.ts";
 import { askItem } from "./needs.ts";
 import { controlTeam, giveTask, shipTask } from "./team-forms.ts";
 import { openTerminal, runTerminal, type TerminalRun } from "./terminal.ts";
+import { onViewKey } from "./view-keys.ts";
 import { askProjects, projectNames, projectTile, workNow } from "./work-rows.ts";
 import { diffParts, openWorkspace } from "./workspace.ts";
 import { rosterBack } from "./sidebar.ts";
@@ -226,7 +228,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     },
   });
   newShell.hidden = true;
-  const hideTerminal = button("Hide the terminal", { variant: "ghost", size: "sm", iconOnly: true, icon: "x", onClick: () => showTerminal(false) });
+  const hideTerminal = button("Hide the terminal", { variant: "ghost", size: "sm", iconOnly: true, icon: "x", title: `Hide the terminal  (${keyWords(["mod", "J"], isMac())})`, onClick: () => showTerminal(false) });
   const grip = h("div", { class: "drawer-grip", role: "separator", tabindex: 0, "aria-orientation": "horizontal", "aria-label": "The terminal's height", "aria-valuemin": String(DRAWER_LEAST) });
   const drawer = h("section", { class: "thread-drawer", hidden: true, "aria-label": "Terminal" }, grip, h("div", { class: "drawer-bar" }, icon("terminal", { size: 14 }), termTitle, termStatus, h("span", { class: "grow" }), endShell, newShell, hideTerminal), termBox);
   const column = h("div", { class: "thread-column" }, scroller, liveLine, composerWrap, drawer);
@@ -394,19 +396,22 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   }
 
   const backHome = (): HTMLElement => rosterBack(ctx);
+  /** Its details shown or hidden beside it (a sheet on a phone): its button, and ⌘D. */
+  const toggleDetails = (): void => {
+    if (!wide.matches) return openDetailsSheet();
+    shownDetails = !shownDetails;
+    setTaskDetailsShown(shownDetails);
+    drawHead(now()!, true);
+    drawDetails(true);
+  };
   const detailsToggle = (): HTMLButtonElement => {
     const toggle = button(shownDetails ? "Hide the details" : "Show the details", {
       variant: "ghost",
       size: "sm",
       iconOnly: true,
       icon: "panel",
-      onClick: () => {
-        if (!wide.matches) return openDetailsSheet();
-        shownDetails = !shownDetails;
-        setTaskDetailsShown(shownDetails);
-        drawHead(now()!, true);
-        drawDetails(true);
-      },
+      title: `${shownDetails ? "Hide" : "Show"} the details  (${keyWords(["mod", "D"], isMac())})`,
+      onClick: toggleDetails,
     });
     toggle.classList.add("thread-details-toggle");
     toggle.setAttribute("aria-pressed", String(wide.matches && shownDetails));
@@ -420,7 +425,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   };
   const terminalToggle = (n: Now): HTMLButtonElement | null => {
     if (!desk.matches || !terminalOf(n)) return null;
-    const toggle = button(terminalShown ? "Hide the terminal" : "Show the terminal", { variant: "ghost", size: "sm", iconOnly: true, icon: "terminal", onClick: () => showTerminal(!terminalShown) });
+    const toggle = button(terminalShown ? "Hide the terminal" : "Show the terminal", { variant: "ghost", size: "sm", iconOnly: true, icon: "terminal", title: `${terminalShown ? "Hide" : "Show"} the terminal  (${keyWords(["mod", "J"], isMac())})`, onClick: () => showTerminal(!terminalShown) });
     toggle.classList.add("thread-terminal-toggle");
     toggle.setAttribute("aria-pressed", String(terminalShown));
     return toggle;
@@ -1028,6 +1033,22 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   scope.add(() => wide.removeEventListener("change", resized));
   desk.addEventListener("change", resized);
   scope.add(() => desk.removeEventListener("change", resized));
+  // T3 Code's ⌘D (its details) and ⌘J (its terminal, a desk's, where its agent's VM is on this node), while it shows.
+  scope.add(
+    onViewKey("panel", () => {
+      if (!now()) return false;
+      toggleDetails();
+      return true;
+    }),
+  );
+  scope.add(
+    onViewKey("terminal", () => {
+      const n = now();
+      if (!n || !desk.matches || !terminalOf(n)) return false;
+      showTerminal(!terminalShown);
+      return true;
+    }),
+  );
   // The trail as it was last read this session, at once (api.peek): the work shows with the page.
   const kept = id ? ctx.api.peek<TrailPage>("/api/team/trail", { task: id, after: 0 }) : null;
   if (kept && !kept.more) {

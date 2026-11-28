@@ -2,6 +2,7 @@ import type { ConversationSummary } from "@invincible/core";
 import { glassState } from "@invincible/core/glass";
 import type { Ctx, Route } from "../context.ts";
 import { type AgentState, primaryState, STATES, withState } from "../lib/agent-state.ts";
+import { keyWords } from "../lib/keys.ts";
 import { taskOf } from "../lib/nav.ts";
 import { teamLocation } from "../lib/team.ts";
 import { age, type Thread, type ThreadProject, threadsOf } from "../lib/threads.ts";
@@ -58,9 +59,9 @@ export function deskNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   let conversations: ConversationSummary[] = [];
 
   // ---- the head: the app's mark (your agent's chat), a new chat, search and the fold ----
-  const fold = button("Hide the sidebar", { variant: "ghost", size: "sm", iconOnly: true, icon: "sidebar", title: "Hide the sidebar  ( [ )", onClick: () => shell.toggle() });
+  const fold = button("Hide the sidebar", { variant: "ghost", size: "sm", iconOnly: true, icon: "sidebar", title: `Hide the sidebar  (${keyWords(["mod", "B"], isMac())} or [ )`, onClick: () => shell.toggle() });
   const search = button("Search", { variant: "ghost", size: "sm", iconOnly: true, icon: "search", title: `Search and commands  (${isMac() ? "⌘" : "Ctrl"} K)`, onClick: () => ctx.palette() });
-  const fresh = button("New chat", { variant: "ghost", size: "sm", iconOnly: true, icon: "edit", title: "New chat with your agent", onClick: () => (startNewChat(), ctx.navigate("chat")) });
+  const fresh = button("New chat", { variant: "ghost", size: "sm", iconOnly: true, icon: "edit", title: `New chat with your agent  (${keyWords(["mod", "N"], isMac())})`, onClick: () => (startNewChat(), ctx.navigate("chat")) });
   const brand = h("a", { class: "side-mark", href: "#/chat", title: "Your agent" }, appMark(20), h("span", { class: "wordmark-text" }, "Invincible"));
   const head = h("div", { class: "side-head" }, brand, fresh, search, fold);
 
@@ -285,6 +286,12 @@ export function deskNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
       for (const stop of stops.splice(0)) stop();
     },
   };
+}
+
+/** The threads in a desk's sidebar as it shows them, top to bottom (your agent's chats, each project's): ⌘1–⌘9 go to the
+ * first nine, ⌘⇧[ and ⌘⇧] to the one above and below the one you are on (lib/keys.ts). None where there is no desk's. */
+export function deskThreadRows(root: ParentNode = document): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(".sidebar.desk .desk-row[data-key]")].filter((row) => /^(task|chat):/.test(row.dataset.key ?? ""));
 }
 
 /** The kept chat an address names (#/chat?c=<id>), or null. */

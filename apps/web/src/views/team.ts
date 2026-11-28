@@ -9,6 +9,7 @@ import { errorMessage, type View } from "../context.ts";
 import { PRIMARY } from "../lib/arrange.ts";
 import { hasDesktop, hasHardware } from "../lib/desktop.ts";
 import { besideChip } from "../lib/agent-state.ts";
+import { keyWords } from "../lib/keys.ts";
 import { rosterRows } from "../lib/roster.ts";
 import { handedFrom, type TaskAction, taskStanding } from "../lib/task-card.ts";
 import { activeTeamWork, engramLine, HARNESS, harnessNote, agentWorksOn, taskDependencies, teamSpeaker, agentMaker, type HarnessStatus } from "../lib/team.ts";
@@ -17,7 +18,7 @@ import { relativeTime } from "../lib/time.ts";
 import { agentPanelShown, setAgentPanelShown } from "../prefs.ts";
 import { badge, button, callout, dot, empty, errorState, list, listRow, note, section, skeletonRows } from "../ui/controls.ts";
 import { composerBox } from "../ui/composer.ts";
-import { h, keepPlace, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
+import { h, isMac, keepPlace, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
 import { icon } from "../ui/icons.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
 import { stateChip, workerAvatar } from "../ui/avatar.ts";
@@ -31,6 +32,7 @@ import { desktopViewer, type DesktopViewer } from "./desktop.ts";
 import { showLatest, taskCard } from "./task-card.ts";
 import { controlTeam, editAgent, editNotes, editRoom, exportAgent, giveTask, growVm, provisionVm, remakeVm, removeAgent, setCiBack, setEngram, setWritesFirst, shipTask, steerTask } from "./team-forms.ts";
 import { openTerminal } from "./terminal.ts";
+import { onViewKey } from "./view-keys.ts";
 import { openWorkspace } from "./workspace.ts";
 import { rosterBack } from "./sidebar.ts";
 
@@ -144,6 +146,15 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     setAgentPanelShown(shown);
     draw(true);
   };
+  // ⌘D (T3 Code's right panel): an agent's side panel, where it shows (from 1200 px).
+  const sideRoom = matchMedia("(min-width: 1200px)");
+  scope.add(
+    onViewKey("panel", () => {
+      if (!agent() || !sideRoom.matches) return false;
+      showSide(!sideShown);
+      return true;
+    }),
+  );
   /** A VM made, or made again: shown at once, and asked about again. */
   const madeVm = (person: Agent) => (made: SandboxView | null) => {
     workspace = { workspace: made };
@@ -174,7 +185,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     const toggle = button("Workspace", { size: "sm", icon: "sandbox", label: open ? "Close the workspace" : "Workspace", onClick: () => showPanel(!open) });
     toggle.classList.add("workspace-toggle");
     toggle.setAttribute("aria-pressed", String(open));
-    const sideToggle = button(sideShown ? "Hide the side panel" : "Show the side panel", { variant: "ghost", size: "sm", iconOnly: true, icon: "panel", onClick: () => showSide(!sideShown) });
+    const sideToggle = button(sideShown ? "Hide the side panel" : "Show the side panel", { variant: "ghost", size: "sm", iconOnly: true, icon: "panel", title: `${sideShown ? "Hide" : "Show"} the side panel  (${keyWords(["mod", "D"], isMac())})`, onClick: () => showSide(!sideShown) });
     sideToggle.classList.add("side-toggle");
     sideToggle.setAttribute("aria-pressed", String(sideShown));
     keepPlace(head, () =>

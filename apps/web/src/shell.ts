@@ -20,6 +20,7 @@ import { archiveView, openNewIdea } from "./views/archive.ts";
 import { projectsView } from "./views/projects.ts";
 import { chatActivityPill, chatsForPalette, chatView, lookAtWork, startNewChat } from "./views/chat.ts";
 import { filterConversations } from "./lib/chats.ts";
+import { KEY_ROWS, type KeyAction, keyAction } from "./lib/keys.ts";
 import { goToOf, hashOf, homeOf, keyedOf, landingOf, placesFor, routeOf, taskOf } from "./lib/nav.ts";
 import { closesKeyboard, keyboardOpen } from "./lib/viewport.ts";
 import { fromEdge, type Point, swiped } from "./lib/swipe.ts";
@@ -48,9 +49,10 @@ import { evalsView } from "./views/evals.ts";
 import { teamView } from "./views/team.ts";
 import { homeView } from "./views/home.ts";
 import { openRoster, type Sidebar, sidebarNav } from "./views/sidebar.ts";
-import { deskNav } from "./views/desk-nav.ts";
+import { deskNav, deskThreadRows } from "./views/desk-nav.ts";
 import { taskView } from "./views/task.ts";
 import { giveToAgents, openDirect } from "./views/team-forms.ts";
+import { viewKey } from "./views/view-keys.ts";
 import { tableOf } from "./views/roster.ts";
 import { teamLocation } from "./lib/team.ts";
 import { openAddKey, vaultView } from "./views/vault.ts";
@@ -517,7 +519,8 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
       body: h(
         "div",
         { class: "help-list" },
-        ...row("Search and commands", mod, "K"),
+        // T3 Code's, and Invincible's own where T3 Code leaves a key free (lib/keys.ts).
+        ...KEY_ROWS.filter((key) => !key.app || document.documentElement.dataset.shell === "mac").flatMap((key) => row(key.label, ...key.keys.map((part) => (part === "mod" ? mod : part)))),
         ...row("Show shortcuts", "?"),
         ...row("Show or hide the sidebar", "["),
         ...keyedOf(visible).flatMap((spec) => row(`Go to ${spec.label}`, "G", spec.key.toUpperCase())),
@@ -532,9 +535,15 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
   let gPressed = 0;
   document.addEventListener("keydown", onKey, { signal: lifetime.signal });
   function onKey(event: KeyboardEvent): void {
-    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
+    // T3 Code's keys (lib/keys.ts), from a message box as well: the palette over anything; the rest not over a sheet.
+    const action = keyAction(event, { mac: isMac(), app: document.documentElement.dataset.shell === "mac" });
+    if (action === "palette") {
       event.preventDefault();
       ctx.palette();
+      return;
+    }
+    if (action) {
+      if (!isPaletteOpen() && !document.querySelector("dialog[open]") && runKey(action)) event.preventDefault();
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event.target) || isPaletteOpen() || document.querySelector("dialog[open]")) return;
@@ -555,6 +564,50 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
         event.preventDefault();
         ctx.navigate(spec.id);
       }
+    }
+  }
+
+  /** What a key does (lib/keys.ts), and whether it did anything: one that didn't is left to the browser. */
+  function runKey(action: Exclude<KeyAction, "palette">): boolean {
+    if (typeof action === "object" || action === "previous" || action === "next") {
+      // A desk's threads, in its sidebar's order.
+      const rows = deskThreadRows();
+      const at = rows.findIndex((row) => row.getAttribute("aria-current") === "page");
+      const to = typeof action === "object" ? rows[action.thread - 1] : action === "next" ? rows[at < 0 ? 0 : at + 1] : rows[at < 0 ? rows.length - 1 : at - 1];
+      if (!to) return false;
+      to.click();
+      return true;
+    }
+    switch (action) {
+      case "new-chat":
+        if (!can("chat")) return false;
+        startNewChat();
+        ctx.navigate("chat");
+        return true;
+      case "give":
+        if (!can("fleet:admin") || !can("chat")) return false;
+        giveToAgents(ctx);
+        return true;
+      case "sidebar":
+        if (!hasWork || narrow.matches) return false;
+        toggleSidebar();
+        return true;
+      case "primary":
+        if (!can("chat")) return false;
+        ctx.navigate("chat");
+        return true;
+      case "needs":
+        ctx.navigate("inbox");
+        return true;
+      case "back":
+        history.back();
+        return true;
+      case "forward":
+        history.forward();
+        return true;
+      case "panel":
+      case "terminal":
+        return viewKey(action);
     }
   }
 

@@ -1183,7 +1183,9 @@ try {
     // The sheets and forms the places open, and the modes a place has: what opens each (a button's words, or a script).
     const press = (...labels: string[]) =>
       `(() => { const all = [...document.querySelectorAll("button, a.btn, [role=option]")].filter((el) => el.getClientRects().length); const el = ${JSON.stringify(labels)}.map((label) => all.find((b) => b.textContent.trim() === label || b.getAttribute("aria-label") === label)).find(Boolean); if (!el) throw new Error("nothing to press: " + ${JSON.stringify(labels.join(" / "))}); el.click(); })()`;
-    const key = (k: string, meta = false) => `document.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, metaKey: ${meta}, ctrlKey: ${meta}, bubbles: true }))`;
+    // (⌘ on a Mac, Ctrl elsewhere, as the app reads them: lib/keys.ts. Both at once is neither, a Mac's ⌃⌘ the system's.)
+    const key = (k: string, meta = false) =>
+      `(() => { const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent); document.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, code: ${JSON.stringify(/^[a-z]$/i.test(k) ? `Key${k.toUpperCase()}` : /^[0-9]$/.test(k) ? `Digit${k}` : "")}, metaKey: ${meta} && mac, ctrlKey: ${meta} && !mac, bubbles: true })); })()`;
     /** A view: where, what it waits for, this device's choices it is shot with (localStorage, cleared after), what is
      * pressed once it is there, and what the node is told before it and after (a route an older node lacks skips it). */
     interface View {
@@ -1237,6 +1239,10 @@ try {
       { name: "mac-task-running", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps", steps: [`document.documentElement.dataset.shell = "mac"`] },
       { name: "mac-task-running-folded", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps", prefs: { "invincible:sidebar": "collapsed" }, steps: [`document.documentElement.dataset.shell = "mac"`] },
       { name: "mac-primary", hash: `#/chat?c=${conversation}`, wait: ".turn.assistant", steps: [`document.documentElement.dataset.shell = "mac"`] },
+      // T3 Code's keys (since 28 November 2026): ⌘D its details, ⌘J its terminal; in the Mac app's window (a browser keeps
+      // its tabs' keys), ⌘1 the sidebar's first thread.
+      { name: "keys-task-panel-terminal", hash: `#/task/${first.id}`, wait: ".thread-drawer .xterm-screen", steps: [key("d", true), key("j", true)] },
+      { name: "mac-keys-first-thread", hash: "#/inbox", steps: [`document.documentElement.dataset.shell = "mac"`, key("1", true)], wait: ".thread-page .thread-steps, .chat-head, .thread-page .proof" },
       // Its terminal (a desk's, T3 Code's ⌘J): a drawer under the thread, a shell in its agent's VM.
       { name: "task-running-terminal", hash: `#/task/${first.id}`, steps: [press("Show the terminal")], wait: ".thread-drawer .xterm-screen" },
       { name: "inbox", hash: "#/inbox" },
@@ -1251,6 +1257,8 @@ try {
       // chat opens it. (On a wide screen the roster is the sidebar, in every other picture.)
       { name: "sheet-roster", hash: "#/chat", open: [press("Your agents")], wait: "dialog.sheet.drawer[open] .roster-row" },
       { name: "sheet-shortcuts", hash: "#/overview", open: [key("?")] },
+      // (In the Mac app's window: the keys a browser keeps for itself are the app's there.)
+      { name: "mac-sheet-shortcuts", hash: "#/overview", open: [`document.documentElement.dataset.shell = "mac"`, key("?")] },
       // A terminal in a VM, as a sheet (everywhere but a desk's thread, which has its drawer): a shell, the stand-in's.
       { name: "sheet-terminal", hash: "#/sandboxes", open: [press("Terminal")], wait: "dialog.terminal-sheet .xterm-screen" },
       { name: "sheet-chat-menu", hash: "#/chat", open: [press("Chat options")], wait: "dialog.selector-pop[open], dialog.selector-sheet[open]" },
