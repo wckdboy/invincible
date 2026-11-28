@@ -65,6 +65,16 @@ export interface RoleSpec {
 const WORK = ["deepseek/deepseek-v4-pro", "zai/glm-5.3", "mistral/mistral-large-latest", "anthropic/claude-opus-5-5", "openrouter/anthropic/claude-opus-5.5", "orcarouter/anthropic/claude-opus-5.5", "openai/gpt-6.2-astra", "xai/grok-4.7"];
 
 /**
+ * The orchestrator's defaults, the strongest first (your word, 28 November 2026: "orchestrator (big beefy models),
+ * workers/builders/subagents (fast cheaper models)"): it plans, reviews, decides who does what and talks with you, few
+ * calls where being right is worth the most. The frontier closed models first: Claude Opus 5.5, the one this system's
+ * own measurements ran its orchestrator roles on (and the desktop's toolset), then OpenAI's, Claude through the two
+ * routers, and xAI's; the open models after them, as fallbacks. The work's defaults stay the cheaper ones first (WORK,
+ * PLANS), so a key for both gives the ladder a rung (run.ts escalate): work stuck on the engineer's model goes to another.
+ */
+const LEAD = ["anthropic/claude-opus-5-5", "openai/gpt-6.2-astra", "openrouter/anthropic/claude-opus-5.5", "orcarouter/anthropic/claude-opus-5.5", "xai/grok-4.7", "deepseek/deepseek-v4-pro", "zai/glm-5.3", "mistral/mistral-large-latest"];
+
+/**
  * The coding plans' models, first for the engineer's work once you add a plan's key: its allowance is paid for already.
  * Each is asked only what its vendor's terms allow (providers.ts CodingPlan.allows): OpenCode Go its own coding and the
  * coding tools', Z.ai's and MiMo's the coding tools' alone, and never its talk with you.
@@ -74,13 +84,13 @@ const PLANS = ["opencode-go/deepseek-v4-pro", "opencode-go/glm-5.3", "zai-coding
 export const ROLES: Record<string, RoleSpec> = {
   planner: {
     description: "decomposes runs, makes judgment calls, talks to you",
-    defaults: WORK,
+    defaults: LEAD,
     effort: "high",
   },
   engineer: { description: "writes and changes code", defaults: [...PLANS, ...WORK], effort: "xhigh" },
   reviewer: {
     description: "independent check, ideally a different model family than the author",
-    defaults: WORK,
+    defaults: LEAD,
     effort: "high",
   },
   swift: {

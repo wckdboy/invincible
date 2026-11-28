@@ -267,7 +267,8 @@ describe("a plan whose allowance is spent says so", () => {
     foundFleet(store, identity, { fleetName: "homelab", nodeName: "fresh" });
     const events = await all(chat({ store, vault: new Vault(store, identity), fetch: spentFetch }, { messages: ask }));
     const error = events.find((e) => e.type === "error") as { type: "error"; error: string };
-    expect(error.error).toBe("no model can answer yet: none of deepseek, zai, mistral, anthropic, openrouter, orcarouter, openai, xai is set up here. Add a key for one of them (invincible key add), or hire a model you have a key for (invincible roster set <role> <provider/model>)");
+    // (The planner's defaults, the strongest first: roster.ts LEAD.)
+    expect(error.error).toBe("no model can answer yet: none of anthropic, openai, openrouter, orcarouter, xai, deepseek, zai, mistral is set up here. Add a key for one of them (invincible key add), or hire a model you have a key for (invincible roster set <role> <provider/model>)");
   });
 });
 

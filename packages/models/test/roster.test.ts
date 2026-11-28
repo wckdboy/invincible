@@ -19,17 +19,23 @@ describe("a role you haven't set", () => {
     const { store, setUp } = mind();
     // Nothing set up: every default, so what can't answer says what to add.
     expect(roleModels(store, "planner")).toEqual(ROLES.planner!.defaults);
-    // The cheaper open models first (your word, 23 November 2026), the frontier closed ones after.
-    expect(roleModels(store, "planner")[0]).toBe("deepseek/deepseek-v4-pro");
+    // The orchestrator's roles, the strongest first (your word, 28 November 2026: "orchestrator (big beefy models)"); the
+    // work's, the cheaper open models first (23 November 2026), the frontier closed ones after.
+    for (const role of ["planner", "reviewer"]) expect([role, roleModels(store, role)[0]]).toEqual([role, "anthropic/claude-opus-5-5"]);
+    expect(roleModels(store, "engineer")[0]).toBe("opencode-go/deepseek-v4-pro");
+    expect(ROLES.engineer!.defaults.filter((ref) => !ref.startsWith("opencode-go/") && !ref.includes("-coding/") && !ref.startsWith("mimo-token/"))[0]).toBe("deepseek/deepseek-v4-pro");
     // DeepSeek's key alone: its models play the roles, and no other default is passed over in every answer.
     setUp("deepseek", "https://api.deepseek.com");
     for (const role of ["planner", "engineer", "reviewer"]) expect([role, roleModels(store, role)]).toEqual([role, ["deepseek/deepseek-v4-pro"]]);
     expect(roleModels(store, "swift")).toEqual(["deepseek/deepseek-flash"]);
     expect(roster(store).planner).toMatchObject({ models: ["deepseek/deepseek-v4-pro"], configured: false });
-    // An Anthropic key too: the cheaper open model answers first, Claude after it (your word, 23 November 2026: mainly
-    // the coding plans and the cheaper, still near-frontier open models from China or hosted in Europe).
+    // An Anthropic key too: the orchestrator plans, reviews and talks with you on Claude first, the open model after it
+    // (28 November 2026); the work stays on the cheaper open model first, Claude after it (23 November 2026: mainly the
+    // coding plans and the cheaper, still near-frontier open models from China or hosted in Europe). So the ladder
+    // (escalate) has a rung: from the work's model to another.
     setUp("anthropic", "https://api.anthropic.com");
-    expect(roleModels(store, "planner")).toEqual(["deepseek/deepseek-v4-pro", "anthropic/claude-opus-5-5"]);
+    for (const role of ["planner", "reviewer"]) expect([role, roleModels(store, role)]).toEqual([role, ["anthropic/claude-opus-5-5", "deepseek/deepseek-v4-pro"]]);
+    expect(roleModels(store, "engineer")).toEqual(["deepseek/deepseek-v4-pro", "anthropic/claude-opus-5-5"]);
     // A role nobody hired goes on the engineer's.
     expect(roleModels(store, "researcher")).toEqual(["deepseek/deepseek-v4-pro", "anthropic/claude-opus-5-5"]);
   });
