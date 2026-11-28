@@ -10,11 +10,12 @@ import { icon, type IconName } from "../ui/icons.ts";
 import { agentMark, markStateOfAgent } from "../ui/mark.ts";
 import { appMark } from "../ui/orb.ts";
 import { needsCount } from "./needs.ts";
-import { tableOf, tableSources } from "./roster.ts";
+import { homeTimes, tableOf, tableSources } from "./roster.ts";
 import { askProjects, projectNames, workNow, workSources } from "./work-rows.ts";
 import { openDirect } from "./team-forms.ts";
 import { placesFor, taskOf } from "../lib/nav.ts";
 import { teamLocation } from "../lib/team.ts";
+import { listTime } from "../lib/time.ts";
 
 /*
  * The roster (the owner's word of 27 November 2026: "something like t3code on desktop, and openmausbot/grokbot on
@@ -44,9 +45,17 @@ interface Row {
   name: string;
   line: string;
   state: AgentState;
+  /** A phone's list: when it last did something, and what its dot says (null: no dot). */
+  end?: { time: string; mark: string | null };
 }
 
-export function rosterNav(ctx: Ctx, picked: () => void = () => {}): Roster {
+/**
+ * [phone]: the drawer as a phone's list (I10's phone-gaps, the lead's word of 28 November 2026): your agent pinned, then
+ * every agent and room the latest first, each its face (its glass moves as it stands, no dot on it), its name, its line
+ * in plain words (RosterRow.plain), and at its end when, and an ink dot where something waits on you or is new; no
+ * Needs you row (each ask is in its own chat), no section's head, no projects; at its foot Settings and everything else.
+ */
+export function rosterNav(ctx: Ctx, picked: () => void = () => {}, phone = false): Roster {
   const stops: (() => void)[] = [];
   const rows = new Map<string, { el: HTMLElement; face: HTMLElement; look: string; text: string }>();
   /** Where the app is, and the row that is (worked out again as the table comes: a room's agent is known only then). */
@@ -67,13 +76,18 @@ export function rosterNav(ctx: Ctx, picked: () => void = () => {}): Roster {
   };
 
   const draw = (row: Row): HTMLElement => {
-    const text = `${row.name}\n${row.line}\n${row.state}\n${row.href}`;
+    const text = `${row.name}\n${row.line}\n${row.state}\n${row.href}\n${row.end?.time ?? ""}\n${row.end?.mark ?? ""}`;
     const kept = rows.get(row.key);
     if (kept && kept.text === text && kept.look === row.look) return kept.el;
     const face = kept && kept.look === row.look ? kept.face : h("span", { class: "roster-face" }, row.face());
-    const label = `${withState(row.name, row.state)}${row.line ? `: ${row.line}` : ""}`;
-    const attrs = { class: "roster-row", "data-state": row.state, title: label, "aria-current": current === row.key ? "page" : null };
-    const parts = [face, h("span", { class: "roster-text" }, h("span", { class: "roster-name" }, row.name), h("span", { class: "roster-line" }, row.line))];
+    const label = `${withState(row.name, row.state)}${row.line ? `: ${row.line}` : ""}${row.end?.mark ? `, ${row.end.mark}` : ""}${row.end?.time ? `, ${row.end.time}` : ""}`;
+    const attrs = { class: "roster-row", "data-state": row.state, title: label, "aria-label": row.end ? label : null, "aria-current": current === row.key ? "page" : null };
+    const parts = [
+      face,
+      h("span", { class: "roster-text" }, h("span", { class: "roster-name" }, row.name), h("span", { class: "roster-line" }, row.line)),
+      // (Its dot's place is kept whether or not it shows, so a row never moves as its dot comes and goes.)
+      row.end ? h("span", { class: "roster-end", "aria-hidden": "true" }, h("span", { class: "roster-time tnum" }, row.end.time), h("span", { class: "roster-mark", "data-on": row.end.mark ? "" : null })) : null,
+    ];
     const el = row.run
       ? h("button", { ...attrs, type: "button", onclick: () => (picked(), row.run?.()) }, ...parts)
       : h("a", { ...attrs, href: row.href, onclick: () => picked() }, ...parts);
@@ -105,9 +119,16 @@ export function rosterNav(ctx: Ctx, picked: () => void = () => {}): Roster {
   const drawTable = (): void => {
     const table = tableOf(ctx);
     const [primary, ...seats] = table.seats;
+    const times = phone ? homeTimes(ctx) : null;
+    const now = Date.now();
+    const size = phone ? 44 : 22;
+    const at = (key: string): string => {
+      const when = times?.get(key);
+      return when ? listTime(when, now) : "";
+    };
     if (primary) {
       const state = primary.now ? primaryState(primary.now) : "resting";
-      replace(primarySlot, draw({ key: "primary", href: "#/chat", face: () => guardianMark({ size: 22, state: glassState(markStateOfAgent(state)) }), look: `primary:${state}`, name: "Your agent", line: primary.line, state }));
+      replace(primarySlot, draw({ key: "primary", href: "#/chat", face: () => guardianMark({ size, state: glassState(markStateOfAgent(state)) }), look: `primary:${state}:${size}`, name: "Your agent", line: primary.line, state, ...(phone ? { end: { time: "", mark: primary.needs ? "Needs you" : null } } : {}) }));
     }
     const agentRows = seats.map((seat) => {
       const state = seat.state;
@@ -117,16 +138,37 @@ export function rosterNav(ctx: Ctx, picked: () => void = () => {}): Roster {
         href: seat.href,
         // (One you have not written to yet: its conversation is made on the way in, as its card's.)
         run: seat.room ? undefined : () => void openDirect(ctx, { id: seat.id }),
-        face: () => agentMark({ id: seat.id, profile, size: 22, state: markStateOfAgent(state) }),
-        look: `${JSON.stringify(profile ?? null)}:${state}`,
+        face: () => agentMark({ id: seat.id, profile, size, state: markStateOfAgent(state) }),
+        look: `${JSON.stringify(profile ?? null)}:${state}:${size}`,
         name: seat.name,
-        line: seat.line,
+        line: phone ? (seat.row?.plain ?? seat.line) : seat.line,
         state,
+        ...(phone ? { end: { time: at(`person:${seat.id}`), mark: seat.needs ? "Needs you" : seat.row?.unread ? "New" : null } } : {}),
       });
     });
     const roomRows = table.rooms.map((room) =>
-      draw({ key: `room:${room.id}`, href: `#/team?room=${encodeURIComponent(room.id)}`, face: () => icon("hash", { size: 16 }), look: "room", name: room.name, line: room.line, state: room.state ?? "resting" }),
+      draw({
+        key: `room:${room.id}`,
+        href: `#/team?room=${encodeURIComponent(room.id)}`,
+        face: () => (phone ? h("span", { class: "roster-room-face" }, icon("agents", { size: 20 })) : icon("hash", { size: 16 })),
+        look: phone ? "room:phone" : "room",
+        name: room.name,
+        line: phone ? room.plain : room.line,
+        state: room.state ?? "resting",
+        ...(phone ? { end: { time: at(`room:${room.id}`), mark: room.needs ? "Needs you" : room.unread ? "New" : null } } : {}),
+      }),
     );
+    // A phone's list: every agent and room in one, the latest first (homeRows' order), with no section's head.
+    if (phone) {
+      const order = (el: HTMLElement): number => times?.get(el.dataset.key?.replace(/^agent:/, "person:") ?? "") ?? 0;
+      const all = [...agentRows, ...roomRows].sort((a, b) => order(b) - order(a) || ((a.dataset.key ?? "") < (b.dataset.key ?? "") ? -1 : 1));
+      const keys = all.map((el) => el.dataset.key).join("|");
+      if (keys !== shownAgents) {
+        shownAgents = keys;
+        replace(agents, ...all);
+      }
+      return;
+    }
     // (A group comes whole, and only when it changed which rows it has: a row's own words change in place.)
     const agentKeys = agentRows.map((el) => el.dataset.key).join("|");
     if (agentKeys !== shownAgents) {
@@ -144,6 +186,8 @@ export function rosterNav(ctx: Ctx, picked: () => void = () => {}): Roster {
   const projects = h("div", { class: "roster-group", role: "group", "aria-label": "Projects" });
   let shownProjects = "";
   const drawProjects = (): void => {
+    // (A phone's list holds chats alone: a project is a place, under everything else.)
+    if (phone) return;
     const list: ProjectView[] = projectNames.value;
     const version = JSON.stringify(list.map((project) => [project.id, project.name]));
     if (version === shownProjects) return;
@@ -167,10 +211,12 @@ export function rosterNav(ctx: Ctx, picked: () => void = () => {}): Roster {
     replace(machine, dot(tone), h("span", { class: "ellipsis tnum" }, fleet && nodes.length > 1 ? `${self} · ${online}/${nodes.length}` : self));
     machine.setAttribute("aria-label", fleet ? `${self}: ${online} of ${nodes.length} machines online` : self);
   };
-  const foot = h("div", { class: "roster-foot" }, place("home", "layers", "Work"), place("settings", "settings", "Settings"), place("more", "more", "Everything else"), machine);
+  const foot = phone
+    ? h("div", { class: "roster-foot" }, place("settings", "settings", "Settings"), place("more", "more", "Everything else"))
+    : h("div", { class: "roster-foot" }, place("home", "layers", "Work"), place("settings", "settings", "Settings"), place("more", "more", "Everything else"), machine);
 
-  const body = h("div", { class: "roster-body" }, needs, primarySlot, agents, rooms, projects);
-  const el = h("nav", { class: "roster", "aria-label": "Your agents" }, body, foot);
+  const body = phone ? h("div", { class: "roster-body" }, primarySlot, agents) : h("div", { class: "roster-body" }, needs, primarySlot, agents, rooms, projects);
+  const el = h("nav", { class: "roster", "aria-label": "Your agents", "data-phone": phone ? "" : null }, body, foot);
   arrowsThrough(el, ".roster-needs, .roster-row, .roster-heading, .roster-place");
 
   // ---- kept true while it shows, drawn at most once a frame ----
@@ -236,9 +282,9 @@ export function sidebarNav(ctx: Ctx, shell: { toggle(): void }): Sidebar {
   return { el, at: (where) => roster.at(where), dispose: () => roster.dispose() };
 }
 
-/** A phone's drawer: the roster from the screen's left edge (the menu in a page's header, or a swipe). */
+/** A phone's drawer: the roster from the screen's left edge (the menu in a page's header, or a swipe), as a phone's list. */
 export function openRoster(ctx: Ctx): void {
-  const roster = rosterNav(ctx, () => sheet.close());
+  const roster = rosterNav(ctx, () => sheet.close(), true);
   const sheet = openSheet({
     title: "Invincible",
     description: ctx.whoami.nodeName || ctx.whoami.fleetName || undefined,

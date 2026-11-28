@@ -17,7 +17,7 @@ import type { RoleSpec } from "../types.ts";
 import { badge, button, callout, copyText, dot, empty, skeletonRows, spinner } from "../ui/controls.ts";
 import { composerBox } from "../ui/composer.ts";
 import { confirmAction, openSheet } from "../ui/dialog.ts";
-import { debounce, h, replace } from "../ui/dom.ts";
+import { debounce, h, PHONE_WIDTH, replace } from "../ui/dom.ts";
 import { orb } from "../ui/orb.ts";
 import { primaryState } from "../lib/agent-state.ts";
 import { orbMoodOfState } from "../lib/orb-motion.ts";
@@ -29,6 +29,7 @@ import { toast } from "../ui/toast.ts";
 import { attachedView, attachTray, type Waiting } from "./attach-tray.ts";
 import { openAside } from "./chat-aside.ts";
 import { openComputer } from "./computer.ts";
+import { openWaiting } from "./needs.ts";
 import { underway } from "./underway.ts";
 import { queuePanel } from "./chat-queue.ts";
 import { openInHand } from "./in-hand.ts";
@@ -884,7 +885,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
         : null;
     return h(
       "article",
-      { class: `turn assistant${thread.turns.at(-1) === turn ? " last" : ""}`, "aria-label": "Your agent said" },
+      { class: `turn assistant${thread.turns.at(-1) === turn ? " last" : ""}${turn.status === "streaming" ? " writing" : ""}${turn.status === "error" ? " failed" : ""}`, "aria-label": "Your agent said" },
       // Its orb beside each answer of its, still and at rest, but for the one it is writing, which is at work (and kept
       // while it writes, as the answer is drawn again with each word): the colour of its state is its line's, above.
       h("span", { class: "avatar agent orb-avatar", "aria-hidden": "true" }, turn.status === "streaming" ? writingOrb(turn.id) : orb({ size: 28 })),
@@ -1042,6 +1043,30 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   const queueButton = button("Queue", { size: "sm", title: "Keep it on the node and send it when it's done", onClick: () => void deliver({ how: "queue" }) });
   const stopButton = button("Stop", { icon: "stop", iconOnly: true, label: "Stop it", title: "Stop it (Esc)", onClick: () => stopChat() });
   stopButton.classList.add("send");
+  // On a phone (PHONE_WIDTH): no Queue or Steer words. Send steers while it works, a long press on it queues for after
+  // this turn, and with nothing written Stop stands in its place (the lead's defaults of 28 November 2026).
+  const phoneWidth = matchMedia(PHONE_WIDTH);
+  let heldToQueue = false;
+  let holding = 0;
+  const letGo = (): void => {
+    if (holding) clearTimeout(holding);
+    holding = 0;
+  };
+  sendButton.addEventListener("pointerdown", () => {
+    letGo();
+    if (!phoneWidth.matches || live === null || current === null) return;
+    holding = window.setTimeout(() => {
+      holding = 0;
+      heldToQueue = true;
+      navigator.vibrate?.(10);
+      void deliver({ how: "queue" });
+    }, 500);
+  });
+  for (const end of ["pointerup", "pointercancel", "pointerleave"]) sendButton.addEventListener(end, letGo);
+  // (A long press is the queue's, never the page's menu.)
+  sendButton.addEventListener("contextmenu", (event) => {
+    if (phoneWidth.matches && live !== null) event.preventDefault();
+  });
   const panel = queuePanel(queueActions(ctx.api));
   // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait (Cancel).
   const going = underway(ctx);
@@ -1104,17 +1129,19 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
     const has = (Boolean(input.value.trim()) || files) && !blocked && !tray.going();
     const canQueue = current !== null;
     const enter = chatEnter();
-    sendButton.hidden = busy;
+    const phone = phoneWidth.matches;
+    sendButton.hidden = phone ? busy && !has : busy;
     sendButton.disabled = !canChat || !has;
-    stopButton.hidden = !busy;
-    steerButton.hidden = !busy;
-    queueButton.hidden = !busy || !canQueue;
+    stopButton.hidden = phone ? !busy || has : !busy;
+    steerButton.hidden = phone || !busy;
+    queueButton.hidden = phone || !busy || !canQueue;
+    sendButton.setAttribute("aria-label", phone && busy ? (canQueue ? "Send: it steers it now. Hold to queue it for after this turn" : "Send: it steers it now") : "Send");
     // (Files go with a message it answers from its start, never one it's handed as it works.)
     steerButton.disabled = queueButton.disabled = !canChat || !has || files;
     // The one Enter does is in ink.
     steerButton.classList.toggle("primary", !canQueue || enter === "steer");
     queueButton.classList.toggle("primary", canQueue && enter === "queue");
-    input.placeholder = busy ? busyPlaceholder(canQueue) : "Ask your agent…";
+    input.placeholder = busy && !phone ? busyPlaceholder(canQueue) : "Ask your agent…";
     syncKeyAsks();
     syncConnectorAsks();
     panel.render({ queue, held, steering, busy, deadline: live?.deadline ?? null });
@@ -1342,6 +1369,19 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
       const groups: SelectorGroup[] = [
         ...(canChat ? [{ id: "chats", mode: "action" as const, options: CHATS_MENU.map((action) => ({ ...action, icon: action.value === "new" ? ("plus" as const) : ("clock" as const) })) }] : []),
         ...(actions.length ? [{ id: "do", mode: "action" as const, options: actions.map((action) => ({ ...action, icon: ACTION_ICON[action.value] })) }] : []),
+        // (On a phone the bar holds back, its name and this menu alone: what waits on you, and its computer, are here.)
+        ...(phoneWidth.matches
+          ? [
+              {
+                id: "elsewhere",
+                mode: "action" as const,
+                options: [
+                  { value: "waiting", label: "Waiting on you", icon: "inbox" as const },
+                  ...(ctx.can("sandbox") ? [{ value: "computer", label: "Its computer", icon: "monitor" as const }] : []),
+                ],
+              },
+            ]
+          : []),
         {
           id: "role",
           label: "Who answers",
@@ -1378,6 +1418,7 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
         if (!coarse) input.focus();
         return;
       }
+      if (group === "elsewhere") return option.value === "computer" ? openComputer(ctx) : openWaiting(ctx);
       if (group === "do") {
         if (option.value === "aside") openChatAside(ctx.api);
         else if (option.value === "rename") rename();
@@ -1489,12 +1530,24 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
   keptChanged.add(onKept);
   scope.add(() => keptChanged.delete(onKept));
 
+  // On a phone nothing is pinned between the messages and the box (I10's phone-gaps): a turn started elsewhere, the keys
+  // and connectors it asks for, what is under way and what you queued go in the flow, after the conversation; on a wider
+  // screen they stay over the box.
+  const flowTail = h("div", { class: "chat-flow-tail" });
+  function placeWaiting(): void {
+    const parts = [elsewhere, keyAsks, connectorAsks, going.el, panel.el];
+    if (phoneWidth.matches) flowTail.append(...parts);
+    else form.before(...parts);
+  }
+
   // The one message box (ui/composer.ts): the paperclip, the field, Queue and Steer while it works, and the send circle
   // (Stop in its place while it answers).
   const form = composerBox({
     onSubmit: (event: Event) => {
       event.preventDefault();
-      void deliver();
+      // (Held to queue it, it has gone: the press that let go sends nothing more.)
+      if (heldToQueue) return void (heldToQueue = false);
+      void deliver(live !== null && phoneWidth.matches ? { how: "steer" } : {});
     },
     files: tray.row,
     lead: [tray.button],
@@ -1518,9 +1571,17 @@ export const chatView: View = (root, ctx, { scope, opts }) => {
       h("div", { class: "chat-head" }, back, who, computer, inbox, options.el),
       subHead,
       threadEl,
+      flowTail,
       h("div", { class: "composer-wrap" }, h("div", { class: "jump-anchor" }, jump), alerts, elsewhere, keyAsks, connectorAsks, going.el, panel.el, form),
     ),
   );
+  placeWaiting();
+  phoneWidth.addEventListener("change", placeWaiting);
+  phoneWidth.addEventListener("change", syncComposer);
+  scope.add(() => {
+    phoneWidth.removeEventListener("change", placeWaiting);
+    phoneWidth.removeEventListener("change", syncComposer);
+  });
 
   changed.add(onChange);
   scope.add(() => changed.delete(onChange));

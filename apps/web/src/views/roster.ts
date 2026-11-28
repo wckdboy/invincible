@@ -4,7 +4,7 @@ import { isWaiting } from "../live.ts";
 import { PRIMARY, seating } from "../lib/arrange.ts";
 import { primaryState, type AgentState } from "../lib/agent-state.ts";
 import { primaryNow, type Now } from "../lib/now.ts";
-import { primaryNeeds, rosterRows, type RosterRow, type Said } from "../lib/roster.ts";
+import { homeRows, primaryNeeds, rosterRows, type RosterRow, type Said } from "../lib/roster.ts";
 import { teamHash } from "../lib/team.ts";
 import { seat } from "../ui/avatar.ts";
 import type { Signal } from "../ui/signal.ts";
@@ -51,6 +51,16 @@ export interface Table {
 /** What any list of the agents is drawn from: watched, it is drawn again whenever one of these changes. */
 export const tableSources = (ctx: Ctx): Signal<unknown>[] =>
   [ctx.live.team, ctx.live.teamProblem, ctx.live.actions, ctx.live.inboxCount, ctx.live.inboxLoaded, nodeTurns, runsInHand, unreadChats, answerStep, chatActivity] as Signal<unknown>[];
+
+/** When each row last did something (lib/roster.ts homeRows' `at`, by its key: "person:<id>", "room:<id>"), the latest
+ * first: a phone's list orders its rows by it and says it at each row's end. */
+export function homeTimes(ctx: Ctx): Map<string, number> {
+  const snapshot = ctx.live.team.value;
+  if (!snapshot) return new Map();
+  const now = Date.now();
+  const asks = ctx.live.actions.value.filter((action) => isWaiting(action, now));
+  return new Map(homeRows({ snapshot, said, asks, now }).map((row) => [row.key, row.at]));
+}
 
 export function tableOf(ctx: Ctx): Table {
   const snapshot = ctx.live.team.value;

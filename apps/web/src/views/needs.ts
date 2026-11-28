@@ -10,7 +10,7 @@ import type { Attended, WorkRow } from "../lib/work.ts";
 import type { ActionClass } from "../types.ts";
 import { busy, button, callout, card, disclosure, empty, note, pageBody, pageHead, rows, skeletonRows } from "../ui/controls.ts";
 import { openSheet } from "../ui/dialog.ts";
-import { cx, h, keepPlace, replace, type Child } from "../ui/dom.ts";
+import { cx, h, keepPlace, replace, Scope, type Child } from "../ui/dom.ts";
 import { icon, type IconName } from "../ui/icons.ts";
 import { agentFace } from "../ui/orb.ts";
 import { selector } from "../ui/selector.ts";
@@ -292,7 +292,21 @@ export function askItem(ctx: Ctx, action: ActionView, row: WorkRow | null): HTML
  * noticed for you, news counted nowhere; then, folded, what was decided lately. An approval named in the address
  * (#/inbox?a=…, a notification's or a link's) opens its card once the page has it; one no longer waiting says so.
  */
+/**
+ * Every ask at once, in a sheet over your agent's chat on a phone (••• › Waiting on you, or a link to them: there is no
+ * Needs you screen on a phone, the lead's defaults of 28 November 2026): Needs you's own list, its approval's card at
+ * once where one is named.
+ */
+export function openWaiting(ctx: Ctx, approval?: string): void {
+  const scope = new Scope();
+  const body = h("div", { class: "waiting" });
+  openSheet({ title: "Waiting on you", body, onClose: () => scope.dispose() });
+  needsView(body, ctx, { scope, opts: { intent: "sheet", ...(approval ? { approval } : {}) } });
+}
+
 export const needsView: View = (root, ctx, { scope, opts }) => {
+  // (In a sheet, Waiting on you: its title is the sheet's, and what it lists says no count.)
+  const inSheet = opts.intent === "sheet";
   const picked = opts.approval && isNotifyActionId(opts.approval) ? opts.approval : null;
   let opened = false;
   const pickedNote = h("div");
@@ -310,7 +324,7 @@ export const needsView: View = (root, ctx, { scope, opts }) => {
     h(
       "section",
       { class: "decisions", "aria-label": title },
-      h("h2", { class: "decisions-head" }, h("span", {}, title), count !== null ? h("span", { class: "tnum" }, String(count)) : null),
+      inSheet && count !== null ? null : h("h2", { class: "decisions-head" }, h("span", {}, title), count !== null ? h("span", { class: "tnum" }, String(count)) : null),
       h("div", { class: "decisions-list" }, ...items.map(decisionEl)),
       note(foot),
     );
@@ -365,7 +379,7 @@ export const needsView: View = (root, ctx, { scope, opts }) => {
     h(
       "div",
       { class: "page narrow" },
-      pageHead("Needs you", "Nothing here happens without your say."),
+      inSheet ? null : pageHead("Needs you", "Nothing here happens without your say."),
       // Shown whole once it has been read: what waits comes in at once.
       pageBody(pickedNote, reach.el, lists, ctx.can("mind:read") ? history : null),
     ),

@@ -35,7 +35,7 @@ import { syncPush, takeDownWithdrawn } from "./views/notifications.ts";
 import { connectorsView } from "./views/connectors.ts";
 import { findingsView } from "./views/findings.ts";
 import { fleetView, openInvite } from "./views/fleet.ts";
-import { needsCount, needsView } from "./views/needs.ts";
+import { needsCount, needsView, openWaiting } from "./views/needs.ts";
 import { workNow, workSources } from "./views/work-rows.ts";
 import { loopsView, openLoopSheet } from "./views/loops.ts";
 import { memoryView, openRemember } from "./views/memory.ts";
@@ -382,6 +382,14 @@ export function renderShell(root: HTMLElement, base: ShellBase): { dispose(): vo
     const spec = visible.find((r) => r.id === route)!;
     const opts = pending?.route === route ? pending.opts : route === "team" ? teamLocation(location.hash) : route === "task" ? { task: taskOf(location.hash) ?? undefined } : route === "inbox" ? { approval: approvalFromHash(location.hash) ?? undefined } : {};
     pending = null;
+    // A phone has no Needs you screen (the lead's defaults of 28 November 2026): its address opens your agent's chat
+    // with every ask over it, an approval it names its card at once.
+    if (route === "inbox" && narrow.matches) {
+      history.replaceState(history.state, "", "#/chat");
+      render();
+      openWaiting(ctx, "approval" in opts && typeof opts.approval === "string" ? opts.approval : undefined);
+      return;
+    }
     viewScope?.dispose();
     viewScope = new Scope();
     const changed = current !== route;

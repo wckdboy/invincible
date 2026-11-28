@@ -118,6 +118,13 @@ export const nextId = (prefix = "g"): string => `${prefix}-${++uid}`;
  * A view's lifetime: timers, listeners and in-flight requests registered here
  * are cleaned up when the view goes away. `signal` aborts pending fetches.
  */
+/**
+ * Where a thread is the whole screen and the roster a drawer (the shell's `narrow`): there a phone's rules hold (I10's
+ * phone-gaps, the lead's word of 28 November 2026): the list or a chat, nothing pinned between a chat's messages and its
+ * box, Send steering while it works.
+ */
+export const PHONE_WIDTH = "(max-width: 767px)";
+
 export class Scope {
   private readonly cleanups: (() => void)[] = [];
   private readonly controller = new AbortController();

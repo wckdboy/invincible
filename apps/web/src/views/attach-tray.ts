@@ -52,6 +52,9 @@ let keys = 0;
 export function attachTray(ctx: Ctx, o: { files: { get(): Waiting[]; set(next: Waiting[]): void }; enabled(): boolean; changed(): void; disposed(): boolean }): Tray {
   const chooser = h("input", { type: "file", multiple: true, accept: ATTACH_ACCEPT, hidden: true, "aria-hidden": "true", tabindex: "-1" });
   const clip = button("Attach pictures or files", { variant: "ghost", size: "sm", icon: "paperclip", iconOnly: true, onClick: () => chooser.click() });
+  // (On a phone the box leads with +, as Grok Bot's (I10's phone-gaps): the same button, its other face.)
+  clip.append(icon("plus", { size: 18, class: "phone-plus" }));
+  clip.classList.add("attach-button");
   const row = h("div", { class: "composer-files", role: "list", "aria-label": "Files with your message" });
 
   function render(): void {

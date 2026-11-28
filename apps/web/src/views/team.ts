@@ -12,14 +12,15 @@ import { besideChip } from "../lib/agent-state.ts";
 import { keyWords } from "../lib/keys.ts";
 import { rosterRows } from "../lib/roster.ts";
 import { beginLines } from "../lib/routing.ts";
-import { handedFrom, type TaskAction, taskStanding } from "../lib/task-card.ts";
+import { handedFrom, type TaskAction, taskStanding, taskWord } from "../lib/task-card.ts";
 import { activeTeamWork, engramLine, HARNESS, harnessNote, agentWorksOn, taskDependencies, teamSpeaker, agentMaker, type HarnessStatus } from "../lib/team.ts";
 import { giveAgain, timeline, timelineTasks } from "../lib/timeline.ts";
 import { relativeTime } from "../lib/time.ts";
 import { agentPanelShown, setAgentPanelShown } from "../prefs.ts";
 import { badge, button, callout, dot, empty, errorState, list, listRow, note, section, skeletonRows } from "../ui/controls.ts";
 import { composerBox } from "../ui/composer.ts";
-import { h, isMac, keepPlace, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
+import { h, isMac, keepPlace, PHONE_WIDTH, prefersReducedMotion, replace, syncChildren } from "../ui/dom.ts";
+import { selector } from "../ui/selector.ts";
 import { icon } from "../ui/icons.ts";
 import { renderMarkdown } from "../ui/markdown.ts";
 import { stateChip, workerAvatar } from "../ui/avatar.ts";
@@ -76,6 +77,13 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   let drawnItems = new Map<string, { version: string; el: HTMLElement }>();
 
   const head = h("header", { class: "team-head" });
+  // On a phone (PHONE_WIDTH) an agent's chat is Grok Bot's (I10's phone-gaps): its bar back, its name and one menu (Give
+  // a task, its workspace); each task a compact row and one grey word, a proposal its ask with Approve and Decline; its
+  // words and yours in bubbles; nothing pinned over the box.
+  const phoneWidth = matchMedia(PHONE_WIDTH);
+  const turned = (): void => draw(true);
+  phoneWidth.addEventListener("change", turned);
+  scope.add(() => phoneWidth.removeEventListener("change", turned));
   const notice = h("div", { class: "team-notice", role: "status", hidden: true });
   const thread = h("div", { class: "team-thread", "aria-label": "Timeline" });
   const content = h("div", { class: "team-content", tabindex: 0 });
@@ -94,6 +102,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   send.classList.add("send");
   // Giving a task (a goal and the commands that prove it) sits beside the message.
   const give = button("Give a task", { size: "sm", icon: "layers", onClick: () => room && giveTask(ctx, room) });
+  give.classList.add("team-give");
   const composerHint = h("span", { class: "hint grow" });
   // The one message box (ui/composer.ts): the paperclip, the field, Give a task and the send circle.
   const composer = composerBox({
@@ -180,10 +189,33 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     const table = person ? tableOf(ctx) : null;
     const seated = person ? table!.seats.find((one) => one.id === person.id) : undefined;
     const open = panelOpen();
-    const version = JSON.stringify([current.id, current.name, current.members.map((id) => [id, nameOf(id)]), current.paused, person, seated, active.map((job) => [job.id, job.status]), person && snapshot ? avatarExpression(person, snapshot, Date.now()) : null, open, sideShown]);
+    // (One agent's own chat says no name over its words, on a phone.)
+    thread.toggleAttribute("data-direct", Boolean(current.direct));
+    const version = JSON.stringify([phoneWidth.matches, current.id, current.name, current.members.map((id) => [id, nameOf(id)]), current.paused, person, seated, active.map((job) => [job.id, job.status]), person && snapshot ? avatarExpression(person, snapshot, Date.now()) : null, open, sideShown]);
     if (version === headVersion) return;
     headVersion = version;
     const toggle = button("Workspace", { size: "sm", icon: "sandbox", label: open ? "Close the workspace" : "Workspace", onClick: () => showPanel(!open) });
+    // (A phone's bar: back, its name, and this one menu; what else it offers is here.)
+    const more = phoneWidth.matches
+      ? selector({
+          label: `${person?.name ?? current.name}'s options`,
+          scope,
+          variant: "ghost",
+          className: "icon-only team-more",
+          current: () => ({ text: "", icon: "more" }),
+          groups: () => [
+            {
+              id: "do",
+              mode: "action" as const,
+              options: [
+                ...(canChat ? [{ value: "give", label: "Give a task", icon: "layers" as const }] : []),
+                ...(person ? [{ value: "workspace", label: open ? "Close the workspace" : "Workspace", icon: "sandbox" as const }] : []),
+              ],
+            },
+          ],
+          onSelect: (_group, option) => void (option.value === "give" ? room && giveTask(ctx, room) : showPanel(!open)),
+        }).el
+      : null;
     toggle.classList.add("workspace-toggle");
     toggle.setAttribute("aria-pressed", String(open));
     const sideToggle = button(sideShown ? "Hide the side panel" : "Show the side panel", { variant: "ghost", size: "sm", iconOnly: true, icon: "panel", title: `${sideShown ? "Hide" : "Show"} the side panel  (${keyWords(["mod", "D"], isMac())})`, onClick: () => showSide(!sideShown) });
@@ -193,18 +225,24 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
       replace(
         head,
         backLink(),
-        person ? (seated ? seatFace(seated, 28) : avatar(person)) : h("span", { class: "avatar" }, icon("hash")),
+        // (Its face and its name, together: a phone's name pill; a wide screen lays them out as they were.)
         h(
-          "div",
-          { class: "grow" },
-          h("div", { class: "team-head-title" }, h("h2", { class: "ellipsis" }, person?.name ?? current.name), person ? stateChip(seated?.state) : null),
-          h("p", { class: "meta ellipsis" }, person ? [agentWorksOn(person), madeBy(person)].filter(Boolean).join(" · ") : [...(current.direct ? [] : ["Your agent"]), ...current.members.map(nameOf)].join(" · ")),
+          "span",
+          { class: "team-who" },
+          person ? (seated ? seatFace(seated, 28) : avatar(person)) : h("span", { class: "avatar" }, icon("hash")),
+          h(
+            "div",
+            { class: "grow" },
+            h("div", { class: "team-head-title" }, h("h2", { class: "ellipsis" }, person?.name ?? current.name), person ? stateChip(seated?.state) : null),
+            h("p", { class: "meta ellipsis" }, person ? [agentWorksOn(person), madeBy(person)].filter(Boolean).join(" · ") : [...(current.direct ? [] : ["Your agent"]), ...current.members.map(nameOf)].join(" · ")),
+          ),
         ),
         current.paused ? badge("Paused", "warn") : null,
         person ? sideToggle : null,
         person ? toggle : null,
         !person && canEdit ? button("Room settings", { variant: "ghost", size: "sm", iconOnly: true, icon: "settings", onClick: () => editRoom(ctx, current) }) : null,
         !person && canChat ? button(current.paused ? "Resume room" : "Pause room", { variant: "ghost", size: "sm", iconOnly: true, icon: current.paused ? "play" : "pause", onClick: () => void control({ room: current.id, action: current.paused ? "resume" : "pause" }) }) : null,
+        more,
         !person && canChat && active.length ? button("Stop the room's work", { variant: "ghost", size: "sm", iconOnly: true, icon: "stop", onClick: () => void control({ room: current.id, action: "stop" }) }) : null,
       ),
     );
@@ -246,6 +284,7 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
   }
 
   function taskEl(task: TeamTask): HTMLElement {
+    if (phoneWidth.matches) return task.status === "proposed" ? proposalEl(task) : compactTaskEl(task);
     return taskCard(ctx, task, {
       room: room!.id,
       roomName,
@@ -262,11 +301,38 @@ export const teamView: View = (root, ctx, { scope, opts }) => {
     });
   }
 
+  /** A task as a phone's chat says it: its title and one grey word (lib/task-card.ts taskWord); a tap opens its thread,
+   * where its proof, Stop, Ship it, Resume and Give again are. */
+  function compactTaskEl(task: TeamTask): HTMLElement {
+    return h("a", { class: "task-compact", href: `#/task/${task.id}` }, h("span", { class: "task-compact-title" }, task.title), h("span", { class: "task-compact-word" }, taskWord(task)));
+  }
+
+  /** A proposal as a phone's chat says it: an ask, in a bubble beside whoever proposed it (its own agent, or another, your
+   * agent among them), its first line of goal under it, and Approve and Decline. */
+  function proposalEl(task: TeamTask): HTMLElement {
+    const by = task.proposedBy && task.proposedBy !== task.assignee && task.proposedBy !== "owner" ? task.proposedBy : null;
+    const name = nameOf(task.assignee);
+    const goal = task.goal.split("\n")[0]?.trim() ?? "";
+    const asker = by ?? task.assignee;
+    return h(
+      "article",
+      { class: "team-message team-ask", "aria-label": `${by ? nameOf(by) : name} asks` },
+      asker === PRIMARY ? orb({ size: 40 }) : workerAvatar({ id: asker, name: nameOf(asker), profile: personOf(asker)?.avatar, still: true }),
+      h(
+        "div",
+        { class: "team-message-body" },
+        h("a", { class: "md team-ask-words", href: `#/task/${task.id}` }, h("p", {}, by ? `Shall ${name} start “${task.title}”?` : `Shall I start “${task.title}”?`), goal && goal !== task.title ? h("p", { class: "small subtle" }, goal) : null),
+        canChat ? h("div", { class: "row team-ask-answers" }, button("Approve", { size: "sm", onClick: () => act(task, "approve") }), button("Decline", { size: "sm", variant: "ghost", onClick: () => act(task, "decline") })) : null,
+      ),
+    );
+  }
+
   /** What a task's card shows, so that one whose card would look the same is not drawn again: everything but a running
-   * task's latest line, which is set where it is (showLatest), and its times, which it doesn't show. */
+   * task's latest line, which is set where it is (showLatest), and its times, which it doesn't show. (A phone draws it
+   * as a row, so a turned phone draws it again.) */
   const taskVersion = (task: TeamTask): string => {
     const { progress: _latest, updatedAt: _ended, ...shown } = task;
-    return JSON.stringify([shown, roomName(task.room), nameOf(task.assignee), task.proposedBy ? nameOf(task.proposedBy) : null, taskDependencies(task, snapshot?.tasks ?? [])]);
+    return JSON.stringify([phoneWidth.matches, shown, roomName(task.room), nameOf(task.assignee), task.proposedBy ? nameOf(task.proposedBy) : null, taskDependencies(task, snapshot?.tasks ?? [])]);
   };
 
   function renderTimeline(): void {
