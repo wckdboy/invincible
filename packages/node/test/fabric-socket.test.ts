@@ -113,6 +113,19 @@ describe("the sidecar's socket, as the node speaks it", () => {
     await expect(SidecarClient.connect(f.path)).rejects.toThrow(/speaks API 2, this node 1/);
   });
 
+  test("Q-AMP 0.3.0's sidecar (API 2) is taken, and 0.2.0's (API 1) still is", async () => {
+    // A node whose binary is one release behind its code, as during a deploy, keeps its sidecar either way.
+    for (const [api, version] of [
+      [2, "0.3.0"],
+      [1, "0.2.0"],
+    ] as const) {
+      const f = fake({ hello: { t: "hello", api, did: "did:key:z6Mk-stand-in", key_type: "ed25519", version } });
+      const client = await SidecarClient.connect(f.path);
+      expect(client.hello.version).toBe(version);
+      client.close();
+    }
+  });
+
   test("a message cut across writes, and two in one write, are each read whole", async () => {
     const f = fake({ hello: null });
     const connecting = SidecarClient.connect(f.path);
