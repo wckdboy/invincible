@@ -69,6 +69,11 @@ class Bridge(Client):
     def run(self):
         args = self.args
         gemini = Path(args.gemini_dir or os.environ.get("INVINCIBLE_AGY_DIR") or os.path.join(os.path.expanduser("~"), ".antigravity"))
+        # A profile left as a link, or as anything but a folder (a run's command can replace it in the seat's volume), is
+        # taken away, never followed, as a sign-in takes one away: else the reset would empty what it points at (the next
+        # run's /work) and leave the link (the re-check of 28 November 2026, R2).
+        if gemini.is_symlink() or (gemini.exists() and not gemini.is_dir()):
+            gemini.unlink()
         gemini.mkdir(parents=True, exist_ok=True, mode=0o700)
         reset(gemini)
         temp = gemini / "tmp"

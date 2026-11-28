@@ -464,6 +464,25 @@ describe("Antigravity's profile, reset", () => {
     expect((await run(box, " --session sess-FAKE-0001")).events).toEqual(WORKED);
   });
 
+  // The re-check of 28 November 2026, R2: a run's command can leave the profile itself a link, to the next run's /work.
+  test("a profile left as a link is taken away, never followed, by a run's start and by the status check: what it pointed at is untouched", async () => {
+    for (const how of ["run", "check"] as const) {
+      const box = vm();
+      const work = join(box.dir, "work");
+      mkdirSync(join(work, "repo"), { recursive: true });
+      writeFileSync(join(work, "repo", "unpushed.txt"), "an hour of the agent's work");
+      mkdirSync(join(box.home, ".."), { recursive: true });
+      symlinkSync(work, box.home);
+      if (how === "run") expect((await run(box)).events.at(-1)).toMatchObject({ type: "error", message: expect.stringContaining("isn't signed in") });
+      else {
+        const proc = Bun.spawn(["bash", "-c", ANTIGRAVITY.check], { cwd: box.dir, env: box.env, stdout: "pipe", stderr: "pipe" });
+        const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+        expect(stdout).toContain('"signedIn": false');
+      }
+      expect([how, readFileSync(join(work, "repo", "unpushed.txt"), "utf8"), lstatSync(box.home).isSymbolicLink(), lstatSync(box.home).isDirectory()]).toEqual([how, "an hour of the agent's work", false, true]);
+    }
+  });
+
   test("a fresh sign-in starts from an empty profile: what a run left goes, its old sign-in and sessions too", async () => {
     const box = vm();
     plant(box);
