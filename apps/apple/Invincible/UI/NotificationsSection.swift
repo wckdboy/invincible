@@ -17,25 +17,36 @@ struct NotificationsSection: View {
     private struct Nothing: Encodable {}
 
     var body: some View {
+        #if os(iOS)
+        // (An iPhone's and an iPad's Settings are a short list, as simple as Grok's and T3 Code's, the owner's word of 28
+        // November 2026: the row says what it is, with no name over it and no paragraph under it.)
+        Section { rows }
+            .task { await load() }
+        #else
         Section {
-            Toggle(isOn: Binding(get: { on ?? false }, set: { want in Task { await turn(want) } })) {
-                Label("Notifications on this \(ThisDevice.kind)", systemImage: "bell")
-            }
-            .disabled(on == nil || busy)
-            if on == true {
-                Button("Send a test") { Task { await test() } }
-                    .disabled(busy)
-            }
-            if let said { Text(said).font(.footnote).foregroundStyle(.secondary) }
-            if let problem {
-                Label(problem, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Color.danger)
-            }
+            rows
         } header: {
             SectionHead("Notifications")
         } footer: {
             PageNote("\(Primary.name) comes to you here when something needs you: an approval, a key it asked for, a question, at once and with a sound; work that ended while you were away, quietly. A notification says fixed words only, never a key, your own words or a model's: the app shows those once you open it.")
         }
         .task { await load() }
+        #endif
+    }
+
+    @ViewBuilder private var rows: some View {
+        Toggle(isOn: Binding(get: { on ?? false }, set: { want in Task { await turn(want) } })) {
+            Label("Notifications on this \(ThisDevice.kind)", systemImage: "bell")
+        }
+        .disabled(on == nil || busy)
+        if on == true {
+            Button("Send a test") { Task { await test() } }
+                .disabled(busy)
+        }
+        if let said { Text(said).font(.footnote).foregroundStyle(.secondary) }
+        if let problem {
+            Label(problem, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Color.danger)
+        }
     }
 
     private func load() async {

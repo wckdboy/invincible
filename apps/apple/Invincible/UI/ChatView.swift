@@ -608,7 +608,10 @@ private struct NeedsCard: View {
                 .padding(.horizontal, Space.s4)
                 .padding(.vertical, Space.s1)
                 .background(Color(uiColor: .secondarySystemBackground), in: .rect(cornerRadius: ComposerBoxMetrics.radius, style: .continuous))
-                .padding(.horizontal, Space.s2)
+                // As wide as the message box under it and what is under way: on an iPad the conversation's column, not
+                // the window's (the first pictures had it out to the sidebar).
+                .padding(.horizontal, Metrics.margin)
+                .readingWidth()
                 .modifier(DecisionDeskSheets(desk: desk, session: session))
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("chat.needs")

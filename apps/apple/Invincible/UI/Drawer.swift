@@ -60,11 +60,10 @@ struct Drawer: View {
                     row(.needs, symbol: "tray", title: "Needs you", count: session.needsYou)
                         .accessibilityIdentifier("roster.needs")
                 }
-            }
-            // Your agents and rooms in one row of faces, as Grok Bot pins its bots and Messages its people: each its own chat,
-            // a tap away, and your chats right under them.
-            if !searching, !session.rows.isEmpty || !session.roomRows.isEmpty {
-                Section {
+                // Your agents and rooms in one row of faces, as Grok Bot pins its bots and Messages its people: each its own
+                // chat, a tap away, and your chats right under them. (In this section: a section of its own stood a blank
+                // band's height below Needs you.)
+                if !searching, !session.rows.isEmpty || !session.roomRows.isEmpty {
                     DrawerFaces(session: session, current: current, pick: pick)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
