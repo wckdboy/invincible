@@ -392,7 +392,7 @@ echo written`,
  * honest bun.lock and a test that imports it; and the same asking for it from GitHub. Their gate installs it, offline.
  */
 const LATE: Record<string, string> = {};
-type Work = keyof typeof WORK | "TASK_DEPS" | "TASK_DEPS_GIT";
+type Work = keyof typeof WORK | "TASK_DEPS" | "TASK_DEPS_GIT" | "TASK_DEPS_MANIFEST";
 /** A bun.lock made the honest way, by the image's bun in a scratch container of this run's on Docker's default bridge. */
 function lockfile(deps: Record<string, string>): { manifest: string; lock: string } {
   const manifest = JSON.stringify({ name: "project", private: true, dependencies: deps });
@@ -682,7 +682,9 @@ for (const runtime of ["kata", "runc"] as const) {
     /*
      * Its gates' VM has no network: a gate that installs its packages takes them from the node's install cache, filled
      * by the node's filler from the registry as each round begins (sandbox install-cache.ts), mounted read-only. One whose
-     * lockfile names another source is filled with nothing, and its gate fails offline, saying why.
+     * lockfile names another source is filled with nothing; one whose manifest alone does is filled with its lockfile's
+     * packages, the registry's, and nothing its manifest names (the filler is given the lockfile alone: the twelfth
+     * review's R12-2). Either way its gate fails offline, saying why.
      */
     test("a gate that installs a dependency of the registry's takes it from the node's install cache, offline, and passes", async () => {
       const { manifest, lock } = lockfile({ "is-odd": "3.0.1" });
@@ -697,14 +699,29 @@ for (const runtime of ["kata", "runc"] as const) {
     });
 
     test("a gate whose lockfile names a package from elsewhere than the registry fails offline, and says why", async () => {
-      const { manifest, lock } = lockfile({ "is-odd": "3.0.1" });
+      const { lock } = lockfile({ "is-odd": "3.0.1" });
       const git = JSON.stringify({ name: "project", private: true, dependencies: { "is-odd": "github:someone/is-odd" } });
-      LATE.TASK_DEPS_GIT = written({ "package.json": git, "bun.lock": lock.replace(manifest.slice(1, -1), git.slice(1, -1)), "odd.test.ts": ODD_TEST });
+      // (Its lockfile as bun writes one for a GitHub dependency: the package, and the workspace's ask of it.)
+      const named = lock.replace(/"is-odd@3\.0\.1", "",[^\n]*\]/, '"is-odd@github:someone/is-odd#abc", {}, "someone-is-odd-abc"]').replace('"is-odd": "3.0.1"', '"is-odd": "github:someone/is-odd"');
+      expect(named).toContain('"is-odd@github:someone/is-odd#abc"');
+      LATE.TASK_DEPS_GIT = written({ "package.json": git, "bun.lock": named, "odd.test.ts": ODD_TEST });
       const { done } = await handOff("TASK_DEPS_GIT", ["bun install --frozen-lockfile && bun test odd.test.ts"]);
       const said = done.trail.filter((t) => t.text.startsWith("Gate ")).map((t) => t.text).join("\n");
       console.log(`  ${runtime}, the install cache refused: proof ${JSON.stringify(done.proof)}; said: ${/\(Its round's VM has no network[^)]*\)/.exec(said)?.[0] ?? "nothing"}`);
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
       expect(said).toContain("Its round's VM has no network, and the install cache it takes its packages from couldn't be filled");
+      expect(said).toContain(`its bun.lock's workspace of its own's dependencies asks is-odd from "github:someone/is-odd", which isn't the default registry, so nothing is filled`);
+    });
+
+    test("a gate whose manifest alone names a package from elsewhere fails offline, and says why: the filler, given the lockfile alone, fills the registry's", async () => {
+      const { lock } = lockfile({ "is-odd": "3.0.1" });
+      const git = JSON.stringify({ name: "project", private: true, dependencies: { "is-odd": "github:someone/is-odd" } });
+      LATE.TASK_DEPS_MANIFEST = written({ "package.json": git, "bun.lock": lock, "odd.test.ts": ODD_TEST });
+      const { done } = await handOff("TASK_DEPS_MANIFEST", ["bun install --frozen-lockfile && bun test odd.test.ts"]);
+      const said = done.trail.filter((t) => t.text.startsWith("Gate ")).map((t) => t.text).join("\n");
+      console.log(`  ${runtime}, a manifest's own: proof ${JSON.stringify(done.proof)}; said: ${/\((Its round's VM has no network|Bun had a package to fetch)[^)]*\)/.exec(said)?.[0] ?? "nothing"}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      expect(said).toContain("Bun had a package to fetch that its round's install cache doesn't hold");
     });
 
     test("R11-2: the same task with a process the freeze misses, closing its .git around the check's copy, is sent back all the same", async () => {
