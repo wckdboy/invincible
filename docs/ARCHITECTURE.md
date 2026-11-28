@@ -287,7 +287,8 @@ The run loop is carried and renamed (§10), the most proven part of it:
     shown (`servedBy`, `seatServes`), and nothing is written for you when an agent goes. A seat added without one serves
     none, and so does a key's seat, which has no home (a key reaches the agents you grant it);
   - runs at once on one subscription seat: one until shared runs are shown safe, then three, your word given
-    (`SHARED_RUNS_PROVEN`); Codex's homes stay one at a time;
+    (`SHARED_RUNS_PROVEN`); Codex's homes and a Gemini plan's stay one at a time (`ONE_VM_AT_A_TIME`: a Gemini
+    seat's runs share agy's profile, which each start empties and gives the sealed sign-in);
   - a seat's home is a volume of its own (`invincible-seat-<id>`), mounted at `/seats/<id>` only in a VM made for that
     seat from the pinned tools' image (`createSeatVm`): for its sign-in, its status, or a run on it, which shares the
     agent's own `/work`. Its tool is told the home by the variable its vendor documents (`seatEnv`). The host refuses a

@@ -126,7 +126,7 @@ export const SEAT_LIMITS = {
  * home across a token refresh with its window read right (I15 step 3b); then three, the owner's word already given. A
  * seat's own setting (`runs`) can only lower it. Codex's homes stay one at a time whatever that shows: OpenAI's CI page
  * (learn.chatgpt.com/docs/auth/ci-cd-auth, read 26 November 2026) asks that only one machine or serialized job stream
- * use a given copy of Codex's sign-in.
+ * use a given copy of Codex's sign-in. So do a Gemini plan's (ONE_VM_AT_A_TIME, below).
  */
 export const SHARED_RUNS_PROVEN = 1;
 
@@ -564,9 +564,20 @@ export function seatVendor(seat: { kind: SeatKind; provider?: string | null }): 
   }
 }
 
-/** Runs at once a seat takes: its own setting, and for a subscription never more than has been shown safe (D4). */
-export function seatRuns(seat: { kind: SeatKind; runs: number }): number {
-  const limit = seat.kind === "chatgpt-codex" ? 1 : SUBSCRIPTION_KINDS.includes(seat.kind) ? SHARED_RUNS_PROVEN : SEAT_LIMITS.runs;
+/**
+ * The seat kinds whose home is in one VM at a time, whatever is shown safe for other subscriptions (SHARED_RUNS_PROVEN):
+ * Codex's (OpenAI's CI page, above), and a Gemini plan's, whose runs share agy's profile in the seat's home. Each start
+ * empties that profile and copies the seat's sealed sign-in in, so a second VM's start would empty a running agy's
+ * sign-in, and one run's swap would reach another's (design (a); the fourth re-check of 28 November 2026, I7).
+ */
+export const ONE_VM_AT_A_TIME: readonly SeatKind[] = ["chatgpt-codex", "google-antigravity"];
+
+/**
+ * Runs at once a seat takes: its own setting, and for a subscription never more than has been shown safe (D4), and one
+ * for a kind whose home is in one VM at a time. (`proven`: what has been shown safe; a test may ask of more.)
+ */
+export function seatRuns(seat: { kind: SeatKind; runs: number }, proven = SHARED_RUNS_PROVEN): number {
+  const limit = ONE_VM_AT_A_TIME.includes(seat.kind) ? 1 : SUBSCRIPTION_KINDS.includes(seat.kind) ? proven : SEAT_LIMITS.runs;
   return Math.max(1, Math.min(seat.runs, limit));
 }
 

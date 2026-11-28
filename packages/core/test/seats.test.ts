@@ -20,6 +20,7 @@ import {
   SEAT_LIMITS,
   SeatAddInput,
   type SeatFacts,
+  type SeatKind,
   SeatIdInput,
   SeatPolicyInput,
   SeatServesInput,
@@ -447,13 +448,23 @@ describe("a kind a later release brings", () => {
  * by it, as T3 Code drives it: the owner's choice of 27 November 2026 (agents' antigravity.ts says what was taken).
  */
 describe("an Antigravity seat", () => {
-  test("is Google's, has a home of its own, runs Antigravity, and takes one run at a time until more is shown safe", () => {
+  // The fourth re-check of 28 November 2026, I7: a Gemini seat's runs share agy's profile in its home, which each start
+  // empties and gives the sealed sign-in (design (a)): a second VM's start would empty a running agy's sign-in, and one
+  // run's swap would reach another's. So its home is in one VM at a time, as Codex's is, whatever is shown safe for more.
+  test("a Gemini plan's home is in one VM at a time, as Codex's is, however many runs at once are shown safe for a subscription", () => {
+    for (const proven of [1, 3]) {
+      const takes = (kind: SeatKind) => seatRuns({ kind, runs: 3 }, proven);
+      expect([proven, takes("google-antigravity"), takes("chatgpt-codex"), takes("claude-subscription")]).toEqual([proven, 1, 1, proven]);
+    }
+  });
+
+  test("is Google's, has a home of its own, runs Antigravity, and takes one run at a time, as Codex does", () => {
     expect(SEAT_KINDS).toContain("google-antigravity");
     expect(HOMED_KINDS).toContain("google-antigravity");
     expect(SEAT_HARNESS["google-antigravity"]).toBe("antigravity");
     expect(seatKindOf("antigravity")).toBe("google-antigravity");
     expect(seatVendor({ kind: "google-antigravity" })).toBe("google");
-    expect(seatRuns({ kind: "google-antigravity", runs: 3 })).toBe(SHARED_RUNS_PROVEN);
+    expect(seatRuns({ kind: "google-antigravity", runs: 3 })).toBe(1);
     expect(SeatAddInput.safeParse({ kind: "google-antigravity", label: "Gemini Ultra", agent: "ada" }).success).toBe(true);
     // Its sign-in is Google's own page: no provider, no key.
     expect(SeatAddInput.safeParse({ kind: "google-antigravity", label: "Gemini Ultra", provider: "gemini" }).success).toBe(false);
