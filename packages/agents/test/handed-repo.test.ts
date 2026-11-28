@@ -588,7 +588,7 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
     expect([existsSync(join(s.root, "moved.txt")), existsSync(join(s.root, "pre.txt"))]).toEqual([false, true]);
   });
 
-  test("R8-1: a copy or a rename spelled otherwise is refused too: git's older rename old/new, two names in a diff --git, a --- or +++ that names another file", () => {
+  test("R8-1 and R9-1: a copy or a rename spelled otherwise is refused too: git's older rename old/new, two names in a diff --git, a --- or +++ that names another file, a /dev/null that is a file to git", () => {
     // (The eighth fabric review's R8-1: each took the content of a file of the base and carried none of it; 64 of them in
     // 6 KB wrote 5.6 MB at a 1 MiB limit.)
     const LIMIT = 64 << 10;
@@ -602,6 +602,10 @@ describe("a binary part of what comes back (the seventh review's R7-1 and R7-2)"
       "a +++ that names another file": `diff --git a/pre.txt b/pre.txt\n--- a/pre.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n-${x}\n+moved\n ${x}\n`,
       "a --- that names another file": `diff --git a/pre.txt b/pre.txt\n--- a/other.txt\n+++ b/pre.txt\n@@ -1,2 +1,2 @@\n-${x}\n+moved\n ${x}\n`,
       "two names in a diff --git alone": `diff --git a/pre.txt b/e.txt\n`,
+      // (The ninth review's R9-1: a /dev/null with no `new file mode` or `deleted file mode` before it is a file to git,
+      // dev/null. One section renames the base's file there and each after it copies it: 64 in 6 KB wrote 5.6 MB.)
+      "+++ /dev/null with no deleted file mode, then --- /dev/null with no new file mode": `diff --git a/pre.txt b/pre.txt\n--- a/pre.txt\n+++ /dev/null\n@@ -1,2 +1,2 @@\n-${x}\n+first!\n ${x}\n${Array.from({ length: 64 }, (_, i) => `diff --git a/m${i}.txt b/m${i}.txt\n--- /dev/null\n+++ b/m${i}.txt\n@@ -1,2 +1,2 @@\n-first!\n+copy ${i}\n ${x}\n`).join("")}`,
+      "the same with modes alone and no hunk": `diff --git a/pre.txt b/pre.txt\nold mode 100644\nnew mode 100755\n--- a/pre.txt\n+++ /dev/null\n${Array.from({ length: 64 }, (_, i) => `diff --git a/m${i}.txt b/m${i}.txt\nold mode 100755\nnew mode 100644\n--- /dev/null\n+++ b/m${i}.txt\n`).join("")}`,
     };
     for (const [what, patch] of Object.entries(forms)) {
       // (Each a few KiB at most: 64 copies of a 32 KiB file of the base would write 2 MiB from it.)

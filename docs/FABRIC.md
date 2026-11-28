@@ -174,9 +174,14 @@ transport keys carries all of it:
        replaced by a folder, never written through (R7-3, I-a). Each binary part must carry the content of the object it
        names, checked before git reads the patch, so nothing of it comes from the agent's store, and it counts at what
        git inflates it to (R7-1, R7-2); a copy or a rename, which carries none of its content and which its send never
-       makes, is refused however it is spelled: a `copy` or `rename` header line of any kind (git's older `rename
-       old`/`new` among them), a `diff --git` whose two names aren't one path, or a `---` or `+++` naming another than
-       its section's (the eighth re-review's R8-1). A patch is applied
+       makes, is refused. A patch is refused for any of these: a `copy` or `rename` header line of any kind (git's
+       older `rename old`/`new` among them), a `diff --git` whose two names aren't one path, or a `---` or `+++` naming
+       another than its section's (the eighth re-review's R8-1). A /dev/null there names no file only after the same
+       header's `new file mode` (for `---`) or `deleted file mode` (for `+++`) line: git reads any other as the file
+       `dev/null`, and one section renamed the base's file there and each later one copied it, 946 MB from a 1 MiB
+       patch (the ninth re-review's R9-1). And git's own reading of the patch (`git apply --numstat -z`) must name each
+       file it touches by one name, a path a `diff --git` line names: so a spelling git takes and the lines above miss
+       is refused too. A patch is applied
        only once all of it came (its sender done, the pipe not cut, as many bytes kept in its own file as were carried),
        and only up to 512 MiB, its bytes and its binary parts as they inflate. One that is cut short, or bigger, is
        dropped, and the task says its changes couldn't be brought back. Every step of the agent's side on that worktree

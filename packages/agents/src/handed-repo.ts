@@ -154,8 +154,13 @@ print(size)`;
  *   clone's send never makes one (`--no-renames`), so a patch with one is refused, however it is spelled (the eighth
  *   review's R8-1: 64 of git's older `rename old`/`new`, or of a `diff --git` naming two files, wrote 5.6 MB at a
  *   1 MiB limit): a `copy` or `rename` header line of any kind, a `diff --git` line whose two names aren't one path, or
- *   a `---` or `+++` in a section's header naming another than its path (or /dev/null). A traditional patch, with no
- *   `diff --git` line, is no copy: git patches the file its `+++` names, which must be there, with what it carries.
+ *   a `---` or `+++` in a section's header naming another than its path. A /dev/null there is no file only after a
+ *   `new file mode` (for `---`) or a `deleted file mode` (for `+++`) line of the same header: git reads any other as the
+ *   file `dev/null` (the ninth review's R9-1: one section renamed the base's file there, and each after it copied it,
+ *   946 MB from a 1 MiB patch). And git's own reading of the patch, `git apply --numstat -z`, must name each file it
+ *   touches by one name, and that a path a `diff --git` line names: whatever spelling of a copy or a rename git takes
+ *   that the lines above don't, it is refused so. A traditional patch, with no `diff --git` line, is no copy: git
+ *   patches the file its `+++` names, which must be there, with what it carries.
  */
 const BINARY_CHECK = `import base64,hashlib,zlib
 def binary_refused(root, base, path, limit):
@@ -169,6 +174,23 @@ def binary_refused(root, base, path, limit):
     held = {}
     def text(line):
         return line[:-1] if line.endswith(b'\\n') else line
+    def unquoted(q):
+        # (A name git quoted, as git's unquote_c_style reads it: its C escapes and octal bytes; None for any other.)
+        out, i = bytearray(), 0
+        escaped = {97: 7, 98: 8, 116: 9, 110: 10, 118: 11, 102: 12, 114: 13, 34: 34, 92: 92}
+        while i < len(q):
+            if q[i] != 92:
+                out.append(q[i])
+                i += 1
+            elif i + 1 < len(q) and q[i+1] in escaped:
+                out.append(escaped[q[i+1]])
+                i += 2
+            elif re.fullmatch(rb'[0-3][0-7][0-7]', q[i+1:i+4]):
+                out.append(int(q[i+1:i+4], 8))
+                i += 4
+            else:
+                return None
+        return bytes(out)
     def names(rest):
         # (A diff --git line's two names, as git writes them for one file, quoted or not: its a/ and b/ names, else None.)
         q = (len(rest) - (9 if rest.startswith(b'"') else 5)) // 2
@@ -275,20 +297,30 @@ def binary_refused(root, base, path, limit):
                 yield line
         lines = read()
         total, index = 0, None
-        # (The names of the section being read, from its diff --git line, and whether its header is: to its first hunk.)
-        section, header = None, False
+        # (The names of the section being read, from its diff --git line, and whether its header is: to its first hunk;
+        # whether that header has said its file is new, or deleted; and every path a diff --git line names, as git reads it.)
+        section, header, born, dead, paths = None, False, False, False, set()
         line = next(lines, None)
         while line is not None:
             if line.startswith(b'diff --git '):
-                section, header = names(text(line)[11:]), True
+                section, header, born, dead = names(text(line)[11:]), True, False, False
                 if section is None:
                     return copied
+                named = unquoted(section[0][3:-1]) if section[0].startswith(b'"') else section[0][2:]
+                if named is None:
+                    return copied
+                paths.add(named)
             elif header and (line.startswith(b'@@ ') or text(line) == b'GIT binary patch'):
                 header = False
-            # (Each name to its first tab, as git reads it: git ends one with a space in it so, and quotes any with a tab.)
-            elif header and line.startswith(b'--- ') and text(line)[4:].split(b'\\t', 1)[0] not in (section[0], b'/dev/null'):
+            elif header and line.startswith(b'new file mode '):
+                born = True
+            elif header and line.startswith(b'deleted file mode '):
+                dead = True
+            # (Each name to its first tab, as git reads it: git ends one with a space in it so, and quotes any with a tab. A
+            # /dev/null is none only where the header said the file is new, or deleted: else git reads the file dev/null.)
+            elif header and line.startswith(b'--- ') and text(line)[4:].split(b'\\t', 1)[0] not in ((section[0], b'/dev/null') if born else (section[0],)):
                 return copied
-            elif header and line.startswith(b'+++ ') and text(line)[4:].split(b'\\t', 1)[0] not in (section[1], b'/dev/null'):
+            elif header and line.startswith(b'+++ ') and text(line)[4:].split(b'\\t', 1)[0] not in ((section[1], b'/dev/null') if dead else (section[1],)):
                 return copied
             if method(line):
                 return spelled
@@ -365,6 +397,20 @@ def binary_refused(root, base, path, limit):
                 if hunk(lines, None) is None:
                     return spelled
                 line = next(lines, None)
+    # (Then git's own reading of it, as its apply reads it: each file it touches by one name, a path a diff --git line names.
+    # A record of two names is a copy or a rename. The ninth review's R9-1.)
+    r = git(root,'apply','--numstat','-z','--binary','--allow-empty',path,timeout=600)
+    if r.returncode:
+        return "its changes can't be read as git reads them"
+    out, at = r.stdout, 0
+    while at < len(out):
+        end = out.find(b'\\0', at)
+        if end < 0:
+            return copied
+        fields = out[at:end].split(b'\\t', 2)
+        at = end + 1
+        if len(fields) != 3 or fields[2] == b'' or (section is not None and fields[2] not in paths):
+            return copied
     return None
 `;
 
