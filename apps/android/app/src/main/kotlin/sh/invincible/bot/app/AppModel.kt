@@ -104,7 +104,7 @@ data class Inbox(
             val kind = source.substringBefore(':', "")
             val name = source.substringAfter(':', "")
             if (name.isNotEmpty()) mapOf("rule" to "Your rule", "loop" to "The loop")[kind]?.let { return "$it $name" }
-            return mapOf("heartbeat" to "The heartbeat", "ci" to "CI", "compute" to "Its compute")[source] ?: source
+            return mapOf("heartbeat" to "The heartbeat", "ci" to "CI", "compute" to "Its compute", "routing" to "Routing")[source] ?: source
         }
 
         /**

@@ -290,7 +290,7 @@ struct NoticeView: Decodable, Sendable, Identifiable, Equatable {
     let severity: String
     let title: String
     let body: String
-    /// What raised it: `heartbeat`, `loop:<name>`, `rule:<name>`, `ci`, `compute`.
+    /// What raised it: `heartbeat`, `loop:<name>`, `rule:<name>`, `ci`, `compute`, `routing` (work going round on both tiers).
     let source: String
     /// The node it is about, when it is about one.
     let node: String?

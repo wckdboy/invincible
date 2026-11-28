@@ -2,9 +2,11 @@ package sh.invincible.bot.app
 
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.get
+import sh.invincible.bot.core.list
 import sh.invincible.bot.core.string
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -43,7 +45,16 @@ class InboxTest {
         assertEquals("The heartbeat", Inbox.from("heartbeat"))
         assertEquals("CI", Inbox.from("ci"))
         assertEquals("Its compute", Inbox.from("compute"))
+        assertEquals("Routing", Inbox.from("routing"))
         assertEquals("rule:", Inbox.from("rule:"))
         assertEquals("something else", Inbox.from("something else"))
+    }
+
+    @Test
+    fun whereANoticeCameFromIsThePwasWordsByTheVectors() {
+        // (apps/apple/InvincibleTests/Fixtures/core-vectors.json: the PWA's lib/notices.ts on each source, the iPhone's too.)
+        val vectors = Json.parse(javaClass.classLoader!!.getResource("core-vectors.json")!!.readText())["notices"].list
+        assertTrue(vectors.isNotEmpty())
+        for (v in vectors) assertEquals(v["source"].string, v["from"].string, Inbox.from(v["source"].string!!))
     }
 }

@@ -1,6 +1,9 @@
+import { ROUND_SOURCE } from "@invincible/core/routing";
+
 /*
- * The node's notices as the Inbox says them: where one came from, in words. The iPhone and Mac apps say the same
- * (Core/Notices.swift), held to it by the parity vectors (apps/apple/scripts/vectors.ts). Pure, unit-tested.
+ * The node's notices as the Inbox says them: where one came from, in words. The iPhone and Mac apps (Core/Notices.swift)
+ * and Android (app/AppModel.kt, Inbox.from) say the same, held to it by the parity vectors (apps/apple/scripts/vectors.ts).
+ * Pure, unit-tested.
  */
 
 const KINDS = new Map([
@@ -11,6 +14,8 @@ const NAMED = new Map([
   ["heartbeat", "The heartbeat"],
   ["ci", "CI"],
   ["compute", "Its compute"],
+  // Work going round on both tiers, told by the node's own routing (core's routing.ts).
+  [ROUND_SOURCE, "Routing"],
 ]);
 
 /** Where a notice came from, as you'd say it: "rule:pushes" is "Your rule pushes"; one this app doesn't know, as it is. */

@@ -1318,7 +1318,7 @@ const timelines = {
 };
 
 // ---- where a notice came from, in words (the PWA's lib/notices.ts) ----------------------------------------------------
-const notices = ["rule:pushes", "loop:morning", "heartbeat", "ci", "compute", "rule:a:b", "rule:", ":x", "constructor:x", "something-new"].map((source) => ({ source, from: noticeFrom(source) }));
+const notices = ["rule:pushes", "loop:morning", "heartbeat", "ci", "compute", "routing", "rule:a:b", "rule:", ":x", "constructor:x", "something-new"].map((source) => ({ source, from: noticeFrom(source) }));
 
 // ---- notifications: what a native app does when it opens, and which kinds it tells quietly (core's notify.ts) --------
 const notifyReach = (["granted", "denied", "undetermined"] as const).flatMap((permission) =>

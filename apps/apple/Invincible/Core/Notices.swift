@@ -20,6 +20,6 @@ enum Notices {
     static func from(_ source: String) -> String {
         let parts = source.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
         if parts.count == 2, !parts[1].isEmpty, let kind = ["rule": "Your rule", "loop": "The loop"][String(parts[0])] { return "\(kind) \(parts[1])" }
-        return ["heartbeat": "The heartbeat", "ci": "CI", "compute": "Its compute"][source] ?? source
+        return ["heartbeat": "The heartbeat", "ci": "CI", "compute": "Its compute", "routing": "Routing"][source] ?? source
     }
 }
