@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, beginFor, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { seatVmClearCommand } from "./agent-process.ts";
@@ -647,22 +647,6 @@ export function progress(event: RunEvent): string {
   }
 }
 
-/** Why a task begins on the planner's models by what its agent's last tasks needed (beginOf): said on its trail. */
-export const BEGIN_BY_MEMORY = "its agent's last two tasks had to move up to the strongest models, so this one begins on them";
-
-/**
- * Where an agent's next task begins (smart routing's memory, by kind of task: an agent's own tasks, its job and its
- * repository): its tasks as they stand, the latest first. On the planner's models when the last two that began on the
- * engineer's both had to move up before they were done; on the engineer's again once the last two began on the planner's
- * by this memory, so that work the cheaper models can do now goes back to them. Null: on the engineer's, as ever.
- */
-export function beginOf(tasks: readonly Pick<TeamTask, "id" | "record">[], current: string): { why: string } | null {
-  const routed = tasks.filter((t) => t.id !== current && t.record?.routing).map((t) => t.record!.routing!);
-  if (routed.length >= 2 && routed[0]!.because === "memory" && routed[1]!.because === "memory") return null;
-  const cheap = routed.filter((r) => r.began === "engineer").slice(0, 2);
-  return cheap.length === 2 && cheap.every((r) => r.moved !== undefined) ? { why: BEGIN_BY_MEMORY } : null;
-}
-
 export function teamRuntime(deps: TeamRuntimeDeps) {
   /**
    * A job the owner did not write, as its worker is told it: the primary's own brief (its in your conversation, or a
@@ -1295,9 +1279,14 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Nor is work whose models the planner's are already, its first the same model: the ladder climbs to other models.
       const rungs = deps.brain(agent).store;
       const escalate = !held && !agent.models?.length && !sameModel(roleModels(rungs, "planner")[0] ?? "", roleModels(rungs, workRole(agent.role))[0] ?? "");
-      // Where it begins, by what this agent's last tasks needed (beginOf), and how its work is routed as it goes: its record keeps it.
-      const begin = escalate && !coding ? beginOf(deps.work?.(agent.id) ?? [], task.id) : null;
-      let routing: TeamTaskRouting = { began: "engineer" };
+      // Where it begins: by how its agent's tasks of its kind went (core's routing.ts beginFor), the planner's models where
+      // the last of its kind was verified there; and how its work is routed as it goes, its kind and all, kept for its record.
+      const kind = taskKindOf({ fix: Boolean(task.fix), desktop, repository: Boolean(agent.repository) });
+      const begun = escalate && !coding ? beginFor(deps.work?.(agent.id) ?? [], kind, task.id) : null;
+      const begin = begun?.tier === "planner" ? { why: begun.why } : null;
+      // (A try of the engineer's after the planner's is said too: the run says only where work goes to the planner's.)
+      if (begun?.because === "probe") ctx.emit(`Routed · ${begun.why}: the engineer's models do the work`);
+      let routing: TeamTaskRouting = { began: "engineer", kind, ...(begun?.because === "probe" ? { because: "probe" as const } : {}) };
       // On a seat its tool's commands run in the seat's VM: told so, and not told of a desktop out of their reach.
       const where = onSeat ? ` Your commands run in a VM made for your plan, beside your own VM and sharing its /work${desktop ? ": your own VM's desktop is out of their reach" : ""}.` : screen;
       // A desktop task's desktop starts as its work begins, beside its first model call (C1, 28 November 2026: its cold
@@ -1395,8 +1384,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           // What a review judged the work against, when the work was steered: its goal and every steer it had taken, in order.
           if (event.type === "steered") steered += 1;
           if (event.type === "review" && steered) ctx.emit(`Judged · against its goal and ${steered} steer${steered === 1 ? "" : "s"}, in order`);
-          // How its work was routed, kept for its record: the next task of this agent's begins by it (beginOf).
-          if (event.type === "routed") routing = { began: "planner", because: begin && event.why === begin.why ? "memory" : "plan" };
+          // How its work was routed, kept for its record: the next task of this agent's of its kind begins by it (beginFor).
+          if (event.type === "routed") routing = { began: "planner", because: begin && event.why === begin.why ? "memory" : "plan", kind };
           else if (event.type === "escalated") routing = { ...routing, moved: event.why };
           // What proves it, kept for its record: each gate before the work and in the last round, and the last verdict.
           if (event.type === "baseline") proof.before = event.results.map((g) => g.exitCode);

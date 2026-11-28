@@ -331,27 +331,43 @@ test("an agent's work held to models (its own, or sensitive mode's) stays on the
   expect(heard.filter((line) => /^(Escalated|Routed) ·/.test(line))).toEqual([]);
 });
 
-test("an agent whose last two tasks had to move up begins its next on the planner's models, said on its trail and kept with its record", async () => {
-  const past = (id: string): TeamTask => ({ ...task, id, status: "done", verified: true, record: { startedAt: 0, endedAt: 1, ended: "done", commands: 9, revisions: 2, spent: [], routing: { began: "engineer", moved: "gate" } } });
+test("an agent's next task of a kind begins where its last of that kind was verified: said on its trail and kept with its record, each kind apart", async () => {
+  /** One of its finished tasks of a kind, verified, where its work began and whether it moved up (routing.ts). */
+  const past = (id: string, routing: NonNullable<NonNullable<TeamTask["record"]>["routing"]>): TeamTask => ({ ...task, id, status: "done", verified: true, record: { startedAt: 0, endedAt: 1, ended: "done", commands: 9, revisions: 1, spent: [], routing } });
+  const rounds = () => [say("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")];
+  // (The fixture's agent has no repository and its VM no desktop: its tasks are of the kind "task", a fix is a "fix".)
+  const history = [past("task-past00000001", { began: "engineer", moved: "gate", kind: "task" })];
   const told: string[] = [];
-  const f = fixture([say("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")], { work: () => [past("task-past00000001"), past("task-past00000002")] });
+  const f = fixture(rounds(), { work: () => history });
   f.setRoster("planner", ["local/plan"]);
   const outcome = await f.runtime.executeTask(member, task, { ...f.context, emit: (line) => void told.push(line) });
   expect(outcome.verified).toBe(true);
   // The plan, then every turn of the work on the planner's model; the review the reviewer's.
   expect(f.bodies.map((body) => body.model)).toEqual(["plan", "plan", "plan", "fake"]);
-  expect(told.filter((line) => line.startsWith("Routed ·"))).toEqual(["Routed · its agent's last two tasks had to move up to the strongest models, so this one begins on them: the planner's models do the work"]);
-  expect(outcome.record.routing).toEqual({ began: "planner", because: "memory" });
-  // On the engineer's, with nothing to move it: kept as that.
-  const g = fixture([say("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")]);
+  expect(told.filter((line) => line.startsWith("Routed ·"))).toEqual(["Routed · its last task was verified on the planner's models: the planner's models do the work"]);
+  expect(outcome.record.routing).toEqual({ began: "planner", because: "memory", kind: "task" });
+  // A fix, with the same history: none of its kind verified yet, so the engineer's.
+  const fix = { connector: "github", owner: "o", repo: "r", branch: "fix-it", pr: 7, head: "a".repeat(40) };
+  const g = fixture(rounds(), { work: () => history });
   g.setRoster("planner", ["local/plan"]);
-  expect((await g.runtime.executeTask(member, task, g.context)).record.routing).toEqual({ began: "engineer" });
+  const fixed = await g.runtime.executeTask(member, { ...task, fix }, g.context);
+  expect(g.bodies.map((body) => body.model)).toEqual(["plan", "fake", "fake", "fake"]);
+  expect(fixed.record.routing).toEqual({ began: "engineer", kind: "fix" });
+  // Two in a row begun on the planner's by it: the next tries the engineer's again, and says so.
+  const heard: string[] = [];
+  const twice = [past("task-past00000003", { began: "planner", because: "memory", kind: "task" }), past("task-past00000002", { began: "planner", because: "memory", kind: "task" }), ...history];
+  const h = fixture(rounds(), { work: () => twice });
+  h.setRoster("planner", ["local/plan"]);
+  const tried = await h.runtime.executeTask(member, task, { ...h.context, emit: (line) => void heard.push(line) });
+  expect(h.bodies.map((body) => body.model)).toEqual(["plan", "fake", "fake", "fake"]);
+  expect(heard.filter((line) => line.startsWith("Routed ·"))).toEqual(["Routed · its last 2 tasks began on the planner's models: this one tries the engineer's again: the engineer's models do the work"]);
+  expect(tried.record.routing).toEqual({ began: "engineer", because: "probe", kind: "task" });
   // Pinned to its own models, none of it applies: no memory, and no routing kept.
   const own: Agent = { ...member, models: ["local/mimo"] };
-  const h = fixture([say("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")], { agent: () => own, work: () => [past("task-past00000001"), past("task-past00000002")] });
-  h.setRoster("planner", ["local/plan"]);
-  const pinned = await h.runtime.executeTask(own, task, h.context);
-  expect(h.bodies.map((body) => body.model)).toEqual(["plan", "mimo", "mimo", "fake"]);
+  const k = fixture(rounds(), { agent: () => own, work: () => history });
+  k.setRoster("planner", ["local/plan"]);
+  const pinned = await k.runtime.executeTask(own, task, k.context);
+  expect(k.bodies.map((body) => body.model)).toEqual(["plan", "mimo", "mimo", "fake"]);
   expect(pinned.record.routing).toBeUndefined();
 });
 

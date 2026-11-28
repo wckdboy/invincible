@@ -49,14 +49,15 @@ describe("the routing suite's stand-ins", () => {
     expect(r.tasks[0]!.usd).toBeGreaterThan(routed.tasks[0]!.usd);
   });
 
-  test("the memory: an agent whose tasks all need the lead begins on it after two that had to move up, and tries the worker every third; one whose tasks the worker does never does", async () => {
+  test("the memory: an agent whose tasks all need the lead begins on it once one moved up, and tries the worker after two begun there; one whose tasks the worker does never does", async () => {
     const tasks = memoryTasks(7, 6);
     expect(["ada", "bo", "cy"].map((agent) => tasks.filter((t) => t.agent === agent).length)).toEqual([6, 6, 6]);
     expect(tasks.filter((t) => t.agent === "bo").every((t) => t.level === 3)).toBe(true);
     expect(tasks.filter((t) => t.agent === "ada").every((t) => t.level <= 2)).toBe(true);
     const on = await runPolicy("routed", tasks, { memory: true });
     const began = (agent: string) => on.tasks.filter((t) => t.task.agent === agent).map((t) => t.began);
-    expect(began("bo")).toEqual(["engineer", "engineer", "planner", "planner", "engineer", "planner"]);
+    // The tier its last verified (core's beginFor): the lead's, once one moved up; after two begun there, the worker's tried.
+    expect(began("bo")).toEqual(["engineer", "planner", "planner", "engineer", "planner", "planner"]);
     expect(began("ada").every((b) => b === "engineer")).toBe(true);
     // Without it, every one of bo's begins on the worker and moves up.
     const off = await runPolicy("routed", tasks);
