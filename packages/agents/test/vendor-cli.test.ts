@@ -1421,20 +1421,26 @@ describe("a subscription's sign-in never reaches your agent", () => {
     };
     const root = new URL("../../../", import.meta.url).pathname;
     const sources: string[] = [];
+    // Every shipped source: TypeScript, JavaScript, Python and shell, and files of no extension (the image's Dockerfile,
+    // its scripts); a package's own tests aside, but not a folder named test inside its sources (the re-check of 28
+    // November 2026, R10, found those four unread).
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
-        if (name === "node_modules" || name === "test" || name === "dist" || name.startsWith(".")) continue;
+        if (name === "node_modules" || name === "dist" || name.startsWith(".")) continue;
         const path = join(dir, name);
+        if (name === "test" && /^packages\/[^/]+$/.test(dir.slice(root.length))) continue;
         if (statSync(path).isDirectory()) walk(path);
-        else if (/\.(ts|py|sh)$/.test(name) && !name.endsWith(".test.ts")) sources.push(path);
+        else if ((/\.(ts|tsx|js|mjs|cjs|py|sh)$/.test(name) || !name.includes(".") || name.startsWith("Dockerfile")) && !/\.test\.[jt]s$/.test(name)) sources.push(path);
       }
     };
+    // A name split in two is the name: string literals joined by + (or side by side, as Python joins them) are read joined.
+    const joined = (text: string) => text.replace(/(["'`])\s*\+\s*\1/g, "").replace(/(["'])[ \t]+\1/g, "");
     for (const dir of ["packages", "apps/web/src", "sandbox", "integrations"]) walk(join(root, dir));
     expect(sources.length).toBeGreaterThan(100);
     const found = sources.flatMap((path) => {
       const text = readFileSync(path, "utf8");
       const rel = path.slice(root.length);
-      const named = [...kept, ...homes].filter((name) => text.includes(name) && !(rel === POINTED && homes.includes(name) && pointsAtSeatHome(text, name)) && !(rel === KEEPS && name === "antigravity-oauth-token" && keepsAgyToken(text)));
+      const named = [...kept, ...homes].filter((name) => (text.includes(name) || joined(text).includes(name)) && !(rel === POINTED && homes.includes(name) && pointsAtSeatHome(text, name)) && !(rel === KEEPS && name === "antigravity-oauth-token" && keepsAgyToken(text)));
       return named.map((name) => `${rel}: ${name}`);
     });
     expect(found).toEqual([]);
