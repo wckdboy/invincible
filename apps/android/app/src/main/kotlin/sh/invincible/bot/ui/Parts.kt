@@ -81,11 +81,12 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 
 /**
  * A page's bar (Material's top app bar): back to where it opened from, what it is, and what it offers. The page already
- * sits below the status bar, so the bar adds no inset of its own.
+ * sits below the status bar, so the bar adds no inset of its own. What it offers comes last, since pages pass it as a
+ * trailing lambda (PageBarTest).
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun PageBar(title: String, back: () -> Unit, navigation: (@Composable () -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}, titleContent: (@Composable () -> Unit)? = null) {
+fun PageBar(title: String, back: () -> Unit, navigation: (@Composable () -> Unit)? = null, titleContent: (@Composable () -> Unit)? = null, actions: @Composable RowScope.() -> Unit = {}) {
     TopAppBar(
         // (A page may name itself with more than words: an agent's, its glass beside its name.)
         title = { if (titleContent != null) titleContent() else Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
