@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { TERMINAL_HANG_UP } from "../src/spec.ts";
 
 /*
@@ -23,6 +23,19 @@ const alive = (pid: number): boolean => {
   }
 };
 
+/** The processes still running whose environment carries this terminal's tag, as the hang-up finds them. */
+const tagged = (tag: string): number[] =>
+  readdirSync("/proc")
+    .filter((name) => /^\d+$/.test(name))
+    .map(Number)
+    .filter((pid) => {
+      try {
+        return readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").includes(`INVINCIBLE_TERMINAL=${tag}`) && alive(pid);
+      } catch {
+        return false;
+      }
+    });
+
 async function until(what: () => boolean, ms = 5000): Promise<void> {
   const end = Date.now() + ms;
   while (!what()) {
@@ -38,8 +51,9 @@ test.skipIf(process.platform !== "linux")("what a terminal started is hung up by
   const shell = Bun.spawn(["sh", "-c", "sleep 300 & echo $!; nohup sleep 301 >/dev/null 2>&1 & echo $!; wait"], { env, stdout: "pipe" });
   // A shell that leads its own session and ignores the hang-up: one that would otherwise never go.
   const stubborn = Bun.spawn(["setsid", "sh", "-c", "trap '' HUP; while :; do sleep 1; done"], { env });
-  // Another terminal's shell, untouched.
-  const other = Bun.spawn(["sh", "-c", "sleep 303"], { env: { ...process.env, INVINCIBLE_TERMINAL: `${tag}x` } });
+  // Another terminal's shell, untouched. (Its sleep in its place, so that ending it ends its sleep: a `sleep 303` left
+  // behind by `sh -c` held the test run's output open for five minutes after the suite, 28 November 2026.)
+  const other = Bun.spawn(["sh", "-c", "exec sleep 303"], { env: { ...process.env, INVINCIBLE_TERMINAL: `${tag}x` } });
   const reader = shell.stdout.getReader();
   let printed = "";
   while (printed.split("\n").length < 3) printed += new TextDecoder().decode((await reader.read()).value);
@@ -53,4 +67,6 @@ test.skipIf(process.platform !== "linux")("what a terminal started is hung up by
   expect(alive(other.pid)).toBe(true);
   process.kill(nohupped, "SIGKILL");
   other.kill();
+  // Nothing either terminal started is left running once the test is done with it.
+  await until(() => tagged(tag).length === 0 && tagged(`${tag}x`).length === 0, 1500);
 });
