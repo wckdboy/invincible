@@ -21,9 +21,16 @@ const client = join(root, "desktop");
 let built: string | null = null;
 
 beforeAll(() => {
-  const cc = Bun.spawnSync(["cc", "-O2", "-Wall", "-Wextra", "-Werror", "-o", client, join(desktopDir, "desktop.c")], { stderr: "pipe" });
-  built = cc.exitCode === 0 ? client : null;
-  if (!built) console.warn(`deskd.test.ts: the desktop client's tests SKIPPED, unverified: no C compiler here (${cc.stderr.toString().slice(0, 200)})`);
+  let why: string;
+  try {
+    const cc = Bun.spawnSync(["cc", "-O2", "-Wall", "-Wextra", "-Werror", "-o", client, join(desktopDir, "desktop.c")], { stderr: "pipe" });
+    built = cc.exitCode === 0 ? client : null;
+    why = cc.stderr.toString();
+  } catch (error) {
+    // No cc on the PATH at all: Bun throws for a command it can't find (1.4.4), where a compiler that fails answers.
+    why = (error as Error).message;
+  }
+  if (!built) console.warn(`deskd.test.ts: the desktop client's tests SKIPPED, unverified: no C compiler here (${why.slice(0, 200)})`);
 });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
