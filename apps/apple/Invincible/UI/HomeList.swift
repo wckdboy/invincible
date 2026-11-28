@@ -36,6 +36,10 @@ struct HomeList: View {
     /// The link's trouble said over it, where it is the screen (an iPhone's): a node that proves to be another,
     /// reconnecting, what went wrong. An iPad's sidebar says them at its foot, and its chat the refusal.
     var saysLink = false
+    /// Its own head where the system's bar was (an iPhone's): the bar's glass items, large title and search drawer over
+    /// the moving list made every fling late (PerfTests.testScrollHome, 45 ms a second against 15). An iPad's sidebar keeps
+    /// the system's, with its sidebar button.
+    var ownHead = false
     let open: (HomePick) -> Void
     let settings: () -> Void
     let newChat: () -> Void
@@ -53,6 +57,12 @@ struct HomeList: View {
         let rows = Home.filter(rows, query: query)
         let chats = searching ? Chats.filter(history.chats ?? [], query: query) : []
         List {
+            if ownHead {
+                // Its search, at the top of the list, scrolling away with it.
+                HomeSearchField(text: $query)
+                    .listRowInsets(EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s2, trailing: Metrics.margin))
+                    .listRowSeparator(.hidden)
+            }
             ForEach(rows) { row in
                 rowButton(row)
             }
@@ -75,30 +85,9 @@ struct HomeList: View {
         .listStyle(.plain)
         .safeAreaInset(edge: .top, spacing: 0) { if saysLink { link } }
         .navigationTitle("Invincible")
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search")
+        .modifier(HomeBar(own: ownHead, query: $query, settings: settings) { newMenu })
         // Your chats are read only once you search them: nothing more is asked at rest.
         .task(id: searching) { if searching && history.chats == nil { await history.load(session) } }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: settings) { Image(systemName: "gearshape") }
-                    .accessibilityLabel("Settings")
-                    .accessibilityIdentifier("home.settings")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("New chat", systemImage: "square.and.pencil", action: newChat)
-                        .accessibilityIdentifier("home.new.chat")
-                    if session.can("fleet:admin") {
-                        Button("New agent", systemImage: "person.badge.plus") { creating = true }
-                            .accessibilityIdentifier("home.new.agent")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("New")
-                .accessibilityIdentifier("home.new")
-            }
-        }
         .sheet(isPresented: $creating) { AgentEditor(session: session) { open(.agent($0.id)) } }
         .task {
             // Your latest chat, read as the app opens (its row's line, and the chat ready when you open it); the list's
@@ -110,6 +99,16 @@ struct HomeList: View {
         // every element in it.)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home")
+    }
+
+    /// + : a new chat with your agent, or a new agent where this device may make one.
+    @ViewBuilder private var newMenu: some View {
+        Button("New chat", systemImage: "square.and.pencil", action: newChat)
+            .accessibilityIdentifier("home.new.chat")
+        if session.can("fleet:admin") {
+            Button("New agent", systemImage: "person.badge.plus") { creating = true }
+                .accessibilityIdentifier("home.new.agent")
+        }
     }
 
     /// The link's trouble: a node that proves to be another (with Try again; Settings forgets this device), else
@@ -207,6 +206,106 @@ struct HomeList: View {
         }
         .listRowInsets(EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s1, trailing: Metrics.margin))
         .accessibilityIdentifier("home.notifications")
+    }
+}
+
+/// Home's bar: its own head where it has one (an iPhone's: the system's bar hidden, its search a field in the list), else
+/// the system's, its title, its search drawer, Settings and +.
+private struct HomeBar<New: View>: ViewModifier {
+    let own: Bool
+    @Binding var query: String
+    let settings: () -> Void
+    @ViewBuilder let new: New
+
+    func body(content: Content) -> some View {
+        if own {
+            content
+                .toolbar(.hidden, for: .navigationBar)
+                .safeAreaBar(edge: .top) { HomeHead(settings: settings) { new } }
+        } else {
+            content
+                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(action: settings) { Image(systemName: "gearshape") }
+                            .accessibilityLabel("Settings")
+                            .accessibilityIdentifier("home.settings")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu { new } label: { Image(systemName: "plus") }
+                            .accessibilityLabel("New")
+                            .accessibilityIdentifier("home.new")
+                    }
+                }
+        }
+    }
+}
+
+/// Home's own head (an iPhone's), where the system's bar was, at its sizes: Settings, the app's name, and + for a new chat
+/// or a new agent, each on its own glass. The system's bar over the moving list (its title, its search drawer, its glass
+/// items) is what a scroll's every accessibility snapshot walked (PerfTests.testScrollHome, profiled: three fifths of the
+/// main thread's time); Work's own head was measured the same way (1.7 ms a second where the system's bar cost 10 to 14).
+struct HomeHead<New: View>: View {
+    let settings: () -> Void
+    @ViewBuilder let new: New
+
+    var body: some View {
+        ZStack {
+            Text("Invincible")
+                .font(.headline)
+                .lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 0) {
+                Button(action: settings) { glyph("gearshape") }
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .accessibilityLabel("Settings")
+                    .accessibilityIdentifier("home.settings")
+                Spacer(minLength: Space.s2)
+                Menu { new } label: { glyph("plus") }
+                    .menuIndicator(.hidden)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .accessibilityLabel("New")
+                    .accessibilityIdentifier("home.new")
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, Space.s4)
+        .padding(.vertical, Space.s1)
+    }
+
+    /// A button's symbol at the system bar's size (the body's, large) in a touch's box.
+    private func glyph(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.body)
+            .imageScale(.large)
+            .foregroundStyle(.primary)
+            .frame(width: Metrics.touch, height: Metrics.touch)
+            .contentShape(.circle)
+    }
+}
+
+/// Home's search, a field at the top of its list (an iPhone's, whose own head has no search drawer): it finds your agents,
+/// your rooms and your chats by their words.
+private struct HomeSearchField: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: Space.s2) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search", text: $text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .accessibilityIdentifier("home.search")
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear")
+            }
+        }
+        .padding(.horizontal, Space.s3)
+        .frame(minHeight: 36)
+        .background(.fill.tertiary, in: .capsule)
     }
 }
 

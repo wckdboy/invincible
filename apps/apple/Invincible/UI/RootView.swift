@@ -89,7 +89,7 @@ struct PhoneRoot: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            HomeList(session: session, saysLink: true, open: pick, settings: { path = [.more] }, newChat: newChat)
+            HomeList(session: session, saysLink: true, ownHead: true, open: pick, settings: { path = [.more] }, newChat: newChat)
                 .navigationDestination(for: Place.self) { place in destination(place) }
         }
         .environment(\.showInbox) { path.append(.inbox) }
