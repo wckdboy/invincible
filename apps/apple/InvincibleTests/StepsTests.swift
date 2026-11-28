@@ -147,8 +147,9 @@ struct StepsTests {
     }
 
     @Test func whatItCostIsSaidAsThePWASaysIt() {
-        // (Two more since 28 November 2026, money in two decimals however much: "budget $25.00", "$14.40 of $25.00".)
-        #expect(steps.costs.count == 12)
+        // (Two more since 28 November 2026, money in two decimals however much: "budget $25.00", "$14.40 of $25.00";
+        // and two more for a call counted at its most, said as an upper bound: "at most $0.30".)
+        #expect(steps.costs.count == 14)
         for item in steps.costs {
             #expect(Steps.costWords(budgetUsd: item.budgetUsd, record: item.record, prices: steps.prices) == item.words, "\(item.words)")
         }
