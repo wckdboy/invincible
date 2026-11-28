@@ -13,10 +13,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,10 +75,15 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
     val dark = LocalBrand.current.paper.luminance() < 0.5f
     val box = with(LocalDensity.current) { size.roundToPx() }
     val picture = remember(glass, size, box, dark) { GlassPictures.picture(glass.shape, glass.color, size.value, box, dark) }
-    val breath = breathing(glassBreathes(state, live, motionAllowed()))
+    val motion = motionAllowed()
+    val breath = breathing(glassBreathes(state, live, motion))
+    val nudges = glassNudges(state, live, motion)
+    val nudge = nudging(nudges)
     val named = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier.clearAndSetSemantics { }
     val ramp = Glass.RAMPS[glass.color]
-    Box(Modifier.size(size).then(named), contentAlignment = Alignment.Center) {
+    // (Only a glass that may nudge has a layer of its own to turn.)
+    val turned = if (nudges) Modifier.graphicsLayer { rotationZ = nudge.value } else Modifier
+    Box(Modifier.size(size).then(named).then(turned), contentAlignment = Alignment.Center) {
         // Its glow at its fullest, drawn once into a layer the render thread keeps: its breath is that layer's opacity alone
         // (read only here, so it draws nothing again), the kept picture of it shown more or less strongly. The layer reaches
         // GLOW_PAD past the box on each side, so the pool and the shadow are whole: kept in a layer only the box's size, they
@@ -92,6 +101,30 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
         }
         Canvas(Modifier.matchParentSize()) { drawPicture(picture, size.value, dark, state, this.size.minDimension) }
     }
+}
+
+/** Whether a glass nudges: one that waits on you, where it is in focus ([live]), while the phone's animations are on. */
+internal fun glassNudges(state: Glass.State?, live: Boolean, motion: Boolean): Boolean = live && motion && state == Glass.State.NEEDS
+
+/**
+ * A glass that waits on you, nudged (core's GLASS_NUDGE, the lead's word of 28 November 2026: its motion, not a colour):
+ * once every Glass.Nudge.EVERY ms, timed from the clock so the glasses on a page nudge together, a knock through its
+ * turns; between knocks it only waits, asking for no frame, and where [on] is false it is still. Its turn is read only in
+ * its layer, so a knock draws nothing again: the render thread turns the layer.
+ */
+@Composable
+private fun nudging(on: Boolean): State<Float> {
+    val turn = remember { Animatable(0f) }
+    LaunchedEffect(on) {
+        turn.snapTo(0f)
+        if (!on) return@LaunchedEffect
+        val step = (Glass.Nudge.MS / (Glass.Nudge.TURNS.size - 1)).toInt()
+        while (true) {
+            delay(Glass.Nudge.EVERY - System.currentTimeMillis() % Glass.Nudge.EVERY)
+            for (t in Glass.Nudge.TURNS.drop(1)) turn.animateTo(t * Glass.Nudge.TURN, tween(step, easing = FastOutSlowInEasing))
+        }
+    }
+    return turn.asState()
 }
 
 /** Whether a glass breathes: a working agent's, on its own page ([live]), while the phone's animations are on. */

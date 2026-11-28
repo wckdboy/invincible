@@ -40173,8 +40173,8 @@
           "dark": "#51a2ff"
         },
         "needs": {
-          "light": "#e17100",
-          "dark": "#ffba00"
+          "light": "#0a0a0b",
+          "dark": "#ffffff"
         },
         "failed": {
           "light": "#e7000b",
@@ -40211,6 +40211,18 @@
           "out": -1,
           "cut": 3
         }
+      ]
+    },
+    "nudge": {
+      "every": 4000,
+      "ms": 600,
+      "turn": 7,
+      "turns": [
+        0,
+        -1,
+        1,
+        -0.5,
+        0
       ]
     },
     "states": [

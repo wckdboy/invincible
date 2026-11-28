@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { GLASS_DOT, GLASS_RAMPS, GLASS_SHAPES, glassOf, glassState } from "@invincible/core/glass";
+import { GLASS_DOT, GLASS_NUDGE, GLASS_RAMPS, GLASS_SHAPES, glassOf, glassState } from "@invincible/core/glass";
 import { GLASS_CSS, glassAvatar } from "./glass.ts";
 import { agentMark, markStateOfAgent, markStateOfMood } from "./mark.ts";
 
@@ -82,8 +82,16 @@ describe("its stylesheet", () => {
     expect(GLASS_CSS).toContain('@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="working"]::before, :root:not([data-motion="full"]) .agent-glass[data-state="working"]::after { animation: none; } }');
     expect(GLASS_CSS).toContain(':root[data-motion="reduce"] .agent-glass[data-state="working"]::before, :root[data-motion="reduce"] .agent-glass[data-state="working"]::after { animation: none; }');
     expect(GLASS_CSS).toContain(":root[data-hidden] .agent-glass::before, :root[data-hidden] .agent-glass::after { animation-play-state: paused; }");
-    // Nothing else in it moves: its two breaths, and the two rules that still them.
-    expect(GLASS_CSS.match(/animation:/g)).toHaveLength(4);
+    // Nothing else in it moves: its two breaths and its nudge, and the rules that still them.
+    expect(GLASS_CSS.match(/animation:/g)).toHaveLength(7);
+  });
+
+  test("one that waits on you nudges: a knock through its turns at the start of each 4 s; still where motion is reduced; paused while the page is hidden", () => {
+    expect(GLASS_CSS).toContain(`.agent-glass[data-state="needs"] { animation: gl-nudge ${GLASS_NUDGE.every}ms ease-in-out infinite; }`);
+    expect(GLASS_CSS).toContain("@keyframes gl-nudge { 0% { transform: rotate(0deg); } 3.75% { transform: rotate(-7deg); } 7.5% { transform: rotate(7deg); } 11.25% { transform: rotate(-3.5deg); } 15%, 100% { transform: rotate(0deg); } }");
+    expect(GLASS_CSS).toContain(':root[data-motion="reduce"] .agent-glass[data-state="needs"] { animation: none; }');
+    expect(GLASS_CSS).toContain('@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="needs"] { animation: none; } }');
+    expect(GLASS_CSS).toContain(":root[data-hidden] .agent-glass { animation-play-state: paused; }");
   });
 
   test("its glow follows the page's theme by itself: the pool on a dark page, the shadow on a light one", () => {

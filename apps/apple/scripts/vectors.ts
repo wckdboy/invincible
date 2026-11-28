@@ -1974,6 +1974,7 @@ const glass = {
   paint: core.GLASS_PAINT,
   glow: core.GLASS_GLOW,
   dot: core.GLASS_DOT,
+  nudge: core.GLASS_NUDGE,
   states: core.MARK_STATES.map((state) => ({ state, glass: core.glassState(state) })),
   reads: glassReads.map((r) => ({ ...r, glass: core.glassOf(r.id, r.profile), own: core.isGlassProfile(r.profile) })),
   // As a node gives them, one by one in the order they join (the apps preview a new agent's with the same rule): the

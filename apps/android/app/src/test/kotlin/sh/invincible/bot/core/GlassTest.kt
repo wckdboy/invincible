@@ -100,6 +100,12 @@ class GlassTest {
         assertEquals(dot["sizes"].list.map { Glass.Dot.Size(it["upTo"].double!!.toFloat(), it["size"].double!!.toFloat(), it["out"].double!!.toFloat(), it["cut"].double!!.toFloat()) }, Glass.Dot.SIZES)
         assertEquals(Glass.Dot.SIZES[1], Glass.Dot.size(20f))
         assertEquals(Glass.Dot.SIZES[3], Glass.Dot.size(96f))
+
+        // (Needs you is the ink, its glass's nudge telling it: when, how long, how far, by what steps.)
+        val nudge = g["nudge"]
+        assertEquals(listOf(nudge["every"].long, nudge["ms"].long), listOf(Glass.Nudge.EVERY, Glass.Nudge.MS))
+        assertEquals(nudge["turn"].double!!.toFloat(), Glass.Nudge.TURN, 0f)
+        assertEquals(nudge["turns"].list.map { it.double!!.toFloat() }, Glass.Nudge.TURNS)
     }
 
     @Test fun anAgentsGlassIsReadAsCoreReadsIt() {

@@ -21,4 +21,15 @@ class GlassBreathTest {
             assertEquals("$state", false, glassBreathes(state, live = true, motion = true))
         }
     }
+
+    @Test fun aGlassThatWaitsOnYouNudgesWhereItIsInFocusWhileThingsMayMove() {
+        // (The lead's word, 28 November 2026: "the avatar's nudge is its motion, not a colour".)
+        assertEquals(true, glassNudges(Glass.State.NEEDS, live = true, motion = true))
+        assertEquals(false, glassNudges(Glass.State.NEEDS, live = false, motion = true))
+        // The phone's animations off: still.
+        assertEquals(false, glassNudges(Glass.State.NEEDS, live = true, motion = false))
+        for (state in listOf(Glass.State.WORKING, Glass.State.IDLE, Glass.State.FAILED, null)) {
+            assertEquals("$state", false, glassNudges(state, live = true, motion = true))
+        }
+    }
 }

@@ -81,7 +81,7 @@ data class Glass(val color: Int, val shape: Int) {
     object Dot {
         val COLORS = mapOf(
             State.WORKING to AgentMark.Paired("#155dfc", "#51a2ff"),
-            State.NEEDS to AgentMark.Paired("#e17100", "#ffba00"),
+            State.NEEDS to AgentMark.Paired("#0a0a0b", "#ffffff"),
             State.FAILED to AgentMark.Paired("#e7000b", "#ff6467"),
             State.IDLE to AgentMark.Paired("#a1a1a1", "#737373"),
         )
@@ -92,6 +92,15 @@ data class Glass(val color: Int, val shape: Int) {
         val SIZES = listOf(Size(16f, 6f, 2f, 1.5f), Size(28f, 8f, 2f, 2f), Size(40f, 10f, 1f, 2f), Size(1000f, 13f, -1f, 3f))
 
         fun size(avatar: Float): Size = SIZES.firstOrNull { avatar <= it.upTo } ?: SIZES.last()
+    }
+
+    /** How a glass that waits on you nudges (core's GLASS_NUDGE): once every [EVERY] ms, timed from the clock, a knock [MS]
+     * long through [TURNS] (shares of [TURN] degrees, at even steps), then still. */
+    object Nudge {
+        const val EVERY = 4000L
+        const val MS = 600L
+        const val TURN = 7f
+        val TURNS = listOf(0f, -1f, 1f, -0.5f, 0f)
     }
 
     companion object {

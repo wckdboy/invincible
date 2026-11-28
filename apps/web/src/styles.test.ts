@@ -179,8 +179,10 @@ describe("the stylesheet", () => {
   test("nothing animates at rest: what repeats for ever says only that something is loading, being written or worked on", () => {
     // (Your word, 26 November 2026: a hyper-modern interface with nothing animating at rest. A state's dot is lit, still;
     // the banner's line of light passes once as it tries again. Loading and writing are not rest, nor is an agent's work:
-    // a working agent's light breathes, by opacity alone, the lead's call for the glass of 27 November 2026.)
-    const ALLOWED = [".spinner", ".skeleton::after", ".caret", ".boot img", '.agent-glass[data-state="working"]::before', '.agent-glass[data-state="working"]::after'];
+    // a working agent's light breathes, by opacity alone, the lead's call for the glass of 27 November 2026; and an agent
+    // waiting on you is no more at rest than one at work: its glass nudges, a knock every four seconds, the lead's call of
+    // 28 November 2026, "the avatar's nudge is its motion, not a colour".)
+    const ALLOWED = [".spinner", ".skeleton::after", ".caret", ".boot img", '.agent-glass[data-state="working"]::before', '.agent-glass[data-state="working"]::after', '.agent-glass[data-state="needs"]'];
     const forever = all.filter((r) => /(?:^|;)\s*animation(?:-iteration-count)?\s*:[^;]*\binfinite\b/.test(r.body)).flatMap((r) => r.selectors);
     expect(forever.filter((selector) => !ALLOWED.includes(selector))).toEqual([]);
   });

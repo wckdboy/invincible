@@ -329,11 +329,13 @@ export function glassState(state: MarkState): GlassState {
 }
 
 /** The dots' colours (the designs' state colours; idle is a ring in it, the page inside), and their size by the avatar's:
- * diameter, how far past the box's bottom-right corner it sits, and the ring of the page that cuts it out. */
+ * diameter, how far past the box's bottom-right corner it sits, and the ring of the page that cuts it out. Needs you is
+ * the ink, as everything that waits on you is (the lead's word, 28 November 2026: "Ink, not amber, in every app"): its
+ * glass's nudge says it (GLASS_NUDGE), its motion, not a colour. */
 export const GLASS_DOT = {
   colors: {
     working: { light: "#155dfc", dark: "#51a2ff" },
-    needs: { light: "#e17100", dark: "#ffba00" },
+    needs: { light: "#0a0a0b", dark: "#ffffff" },
     failed: { light: "#e7000b", dark: "#ff6467" },
     idle: { light: "#a1a1a1", dark: "#737373" },
   },
@@ -345,6 +347,14 @@ export const GLASS_DOT = {
     { upTo: 1000, size: 13, out: -1, cut: 3 },
   ],
 } as const;
+
+/**
+ * How a glass that waits on you nudges (the lead's word, 28 November 2026: "the avatar's nudge is its motion, not a
+ * colour"): once every `every` ms, a knock `ms` long that turns it about its middle through `turns` (each a share of
+ * `turn` degrees, at even steps; the last at rest), then still until the next. Timed from the clock (at a multiple of
+ * `every`), so the glasses on a page that wait on you nudge together; never where motion is reduced.
+ */
+export const GLASS_NUDGE = { every: 4000, ms: 600, turn: 7, turns: [0, -1, 1, -0.5, 0] } as const;
 
 /* ---------- who wears what ---------- */
 

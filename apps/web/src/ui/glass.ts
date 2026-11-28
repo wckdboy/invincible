@@ -1,4 +1,4 @@
-import { GLASS_DOT, GLASS_GLOW, GLASS_IBEAM, GLASS_PAINT, GLASS_PEARL, GLASS_RAMPS, GLASS_SHAPES, type GlassRamp, type GlassShape, type GlassState, type GlassStops, glassOf } from "@invincible/core/glass";
+import { GLASS_DOT, GLASS_GLOW, GLASS_IBEAM, GLASS_NUDGE, GLASS_PAINT, GLASS_PEARL, GLASS_RAMPS, GLASS_SHAPES, type GlassRamp, type GlassShape, type GlassState, type GlassStops, glassOf } from "@invincible/core/glass";
 import { MARK_POLYGON } from "../../../../scripts/mark.ts";
 import { h, svg } from "./dom.ts";
 
@@ -43,7 +43,13 @@ function paintOf(id: string, ramp: GlassRamp): SVGElement[] {
   ];
 }
 
-/** Its styles: the glow, the dot and the breathing (GLASS_GLOW, GLASS_DOT), and your agent's bare I-beam. */
+/** The nudge's keyframes (GLASS_NUDGE): its turns at even steps from the start of each cycle, then still to its end. */
+const nudgeAt = (i: number): number => +(((i * GLASS_NUDGE.ms) / (GLASS_NUDGE.turns.length - 1) / GLASS_NUDGE.every) * 100).toFixed(4);
+const NUDGE_FRAMES = GLASS_NUDGE.turns.map((turn, i) => `${nudgeAt(i)}%${i === GLASS_NUDGE.turns.length - 1 ? ", 100%" : ""} { transform: rotate(${turn * GLASS_NUDGE.turn}deg); }`).join(" ");
+
+/** Its styles: the glow, the dot, the breathing and the nudge (GLASS_GLOW, GLASS_DOT, GLASS_NUDGE), and your agent's bare
+ * I-beam. A glass that waits on you nudges (its motion tells it, its dot the ink): the glasses a page draws together
+ * nudge together. */
 export const GLASS_CSS = `
 :root { --gl-dark: 0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --gl-dark: 1; } }
@@ -69,6 +75,11 @@ export const GLASS_CSS = `
 :root[data-hidden] .agent-glass::before, :root[data-hidden] .agent-glass::after { animation-play-state: paused; }
 :root[data-motion="reduce"] .agent-glass[data-state="working"]::before, :root[data-motion="reduce"] .agent-glass[data-state="working"]::after { animation: none; }
 @media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="working"]::before, :root:not([data-motion="full"]) .agent-glass[data-state="working"]::after { animation: none; } }
+.agent-glass[data-state="needs"] { animation: gl-nudge ${GLASS_NUDGE.every}ms ease-in-out infinite; }
+@keyframes gl-nudge { ${NUDGE_FRAMES} }
+:root[data-hidden] .agent-glass { animation-play-state: paused; }
+:root[data-motion="reduce"] .agent-glass[data-state="needs"] { animation: none; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .agent-glass[data-state="needs"] { animation: none; } }
 .gl-dot { position: absolute; right: calc(-1 * var(--gl-dot-out)); bottom: calc(-1 * var(--gl-dot-out)); width: var(--gl-dot); height: var(--gl-dot); border-radius: 50%; background: var(--gl-dot-c); box-shadow: 0 0 0 var(--gl-dot-cut) var(--gl-surface, var(--bg)); }
 [data-state="working"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.working.light}, ${GLASS_DOT.colors.working.dark}); }
 [data-state="needs"] > .gl-dot { --gl-dot-c: light-dark(${GLASS_DOT.colors.needs.light}, ${GLASS_DOT.colors.needs.dark}); }
