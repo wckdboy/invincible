@@ -1232,6 +1232,11 @@ try {
       { name: "task-verified-panel", hash: `#/task/${kept.id}`, wait: ".thread-page .dp-changes", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "changes" }, steps: [`document.querySelector("details.dp-file")?.setAttribute("open", "")`] },
       { name: "task-verified-panel-proof", hash: `#/task/${kept.id}`, wait: ".thread-page .proof", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "proof" } },
       { name: "task-running-panel", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "details" } },
+      // In the Mac app's window (data-shell="mac", which its shell sets): its own buttons over the sidebar's head, the
+      // sidebar shown and folded away. (The buttons themselves are the window's: here the place they are kept clear of.)
+      { name: "mac-task-running", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps", steps: [`document.documentElement.dataset.shell = "mac"`] },
+      { name: "mac-task-running-folded", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps", prefs: { "invincible:sidebar": "collapsed" }, steps: [`document.documentElement.dataset.shell = "mac"`] },
+      { name: "mac-primary", hash: `#/chat?c=${conversation}`, wait: ".turn.assistant", steps: [`document.documentElement.dataset.shell = "mac"`] },
       // Its terminal (a desk's, T3 Code's ⌘J): a drawer under the thread, a shell in its agent's VM.
       { name: "task-running-terminal", hash: `#/task/${first.id}`, steps: [press("Show the terminal")], wait: ".thread-drawer .xterm-screen" },
       { name: "inbox", hash: "#/inbox" },

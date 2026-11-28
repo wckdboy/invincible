@@ -1549,6 +1549,18 @@
         .drawer-screen { flex: 1; min-height: 0; display: flex; background: #060607; }
         .drawer-screen > .term-screen { flex: 1; min-width: 0; border: 0; border-radius: 0; }
       }
+      /* The Mac app's window (data-shell="mac" on the root, set by the app's shell; docs/DESIGN.md): from 1024 px its own three
+         buttons (close, minimise, zoom) sit at its top left over the page, as T3 Code's do, in the sidebar's head (its
+         middle 26 px down, as the window's 52 pt title bar's). The head keeps clear of them, a pane's header is on the same
+         line, and a folded sidebar's button comes after them. Narrower, the window has its own title bar above the page. */
+      @media (min-width: 1024px) {
+        :root[data-shell="mac"] { --chrome-lights: 80px; }
+        :root[data-shell="mac"] .sidebar.desk .side-head { padding-left: calc(var(--chrome-lights) - var(--sp-2)); }
+        :root[data-shell="mac"] .sidebar.desk .wordmark-text { display: none; }
+        :root[data-shell="mac"] .thread-head { min-height: 52px; }
+        :root[data-shell="mac"][data-sidebar="collapsed"] .btn.side-expand { top: 12px; left: var(--chrome-lights); }
+        :root[data-shell="mac"][data-sidebar="collapsed"] :is(.topbar, .thread-head, .team-head) { padding-left: calc(var(--chrome-lights) + 40px); }
+      }
       /* (A narrow desk's header keeps its words for the task: the Workspace button is its icon there.) */
       @media (min-width: 1024px) and (max-width: 1279px) {
         .thread-head-acts .thread-workspace .label { display: none; }
