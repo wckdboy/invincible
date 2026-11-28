@@ -1,7 +1,16 @@
 package sh.invincible.bot.ui
 
+import android.app.Activity
+import android.content.Context
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.Shapes
@@ -122,10 +131,42 @@ private fun invincibleTypography(): Typography {
     )
 }
 
+/** How this phone shows the app (Settings' Appearance): as the phone does ("system"), always "light", or always "dark".
+ * Read once, then the one value the theme reads, so a change shows at once. */
+internal object AppearanceSetting {
+    private const val KEY = "appearance"
+    private var state: MutableState<String>? = null
+
+    fun theme(context: Context): MutableState<String> = state ?: mutableStateOf(prefs(context).getString(KEY, "system") ?: "system").also { state = it }
+
+    fun set(context: Context, theme: String) {
+        prefs(context).edit().putString(KEY, theme).apply()
+        theme(context).value = theme
+    }
+
+    private fun prefs(context: Context) = (context.applicationContext ?: context).getSharedPreferences("invincible", Context.MODE_PRIVATE)
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun InvincibleTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+    val choice by AppearanceSetting.theme(LocalContext.current)
+    val dark = when (choice) {
+        "light" -> false
+        "dark" -> true
+        else -> isSystemInDarkTheme()
+    }
+    // (The system bars' icons follow the page, light or dark, whatever the phone's own mode.)
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
     val b = if (dark) Dark else Light
     val scheme = if (dark) {
         darkColorScheme(

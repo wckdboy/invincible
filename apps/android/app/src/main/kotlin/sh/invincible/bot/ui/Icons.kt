@@ -286,3 +286,35 @@ val agentsIcon: ImageVector = icon("Agents") {
         moveTo(17.4f, 14.2f); curveTo(19.4f, 14.8f, 20.5f, 16.6f, 20.5f, 19.5f)
     }
 }
+
+/** Notifications: a bell, and its clapper under it. */
+val BellIcon: ImageVector = icon("Notifications") {
+    line {
+        moveTo(6f, 16.5f); lineTo(6f, 11f); curveTo(6f, 7.4f, 8.6f, 4.8f, 12f, 4.8f); curveTo(15.4f, 4.8f, 18f, 7.4f, 18f, 11f); lineTo(18f, 16.5f); lineTo(19.5f, 18f); lineTo(4.5f, 18f); close()
+        moveTo(10f, 20.5f); lineTo(14f, 20.5f)
+    }
+}
+
+/** Appearance: a ring, its one half filled (light and dark). */
+val ContrastIcon: ImageVector = icon("Appearance") {
+    line { moveTo(20.5f, 12f); arcTo(8.5f, 8.5f, 0f, true, true, 3.5f, 12f); arcTo(8.5f, 8.5f, 0f, true, true, 20.5f, 12f); close() }
+    path(fill = SolidColor(Color.Black)) { moveTo(12f, 3.5f); arcTo(8.5f, 8.5f, 0f, false, true, 12f, 20.5f); close() }
+}
+
+/** This device: a phone, and its one button. */
+val PhoneIcon: ImageVector = icon("This device") {
+    line {
+        moveTo(8.5f, 3f); lineTo(15.5f, 3f); curveTo(16.6f, 3f, 17.5f, 3.9f, 17.5f, 5f); lineTo(17.5f, 19f); curveTo(17.5f, 20.1f, 16.6f, 21f, 15.5f, 21f); lineTo(8.5f, 21f); curveTo(7.4f, 21f, 6.5f, 20.1f, 6.5f, 19f); lineTo(6.5f, 5f); curveTo(6.5f, 3.9f, 7.4f, 3f, 8.5f, 3f); close()
+        moveTo(11f, 18f); lineTo(13f, 18f)
+    }
+}
+
+/** Providers: a chip, its pins on each side. */
+val ChipIcon: ImageVector = icon("Providers") {
+    line {
+        moveTo(7f, 7f); lineTo(17f, 7f); lineTo(17f, 17f); lineTo(7f, 17f); close()
+        moveTo(10f, 10f); lineTo(14f, 10f); lineTo(14f, 14f); lineTo(10f, 14f); close()
+        moveTo(10f, 3.5f); lineTo(10f, 7f); moveTo(14f, 3.5f); lineTo(14f, 7f); moveTo(10f, 17f); lineTo(10f, 20.5f); moveTo(14f, 17f); lineTo(14f, 20.5f)
+        moveTo(3.5f, 10f); lineTo(7f, 10f); moveTo(3.5f, 14f); lineTo(7f, 14f); moveTo(17f, 10f); lineTo(20.5f, 10f); moveTo(17f, 14f); lineTo(20.5f, 14f)
+    }
+}

@@ -49,7 +49,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -62,108 +61,224 @@ import sh.invincible.bot.app.Updates
 import sh.invincible.bot.core.Json
 import sh.invincible.bot.core.NodeClient
 import sh.invincible.bot.core.NodeError
+import sh.invincible.bot.core.Permissions
 import sh.invincible.bot.core.Primary
+import sh.invincible.bot.core.Providers
+import sh.invincible.bot.core.Seats
 import sh.invincible.bot.core.ThisPhone
+import sh.invincible.bot.core.Usage
+import sh.invincible.bot.core.get
+import sh.invincible.bot.core.list
+import sh.invincible.bot.core.string
 
 /**
- * Settings, as the web's: sections of plain rows, each section's name small and grey over its rows, which lie on the
- * raised ground with a hairline between each two, inside the page's margin once. How your agent looks here, this
- * phone's notifications, its keys and services, this phone and the node it talks to, the way out (forgetting the node
- * here), and the app. A newer build, when there is one, comes first. Under "Everything else".
+ * Settings, from the list's gear (the owner's words, 28 November 2026: "a settings menu for adding connectors, keys,
+ * providers, permissions etc.", then "super simple chat like interface, modern simple sleek"): one plain list of eight,
+ * each a page one tap deep. What the agents work with (Connectors, Keys, Providers, Permissions), then this app
+ * (Notifications, Appearance, This device, About), as the iPhone's. No words under its rows; a newer build, when there is
+ * one, comes first. Its rows are offered as this phone's scopes allow (AppModel.can), as the iPhone's are. [page]: one
+ * of them open ("providers", "permissions", "notifications", "appearance", "device", "about"); [open] opens one.
  */
 @Composable
-fun SettingsScreen(app: AppModel, openKeys: () -> Unit, openConnectors: () -> Unit, back: () -> Unit) {
-    val paired by app.paired.collectAsState()
+fun SettingsScreen(app: AppModel, page: String?, open: (String) -> Unit, openKeys: () -> Unit, openConnectors: () -> Unit, back: () -> Unit) {
     val context = LocalContext.current
-    val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
+    val visit = { url: String -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    when (page) {
+        "providers" -> ProvidersPage(app, back)
+        "permissions" -> PermissionsPage(app, back)
+        "notifications" -> SettingsPage("Notifications", back) { NotificationsSection(app, visit) }
+        "appearance" -> SettingsPage("Appearance", back) { Group(listOf({ ThemeRow() }, { MarkRow() })) }
+        "device" -> ThisDevicePage(app, back)
+        "about" -> AboutPage(visit, back)
+        else -> SettingsList(app, open, openKeys, openConnectors, visit, back)
+    }
+}
+
+/** The list: two plain groups of rows, each its icon, its name and a chevron; About says the build. */
+@Composable
+private fun SettingsList(app: AppModel, open: (String) -> Unit, openKeys: () -> Unit, openConnectors: () -> Unit, visit: (String) -> Unit, back: () -> Unit) {
+    val context = LocalContext.current
     var newer by remember { mutableStateOf<Updates.Newer?>(null) }
     LaunchedEffect(Unit) { newer = Updates.newer(context) }
-    val open = { url: String -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    // (Read again as the node says what this phone may do.)
+    val scopes by app.scopes.collectAsState()
+    val reads = scopes?.contains("mind:read") ?: true
+    SettingsPage("Settings", back) {
+        newer?.let { n -> Group(listOf({ SettingRow("A newer ${Primary.name} is out", trail = { AnswerPill("Download", onClick = { visit(n.url) }) }) })) }
+        Group(
+            buildList<@Composable () -> Unit> {
+                if (reads) add { LinkRow(PlugIcon, "Connectors", onClick = openConnectors) }
+                if (scopes?.contains("vault:read") ?: true) add { LinkRow(KeyIcon, "Keys", onClick = openKeys) }
+                if (reads) add { LinkRow(ChipIcon, "Providers") { open("providers") } }
+                if (reads) add { LinkRow(ShieldIcon, "Permissions") { open("permissions") } }
+            },
+        )
+        Group(
+            buildList<@Composable () -> Unit> {
+                if (reads) add { LinkRow(BellIcon, "Notifications") { open("notifications") } }
+                add { LinkRow(ContrastIcon, "Appearance") { open("appearance") } }
+                add { LinkRow(PhoneIcon, "This device") { open("device") } }
+                add { LinkRow(InfoIcon, "About", value = appVersion(context)) { open("about") } }
+            },
+        )
+    }
+}
+
+/** A page of Settings: its bar (back, its name), and its groups under it, as wide as the web's narrow page at most. */
+@Composable
+private fun SettingsPage(title: String, back: () -> Unit, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        PageBar("Settings", back)
+        PageBar(title, back)
         Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.TopCenter) {
-            // (As wide as the web's narrow page at most, on a tablet's pane.)
             Column(
                 Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(horizontal = Space.margin).padding(top = Space.s2, bottom = Space.s8),
-                verticalArrangement = Arrangement.spacedBy(Space.s6),
-            ) {
-                newer?.let { n ->
-                    Section("Update", listOf<@Composable () -> Unit>({
-                        SettingRow(
-                            "A newer ${Primary.name} is out",
-                            sub = "Build ${n.build} (${n.size}). It installs over this one: open it once it's downloaded.",
-                            trail = { AnswerPill("Download", onClick = { open(n.url) }) },
-                        )
-                    }))
-                }
-                Section("Appearance", listOf<@Composable () -> Unit>({ MarkRow() }))
-                NotificationsSection(app, open)
-                Section(
-                    "Keys and services",
-                    listOf<@Composable () -> Unit>(
-                        { SettingRow("Keys", sub = "Your providers' and services' keys, sealed", lead = { RowIcon(KeyIcon) }, onClick = openKeys, chevron = true) },
-                        { SettingRow("Connectors", sub = "Mail, calendars, GitHub and MCP servers", lead = { RowIcon(PlugIcon) }, onClick = openConnectors, chevron = true) },
-                    ),
-                )
-                paired?.let { p ->
-                    Section(
-                        "This phone",
-                        listOf<@Composable () -> Unit>(
-                            { Fact("Name", p.name) },
-                            { Fact("Its key", ThisPhone.shortId(p.device, 16), mono = true) },
-                            { Fact("Talks to", ThisPhone.talksTo(p.nodeName, p.origin)) },
-                            { Fact("Fleet", ThisPhone.fleet(p.fleetName, p.fleet)) },
-                        ),
-                        note = "Its key is kept in this phone's secure hardware; every request is signed with it.",
-                    )
-                }
-                Section(
-                    "Leave",
-                    listOf<@Composable () -> Unit>({
-                        SettingRow(
-                            "Forget this device",
-                            sub = "Deletes this phone's key here. Your node keeps everything: remove this phone from its devices there too.",
-                            under = { ForgetThisDevice(app, outlined = true) },
-                        )
-                    }),
-                    danger = true,
-                )
-                Section(
-                    "About",
-                    listOf<@Composable () -> Unit>(
-                        // The app's mark, on nothing (AppMark): no tile on a light page.
-                        { SettingRow("Invincible", sub = "App $version · open source (Apache-2.0)", lead = { AppMark(36.dp) }) },
-                        { SettingRow("The source on GitHub", onClick = { open("https://github.com/wckdboy/invincible") }, end = ExternalIcon) },
-                        { SettingRow("invincible.sh", onClick = { open("https://invincible.sh") }, end = ExternalIcon) },
-                    ),
-                )
-            }
+                verticalArrangement = Arrangement.spacedBy(Space.s5),
+            ) { content() }
         }
     }
 }
 
-/** A section, as the web's Settings draws one: its name, small and grey, over its rows on the raised ground, a hairline
- * between each two; a note under them; the way out's in a red line. */
+/** A group of rows on the raised ground, nothing over it and nothing between them: whitespace says where one ends. */
 @Composable
-private fun Section(title: String, rows: List<@Composable () -> Unit>, note: String? = null, danger: Boolean = false) {
-    val brand = LocalBrand.current
-    val shape = MaterialTheme.shapes.medium
-    Column(verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-        Text(title, style = Type.section, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.semantics { heading() })
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(brand.raised)
-                .then(if (danger) Modifier.border(1.dp, brand.danger.copy(alpha = 0.45f), shape) else Modifier),
-        ) {
-            rows.forEachIndexed { i, row ->
-                if (i > 0) Hairline()
-                row()
+private fun Group(rows: List<@Composable () -> Unit>) {
+    if (rows.isEmpty()) return
+    Column(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(LocalBrand.current.raised)) {
+        rows.forEach { it() }
+    }
+}
+
+/** A row that opens a page: its icon, its name, what it holds where that is one word ([value]), and a chevron. */
+@Composable
+private fun LinkRow(icon: ImageVector, title: String, value: String? = null, onClick: () -> Unit) {
+    SettingRow(title, lead = { RowIcon(icon) }, onClick = onClick, chevron = true, trail = value?.let { v -> { Text(v, style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant) } })
+}
+
+/** What a read-only page says of itself, in one line. */
+@Composable
+private fun ReadOnly() {
+    Text("Read-only for now: adding and changing come next.", style = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = Space.s1))
+}
+
+/** This build's version, as About and the list say it. */
+private fun appVersion(context: android.content.Context): String =
+    runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
+
+/** What a page reads from the node as it opens, once: its answer, or why there is none. */
+@Composable
+private fun <T> readOnOpen(app: AppModel, path: String, read: (Json) -> T): Pair<T?, String?> {
+    var got by remember(path) { mutableStateOf<T?>(null) }
+    var problem by remember(path) { mutableStateOf<String?>(null) }
+    LaunchedEffect(path) {
+        val client = app.client ?: return@LaunchedEffect
+        try {
+            got = read(client.get(path))
+        } catch (e: NodeError) {
+            problem = e.message
+        }
+    }
+    return got to problem
+}
+
+/**
+ * Providers, read-only (the lead's ruling, 28 November 2026): this period's usage, the providers your fleet uses, and
+ * your seats (the accounts you hold with a vendor), each in a row of one line (SettingsWords.kt).
+ */
+@Composable
+private fun ProvidersPage(app: AppModel, back: () -> Unit) {
+    val meter by app.usage.collectAsState()
+    val (providers, said) = readOnOpen(app, "/api/providers") { Providers.of(it).providers }
+    val (seats, seatsSaid) = readOnOpen(app, "/api/seats") { it["seats"].list }
+    val now = System.currentTimeMillis()
+    SettingsPage("Providers", back) {
+        ReadOnly()
+        meter?.let { m -> Group(listOf({ SettingRow(Usage.period(m), sub = Usage.line(m)) })) }
+        providers?.let { list ->
+            Group(
+                if (list.isEmpty()) listOf({ SettingRow(null, sub = "None yet: a key you add in Keys sets up its provider.") })
+                else list.map { p -> { SettingRow(p.label ?: p.id, sub = listOfNotNull(p.kind.takeIf { it.isNotBlank() }, if (p.hasKey) "its key sealed" else null).joinToString(" · ")) } },
+            )
+        }
+        seats?.let { list ->
+            if (list.isNotEmpty()) {
+                Group(
+                    list.map { s ->
+                        { SettingRow(s["label"].string ?: s["id"].string ?: "", sub = "${Seats.kindName(s["kind"].string ?: "")} · ${Seats.state(s["state"] ?: Json.obj(), s["plan"].string, now).first}") }
+                    },
+                )
             }
         }
-        note?.let { Text(it, style = Type.small, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        (said ?: seatsSaid)?.let { Text(it, style = Type.meta, color = LocalBrand.current.failed) }
     }
+}
+
+/**
+ * Permissions, read-only (the lead's ruling, 28 November 2026): what always asks you, your rules on the commands the
+ * work runs, and the hand-offs one node may make to another's agents without asking you, each in a row (SettingsWords.kt).
+ */
+@Composable
+private fun PermissionsPage(app: AppModel, back: () -> Unit) {
+    val (rules, said) = readOnOpen(app, "/api/rules") { it["rules"].list }
+    // (The hand-offs only for a phone that may read them: fleet:admin.)
+    val grantsAllowed = app.can("fleet:admin")
+    val (grants, grantsSaid) = if (grantsAllowed) readOnOpen(app, "/api/fabric/grants") { it["grants"].list } else null to null
+    SettingsPage("Permissions", back) {
+        ReadOnly()
+        Group(listOf({ SettingRow("Always asks you", sub = "Money, legal steps and anything that can't be undone.", lead = { RowIcon(ShieldIcon) }) }))
+        rules?.let { list ->
+            Group(
+                if (list.isEmpty()) listOf({ SettingRow(null, sub = "No rules yet.") })
+                else list.map { r -> { SettingRow(r["name"].string ?: "", sub = r["rule"].takeIf { it is Json.Obj }?.let { Permissions.sentence(it) } ?: "Written by a newer node: not understood here.") } },
+            )
+        }
+        grants?.let { list -> if (list.isNotEmpty()) Group(list.map { g -> { SettingRow(Permissions.handoffTitle(g), sub = Permissions.handoffTerms(g["terms"])) } }) }
+        (said ?: grantsSaid)?.let { Text(it, style = Type.meta, color = LocalBrand.current.failed) }
+    }
+}
+
+/** This device: its name, its key, what it may do, its node and fleet; and forgetting the node here. */
+@Composable
+private fun ThisDevicePage(app: AppModel, back: () -> Unit) {
+    val paired by app.paired.collectAsState()
+    val scopes by app.scopes.collectAsState()
+    SettingsPage("This device", back) {
+        paired?.let { p ->
+            Group(
+                listOfNotNull<@Composable () -> Unit>(
+                    { Fact("Name", p.name) },
+                    { Fact("Its key", ThisPhone.shortId(p.device, 16), mono = true) },
+                    scopes?.let { s -> { Fact("May", s.joinToString(", ").ifEmpty { "nothing" }) } },
+                    { Fact("Node", ThisPhone.talksTo(p.nodeName, p.origin)) },
+                    { Fact("Fleet", ThisPhone.fleet(p.fleetName, p.fleet)) },
+                ),
+            )
+        }
+        Group(listOf({ SettingRow(null, under = { ForgetThisDevice(app, outlined = true) }) }))
+    }
+}
+
+/** About: the app and its build, its source, its site. */
+@Composable
+private fun AboutPage(visit: (String) -> Unit, back: () -> Unit) {
+    val context = LocalContext.current
+    SettingsPage("About", back) {
+        Group(
+            listOf(
+                // The app's mark, on nothing (AppMark): no tile on a light page.
+                { SettingRow("Invincible", sub = "App ${appVersion(context)} · open source (Apache-2.0)", lead = { AppMark(36.dp) }) },
+                { SettingRow("The source on GitHub", onClick = { visit("https://github.com/wckdboy/invincible") }, end = ExternalIcon) },
+                { SettingRow("invincible.sh", onClick = { visit("https://invincible.sh") }, end = ExternalIcon) },
+            ),
+        )
+    }
+}
+
+/** How this phone shows the app: as the phone does, or always light, or always dark (AppearanceSetting). */
+@Composable
+private fun ThemeRow() {
+    val context = LocalContext.current
+    val theme by AppearanceSetting.theme(context)
+    val choices = listOf("system", "light", "dark")
+    SettingRow("Theme", under = { Segmented(listOf("System", "Light", "Dark"), choices.indexOf(theme).coerceAtLeast(0)) { AppearanceSetting.set(context, choices[it]) } })
 }
 
 /**
@@ -272,7 +387,6 @@ private fun MarkRow() {
     val pearl by GuardianSetting.pearl(context)
     SettingRow(
         "Your agent's mark",
-        sub = "Its I-beam, in ink or in pearl glass: this phone's choice alone.",
         lead = { PrimaryMark(36.dp) },
         under = { Segmented(listOf("Ink", "Pearl glass"), if (pearl) 1 else 0) { GuardianSetting.set(context, it == 1) } },
     )
@@ -428,5 +542,5 @@ private fun NotificationsSection(app: AppModel, open: (String) -> Unit) {
             }
         }
     }
-    Section("Notifications", rows, note = "What it sends, and the hours it stays quiet, are your node's settings: Settings in the web app, or invincible notify.")
+    Group(rows)
 }

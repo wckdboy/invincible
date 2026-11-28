@@ -66,7 +66,7 @@ import sh.invincible.bot.core.Blocks
 
 /** Series colours, in a fixed order, apart from the four state colours (a series is no state). */
 @Composable
-private fun palette(): List<Color> = if (isSystemInDarkTheme()) {
+private fun palette(): List<Color> = if (LocalBrand.current.paper.luminance() < 0.5f) {
     listOf(Color(0xFF7AA7FF), Color(0xFFF2A65A), Color(0xFF46C2B0), Color(0xFFB39BFF), Color(0xFFF07FB0), Color(0xFFA4ACB8))
 } else {
     listOf(Color(0xFF2F64D0), Color(0xFFC8661A), Color(0xFF0F7F73), Color(0xFF7048CF), Color(0xFFB8336F), Color(0xFF59616E))
