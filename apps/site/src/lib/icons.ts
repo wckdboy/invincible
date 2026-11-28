@@ -1,18 +1,23 @@
 /*
- * The site's icons, made from its mark (mark.ts) when it is built: a browser tab's (favicon.svg, and icon-64.png for a
- * browser that takes no SVG), the touch icon iOS asks for (apple-touch-icon.png) and the picture a link's preview shows
- * (og.png), each the I-beam in white on black. Pure: a shape filled with its exact coverage along each row and sixteen
+ * The site's icons, made from its mark (mark.ts) when it is built: a browser tab's (favicon.svg, the bare I-beam whose
+ * ink follows the mode, and icon-64.png for a browser that takes no SVG), the touch icon iOS asks for
+ * (apple-touch-icon.png) and the picture a link's preview shows (og.png), these three the I-beam in white on black. Pure: a shape filled with its exact coverage along each row and sixteen
  * samples down each pixel, written as a PNG with Node's zlib, so every build makes the same bytes.
  */
 import { deflateSync } from "node:zlib";
+import { MARK_FORMS } from "../../../../scripts/mark.ts";
 import { MARK, markCorners, markSvg } from "./mark.ts";
 
 type Rgb = [number, number, number];
 const BLACK: Rgb = [0, 0, 0];
 const WHITE: Rgb = [255, 255, 255];
 
-/** A browser tab's icon: the mark in white on a black tile, legible on a light tab bar and a dark one. */
-export const FAVICON_SVG = markSvg({ ink: "#ffffff", ground: "#000000", radius: 0.22 });
+/**
+ * A browser tab's icon, which follows the mode (the owner's word, 28 November 2026: "light/dark mode, preferred bare
+ * I-beam logo/no background"): the bare I-beam, near black on a light tab and white on a dark one (the icons' inks,
+ * scripts/mark.ts MARK_FORMS), the same as the web app's tab.
+ */
+export const FAVICON_SVG = markSvg({ light: MARK_FORMS.light.mark, dark: MARK_FORMS.dark.mark });
 
 /** The same, 64 pixels across, for a browser that takes no SVG icon. */
 export const icon64 = (): Uint8Array<ArrayBuffer> => tile(64, 0.22);

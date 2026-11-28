@@ -86,9 +86,15 @@ describe("the mark and the icons made from it", () => {
     expect(spelled.map((path) => relative(SITE, path))).toEqual([]);
   });
 
-  test("a tab's icon: the mark in white on a black tile", () => {
-    expect(FAVICON_SVG).toContain(`<polygon points="${MARK.points}" fill="#ffffff"/>`);
-    expect(FAVICON_SVG).toContain('fill="#000000"');
+  // The owner's word (28 November 2026): "what ever makes it look the best, light/dark mode, preferred bare I-beam
+  // logo/no background". A tab's icon can follow the mode, so it does.
+  test("a tab's icon: the bare mark, near black in a light tab and white in a dark one, as the web app's tab", () => {
+    expect(FAVICON_SVG).toContain(`<polygon points="${MARK.points}"/>`);
+    expect(FAVICON_SVG).toContain("polygon{fill:#0a0a0b}");
+    expect(FAVICON_SVG).toContain("@media (prefers-color-scheme:dark){polygon{fill:#ffffff}}");
+    expect(FAVICON_SVG).not.toMatch(/<rect|background/);
+    // The same icon, to the byte, as the web app's (scripts/brand.ts), so a tab reads the same on the site and in the app.
+    expect(`${FAVICON_SVG}\n`).toBe(readFileSync(join(SITE, "../web/src/favicon.svg"), "utf8"));
   });
 
   test("the PNGs: their sizes, the same bytes every build, black with the mark in white", () => {

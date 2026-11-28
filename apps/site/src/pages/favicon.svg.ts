@@ -1,4 +1,4 @@
-/* /favicon.svg: the mark in white on a black tile (src/lib/icons.ts). */
+/* /favicon.svg: the bare mark, its ink following the mode (src/lib/icons.ts). */
 import { FAVICON_SVG } from "../lib/icons.ts";
 
 export const prerender = true;

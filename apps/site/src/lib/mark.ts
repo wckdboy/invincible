@@ -12,8 +12,12 @@ export const MARK = { box: 100, points: MARK_POLYGON } as const;
 /** The polygon's corners, in the viewBox's units. */
 export const markCorners = (): [number, number][] => MARK.points.split(" ").map((pair) => pair.split(",").map(Number) as [number, number]);
 
-/** The mark as a standalone SVG: its ink on a ground (a rounded tile, `radius` of its width), or on nothing. */
-export function markSvg({ ink, ground, radius = 0 }: { ink: string; ground?: string; radius?: number }): string {
-  const tile = ground ? `<rect width="${MARK.box}" height="${MARK.box}" rx="${radius * MARK.box}" fill="${ground}"/>` : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${MARK.box} ${MARK.box}">${tile}<polygon points="${MARK.points}" fill="${ink}"/></svg>`;
+/**
+ * The mark as a standalone SVG on nothing, its ink the page's: `light`, or `dark` where the page is dark
+ * (prefers-color-scheme); the box cut to the mark's height, so it fills a square such as a tab's.
+ */
+export function markSvg({ light, dark }: { light: string; dark: string }): string {
+  const ys = markCorners().map(([, y]) => y);
+  const top = Math.min(...ys), side = Math.max(...ys) - top, left = MARK.box / 2 - side / 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${left} ${top} ${side} ${side}"><style>polygon{fill:${light}}@media (prefers-color-scheme:dark){polygon{fill:${dark}}}</style><polygon points="${MARK.points}"/></svg>`;
 }
