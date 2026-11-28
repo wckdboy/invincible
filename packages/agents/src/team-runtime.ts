@@ -316,7 +316,8 @@ export const withGateway = (command: string, lease?: string): string => {
  * Where a task in a repository starts, run in the agent's VM as `python3 -I -c SCRIPT <worktree> <kept>`: the
  * repository as it is now, fetched through the read-only gateway with the lease that is in the VM (never a token
  * in a command), in a worktree of the task's own. The commit it started from is written down, with whether the
- * fetch came through (`fetched`) or the clone had to do as it was (`stale`), and printed. A task taken up again
+ * fetch came through (`fetched`), the clone had to do as it was (`stale`), or the fetch came through but the clone
+ * names no default branch, so its own HEAD, as earlier work left it, is the start (`local`), and printed. A task taken up again
  * finds its worktree and what was written; one from before this was written says `unknown`. A fix to a pull
  * request (`<branch>`, a third argument) starts on that branch as fetched, or not at all. Its git holds the
  * repository's own configuration off (held-git.ts: the fourth fabric review's R4-4, and the fifth's R5-6), so nothing
@@ -357,6 +358,7 @@ elif not os.path.isdir(root):
         except Exception:
             how = 'stale'
     start = 'origin/HEAD' if git(repo,'rev-parse','--verify','--quiet','origin/HEAD').returncode == 0 else 'HEAD'
+    if start == 'HEAD' and how == 'fetched' and not branch: how = 'local'
     if branch:
         start = 'refs/remotes/origin/'+branch
         if git(repo,'rev-parse','--verify','--quiet',start+'^{commit}').returncode: sys.exit('the branch '+branch+' is not in the repository'+(' (it could not be fetched)' if how == 'stale' else ''))
@@ -877,6 +879,16 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // In a repository: the commit the work starts from, and whether the repository could be fetched for it.
       const [base = "", fetched = ""] = agent.repository ? ready.stdout.trim().split(/\s+/) : [];
       if (agent.repository && !/^[0-9a-f]{40}$/.test(base)) throw new Error("Workspace not ready: the task's starting commit could not be read");
+      // A plan that works only on your own repositories starts only from your repository as it is now: fetched, at its
+      // default branch or a fix's, or a step of its own work; never the VM's clone as earlier work left it, which may
+      // hold anything (the re-check of 28 November 2026, R9).
+      if (agent.repository && ownWorkOnly(agent) && fetched !== "fetched" && fetched !== "from") {
+        const why =
+          fetched === "stale" ? `${agent.repository} couldn't be fetched for this task; give it again once it can be`
+          : fetched === "local" ? `its clone of ${agent.repository} in ${agent.name}'s VM names no default branch to start from (origin/HEAD); give it to an agent of yours on another plan`
+          : "where this task's work started isn't known; give it again";
+        throw new Error(`Workspace not ready: the Gemini plan works only on your own repositories as they are, and ${why}`);
+      }
       // Its commits carry its own name, never yours: with none set, the first real task's agent copied the repository's
       // owner's from its history. An address under .invalid, which can't belong to anyone. (Set at each task: an agent's
       // VM is its own, and one set by hand there goes back to the agent's.)
@@ -1362,7 +1374,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
             changed = `Changes: ${count}, but they could not be kept: ${redact(String((error as Error).message ?? error)).slice(0, 200)}`;
           }
         }
-        changed = `\nBase: ${base.slice(0, 12)}${fetched === "stale" ? " (the repository could not be fetched: this is the clone as it was)" : ""}\n${changed}`;
+        changed = `\nBase: ${base.slice(0, 12)}${fetched === "stale" ? " (the repository could not be fetched: this is the clone as it was)" : fetched === "local" ? " (the clone names no default branch: this is its own HEAD, as earlier work left it)" : ""}\n${changed}`;
       }
       // (Whatever the task left in its temporary directory goes with it.)
       await inVm(`rm -rf ${quote(temp)}`, 60, ctx.signal).catch(() => {});

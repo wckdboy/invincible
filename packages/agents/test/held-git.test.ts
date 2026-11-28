@@ -65,8 +65,11 @@ function vm() {
   git("commit", "-q", "-m", "first");
   git("config", "user.name", "Ada");
   git("config", "user.email", "ada@agents.invalid");
-  // (A clone, as every agent's repository is: what is kept to ship says where it came from.)
+  // (A clone, as every agent's repository is: what is kept to ship says where it came from, and it names its default
+  // branch, origin/HEAD, as a clone does.)
   git("remote", "add", "origin", "https://example.test/ada/repo.git");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
   writeFileSync(join(home, LEASE_FILE), JSON.stringify({ INVINCIBLE_TOKEN: TOKEN, INVINCIBLE_REPO_URL: `http://127.0.0.1:${gateway.port}/git/repo`, INVINCIBLE_KEYS: "http://127.0.0.1:9/key" }));
   /** Whatever a planted command ran, it says here: as whom, and the lease it read. */
   const marker = join(work, "what-it-read");
@@ -147,6 +150,8 @@ describe("a task's setup in the agent's repository (REPO_TASK_START)", () => {
     writeFileSync(join(v.repo, "model.bin"), pointer);
     v.git("add", ".");
     v.git("commit", "-q", "-m", "a model, in LFS");
+    // (The repository's own: its default branch, as last fetched, holds it.)
+    v.git("update-ref", "refs/remotes/origin/main", "HEAD");
     // What `git lfs install --local` writes (git-lfs 3): its filter, required, and its four hooks; git-lfs itself a
     // stand-in that says when it runs.
     v.git("config", "filter.lfs.clean", "git-lfs clean -- %f");
@@ -348,6 +353,32 @@ describe("the lease's fetch, against a smart-HTTP server", () => {
     } finally {
       gate.stop();
       other.stop();
+    }
+  });
+
+  // The re-check of 28 November 2026, R9: a repository whose clone names no default branch (earlier work in the VM may
+  // leave it so) starts from the clone's own HEAD, whatever that holds; it says so (local), so a plan that works only on
+  // your own repositories can refuse it.
+  test("says where it started: the default branch as fetched (fetched), or, when the clone names none, its own HEAD (local)", async () => {
+    const v = vm();
+    const served = temp("held-served-");
+    const gate = smartHttp(served);
+    try {
+      spawnSync("git", ["-C", served, "init", "-q", "--bare", "repo.git"]);
+      v.git("push", "-q", join(served, "repo.git"), "HEAD:refs/heads/main");
+      spawnSync("git", ["-C", served, "--git-dir=repo.git", "symbolic-ref", "HEAD", "refs/heads/main"]);
+      v.lease(`${gate.url}/repo.git`);
+      expect((await v.start("task-head")).stdout.trim()).toMatch(/^[0-9a-f]{40} fetched$/);
+      // What earlier work left: no default branch named, and a HEAD of its own.
+      v.git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+      v.git("checkout", "-q", "-b", "earlier-work");
+      writeFileSync(join(v.repo, "left.txt"), "what earlier work left\n");
+      v.git("add", ".");
+      v.git("commit", "-q", "-m", "earlier work");
+      const ran = await v.start("task-local");
+      expect([ran.status, ran.stdout.trim()]).toEqual([0, `${v.git("rev-parse", "HEAD").stdout.trim()} local`]);
+    } finally {
+      gate.stop();
     }
   });
 

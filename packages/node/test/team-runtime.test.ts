@@ -2139,6 +2139,9 @@ test("work that was not verified is kept too, and says so where it says how to s
 test("a repository that could not be fetched is said, and changes that could not be kept are said: neither passes in silence", async () => {
   const stale = await repoTask({ start: `${BASE} stale` }).run();
   expect(stale.output).toContain(`Base: ${BASE.slice(0, 12)} (the repository could not be fetched: this is the clone as it was)`);
+  // (A clone that names no default branch: its own HEAD, said as such, for any agent but one on a Gemini plan.)
+  const local = await repoTask({ start: `${BASE} local` }).run();
+  expect(local.output).toContain(`Base: ${BASE.slice(0, 12)} (the clone names no default branch: this is its own HEAD, as earlier work left it)`);
   const lost = repoTask({ keepFails: true });
   const outcome = await lost.run();
   expect(outcome.changes).toBeUndefined();
@@ -2498,14 +2501,14 @@ test("a task another node handed over has its gates bounded in all, every round 
  * with no repository you set, ends before a seat or the tool is asked anything, in words that say how to get it run, and
  * goes to no other harness or seat. So does an ACP agent whose command runs agy.
  */
-function geminiTask(over: Partial<TeamTask>, options: { repository?: string | null; acp?: string } = {}) {
+function geminiTask(over: Partial<TeamTask>, options: { repository?: string | null; acp?: string; start?: string } = {}) {
   const asked: string[] = [];
   const ran: string[] = [];
   const agent: Agent = { ...member, harness: options.acp ? "acp" : "antigravity", ...(options.acp ? { acp: options.acp } : {}), repository: options.repository === undefined ? "https://github.com/example/app" : options.repository };
   const f = fixture([], {
     agent: () => agent,
     // (Its repository's start answered as repoTask's is.)
-    exec: async (_m, command) => (ran.push(command), command.includes("from_commit") ? result({ stdout: `${BASE} fetched\n` }) : result()),
+    exec: async (_m, command) => (ran.push(command), command.includes("from_commit") ? result({ stdout: `${BASE} ${options.start ?? "fetched"}\n` }) : result()),
     prepare: async () => void ran.push("prepare"),
     seat: async () => (asked.push("seat"), { none: true }),
   });
@@ -2520,6 +2523,28 @@ test("a Gemini plan takes your work and your agent's on its agent's repository: 
     // It goes on to its seats and its tool as any vendor's tool does (here there is none signed in, so it ends there).
     const ended = await t.go().then(() => "", (error: Error) => error.message);
     expect([JSON.stringify(over), ended.startsWith(GEMINI_RULE), t.ran.includes("prepare"), t.asked.length > 0]).toEqual([JSON.stringify(over), false, true, true]);
+  }
+});
+
+// The re-check of 28 November 2026, R9: its workspace is its repository as it is now, never the VM's clone as earlier work
+// left it (a fetch that didn't come through, a clone that names no default branch).
+test("a Gemini plan starts only from your repository as it is now: fetched at its default branch, or from a step of its own; never the clone as earlier work left it", async () => {
+  const as = "Workspace not ready: the Gemini plan works only on your own repositories as they are, and ";
+  const refused: [string, string][] = [
+    ["stale", `${as}https://github.com/example/app couldn't be fetched for this task; give it again once it can be`],
+    ["local", `${as}its clone of https://github.com/example/app in Ada's VM names no default branch to start from (origin/HEAD); give it to an agent of yours on another plan`],
+    ["unknown", `${as}where this task's work started isn't known; give it again`],
+  ];
+  for (const [start, why] of refused) {
+    const t = geminiTask({}, { start });
+    await expect(t.go()).rejects.toThrow(why);
+    // (Its VM was prepared to see where it would start; no seat or tool was asked.)
+    expect([start, t.asked]).toEqual([start, []]);
+  }
+  for (const start of ["fetched", "from"]) {
+    const t = geminiTask({}, { start });
+    const ended = await t.go().then(() => "", (error: Error) => error.message);
+    expect([start, ended.startsWith("Workspace not ready"), t.asked.length > 0]).toEqual([start, false, true]);
   }
 });
 
