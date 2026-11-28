@@ -171,32 +171,38 @@ transport keys carries all of it:
        and applies it with the node's held git: `git apply --cached` to where the work began alone, in an index of its
        own, which reads and writes nothing of the worktree and takes no path outside it, into a `.git`, or through a
        link; then the tree that makes, and nothing else, is made the worktree, a link in the way of one of its paths
-       replaced by a folder, never written through (R7-3, I-a). Each binary part must carry the content of the object
-       it names, checked before git reads the patch, so nothing of it comes from the agent's store, and it counts at
-       what git inflates it to (R7-1, R7-2); a copy or a rename, which carries none of its content and which its send
-       never makes, is refused. A patch is applied only once all of it came (its sender done, the pipe not
-       cut, as many bytes kept in its own file as were carried), and only up to 512 MiB, in bytes and as its binary
-       parts inflate. One that is cut short, or bigger, is dropped, and the task says its changes couldn't be brought
-       back. Every step of the agent's side on that worktree (a bring-back, a checkpoint, a review's evidence, the
-       changes' read) runs one at a time, in order (R7-3). Both ways go through the node, one side's output the
-       other's input, never kept on the host (`SandboxHost.pipe`); a pipe cut at its cap or past its deadline ends both
-       sides' commands in their VMs, not only the node's two clients, and one whose receiving side is gone ends its
-       sender's (I-c). In a Kata microVM, once an interactive exec's input has ended, no other exec of its VM starts
-       until that exec's output ends, and one whose input ended before its command started never sees that end, so it
-       runs to its deadline (the Kata audit, 28 November 2026). So a pipe's receiving side starts with its input: at
-       the sending side's first chunk, or, if that gives none, with no input at all, its stdin `/dev/null` in its VM;
-       started with the pipe and given nothing, one ran to its 120 s deadline behind an 8 s command of its VM's. A
-       receiving side that runs on past its input's end, its output open, is ended there only by its own deadline; the
-       node's own receivers end with their input, which a cut ends at once. A task with no repository keeps its files in
-       its own VM, and they go with it.
-     - **What its review passes is what is shipped** (the seventh re-review's I-b). Its review's evidence is read on its
-       agent's side, on the tree its last bring-back made there, never in its VM, whose processes are the task's own.
-       When the review passes, that tree is what is kept and shipped as verified, and nothing its VM had after it; the
+       replaced by a folder, never written through (R7-3, I-a). Each binary part must carry the content of the object it
+       names, checked before git reads the patch, so nothing of it comes from the agent's store, and it counts at what
+       git inflates it to (R7-1, R7-2); a copy or a rename by its `copy` or `rename from`/`to` headers, which carries
+       none of its content and which its send never makes, is refused. One spelled otherwise isn't yet: git's older
+       `rename old`/`new`, or a `---` and a `+++` that name two files, writes a copy of a file of the base that nothing
+       counts, so a text patch can still write past the limit (the eighth re-review's R8-1, open). A patch is applied
+       only once all of it came (its sender done, the pipe not cut, as many bytes kept in its own file as were carried),
+       and only up to 512 MiB, its bytes and its binary parts as they inflate. One that is cut short, or bigger, is
+       dropped, and the task says its changes couldn't be brought back. Every step of the agent's side on that worktree
+       (a bring-back, a checkpoint, a review's evidence, the changes' read) runs one at a time, in order (R7-3). Both
+       ways go through the node, one side's output the other's input, never kept on the host (`SandboxHost.pipe`); a
+       pipe cut at its cap or past its deadline ends both sides' commands in their VMs, not only the node's two clients,
+       and one whose receiving side is gone ends its sender's (I-c). In a Kata microVM, an interactive exec given
+       nothing, its input ended before its command started, never sees that end: it runs to its deadline, and no other
+       exec of its VM starts meanwhile (the Kata audit, 28 November 2026). One that was fed holds nothing, after its
+       input ends too: an exec beside it took 35 to 45 ms (the eighth re-review's P2). So a pipe's receiving side starts
+       with its input: at the sending side's first chunk, or, if that gives none, with no input at all, its stdin
+       `/dev/null` in its VM; started with the pipe and given nothing, one ran to its 120 s deadline behind an 8 s
+       command of its VM's. One that runs on past its input's end is ended by the pipe's end, in Kata too (174 ms, P4).
+       A task with no repository keeps its files in its own VM, and they go with it.
+     - **What its review passes is what is shipped** (the seventh re-review's I-b). In a repository, its review's
+       evidence is read on its agent's side, on the tree its last bring-back made there, never in its VM, whose
+       processes are the task's own; a task with no repository reads it in its VM, and nothing is shipped from one. When
+       the review passes, that tree is what is kept and shipped as verified, and nothing its VM had after it; the
        worktree there is checked to be that tree still, and short of that the task isn't verified, and says why. Its
        gates run in its VM, on its clone, and before a submission's gates everything of the task's there is ended (a
        task whose gates need a server starts it in the gate) and its clone's tree is read as they begin: the review's
        tree must be that one, so nothing of the task's changes a file under its gates, or between them and the review,
-       and is shipped as verified (the lead's decision for I-b's gates).
+       and is shipped as verified (the lead's decision for I-b's gates). Their verdict isn't bound yet: the gates, that
+       end and that read run in its VM as `bash -lc`, under the login profile the task writes there, so a task can make
+       a gate that fails say it passed, and come back verified (the eighth re-review's R8-3, open: the fabric stays off
+       until it is fixed).
      - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
        the task started there. When its work ends (a revocation among its ends: your brake), its lease ends and the VM
        is removed at once, the command in flight there with it, never once that command returns (the fifth re-review's
@@ -488,8 +494,10 @@ answered and a Q-AMP release with the sidecar is pinned.
   image's git is 2.47.3, past CVE-2023-23946's fix to `git apply`'s checks of links
   (`handed-docker.integration.test.ts`, 27 November 2026). A pipe cut at its cap left nothing of either side running
   in either VM, the children a side started without the pipe's tag among them, in 0.7 s in containers and 4.2 s in
-  Kata, with the sides' own deadline past the test's (I-c, 28 November 2026). A task that changed nothing came back
-  at once, empty, and applied as its base, also while its agent's VM ran an 8 s command of its own: in Kata it had
-  run to its 120 s deadline before its receiving side started with its input. No node has taken a handed task through
-  it yet.
+  Kata, with the sides' own deadline past the test's (I-c, 28 November 2026). A task that changed nothing came back at
+  once, empty, and applied as its base, also while its agent's VM ran an 8 s command of its own: in Kata it had run to
+  its 120 s deadline before its receiving side started with its input. Two scratch nodes on one host have since taken a
+  handed task through it end to end, over Q-AMP, its gates, review and bring-back among it, in Kata and in runc, on
+  stand-in models (`handed-real.integration.test.ts`, 28 November 2026): not yet two machines, real models, or a node's
+  gateway and lease.
 - **Relays and NAT traversal** (Q-AMP's `feat/relays`) aren't used: nodes reach each other on the tailnet, directly.

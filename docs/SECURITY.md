@@ -490,7 +490,10 @@ its lease were in the workspace, and a VM that shares the workspace (a run on a 
   - before git reads the patch, each binary part is parsed as git parses it, its size counted as git inflates it (a
     delta's at what it makes), and its content must be the object it names (a delta's base a blob of where the work
     began), so nothing comes from the agent's store, and whether the store holds an object is no answer (R7-1, R7-2);
-    a copy or a rename, which carries none of its content and which the clone's send never makes, is refused whole;
+    a copy or a rename by its `copy` or `rename from`/`to` headers, which carries none of its content and which the
+    clone's send never makes, is refused whole; one spelled otherwise (git's older `rename old`/`new`, or a `---` and a
+    `+++` that name two files) isn't yet, and writes a copy of a file of the base that nothing counts (the eighth
+    re-review's R8-1, open);
   - every step of the agent's side on that worktree (a bring-back, a checkpoint, a review's evidence, the changes'
     read) runs one at a time (R7-3).
   A patch that didn't all come (its sender ended, the pipe cut, fewer bytes kept than were carried), or that is past
@@ -892,12 +895,15 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       re-review's R5-3): a `/work` of its own, removed with it, a HOME of its own in memory, and a clone of its own of
       the repository, whose changes come back as a patch (the held git's section, above; `handed-repo.test.ts`,
       `pipe.test.ts`). Its lease is the task's paid models alone, never your keys nor its repository, counted under
-      its agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. Its
-      review's evidence is read on its agent's side, on the tree brought back for it, and that tree is what is shipped
-      as verified, nothing its VM had after it; the worktree there is checked to be that tree still, or the task isn't
-      verified (the seventh re-review's I-b, `team-runtime.test.ts`). Its gates run in its VM, on its clone: before a
-      submission's gates everything of the task's there is ended and its clone's tree read, and the review's tree must
-      be that one, or the task isn't verified, so nothing of the task's changes a file under its gates and ships. The
+      its agent's label so that its budget counts what it spends. None of its commands runs in the agent's own VM. In a
+      repository, its review's evidence is read on its agent's side, on the tree brought back for it, and that tree is
+      what is shipped as verified, nothing its VM had after it; the worktree there is checked to be that tree still, or
+      the task isn't verified (the seventh re-review's I-b, `team-runtime.test.ts`); a task with no repository reads its
+      evidence in its VM, and ships nothing. Its gates run in its VM, on its clone: before a submission's gates
+      everything of the task's there is ended and its clone's tree read, and the review's tree must be that one, or the
+      task isn't verified, so nothing of the task's changes a file under its gates and ships. Their verdict isn't bound
+      yet: the gates, that end and that read run in its VM as `bash -lc`, under the login profile the task writes there,
+      so a task can make a gate that fails say it passed (the eighth re-review's R8-3, open). The
       VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
       ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
       flight there with it, never once that command returns (the fifth re-review's I-1, `task-vms.test.ts`). Its lease
