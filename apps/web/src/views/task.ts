@@ -22,7 +22,7 @@ import { chatEnter, setTaskDetailsShown, taskDetailsShown } from "../prefs.ts";
 import { badge, button, callout, dot, empty, errorState, skeletonBlock } from "../ui/controls.ts";
 import { composerBox } from "../ui/composer.ts";
 import { openSheet } from "../ui/dialog.ts";
-import { cx, h, keepPlace, replace, type Child } from "../ui/dom.ts";
+import { cx, h, keepPlace, replace, type Child, type Scope } from "../ui/dom.ts";
 import { icon, type IconName } from "../ui/icons.ts";
 import { codeBlock, renderMarkdown } from "../ui/markdown.ts";
 import { markStateOfAgent } from "../ui/mark.ts";
@@ -30,7 +30,7 @@ import { agentFace, orb } from "../ui/orb.ts";
 import { toast } from "../ui/toast.ts";
 import { askItem } from "./needs.ts";
 import { controlTeam, giveTask, shipTask } from "./team-forms.ts";
-import { openTerminal } from "./terminal.ts";
+import { openTerminal, runTerminal, type TerminalRun } from "./terminal.ts";
 import { askProjects, projectNames, projectTile, workNow } from "./work-rows.ts";
 import { diffParts, openWorkspace } from "./workspace.ts";
 import { rosterBack } from "./sidebar.ts";
@@ -101,6 +101,26 @@ function panelTabKept(): PanelTab {
 function keepPanelTab(tab: PanelTab): void {
   try {
     localStorage.setItem(PANEL_KEY, tab);
+  } catch {
+    /* refused: this session's only */
+  }
+}
+
+/** A desk's terminal drawer's height (views/task.ts), kept on this device, and how short it goes. */
+const DRAWER_KEY = "invincible:terminal-height";
+const DRAWER_LEAST = 140;
+/** The height you left it at on this device (null: none yet). */
+function drawerHeightKept(): number | null {
+  try {
+    const kept = Number(localStorage.getItem(DRAWER_KEY));
+    return Number.isFinite(kept) && kept >= DRAWER_LEAST ? kept : null;
+  } catch {
+    return null;
+  }
+}
+function keepDrawerHeight(height: number): void {
+  try {
+    localStorage.setItem(DRAWER_KEY, String(Math.round(height)));
   } catch {
     /* refused: this session's only */
   }
@@ -187,7 +207,31 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   });
   const composerWrap = h("div", { class: "thread-composer-wrap", hidden: true }, onItsWay, problem, composer);
 
-  replace(root, h("div", { class: "thread-page" }, head, h("div", { class: "thread-body" }, h("div", { class: "thread-column" }, scroller, liveLine, composerWrap), details)));
+  // A desk's terminal (T3 Code's ⌘J): a drawer under the thread, in its agent's VM. Hidden, its shell runs on; the thread
+  // left, the node keeps it for fifteen minutes, and the thread opened again takes it up (views/terminal.ts).
+  let terminalShown = false;
+  let term: { run: TerminalRun; scope: Scope; sandbox: string } | null = null;
+  let drawerHeight = drawerHeightKept() ?? 0;
+  const termTitle = h("span", { class: "drawer-title ellipsis" });
+  const termStatus = h("span", { class: "drawer-status", role: "status" });
+  const termBox = h("div", { class: "drawer-screen" });
+  const endShell = button("End its shell", { variant: "ghost", size: "sm", onClick: () => term?.run.end() });
+  const newShell = button("New shell", {
+    variant: "ghost",
+    size: "sm",
+    onClick: () => {
+      term?.scope.dispose();
+      term = null;
+      showTerminal(true);
+    },
+  });
+  newShell.hidden = true;
+  const hideTerminal = button("Hide the terminal", { variant: "ghost", size: "sm", iconOnly: true, icon: "x", onClick: () => showTerminal(false) });
+  const grip = h("div", { class: "drawer-grip", role: "separator", tabindex: 0, "aria-orientation": "horizontal", "aria-label": "The terminal's height", "aria-valuemin": String(DRAWER_LEAST) });
+  const drawer = h("section", { class: "thread-drawer", hidden: true, "aria-label": "Terminal" }, grip, h("div", { class: "drawer-bar" }, icon("terminal", { size: 14 }), termTitle, termStatus, h("span", { class: "grow" }), endShell, newShell, hideTerminal), termBox);
+  const column = h("div", { class: "thread-column" }, scroller, liveLine, composerWrap, drawer);
+
+  replace(root, h("div", { class: "thread-page" }, head, h("div", { class: "thread-body" }, column, details)));
   // Until the team is known, the header and the thread hold their places.
   replace(head, rosterBack(ctx), h("div", { class: "grow stack snug", "aria-hidden": "true" }, h("div", { class: "skeleton thread-head-name" }), h("div", { class: "skeleton sk-line thread-head-line" })));
   replace(thread, skeletonBlock(64), skeletonBlock(160));
@@ -369,11 +413,87 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
     return toggle;
   };
 
+  /** Its agent's VM, where this device may open a terminal in it (a sandbox device, the VM on this node). */
+  const terminalOf = (n: Now): { id: string; name: string } | null => {
+    const vm = n.agent?.workspace;
+    return ctx.can("sandbox") && vm && vm.node === ctx.whoami.node ? { id: vm.id, name: `${n.name}'s VM` } : null;
+  };
+  const terminalToggle = (n: Now): HTMLButtonElement | null => {
+    if (!desk.matches || !terminalOf(n)) return null;
+    const toggle = button(terminalShown ? "Hide the terminal" : "Show the terminal", { variant: "ghost", size: "sm", iconOnly: true, icon: "terminal", onClick: () => showTerminal(!terminalShown) });
+    toggle.classList.add("thread-terminal-toggle");
+    toggle.setAttribute("aria-pressed", String(terminalShown));
+    return toggle;
+  };
+  /** The drawer shown (a shell opened in its agent's VM, or the one it had taken up again) or hidden (its shell runs on). */
+  function showTerminal(on: boolean): void {
+    const n = now();
+    const vm = n ? terminalOf(n) : null;
+    terminalShown = on && Boolean(vm);
+    // (Hidden while you typed in it: the message box takes the keys.)
+    const typing = drawer.contains(document.activeElement);
+    drawer.hidden = !(terminalShown && desk.matches);
+    if (n) drawHead(n, true);
+    if (!terminalShown || !vm) {
+      if (typing && !composerWrap.hidden) input.focus();
+      return;
+    }
+    // First shown on this device: 38 % of the thread's height, at most 360 px.
+    sizeDrawer(drawerHeight || Math.min(360, column.getBoundingClientRect().height * 0.38));
+    if (!term || term.run.ended || term.sandbox !== vm.id) {
+      term?.scope.dispose();
+      const screen = h("div", { class: "term-screen" });
+      replace(termBox, screen);
+      termTitle.textContent = vm.name;
+      termStatus.textContent = "Opening…";
+      endShell.hidden = false;
+      newShell.hidden = true;
+      const child = scope.child();
+      const said = (text: string) => {
+        termStatus.textContent = text;
+        // (Its shell ended: a new one in its place, a press away.)
+        const ended = Boolean(term?.run.ended);
+        endShell.hidden = ended;
+        newShell.hidden = !ended;
+      };
+      term = { sandbox: vm.id, scope: child, run: runTerminal(ctx, vm, screen, { scope: child, say: said }) };
+    }
+    term.run.focus();
+  }
+  /** Its height, between DRAWER_LEAST and what leaves the thread 220 px. */
+  function sizeDrawer(height: number): void {
+    const most = Math.max(DRAWER_LEAST, column.getBoundingClientRect().height - 220);
+    drawerHeight = Math.round(Math.min(most, Math.max(DRAWER_LEAST, height)));
+    drawer.style.setProperty("--drawer-h", `${drawerHeight}px`);
+    grip.setAttribute("aria-valuenow", String(drawerHeight));
+  }
+  // Its top edge pulled up or down (or ↑ ↓ on it) sets its height, kept on this device.
+  grip.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    grip.setPointerCapture(event.pointerId);
+    const from = event.clientY;
+    const start = drawerHeight;
+    const move = (e: PointerEvent) => sizeDrawer(start + from - e.clientY);
+    const done = () => {
+      grip.removeEventListener("pointermove", move);
+      keepDrawerHeight(drawerHeight);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", done, { once: true });
+    grip.addEventListener("pointercancel", done, { once: true });
+  });
+  grip.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    sizeDrawer(drawerHeight + (event.key === "ArrowUp" ? 24 : -24));
+    keepDrawerHeight(drawerHeight);
+  });
+
   function drawHead(n: Now, force = false): void {
     const working = n.task.status === "running";
     const state = taskState(n.task);
     const chips = threadChips(n.task, verdictOf(n.task, factsOfRecord(n.task.record) ?? (trailRead ? factsOfProof(proofOf(n.task, trail.entries)) : null)), changes?.base ?? null);
-    const version = JSON.stringify([n.task.title, n.project, n.name, n.agent?.avatar, working, state, shownDetails, wide.matches, chips]);
+    const version = JSON.stringify([n.task.title, n.project, n.name, n.agent?.avatar, working, state, shownDetails, wide.matches, chips, desk.matches, terminalShown, terminalOf(n)?.id]);
     if (version === headVersion && !force) return;
     headVersion = version;
     const direct = directRoom(n.snapshot, n.task.assignee);
@@ -398,6 +518,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
           { class: "actions thread-head-acts" },
           // Its agent's desktop and terminal, watched and taken over, in its Workspace.
           direct && n.agent?.workspace ? h("a", { class: "btn ghost sm thread-workspace", href: hashOf("team", { room: direct.id, teamTab: "workspace" }), title: `${n.name}'s Workspace: its desktop to watch and take over, a terminal, its files` }, icon("monitor", { size: 15 }), h("span", { class: "label" }, "Workspace")) : null,
+          terminalToggle(n),
           detailsToggle(),
         ),
         face,
@@ -664,7 +785,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
                 "span",
                 { class: "td-seg" },
                 h("a", { class: "btn ghost sm", href: hashOf("team", { room: direct.id, teamTab: "workspace" }), title: "Its desktop, to watch and take over" }, "Peek"),
-                ctx.can("sandbox") && vm.node === ctx.whoami.node ? button("Terminal", { variant: "ghost", size: "sm", onClick: () => void openTerminal(ctx, { id: vm.id, name: `${n.name}'s VM` }) }) : null,
+                ctx.can("sandbox") && vm.node === ctx.whoami.node ? button("Terminal", { variant: "ghost", size: "sm", onClick: () => (desk.matches ? showTerminal(true) : openTerminal(ctx, { id: vm.id, name: `${n.name}'s VM` })) }) : null,
               )
             : null,
         ),
@@ -899,6 +1020,7 @@ export const taskView: View = (root, ctx, { scope, opts }) => {
   }, 2000, 2000));
   const resized = () => {
     headVersion = "";
+    drawer.hidden = !(terminalShown && desk.matches);
     drawDetails(true);
     draw();
   };

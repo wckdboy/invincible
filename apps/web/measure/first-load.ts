@@ -628,10 +628,22 @@ try {
       exited,
     };
   };
+  // A shell in a VM's terminal, stood in for (the stand-in Docker runs none): a prompt, the last thing run there, and what
+  // is typed echoed, so a terminal (a desk's drawer under a thread, the sheet) has something of its own to show.
+  const spawnTerminal = (_argv: string[], _size: { cols: number; rows: number }, onData: (bytes: Uint8Array) => void) => {
+    const say = (text: string) => onData(new TextEncoder().encode(text));
+    const prompt = "\x1b[1;32mada@vm\x1b[0m:\x1b[1;34m/work\x1b[0m$ ";
+    let exit!: (code: number) => void;
+    const exited = new Promise<number>((resolve) => (exit = resolve));
+    const ran = ["bun test sync", "bun test v1.4.2", "", "sync/resume.test.ts:", "\x1b[32m✓\x1b[0m resumes after a dropped connection \x1b[2m[12.41ms]\x1b[0m", "\x1b[32m✓\x1b[0m keeps the old reconnect path \x1b[2m[3.02ms]\x1b[0m", "", " \x1b[32m2 pass\x1b[0m", " 0 fail", "Ran 2 tests across 1 file. \x1b[2m[41.00ms]\x1b[0m", ""];
+    setTimeout(() => say(prompt + ran.join("\r\n") + prompt), 20);
+    return { write: (data: string) => say(data.replace(/\r/g, `\r\n${prompt}`)), resize: () => {}, kill: () => exit(0), exited };
+  };
   // The browser comes in as a phone does behind `tailscale serve`: through the proxied port.
   const proxyPort = freePort();
   const started = await startDaemon(home, {
     ...(live ? { spawnFrames, spawnSession } : {}),
+    spawnTerminal,
     capabilities: caps,
     proxyPort,
     log: () => {},
@@ -1220,6 +1232,8 @@ try {
       { name: "task-verified-panel", hash: `#/task/${kept.id}`, wait: ".thread-page .dp-changes", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "changes" }, steps: [`document.querySelector("details.dp-file")?.setAttribute("open", "")`] },
       { name: "task-verified-panel-proof", hash: `#/task/${kept.id}`, wait: ".thread-page .proof", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "proof" } },
       { name: "task-running-panel", hash: `#/task/${first.id}`, wait: ".thread-page .thread-steps", prefs: { "invincible:task-details": "shown", "invincible:task-panel": "details" } },
+      // Its terminal (a desk's, T3 Code's ⌘J): a drawer under the thread, a shell in its agent's VM.
+      { name: "task-running-terminal", hash: `#/task/${first.id}`, steps: [press("Show the terminal")], wait: ".thread-drawer .xterm-screen" },
       { name: "inbox", hash: "#/inbox" },
       { name: "memory", hash: "#/memory", wait: "#memory-results .item" },
       { name: "more", hash: "#/more" },
@@ -1232,6 +1246,8 @@ try {
       // chat opens it. (On a wide screen the roster is the sidebar, in every other picture.)
       { name: "sheet-roster", hash: "#/chat", open: [press("Your agents")], wait: "dialog.sheet.drawer[open] .roster-row" },
       { name: "sheet-shortcuts", hash: "#/overview", open: [key("?")] },
+      // A terminal in a VM, as a sheet (everywhere but a desk's thread, which has its drawer): a shell, the stand-in's.
+      { name: "sheet-terminal", hash: "#/sandboxes", open: [press("Terminal")], wait: "dialog.terminal-sheet .xterm-screen" },
       { name: "sheet-chat-menu", hash: "#/chat", open: [press("Chat options")], wait: "dialog.selector-pop[open], dialog.selector-sheet[open]" },
       { name: "sheet-all-chats", hash: "#/chat", open: [press("Chat options"), press("All chats…", "All chats")] },
       { name: "sheet-new-agent", hash: "#/team", open: [press("New agent", "Add an agent")] },
