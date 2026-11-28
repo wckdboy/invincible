@@ -1001,6 +1001,28 @@ test("another node's task whose agent's worktree isn't the tree its review was s
   expect(lines).toContain("Review · passed, but its work isn't verified: its workspace on its agent's side isn't the tree its review was shown");
 });
 
+/* The seventh fabric review's I-d: what a run of another node's task cut off leaves on its agent's side (a receive's
+ * patch of up to its limit, an index, the give's ref) stayed there until it ran again, and then too. */
+test("another node's task's run sweeps what a run of it cut off left on its agent's side before it is given its clone (I-d)", async () => {
+  const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const agent = { ...member, repository: "https://github.com/you/project" };
+  const order: string[] = [];
+  const f = fixture([say("1. Make the change."), say("GIVE UP\nNot today.")], {
+    agent: () => agent,
+    models: () => [{ provider: "paid", model: "m" }],
+    paid: (ref: string) => ref === "paid/m",
+    exec: async (_m: Agent, command: string) => {
+      if (plain(command).includes("name.startswith(task+'.')")) order.push(`sweep of ${plain(command).includes(`'${handedTask.id}' '/work/.agent/handed'`) ? "its own" : "another's"}`);
+      if (command.includes("from_commit")) return result({ stdout: `${HANDED_BASE} fetched` });
+      return result({ stdout: command.includes("--allow-empty") ? `0 ${"a".repeat(40)}` : "0" });
+    },
+    handedVm: async () => ({ exec: async () => result(), receive: async () => (order.push("its clone given"), { from: result(), to: result(), bytes: 0, cut: false }), send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }), stop: async () => {}, release: async () => {} }),
+  });
+  f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+  await f.runtime.executeTask(agent, handedTask, f.context);
+  expect(order).toEqual(["sweep of its own", "its clone given"]);
+});
+
 /* What another node's task sends back is applied on its agent's side only once all of it came (R5-3): a pipe cut at its
  * cap, a sender ended by its deadline, or fewer bytes kept than the node carried each end the other side's input as if the
  * patch ended there, and a patch cut short at a file's end reads as a smaller one. None is applied; each is dropped, and

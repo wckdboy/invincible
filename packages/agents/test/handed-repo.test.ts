@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedTake, handedTree } from "../src/handed-repo.ts";
+import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedSweep, handedTake, handedTree } from "../src/handed-repo.ts";
 import { changesCommand } from "../src/team-runtime.ts";
 
 // Every test here makes repositories and runs git on them, as processes of their own, so its time is the machine's to
@@ -347,5 +347,25 @@ describe("a step's apply beside the last bring-back's (R7-3)", () => {
     // (The link is a folder of the worktree's now, holding the patch's file.)
     expect(lstatSync(join(nested, "out")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(nested, "out/planted.txt"), "utf8")).toBe("planted\n");
+  });
+});
+
+describe("what a run of another node's task cut off leaves on its agent's side (I-d)", () => {
+  test("is swept as the task starts again: its own receives' patches, its indexes and its give's ref, never another task's", () => {
+    const s = setUp();
+    mkdirSync(s.keep.agent, { recursive: true });
+    const [a, b] = [handedNonce(), handedNonce()];
+    // (What a SIGKILL at a deadline skips the removal of: each script's own end, and the give's finally.)
+    const mine = ["task-x.patch", `task-x.${a}.patch`, `task-x.${a}.apply-index`, `task-x.${b}.patch`, "task-x.give-index", "task-x.tree-index"];
+    const theirs = [`task-xy.${a}.patch`, "task-xy.give-index", "task-y.patch"];
+    for (const name of [...mine, ...theirs]) writeFileSync(join(s.keep.agent, name), "left\n");
+    s.git(s.root, "update-ref", "refs/invincible/give/task-x", s.base);
+    s.git(s.root, "update-ref", "refs/invincible/give/task-xy", s.base);
+    const swept = sh(handedSweep(s.root, "task-x", s.keep.agent));
+    expect([swept.status, swept.stderr]).toEqual([0, ""]);
+    expect(s.left().sort()).toEqual(theirs.sort());
+    expect(s.git(s.repo, "for-each-ref", "--format=%(refname)", "refs/invincible").stdout.trim()).toBe("refs/invincible/give/task-xy");
+    // (And again, with nothing left: nothing to do.)
+    expect(sh(handedSweep(s.root, "task-x", s.keep.agent)).status).toBe(0);
   });
 });

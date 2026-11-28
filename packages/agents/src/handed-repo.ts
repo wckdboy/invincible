@@ -20,6 +20,8 @@ import { heldGit } from "./held-git.ts";
  *   as were carried. A side ended by its deadline, or a pipe cut at its cap, ends what the other reads as if the patch
  *   ended there, so a patch cut short at a file's end would otherwise be applied as a smaller one. One that didn't all
  *   come is dropped (`handedDrop`).
+ * - What a run cut off left on the agent's side (a receive's file, an index, the give's ref: each removed by its own
+ *   script's end, which a deadline's SIGKILL skips) is swept as the task starts again (`handedSweep`).
  *
  * Each pair is joined through the node (HandedVm.receive and send): one side's stdout is the other's input, never kept.
  * Every git of these is the node's held git (held-git.ts), in the task's VM as well as in its agent's.
@@ -217,6 +219,26 @@ gone()
 if not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', tree): sys.exit('could not read its workspace')
 print(tree)`;
 
+/**
+ * Its agent's side, as the task starts again: what a run of it cut off left there (the seventh fabric review's I-d), gone.
+ * A receive's patch (up to the limit), an apply's, a give's or a tree's index, each removed by its own script's end, and
+ * the give's ref, removed by its finally: a deadline's SIGKILL skips both. Only this task's own: another's may be under
+ * way.
+ */
+const SWEEP_SCRIPT = `root, task, keep = sys.argv[1], sys.argv[2], sys.argv[3]
+if os.path.isdir(keep):
+    for name in os.listdir(keep):
+        if name.startswith(task+'.') and (name.endswith('.patch') or name.endswith('-index')):
+            try:
+                os.remove(os.path.join(keep, name))
+            except OSError:
+                pass
+bad = refused(root)
+if bad: sys.exit(bad)
+ref = 'refs/invincible/give/'+task
+if git(root,'rev-parse','-q','--verify',ref).returncode == 0 and git(root,'update-ref','-d',ref).returncode:
+    sys.exit('its given workspace could not be let go')`;
+
 /** Where each side keeps its scratch files: under the agent's /work/.agent, and the task VM's own. */
 export const HANDED_KEEP = "/work/.agent/handed";
 
@@ -229,3 +251,4 @@ export const handedReceive = (task: string, nonce: string, limit: number, keep =
 export const handedApply = (root: string, base: string, task: string, nonce: string, size: number, limit: number, keep = HANDED_KEEP): string => heldGit(APPLY_SCRIPT, root, base, keep, task, nonce, String(size), String(limit));
 export const handedDrop = (task: string, nonce: string, keep = HANDED_KEEP): string => heldGit(DROP_SCRIPT, keep, task, nonce);
 export const handedTree = (root: string, base: string, task: string, keep = HANDED_KEEP): string => heldGit(TREE_SCRIPT, root, base, keep, task);
+export const handedSweep = (root: string, task: string, keep = HANDED_KEEP): string => heldGit(SWEEP_SCRIPT, root, task, keep);

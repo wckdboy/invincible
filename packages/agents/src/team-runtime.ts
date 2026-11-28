@@ -9,7 +9,7 @@ import { commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type 
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
 import { HELD_GIT, heldGit } from "./held-git.ts";
-import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedTake, handedTree } from "./handed-repo.ts";
+import { handedApply, handedDrop, handedGive, handedNonce, handedReceive, handedSend, handedSweep, handedTake, handedTree } from "./handed-repo.ts";
 import { runEvidence, runTrail } from "./skills-run.ts";
 
 /** What one run of an agent is given by the team service (node/team.ts) that starts it. */
@@ -869,6 +869,10 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Another node's task's own clone, of the task's worktree as it stands (R5-3): made in its VM at the same place,
       // from what its agent's side gives it through the node, with its changes so far for a task taken up again.
       if (own && agent.repository) {
+        // What a run of it cut off left on its agent's side first (the seventh fabric review's I-d): a receive's patch of up
+        // to the limit, an index, the give's ref. Each is removed by its own script's end, which a deadline's SIGKILL skips.
+        const swept = await inRepo(handedSweep(root, task.id), 60, ctx.signal).catch((error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false }));
+        if (swept.exitCode !== 0) ctx.emit(`Workspace · what an earlier run of this task left on its agent's side couldn't all be swept: ${redact(swept.stderr || swept.stdout).trim().slice(0, 200)}`);
         const given = await own.vm.receive(handedGive(root, task.id), handedTake(root, base, agent.name, `${agent.id}@agents.invalid`), 900, ctx.signal);
         if (given.cut || given.from.exitCode !== 0 || given.to.exitCode !== 0) {
           throw new Error(`Workspace not ready: its clone of the repository couldn't be made in its VM: ${redact((given.cut ? "it came to more than its cap" : "") || given.from.stderr || given.to.stderr || given.to.stdout).trim().split("\n").at(-1)?.slice(0, 300) ?? "no reason given"}`);
