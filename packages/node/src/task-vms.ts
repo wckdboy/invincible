@@ -21,7 +21,7 @@ import type { SandboxHost } from "@invincible/sandbox";
 const RETRY_MS = 60_000;
 const RETRY_MAX_MS = 15 * 60_000;
 
-type Host = Pick<SandboxHost, "createTaskVm" | "createGateVm" | "sweepGates" | "hasInstallCache" | "fillCache" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe" | "makesSandboxes">;
+type Host = Pick<SandboxHost, "createTaskVm" | "createGateVm" | "sweepGates" | "gateLeft" | "hasInstallCache" | "fillCache" | "exec" | "destroy" | "stream" | "taskVms" | "get" | "endLease" | "pipe" | "makesSandboxes">;
 
 /**
  * A command of the node's in a task's VM: a shell that reads no profile of the task's (the eighth fabric review's R8-3).
@@ -170,6 +170,10 @@ export class TaskVms {
           sweep: async (signal, uid) => {
             if (signal.aborted || gating !== gate) throw new Error("its work has stopped");
             return host.sweepGates(gate, uid);
+          },
+          left: async (signal, uid) => {
+            if (signal.aborted || gating !== gate) throw new Error("its work has stopped");
+            return host.gateLeft(gate, uid);
           },
         };
       },

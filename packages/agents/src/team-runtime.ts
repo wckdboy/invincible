@@ -99,6 +99,8 @@ export interface HandedRound {
   gates(command: string, timeoutSec: number, signal: AbortSignal, uid: number): Promise<ExecResult>;
   /** What gate user `uid` left in the round's VM ended and tidied, from an exec of its own (sandbox gate.ts): exit 0, none is left. */
   sweep(signal: AbortSignal, uid: number): Promise<ExecResult>;
+  /** What of gate user `uid` is still alive in the round's VM after its sweep, counted as the VM's own user (sandbox gate.ts GATE_LEFT_PY): its stdout the count. */
+  left(signal: AbortSignal, uid: number): Promise<ExecResult>;
 }
 
 /** The most another node's task's changes may come to, as a patch or as its binary parts inflate: 512 MiB. */
@@ -1061,17 +1063,22 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
        * they name) and, with no repository, its review's evidence then runs there as a user of its own, one no other gate
        * of the round has (the twelfth fabric re-review's R12-1), on a copy of that tree of its own that user made: nothing
        * of the task's reaches it, nor anything a gate before it left, as CI runs each job on a checkout of the tree that
-       * comes back. What each left is ended and tidied after it.
+       * comes back. What each left is ended and tidied after it, and then counted as the VM's own user: a round whose
+       * gate's user still has a process alive (in Kata, one that traced its sweep) ends there, that gate failing, and
+       * every later gate, check and evidence of it failing without running (the thirteenth fabric re-review's Info).
        */
       let judged: { tree: string } | { why: string } | null = null;
       let round: HandedRound | null = null;
       /** How many of its gates' users the round under way has given: the next is VM_GATE_UID_FIRST + this, never one again. */
       let usersGiven = 0;
+      /** Why the round under way ended early: what a gate's user left outlived its sweep, or couldn't be counted. */
+      let roundEnded: string | null = null;
       const failed = (error: Error): ExecResult => ({ exitCode: -1, stdout: "", stderr: error.message, durationMs: 0, truncated: false });
       const said = (r: ExecResult) => redact(r.stderr || r.stdout).trim().split("\n").at(-1)?.slice(0, 200) || "no reason given";
       const treeId = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
       /** A copy of the round's tree, made by a gate's user the round has given no other: where, as whom, and what it took. */
       const copied = async (on: HandedRound, tree: string): Promise<{ on: string; uid: number; ms: number } | { why: string; ms: number }> => {
+        if (roundEnded) return { why: roundEnded, ms: 0 };
         if (usersGiven >= VM_GATE_UIDS) return { why: `its round has run a gate as each of its ${VM_GATE_UIDS} users: no more run in it`, ms: 0 };
         const uid = VM_GATE_UID_FIRST + usersGiven++;
         const at = `${VM_GATES}/${handedNonce()}`;
@@ -1108,6 +1115,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         }
         round = made;
         usersGiven = 0;
+        roundEnded = null;
         judged = { tree: held };
       };
       /** A gate, a check of the node's or the evidence of a task with no repository: on a copy of what its gates judge of its own. */
@@ -1122,6 +1130,7 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           if (what === "check") throw new CheckRefused(made.why);
           return { exitCode: -1, stdout: "", stderr: made.why, durationMs: made.ms, truncated: false };
         }
+        let ended: string | null = null;
         const ran = await there!
           .gates(handedCommand(command, { task: task.id, limitSec: limit, ends: "gate", on: made.on }), limit + HANDED_MARGIN_SECONDS, ctx.signal, made.uid)
           .catch((error: Error) => {
@@ -1132,7 +1141,23 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
             // (What its user left, ended and tidied: hygiene, as no later gate of the round is that user. A process of its
             // own that stops this sweep keeps only what is that user's.)
             await there!.sweep(ctx.signal, made.uid).catch(failed);
+            // Then what of its user is still alive, counted as the VM's own user, whom none of its can trace: anything,
+            // or no count, and its round ends here (the thirteenth review's Info). What it left shares the VM's loopback,
+            // its /tmp and its memory with every later gate, which no user of their own keeps from them.
+            const counted = await Promise.resolve()
+              .then(() => there!.left(ctx.signal, made.uid))
+              .catch(failed);
+            const count = counted.exitCode === 0 && /^\d+$/.test(counted.stdout.trim()) ? Number(counted.stdout.trim()) : null;
+            if (count !== 0) {
+              ended = count === null ? `its round's VM couldn't say what its gate user ${made.uid} left after its sweep (${said(counted)}): its round ends here, and nothing more of it runs` : `its round's VM still holds what its gate user ${made.uid} left, alive after its sweep: its round ends here, and nothing more of it runs`;
+              roundEnded = ended;
+            }
           });
+        // (A gate, check or evidence whose user left what its round can't be rid of answers for nothing: it fails too.)
+        if (ended) {
+          if (what === "check") throw new CheckRefused(ended);
+          return { ...ran, exitCode: -1, stderr: `${ran.stderr}${ran.stderr ? "\n" : ""}(${ended})`, durationMs: ran.durationMs + made.ms };
+        }
         // (A check whose command didn't end as it does, reading every file it names, is no answer of what changed.)
         if (what === "check" && ran.exitCode !== 0) throw new CheckRefused(`its check exited ${ran.exitCode}: ${said(ran)}`);
         // A gate that failed for want of a package says why: its round's VM has no network. Bun, given a package to fetch

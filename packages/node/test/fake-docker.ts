@@ -177,6 +177,9 @@ export function fakeDocker(opts: { engine?: string } = {}): FakeDocker {
           const cmd = none.every((part, i) => after[i] === part) ? after.slice(none.length) : after;
           fake.execs.push({ container, cmd });
           fake.execOptions.push(rest.slice(0, at));
+          // (What a gate's user left after its sweep, counted as a round's VM's own user (sandbox gate.ts GATE_LEFT_PY):
+          // none, here, where nothing is left behind.)
+          if (rest.some((part) => part.includes("this count runs only as a gate VM's own user"))) return ok("0\n");
           const answer = (await fake.onExec?.(container, cmd)) ?? { code: 0, stdout: "" };
           // A lease the host wrote is kept where the VM's HOME is (its payload: the JSON, base64, its last argument).
           if (answer.code === 0 && cmd.some((part) => part.includes(LEASE_WRITE))) {

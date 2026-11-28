@@ -248,8 +248,14 @@ transport keys carries all of it:
            its own with nothing of that user's above it, repeated until `/proc` shows none with a thread alive (20 tries
            of a zombie-led group and of a fork chain came back with nothing left, in Kata and in runc), then its files
            in `/tmp`, `/dev/shm` and `/dev/mqueue`, its folders in `/gates`, and its System V IPC objects. That keeps
-           the round's VM from filling. It decides nothing: in Kata a process of that user can trace its sweep and
-           outlive it, and then it stays that user's alone, which no later gate of the round is;
+           the round's VM from filling.
+         - Then what of that user is still alive is counted, as the VM's own user, whom no process of a gate's can trace
+           or stop. In Kata a process of that user can trace its sweep and outlive it. Anything alive, or a count that
+           can't be made, and the round ends there: that gate fails, and every later gate, check and evidence of the
+           round fails without running (the thirteenth re-review's Info). So what one gate's user leaves alive shares
+           nothing with a later gate: not the loopback, a name in `/tmp`, or the memory. In Kata and in runc, the PoC
+           whose process outlived its sweep and left a file a later gate read comes back not verified
+           (`handed-real.integration.test.ts`; in Kata it came back verified before);
        - a check that can't be made sends the work back, never "no change" (the eleventh re-review's R11-2). That covers
          a round whose tree can't be given, a copy that can't be made, and a check that didn't end as it does. Before, a
          process the freeze missed closed the clone's `.git` to the gates' user around the check's copy alone, and the
@@ -303,11 +309,9 @@ transport keys carries all of it:
        With no repository, a process the task's end missed can still change what is tarred for a round. Its gates and
        its evidence then both read that, and the same, and nothing is shipped (a task with no repository ships nothing).
 
-       Within a round, its gates still share its VM's kernel: its loopback network, its CPU and memory, and what can be
-       made by name in its `/tmp` and `/dev/shm`. A process a gate's run of the task's code left (which, in Kata, can
-       outlive its sweep) can listen on a port of the loopback, or leave a file of a fixed name there, which a later
-       gate's command trusts only if it reads that port or name without making it. A gate's own HOME and `TMPDIR` are
-       its own, in its own folder.
+       Within a round, nothing of one gate's user is alive when the next gate runs: its round ended first (above). What
+       a gate's command runs of the task's code can still make that gate say what it likes, as ever: in Kata by tracing
+       its helper too, which ends its round if what traced it lives on.
      - The VM goes as the task ends, however it ends (done, failed, stopped, its agent paused), and with it everything
        the task started there. When its work ends (a revocation among its ends: your brake), its lease ends and the VM
        is removed at once, the command in flight there with it, never once that command returns (the fifth re-review's

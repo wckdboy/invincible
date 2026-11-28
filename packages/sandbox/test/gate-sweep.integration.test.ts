@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { GATE_SWEEP_PY, GATE_VM_ENV, gateSweepArgs, KATA_RUNTIME } from "../src/index.ts";
+import { GATE_LEFT_PY, GATE_SWEEP_PY, GATE_VM_ENV, gateLeftArgs, gateSweepArgs, KATA_RUNTIME } from "../src/index.ts";
 
 /*
  * The sweep between another node's task's gates, on real containers and Kata microVMs (gate.ts GATE_SWEEP_PY; the
@@ -192,6 +192,24 @@ print(" ".join(out))`).stdout.trim();
       expect(held(61002)).toBe(all(61002).replace(" /gates/left-61002", " /gates/b /gates/left-61002"));
       expect(docker(...gateSweepArgs(name, 61002)).status).toBe(0);
       expect(held(61002)).toBe("");
+    });
+
+    /*
+     * The thirteenth review's Info: after each sweep the node counts, as the VM's own user, what of the gate's user is
+     * still alive, and a round with any left ends there (team-runtime). The count is the VM's own user's: no process of a
+     * gate's can trace it.
+     */
+    test(`what a gate's user left alive is counted as the VM's own user: what it leaves, and none once it is swept; never as a gate's user (${runtime})`, () => {
+      docker("exec", "-d", "--user", "61001:61001", name, "sleep", "300");
+      Bun.sleepSync(300);
+      const count = () => docker(...gateLeftArgs(name, 61001));
+      const before = count();
+      expect([before.status, before.stderr.trim(), before.stdout.trim()]).toEqual([0, "", "1"]);
+      expect(sweep().code).toBe(0);
+      const after = count();
+      expect([after.status, after.stdout.trim()]).toEqual([0, "0"]);
+      const asGate = docker("exec", "--user", "61002:61002", "--workdir", "/gates", name, "/usr/bin/python3", "-I", "-c", GATE_LEFT_PY, "61001");
+      expect([asGate.status, asGate.stderr.trim()]).toEqual([1, "this count runs only as a gate VM's own user, in a gate VM"]);
     });
 
     test(`it runs only as a gate's user, in a gate VM: as the VM's own user it does nothing (${runtime})`, () => {

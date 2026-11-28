@@ -1,7 +1,7 @@
 import { chownSync, existsSync, mkdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type ActionClass, COMPUTER_START, type Decision, decide, type ExecResult, isGateUid, isReservedGatewayScope, LEASE_FILE, MAC_VM_OVERHEAD, NOTES_DIR, randomBytes, redact, type SandboxNetwork, type SandboxView, type SeatKind, TeamWorkspaceRun, VM_OVERHEAD, type VmOverhead, WORKSPACE_OWN } from "@invincible/core";
-import { gateSweepArgs, gateUsers } from "./gate.ts";
+import { gateLeftArgs, gateSweepArgs, gateUsers } from "./gate.ts";
 import { FILL_PROXY_SOCKET, FILLER_UID, fillerArgs } from "./install-cache.ts";
 import { REGISTRY, type RegistryProxy, registryProxy } from "./registry-proxy.ts";
 import { layoutPath, MOVE_PY, WORK_TREE } from "./layout.ts";
@@ -2785,6 +2785,21 @@ export class SandboxHost {
     const started = performance.now();
     const ran = await this.docker(gateSweepArgs(containerName(id), uid), 60_000);
     this.opts.ledger({ class: "modify", resource: "sandbox.exec", target: sandbox.name, verdict: "allow", run: sandbox.run, detail: `every process of gate user ${uid} ended, and what it left tidied → exit ${ran.code}` });
+    return { exitCode: ran.code, stdout: ran.stdout, stderr: ran.stderr, durationMs: Math.round(performance.now() - started), truncated: ran.truncated };
+  }
+
+  /**
+   * What of gate user `uid` is still alive in a round's VM once its sweep has run (gate.ts GATE_LEFT_PY), counted as the
+   * VM's own user, whom no process of a gate's can trace or stop: exit 0, the count on stdout. A gate VM's alone.
+   */
+  async gateLeft(id: string, uid: number): Promise<ExecResult> {
+    const sandbox = await this.forCommand(id);
+    if (!sandbox) throw new SandboxError("no such sandbox on this node", 404);
+    if (this.apple || !sandbox.gate) throw new SandboxError("only a VM made for a round of another node's task's gates is counted", 409);
+    if (!isGateUid(uid)) throw new SandboxError("only a gate's user is counted", 409);
+    if (sandbox.status !== "running") throw new SandboxError(`sandbox is ${sandbox.status}`, 409);
+    const started = performance.now();
+    const ran = await this.docker(gateLeftArgs(containerName(id), uid), 60_000);
     return { exitCode: ran.code, stdout: ran.stdout, stderr: ran.stderr, durationMs: Math.round(performance.now() - started), truncated: ran.truncated };
   }
 

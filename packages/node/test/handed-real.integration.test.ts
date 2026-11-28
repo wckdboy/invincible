@@ -98,7 +98,7 @@ all="$*"
 kind=\${args[0]}
 [ "$kind" = run ] && case $all in *"${LABEL}.gate=1"*) kind=run-gate;; *"${LABEL}.task="*) kind=run-task;; esac
 [ "$kind" = run ] || [ "$kind" = run-task ] || [ "$kind" = run-gate ] || case $all in
-  *"not a store for its gates"*) kind=store;; *"this sweep runs only as"*) kind=sweep;; *"its tree could not be packed"*) kind=pack;; *"its folder is not there"*) kind=tar;;
+  *"not a store for its gates"*) kind=store;; *"this sweep runs only as"*) kind=sweep;; *"this count runs only as"*) kind=count;; *"its tree could not be packed"*) kind=pack;; *"its folder is not there"*) kind=tar;;
   *given.bundle*) kind=take;; *"its workspace as it was given"*) kind=give;; *send-index*) kind=send;; *apply-index*) kind=apply;;
   *tree-index*) kind=tree;; *"no such receive"*) kind=receive;; *"tagged()"*) kind=pipe-end;; *"its gates run on the tree alone"*) kind=copy;;
   *gate-faker*|*PROFILE*|*zz-work*) kind=work;; *"test -f result-real.txt"*) kind=gate;; *"> result-real.txt"*) kind=work;;
@@ -347,6 +347,79 @@ while True:
     time.sleep(0.001)
 ZZ
 echo written`,
+  // The thirteenth review's Info, made a task: TASK_PTRACE's process, which traces its gate's helper and each later sweep
+  // (so in Kata it outlives them), leaving a file of a fixed name in its round VM's /tmp instead of writing into copies:
+  // the residue a later gate's command trusts if it reads that name without making it.
+  TASK_RESIDUE: String.raw`# zz-work
+cat > zz.test.ts <<'ZZ'
+import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+test("the work", () => {
+  spawnSync("bash", ["zz-daemon.sh"], { stdio: "ignore" });
+  expect(1 + 1).toBe(2);
+});
+ZZ
+cat > zz-daemon.sh <<'ZZ'
+setsid /usr/bin/python3 zz-attacker.py </dev/null >/dev/null 2>&1 &
+sleep 1
+ZZ
+cat > zz-attacker.py <<'ZZ'
+import ctypes, glob, os, time
+libc = ctypes.CDLL(None, use_errno=True)
+libc.ptrace.restype = ctypes.c_long
+libc.ptrace.argtypes = [ctypes.c_long, ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p]
+class Regs(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_ulonglong) for n in "r15 r14 r13 r12 rbp rbx r11 r10 r9 r8 rax rcx rdx rsi rdi orig_rax rip cs eflags rsp ss fs_base gs_base ds es fs gs".split()]
+def cmd(p):
+    return open("/proc/%d/cmdline" % p, "rb").read()
+def parent(p):
+    return int(open("/proc/%d/stat" % p).read().rsplit(")", 1)[1].split()[1])
+def take(pid, syscall):
+    # Stopped at its next system call of number syscall (any, if None), it calls exit_group(0) instead.
+    if libc.ptrace(0x4206, pid, None, None) != 0:
+        return False
+    libc.ptrace(0x4207, pid, None, None)
+    os.waitpid(pid, 0x40000000)
+    regs = Regs()
+    while True:
+        libc.ptrace(24, pid, None, None)
+        _, status = os.waitpid(pid, 0x40000000)
+        if os.WIFEXITED(status) or os.WIFSIGNALED(status):
+            return True
+        libc.ptrace(12, pid, None, ctypes.byref(regs))
+        if regs.rax == 0xffffffffffffffda and (syscall is None or regs.orig_rax == syscall):
+            regs.orig_rax, regs.rdi = 231, 0
+            libc.ptrace(13, pid, None, ctypes.byref(regs))
+            libc.ptrace(17, pid, None, None)
+            return True
+with open("/tmp/zz-fixed", "w") as f:
+    f.write("done")
+os.chmod("/tmp/zz-fixed", 0o644)
+p, helper = os.getppid(), None
+while p > 1 and helper is None:
+    try:
+        if b"PR_SET_CHILD_SUBREAPER" in cmd(p):
+            helper = p
+        else:
+            p = parent(p)
+    except OSError:
+        break
+if helper and os.fork() == 0:
+    take(helper, 62)
+    os._exit(0)
+done = set()
+while True:
+    for n in os.listdir("/proc"):
+        if n.isdigit() and int(n) not in done and int(n) != os.getpid():
+            try:
+                if b"this sweep runs only" in cmd(int(n)):
+                    done.add(int(n))
+                    take(int(n), None)
+            except OSError:
+                pass
+    time.sleep(0.001)
+ZZ
+echo written`,
   // The eleventh review's R11-2 (zz-rc11-locked-check), its control: her locked.test.ts rewritten to pass whatever
   // app.txt says, and nothing else.
   TASK_LOCKED_PLAIN: String.raw`# zz-work
@@ -548,7 +621,7 @@ for (const runtime of ["kata", "runc"] as const) {
       console.log(`  rounds: ${roundNames.size}; its gates, copies and sweeps ran in: ${placed(["gate", "copy", "sweep"]).join(", ") || "none"}; its work in: ${placed(["work"]).join(", ")}`);
       const placement = () => {
         expect(roundNames.size).toBeGreaterThan(0);
-        expect(placed(["gate", "copy", "sweep", "store"])).toEqual(["round's"]);
+        expect(placed(["gate", "copy", "sweep", "count", "store"])).toEqual(["round's"]);
         expect(placed(["work", "pack", "tar"]).filter((p) => p !== "task's")).toEqual([]);
       };
       return { done, herVm, placement, gates: done.trail.filter((t) => t.text.startsWith("Gate ")).map((t) => t.text.split("\n").slice(0, 2).join(" / ").slice(0, 200)) };
@@ -662,6 +735,21 @@ for (const runtime of ["kata", "runc"] as const) {
       expect(done.proof).toMatchObject({ state: "checked", verified: false });
       expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
       expect(docker("exec", herVm, "test", "-e", `/work/tasks/${done.task}/result-real.txt`).status).not.toBe(0);
+      placement();
+    });
+
+    /*
+     * The thirteenth review's Info: what a gate's user left that its sweep couldn't end (in Kata, a process that traced
+     * it) still shared its round's VM with the later gates, and a later gate whose command trusted a name in /tmp read
+     * what it left there: the task came back Proven in Kata. Now, after each sweep, what of that user is still alive is
+     * counted as the VM's own user, and a round with any left ends there, its later gates failing.
+     */
+    test.skipIf(process.arch !== "x64")("the thirteenth review's Info: what a gate's user leaves alive past its sweep ends its round, and no later gate reads what it left", async () => {
+      const { done, gates, placement } = await handOff("TASK_RESIDUE", ["bun test zz", 'test "$(cat /tmp/zz-fixed 2>/dev/null)" = done']);
+      console.log(`  its gates, as its trail says them:\n    ${gates.join("\n    ")}`);
+      console.log(`  ${runtime}, the residue: proof ${JSON.stringify(done.proof)}`);
+      expect(done.proof).toMatchObject({ state: "checked", verified: false });
+      expect((done.proof as { proof: { after: number[] } }).proof.after[1]).not.toBe(0);
       placement();
     });
 

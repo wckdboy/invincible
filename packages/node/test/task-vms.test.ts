@@ -20,7 +20,7 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
   for (const id of options.left ?? []) vms.set(id, { createdAt: STARTED - 60_000, run: `handed.task-${id}` });
   const asked: unknown[] = [], ran: { vm: string; cmd: string[]; as?: number }[] = [], removed: string[] = [];
   /** Each round's VM as it was asked for, each sweep of one, and each fill of the install cache. */
-  const rounds: unknown[] = [], swept: { vm: string; uid: number }[] = [], filled: { vm: string; manifests: string }[] = [];
+  const rounds: unknown[] = [], swept: { vm: string; uid: number }[] = [], counted: { vm: string; uid: number }[] = [], filled: { vm: string; manifests: string }[] = [];
   /** Each pipe between two VMs, as the host was asked for it: from which VM's command to which. */
   const piped: { from: { id: string; cmd: string[] }; to: { id: string; cmd: string[] }; maxBytes: number }[] = [];
   /** Each step of a removal, in order: a lease ended, a VM removed. */
@@ -53,6 +53,10 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
     sweepGates: async (vm: string, uid: number) => {
       swept.push({ vm, uid });
       return done();
+    },
+    gateLeft: async (vm: string, uid: number) => {
+      counted.push({ vm, uid });
+      return done("0\n");
     },
     hasInstallCache: () => !!options.cache,
     fillCache: async (vm: string, manifests: Uint8Array) => {
@@ -93,7 +97,7 @@ function host(options: { left?: string[]; failRemove?: string; failTimes?: numbe
       return { from: done(), to: done(), bytes: 0, cut: false };
     },
   };
-  return { fake, vms, asked, rounds, swept, filled, ran, removed, steps, signals, piped, listed: () => listed };
+  return { fake, vms, asked, rounds, swept, counted, filled, ran, removed, steps, signals, piped, listed: () => listed };
 }
 
 const ask = { vm: "agent-vm", task: "task-abcdefghijkl", providers: ["anthropic"], models: ["anthropic/claude-paid"] };
@@ -136,12 +140,16 @@ describe("another node's task's VM, on this node", () => {
     expect(h.ran.at(-1)).toEqual({ vm: "gate-2", cmd: ["bash", "--noprofile", "--norc", "-c", "test -f x"], as: 61001 });
     await first.sweep(live, 61001);
     expect(h.swept).toEqual([{ vm: "gate-2", uid: 61001 }]);
+    // And what of that user is still alive, counted there by this host (gateLeft: as the VM's own user).
+    expect((await first.left(live, 61001)).stdout).toBe("0\n");
+    expect(h.counted).toEqual([{ vm: "gate-2", uid: 61001 }]);
     expect(h.ran.filter((r) => r.as !== undefined && r.vm === "vm-1")).toEqual([]);
     // The next round's VM takes its place: the first is gone, and what is asked of it is refused.
     const second = await vm.round("take-the-tree", "keep-the-tree", "", 900, live);
     expect(h.removed).toEqual(["gate-2"]);
     await expect(first.gates("test -f x", 30, live, 61002)).rejects.toThrow("its work has stopped");
     await expect(first.sweep(live, 61002)).rejects.toThrow("its work has stopped");
+    await expect(first.left(live, 61002)).rejects.toThrow("its work has stopped");
     await second.sweep(live, 61001);
     expect(h.swept).toEqual([{ vm: "gate-2", uid: 61001 }, { vm: "gate-3", uid: 61001 }]);
     // The task's end takes the round's VM with it.

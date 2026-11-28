@@ -38,7 +38,7 @@ const roundAnswer = (command: string): ExecResult | null => {
   if (command.includes("not a copy for its gates")) return result({ stdout: `1 1 ${words.at(-3)}` });
   return null;
 };
-/** A fake round of its gates: its commands go where `exec` sends them, its store and copies answered as made, its sweep finding none. */
+/** A fake round of its gates: its commands go where `exec` sends them, its store and copies answered as made, its sweep and its count finding none. */
 const roundOf = (exec: HandedVm["exec"]): HandedVm["round"] => async (take, store, _fill, timeout, signal) => {
   const from = await exec(take, timeout, signal);
   const kept = await exec(store, timeout, signal);
@@ -50,6 +50,7 @@ const roundOf = (exec: HandedVm["exec"]): HandedVm["round"] => async (take, stor
       return roundAnswer(command) ?? ran;
     },
     sweep: async () => result({ stdout: "" }),
+    left: async () => result({ stdout: "0\n" }),
   };
 };
 type Overrides = Partial<Omit<TeamRuntimeDeps, "handedVm">> & { handedVm?: (...asked: Parameters<NonNullable<TeamRuntimeDeps["handedVm"]>>) => Promise<GivenVm> };
@@ -1182,7 +1183,7 @@ function gatedFixture(opts: { outlives: boolean; changes: "during its gates" | "
 test("another node's task's gates each run in their round's own VM, each as a user of its own that no other gate of the round has, on a copy of their own that user made of the tree read as they began, what it left swept after it (R8-3, R11-1, R12-1)", async () => {
   const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
   const agent = { ...member, repository: "https://github.com/you/project" };
-  const said: { via: "exec" | "take" | "store" | "gates" | "sweep"; command: string; uid?: number }[] = [];
+  const said: { via: "exec" | "take" | "store" | "gates" | "sweep" | "left"; command: string; uid?: number }[] = [];
   const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("PASS\nFine.")], {
     agent: () => agent,
     models: () => [{ provider: "paid", model: "m" }],
@@ -1206,6 +1207,7 @@ test("another node's task's gates each run in their round's own VM, each as a us
             return roundAnswer(command) ?? result({ exitCode: command.includes("bun test required-check") && said.some((c) => plain(c.command).includes("echo one")) ? 0 : 1 });
           },
           sweep: async (_s: AbortSignal, uid: number) => (said.push({ via: "sweep", command: "", uid }), result({ stdout: "" })),
+          left: async (_s: AbortSignal, uid: number) => (said.push({ via: "left", command: "", uid }), result({ stdout: "0\n" })),
         };
       },
       receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
@@ -1227,10 +1229,11 @@ test("another node's task's gates each run in their round's own VM, each as a us
   expect(new Set(ons).size).toBe(4);
   for (const [i, on] of ons.entries()) {
     const at = said.indexOf(gates[i]!);
-    // Its copy made just before it, as its own user, and that user's leavings swept just after it.
+    // Its copy made just before it, as its own user, and that user's leavings swept just after it, then counted.
     expect(said[at - 1]!.command).toContain(` '${"7".repeat(40)}' '${on}' 'repo'`);
     expect(said[at - 1]!.uid).toBe(gates[i]!.uid);
     expect(said[at + 1]).toMatchObject({ via: "sweep", uid: gates[i]!.uid });
+    expect(said[at + 2]).toMatchObject({ via: "left", uid: gates[i]!.uid });
   }
   // Each gate's user its own, never one twice within its round (the baseline's round, then the submission's).
   const users = gates.map((g) => g.uid!);
@@ -1253,6 +1256,65 @@ test("another node's task's gates each run in their round's own VM, each as a us
   expect(work.map((c) => [c.via, c.command.startsWith("/usr/bin/python3 -I -c "), c.command.includes("sys.argv[4:6]))' task ")])).toEqual([["exec", true, true]]);
   // The second gate's file never came: it fails, honestly, and the task isn't verified.
   expect(done.verified).toBe(false);
+});
+
+/*
+ * The thirteenth fabric review's Info: what a gate's user left that its sweep couldn't end (in Kata, a process that
+ * traces its sweep) still shared its round's VM with the later gates: the loopback, names in /tmp and /dev/shm, the
+ * memory. Now, after each sweep, the node counts what of that user is still alive, as the VM's own user, whom no process
+ * of a gate's can trace or stop: one, or a count it can't make, and the round ends there. That gate fails, and every
+ * later gate, check and evidence of the round fails without running.
+ */
+test("a round whose gate's user still has a process alive after its sweep ends there: that gate and every later one of the round fail, none of them run (the thirteenth review's Info)", async () => {
+  const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
+  const agent = { ...member, repository: "https://github.com/you/project" };
+  for (const count of ["1\n", "", "not a count", "exit 1"] as const) {
+    const said: { via: "gates" | "sweep" | "left"; command: string; uid: number }[] = [];
+    const f = fixture([say("1. Make the change."), say("```sh\necho one\n```"), say("DONE\nBuilt."), say("DONE\nBuilt."), say("DONE\nBuilt."), say("DONE\nBuilt.")], {
+      agent: () => agent,
+      models: () => [{ provider: "paid", model: "m" }],
+      paid: (ref: string) => ref === "paid/m",
+      keep: async () => "artifact-left",
+      exec: async (_m: Agent, command: string) => {
+        if (command.includes("from_commit")) return result({ stdout: `${HANDED_BASE} fetched` });
+        if (command.includes("--allow-empty")) return result({ stdout: `0 ${"7".repeat(40)}` });
+        if (command.includes(".tree-index")) return result({ stdout: "7".repeat(40) });
+        return result({ stdout: "0" });
+      },
+      handedVm: async () => ({
+        exec: async (command: string) => result(command.includes(".tree-index") ? { stdout: "7".repeat(40) } : {}),
+        round: async (_take: string, store: string) => ({
+          taken: { from: result(), to: roundAnswer(store)!, bytes: 1, cut: false },
+          cache: null,
+          gates: async (command: string, _t: number, _s: AbortSignal, uid: number) => {
+            said.push({ via: "gates", command, uid });
+            // (Each gate would pass: what fails them is what their round's VM still holds.)
+            return roundAnswer(command) ?? result({ exitCode: 0 });
+          },
+          sweep: async (_s: AbortSignal, uid: number) => (said.push({ via: "sweep", command: "", uid }), result({ stdout: "" })),
+          // What the first gate's user (61001) left outlives its sweep, in every round.
+          left: async (_s: AbortSignal, uid: number) => {
+            said.push({ via: "left", command: "", uid });
+            if (uid !== 61001) return result({ stdout: "0\n" });
+            return count === "exit 1" ? result({ exitCode: 1, stderr: "this count runs only as a gate VM's own user" }) : result({ stdout: count });
+          },
+        }),
+        receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
+        send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }),
+        stop: async () => {},
+        release: async () => {},
+      }),
+    });
+    f.store.emit(f.identity, "price.set", { model: "local/fake", price: { input: 1, output: 2 } });
+    const done = await f.runtime.executeTask(agent, { ...handedTask, gates: ["bun test required-check", "test -f built.txt"] }, f.context);
+    // In each round its first gate ran, as 61001, was swept, and counted; nothing ran as 61002, its copy not even made.
+    const ran = said.filter((c) => c.via === "gates");
+    expect([count, ran.some((c) => c.uid === 61002)]).toEqual([count, false]);
+    expect([count, ran.filter((c) => c.command.includes("sys.argv[4:6]))' gate ")).every((c) => c.uid === 61001)]).toEqual([count, true]);
+    const trail = JSON.stringify(f.bodies);
+    expect([count, trail.includes("what its gate user 61001 left")]).toEqual([count, true]);
+    expect([count, done.verified]).toEqual([count, false]);
+  }
 });
 
 test("another node's task's gate that fails where its round's install cache couldn't be filled says why: its round's VM has no network", async () => {
@@ -1316,6 +1378,7 @@ for (const [what, breaks] of [
   ["its round's tree can't be given to its VM", { take: true }],
   ["its copy can't be made", { copy: true }],
   ["its check doesn't end as it does", { check: true }],
+  ["what its check's user left outlives its sweep", { left: true }],
 ] as const) {
   test(`another node's task's check of its locked tests sends the work back when ${what}, and the gates never run on it (R11-2)`, async () => {
     const HANDED_BASE = "89abcdef0123456789abcdef0123456789abcdef";
@@ -1350,6 +1413,7 @@ for (const [what, breaks] of [
             return result({ exitCode: submitted ? 0 : 1 });
           },
           sweep: async () => result({ stdout: "" }),
+          left: async () => result({ stdout: submitted && "left" in breaks ? "1\n" : "0\n" }),
         }),
         receive: async () => ({ from: result(), to: result(), bytes: 0, cut: false }),
         send: async () => ({ from: result(), to: result({ stdout: "0" }), bytes: 0, cut: false }),

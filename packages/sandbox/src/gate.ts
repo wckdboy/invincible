@@ -117,6 +117,43 @@ export const gateSweepArgs = (container: string, uid: number): string[] => {
 };
 
 /**
+ * What of gate user `sys.argv[1]` is still alive in a round's VM once its sweep has run: a process of that user with a
+ * thread alive, by `/proc`, counted as the VM's own user, never a gate's, so no process of a gate's user can trace or
+ * stop it (the thirteenth fabric re-review's Info). In Kata a process that traces its user's sweep outlives it; a round
+ * with any left ends there (team-runtime.ts). One it can't read is counted as left. It prints the count. It refuses to
+ * run as a gate's user, or but where /proc is, in a gate VM's environment.
+ */
+export const GATE_LEFT_PY = String.raw`import os, sys
+if ${VM_GATE_UID_FIRST} <= os.getuid() < ${VM_GATE_UID_FIRST + VM_GATE_UIDS} or os.environ.get("${GATE_VM_ENV}") != "1" or not os.path.isdir("/proc/self") or len(sys.argv) != 2 or not sys.argv[1].isdigit():
+    sys.exit("this count runs only as a gate VM's own user, in a gate VM")
+uid, me, left = int(sys.argv[1]), os.getpid(), 0
+for name in os.listdir("/proc"):
+    if not name.isdigit() or int(name) == me:
+        continue
+    try:
+        with open("/proc/%s/status" % name) as f:
+            owner = next((int(line.split()[1]) for line in f if line.startswith("Uid:")), None)
+        if owner != uid:
+            continue
+        for thread in os.listdir("/proc/%s/task" % name):
+            with open("/proc/%s/task/%s/stat" % (name, thread)) as f:
+                if f.read().rsplit(")", 1)[1].split()[0] not in ("Z", "X"):
+                    left += 1
+                    break
+    except (FileNotFoundError, ProcessLookupError):
+        pass
+    except (OSError, StopIteration, ValueError, IndexError):
+        left += 1
+print(left)
+`;
+
+/** The count as Docker runs it for gate user `uid`: as the VM's own user (1000), never a gate's. */
+export const gateLeftArgs = (container: string, uid: number): string[] => {
+  if (!isGateUid(uid)) throw new Error("not a gate's user");
+  return ["exec", "--user", "1000:1000", "--workdir", "/", container, "/usr/bin/python3", "-I", "-c", GATE_LEFT_PY, String(uid)];
+};
+
+/**
  * The round's VM's users, as its /etc/passwd and /etc/group say them (mounted read-only over the image's): the image's
  * own, then each gate's user, gate1… (core's VM_GATE_UID_FIRST…), so a tool that asks who it runs as (Node's
  * os.userInfo, Python's getpass, `whoami`) has an answer, as it has for nobody. An image that already has a user or a

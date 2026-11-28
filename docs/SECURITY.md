@@ -946,8 +946,14 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
         own, repeated until `/proc` shows none of that user's processes with a thread alive (the kernel signals them all
         at once and refuses a fork once its parent has the signal), then its files in `/tmp`, `/dev/shm` and
         `/dev/mqueue`, its folders in `/gates`, and its System V IPC objects (`gate-sweep.integration.test.ts`). This
-        keeps the round's VM from filling, and decides nothing: in Kata a process of that user can trace its sweep and
-        outlive it, and stays that user's alone, which no later gate of the round is.
+        keeps the round's VM from filling.
+      - Then what of that user is still alive is counted as the VM's own user (1000), whom no process of a gate's can
+        trace or stop (`GATE_LEFT_PY`). In Kata a process of that user can trace its sweep and outlive it. Anything
+        alive, or a count that can't be made, ends the round there: that gate fails, and every later gate, check and
+        evidence of the round fails without running (a check sends the work back). Before, the thirteenth re-review's
+        Info: what outlived its sweep shared the round's VM with the later gates, and a later gate read a file of a
+        fixed name it left in `/tmp`, so the task came back verified in Kata. It comes back not verified now, in Kata
+        and runc (`handed-real.integration.test.ts`, `team-runtime.test.ts`).
       - A check that can't be made sends the work back, never "no change" (R11-2). Before any work it ends the run, as
         nothing could be locked.
       - With no repository, a file the task's VM's user can't read fails the round and says which, rather than being
@@ -1000,10 +1006,8 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
           round's tree is that tree, hashed, and the review's must be the same.
         - With no repository, it can change what is tarred for a round. Its gates and its evidence then both read
           that, the same, and nothing is shipped.
-      - Within a round, its gates still share its VM's kernel: its loopback network, its CPU and memory, and names in
-        its `/tmp` and `/dev/shm`. A process one gate's run of the task's code left (in Kata it can outlive its sweep)
-        can listen on a port of the loopback, or make a file of a fixed name there, which reaches a later gate only if
-        that gate's command reads the port or the name without making it; a gate's HOME and `TMPDIR` are its own. The
+      - Within a round, nothing of one gate's user is alive when a later gate runs: the round ends first. What the
+        task's code left that its sweep tidied (files, IPC objects) goes with that user's sweep. The
       VM goes as the task ends, however it ends, and with it everything the task started there. When its task's work
       ends (a revocation among its ends: your brake), its lease ends and its VM is removed at once, the command in
       flight there with it, never once that command returns (the fifth re-review's I-1, `task-vms.test.ts`). Its lease
@@ -1019,15 +1023,15 @@ tailnet (the sidecar's, 7410), a socket in the node's home, and a gateway path i
       its own words (`MAC_TAKES_NO_TASK`), which the giver shows as that node's. Below it, a Mac's host refuses a seat's
       VM, a task's VM and a pipe before it makes or runs anything, and its spec refuses any VM that would share a
       workspace.
-    - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`),
-      in a process group of its own and under its own deadline, its `desktop` verbs too (the third re-review's R3-3).
-      In the VM (Linux) the helper is the command's subreaper while it lives. What a gate starts ends with the gate;
-      what its other commands leave running, its coding tool's included, is listed and ended with the task however it
-      ends (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that
-      bound, but not the task's VM (R3-1, closed): its gates run in a VM of each round's own, which nothing of the task's
-      VM reaches (R11-1, above). What a gate's run of the task's code leaves running there, a zombie-led thread group
-      among it, is its user's alone, which no later gate of the round is, and is ended after its gate, except that in
-      Kata it can trace that sweep and outlive it (R12-1, above).
+    - Each shell command of its agent, its coding tool and its gates runs under a fixed helper (`handed-process.ts`), in
+      a process group of its own and under its own deadline, its `desktop` verbs too (the third re-review's R3-3). In
+      the VM (Linux) the helper is the command's subreaper while it lives. What a gate starts ends with the gate; what
+      its other commands leave running, its coding tool's included, is listed and ended with the task however it ends
+      (R3-5). A command that ends or stops its own helper, or a process that double-forks out of it, escapes that bound,
+      but not the task's VM (R3-1, closed): its gates run in a VM of each round's own, which nothing of the task's VM
+      reaches (R11-1, above). What a gate's run of the task's code leaves running there, a zombie-led thread group among
+      it, is its user's alone, which no later gate of the round is, and is ended after its gate. In Kata it can trace
+      that sweep and outlive it, and its round then ends there (R12-1 and the thirteenth re-review's Info, above).
     - The runner stops it at its call's deadline or after 24 hours, whichever comes first. A stop that can't be
       written (the node stopping, or a write that fails) ends its call all the same, answered as failed (the third
       re-review's R3-2). A task you take up again by its id is held to 24 hours from then (R3-6).

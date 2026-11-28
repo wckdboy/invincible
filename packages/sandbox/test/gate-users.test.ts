@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { gateSweepArgs, gateUsers } from "../src/index.ts";
+import { GATE_LEFT_PY, gateLeftArgs, gateSweepArgs, gateUsers } from "../src/index.ts";
 
 /*
  * A round of gates' VM's users (gate.ts gateUsers; the twelfth fabric re-review's R12-1): the image's own /etc/passwd
@@ -37,4 +37,16 @@ test("an image that already has a gate's user, by id or by name, in either file 
 test("the sweep runs as a gate's user alone", () => {
   expect(gateSweepArgs("invincible-sbx-0123456789", 61001).slice(0, 6)).toEqual(["exec", "--user", "61001:61001", "--workdir", "/gates", "invincible-sbx-0123456789"]);
   for (const uid of [65534, 1000, 0, 61257]) expect(() => gateSweepArgs("invincible-sbx-0123456789", uid)).toThrow("not a gate's user");
+});
+
+/*
+ * The thirteenth fabric review's Info: what a gate's user leaves that its sweep can't end shared its round's VM with the
+ * later gates. The node counts it after each sweep as the VM's own user (1000), whom no process of a gate's can trace or
+ * stop (gate.ts GATE_LEFT_PY), and a round with any left ends there.
+ */
+test("what a gate's user left after its sweep is counted as the VM's own user, never a gate's, and for a gate's user alone", () => {
+  expect(gateLeftArgs("invincible-sbx-0123456789", 61001)).toEqual(["exec", "--user", "1000:1000", "--workdir", "/", "invincible-sbx-0123456789", "/usr/bin/python3", "-I", "-c", GATE_LEFT_PY, "61001"]);
+  for (const uid of [65534, 1000, 0, 61257, 61000]) expect(() => gateLeftArgs("invincible-sbx-0123456789", uid)).toThrow("not a gate's user");
+  // (It refuses to run as a gate's user, whom another process of that user could trace, and outside a gate VM.)
+  expect(GATE_LEFT_PY).toContain("this count runs only as a gate VM's own user, in a gate VM");
 });

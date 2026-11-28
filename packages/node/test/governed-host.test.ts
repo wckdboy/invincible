@@ -96,6 +96,11 @@ describe("another node's task's gates' own user (the eighth fabric review's R8-3
     for (const other of [vm, agent]) await expect(sandbox.exec(other.id, ["true"], 30, undefined, 61002)).rejects.toThrow("only a VM made for a round of another node's task's gates has its gates' own users");
     // A round is made beside its task's own VM alone.
     await expect(sandbox.createGateVm({ task: "task-abcdefghijkl", of: agent.id, beside: agent.id, run: "handed.task-abcdefghijkl", ttlMinutes: 60 })).rejects.toThrow("beside that task's own VM");
+    // What a gate's user left after its sweep is counted in a round's VM alone, for a gate's user alone (the thirteenth
+    // review's Info), as the VM's own user.
+    await sandbox.gateLeft(round.id, 61001);
+    for (const other of [vm, agent]) await expect(sandbox.gateLeft(other.id, 61001)).rejects.toThrow("only a VM made for a round of another node's task's gates is counted");
+    await expect(sandbox.gateLeft(round.id, 1000)).rejects.toThrow("only a gate's user is counted");
   });
 });
 
