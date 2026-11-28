@@ -44,4 +44,4 @@ internal val GLASS_RAMPS: List<Glass.Ramp> = listOf(
     Glass.Ramp("dusk", "Dusk", light = Glass.Stops("#eae6ff", "#927eec", "#ec5b57", "#67d283", "#3e316d"), dark = Glass.Stops("#f1eeff", "#aa98ff", "#ff7a73", "#7ce695", "#2e2357")),
     Glass.Ramp("orchid", "Orchid", light = Glass.Stops("#ffdbf1", "#f46eb4", "#9751d7", "#fb817a", "#5b2987"), dark = Glass.Stops("#ffebf9", "#ff90cc", "#ae6dee", "#ff9890", "#421c62")),
 )
-internal val GLASS_PEARL: Glass.Ramp = Glass.Ramp("pearl", "Pearl", light = Glass.Stops("#f9fcff", "#dddcee", "#95afbd", "#f3dba9", "#343e4d"), dark = Glass.Stops("#f9fcff", "#dddcee", "#95afbd", "#f3dba9", "#343e4d"))
+internal val GLASS_PEARL: Glass.Ramp = Glass.Ramp("pearl", "Pearl", light = Glass.Stops("#9a9ea9", "#4a4954", "#1e282d", "#6b624f", "#0b0d11"), dark = Glass.Stops("#f9fcff", "#dddcee", "#95afbd", "#f3dba9", "#343e4d"))

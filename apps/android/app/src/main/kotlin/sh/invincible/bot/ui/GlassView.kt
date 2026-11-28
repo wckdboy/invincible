@@ -75,8 +75,8 @@ fun GlassMark(glass: Glass, size: Dp, state: Glass.State? = null, description: S
 internal fun glassBreathes(state: Glass.State?, live: Boolean, motion: Boolean): Boolean = live && motion && state == Glass.State.WORKING
 
 /** Your agent's mark, where a face goes: the app's I-beam, bare, in the page's ink, as the app's own mark is; or, where
- * this phone is set so (Settings), in pearl glass, lit as an agent's glass is: on a graphite tile on a light page (white
- * glass shows on nothing else there), glowing on its own on a dark one (its pool from 24 dp), its blur from 40.
+ * this phone is set so (Settings), in pearl glass, lit as an agent's glass is: on a light page the pearl inked (core's
+ * light stops), on nothing; on a dark one the pearl, glowing on its own (its pool from 24 dp); its blur from 40.
  * Decorative unless named ([description]). */
 @Composable
 fun GuardianMark(size: Dp, description: String? = null) {
@@ -84,8 +84,8 @@ fun GuardianMark(size: Dp, description: String? = null) {
     val dark = brand.paper.luminance() < 0.5f
     val pearl = GuardianSetting.pearl(LocalContext.current).value
     val box = with(LocalDensity.current) { size.roundToPx() }
-    // (Pearl: on a dark page the pearl, glowing; on a light one the pearl inked, -2, on nothing: Glass.pearlOn.)
-    val picture = if (pearl) remember(size, box, dark) { GlassPictures.picture(-1, if (dark) -1 else -2, size.value, box, dark) } else null
+    // (Pearl, as core has it on each page: the pearl, glowing, on a dark one; inked, on nothing, on a light one.)
+    val picture = if (pearl) remember(size, box, dark) { GlassPictures.picture(-1, -1, size.value, box, dark) } else null
     val named = if (description != null) Modifier.clearAndSetSemantics { contentDescription = description } else Modifier.clearAndSetSemantics { }
     Canvas(Modifier.size(size).then(named)) {
         if (picture != null) {
@@ -201,11 +201,11 @@ internal object GlassPictures {
         override fun sizeOf(key: Key, value: Picture) = value.image.width * value.image.height * 4
     }
 
-    /** [shape] and [ramp] -1: the Guardian's I-beam in pearl ([ramp] -2: in pearl inked, for a light page). [box]: the avatar's side in pixels. */
+    /** [shape] and [ramp] -1: the Guardian's I-beam in pearl (inked on a light page, as core's light stops are). [box]: the avatar's side in pixels. */
     fun picture(shape: Int, ramp: Int, sizeDp: Float, box: Int, dark: Boolean): Picture {
         val key = Key(shape, ramp, box, dark)
         kept.get(key)?.let { return it }
-        val made = draw(if (shape < 0) Glass.IBEAM else Glass.SHAPES[shape], when (ramp) { -1 -> Glass.PEARL; -2 -> Glass.PEARL_INK; else -> Glass.RAMPS[ramp] }, sizeDp, max(1, box), dark)
+        val made = draw(if (shape < 0) Glass.IBEAM else Glass.SHAPES[shape], if (ramp < 0) Glass.PEARL else Glass.RAMPS[ramp], sizeDp, max(1, box), dark)
         kept.put(key, made)
         return made
     }

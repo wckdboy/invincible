@@ -116,7 +116,7 @@ fun SettingsScreen(app: AppModel, openKeys: () -> Unit, openConnectors: () -> Un
  * keeps them and this phone asks for them; instant, they come through a UnifiedPush distributor of your choice (Sunup,
  * ntfy, or another), encrypted to this phone's own key. What it sends and when it stays quiet are the node's settings.
  */
-/** Your agent's mark on this phone: its I-beam on a tile in ink (as it comes), or in pearl glass. */
+/** Your agent's mark on this phone: its bare I-beam in ink (as it comes), or in pearl glass. */
 @Composable
 private fun GuardianPanel() {
     val context = LocalContext.current

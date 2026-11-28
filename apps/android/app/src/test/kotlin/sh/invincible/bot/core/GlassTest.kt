@@ -47,24 +47,24 @@ class GlassTest {
         }
     }
 
-    // The owner's word (27 November 2026): the logo is just the I-beam, so no tile anywhere, pearl's light-page tile too.
-    @Test fun yourAgentsPearlOnALightPageIsADarkGlassOfItsOwnAndOnADarkPageThePearl() {
+    // The owner's word (27 November 2026): the logo is just the I-beam, so no tile anywhere, pearl's on a light page too.
+    // Core's pearl is inked on a light page (its light stops), the pearl on a dark one, and the vectors hold no tile.
+    @Test fun yourAgentsPearlIsCoresInkedOnALightPageThePearlOnADarkOneAndNoTile() {
         fun luminance(hex: String): Double {
             val c = hex.removePrefix("#").chunked(2).map { it.toInt(16) / 255.0 }
             return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
         }
-        val light = Glass.pearlOn(dark = false)
-        assertTrue("its body reads on paper, with no tile: ${light.light.a}", luminance(light.light.a) < 0.3 && luminance(light.light.b) < 0.3)
-        assertTrue("its light still catches it", luminance(light.light.highlight) > luminance(light.light.a))
-        assertEquals(Glass.PEARL, Glass.pearlOn(dark = true))
+        val pearl = Glass.PEARL
+        assertTrue("its body reads on paper, with no tile: ${pearl.light.a}", luminance(pearl.light.a) < 0.3 && luminance(pearl.light.b) < 0.3)
+        assertTrue("its light still catches it", luminance(pearl.light.highlight) > luminance(pearl.light.a))
+        assertTrue("on a dark page, the pearl: ${pearl.dark.a}", luminance(pearl.dark.a) > 0.6)
+        assertEquals(null, g["pearlTile"])
     }
 
     @Test fun itsRampsAreCores() {
         assertEquals(g["ramps"].list.map(::ramp), Glass.RAMPS)
         assertEquals(AgentMark.PALETTE.size, Glass.RAMPS.size)
         assertEquals(ramp(g["pearl"]), Glass.PEARL)
-        assertEquals(g["pearlTile"]["light"].string, Glass.PEARL_TILE)
-        assertTrue(g["pearlTile"]["dark"] is Json.Null)
     }
 
     @Test fun itsPaintItsGlowAndItsDotAreCores() {
