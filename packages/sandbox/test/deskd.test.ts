@@ -1137,7 +1137,10 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     // brings it up, so it never stops for being unused either. Every run of this file left one running, for hours.)
     expect(desktop(r, ["status"], { INVINCIBLE_DESKTOP_IDLE: "60" }).code).toBe(0);
     const trace = join(dirname(r.run), "trace");
-    const served = readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((t) => t.call === "serving").map((t) => t.pid as number);
+    // (A deskd that left at once, another holding the lock, never served: the client may start one again as it waits.)
+    const said = readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const left = new Set(said.filter((t) => t.call === "left").map((t) => t.pid as number));
+    const served = said.filter((t) => t.call === "serving" && !left.has(t.pid as number)).map((t) => t.pid as number);
     expect(served).toHaveLength(2);
     const started = served.at(-1)!;
     // (Ended: gone, or a zombie, ended and not yet reaped: its parent is then the first process of wherever it runs, which
@@ -1186,6 +1189,26 @@ describe("light by default (C1 step 10): an unused desktop stops, and the next c
     rmSync(watched);
     expect(await stopped(r, 3000)).toBe(true);
   });
+
+  test("a command that comes as the unused desktop stops, its deskd still holding the lock, starts deskd again as it waits, and is answered", async () => {
+    if (!built) return;
+    // The deskd that stops for being unused holds deskd.lock until it has gone, and one started meanwhile leaves at once
+    // (one deskd at a time). Here the test's deskd is stopped outright and the lock held 2 s after, as a stopping deskd
+    // holds it on a busy machine (2 % of a core, 28 November 2026): the command's first deskd leaves, and it must start
+    // another as it waits, within the product's own 20 s.
+    const r = await deskd();
+    r.stop();
+    const holding = Bun.spawn(["python3", "-I", "-c", "import fcntl, sys, time\nf = open(sys.argv[1], 'w')\nfcntl.flock(f, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(2)", join(r.run, "deskd.lock")], { stdout: "pipe" });
+    expect(new TextDecoder().decode((await holding.stdout.getReader().read()).value)).toBe("held\n");
+    const asked = desktop(r, ["status"], { INVINCIBLE_DESKTOP_WAIT: "20" });
+    expect({ code: asked.code, err: asked.err }).toEqual({ code: 0, err: "" });
+    await holding.exited;
+    // (The command's first deskd left while the lock was held; one started again served it, after the test's own.)
+    const said = readFileSync(join(dirname(r.run), "trace"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const left = new Set(said.filter((t) => t.call === "left").map((t) => t.pid as number));
+    expect(left.size).toBeGreaterThanOrEqual(1);
+    expect(said.filter((t) => t.call === "serving" && !left.has(t.pid as number))).toHaveLength(2);
+  }, 30_000);
 
   test("asking only whether it is up keeps it from nothing; and the owner's look that starts it again leaves the agent's word for the agent", async () => {
     if (!built) return;

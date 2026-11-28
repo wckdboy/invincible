@@ -87,7 +87,11 @@ C1 step 10. An agent whose desktop isn't used costs what an agent without one do
 - **It starts again on the next command.** The agent's next command that does something is told, once: "this desktop
   was stopped after 10 minutes with nothing done on it and no one watching, its windows closed as a person closes them;
   this command started it again, a fresh screen (the browser's profile, and what is signed in there, are kept in
-  /work)". The node's own `status`, and the owner's look, leave the word for the agent.
+  /work)". The node's own `status`, and the owner's look, leave the word for the agent. A command that comes as the
+  unused desktop stops is answered too: the deskd that stops holds its lock until it has gone, and one started
+  meanwhile leaves at once (one deskd at a time), so the command starts deskd again while it waits, at 1, 2, 4 and 8 s of
+  its 20 s (`INVINCIBLE_DESKTOP_WAIT`). Started once, it waited out the 20 s for nothing on a busy machine and said "the
+  desktop process did not start" (28 November 2026).
 - **Its memory comes with its first use.** An agent's VM is made with 2 GB, desktop or not (core's COMPUTER_START).
   Before the first use that may start its desktop (the agent's command, the owner's look, input or take-over, the
   stream), the node grows it, live, to 4 GB (the sandbox host's `desktopRoom`, through the governor, so within the

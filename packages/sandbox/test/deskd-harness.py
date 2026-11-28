@@ -330,4 +330,8 @@ def ends_with_its_test():
 
 
 threading.Thread(target=ends_with_its_test, daemon=True).start()
-sys.exit(deskd.serve(desk, run=os.environ["INVINCIBLE_DESKTOP_RUN"]))
+code = deskd.serve(desk, run=os.environ["INVINCIBLE_DESKTOP_RUN"])
+# (Back from serving only when another deskd held the lock: this one left at once, as a second deskd does. The client
+# may start one again as it waits, desktop.c's reach, so a test counts those that served apart.)
+trace(call="left", pid=os.getpid())
+sys.exit(code)

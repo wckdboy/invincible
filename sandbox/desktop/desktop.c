@@ -11,7 +11,7 @@
  *
  * INVINCIBLE_DESKTOP_RUN is the directory of its socket (default /tmp/invincible-desktop), INVINCIBLE_DESKD the
  * process to start (default /usr/local/lib/invincible/deskd.py), INVINCIBLE_DESKTOP_WAIT how long it waits for it
- * to start (seconds, default 20). The eyes' model, the space they answer places in, their gateway and token
+ * to start (seconds, default 20; started again as it waits, reach). The eyes' model, the space they answer places in, their gateway and token
  * (INVINCIBLE_EYES, INVINCIBLE_EYES_SPACE, INVINCIBLE_GATEWAY, INVINCIBLE_TOKEN) go with a command from its
  * environment, never as arguments.
  */
@@ -72,6 +72,13 @@ static void start_deskd(const char *run) {
   if (p > 0) waitpid(p, NULL, 0);
 }
 
+/*
+ * deskd's socket, deskd started when nothing answers there, and waited for (INVINCIBLE_DESKTOP_WAIT). A deskd that is
+ * stopping (its desktop unused, deskd.py's idle_stop) holds deskd.lock until it has gone, and one started meanwhile
+ * leaves at once (one deskd at a time): so, while nothing answers, deskd is started again at 1, 2, 4 and 8 s of the
+ * wait, and an extra one leaves at once. Started once, a command that came as an unused desktop stopped waited out the
+ * whole wait for nothing, on a busy machine (28 November 2026).
+ */
 static int reach(void) {
   const char *run = setting("INVINCIBLE_DESKTOP_RUN", "/tmp/invincible-desktop");
   char path[4096];
@@ -80,13 +87,19 @@ static int reach(void) {
   if (fd >= 0) return fd;
   start_deskd(run);
   double wait = atof(setting("INVINCIBLE_DESKTOP_WAIT", "20"));
+  double again = 1;
   struct timespec t0, t;
   clock_gettime(CLOCK_MONOTONIC, &t0);
   for (;;) {
     usleep(5000);
     if ((fd = connect_to(path)) >= 0) return fd;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    if ((t.tv_sec - t0.tv_sec) + (t.tv_nsec - t0.tv_nsec) / 1e9 > wait) return -1;
+    double waited = (t.tv_sec - t0.tv_sec) + (t.tv_nsec - t0.tv_nsec) / 1e9;
+    if (waited > wait) return -1;
+    if (waited >= again && again <= 8) {
+      start_deskd(run);
+      again *= 2;
+    }
   }
 }
 
