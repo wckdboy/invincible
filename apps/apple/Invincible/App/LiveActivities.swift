@@ -60,11 +60,13 @@ import Foundation
         start(given, agent: session.drawn(given.assignee), state: state, session: session)
     }
 
-    /// While a window of the app is in front: each activity told how its task stands as the node says the agents moved
-    /// (its trail read for its gates), and watched again after a launch. Returns when the window leaves the front.
+    /// While a window of the app is in front: each activity told how its task stands as the session reads the agents again
+    /// (it does as the node says they moved), its trail read for its gates only as its own task's entry moved (TrailMark),
+    /// and watched again after a launch. Returns when the window leaves the front.
     func keepUp(_ session: Session) async {
         var threads: [String: TaskThread] = [:]
-        let stop = session.follow(["team"], every: nil, gap: 1_000) { [weak self] in
+        var marks: [String: TrailMark] = [:]
+        let pace = Paced(gap: 1_000, clock: .real) { [weak self] _ in
             guard let self else { return }
             for activity in Activity<TaskActivityAttributes>.activities {
                 let id = activity.attributes.task
@@ -72,12 +74,21 @@ import Foundation
                 watch(activity, client: session.client)
                 let thread = threads[id] ?? TaskThread(task: task)
                 threads[id] = thread
-                await thread.readTrail(with: session.client)
+                let mark = TrailMark(task)
+                if marks[id] != mark {
+                    marks[id] = mark
+                    await thread.readTrail(with: session.client)
+                }
                 await update(id, TaskActivityState.of(status: task.status, verified: task.verified, error: task.error, gates: task.gates ?? [], record: task.record, entries: thread.entries, at: Date.now.timeIntervalSince1970 * 1000, others: session.othersAtWork(besides: id)))
             }
         }
+        // Each task's mark as the session read it: any task's moving can move how an activity stands (the others at work).
+        let stop = watching({ session.team?.tasks.map(TrailMark.init) ?? [] }) { _ in pace.want(nil) }
+        // Once as the window comes to the front, each activity watched again and told how its task stands.
+        pace.want(nil)
         await Session.held()
         stop()
+        pace.cancel()
     }
 
     /// How its task stands, told to its activity while the app is in front (when that changed); its end with its verdict,

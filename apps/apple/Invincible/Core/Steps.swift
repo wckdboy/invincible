@@ -15,6 +15,24 @@ struct TrailEntry: Codable, Equatable, Sendable {
     let text: String
 }
 
+/// What of a task, in the team's answer, moves when its trail does: the node writes a trail line, the task's progress and
+/// its `updatedAt` in one transaction. `team` moves with every line of every task at work (a topic is the node's, not a
+/// task's), so a task's trail is read again only as its own mark moves (the lead's rule of 28 November 2026, the web's and
+/// Android's too): its status, its progress, its `updatedAt`, how you stepped in.
+struct TrailMark: Equatable, Sendable {
+    let status: String
+    let progress: String
+    let updatedAt: Double
+    let interventions: [String: Int]
+
+    init(_ task: TeamTask) {
+        status = task.status
+        progress = task.progress
+        updatedAt = task.updatedAt
+        interventions = task.interventions ?? [:]
+    }
+}
+
 enum Steps {
     enum Kind: String, Sendable { case plan, read, edit, run, submitted, gate, review, note, steer }
     enum Tone: String, Sendable { case neutral, ok, failed, warn }

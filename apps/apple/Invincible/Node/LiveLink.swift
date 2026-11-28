@@ -414,6 +414,40 @@ final class Paced {
     }
 }
 
+/// `changed` with what `read` reads, each time that changes, until stopped (never for what it read first): Observation, as
+/// what it reads is set, then read again on the main actor once the setting is done (as a Mac's menus follow what they
+/// offer). What the session read from the node, watched this way, is acted on once it has landed, where a follower of the
+/// same topic could run before the session's own read of it. Returns how to stop.
+@MainActor
+func watching<Value: Equatable>(_ read: @escaping @MainActor () -> Value, changed: @escaping @MainActor (Value) -> Void) -> @MainActor () -> Void {
+    let watch = Watch(read: read, changed: changed)
+    watch.observe()
+    return { watch.stopped = true }
+}
+
+@MainActor
+private final class Watch<Value: Equatable> {
+    let read: @MainActor () -> Value
+    let changed: @MainActor (Value) -> Void
+    var last: Value?
+    var stopped = false
+
+    init(read: @escaping @MainActor () -> Value, changed: @escaping @MainActor (Value) -> Void) {
+        self.read = read
+        self.changed = changed
+    }
+
+    func observe() {
+        guard !stopped else { return }
+        let now = withObservationTracking { read() } onChange: { [weak self] in
+            Task { @MainActor in self?.observe() }
+        }
+        let before = last
+        last = now
+        if let before, before != now { changed(now) }
+    }
+}
+
 /// What the app reads, each for its topics, as the stream stands (above).
 @MainActor
 final class Followers {

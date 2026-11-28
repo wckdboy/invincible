@@ -45,9 +45,10 @@ import SwiftUI
         let more: Bool
     }
 
-    /// What is new on its trail since the last line held, as many pages as the node has.
-    func readTrail(with client: NodeClient) async {
+    /// What is new on its trail since the last line held, as many pages as the node has. Returns whether it was read.
+    @discardableResult func readTrail(with client: NodeClient) async -> Bool {
         struct Ask: Encodable { let task: String; let after: Int }
+        defer { read = true }
         do {
             while true {
                 let page = try await client.post("/api/team/trail", Ask(task: id, after: after), as: Page.self)
@@ -59,10 +60,11 @@ import SwiftUI
                 problem = nil
                 if !(page.more && !fresh.isEmpty) { break }
             }
+            return true
         } catch {
             problem = error.localizedDescription
+            return false
         }
-        read = true
     }
 
     /// What it changed, asked for once and again when the work has moved on (ended, or kept), where this device may look
@@ -201,7 +203,7 @@ struct TaskView: View {
     /// conversation, its changes, your prices, and its result marked read.
     private func follow(_ task: TeamTask, _ thread: TaskThread) async {
         let client = session.client
-        async let trail: Void = thread.readTrail(with: client)
+        async let trail = thread.readTrail(with: client)
         async let room: Void = thread.room.load(room: task.room, with: client)
         async let projects: Void = session.askProjects()
         _ = await (trail, room, projects)
@@ -213,18 +215,26 @@ struct TaskView: View {
         if task.status == "running" || task.status == "queued" { LiveActivities.shared.start(task, agent: session.drawn(task.assignee), state: activityState(task, thread, session), session: session) }
         await LiveActivities.shared.update(task.id, activityState(task, thread, session))
         #endif
-        // At work (or about to be): read again as the node says the agents moved (each step it takes moves them), its
-        // trail within half a second, its conversation within two; nothing is asked while nothing moves.
+        // At work (or about to be): its trail read again within half a second of its own entry moving in the agents' answer
+        // as the session reads it (TrailMark: every task's lines move `team`, so following that read this trail again for
+        // each line of every other task at work), its conversation within two as the node says the agents moved; nothing
+        // is asked while nothing moves.
         guard task.status == "running" || task.status == "queued" else { return }
-        let steps = session.follow(["team"], every: 4_000, gap: 500) {
-            await thread.readTrail(with: client)
+        let steps = Paced(gap: 500, clock: .real) { _ in
+            // A read that failed is tried again after a pause (the web's), a few times; then at its next move.
+            for _ in 0..<3 {
+                if await thread.readTrail(with: client) { break }
+                try? await Task.sleep(for: .seconds(6))
+            }
             #if os(iOS)
             if let now = session.task(task.id) { await LiveActivities.shared.update(task.id, activityState(now, thread, session)) }
             #endif
         }
+        let moved = watching({ session.task(task.id).map(TrailMark.init) }) { _ in steps.want(nil) }
         let talk = session.follow(["team"], every: 8_000, gap: 2_000) { await thread.room.load(room: task.room, with: client) }
         await Session.held()
-        steps()
+        moved()
+        steps.cancel()
         talk()
     }
 }
