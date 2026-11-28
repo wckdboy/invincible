@@ -4,7 +4,7 @@ import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { ENGRAM_PROBE, ENGRAM_VERSION, engramFound, engramProjectFor, engramShell } from "./engram.ts";
-import { apartMatches, chat, choreRole, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
+import { apartMatches, chat, choreRole, roleModels, sameModel, workRole, type ModelsContext, type ChatTools, type ToolImage, type ToolSpec } from "@invincible/models";
 import { commandsRun, DESKTOP_EVIDENCE, escalatedWhy, runLoop, stepsNamed, type RunEvent, type RunSteer } from "./run.ts";
 import { type Trip } from "./tripwires.ts";
 import { SHIPMENT_SCRIPT } from "./ship.ts";
@@ -1106,7 +1106,9 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // Its own tools where they were measured: on the roster's engineer models, in the primary's own loop (toolsLoop).
       const tools = Boolean(deps.toolsLoop) && !coding && !held && !agent.models?.length;
       // Work held to models (its own, or sensitive mode's) is never moved to the planner's (escalate): what you chose holds.
-      const escalate = !held && !agent.models?.length;
+      // Nor is work whose models the planner's are already, its first the same model: the ladder climbs to other models.
+      const rungs = deps.brain(agent).store;
+      const escalate = !held && !agent.models?.length && !sameModel(roleModels(rungs, "planner")[0] ?? "", roleModels(rungs, workRole(agent.role))[0] ?? "");
       // On a seat its tool's commands run in the seat's VM: told so, and not told of a desktop out of their reach.
       const where = onSeat ? ` Your commands run in a VM made for your plan, beside your own VM and sharing its /work${desktop ? ": your own VM's desktop is out of their reach" : ""}.` : screen;
       const outcome = await runLoop({ goal: task.goal, environment: `Your persistent Linux VM; isolated task workspace ${root}. Other tasks' files must not be modified. Files in /tmp can't be run here: $TMPDIR is a directory of this task's where they can. ${home}/${LEASE_FILE} is your model access, written by your agent for this task: never move, change or delete it.${where}${keysLine(agent.keys, deps.keyAddress)}`, instructions, gates: task.gates, evidence: agent.repository ? repositoryEvidence(base) : [...TASK_FILES_EVIDENCE], maxSteps: Infinity, audit: true, maxRevisions: 2, commandTimeoutSec: TEAM_COMMAND_SECONDS, gatesFirst: true, ...(task.givenBy?.startsWith("node:") ? { gateSeconds: HANDED_GATE_SECONDS } : {}), submitAtLimit: true, escalate, keepReads: true, ...(tools ? { tools: true, plan: "", ...(desktop && !onSeat ? { computer: true } : {}) } : {}), ...(task.budgetUsd !== undefined ? { budgetUsd: task.budgetUsd } : {}), ...(coding ? { agent: coding } : {}), ...(engram ? { engram } : {}), home }, {

@@ -306,6 +306,26 @@ test("an agent's work held to models (its own, or sensitive mode's) stays on the
   expect(heard.filter((line) => /^(Escalated|Routed) ·/.test(line))).toEqual([]);
 });
 
+test("the ladder is climbed only to other models: with the planner's first model the work's own, a gate failing twice moves nothing and says nothing moved", async () => {
+  const failing = () => {
+    let gates = 0;
+    return async (_m: Agent, command: string) => (command.includes("bun test required-check") ? result({ exitCode: ++gates <= 3 ? 1 : 0 }) : result());
+  };
+  const rounds = [say("1. Make the change.\nDone when: the gate passes.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nFirst."), say("```sh\necho two\n```"), say("DONE\nSecond."), say("```sh\necho three\n```"), say("DONE\nThird."), say("PASS\nFine.")];
+  // The fixture's roles are all on one model (local/fake): its planner's is the work's.
+  const told: string[] = [];
+  const f = fixture([...rounds], { exec: failing() });
+  expect((await f.runtime.executeTask(member, task, { ...f.context, emit: (line) => void told.push(line) })).verified).toBe(true);
+  expect(told.filter((line) => /^(Escalated|Routed) ·/.test(line))).toEqual([]);
+  // Another model on the planner's role: the third round is its, and said.
+  const heard: string[] = [];
+  const g = fixture([...rounds], { exec: failing() });
+  g.setRoster("planner", ["local/plan"]);
+  expect((await g.runtime.executeTask(member, task, { ...g.context, emit: (line) => void heard.push(line) })).verified).toBe(true);
+  expect(g.bodies.map((body) => body.model)).toEqual(["plan", "fake", "fake", "fake", "fake", "plan", "plan", "fake"]);
+  expect(heard.filter((line) => line.startsWith("Escalated ·"))).toEqual(["Escalated · the same gate failed twice in a row: the planner's models take the work\n$ bun test required-check"]);
+});
+
 test("sensitive mode: every call of an agent's task is on its own models alone, its plan's and its review's too, the review on another of them than did the work; its VM's lease is for them", async () => {
   const held: Agent = { ...member, models: ["local/mimo", "local/qwen"], sensitive: true };
   const leases: (readonly string[] | undefined)[] = [];
