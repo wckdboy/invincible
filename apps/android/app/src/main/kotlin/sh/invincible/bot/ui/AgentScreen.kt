@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
@@ -68,6 +69,7 @@ private data class Entry(val at: Long, val key: String, val speaker: String?, va
  * An agent's page: its face and state, then its timeline (what you and it said, and its tasks as they stand, oldest
  * first), and a box to write to it or to give it a task. Opening it is looking, so what ended here is no longer new.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -> Unit = {}) {
     val table by app.table.collectAsState()
@@ -78,6 +80,7 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
     var inTerminal by rememberSaveable(id) { mutableStateOf(false) }
     var vmMenu by remember { mutableStateOf(false) }
     var colouring by remember(id) { mutableStateOf(false) }
+    var about by rememberSaveable(id) { mutableStateOf(false) }
     BackHandler(enabled = watching) { watching = false }
     if (watching) {
         DesktopScreen(app, id, person?.name ?: id) { watching = false }
@@ -99,7 +102,8 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
         title = person?.name ?: id,
         back = back,
         openTask = openTask,
-        barTitle = { AgentBarTitle(id, person?.name ?: id, person?.avatar ?: row?.avatar, row) },
+        barTitle = { AgentBarTitle(id, person?.name ?: id, person?.avatar ?: row?.avatar, row, person?.role, open = { about = true }) },
+        barAlways = true,
         // Any VM, as the iPhone offers it: one without a desktop says so (the node's refusal) and how to get one.
         actions = {
             if (sandbox != null) {
@@ -113,21 +117,30 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
             }
         },
     ) {
-        val scope = rememberCoroutineScope()
-        Column(Modifier.fillMaxWidth().padding(Space.margin), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.s2)) {
-            // Its glass, its dot saying how it stands: the one in focus, so its light breathes while it works.
-            AgentMarkView(id, person?.avatar, 96.dp, state = AgentMark.state(row?.state), description = person?.name, live = true)
-            Text(person?.name ?: id, style = MaterialTheme.typography.headlineSmallEmphasized)
-            StateChip(row?.state)
-            row?.let { Text(Roster.besideChip(it.line, it.state), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            person?.let { p ->
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
-                    // Paused, an agent starts nothing new until you resume it; what it's doing now finishes.
-                    TextButton(onClick = {
-                        scope.launch { runCatching { app.client?.post("/api/team/control", Json.obj("agent" to id, "action" to if (p.enabled) "pause" else "resume")); app.refresh() } }
-                    }) { Text(if (p.enabled) "Pause ${p.name}" else "Resume ${p.name}") }
-                    // Its glass, chosen once the node has answered (never from the agents this phone kept).
-                    if (table.asOf == null) TextButton(onClick = { colouring = true }) { Text("Its glass") }
+        // (No head on the page, as the web's and the iPhone's: the bar says the agent, and a tap on it what it is.)
+    }
+    if (about) {
+        androidx.compose.material3.ModalBottomSheet(onDismissRequest = { about = false }, containerColor = MaterialTheme.colorScheme.surface) {
+            val scope = rememberCoroutineScope()
+            Column(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = Space.margin).padding(bottom = Space.s4),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Space.s2),
+            ) {
+                // Its glass, its dot saying how it stands: the one in focus, so its light breathes while it works.
+                AgentMarkView(id, person?.avatar, 96.dp, state = AgentMark.state(row?.state), description = person?.name, live = true)
+                Text(person?.name ?: id, style = MaterialTheme.typography.headlineSmallEmphasized)
+                StateChip(row?.state)
+                row?.let { Text(Roster.besideChip(it.line, it.state), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                person?.let { p ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+                        // Paused, an agent starts nothing new until you resume it; what it's doing now finishes.
+                        TextButton(onClick = {
+                            scope.launch { runCatching { app.client?.post("/api/team/control", Json.obj("agent" to id, "action" to if (p.enabled) "pause" else "resume")); app.refresh() } }
+                        }) { Text(if (p.enabled) "Pause ${p.name}" else "Resume ${p.name}") }
+                        // Its glass, chosen once the node has answered (never from the agents this phone kept).
+                        if (table.asOf == null) TextButton(onClick = { about = false; colouring = true }) { Text("Its glass") }
+                    }
                 }
             }
         }
@@ -136,18 +149,30 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
 }
 
 /**
- * An agent's page's bar once its head has scrolled away (I10's 16dae258, as the iPhone's): its glass, its state's dot on
- * it, beside its name, and under the name how it stands, in the needs ink where it needs you. The glass is the one in
- * focus then, so its light breathes while it works.
+ * An agent's page's bar, always (I10's 16dae258, as the iPhone's and the web's: the page has no head of its own): its glass,
+ * its state's dot on it; its name and its state's chip; under them what it is doing, in the needs ink where it needs you,
+ * or its role where it does nothing. The glass is the one in focus, so its light breathes while it works. A tap opens what
+ * the agent is ([open]).
  */
 @Composable
-private fun AgentBarTitle(id: String, name: String, avatar: Json?, row: RosterRow?) {
-    Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s2)) {
+private fun AgentBarTitle(id: String, name: String, avatar: Json?, row: RosterRow?, role: String?, open: () -> Unit) {
+    val line = row?.let { Roster.besideChip(it.line, it.state) }?.takeIf { it.isNotBlank() }
+    Row(
+        Modifier
+            .clip(MaterialTheme.shapes.small)
+            .clickable(role = Role.Button, onClickLabel = "About $name", onClick = open)
+            .semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.s2),
+    ) {
         AgentMarkView(id, avatar, 28.dp, state = AgentMark.state(row?.state), live = true)
         Column {
-            Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            row?.line?.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.labelMedium, color = if (row.needs) LocalBrand.current.needs else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                StateChip(row?.state)
+            }
+            (line ?: role?.takeIf { it.isNotBlank() })?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium, color = if (line != null && row?.needs == true) LocalBrand.current.needs else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
         }
     }
@@ -185,7 +210,8 @@ fun RoomScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) -
 /**
  * A conversation's timeline under its [header], oldest first, read again every four seconds while it's open (two while
  * work runs there), and a box to write in; [assignee] offers the same words as a task for that agent instead. The bar
- * above names it ([title], or [barTitle] where the page draws more than words) once the header has scrolled out of sight.
+ * above names it ([title], or [barTitle] where the page draws more than words) once the header has scrolled out of sight,
+ * or always ([barAlways]: a page with no head of its own, an agent's).
  */
 @Composable
 private fun Timeline(
@@ -201,6 +227,7 @@ private fun Timeline(
     openTask: (String) -> Unit,
     actions: @Composable RowScope.() -> Unit = {},
     barTitle: (@Composable () -> Unit)? = null,
+    barAlways: Boolean = false,
     header: @Composable () -> Unit,
 ) {
     val table by app.table.collectAsState()
@@ -240,7 +267,8 @@ private fun Timeline(
 
     val headerGone by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
     Column(Modifier.fillMaxSize().imePadding()) {
-        PageBar(if (headerGone) title else "", back, actions = actions, titleContent = if (headerGone) barTitle else null)
+        val named = headerGone || barAlways
+        PageBar(if (named) title else "", back, actions = actions, titleContent = if (named) barTitle else null)
         LazyColumn(Modifier.weight(1f), state = list, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.s4)) {
             item { header() }
             problem?.let { item { Problem(it) } }
