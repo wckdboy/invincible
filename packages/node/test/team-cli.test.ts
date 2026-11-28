@@ -55,6 +55,22 @@ test("a task that has run says what it came to: how it ended, its time, its comm
   ]);
 });
 
+test("a task done on a coding plan, or on your own sign-in, costs no money in the listing: those calls are paid for already, as the node and the apps count them", async () => {
+  const lines: string[] = [];
+  const task = (id: string, model: string) => ({ id, room: "forge", assignee: "ada", title: `Task ${id}`, goal: "g", dependsOn: [], gates: [], status: "done", verified: true, progress: "", output: "", error: null, chainId: "c", createdAt: 1, updatedAt: 2, record: { startedAt: 0, endedAt: 724_000, ended: "done", commands: 8, revisions: 0, spent: [{ role: "engineer", model, calls: 9, unknown: 0, input: 90_000, output: 4000, cached: 0, reasoning: 0 }] } });
+  const state = { agents: [member("ada")], rooms: [], deliveries: [], tasks: [task("task-listed", "zplan/glm"), task("task-unlisted", "zplan/kimi"), task("task-seat", "own sign-in/claude"), task("task-keys", "byok/m")] };
+  // Your prices: a list price for one of the plan's models and none for its other, and the plans the node names.
+  const api = { async call<T>(name: RouteName): Promise<T> { return (name === "prices" ? { prices: { "zplan/glm": { input: 3, output: 12 }, "byok/m": { input: 1, output: 4 } }, plans: ["zplan"] } : state) as T; } };
+  await teamCommand(api, undefined, [], {}, (line) => lines.push(line));
+  expect(lines.slice(1)).toEqual([
+    "task-listed · done (verified) · ada · Task task-listed · 12m04s · 8 commands · 94.0k tokens · $0",
+    "task-unlisted · done (verified) · ada · Task task-unlisted · 12m04s · 8 commands · 94.0k tokens · $0",
+    "task-seat · done (verified) · ada · Task task-seat · 12m04s · 8 commands · 94.0k tokens · $0",
+    // Your own keys: money at your prices, as ever.
+    "task-keys · done (verified) · ada · Task task-keys · 12m04s · 8 commands · 94.0k tokens · $0.11",
+  ]);
+});
+
 /** A node that answers each route with what the test gives it. */
 const answering = (answers: Partial<Record<RouteName, unknown>>) => ({
   async call<T>(name: RouteName): Promise<T> {

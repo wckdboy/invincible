@@ -53,6 +53,11 @@ export function foldLine(line: string, width: number): string[] {
 export const taskRecordLine = (task: Pick<TeamTask, "record">, prices: Prices): string => (task.record ? taskRecordFacts(task.record, prices).map((fact) => ` · ${fact}`).join("") : "");
 /** What a task changed in its repository and where that is kept (`invincible ship <artifact>` opens a pull request from it). Empty when it kept nothing. */
 export const taskChangesLine = (task: Pick<TeamTask, "changes">): string => (task.changes ? ` · ${task.changes.files} file${task.changes.files === 1 ? "" : "s"} changed, kept as ${task.changes.artifact}` : "");
+/**
+ * Your prices as the node's own money is (core's moneyPrices, with the plans the node names): a coding plan's calls and
+ * your own sign-in's are paid for already, so they cost no money. None where the node won't say: then nothing is priced.
+ */
+const yourMoney = (api: Api): Promise<Prices> => api.call<{ prices: Prices; plans?: string[] }>("prices").then((answer) => moneyPrices(answer.prices, answer.plans ?? []), (): Prices => ({}));
 
 const usage = "invincible agents [add <id> | avatar <id> | models <id> [provider/model…] | sensitive <id> [on|off] [provider/model…] | dm <id> [message] | room <name> <member…> | chat <room> [message] | task <room> <assignee> <goal> [--sensitive] [--models provider/model,…] | steps <task-id> | again <task-id> [--from <step>] [goal] | keys <id> [add <secret> [--write] | rm <secret>] | export <id> [--out file.md] | import <file.md> [--id <new id>] [-y] | give <goal> | trail <task-id> [--follow] | routing [<id>] [--json] | provision <id> | memory <id> [text] | engram [on|off] | ci [on|off] | daily [<usd>] | merge <owner/repo> [on|off] | pause|resume|stop <room|agent|task> <id> | approve|decline <task-id> | remove <id> [--destroy-workspace] [--yes]]";
 
@@ -125,8 +130,8 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     // (One you removed is named still: its handle stays taken.)
     for (const m of state.removed ?? []) print(`${m.id} · ${plainLine(m.name)} · removed${m.conversations?.length ? ` · its conversations, kept to read: ${m.conversations.map((room) => `invincible agents chat ${room}`).join(", ")}` : ""}`);
     for (const r of state.rooms) print(`${r.id} · ${plainLine(r.name)} · ${r.members.join(", ")}${r.paused ? " · paused" : ""}`);
-    // (Money is at your prices, asked for only when a task here has a record to price.)
-    const prices: Prices = state.tasks.some((t) => t.record) ? (await api.call<{ prices: Prices }>("prices").catch(() => ({ prices: {} }))).prices : {};
+    // (Money is at your prices, as the node's own is, asked for only when a task here has a record to price.)
+    const prices: Prices = state.tasks.some((t) => t.record) ? await yourMoney(api) : {};
     for (const t of state.tasks) print(`${t.id} · ${t.status}${t.verified ? " (verified)" : ""} · ${t.assignee} · ${plainLine(t.title)}${taskRecordLine(t, prices)}${taskChangesLine(t)}${t.status === "proposed" && t.proposedBy ? ` · proposed by ${t.proposedBy}: invincible agents approve ${t.id}` : ""}${interventionWords(t.interventions) ? ` · you stepped in: ${interventionWords(t.interventions)}` : ""}`);
     // The mandate's north star (#28): how often you stepped in, per task done and verified.
     const star = state.northStar;
@@ -361,7 +366,7 @@ export async function teamCommand(api: Api, sub: string | undefined, args: strin
     // `--json`: the report itself, a contract.
     if (!args[0]) {
       const state = await api.call<TeamSnapshot>("team");
-      const prices: Prices = state.tasks.some((t) => t.record) ? await api.call<{ prices: Prices; plans?: string[] }>("prices").then((answer) => moneyPrices(answer.prices, answer.plans ?? []), (): Prices => ({})) : {};
+      const prices: Prices = state.tasks.some((t) => t.record) ? await yourMoney(api) : {};
       const report = routingReport(state.tasks, prices);
       if (flags.json) print(JSON.stringify(report, null, 2));
       else for (const line of routingReportLines(report)) print(line);
