@@ -26,10 +26,7 @@ struct UnderwayBar: View {
                 lookRow(look)
             }
         }
-        // As the message box under it is: glass.
-        .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
-        .padding(.horizontal, Metrics.margin)
-        .readingWidth()
+        // Compact rows at the chat's foot, in its flow: nothing around them.
         .opacity(shown.isEmpty ? 0 : 1)
         .frame(height: shown.isEmpty ? 0 : nil)
         .accessibilityElement(children: .contain)

@@ -38,6 +38,7 @@
  *   POST /__dev/loop               a loop drafted for you, woken by a webhook (adding it says the webhook's secret, this
  *                                  once): { draft }
  *   GET  /__dev/tasks              the fixture's tasks by what they show: { working, failed, proven } (proven: --heavy's)
+ *   GET  /__dev/approvals          the approvals held for you (the release bot's outward posts), oldest first: { ids }
  *   GET  /__dev/chats              --heavy's kept chats with the primary: { long: [ids], shown } (long: its three of
  *                                  twenty-five exchanges; shown: the one that shows what an answer can hold), for a
  *                                  runner to open by its link
@@ -475,8 +476,11 @@ const forge = { id: "forge", label: "Forge", origin: `http://127.0.0.1:${upstrea
 await admin("setConnector", { id: "forge", manifest: forge });
 await admin("setSecret", { name: "forge", value: "fake-forge-key-for-tests-only", provider: "forge" });
 const { token: bot } = await admin("mintArm", { label: "release-bot", scopes: ["connect"] });
+/** The approvals held for you, oldest first (GET /__dev/approvals). */
+const heldApprovals: string[] = [];
 const asked = await call(bot, "callConnector", { connector: "forge", tool: "post", args: { text: "Invincible 0.4: sync survives a dropped connection." }, why: "Announce the release once its checks pass." });
 if (asked.status !== "asked") throw new Error(`the agent's call wasn't held for you: ${JSON.stringify(asked)}`);
+if (typeof asked.action === "string") heldApprovals.push(asked.action);
 await admin("requestSecret", { name: "github-token", purpose: "To open the pull request for the sync fix." });
 // A rule of yours that tells you, and a command of one of its runs it matched: a notice in the Inbox.
 await admin("setRule", { name: "pushes", does: "tell", words: ["git"], contains: "push" });
@@ -548,7 +552,8 @@ if (heavy) {
   shownChat = await chatOnce({ save: true, messages: [{ role: "user", content: "Show me what the release looks like." }] });
   // More approvals waiting: the release bot's posts, each held for you.
   for (const text of ["Sync survives a dropped connection: thanks to everyone who tested it.", "The importer now reads ISO 8601 dates.", "Backups are taken daily on every node.", "0.4 is out: here is what changed."]) {
-    await call(bot, "callConnector", { connector: "forge", tool: "post", args: { text }, why: "Tell people what shipped." });
+    const held = await call(bot, "callConnector", { connector: "forge", tool: "post", args: { text }, why: "Tell people what shipped." });
+    if (typeof held.action === "string") heldApprovals.push(held.action);
   }
   await admin("requestSecret", { name: "npm-token", purpose: "To publish the CLI's package." });
   say(`heavy: ${more.length + agents.length} agents, ${given.length} more tasks, 4 long chats, 5 approvals (${Math.round((Date.now() - started) / 1000)} s)`);
@@ -602,6 +607,7 @@ const front = Bun.serve({
         return Response.json({ blackhole, at: Date.now() });
       }
       if (control === "tasks") return Response.json({ working: syncing.id, failed: failing.id, proven: provenFixture });
+      if (control === "approvals") return Response.json({ ids: heldApprovals });
       if (control === "chats") return Response.json({ long: longChats, shown: shownChat });
       if (control === "say" && req.method === "POST") {
         const room = own[url.searchParams.get("agent") ?? "builder"];

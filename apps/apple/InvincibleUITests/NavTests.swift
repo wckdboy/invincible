@@ -58,13 +58,28 @@ final class NavTests: XCTestCase {
         shown(app, "settings.screen")
     }
 
+    /// An approval's link (a notification's, `invincible://approval/<id>`) opens the ask in its own chat, its card over
+    /// it: the release bot's, no agent's, in your agent's chat (the lead, 28 November 2026: no Needs you screen).
     @MainActor
-    func testNeedsYouIsTwoTaps() throws {
+    func testAnApprovalsLinkOpensItInItsChat() throws {
+        let node = try DevNode.named()
+        let app = try opened()
+        let id = try XCTUnwrap(node.approvals().first, "The dev node holds no approval")
+        app.open(try XCTUnwrap(URL(string: "invincible://approval/\(id)")))
+        shown(app, "approval.card")
+        // Behind its card, your agent's chat.
+        XCTAssertTrue(app.descendants(matching: .any)["chat.screen"].exists, "The approval's link opened no chat behind its card")
+    }
+
+    /// Every ask at once (the lead, 28 November 2026: no Needs you screen; your agent's ••• lists them all).
+    @MainActor
+    func testEveryAskAtOnceIsThreeTaps() throws {
         let app = try opened()
         tap(app, "home.primary")
-        let more = app.buttons["chat.needs.more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10), "Nothing more needs you under your agent's chat")
-        more.tap()
+        tap(app, "chat.more")
+        let asks = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Everything that waits on you'")).firstMatch
+        XCTAssertTrue(asks.waitForExistence(timeout: 10), "Your agent's ••• lists no asks")
+        asks.tap()
         shown(app, "needs.screen")
     }
 

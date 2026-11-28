@@ -70,6 +70,11 @@ struct AgentView: View {
                 if let problem = room.problem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(Color.danger)
                 }
+                #if os(iOS)
+                // What waits on you from it, answered in place as the chat's last message (its proposals are answered on
+                // their rows above).
+                NeedsCard(session: session, agent: id)
+                #endif
             }
             .padding(.horizontal, Metrics.margin)
             .padding(.vertical, Space.s3)
@@ -81,10 +86,6 @@ struct AgentView: View {
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: Space.s2) {
-                #if os(iOS)
-                // What waits on you from it, answered in place (its proposals are answered on their rows above).
-                NeedsCard(session: session, agent: id)
-                #endif
                 if agent != nil {
                     RoomComposer(room: room, name: name, client: session.client, composing: $composing, seats: [Mentions.Seat(id: id, name: name), Mentions.Seat(id: "primary", name: Primary.name)], give: room.view == nil ? nil : { giving = true })
                 }
@@ -295,15 +296,14 @@ struct TaskCardView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        // A compact row in the chat's flow: its title and how it stands, nothing around it; the rest a tap away.
         VStack(alignment: .leading, spacing: Space.s1) {
-            Divider().padding(.bottom, Space.s2)
             Button { openPlace?(.task(task.id)) } label: {
                 let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.s1)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Space.s2))
                 layout {
                     Text(task.title).font(Typeset.row).foregroundStyle(.primary).multilineTextAlignment(.leading).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     if !typeSize.isAccessibilitySize { Spacer(minLength: Space.s1) }
                     standing.font(.caption)
-                    if openPlace != nil { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).accessibilityHidden(true) }
                 }
                 .frame(minHeight: Metrics.touch)
                 .contentShape(.rect)

@@ -228,15 +228,18 @@ final class ShotsTests: XCTestCase {
         bar.tap()
         bar.typeText("Take your time: what's next for the importer?")
         guard tapIfThere(app.buttons["send"], app) else { return }
-        let queue = app.buttons["composer.queue"]
-        guard chat.waitForExistence(timeout: 10), queue.waitForExistence(timeout: 20) else { return }
+        guard chat.waitForExistence(timeout: 10), app.buttons["composer.stop"].waitForExistence(timeout: 20) else { return }
         let box = chat.descendants(matching: .any)["composer"]
         box.tap()
         box.typeText("And after that, the CLI's help.")
-        queue.tap()
+        // Queued, a long press on its one Send away.
+        app.buttons["send"].press(forDuration: 1.2)
+        guard tapIfThere(app.buttons["Queue it: send when it's done"], app) else { return }
         _ = app.descendants(matching: .any)["queue.head"].waitForExistence(timeout: 10)
-        // The keyboard put away (a tap above the box closes it), so the picture is the chat's.
-        chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
+        // The keyboard put away, so the picture is the chat's: a tap on the bar's name, which does nothing else (a tap on
+        // the page could land on what waits at the chat's foot, now in its flow, and open it).
+        let title = app.descendants(matching: .any)["chat.title"]
+        if title.exists { title.tap() } else { chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap() }
         settle(1.5)
         shot("08-chat-busy", look)
         if tapIfThere(app.buttons["composer.stop"], app) {

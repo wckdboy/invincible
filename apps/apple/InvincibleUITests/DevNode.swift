@@ -108,6 +108,12 @@ struct DevNode {
 
     func tasks() throws -> Tasks { try JSONDecoder().decode(Tasks.self, from: fetch("tasks")) }
 
+    /// The approvals held for you (the release bot's outward posts, no agent's), oldest first.
+    func approvals() throws -> [String] {
+        struct Held: Decodable { let ids: [String] }
+        return try JSONDecoder().decode(Held.self, from: fetch("approvals")).ids
+    }
+
     struct Demo: Decodable { let task: String }
 
     /// A task to step through (the Live Activity's pictures): held at its start and at its review until `demoUntil`.
@@ -190,11 +196,16 @@ extension XCUIApplication {
         _ = descendants(matching: .any)["chat.screen"].waitForExistence(timeout: 10)
     }
 
-    /// Needs you in full: your agent's chat, then "N more need you" under the first of what waits there.
+    /// Every ask at once: your agent's chat, then its ••• and "Everything that waits on you" (no Needs you screen on a
+    /// phone; each ask waits in its own chat).
     func openNeeds() {
         openPrimary()
-        let more = buttons["chat.needs.more"]
-        if more.waitForExistence(timeout: 10) { more.tap() }
+        let more = buttons["chat.more"]
+        guard more.waitForExistence(timeout: 10) else { return }
+        more.tap()
+        // (A menu's item, found by its words: its identifier doesn't always reach XCUITest.)
+        let asks = buttons.matching(NSPredicate(format: "label BEGINSWITH 'Everything that waits on you'")).firstMatch
+        if asks.waitForExistence(timeout: 5) { asks.tap() }
     }
 
     /// One of Home's rows (`home.primary`, `home.agent.<id>`, `home.room.<id>`, `home.chat.<id>`) or its bar's buttons

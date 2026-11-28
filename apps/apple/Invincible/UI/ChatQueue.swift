@@ -61,11 +61,8 @@ struct QueuePanel: View {
                     ForEach(chat.queue) { queued in row(queued) }
                 }
             }
-            .padding(.horizontal, Metrics.margin)
             .padding(.vertical, Space.s2)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .top) { Divider() }
-            .readingWidth()
             .alert("Edit the queued message", isPresented: .init(get: { editing != nil }, set: { if !$0 { editing = nil } }), presenting: editing) { queued in
                 TextField("Queued message", text: $edited)
                 Button("Save") {

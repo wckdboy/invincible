@@ -15,6 +15,8 @@ struct ChatView: View {
     @State private var watching = false
     @State private var inTerminal = false
     @State private var inFiles = false
+    /// Every ask at once, from •••.
+    @State private var asks = false
     @Environment(\.workspaceColumn) private var workspaceColumn
     /// A thread of a project in the Build window, which titles it and has its tools (nil: the primary's chat).
     @Environment(\.buildThread) private var build
@@ -88,6 +90,14 @@ struct ChatView: View {
                         // Choices it offered are yours to tap on its latest finished answer only.
                         .environment(\.choose, turn.id == latestAnswer && turn.status == .done && !chat.answering ? { text in chat.reply(text, with: session.client) } : nil)
                 }
+                #if os(iOS)
+                // What needs you here, its first decision answered in place, as a message of its own.
+                if build == nil && shown == nil { NeedsCard(session: session) }
+                #endif
+                // What is under way from this chat: its agents' tasks given here (Stop on each), its looks that wait.
+                UnderwayBar(session: session, chat: chat)
+                // What waits to go while it works: steers on their way, the queue, what became of a message.
+                QueuePanel(chat: chat, client: session.client)
             }
             .padding(.horizontal, Metrics.margin)
             .padding(.vertical, Space.s3)
@@ -99,17 +109,9 @@ struct ChatView: View {
         .scrollDismissesKeyboard(.interactively)
         .modifier(LinkTrouble(session: session, said: build == nil && shown == nil, lines: saysLink, forget: forget))
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: Space.s2) {
-                #if os(iOS)
-                // What needs you, on the chat itself (one screen): its first decision, answered in place.
-                if build == nil && shown == nil { NeedsCard(session: session) }
-                #endif
-                // What is under way in this chat: its agents' tasks given here (Stop on each), its looks that wait.
-                UnderwayBar(session: session, chat: chat)
-                // What waits above the box while it works: steers on their way, the queue, what became of a message.
-                QueuePanel(chat: chat, client: session.client)
-                Composer(chat: chat, client: session.client, composing: $composing, askAside: { openAside($0) })
-            }
+            // Nothing between the messages and the box: what needs you, what is under way and what waits to go are the
+            // chat's last lines, above.
+            Composer(chat: chat, client: session.client, composing: $composing, askAside: { openAside($0) })
         }
         .screen("chat.screen")
         .navigationTitle(build?.project ?? Primary.name)
@@ -146,6 +148,16 @@ struct ChatView: View {
                     newChat
                     Button { listing = true } label: { Label("All chats", systemImage: "clock.arrow.circlepath") }
                         .accessibilityIdentifier("chats")
+                    // While it works: what is typed, queued behind this turn (Send steers; this, as a long press on Send).
+                    if chat.answering && chat.canQueue && !chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button { chat.deliver(.queue, enter: .steer, with: session.client) } label: { Label("Queue it: send when it's done", systemImage: "text.badge.plus") }
+                            .accessibilityIdentifier("chat.queue")
+                    }
+                    // Every ask at once (no Needs you screen on a phone: each waits in its own chat, answered there).
+                    if build == nil && shown == nil {
+                        Button { asks = true } label: { Label(session.needsYou > 0 ? "Everything that waits on you · \(session.needsYou)" : "Everything that waits on you", systemImage: "tray") }
+                            .accessibilityIdentifier("chat.asks")
+                    }
                     if session.team?.computer != nil && session.can("sandbox") {
                         Section("Its computer") {
                             Button { watching = true } label: { Label("Its screen", systemImage: "display") }
@@ -198,6 +210,14 @@ struct ChatView: View {
             if let computer = session.team?.computer { AgentTerminalView(session: session, agent: VMSeat(computer: computer)) }
         }
         .sheet(isPresented: $inFiles) { WorkspaceView(session: session, id: "primary", name: Primary.name) }
+        #if os(iOS)
+        .sheet(isPresented: $asks) {
+            NavigationStack {
+                InboxView(session: session)
+                    .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Done") { asks = false } } }
+            }
+        }
+        #endif
         .sheet(isPresented: .init(get: { aside != nil }, set: { if !$0 { aside = nil } })) {
             if let aside {
                 AsideSheet(side: aside, client: session.client) { words in chat.notice = (words, "") }
@@ -393,6 +413,8 @@ struct MessageRow: View {
     var reply: ((String) -> Void)? = nil
     var edit: ((String) -> Void)? = nil
     var askAgain: (() -> Void)? = nil
+    /// Its tools' steps, opened from their one line.
+    @State private var stepsOpen = false
 
     var body: some View {
         switch turn.role {
@@ -420,14 +442,23 @@ struct MessageRow: View {
                 }
             }
         case .assistant:
+            // Its answer in a quiet bubble, as a chat app's (who answers, the bar's pill says): what its tools did one muted
+            // line over it, opened with a tap.
             HStack(alignment: .top, spacing: Space.s2) {
-                // Its orb beside each answer it gives, still and at rest, but for the one it is writing, which is at work (an
-                // orb of its own, so it never pulls its header's out of where it stands): the colour of its state is its
-                // line's, above.
-                PrimaryOrb(size: Metrics.speakerFace, mood: turn.status == .streaming ? .working : nil, key: "primary:writing")
                 VStack(alignment: .leading, spacing: Space.s2) {
-                    ForEach(Array(turn.steps.enumerated()).filter { $0.element.tool != nil }, id: \.offset) { _, step in
-                        StepLine(step: step)
+                    let tools = turn.steps.filter { $0.tool != nil }
+                    if !tools.isEmpty {
+                        Button { stepsOpen.toggle() } label: {
+                            Label(ChatWords.toolSteps(tools.count), systemImage: stepsOpen ? "chevron.down" : "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("answer.steps")
+                        if stepsOpen {
+                            ForEach(Array(tools.enumerated()), id: \.offset) { _, step in StepLine(step: step) }
+                        }
                     }
                     if !turn.content.isEmpty {
                         MarkdownView(turn.content)
@@ -467,8 +498,9 @@ struct MessageRow: View {
     }
 }
 
-/// The message box (ComposerBox): on the keyboard, growing to eight lines; Send, or while it answers Queue, Steer and Stop
-/// under its words.
+/// The message box (ComposerBox): on the keyboard, growing to eight lines; Send, and while it answers Stop, until there
+/// are words to send: then one Send that does what Return does (Settings → Chat: steer unless you chose queue), the
+/// other way a long press on it.
 struct Composer: View {
     @Bindable var chat: ChatModel
     let client: NodeClient
@@ -490,10 +522,6 @@ struct Composer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s2) {
             OutboxLines(outbox: chat.outbox)
-            // At the accessibility sizes, Queue and Steer stand over the box, so it keeps its width.
-            if chat.answering, typeSize.isAccessibilitySize {
-                HStack(spacing: Space.s2) { busyButtons }
-            }
             field
         }
         .padding(.horizontal, Metrics.margin)
@@ -503,7 +531,7 @@ struct Composer: View {
     }
 
     private var field: some View {
-        ComposerBox(composing: composing, wide: chat.answering && !typeSize.isAccessibilitySize) {
+        ComposerBox(composing: composing) {
             // Made anew with each message sent: clearing a focused multi-line field can leave what was sent on screen, or
             // let the keyboard put back what it still held (a word it was correcting, a dictation finishing). A new one is
             // empty, and nothing late reaches it. While it works it stays open: what you write steers it or is queued
@@ -518,25 +546,24 @@ struct Composer: View {
         } leading: {
             AttachButton(outbox: chat.outbox, client: client)
         } trailing: {
-            if chat.answering {
-                if !typeSize.isAccessibilitySize { busyButtons }
+            if chat.answering && !ready {
                 ComposerStop(label: "Stop \(Primary.name) answering") { chat.stop(with: client) }
                     .accessibilityIdentifier("composer.stop")
+            } else if chat.answering {
+                // One Send while it works: Return's way (steer, unless Settings → Chat says queue); the other on a long press.
+                let other: ComposerWords.Action = choice == .queue && chat.canQueue ? .steer : .queue
+                ComposerSend(ready: ready, label: choice == .queue && chat.canQueue ? "Queue" : "Steer") { send() }
+                    .contextMenu {
+                        if other == .steer || chat.canQueue {
+                            Button(other == .queue ? "Queue it: send when it's done" : "Steer: tell it now", systemImage: other == .queue ? "text.badge.plus" : "arrow.turn.down.right") { send(how: other) }
+                                .accessibilityIdentifier(other == .queue ? "composer.queue" : "composer.steer")
+                        }
+                    }
+                    .accessibilityHint(chat.canQueue ? "Touch and hold to \(other == .queue ? "queue it instead" : "steer with it instead")" : "")
             } else {
                 ComposerSend(ready: chat.sendable, label: "Send") { send() }
             }
         }
-    }
-
-    /// While it works: Queue (where the chat is kept) and Steer, each its own button (the way on a phone); the one Return
-    /// does is in ink once there is something to send, the other quiet.
-    @ViewBuilder private var busyButtons: some View {
-        if chat.canQueue {
-            ComposerChoice(title: "Queue", filled: ready && choice == .queue, ready: ready, hint: "Keep it on the node and send it when it's done") { send(how: .queue) }
-                .accessibilityIdentifier("composer.queue")
-        }
-        ComposerChoice(title: "Steer", filled: ready && (choice == .steer || !chat.canQueue), ready: ready, hint: "Tell it now: it reaches it at its next safe point") { send(how: .steer) }
-            .accessibilityIdentifier("composer.steer")
     }
 
     /// What's in the box, by its button or Return: a side question typed into it is asked apart; while it works the
@@ -598,3 +625,9 @@ private struct StepLine: View {
     }
 }
 
+
+/// A chat's words said in more than one place.
+enum ChatWords {
+    /// What an answer's tools did, in its one muted line over the answer: "1 step", "3 steps".
+    static func toolSteps(_ count: Int) -> String { count == 1 ? "1 step" : "\(count) steps" }
+}

@@ -92,7 +92,8 @@ struct PhoneRoot: View {
             HomeList(session: session, saysLink: true, ownHead: true, open: pick, settings: { path = [.more] }, newChat: newChat)
                 .navigationDestination(for: Place.self) { place in destination(place) }
         }
-        .environment(\.showInbox) { path.append(.inbox) }
+        // (No Needs you screen on a phone: every ask is in its own chat, and your agent's ••• lists them all at once.)
+        .environment(\.showInbox) { path = [.primary] }
         .environment(\.showPrimary) { path = [.primary] }
         .environment(\.openPlace) { go($0) }
         .task(id: PushCenter.shared.opened) { await follow() }
@@ -147,7 +148,8 @@ struct PhoneRoot: View {
         guard let opened = PushCenter.shared.opened else { return }
         PushCenter.shared.opened = nil
         switch opened {
-        case .inbox: path = [.inbox]
+        // What needs you: your agent's chat, whose ••• lists every ask at once.
+        case .inbox: path = [.primary]
         case .settings: path = [.more]
         // The agents: the list, which is them.
         case .overview: path = []
@@ -155,7 +157,10 @@ struct PhoneRoot: View {
             if let id { await session.chat.open(id, with: session.client) }
             path = [.primary]
         case .approval(let id):
-            path = [.inbox]
+            // The ask in its own chat (its agent's, else your agent's), its card opened there behind Face ID (NeedsCard).
+            if !session.waiting.contains(where: { $0.id == id }) { await session.reread(["actions"], force: true) }
+            let agent = session.waiting.first { $0.id == id }.flatMap { NeedsCard.chat(of: $0, work: session.attended) }
+            path = [agent.map { .agent($0) } ?? .primary]
             session.approvalToOpen = id
         case .task(let id): path = [.task(id)]
         case .agent(let id): path = [.agent(id)]
