@@ -279,6 +279,27 @@ test("a module where its helper starts isn't run by it: it is python3 -I (R8-3)"
   }
 });
 
+test("a gate on its copy keeps its VM's read-only PATH where the image's /etc/profile sets PATH afresh, as Debian's does (the lab image's /opt/lab/bin)", () => {
+  const s = scratch();
+  try {
+    const on = realpathSync(s.path(""));
+    for (const sub of ["tree", "home", "tmp"]) mkdirSync(join(on, sub));
+    // (The image's profile, as the lab image's is: Debian's /etc/profile, which sets PATH afresh and puts nothing back.)
+    writeFileSync(join(on, "profile"), 'PATH="/usr/local/games"\nexport PATH\n');
+    const helper = HANDED_PROCESS_PY.replaceAll("/etc/profile", join(on, "profile"));
+    const env = { ...process.env, PATH: process.env.PATH ?? "/usr/bin:/bin" };
+    const held = spawnSync("python3", ["-I", "-c", `${helper}\nprint(held_path())`], { encoding: "utf8", env }).stdout.trim().split(":");
+    const ran = spawnSync("python3", ["-I", "-c", `${helper}\nsys.exit(run("gate", "task-test", 20.0, sys.argv[1], sys.argv[2]))`, 'printf "%s" "$PATH"', on], { encoding: "utf8", timeout: 30_000, env });
+    expect(ran.stderr).toBe("");
+    const path = ran.stdout.split(":");
+    // What the profile put first stays first; each of the VM's read-only folders comes after it, none lost.
+    expect(path[0]).toBe("/usr/local/games");
+    expect(held.filter((dir) => !path.includes(dir))).toEqual([]);
+  } finally {
+    s.done();
+  }
+});
+
 test("a gate on its copy runs in the copy's tree, its HOME and TMPDIR the copy's own, with nothing else of the VM's environment (R8-3)", () => {
   const s = scratch();
   try {

@@ -128,6 +128,15 @@ def held_path():
                 pass
     return ":".join(kept) or "/nonexistent"
 
+# A gate's shell, before its command: the image's /etc/profile, then each folder of the PATH it was given (the VM's
+# read-only ones) that the profile left off, after what the profile set. No word of the gate's is in it.
+GATE_PATH = """__held=$PATH
+[ -r /etc/profile ] && . /etc/profile >/dev/null 2>&1
+set -f; __ifs=$IFS; IFS=:
+for __d in $__held; do case ":$PATH:" in *":$__d:"*) ;; *) PATH="$PATH:$__d" ;; esac; done
+IFS=$__ifs; set +f; unset __held __d __ifs; export PATH
+"""
+
 def run(mode, task, limit, command, on=""):
     if sys.platform.startswith("linux"):
         try:
@@ -147,8 +156,10 @@ def run(mode, task, limit, command, on=""):
             if on:
                 # A gate on its copy (R8-3): in its tree, with nothing of the VM's environment but its read-only PATH, and of
                 # its login profiles only the image's own (/etc/profile, on its read-only root), which puts its tools on it.
+                # Where that profile sets PATH afresh and puts none back (Debian's does; the lab image adds none), each
+                # read-only folder of the VM's own PATH it left off comes after what it set (GATE_PATH).
                 os.chdir(os.path.join(on, "tree"))
-                os.execve("/bin/bash", ["bash", "--noprofile", "--norc", "-c", "[ -r /etc/profile ] && . /etc/profile >/dev/null 2>&1\n" + command], {"PATH": held_path(), "HOME": os.path.join(on, "home"), "TMPDIR": os.path.join(on, "tmp"), "LANG": "C.UTF-8"})
+                os.execve("/bin/bash", ["bash", "--noprofile", "--norc", "-c", GATE_PATH + command], {"PATH": held_path(), "HOME": os.path.join(on, "home"), "TMPDIR": os.path.join(on, "tmp"), "LANG": "C.UTF-8"})
             os.execvp("bash", ["bash", "-c", command])
         except BaseException as e:
             try:
