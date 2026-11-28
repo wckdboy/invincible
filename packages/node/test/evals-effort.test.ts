@@ -144,7 +144,13 @@ describe("a run with effort", () => {
     // Attempt A (1) is right, attempt B (2) is wrong. The reviewer takes A: full marks.
     const right = fakeNode({ pick: "A" });
     const a = await runEvals(right.node, { suite: "engineering", problems: [cantilever], repeat: 2, parallel: "auto", network: "gateway", seed: 11, effort: 2 });
-    expect(a.evals.map((t) => t.score)).toEqual([1, 1]);
+    // Each eval by its seed (they finish in either order), with how its run ended and which attempt's work it kept, so a
+    // wrong score says which and why: [1, 0] was seen once in about 110 runs of the parallel suite, and never alone.
+    const graded = a.evals.map((t) => ({ seed: t.seed, score: t.score, status: t.status, ended: t.outcome?.status ?? null, kept: t.artifact?.slice(-1) ?? null, note: t.note ?? null }));
+    expect(graded.sort((x, y) => x.seed - y.seed)).toEqual([
+      { seed: 11, score: 1, status: "scored", ended: "done", kept: "1", note: null },
+      { seed: 12, score: 1, status: "scored", ended: "done", kept: "1", note: null },
+    ]);
     // (And the seed it was given: a second run with the same seed poses the same problems.)
     expect(right.runs).toEqual([{ run: a.run, suite: "engineering", effort: 2, parallel: 2, seed: 11 }]);
     // On record before any sandbox exists.
