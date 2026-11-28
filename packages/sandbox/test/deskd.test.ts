@@ -1127,10 +1127,26 @@ desk.settle = lambda cap=None, since=None: None
 `;
 
   test("a page that puts up an alert as it loads: desktop open answers at once, the page opened and its alert said, never the 30 s of a load that waits on it", () => {
+    // "At once" counted, not timed (timed, "under a second" got 1,039 ms at 5 % of a core, 28 November 2026): each read
+    // of the page the open waited on was answered by the alert, none at its 2 s bound, and its wait for the load paced
+    // itself (50 ms a look) once at most: it ended at the alert, never at its 30 s deadline.
     const got = py(`${ALERT_AS_IT_LOADS}
-t0 = time.monotonic(); code, out, err = d.cli(desk, ["open", "http://127.0.0.1:8000/alert.html"])
-print(json.dumps({"code": code, "out": out, "err": err, "ms": (time.monotonic() - t0) * 1000}))`) as { code: number; out: string; err: string; ms: number };
-    expect(got.ms).toBeLessThan(1000);
+asked = []
+_send = b._send
+def send(message, reply=None):
+    if reply is not None:
+        asked.append((message["method"], reply))
+    return _send(message, reply)
+b._send = send
+paced = []
+_sleep = time.sleep
+time.sleep = lambda s: (paced.append(s), _sleep(s))[1]
+code, out, err = d.cli(desk, ["open", "http://127.0.0.1:8000/alert.html"])
+time.sleep = _sleep
+reads = ["by the alert" if "dialog" in r else "answered" if "result" in r or "error" in r else "at its bound" for m, r in asked if m == "Runtime.evaluate"]
+print(json.dumps({"code": code, "out": out, "err": err, "reads": reads, "paced": paced.count(0.05)}))`) as { code: number; out: string; err: string; reads: string[]; paced: number };
+    expect(got.reads.filter((read) => read !== "by the alert")).toEqual([]);
+    expect(got.paced).toBeLessThanOrEqual(1);
     expect(got.code).toBe(0);
     expect(got.out).toContain("http://127.0.0.1:8000/alert.html");
     expect(got.out).toContain('a JavaScript alert is open on the page: "Hello from the page" [OK]');
