@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { desktopArgv, desktopBriefing, hardwareBriefing, LOOKING } from "./desktop-command.ts";
-import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, beginFor, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
+import { addUsage, type AttachmentRef, type ClientCall, costOf, mergeSpend, OWN_SIGN_IN_TALLY, type NamedRule, type RunEvidence, type Prices, type ChatMessage, type ExecResult, TEAM_PRIMARY, TEAM_LIMITS, TEAM_OWNER, type Agent, type TeamMessage, type TeamOverview, TeamRecruitInput, type TeamRoom, type TeamTask, type TeamTaskChanges, TeamTaskInput, type TeamTaskRecord, type TeamTaskPlan, type TeamTaskRouting, type TeamCheckpoint, type TeamKeyGrant, type Usage, type UsageLine, beginFor, roundKey, roundNotice, heldModels, looksToNeedAScreen, randomId, redact, SENSITIVE_WORK, taskKindOf, type SeatKind, seatKindOf, seatVendor, type TaskAccount, LEASE_FILE, VM_GATES, VM_WORK, ownWorkOnly, ownWorkRefusal } from "@invincible/core";
 import { driverFor, OWN_SIGN_IN, agentModelName, type AgentDriver, type AgentModel, type FollowedRun } from "./harnesses.ts";
 import { HANDED_MARGIN_SECONDS, handedCommand, handedEndCommand } from "./handed-process.ts";
 import { seatVmClearCommand } from "./agent-process.ts";
@@ -212,6 +212,12 @@ export interface TeamRuntimeDeps {
   agents?(): TeamOverview["workers"];
   /** An agent's latest tasks, wherever they were given, the latest first. */
   work?(agent: string): TeamTask[];
+  /**
+   * Work going round on both tiers (run.ts `round`): a notice of the node's, raised as it comes (core's routing.ts
+   * roundNotice: one a task, keyed roundKey) and cleared when the task ends, whatever it came to. Absent: the trail alone
+   * says it.
+   */
+  roundNotice?: { raise(notice: { key: string; title: string; body: string }): void; clear(key: string): void };
   /** A room's story so far: the summing up of its conversation through the message `through` (TeamStore.story). */
   story?(room: string): { text: string; through: string } | null;
   /** Keeps a room's story told anew (TeamStore.keepStory). Absent: a conversation is only ever its latest part. */
@@ -647,6 +653,7 @@ export function progress(event: RunEvent): string {
       return `Escalated · ${why[0]!.toLowerCase()}${why.slice(1)}: the ${event.to}'s models take the work${event.why === "gate" ? `\n$ ${event.gate}` : ""}`;
     }
     case "routed": return `Routed · ${event.why}: the ${event.to}'s models do the work`;
+    case "round": return `Going round · it has read the same files again ${event.rereads} times on the ${event.on}'s models too, nothing changed: you were told, and it goes on until you stop it or its budget ends it`;
     case "locked": return `Tests changed · ${event.changed.join(", ")}: the tests its gates run are the contract, so the work goes back`;
     case "contract": return event.kept ? `Contract · the planner wrote a test that fails before the work, and the work must make it pass\n$ ${event.command}` : `Contract · none: ${event.why}`;
     case "budget": return event.out ? `Budget · spent ($${event.spentUsd.toFixed(2)} of $${event.budgetUsd.toFixed(2)}): the work stops` : `Budget · $${event.spentUsd.toFixed(2)} of $${event.budgetUsd.toFixed(2)} spent: wrapping up`;
@@ -1334,6 +1341,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
       // (A try of the engineer's after the planner's is said too: the run says only where work goes to the planner's.)
       if (begun?.because === "probe") ctx.emit(`Routed · ${begun.why}: the engineer's models do the work`);
       let routing: TeamTaskRouting = { began: "engineer", kind, ...(begun?.because === "probe" ? { because: "probe" as const } : {}) };
+      /** Whether you were told it went round on both tiers (its notice, cleared as the task ends). */
+      let roundRaised = false;
       // On a seat its tool's commands run in the seat's VM: told so, and not told of a desktop out of their reach.
       const where = onSeat ? ` Your commands run in a VM made for your plan, beside your own VM and sharing its /work${desktop ? ": your own VM's desktop is out of their reach" : ""}.` : screen;
       // A desktop task's desktop starts as its work begins, beside its first model call (C1, 28 November 2026: its cold
@@ -1434,6 +1443,11 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
           // How its work was routed, kept for its record: the next task of this agent's of its kind begins by it (beginFor).
           if (event.type === "routed") routing = { began: "planner", because: begin && event.why === begin.why ? "memory" : "plan", kind };
           else if (event.type === "escalated") routing = { ...routing, moved: event.why };
+          // Going round on both tiers: you are told at once (a notice, one a task), and the work goes on (run.ts round).
+          if (event.type === "round") {
+            roundRaised = true;
+            deps.roundNotice?.raise({ key: roundKey(task.id), ...roundNotice({ agent: agent.name, task: task.title, id: task.id, rereads: event.rereads, files: event.files }) });
+          }
           // What proves it, kept for its record: each gate before the work and in the last round, and the last verdict.
           if (event.type === "baseline") proof.before = event.results.map((g) => g.exitCode);
           else if (event.type === "gated") proof.after = event.results.map((g) => g.exitCode);
@@ -1479,6 +1493,8 @@ export function teamRuntime(deps: TeamRuntimeDeps) {
         },
       }).finally(async () => {
         ending = true;
+        // (Whatever it came to, it's no longer going round: its notice goes.)
+        if (roundRaised) deps.roundNotice?.clear(roundKey(task.id));
         await letGo();
         if (handed) await endHanded();
       });

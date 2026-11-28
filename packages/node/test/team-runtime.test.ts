@@ -2,7 +2,7 @@ import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { costOf, moneyPrices, newNodeIdentity, type ExecResult, type Prices, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
+import { costOf, moneyPrices, newNodeIdentity, roundNotice, type ExecResult, type Prices, type TeamCheckpoint, type Agent, type TeamRoom, type TeamTask, type TeamMessage } from "@invincible/core";
 import { taskStep, type AvatarExpression } from "@invincible/core/avatar";
 import { foundFleet, LedgerStore, Vault } from "@invincible/ledger";
 import { acpDriver, AGENTS, OWN_SIGN_IN, planTaken, type RunEvent } from "@invincible/agents";
@@ -379,6 +379,35 @@ test("an agent's next task of a kind begins where its last of that kind was veri
   const pinned = await k.runtime.executeTask(own, task, k.context);
   expect(k.bodies.map((body) => body.model)).toEqual(["plan", "mimo", "mimo", "fake"]);
   expect(pinned.record.routing).toBeUndefined();
+});
+
+test("work going round on both tiers: you are told at once, a notice of the node's own, and the work goes on; the notice goes as the task ends", async () => {
+  const REREADS = 8;
+  const read = (file: string) => say(`\`\`\`sh\ncat src/${file}.ts\n\`\`\``);
+  const reads = (n: number) => Array.from({ length: n }, (_, i) => read(i % 2 === 0 ? "a" : "b"));
+  const raised: { key: string; title: string; body: string }[] = [];
+  const cleared: string[] = [];
+  const told: string[] = [];
+  // The plan; the engineer's ten reads, going round, and the work moves up; the planner's ten, going round too; the
+  // audit at twenty commands; then the planner's DONE, and the review.
+  const f = fixture(
+    [say("1. Read, then change.\nDone when: the gate passes.\nEngineer: usual"), ...reads(2 + REREADS), ...reads(2 + REREADS), say("ON\nIt is on its task."), say("DONE\nDone."), say("PASS\nFine.")],
+    { roundNotice: { raise: (notice) => void raised.push(notice), clear: (key) => void cleared.push(key) } },
+  );
+  f.setRoster("planner", ["local/plan"]);
+  const outcome = await f.runtime.executeTask(member, task, { ...f.context, emit: (line) => void told.push(line) });
+  // Nothing stopped it: the planner's model went on to DONE, and the reviewer passed it.
+  expect(outcome.verified).toBe(true);
+  expect(f.bodies.at(-2).model).toBe("plan");
+  expect(raised).toEqual([{ key: "went-round:task-abcdefghijkl", ...roundNotice({ agent: "Ada", task: "Build", id: "task-abcdefghijkl", rereads: REREADS, files: ["src/a.ts", "src/b.ts"] }) }]);
+  expect(cleared).toEqual(["went-round:task-abcdefghijkl"]);
+  expect(told.filter((line) => line.startsWith("Going round ·"))).toEqual([`Going round · it has read the same files again ${REREADS} times on the planner's models too, nothing changed: you were told, and it goes on until you stop it or its budget ends it`]);
+  // A task that never went round on both tiers raises nothing, and clears nothing.
+  const quiet: string[] = [];
+  const g = fixture([say("1. Do it.\nDone when: it is done.\nEngineer: usual"), say("```sh\necho one\n```"), say("DONE\nDone."), say("PASS\nFine.")], { roundNotice: { raise: (notice) => void quiet.push(notice.key), clear: (key) => void quiet.push(key) } });
+  g.setRoster("planner", ["local/plan"]);
+  expect((await g.runtime.executeTask(member, task, g.context)).verified).toBe(true);
+  expect(quiet).toEqual([]);
 });
 
 test("the ladder is climbed only to other models: with the planner's first model the work's own, a gate failing twice moves nothing and says nothing moved", async () => {

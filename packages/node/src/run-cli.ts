@@ -446,6 +446,9 @@ export function printRunEvent(event: RunEvent): void {
     case "routed":
       console.log(`  ${bold(`The ${event.to}'s models do the work`)} ${dim(`· ${event.why}`)}`);
       return;
+    case "round":
+      console.log(`  ${bold(`Going round on the ${event.on}'s models too`)} ${dim(`· ${event.rereads} reads again of ${event.files.join(", ")}, nothing changed; it goes on until you stop it or its budget is spent`)}`);
+      return;
     case "locked":
       console.log(`  ${bold(`Not run: the work changed ${event.changed.join(", ")}`)} ${dim("· the tests its gates run are the contract; the work goes back")}`);
       return;
@@ -497,6 +500,9 @@ function printAttempt(attempt: number, event: RunEvent): void {
       return;
     case "routed":
       console.log(`${tag} ${bold(`the ${event.to} does the work`)} ${dim(`(${event.why})`)}`);
+      return;
+    case "round":
+      console.log(`${tag} ${bold(`going round on the ${event.on} too`)} ${dim(`(${event.rereads} reads again, nothing changed; it goes on)`)}`);
       return;
     case "locked":
       console.log(`${tag} ${bold(`tests changed: ${event.changed.join(", ")}`)} ${dim("(sent back)")}`);

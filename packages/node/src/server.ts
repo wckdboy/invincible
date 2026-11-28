@@ -138,6 +138,7 @@ import {
   type LiveTopic,
   SEAT_HARNESS as SEAT_HARNESS_OF,
   LEASE_FILE,
+  ROUND_SOURCE,
 } from "@invincible/core";
 import { AGENTS, acpDriver, ENGRAM_PROBE, ENGRAM_VERSION, agentCleanupCommand, chooseAgentModels, endLeftovers, sweepLeftovers, engramFound, checkModel, eyesForVm, clip, type Trip, tellsAfter, tripOf } from "@invincible/agents";
 import { CATALOG, isEmbeddingModel, roleModels, ROLES, workRole, chat, decide, DecisionError, GatewayTokens, installedConnector, installedConnectors, keyState, type OAuthEndpoints, handleGateway, offeredModels, originOf, parseRef, planOf, PLAN_PROVIDERS, PRESETS, preset, providerRecord, providerViews, resolveProvider, roster, SIGN_INS, signIn, signInWindowsOf, windowsOf, choreRole, Steering, countable, paidFor, nowLine, PRIMARY_NAME, Pacer } from "@invincible/models";
@@ -2897,6 +2898,14 @@ export function createApp(ctx: AppContext) {
       memories: (query) => memoryContext(query) ?? "",
       agents: () => teamOf().overview().workers,
       work: (id) => teamOf().snapshot().tasks.filter((task) => task.assignee === id),
+      // Work going round on both tiers: a notice of the node's own, told at once (core's routing.ts; notify.ts tiers it
+      // Now), and cleared as the task ends. The work goes on.
+      roundNotice: {
+        raise: (notice) => void ctx.store.emit(ctx.identity, "notice.raised", { ...notice, severity: "warn", source: ROUND_SOURCE, at: Date.now() }),
+        clear: (key) => {
+          if (ctx.store.lww(`notice:${key}`)?.value) ctx.store.emit(ctx.identity, "notice.cleared", { key });
+        },
+      },
       // Where a key of yours an agent may use is pinned (PLAN #17), for telling it so.
       keyAddress: (secret) => ctx.vault.info(secret)?.origin ?? null,
       // Each step of an agent's task, kept as it ended (PLAN #15): another can be started from it.
