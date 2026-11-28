@@ -1,0 +1,107 @@
+{
+  "v": 1,
+  "finished": 7,
+  "unrouted": 1,
+  "kinds": [
+    {
+      "kind": "fix",
+      "tasks": 1,
+      "verified": 1,
+      "usd": 0,
+      "priced": true,
+      "minutes": 4,
+      "usdPerVerified": 0,
+      "minutesPerVerified": 4,
+      "groups": [
+        {
+          "began": "engineer",
+          "because": null,
+          "tasks": 1,
+          "verified": 1,
+          "usd": 0,
+          "priced": true,
+          "minutes": 4,
+          "usdPerVerified": 0,
+          "minutesPerVerified": 4,
+          "movedUp": {
+            "gate": 0,
+            "review": 0,
+            "stall": 0,
+            "rereads": 0
+          },
+          "wentRound": 0
+        }
+      ]
+    },
+    {
+      "kind": "code",
+      "tasks": 5,
+      "verified": 4,
+      "usd": 32,
+      "priced": true,
+      "minutes": 72,
+      "usdPerVerified": 8,
+      "minutesPerVerified": 18,
+      "groups": [
+        {
+          "began": "engineer",
+          "because": null,
+          "tasks": 3,
+          "verified": 2,
+          "usd": 21,
+          "priced": true,
+          "minutes": 56,
+          "usdPerVerified": 10.5,
+          "minutesPerVerified": 28,
+          "movedUp": {
+            "gate": 1,
+            "review": 0,
+            "stall": 0,
+            "rereads": 1
+          },
+          "wentRound": 1
+        },
+        {
+          "began": "engineer",
+          "because": "probe",
+          "tasks": 1,
+          "verified": 1,
+          "usd": 1,
+          "priced": true,
+          "minutes": 8,
+          "usdPerVerified": 1,
+          "minutesPerVerified": 8,
+          "movedUp": {
+            "gate": 0,
+            "review": 0,
+            "stall": 0,
+            "rereads": 0
+          },
+          "wentRound": 0
+        },
+        {
+          "began": "planner",
+          "because": "memory",
+          "tasks": 1,
+          "verified": 1,
+          "usd": 10,
+          "priced": true,
+          "minutes": 8,
+          "usdPerVerified": 10,
+          "minutesPerVerified": 8,
+          "movedUp": {
+            "gate": 0,
+            "review": 0,
+            "stall": 0,
+            "rereads": 0
+          },
+          "wentRound": 0
+        }
+      ]
+    }
+  ],
+  "probes": {
+    "tried": 1,
+    "held": 1
+  }
+}

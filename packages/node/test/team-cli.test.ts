@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentInput, type RouteName, type Agent, type TeamMessage, type TeamRoom, type TeamRoomView, type TeamSnapshot } from "@invincible/core";
@@ -873,4 +873,23 @@ test("`invincible agents routing`, no agent: the team's routing from the node's 
   const unrouted: string[] = [];
   await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? { prices } : { ...state, tasks: [finished(6, undefined, { minutes: 3 })] }) as T; } }, "routing", [], {}, (line) => unrouted.push(line));
   expect(unrouted).toEqual(["Routing, from the last 1 task this node finished (1 not routed: held to models, a coding tool's, or from before kinds were kept):", "  None of them was routed."]);
+});
+
+/*
+ * The routing report's JSON, pinned by fixtures (fixtures/routing-report): a node's tasks (tasks.json) at your prices
+ * (prices.json), and what `invincible agents routing --json` printed for them as deployed (v1.json, main f64776ba).
+ */
+const reportDir = join(import.meta.dir, "fixtures/routing-report");
+const fixture = (name: string): unknown => JSON.parse(readFileSync(join(reportDir, name), "utf8"));
+/** `invincible agents routing --json` for the fixture's tasks, with these flags. */
+async function reportJson(flags: Record<string, unknown> = {}): Promise<unknown> {
+  const tasks = fixture("tasks.json");
+  const prices = fixture("prices.json");
+  const json: string[] = [];
+  await teamCommand({ async call<T>(name: string): Promise<T> { return (name === "prices" ? prices : { agents: [], rooms: [], deliveries: [], tasks }) as T; } }, "routing", [], { json: true, ...flags }, (line) => json.push(line));
+  return JSON.parse(json.join("\n"));
+}
+
+test("the routing report's JSON as deployed (v 1, main f64776ba) is pinned: fixtures/routing-report/v1.json", async () => {
+  expect(await reportJson()).toEqual(fixture("v1.json"));
 });

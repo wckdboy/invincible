@@ -1,0 +1,59 @@
+[
+  {
+    "id": "task-000000000001", "room": "forge", "assignee": "ada", "title": "t1", "goal": "g", "dependsOn": [], "gates": [],
+    "status": "done", "verified": true, "progress": "", "output": "", "error": null, "chainId": "c", "createdAt": 1795867200000, "updatedAt": 1795867560000,
+    "record": { "startedAt": 1795867200000, "endedAt": 1795867560000, "ended": "done", "commands": 3, "revisions": 0,
+      "spent": [{ "role": "engineer", "model": "byok/cheap", "calls": 1, "unknown": 0, "input": 1000000, "output": 0, "cached": 0, "reasoning": 0 }],
+      "routing": { "began": "engineer", "kind": "code" } }
+  },
+  {
+    "id": "task-000000000002", "room": "forge", "assignee": "ada", "title": "t2", "goal": "g", "dependsOn": [], "gates": [],
+    "status": "done", "verified": true, "progress": "", "output": "", "error": null, "chainId": "c", "createdAt": 1795869000000, "updatedAt": 1795870200000,
+    "record": { "startedAt": 1795869000000, "endedAt": 1795870200000, "ended": "done", "commands": 9, "revisions": 1,
+      "spent": [{ "role": "engineer", "model": "byok/strong", "calls": 1, "unknown": 0, "input": 1000000, "output": 0, "cached": 0, "reasoning": 0 }],
+      "routing": { "began": "engineer", "moved": "gate", "kind": "code" } },
+    "interventions": { "steer": 1 }
+  },
+  {
+    "id": "task-000000000003", "room": "forge", "assignee": "ada", "title": "t3", "goal": "g", "dependsOn": [], "gates": [],
+    "status": "failed", "verified": false, "progress": "", "output": "", "error": "stopped", "chainId": "c", "createdAt": 1795870800000, "updatedAt": 1795872600000,
+    "record": { "startedAt": 1795870800000, "endedAt": 1795872600000, "ended": "stopped", "commands": 40, "revisions": 0,
+      "spent": [{ "role": "engineer", "model": "byok/strong", "calls": 1, "unknown": 0, "input": 1000000, "output": 0, "cached": 0, "reasoning": 0 }],
+      "routing": { "began": "engineer", "moved": "rereads", "round": true, "kind": "code" } },
+    "interventions": { "message": 2, "stop": 1 }
+  },
+  {
+    "id": "task-000000000004", "room": "forge", "assignee": "ada", "title": "t4", "goal": "g", "dependsOn": [], "gates": [],
+    "status": "done", "verified": true, "progress": "", "output": "", "error": null, "chainId": "c", "createdAt": 1795874400000, "updatedAt": 1795874880000,
+    "record": { "startedAt": 1795874400000, "endedAt": 1795874880000, "ended": "done", "commands": 5, "revisions": 0,
+      "spent": [{ "role": "planner", "model": "byok/strong", "calls": 1, "unknown": 0, "input": 1000000, "output": 0, "cached": 0, "reasoning": 0 }],
+      "routing": { "began": "planner", "because": "memory", "kind": "code" } }
+  },
+  {
+    "id": "task-000000000005", "room": "forge", "assignee": "ada", "title": "t5", "goal": "g", "dependsOn": [], "gates": [],
+    "status": "done", "verified": true, "progress": "", "output": "", "error": null, "chainId": "c", "createdAt": 1795885200000, "updatedAt": 1795885440000,
+    "record": { "startedAt": 1795885200000, "endedAt": 1795885440000, "ended": "done", "commands": 2, "revisions": 0,
+      "spent": [{ "role": "engineer", "model": "zplan/glm", "calls": 1, "unknown": 0, "input": 1000000, "output": 0, "cached": 0, "reasoning": 0 }],
+      "routing": { "began": "engineer", "kind": "fix" } },
+    "interventions": { "again": 1, "poke": 3 }
+  },
+  {
+    "id": "task-000000000006", "room": "forge", "assignee": "ada", "title": "t6", "goal": "g", "dependsOn": [], "gates": [],
+    "status": "done", "verified": true, "progress": "", "output": "", "error": null, "chainId": "c", "createdAt": 1795878000000, "updatedAt": 1795878180000,
+    "record": { "startedAt": 1795878000000, "endedAt": 1795878180000, "ended": "done", "commands": 1, "revisions": 0,
+      "spent": [{ "role": "engineer", "model": "byok/cheap", "calls": 1, "unknown": 0, "input": 1000000, "output": 0, "cached": 0, "reasoning": 0 }] },
+    "interventions": { "approval": 1 }
+  },
+  {
+    "id": "task-000000000007", "room": "forge", "assignee": "ada", "title": "t7", "goal": "g", "dependsOn": [], "gates": [],
+    "status": "running", "verified": false, "progress": "", "output": "", "error": null, "chainId": "c", "createdAt": 1795885800000, "updatedAt": 1795885800000,
+    "interventions": { "steer": 2 }
+  },
+  {
+    "id": "task-000000000008", "room": "forge", "assignee": "ada", "title": "t8", "goal": "g", "dependsOn": [], "gates": [],
+    "status": "done", "verified": true, "progress": "", "output": "", "error": null, "chainId": "c", "createdAt": 1795885800000, "updatedAt": 1795886280000,
+    "record": { "startedAt": 1795885800000, "endedAt": 1795886280000, "ended": "done", "commands": 4, "revisions": 0,
+      "spent": [{ "role": "engineer", "model": "byok/cheap", "calls": 1, "unknown": 0, "input": 1000000, "output": 0, "cached": 0, "reasoning": 0 }],
+      "routing": { "began": "engineer", "because": "probe", "kind": "code" } }
+  }
+]
