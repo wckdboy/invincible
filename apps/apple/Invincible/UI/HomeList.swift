@@ -46,7 +46,6 @@ struct HomeList: View {
     @State private var query = ""
     @State private var history = ChatHistory()
     @State private var creating = false
-    @State private var push = PushCenter.shared
 
     /// A face's size in its row.
     static let face: CGFloat = 44
@@ -77,9 +76,6 @@ struct HomeList: View {
             } else if searching && rows.isEmpty && history.chats != nil {
                 Text("Nothing says “\(query)”.").font(.subheadline).foregroundStyle(.secondary).listRowSeparator(.hidden)
                     .padding(ownHead ? EdgeInsets(top: Space.s2, leading: Metrics.margin, bottom: Space.s2, trailing: Metrics.margin) : EdgeInsets())
-            }
-            if !searching && (push.reach == .turnOn || push.reach == .settings) {
-                notificationsOff.listRowSeparator(.hidden)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) { if saysLink { link } }
@@ -189,28 +185,6 @@ struct HomeList: View {
             .listRowBackground(RosterMark().opacity(here ? 1 : 0))
             .accessibilityAddTraits(here ? .isSelected : [])
     }
-
-    /// While notifications are off: a word to turn them on, so a finished task or a question reaches you.
-    private var notificationsOff: some View {
-        HStack(spacing: Space.s3) {
-            Image(systemName: "bell.slash").foregroundStyle(.secondary).frame(width: Self.face)
-            Text(push.reach == .settings ? "Notifications are off in Settings" : "Notifications are off").font(.subheadline).foregroundStyle(.secondary)
-            Spacer(minLength: Space.s2)
-            Button(push.reach == .settings ? "Open" : "Turn on") {
-                if push.reach == .settings {
-                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                } else {
-                    Task { try? await PushCenter.shared.turnOn(session) }
-                }
-            }
-            .font(.subheadline.weight(.semibold))
-            .buttonStyle(.borderless)
-            .frame(minHeight: Metrics.touch)
-        }
-        .padding(ownHead ? EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s1, trailing: Metrics.margin) : EdgeInsets())
-        .listRowInsets(EdgeInsets(top: Space.s1, leading: Metrics.margin, bottom: Space.s1, trailing: Metrics.margin))
-        .accessibilityIdentifier("home.notifications")
-    }
 }
 
 /// Home's bar: its own head where it has one (an iPhone's: the system's bar hidden, its search a field in the list), else
@@ -313,8 +287,9 @@ private struct HomeSearchField: View {
     }
 }
 
-/// One row of Home: its face, its name with when on its right, and its line with what waits on you on its right (an ink
-/// capsule with the count), else a dot in the ink while something there is new to you.
+/// One row of Home, as a chat app's list has it: its face, its name with when on its right, and its line under them in
+/// grey; a small ink dot at the line's end where something there waits on you or is new to you (no number, no colour:
+/// what it is, its chat says).
 struct HomeRowView<Face: View>: View {
     let row: Home.Row
     @ViewBuilder let face: Face
@@ -332,21 +307,10 @@ struct HomeRowView<Face: View>: View {
                     }
                 }
                 HStack(alignment: .center, spacing: Space.s2) {
-                    Text(row.line.isEmpty ? " " : row.line)
-                        .font(.subheadline)
-                        .foregroundStyle(row.standing == .failed ? AnyShapeStyle(Color.danger) : AnyShapeStyle(.secondary))
-                        .lineLimit(1)
+                    Text(row.line.isEmpty ? " " : row.line).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: Space.s2)
-                    if row.count > 0 {
-                        Text("\(row.count)")
-                            .font(.footnote.weight(.bold))
-                            .monospacedDigit()
-                            .foregroundStyle(Color.onAccent)
-                            .padding(.horizontal, 7)
-                            .frame(minWidth: 22, minHeight: 22)
-                            .background(Color.ink, in: .capsule)
-                    } else if row.unread {
-                        Circle().fill(Color.ink).frame(width: 9, height: 9)
+                    if row.count > 0 || row.unread {
+                        Circle().fill(Color.ink).frame(width: 8, height: 8)
                     }
                 }
             }
