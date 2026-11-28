@@ -363,8 +363,9 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
         }
         said?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = brand.failed) }
         QueuePanel(app)
-        // One big box (the owner's word, 27 November 2026, as the iPhone's and the web's): the words across all of it, and
-        // under them the paperclip on the left and what sends on the right: Send, or while it answers Queue, Steer and Stop.
+        // Grok Bot's pill (the owner's structure, 28 November 2026): + to attach, the words, Send; it grows into the big box
+        // as the words wrap (the owner's big composer, 27 November 2026). While it answers, Stop; with something written
+        // then, Queue and Steer too, under the words, the box opened so nothing squeezes them. No mic (the owner's word).
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
         fun send() {
             val client = app.client ?: return
@@ -389,20 +390,22 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
         }
         val written = text.isNotBlank()
         val aside = sh.invincible.bot.core.Composer.aside(text) != null
+        val choosing = live && written
         ComposerBox(
             focus = focus,
+            compact = !choosing,
             field = {
                 ComposerField(
                     value = text,
                     onValueChange = { text = it },
-                    placeholder = if (live) sh.invincible.bot.core.Composer.placeholder(app.chat.canQueue) else "Ask your agent…",
+                    placeholder = if (live) sh.invincible.bot.core.Composer.placeholder(app.chat.canQueue) else "Ask ${Primary.name}",
                     focus = focus,
                     enter = { if (live) steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) else send() },
                 )
             },
             leading = {
                 androidx.compose.foundation.layout.Box {
-                    androidx.compose.material3.IconButton(onClick = { menu = true }, enabled = !sending) { Icon(AttachIcon, contentDescription = "Attach, or ask on the side") }
+                    androidx.compose.material3.IconButton(onClick = { menu = true }, enabled = !sending) { Icon(PlusIcon, contentDescription = "Attach, or ask on the side") }
                     androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         androidx.compose.material3.DropdownMenuItem(text = { Text("A photo") }, onClick = {
                             menu = false
@@ -421,9 +424,12 @@ internal fun ChatComposer(app: AppModel, live: Boolean, offered: Pair<Int, Strin
             },
             trailing = {
                 if (live) {
-                    // Queue (for after this turn) and Steer (now, at its next safe point), in words, then Stop.
-                    if (app.chat.canQueue && !aside) ComposerChoice("Queue", filled = false, ready = written) { steerOrQueue(sh.invincible.bot.core.Composer.Action.QUEUE) }
-                    ComposerChoice(if (aside) "Ask on the side" else "Steer", filled = true, ready = written) { steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) }
+                    // Queue (for after this turn) and Steer (now, at its next safe point), in words, once something is
+                    // written; then Stop.
+                    if (choosing) {
+                        if (app.chat.canQueue && !aside) ComposerChoice("Queue", filled = false, ready = true) { steerOrQueue(sh.invincible.bot.core.Composer.Action.QUEUE) }
+                        ComposerChoice(if (aside) "Ask on the side" else "Steer", filled = true, ready = true) { steerOrQueue(sh.invincible.bot.core.Composer.Action.STEER) }
+                    }
                     ComposerDisc(StopIcon, "Stop ${Primary.name} answering", ready = true, onClick = app.chat::stop)
                 } else {
                     ComposerDisc(SendIcon, if (sending) "Sending" else "Send", ready = (written || files.isNotEmpty()) && !sending, onClick = ::send)

@@ -38,6 +38,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -96,7 +101,8 @@ fun AgentScreen(app: AppModel, id: String, back: () -> Unit, openTask: (String) 
         roomOf = { c -> c.post("/api/team/direct", Json.obj("id" to id))["room"].let { it.string ?: it["id"].string } },
         seen = Json.obj("agent" to id),
         assignee = id,
-        placeholder = "Write to ${person?.name ?: id}",
+        placeholder = "Ask ${person?.name ?: id}",
+        taskPlaceholder = "Give ${person?.name ?: id} a task",
         title = person?.name ?: id,
         back = back,
         openTask = openTask,
@@ -200,6 +206,7 @@ private fun Timeline(
     seen: Json,
     assignee: String?,
     placeholder: String,
+    taskPlaceholder: String? = null,
     title: String,
     back: () -> Unit,
     openTask: (String) -> Unit,
@@ -271,6 +278,7 @@ private fun Timeline(
         Composer(
             placeholder = placeholder,
             asTask = if (assignee != null) "Give it as a task" else null,
+            taskPlaceholder = taskPlaceholder,
             sending = false,
             onSend = { text, task ->
                 val r = room ?: return@Composer
@@ -525,12 +533,12 @@ internal fun ShipDialog(app: AppModel, t: Json, done: () -> Unit) {
 }
 
 /**
- * A box to write in, as the primary's conversation's (the owner's word, 27 November 2026: a big composer, the same
- * everywhere): a rounded field that grows to six lines and a round send, or Stop; [asTask] offers the same words as a task
- * instead, a chip above it.
+ * A box to write in, as your agent's chat's: Grok Bot's pill, growing into the big box as the words wrap, and a round
+ * send, or Stop. [asTask] offers the same words as a task instead: a toggle where the pill's + is, its words said to a
+ * screen reader, and [taskPlaceholder] in the box while it is on.
  */
 @Composable
-fun Composer(placeholder: String, asTask: String?, sending: Boolean, stop: (() -> Unit)? = null, onSend: (String, Boolean) -> Unit) {
+fun Composer(placeholder: String, asTask: String?, sending: Boolean, stop: (() -> Unit)? = null, taskPlaceholder: String? = null, onSend: (String, Boolean) -> Unit) {
     var text by remember { mutableStateOf("") }
     var task by remember { mutableStateOf(false) }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -539,14 +547,20 @@ fun Composer(placeholder: String, asTask: String?, sending: Boolean, stop: (() -
         onSend(text.trim(), task)
         text = ""
     }
-    // One big box, as the chat's: the words across all of it; under them, the same words as a task on the left, and Send
-    // (or Stop) on the right.
+    // The pill, as the chat's: the same words as a task (a toggle) on the left, the words, and Send (or Stop) on the right.
+    val brand = LocalBrand.current
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = Space.s3, vertical = Space.s2)) {
         ComposerBox(
             focus = focus,
-            field = { ComposerField(text, { text = it }, placeholder, focus, enter = ::send) },
+            field = { ComposerField(text, { text = it }, if (task && taskPlaceholder != null) taskPlaceholder else placeholder, focus, enter = ::send) },
             leading = {
-                if (asTask != null) androidx.compose.material3.FilterChip(selected = task, onClick = { task = !task }, label = { Text(asTask) }, modifier = Modifier.padding(start = Space.s1))
+                if (asTask != null) {
+                    androidx.compose.material3.IconToggleButton(checked = task, onCheckedChange = { task = it }, modifier = Modifier.semantics { contentDescription = asTask }) {
+                        Box(Modifier.size(32.dp).clip(CircleShape).background(if (task) brand.ink else Color.Transparent), contentAlignment = Alignment.Center) {
+                            Icon(LayersIcon, null, Modifier.size(20.dp), tint = if (task) brand.paper else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
             },
             trailing = {
                 if (stop != null) ComposerDisc(StopIcon, "Stop", ready = true, onClick = stop)

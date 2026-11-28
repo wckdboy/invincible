@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -58,21 +59,35 @@ private val BOX = RoundedCornerShape(24.dp)
 /** A button's disc in it (send, stop): drawn this size, touched at a thumb's. */
 private val DISC = 32.dp
 
+/** A line of its words, as the field draws one (Material's text field, at its least): the pill's height. */
+private val LINE = 56.dp
+
 /**
- * The box: [field] (a [ComposerField]) over a line of buttons, [leading] on the left and [trailing] on the right.
- * [focus] is the field's, which a tap on the box asks for.
+ * The box: [field] (a [ComposerField]) with [leading] on the left and [trailing] on the right. [compact], Grok Bot's pill
+ * (the owner's structure, 28 November 2026): one row, what leads, the words, what sends, its corners a thumb's round, so
+ * it reads as a pill on one line and grows into a box as the words wrap (to eight lines), its buttons at its foot. Not
+ * compact: the words across its whole width and its buttons on a line under them, while there is more to choose than
+ * fits beside the words (Queue, Steer and Stop as it works). [focus] is the field's, which a tap on the box asks for.
  */
 @Composable
-fun ComposerBox(focus: FocusRequester, modifier: Modifier = Modifier, field: @Composable () -> Unit, leading: @Composable RowScope.() -> Unit = {}, trailing: @Composable RowScope.() -> Unit) {
+fun ComposerBox(focus: FocusRequester, modifier: Modifier = Modifier, compact: Boolean = true, field: @Composable () -> Unit, leading: @Composable RowScope.() -> Unit = {}, trailing: @Composable RowScope.() -> Unit) {
     val brand = LocalBrand.current
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(BOX)
-            .border(BorderStroke(1.dp, brand.line), BOX)
-            .background(brand.raised)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { runCatching { focus.requestFocus() } },
-    ) {
+    val box = modifier
+        .fillMaxWidth()
+        .clip(BOX)
+        .border(BorderStroke(1.dp, brand.line), BOX)
+        .background(brand.raised)
+        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { runCatching { focus.requestFocus() } }
+    if (compact) {
+        Row(box.padding(horizontal = Space.s1), verticalAlignment = Alignment.Bottom) {
+            // (Its buttons centred on a line of words, and kept at its foot as the words wrap.)
+            Row(Modifier.height(LINE), verticalAlignment = Alignment.CenterVertically) { leading() }
+            Box(Modifier.weight(1f)) { field() }
+            Row(Modifier.height(LINE), verticalAlignment = Alignment.CenterVertically) { trailing() }
+        }
+        return
+    }
+    Column(box) {
         Box(Modifier.fillMaxWidth().padding(top = Space.s1)) { field() }
         Row(
             Modifier.fillMaxWidth().padding(start = Space.s1, end = Space.s1, bottom = Space.s1),
