@@ -16,6 +16,15 @@ import { AGENTS, agentOrb, MARKS, orbFiles } from "../src/lib/orbs.ts";
 
 const SITE = resolve(import.meta.dir, "..");
 
+/**
+ * The PNGs' own time, as ship.test's and team-steps.test's have theirs (be6f9ada, 4aa3aa41): they are drawn exactly, a
+ * link's 1,200 × 630 preview and two icons at sixteen samples down each pixel, and deflated, honest CPU work whose wall
+ * time is the machine's. Alone on the mini it takes 0.2-0.4 s; beside 48 busy loops 3.4-4.6 s, beside 96 25-41 s; on the
+ * MacBook at a load of 297 it took 6.2 s, past bun's 5 s default. It is synchronous, so a timeout can't stop it, only fail
+ * it afterwards by its wall clock: this is how long a busy machine may take, never what the test checks.
+ */
+const PNG_MS = 60_000;
+
 /** A PNG's width, height and colour type, and its pixels' bytes (each row's filter byte first). */
 function readPng(bytes: Uint8Array): { width: number; height: number; type: number; raw: Uint8Array } {
   expect([...bytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -114,5 +123,5 @@ describe("the mark and the icons made from it", () => {
     expect(pixel(touch, 90, 90)).toEqual([255, 255, 255]);
     expect(pixel(og, 600, 315)).toEqual([255, 255, 255]);
     expect(pixel(og, 20, 20)).toEqual([0, 0, 0]);
-  });
+  }, PNG_MS);
 });
