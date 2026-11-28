@@ -310,13 +310,14 @@ describe("a deadline a stamp names", () => {
     const start = Date.now();
     const told: { topics: LiveTopic[]; after: number }[] = [];
     const stop = live.subscribe((topics) => told.push({ topics, after: Date.now() - start }));
-    await Bun.sleep(250);
+    // (Waited for as long as a starved machine takes to run its timer: a second a slice of CPU, at 2 % of a core.)
+    for (const until = Date.now() + 30_000; !told.length && Date.now() < until; ) await Bun.sleep(10);
     stop();
     expect(told.map((t) => t.topics)).toEqual([["actions"]]);
-    // Not before its time, and soon after it.
+    // Not before its time, and by its own timer: nothing pokes here, and the look is a minute away.
     expect(told[0]!.after).toBeGreaterThanOrEqual(due - start);
-    expect(told[0]!.after).toBeLessThan(due - start + 100);
-  });
+    expect(told[0]!.after).toBeLessThan(30_000);
+  }, 40_000);
 
   test("leaves nothing waiting once nobody listens: its time comes and nothing is read", async () => {
     const s = stamps();

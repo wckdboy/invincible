@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -199,13 +199,23 @@ const letGo = async (live: Listening): Promise<void> => {
   await Bun.sleep(150);
 };
 
+// Its streams, its pairings and its reads are processes' time to give: at 2 % of a core (SIGSTOP 980 ms of every second,
+// then SIGCONT: what each of about 585 runnable tasks gets of 12 cores), "opened again after some of what it may read
+// changed" took 5.10 and 5.14 s, past bun's 5 s (the Mac mini, 28 November 2026). The limit is how long a busy machine
+// may take, never what a test checks: the tests that time the stream say so themselves.
+setDefaultTimeout(20_000);
+
 beforeAll(async () => {
   const { identity, keystore } = await home.createIdentity("file");
   const store = new LedgerStore(home.ledgerPath);
   const fleet = foundFleet(store, identity, { fleetName: "homelab", nodeName: "keep" });
   store.close();
   home.writeConfig({ v: 1, name: "keep", fleet, port, keystore, advertise: "127.0.0.1" });
-  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 3_600_000, defaultHeartbeat: false, archiveIntervalMs: false, backups: false, shutdownGraceMs: 100 });
+  // (Its notifications don't look by themselves: every 15 s, and 1.5 s after anything that may be worth telling, such as a
+  // device paired. With a device that collects its own, from the test that says so, each look kept what had newly come
+  // up for it and moved `notify` in whatever test ran then: during "nothing at rest", 1.5 s after its pairing. Its tests
+  // send theirs themselves.)
+  daemon = await startDaemon(home, { capabilities: caps, proxyPort: freePort(), log: () => {}, loopIntervalMs: 3_600_000, defaultHeartbeat: false, archiveIntervalMs: false, backups: false, shutdownGraceMs: 100, push: { tickMs: false } });
 });
 
 afterAll(async () => {
