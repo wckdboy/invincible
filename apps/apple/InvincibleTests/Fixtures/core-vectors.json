@@ -5842,6 +5842,115 @@
       }
     ]
   },
+  "permissions": {
+    "rules": [
+      {
+        "rule": {
+          "does": "halt",
+          "words": [
+            "sudo",
+            "curl*",
+            "wget"
+          ]
+        },
+        "sentence": "Halts the work when a word matches sudo, curl* or wget."
+      },
+      {
+        "rule": {
+          "does": "refuse",
+          "words": [
+            "git"
+          ],
+          "contains": "push --force"
+        },
+        "sentence": "Refuses the command when a word matches git and it holds “push --force”."
+      },
+      {
+        "rule": {
+          "does": "check",
+          "words": [
+            "bun"
+          ],
+          "run": "bun run check"
+        },
+        "sentence": "Runs bun run check after a command that succeeds, when a word matches bun."
+      },
+      {
+        "rule": {
+          "does": "tell",
+          "words": [],
+          "contains": "deploy"
+        },
+        "sentence": "Tells you when a command has run, when it holds “deploy”."
+      },
+      {
+        "rule": {
+          "does": "tell",
+          "words": [
+            "kubectl"
+          ]
+        },
+        "sentence": "Tells you when a command has run, when a word matches kubectl."
+      }
+    ],
+    "handoffs": [
+      {
+        "grant": {
+          "from": {
+            "id": "n_laptop",
+            "name": "laptop"
+          },
+          "to": {
+            "id": "n_homelab",
+            "name": "homelab"
+          },
+          "terms": {
+            "agents": [
+              "ada",
+              "bea"
+            ],
+            "tools": [],
+            "budgetUsdPerDay": 5
+          }
+        },
+        "title": "laptop → homelab",
+        "terms": "To ada, bea · up to $5.00 a day"
+      },
+      {
+        "grant": {
+          "from": {
+            "id": "n_homelab",
+            "name": "homelab"
+          },
+          "to": {
+            "id": "n_ultra",
+            "name": "ultra"
+          },
+          "terms": {
+            "tools": [],
+            "budgetUsdPerDay": 0.5
+          }
+        },
+        "title": "homelab → ultra",
+        "terms": "To any of its agents · up to $0.50 a day"
+      },
+      {
+        "grant": {
+          "from": {
+            "id": "n_ultra",
+            "name": "ultra"
+          },
+          "to": {
+            "id": "n_laptop",
+            "name": "laptop"
+          },
+          "terms": null
+        },
+        "title": "ultra → laptop",
+        "terms": "Written by a newer node: not understood here."
+      }
+    ]
+  },
   "proofLines": [
     {
       "task": {

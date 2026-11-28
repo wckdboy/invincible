@@ -75,5 +75,12 @@ export function ruleParts(rule: { does: RuleDoes; words: readonly string[]; cont
   return parts;
 }
 
+/** The same as a sentence, as Settings' Permissions says it in every app (the iPhone's Permissions.sentence): its first
+ * word a capital, its text in curly quotes, a full stop. */
+export const ruleSentence = (rule: { does: RuleDoes; words: readonly string[]; contains?: string; run?: string }): string => {
+  const line = ruleParts(rule).map((part) => (part.kind === "text" ? `“${part.text}”` : part.text)).join("");
+  return `${line.charAt(0).toUpperCase()}${line.slice(1)}.`;
+};
+
 /** The same in a line (its text in quotes), as the terminal says it. */
 export const ruleWhen = (rule: { does: RuleDoes; words: readonly string[]; contains?: string; run?: string }): string => ruleParts(rule).map((part) => (part.kind === "text" ? `"${part.text}"` : part.text)).join("");

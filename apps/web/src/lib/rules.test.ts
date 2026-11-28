@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_RULE_GLOBS as CONTRACT_GLOBS, RuleInput } from "@invincible/core";
-import { globsFromText, MAX_CHECK_LENGTH, MAX_GLOB_LENGTH, MAX_RULE_GLOBS, MAX_TEXT_LENGTH, ruleFromForm, ruleParts, ruleWhen } from "./rules.ts";
+import { globsFromText, MAX_CHECK_LENGTH, MAX_GLOB_LENGTH, MAX_RULE_GLOBS, MAX_TEXT_LENGTH, ruleFromForm, ruleParts, ruleSentence, ruleWhen } from "./rules.ts";
 
 describe("a tripwire typed into the app", () => {
   test("its globs at spaces, commas or new lines, each once, as typed", () => {
@@ -89,5 +89,14 @@ describe("a tripwire in words", () => {
       { kind: "words", text: " and it holds " },
       { kind: "text", text: "--force" },
     ]);
+  });
+});
+
+describe("a rule in a sentence, as Settings' Permissions says it", () => {
+  test("what it does and when, its first word a capital, its text in curly quotes, and a full stop", () => {
+    expect(ruleSentence({ does: "halt", words: ["rm", "sudo", "curl*"] })).toBe("Halts the work when a word matches rm, sudo or curl*.");
+    expect(ruleSentence({ does: "refuse", words: ["git"], contains: "push --force" })).toBe("Refuses the command when a word matches git and it holds “push --force”.");
+    expect(ruleSentence({ does: "check", words: ["bun"], run: "bun run check" })).toBe("Runs bun run check after a command that succeeds, when a word matches bun.");
+    expect(ruleSentence({ does: "tell", words: [], contains: "deploy" })).toBe("Tells you when a command has run, when it holds “deploy”.");
   });
 });

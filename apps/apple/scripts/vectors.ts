@@ -16,6 +16,8 @@ import * as core from "../../../packages/core/src/index.ts";
 import { besideChip, primaryState, type AgentState } from "../../web/src/lib/agent-state.ts";
 import { homePrimaryLine, homeRows, primaryNeeds, rosterRows } from "../../web/src/lib/roster.ts";
 import { listLocale, listTime, timeMark } from "../../web/src/lib/time.ts";
+import { ruleSentence } from "../../web/src/lib/rules.ts";
+import { handoffTerms, handoffTitle } from "../../web/src/lib/grants.ts";
 import { primaryNow, needsFirst, type NowInput } from "../../web/src/lib/now.ts";
 import { groupConversations, timeMarks } from "../../web/src/lib/chats.ts";
 import { highlight } from "../../web/src/lib/highlight.ts";
@@ -539,6 +541,25 @@ const chatMarks = {
   ats: MARK_ATS,
   marked: timeMarks(MARK_ATS, LIST_ZONE),
   devices: ["en-GB", "da-DK"].map((device) => ({ device, cases: MARK_MOMENTS.map((at) => ({ at, words: timeMark(at, LIST_NOW, LIST_ZONE, device) })) })),
+};
+
+// ---- Settings' Permissions, read-only, in every app's words: a rule as a sentence (lib/rules.ts ruleSentence), a hand-off
+// grant's title and terms (lib/grants.ts handoffTitle, handoffTerms) ----
+const permissions = {
+  rules: (
+    [
+      { does: "halt", words: ["sudo", "curl*", "wget"] },
+      { does: "refuse", words: ["git"], contains: "push --force" },
+      { does: "check", words: ["bun"], run: "bun run check" },
+      { does: "tell", words: [], contains: "deploy" },
+      { does: "tell", words: ["kubectl"] },
+    ] as { does: "halt" | "refuse" | "check" | "tell"; words: string[]; contains?: string; run?: string }[]
+  ).map((rule) => ({ rule, sentence: ruleSentence(rule) })),
+  handoffs: [
+    { from: { id: "n_laptop", name: "laptop" }, to: { id: "n_homelab", name: "homelab" }, terms: { agents: ["ada", "bea"], tools: [], budgetUsdPerDay: 5 } },
+    { from: { id: "n_homelab", name: "homelab" }, to: { id: "n_ultra", name: "ultra" }, terms: { tools: [], budgetUsdPerDay: 0.5 } },
+    { from: { id: "n_ultra", name: "ultra" }, to: { id: "n_laptop", name: "laptop" }, terms: null },
+  ].map((grant) => ({ grant, title: handoffTitle(grant), terms: handoffTerms(grant.terms) })),
 };
 
 // ---- your agent's line in the list that is home (lib/roster.ts homePrimaryLine): never what waits on you, which its row
@@ -2090,6 +2111,7 @@ const vectors = {
   rooms,
   listTimes,
   chatMarks,
+  permissions,
   proofLines,
   homePrimary,
   agentForms,

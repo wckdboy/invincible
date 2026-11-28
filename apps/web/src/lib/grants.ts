@@ -8,8 +8,18 @@ import { relativeTime } from "./time.ts";
 /** A grant's arm, by its label: core's QAMP_ARM_PREFIX (grants.test.ts holds the two the same). */
 export const isGrantArm = (label: string): boolean => label.startsWith("qamp.");
 
+/** A hand-off grant (core's HandoffGrantView), as Settings' Permissions says it in every app: from which node to which. */
+export const handoffTitle = (grant: { from: { name: string }; to: { name: string } }): string => `${grant.from.name} → ${grant.to.name}`;
+
+/** Its terms in a line: whose agents (none named: any of them), and what its tasks there may spend a day; terms this
+ * version doesn't understand (null), said so. */
+export const handoffTerms = (terms: { agents?: readonly string[]; budgetUsdPerDay: number } | null): string => {
+  if (!terms) return "Written by a newer node: not understood here.";
+  return `To ${terms.agents?.length ? terms.agents.join(", ") : "any of its agents"} · up to $${terms.budgetUsdPerDay.toFixed(2)} a day`;
+};
+
 /** An agent's key, short enough for a row: its kind and the last of it ("did:key:z6Mk…pjyBW"); the whole of it goes in a title. */
-export const shortDid = (did: string): string => (did.length > 26 ? `${did.slice(0, 12)}…${did.slice(-6)}` : did);
+export const shortDid =(did: string): string => (did.length > 26 ? `${did.slice(0, 12)}…${did.slice(-6)}` : did);
 
 /** When a grant ends, as its row says it: "ends in 52 min"; one whose time is up, which the node ends within seconds: "ending now". */
 export const grantEnds = (endsAt: number, now = Date.now()): string => (endsAt <= now ? "ending now" : `ends ${relativeTime(endsAt, now)}`);
