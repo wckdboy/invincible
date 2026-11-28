@@ -1,0 +1,35 @@
+{
+  "suite": "routing",
+  "commit": "f0f45c6c61c2",
+  "at": 1795842307311,
+  "seed": 20261112,
+  "machine": {
+    "name": "Apple M3 Pro",
+    "calibration": 75373,
+    "cores": 12
+  },
+  "metrics": [
+    {"id":"routing.routed.verified","value":29,"unit":"tasks","kind":"quality","better":"higher","note":"of 36, the tasks that ended verified, routed as a node does: the ladder may move the work from the cheap worker to the strong lead"},
+    {"id":"routing.routed.interventions-per-done","value":0.24137931,"unit":"","kind":"quality","better":"lower","note":"tasks that ended unverified (each needs you), per verified task: the north star"},
+    {"id":"routing.routed.usd-per-done","value":1.01121048,"unit":"$","kind":"quality","better":"lower","note":"stand-in dollars every task spent (its record's tokens at the stand-ins' prices), per verified task"},
+    {"id":"routing.routed.minutes-per-done","value":4.32011494,"unit":"min","kind":"quality","better":"lower","note":"virtual minutes every task took (its calls, commands and gates at the stand-ins' seconds), per verified task"},
+    {"id":"routing.routed.escalations","value":18,"unit":"","kind":"quality","better":"lower","note":"times work moved up the ladder: each a failure found late, on the cheap model"},
+    {"id":"routing.pinned.verified","value":18,"unit":"tasks","kind":"quality","better":"higher","note":"of 36, the tasks that ended verified, the agent pinned to the cheap worker, so its work stays there (the all-cheap bound)"},
+    {"id":"routing.pinned.interventions-per-done","value":1,"unit":"","kind":"quality","better":"lower","note":"tasks that ended unverified (each needs you), per verified task: the north star"},
+    {"id":"routing.pinned.usd-per-done","value":1.46164167,"unit":"$","kind":"quality","better":"lower","note":"stand-in dollars every task spent (its record's tokens at the stand-ins' prices), per verified task"},
+    {"id":"routing.pinned.minutes-per-done","value":7.58148148,"unit":"min","kind":"quality","better":"lower","note":"virtual minutes every task took (its calls, commands and gates at the stand-ins' seconds), per verified task"},
+    {"id":"routing.pinned.escalations","value":0,"unit":"","kind":"quality","better":"lower","note":"times work moved up the ladder: each a failure found late, on the cheap model"},
+    {"id":"routing.strong.verified","value":29,"unit":"tasks","kind":"quality","better":"higher","note":"of 36, the tasks that ended verified, every turn of the work on the strong lead (the all-strong bound)"},
+    {"id":"routing.strong.interventions-per-done","value":0.24137931,"unit":"","kind":"quality","better":"lower","note":"tasks that ended unverified (each needs you), per verified task: the north star"},
+    {"id":"routing.strong.usd-per-done","value":0.693357586,"unit":"$","kind":"quality","better":"lower","note":"stand-in dollars every task spent (its record's tokens at the stand-ins' prices), per verified task"},
+    {"id":"routing.strong.minutes-per-done","value":3.5591954,"unit":"min","kind":"quality","better":"lower","note":"virtual minutes every task took (its calls, commands and gates at the stand-ins' seconds), per verified task"},
+    {"id":"routing.strong.escalations","value":0,"unit":"","kind":"quality","better":"lower","note":"times work moved up the ladder: each a failure found late, on the cheap model"},
+    {"id":"routing.routed.escalations.gate","value":4,"unit":"tasks","kind":"quality","better":"lower","note":"routed tasks whose work moved up because the same gate failed twice in a row"},
+    {"id":"routing.routed.escalations.review","value":6,"unit":"tasks","kind":"quality","better":"lower","note":"routed tasks whose work moved up because the reviewer sent it back twice in a row"},
+    {"id":"routing.routed.escalations.stall","value":8,"unit":"tasks","kind":"quality","better":"lower","note":"routed tasks whose work moved up because two audits in a row steered it"},
+    {"id":"routing.rule.pinned-moved","value":0,"unit":"turns","kind":"quality","better":"lower","note":"turns of a pinned agent's work answered by a model other than its own (the rule: never)"},
+    {"id":"routing.rule.climbs","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"tasks whose work moved up more than once: the ladder has one rung (never)"},
+    {"id":"routing.rule.same-rung","value":0,"unit":"","kind":"quality","better":"lower","note":"work said to move up onto the model it was on: with the planner's model the work's own there is no rung (never)"},
+    {"id":"routing.replay.differs","value":0,"unit":"tasks","kind":"quality","better":"lower","note":"of 36, the tasks whose outcome, cost, time or escalations differed when run again"}
+  ]
+}
